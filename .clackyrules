@@ -1,0 +1,106 @@
+# Clacky Project Rules (.clackyrules)
+
+## Project Overview
+This is the `clacky` Ruby gem - a command-line interface for interacting with AI models (Claude, OpenAI, etc.).
+It provides chat functionality and autonomous AI agent capabilities with tool use.
+
+## Project Structure
+- `lib/clacky/` - Main gem source code
+  - `cli.rb` - Command-line interface using Thor
+  - `agent.rb` - Core AI agent with tool execution
+  - `tools/` - Built-in tools (file operations, web search, shell, etc.)
+  - `client.rb` - API client for AI models
+  - `config.rb` - Configuration management
+- `bin/` - Development executables
+- `spec/` - RSpec test suite
+- `clacky.gemspec` - Gem specification
+
+## Development Guidelines
+
+### Code Style
+- Follow Ruby conventions and best practices
+- Use frozen string literals: `# frozen_string_literal: true`
+- Keep classes focused and single-responsibility
+- Use meaningful variable and method names
+- **IMPORTANT**: All code comments must be written in English
+- Add descriptive comments for complex logic
+- Use clear, self-documenting code with English naming
+- **IMPORTANT**: Always use inline `private` with instance method definitions (e.g., `private def method_name`). Do NOT use standalone `private` keyword
+- **IMPORTANT**: For class methods (`def self.method_name`), do NOT use `private`. Class methods should be public
+
+### Architecture Patterns
+- Tools inherit from `Clacky::Tools::Base`
+- Each tool defines: `tool_name`, `tool_description`, `tool_category`, `tool_parameters`
+- Agent uses React pattern (Reason-Act-Observe) for task execution
+- Configuration is managed through `Clacky::Config`
+- CLI commands use Thor framework
+
+### Testing
+- Use RSpec for testing
+- Test files in `spec/` directory
+- **IMPORTANT**: Always run `bundle exec rspec` to verify tests pass after making changes
+- All tests must pass before considering a task complete
+- Maintain good test coverage
+- When modifying existing functionality, ensure related tests still pass
+- When adding new features, consider adding corresponding tests
+- **IMPORTANT**: When developing new features, write RSpec tests as needed and ensure they pass
+- **DO NOT** write custom test scripts unless explicitly requested by the user
+- **DO NOT** create markdown documentation unless explicitly requested by the user
+- **IMPORTANT**: When testing clacky commands or debugging, always use `bundle exec ruby bin/clacky` instead of the global `clacky` command. The global command loads the system-installed gem version (e.g., `openclacky-0.7.0`), not your local development code
+
+### Tool Development
+**IMPORTANT**: Do NOT add new Ruby Tool classes without careful consideration. Tools are low-level primitives (file I/O, shell, web search, etc.). Before creating a new Tool, always ask: can this capability be achieved with an existing Tool + a Skill (SKILL.md) instead? If yes, use a Skill.
+
+Only add a new Tool when it requires capabilities that no existing tool can provide (e.g., a new API integration, a new system-level operation).
+
+When a new Tool is truly necessary:
+1. Create class in `lib/clacky/tools/`
+2. Inherit from `Clacky::Tools::Base`
+3. Define required class attributes
+4. Implement `execute` method
+5. Add optional `format_call` and `format_result` methods
+6. Require in `lib/clacky.rb`
+
+### Skill Development
+Skills are the preferred way to add new high-level capabilities. A skill is a Markdown instruction file (SKILL.md) that guides the Agent to accomplish a goal using existing Tools.
+
+- Built-in default skills live in `lib/clacky/default_skills/<skill-name>/SKILL.md` (shipped with the gem)
+- Project-level skills live in `.clacky/skills/<skill-name>/SKILL.md`
+- User-level skills live in `~/.clacky/skills/<skill-name>/SKILL.md`
+- **Prefer Skills over new Tools** whenever the task can be composed from existing primitives (write, shell, read, etc.)
+
+### Agent Behavior
+- TODO manager is for planning only - must execute tasks after planning
+- Always use tools to create/modify files, don't just return code
+- Maintain conversation context across tasks
+- Follow cost and iteration limits
+- Support different permission modes (confirm_all, confirm_edits, auto_approve, plan_only)
+
+## Dependencies
+- Ruby >= 3.1.0
+- faraday (~> 2.0) - HTTP client
+- thor (~> 1.3) - CLI framework
+- tty-prompt (~> 0.23) - Interactive prompts
+- tty-spinner (~> 0.9) - Progress indicators
+- diffy (~> 3.4) - Text diffs
+
+## Important Notes
+- This gem is designed to work with OpenAI-compatible APIs
+- Security features include safe shell execution and path validation
+- Agent includes cost control and message compression features
+- Built-in tools cover file operations, web search, code execution, and project management
+
+## Execution Binary
+- Development: `bin/clacky` (in repository)
+- Installed gem: `clacky` command globally available
+
+## Configuration
+- Stores API keys and settings in user's home directory
+- Supports multiple AI model providers
+- Configurable through `clacky config set` command
+
+## Personal Rules
+1. 先想清楚，再动手 — 不确定就问，千万别猜。AI 最可怕的不是不会写，而是"自信乱写"。
+2. 能简单，就别复杂 — 只写刚好够用的代码。过度抽象，大多数时候都是技术负债。
+3. 外科手术式修改 — 需求没提到的地方，一行别碰。每次改动，都必须说得清理由。
+4. 先定义"成功" — 写代码前，先明确什么叫"完成"。否则 AI 只是在随机输出。

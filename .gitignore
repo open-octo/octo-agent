@@ -1,0 +1,17 @@
+CLAUDE.md
+/.bundle/
+/.yardoc
+/_yardoc/
+/coverage/
+/doc/
+/pkg/
+/spec/reports/
+/tmp/
+/workspace/
+
+# rspec failure tracking
+.rspec_status
+*.gem
+.DS_Store
+.history
+coscli*

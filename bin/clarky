@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+
+# Display typo correction message
+warn "\nNote: 'clarky' appears to be a typo!"
+warn "The correct command is 'clacky'"
+
+warn "\nRedirecting to the correct command...\n\n"
+
+# Redirect to clacky
+clacky_path = File.expand_path("clacky", __dir__)
+exec(clacky_path, *ARGV)
