@@ -33,6 +33,22 @@ module Octo
       end
 
       def show_user_message(content, created_at: nil, files: [])
+        images = []
+        if content.is_a?(Array)
+          text_parts = []
+          content.each do |block|
+            next unless block.is_a?(Hash)
+            case block[:type]
+            when "text"
+              text_parts << block[:text]
+            when "image_url"
+              url = block.dig(:image_url, :url)
+              images << url if url
+            end
+          end
+          content = text_parts.join("\n")
+        end
+
         ev = { type: "history_user_message", session_id: @session_id, content: content }
         ev[:created_at] = created_at if created_at
         rendered = Array(files).filter_map do |f|
@@ -51,7 +67,8 @@ module Octo
             type.to_s == "image" ? "expired:#{name}" : "pdf:#{name}"
           end
         end
-        ev[:images] = rendered unless rendered.empty?
+        images.concat(rendered)
+        ev[:images] = images unless images.empty?
         @events << ev
       end
 

@@ -66,6 +66,25 @@ module Octo
       # === Output display ===
 
       def show_user_message(content, created_at: nil, files: [], source: :web)
+        # content may be an Array (multipart: text + vision image blocks) when
+        # the user uploaded images. Extract plain text and image URLs so the
+        # frontend receives strings it can render directly.
+        images = []
+        if content.is_a?(Array)
+          text_parts = []
+          content.each do |block|
+            next unless block.is_a?(Hash)
+            case block[:type]
+            when "text"
+              text_parts << block[:text]
+            when "image_url"
+              url = block.dig(:image_url, :url)
+              images << url if url
+            end
+          end
+          content = text_parts.join("\n")
+        end
+
         data = { content: content }
         data[:created_at] = created_at if created_at
         # Build ev.images for the frontend renderer (history_user_message):
@@ -76,7 +95,8 @@ module Octo
           name = f[:name]     || f["name"]
           url || (name ? "pdf:#{name}" : nil)
         end
-        data[:images] = rendered unless rendered.empty?
+        images.concat(rendered)
+        data[:images] = images unless images.empty?
         emit("history_user_message", **data)
         # Only forward to channel subscribers when the message originated from the WebUI,
         # to avoid echoing channel messages back to the same channel.
