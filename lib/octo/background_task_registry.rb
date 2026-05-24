@@ -16,14 +16,25 @@ module Octo
     SWEEP_INTERVAL   = 30
 
     class << self
-      def create_task(type:, metadata: {}, on_cancel: nil)
+      def create_task(type:, metadata: {}, on_cancel: nil, dedup_key: nil)
         @mutex.synchronize do
+          if dedup_key
+            existing = @tasks.values.find do |t|
+              t[:status] == "running" &&
+                t[:type] == type &&
+                t[:metadata]&.[](:dedup_key) == dedup_key
+            end
+            if existing
+              return { duplicate: true, handle_id: existing[:id], created_at: existing[:created_at] }
+            end
+          end
+
           handle_id = generate_unique_handle_id
           @tasks[handle_id] = {
             id: handle_id,
             type: type,
             status: "running",
-            metadata: metadata,
+            metadata: dedup_key ? metadata.merge(dedup_key: dedup_key) : metadata,
             result: nil,
             created_at: Time.now,
             completed_at: nil,

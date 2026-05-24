@@ -143,6 +143,104 @@ RSpec.describe "BackgroundTaskRegistry multi-session isolation" do
       expect(rb[:cancelled]).to be_nil
     end
   end
+
+  describe "dedup_key duplicate prevention" do
+    it "rejects a second task with the same dedup_key while the first is running" do
+      id_a = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal",
+        metadata: { command: "sleep 30", agent_session_id: "sess-A" },
+        dedup_key: "sess-A:sleep 30"
+      )
+      expect(id_a).to be_a(String)
+
+      result = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal",
+        metadata: { command: "sleep 30", agent_session_id: "sess-A" },
+        dedup_key: "sess-A:sleep 30"
+      )
+      expect(result).to be_a(Hash)
+      expect(result[:duplicate]).to be(true)
+      expect(result[:handle_id]).to eq(id_a)
+    end
+
+    it "allows duplicates when no dedup_key is provided" do
+      id_a = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal", metadata: { command: "sleep 30", agent_session_id: "sess-A" }
+      )
+      id_b = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal", metadata: { command: "sleep 30", agent_session_id: "sess-A" }
+      )
+      expect(id_a).to be_a(String)
+      expect(id_b).to be_a(String)
+      expect(id_a).not_to eq(id_b)
+    end
+
+    it "allows reuse of dedup_key after the original task completes" do
+      id_a = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal",
+        metadata: { command: "sleep 30", agent_session_id: "sess-A" },
+        dedup_key: "sess-A:sleep 30"
+      )
+      Octo::BackgroundTaskRegistry.complete(id_a, { exit_code: 0 })
+
+      id_b = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal",
+        metadata: { command: "sleep 30", agent_session_id: "sess-A" },
+        dedup_key: "sess-A:sleep 30"
+      )
+      expect(id_b).to be_a(String)
+      expect(id_b).not_to eq(id_a)
+    end
+
+    it "allows reuse of dedup_key after the original task is cancelled" do
+      id_a = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal",
+        metadata: { command: "sleep 30", agent_session_id: "sess-A" },
+        dedup_key: "sess-A:sleep 30"
+      )
+      Octo::BackgroundTaskRegistry.cancel(id_a)
+
+      id_b = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal",
+        metadata: { command: "sleep 30", agent_session_id: "sess-A" },
+        dedup_key: "sess-A:sleep 30"
+      )
+      expect(id_b).to be_a(String)
+      expect(id_b).not_to eq(id_a)
+    end
+
+    it "different dedup_keys do not interfere" do
+      id_a = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal",
+        metadata: { command: "sleep 30", agent_session_id: "sess-A" },
+        dedup_key: "sess-A:sleep 30"
+      )
+      id_b = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal",
+        metadata: { command: "sleep 60", agent_session_id: "sess-A" },
+        dedup_key: "sess-A:sleep 60"
+      )
+      expect(id_a).to be_a(String)
+      expect(id_b).to be_a(String)
+      expect(id_a).not_to eq(id_b)
+    end
+
+    it "same dedup_key across different types is allowed" do
+      id_a = Octo::BackgroundTaskRegistry.create_task(
+        type: "terminal",
+        metadata: { command: "sleep 30" },
+        dedup_key: "shared-key"
+      )
+      id_b = Octo::BackgroundTaskRegistry.create_task(
+        type: "other",
+        metadata: { command: "sleep 30" },
+        dedup_key: "shared-key"
+      )
+      expect(id_a).to be_a(String)
+      expect(id_b).to be_a(String)
+      expect(id_a).not_to eq(id_b)
+    end
+  end
 end
 
 RSpec.describe "Terminal tool stamps agent_session_id on background tasks" do
@@ -211,5 +309,20 @@ RSpec.describe "Terminal tool stamps agent_session_id on background tasks" do
 
     expect(captured[:metadata]).to have_key(:agent_session_id)
     expect(captured[:metadata][:agent_session_id]).to be_nil
+  end
+
+  it "rejects a duplicate async command and returns a clear error" do
+    tool = Octo::Tools::Terminal.new(agent_session_id: "sess-dedup")
+    stub_background_path(tool, session_id: 50)
+
+    result1 = tool.execute(command: "rspec", async: true)
+    expect(result1[:handle_id]).to be_a(String)
+
+    stub_background_path(tool, session_id: 51)
+    result2 = tool.execute(command: "rspec", async: true)
+
+    expect(result2[:error]).to eq("duplicate_task")
+    expect(result2[:handle_id]).to eq(result1[:handle_id])
+    expect(result2[:message]).to include("already running")
   end
 end

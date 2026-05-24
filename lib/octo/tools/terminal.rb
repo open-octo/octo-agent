@@ -488,7 +488,25 @@ module Octo
         end
 
         # Still running — register the task + watcher, return a handle.
-        handle_id = register_task_for_session(session, command: command, cwd: cwd, max_duration: max_duration, watch: true)
+        task_result = register_task_for_session(
+          session, command: command, cwd: cwd,
+          max_duration: max_duration, watch: true, dedup: true
+        )
+
+        if task_result.is_a?(Hash) && task_result[:duplicate]
+          SessionManager.kill(session.id)
+          return {
+            error:       "duplicate_task",
+            handle_id:   task_result[:handle_id],
+            state:       "running",
+            message:     "A background task with the same command is already running " \
+                         "(handle: #{task_result[:handle_id]}). " \
+                         "Please wait for it to complete, or kill it first with " \
+                         "terminal(handle_id: \"#{task_result[:handle_id]}\", kill: true)."
+          }
+        end
+
+        handle_id = task_result
 
         {
           accepted:       true,
@@ -551,8 +569,10 @@ module Octo
       # the PTY later. Watcher is optional — async paths want it (for
       # push notifications); sync-promoted handles don't (LLM is driving
       # synchronously). Returns the handle_id.
-      private def register_task_for_session(session, command:, cwd:, max_duration:, watch:)
-        handle_id = BackgroundTaskRegistry.create_task(
+      private def register_task_for_session(session, command:, cwd:, max_duration:, watch:, dedup: false)
+        dedup_key = dedup ? "#{@agent_session_id}:#{command}" : nil
+
+        result = BackgroundTaskRegistry.create_task(
           type: "terminal",
           metadata: {
             command:              command,
@@ -562,8 +582,13 @@ module Octo
             internal_session_id:  session.id,
             watched:              watch
           },
-          on_cancel: build_session_cancel_hook(session)
+          on_cancel: build_session_cancel_hook(session),
+          dedup_key: dedup_key
         )
+
+        return result if result.is_a?(Hash) && result[:duplicate]
+
+        handle_id = result
 
         if watch
           start_background_watcher(session, handle_id, command: command,
