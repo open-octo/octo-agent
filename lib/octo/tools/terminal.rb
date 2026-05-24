@@ -164,7 +164,7 @@ module Octo
       # 2 hours covers large CI suites (full rspec, big docker build, slow
       # `npm install` on a cold cache) but still bounds resource usage.
       BACKGROUND_TASK_MAX_DURATION = 7_200
-      IDLE_MAX_DURATION            = 300    # 5 min — abandoned pagers/REPLs
+      IDLE_MAX_DURATION            = 120    # 2 min — abandoned pagers/REPLs
       # Sentinel: when passed as idle_ms, disables idle early-return.
       DISABLED_IDLE_MS = 10_000_000
 
@@ -675,7 +675,7 @@ module Octo
       #    on_cancel hook to TERM/KILL the underlying process and close fds).
       # ---------------------------------------------------------------------
       private def do_kill_handle(handle_id)
-        cancelled = BackgroundTaskRegistry.cancel(handle_id)
+        cancelled = BackgroundTaskRegistry.cancel(handle_id, reason: "Killed by user via terminal tool.")
         if cancelled
           { killed: true, handle_id: handle_id, message: "Handle #{handle_id} cancelled." }
         else

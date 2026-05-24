@@ -48,7 +48,7 @@ module Octo
           if task[:status] == "completed" || task[:status] == "cancelled"
             fire_immediately = task[:result] || {
               cancelled: task[:status] == "cancelled",
-              output: task[:status] == "cancelled" ? "Task was cancelled by user." : "",
+              output: task[:cancel_reason] || (task[:status] == "cancelled" ? "Task was cancelled by user." : ""),
               exit_code: nil,
               state: task[:status]
             }
@@ -92,7 +92,7 @@ module Octo
         true
       end
 
-      def cancel(handle_id)
+      def cancel(handle_id, reason: nil)
         task = nil
         handler = nil
 
@@ -103,6 +103,7 @@ module Octo
 
           task[:status] = "cancelled"
           task[:completed_at] = Time.now
+          task[:cancel_reason] = reason || "Task was cancelled by user."
           handler = @callbacks.delete(handle_id)
         end
 
@@ -118,7 +119,7 @@ module Octo
         if handler
           enriched = enrich_with_timing({
             cancelled: true,
-            output: "Task was cancelled by user.",
+            output: task[:cancel_reason],
             exit_code: nil,
             state: "cancelled"
           }, task)
@@ -269,22 +270,23 @@ module Octo
 
               last_activity = task[:last_activity_at] || task[:created_at]
               next unless last_activity
-              next if now - last_activity < TTL_UNWATCHED
+              ttl = task[:metadata]&.[](:max_duration) || TTL_UNWATCHED
+              next if now - last_activity < ttl
 
-              to_cancel << handle_id
+              to_cancel << { handle_id: handle_id, ttl: ttl }
             end
           end
 
-          to_cancel.each do |handle_id|
+          to_cancel.each do |item|
             begin
-              cancel(handle_id)
+              cancel(item[:handle_id], reason: "Task timed out after #{item[:ttl]}s")
               Octo::Logger.info("bg_task_ttl_cleanup",
-                handle_id: handle_id,
-                reason: "unwatched handle exceeded #{TTL_UNWATCHED}s TTL"
+                handle_id: item[:handle_id],
+                reason: "unwatched handle exceeded #{item[:ttl]}s TTL"
               )
             rescue => e
               Octo::Logger.error("bg_task_sweep_error",
-                handle_id: handle_id,
+                handle_id: item[:handle_id],
                 error: e
               )
             end
