@@ -13,7 +13,7 @@ Octo is being rewritten in Go. The Ruby line ended at `v0.11.2-final-ruby` (pres
 
 ### Added
 - **Go module scaffolding** — `go.mod` at module path `github.com/Leihb/octo`, `cmd/octo/main.go` entrypoint wiring up `version`/`help`, `internal/version` with `-ldflags`-overridable `Version` and `Commit` variables (PR #28).
-- **Go CI matrix** — `.github/workflows/go.yml` runs `go vet`, `gofmt -l`, `go build`, `go test -race` against Go 1.22 and 1.23 on Linux, macOS, and Windows — including the first proof that the Go tree builds and tests on native Windows.
+- **Go CI matrix** — `.github/workflows/go.yml` runs `go vet`, `gofmt -l`, `go build`, `go test -race` against Go 1.22 on Linux, macOS, and Windows — including the first proof that the Go tree builds and tests on native Windows.
 - **Makefile** — `make build / test / cover / vet / fmt / fmt-check / tidy / install / clean` targets. `VERSION` and `COMMIT` are injected at build time via `-ldflags`; release builds set `VERSION` explicitly (e.g. `VERSION=0.12.0 make build`).
 - **`octo chat` subcommand** — single-turn Anthropic Messages call via `internal/agent` + `internal/provider/anthropic`. Reads `ANTHROPIC_API_KEY` from env. Flags: `--model`, `--system`, `--max-tokens` (PR #30).
 - **`ANTHROPIC_BASE_URL` env var** — same name the official Anthropic SDK uses. Lets `octo chat` target any Anthropic-protocol-compatible third party (DeepSeek `https://api.deepseek.com/anthropic`, Kimi K2 `https://api.moonshot.cn/anthropic`, OpenRouter Anthropic-shim, etc.) without code changes.
@@ -25,7 +25,7 @@ Octo is being rewritten in Go. The Ruby line ended at `v0.11.2-final-ruby` (pres
 - **Tag `v0.11.2-final-ruby`** added on top of `v0.11.2`, and **branch `archive/ruby`** created pointing at the same commit — the canonical access points for the Ruby line going forward.
 
 ### Removed
-- **Ruby CI workflows** (`.github/workflows/main.yml`, `.github/workflows/smoke_test.yml`) — the Ruby tree on `main` is frozen and the green/red Ruby signal is no longer meaningful. Go CI matrix (1.22 / 1.23 × Linux / macOS / Windows) remains. The Ruby tree under `lib/`, `scripts/`, `spec/` itself stays on `main` until the Go rewrite reaches parity; a later PR will excise it.
+- **Ruby CI workflows** (`.github/workflows/main.yml`, `.github/workflows/smoke_test.yml`) — the Ruby tree on `main` is frozen and the green/red Ruby signal is no longer meaningful. Go CI matrix (1.22 × Linux / macOS / Windows) remains. The Ruby tree under `lib/`, `scripts/`, `spec/` itself stays on `main` until the Go rewrite reaches parity; a later PR will excise it.
 
 ## [0.11.2] - 2026-05-25
 
