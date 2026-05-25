@@ -16,3 +16,8 @@ CLAUDE.md
 .history
 coscli*
 openclacky/
+
+# Extracted .gem payload (produced by `tar -xf some.gem` or `gem unpack`)
+/checksums.yaml.gz
+/data.tar.gz
+/metadata.gz
