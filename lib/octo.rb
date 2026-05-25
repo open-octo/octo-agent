@@ -141,5 +141,9 @@ module Octo
   class UpstreamTruncatedError < RetryableError; end
   class ToolCallError < AgentError; end  # Raised when tool call fails due to invalid parameters
   class BrowserNotReachableError < AgentError; end  # Chrome/Edge not running or remote debugging disabled
+  # Raised when the agent main loop exceeds the configured turn budget for a single task.
+  class TurnLimitExceeded < AgentError; end
+  # Raised when the agent main loop exceeds the configured cumulative cost budget for the session.
+  class CostLimitExceeded < AgentError; end
   # BrowserManager singleton: Octo::BrowserManager.instance
 end

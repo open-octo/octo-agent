@@ -57,6 +57,8 @@ module Octo
     option :image, type: :array, aliases: "-i", desc: "Image file path(s) to attach (alias for --file, kept for compatibility)"
     option :agent, type: :string, default: "coding", desc: "Agent profile to use: coding, general, or any custom profile name (default: coding)"
     option :model, type: :string, desc: "Override the model to use (by name, e.g. gpt-5.3-codex or deepseek-v4-pro). Uses default model if not specified"
+    option :max_turns, type: :numeric, desc: "Per-task turn budget. Aborts the run when the LLM keeps tool-looping past this number (default: 30, 0 disables)."
+    option :max_cost, type: :numeric, desc: "Session USD budget. Aborts the run once cumulative cost exceeds this number (unlimited by default)."
     option :help, type: :boolean, aliases: "-h", desc: "Show this help message"
     def agent
       # Handle help option
@@ -101,6 +103,8 @@ module Octo
       # Update agent config with CLI options
       agent_config.permission_mode = options[:mode].to_sym if options[:mode]
       agent_config.verbose = options[:verbose] if options[:verbose]
+      agent_config.max_turns = options[:max_turns].to_i if options[:max_turns]
+      agent_config.max_cost_usd = options[:max_cost].to_f if options[:max_cost]
 
       # Client factory: produces a fresh Client reflecting the *current*
       # state of agent_config each time it's called. The CLI never holds a
@@ -338,6 +342,26 @@ module Octo
       private def format_number(num)
         return "0" if num.nil? || num == 0
         num.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
+      end
+
+      # Human-readable summary of session token usage and estimated USD cost.
+      # Used by the /cost slash command across UI / JSON / TTY paths.
+      private def format_cost_summary(agent)
+        totals = agent.session_token_totals
+        cost = agent.session_cost_usd
+        model = agent.current_model_info&.dig(:model)
+        priced = !Octo::ModelPricing.normalize_model_name(model.to_s).nil?
+        cost_str = priced ? format("$%.4f", cost) : "n/a (model not in price table)"
+        lines = []
+        lines << "Session usage:"
+        lines << "  prompt tokens     #{format_number(totals[:prompt_tokens])}"
+        lines << "  completion tokens #{format_number(totals[:completion_tokens])}"
+        if totals[:cache_creation_input_tokens].positive? || totals[:cache_read_input_tokens].positive?
+          lines << "  cache write       #{format_number(totals[:cache_creation_input_tokens])}"
+          lines << "  cache read        #{format_number(totals[:cache_read_input_tokens])}"
+        end
+        lines << "  estimated cost    #{cost_str}"
+        lines.join("\n")
       end
 
       # Auto-name a CLI session from the first user message, mirroring server-side logic.
@@ -579,6 +603,9 @@ module Octo
               agent.instance_variable_set(:@ui, json_ui)
               json_ui.emit("info", message: "Session cleared. Starting fresh.")
               next
+            when "/cost"
+              json_ui.emit("info", message: format_cost_summary(agent))
+              next
             end
 
             files = input["files"] || []
@@ -762,6 +789,9 @@ module Octo
           when "/help"
             sleep 0.1
             ui_controller.show_help
+            next
+          when "/cost"
+            ui_controller.show_info(format_cost_summary(agent))
             next
           end
 

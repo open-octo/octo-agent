@@ -157,7 +157,8 @@ module Octo
                   :memory_update_enabled, :skill_evolution,
                   :next_message_suggestion_enabled,
                   :max_running_agents, :max_idle_agents,
-                  :default_working_dir
+                  :default_working_dir,
+                  :max_turns, :max_cost_usd
 
     def initialize(options = {})
       @permission_mode = validate_permission_mode(options[:permission_mode])
@@ -203,6 +204,13 @@ module Octo
       @max_idle_agents = options[:max_idle_agents] || 10
 
       @default_working_dir = options[:default_working_dir] || ENV["OCTO_WORKSPACE_DIR"]
+
+      # Loop budget guards. Both opt-in by configuration but max_turns has a
+      # sane default of 30 to catch runaway tool loops; max_cost_usd defaults
+      # to nil (unlimited) because cost gating requires a priced model and we
+      # don't want to surprise users who run on self-hosted endpoints.
+      @max_turns = options.key?(:max_turns) ? options[:max_turns] : 30
+      @max_cost_usd = options[:max_cost_usd]
 
       # Per-session virtual model overlay.
       # When set, #current_model returns a *merged* hash (the resolved @models
@@ -380,6 +388,7 @@ module Octo
       next_message_suggestion_enabled
       skill_evolution max_running_agents max_idle_agents
       default_working_dir
+      max_turns max_cost_usd
     ].freeze
 
     # Serialize the current agent configuration to YAML.
@@ -397,7 +406,9 @@ module Octo
         "skill_evolution" => @skill_evolution,
         "max_running_agents" => @max_running_agents,
         "max_idle_agents" => @max_idle_agents,
-        "default_working_dir" => @default_working_dir
+        "default_working_dir" => @default_working_dir,
+        "max_turns" => @max_turns,
+        "max_cost_usd" => @max_cost_usd
       }
       YAML.dump("settings" => settings, "models" => persistable_models)
     end

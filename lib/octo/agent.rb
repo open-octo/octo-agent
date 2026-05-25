@@ -45,7 +45,8 @@ module Octo
                 :cache_stats, :ui, :skill_loader, :agent_profile,
                 :status, :error, :updated_at, :source,
                 :latest_latency,  # Hash of latency metrics from the most recent LLM call (see Client#send_messages_with_tools)
-                :reasoning_effort
+                :reasoning_effort,
+                :session_token_totals, :session_cost_usd
     attr_accessor :pinned
 
     REASONING_EFFORTS = %w[low medium high].freeze
@@ -93,6 +94,18 @@ module Octo
       @created_at = Time.now.iso8601
       @total_tasks = 0
       @previous_total_tokens = 0  # Track tokens from previous iteration for delta calculation
+
+      # Session-level cumulative usage. Accumulators are bumped after every
+      # successful LLM response so /cost and the max_cost_usd gate have one
+      # source of truth. Token totals work for all providers; cost is best-
+      # effort and stays at 0.0 when the active model isn't priced.
+      @session_token_totals = {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0
+      }
+      @session_cost_usd = 0.0
       @latest_latency = nil  # Most recent LLM call's latency metrics (see Client#send_messages_with_tools)
       @reasoning_effort = nil  # Per-session reasoning effort override; nil = provider default
       @ui = ui  # UIController for direct UI interaction
@@ -386,6 +399,12 @@ module Octo
           @iterations += 1
           @hooks.trigger(:on_iteration, @iterations)
 
+          # Budget gates: enforce per-task turn count and session cumulative
+          # cost. Both are configured on AgentConfig. Raising here exits the
+          # loop through the existing rescue path, producing a friendly UI
+          # error and a checkpointed session.
+          enforce_loop_budget!
+
           # Drain any inbox items (queued user messages) since the last
           # iteration. Without this, items sit in the queue until the WHOLE
           # run completes — latency drops from "minutes" to "one LLM turn".
@@ -397,7 +416,10 @@ module Octo
 
           # Think: LLM reasoning with tool support
           response = think
-          @last_token_usage = response[:token_usage] if response && response[:token_usage]
+          if response && response[:token_usage]
+            @last_token_usage = response[:token_usage]
+            accumulate_session_usage!(response[:token_usage])
+          end
 
           # Debug: check for potential infinite loops
           if @config.verbose
@@ -754,6 +776,56 @@ module Octo
     # run loop's "LLM said done — but should we really break?" check.
     private def inbox_pending?
       @state_mutex.synchronize { !@inbox.empty? }
+    end
+
+    # Raise if the current task has exceeded max_turns, or the session has
+    # exceeded max_cost_usd. Called at the top of every loop iteration so the
+    # guard fires BEFORE the next think() (preventing one more billed call).
+    private def enforce_loop_budget!
+      task_turns = @iterations - (@task_start_iterations || 0)
+      max_turns = @config.max_turns
+      if max_turns && max_turns.positive? && task_turns > max_turns
+        raise Octo::TurnLimitExceeded,
+              "Task exceeded max_turns budget (#{task_turns} > #{max_turns}). " \
+              "Adjust with --max-turns or AgentConfig#max_turns."
+      end
+
+      max_cost = @config.max_cost_usd
+      if max_cost && max_cost.positive? && @session_cost_usd >= max_cost
+        raise Octo::CostLimitExceeded,
+              format("Session cost $%.4f exceeded budget $%.4f. " \
+                     "Adjust with --max-cost or AgentConfig#max_cost_usd.",
+                     @session_cost_usd, max_cost)
+      end
+    end
+
+    # Add a single LLM response's usage into the session totals and cost.
+    # Cost rolls forward only when the active model has a known price; for
+    # unpriced models the token totals still update so /cost remains useful.
+    # Delegates pricing to Octo::ModelPricing so all USD math goes through
+    # one source of truth (tiered rates, cache surcharges, normalization).
+    private def accumulate_session_usage!(usage)
+      return unless usage.is_a?(Hash)
+
+      @session_token_totals[:prompt_tokens] += usage[:prompt_tokens].to_i
+      @session_token_totals[:completion_tokens] += usage[:completion_tokens].to_i
+      @session_token_totals[:cache_creation_input_tokens] += usage[:cache_creation_input_tokens].to_i
+      @session_token_totals[:cache_read_input_tokens] += usage[:cache_read_input_tokens].to_i
+
+      result = Octo::ModelPricing.calculate_cost(
+        model: current_model_name_for_pricing,
+        usage: usage
+      )
+      @session_cost_usd += result[:cost] if result && result[:cost]
+    end
+
+    # The model name to consult when pricing the most recent LLM call. Uses
+    # effective_model_name so fallbacks are priced against their actual model,
+    # not the configured primary.
+    private def current_model_name_for_pricing
+      @config.effective_model_name
+    rescue StandardError
+      @config.model_name
     end
 
     # Public: count of pending :user_msg items in the inbox.
