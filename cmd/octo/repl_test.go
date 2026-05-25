@@ -37,11 +37,14 @@ func (s *stubSender) StreamMessages(
 }
 
 // makeREPLFixture returns a replConfig wired to a stubSender and in-memory
-// buffers. HOME is redirected to a temp dir so session files don't pollute
-// ~/.octo.
+// buffers. HOME/USERPROFILE is redirected to a temp dir so session files don't
+// pollute ~/.octo (USERPROFILE is needed for Windows where os.UserHomeDir()
+// ignores HOME).
 func makeREPLFixture(t *testing.T, input string) (replConfig, *bytes.Buffer, *bytes.Buffer, *stubSender) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 
 	stub := &stubSender{reply: "pong"}
 	a := agent.New(stub, "test-model")

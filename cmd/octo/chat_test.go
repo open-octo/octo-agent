@@ -18,7 +18,9 @@ import (
 // We supply an immediate EOF on stdin so the REPL exits without blocking.
 func TestRunChat_NoArgs_EntersREPL(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp) // Windows compat
 	// Fake provider so we don't need a real API key.
 	var stdout, stderr bytes.Buffer
 	// Immediate EOF → REPL reads nothing and exits cleanly.

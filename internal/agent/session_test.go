@@ -8,6 +8,16 @@ import (
 	"time"
 )
 
+// setTempHome redirects both HOME (Unix) and USERPROFILE (Windows) to tmp so
+// sessionsDir() stays inside the test sandbox on all platforms.
+func setTempHome(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp) // Windows: os.UserHomeDir() reads USERPROFILE
+	return tmp
+}
+
 func TestNewSession(t *testing.T) {
 	s := NewSession("claude-haiku-4-5-20251001", "be helpful")
 	if s.ID == "" {
@@ -53,8 +63,7 @@ func TestTurnCount(t *testing.T) {
 
 func TestSaveAndLoad(t *testing.T) {
 	// Point sessions dir at a temp directory so we don't pollute ~/.octo.
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	setTempHome(t)
 
 	s := NewSession("model-x", "sys")
 	s.Messages = []Message{
@@ -86,8 +95,7 @@ func TestSaveAndLoad(t *testing.T) {
 }
 
 func TestLoadSession_NotFound(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	setTempHome(t)
 
 	_, err := LoadSession("19991231-235959")
 	if err == nil {
@@ -96,8 +104,7 @@ func TestLoadSession_NotFound(t *testing.T) {
 }
 
 func TestLoadSession_StripDotJSON(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	setTempHome(t)
 
 	s := NewSession("m", "")
 	if err := s.Save(); err != nil {
@@ -114,8 +121,7 @@ func TestLoadSession_StripDotJSON(t *testing.T) {
 }
 
 func TestListSessions(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	tmp := setTempHome(t)
 
 	// Write 3 sessions with distinct UpdatedAt so ordering is deterministic.
 	for i := 0; i < 3; i++ {
@@ -149,8 +155,7 @@ func TestListSessions(t *testing.T) {
 }
 
 func TestListSessions_Limit(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	tmp := setTempHome(t)
 
 	dir := filepath.Join(tmp, ".octo", "sessions")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
