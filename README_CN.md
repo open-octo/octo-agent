@@ -1,112 +1,66 @@
 # Octo
 
-[![Build](https://img.shields.io/github/actions/workflow/status/octo-ai/octo/main.yml?label=build&style=flat-square)](https://github.com/octo-ai/octo/actions)
+[![Build](https://img.shields.io/github/actions/workflow/status/Leihb/octo/main.yml?label=build&style=flat-square)](https://github.com/Leihb/octo/actions)
 [![Release](https://img.shields.io/gem/v/octo?label=release&style=flat-square&color=blue)](https://rubygems.org/gems/octo)
 [![Ruby](https://img.shields.io/badge/ruby-%3E%3D%203.1.0-red?style=flat-square)](https://www.ruby-lang.org)
-[![Downloads](https://img.shields.io/gem/dt/octo?label=downloads&style=flat-square&color=brightgreen)](https://rubygems.org/gems/octo)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE.txt)
 
-> 想贡献代码？提 PR 前请先读 **[CONTRIBUTING.md](./CONTRIBUTING.md)**。
+<p align="center">
+  <a href="README.md">English</a> · <a href="README_CN.md">简体中文</a>
+</p>
 
-**最省 Token 的开源 AI Agent。**
+一个**功能优先**的 AI Agent，三种界面一视同仁。
 
-Octo 在任务能力上对齐 Claude Code，成本相当，同时相比其他开源 Agent 有显著优势（约节省 50% vs OpenClaw，约便宜 3× vs Hermes）。100% 开源（MIT），支持 BYOK 接入任意 OpenAI 兼容模型，背后是两年 Agentic 研发与 Harness 工程积累。
+Octo 是一个 Ruby 工具，通过 OpenAI 兼容 API 与 AI 模型交互。提供聊天功能和具备工具执行能力的自主 AI Agent。你可以在**终端**、**浏览器**或**即时通讯**中使用它 —— 三种界面都是一等公民，能力完全相同。
 
-> 官网：https://www.octo.com/ · 投资方：**奇绩创坛 · 真格基金 · 红杉中国 · 高瓴资本**
+## 理念
 
-## 为什么选 Octo？
+- **三面一体** — CLI、Web、IM 都是一等公民，没有次要界面
+- **开放技能** — 兼容 Claude Code 技能格式，无缝安装社区技能
+- **Token 务实** — 合理使用 token，但绝不为了省钱而牺牲功能正确性
 
-同一个任务，你要花多少钱？在可比的 Agent 工作负载下，Octo 相比主流方案节省了大量 Token 费用。
+## Octo 不是什么
 
-| Agent | 相对成本 | 备注 |
-|---|---|---|
-| **Octo** | **~0.8×** | 16 个工具 · 近 100% 缓存命中 · 子 Agent 路由 |
-| Claude Code | 1.0×（基准） | 世界级 Harness，闭源订阅制 |
-| OpenClaw | ~1.5× | 能力对标的 Harness Agent |
-| Hermes | ~3× | 52 个内置工具，Schema 体积膨胀 ~3–4× |
+- 不是 token 最小化执念 — 功能优先
+- 不是 web 优先 — 本地 CLI 使用不受主从架构约束
+- 不是应用市场 — 没有加密技能，没有商业化技能生态
 
-*数据为内部常见 Agent 任务均值，以 Claude Code 为基准。完整基准测试报告将在 GitHub 发布。*
+## 特性
 
-## 功能对比
-
-核心 Agent 能力各家大致对齐，真正的差异在于**成本、开放性、Skill 进化能力和集成支持**。
-
-| 功能 | Claude Code | OpenClaw | Hermes | **Octo** |
-|---|:---:|:---:|:---:|:---:|
-| Token 成本 | 1.0× | ~1.5× | ~3× | **~0.8×** |
-| 开源 | ❌ 闭源 | ✅ 开源 | ✅ 开源 | ✅ MIT |
-| BYOK / 自由选模型 | ❌ 仅限 Anthropic | ✅ | ✅ | ✅ |
-| Skill 自我进化 | ❌ | ❌ | ✅ | ✅ |
-| IM 集成（飞书/企微/微信/Discord/Telegram） | ❌ | ✅ | ✅ | ✅ |
-
-## 成本是怎么降下来的
-
-不是靠裁剪功能——而是在每一层都做了正确的取舍，效果叠加。
-
-### 1. 极高缓存命中率
-Session 不重启、双缓存标记、**先插入再压缩**——System Prompt 从不被修改，压缩后仍能复用缓存。**实测缓存命中率：接近 100%。**
-
-### 2. 极简工具集
-仅 **16 个核心工具**。扩展能力通过一个 `invoke_skill` 元工具交给 Skill 生态承载。工具数量不是指标——任务完成率才是。
-
-| Octo | Claude Code | OpenClaw | Hermes |
-|:--:|:--:|:--:|:--:|
-| **16** | 40+ | 23 | 52 |
-
-### 3. 空闲时自动压缩
-去开个会、倒杯咖啡——Agent 在后台压缩长上下文并预热缓存。你回来发第一条消息就能直接命中缓存。**冷启动首 Token 成本降低 50%+。**
-
-### 4. BYOK——你选模型，你定成本
-任意 OpenAI 兼容 API，即插即用。官方直连、聚合路由、兼容中转——100% 由你决定。代码用 Claude，子任务自动路由到 DeepSeek，再省一截。
-
-背后是 **2 年 · 3 代 Agentic 架构 · 6 个核心 Harness 工程决策**的积累。
-
-## Skills——Agent 的灵魂
-
-- **`/` 唤起** — 即时浏览、模糊搜索、直接调用。数百个 Skill 触手可及。
-- **用自然语言创建 Skill** — 描述你想要的，Agent 自动起草 `SKILL.md`、拆解步骤、跑验证。无需写代码。
-- **自我进化** — 每次运行后，Agent 根据执行上下文和结果更新 Skill。下次调用更稳定、更精准。
-- **开放兼容** — 支持 Claude Skills / Markdown Pack / 自定义格式。
-- **可变现** — 打磨好的 Skill 可打包出售，支持加密分发、License 管理、创作者自定价。
+| 特性 | 说明 |
+|---|---|
+| **交互式 CLI** | 直接在终端启动 Agent 会话 |
+| **Web UI** | 完整的聊天界面，支持多 Session，`localhost:7070` |
+| **IM 集成** | 飞书、企微、微信、Discord、Telegram —— 全部能力对等 |
+| **Skills** | 以标准 Markdown 格式安装、创建和进化技能 |
+| **BYOK** | 自带 API Key —— 任意 OpenAI 兼容模型 |
+| **自主 Agent** | ReAct 模式配合工具执行，处理复杂任务 |
 
 ## 安装
 
-### 桌面安装器（推荐）
+### RubyGem
 
-双击安装，环境、依赖、Skill 全部自动配置好。
-
-- **macOS** — [下载 `.dmg`](https://oss.1024code.com/octo-installer/official/octo-installer.dmg)（Apple Silicon / Intel）
-- **Windows** — [下载 `.exe`](https://oss.1024code.com/octo-installer/official/octo-installer.exe)（Windows 10 2004+ / Windows 11）
-
-更多选项：https://www.octo.com/
-
-### 命令行安装
-
-一键安装（Mac/Ubuntu）：
-
-```bash
-/bin/bash -c "$(curl -sSL https://raw.githubusercontent.com/octo-ai/octo/main/scripts/install.sh)"
-```
-
-Windows：
-
-```bash
-powershell -c "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/octo-ai/octo/main/scripts/install.ps1')))"
-```
-
-或使用 Ruby（3.x/4.x）：
-
-**环境要求：** Ruby >= 3.1.0
+需要 Ruby >= 3.1.0
 
 ```bash
 gem install octo
 ```
 
-详见：https://www.octo.com/docs/installation
+### 一键安装（macOS / Ubuntu）
+
+```bash
+/bin/bash -c "$(curl -sSL https://raw.githubusercontent.com/Leihb/octo/main/scripts/install.sh)"
+```
+
+### Windows
+
+```powershell
+powershell -c "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/Leihb/octo/main/scripts/install.ps1')))"
+```
 
 ## 快速开始
 
-### 终端（CLI）
+### 终端
 
 ```bash
 octo            # 在当前目录启动交互式 Agent
@@ -118,16 +72,14 @@ octo            # 在当前目录启动交互式 Agent
 octo server     # 默认地址：http://localhost:7070
 ```
 
-打开 **http://localhost:7070**，享受完整的聊天界面，支持多 Session 并行——同时跑编码、文案、研究等多个任务。
-
 选项：
 
 ```bash
 octo server --port 8080        # 自定义端口
-octo server --host 0.0.0.0     # 监听所有接口（支持远程访问）
+octo server --host 0.0.0.0     # 监听所有接口
 ```
 
-## 配置
+### 配置
 
 ```bash
 $ octo
@@ -138,9 +90,22 @@ $ octo
 
 开箱即支持：**Claude (Anthropic) · GPT (OpenAI) · DeepSeek · Kimi (Moonshot) · MiniMax · OpenRouter**，或任意自定义端点。
 
-## 代码开发场景
+## Skills
 
-Octo 是一款通用 AI 编程助手——搭建全栈应用脚手架、添加功能，或快速探索陌生代码库：
+Skills 是扩展 Octo 能力的主要方式。一个 skill 是一份 Markdown 指令文件，指导 Agent 使用现有工具完成特定任务。
+
+- **`/` 唤起** — 模糊搜索并调用已安装 skill
+- **自然语言创建** — 描述你想要什么，Agent 自动起草 `SKILL.md`
+- **自我进化** — 根据执行上下文和结果持续改进
+- **开放格式** — 兼容 Claude Code / Markdown Pack / 自定义格式
+
+Skill 目录：
+
+- 内置：`lib/octo/default_skills/`
+- 项目级：`.octo/skills/`
+- 用户级：`~/.octo/skills/`
+
+## 使用示例
 
 ```bash
 $ octo
@@ -149,59 +114,18 @@ $ octo
 > 支付模块是怎么实现的？
 ```
 
-## Star 历史
-
-<a href="https://www.star-history.com/?repos=octo-ai%2Focto&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=octo-ai/octo&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=octo-ai/octo&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=octo-ai/octo&type=date&legend=top-left" />
- </picture>
-</a>
-
-## 进阶——创作者计划
-
-已有深度用户将自己的工作流打磨成垂直 AI 专家在 Octo 上发布——支持加密分发、License 管理、自定义定价。法律、医疗、财务规划等领域均有落地。
-
-了解更多：https://www.octo.com/ → Creators
-
 ## 从源码安装
 
 ```bash
-git clone https://github.com/octo-ai/octo.git
+git clone https://github.com/Leihb/octo.git
 cd octo
 bundle install
 bin/octo
 ```
 
-## 信任与背书
-
-- **100% 开源** — MIT 协议，所有代码公开，所有决策可溯源
-- **2 年 Agentic 研发** — 经历 3 代架构演进
-- **16 个核心工具** — 极简设计
-- **投资方** — 奇绩创坛 · 真格基金 · 红杉中国 · 高瓴资本
-
-## 关注作者公众号
-
-本项目由 **李亚飞** 创立并主导开发。如果你对 AI Agent 工程、Harness 设计、创业经历感兴趣，欢迎关注微信公众号： **技术达人李亚飞**
-
-近期文章：
-
-- [从 ShowMeBug 到 Octo：我对 AI 时代的 4 次下注](https://mp.weixin.qq.com/s/wTW-IU5Czu-OpJTFh_mwgA)
-- [我把 AI 账单从 30 美金打到 5 美金](https://mp.weixin.qq.com/s/BDhE0y8xbX0ea3vLlV37Ig)
-- [100% Cache 命中的 Harness 怎么设计：一个开源 AI Agent 的 7 个工程决策](https://mp.weixin.qq.com/s/Rc1xk0Qw168D4Y07kkBiGQ)
-
-## 贡献者
-
-每一行代码、每一个 Bug 报告、每一次认真的 Review，都让 Octo 变得更好。感谢你们！
-
-<a href="https://github.com/octo-ai/octo/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=octo-ai/octo" />
-</a>
-
 ## 参与贡献
 
-欢迎在 GitHub 提交 Bug 报告和 Pull Request：https://github.com/octo-ai/octo 。参与贡献者须遵守[行为准则](https://github.com/octo-ai/octo/blob/main/CODE_OF_CONDUCT.md)。
+欢迎在 GitHub 提交 Bug 报告和 Pull Request：https://github.com/Leihb/octo 。提 PR 前请先阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 ## 许可证
 
