@@ -33,7 +33,7 @@ Octo 是一个 Ruby 工具，用于与 AI 模型交互。原生支持 **Anthropi
 | 特性 | 说明 |
 |---|---|
 | **交互式 CLI** | 直接在终端启动 Agent 会话 |
-| **Web UI** | 完整的聊天界面，支持多 Session，`localhost:7070` |
+| **Web UI** | 完整的聊天界面，支持多 Session，`localhost:8888` |
 | **IM 集成** | 飞书、企微、微信、Discord、Telegram —— 全部能力对等 |
 | **Skills** | 以标准 Markdown 格式安装、创建和进化技能 |
 | **BYOK** | 自带 API Key —— 任意 Anthropic / OpenAI / Bedrock 协议模型 |
@@ -72,7 +72,7 @@ octo            # 在当前目录启动交互式 Agent
 ### Web UI
 
 ```bash
-octo server     # 默认地址：http://localhost:7070
+octo server     # 默认地址：http://localhost:8888
 ```
 
 选项：

@@ -799,7 +799,7 @@ show_post_install_info() {
     echo -e "    ${YELLOW}source ${SHELL_RC}${NC}"
     echo ""
     echo -e "  ${GREEN}Web UI${NC} (recommended):"
-    echo "    $cmd server  →  http://localhost:7070"
+    echo "    $cmd server  →  http://localhost:8888"
     echo ""
     echo -e "  ${GREEN}Terminal${NC}:"
     echo "    $cmd"

@@ -533,7 +533,7 @@ show_post_install_info() {
     echo ""
     echo -e "  ${GREEN}Web UI${NC} (recommended):"
     echo "    $cmd server"
-    echo "    Open http://localhost:7070"
+    echo "    Open http://localhost:8888"
     echo ""
     echo -e "  ${GREEN}Terminal${NC}:"
     echo "    $cmd"

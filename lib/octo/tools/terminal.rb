@@ -1210,7 +1210,7 @@ module Octo
         log_io   = File.open(log_file, "wb")
 
         # Prevent the child process from inheriting the server's
-        # listening socket (port 7070) which would block hot_restart.
+        # listening socket (default port 8888) which would block hot_restart.
         # PTY.spawn does not support close_others, so we temporarily
         # set close_on_exec on the inherited fd — the kernel closes
         # it in the child after exec while the parent keeps it open.
