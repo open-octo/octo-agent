@@ -12,7 +12,7 @@
 | P0-2 | 通用 MCP 客户端（stdio + SSE） | [#3](https://github.com/Leihb/octo/issues/3) | P0 | ⬜ todo | 5d |
 | P0-3 | `settings.yml` 用户可配置 hook | [#4](https://github.com/Leihb/octo/issues/4) | P0 | ⬜ todo | 3d |
 | P0-4 | `max_turns` / `max_cost_usd` 主循环闸门 | [#5](https://github.com/Leihb/octo/issues/5) | P0 | ✅ 2026-05-25 | 1d |
-| P1-1 | 内置子代理预设 explore/plan/verification/general-purpose | [#6](https://github.com/Leihb/octo/issues/6) | P1 | ⬜ todo | 2d |
+| P1-1 | 内置子代理预设 explore/plan/verification/general-purpose | [#6](https://github.com/Leihb/octo/issues/6) | P1 | ✅ 2026-05-25 | 2d |
 | P1-2 | 沙箱执行（命令/网络/路径白名单） | [#7](https://github.com/Leihb/octo/issues/7) | P1 | ⬜ todo | 3d |
 | P1-3 | 高价值内置 slash skill：`/commit` `/review` `/diff` `/compact` `/cost` `/doctor` `/resume` `/status` | [#8](https://github.com/Leihb/octo/issues/8) | P1 | ⬜ todo | 5d |
 | P1-4 | `AskUserQuestion` 升级（多选 / 选项描述 / 预览） | [#9](https://github.com/Leihb/octo/issues/9) | P1 | ⬜ todo | 3d |
@@ -123,6 +123,8 @@
 每个含 `agent.yml`（model、forbidden_tools）+ `system_prompt.md`。
 
 **验收**：Agent 工具传 `subagent_type: "explore"` 时自动应用预设。
+
+**完成**：2026-05-25。新增 `Octo::SubagentPreset` + `Octo::SubagentRegistry`（user → built-in 二级查找）+ 4 个 preset 目录 `lib/octo/default_subagents/{explore,plan,verification,general-purpose}/`，每个含 `subagent.yml`（model / forbidden_tools / description）+ `system_prompt.md`（curated playbook）。`agent` 工具的 `subagent_type` 不再是 stub：未知名字直接拒；命中 preset 时 model 缺省走 preset、forbidden_tools 与 caller 取并集、system_prompt 与 brief 拼接。同 PR 顺手修了一致性 bug：`Octo::Agent#absorb_subagent_session_usage!` 抽到 Agent 类，5 个 fork_subagent 调用点（agent tool / skill_manager / memory_updater / skill_reflector / skill_auto_creator）都接入，`/cost` 不再低估子代理开销。
 
 ---
 

@@ -75,27 +75,41 @@ module Octo
       #
       # @param description [String] short label for UI
       # @param prompt [String] task brief delivered as the sub-agent's user turn
-      # @param subagent_type [String, nil] preset name (P1-1 hook; ignored today)
+      # @param subagent_type [String, nil] preset name registered in
+      #   Octo::SubagentRegistry. When set, the preset's model + forbidden_tools
+      #   + system_prompt merge into this call (caller params still override).
       # @param tools [Array<String>, nil] allowlist of tool names
       # @param forbidden_tools [Array<String>, nil] explicit denylist
-      # @param model [String] model role / name (default: "lite")
+      # @param model [String, nil] model role / name. nil = use preset's model
+      #   if a preset is in play, else "lite".
       # @param agent [Octo::Agent] injected by the dispatcher
-      # @param working_dir [String, nil] injected by the dispatcher (unused; here for parity)
+      # @param working_dir [String, nil] injected; unused (sub-agent inherits parent's)
       # @return [String, Hash] sub-agent summary on success, error hash on misuse
       def execute(description:, prompt:, subagent_type: nil, tools: nil,
-                  forbidden_tools: nil, model: "lite", agent: nil, working_dir: nil)
-        _ = working_dir  # accepted but unused — sub-agent inherits parent's working_dir
-        _ = subagent_type  # reserved for P1-1 preset loading
+                  forbidden_tools: nil, model: nil, agent: nil, working_dir: nil)
+        _ = working_dir
         return { error: "Agent context is required" } unless agent
         return { error: "description is required" } if description.to_s.strip.empty?
         return { error: "prompt is required" } if prompt.to_s.strip.empty?
 
-        effective_forbidden = resolve_forbidden(agent, tools: tools, forbidden_tools: forbidden_tools)
+        preset = resolve_preset(subagent_type)
+        if subagent_type && !preset
+          return { error: "Unknown subagent_type: #{subagent_type}" }
+        end
+
+        effective_model = model || preset&.model || "lite"
+        effective_forbidden = resolve_forbidden(
+          agent,
+          tools: tools,
+          forbidden_tools: forbidden_tools,
+          preset: preset
+        )
+        effective_suffix = build_subagent_brief(description, preset: preset)
 
         subagent = agent.fork_subagent(
-          model: model,
+          model: effective_model,
           forbidden_tools: effective_forbidden,
-          system_prompt_suffix: build_subagent_brief(description)
+          system_prompt_suffix: effective_suffix
         )
 
         agent.ui&.show_info(
@@ -113,7 +127,7 @@ module Octo
 
         # Roll the sub-agent's token + cost into the parent's session totals
         # so /cost and max_cost_usd see the full bill for the user request.
-        absorb_session_usage(agent, subagent)
+        agent.absorb_subagent_session_usage!(subagent)
 
         agent.ui&.show_info("Sub-agent done: #{description} (#{subagent.iterations} iterations)")
 
@@ -140,8 +154,14 @@ module Octo
         end
       end
 
-      private def resolve_forbidden(agent, tools:, forbidden_tools:)
+      private def resolve_preset(subagent_type)
+        return nil if subagent_type.nil? || subagent_type.to_s.empty?
+        Octo::SubagentRegistry.find(subagent_type.to_s)
+      end
+
+      private def resolve_forbidden(agent, tools:, forbidden_tools:, preset: nil)
         denylist = Array(forbidden_tools).map(&:to_s)
+        denylist.concat(preset.forbidden_tools) if preset
 
         if tools && !Array(tools).empty?
           # Allowlist takes precedence: forbid everything not on the list.
@@ -158,8 +178,8 @@ module Octo
         denylist.uniq
       end
 
-      private def build_subagent_brief(description)
-        <<~BRIEF.strip
+      private def build_subagent_brief(description, preset: nil)
+        brief = <<~BRIEF.strip
           You have been spawned by the parent agent to handle this sub-task: #{description}
 
           Work autonomously. You cannot ask follow-up questions of the parent — your
@@ -167,21 +187,16 @@ module Octo
           and produce a final response), your output will be summarized and handed
           back to the parent as a tool result.
         BRIEF
+
+        if preset && !preset.system_prompt.empty?
+          # Preset playbook first (defines role + constraints), then the
+          # concrete sub-task brief from the parent.
+          "#{preset.system_prompt}\n\n---\n\n#{brief}"
+        else
+          brief
+        end
       end
 
-      private def absorb_session_usage(parent, subagent)
-        return unless parent && subagent
-        parent_totals = parent.session_token_totals
-        sub_totals = subagent.session_token_totals
-        parent_totals[:prompt_tokens] += sub_totals[:prompt_tokens]
-        parent_totals[:completion_tokens] += sub_totals[:completion_tokens]
-        parent_totals[:cache_creation_input_tokens] += sub_totals[:cache_creation_input_tokens]
-        parent_totals[:cache_read_input_tokens] += sub_totals[:cache_read_input_tokens]
-        parent.instance_variable_set(
-          :@session_cost_usd,
-          parent.session_cost_usd + subagent.session_cost_usd
-        )
-      end
     end
   end
 end

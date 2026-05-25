@@ -76,6 +76,7 @@ RSpec.describe Octo::Tools::Agent do
       allow(a).to receive(:instance_variable_set)
       allow(a).to receive(:fork_subagent).and_return(subagent)
       allow(a).to receive(:send).with(:generate_subagent_summary, subagent).and_return("done!")
+      allow(a).to receive(:absorb_subagent_session_usage!)
       a
     end
 
@@ -128,15 +129,8 @@ RSpec.describe Octo::Tools::Agent do
       expect(captured_forbidden).not_to include("file_reader", "grep")
     end
 
-    it "absorbs subagent token totals into the parent" do
-      tool.execute(description: "x", prompt: "y", agent: agent)
-      totals = agent.session_token_totals
-      expect(totals[:prompt_tokens]).to eq(300)       # 200 + 100
-      expect(totals[:completion_tokens]).to eq(150)   # 100 + 50
-    end
-
-    it "absorbs subagent USD cost into the parent" do
-      expect(agent).to receive(:instance_variable_set).with(:@session_cost_usd, 0.005 + 0.0012)
+    it "asks the parent to absorb the sub-agent's session usage" do
+      expect(agent).to receive(:absorb_subagent_session_usage!).with(subagent)
       tool.execute(description: "x", prompt: "y", agent: agent)
     end
 
@@ -146,6 +140,66 @@ RSpec.describe Octo::Tools::Agent do
       ).and_return(subagent)
 
       tool.execute(description: "x", prompt: "y", agent: agent, model: "claude-opus-4-1")
+    end
+
+    it "rejects unknown subagent_type with a friendly error" do
+      result = tool.execute(description: "x", prompt: "y", agent: agent, subagent_type: "no-such-preset")
+      expect(result).to eq({ error: "Unknown subagent_type: no-such-preset" })
+    end
+
+    it "applies a known preset's model and forbidden_tools" do
+      captured = nil
+      allow(agent).to receive(:fork_subagent) do |**kw|
+        captured = kw
+        subagent
+      end
+
+      tool.execute(description: "x", prompt: "y", agent: agent, subagent_type: "explore")
+
+      # explore preset says model: lite and forbids write/edit/web_search/web_fetch/browser/agent
+      expect(captured[:model]).to eq("lite")
+      expect(captured[:forbidden_tools]).to include("write", "edit", "web_search", "web_fetch", "browser", "agent")
+    end
+
+    it "merges preset forbidden_tools with caller-provided ones" do
+      captured_forbidden = nil
+      allow(agent).to receive(:fork_subagent) do |**kw|
+        captured_forbidden = kw[:forbidden_tools]
+        subagent
+      end
+
+      tool.execute(description: "x", prompt: "y", agent: agent,
+                   subagent_type: "explore", forbidden_tools: ["terminal"])
+
+      expect(captured_forbidden).to include("terminal")          # caller
+      expect(captured_forbidden).to include("write", "edit")     # preset
+      expect(captured_forbidden).to include("agent")             # self-block
+    end
+
+    it "caller's explicit model overrides the preset's model" do
+      captured = nil
+      allow(agent).to receive(:fork_subagent) do |**kw|
+        captured = kw
+        subagent
+      end
+
+      tool.execute(description: "x", prompt: "y", agent: agent,
+                   subagent_type: "explore", model: "claude-opus-4-1")
+
+      expect(captured[:model]).to eq("claude-opus-4-1")
+    end
+
+    it "prepends the preset's system_prompt to the brief" do
+      captured_suffix = nil
+      allow(agent).to receive(:fork_subagent) do |**kw|
+        captured_suffix = kw[:system_prompt_suffix]
+        subagent
+      end
+
+      tool.execute(description: "audit auth", prompt: "y", agent: agent, subagent_type: "explore")
+
+      expect(captured_suffix).to include("Code Exploration Sub-agent") # from explore preset
+      expect(captured_suffix).to include("audit auth")                  # from brief
     end
 
     it "lets AgentInterrupted bubble up" do

@@ -178,6 +178,12 @@ RSpec.describe Octo::Agent::MemoryUpdater do
           @fork_target
         end
 
+        # Real Octo::Agent provides this; MemoryUpdater calls it after the
+        # sub-agent run to roll cost back to the parent. No-op in tests.
+        def absorb_subagent_session_usage!(_sub)
+          @absorbed = true
+        end
+
         def load_memories_meta
           "(No long-term memories found.)"
         end
