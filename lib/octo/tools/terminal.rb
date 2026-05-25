@@ -377,19 +377,19 @@ module Octo
         # must terminate. Each individual poll still carries `timeout`.
         deadline = Time.now + timeout.to_i + 60
 
-        while result[:exit_code].nil? && result[:session_id] && Time.now < deadline
+        while result[:exit_code].nil? && result[:handle_id] && Time.now < deadline
           result = terminal.execute(
-            session_id: result[:session_id],
-            input:      "",
-            timeout:    timeout,
+            handle_id: result[:handle_id],
+            input:     "",
+            timeout:   timeout,
           )
           output += result[:output].to_s
         end
 
         # Deadline exceeded — best-effort cleanup so the session doesn't leak.
-        if result[:exit_code].nil? && result[:session_id]
+        if result[:exit_code].nil? && result[:handle_id]
           begin
-            terminal.execute(session_id: result[:session_id], kill: true)
+            terminal.execute(handle_id: result[:handle_id], kill: true)
           rescue StandardError
             # swallow — cleanup is best-effort
           end
