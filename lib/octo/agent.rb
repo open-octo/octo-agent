@@ -1862,6 +1862,27 @@ module Octo
       parts.join("\n")
     end
 
+    # Absorb a finished sub-agent's session usage into this (parent) agent's
+    # cumulative counters. After the sub-agent returns, its private @session_
+    # token_totals and @session_cost_usd carry whatever it spent — without this
+    # call, /cost and the max_cost_usd guard would silently undercount work
+    # that fanned out to sub-agents.
+    #
+    # Callers: tools/agent.rb, skill_manager.rb, memory_updater.rb,
+    #          skill_reflector.rb, skill_auto_creator.rb.
+    #
+    # @param subagent [Octo::Agent]
+    # @return [void]
+    def absorb_subagent_session_usage!(subagent)
+      return unless subagent
+      sub_totals = subagent.session_token_totals
+      @session_token_totals[:prompt_tokens] += sub_totals[:prompt_tokens]
+      @session_token_totals[:completion_tokens] += sub_totals[:completion_tokens]
+      @session_token_totals[:cache_creation_input_tokens] += sub_totals[:cache_creation_input_tokens]
+      @session_token_totals[:cache_read_input_tokens] += sub_totals[:cache_read_input_tokens]
+      @session_cost_usd += subagent.session_cost_usd
+    end
+
     # Deep clone helper for messages using Marshal
     # @param obj [Object] Object to clone
     # @return [Object] Deep cloned object

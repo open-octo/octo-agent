@@ -108,6 +108,11 @@ module Octo
 
         return unless result
 
+        # Roll sub-agent's tokens + USD into parent's session totals so the
+        # memory-update overhead is visible in /cost and counted against
+        # max_cost_usd. Background tasks are not free.
+        absorb_subagent_session_usage!(subagent)
+
         # Only surface a completion info line if the subagent actually
         # wrote something to memory. The common "No memory updates needed."
         # path stays silent to avoid visual noise.

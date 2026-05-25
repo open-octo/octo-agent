@@ -77,6 +77,34 @@ RSpec.describe Octo::Agent, "loop budget gates" do
     end
   end
 
+  describe "#absorb_subagent_session_usage!" do
+    it "adds the sub-agent's token and cost totals into the parent" do
+      parent = build_agent
+      sub = build_agent
+      parent.send(:accumulate_session_usage!, {
+        prompt_tokens: 100_000, completion_tokens: 50_000
+      })
+      sub.send(:accumulate_session_usage!, {
+        prompt_tokens: 200_000, completion_tokens: 100_000
+      })
+      parent_cost_before = parent.session_cost_usd
+      sub_cost = sub.session_cost_usd
+
+      parent.absorb_subagent_session_usage!(sub)
+
+      expect(parent.session_token_totals[:prompt_tokens]).to eq(300_000)
+      expect(parent.session_token_totals[:completion_tokens]).to eq(150_000)
+      expect(parent.session_cost_usd).to be_within(0.0001).of(parent_cost_before + sub_cost)
+    end
+
+    it "is a no-op for nil sub-agent" do
+      parent = build_agent
+      parent.send(:accumulate_session_usage!, { prompt_tokens: 100, completion_tokens: 50 })
+      expect { parent.absorb_subagent_session_usage!(nil) }.not_to raise_error
+      expect(parent.session_token_totals[:prompt_tokens]).to eq(100)
+    end
+  end
+
   describe "#enforce_loop_budget!" do
     it "raises TurnLimitExceeded once task turns exceed the budget" do
       agent = build_agent(max_turns: 3)

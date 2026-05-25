@@ -45,6 +45,10 @@ module Octo
         subagent = fork_subagent
         result = subagent.run(build_skill_reflection_prompt(skill_name))
 
+        # Roll sub-agent's tokens + USD into parent's session totals so the
+        # reflection overhead is visible in /cost.
+        absorb_subagent_session_usage!(subagent)
+
         # Clear the context so we don't reflect again
         @skill_execution_context = nil
       end

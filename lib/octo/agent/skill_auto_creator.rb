@@ -25,6 +25,10 @@ module Octo
         # Fork an isolated subagent to evaluate + create — does NOT touch main history
         subagent = fork_subagent
         subagent.run(build_skill_creation_prompt)
+
+        # Roll sub-agent's tokens + USD into parent's session totals so the
+        # auto-create overhead is visible in /cost.
+        absorb_subagent_session_usage!(subagent)
       end
 
       # Determine if this task is a candidate for skill auto-creation

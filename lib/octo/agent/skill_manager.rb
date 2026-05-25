@@ -447,6 +447,10 @@ module Octo
         # Generate summary
         summary = generate_subagent_summary(subagent)
 
+        # Roll sub-agent's tokens + USD cost into the parent so /cost and
+        # max_cost_usd see the full bill from skill-spawned subagents too.
+        absorb_subagent_session_usage!(subagent)
+
         # Mutate the subagent_instructions message in-place to become the result summary
         @history.mutate_last_matching(->(m) { m[:subagent_instructions] }) do |m|
           m[:content] = summary
