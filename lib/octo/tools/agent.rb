@@ -36,6 +36,15 @@ module Octo
 
         Defaults to the lite model for cost; pass `model: "default"` for primary.
         Recursion is blocked: a sub-agent cannot itself call `agent`.
+
+        Built-in `subagent_type` presets:
+        - `explore` — fast read-only research (no network, no mutation)
+        - `plan` — pure planning, no execution side effects
+        - `verification` — read + run tests, check work without mutating
+        - `general-purpose` — broad capability, only recursion blocked
+        - `code-explorer` — workflow-driven codebase exploration
+        - `persist-memory` — write to long-term memory at ~/.octo/memories/
+        - `recall-memory` — read relevant memories and summarize
       DESC
       self.tool_category = "subagent"
       self.tool_parameters = {

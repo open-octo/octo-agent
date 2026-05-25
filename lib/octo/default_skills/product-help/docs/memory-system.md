@@ -18,17 +18,16 @@ Memories are stored as Markdown files with YAML frontmatter.
 
 ## Manual Memory Management
 
-Use the `persist-memory` skill to save information:
+Persist and recall are sub-agent presets, not user-callable slash commands.
+Ask the agent in natural language and it routes through the `agent` tool
+with the right `subagent_type`:
 
-```bash
-> /persist-memory
-```
+- **Persist** — "remember that we use Railway for staging" → agent forks a
+  `persist-memory` sub-agent that writes the file
+- **Recall** — "what do you know about our deployment setup?" → agent forks
+  a `recall-memory` sub-agent that scans existing memory and summarizes
 
-Use the `recall-memory` skill to retrieve information:
-
-```bash
-> /recall-memory
-```
+A `--no-memory` server flag disables automatic persistence (see below).
 
 ## Disabling Memory
 

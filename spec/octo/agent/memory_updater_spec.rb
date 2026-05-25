@@ -75,24 +75,20 @@ RSpec.describe Octo::Agent::MemoryUpdater do
   end
 
   describe "#build_memory_update_prompt" do
-    # All build_memory_update_prompt tests need a working skill_loader since
-    # persist-memory is a built-in skill that must always be present.
-    let(:fake_skill) do
-      double("skill").tap do |s|
-        allow(s).to receive(:process_content).and_return(
-          "# Persist Memory Subagent\nSKILL_BODY_MARKER\n4000 characters\n~/.octo/memories/\n"
-        )
-      end
-    end
-    let(:fake_loader) do
-      double("skill_loader").tap do |l|
-        allow(l).to receive(:find_by_name).with("persist-memory").and_return(fake_skill)
-      end
+    # All build_memory_update_prompt tests need persist-memory preset to be
+    # discoverable. Stub Octo::SubagentRegistry.find since the real registry
+    # caches and we don't want this spec to depend on the on-disk preset
+    # body (whose wording can drift independently).
+    let(:fake_preset) do
+      double(
+        "subagent_preset",
+        system_prompt: "# Persist Memory Sub-agent\nPRESET_BODY_MARKER\n4000 characters\n~/.octo/memories/\n",
+        forbidden_tools: []
+      )
     end
 
     before do
-      agent.instance_variable_set(:@skill_loader, fake_loader)
-      allow(agent).to receive(:build_template_context).and_return({})
+      allow(Octo::SubagentRegistry).to receive(:find).with("persist-memory").and_return(fake_preset)
     end
 
     it "includes whitelist decision rules and executor manual" do
@@ -105,23 +101,27 @@ RSpec.describe Octo::Agent::MemoryUpdater do
       expect(prompt).to include("Whitelist")
       expect(prompt).to include("No memory updates needed.")
 
-      # Executor manual layer (delegated to persist-memory skill)
+      # Executor manual layer (delegated to persist-memory preset)
       expect(prompt).to include("EXECUTOR MANUAL")
       expect(prompt).to include("~/.octo/memories/")
       expect(prompt).to include("4000 characters")
     end
 
-    it "embeds the persist-memory skill body via skill.process_content" do
+    it "embeds the persist-memory preset body verbatim" do
       prompt = agent.send(:build_memory_update_prompt)
-      expect(fake_skill).to have_received(:process_content)
-        .with(template_context: {})
-      expect(prompt).to include("SKILL_BODY_MARKER")
+      expect(prompt).to include("PRESET_BODY_MARKER")
     end
 
-    it "raises when persist-memory skill is missing (built-in must exist)" do
-      allow(fake_loader).to receive(:find_by_name).with("persist-memory").and_return(nil)
+    it "appends the existing memory files list after the preset body" do
+      prompt = agent.send(:build_memory_update_prompt)
+      expect(prompt).to include("Existing memory files")
+      expect(prompt).to include("No long-term memories found.")
+    end
+
+    it "raises when persist-memory preset is missing (built-in must exist)" do
+      allow(Octo::SubagentRegistry).to receive(:find).with("persist-memory").and_return(nil)
       expect { agent.send(:build_memory_update_prompt) }
-        .to raise_error(/persist-memory skill not found/)
+        .to raise_error(/persist-memory sub-agent preset not found/)
     end
   end
 
@@ -194,15 +194,15 @@ RSpec.describe Octo::Agent::MemoryUpdater do
       a = full_agent_class.new(ui: ui, config: config, fork_target: subagent)
       # Silence Logger
       allow(Octo::Logger).to receive(:error)
-      # Stub skill_loader + build_template_context so build_memory_update_prompt
-      # can load the persist-memory skill body. (persist-memory is a built-in
-      # skill — required, never optional.)
-      fake_skill = double("persist_memory_skill")
-      allow(fake_skill).to receive(:process_content).and_return("EXECUTOR MANUAL BODY")
-      fake_loader = double("skill_loader")
-      allow(fake_loader).to receive(:find_by_name).with("persist-memory").and_return(fake_skill)
-      a.instance_variable_set(:@skill_loader, fake_loader)
-      def a.build_template_context; {}; end
+      # Stub SubagentRegistry so build_memory_update_prompt can load the
+      # persist-memory preset body. (persist-memory is a built-in preset —
+      # required, never optional.)
+      fake_preset = double(
+        "persist_memory_preset",
+        system_prompt: "EXECUTOR MANUAL BODY",
+        forbidden_tools: %w[web_search web_fetch browser agent]
+      )
+      allow(Octo::SubagentRegistry).to receive(:find).with("persist-memory").and_return(fake_preset)
       a
     end
 
@@ -218,9 +218,11 @@ RSpec.describe Octo::Agent::MemoryUpdater do
 
       expect(full_agent.fork_spy[:called]).to be true
       args = full_agent.fork_spy[:args]
-      # We intentionally inherit model/tools for cache reuse — no model/forbidden_tools passed.
+      # We intentionally inherit model for cache reuse — no model arg passed.
       expect(args.key?(:model)).to be false
-      expect(args.key?(:forbidden_tools)).to be false
+      # forbidden_tools comes from the persist-memory preset so the
+      # programmatic fork enforces the same denylist as an LLM-triggered call.
+      expect(args[:forbidden_tools]).to include("web_search", "web_fetch", "browser", "agent")
       expect(args[:system_prompt_suffix]).to include("MEMORY UPDATE MODE")
     end
 

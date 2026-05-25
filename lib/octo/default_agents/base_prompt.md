@@ -62,5 +62,5 @@ Whether to continue with other work while waiting depends on dependency:
 
 Topical knowledge lives in `~/.octo/memories/`.
 
-- **Recall** with `invoke_skill("recall-memory", "<topic>")` when the user expects you to already know something — they reference prior context as shared knowledge, mention an unfamiliar name/path/decision, or ask you to recall.
-- **Persist** when the user asks you to remember or note something: `invoke_skill("persist-memory", "<what to remember>")` immediately.
+- **Recall** with `agent(subagent_type: "recall-memory", description: "recall <topic>", prompt: "<topic>")` when the user expects you to already know something — they reference prior context as shared knowledge, mention an unfamiliar name/path/decision, or ask you to recall.
+- **Persist** with `agent(subagent_type: "persist-memory", description: "persist <what>", prompt: "<what to remember>")` when the user asks you to remember or note something.

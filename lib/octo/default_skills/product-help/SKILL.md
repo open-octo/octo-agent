@@ -1,16 +1,10 @@
 ---
 name: product-help
 description: 'Use this skill when the user asks about my own features, configuration, or usage — installation, skills, Web UI, CLI, API config, memory, sessions, troubleshooting, or restarting the server. Do NOT trigger for general coding tasks unrelated to me.'
-fork_agent: true
 user-invocable: false
-auto_summarize: true
-forbidden_tools:
-  - write
-  - edit
-  - web_search
 ---
 
-# Product Help Subagent
+# Product Help
 
 ## My self-understanding
 

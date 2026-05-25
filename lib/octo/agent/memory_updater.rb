@@ -75,7 +75,15 @@ module Octo
         # cloned history — only the +system_prompt_suffix+ (the memory
         # update instructions) and the final "Please proceed." user turn
         # are new, landing on top of a warm cache.
-        subagent = fork_subagent(system_prompt_suffix: build_memory_update_prompt)
+        #
+        # forbidden_tools comes from the persist-memory preset (web/browser/
+        # agent) so this programmatic fork enforces the same boundaries as
+        # an LLM-triggered `agent(subagent_type: "persist-memory", ...)`.
+        preset = Octo::SubagentRegistry.find("persist-memory")
+        subagent = fork_subagent(
+          system_prompt_suffix: build_memory_update_prompt,
+          forbidden_tools: preset ? preset.forbidden_tools : []
+        )
 
         # Memory update is a background consolidation task — never prompt
         # the user for confirmation on memory file writes. The subagent
@@ -171,18 +179,16 @@ module Octo
       #   - Decision (whitelist) lives HERE — MemoryUpdater is the trigger
       #     and decides whether/what to persist.
       #   - Execution (file naming, merging, frontmatter, size limits) lives
-      #     in the persist-memory skill — MemoryUpdater loads SKILL.md
-      #     directly via SkillManager and embeds it as the executor manual.
+      #     in the persist-memory sub-agent preset — loaded directly from
+      #     Octo::SubagentRegistry and embedded as the executor manual.
       #
-      #   We do NOT call invoke_skill here (that would fork a second
-      #   subagent — the persist-memory skill is fork_agent:true). Instead
-      #   the subagent we already forked plays both roles: it reads the
-      #   whitelist, decides what (if anything) to persist, and follows
-      #   the embedded SKILL.md rules to write the files.
+      # The list of existing memory files (`memories_meta`) used to be ERB-
+      # rendered into the preset content; now we append it explicitly after
+      # the static preset body so the preset itself stays a clean playbook.
       #
       # @return [String]
       private def build_memory_update_prompt
-        executor_manual = load_persist_memory_skill_body
+        executor_manual = load_persist_memory_preset_body
 
         <<~PROMPT
           ═══════════════════════════════════════════════════════════════
@@ -217,7 +223,7 @@ module Octo
           - Repeating or slightly rephrasing what is already in memory
 
           ═══════════════════════════════════════════════════════════════
-          EXECUTOR MANUAL (from persist-memory skill)
+          EXECUTOR MANUAL (from persist-memory sub-agent preset)
           ═══════════════════════════════════════════════════════════════
           If — and ONLY if — the whitelist matched, follow the manual below
           to actually write the files. The manual owns file naming, merging,
@@ -227,24 +233,26 @@ module Octo
 
           #{executor_manual}
 
+          ## Existing memory files
+          #{load_memories_meta}
+
           ───────────────────────────────────────────────────────────────
           Begin by checking the whitelist. If no condition is met, stop immediately.
         PROMPT
       end
 
-      # Load the persist-memory skill's expanded body (frontmatter stripped,
-      # template variables like <%= memories_meta %> resolved).
+      # Load the persist-memory sub-agent preset's system_prompt body.
       #
-      # The persist-memory skill is a built-in default skill — it is always
-      # present. If it isn't, that's a build/install bug and we want it to
-      # surface loudly rather than silently degrade.
+      # Persist-memory is a built-in preset shipped with the gem under
+      # lib/octo/default_subagents/persist-memory/. If it is missing, that's
+      # a build/install bug and we want it to surface loudly.
       #
       # @return [String]
-      private def load_persist_memory_skill_body
-        skill = @skill_loader.find_by_name("persist-memory")
-        raise "persist-memory skill not found — built-in skill is missing" unless skill
+      private def load_persist_memory_preset_body
+        preset = Octo::SubagentRegistry.find("persist-memory")
+        raise "persist-memory sub-agent preset not found — built-in is missing" unless preset
 
-        skill.process_content(template_context: build_template_context)
+        preset.system_prompt
       end
     end
   end
