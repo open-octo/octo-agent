@@ -8,8 +8,8 @@ import (
 
 func TestBashTool_Definition(t *testing.T) {
 	def := BashTool{}.Definition()
-	if def.Name != "bash" {
-		t.Errorf("Name = %q, want bash", def.Name)
+	if def.Name != "Bash" {
+		t.Errorf("Name = %q, want Bash", def.Name)
 	}
 	if def.Description == "" {
 		t.Error("Description should not be empty")
@@ -34,7 +34,7 @@ func TestBashTool_Definition(t *testing.T) {
 }
 
 func TestBashTool_Execute_Echo(t *testing.T) {
-	result, err := BashTool{}.Execute(context.Background(), "bash", map[string]any{
+	result, err := BashTool{}.Execute(context.Background(), "Bash", map[string]any{
 		"command": "echo hello",
 	})
 	if err != nil {
@@ -46,7 +46,7 @@ func TestBashTool_Execute_Echo(t *testing.T) {
 }
 
 func TestBashTool_Execute_Multiline(t *testing.T) {
-	result, err := BashTool{}.Execute(context.Background(), "bash", map[string]any{
+	result, err := BashTool{}.Execute(context.Background(), "Bash", map[string]any{
 		"command": "echo line1 && echo line2",
 	})
 	if err != nil {
@@ -60,7 +60,7 @@ func TestBashTool_Execute_Multiline(t *testing.T) {
 func TestBashTool_Execute_NonZeroExit(t *testing.T) {
 	// A failing command should return output + exit info as result text,
 	// NOT as a Go error, so the LLM can read it.
-	result, err := BashTool{}.Execute(context.Background(), "bash", map[string]any{
+	result, err := BashTool{}.Execute(context.Background(), "Bash", map[string]any{
 		"command": "sh -c 'echo oops; exit 1'",
 	})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestBashTool_Execute_NonZeroExit(t *testing.T) {
 }
 
 func TestBashTool_Execute_EmptyCommand(t *testing.T) {
-	_, err := BashTool{}.Execute(context.Background(), "bash", map[string]any{
+	_, err := BashTool{}.Execute(context.Background(), "Bash", map[string]any{
 		"command": "",
 	})
 	if err == nil {
@@ -84,7 +84,7 @@ func TestBashTool_Execute_EmptyCommand(t *testing.T) {
 }
 
 func TestBashTool_Execute_NoCommandKey(t *testing.T) {
-	_, err := BashTool{}.Execute(context.Background(), "bash", map[string]any{})
+	_, err := BashTool{}.Execute(context.Background(), "Bash", map[string]any{})
 	if err == nil {
 		t.Error("missing command key should return error")
 	}
@@ -93,7 +93,7 @@ func TestBashTool_Execute_NoCommandKey(t *testing.T) {
 func TestRegistryWithBash_Execute(t *testing.T) {
 	r := RegistryWithBash{}
 
-	result, err := r.Execute(context.Background(), "bash", map[string]any{
+	result, err := r.Execute(context.Background(), "Bash", map[string]any{
 		"command": "echo registry",
 	})
 	if err != nil {
@@ -120,7 +120,7 @@ func TestDefaultTools(t *testing.T) {
 	if len(defs) != 1 {
 		t.Fatalf("len = %d, want 1", len(defs))
 	}
-	if defs[0].Name != "bash" {
-		t.Errorf("Name = %q, want bash", defs[0].Name)
+	if defs[0].Name != "Bash" {
+		t.Errorf("Name = %q, want Bash", defs[0].Name)
 	}
 }

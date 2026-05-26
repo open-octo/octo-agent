@@ -20,14 +20,18 @@ const BashTimeout = 30 * time.Second
 // Stdout and stderr are combined and returned as the tool result. Non-zero
 // exit codes are reported as extra metadata in the result text rather than
 // as a tool error, so the LLM can see the failure output and adapt.
+//
+// The LLM-facing tool name is "Bash" (capitalised) to mirror Claude Code's
+// convention. The implementation actually shells out via `sh -c`, not
+// `/bin/bash`, so a lowercase "bash" name would be doubly misleading.
 type BashTool struct{}
 
 // Definition returns the agent.ToolDefinition the LLM receives in the tools
 // list. The JSON Schema describes a single required "command" string parameter.
 func (BashTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
-		Name:        "bash",
-		Description: "Run a bash/shell command and return stdout+stderr. Use for file operations, running programs, searching code, etc.",
+		Name:        "Bash",
+		Description: "Run a shell command (via `sh -c`) and return stdout+stderr. Use for file operations, running programs, searching code, etc.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -47,7 +51,7 @@ func (BashTool) Definition() agent.ToolDefinition {
 func (BashTool) Execute(ctx context.Context, _ string, input map[string]any) (string, error) {
 	command, _ := input["command"].(string)
 	if command == "" {
-		return "", fmt.Errorf("bash: command is required")
+		return "", fmt.Errorf("Bash: command is required")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, BashTimeout)
@@ -66,11 +70,11 @@ func (BashTool) Execute(ctx context.Context, _ string, input map[string]any) (st
 // BashTool. It is the default executor used when --tools is enabled.
 type RegistryWithBash struct{}
 
-// Execute dispatches to BashTool for "bash" and returns an error for unknown
+// Execute dispatches to BashTool for "Bash" and returns an error for unknown
 // tools so the LLM receives a clean error result.
 func (RegistryWithBash) Execute(ctx context.Context, name string, input map[string]any) (string, error) {
 	switch name {
-	case "bash":
+	case "Bash":
 		return BashTool{}.Execute(ctx, name, input)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
