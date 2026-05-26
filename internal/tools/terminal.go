@@ -13,21 +13,26 @@ import (
 	"github.com/Leihb/octo/internal/agent"
 )
 
-// BashTimeout is the maximum time a single bash command may run.
-const BashTimeout = 30 * time.Second
+// TerminalTimeout is the maximum time a single terminal command may run.
+const TerminalTimeout = 30 * time.Second
 
-// BashTool is an agent.ToolExecutor that runs shell commands via `sh -c`.
+// TerminalTool is an agent.ToolExecutor that runs shell commands via `sh -c`.
 // Stdout and stderr are combined and returned as the tool result. Non-zero
 // exit codes are reported as extra metadata in the result text rather than
 // as a tool error, so the LLM can see the failure output and adapt.
-type BashTool struct{}
+//
+// The LLM-facing tool name is "terminal" — matches the Ruby implementation
+// (lib/octo/tools/terminal.rb on archive/ruby) and avoids the misleading
+// implication of a hard /bin/bash dependency (the executor actually shells
+// out via `sh -c`).
+type TerminalTool struct{}
 
 // Definition returns the agent.ToolDefinition the LLM receives in the tools
 // list. The JSON Schema describes a single required "command" string parameter.
-func (BashTool) Definition() agent.ToolDefinition {
+func (TerminalTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
-		Name:        "bash",
-		Description: "Run a bash/shell command and return stdout+stderr. Use for file operations, running programs, searching code, etc.",
+		Name:        "terminal",
+		Description: "Run a shell command (via `sh -c`) and return stdout+stderr. Use for file operations, running programs, searching code, etc.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -44,13 +49,13 @@ func (BashTool) Definition() agent.ToolDefinition {
 // Execute runs the command and returns combined output. A non-zero exit code
 // is appended to the output as `[exit: <error>]` rather than being surfaced
 // as an error, giving the LLM visibility into what went wrong.
-func (BashTool) Execute(ctx context.Context, _ string, input map[string]any) (string, error) {
+func (TerminalTool) Execute(ctx context.Context, _ string, input map[string]any) (string, error) {
 	command, _ := input["command"].(string)
 	if command == "" {
-		return "", fmt.Errorf("bash: command is required")
+		return "", fmt.Errorf("terminal: command is required")
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, BashTimeout)
+	ctx, cancel := context.WithTimeout(ctx, TerminalTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
@@ -62,23 +67,23 @@ func (BashTool) Execute(ctx context.Context, _ string, input map[string]any) (st
 	return strings.TrimSpace(string(out)), nil
 }
 
-// RegistryWithBash is a simple ToolExecutor registry that contains only
-// BashTool. It is the default executor used when --tools is enabled.
-type RegistryWithBash struct{}
+// DefaultRegistry is a simple ToolExecutor registry that contains only
+// TerminalTool. It is the default executor used when --tools is enabled.
+type DefaultRegistry struct{}
 
-// Execute dispatches to BashTool for "bash" and returns an error for unknown
-// tools so the LLM receives a clean error result.
-func (RegistryWithBash) Execute(ctx context.Context, name string, input map[string]any) (string, error) {
+// Execute dispatches to TerminalTool for "terminal" and returns an error for
+// unknown tools so the LLM receives a clean error result.
+func (DefaultRegistry) Execute(ctx context.Context, name string, input map[string]any) (string, error) {
 	switch name {
-	case "bash":
-		return BashTool{}.Execute(ctx, name, input)
+	case "terminal":
+		return TerminalTool{}.Execute(ctx, name, input)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
 }
 
 // DefaultTools returns the set of tool definitions that are active when
-// --tools is enabled. Currently this is just the bash tool.
+// --tools is enabled. Currently this is just the terminal tool.
 func DefaultTools() []agent.ToolDefinition {
-	return []agent.ToolDefinition{BashTool{}.Definition()}
+	return []agent.ToolDefinition{TerminalTool{}.Definition()}
 }
