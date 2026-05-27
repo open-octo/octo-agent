@@ -63,7 +63,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	permMode := fs.String("permission-mode", "interactive", "Tool permission handling: interactive (prompt on ask) | strict (deny on ask)")
 	maxTurns := fs.Int("max-turns", 0, "Max provider round-trips per message in the agentic loop (0 = default 20)")
 	maxCost := fs.Float64("max-cost", 0, "Stop the session once estimated cost (USD) reaches this; 0 = unlimited")
-	compactThreshold := fs.Int("compact-threshold", 0, "Summarize older history once a turn's input exceeds this many tokens; 0 = disabled")
+	compactThreshold := fs.Int("compact-threshold", 0, "Compact older history once a turn's input crosses this many tokens; 0 = auto (~75% of the model's context window), <0 = disabled")
 	thinkingBudget := fs.Int("thinking-budget", 0, "Enable extended thinking with this token budget (Anthropic/Kimi); 0 = off")
 
 	if err := fs.Parse(args); err != nil {

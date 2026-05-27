@@ -3,11 +3,52 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // compactKeepTurns is how many of the most recent user turns runLoop keeps
 // verbatim when it compacts; everything older is folded into one summary.
 const compactKeepTurns = 4
+
+// compactThresholdFraction is the share of the model's context window at which
+// auto-compaction (CompactThreshold == 0) triggers, leaving headroom for the
+// kept tail, the summary side-call, and the next turn's output.
+const compactThresholdFraction = 0.75
+
+// defaultContextWindow is the conservative fallback window (in tokens) for
+// models not named in contextWindow. Under-estimating only makes us compact
+// slightly earlier — never overflow — so unknown models stay safe.
+const defaultContextWindow = 128_000
+
+// contextWindow returns the approximate context-window size (in tokens) for a
+// model. Values are deliberately conservative; matched case-insensitively by
+// substring so dated/aliased names ("claude-haiku-4-5-2025…") still resolve.
+// Raise a model's entry when a larger window is confirmed.
+func contextWindow(model string) int {
+	switch {
+	case strings.Contains(strings.ToLower(model), "claude"):
+		return 200_000
+	default:
+		return defaultContextWindow
+	}
+}
+
+// compactTriggerTokens resolves the effective auto-compaction trigger from
+// CompactThreshold:
+//
+//	< 0  → disabled (0)
+//	== 0 → auto: a fraction of the model's context window
+//	> 0  → that explicit token count
+func (a *Agent) compactTriggerTokens() int {
+	switch {
+	case a.CompactThreshold < 0:
+		return 0
+	case a.CompactThreshold == 0:
+		return int(float64(contextWindow(a.Model)) * compactThresholdFraction)
+	default:
+		return a.CompactThreshold
+	}
+}
 
 // summarizeMaxTokens caps the summary length. A summary is meant to be a
 // compact carry-forward of decisions/paths/open tasks, not a transcript.
@@ -46,7 +87,8 @@ What was just completed, and the immediate next action if the task is unfinished
 // means the summarization side-call failed (the caller logs and proceeds with
 // uncompacted history rather than aborting the turn).
 func (a *Agent) maybeCompact(ctx context.Context) error {
-	if a.CompactThreshold <= 0 || a.lastInputTokens < a.CompactThreshold {
+	trigger := a.compactTriggerTokens()
+	if trigger <= 0 || a.lastInputTokens < trigger {
 		return nil
 	}
 
