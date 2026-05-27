@@ -33,13 +33,50 @@ var allTools = []tool{
 // DefaultRegistry is the agent.ToolExecutor used when `octo chat --tools` is
 // enabled. It dispatches each tool call by name to the matching entry in
 // allTools, returning a clean error for unknown names.
-type DefaultRegistry struct{}
+//
+// When tracker is non-nil it enforces read-before-write: write_file /
+// edit_file calls to an existing file are refused unless the file was read
+// (and is unchanged) this session. The zero value (DefaultRegistry{}) has a
+// nil tracker and so enforces nothing — preserved for tests and callers that
+// don't want the discipline. Use NewDefaultRegistry for the enforced variant.
+type DefaultRegistry struct {
+	tracker *ReadTracker
+}
+
+// NewDefaultRegistry returns a registry with read-before-write enforcement
+// backed by a fresh per-session ReadTracker.
+func NewDefaultRegistry() DefaultRegistry {
+	return DefaultRegistry{tracker: NewReadTracker()}
+}
 
 // Execute implements agent.ToolExecutor.
-func (DefaultRegistry) Execute(ctx context.Context, name string, input map[string]any) (string, error) {
+func (r DefaultRegistry) Execute(ctx context.Context, name string, input map[string]any) (string, error) {
+	// Read-before-write pre-check (skipped when no tracker is configured).
+	if r.tracker != nil && (name == "write_file" || name == "edit_file") {
+		if path, ok := input["path"].(string); ok {
+			if abs, err := resolvePath(path); err == nil {
+				if cerr := r.tracker.CheckWritable(abs); cerr != nil {
+					return "", cerr
+				}
+			}
+		}
+	}
+
 	for _, t := range allTools {
 		if t.Definition().Name == name {
-			return t.Execute(ctx, name, input)
+			out, err := t.Execute(ctx, name, input)
+			// On a successful read OR write, (re)stamp the tracker so the
+			// file is considered "read at its current mtime" — this lets a
+			// write be followed by an edit without a redundant re-read.
+			if err == nil && r.tracker != nil &&
+				(name == "read_file" || name == "write_file" || name == "edit_file") {
+				if path, ok := input["path"].(string); ok {
+					if abs, rerr := resolvePath(path); rerr == nil {
+						r.tracker.RecordRead(abs)
+					}
+				}
+			}
+			return out, err
 		}
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
