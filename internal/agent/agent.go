@@ -122,9 +122,11 @@ type Agent struct {
 	// provider call with StopReason "max_cost".
 	MaxCostUSD float64
 
-	// CompactThreshold triggers history compaction: when the most recent
-	// context sent (lastInputTokens) exceeds this, the next Run/RunStream
-	// summarizes the older turns before continuing. 0 disables compaction.
+	// CompactThreshold controls history compaction: when the most recent
+	// context sent (lastInputTokens) crosses the effective trigger, the next
+	// Run/RunStream summarizes the older turns before continuing. Semantics:
+	// <0 disables; ==0 auto (a fraction of the model's context window, the
+	// default); >0 is an explicit token count. See compactTriggerTokens.
 	CompactThreshold int
 
 	// Cumulative token counts for this session (all turns combined).
