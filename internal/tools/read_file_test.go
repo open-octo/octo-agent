@@ -172,3 +172,27 @@ func TestReadFile_AllowsDevNull(t *testing.T) {
 		t.Errorf("expected empty-file marker, got %q", out)
 	}
 }
+
+func TestReadFile_RefusesUNCPath(t *testing.T) {
+	for _, p := range []string{`\\evil-host\share\file`, "//evil-host/share/file"} {
+		_, err := ReadFileTool{}.Execute(context.Background(), "read_file", map[string]any{"path": p})
+		if err == nil || !strings.Contains(err.Error(), "UNC") {
+			t.Errorf("read_file should refuse UNC path %q, got %v", p, err)
+		}
+	}
+}
+
+func TestIsUNCPath(t *testing.T) {
+	unc := []string{`\\server\share`, "//server/share"}
+	for _, p := range unc {
+		if !isUNCPath(p) {
+			t.Errorf("isUNCPath(%q) = false, want true", p)
+		}
+	}
+	notUNC := []string{"/etc/passwd", "relative/path", "~/file", `C:\Users\me`, "/single/slash"}
+	for _, p := range notUNC {
+		if isUNCPath(p) {
+			t.Errorf("isUNCPath(%q) = true, want false", p)
+		}
+	}
+}

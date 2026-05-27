@@ -48,6 +48,11 @@ func (WriteFileTool) Execute(_ context.Context, _ string, input map[string]any) 
 		// Distinguish "not provided" from "empty string". JSON null → not a string.
 		return "", fmt.Errorf("write_file: content is required (string)")
 	}
+	if secret := scanForSecrets(content); secret != "" {
+		return "", fmt.Errorf("write_file: refusing to write content that contains a %s. "+
+			"If this is genuinely intended (e.g. a test fixture), remove the live-credential "+
+			"shape or create the file outside the agent.", secret)
+	}
 	abs, err := resolvePath(path)
 	if err != nil {
 		return "", err

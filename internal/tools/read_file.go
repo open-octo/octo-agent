@@ -55,6 +55,13 @@ func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("read_file: path is required")
 	}
+	// Refuse UNC / network paths (\\server\share, //server/share) before
+	// resolving. On Windows these trigger an SMB connection that can leak
+	// NTLM credentials to an attacker-controlled host; nowhere does a
+	// legitimate read need one.
+	if isUNCPath(path) {
+		return "", fmt.Errorf("read_file: refusing network/UNC path %q — it could leak credentials to a remote host", path)
+	}
 	abs, err := resolvePath(path)
 	if err != nil {
 		return "", err
@@ -124,6 +131,14 @@ func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 		return "(empty file)", nil
 	}
 	return out.String(), nil
+}
+
+// isUNCPath reports whether path is a UNC / network path. Both the Windows
+// backslash form (\\server\share) and the forward-slash form (//server/share,
+// which SMB clients also accept) are treated as UNC. A genuine local path
+// never needs a double-separator prefix, so this is safe to refuse outright.
+func isUNCPath(path string) bool {
+	return strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//")
 }
 
 // resolvePath normalises path → absolute, expanding "~" and cleaning.

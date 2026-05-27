@@ -84,7 +84,7 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 	// Identify ourselves so Jina can reach us about issues.
 	req.Header.Set("User-Agent", "octo-agent/web_fetch")
 
-	resp, err := webHTTPClient().Do(req)
+	resp, err := webFetchHTTPClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("web_fetch: %w", err)
 	}
@@ -112,9 +112,33 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 	return out, nil
 }
 
-// webHTTPClient is the shared http.Client used by web_fetch and the
-// network backends of web_search. Default Go client has no timeout — we
-// set 30s to keep agents responsive.
+// webHTTPClient is the shared http.Client used by the network backends of
+// web_search. Default Go client has no timeout — we set 30s to keep agents
+// responsive.
 func webHTTPClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
+}
+
+// webFetchHTTPClient is web_fetch's dedicated client. It refuses to follow a
+// cross-host 3xx redirect: web_fetch always targets r.jina.ai, so a redirect
+// to a different host means the proxy is bouncing us somewhere unexpected —
+// a classic SSRF / data-exfil vector. Same-host redirects (path changes) are
+// still followed. web_search keeps the plain webHTTPClient because search
+// backends legitimately redirect across hosts.
+func webFetchHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) == 0 {
+				return nil
+			}
+			prev := via[len(via)-1].URL.Host
+			if !strings.EqualFold(req.URL.Host, prev) {
+				return fmt.Errorf("refusing cross-host redirect to %q (from %q); "+
+					"re-issue web_fetch against the final URL if that destination is intended",
+					req.URL.Host, prev)
+			}
+			return nil
+		},
+	}
 }
