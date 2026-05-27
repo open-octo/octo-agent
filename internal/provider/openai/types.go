@@ -28,6 +28,9 @@ type apiRequest struct {
 	MaxTokens int          `json:"max_tokens,omitempty"`
 	Stream    bool         `json:"stream,omitempty"`
 	Tools     []apiTool    `json:"tools,omitempty"`
+	// PromptCacheKey routes the request to a consistent prompt cache. Stable
+	// across a conversation's turns → higher cache hit-rate. Omitted when empty.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 // apiMessage is one element of apiRequest.Messages.

@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/permission"
@@ -132,9 +135,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// provider's system+tools prompt cache. The session stores only the raw
 	// user layer; base/project are recomposed fresh each run.
 	cwd, _ := os.Getwd()
+	env := buildEnvContext(cwd)
 
-	a := agent.New(providerSender{p: prov}, resolvedModel)
-	a.System = prompt.Compose(*system, cwd)
+	// A stable per-process cache key lets OpenAI route every turn (and every
+	// tool-loop iteration) of this conversation to the same prompt cache.
+	a := agent.New(providerSender{p: prov, cacheKey: newCacheKey()}, resolvedModel)
+	a.System = prompt.Compose(*system, cwd, env)
 	a.MaxTokens = *maxTokens
 	a.MaxTurns = *maxTurns
 	a.MaxCostUSD = *maxCost
@@ -155,9 +161,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			if sess.Model != "" {
 				a.Model = sess.Model
 			}
-			// Recompose from the session's raw user layer so base/project
+			// Recompose from the session's raw user layer so base/project/env
 			// pick up any changes since the session was created.
-			a.System = prompt.Compose(sess.System, cwd)
+			a.System = prompt.Compose(sess.System, cwd, env)
 		} else {
 			sess = agent.NewSession(resolvedModel, *system)
 		}
@@ -257,7 +263,25 @@ func buildProvider(name string, stderr io.Writer) (provider.Provider, error) {
 // adapter in cmd/octo means the agent package never imports provider — a
 // one-directional dep graph that pays off as more provider implementations
 // land.
-type providerSender struct{ p provider.Provider }
+type providerSender struct {
+	p provider.Provider
+	// cacheKey is a stable per-conversation identifier forwarded as the
+	// provider's prompt-cache key (OpenAI prompt_cache_key). Keeping it
+	// constant across a session's turns lets the backend route them to the
+	// same prompt cache. Empty is fine — providers omit the field.
+	cacheKey string
+}
+
+// newCacheKey returns a random hex token used as the prompt-cache key for one
+// conversation/process. Falls back to a timestamp if the system RNG is
+// unavailable (still stable for the process).
+func newCacheKey() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("octo-%d", time.Now().UnixNano())
+	}
+	return "octo-" + hex.EncodeToString(b[:])
+}
 
 func (s providerSender) SendMessages(ctx context.Context, model, system string, msgs []agent.Message, maxTokens int) (agent.Reply, error) {
 	if s.p == nil {
@@ -268,6 +292,7 @@ func (s providerSender) SendMessages(ctx context.Context, model, system string, 
 		SystemPrompt: system,
 		Messages:     msgs,
 		MaxTokens:    maxTokens,
+		CacheKey:     s.cacheKey,
 	})
 	if err != nil {
 		return agent.Reply{}, err
@@ -296,6 +321,7 @@ func (s providerSender) StreamMessages(
 		SystemPrompt: system,
 		Messages:     msgs,
 		MaxTokens:    maxTokens,
+		CacheKey:     s.cacheKey,
 	}
 	if sp, ok := s.p.(provider.StreamingProvider); ok {
 		// Text-only path: no tool deltas applicable.
@@ -345,6 +371,7 @@ func (s providerSender) SendMessagesWithTools(
 		SystemPrompt: system,
 		Messages:     msgs,
 		MaxTokens:    maxTokens,
+		CacheKey:     s.cacheKey,
 		Tools:        tools,
 	})
 	if err != nil {
@@ -373,6 +400,7 @@ func (s providerSender) StreamMessagesWithTools(
 		SystemPrompt: system,
 		Messages:     msgs,
 		MaxTokens:    maxTokens,
+		CacheKey:     s.cacheKey,
 		Tools:        tools,
 	}
 	if sp, ok := s.p.(provider.StreamingProvider); ok {

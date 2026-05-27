@@ -8,7 +8,7 @@ import (
 )
 
 func TestCompose_BaseAlwaysPresent(t *testing.T) {
-	out := Compose("", t.TempDir()) // empty user, no .octorules
+	out := Compose("", t.TempDir(), "") // empty user/env, no .octorules
 	if !strings.Contains(out, "octo") {
 		t.Errorf("composed prompt should contain the base identity:\n%s", out)
 	}
@@ -22,18 +22,19 @@ func TestCompose_LayersInOrder(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ProjectContextFile), []byte("PROJECT_RULE_X"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out := Compose("USER_RULE_Y", dir)
+	out := Compose("USER_RULE_Y", dir, "ENV_BLOCK_Z")
 
 	baseIdx := strings.Index(out, "octo")
+	envIdx := strings.Index(out, "ENV_BLOCK_Z")
 	projIdx := strings.Index(out, "PROJECT_RULE_X")
 	userIdx := strings.Index(out, "USER_RULE_Y")
 
-	if baseIdx == -1 || projIdx == -1 || userIdx == -1 {
-		t.Fatalf("all three layers should be present:\n%s", out)
+	if baseIdx == -1 || envIdx == -1 || projIdx == -1 || userIdx == -1 {
+		t.Fatalf("all four layers should be present:\n%s", out)
 	}
-	// Order: base < project < user.
-	if !(baseIdx < projIdx && projIdx < userIdx) {
-		t.Errorf("layer order wrong: base=%d project=%d user=%d", baseIdx, projIdx, userIdx)
+	// Order: base < env < project < user.
+	if !(baseIdx < envIdx && envIdx < projIdx && projIdx < userIdx) {
+		t.Errorf("layer order wrong: base=%d env=%d project=%d user=%d", baseIdx, envIdx, projIdx, userIdx)
 	}
 	if !strings.Contains(out, ProjectContextFile) {
 		t.Errorf("project layer should be labelled with the source file")
@@ -41,8 +42,8 @@ func TestCompose_LayersInOrder(t *testing.T) {
 }
 
 func TestCompose_SkipsAbsentLayers(t *testing.T) {
-	// No .octorules, no user prompt → just the base, no stray separators.
-	out := Compose("", t.TempDir())
+	// No env, no .octorules, no user prompt → just the base, no separators.
+	out := Compose("", t.TempDir(), "")
 	if strings.Contains(out, "---") {
 		t.Errorf("single-layer prompt should have no separator:\n%s", out)
 	}

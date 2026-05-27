@@ -47,11 +47,12 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 	}
 
 	body := apiRequest{
-		Model:     req.Model,
-		MaxTokens: req.MaxTokens,
-		Messages:  msgs,
-		Stream:    true,
-		Tools:     toAPITools(req.Tools),
+		Model:          req.Model,
+		MaxTokens:      req.MaxTokens,
+		Messages:       msgs,
+		Stream:         true,
+		Tools:          toAPITools(req.Tools),
+		PromptCacheKey: req.CacheKey,
 	}
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = DefaultMaxTokens

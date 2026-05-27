@@ -55,6 +55,10 @@ func TestSend_Success(t *testing.T) {
 		if req.Messages[1].Role != "user" || req.Messages[1].Content != "hello" {
 			t.Errorf("second message = %+v, want {user, hello}", req.Messages[1])
 		}
+		// The prompt-cache key is forwarded for prefix-cache routing.
+		if req.PromptCacheKey != "octo-test-key" {
+			t.Errorf("prompt_cache_key = %q, want 'octo-test-key'", req.PromptCacheKey)
+		}
 
 		// Response
 		w.Header().Set("Content-Type", "application/json")
@@ -82,6 +86,7 @@ func TestSend_Success(t *testing.T) {
 		Model:        "gpt-4o-mini",
 		SystemPrompt: "you are octo",
 		Messages:     []agent.Message{agent.NewUserMessage("hello")},
+		CacheKey:     "octo-test-key",
 	})
 	if err != nil {
 		t.Fatalf("Send: %v", err)

@@ -26,18 +26,27 @@ var base string
 // follow (the human-facing counterpart to CLAUDE.md).
 const ProjectContextFile = ".octorules"
 
-// Compose assembles the session system prompt from up to three layers, in
+// Compose assembles the session system prompt from up to four layers, in
 // order of increasing specificity:
 //
 //  1. base    — embedded octo foundation (always present)
-//  2. project — ProjectContextFile in cwd, if present (repo conventions)
-//  3. user    — the --system value, if any (highest-priority override, last)
+//  2. env     — environment snapshot (cwd, git, date, OS) the caller renders
+//  3. project — ProjectContextFile in cwd, if present (repo conventions)
+//  4. user    — the --system value, if any (highest-priority override, last)
 //
 // Empty layers are skipped. Later layers appear later in the text, which is
 // the conventional way to let more specific instructions take precedence.
-func Compose(userSystem, cwd string) string {
+//
+// env is passed in rather than computed here so this package stays pure (no
+// os/exec, no git). The caller takes a snapshot once at session start; since
+// the composed prompt is frozen for the session, a snapshot is correct and
+// keeps the cached prompt prefix stable across turns.
+func Compose(userSystem, cwd, env string) string {
 	layers := []string{strings.TrimSpace(base)}
 
+	if e := strings.TrimSpace(env); e != "" {
+		layers = append(layers, e)
+	}
 	if proj := readProjectContext(cwd); proj != "" {
 		layers = append(layers, "# Project conventions ("+ProjectContextFile+")\n\n"+proj)
 	}
