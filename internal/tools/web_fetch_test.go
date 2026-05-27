@@ -62,6 +62,65 @@ func TestWebFetch_AgainstHTTPTest(t *testing.T) {
 	}
 }
 
+func TestWebFetch_RefusesCrossHostRedirect(t *testing.T) {
+	// Destination server (a different host:port than the "jina" entry point).
+	dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("secret internal content"))
+	}))
+	defer dest.Close()
+
+	// Entry server stands in for r.jina.ai and 302s us to dest — a different
+	// host. The web_fetch client must refuse to follow.
+	entry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, dest.URL, http.StatusFound)
+	}))
+	defer entry.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = entry.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	out, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
+		"url": "https://example.com/x",
+	})
+	if err == nil {
+		t.Fatalf("expected cross-host redirect to be refused; got body %q", out)
+	}
+	if !strings.Contains(err.Error(), "cross-host redirect") {
+		t.Errorf("error should mention cross-host redirect, got %v", err)
+	}
+	if strings.Contains(out, "secret internal content") {
+		t.Errorf("must not have followed the redirect to the destination")
+	}
+}
+
+func TestWebFetch_FollowsSameHostRedirect(t *testing.T) {
+	// A redirect that stays on the same host (path change only) is fine.
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			http.Redirect(w, r, srv.URL+"/final", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("# arrived"))
+	}))
+	defer srv.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = srv.URL + "/start?u=" // shape: <host>/start?u=<rawURL>
+	defer func() { jinaReaderHostForTest = old }()
+
+	out, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
+		"url": "https://example.com/x",
+	})
+	if err != nil {
+		t.Fatalf("same-host redirect should be followed: %v", err)
+	}
+	if !strings.Contains(out, "arrived") {
+		t.Errorf("expected to reach the same-host redirect target, got %q", out)
+	}
+}
+
 func TestWebFetch_HTTPErrorWrapped(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream is sad", http.StatusBadGateway)
