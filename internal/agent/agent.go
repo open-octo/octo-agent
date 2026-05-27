@@ -655,12 +655,14 @@ func canParallelize(calls []toolCall) bool {
 }
 
 // toolResultBlock builds a tool_result, mapping an execution error onto an
-// IsError result carrying the error text.
+// IsError result carrying the error text. Both success output and error text
+// pass through microCompact so a single oversized result can't dominate the
+// context window.
 func toolResultBlock(id, output string, err error) ContentBlock {
 	if err != nil {
-		return NewToolResultBlock(id, err.Error(), true)
+		return NewToolResultBlock(id, microCompact(err.Error()), true)
 	}
-	return NewToolResultBlock(id, output, false)
+	return NewToolResultBlock(id, microCompact(output), false)
 }
 
 // textFromBlocks joins text from all "text" content blocks.
