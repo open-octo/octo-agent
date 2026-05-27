@@ -1,15 +1,17 @@
 package agent
 
 // ContentBlock is a single element of a multi-part message. It unifies the
-// three roles a block can play in an LLM conversation:
+// roles a block can play in an LLM conversation:
 //
 //   - "text"        — plain assistant or user text
 //   - "tool_use"    — the model requesting a tool call (assistant turn)
 //   - "tool_result" — the result of a tool call (user turn)
+//   - "thinking"    — a reasoning model's extended-thinking trace (assistant turn)
 //
 // The zero value is not valid; use the New*Block helpers instead.
 type ContentBlock struct {
-	// Type distinguishes the block variant: "text", "tool_use", "tool_result".
+	// Type distinguishes the block variant: "text", "tool_use", "tool_result",
+	// "thinking".
 	Type string `json:"type"`
 
 	// Text is the text payload (type=="text").
@@ -39,11 +41,21 @@ type ContentBlock struct {
 	// The LLM can inspect Result for the error message and recover gracefully.
 	IsError bool `json:"is_error,omitempty"`
 
-	// Reasoning carries a thinking model's reasoning trace that must be echoed
-	// back on the next request (type=="tool_use"). OpenAI thinking models such
-	// as deepseek-v4 return reasoning_content alongside a tool call and reject
-	// the follow-up unless it's resent; the OpenAI adapter stashes it here so it
-	// round-trips through history. Providers that don't need it ignore the field.
+	// Thinking is the reasoning trace text (type=="thinking"). Anthropic-protocol
+	// reasoning models (Claude, Kimi k2.6) return it as a first-class content
+	// block that must be preserved and replayed on subsequent requests when tool
+	// use is in play, or the API rejects the follow-up.
+	Thinking string `json:"thinking,omitempty"`
+
+	// Signature authenticates a thinking block (type=="thinking"). It must be
+	// sent back verbatim alongside the thinking text on the next request.
+	Signature string `json:"signature,omitempty"`
+
+	// Reasoning carries an OpenAI-protocol thinking model's reasoning trace that
+	// must be echoed back on the next request (type=="tool_use"). deepseek-v4
+	// returns reasoning_content alongside a tool call and rejects the follow-up
+	// unless it's resent; the OpenAI adapter stashes it here so it round-trips
+	// through history. Providers that don't need it ignore the field.
 	Reasoning string `json:"reasoning,omitempty"`
 }
 
@@ -60,6 +72,16 @@ func NewToolUseBlock(id, name string, input map[string]any) ContentBlock {
 		ID:    id,
 		Name:  name,
 		Input: input,
+	}
+}
+
+// NewThinkingBlock creates a ContentBlock with Type=="thinking". The signature
+// authenticates the trace and must be preserved for the round-trip.
+func NewThinkingBlock(thinking, signature string) ContentBlock {
+	return ContentBlock{
+		Type:      "thinking",
+		Thinking:  thinking,
+		Signature: signature,
 	}
 }
 
