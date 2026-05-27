@@ -41,15 +41,22 @@ type ContentBlock struct {
 	// The LLM can inspect Result for the error message and recover gracefully.
 	IsError bool `json:"is_error,omitempty"`
 
-	// Thinking is the reasoning trace text (type=="thinking"). Reasoning models
-	// such as Claude and Kimi k2.6 return it as a first-class content block that
-	// must be preserved and replayed on subsequent requests when tool use is in
-	// play, or the API rejects the follow-up.
+	// Thinking is the reasoning trace text (type=="thinking"). Anthropic-protocol
+	// reasoning models (Claude, Kimi k2.6) return it as a first-class content
+	// block that must be preserved and replayed on subsequent requests when tool
+	// use is in play, or the API rejects the follow-up.
 	Thinking string `json:"thinking,omitempty"`
 
 	// Signature authenticates a thinking block (type=="thinking"). It must be
 	// sent back verbatim alongside the thinking text on the next request.
 	Signature string `json:"signature,omitempty"`
+
+	// Reasoning carries an OpenAI-protocol thinking model's reasoning trace that
+	// must be echoed back on the next request (type=="tool_use"). deepseek-v4
+	// returns reasoning_content alongside a tool call and rejects the follow-up
+	// unless it's resent; the OpenAI adapter stashes it here so it round-trips
+	// through history. Providers that don't need it ignore the field.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // NewTextBlock creates a ContentBlock with Type=="text".
