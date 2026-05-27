@@ -73,15 +73,17 @@ func DefaultPolicy(cwd string) Policy {
 	return Policy{ReadRoots: dedupe(read), WriteRoots: dedupe(write), AllowNetwork: false}
 }
 
-// systemReadRoots returns the OS-specific read-only roots ordinary commands
-// need (toolchains, shared libs, config). Best-effort: missing paths are
-// harmless (a sandbox rule for a nonexistent path just never matches).
+// systemReadRoots returns the OS-specific read-only DIRECTORY roots ordinary
+// commands need (toolchains, shared libs, config). Directories only — device
+// files like /dev/null are granted separately by the platform layer, since
+// directory access rights are invalid on a character device. Best-effort:
+// missing paths are harmless (a rule for a nonexistent path never matches).
 func systemReadRoots() []string {
 	switch runtime.GOOS {
 	case "darwin":
-		return []string{"/usr", "/bin", "/sbin", "/etc", "/var", "/private", "/System", "/Library", "/opt", "/dev/null"}
+		return []string{"/usr", "/bin", "/sbin", "/etc", "/var", "/private", "/System", "/Library", "/opt"}
 	case "linux":
-		return []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt", "/proc/self", "/dev/null"}
+		return []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt", "/proc"}
 	default:
 		return nil
 	}

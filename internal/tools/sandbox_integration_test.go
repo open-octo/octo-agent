@@ -28,9 +28,11 @@ func TestTerminal_SandboxConfinesIO(t *testing.T) {
 
 	// Write INSIDE the project root succeeds.
 	inside := filepath.Join(cwd, "inside.txt")
-	if _, err := reg.Execute(ctx, "terminal", map[string]any{
-		"command": "echo hi > " + inside,
-	}); err != nil {
+	out, err := reg.Execute(ctx, "terminal", map[string]any{
+		"command": "echo hi > " + inside + " && echo OK || echo FAIL:$?",
+	})
+	t.Logf("inside cmd → err=%v out=%q", err, out)
+	if err != nil {
 		t.Fatalf("terminal execute (inside): %v", err)
 	}
 	if _, err := os.Stat(inside); err != nil {

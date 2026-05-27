@@ -137,16 +137,6 @@ func handledAccessFS(abi int) uint64 {
 	return a
 }
 
-// fileAccessMask is the subset of access rights valid on a (non-directory)
-// file — directory-only bits (READ_DIR, MAKE_*, REMOVE_*) would make add_rule
-// reject a regular-file target.
-func fileAccessMask(handled uint64) uint64 {
-	return handled & uint64(unix.LANDLOCK_ACCESS_FS_READ_FILE|
-		unix.LANDLOCK_ACCESS_FS_WRITE_FILE|
-		unix.LANDLOCK_ACCESS_FS_EXECUTE|
-		unix.LANDLOCK_ACCESS_FS_TRUNCATE)
-}
-
 // applyLandlock confines this process to the policy's filesystem roots: read
 // (+exec) on ReadRoots, full read/write on WriteRoots, plus read/write on a few
 // device files. Paths that don't exist are skipped.
@@ -183,10 +173,12 @@ func applyLandlock(p Policy) error {
 			return err
 		}
 	}
+	// Device files: only the file read/write rights are valid on a character
+	// device (EXECUTE/TRUNCATE make add_rule return EINVAL). Best-effort — a
+	// device-rule failure must never abort the whole sandbox.
+	devAccess := handled & uint64(unix.LANDLOCK_ACCESS_FS_READ_FILE|unix.LANDLOCK_ACCESS_FS_WRITE_FILE)
 	for _, dev := range deviceFiles {
-		if err := addPathRule(rulesetFd, dev, fileAccessMask(handled)); err != nil {
-			return err
-		}
+		_ = addPathRule(rulesetFd, dev, devAccess)
 	}
 
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
