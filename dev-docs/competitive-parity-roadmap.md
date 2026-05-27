@@ -6,6 +6,29 @@
 
 ---
 
+## 落地状态（2026-05-27 更新）
+
+A+B 加固（#60–#65）之后，对标项基本落地完毕：
+
+| 项 | 内容 | 状态 |
+|----|------|------|
+| C1+C2+C3 | env 上下文 + OpenAI `prompt_cache_key` + 结构化压缩摘要 | ✅ #67 |
+| C4 | Anthropic history 缓存（message 断点） | ✅ #68 |
+| C5 | micro-compact（单条 tool_result 截断） | ✅ #69 |
+| C6 | 压缩默认开 + 窗口相对阈值 | ✅ #75 |
+| C7 | append-only JSONL 持久化 | ✅ #70 |
+| C8 | 跨会话记忆 · 第一层（`~/.octo/octorules.md` + `@include`） | ✅ #79 |
+| C9 | 跨会话记忆 · 第二层（类型化记忆） | ⏸ 推迟，与 M7 Skill 合并规划 |
+| C10 | 优雅中断（Ctrl-C） | ✅ #77 |
+| C11 | OS 级命令沙箱 | ✅ Phase 1 #82（设计 #81）；Phase 2/3 待做 |
+| C12 | 后台/并发命令执行（`terminal background` + `terminal_output`） | ✅ #76 |
+
+附带落地：provider 流式/缓存修复(#72)、DeepSeek reasoning_content(#73)、Anthropic extended thinking(#74)、`octo init` / `/init`(#80)。
+
+**剩余**：C9（并入 M7）、沙箱 C11 Phase 2（网络白名单）+ Phase 3（默认开 + 可配策略，见 `c11-sandbox-design.md` §8）。
+
+---
+
 ## 现状：已对齐 vs 仍有差距
 
 A+B 之后，octo 在以下点已与两家**基本对齐**：主循环预算闸门（`max_turns`/`max_cost`
