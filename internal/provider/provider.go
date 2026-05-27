@@ -30,6 +30,12 @@ type Request struct {
 	Messages     []agent.Message
 	MaxTokens    int
 	Tools        []agent.ToolDefinition
+
+	// CacheKey is an optional, stable-per-conversation prompt-cache hint.
+	// Providers with an explicit cache key (OpenAI's prompt_cache_key)
+	// forward it; others (Anthropic, which uses inline cache_control
+	// breakpoints) ignore it. Empty means "no hint".
+	CacheKey string
 }
 
 // Response is the assistant reply produced by Send.

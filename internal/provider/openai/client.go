@@ -78,10 +78,11 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 	}
 
 	body := apiRequest{
-		Model:     req.Model,
-		MaxTokens: req.MaxTokens,
-		Messages:  msgs,
-		Tools:     toAPITools(req.Tools),
+		Model:          req.Model,
+		MaxTokens:      req.MaxTokens,
+		Messages:       msgs,
+		Tools:          toAPITools(req.Tools),
+		PromptCacheKey: req.CacheKey,
 	}
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = DefaultMaxTokens

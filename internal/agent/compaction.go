@@ -14,13 +14,29 @@ const compactKeepTurns = 4
 const summarizeMaxTokens = 1024
 
 // summarizeSystem is the system prompt for the summarization side-call. It is
-// deliberately small and distinct from the main session prompt — the call
-// trades a cache miss (it's infrequent) for a focused instruction.
-const summarizeSystem = "You are a conversation summarizer for a coding agent. " +
-	"Produce a compact summary of the conversation so the agent can continue " +
-	"without the full transcript. Preserve: the user's goal, decisions made, " +
-	"files/paths touched, commands run and their outcomes, and any open tasks " +
-	"or unresolved errors. Omit chit-chat. Write in terse bullet points."
+// distinct from the main session prompt (the call is infrequent, so a cache
+// miss here is fine). The five-section structure mirrors Claude Code's
+// compaction prompt — a structured carry-forward retains far more usable
+// signal than a freeform "summarize this" instruction.
+const summarizeSystem = `You are a conversation summarizer for a coding agent. Produce a
+structured summary so the agent can continue the task without the full
+transcript. Be specific and terse — bullet points, real names, real paths.
+Output exactly these five sections:
+
+## Primary Request
+The user's overall goal and any explicit, still-active instructions or constraints.
+
+## Key Technical Concepts
+Architecture, libraries, patterns, and decisions established so far.
+
+## Files and Code
+Files read or modified (with paths), and the important changes made to each.
+
+## Errors and Fixes
+Errors encountered and how they were resolved; anything still broken.
+
+## Current State and Next Steps
+What was just completed, and the immediate next action if the task is unfinished.`
 
 // maybeCompact summarizes the older portion of history when the most recent
 // context size (lastInputTokens) crossed CompactThreshold. It runs only at a
