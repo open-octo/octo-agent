@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased — 0.1.0-dev]
 
 ### Added
+- **System prompt composition** — new `internal/prompt` package assembles the session system prompt from three layers in order of specificity: an embedded base prompt (octo identity + tool-use / permission / read-before-write norms) < the repo's `.octorules` (if present in cwd) < the `--system` flag. Composed once per session and frozen (recomputing mid-session would bust the provider prompt cache). Previously the default system prompt was empty — the agent got tool schemas but zero behavioral guidance.
+- **Anthropic prompt caching** — requests now place a `cache_control: ephemeral` breakpoint on the system block, which (per the tools → system → messages prefix order) caches the entire stable system+tools prefix that was previously re-sent at full price every agentic-loop iteration. Falls back to marking the last tool when there's no system prompt. Cuts input-token cost on the cached prefix by ~90% on multi-tool turns. (History-prefix caching pairs with the upcoming compaction work.)
 - **Go module scaffold** at `github.com/Leihb/octo-agent` (`cmd/octo` entry, `internal/{agent,provider,tools,version}`, Makefile, Go 1.22 CI matrix on Linux / macOS / Windows).
 - **`octo chat` CLI** — single-turn and interactive REPL modes. Streams by default; `--stream=false` opts back into buffered output.
 - **Anthropic Messages provider** — `x-api-key` auth, `anthropic-version` header, `content[].text` block parsing. `ANTHROPIC_BASE_URL` env override targets compatible third parties (DeepSeek, Kimi, OpenRouter Anthropic shim, etc.).

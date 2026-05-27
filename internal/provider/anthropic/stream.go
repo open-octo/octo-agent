@@ -54,11 +54,10 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 	body := apiRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		System:    req.SystemPrompt,
 		Messages:  msgs,
 		Stream:    true,
-		Tools:     toAPITools(req.Tools),
 	}
+	cacheableRequest(&body, req.SystemPrompt, toAPITools(req.Tools))
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = DefaultMaxTokens
 	}

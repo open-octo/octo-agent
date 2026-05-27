@@ -6,19 +6,43 @@ package anthropic
 
 import "encoding/json"
 
+// cacheControl marks a prompt-cache breakpoint. Anthropic caches the entire
+// prefix up to and including the block carrying this marker and reuses it on
+// later requests sharing that prefix (billed at the cheaper cached rate).
+// Only "ephemeral" exists today.
+type cacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
+// ephemeral is the shared marker; it's immutable so sharing the pointer is safe.
+var ephemeral = &cacheControl{Type: "ephemeral"}
+
+// apiSystemBlock is one element of the array form of the `system` field.
+// Anthropic accepts `system` as a plain string OR an array of text blocks;
+// only the array form can carry a cache_control marker.
+type apiSystemBlock struct {
+	Type         string        `json:"type"` // always "text"
+	Text         string        `json:"text"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
 // apiTool describes one tool the model may invoke, in the Anthropic wire format.
 // Note: Anthropic uses "input_schema" where the agent layer uses "parameters".
 type apiTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"input_schema"`
+	CacheControl *cacheControl  `json:"cache_control,omitempty"`
 }
 
 // apiRequest is the wire-level JSON body of POST /v1/messages.
+//
+// System is `any` so it serializes as either a plain string or a
+// []apiSystemBlock carrying a cache breakpoint; omitempty drops it when nil.
 type apiRequest struct {
 	Model     string       `json:"model"`
 	MaxTokens int          `json:"max_tokens"`
-	System    string       `json:"system,omitempty"`
+	System    any          `json:"system,omitempty"`
 	Messages  []apiMessage `json:"messages"`
 	Stream    bool         `json:"stream,omitempty"`
 	Tools     []apiTool    `json:"tools,omitempty"`

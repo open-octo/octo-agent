@@ -43,8 +43,14 @@ func TestSend_Success(t *testing.T) {
 		if req.Model != "claude-haiku-4-5-20251001" {
 			t.Errorf("model = %q, want claude-haiku-4-5-20251001", req.Model)
 		}
-		if req.System != "you are octo" {
-			t.Errorf("system = %q, want 'you are octo'", req.System)
+		// System is now sent in the cacheable array form: a single text block
+		// carrying the prompt plus an ephemeral cache_control breakpoint.
+		sysJSON, _ := json.Marshal(req.System)
+		if !strings.Contains(string(sysJSON), `"you are octo"`) {
+			t.Errorf("system missing prompt text: %s", sysJSON)
+		}
+		if !strings.Contains(string(sysJSON), `"ephemeral"`) {
+			t.Errorf("system missing cache_control breakpoint: %s", sysJSON)
 		}
 		if len(req.Messages) != 1 {
 			t.Fatalf("messages len = %d, want 1", len(req.Messages))
