@@ -11,6 +11,7 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/permission"
+	"github.com/Leihb/octo-agent/internal/prompt"
 	"github.com/Leihb/octo-agent/internal/provider"
 	"github.com/Leihb/octo-agent/internal/provider/anthropic"
 	"github.com/Leihb/octo-agent/internal/provider/openai"
@@ -123,8 +124,14 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// Compose the system prompt once (base + project .octorules + user --system)
+	// and freeze it for the session — recomputing mid-session would bust the
+	// provider's system+tools prompt cache. The session stores only the raw
+	// user layer; base/project are recomposed fresh each run.
+	cwd, _ := os.Getwd()
+
 	a := agent.New(providerSender{p: prov}, resolvedModel)
-	a.System = *system
+	a.System = prompt.Compose(*system, cwd)
 	a.MaxTokens = *maxTokens
 
 	// ── REPL mode ────────────────────────────────────────────────────────────
@@ -142,9 +149,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			if sess.Model != "" {
 				a.Model = sess.Model
 			}
-			if sess.System != "" {
-				a.System = sess.System
-			}
+			// Recompose from the session's raw user layer so base/project
+			// pick up any changes since the session was created.
+			a.System = prompt.Compose(sess.System, cwd)
 		} else {
 			sess = agent.NewSession(resolvedModel, *system)
 		}

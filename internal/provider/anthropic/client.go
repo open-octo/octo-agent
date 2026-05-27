@@ -86,10 +86,9 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 	body := apiRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		System:    req.SystemPrompt,
 		Messages:  msgs,
-		Tools:     toAPITools(req.Tools),
 	}
+	cacheableRequest(&body, req.SystemPrompt, toAPITools(req.Tools))
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = DefaultMaxTokens
 	}
@@ -162,6 +161,40 @@ func (c *Client) endpointURL() string {
 		base = DefaultBaseURL
 	}
 	return strings.TrimRight(base, "/") + MessagesPath
+}
+
+// buildSystem returns the value for the request's `system` field, placing a
+// cache breakpoint on it when non-empty. Because the cache prefix order is
+// tools → system → messages, a breakpoint on the system block also caches the
+// (stable, every-turn-identical) tools array that precedes it — capturing the
+// bulk of the per-turn input-token cost of an agentic loop. Returns nil for an
+// empty prompt so the field is omitted.
+func buildSystem(prompt string) any {
+	if prompt == "" {
+		return nil
+	}
+	return []apiSystemBlock{{Type: "text", Text: prompt, CacheControl: ephemeral}}
+}
+
+// markToolsCacheable puts a cache breakpoint on the LAST tool so the tools
+// array is cached even with no system prompt to anchor on. No-op when there
+// are no tools.
+func markToolsCacheable(tools []apiTool) []apiTool {
+	if len(tools) > 0 {
+		tools[len(tools)-1].CacheControl = ephemeral
+	}
+	return tools
+}
+
+// cacheableRequest sets body.System and body.Tools with cache breakpoints
+// placed appropriately for the given prompt/tools. Shared by Send and
+// SendStream so both paths cache identically.
+func cacheableRequest(body *apiRequest, systemPrompt string, tools []apiTool) {
+	body.System = buildSystem(systemPrompt)
+	if body.System == nil {
+		tools = markToolsCacheable(tools) // no system block to anchor on
+	}
+	body.Tools = tools
 }
 
 // toAPITools converts []agent.ToolDefinition to []apiTool.
