@@ -140,10 +140,11 @@ Phase 1 的启动时路径，记忆功能不丢。
 
 - **生命周期**：`octo memoryd start|stop|status`。PID 文件 `~/.octo/memoryd.pid`；
   SIGTERM 优雅关闭（跑完手头的 side-call 再退）；start 时检测已在跑则报错退出。
-- **感知会话结束（松耦合）**：daemon 轮询 / watch `~/.octo/sessions/` 的 mtime，某会话
-  文件静默 ≥ idle 阈值（默认评审定，起点 5–10 分钟）即视为结束 → 异步提取。daemon 与
-  `octo chat` **互不依赖**：chat 不必通知 daemon，daemon 不在也不影响 chat。（备选：Unix
-  socket IPC，更及时但耦合——留开放点。）
+- **感知会话结束（松耦合，已定 2026-05-28）**：daemon watch `~/.octo/sessions/` 的 mtime，
+  两类信号：打了"待提取"标记的会话 daemon **立即**处理；无标记但 mtime 静默 ≥ **idle
+  阈值（默认 15 分钟，可配）** 的视为异常退出/挂起，兜底提取。daemon 与 `octo chat`
+  **互不依赖**：chat 不必通知 daemon，daemon 不在也不影响 chat。（否决 Unix socket IPC：
+  更及时但把 chat 与 daemon 耦合，不值。）
 - **并发与锁**：daemon 是 `~/.octo/memory/` 的主写者；fallback 路径下 chat 启动时也可能写。
   统一一把文件锁（`~/.octo/memory/.lock`，flock）互斥，对标 Codex 的全局锁。
 - **provider 配置**：daemon 跑提取/整合 side-call 需要 key + provider，启动时从 env /
@@ -151,8 +152,8 @@ Phase 1 的启动时路径，记忆功能不丢。
 - **跨平台**：macOS 经 launchd plist、Linux 经 systemd user service 托管（可选
   `octo memoryd install` 生成单元文件）；**Windows 降级** —— 不做 daemon，强制走 Phase 1
   启动时路径（与 sandbox 的 Windows 降级一致，fail-soft）。
-- **自启动（开放点）**：MVP 手动 `octo memoryd start`；是否让 `octo chat` 首次发现 daemon
-  未运行时友好提示 / 可选自动 spawn，评审定。
+- **自启动（已定：手动）**：MVP `octo memoryd start` 手动启动。自动 spawn / launchd 托管
+  留待后续，不在首版。
 
 ## 8. Phase 3 — 插件机制 + Hindsight（检索增强）
 
@@ -217,9 +218,9 @@ summary 注入。
 
 ## 11. 开放决策点（评审拍板）
 
-1. **daemon 感知会话结束**：监控 sessions mtime（推荐，松耦合）vs Unix socket IPC（及时但耦合）。
-2. **idle 阈值**：判定会话结束的静默时长（起点 5–10 分钟）。
-3. **daemon 自启动**：手动 `octo memoryd start` vs `octo chat` 自动 spawn / 提示。
+1. ✓ **已定（2026-05-28）daemon 感知会话结束**：监控 sessions mtime（松耦合）；否决 socket IPC。
+2. ✓ **已定 idle 阈值**：默认 15 分钟（可配）；有退出标记的会话立即处理。
+3. ✓ **已定 daemon 自启动**：MVP 手动 `octo memoryd start`；自动 spawn / launchd 留后续。
 4. **整合阈值**：fallback 路径下 N 天 / M 条默认值（起点 N=1、M=5）。
 5. **extractModel**：是否暴露独立（更便宜）model 覆盖，还是固定用主 model。
 6. **注入层位置**：`memory` 放在 skills 之后 / user 之前（本文采用），还是紧跟 env。
