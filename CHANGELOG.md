@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased — 0.3.0-dev]
+## [Unreleased — 0.4.0-dev]
+
+_Nothing yet — next milestone work (M8 web server, M9 IM bridge, or further roadmap items) will accumulate here._
+
+## [0.3.0] — 2026-05-28
+
+CLI usability sweep — five PRs improving the `octo chat` / `octo task` surface without touching the underlying agent loop. The headline change is that interactive sessions feel like a modern CLI: readline-edited prompt with history, 8-character short IDs everywhere a 23-character ID used to be, `octo help <command>` pages with copy-paste examples, a `thinking…` spinner during pauses, `--quiet` / `--verbose` knobs, and TAB completion for bash / zsh / fish that knows your sessions and tasks.
 
 ### Added
 - **Shell completion for bash / zsh / fish (UX-5)** — new `octo completion bash|zsh|fish` prints a tiny per-shell snippet the user sources from their rc file (`source <(octo completion bash)`, or persist with `octo completion zsh > "${fpath[1]}/_octo"`, or `octo completion fish > ~/.config/fish/completions/octo.fish`). The snippet delegates each TAB to a hidden `octo __complete <command-line-so-far>` subcommand so all routing lives in one Go function — three shell scripts stay near-identical and don't drift as new flags land. Static completion covers top-level subcommands, `task` / `memory` / `memoryd` / `help` / `completion` subcommands, `--provider` (anthropic|openai), and `--permission-mode` (interactive|strict). **Dynamic completion** reads the live filesystem: TAB after `octo chat -c ` lists `last` + the short + full IDs of the 50 most recent sessions; TAB after `octo task status|show|resume|cancel|run ` does the same for tasks. `octo help completion` documents installation per shell.
