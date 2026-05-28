@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/hooks"
 	"github.com/Leihb/octo-agent/internal/memory"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/prompt"
@@ -282,7 +283,8 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			stderr:   stderr,
 			skillReg: skillReg,
 			memStore: memStore,
-			scanner:  replScanner, // shared with the asker / permission gate
+			scanner:  replScanner,         // shared with the asker / permission gate
+			hooks:    hooks.LoadFromEnv(), // C9 Phase 3: external retrieval layer hooks
 		}
 		if *enableTools {
 			// Spawner is already registered above (before the memory pass) so
