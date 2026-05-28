@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/hooks"
 	"github.com/Leihb/octo-agent/internal/memory"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/skills"
@@ -35,6 +36,7 @@ type replConfig struct {
 	executor   agent.ToolExecutor
 	skillReg   *skills.Registry // discovered skills; backs /skills and /<name>
 	memStore   *memory.Store    // cross-session memory; backs /memory (nil → disabled)
+	hooks      *hooks.Runner    // C9 Phase 3 pre/post-turn hooks; nil-safe via Configured()
 	// scanner, when non-nil, is the stdin reader to use instead of building
 	// one fresh inside runREPL. Set by cmd/octo when the asker / spawner need
 	// the same scanner the loop will read from (no double-buffering). Tests
@@ -190,6 +192,21 @@ func runREPL(cfg replConfig) int {
 		// just this turn without tearing down the session.
 		turnCtx, cancelTurn := context.WithCancel(context.Background())
 		setTurnCancel(cancelTurn)
+
+		// C9 Phase 3 pre-turn hook: feed the user input to an external
+		// retrieval layer (Hindsight); whatever it returns gets folded
+		// into the user message before the model sees it. Hook errors
+		// are logged but never block the turn — the user still gets
+		// their reply.
+		turnInput := line
+		if cfg.hooks.Configured() {
+			extra, herr := cfg.hooks.Pre(turnCtx, line)
+			if herr != nil {
+				fmt.Fprintf(cfg.stderr, "↳ pre-turn hook: %v\n", herr)
+			}
+			turnInput = hooks.InjectContext(line, extra)
+		}
+
 		var (
 			reply agent.Reply
 			err   error
@@ -202,14 +219,25 @@ func runREPL(cfg replConfig) int {
 			// stdout, etc.) is conversational state for the LLM, not user-
 			// facing chrome. EventTurnDone is also silent; the trailing
 			// newline below marks the visible turn boundary.
-			reply, err = a.RunStream(turnCtx, line, cfg.tools, cfg.executor, replToolEventHandler(cfg.stdout, cfg.plain))
+			reply, err = a.RunStream(turnCtx, turnInput, cfg.tools, cfg.executor, replToolEventHandler(cfg.stdout, cfg.plain))
 		} else {
-			reply, err = a.TurnStream(turnCtx, line, func(delta string) {
+			reply, err = a.TurnStream(turnCtx, turnInput, func(delta string) {
 				fmt.Fprint(cfg.stdout, delta)
 			})
 		}
 		setTurnCancel(nil)
 		cancelTurn()
+
+		// C9 Phase 3 post-turn hook: fire-and-forget the just-finished
+		// turn at the retain side (Hindsight stores it for future
+		// recall). Runs only on a successful turn — errors / interrupts
+		// don't pollute the retention index. Sync but timeout-bounded
+		// so a flaky hook can't pile up unbounded goroutines.
+		if err == nil && cfg.hooks.Configured() {
+			if herr := cfg.hooks.Post(context.Background(), line, reply.Content); herr != nil {
+				fmt.Fprintf(cfg.stderr, "↳ post-turn hook: %v\n", herr)
+			}
+		}
 
 		switch {
 		case errors.Is(err, context.Canceled):
