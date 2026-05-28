@@ -16,8 +16,9 @@
 本轮基调（已与用户对齐）：
 
 - ✅ **贴 Codex 的写入质量**：独立提取（专门的 side-call + 独立 prompt，可配更便宜的
-  model）判断 load-bearing vs noise，而非主模型顺手内联。注入用整合过的 **summary**，
-  不是全量索引。
+  model）判断 load-bearing vs noise。注入用整合过的 **summary**，不是全量索引。
+- ✅ **即时写入（对标 CC 内联）**：会话中用户给反馈/偏好时，模型经 `remember` 工具
+  **立即**落地，不必等会话结束的提取；边界提取补隐式信号 + 整合去重。
 - ✅ **原生为主、自足**：不装任何插件，记忆也完整可用（提取 → typed 存储 → summary 注入）。
   **不含检索**。
 - ✅ **检索不进 harness 核心**：做一个 **hook 插件机制**，让 **Hindsight** 作为**可选**的
@@ -89,7 +90,25 @@ last_verified: <YYYY-MM-DD>
 - 二阶性约束：`memory_summary.md` 是整合产物，不作权威事实源；需要细节时回查
   `<slug>.md`。
 
-## 4. Write — 提取（贴 Codex，复用 summarize side-call）
+## 4. Write — 即时 `remember` 工具 + 边界提取
+
+写入有两个来源（对标 Claude Code：主模型内联即时写 + 事后整合补全）：
+
+### 4a. 即时：`remember` 工具（会话内，捕捉显式信号）
+
+会话进行中用户给出**反馈 / 偏好 / 纠正 / 跨会话约束**时（"我希望你下次运行完测试再
+提交"、"以后提交信息用中文"），**立即**落地，而不是等会话结束才提取。
+
+- `remember` 工具加进 tools（像 skill 工具）：参数 `content` + 可选 `type`（模型判断
+  user/feedback/project/reference）+ `description`。Execute 立即写 `<slug>.md` + 追加
+  MEMORY.md，写前查 MEMORY.md 去重。
+- **触发**：(a) 模型自主 —— base prompt 引导它识别到 load-bearing 用户反馈时调用；
+  (b) 用户显式 —— `/remember <text>` 或自然语言"记住…"。
+- **不刷新当前会话注入**：注入走冻结 prefix（§2/§6），即时写入只落盘、不重注入当前会话；
+  但该反馈已在对话上下文里，当前会话本就遵守，记下来是为**下次**会话持久生效。
+- 即时工具吃显式信号（低延迟、高精度，用户当场说的）；隐式信号 + 去重整合交给 4b 与 §5。
+
+### 4b. 边界：提取 side-call（事后补全）
 
 提取是一次专门的 side-call，与 `compaction.go` 的 `a.summarize` 同构：
 `Sender.SendMessages(ctx, extractModel, extractSystem, msgs, maxTokens)`，独立 system
@@ -189,6 +208,9 @@ summary 注入。
 - **D6（提取/整合复用 compaction side-call 模式）**：与 `a.summarize` 同构，不另起机制。
 - **D7（daemon 经 sessions mtime 感知会话结束，与 chat 松耦合）**：daemon 不依赖 chat
   通知、chat 不依赖 daemon 在线；Windows 降级到无 daemon。锁用 flock 单点互斥。
+- **D8（即时 remember 工具 + 边界提取双路径，对标 CC）**：显式用户反馈经 `remember`
+  工具会话内即时落地；边界提取补隐式信号 + 整合去重。即时写入因 prefix 冻结不刷新当前
+  会话，下次会话生效。
 
 ## 10. 分阶段与切片
 
@@ -196,23 +218,25 @@ summary 注入。
 
 1. `internal/memory/` 包：`Store`（读写 `~/.octo/memory/` 的 `<slug>.md` + MEMORY.md +
    memory_summary.md）、`Entry`/type、`RenderInjection()`、flock 互斥。+ 测试。
-2. 提取：`agent` 层加 `extractMemory` side-call（复用 summarize 模式）+ extractSystem
-   prompt + extractModel 可选覆盖。+ 测试。
-3. 触发接线：会话退出打"待提取"标记（session.go）；启动时检查待提取 + 按需整合
+2. `remember` 工具：即时写入（去重后落 `<slug>.md` + MEMORY.md）+ base prompt 引导模型
+   在识别用户反馈时调用 + REPL `/remember`。+ 测试。
+3. 边界提取：`agent` 层加 `extractMemory` side-call（复用 summarize 模式）+ extractSystem
+   + extractModel 可选覆盖。+ 测试。
+4. 触发接线：会话退出打"待提取"标记（session.go）；启动时检查待提取 + 按需整合
    （cmd/octo）。+ 测试。
-4. 注入：`prompt.Compose` 加 memory 层；chat.go 两处调用点接线。+ 测试。
-5. CLI/REPL：`/memory`（列出/开关）、`--no-memory`、`octo memory list`。+ 测试。
+5. 注入：`prompt.Compose` 加 memory 层；chat.go 两处调用点接线。+ 测试。
+6. CLI/REPL：`/memory`（列出/开关）、`--no-memory`、`octo memory list`。+ 测试。
 
 **Phase 2（常驻 daemon，单独 PR）**
 
-6. `octo memoryd`：start/stop/status + PID 文件 + SIGTERM 优雅关闭；sessions mtime idle
+7. `octo memoryd`：start/stop/status + PID 文件 + SIGTERM 优雅关闭；sessions mtime idle
    检测 → 异步提取/整合；fallback 协调（daemon 在线时 chat 跳过启动时路径）。+ 测试。
-7. 跨平台托管：launchd / systemd 单元（可选 `octo memoryd install`）；Windows 降级。
+8. 跨平台托管：launchd / systemd 单元（可选 `octo memoryd install`）；Windows 降级。
 
 **Phase 3（插件 + Hindsight，单独 PR/里程碑）**
 
-8. 记忆插件机制（pre-turn / post-turn hook 点；形态 hook vs MCP 评审定）。
-9. Hindsight 参考集成 + 文档。
+9. 记忆插件机制（pre-turn / post-turn hook 点；形态 hook vs MCP 评审定）。
+10. Hindsight 参考集成 + 文档。
 
 每步 `make vet && make test`（race）+ gofmt；跨 OS `GOOS=linux/windows go build ./...`。
 
