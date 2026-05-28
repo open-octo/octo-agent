@@ -56,20 +56,26 @@ C9 的注入层和 skills manifest 一样，落在 `prompt.Compose` 的**冻结 
 （session-start 组装、provider 缓存、整场不动）——所以注入的是会话开始时就定下的
 summary，**不**随对话中途新增的记忆刷新（那会让缓存失效）。新记忆在**下次会话**生效。
 
-## 3. 存储模型（typed，一事一文件 + 注册表 + 注入摘要）
+## 3. 存储模型（typed，一事一文件 + 注册表 + 注入摘要 + per-rollout 引用）
 
-`~/.octo/memory/`，融合 CC 的「一事一文件 + 类型 frontmatter + MEMORY.md 索引」与 Codex 的
-「注册表 + 注入摘要」分离：
+`~/.octo/memory/` —— **自身是 git repo**（PR #101 起，对标 Codex）：
 
 ```
 ~/.octo/memory/
-  MEMORY.md            # 注册表/索引：一行一条（标题 + 钩子），管理与去重用
-  memory_summary.md    # 注入用：整合产出的 summary，进 system prompt（read 层读它）
-  <slug>.md            # 一事一文件：单条记忆 + frontmatter
+  .git/                              # 自动初始化；每次 Save / WriteSummary / ArchiveAll 一个 commit
+  .gitignore                         # 跑时排除 .lock / .state
+  MEMORY.md                          # 注册表/索引：一行一条（slug + 钩子），管理与去重
+  memory_summary.md                  # 注入用：整合产出的 summary，首行 v1 协议标记
+  <slug>.md                          # 一事一文件：单条记忆 + frontmatter
+  rollout_summaries/                 # 每会话一份详细叙事 reference（PR #102）
+    <YYYYMMDD-HHMMSS>-<slug>.md
+  .state                             # 提取/整合/git-baseline 三个游标（gitignored）
 ```
 
-单条 `<slug>.md` frontmatter（type 沿用调研里 CC 的语义分类，也是本仓库 auto-memory
-正在用的形态）：
+`memory_summary.md` 首行恒为 `<!-- octo-memory v1 -->`（PR #100）—— HTML 注释,读取
+时剥掉,Markdown 渲染时不可见。给未来 schema 升级留余地（v2 时可一眼区分）。
+
+单条 `<slug>.md` frontmatter：
 
 ```markdown
 ---
@@ -88,7 +94,13 @@ last_verified: <YYYY-MM-DD>
 - **MEMORY.md ≠ 注入源**：MEMORY.md 是注册表（整合时读它做去重/分类），注入进 prompt 的
   是 `memory_summary.md`（贴 Codex：整合过的紧凑摘要，避免 CC「全量索引一多就退化」）。
 - 二阶性约束：`memory_summary.md` 是整合产物，不作权威事实源；需要细节时回查
-  `<slug>.md`。
+  `<slug>.md`，深度回放回查 `rollout_summaries/<…>.md`。
+- **`rollout_summaries/` 不进注入**：每会话一份叙事文档，按需 grep / read（base.md 在
+  PR #99 / #102 中提示了这条路径），用来回答"我们以前在 X 区域做过什么吗?"。
+- **archive 退场**：PR #96 的 `archive/` 子目录被 git history 取代（PR #101）。
+  `ArchiveAll` 现在删工作树文件 + commit("consolidate: drop N entries…")；
+  `ListArchived` 走 `git log` 还原。原 `archive/` 子目录如果已存在,被忽略不删,
+  非破坏迁移。
 
 ## 4. Write — 即时 `remember` 工具 + 边界提取
 
@@ -108,51 +120,87 @@ last_verified: <YYYY-MM-DD>
   但该反馈已在对话上下文里，当前会话本就遵守，记下来是为**下次**会话持久生效。
 - 即时工具吃显式信号（低延迟、高精度，用户当场说的）；隐式信号 + 去重整合交给 4b 与 §5。
 
-### 4b. 边界：提取 side-call（事后补全）
+### 4b. 边界：提取 side-call（事后补全，三件套产出）
 
 提取是一次专门的 side-call，与 `compaction.go` 的 `a.summarize` 同构：
 `Sender.SendMessages(ctx, extractModel, extractSystem, msgs, maxTokens)`，独立 system
 prompt，token 计入会话预算。
 
-- **extractSystem**：独立提取 prompt，明确「记什么 / 不记什么」。对标 Codex 的 stage-one：
-  只记 load-bearing（用户是谁、确认过的偏好/纠正、跨会话的项目约束、外部资源指针）；
-  **不记** 仓库/octorules/CLAUDE.md 已有的、单任务琐碎纠正、实时状态、下次大概率翻盘的。
-  输出结构化条目（每条带建议的 type + slug + description + body）。
+- **extractSystem**（PR #98 升级到 Codex stage_one 风格 → PR #102 改产三件套）：
+  从 ~20 行扩到 ~140 行,核心 patterns 全部就位：
+  - **No-op gate**：显式问"未来 session 会因这条 fact 做得更好吗？" 否则丢弃。
+  - **Reading priority**：User > Tool output > Assistant。assistant 提议未被用户采纳
+    不能写成 durable。
+  - **Outcome triage**：success / partial / fail / uncertain，不同结局写不同内容。
+  - **Evidence → implication shape**：feedback 必须 `user said "<quote>" → implies <default>`。
+  - **三件套产出**（PR #102）：单次 side-call 同时产 `rollout_slug` + `rollout_summary`
+    + `facts[]`。No-op 时全空。
 - **extractModel**：默认主 model；可经配置覆盖为更便宜的 model（对标 Codex 的
-  `extract_model` 钩子，但 octo 只暴露一个可选覆盖，不强求）。
+  `extract_model` 钩子，但 octo 只暴露一个可选覆盖，不强求）。当前未暴露 CLI flag。
 - **触发点（双模式，都不阻塞退出）**：
   - **daemon 在线**：daemon 经 idle 检测发现会话停止活动（见 §7），异步跑提取，完全不碰
     会话进程。
-  - **daemon 离线（fallback）**：`/exit`/EOF 时把本会话标记为"待提取"（session 元数据
-    加 flag）；下次 `octo chat` 启动时检查待提取会话 → 跑提取。对标 Auto Dream 的
-    "启动时做"，不拖慢退出。
-  两条路写入同一套 `<slug>.md` + MEMORY.md，经文件锁互斥（§7）。`--no-memory` 全关。
-- 写入：把提取出的条目写成 `<slug>.md` + 追加 MEMORY.md 一行。与已有 session
-  持久化（`internal/agent/session.go`，`~/.octo/sessions/`）同目录体系。
+  - **daemon 离线（Phase 1 fallback,已落地）**：下次 `octo chat` 启动时检查上一会话
+    （cmd/octo/memory_extract.go `extractPreviousSession`）→ 跑提取，状态游标用
+    `.state.last_extracted_session`。对标 Auto Dream 的"启动时做"，不拖慢退出。
+  两条路写入同一套 `<slug>.md` + MEMORY.md + rollout_summaries/，经文件锁互斥（§7）+
+  git auto-commit（§3）。`--no-memory` 全关。
+- **写入**：
+  - 每条 fact → `<slug>.md` + 追加 MEMORY.md 一行 + commit("remember: <slug>")。
+  - rollout_summary → `rollout_summaries/<timestamp>-<slug>.md` + commit("rollout-summary: <slug>")。
+  - 模型返空 slug 时,fallback 用 session id。空 summary → 不写文件（no-op）。
 
-## 5. Manage — 整合（daemon idle / 启动时按需）
+## 5. Manage — 整合（daemon idle / 启动时按需）+ git baseline
 
-随会话累积，`<slug>.md` 会重复/过时。整合是另一次 side-call，读 MEMORY.md + 相关条目，
-做合并去重、淘汰过期、刷新 `memory_summary.md`。
+随会话累积，`<slug>.md` 会重复/过时。整合是另一次 side-call,读 MEMORY.md + 相关条目，
+做合并去重、淘汰过期、刷新 `memory_summary.md`，然后**删除已整合的 entry**（git
+history 保留）。
 
-- **触发（双模式）**：daemon 在线 → idle 时异步整合；daemon 离线 → 启动时按需，距上次
-  整合 > N 天 **且** 累积 ≥ M 条新记忆（默认值评审定，起点 N=1、M=5，对标 CC Auto Dream
-  的 24h+5session 量级）。
-- **产物**：更新 `memory_summary.md`（注入源）+ 清理 `<slug>.md`/MEMORY.md。
+- **触发（Phase 1 已落地）**：启动时按需，累积 ≥ **5** 条新记忆 **且** 距上次整合
+  > **24h**（`cmd/octo/memory_extract.go` `consolidateIfDue`）。daemon Phase 2 时改为
+  idle 异步。
+- **incremental consolidate**（PR #96 起）：`ConsolidateMemory(priorSummary, newNotes)`
+  把新增 entries 折进现有 summary，不每次重建。priorSummary 空 → INIT 模式（首次）；
+  非空 → INCREMENTAL UPDATE。两 mode 都共用一个 ~10 行 prompt（未来升级到 Codex 880 行
+  的 INIT/INCREMENTAL 分模式 prompt 是 backlog）。
+- **产物**：
+  - 写新 `memory_summary.md` → commit("consolidate: write summary")。
+  - `ArchiveAll` 删除已整合的 `<slug>.md` + 重建 MEMORY.md → commit("consolidate: drop
+    N entries…")。git history 是 archive（PR #101 起替代旧的 `archive/` 子目录）。
+- **state 三游标**（`.state` JSON,gitignored）：
+  - `last_extracted_session` —— 上次跑过提取的 session id,防重复处理。
+  - `last_consolidated` —— 上次整合的日期(YYYY-MM-DD),驱动 24h 触发。
+  - `last_consolidated_sha` —— 上次整合 commit 的 SHA（PR #101 起）。M10 sub-agent
+    consolidator 落地后,会用 `Store.WorkspaceDiff(last_consolidated_sha)` 拿"自上次整合
+    以来变更"作上下文。Phase 1 阶段只持久化,未消费。
 - 失败非致命：整合 side-call 失败则保留现状，下次再试（与 maybeCompact 的容错一致）。
 
-## 6. Read — 注入（summary 进冻结 prefix）
+## 6. Read — 注入（summary 进冻结 prefix）+ 按需 rollout_summaries
 
-`prompt.Compose` 新增 memory 层，注入 `memory_summary.md` 的内容。
+`prompt.Compose` 新增 memory 层，注入 `memory_summary.md` 的内容（剥掉首行 v1 标记）。
 
 - 层位置（skills 之后、用户身份/规则之前——记忆是"跨会话用户上下文"，让用户显式
   规则仍可覆盖）：
   `base → soul → env → skills → memory → user.md → octorules(user) → octorules(project) → --system`
   其中 `soul` / `user.md` 由独立的**身份文件特性**提供（见 `identity-files-design.md`）；
   本设计只负责 `memory` 层。
-- 与 skills 一致：caller（cmd/octo）读 `memory_summary.md` 渲染好传入 `Compose`，
-  保持 prompt 包不做记忆 IO（单向依赖）。空则跳过该层。
-- 冻结约束同 §2：注入的是会话开始时的 summary，整场不变。
+- 与 skills 一致：caller（cmd/octo）读 `Store.RenderInjection()` 渲染好传入 `Compose`,
+  保持 prompt 包不做记忆 IO（单向依赖）。`memory_summary.md` 缺失 fallback 到 entries
+  列表；都空则跳过该层。
+- **按需 rollout_summaries（PR #99 + #102 加进 base.md）**：injection 之外，base.md 的
+  Memory 段（~60 行）告诉模型 `rollout_summaries/<…>.md` 是 on-demand reference —— 用户
+  问"我们以前在 X 区域做过什么吗？"或当注入 summary 太短时，模型可以自己 grep / read
+  这些文件深挖。不进 prompt prefix（会被 base.md 的引导驱动按需 read_file）。
+- **base.md Memory 段还教了三件事**（PR #99）：
+  - **Citations**：用 `(from memory: <slug>)` 内联标注 load-bearing 的记忆引用,避免把
+    旧记忆当作用户当下说的内容；轻量,不强制每条都加 —— 仅当某条记忆物质性影响这次回答
+    时才注明。
+  - **Verify-first**：记忆里命名的 path/function/flag 在动手前 `grep` / `read_file` 验证;
+    背景信息（用户身份、风格）不必每次验证。
+  - **User contradicts memory → user wins**：调用 `remember` 写下新事实,整合下次会和老
+    的对账。
+- 冻结约束同 §2：注入的是会话开始时的 summary，整场不变。新 `remember` 调用 / 提取
+  产物下次会话才生效。
 
 ## 7. Phase 2 — 常驻 memory daemon
 
@@ -213,32 +261,62 @@ summary 注入。
 - **D8（即时 remember 工具 + 边界提取双路径，对标 CC）**：显式用户反馈经 `remember`
   工具会话内即时落地；边界提取补隐式信号 + 整合去重。即时写入因 prefix 冻结不刷新当前
   会话，下次会话生效。
+- **D9（git baseline 替换 archive,PR #101）**：`~/.octo/memory/` lazy `git init`,
+  Save/WriteSummary/ArchiveAll auto-commit。`archive/` 子目录退场,git history 是 archive。
+  `WorkspaceDiff(baseSHA)` + `LastConsolidatedSHA` 给未来 sub-agent consolidator 留接口。
+  好处：rollback 天然 / deletion 信号 / 审计完整。Lazy（无 git in PATH → 静默降级,memory
+  仍可用）。
+- **D10（三件套 per-rollout 产出,PR #102）**：单次 extract side-call 同时产 `slug` +
+  `rollout_summary`（叙事 reference）+ `facts[]`（typed durable）。对标 Codex stage_one
+  返回的 `{rollout_summary, rollout_slug, raw_memory}`。Slug fallback 用 session id；
+  rollout_summary 空 → no-op。`extractMaxTokens` 1024 → 4096 给叙事留空间。
+- **D11（memory_summary.md v1 协议标记,PR #100）**：首行 `<!-- octo-memory v1 -->`,
+  HTML 注释（Markdown 不渲染）+ `ReadSummary` 自动剥。给未来 schema 升级留 v2 / v3 通道,
+  不必凭 body shape 猜版本。Legacy markerless 文件透传（PR #96 时代的文件不破坏）。
+- **D12（extract prompt 升级到 Codex stage_one 形态,PR #98 → PR #102）**：从 ~20 行
+  扩到 ~140 行,囊括 no-op gate / outcome triage / evidence→implication / user>tool>assistant
+  / explicit DO-NOT。直接修 PR #96 实测时观察到的"两条 feedback 重复"低质量。
+- **D13（base.md Memory 段升级到 ~60 行,PR #99）**：教模型 citations（`(from memory: …)`
+  内联标注）+ verify-first（动手前验证路径/函数/flag）+ "user contradicts → user wins"。
+  借了 Codex `read_path.md` 130 行的形,但用更轻的内联引用而不是 `<oai-mem-citation>`
+  XML block —— 适合 conversational REPL,不适合一次性回答的 ceremony。
 
 ## 10. 分阶段与切片
 
-**Phase 1（原生自足，可独立合并）**
+**Phase 1（原生自足）—— ✅ 已完成**
 
-1. `internal/memory/` 包：`Store`（读写 `~/.octo/memory/` 的 `<slug>.md` + MEMORY.md +
-   memory_summary.md）、`Entry`/type、`RenderInjection()`、flock 互斥。+ 测试。
-2. `remember` 工具：即时写入（去重后落 `<slug>.md` + MEMORY.md）+ base prompt 引导模型
-   在识别用户反馈时调用 + REPL `/remember`。+ 测试。
-3. 边界提取：`agent` 层加 `extractMemory` side-call（复用 summarize 模式）+ extractSystem
-   + extractModel 可选覆盖。+ 测试。
-4. 触发接线：会话退出打"待提取"标记（session.go）；启动时检查待提取 + 按需整合
-   （cmd/octo）。+ 测试。
-5. 注入：`prompt.Compose` 加 memory 层；chat.go 两处调用点接线。+ 测试。
-6. CLI/REPL：`/memory`（列出/开关）、`--no-memory`、`octo memory list`。+ 测试。
+| # | 内容 | PR |
+|---|---|---|
+| 1 | `internal/memory/` 包：`Store` + `Entry`/type + `RenderInjection` + flock | #93 |
+| 2 | `remember` 工具：即时写入 + base prompt 引导 + REPL `/remember` | #93 |
+| 3 | 边界提取：`agent.ExtractMemory` side-call + extractSystem | #93 |
+| 4 | 触发接线：startup 时检查上一会话 + 按需整合（`maybeProcessMemory`） | #94 |
+| 5 | 注入：`prompt.Compose` 加 memory 层（9 层完整顺序） | #93 |
+| 6 | CLI/REPL：`/memory`、`--no-memory`、`octo memory list [--archive]` | #93, #96 |
+| 7 | Incremental consolidate + ArchiveAll | #96 |
+| 8 | Codex stage_one 风格 extractSystem（no-op gate / outcome triage / …） | #98 |
+| 9 | base.md Memory 段升级 ~60 行（citations / verify-first） | #99 |
+| 10 | `memory_summary.md` v1 协议标记 | #100 |
+| 11 | Git baseline 替换 archive（lazy init / auto-commit / WorkspaceDiff） | #101 |
+| 12 | 三件套 per-rollout 产物（slug + summary + facts） | #102 |
 
-**Phase 2（常驻 daemon，单独 PR）**
+**Phase 2（常驻 daemon，单独 PR）—— 设计完成,实现待启动**
 
-7. `octo memoryd`：start/stop/status + PID 文件 + SIGTERM 优雅关闭；sessions mtime idle
-   检测 → 异步提取/整合；fallback 协调（daemon 在线时 chat 跳过启动时路径）。+ 测试。
-8. 跨平台托管：launchd / systemd 单元（可选 `octo memoryd install`）；Windows 降级。
+13. `octo memoryd`：start/stop/status + PID 文件 + SIGTERM 优雅关闭；sessions mtime idle
+    检测 → 异步提取/整合；fallback 协调（daemon 在线时 chat 跳过启动时路径）。+ 测试。
+14. 跨平台托管：launchd / systemd 单元（可选 `octo memoryd install`）；Windows 降级。
 
 **Phase 3（插件 + Hindsight，单独 PR/里程碑）**
 
-9. 记忆插件机制（pre-turn / post-turn hook 点；形态 hook vs MCP 评审定）。
-10. Hindsight 参考集成 + 文档。
+15. 记忆插件机制（pre-turn / post-turn hook 点；形态 hook vs MCP 评审定）。
+16. Hindsight 参考集成 + 文档。
+
+**与 M10 相关的延迟项（依赖 sub-agent tool）**
+
+17. **整合改用 sub-agent 执行**：M10 落地后,把 `ConsolidateMemory` 从 side-call 换成
+    spawn 一个受限 sub-agent（no network / no approvals / local write only）,给它
+    `Store.WorkspaceDiff(LastConsolidatedSHA)` 当上下文,自己决定怎么改文件。当前的
+    plumbing（git baseline + 三件套）已经为这一步铺好。
 
 每步 `make vet && make test`（race）+ gofmt；跨 OS `GOOS=linux/windows go build ./...`。
 
@@ -247,11 +325,16 @@ summary 注入。
 1. ✓ **已定（2026-05-28）daemon 感知会话结束**：监控 sessions mtime（松耦合）；否决 socket IPC。
 2. ✓ **已定 idle 阈值**：默认 15 分钟（可配）；有退出标记的会话立即处理。
 3. ✓ **已定 daemon 自启动**：MVP 手动 `octo memoryd start`；自动 spawn / launchd 留后续。
-4. **整合阈值**：fallback 路径下 N 天 / M 条默认值（起点 N=1、M=5）。
-5. **extractModel**：是否暴露独立（更便宜）model 覆盖，还是固定用主 model。
-6. **注入层位置**：`memory` 放在 skills 之后 / user 之前（本文采用），还是紧跟 env。
+4. ✓ **已定（PR #94）整合阈值**：24 小时 + 5 条新记忆。后续如需调整再开议。
+5. **extractModel**：是否暴露独立（更便宜）model 覆盖，还是固定用主 model。当前未暴露 CLI flag。
+6. ✓ **已定 注入层位置**：`memory` 在 skills 之后、user 之前（已落 `prompt.Compose`）。
 7. **Phase 3 插件形态**：事件 hook（shell-out，倾向）vs MCP client。
 8. **type 体系**：沿用 CC 四类是否够，要不要加 Codex 的时效分层（durable/recent）。
+9. **整合 prompt 升级**：当前 consolidate prompt 还是 ~10 行,Codex 是 880 行 INIT/INCREMENTAL
+   双 mode。值得做但 prompt-engineering 成本高,建议等 M10 sub-agent consolidator 落地时
+   一并设计（sub-agent 拿 diff 自己决定改哪个文件,prompt 角色变了）。
+10. **rollout_summaries 的 GC**：当前不删。会随时间无限增长。Phase 2 daemon 落地后可加
+    `max_unused_days` / `last_usage` 清理（对标 Codex 的 extension `prune`）。
 
 ## 12. 测试（stdlib + httptest，无外部框架）
 
@@ -364,40 +447,47 @@ frontmatter 字段也更丰富：`description / task / task_group / task_outcome
 - **Phase 2 决策给 sub-agent 写文件，不是 side-call 拿字符串**。sub-agent 拿 diff，自己
   决定改哪些文件。我们 ConsolidateMemory 返回 string，cmd 写 `memory_summary.md`。
 
-### A.6 我们 C9 vs Codex 差异表
+### A.6 我们 C9 vs Codex 差异表（更新 2026-05-28,PR #98–#102 后）
 
-| 维度 | 我们 C9 Phase 1 | Codex |
-|---|---|---|
-| 触发 | 启动时同步 / Phase 2 daemon idle | Session start 异步后台 |
-| 提取模型 | 主 model（无 override） | 独立小模型 + reasoning effort |
-| 提取 prompt | ~20 行 JSON 输出 | 569 行 + no-op gate + outcome triage |
-| 写入产物 | 单条 `<slug>.md`(typed) | **rollout_summary + raw_memory + slug** 三件 |
-| 整合执行 | side-call 返 string | spawn sub-agent，限权（no net/no approvals/no collab） |
-| 整合 prompt | ~10 行 | 880 行，INIT/INCREMENTAL 两 mode |
-| 整合产物 | `memory_summary.md` | summary + MEMORY.md + skills/ + 修 rollout_summaries |
-| 状态管理 | `.state` JSON（last_extracted_session + last_consolidated） | SQLite state DB（claim/lease/backoff/usage_count/last_usage） |
-| 增长控制 | PR #96 后归档到 `archive/` | git baseline + workspace diff |
-| 检索 | 无（依赖 Phase 3 Hindsight） | 无（read 端纯 fs，sub-agent 经 MCP 访问） |
-| 注入 prompt | 几行 base.md 提示 | 130 行 `read_path.md` + citations |
+| 维度 | 我们 C9 Phase 1 | Codex | 差距评 |
+|---|---|---|---|
+| 触发 | 启动时同步 / Phase 2 daemon idle | Session start 异步后台 | Phase 2 daemon 落地后对齐 |
+| 提取模型 | 主 model（无 override） | 独立小模型 + reasoning effort | open decision §11.5 |
+| 提取 prompt | ~140 行 stage_one 风格（no-op gate / outcome triage / evidence→implication / DO-NOT） | 569 行 | ✅ 形态对齐,prompt 体量小很多 |
+| 写入产物 | **rollout_slug + rollout_summary + facts[]** 三件套（PR #102） | rollout_summary + rollout_slug + raw_memory | ✅ 对齐;facts[] 走 typed 数组,raw_memory 走单 markdown |
+| 整合执行 | side-call 返 string | spawn sub-agent,限权（no net/no approvals/no collab） | 待 M10,plumbing 已就位（PR #101 WorkspaceDiff） |
+| 整合 prompt | ~10 行 incremental | 880 行 INIT/INCREMENTAL 两 mode | open decision §11.9 |
+| 整合产物 | `memory_summary.md` + 删 entries(commit) | summary + MEMORY.md + skills/ + 改 rollout_summaries | skills/ 自动生成是更大 scope,未排期 |
+| 状态管理 | `.state` JSON（last_extracted_session + last_consolidated + last_consolidated_sha） | SQLite state DB（claim/lease/backoff/usage_count/last_usage） | 单进程够用;Phase 2 多 worker 时再升级 |
+| 增长控制 | **git baseline + history-as-archive**（PR #101） | git baseline + workspace diff | ✅ 形态对齐 |
+| Summary 协议标记 | `<!-- octo-memory v1 -->` 首行（PR #100） | `v1` 首行 | ✅ 对齐 |
+| 检索 | 无（依赖 Phase 3 Hindsight） | 无（read 端纯 fs,sub-agent 经 MCP 访问） | 一致 |
+| 注入 prompt | ~60 行 base.md Memory 段（citations 内联 / verify-first）（PR #99） | 130 行 `read_path.md` + `<oai-mem-citation>` XML block | 形态对齐,citations 走轻量内联,故意更轻 |
+| rollout_summaries | ✅ 写入 + on-demand grep（PR #102） | ✅ 写入 + read_path 教模型按需读 | ✅ 对齐 |
+| extensions（可插拔 sources） | 无 | `ad_hoc` / `prune` | 低 ROI,future |
 
-### A.7 推荐改进（按优先级）
+### A.7 推荐改进（按优先级,更新 2026-05-28）
 
-基于上面的对照，C9 后续值得做的改进，按 ROI 排序：
+| # | 项目 | 状态 | PR |
+|---|---|---|---|
+| 1 | 升级 stage_one prompt（no-op gate / outcome triage / evidence→implication / user>tool>assistant） | ✅ done | #98 |
+| 2 | 升级 read_path 注入 prompt（base.md Memory 段 ~60 行,citations + verify-first） | ✅ done | #99 |
+| 3 | `memory_summary.md` v1 协议字段 | ✅ done | #100 |
+| 4 | Git baseline 替换 archive（lazy init / auto-commit / WorkspaceDiff） | ✅ done | #101 |
+| 5 | 三件套产物（slug + summary + facts） | ✅ done | #102 |
+| 6 | Memory extensions（可插拔 sources：`ad_hoc`/`prune`） | 未排期 | — |
+| 7 | 整合改为 sub-agent 执行 | **阻塞 on M10** | — |
+| 8 | 升级 consolidate prompt 到 ~880 行 INIT/INCREMENTAL 双 mode | 未排期 | — |
+| 9 | rollout_summaries GC（`max_unused_days` / `last_usage`） | Phase 2 daemon 时一并 | — |
+| 10 | Skills/<name>/SKILL.md 自动生成（Codex 的整合产物之一） | 未排期 | — |
 
-1. **升级 stage_one prompt（高 ROI / 低风险）**——加 no-op gate + outcome triage +
-   evidence→implication shape + user/tool/assistant 优先级。预期：显著提升 extract 质量，
-   减少 like-Pre-commit-workflow-preference 那种空泛重复。
-2. **升级 read_path 注入 prompt**——base.md 的 Memory 段从几行扩到 ~50–100 行，
-   教模型怎么读 memory + citations 概念。预期：模型回答时能 ground 在 memory 上。
-3. **`memory_summary.md` 首行加协议字段**（如 `v1`），便于将来格式升级 + 解析判定。
-4. **git baseline 替换 archive 机制（中 ROI / 中改动）**——`~/.octo/memory/` init 成
-   git repo，整合用 workspace diff 决定 dirty，archive 改为 git history。回滚天然，
-   deletion 信号自然。**这能合并 PR #96 的 archive 逻辑**到 git 模型，更可审计。
-5. **三件套产物**（per-rollout）：rollout_summary + raw_memory + slug。当前是单条 entry，
-   失去了"reference vs durable"的层次。这会涉及 ConsolidateMemory 改签名/重写。
-6. **Memory extensions（低 ROI / 中改动）**——可插拔 sources。本轮可不做，留作 future。
-7. **整合改为 sub-agent 执行**——依赖 M10（sub-agent tool）。Phase 2 daemon 落地时
-   一并考虑。
+Phase 1 的 "Codex 对齐" 工程已基本到位（#1–#5 完成）。剩下的两个大件是：
+- **#7 sub-agent consolidator** —— 需要 M10 先落（roadmap 已规划）。M10 一到位，把
+  `ConsolidateMemory` 从 side-call 切到 spawn 受限 sub-agent,加权限围栏（no net /
+  no approvals / local write only）,给 sub-agent `Store.WorkspaceDiff(LastConsolidatedSHA)`
+  作上下文。当前的 `LastConsolidatedSHA` 持久化 + `WorkspaceDiff` API 已铺路。
+- **#8 consolidate prompt 升级** —— 等 #7 落地时一并设计（sub-agent 拿 diff 自己改文件,
+  prompt 角色从"返字符串"变"指导 agent 编辑",形态变了）。
 
 ### A.8 验证来源
 
