@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 )
@@ -181,6 +182,38 @@ func TestTerminalTool_ExecuteStream_NonZeroExitPreservesContract(t *testing.T) {
 	}
 	if !strings.Contains(result, "[exit:") {
 		t.Errorf("output should include exit annotation: %q", result)
+	}
+}
+
+func TestTerminalTool_ContextCancel_KillsChild(t *testing.T) {
+	// When the context is cancelled mid-run (e.g. user pressed Esc in the TUI),
+	// the subprocess must be killed rather than left running.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start a long-running command that would sleep for 30s.
+	go func() {
+		// Cancel after a short delay so the test doesn't hang forever if the
+		// fix is broken.
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	result, err := TerminalTool{}.Execute(ctx, "terminal", map[string]any{
+		"command": "sleep 30",
+	})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Execute should not error on cancellation: %v", err)
+	}
+	// The result should mention the signal/kill, not a clean exit.
+	if !strings.Contains(result, "[exit:") {
+		t.Errorf("result should contain [exit:...] after kill; got: %q", result)
+	}
+	// Must finish well before 30s — the cancellation killed it.
+	if elapsed > 2*time.Second {
+		t.Errorf("took %s — context cancellation did not kill the child promptly", elapsed)
 	}
 }
 

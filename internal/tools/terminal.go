@@ -151,6 +151,17 @@ func (t TerminalTool) ExecuteStream(
 		// the rest. The Wait() error below is the canonical signal.
 	}()
 
+	// Kill the subprocess (and any children it spawned) when the context is
+	// cancelled (e.g. user pressed Esc in the TUI). Without this, cmd.Wait()
+	// blocks until the child exits on its own, so an interactive command like
+	// `gh pr checks --watch` appears to ignore the interrupt.
+	go func() {
+		<-ctx.Done()
+		if cmd.Process != nil {
+			_ = killProcessGroup(cmd.Process)
+		}
+	}()
+
 	waitErr := cmd.Wait()
 	_ = pw.Close() // unblocks the scanner's Read by EOF
 	<-readDone     // ensure goroutine has flushed before reading `out`
