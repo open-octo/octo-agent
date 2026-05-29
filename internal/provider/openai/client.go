@@ -13,6 +13,7 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/provider"
+	"github.com/Leihb/octo-agent/internal/provider/retry"
 )
 
 // DefaultBaseURL is OpenAI's API host. The actual Chat Completions endpoint
@@ -41,6 +42,16 @@ type Client struct {
 	APIKey     string
 	BaseURL    string       // optional override; defaults to DefaultBaseURL
 	HTTPClient *http.Client // optional; defaults to http.Client with a 60s timeout
+	Retry      retry.Policy // optional; zero value falls back to retry.Default()
+}
+
+// policy returns the configured retry policy, or the package default when the
+// caller left Client.Retry zero.
+func (c *Client) policy() retry.Policy {
+	if c.Retry.MaxAttempts > 0 {
+		return c.Retry
+	}
+	return retry.Default()
 }
 
 // New constructs a Client with the given API key and the standard defaults.
@@ -93,38 +104,47 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		return provider.Response{}, fmt.Errorf("openai: marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL(), bytes.NewReader(payload))
-	if err != nil {
-		return provider.Response{}, fmt.Errorf("openai: build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
-
 	httpClient := c.HTTPClient
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
 
-	resp, err := httpClient.Do(httpReq)
-	if err != nil {
-		return provider.Response{}, fmt.Errorf("openai: send: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return provider.Response{}, fmt.Errorf("openai: read response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var apiErr apiError
-		if jerr := json.Unmarshal(respBody, &apiErr); jerr == nil && apiErr.Error.Message != "" {
-			return provider.Response{}, fmt.Errorf(
-				"openai: HTTP %d (%s): %s",
-				resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message,
-			)
+	// Retry request establishment + body read on transient failures; parse the
+	// (fixed) response body below. Each attempt gets a fresh body reader.
+	respBody, err := retry.Do(ctx, c.policy(), func(ctx context.Context) ([]byte, retry.Decision, error) {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL(), bytes.NewReader(payload))
+		if err != nil {
+			return nil, retry.Decision{}, fmt.Errorf("openai: build request: %w", err)
 		}
-		return provider.Response{}, fmt.Errorf("openai: HTTP %d: %s", resp.StatusCode, string(respBody))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+
+		resp, err := httpClient.Do(httpReq)
+		if err != nil {
+			return nil, retry.Decision{Retry: retry.RetryableErr(ctx, err)}, fmt.Errorf("openai: send: %w", err)
+		}
+		defer resp.Body.Close()
+
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, retry.Decision{Retry: retry.RetryableErr(ctx, err)}, fmt.Errorf("openai: read response: %w", err)
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			dec := retry.Decision{Retry: retry.RetryableStatus(resp.StatusCode), RetryAfter: retry.RetryAfterHeader(resp.Header)}
+			var apiErr apiError
+			if jerr := json.Unmarshal(respBody, &apiErr); jerr == nil && apiErr.Error.Message != "" {
+				return nil, dec, fmt.Errorf(
+					"openai: HTTP %d (%s): %s",
+					resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message,
+				)
+			}
+			return nil, dec, fmt.Errorf("openai: HTTP %d: %s", resp.StatusCode, string(respBody))
+		}
+		return respBody, retry.Decision{}, nil
+	})
+	if err != nil {
+		return provider.Response{}, err
 	}
 
 	var apiResp apiResponse

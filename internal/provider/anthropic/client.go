@@ -13,6 +13,7 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/provider"
+	"github.com/Leihb/octo-agent/internal/provider/retry"
 )
 
 // DefaultBaseURL is Anthropic's API base. The actual Messages endpoint is
@@ -46,6 +47,16 @@ type Client struct {
 	BaseURL    string       // optional override; defaults to DefaultBaseURL
 	APIVersion string       // optional override; defaults to DefaultAPIVersion
 	HTTPClient *http.Client // optional; defaults to http.Client with a 60s timeout
+	Retry      retry.Policy // optional; zero value falls back to retry.Default()
+}
+
+// policy returns the configured retry policy, or the package default when the
+// caller left Client.Retry zero.
+func (c *Client) policy() retry.Policy {
+	if c.Retry.MaxAttempts > 0 {
+		return c.Retry
+	}
+	return retry.Default()
 }
 
 // New constructs a Client with the given API key and the standard defaults.
@@ -99,61 +110,66 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		return provider.Response{}, fmt.Errorf("anthropic: marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL(), bytes.NewReader(payload))
-	if err != nil {
-		return provider.Response{}, fmt.Errorf("anthropic: build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-api-key", c.APIKey)
-	apiVer := c.APIVersion
-	if apiVer == "" {
-		apiVer = DefaultAPIVersion
-	}
-	httpReq.Header.Set("anthropic-version", apiVer)
-
 	httpClient := c.HTTPClient
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
 
-	resp, err := httpClient.Do(httpReq)
-	if err != nil {
-		return provider.Response{}, fmt.Errorf("anthropic: send: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return provider.Response{}, fmt.Errorf("anthropic: read response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var apiErr apiError
-		if jerr := json.Unmarshal(respBody, &apiErr); jerr == nil && apiErr.Error.Message != "" {
-			return provider.Response{}, fmt.Errorf(
-				"anthropic: HTTP %d (%s): %s",
-				resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message,
-			)
+	// Retry the request on transient failures (429/5xx/529/network). The
+	// payload is fixed across attempts; each attempt gets a fresh body reader.
+	return retry.Do(ctx, c.policy(), func(ctx context.Context) (provider.Response, retry.Decision, error) {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL(), bytes.NewReader(payload))
+		if err != nil {
+			return provider.Response{}, retry.Decision{}, fmt.Errorf("anthropic: build request: %w", err)
 		}
-		return provider.Response{}, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("x-api-key", c.APIKey)
+		apiVer := c.APIVersion
+		if apiVer == "" {
+			apiVer = DefaultAPIVersion
+		}
+		httpReq.Header.Set("anthropic-version", apiVer)
 
-	var apiResp apiResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return provider.Response{}, fmt.Errorf("anthropic: decode response: %w", err)
-	}
+		resp, err := httpClient.Do(httpReq)
+		if err != nil {
+			return provider.Response{}, retry.Decision{Retry: retry.RetryableErr(ctx, err)}, fmt.Errorf("anthropic: send: %w", err)
+		}
+		defer resp.Body.Close()
 
-	blocks := fromAPIContentBlocks(apiResp.Content)
-	return provider.Response{
-		Content:          joinTextBlocks(apiResp.Content),
-		Blocks:           blocks,
-		Model:            apiResp.Model,
-		StopReason:       apiResp.StopReason,
-		InputTokens:      apiResp.Usage.InputTokens,
-		OutputTokens:     apiResp.Usage.OutputTokens,
-		CacheReadTokens:  apiResp.Usage.CacheReadInputTokens,
-		CacheWriteTokens: apiResp.Usage.CacheCreationInputTokens,
-	}, nil
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return provider.Response{}, retry.Decision{Retry: retry.RetryableErr(ctx, err)}, fmt.Errorf("anthropic: read response: %w", err)
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			dec := retry.Decision{Retry: retry.RetryableStatus(resp.StatusCode), RetryAfter: retry.RetryAfterHeader(resp.Header)}
+			var apiErr apiError
+			if jerr := json.Unmarshal(respBody, &apiErr); jerr == nil && apiErr.Error.Message != "" {
+				return provider.Response{}, dec, fmt.Errorf(
+					"anthropic: HTTP %d (%s): %s",
+					resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message,
+				)
+			}
+			return provider.Response{}, dec, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		var apiResp apiResponse
+		if err := json.Unmarshal(respBody, &apiResp); err != nil {
+			return provider.Response{}, retry.Decision{}, fmt.Errorf("anthropic: decode response: %w", err)
+		}
+
+		blocks := fromAPIContentBlocks(apiResp.Content)
+		return provider.Response{
+			Content:          joinTextBlocks(apiResp.Content),
+			Blocks:           blocks,
+			Model:            apiResp.Model,
+			StopReason:       apiResp.StopReason,
+			InputTokens:      apiResp.Usage.InputTokens,
+			OutputTokens:     apiResp.Usage.OutputTokens,
+			CacheReadTokens:  apiResp.Usage.CacheReadInputTokens,
+			CacheWriteTokens: apiResp.Usage.CacheCreationInputTokens,
+		}, retry.Decision{}, nil
+	})
 }
 
 // endpointURL returns BaseURL + MessagesPath, applying defaults and trimming
