@@ -54,8 +54,28 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 	// decision point. Gated on tools because the nudge asks the model to call
 	// a tool.
 	turnInput := line
+
+	// Drain anything that accumulated before this turn started — in practice a
+	// background-process completion notice (Agent.Steer) that fired while the
+	// REPL was idle. Prepend it so the model sees it as context for this turn.
+	// This is the idle counterpart to the in-turn injection RunStream does at
+	// each tool-batch boundary; the steer buffer holds no user steer here (that
+	// only arrives mid-turn and is drained by the boundary or post-turn).
+	if pending := a.DrainSteer(); pending != "" {
+		turnInput = pending + "\n\n" + turnInput
+	}
+
 	if cfg.memStore != nil && len(cfg.tools) > 0 {
 		turnInput = appendMemoryNudge(turnInput)
+	}
+
+	// Live cross-session memory: fold any entries written since this session
+	// started (e.g. by another terminal) into the tail of this turn. Tail
+	// injection is cache-free — the new user turn is uncached regardless, so
+	// the system/tools/history prefix stays cached. The session-start snapshot
+	// in the (frozen) system prompt is unaffected.
+	if cfg.memRefresh != nil {
+		turnInput += renderMemoryUpdate(cfg.memRefresh.delta())
 	}
 
 	// Pre-turn hook: feed the raw user input to an external retrieval layer;
