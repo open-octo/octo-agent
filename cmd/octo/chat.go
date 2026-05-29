@@ -314,7 +314,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	var memInjection string
 	if memStore != nil {
-		memInjection, _ = memStore.RenderInjection()
+		memInjection, _ = memStore.RenderInjection(memory.ProjectRoot(cwd))
 	}
 	a.System = prompt.Compose(*system, cwd, env, skillsManifest, memInjection)
 

@@ -57,13 +57,18 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// In the non-archive view, also show the consolidated summary (the actual
-	// injection source) so users can see consolidation happened — otherwise it
-	// generates memory_summary.md silently.
+	// In the non-archive view, also show the consolidated summaries (the actual
+	// injection source) so users can see consolidation happened — otherwise they
+	// generate silently. One global bucket + one per project.
 	if !showArchive {
-		if sum := store.ReadSummary(); sum != "" {
-			fmt.Fprintln(stdout, "\nConsolidated summary (injected next session):")
-			for _, line := range strings.Split(sum, "\n") {
+		buckets, _ := store.Summaries()
+		for _, sb := range buckets {
+			if sb.Cwd == "" {
+				fmt.Fprintln(stdout, "\nConsolidated summary — global (injected every session):")
+			} else {
+				fmt.Fprintf(stdout, "\nConsolidated summary — %s (injected in that project):\n", sb.Cwd)
+			}
+			for _, line := range strings.Split(sb.Body, "\n") {
 				fmt.Fprintf(stdout, "  %s\n", line)
 			}
 		}

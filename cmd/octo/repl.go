@@ -374,9 +374,9 @@ func printMemory(w io.Writer, store *memory.Store) {
 		return
 	}
 	archived, _ := store.ListArchived()
-	summary := store.ReadSummary()
+	buckets, _ := store.Summaries()
 
-	if len(active) == 0 && summary == "" && len(archived) == 0 {
+	if len(active) == 0 && len(buckets) == 0 && len(archived) == 0 {
 		fmt.Fprintln(w, "Nothing remembered yet.")
 		return
 	}
@@ -387,12 +387,16 @@ func printMemory(w io.Writer, store *memory.Store) {
 			fmt.Fprintf(w, "  [%-9s] %s\n", e.Type, e.Description)
 		}
 	}
-	if summary != "" {
-		if len(active) > 0 {
+	for i, sb := range buckets {
+		if i == 0 && len(active) > 0 {
 			fmt.Fprintln(w)
 		}
-		fmt.Fprintln(w, "Consolidated summary (injected next session):")
-		for _, line := range strings.Split(summary, "\n") {
+		if sb.Cwd == "" {
+			fmt.Fprintln(w, "Consolidated summary — global (injected every session):")
+		} else {
+			fmt.Fprintf(w, "Consolidated summary — %s:\n", sb.Cwd)
+		}
+		for _, line := range strings.Split(sb.Body, "\n") {
 			fmt.Fprintf(w, "  %s\n", line)
 		}
 	}

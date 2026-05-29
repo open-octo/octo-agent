@@ -90,12 +90,12 @@ func TestRenderInjection(t *testing.T) {
 	s := NewStoreAt(t.TempDir())
 
 	// Empty store → empty injection.
-	if out, _ := s.RenderInjection(); out != "" {
+	if out, _ := s.RenderInjection(""); out != "" {
 		t.Errorf("empty store injection = %q, want empty", out)
 	}
 
 	_ = s.Save(Entry{Name: "n", Description: "prefers Go", Type: TypeUser})
-	out, err := s.RenderInjection()
+	out, err := s.RenderInjection("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,13 +103,15 @@ func TestRenderInjection(t *testing.T) {
 		t.Errorf("injection missing header/entry:\n%s", out)
 	}
 
-	// A consolidated summary takes precedence over the entry list.
+	// A consolidated summary is included; still-active (un-consolidated) entries
+	// are ALSO shown beneath it so freshly remembered facts aren't hidden until
+	// the next consolidation folds them in.
 	if err := os.WriteFile(filepath.Join(s.dir, summaryFile), []byte("CONSOLIDATED SUMMARY"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ = s.RenderInjection()
-	if !strings.Contains(out, "CONSOLIDATED SUMMARY") || strings.Contains(out, "prefers Go") {
-		t.Errorf("summary should take precedence over entry list:\n%s", out)
+	out, _ = s.RenderInjection("")
+	if !strings.Contains(out, "CONSOLIDATED SUMMARY") || !strings.Contains(out, "prefers Go") {
+		t.Errorf("injection should include both summary and active entries:\n%s", out)
 	}
 }
 
@@ -150,7 +152,7 @@ func TestState_RoundTrip(t *testing.T) {
 	if st := s.LoadState(); st.LastConsolidated != "" {
 		t.Errorf("missing state should be zero: %+v", st)
 	}
-	in := State{LastConsolidated: "2026-05-28", LastConsolidatedSHA: "abc123"}
+	in := State{LastConsolidated: "2026-05-28"}
 	if err := s.SaveState(in); err != nil {
 		t.Fatal(err)
 	}
@@ -160,21 +162,33 @@ func TestState_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestWriteSummary_PreferredByInjection(t *testing.T) {
+func TestRenderInjection_CwdScoping(t *testing.T) {
 	s := NewStoreAt(t.TempDir())
-	_ = s.Save(Entry{Description: "prefers Go", Type: TypeUser})
-	if err := s.WriteSummary("CONSOLIDATED"); err != nil {
-		t.Fatal(err)
+	_ = s.Save(Entry{Name: "g", Description: "global pref", Type: TypeUser})
+	_ = s.Save(Entry{Name: "a", Description: "proj A fact", Type: TypeProject, Cwd: "/proj/A"})
+	_ = s.Save(Entry{Name: "b", Description: "proj B fact", Type: TypeProject, Cwd: "/proj/B"})
+
+	// Active-entry scoping: global (cwd "") + current project only.
+	out, _ := s.RenderInjection("/proj/A")
+	if !strings.Contains(out, "global pref") || !strings.Contains(out, "proj A fact") {
+		t.Errorf("injection for /proj/A should include global + A entries:\n%s", out)
 	}
-	out, _ := s.RenderInjection()
-	if !strings.Contains(out, "CONSOLIDATED") || strings.Contains(out, "prefers Go") {
-		t.Errorf("WriteSummary should be preferred over entries:\n%s", out)
+	if strings.Contains(out, "proj B fact") {
+		t.Errorf("injection for /proj/A should NOT include B's entry:\n%s", out)
+	}
+
+	// Summary buckets: the matching project's summary is included, others aren't.
+	_ = s.WriteSummary("/proj/A", "A SUMMARY")
+	_ = s.WriteSummary("/proj/B", "B SUMMARY")
+	out, _ = s.RenderInjection("/proj/A")
+	if !strings.Contains(out, "A SUMMARY") || strings.Contains(out, "B SUMMARY") {
+		t.Errorf("injection for /proj/A should include A's summary, not B's:\n%s", out)
 	}
 }
 
 // requireGit skips the test when `git` isn't on PATH. The git-baseline path
-// (auto-commit, ListArchived, HeadSHA, WorkspaceDiff) all degrade to no-ops
-// without git; tests for those paths can't meaningfully run without it.
+// (auto-commit, ListArchived) degrades to no-ops without git; tests for those
+// paths can't meaningfully run without it.
 func requireGit(t *testing.T) {
 	t.Helper()
 	if !gitAvailable() {
@@ -250,12 +264,12 @@ func TestSave_AutoCommitsWhenGitEnabled(t *testing.T) {
 	if !isGitRepo(s.dir) {
 		t.Fatalf("Save should lazily init a git repo when git is enabled")
 	}
-	sha, err := s.HeadSHA()
+	sha, err := gitHead(s.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sha == "" {
-		t.Errorf("HeadSHA should be non-empty after a successful Save+commit")
+		t.Errorf("HEAD should be non-empty after a successful Save+commit")
 	}
 }
 
@@ -265,32 +279,6 @@ func TestSave_NoGitWhenDisabled(t *testing.T) {
 	_ = s.Save(Entry{Description: "first fact", Type: TypeUser})
 	if isGitRepo(s.dir) {
 		t.Errorf("Save should NOT create .git/ when git is disabled")
-	}
-}
-
-func TestWorkspaceDiff_ReportsNewEntriesSinceBaseline(t *testing.T) {
-	requireGit(t)
-	s := NewStoreAt(t.TempDir()).EnableGit()
-	_ = s.Save(Entry{Description: "before baseline", Type: TypeUser})
-	base, _ := s.HeadSHA()
-	if base == "" {
-		t.Fatal("baseline SHA must be set after a save")
-	}
-
-	_ = s.Save(Entry{Description: "after baseline", Type: TypeFeedback})
-
-	diff, err := s.WorkspaceDiff(base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The diff must record that after-baseline.md was added (a "new file mode"
-	// or "+++ b/after-baseline.md" line) but must NOT report before-baseline.md
-	// as newly added — it was already in the baseline.
-	if !strings.Contains(diff, "+++ b/after-baseline.md") {
-		t.Errorf("WorkspaceDiff should record the new file added since the baseline:\n%s", diff)
-	}
-	if strings.Contains(diff, "+++ b/before-baseline.md") {
-		t.Errorf("WorkspaceDiff should NOT record the baseline file as new:\n%s", diff)
 	}
 }
 
@@ -312,18 +300,18 @@ func TestListArchived_EmptyWithoutGit(t *testing.T) {
 
 func TestReadSummary(t *testing.T) {
 	s := NewStoreAt(t.TempDir())
-	if got := s.ReadSummary(); got != "" {
+	if got := s.ReadSummary(""); got != "" {
 		t.Errorf("missing summary = %q, want empty", got)
 	}
-	_ = s.WriteSummary("hello world")
-	if got := s.ReadSummary(); got != "hello world" {
+	_ = s.WriteSummary("", "hello world")
+	if got := s.ReadSummary(""); got != "hello world" {
 		t.Errorf("ReadSummary = %q, want %q", got, "hello world")
 	}
 }
 
 func TestWriteSummary_StampsV1Marker(t *testing.T) {
 	s := NewStoreAt(t.TempDir())
-	if err := s.WriteSummary("body content"); err != nil {
+	if err := s.WriteSummary("", "body content"); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(s.dir, summaryFile))
@@ -342,8 +330,8 @@ func TestWriteSummary_StampsV1Marker(t *testing.T) {
 
 func TestReadSummary_HidesMarkerFromCallers(t *testing.T) {
 	s := NewStoreAt(t.TempDir())
-	_ = s.WriteSummary("alpha\nbeta")
-	got := s.ReadSummary()
+	_ = s.WriteSummary("", "alpha\nbeta")
+	got := s.ReadSummary("")
 	if strings.Contains(got, summaryMarker) {
 		t.Errorf("ReadSummary should strip the marker, got: %q", got)
 	}
@@ -360,15 +348,15 @@ func TestReadSummary_AcceptsLegacyMarkerless(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(s.dir, summaryFile), []byte("legacy body\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.ReadSummary(); got != "legacy body" {
+	if got := s.ReadSummary(""); got != "legacy body" {
 		t.Errorf("legacy markerless summary should pass through, got %q", got)
 	}
 }
 
 func TestRenderInjection_HidesMarker(t *testing.T) {
 	s := NewStoreAt(t.TempDir())
-	_ = s.WriteSummary("CONSOLIDATED")
-	out, err := s.RenderInjection()
+	_ = s.WriteSummary("", "CONSOLIDATED")
+	out, err := s.RenderInjection("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,5 +395,83 @@ func TestReadEntry_MalformedSkipped(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name != "good" {
 		t.Errorf("malformed entry should be skipped, got %+v", entries)
+	}
+}
+
+func TestEntryCwdRoundTrip(t *testing.T) {
+	s := NewStoreAt(t.TempDir())
+	if err := s.Save(Entry{Name: "n", Description: "d", Type: TypeProject, Cwd: "/proj/X"}); err != nil {
+		t.Fatal(err)
+	}
+	e, ok, err := s.Get("n")
+	if err != nil || !ok {
+		t.Fatalf("Get: ok=%v err=%v", ok, err)
+	}
+	if e.Cwd != "/proj/X" {
+		t.Errorf("cwd lost in round-trip: %q", e.Cwd)
+	}
+	// An entry saved without a cwd has the field omitted (no `cwd:` line).
+	_ = s.Save(Entry{Name: "g", Description: "d", Type: TypeUser})
+	b, _ := os.ReadFile(filepath.Join(s.dir, "g.md"))
+	if strings.Contains(string(b), "cwd:") {
+		t.Errorf("global entry should omit the cwd frontmatter line:\n%s", b)
+	}
+}
+
+func TestActiveNotesByCwd(t *testing.T) {
+	s := NewStoreAt(t.TempDir())
+	_ = s.Save(Entry{Name: "g", Description: "global", Type: TypeUser})
+	_ = s.Save(Entry{Name: "a1", Description: "alpha one", Type: TypeProject, Cwd: "/proj/A"})
+	_ = s.Save(Entry{Name: "a2", Description: "alpha two", Type: TypeProject, Cwd: "/proj/A"})
+
+	buckets, err := s.ActiveNotesByCwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(buckets) != 2 {
+		t.Fatalf("expected 2 buckets (global + /proj/A), got %d: %+v", len(buckets), buckets)
+	}
+	if !strings.Contains(buckets[""], "global") {
+		t.Errorf("global bucket missing its entry: %q", buckets[""])
+	}
+	if !strings.Contains(buckets["/proj/A"], "alpha one") || !strings.Contains(buckets["/proj/A"], "alpha two") {
+		t.Errorf("/proj/A bucket should hold both A entries: %q", buckets["/proj/A"])
+	}
+}
+
+func TestArchiveCwd_OnlyTargetBucket(t *testing.T) {
+	requireGit(t)
+	s := NewStoreAt(t.TempDir()).EnableGit()
+	_ = s.Save(Entry{Name: "g", Description: "global", Type: TypeUser})
+	_ = s.Save(Entry{Name: "a", Description: "alpha", Type: TypeProject, Cwd: "/proj/A"})
+
+	if err := s.ArchiveCwd("/proj/A"); err != nil {
+		t.Fatal(err)
+	}
+	active, _ := s.List()
+	if len(active) != 1 || active[0].Name != "g" {
+		t.Errorf("ArchiveCwd should remove only the /proj/A entry, left: %+v", active)
+	}
+}
+
+func TestSummaries_GlobalAndProject(t *testing.T) {
+	s := NewStoreAt(t.TempDir())
+	_ = s.WriteSummary("", "GLOBAL BODY")
+	_ = s.WriteSummary("/proj/A", "PROJECT A BODY")
+
+	buckets, err := s.Summaries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(buckets) != 2 {
+		t.Fatalf("expected 2 summary buckets, got %d: %+v", len(buckets), buckets)
+	}
+	// Global sorts first; its cwd is empty.
+	if buckets[0].Cwd != "" || buckets[0].Body != "GLOBAL BODY" {
+		t.Errorf("first bucket should be global: %+v", buckets[0])
+	}
+	// The project bucket recovers its cwd from the embedded marker.
+	if buckets[1].Cwd != "/proj/A" || buckets[1].Body != "PROJECT A BODY" {
+		t.Errorf("project bucket should recover cwd from marker: %+v", buckets[1])
 	}
 }
