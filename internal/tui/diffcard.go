@@ -49,12 +49,13 @@ type Card struct {
 func (c Card) Render() string {
 	var b strings.Builder
 
+	dark := IsDark() // probe once per card; threads to the row washes + Chroma style
 	b.WriteString(renderHeader(c.Verb, c.Path))
 	b.WriteString("\n")
 	b.WriteString(renderSummary(c.Added, c.Removed))
 	b.WriteString("\n")
 	for _, ln := range c.Lines {
-		b.WriteString(renderRow(ln, c.Language))
+		b.WriteString(renderRow(ln, c.Language, dark))
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
@@ -104,29 +105,57 @@ func RenderEditCard(filePath, oldString, newString string) string {
 
 // ─── internals ────────────────────────────────────────────────────────────
 
+// Foreground styles draw from the shared adaptive palette (theme.go) so they
+// read on light and dark terminals; lipgloss resolves the side at render time.
 var (
-	headerBullet  = lipgloss.NewStyle().Foreground(lipgloss.Color("#3FB950")).SetString("●")
+	headerBullet  = lipgloss.NewStyle().Foreground(ColAccent).SetString("●")
 	headerVerb    = lipgloss.NewStyle().Bold(true)
-	headerSummary = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B949E"))
+	headerSummary = lipgloss.NewStyle().Foreground(ColMuted)
 
-	lineNoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6E7681")).Width(4).Align(lipgloss.Right)
-	lineNoDim   = lineNoStyle.Foreground(lipgloss.Color("#484F58"))
+	lineNoStyle = lipgloss.NewStyle().Foreground(ColDim).Width(4).Align(lipgloss.Right)
+	lineNoDim   = lineNoStyle.Foreground(ColDimmer)
 
-	plusMark  = lipgloss.NewStyle().Foreground(lipgloss.Color("#3FB950")).SetString("+")
-	minusMark = lipgloss.NewStyle().Foreground(lipgloss.Color("#F85149")).SetString("-")
+	plusMark  = lipgloss.NewStyle().Foreground(ColAccent).SetString("+")
+	minusMark = lipgloss.NewStyle().Foreground(ColDanger).SetString("-")
 )
 
-// Raw 24-bit ANSI background escapes for +/- rows. We use raw codes here
-// rather than Lipgloss styles because Chroma emits `\x1b[0m` resets
-// mid-line; re-applying the background over a plain string after each
-// reset is simpler than coaxing Lipgloss to do it.
+// Raw 24-bit ANSI background washes for +/- rows. Raw codes (not Lipgloss)
+// because Chroma emits `\x1b[0m` resets mid-line; re-applying the background
+// after each reset is simpler than coaxing Lipgloss to do it. Light/dark
+// variants are picked together with the Chroma style (see bgWash / chromaStyle)
+// so foreground text stays legible against the wash.
 const (
-	bgAdded   = "\x1b[48;2;14;58;28m" // deep green
-	bgRemoved = "\x1b[48;2;74;18;18m" // deep red
-	bgReset   = "\x1b[49m"
-	resetAll  = "\x1b[0m"
-	clearEOL  = "\x1b[K" // paints the row background to the right margin
+	bgAddedDark    = "\x1b[48;2;14;58;28m"    // deep green
+	bgRemovedDark  = "\x1b[48;2;74;18;18m"    // deep red
+	bgAddedLight   = "\x1b[48;2;230;255;236m" // pale green (#E6FFEC)
+	bgRemovedLight = "\x1b[48;2;255;235;233m" // pale red (#FFEBE9)
+	bgReset        = "\x1b[49m"
+	resetAll       = "\x1b[0m"
+	clearEOL       = "\x1b[K" // paints the row background to the right margin
 )
+
+// bgWash returns the row-background escape for a +/- line, matched to the
+// terminal background.
+func bgWash(kind rune, dark bool) string {
+	switch {
+	case kind == '-' && dark:
+		return bgRemovedDark
+	case kind == '-':
+		return bgRemovedLight
+	case dark:
+		return bgAddedDark
+	default:
+		return bgAddedLight
+	}
+}
+
+// chromaStyle picks a syntax-highlight style legible against the wash.
+func chromaStyle(dark bool) string {
+	if dark {
+		return "github-dark"
+	}
+	return "github"
+}
 
 func renderHeader(verb, path string) string {
 	return fmt.Sprintf("%s %s",
@@ -142,22 +171,19 @@ func renderSummary(added, removed int) string {
 	)
 }
 
-func renderRow(ln Line, language string) string {
+func renderRow(ln Line, language string, dark bool) string {
 	noCol := renderLineNo(ln)
 	mark := renderMark(ln.Kind)
 	body := ln.Text
 	if language != "" {
-		body = highlightLine(body, language)
+		body = highlightLine(body, language, dark)
 	}
 
 	if ln.Kind == ' ' {
 		return fmt.Sprintf(" %s %s %s", noCol, mark, body)
 	}
 
-	bg := bgAdded
-	if ln.Kind == '-' {
-		bg = bgRemoved
-	}
+	bg := bgWash(ln.Kind, dark)
 	// Re-apply background after each reset so highlighting tokens don't
 	// punch holes in the row colour.
 	body = strings.ReplaceAll(body, resetAll, resetAll+bg)
@@ -190,12 +216,12 @@ func renderMark(kind rune) string {
 // highlightLine returns the input with Chroma syntax-highlighting ANSI
 // escapes applied. On any failure (unknown lexer, format error) the raw
 // input is returned unchanged.
-func highlightLine(src, language string) string {
+func highlightLine(src, language string, dark bool) string {
 	lex := lexers.Get(language)
 	if lex == nil {
 		return src
 	}
-	style := styles.Get("github-dark")
+	style := styles.Get(chromaStyle(dark))
 	if style == nil {
 		style = styles.Fallback
 	}

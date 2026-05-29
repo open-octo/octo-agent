@@ -35,12 +35,13 @@ func TestCard_Render_Structure(t *testing.T) {
 			t.Errorf("output missing line number %q:\n%s", n, out)
 		}
 	}
-	// + rows should carry the deep-green background escape.
-	if !strings.Contains(out, bgAdded) {
+	// + / - rows should carry the background wash matching the detected
+	// terminal background (light or dark — both branches are valid here).
+	dark := IsDark()
+	if !strings.Contains(out, bgWash('+', dark)) {
 		t.Errorf("output missing added-row background escape:\n%s", out)
 	}
-	// - rows should carry the deep-red background escape.
-	if !strings.Contains(out, bgRemoved) {
+	if !strings.Contains(out, bgWash('-', dark)) {
 		t.Errorf("output missing removed-row background escape:\n%s", out)
 	}
 	// Background rows must each end with the right-margin paint then reset.

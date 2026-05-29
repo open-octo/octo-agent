@@ -29,3 +29,18 @@ func TestBox_BordersContent(t *testing.T) {
 		}
 	}
 }
+
+func TestBgWash_LightDark(t *testing.T) {
+	if bgWash('+', true) != bgAddedDark || bgWash('-', true) != bgRemovedDark {
+		t.Error("dark background should use the deep washes")
+	}
+	if bgWash('+', false) != bgAddedLight || bgWash('-', false) != bgRemovedLight {
+		t.Error("light background should use the pale washes")
+	}
+}
+
+func TestChromaStyle_LightDark(t *testing.T) {
+	if chromaStyle(true) != "github-dark" || chromaStyle(false) != "github" {
+		t.Errorf("chromaStyle: dark=%q light=%q", chromaStyle(true), chromaStyle(false))
+	}
+}
