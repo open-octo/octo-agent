@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/prompt"
 	"github.com/Leihb/octo-agent/internal/tools"
@@ -33,7 +34,7 @@ Then write ` + "`.octorules`" + ` with concise, factual content — short sectio
 func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	providerName := fs.String("provider", providerAnthropic, "Provider: anthropic | openai")
+	providerName := fs.String("provider", "", "Provider: anthropic | openai (default from `octo config`, else anthropic)")
 	model := fs.String("model", "", "Model name (defaults to the provider's cheapest reasoning model)")
 	plain := fs.Bool("plain", false, "Render tool events as one-line ↳ status lines instead of rich diff cards")
 	permMode := fs.String("permission-mode", "strict", "Tool permission handling: interactive | strict")
@@ -50,16 +51,19 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	resolvedModel := *model
-	if resolvedModel == "" {
-		resolvedModel = defaultModels[*providerName]
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "octo init: %v\n", err)
+		fmt.Fprintln(stderr, "Run `octo config` to rewrite ~/.octo/config.json.")
+		return 1
 	}
-	if resolvedModel == "" {
-		fmt.Fprintf(stderr, "octo init: unknown provider %q (use 'anthropic' or 'openai')\n", *providerName)
+	provName, resolvedModel, ok := resolveProviderModel(*providerName, *model, cfg)
+	if !ok {
+		fmt.Fprintf(stderr, "octo init: unknown provider %q (use 'anthropic' or 'openai')\n", provName)
 		return 2
 	}
 
-	prov, err := buildProvider(*providerName, stderr)
+	prov, err := buildProvider(provName, cfg, stderr)
 	if err != nil {
 		return 1
 	}

@@ -57,6 +57,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runChat(args[1:], stdin, stdout, stderr)
 	case "init":
 		return runInit(args[1:], stdin, stdout, stderr)
+	case "config":
+		return runConfig(args[1:], stdin, stdout, stderr)
 	case "memory":
 		return runMemory(args[1:], stdout, stderr)
 	case "task":
@@ -75,12 +77,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintln(w, "octo — a functionality-first AI agent (Go rewrite in progress)")
+	fmt.Fprintln(w, "octo — a functionality-first AI agent in a single Go binary.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage: octo <command>")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  chat       Start an interactive session (or single-turn with a message)")
+	fmt.Fprintln(w, "  config     Set your default provider/model (~/.octo/config.json)")
 	fmt.Fprintln(w, "  init       Analyze the repo and generate/update .octorules")
 	fmt.Fprintln(w, "  memory     Manage cross-session memory (e.g. `octo memory list`)")
 	fmt.Fprintln(w, "  task       Autonomous task orchestration (M11; `octo task start \"<goal>\"`)")

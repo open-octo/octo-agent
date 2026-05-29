@@ -50,6 +50,9 @@ make build       # produces ./octo
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...      # or OPENAI_API_KEY=...
 
+# One-time setup: save your default provider/model (skip the export above next time)
+octo config
+
 # Single-shot
 octo chat "Explain ring buffers in 100 words"
 
@@ -99,6 +102,18 @@ Octo composes its system prompt from several optional layers (later overrides ea
 - `--system "..."` — a one-off override for a single run.
 
 The identity and rule files support `@include path/to/fragment.md` to pull in shared content.
+
+### Defaults (`octo config`)
+
+`octo config` saves your default provider, model, and (optionally) base URL to `~/.octo/config.json`, so a bare `octo chat` works without re-typing `--provider`/`--model` every time:
+
+```bash
+octo config        # interactive wizard
+octo config show   # print the effective settings + where each comes from
+octo config path   # print the file location
+```
+
+Precedence is **CLI flag > env var > `~/.octo/config.json` > built-in default**. API keys are read from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` first; the wizard can store one in the file (mode `0600`), but the env var is recommended.
 
 ## Skills
 
