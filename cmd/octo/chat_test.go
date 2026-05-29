@@ -173,6 +173,30 @@ func TestRunChat_PromptFile_SingleTurn(t *testing.T) {
 	}
 }
 
+func TestResolveMaxTurns(t *testing.T) {
+	cases := []struct {
+		name        string
+		flagVal     int
+		seeded      bool
+		interactive bool
+		want        int
+	}{
+		{"interactive default → agent's own (0)", 0, false, true, 0},
+		{"piped stdin, no human → unattended", 0, false, false, unattendedMaxTurns},
+		{"prompt-file seed → unattended even on a tty", 0, true, true, unattendedMaxTurns},
+		{"explicit flag wins (interactive)", 35, false, true, 35},
+		{"explicit flag wins (unattended)", 35, false, false, 35},
+		{"explicit flag wins over seed", 12, true, true, 12},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := resolveMaxTurns(c.flagVal, c.seeded, c.interactive); got != c.want {
+				t.Errorf("resolveMaxTurns(%d, %v, %v) = %d, want %d", c.flagVal, c.seeded, c.interactive, got, c.want)
+			}
+		})
+	}
+}
+
 func TestRunChat_OpenAI_EndToEnd(t *testing.T) {
 	// Stand up a fake OpenAI-compatible endpoint and verify --provider openai
 	// routes there with Bearer auth and lands at /v1/chat/completions.

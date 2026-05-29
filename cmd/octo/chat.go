@@ -34,6 +34,27 @@ const (
 	providerOpenAI    = "openai"
 )
 
+// unattendedMaxTurns is the agentic-loop cap applied when --max-turns is left
+// at its auto-sentinel (0) and there's no interactive human to continue past
+// the limit (piped stdin, --prompt-file). Higher than the interactive default
+// (agent's 20) because a headless task can't be told to keep going.
+const unattendedMaxTurns = 60
+
+// resolveMaxTurns picks the agentic-loop cap. An explicit --max-turns (any
+// non-zero flagVal) always wins. Otherwise an unattended run — seeded via
+// --prompt-file, or reading piped/non-tty stdin, where nobody can type
+// "continue" past the limit — gets unattendedMaxTurns; an interactive run
+// returns 0 so the agent applies its own (lower) checkpoint default.
+func resolveMaxTurns(flagVal int, seeded, interactive bool) int {
+	if flagVal != 0 {
+		return flagVal
+	}
+	if seeded || !interactive {
+		return unattendedMaxTurns
+	}
+	return 0
+}
+
 // tuiDisabledByEnv reports whether OCTO_TUI is set to a falsey value, the env
 // equivalent of --no-tui (handy for dumb terminals / CI without editing the
 // command line).
@@ -86,7 +107,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	quietFlag := fs.Bool("quiet", false, "Strip all status chrome (no spinner, no banner, no cache line). Also OCTO_VERBOSITY=quiet.")
 	verboseFlag := fs.Bool("verbose", false, "Print extra context (provider/model/endpoint, always-on cache line). Also OCTO_VERBOSITY=verbose.")
 	permMode := fs.String("permission-mode", "interactive", "Tool permission handling: interactive (prompt on ask) | strict (deny on ask)")
-	maxTurns := fs.Int("max-turns", 0, "Max provider round-trips per message in the agentic loop (0 = default 20)")
+	maxTurns := fs.Int("max-turns", 0, "Max provider round-trips per message in the agentic loop (0 = auto: 20 interactive, 60 unattended/--prompt-file)")
 	maxCost := fs.Float64("max-cost", 0, "Stop the session once estimated cost (USD) reaches this; 0 = unlimited")
 	compactThreshold := fs.Int("compact-threshold", 0, "Compact older history once a turn's input crosses this many tokens; 0 = auto (~75% of the model's context window), <0 = disabled")
 	thinkingBudget := fs.Int("thinking-budget", 0, "Enable extended thinking with this token budget (Anthropic/Kimi); 0 = off")
@@ -274,7 +295,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		thinkingOut:    stdout,
 	}, resolvedModel)
 	a.MaxTokens = *maxTokens
-	a.MaxTurns = *maxTurns
+	a.MaxTurns = resolveMaxTurns(*maxTurns, seedPrompt != "", stdinIsTTY(stdin))
 	a.MaxCostUSD = *maxCost
 	a.CompactThreshold = *compactThreshold
 
