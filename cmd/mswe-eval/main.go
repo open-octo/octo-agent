@@ -64,7 +64,7 @@ func usage() {
 func runInspect(args []string) error {
 	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	dataset := fs.String("dataset", "", "path to the Multi-SWE-bench JSONL dataset")
-	lang := fs.String("lang", "go", "language filter ('' = all)")
+	lang := fs.String("lang", "", "language filter (''=all; the dataset ships pre-split per language, so usually leave empty)")
 	limit := fs.Int("limit", 1, "number of records to inspect")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -95,7 +95,7 @@ func runInspect(args []string) error {
 func runGenerate(args []string) error {
 	fs := flag.NewFlagSet("generate", flag.ContinueOnError)
 	dataset := fs.String("dataset", "", "path to the Multi-SWE-bench JSONL dataset")
-	lang := fs.String("lang", "go", "language filter")
+	lang := fs.String("lang", "", "language filter (''=all; dataset ships pre-split per language)")
 	limit := fs.Int("limit", 5, "max instances to run")
 	octoBin := fs.String("octo", "./octo", "path to the octo binary")
 	out := fs.String("out", "predictions.jsonl", "output predictions file (JSONL)")
