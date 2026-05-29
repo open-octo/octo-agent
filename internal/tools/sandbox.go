@@ -28,12 +28,18 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 	if activeSandbox != nil {
 		return sandbox.Command(ctx, command, *activeSandbox)
 	}
+	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		// -NoProfile: reproducible env (don't run the user's $PROFILE).
 		// -NonInteractive: never block on a PowerShell prompt mid-command.
-		return exec.CommandContext(ctx, resolvePowerShell(), "-NoProfile", "-NonInteractive", "-Command", command), nil
+		cmd = exec.CommandContext(ctx, resolvePowerShell(), "-NoProfile", "-NonInteractive", "-Command", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	}
-	return exec.CommandContext(ctx, "sh", "-c", command), nil
+	if attr := setProcessGroupOpts(); attr != nil {
+		cmd.SysProcAttr = attr
+	}
+	return cmd, nil
 }
 
 // resolvePowerShell picks the Windows shell once: PowerShell 7+ (`pwsh`) when
