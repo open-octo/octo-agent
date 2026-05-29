@@ -24,8 +24,9 @@ You have cross-session memory under `~/.octo/memory/`. Earlier sessions condense
 
 ### What's there
 
-- **memory_summary.md** — consolidated narrative across sessions; this is what gets injected when present.
-- **`<slug>.md`** — one fact per file with frontmatter (`name / description / type / created`). Types: `user`, `feedback`, `project`, `reference`.
+- **memory_summary.md** — consolidated global narrative across sessions; injected every session.
+- **memory_summary__*.md** — per-project consolidated summaries; injected only when you're working in that project (git repo root).
+- **`<slug>.md`** — one fact per file with frontmatter (`name / description / type / created / cwd`). Types: `user`, `feedback`, `project`, `reference`. A `cwd` scopes the fact to that project; absent = global.
 - **MEMORY.md** — searchable index of slugs.
 
 The whole directory is a git repo: `cd ~/.octo/memory && git log` shows every change, and the archive of consolidated entries lives in history rather than a sibling folder.

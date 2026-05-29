@@ -167,12 +167,14 @@ Examples:
   octo memory list --archive         Show entries that have been consolidated into the summary
 
 Layout:
-  ~/.octo/memory/<slug>.md           One file per unconsolidated fact
-  ~/.octo/memory/memory_summary.md   The injected summary (loaded into every system prompt)
-  ~/.octo/memory/MEMORY.md           Searchable index of slugs
+  ~/.octo/memory/<slug>.md            One file per unconsolidated fact
+  ~/.octo/memory/memory_summary.md    The global injected summary
+  ~/.octo/memory/memory_summary__*.md Per-project summaries (injected only in that project)
+  ~/.octo/memory/MEMORY.md            Searchable index of slugs
 
 Memory is built up by the in-session 'remember' tool and consolidated at chat
-startup once enough entries accumulate. To disable memory injection for a
+startup once enough entries accumulate. Facts remembered inside a git repo are
+scoped to that project; the rest are global. To disable memory injection for a
 single session, run "octo chat --no-memory".`)
 }
 

@@ -48,7 +48,7 @@ func TestConsolidateViaSubAgent_HappyPath(t *testing.T) {
 	stub := &stubConsolidationSpawner{reply: "## Consolidated\n- one line\n- two lines"}
 	useConsolidationSpawner(t, stub)
 
-	out := consolidateViaSubAgent(context.Background(), memory.NewStoreAt(t.TempDir()), "PRIOR_SUMMARY_MARKER", "NEW_NOTES_MARKER")
+	out := consolidateViaSubAgent(context.Background(), memory.NewStoreAt(t.TempDir()), "", "PRIOR_SUMMARY_MARKER", "NEW_NOTES_MARKER")
 	if out == "" {
 		t.Fatalf("expected sub-agent path to return text, got empty")
 	}
@@ -68,7 +68,7 @@ func TestConsolidateViaSubAgent_HappyPath(t *testing.T) {
 
 func TestConsolidateViaSubAgent_NoSpawner(t *testing.T) {
 	tools.SetSpawner(nil)
-	out := consolidateViaSubAgent(context.Background(), memory.NewStoreAt(t.TempDir()), "x", "y")
+	out := consolidateViaSubAgent(context.Background(), memory.NewStoreAt(t.TempDir()), "", "x", "y")
 	if out != "" {
 		t.Errorf("with no spawner, should return empty (caller falls back to side-call), got %q", out)
 	}
@@ -76,7 +76,7 @@ func TestConsolidateViaSubAgent_NoSpawner(t *testing.T) {
 
 func TestConsolidateViaSubAgent_SpawnerError(t *testing.T) {
 	useConsolidationSpawner(t, &stubConsolidationSpawner{err: errors.New("provider down")})
-	out := consolidateViaSubAgent(context.Background(), memory.NewStoreAt(t.TempDir()), "x", "y")
+	out := consolidateViaSubAgent(context.Background(), memory.NewStoreAt(t.TempDir()), "", "x", "y")
 	if out != "" {
 		t.Errorf("sub-agent error should be swallowed as empty (caller falls back), got %q", out)
 	}
@@ -88,7 +88,7 @@ func TestConsolidateViaSubAgent_StripsCodeFence(t *testing.T) {
 	}
 	useConsolidationSpawner(t, stub)
 
-	out := consolidateViaSubAgent(context.Background(), memory.NewStoreAt(t.TempDir()), "p", "n")
+	out := consolidateViaSubAgent(context.Background(), memory.NewStoreAt(t.TempDir()), "", "p", "n")
 	if strings.Contains(out, "```") {
 		t.Errorf("code fence should be stripped, got %q", out)
 	}
@@ -99,17 +99,18 @@ func TestConsolidateViaSubAgent_StripsCodeFence(t *testing.T) {
 
 func TestConsolidateViaSubAgent_EmptyReply(t *testing.T) {
 	useConsolidationSpawner(t, &stubConsolidationSpawner{reply: "   "})
-	out := consolidateViaSubAgent(context.Background(), memory.NewStoreAt(t.TempDir()), "p", "n")
+	out := consolidateViaSubAgent(context.Background(), memory.NewStoreAt(t.TempDir()), "", "p", "n")
 	if out != "" {
 		t.Errorf("empty sub-agent reply should be reported as empty so caller can fall back, got %q", out)
 	}
 }
 
 func TestBuildConsolidationPrompt_ContentShape(t *testing.T) {
-	p := buildConsolidationPrompt("/tmp/mem", "PRIOR", "NEW")
+	p := buildConsolidationPrompt("/tmp/mem", "/some/proj", "PRIOR", "NEW")
 	for _, want := range []string{
 		"cross-session memory",
-		"/tmp/mem/memory_summary.md",
+		"/tmp/mem/MEMORY.md",
+		"/some/proj", // project-scope line
 		"PRIOR",
 		"NEW",
 		"read_file",
@@ -122,7 +123,7 @@ func TestBuildConsolidationPrompt_ContentShape(t *testing.T) {
 }
 
 func TestBuildConsolidationPrompt_HandlesEmptyPriorSummary(t *testing.T) {
-	p := buildConsolidationPrompt("/tmp/mem", "", "NEW")
+	p := buildConsolidationPrompt("/tmp/mem", "", "", "NEW")
 	if !strings.Contains(p, "first consolidation pass") {
 		t.Errorf("empty prior summary should be labelled as first pass:\n%s", p)
 	}

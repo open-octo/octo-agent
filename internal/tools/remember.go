@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Leihb/octo-agent/internal/agent"
@@ -68,10 +69,12 @@ func (RememberTool) Execute(_ context.Context, _ string, input map[string]any) (
 	if desc == "" {
 		desc = firstLine(content)
 	}
+	cwd, _ := os.Getwd()
 	e := memory.Entry{
 		Name:        slugify(desc),
 		Description: desc,
 		Type:        memory.Type(strings.TrimSpace(stringArg(input, "type"))),
+		Cwd:         memory.ProjectRoot(cwd),
 		Body:        content,
 	}
 	if e.Name == "" {

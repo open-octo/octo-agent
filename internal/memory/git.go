@@ -184,22 +184,6 @@ func gitShow(dir, ref, path string) (string, error) {
 	return runGit(dir, "show", ref+":"+path)
 }
 
-// gitDiff returns the unified diff between two refs (or between a ref and the
-// working tree if head is empty). Used by the future sub-agent consolidator
-// (#6) to see what changed since the last consolidation baseline.
-func gitDiff(dir, base, head string) (string, error) {
-	if !gitAvailable() || !isGitRepo(dir) {
-		return "", errInternalGitMissing
-	}
-	args := []string{"diff"}
-	if head == "" {
-		args = append(args, base)
-	} else {
-		args = append(args, base+".."+head)
-	}
-	return runGit(dir, args...)
-}
-
 // errInternalGitMissing is returned by helpers that require git when it isn't
 // available or the dir isn't a repo. Callers higher up convert it to a no-op
 // (e.g. ListArchived returns nil, nil rather than surfacing this).
