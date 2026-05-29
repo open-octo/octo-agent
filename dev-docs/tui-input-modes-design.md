@@ -27,7 +27,7 @@
 - 抽出与渲染解耦的 **turn-core**，TTY 视图与非-TTY 纯文本视图共享。
 - permission gate / `ask_user_question` 改为 channel 请求-响应 + TUI 模态。
 - pending 缓冲（queue/steer 共用）、常驻队列区 UI。
-- `mswe-eval` 从「piped REPL 驱动」迁到专用 headless 入口。
+- `mswe-eval` 的 piped-REPL 驱动（最终评估为无需改动，见 §8）。
 - `--no-tui` 兼容性回退。
 
 ### 范围外（见 §11）
@@ -217,7 +217,7 @@ runTurnCore(turnCore, view)      // 同一 core，不同 sink
 ```
 
 - **headless 路径必然保留**（mswe-eval、测试用 `strings.Reader`、`octo chat "msg"` 单发、管道）。`--no-tui` 只是让 TTY 也强制走它，兼容性兜底。
-- **mswe-eval 迁移**：当前它靠「piped stdin 驱动 REPL」（`cmd/mswe-eval/main.go` 的 `runStdin`，喂 `octoPrompt+"\n"` + EOF），这条路依赖即将被 TUI 取代的输入路径，脆弱。改为一个**明确的 headless 入口契约**：单发一个 prompt、跑带工具的 agentic 循环、纯文本渲染、EOF/完成即退出（具体 flag 形态 tech-design 定，如 `octo chat --headless` 读 stdin 或位置参数）。这正是 `fix/mswe-first-run-hardening` 分支在做的 hardening，一并收掉。
+- **mswe-eval（最终：不迁移）**：它靠「piped stdin 驱动 REPL」（`cmd/mswe-eval/main.go` 的 `runStdin`，喂 `octoPrompt+"\n"` + EOF）。最初担心这条路会被 TUI 取代而脆弱，计划改成专用 headless 入口。落地时发现**没必要**：`useTUI = isREPL && stdinIsTTY && !--no-tui`，管道 stdin 的 `stdinIsTTY` 恒为 false，必然路由到 plain `runREPL`（scanner + plainView），bubbletea 永不激活。plain path 现在是一等公民且经测试,piped-REPL 契约完整保留。再加一个 `--headless` flag 属于 YAGNI,故不做。
 
 ---
 
@@ -243,17 +243,19 @@ runTurnCore(turnCore, view)      // 同一 core，不同 sink
 
 ## 11. 任务拆分（单 PR，决策 #11）
 
-虽然单 PR 落地，内部按以下顺序构建，便于自测：
+单 PR 落地，内部按以下顺序构建（实际落地状态标注于后）：
 
-1. **抽 turn-core**：把 `runREPL` 的回合编排与渲染解耦，定义 `ViewSink`；先用一个等价于现有行为的 `plainView` 适配，保证既有测试全绿（零行为变更）。
-2. **agent loop 并发化 + 注入点**：`runLoop` 增加 pending drain（steer 并入 tool_result）、回合末降级逻辑；`Agent` 暴露线程安全的 pending 注入。
-3. **gate/asker 请求-响应化**：`ViewSink.Ask`；plainView 退回 stdin，行为不变。
-4. **bubbletea TTY 视图**：Model/Update/View，对话区 + 队列区 + 输入区 + 模态；键位映射（§7）；`AgentEvent`→`tea.Msg`。
-5. **分流与 flag**：`stdinIsTTY` 分流 + `--no-tui`/`OCTO_TUI=0`。
-6. **迁 mswe-eval**：headless 入口契约，替换 piped REPL 驱动。
-7. **测试补齐**（§9）。
+1. ✅ **抽 turn-core**（`cmd/octo/turncore.go`）：`runREPL` 的回合编排与渲染解耦，定义 `ViewSink`，`plainView` 等价适配。零行为变更，既有测试全绿。
+2. ✅ **agent loop 注入点**（`internal/agent/steer.go` + `runLoop`）：`Agent.Steer`/`DrainSteer`/`HasPendingSteer`；steer 在工具批次边界并入尾部 tool_result；回合末降级。同时修了 OpenAI 适配器丢弃 text block 的 bug。
+3. ✅ **gate/asker 请求-响应化**（`cmd/octo/prompt.go`）：`UserPrompt`/`UserResponse`/`userPrompter`，折入 `ViewSink.Ask`；plainView.Ask 保留 stdin 行为不变。
+4. ✅ **bubbletea TTY 视图**（`cmd/octo/tuirepl.go` + `tuirepl_view.go`）：`runTUI` + `tuiModel` + `tuiSink`；键位（§7）；`AgentEvent`→`tea.Msg`；queue 面板 + 模态。Model 逻辑经 Update 单测覆盖（无需 TTY）。
+5. ✅ **分流与 flag**（`chat.go`）：`stdinIsTTY` 分流 + `--no-tui` / `OCTO_TUI=0`。
+6. ⏭️ **mswe-eval**：**未做，刻意保留 piped-REPL 驱动**（见 §8）。非-TTY stdin 已干净路由到 plain `runREPL`，契约完整保留；专用 headless 入口是可选 hardening，按 YAGNI 不引入额外表面。
+7. ✅ **测试**（§9）：turn-core 经既有 REPL 测试覆盖；steer/注入/适配器/TUI-Model 各有单测。
 
 > ⚠️ 单 PR 风险（已知并接受）：diff 大、review 困难、出问题难二分。缓解：上述步骤各自 commit 清晰、turn-core 步骤保持既有测试绿作为「未回归」基线。
+>
+> ⚠️ **未做交互式真终端验证**：bubbletea 的渲染/键位在真实 TTY 上的手感（光标、换行、resize、Alt+Enter 检测）需人工在真终端冒烟；Model 逻辑已单测，但渲染层无法在 headless CI 中验证。`--no-tui` 是兼容兜底。
 
 ---
 
@@ -262,5 +264,6 @@ runTurnCore(turnCore, view)      // 同一 core，不同 sink
 - **pending 持久化**：typed-ahead 是瞬态输入，会话退出/崩溃即丢，不写盘。
 - **steer 的「立即打断重发」语义**（grill Q2·B）：明确否决——与 interrupt 区分度太低。steer 一律走「下一边界注入」。
 - **队列消息的富文本编辑**（grill Q10·C 的回填编辑）：首版只做删除/清空，不做回填到输入区再编辑。
+- **模态里的 "Other（自由文本）"**：TUI 问答模态首版选中 "Other" 视作取消（模型可重问或自取默认）——内联自由文本输入框留待后续。plain 路径仍支持 Other 自由文本。
 - **Web / IM 端的 queue/steer/interrupt**：本设计只覆盖 CLI TTY；Web/IM 各有自己的输入模型，另案。
 - **多回合并行**：始终一次一个在途回合，pending 串行消费。
