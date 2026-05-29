@@ -133,6 +133,10 @@ type tuiModel struct {
 	a    *agent.Agent
 	sink *tuiSink
 
+	// md renders committed assistant markdown blocks (glamour). Skipped under
+	// --plain (cfg.plain), where text commits as raw lines.
+	md markdownRenderer
+
 	// input is the single-line edit buffer (manual; no bubbles dependency).
 	input []rune
 
@@ -268,11 +272,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			"↳ %s (%s) %s", msg.e.ID, truncate1Line(msg.e.Command), msg.e.Status)))
 
 	case turnEndedMsg:
-		// Flush any trailing partial line; render the cache/error footer.
+		// Flush any trailing assistant block (markdown-rendered); then render
+		// the cache/error footer.
 		var cmds []tea.Cmd
-		if line := m.partial.String(); line != "" {
-			cmds = append(cmds, tea.Println(line))
-			m.partial.Reset()
+		if flush := m.flushText(); flush != nil {
+			cmds = append(cmds, flush)
 		}
 		if msg.err != nil && msg.err != context.Canceled {
 			cmds = append(cmds, tea.Println(errorStyle.Render("error: "+msg.err.Error())))
@@ -355,34 +359,59 @@ func (m *tuiModel) rendersCard(toolName string) bool {
 	return !m.cfg.plain && cardVerbFor(toolName) != ""
 }
 
-// appendText buffers a text delta, emitting any newline-terminated lines to
-// the scrollback and keeping the remainder live.
+// appendText buffers a streamed text delta. Under --plain it commits whole
+// lines as they complete (raw). Otherwise it accumulates markdown and commits
+// complete blocks (up to the last blank line outside a code fence) through
+// glamour, keeping the in-progress block live in the View region.
 func (m *tuiModel) appendText(text string) tea.Cmd {
 	m.partial.WriteString(text)
-	buf := m.partial.String()
-	idx := strings.LastIndexByte(buf, '\n')
-	if idx < 0 {
+
+	if m.cfg.plain {
+		buf := m.partial.String()
+		idx := strings.LastIndexByte(buf, '\n')
+		if idx < 0 {
+			return nil
+		}
+		complete := buf[:idx]
+		m.partial.Reset()
+		m.partial.WriteString(buf[idx+1:])
+		var cmds []tea.Cmd
+		for _, line := range strings.Split(complete, "\n") {
+			cmds = append(cmds, tea.Println(line))
+		}
+		return tea.Batch(cmds...)
+	}
+
+	commit, rest := splitCommittableMarkdown(m.partial.String())
+	if commit == "" {
 		return nil
 	}
-	complete := buf[:idx] // up to and excluding the last newline
 	m.partial.Reset()
-	m.partial.WriteString(buf[idx+1:])
-	var cmds []tea.Cmd
-	for _, line := range strings.Split(complete, "\n") {
-		cmds = append(cmds, tea.Println(line))
-	}
-	return tea.Batch(cmds...)
+	m.partial.WriteString(rest)
+	return tea.Println(m.md.render(commit, m.width))
 }
 
-// commitToolLine flushes any in-progress text line, then prints the tool line.
-func (m *tuiModel) commitToolLine(line string) tea.Cmd {
-	var cmds []tea.Cmd
-	if p := m.partial.String(); p != "" {
-		cmds = append(cmds, tea.Println(p))
-		m.partial.Reset()
+// flushText commits whatever assistant text is still buffered (the final or
+// pre-tool block), rendered through glamour unless --plain. Returns nil when
+// nothing is pending.
+func (m *tuiModel) flushText() tea.Cmd {
+	p := m.partial.String()
+	if p == "" {
+		return nil
 	}
-	cmds = append(cmds, tea.Println(line))
-	return tea.Batch(cmds...)
+	m.partial.Reset()
+	if m.cfg.plain {
+		return tea.Println(p)
+	}
+	return tea.Println(m.md.render(p, m.width))
+}
+
+// commitToolLine flushes any in-progress text, then prints the tool line/card.
+func (m *tuiModel) commitToolLine(line string) tea.Cmd {
+	if flush := m.flushText(); flush != nil {
+		return tea.Batch(flush, tea.Println(line))
+	}
+	return tea.Println(line)
 }
 
 func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {

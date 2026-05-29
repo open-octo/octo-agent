@@ -204,8 +204,24 @@ func TestTUI_QuestionModalMultiSelect(t *testing.T) {
 	}
 }
 
-func TestTUI_AppendTextBuffersPartialLine(t *testing.T) {
+func TestTUI_AppendText_BlockBufferingNonPlain(t *testing.T) {
+	m := newTestModel() // cfg.plain == false → markdown block buffering
+	m.appendText("hello ")
+	m.appendText("world\nnext")
+	// No blank-line block boundary yet, so the whole in-progress block stays live.
+	if got := m.partial.String(); got != "hello world\nnext" {
+		t.Errorf("partial = %q, want the full in-progress block", got)
+	}
+	// A blank line closes the block; only the next block remains live.
+	m.appendText("\n\nsecond para start")
+	if got := m.partial.String(); got != "second para start" {
+		t.Errorf("partial = %q, want 'second para start'", got)
+	}
+}
+
+func TestTUI_AppendText_PlainLineFlush(t *testing.T) {
 	m := newTestModel()
+	m.cfg.plain = true // --plain keeps the line-by-line raw flush
 	m.appendText("hello ")
 	m.appendText("world\nnext")
 	if got := m.partial.String(); got != "next" {
