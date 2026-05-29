@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/provider"
+	"github.com/Leihb/octo-agent/internal/provider/retry"
 )
 
 func TestNew_EmptyKeyRejected(t *testing.T) {
@@ -283,5 +286,65 @@ func TestSend_ParsesCacheUsage(t *testing.T) {
 	}
 	if resp.CacheReadTokens != 3400 {
 		t.Errorf("CacheReadTokens = %d, want 3400 (cache_read_input_tokens)", resp.CacheReadTokens)
+	}
+}
+
+func TestSend_RetriesTransientThenSucceeds(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			// First attempt: transient 503 with a Retry-After the policy caps.
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"type":"overloaded_error","message":"try again"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"m","type":"message","role":"assistant","model":"x",
+			"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	c.Retry = retry.Policy{MaxAttempts: 4, BaseDelay: time.Millisecond, MaxDelay: 5 * time.Millisecond}
+
+	resp, err := c.Send(context.Background(), provider.Request{
+		Model:    "x",
+		Messages: []agent.Message{agent.NewUserMessage("hi")},
+	})
+	if err != nil {
+		t.Fatalf("expected success after retry, got %v", err)
+	}
+	if resp.Content != "ok" {
+		t.Errorf("content = %q, want ok", resp.Content)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Errorf("expected 2 HTTP attempts (1 retry), got %d", got)
+	}
+}
+
+func TestSend_DoesNotRetryClientError(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusBadRequest) // 400: not retryable
+		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"bad"}}`))
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	c.Retry = retry.Policy{MaxAttempts: 4, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}
+
+	if _, err := c.Send(context.Background(), provider.Request{
+		Model:    "x",
+		Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}); err == nil {
+		t.Fatal("expected error for 400")
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("400 should not be retried; attempts=%d", got)
 	}
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/provider"
+	"github.com/Leihb/octo-agent/internal/provider/retry"
 )
 
 // blockAccumulator holds in-progress state for a single content block while
@@ -70,36 +71,46 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		return provider.Response{}, fmt.Errorf("anthropic: marshal stream request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL(), bytes.NewReader(payload))
-	if err != nil {
-		return provider.Response{}, fmt.Errorf("anthropic: build stream request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
-	httpReq.Header.Set("x-api-key", c.APIKey)
-	apiVer := c.APIVersion
-	if apiVer == "" {
-		apiVer = DefaultAPIVersion
-	}
-	httpReq.Header.Set("anthropic-version", apiVer)
+	// Retry only request establishment (build → send → status check). Once the
+	// body below starts streaming we can't retry without duplicating emitted
+	// tokens. On success the attempt returns the open response for scanning.
+	resp, err := retry.Do(ctx, c.policy(), func(ctx context.Context) (*http.Response, retry.Decision, error) {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL(), bytes.NewReader(payload))
+		if err != nil {
+			return nil, retry.Decision{}, fmt.Errorf("anthropic: build stream request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "text/event-stream")
+		httpReq.Header.Set("x-api-key", c.APIKey)
+		apiVer := c.APIVersion
+		if apiVer == "" {
+			apiVer = DefaultAPIVersion
+		}
+		httpReq.Header.Set("anthropic-version", apiVer)
 
-	resp, err := c.streamingHTTPClient().Do(httpReq)
+		resp, err := c.streamingHTTPClient().Do(httpReq)
+		if err != nil {
+			return nil, retry.Decision{Retry: retry.RetryableErr(ctx, err)}, fmt.Errorf("anthropic: send stream: %w", err)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			dec := retry.Decision{Retry: retry.RetryableStatus(resp.StatusCode), RetryAfter: retry.RetryAfterHeader(resp.Header)}
+			var apiErr apiError
+			if jerr := json.Unmarshal(respBody, &apiErr); jerr == nil && apiErr.Error.Message != "" {
+				return nil, dec, fmt.Errorf(
+					"anthropic: HTTP %d (%s): %s",
+					resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message,
+				)
+			}
+			return nil, dec, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(respBody))
+		}
+		return resp, retry.Decision{}, nil
+	})
 	if err != nil {
-		return provider.Response{}, fmt.Errorf("anthropic: send stream: %w", err)
+		return provider.Response{}, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
-		var apiErr apiError
-		if jerr := json.Unmarshal(respBody, &apiErr); jerr == nil && apiErr.Error.Message != "" {
-			return provider.Response{}, fmt.Errorf(
-				"anthropic: HTTP %d (%s): %s",
-				resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message,
-			)
-		}
-		return provider.Response{}, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
 
 	var (
 		result     provider.Response
