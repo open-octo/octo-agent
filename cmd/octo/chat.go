@@ -34,6 +34,17 @@ const (
 	providerOpenAI    = "openai"
 )
 
+// tuiDisabledByEnv reports whether OCTO_TUI is set to a falsey value, the env
+// equivalent of --no-tui (handy for dumb terminals / CI without editing the
+// command line).
+func tuiDisabledByEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OCTO_TUI"))) {
+	case "0", "false", "off", "no":
+		return true
+	}
+	return false
+}
+
 // defaultModels maps each provider to the model used when `--model` isn't
 // supplied. Both defaults are the cheapest reasoning-capable model in the
 // respective vendor's catalogue at the time of writing — the right pick for
@@ -70,6 +81,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	noTools := fs.Bool("no-tools", false, "Disable the built-in tools (and MCP/skill execution) — plain chat only")
 	noMemory := fs.Bool("no-memory", false, "Disable cross-session memory (the remember tool + memory injection)")
 	plain := fs.Bool("plain", false, "Render tool events as one-line ↳ status lines instead of rich diff cards")
+	noTUI := fs.Bool("no-tui", false, "Disable the interactive TUI on a terminal; use the plain line-based REPL (also OCTO_TUI=0)")
 	quietFlag := fs.Bool("quiet", false, "Strip all status chrome (no spinner, no banner, no cache line). Also OCTO_VERBOSITY=quiet.")
 	verboseFlag := fs.Bool("verbose", false, "Print extra context (provider/model/endpoint, always-on cache line). Also OCTO_VERBOSITY=verbose.")
 	permMode := fs.String("permission-mode", "interactive", "Tool permission handling: interactive (prompt on ask) | strict (deny on ask)")
@@ -254,27 +266,37 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		replReader   lineReader
 		replView     ViewSink
 	)
+	// useTUI: an interactive terminal drives the bubbletea TUI unless the user
+	// (or OCTO_TUI=0) opted out. Piped / redirected stdin always uses the plain
+	// line-based path (tests, mswe-eval, CI). See design §5, §12.
+	useTUI := isREPL && stdinIsTTY(stdin) && !*noTUI && !tuiDisabledByEnv()
 	if isREPL {
 		toolExecutor = tools.NewDefaultRegistry()
 		tools.SetSpawner(newAgentSpawner(a, toolExecutor, tools.DefaultTools))
-		if stdinIsTTY(stdin) {
-			rl, err := newReadlineReader(defaultHistoryFile())
-			if err != nil {
-				fmt.Fprintf(stderr, "octo chat: line editor unavailable (%v); falling back to plain input\n", err)
-				replReader = newScannerLineReader(stdin, stdout)
-			} else {
-				replReader = rl
-			}
+		if useTUI {
+			// bubbletea owns stdin and renders its own input; the asker and gate
+			// are wired to the TUI sink inside runTUI. No readline reader or
+			// plainView is built (they'd fight bubbletea for the terminal).
+			defer tools.SetAsker(nil)
 		} else {
-			replReader = newScannerLineReader(stdin, stdout)
+			if stdinIsTTY(stdin) {
+				rl, err := newReadlineReader(defaultHistoryFile())
+				if err != nil {
+					fmt.Fprintf(stderr, "octo chat: line editor unavailable (%v); falling back to plain input\n", err)
+					replReader = newScannerLineReader(stdin, stdout)
+				} else {
+					replReader = rl
+				}
+			} else {
+				replReader = newScannerLineReader(stdin, stdout)
+			}
+			// One view backs the turn loop, the permission gate, and the asker,
+			// so they share a single presentation surface. Built here because
+			// the asker is registered before runREPL constructs its config.
+			replView = newPlainView(replReader, stdout, stderr, resolveVerbosity(*quietFlag, *verboseFlag), *plain)
+			tools.SetAsker(newREPLAsker(replView))
+			defer tools.SetAsker(nil)
 		}
-		// One view backs the turn loop, the permission gate, and the asker, so
-		// they share a single presentation surface (and, in the TUI, a single
-		// modal queue). Built here because the asker is registered before
-		// runREPL constructs its config.
-		replView = newPlainView(replReader, stdout, stderr, resolveVerbosity(*quietFlag, *verboseFlag), *plain)
-		tools.SetAsker(newREPLAsker(replView))
-		defer tools.SetAsker(nil)
 
 		// Session-scoped task tracker for the task_create / task_update /
 		// task_list tools + the /tasks REPL command. Lost on exit by design
@@ -383,6 +405,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				return 1
 			}
 			cfg.permEngine = engine
+		}
+		if useTUI {
+			return runTUI(cfg)
 		}
 		return runREPL(cfg)
 	}
