@@ -787,6 +787,14 @@ func (a *Agent) AccrueChildUsage(inputTokens, outputTokens int) {
 	a.sessionOutputTokens += outputTokens
 }
 
+// ContextUsage reports how full the model's context window is: used is the
+// size of the most recently sent context (the prior turn's input tokens, 0
+// before the first reply), window is the model's approximate context-window
+// size. Lets the TUI status bar render a "ctx N%" gauge. window is always > 0.
+func (a *Agent) ContextUsage() (used, window int) {
+	return a.lastInputTokens, contextWindow(a.Model)
+}
+
 // SessionCacheTokens returns the cumulative cache read/write token counts.
 // Read is input served from cache (cheap); write is input written into the
 // cache (Anthropic only). Both zero when the backend reports no cache info.

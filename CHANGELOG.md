@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased — 0.5.0-dev]
 
 ### Added
+- **TUI status bar + bordered input box (TUI UX upgrade, P2).** The interactive TUI's input line is now a rounded-border box sized to the terminal width, with a status bar beneath it showing the model, home-abbreviated working directory, context-window usage (`ctx N%`), estimated session cost (`$…`), permission mode, and per-turn elapsed time; the contextual key hint moved onto a dim line below. New `Agent.ContextUsage()` exposes the context gauge (last-sent tokens / model window). Borderless fallback before the first window-size message or on a very narrow terminal.
 - **TUI tool cards (TUI UX upgrade, P1).** The interactive bubbletea TUI now renders tool activity as rich cards instead of one-line `↳ tool ✓` status: `edit_file` shows a chroma-highlighted diff card (the `internal/tui` renderer that previously only ran in the non-TTY fallback view), and `terminal` / `grep` / `glob` / `read_file` / `web_fetch` / `web_search` show an output-preview card (`● Verb(target)` header above the output behind a `│` gutter, capped with a "N more lines" marker). A new `internal/tui` theme skeleton centralises the palette. First of the phased TUI upgrade in `dev-docs/tui-ux-upgrade-design.md` (P2 status bar + bordered input, P3 rich spinner, P4 glamour markdown, P5 panels follow).
 
 ### Changed

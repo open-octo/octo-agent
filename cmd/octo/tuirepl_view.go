@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,13 +12,18 @@ import (
 )
 
 var (
-	promptStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-	noticeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	toolErrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	queueStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-	modalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
-	hintStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Italic(true)
+	promptStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	noticeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	toolErrStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	queueStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	modalStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
+	hintStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Italic(true)
+	statusStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	inputBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("8")).
+			Padding(0, 1)
 )
 
 // handleKey routes a keypress by context: a modal grabs all keys; otherwise the
@@ -245,19 +252,74 @@ func (m *tuiModel) View() string {
 		}
 	}
 
-	// Input line.
-	b.WriteString(promptStyle.Render("you> "))
-	b.WriteString(string(m.input))
-	b.WriteString("▏")
-
-	// Context hint.
+	// Bordered input box + status bar.
+	b.WriteString(m.renderInputBox())
 	b.WriteByte('\n')
-	if m.turnRunning {
-		b.WriteString(hintStyle.Render("Enter steer · Alt+Enter queue · Esc interrupt"))
-	} else {
-		b.WriteString(hintStyle.Render("Enter send · /exit quit · Ctrl+D quit"))
-	}
+	b.WriteString(m.renderStatusBar())
 	return b.String()
+}
+
+// renderInputBox draws the prompt + current input inside a rounded border,
+// sized to the terminal width. Falls back to a borderless line before the
+// first WindowSizeMsg (width 0) or on a very narrow terminal.
+func (m *tuiModel) renderInputBox() string {
+	content := promptStyle.Render("you> ") + string(m.input) + "▏"
+	if m.width <= 6 {
+		return content
+	}
+	return inputBoxStyle.Width(m.width - 4).Render(content) // -2 border, -2 padding
+}
+
+// renderStatusBar renders the model / cwd / context% / cost / permission /
+// elapsed segments, with the contextual key hint on a dim line below.
+func (m *tuiModel) renderStatusBar() string {
+	segs := []string{m.a.Model}
+	if m.cwd != "" {
+		segs = append(segs, m.cwd)
+	}
+	if used, window := m.a.ContextUsage(); window > 0 && used > 0 {
+		segs = append(segs, fmt.Sprintf("ctx %d%%", used*100/window))
+	}
+	if c := m.a.SessionCostUSD(); c > 0 {
+		segs = append(segs, fmt.Sprintf("$%.4f", c))
+	}
+	if m.cfg.permEngine != nil {
+		segs = append(segs, string(m.cfg.permEngine.GetMode()))
+	}
+	if m.turnRunning && !m.turnStart.IsZero() {
+		segs = append(segs, time.Since(m.turnStart).Round(time.Second).String())
+	}
+
+	hint := "Enter send · /exit quit · Ctrl+D quit"
+	if m.turnRunning {
+		hint = "Enter steer · Alt+Enter queue · Esc interrupt"
+	}
+	return statusStyle.Render(strings.Join(segs, " · ")) + "\n" + hintStyle.Render(hint)
+}
+
+// workingDir returns the current directory, or "" if it can't be determined.
+func workingDir() string {
+	d, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return d
+}
+
+// abbreviateHome replaces the user's home-dir prefix with "~".
+func abbreviateHome(path string) string {
+	if path == "" {
+		return ""
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if path == home {
+			return "~"
+		}
+		if strings.HasPrefix(path, home+string(os.PathSeparator)) {
+			return "~" + path[len(home):]
+		}
+	}
+	return path
 }
 
 func (m *tuiModel) modalView() string {

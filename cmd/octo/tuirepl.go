@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/tools"
@@ -149,6 +150,12 @@ type tuiModel struct {
 
 	width int
 	quit  bool
+
+	// cwd is the home-abbreviated working directory shown in the status bar
+	// (computed once — it doesn't change during a session).
+	cwd string
+	// turnStart timestamps the current turn so the status bar can show elapsed.
+	turnStart time.Time
 }
 
 // modalState renders a permission / question prompt and collects the answer.
@@ -163,7 +170,7 @@ type modalState struct {
 }
 
 func newTUIModel(cfg replConfig) *tuiModel {
-	return &tuiModel{cfg: cfg, a: cfg.a}
+	return &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir())}
 }
 
 func (m *tuiModel) Init() tea.Cmd { return nil }
@@ -174,6 +181,7 @@ func (m *tuiModel) Init() tea.Cmd { return nil }
 func (m *tuiModel) startTurn(line string) tea.Cmd {
 	m.turnRunning = true
 	m.streaming = false
+	m.turnStart = time.Now()
 	m.partial.Reset()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancelTurn = cancel
