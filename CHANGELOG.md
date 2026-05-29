@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased — 0.5.0-dev]
 
+### Changed
+- **Diff / output cards adapt to light & dark terminals.** The `internal/tui` cards were github-dark-tuned only; their colours now come from an adaptive palette (`lipgloss.AdaptiveColor`, GitHub light/dark values) and the diff row washes + Chroma syntax style switch together on a one-time terminal-background probe (pale washes + the `github` style on light terminals, deep washes + `github-dark` on dark). Resolves the last TUI-upgrade follow-up; the dark rendering is unchanged.
+
 ### Added
 - **TUI live background-process panel.** A `background (N running)` panel now appears in the TUI while detached `terminal background:true` commands are in flight — each line shows a spinner, the command, and elapsed time, refreshed by the same tick loop (which now keeps animating between turns while any background process is alive). Completion still drops a scrollback notice (and injects the result into the conversation); the panel just makes the *running* set visible, which the prior fire-and-forget flow couldn't show. New `BackgroundManager.ListRunning()` / package-level `tools.RunningBackground()`. Follow-up to the terminal-notify work + the TUI UX upgrade.
 - **TUI panels + theme (TUI UX upgrade, P5 — final).** The queue and the permission / question modals now render as rounded-border panels (the queue gets a titled `queue (N)` panel; modals get a bordered box) instead of loose text. A shared `internal/tui.Panel` / `Box` helper and an adaptive `ColBorder` (light/dark) centralise the chrome, and the input box border now references it too. The true-colour diff/output cards stay github-dark-tuned for now (re-theming those to adaptive is noted as future work). Completes the phased TUI UX upgrade (P1 cards → P2 status bar + input box → P3 spinner → P4 markdown → P5 panels) from `dev-docs/tui-ux-upgrade-design.md`.

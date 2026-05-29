@@ -2,22 +2,22 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Palette is the shared TUI colour set. These mirror the github-dark-ish
-// true-colour values the diff card already uses inline; a later phase swaps
-// them for lipgloss.AdaptiveColor (light/dark aware) and folds the diff card's
-// own inline styles in here too. Skeleton for now — one place to grow the
-// theme as the TUI gains cards, a status bar, and panels.
+// Palette — adaptive so cards, panels, and chrome read on both light and dark
+// terminals. Values follow GitHub's light/dark themes; lipgloss resolves the
+// right side at render time from the terminal-background probe.
 var (
-	ColAccent = lipgloss.Color("#3FB950") // success / additions
-	ColDanger = lipgloss.Color("#F85149") // errors / removals
-	ColMuted  = lipgloss.Color("#8B949E") // secondary text
-	ColDim    = lipgloss.Color("#6E7681") // gutters, line numbers
-
-	// ColBorder is the panel / input-box border colour. Adaptive so it reads
-	// on both light and dark terminals (the true-colour diff/output cards stay
-	// github-dark-tuned for now — re-theming those is a separate pass).
-	ColBorder = lipgloss.AdaptiveColor{Light: "#D0D7DE", Dark: "#30363D"}
+	ColAccent = lipgloss.AdaptiveColor{Light: "#1A7F37", Dark: "#3FB950"} // success / additions
+	ColDanger = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F85149"} // errors / removals
+	ColMuted  = lipgloss.AdaptiveColor{Light: "#57606A", Dark: "#8B949E"} // secondary text
+	ColDim    = lipgloss.AdaptiveColor{Light: "#6E7781", Dark: "#6E7681"} // gutters, line numbers
+	ColDimmer = lipgloss.AdaptiveColor{Light: "#AFB8C1", Dark: "#484F58"} // dimmest (unchanged line nos)
+	ColBorder = lipgloss.AdaptiveColor{Light: "#D0D7DE", Dark: "#30363D"} // panel / input-box border
 )
+
+// IsDark reports whether the terminal has a dark background. The raw-ANSI diff
+// row washes and the Chroma style can't go through lipgloss.AdaptiveColor, so
+// they pick light/dark via this. Cached by lipgloss after the first probe.
+func IsDark() bool { return lipgloss.HasDarkBackground() }
 
 var (
 	panelBorder = lipgloss.NewStyle().
