@@ -49,6 +49,9 @@ make build       # 产物 ./octo
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...      # 或 OPENAI_API_KEY=...
 
+# 一次性设置：保存默认 provider/model（下次免去上面的 export）
+octo config
+
 # 单轮
 octo chat "用 100 字解释一下环形缓冲区"
 
@@ -97,6 +100,18 @@ Octo 的系统提示由若干可选层叠加而成（后者覆盖前者）：
 - `--system "..."` —— 单次运行的一次性覆盖。
 
 身份文件与规则文件都支持 `@include path/to/fragment.md` 来引入共享内容。
+
+### 默认值（`octo config`）
+
+`octo config` 把默认 provider、model 和（可选）base URL 存到 `~/.octo/config.json`，这样裸跑 `octo chat` 就不必每次重敲 `--provider`/`--model`：
+
+```bash
+octo config        # 交互式向导
+octo config show   # 打印当前生效设置及各项来源
+octo config path   # 打印配置文件路径
+```
+
+优先级：**命令行 flag > 环境变量 > `~/.octo/config.json` > 内置默认**。API key 优先从 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 读取；向导可选择把 key 存进文件（权限 `0600`），但推荐用环境变量。
 
 ## Skills
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/prompt"
 	"github.com/Leihb/octo-agent/internal/taskgraph"
 	"github.com/Leihb/octo-agent/internal/tools"
@@ -73,7 +74,7 @@ func printTaskUsage(w io.Writer) {
 func runTaskStart(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("task start", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	providerName := fs.String("provider", providerAnthropic, "Provider: anthropic | openai")
+	providerName := fs.String("provider", "", "Provider: anthropic | openai (default from `octo config`, else anthropic)")
 	model := fs.String("model", "", "Model name (defaults to the provider's cheapest reasoning model)")
 	planOnly := fs.Bool("plan-only", false, "Plan the DAG and exit — don't run subtasks yet (use `octo task run <id>` later)")
 	fs.Usage = func() {
@@ -90,16 +91,18 @@ func runTaskStart(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	resolvedModel := *model
-	if resolvedModel == "" {
-		resolvedModel = defaultModels[*providerName]
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "octo task start: %v\n", err)
+		return 1
 	}
-	if resolvedModel == "" {
-		fmt.Fprintf(stderr, "octo task start: unknown provider %q (use 'anthropic' or 'openai')\n", *providerName)
+	provName, resolvedModel, ok := resolveProviderModel(*providerName, *model, cfg)
+	if !ok {
+		fmt.Fprintf(stderr, "octo task start: unknown provider %q (use 'anthropic' or 'openai')\n", provName)
 		return 2
 	}
 
-	prov, err := buildProvider(*providerName, stderr)
+	prov, err := buildProvider(provName, cfg, stderr)
 	if err != nil {
 		return 1
 	}
@@ -216,7 +219,7 @@ const defaultMaxTokensForPlanner = 4096
 func runTaskRun(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("task run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	providerName := fs.String("provider", providerAnthropic, "Provider: anthropic | openai")
+	providerName := fs.String("provider", "", "Provider: anthropic | openai (default from `octo config`, else anthropic)")
 	model := fs.String("model", "", "Model name (defaults to the provider's cheapest reasoning model)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: octo task run <id> [--provider …] [--model …]")
@@ -231,16 +234,18 @@ func runTaskRun(args []string, stdout, stderr io.Writer) int {
 	}
 	id := fs.Arg(0)
 
-	resolvedModel := *model
-	if resolvedModel == "" {
-		resolvedModel = defaultModels[*providerName]
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "octo task run: %v\n", err)
+		return 1
 	}
-	if resolvedModel == "" {
-		fmt.Fprintf(stderr, "octo task run: unknown provider %q (use 'anthropic' or 'openai')\n", *providerName)
+	provName, resolvedModel, ok := resolveProviderModel(*providerName, *model, cfg)
+	if !ok {
+		fmt.Fprintf(stderr, "octo task run: unknown provider %q (use 'anthropic' or 'openai')\n", provName)
 		return 2
 	}
 
-	prov, err := buildProvider(*providerName, stderr)
+	prov, err := buildProvider(provName, cfg, stderr)
 	if err != nil {
 		return 1
 	}
@@ -432,7 +437,7 @@ func runTaskShow(args []string, stdout, stderr io.Writer) int {
 func runTaskResume(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("task resume", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	providerName := fs.String("provider", providerAnthropic, "Provider: anthropic | openai")
+	providerName := fs.String("provider", "", "Provider: anthropic | openai (default from `octo config`, else anthropic)")
 	model := fs.String("model", "", "Model name (defaults to the provider's cheapest reasoning model)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -442,6 +447,12 @@ func runTaskResume(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	rawID := fs.Arg(0)
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "octo task resume: %v\n", err)
+		return 1
+	}
 
 	store, err := taskgraph.NewStore()
 	if err != nil {
@@ -478,22 +489,20 @@ func runTaskResume(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "Resumed task %s — re-running pending subtasks…\n", t.ID)
 
 	// Then drive Scheduler.Run the same way `run` does.
-	return resumeAndRun(t, *providerName, *model, stdout, stderr)
+	return resumeAndRun(t, *providerName, *model, cfg, stdout, stderr)
 }
 
 // resumeAndRun is the shared "build provider+spawner, hand to Scheduler"
-// path used by resume (and potentially by future commands). Returns the
-// CLI exit code.
-func resumeAndRun(t *taskgraph.Task, providerName, model string, stdout, stderr io.Writer) int {
-	resolvedModel := model
-	if resolvedModel == "" {
-		resolvedModel = defaultModels[providerName]
-	}
-	if resolvedModel == "" {
-		fmt.Fprintf(stderr, "unknown provider %q (use 'anthropic' or 'openai')\n", providerName)
+// path used by resume (and potentially by future commands). flagProvider /
+// flagModel are the raw CLI values ("" = unset); cfg supplies the persisted
+// fallbacks. Returns the CLI exit code.
+func resumeAndRun(t *taskgraph.Task, flagProvider, flagModel string, cfg config.Config, stdout, stderr io.Writer) int {
+	provName, resolvedModel, ok := resolveProviderModel(flagProvider, flagModel, cfg)
+	if !ok {
+		fmt.Fprintf(stderr, "unknown provider %q (use 'anthropic' or 'openai')\n", provName)
 		return 2
 	}
-	prov, err := buildProvider(providerName, stderr)
+	prov, err := buildProvider(provName, cfg, stderr)
 	if err != nil {
 		return 1
 	}

@@ -1,0 +1,220 @@
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/Leihb/octo-agent/internal/config"
+)
+
+// firstNonEmpty returns the first non-empty string, or "" if all are empty.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// resolveProviderModel applies precedence flag > config file > built-in default
+// to the provider and model. An empty flagProvider/flagModel means "not set on
+// the CLI". ok is false when the resolved provider has no known default model
+// (i.e. an unknown provider with no explicit model) — the caller prints an
+// error and exits.
+func resolveProviderModel(flagProvider, flagModel string, cfg config.Config) (provider, model string, ok bool) {
+	provider = firstNonEmpty(flagProvider, cfg.Provider, providerAnthropic)
+	model = flagModel
+	// The config's model is specific to the config's provider — only honor it
+	// when the resolved provider matches, so `--provider <other>` doesn't carry
+	// one vendor's model onto another.
+	if model == "" && provider == cfg.Provider {
+		model = cfg.Model
+	}
+	if model == "" {
+		model = defaultModels[provider]
+	}
+	return provider, model, model != ""
+}
+
+// providerBaseURL returns the config's base URL only when the stored config
+// targets the same provider — a base URL is endpoint-specific to its provider,
+// so it must not leak onto a different one selected via --provider.
+func providerBaseURL(provider string, cfg config.Config) string {
+	if cfg.Provider == provider {
+		return cfg.BaseURL
+	}
+	return ""
+}
+
+// runConfig handles `octo config [show|path]` and, with no subcommand, an
+// interactive setup wizard that writes ~/.octo/config.json.
+func runConfig(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "", "setup", "init":
+		return runConfigWizard(stdin, stdout, stderr)
+	case "show", "get":
+		return runConfigShow(stdout, stderr)
+	case "path":
+		path, err := config.Path()
+		if err != nil {
+			fmt.Fprintf(stderr, "octo config: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, path)
+		return 0
+	default:
+		fmt.Fprintf(stderr, "octo config: unknown subcommand %q (use: setup | show | path)\n", sub)
+		return 2
+	}
+}
+
+// runConfigShow prints the effective provider/model/base-URL and where each
+// value comes from (CLI flags aside — those are per-invocation). It never
+// prints the API key, only whether one is reachable.
+func runConfigShow(stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "octo config: %v\n", err)
+		fmt.Fprintln(stderr, "Run `octo config` to rewrite it.")
+		return 1
+	}
+	path, _ := config.Path()
+
+	provider := firstNonEmpty(cfg.Provider, providerAnthropic)
+	provSrc := "default"
+	if cfg.Provider != "" {
+		provSrc = "config"
+	}
+	model := firstNonEmpty(cfg.Model, defaultModels[provider])
+	modelSrc := "default"
+	if cfg.Model != "" {
+		modelSrc = "config"
+	}
+
+	fmt.Fprintf(stdout, "Config file: %s\n", path)
+	if _, statErr := os.Stat(path); statErr != nil {
+		fmt.Fprintln(stdout, "  (not created yet — run `octo config` to set it up)")
+	}
+	fmt.Fprintln(stdout)
+	fmt.Fprintf(stdout, "  provider:  %s (%s)\n", provider, provSrc)
+	fmt.Fprintf(stdout, "  model:     %s (%s)\n", model, modelSrc)
+	if cfg.BaseURL != "" {
+		fmt.Fprintf(stdout, "  base URL:  %s (config)\n", cfg.BaseURL)
+	} else {
+		fmt.Fprintln(stdout, "  base URL:  (provider default)")
+	}
+	fmt.Fprintf(stdout, "  API key:   %s\n", apiKeyStatus(provider, cfg))
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "CLI flags (--provider, --model, --system) and env vars override this file per run.")
+	return 0
+}
+
+// apiKeyStatus reports where a key for the given provider would come from,
+// without revealing it. Env always wins over a config-stored key.
+func apiKeyStatus(provider string, cfg config.Config) string {
+	envVar := "ANTHROPIC_API_KEY"
+	if provider == providerOpenAI {
+		envVar = "OPENAI_API_KEY"
+	}
+	if os.Getenv(envVar) != "" {
+		return "set via $" + envVar
+	}
+	if cfg.APIKey != "" && cfg.Provider == provider {
+		return "stored in config (mode 0600)"
+	}
+	return "not set — export $" + envVar
+}
+
+// runConfigWizard prompts for the persisted defaults and writes the file.
+// Existing values are offered as the default for each prompt so re-running it
+// edits rather than resets.
+func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer) int {
+	existing, _ := config.Load() // a malformed file is treated as empty here — the wizard overwrites it
+
+	var reader lineReader
+	if stdinIsTTY(stdin) {
+		if rl, err := newReadlineReader(defaultHistoryFile()); err == nil {
+			reader = rl
+		}
+	}
+	if reader == nil {
+		reader = newScannerLineReader(stdin, stdout)
+	}
+	defer reader.Close()
+
+	fmt.Fprintln(stdout, "octo config — set your default provider and model (~/.octo/config.json).")
+	fmt.Fprintln(stdout, "Press Enter to keep the shown default. CLI flags and env vars still override per run.")
+	fmt.Fprintln(stdout)
+
+	provider := promptDefault(reader, stdout, "Provider (anthropic | openai)", firstNonEmpty(existing.Provider, providerAnthropic))
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider != providerAnthropic && provider != providerOpenAI {
+		fmt.Fprintf(stderr, "octo config: unknown provider %q (use 'anthropic' or 'openai')\n", provider)
+		return 2
+	}
+
+	modelDefault := firstNonEmpty(existing.Model, defaultModels[provider])
+	model := strings.TrimSpace(promptDefault(reader, stdout, "Model", modelDefault))
+	// Accepting the provider's built-in default leaves Model unset so it floats
+	// with future releases (and never contaminates a different --provider).
+	if model == defaultModels[provider] {
+		model = ""
+	}
+
+	baseURL := strings.TrimSpace(promptDefault(reader, stdout, "Custom base URL (optional, for DeepSeek/Kimi/etc.)", existing.BaseURL))
+
+	out := config.Config{Provider: provider, Model: model, BaseURL: baseURL, APIKey: existing.APIKey}
+
+	// API key: env is the recommended home for it. Offer to store it only if
+	// the env var is empty, and make declining the obvious default.
+	envVar := "ANTHROPIC_API_KEY"
+	if provider == providerOpenAI {
+		envVar = "OPENAI_API_KEY"
+	}
+	if os.Getenv(envVar) == "" && existing.APIKey == "" {
+		ans := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
+			"Store the API key in this file? Not recommended — prefer "+envVar+" (y/N)", "n")))
+		if ans == "y" || ans == "yes" {
+			key := strings.TrimSpace(promptDefault(reader, stdout, "API key", ""))
+			out.APIKey = key
+		}
+	}
+
+	if err := out.Save(); err != nil {
+		fmt.Fprintf(stderr, "octo config: %v\n", err)
+		return 1
+	}
+	path, _ := config.Path()
+	fmt.Fprintln(stdout)
+	fmt.Fprintf(stdout, "Saved %s\n", path)
+	if out.APIKey == "" && os.Getenv(envVar) == "" {
+		fmt.Fprintf(stdout, "Next: export %s=... (or re-run `octo config` to store it), then `octo chat`.\n", envVar)
+	} else {
+		fmt.Fprintln(stdout, "Run `octo chat` to start.")
+	}
+	return 0
+}
+
+// promptDefault asks one question, showing def as the value used on empty input.
+func promptDefault(reader lineReader, stdout io.Writer, label, def string) string {
+	prompt := label
+	if def != "" {
+		prompt += " [" + def + "]"
+	}
+	prompt += ": "
+	line, ok := reader.ReadLine(prompt)
+	if !ok {
+		return def
+	}
+	if strings.TrimSpace(line) == "" {
+		return def
+	}
+	return line
+}

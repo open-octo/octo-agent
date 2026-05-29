@@ -45,6 +45,15 @@ type replConfig struct {
 	reader lineReader
 }
 
+// isFirstEverSession reports whether no sessions exist on disk yet — the
+// signal for a genuinely new user, used to show one-time orientation. Called
+// before the current session is saved, so an empty store means first run. A
+// read error degrades to false (don't show the hint) rather than guessing.
+func isFirstEverSession() bool {
+	sessions, err := agent.ListSessions(1)
+	return err == nil && len(sessions) == 0
+}
+
 // runREPL runs the interactive multi-turn loop until the user exits or EOF.
 // It returns 0 on clean exit, 1 on unexpected error.
 func runREPL(cfg replConfig) int {
@@ -68,6 +77,13 @@ func runREPL(cfg replConfig) int {
 			fmt.Fprintln(cfg.stdout, ")")
 		} else {
 			fmt.Fprintf(cfg.stdout, "Starting session %s (%s)\n", sess.ID, sess.Model)
+			// First-ever session: orient the newcomer once. Suppressed for
+			// everyone with prior sessions so it doesn't nag, and only shown
+			// when tools are actually on (it describes the tool surface).
+			if len(cfg.tools) > 0 && isFirstEverSession() {
+				fmt.Fprintln(cfg.stdout, "  Tools are on — I can run shell commands, read/edit files, and search.")
+				fmt.Fprintln(cfg.stdout, "  Risky actions ask for your approval first. Run `octo config` to set defaults.")
+			}
 		}
 		if cfg.verbosity.verbose() {
 			fmt.Fprintf(cfg.stdout, "  model: %s\n", a.Model)

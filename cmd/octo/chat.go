@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/hooks"
 	"github.com/Leihb/octo-agent/internal/mcp"
 	"github.com/Leihb/octo-agent/internal/memory"
@@ -55,7 +56,7 @@ var defaultModels = map[string]string{
 func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	providerName := fs.String("provider", providerAnthropic, "Provider: anthropic | openai")
+	providerName := fs.String("provider", "", "Provider: anthropic | openai (default from `octo config`, else anthropic)")
 	model := fs.String("model", "", "Model name (defaults to the provider's cheapest reasoning model)")
 	system := fs.String("system", "", "System prompt (optional)")
 	maxTokens := fs.Int("max-tokens", 0, "max_tokens for the response (0 = provider default)")
@@ -135,12 +136,15 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	userInput := strings.TrimSpace(strings.Join(fs.Args(), " "))
 	isREPL := userInput == ""
 
-	resolvedModel := *model
-	if resolvedModel == "" {
-		resolvedModel = defaultModels[*providerName]
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "octo chat: %v\n", err)
+		fmt.Fprintln(stderr, "Run `octo config` to rewrite ~/.octo/config.json.")
+		return 1
 	}
-	if resolvedModel == "" {
-		fmt.Fprintf(stderr, "octo chat: unknown provider %q (use 'anthropic' or 'openai')\n", *providerName)
+	provName, resolvedModel, ok := resolveProviderModel(*providerName, *model, cfg)
+	if !ok {
+		fmt.Fprintf(stderr, "octo chat: unknown provider %q (use 'anthropic' or 'openai')\n", provName)
 		return 2
 	}
 
@@ -181,7 +185,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 
-	prov, err := buildProvider(*providerName, stderr)
+	prov, err := buildProvider(provName, cfg, stderr)
 	if err != nil {
 		return 1
 	}
@@ -424,20 +428,27 @@ func printUsageLine(w io.Writer, reply agent.Reply) {
 		reply.InputTokens, reply.OutputTokens, reply.CacheReadTokens, reply.CacheWriteTokens)
 }
 
-// buildProvider constructs a provider.Provider for the requested vendor,
-// reading the appropriate env vars (key + optional base URL). On
-// configuration errors it writes a user-facing message to stderr and
-// returns a non-nil error.
-func buildProvider(name string, stderr io.Writer) (provider.Provider, error) {
+// buildProvider constructs a provider.Provider for the requested vendor.
+// Credentials and endpoint resolve env-first, then fall back to the persisted
+// config (cfg): the API key comes from the provider's env var, else cfg.APIKey
+// when the stored config is for this same provider; the base URL likewise. On
+// configuration errors it writes a user-facing message to stderr and returns a
+// non-nil error.
+func buildProvider(name string, cfg config.Config, stderr io.Writer) (provider.Provider, error) {
 	switch name {
 	case providerAnthropic:
 		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		if apiKey == "" && cfg.Provider == providerAnthropic {
+			apiKey = cfg.APIKey
+		}
 		if apiKey == "" {
 			fmt.Fprintln(stderr, "octo: ANTHROPIC_API_KEY is not set.")
 			fmt.Fprintln(stderr, "")
 			fmt.Fprintln(stderr, "To use Anthropic (default):")
 			fmt.Fprintln(stderr, "  1. Get a key at https://console.anthropic.com/")
 			fmt.Fprintln(stderr, "  2. export ANTHROPIC_API_KEY=sk-ant-...")
+			fmt.Fprintln(stderr, "")
+			fmt.Fprintln(stderr, "Or run `octo config` to save a default provider/key.")
 			fmt.Fprintln(stderr, "")
 			fmt.Fprintln(stderr, "Or use OpenAI:")
 			fmt.Fprintln(stderr, "  export OPENAI_API_KEY=sk-...")
@@ -449,19 +460,24 @@ func buildProvider(name string, stderr io.Writer) (provider.Provider, error) {
 			fmt.Fprintf(stderr, "octo chat: %v\n", err)
 			return nil, err
 		}
-		if baseURL := os.Getenv("ANTHROPIC_BASE_URL"); baseURL != "" {
+		if baseURL := firstNonEmpty(os.Getenv("ANTHROPIC_BASE_URL"), providerBaseURL(name, cfg)); baseURL != "" {
 			client.BaseURL = baseURL
 		}
 		return client, nil
 
 	case providerOpenAI:
 		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" && cfg.Provider == providerOpenAI {
+			apiKey = cfg.APIKey
+		}
 		if apiKey == "" {
 			fmt.Fprintln(stderr, "octo: OPENAI_API_KEY is not set.")
 			fmt.Fprintln(stderr, "")
 			fmt.Fprintln(stderr, "To use OpenAI:")
 			fmt.Fprintln(stderr, "  1. Get a key at https://platform.openai.com/api-keys")
 			fmt.Fprintln(stderr, "  2. export OPENAI_API_KEY=sk-...")
+			fmt.Fprintln(stderr, "")
+			fmt.Fprintln(stderr, "Or run `octo config` to save a default provider/key.")
 			fmt.Fprintln(stderr, "")
 			fmt.Fprintln(stderr, "Or use Anthropic (the default):")
 			fmt.Fprintln(stderr, "  export ANTHROPIC_API_KEY=sk-ant-...")
@@ -473,7 +489,7 @@ func buildProvider(name string, stderr io.Writer) (provider.Provider, error) {
 			fmt.Fprintf(stderr, "octo chat: %v\n", err)
 			return nil, err
 		}
-		if baseURL := os.Getenv("OPENAI_BASE_URL"); baseURL != "" {
+		if baseURL := firstNonEmpty(os.Getenv("OPENAI_BASE_URL"), providerBaseURL(name, cfg)); baseURL != "" {
 			client.BaseURL = baseURL
 		}
 		return client, nil
