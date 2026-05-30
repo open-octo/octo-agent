@@ -358,13 +358,18 @@ func (m *tuiModel) liveHeight() int {
 	if m.running != nil || (m.turnRunning && !m.streaming) {
 		h++
 	}
-	if len(m.queue) > 0 {
-		h += 3 // panel title + border
+	if n := len(m.queue); n > 0 {
+		h += 3 + n // panel border (2) + title (1) + n body lines
 	}
 	if bg := tools.RunningBackground(); len(bg) > 0 {
-		h += 2 + len(bg) // panel with lines
+		h += 3 + len(bg) // panel border (2) + title (1) + body lines
 	}
-	h += 2 // input box + status bar
+	h++ // input box
+	if m.turnRunning {
+		h += 3 // status bar with hint: separator + segments + hint
+	} else {
+		h += 2 // status bar without hint: separator + segments
+	}
 	return h
 }
 
@@ -385,7 +390,7 @@ func (m *tuiModel) View() string {
 	// ── Scrollback (message history) ──
 	// Calculate how many lines we can show between header and live region.
 	liveH := m.liveHeight()
-	headerH := 1                                // ccHeader is 1 line
+	headerH := tui.BannerHeight + 1             // Banner + the newline after it
 	available := m.height - headerH - liveH - 1 // -1 for safety margin
 	if available < 0 {
 		available = 0

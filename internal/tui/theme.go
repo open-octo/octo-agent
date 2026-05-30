@@ -71,6 +71,9 @@ var octopusASCII = []string{
 	"      ████",
 }
 
+// BannerHeight is the number of lines Banner renders (including the separator).
+const BannerHeight = 8
+
 // Banner renders the octo chat welcome header with pixel-art mascot.
 // The icon sits left of the title, Claude Code style.
 func Banner(version, model, cwd string, width int) string {
