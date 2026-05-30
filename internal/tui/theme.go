@@ -60,17 +60,29 @@ var (
 			Foreground(ColBorder)
 )
 
-// Banner renders the octo chat welcome header. Width caps the separator line.
+// octopusASCII is the pixel-art octo mascot (8x7 grid).
+var octopusASCII = []string{
+	"    ████████",
+	"  ████░░░░████",
+	"  ████████████",
+	"████████████████",
+	"████  ████  ████",
+	"██    ████    ██",
+	"      ████",
+}
+
+// Banner renders the octo chat welcome header with pixel-art mascot.
+// The icon sits left of the title, Claude Code style.
 func Banner(version, model, cwd string, width int) string {
 	if width < 20 {
 		width = 20
 	}
-	var b strings.Builder
-	b.WriteString(bannerStyle.Render("◆ octo chat"))
+
+	// Build text lines
+	title := "◆ octo chat"
 	if version != "" {
-		b.WriteString(bannerSubStyle.Render("  " + version))
+		title += "  " + version
 	}
-	b.WriteByte('\n')
 
 	info := model
 	if cwd != "" {
@@ -79,8 +91,19 @@ func Banner(version, model, cwd string, width int) string {
 		}
 		info += cwd
 	}
-	if info != "" {
-		b.WriteString(bannerSubStyle.Render(info))
+
+	// Merge art + text side-by-side
+	var b strings.Builder
+	for i, artLine := range octopusASCII {
+		b.WriteString(artLine)
+		switch i {
+		case 1:
+			b.WriteString("  ")
+			b.WriteString(bannerStyle.Render(title))
+		case 2:
+			b.WriteString("  ")
+			b.WriteString(bannerSubStyle.Render(info))
+		}
 		b.WriteByte('\n')
 	}
 
