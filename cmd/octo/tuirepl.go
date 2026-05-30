@@ -8,6 +8,7 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/Leihb/octo-agent/internal/tui"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -33,6 +34,11 @@ func runTUI(cfg replConfig) int {
 	p := tea.NewProgram(m)
 	sink := &tuiSink{prog: p}
 	m.sink = sink
+
+	// Eagerly probe terminal background colour so lipgloss caches the result
+	// before bubbletea owns stdin. Without this, the OSC 11 response can leak
+	// into the textinput as apparent user input.
+	_ = tui.IsDark()
 
 	// Gate + asker raise their prompts through the same sink, so they render
 	// as modals on this event loop instead of reading stdin (which bubbletea
