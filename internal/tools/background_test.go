@@ -31,7 +31,7 @@ func TestBackgroundManager_RunsAndReportsExit(t *testing.T) {
 	var out, status string
 	waitFor(t, "process to exit", func() bool {
 		var found bool
-		o, s, f := m.Read(id)
+		o, s, f, _ := m.Read(id)
 		found = f
 		if o != "" {
 			out += o // accumulate across reads (cursor advances)
@@ -57,17 +57,17 @@ func TestBackgroundManager_IncrementalRead(t *testing.T) {
 
 	// First chunk: "one" before "two" is emitted.
 	waitFor(t, "first line", func() bool {
-		o, _, _ := m.Read(id)
+		o, _, _, _ := m.Read(id)
 		return strings.Contains(o, "one")
 	})
 	// A read right after consuming "one" should not re-return it.
-	o, _, _ := m.Read(id)
+	o, _, _, _ := m.Read(id)
 	if strings.Contains(o, "one") {
 		t.Errorf("second read re-returned old output: %q", o)
 	}
 	// Eventually "two" arrives as new output.
 	waitFor(t, "second line", func() bool {
-		o, _, _ := m.Read(id)
+		o, _, _, _ := m.Read(id)
 		return strings.Contains(o, "two")
 	})
 }
@@ -82,7 +82,7 @@ func TestBackgroundManager_Kill(t *testing.T) {
 		t.Fatal("Kill returned false for a live process")
 	}
 	waitFor(t, "killed process to report exit", func() bool {
-		_, s, _ := m.Read(id)
+		_, s, _, _ := m.Read(id)
 		return strings.HasPrefix(s, "exited")
 	})
 
@@ -129,6 +129,11 @@ func TestTerminalOutputTool(t *testing.T) {
 	waitFor(t, "terminal_output to show exit", func() bool {
 		rTool, err := outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
 		if err != nil {
+			// Anti-polling block is temporary while the process is still running
+			// with no new output; retry until it exits.
+			if strings.Contains(err.Error(), "polling blocked") {
+				return false
+			}
 			t.Fatalf("terminal_output: %v", err)
 		}
 		res += rTool.Text
@@ -221,13 +226,47 @@ func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
 	// can be very slow.
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		_, s, _ := m.Read("bg_1")
+		_, s, _, _ := m.Read("bg_1")
 		if strings.HasPrefix(s, "exited") {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for background process to exit")
+}
+
+// TestTerminalOutputTool_AntiPolling verifies that after two consecutive empty
+// polls on a running background process, terminal_output returns an error to
+// force the LLM to stop polling.
+func TestTerminalOutputTool_AntiPolling(t *testing.T) {
+	m := NewBackgroundManager()
+	term := TerminalTool{mgr: m}
+	outTool := TerminalOutputTool{mgr: m}
+
+	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
+		"command":    "sleep 30",
+		"background": true,
+	}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	// First empty poll: should warn but succeed.
+	res1, err := outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
+	if err != nil {
+		t.Fatalf("first poll should succeed: %v", err)
+	}
+	if !strings.Contains(res1.Text, "STOP POLLING") {
+		t.Errorf("first poll should warn, got %q", res1.Text)
+	}
+
+	// Second empty poll: should be blocked with an error.
+	_, err = outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
+	if err == nil {
+		t.Fatal("second poll should error")
+	}
+	if !strings.Contains(err.Error(), "polling blocked") {
+		t.Errorf("error should mention 'polling blocked', got %v", err)
+	}
 }
 
 func TestTerminalOutputTool_ReadOnly(t *testing.T) {
@@ -253,7 +292,7 @@ func TestTerminalOutputTool_ReadOnly(t *testing.T) {
 	if strings.Contains(resOut.Text, "killed") {
 		t.Errorf("terminal_output must not kill, got %q", resOut.Text)
 	}
-	if _, status, _ := m.Read("bg_1"); status != "running" {
+	if _, status, _, _ := m.Read("bg_1"); status != "running" {
 		t.Errorf("process should still be running after terminal_output, status=%q", status)
 	}
 	// When the process is running and there is no new output, the result must

@@ -49,7 +49,7 @@ func TestBackgroundManager_OnExitHookFires(t *testing.T) {
 
 	// Dedup: the hook already consumed the output via readNew, so a subsequent
 	// terminal_output-style poll must not re-report the same bytes.
-	o, _, found := m.Read(id)
+	o, _, found, _ := m.Read(id)
 	if !found {
 		t.Fatal("process should still be known after exit")
 	}
@@ -68,7 +68,7 @@ func TestBackgroundManager_NoHookByDefault(t *testing.T) {
 	}
 	var out string
 	waitFor(t, "process to exit", func() bool {
-		o, s, f := m.Read(id)
+		o, s, f, _ := m.Read(id)
 		out += o
 		return f && strings.HasPrefix(s, "exited")
 	})

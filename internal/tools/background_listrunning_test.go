@@ -38,7 +38,7 @@ func TestBackgroundManager_ListRunning_ExcludesExited(t *testing.T) {
 	}
 	// Wait for it to finish (Read reports exited), then it must not be listed.
 	waitFor(t, "process to exit", func() bool {
-		_, status, _ := m.Read(id)
+		_, status, _, _ := m.Read(id)
 		return strings.HasPrefix(status, "exited")
 	})
 	if run := m.ListRunning(); len(run) != 0 {
