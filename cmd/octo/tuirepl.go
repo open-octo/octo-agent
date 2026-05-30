@@ -341,19 +341,34 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case turnEndedMsg:
 		// Flush any trailing assistant block (markdown-rendered); then render
-		// the cache/error footer.
-		var cmds []tea.Cmd
-		if flush := m.flushText(); flush != nil {
-			cmds = append(cmds, flush)
+		// the cache/error footer. All lines are merged into a single tea.Println
+		// because tea.Batch runs commands concurrently and their output order is
+		// undefined — this was causing the cache line to appear before the
+		// flushed assistant text.
+		var b strings.Builder
+		if s, ok := m.flushTextString(); ok {
+			b.WriteString(s)
 		}
 		if msg.err != nil && msg.err != context.Canceled {
-			cmds = append(cmds, tea.Println(errorStyle.Render("error: "+msg.err.Error())))
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(errorStyle.Render("error: " + msg.err.Error()))
 		} else if msg.err == context.Canceled {
-			cmds = append(cmds, tea.Println(noticeStyle.Render("^C interrupted")))
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(noticeStyle.Render("^C interrupted"))
 		} else if c := cacheLine(m.cfg.verbosity, msg.reply); c != "" {
-			cmds = append(cmds, tea.Println(c))
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(c)
 		}
-		return m, tea.Batch(cmds...)
+		if b.Len() > 0 {
+			return m, tea.Println(b.String())
+		}
+		return m, nil
 
 	case turnFinishedMsg:
 		return m.handleTurnFinished()
@@ -472,11 +487,7 @@ func (m *tuiModel) appendText(text string) tea.Cmd {
 		complete := buf[:idx]
 		m.partial.Reset()
 		m.partial.WriteString(buf[idx+1:])
-		var cmds []tea.Cmd
-		for _, line := range strings.Split(complete, "\n") {
-			cmds = append(cmds, tea.Println(line))
-		}
-		return tea.Batch(cmds...)
+		return tea.Println(complete)
 	}
 
 	commit, rest := splitCommittableMarkdown(m.partial.String())
@@ -492,23 +503,40 @@ func (m *tuiModel) appendText(text string) tea.Cmd {
 // pre-tool block), rendered through glamour unless --plain. Returns nil when
 // nothing is pending.
 func (m *tuiModel) flushText() tea.Cmd {
+	s, ok := m.flushTextString()
+	if !ok {
+		return nil
+	}
+	return tea.Println(s)
+}
+
+// flushTextString returns the buffered assistant text (rendered through glamour
+// unless --plain) and true when there was pending text. Used internally when
+// multiple lines must be emitted in strict order — the caller batches them into
+// a single tea.Println instead of tea.Batch which runs commands concurrently.
+func (m *tuiModel) flushTextString() (string, bool) {
 	p := m.partial.String()
 	if p == "" {
-		return nil
+		return "", false
 	}
 	m.partial.Reset()
 	if m.cfg.plain {
-		return tea.Println(p)
+		return p, true
 	}
-	return tea.Println(m.md.render(p, m.width))
+	return m.md.render(p, m.width), true
 }
 
 // commitToolLine flushes any in-progress text, then prints the tool line/card.
+// The two lines are merged into a single tea.Println because tea.Batch runs
+// commands concurrently and their output order is undefined.
 func (m *tuiModel) commitToolLine(line string) tea.Cmd {
-	if flush := m.flushText(); flush != nil {
-		return tea.Batch(flush, tea.Println(line))
+	var b strings.Builder
+	if s, ok := m.flushTextString(); ok {
+		b.WriteString(s)
+		b.WriteByte('\n')
 	}
-	return tea.Println(line)
+	b.WriteString(line)
+	return tea.Println(b.String())
 }
 
 func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {

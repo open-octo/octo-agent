@@ -105,8 +105,7 @@ func (m *tuiModel) startGoalPlan(goal string) tea.Cmd {
 		prog.Send(goalPlannedMsg{task: task, err: err})
 	}()
 	return tea.Batch(
-		tea.Println(promptStyle.Render("> ")+"/goal "+goal),
-		tea.Println(noticeStyle.Render("Planning…")),
+		tea.Println(promptStyle.Render("> ")+"/goal "+goal+"\n"+noticeStyle.Render("Planning…")),
 		tickCmd(),
 	)
 }
@@ -183,21 +182,33 @@ func (m *tuiModel) startGoalRun(taskID string) tea.Cmd {
 func (m *tuiModel) onGoalDone(msg goalDoneMsg) (tea.Model, tea.Cmd) {
 	m.turnRunning = false
 	m.cancelTurn = nil
-	var cmds []tea.Cmd
+	var b strings.Builder
 	if msg.task != nil {
-		var b bytes.Buffer
-		printTaskStatus(&b, msg.task)
-		cmds = append(cmds, tea.Println(strings.TrimRight(b.String(), "\n")))
+		var sb bytes.Buffer
+		printTaskStatus(&sb, msg.task)
+		b.WriteString(strings.TrimRight(sb.String(), "\n"))
 	}
 	switch {
 	case msg.err != nil && errors.Is(msg.err, context.Canceled):
-		cmds = append(cmds, tea.Println(noticeStyle.Render("^C interrupted")))
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(noticeStyle.Render("^C interrupted"))
 	case msg.err != nil:
-		cmds = append(cmds, tea.Println(errorStyle.Render("goal: "+msg.err.Error())))
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(errorStyle.Render("goal: " + msg.err.Error()))
 	case msg.task != nil:
-		cmds = append(cmds, tea.Println(noticeStyle.Render("Goal "+msg.task.ShortID()+" finished.")))
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(noticeStyle.Render("Goal " + msg.task.ShortID() + " finished."))
 	}
-	return m, tea.Batch(cmds...)
+	if b.Len() > 0 {
+		return m, tea.Println(b.String())
+	}
+	return m, nil
 }
 
 // goalResume resets a task's failed/skipped subtasks to pending and re-runs it.
