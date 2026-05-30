@@ -120,6 +120,9 @@ func firstLine(s string) string {
 // slugify turns a description into a kebab-case filename stem (lowercase
 // alphanumerics, runs of other chars collapsed to a single dash), capped so the
 // filename stays sane.
+//
+// Falls back to a hash when the input contains no ASCII alphanumerics (e.g.
+// pure CJK text) so the result is never empty.
 func slugify(s string) string {
 	var b strings.Builder
 	prevDash := false
@@ -138,6 +141,9 @@ func slugify(s string) string {
 	out := strings.Trim(b.String(), "-")
 	if len(out) > 50 {
 		out = strings.Trim(out[:50], "-")
+	}
+	if out == "" {
+		return memory.Slugify(s)
 	}
 	return out
 }
