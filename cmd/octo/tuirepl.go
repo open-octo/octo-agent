@@ -214,7 +214,6 @@ type tuiModel struct {
 	// tools suppress their started line, so without this they'd show nothing
 	// until completion.)
 	running *runningTool
-
 }
 
 // runningTool is the live indicator state for an in-flight card tool.
