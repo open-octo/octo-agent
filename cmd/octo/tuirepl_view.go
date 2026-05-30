@@ -121,7 +121,6 @@ func (m *tuiModel) submit(alt bool) (tea.Model, tea.Cmd) {
 	if text == "" {
 		return m, nil
 	}
-	m.showBanner = false // dismiss welcome banner on first input
 	m.ti.Reset()
 	m.inputHistoryIdx = -1
 	// Save to history for ↑/↓ recall (dedup consecutive identical lines).
@@ -341,11 +340,10 @@ func (m *tuiModel) View() string {
 
 	var b strings.Builder
 
-	// Welcome banner shown on first launch until the user starts typing.
-	if m.showBanner {
-		b.WriteString(tui.Banner("", m.a.Model, m.cwd, m.width))
-		b.WriteByte('\n')
-	}
+	// Banner always renders at the top of the fixed viewport; scrollback
+	// content naturally pushes it upward rather than abruptly hiding it.
+	b.WriteString(tui.Banner("", m.a.Model, m.cwd, m.width))
+	b.WriteByte('\n')
 
 	// Live partial assistant line (committed lines already scrolled up).
 	// Render through glamour so wrapping stays consistent with committed blocks.

@@ -215,8 +215,6 @@ type tuiModel struct {
 	// until completion.)
 	running *runningTool
 
-	// showBanner is true until the first user input dismisses the welcome banner.
-	showBanner bool
 }
 
 // runningTool is the live indicator state for an in-flight card tool.
@@ -250,7 +248,7 @@ func newTUIModel(cfg replConfig) *tuiModel {
 	if !tui.IsDark() {
 		style = "light"
 	}
-	return &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ti: ti, inputHistoryIdx: -1, showBanner: true, md: markdownRenderer{style: style}}
+	return &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ti: ti, inputHistoryIdx: -1, md: markdownRenderer{style: style}}
 }
 
 func (m *tuiModel) Init() tea.Cmd { return textinput.Blink }
