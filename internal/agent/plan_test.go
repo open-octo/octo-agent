@@ -193,3 +193,80 @@ func TestPlanTask_IncludesProjectContext(t *testing.T) {
 		t.Errorf("user message should still contain the goal, got:\n%s", msg)
 	}
 }
+
+func TestFormatHistoryForPlanner_Empty(t *testing.T) {
+	if got := formatHistoryForPlanner(nil); got != "" {
+		t.Errorf("nil history should yield empty, got %q", got)
+	}
+	if got := formatHistoryForPlanner(NewHistory()); got != "" {
+		t.Errorf("empty history should yield empty, got %q", got)
+	}
+}
+
+func TestFormatHistoryForPlanner_BasicMessages(t *testing.T) {
+	h := NewHistory()
+	h.Append(NewUserMessage("hi"))
+	h.Append(NewAssistantMessage("hello"))
+	got := formatHistoryForPlanner(h)
+	want := "[user] hi\n[assistant] hello"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestFormatHistoryForPlanner_ToolBlocks(t *testing.T) {
+	h := NewHistory()
+	h.Append(NewToolUseMessage([]ContentBlock{
+		NewToolUseBlock("id1", "read_file", map[string]any{"path": "/tmp/x"}),
+	}))
+	h.Append(NewToolResultMessage([]ContentBlock{
+		NewToolResultBlock("id1", "content", false),
+	}))
+	got := formatHistoryForPlanner(h)
+	if !strings.Contains(got, `<tool_use id="id1" name="read_file">`) {
+		t.Errorf("expected tool_use markup, got:\n%s", got)
+	}
+	if !strings.Contains(got, `<tool_result for="id1">content</tool_result>`) {
+		t.Errorf("expected tool_result markup, got:\n%s", got)
+	}
+}
+
+func TestFormatHistoryForPlanner_Truncation(t *testing.T) {
+	h := NewHistory()
+	// Build a history that exceeds maxHistoryChars.
+	longLine := strings.Repeat("x", 100)
+	for i := 0; i < 100; i++ {
+		h.Append(NewUserMessage(longLine))
+	}
+	got := formatHistoryForPlanner(h)
+	if !strings.Contains(got, "... [earlier history truncated]") {
+		t.Errorf("expected truncation notice, got:\n%s", got)
+	}
+	if len(got) > maxHistoryChars+200 {
+		t.Errorf("result too long: %d chars", len(got))
+	}
+}
+
+func TestPlanTask_IncludesHistory(t *testing.T) {
+	s := &stubExtractSender{reply: `{"subtasks":[{"description":"step one"}]}`}
+	a := New(s, "test-model")
+	a.History.Append(NewUserMessage("We decided to use PostgreSQL."))
+	a.History.Append(NewAssistantMessage("Got it, I'll plan around that."))
+	_, err := a.PlanTask(context.Background(), "Add feature X")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.lastMessages) == 0 {
+		t.Fatal("expected a user message")
+	}
+	msg := s.lastMessages[0].Content
+	if !strings.Contains(msg, "Session history:") {
+		t.Errorf("user message should contain 'Session history:', got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "We decided to use PostgreSQL.") {
+		t.Errorf("user message should contain history text, got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "Add feature X") {
+		t.Errorf("user message should still contain the goal, got:\n%s", msg)
+	}
+}
