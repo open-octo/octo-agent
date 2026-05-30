@@ -89,6 +89,12 @@ type PlannedSubtask struct {
 // truncate aggressively rather than risk pushing the context over the limit.
 const maxProjectContextChars = 4000
 
+// maxHistoryChars caps the serialized session history injected into the
+// planner user message. History can grow very long in an active REPL; we
+// truncate from the head (oldest messages) so the planner sees the most
+// recent context.
+const maxHistoryChars = 6000
+
 // projectContextFile is the per-repo conventions file the planner reads to
 // understand what kind of project it is planning for. Kept as a constant so
 // it matches prompt.ProjectContextFile without importing prompt.
@@ -111,14 +117,18 @@ func (a *Agent) PlanTask(ctx context.Context, goal string) (PlanResult, error) {
 	}
 
 	ctxText := readProjectContext(a.CWD)
-	var userMsg string
-	if ctxText != "" {
-		userMsg = "Project context:\n" + ctxText + "\n\nGoal:\n\n" + goal + "\n\nPlan the subtask DAG per your instructions. Output only the JSON object."
-	} else {
-		userMsg = "Goal:\n\n" + goal + "\n\nPlan the subtask DAG per your instructions. Output only the JSON object."
-	}
+	histText := formatHistoryForPlanner(a.History)
 
-	req := []Message{NewUserMessage(userMsg)}
+	var parts []string
+	if ctxText != "" {
+		parts = append(parts, "Project context:\n"+ctxText)
+	}
+	if histText != "" {
+		parts = append(parts, "Session history:\n"+histText)
+	}
+	parts = append(parts, "Goal:\n\n"+goal+"\n\nPlan the subtask DAG per your instructions. Output only the JSON object.")
+
+	req := []Message{NewUserMessage(strings.Join(parts, "\n\n"))}
 	reply, err := a.Sender.SendMessages(ctx, a.Model, planSystem, req, planMaxTokens)
 	if err != nil {
 		return PlanResult{}, err
@@ -148,6 +158,65 @@ func readProjectContext(cwd string) string {
 	s := strings.TrimSpace(string(b))
 	if len(s) > maxProjectContextChars {
 		s = s[:maxProjectContextChars] + "\n... [truncated]"
+	}
+	return s
+}
+
+// formatHistoryForPlanner serialises the session history into a compact,
+// human-readable text form for the planner. Tool-use blocks are rendered as
+// pseudo-markup so the planner can see what tools were invoked and what they
+// returned. The result is truncated from the head (oldest messages) to
+// maxHistoryChars so the planner always sees the most recent context.
+// Returns "" when history is nil or empty.
+func formatHistoryForPlanner(h *History) string {
+	if h == nil || h.Len() == 0 {
+		return ""
+	}
+	msgs := h.Snapshot()
+	var b strings.Builder
+	for _, m := range msgs {
+		switch m.Role {
+		case RoleUser:
+			b.WriteString("[user] ")
+		case RoleAssistant:
+			b.WriteString("[assistant] ")
+		default:
+			b.WriteString("[" + string(m.Role) + "] ")
+		}
+		if m.Content != "" {
+			b.WriteString(m.Content)
+			b.WriteByte('\n')
+		}
+		for _, block := range m.Blocks {
+			switch block.Type {
+			case "text":
+				b.WriteString(block.Text)
+				b.WriteByte('\n')
+			case "tool_use":
+				inputJSON, _ := json.Marshal(block.Input)
+				b.WriteString(fmt.Sprintf("<tool_use id=%q name=%q>%s</tool_use>\n", block.ID, block.Name, string(inputJSON)))
+			case "tool_result":
+				prefix := ""
+				if block.IsError {
+					prefix = " error"
+				}
+				b.WriteString(fmt.Sprintf("<tool_result%s for=%q>%s</tool_result>\n", prefix, block.ToolUseID, block.Result))
+			case "thinking":
+				b.WriteString("<thinking>\n" + block.Thinking + "\n</thinking>\n")
+			case "image":
+				b.WriteString("<image>\n")
+			}
+		}
+	}
+	s := strings.TrimSpace(b.String())
+	if len(s) > maxHistoryChars {
+		// Truncate from the head: find the first newline after the cutoff point
+		// so we don't split a message mid-line.
+		cut := len(s) - maxHistoryChars
+		if idx := strings.Index(s[cut:], "\n"); idx >= 0 {
+			cut += idx + 1
+		}
+		s = "... [earlier history truncated]\n\n" + s[cut:]
 	}
 	return s
 }
