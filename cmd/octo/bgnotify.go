@@ -15,6 +15,7 @@ import (
 func formatBgNote(e tools.BgExit) string {
 	var b strings.Builder
 	b.WriteString("<system-reminder>\n")
+	b.WriteString("[BACKGROUND COMPLETED]\n")
 	fmt.Fprintf(&b, "Background process %s (`%s`) %s.", e.ID, e.Command, e.Status)
 	if out := strings.TrimRight(e.NewOutput, "\n"); out != "" {
 		b.WriteString("\nOutput since last check:\n")

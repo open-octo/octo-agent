@@ -15,6 +15,7 @@ import (
 func formatSubAgentNote(ev tools.SubAgentNotification) string {
 	var b strings.Builder
 	b.WriteString("<system-reminder>\n")
+	b.WriteString("[BACKGROUND COMPLETED]\n")
 	switch ev.Kind {
 	case "spawn_done":
 		fmt.Fprintf(&b, "Sub-agent %s (%s) has completed.", ev.AgentID, ev.Description)

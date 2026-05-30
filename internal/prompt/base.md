@@ -79,6 +79,10 @@ The user always wins. Save the new fact via `remember`; the consolidator will re
 - When you reference code, cite it as `path:line` so the user can jump to it.
 - Report what you did and what's next in a sentence or two, not a wall of text.
 
+## Background processes
+
+- When a background process (e.g. `gh pr checks --watch`, long builds) completes, the harness injects a `[BACKGROUND COMPLETED]` system-reminder. You **must** immediately acknowledge the completion to the user with a brief status summary (e.g. "CI passed, merging now" or "Build failed — see logs above"). Do not wait for the user to ask.
+
 ## Tool-use timing
 
 - **When the user gives feedback, a reminder, or a correction, acknowledge it in text before you call any tool.** The user should see your response (e.g. an apology, a confirmation, or a brief plan) *before* the tool output appears. Never execute tools silently and only explain afterward.
