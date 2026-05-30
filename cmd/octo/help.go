@@ -111,7 +111,7 @@ Common flags:
   --no-save                Don't auto-save the session to ~/.octo/sessions
   --no-memory              Disable cross-session memory injection
   --sandbox                OS-enforced confinement for terminal commands (macOS/Linux)
-  --permission-mode <m>    interactive (default; prompts on ask) | strict (denies asks)
+  --permission-mode <m>    interactive (default; prompts on ask) | strict (denies asks) | auto (allows asks)
   --list-sessions          Print recent sessions and exit
   --quiet                  Strip status chrome (spinner, banner, cache line)
   --verbose                Print extra context (provider/model/endpoint, always-on cache line)
@@ -195,7 +195,7 @@ Common flags:
   --model <name>           Override the default model
   --plain                  Terse ↳ status lines instead of rich diff cards
   --sandbox                OS-enforced command confinement (macOS/Linux)
-  --permission-mode <m>    interactive | strict (default)
+  --permission-mode <m>    interactive | strict (default) | auto
 
 Environment:
   ANTHROPIC_API_KEY / OPENAI_API_KEY    Required for the chosen provider.`)

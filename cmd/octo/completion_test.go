@@ -55,7 +55,7 @@ func TestCompletionCandidates_ProviderValueAfterFlag(t *testing.T) {
 
 func TestCompletionCandidates_PermissionModeAfterFlag(t *testing.T) {
 	got := completionCandidates([]string{"octo", "chat", "--permission-mode", ""})
-	if !sliceEq(got, []string{"interactive", "strict"}) {
+	if !sliceEq(got, []string{"interactive", "strict", "auto"}) {
 		t.Errorf("--permission-mode value completion = %v", got)
 	}
 }

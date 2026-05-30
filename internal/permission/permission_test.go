@@ -148,6 +148,24 @@ func TestInteractiveMode_PreservesAsk(t *testing.T) {
 	}
 }
 
+func TestAutoApproveMode_TurnsAskIntoAllow(t *testing.T) {
+	e, err := New("", "/work", ModeAutoApprove)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf node_modules"}); got != Allow {
+		t.Errorf("auto ask→allow: got %s, want Allow", got)
+	}
+	// Explicit allows still allow.
+	if got := e.Check("terminal", map[string]any{"command": "ls"}); got != Allow {
+		t.Errorf("auto still allows allow rules: got %s", got)
+	}
+	// Explicit denies still deny.
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Deny {
+		t.Errorf("auto still denies deny rules: got %s", got)
+	}
+}
+
 // ─── Remember cache ────────────────────────────────────────────────────────
 
 func TestRemember_ShortCircuits(t *testing.T) {

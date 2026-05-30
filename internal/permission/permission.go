@@ -53,6 +53,7 @@ type Mode string
 const (
 	ModeInteractive Mode = "interactive"
 	ModeStrict      Mode = "strict"
+	ModeAutoApprove Mode = "auto"
 )
 
 // Rule is one entry in the rule list for a tool. Exactly one of Pattern /
@@ -202,10 +203,20 @@ func (e *Engine) DenialReason(toolName string, input map[string]any) string {
 	return fmt.Sprintf("permission_denied: %s — user declined the interactive prompt.", toolName)
 }
 
-// applyMode collapses Ask → Deny when the engine is in strict mode.
+// applyMode adjusts Ask decisions based on the engine mode:
+//   - ModeStrict:      Ask → Deny
+//   - ModeAutoApprove: Ask → Allow
+//   - ModeInteractive: Ask passes through unchanged
 func (e *Engine) applyMode(d Decision) Decision {
-	if d == Ask && e.mode == ModeStrict {
-		return Deny
+	switch e.mode {
+	case ModeStrict:
+		if d == Ask {
+			return Deny
+		}
+	case ModeAutoApprove:
+		if d == Ask {
+			return Allow
+		}
 	}
 	return d
 }

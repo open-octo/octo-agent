@@ -111,7 +111,7 @@ func chatCandidates(words []string, prev string) []string {
 	case "--provider":
 		return []string{"anthropic", "openai"}
 	case "--permission-mode":
-		return []string{"interactive", "strict"}
+		return []string{"interactive", "strict", "auto"}
 	case "--model", "--system", "--max-tokens", "--max-turns",
 		"--max-cost", "--compact-threshold", "--thinking-budget",
 		"--sandbox-write", "--sandbox-read":
@@ -173,7 +173,7 @@ func initCandidates(prev string) []string {
 	case "--provider":
 		return []string{"anthropic", "openai"}
 	case "--permission-mode":
-		return []string{"interactive", "strict"}
+		return []string{"interactive", "strict", "auto"}
 	}
 	return initFlags
 }
@@ -230,7 +230,7 @@ What it completes:
   - Session IDs after "octo chat -c " — full + short + "last".
   - Task IDs after "octo goal status|show|resume|cancel|run " — full + short + "last".
   - Fixed values for --provider (anthropic|openai) and --permission-mode
-    (interactive|strict).
+    (interactive|strict|auto).
 
 The shell snippet just delegates to the hidden "octo __complete" subcommand;
 the routing logic lives in the binary, so the same snippet keeps working as

@@ -109,12 +109,28 @@ func TestCLIGate_StrictModeNeverPrompts(t *testing.T) {
 	}
 }
 
+func TestCLIGate_AutoApproveModeNeverPrompts(t *testing.T) {
+	// In auto-approve mode the engine collapses ask → allow, so a command
+	// that would normally prompt is allowed without reading stdin.
+	g, out := newGate(t, permission.ModeAutoApprove, "") // no stdin needed
+	ok, reason := g.Check(context.Background(), "terminal", map[string]any{"command": "sudo apt update"})
+	if !ok {
+		t.Errorf("auto mode must allow ask-class commands; reason=%q", reason)
+	}
+	if out.Len() != 0 {
+		t.Errorf("auto mode must not prompt; got %q", out.String())
+	}
+}
+
 func TestResolvePermissionMode(t *testing.T) {
 	if resolvePermissionMode("strict") != permission.ModeStrict {
 		t.Error("strict should map to ModeStrict")
 	}
 	if resolvePermissionMode("interactive") != permission.ModeInteractive {
 		t.Error("interactive should map to ModeInteractive")
+	}
+	if resolvePermissionMode("auto") != permission.ModeAutoApprove {
+		t.Error("auto should map to ModeAutoApprove")
 	}
 	// Unknown falls back to interactive (chat.go validates before this is
 	// reached, but the helper itself defaults safely).

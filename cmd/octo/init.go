@@ -37,7 +37,7 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	providerName := fs.String("provider", "", "Provider: anthropic | openai (default from `octo config`, else anthropic)")
 	model := fs.String("model", "", "Model name (defaults to the provider's cheapest reasoning model)")
 	plain := fs.Bool("plain", false, "Render tool events as one-line ↳ status lines instead of rich diff cards")
-	permMode := fs.String("permission-mode", "strict", "Tool permission handling: interactive | strict")
+	permMode := fs.String("permission-mode", "strict", "Tool permission handling: interactive | strict | auto")
 	useSandbox := fs.Bool("sandbox", false, "Confine commands to the project dir + tmp with no network (OS-enforced; macOS/Linux). Fails closed if unavailable.")
 	sandboxAllowNet := fs.Bool("sandbox-allow-net", false, "Under --sandbox, permit network access (default: denied)")
 	var sandboxWrite, sandboxRead stringList
@@ -46,8 +46,8 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *permMode != string(permission.ModeInteractive) && *permMode != string(permission.ModeStrict) {
-		fmt.Fprintf(stderr, "octo init: invalid --permission-mode %q (want 'interactive' or 'strict')\n", *permMode)
+	if *permMode != string(permission.ModeInteractive) && *permMode != string(permission.ModeStrict) && *permMode != string(permission.ModeAutoApprove) {
+		fmt.Fprintf(stderr, "octo init: invalid --permission-mode %q (want 'interactive', 'strict', or 'auto')\n", *permMode)
 		return 2
 	}
 
