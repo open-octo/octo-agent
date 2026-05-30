@@ -23,12 +23,13 @@ type bgProcess struct {
 	cancel  context.CancelFunc
 	start   time.Time
 
-	mu       sync.Mutex
-	buf      []byte // most recent <= maxBgOutputBytes of combined stdout+stderr
-	produced int64  // total bytes ever written to the logical stream
-	readOff  int64  // absolute offset already returned by Read
-	done     bool
-	exitErr  error
+	mu        sync.Mutex
+	buf       []byte // most recent <= maxBgOutputBytes of combined stdout+stderr
+	produced  int64  // total bytes ever written to the logical stream
+	readOff   int64  // absolute offset already returned by Read
+	done      bool
+	exitErr   error
+	pollCount int // consecutive empty reads while running
 }
 
 func (p *bgProcess) append(b []byte) {
@@ -51,7 +52,7 @@ func (p *bgProcess) finish(err error) {
 // readNew returns output produced since the last Read and the current status,
 // advancing the read cursor. When retained output was dropped (buffer cap), the
 // returned text is prefixed with a truncation marker.
-func (p *bgProcess) readNew() (string, string) {
+func (p *bgProcess) readNew() (string, string, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -72,7 +73,19 @@ func (p *bgProcess) readNew() (string, string) {
 			status = "exited: 0"
 		}
 	}
-	return string(out), status
+
+	// Anti-polling: if running and no new output, increment poll count.
+	// After 2 consecutive empty polls, report that polling is blocked.
+	blocked := false
+	if !p.done && len(out) == 0 {
+		p.pollCount++
+		if p.pollCount >= 2 {
+			blocked = true
+		}
+	} else {
+		p.pollCount = 0
+	}
+	return string(out), status, blocked
 }
 
 // BgExit is delivered to a BackgroundManager's onExit hook when a detached
@@ -162,7 +175,7 @@ func (m *BackgroundManager) Start(command string) (string, error) {
 		hook := m.onExit
 		m.mu.Unlock()
 		if hook != nil {
-			out, status := p.readNew() // advances the cursor → dedup vs terminal_output
+			out, status, _ := p.readNew() // advances the cursor → dedup vs terminal_output
 			hook(BgExit{ID: p.id, Command: p.command, Status: status, NewOutput: out})
 		}
 	}()
@@ -171,16 +184,18 @@ func (m *BackgroundManager) Start(command string) (string, error) {
 }
 
 // Read returns output produced since the last call for id, plus a status
-// string. found is false when id is unknown.
-func (m *BackgroundManager) Read(id string) (output, status string, found bool) {
+// string. found is false when id is unknown. blocked is true when the caller
+// has polled too many times without new output while the process is still
+// running — this forces the LLM to stop polling.
+func (m *BackgroundManager) Read(id string) (output, status string, found bool, blocked bool) {
 	m.mu.Lock()
 	p := m.procs[id]
 	m.mu.Unlock()
 	if p == nil {
-		return "", "", false
+		return "", "", false, false
 	}
-	out, st := p.readNew()
-	return out, st, true
+	out, st, blk := p.readNew()
+	return out, st, true, blk
 }
 
 // BgInfo is a snapshot of a still-running background process, for a live

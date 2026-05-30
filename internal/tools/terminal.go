@@ -264,9 +264,12 @@ func (t TerminalOutputTool) Execute(_ context.Context, _ string, input map[strin
 	if id == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: id is required")
 	}
-	out, status, found := t.manager().Read(id)
+	out, status, found, blocked := t.manager().Read(id)
 	if !found {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: no background process %q", id)
+	}
+	if blocked {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: polling blocked for %s — the process is still running with no new output. Wait for the automatic completion notification instead.", id)
 	}
 	header := "[status: " + status + "]"
 	if out == "" {
@@ -324,7 +327,7 @@ func (t KillShellTool) Execute(_ context.Context, _ string, input map[string]any
 	// Give the process a moment to flush and the waiter to record exit.
 	time.Sleep(50 * time.Millisecond)
 
-	out, status, _ := mgr.Read(id) // found guaranteed: Kill succeeded
+	out, status, _, _ := mgr.Read(id) // found guaranteed: Kill succeeded
 	header := "[killed] [status: " + status + "]"
 	if out == "" {
 		return agent.ToolResult{Text: header + "\n(no new output)"}, nil
