@@ -129,6 +129,10 @@ type Agent struct {
 	// default); >0 is an explicit token count. See compactTriggerTokens.
 	CompactThreshold int
 
+	// overflow handles "context too long" 400 errors by compressing history
+	// and retrying. Aligned with Ruby's perform_context_overflow_compression.
+	overflow overflowRecovery
+
 	// Cumulative token counts for this session (all turns combined).
 	sessionInputTokens  int
 	sessionOutputTokens int
@@ -436,11 +440,23 @@ func (a *Agent) runLoop(
 			if ctx.Err() != nil {
 				return a.finishInterrupted(handler)
 			}
+
+			// ── Context overflow recovery (aligned with Ruby) ──
+			if a.overflow.tryRecover(ctx, a, err) {
+				// Compression succeeded — retry the same iteration
+				// without incrementing i or popping user message
+				continue
+			}
+
 			if i == 0 {
 				a.History.popLast()
 			}
 			return Reply{}, fmt.Errorf("agent: loop[%d]: %w", i, err)
 		}
+
+		// Success — reset overflow attempt flag for next turn
+		a.overflow.reset()
+
 		a.accrueUsage(reply)
 
 		if reply.StopReason == "tool_use" {
@@ -478,6 +494,13 @@ func (a *Agent) runLoop(
 			}
 
 			a.History.Append(NewToolResultMessage(resultBlocks))
+
+			// Turn-in compaction check: after a tool batch, history may have
+			// grown significantly. If the estimated size is near the window,
+			// compact before the next LLM call to avoid a 400.
+			if a.shouldCompactBetweenBatches() {
+				_ = a.maybeCompact(ctx)
+			}
 			continue
 		}
 

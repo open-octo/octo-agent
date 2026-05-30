@@ -50,3 +50,48 @@ func (h *History) Reset() {
 	defer h.mu.Unlock()
 	h.messages = nil
 }
+
+// TruncateTo keeps only the first n messages.
+// Used by overflow recovery to pop messages from tail.
+func (h *History) TruncateTo(n int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if n < len(h.messages) {
+		h.messages = h.messages[:n]
+	}
+}
+
+// ReplaceAll atomically replaces the entire message list.
+// Used by compaction to rebuild history from summary + recent messages.
+func (h *History) ReplaceAll(msgs []Message) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messages = make([]Message, len(msgs))
+	copy(h.messages, msgs)
+}
+
+// Tail returns the last n messages (or all if fewer).
+func (h *History) Tail(n int) []Message {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if n >= len(h.messages) {
+		out := make([]Message, len(h.messages))
+		copy(out, h.messages)
+		return out
+	}
+	out := make([]Message, n)
+	copy(out, h.messages[len(h.messages)-n:])
+	return out
+}
+
+// FindSystemMsg returns the first system message index, or -1.
+func (h *History) FindSystemMsg() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for i, m := range h.messages {
+		if m.Role == RoleSystem {
+			return i
+		}
+	}
+	return -1
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // compactKeepTurns is how many of the most recent user turns runLoop keeps
@@ -25,9 +26,25 @@ const defaultContextWindow = 128_000
 // substring so dated/aliased names ("claude-haiku-4-5-2025…") still resolve.
 // Raise a model's entry when a larger window is confirmed.
 func contextWindow(model string) int {
+	m := strings.ToLower(model)
 	switch {
-	case strings.Contains(strings.ToLower(model), "claude"):
+	case strings.Contains(m, "claude-3-5"):
 		return 200_000
+	case strings.Contains(m, "claude-3"):
+		return 200_000
+	case strings.Contains(m, "claude-opus-4"):
+		return 200_000
+	case strings.Contains(m, "claude-sonnet-4"):
+		return 200_000
+	case strings.Contains(m, "claude-haiku-4"):
+		return 200_000
+	case strings.Contains(m, "claude"):
+		// Claude 4.x and newer models with 256K window
+		return 256_000
+	case strings.Contains(m, "gpt-4o"):
+		return 128_000
+	case strings.Contains(m, "gpt-4"):
+		return 128_000
 	default:
 		return defaultContextWindow
 	}
@@ -54,30 +71,41 @@ func (a *Agent) compactTriggerTokens() int {
 // compact carry-forward of decisions/paths/open tasks, not a transcript.
 const summarizeMaxTokens = 1024
 
-// summarizeSystem is the system prompt for the summarization side-call. It is
-// distinct from the main session prompt (the call is infrequent, so a cache
-// miss here is fine). The five-section structure mirrors Claude Code's
-// compaction prompt — a structured carry-forward retains far more usable
-// signal than a freeform "summarize this" instruction.
-const summarizeSystem = `You are a conversation summarizer for a coding agent. Produce a
-structured summary so the agent can continue the task without the full
-transcript. Be specific and terse — bullet points, real names, real paths.
-Output exactly these five sections:
+// compressionPrompt is the instruction inserted into the conversation for
+// insert-then-compress. The LLM sees the full history (cached) plus this
+// instruction, and returns a summary. Aligned with Ruby's COMPRESSION_PROMPT.
+const compressionPrompt = `═══════════════════════════════════════════════════════════════
+CRITICAL: TASK CHANGE - MEMORY COMPRESSION MODE
+═══════════════════════════════════════════════════════════════
+The conversation above has ENDED. You are now in MEMORY COMPRESSION MODE.
 
-## Primary Request
-The user's overall goal and any explicit, still-active instructions or constraints.
+CRITICAL INSTRUCTIONS - READ CAREFULLY:
+1. This is NOT a continuation of the conversation
+2. DO NOT respond to any requests in the conversation above
+3. DO NOT call ANY tools or functions
+4. DO NOT use tool_calls in your response
+5. Your response MUST be PURE TEXT ONLY
 
-## Key Technical Concepts
-Architecture, libraries, patterns, and decisions established so far.
+YOUR ONLY TASK: Create a comprehensive summary of the conversation above.
 
-## Files and Code
-Files read or modified (with paths), and the important changes made to each.
+REQUIRED RESPONSE FORMAT:
+First output a <topics> line listing 3-6 key topic phrases (comma-separated, concise).
+Then output the full summary wrapped in <summary> tags.
 
-## Errors and Fixes
-Errors encountered and how they were resolved; anything still broken.
+Example format:
+<topics>Rails setup, database config, deploy pipeline, Tailwind CSS</topics>
+<summary>
+...full summary text...
+</summary>
 
-## Current State and Next Steps
-What was just completed, and the immediate next action if the task is unfinished.`
+Focus on:
+- User's explicit requests and intents
+- Key technical concepts and code changes
+- Files examined and modified
+- Errors encountered and fixes applied
+- Current work status and pending tasks
+
+Begin your response NOW. Remember: PURE TEXT only, starting with <topics> then <summary>.`
 
 // maybeCompact summarizes the older portion of history when the most recent
 // context size (lastInputTokens) crossed CompactThreshold. It runs only at a
@@ -118,18 +146,48 @@ func (a *Agent) maybeCompact(ctx context.Context) error {
 }
 
 // summarize asks the Sender to condense the given messages into a summary.
-// It appends a single user instruction after the slice (which ends on an
-// assistant message, so alternation holds) and returns the reply text.
+// It uses the insert-then-compress strategy: the compression instruction is
+// appended to the messages slice (which ends on an assistant message, so
+// alternation holds), and the LLM returns a summary. The caller is responsible
+// for rebuilding history with the summary.
+//
+// Overflow protection: if the estimated token count of msgs exceeds the model's
+// context window, messages are popped from the head until it fits. This
+// prevents the compression call itself from 400-ing.
 func (a *Agent) summarize(ctx context.Context, msgs []Message) (string, error) {
+	// ── Overflow protection ──────────────────────────────────────────────
+	// If msgs alone exceeds the window, pop from head until it fits.
+	// This handles the case where the history is already over the limit
+	// (e.g. a single huge tool_result tipped it over).
+	window := contextWindow(a.Model)
+	for {
+		est := estimateMessages(msgs)
+		if est < window {
+			break
+		}
+		if len(msgs) <= 2 {
+			// Can't pop any more; proceed anyway and let the caller handle 400
+			break
+		}
+		msgs = msgs[1:] // pop from head (preserve system msg at index 0)
+	}
+
+	// ── Insert-then-compress ─────────────────────────────────────────────
 	req := make([]Message, 0, len(msgs)+1)
 	req = append(req, msgs...)
-	req = append(req, NewUserMessage(
-		"Summarize the conversation above per your instructions. Output only the summary."))
+	req = append(req, NewUserMessage(compressionPrompt))
 
-	reply, err := a.Sender.SendMessages(ctx, a.Model, summarizeSystem, req, summarizeMaxTokens)
+	reply, err := a.Sender.SendMessages(ctx, a.Model, "", req, summarizeMaxTokens)
 	if err != nil {
 		return "", err
 	}
+
+	// Defensive: if the LLM returned tool_calls instead of text (it shouldn't,
+	// but some models hallucinate), treat it as a failed compression.
+	if reply.StopReason == "tool_use" {
+		return "", fmt.Errorf("agent: compact: LLM returned tool_calls instead of summary")
+	}
+
 	// Summary tokens count toward the session budget like any other call.
 	a.sessionInputTokens += reply.InputTokens
 	a.sessionOutputTokens += reply.OutputTokens
@@ -164,4 +222,85 @@ func hasToolResult(m Message) bool {
 		}
 	}
 	return false
+}
+
+// shouldCompactBetweenBatches reports whether compaction should run after a
+// tool batch, before the next LLM call. This catches history growth within a
+// turn that lastInputTokens (from the previous provider call) doesn't reflect.
+//
+// The heuristic is aggressive: if the estimated token count exceeds 90% of the
+// model's context window, we compact. This prevents the next send() from 400-ing.
+func (a *Agent) shouldCompactBetweenBatches() bool {
+	trigger := a.compactTriggerTokens()
+	if trigger <= 0 {
+		return false
+	}
+	est := estimateMessages(a.History.Snapshot())
+	window := contextWindow(a.Model)
+	// Compact if we're within 10% of the window (more aggressive than the
+	// between-turns trigger, which uses compactThresholdFraction = 75%).
+	return est > int(float64(window)*0.9)
+}
+
+// ── Token estimation (fast heuristic) ──────────────────────────────────────
+
+// estimateMessages returns a fast heuristic token count for a message slice.
+// Used for overflow protection before compression calls.
+func estimateMessages(msgs []Message) int {
+	total := 0
+	for _, m := range msgs {
+		total += estimateMessage(m)
+	}
+	return total
+}
+
+// estimateMessage counts tokens for a single message.
+// Heuristic: ~4 chars/token for ASCII/code, ~1.5 chars/token for CJK.
+func estimateMessage(m Message) int {
+	tokens := 4 // role overhead
+	tokens += estimateText(m.Content)
+	for _, b := range m.Blocks {
+		switch b.Type {
+		case "text":
+			tokens += estimateText(b.Text)
+		case "tool_use":
+			tokens += estimateText(b.Name)
+			tokens += estimateMap(b.Input)
+		case "tool_result":
+			tokens += estimateText(b.Result)
+		case "thinking":
+			tokens += estimateText(b.Thinking)
+		}
+	}
+	return tokens
+}
+
+func estimateText(s string) int {
+	if s == "" {
+		return 0
+	}
+	asciiCount := 0
+	multiCount := 0
+	for _, r := range s {
+		if r < 128 {
+			asciiCount++
+		} else {
+			multiCount += utf8.RuneLen(r)
+		}
+	}
+	return (asciiCount / 4) + int(float64(multiCount)/1.5+0.5)
+}
+
+func estimateMap(m map[string]any) int {
+	if len(m) == 0 {
+		return 0
+	}
+	var b strings.Builder
+	for k, v := range m {
+		b.WriteString(k)
+		b.WriteString(":")
+		b.WriteString(fmt.Sprintf("%v", v))
+		b.WriteString(",")
+	}
+	return estimateText(b.String())
 }
