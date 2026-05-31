@@ -137,11 +137,19 @@ func shiftEnterFilter(_ tea.Model, msg tea.Msg) tea.Msg {
 	}
 	seq := string(v.Bytes())
 	switch seq {
-	case "\x1b[13;2u": // Shift+Enter
+	case "\x1b[13;2u": // Shift+Enter (kitty CSI u)
 		return tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
 	case "\x1b[13;3u": // Alt+Enter (CSI-u form)
 		return tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
-	case "\x1b[13;5u": // Ctrl+Enter
+	case "\x1b[13;5u": // Ctrl+Enter (CSI-u form)
+		return tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
+	case "\x1b[27;2;13~": // Shift+Enter (xterm modifyOtherKeys)
+		return tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
+	case "\x1b[27;3;13~": // Alt+Enter (modifyOtherKeys)
+		return tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
+	case "\x1b[27;5;13~": // Ctrl+Enter (modifyOtherKeys)
+		return tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
+	case "\x1b[27;6;13~": // Shift+Ctrl+Enter (modifyOtherKeys)
 		return tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
 	}
 	return msg
