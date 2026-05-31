@@ -36,9 +36,11 @@ const wheelScrollLines = 4
 func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.MouseWheelUp:
+		m.sticky = false
 		m.scrollOffset += wheelScrollLines
 		return m, nil
 	case tea.MouseWheelDown:
+		m.sticky = false
 		m.scrollOffset -= wheelScrollLines
 		if m.scrollOffset < 0 {
 			m.scrollOffset = 0
@@ -108,6 +110,12 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.submit(msg.Alt)
 
 	case tea.KeyUp:
+		// Alt+Up: scroll up half page (MacBook-friendly — no PgUp key).
+		if msg.Alt {
+			m.sticky = false
+			m.scrollOffset += m.height / 2
+			return m, nil
+		}
 		if m.inputHistoryIdx+1 < len(m.inputHistory) {
 			m.inputHistoryIdx++
 			m.ti.SetValue(m.inputHistory[len(m.inputHistory)-1-m.inputHistoryIdx])
@@ -116,6 +124,15 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyDown:
+		// Alt+Down: scroll down half page (MacBook-friendly — no PgDn key).
+		if msg.Alt {
+			m.sticky = false
+			m.scrollOffset -= m.height / 2
+			if m.scrollOffset < 0 {
+				m.scrollOffset = 0
+			}
+			return m, nil
+		}
 		if m.inputHistoryIdx > 0 {
 			m.inputHistoryIdx--
 			m.ti.SetValue(m.inputHistory[len(m.inputHistory)-1-m.inputHistoryIdx])
@@ -124,6 +141,26 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputHistoryIdx = -1
 			m.ti.Reset()
 		}
+		return m, nil
+
+	// PageUp/PageDown: keyboard scroll — reliable fallback when
+	// mouse wheel events are not delivered (some terminals/tmux).
+	// Half-page scroll matches Claude Code's behavior.
+	case tea.KeyPgUp:
+		m.sticky = false
+		m.scrollOffset += m.height / 2
+		return m, nil
+	case tea.KeyPgDown:
+		m.sticky = false
+		m.scrollOffset -= m.height / 2
+		if m.scrollOffset < 0 {
+			m.scrollOffset = 0
+		}
+		return m, nil
+	case tea.KeyEnd:
+		// Jump to bottom and re-engage auto-follow.
+		m.sticky = true
+		m.scrollOffset = 0
 		return m, nil
 	}
 
@@ -400,13 +437,14 @@ func (m *tuiModel) View() string {
 	if available < 0 {
 		available = 0
 	}
-	// Clamp scrollOffset first so start uses a valid value in this frame
-	// (previously clamped after start, causing one-frame-late correction).
+	// Clamp scrollOffset to valid range without mutating on every frame.
+	// Previously every View() call set scrollOffset = maxOffset (0 when
+	// content fits on one screen), destroying user scroll every frame.
 	maxOffset := len(m.scrollback) - available
 	if maxOffset < 0 {
 		maxOffset = 0
-	}
-	if m.scrollOffset > maxOffset {
+		m.scrollOffset = 0
+	} else if m.scrollOffset > maxOffset {
 		m.scrollOffset = maxOffset
 	}
 	start := 0

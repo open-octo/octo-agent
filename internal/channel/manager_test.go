@@ -68,8 +68,9 @@ func (m *mockAdapter) UpdateMessage(chatID, messageID, text string) bool {
 	m.updatedMsgs = append(m.updatedMsgs, updatedMsg{chatID, messageID, text})
 	return true
 }
-func (m *mockAdapter) SupportsMessageUpdates() bool               { return true }
-func (m *mockAdapter) ValidateConfig(cfg PlatformConfig) []string { return m.validateErrs }
+func (m *mockAdapter) SupportsMessageUpdates() bool                 { return true }
+func (m *mockAdapter) SendTyping(chatID, contextToken string) error { return nil }
+func (m *mockAdapter) ValidateConfig(cfg PlatformConfig) []string   { return m.validateErrs }
 
 func (m *mockAdapter) sentTextCount() int {
 	m.mu.Lock()
