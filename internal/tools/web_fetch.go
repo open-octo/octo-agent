@@ -28,18 +28,19 @@ var jinaReaderHostForTest = JinaReaderHost
 // targeted slices via grep / a follow-up fetch.
 const WebFetchMaxBytes = 200_000
 
-// WebFetchTool fetches a URL and returns its body as Markdown (via the
-// Jina AI Reader proxy). The LLM is expected to read the returned text
-// directly — there's no second-stage extraction model in this tool.
+// WebFetchTool fetches a URL and returns its body as Markdown. It prefers
+// the Jina AI Reader proxy for JS-rendered pages and clean HTML-to-Markdown
+// conversion, but falls back to a direct HTTP fetch when the proxy fails.
 type WebFetchTool struct{}
 
 func (WebFetchTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "web_fetch",
-		Description: "Fetch a URL and return its content as Markdown. Uses the Jina " +
-			"Reader proxy to handle JS-rendered pages and convert HTML cleanly. " +
-			"Response is truncated at ~200 KB; for long pages, fetch a more specific URL " +
-			"or grep the returned text. Public web only — no authentication.",
+		Description: "Fetch a URL and return its content. Prefers the Jina Reader proxy " +
+			"for JS-rendered pages and clean HTML-to-Markdown conversion; falls back to " +
+			"a direct HTTP fetch when the proxy is unavailable. Response is truncated at " +
+			"~200 KB; for long pages, fetch a more specific URL or grep the returned text. " +
+			"Public web only — no authentication.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -66,19 +67,69 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: only http/https URLs are allowed (got %q)", u.Scheme)
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Strategy: try Jina Reader proxy first (better quality), then fall back
+	// to a direct fetch on network-level or 5xx/429 proxy failures.
+	out, jinaErr := fetchViaJina(ctx, raw)
+	if jinaErr == nil {
+		return out, nil
+	}
+
+	// Fallback conditions: network errors (TLS, DNS, timeout), 5xx proxy
+	// errors, or 429 rate-limit. 4xx client errors (e.g. 404) from the proxy
+	// are NOT retried — the proxy correctly reflected an upstream 404.
+	if shouldFallback(jinaErr) {
+		out, directErr := fetchDirect(ctx, raw)
+		if directErr == nil {
+			return out, nil
+		}
+		// Both failed — surface both errors so the LLM knows what happened.
+		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: jina proxy failed (%v); direct fetch also failed (%v)", jinaErr, directErr)
+	}
+
+	return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: %w", jinaErr)
+}
+
+// shouldFallback returns true when a Jina proxy error is worth retrying
+// with a direct fetch. 4xx errors (except 429 rate-limit) are assumed to
+// be legitimate upstream responses and are not retried.
+func shouldFallback(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	// Network-level errors always fallback.
+	if strings.Contains(s, "tls:") ||
+		strings.Contains(s, "x509:") ||
+		strings.Contains(s, "no such host") ||
+		strings.Contains(s, "connection refused") ||
+		strings.Contains(s, "timeout") ||
+		strings.Contains(s, "temporary failure") ||
+		strings.Contains(s, "i/o timeout") ||
+		strings.Contains(s, "EOF") {
+		return true
+	}
+	// HTTP 5xx or 429 from the proxy — the proxy itself is struggling.
+	if strings.Contains(s, "HTTP 5") || strings.Contains(s, "HTTP 429") {
+		return true
+	}
+	return false
+}
+
+// fetchViaJina calls the Jina Reader proxy and returns the rendered Markdown.
+func fetchViaJina(ctx context.Context, rawURL string) (agent.ToolResult, error) {
 	// Jina's contract is literal string concatenation: r.jina.ai/<rest>.
 	// Do NOT QueryEscape — Jina parses the rest-of-path itself, and
 	// escaping breaks routing. A `#fragment` in raw is technically lost
 	// here (Jina won't see it), but fragments are never sent to servers
 	// anyway, so this matches normal HTTP semantics.
-	jinaURL := jinaReaderHostForTest + raw
-
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	jinaURL := jinaReaderHostForTest + rawURL
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jinaURL, nil)
 	if err != nil {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: build request: %w", err)
+		return agent.ToolResult{Text: ""}, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "text/markdown,text/plain,*/*")
 	// Identify ourselves so Jina can reach us about issues.
@@ -86,18 +137,61 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 
 	resp, err := webFetchHTTPClient().Do(req)
 	if err != nil {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: %w", err)
+		return agent.ToolResult{Text: ""}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return agent.ToolResult{Text: ""}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, WebFetchMaxBytes+1))
+	return readBody(resp.Body)
+}
+
+// fetchDirect performs a direct HTTP GET against the original URL. It uses
+// a browser-like header set so simple anti-bot checks don't immediately
+// reject us, but it does NOT run JavaScript — dynamic pages will return
+// their static HTML skeleton.
+func fetchDirect(ctx context.Context, rawURL string) (agent.ToolResult, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: read body: %w", err)
+		return agent.ToolResult{Text: ""}, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			return nil
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return agent.ToolResult{Text: ""}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return agent.ToolResult{Text: ""}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	return readBody(resp.Body)
+}
+
+// readBody reads up to WebFetchMaxBytes+1 from r, truncating if necessary
+// and appending a clear marker.
+func readBody(r io.Reader) (agent.ToolResult, error) {
+	body, err := io.ReadAll(io.LimitReader(r, WebFetchMaxBytes+1))
+	if err != nil {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("read body: %w", err)
 	}
 	truncated := false
 	if len(body) > WebFetchMaxBytes {

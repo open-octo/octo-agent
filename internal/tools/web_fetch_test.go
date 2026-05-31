@@ -162,6 +162,154 @@ func TestWebFetch_Truncates(t *testing.T) {
 	}
 }
 
+// ───────────────────── fallback tests ─────────────────────
+
+func TestWebFetch_FallsBackOnTLSFailure(t *testing.T) {
+	// Jina proxy returns a TLS error (simulated by a server that closes
+	// immediately, causing a connection error that triggers fallback).
+	jina := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Force a connection reset by hijacking and closing.
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("server does not support hijacking")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack failed: %v", err)
+		}
+		conn.Close()
+	}))
+	defer jina.Close()
+
+	// Direct server serves the real content.
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("direct fallback content"))
+	}))
+	defer direct.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = jina.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	out, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
+		"url": direct.URL + "/page",
+	})
+	if err != nil {
+		t.Fatalf("expected fallback to succeed, got: %v", err)
+	}
+	if !strings.Contains(out.Text, "direct fallback content") {
+		t.Errorf("expected direct fallback content, got: %q", out.Text)
+	}
+}
+
+func TestWebFetch_FallsBackOnHTTP5xx(t *testing.T) {
+	jina := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "jina overloaded", http.StatusServiceUnavailable)
+	}))
+	defer jina.Close()
+
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("direct ok"))
+	}))
+	defer direct.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = jina.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	out, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
+		"url": direct.URL + "/page",
+	})
+	if err != nil {
+		t.Fatalf("expected fallback to succeed, got: %v", err)
+	}
+	if !strings.Contains(out.Text, "direct ok") {
+		t.Errorf("expected direct ok, got: %q", out.Text)
+	}
+}
+
+func TestWebFetch_NoFallbackOnHTTP404(t *testing.T) {
+	jina := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer jina.Close()
+
+	// Even though direct would succeed, we should NOT fallback on 4xx.
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("should not reach here"))
+	}))
+	defer direct.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = jina.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	_, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
+		"url": direct.URL + "/page",
+	})
+	if err == nil {
+		t.Fatal("expected 404 error, got success")
+	}
+	if !strings.Contains(err.Error(), "HTTP 404") {
+		t.Errorf("expected HTTP 404 in error, got: %v", err)
+	}
+}
+
+func TestWebFetch_BothFail(t *testing.T) {
+	jina := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "jina bad", http.StatusBadGateway)
+	}))
+	defer jina.Close()
+
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "direct bad", http.StatusInternalServerError)
+	}))
+	defer direct.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = jina.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	_, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
+		"url": direct.URL + "/page",
+	})
+	if err == nil {
+		t.Fatal("expected error when both fail")
+	}
+	if !strings.Contains(err.Error(), "jina proxy failed") {
+		t.Errorf("error should mention jina proxy failure, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "direct fetch also failed") {
+		t.Errorf("error should mention direct fetch failure, got: %v", err)
+	}
+}
+
+func TestWebFetch_FallsBackOnHTTP429(t *testing.T) {
+	jina := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+	}))
+	defer jina.Close()
+
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("direct after rate limit"))
+	}))
+	defer direct.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = jina.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	out, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
+		"url": direct.URL + "/page",
+	})
+	if err != nil {
+		t.Fatalf("expected fallback to succeed, got: %v", err)
+	}
+	if !strings.Contains(out.Text, "direct after rate limit") {
+		t.Errorf("expected direct content, got: %q", out.Text)
+	}
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a
