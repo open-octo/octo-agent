@@ -401,10 +401,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.flushPrints()
 
 	case bgExitMsg:
-		// Async background-process completion: show a one-line scrollback notice
-		// (the full output rode into the conversation via Inbox).
-		m.println(noticeStyle.Render(fmt.Sprintf(
-			"↳ %s (%s) %s", msg.e.ID, truncate1Line(msg.e.Command), msg.e.Status)))
+		// Async background-process completion: the full output rode into the
+		// conversation via Inbox; no scrollback notice needed.
 		// Idle auto-turn: if no turn is running and nothing is queued, drain the
 		// inbox (which holds the full <system-reminder> notice) and start a
 		// turn so the model sees the completion immediately — matching the plain
@@ -418,14 +416,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.flushPrints()
 
 	case subAgentNoteMsg:
-		// Async sub-agent completion: show a one-line scrollback notice (the
-		// full result rode into the conversation via Steer).
-		label := "completed"
-		if msg.ev.Kind == "message_reply" {
-			label = "replied"
-		}
-		m.println(noticeStyle.Render(fmt.Sprintf(
-			"↳ sub-agent %s (%s) %s", msg.ev.AgentID, truncate1Line(msg.ev.Description), label)))
+		// Async sub-agent completion: the full result rode into the conversation
+		// via Inbox; no scrollback notice needed.
 		// Idle auto-turn: same logic as bgExitMsg — drain inbox and trigger a
 		// turn so the model sees the notification immediately.
 		if !m.turnRunning && len(m.queue) == 0 {
