@@ -67,12 +67,12 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: only http/https URLs are allowed (got %q)", u.Scheme)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
 	// Strategy: try Jina Reader proxy first (better quality), then fall back
 	// to a direct fetch on network-level or 5xx/429 proxy failures.
-	out, jinaErr := fetchViaJina(ctx, raw)
+	// Jina gets a short 5s timeout so a slow proxy doesn't block the fallback.
+	jinaCtx, jinaCancel := context.WithTimeout(ctx, 5*time.Second)
+	out, jinaErr := fetchViaJina(jinaCtx, raw)
+	jinaCancel()
 	if jinaErr == nil {
 		return out, nil
 	}
@@ -81,7 +81,10 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 	// errors, or 429 rate-limit. 4xx client errors (e.g. 404) from the proxy
 	// are NOT retried — the proxy correctly reflected an upstream 404.
 	if shouldFallback(jinaErr) {
-		out, directErr := fetchDirect(ctx, raw)
+		// Give the direct fetch the remaining time up to 30s total.
+		directCtx, directCancel := context.WithTimeout(ctx, 30*time.Second)
+		out, directErr := fetchDirect(directCtx, raw)
+		directCancel()
 		if directErr == nil {
 			return out, nil
 		}
@@ -108,6 +111,7 @@ func shouldFallback(err error) bool {
 		strings.Contains(s, "timeout") ||
 		strings.Contains(s, "temporary failure") ||
 		strings.Contains(s, "i/o timeout") ||
+		strings.Contains(s, "context deadline exceeded") ||
 		strings.Contains(s, "EOF") {
 		return true
 	}

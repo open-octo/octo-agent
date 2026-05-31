@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // withJinaHost swaps JinaReaderHost for the test server URL. Since
@@ -306,6 +307,38 @@ func TestWebFetch_FallsBackOnHTTP429(t *testing.T) {
 		t.Fatalf("expected fallback to succeed, got: %v", err)
 	}
 	if !strings.Contains(out.Text, "direct after rate limit") {
+		t.Errorf("expected direct content, got: %q", out.Text)
+	}
+}
+
+func TestWebFetch_FallsBackOnContextDeadlineExceeded(t *testing.T) {
+	// Jina proxy that sleeps longer than the 5s jina timeout but less than
+	// the total budget, so the fallback has time to succeed.
+	jina := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(6 * time.Second)
+	}))
+	defer jina.Close()
+
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("direct after deadline"))
+	}))
+	defer direct.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = jina.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	// Total budget 10s — jina gets 5s, direct gets up to 30s (capped by this 10s).
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	out, err := WebFetchTool{}.Execute(ctx, "web_fetch", map[string]any{
+		"url": direct.URL + "/page",
+	})
+	if err != nil {
+		t.Fatalf("expected fallback to succeed, got: %v", err)
+	}
+	if !strings.Contains(out.Text, "direct after deadline") {
 		t.Errorf("expected direct content, got: %q", out.Text)
 	}
 }
