@@ -10,15 +10,80 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/channel"
+	"github.com/Leihb/octo-agent/internal/channel/adapters/weixin/ilink"
 	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/prompt"
 	"github.com/Leihb/octo-agent/internal/skills"
 	"github.com/Leihb/octo-agent/internal/tools"
 )
 
-// runChannel handles `octo channel start`.
+// runChannel handles `octo channel start` and `octo channel login`.
 func runChannel(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("channel", flag.ContinueOnError)
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "Usage: octo channel <login|start> [flags]")
+		return 2
+	}
+
+	switch args[0] {
+	case "login":
+		return runChannelLogin(args[1:], stdin, stdout, stderr)
+	case "start":
+		return runChannelStart(args[1:], stdin, stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "octo channel: unknown subcommand %q\n", args[0])
+		fmt.Fprintln(stderr, "Usage: octo channel <login|start>")
+		return 2
+	}
+}
+
+// runChannelLogin handles `octo channel login`.
+// It shows a QR code URL, polls for scan status, and saves the bot_token.
+func runChannelLogin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("channel login", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	platform := fs.String("platform", "weixin", "Platform to log in to")
+	force := fs.Bool("force", false, "Force re-login even if credentials exist")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if *platform != "weixin" {
+		fmt.Fprintf(stderr, "octo channel login: unsupported platform %q (only 'weixin' supported)\n", *platform)
+		return 2
+	}
+
+	ctx := context.Background()
+	client := ilink.NewClient()
+
+	fmt.Fprintln(stdout, "Starting WeChat iLink login...")
+	fmt.Fprintln(stdout, "")
+
+	creds, err := ilink.Login(ctx, client, ilink.LoginOptions{
+		Force: *force,
+		OnQRURL: func(url string) {
+			fmt.Fprintf(stdout, "📱 Scan this QR code in WeChat:\n%s\n", url)
+		},
+		OnScanned: func() {
+			fmt.Fprintln(stdout, "✓ QR code scanned — confirm login in WeChat")
+		},
+		OnExpired: func() {
+			fmt.Fprintln(stdout, "✗ QR code expired — requesting new one")
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "octo channel login: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintln(stdout, "")
+	fmt.Fprintf(stdout, "✓ Logged in as %s\n", creds.UserID)
+	fmt.Fprintf(stdout, "Credentials saved to %s\n", ilink.DefaultCredPath())
+	return 0
+}
+
+// runChannelStart handles `octo channel start`.
+func runChannelStart(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("channel start", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	providerName := fs.String("provider", "", "Provider: anthropic | openai")
 	model := fs.String("model", "", "Model name")
@@ -28,11 +93,6 @@ func runChannel(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	maxTurns := fs.Int("max-turns", 0, "Max provider round-trips per message")
 	noTools := fs.Bool("no-tools", false, "Disable built-in tools")
 	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-
-	if len(fs.Args()) == 0 || fs.Args()[0] != "start" {
-		fmt.Fprintln(stderr, "Usage: octo channel start [flags]")
 		return 2
 	}
 
@@ -86,16 +146,9 @@ func runChannel(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	mode := channel.BindingMode(*bindMode)
 	mgr := channel.NewManager(chCfg, agentFactory, mode)
 
-	// Wire inbound message handling: for each message, get/create session,
-	// build a UIController, and run the agent.
-	// The manager's Start handles adapter lifecycle; we inject our own
-	// onMessage callback by wrapping the adapter starts.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Override the manager's default message handling with agent execution.
-	// We do this by starting adapters ourselves and using the manager for
-	// session management only.
 	for _, name := range chCfg.EnabledPlatforms() {
 		pc := chCfg.Platform(name)
 		if pc == nil {
@@ -147,20 +200,6 @@ func handleCommand(mgr *channel.Manager, ad channel.Adapter, ev channel.InboundE
 	if len(text) == 0 || text[0] != '/' {
 		return false
 	}
-	// Delegate to manager's command router, but we need to send replies ourselves
-	// since the manager doesn't have direct adapter access in this wiring.
-	// The manager's handleInbound does routing + reply; we replicate the check.
-	// For simplicity, we let the manager handle it and rely on its sendReply.
-	// But mgr.sendReply needs the adapter stored in mgr.adapters.
-	// So we just let the manager's normal flow handle commands by calling
-	// handleInbound directly — but that also calls handleSessionMessage.
-	// Instead, we manually route commands here.
-
-	// Actually, the simplest approach: use the manager's commandRouter directly.
-	// But it's unexported. We reimplement the command detection.
-	// For now, just return false and let the agent handle it as a message.
-	// Commands like /bind /status will be processed by the LLM as regular text.
-	// TODO: expose command routing or handle here.
 	return false
 }
 
