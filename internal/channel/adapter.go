@@ -95,6 +95,10 @@ type Adapter interface {
 	// SupportsMessageUpdates reports whether the platform can edit sent messages.
 	SupportsMessageUpdates() bool
 
+	// SendTyping sends a typing indicator to the chat.
+	// The contextToken is the platform-specific reply context from the inbound event.
+	SendTyping(chatID, contextToken string) error
+
 	// ValidateConfig returns a list of human-readable errors; empty means valid.
 	ValidateConfig(cfg PlatformConfig) []string
 }

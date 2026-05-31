@@ -226,6 +226,31 @@ func (a *Adapter) UpdateMessage(chatID, messageID, text string) bool { return fa
 // SupportsMessageUpdates returns false.
 func (a *Adapter) SupportsMessageUpdates() bool { return false }
 
+// SendTyping sends a typing indicator to a user via iLink.
+func (a *Adapter) SendTyping(chatID, contextToken string) error {
+	if a.bot == nil || a.bot.creds == nil {
+		return fmt.Errorf("not logged in")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// 1. Get typing ticket.
+	cfg, err := a.bot.client.GetConfig(ctx, a.bot.creds.BaseURL, a.bot.creds.Token, chatID, contextToken)
+	if err != nil {
+		return fmt.Errorf("getconfig: %w", err)
+	}
+	if cfg.TypingTicket == "" {
+		return fmt.Errorf("no typing_ticket in getconfig response")
+	}
+
+	// 2. Send typing indicator (status=1 means "typing").
+	if err := a.bot.client.SendTyping(ctx, a.bot.creds.BaseURL, a.bot.creds.Token, chatID, cfg.TypingTicket, 1); err != nil {
+		return fmt.Errorf("sendtyping: %w", err)
+	}
+	return nil
+}
+
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 	return nil // Weixin iLink uses credentials file, not config fields.

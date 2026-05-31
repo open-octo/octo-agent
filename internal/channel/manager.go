@@ -301,8 +301,13 @@ func (m *Manager) sendReply(ev InboundEvent, text string) {
 
 // sendTyping sends a typing indicator to the chat.
 func (m *Manager) sendTyping(ev InboundEvent) {
-	// Typing indicators are platform-specific; adapters that support them
-	// can implement this. For now this is a no-op placeholder.
+	val, ok := m.adapters.Load(ev.Platform)
+	if !ok {
+		return
+	}
+	ad := val.(Adapter)
+	// Best-effort; ignore errors.
+	_ = ad.SendTyping(ev.ChatID, ev.ContextToken)
 }
 
 // GetSession returns the session for the given inbound event, or nil if none exists.
