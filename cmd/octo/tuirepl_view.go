@@ -389,7 +389,7 @@ func (m *tuiModel) liveHeight() int {
 	if bg := tools.RunningBackground(); len(bg) > 0 {
 		h += 3 + len(bg) // panel border (2) + title (1) + body lines
 	}
-	h++ // input box
+	h += m.ta.Height() // input box (textarea grows with content)
 	if m.turnRunning {
 		h += 3 // status bar with hint: separator + segments + hint
 	} else {
