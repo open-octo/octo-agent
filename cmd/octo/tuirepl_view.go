@@ -128,6 +128,20 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	// PageUp/PageDown: keyboard scroll — reliable fallback when
+	// mouse wheel events are not delivered (some terminals/tmux).
+	// Half-page scroll matches Claude Code's behavior.
+	case tea.KeyPgUp:
+		m.sticky = false
+		m.scrollOffset += m.height / 2
+		return m, nil
+	case tea.KeyPgDown:
+		m.sticky = false
+		m.scrollOffset -= m.height / 2
+		if m.scrollOffset < 0 {
+			m.scrollOffset = 0
+		}
+		return m, nil
 	case tea.KeyEnd:
 		// Jump to bottom and re-engage auto-follow.
 		m.sticky = true
