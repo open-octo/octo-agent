@@ -118,6 +118,9 @@ func (s *agentSpawner) runChild(ctx context.Context, lc *liveChild, prompt strin
 	if err != nil {
 		return "", 0, 0, err
 	}
+	if r.StopReason == agent.StopReasonMaxTurns {
+		return "", 0, 0, fmt.Errorf("sub-agent reached max-turns limit (%d) — task incomplete", lc.agent.MaxTurns)
+	}
 
 	totIn, totOut := lc.agent.SessionTokens()
 	in, out = totIn-lc.accruedIn, totOut-lc.accruedOut
