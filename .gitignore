@@ -20,3 +20,4 @@ coverage.html
 /.claude/settings.local.json
 .codegraph/
 /.claude/scheduled_tasks.lock
+/.worktrees/
