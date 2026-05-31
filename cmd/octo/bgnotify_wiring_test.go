@@ -53,14 +53,13 @@ func TestRunTurn_PrependsIdleBgNote(t *testing.T) {
 	}
 }
 
-// TestTUI_BgExitMsgShowsNotice confirms an async background-exit message is
-// appended to the scrollback buffer.
-func TestTUI_BgExitMsgShowsNotice(t *testing.T) {
+// TestTUI_BgExitMsgNoScrollbackNotice confirms an async background-exit message
+// does NOT append a scrollback notice (the full output rides into the conversation
+// via Inbox instead).
+func TestTUI_BgExitMsgNoScrollbackNotice(t *testing.T) {
 	m := newTestModel()
 	m.Update(bgExitMsg{e: tools.BgExit{ID: "bg_1", Command: "go test ./...", Status: "exited: 0"}})
-	// In inline mode, bgExitMsg emits via tea.Println (returned as Cmd).
-	// printlnBuf is a staging buffer cleared by flushPrints() in Update().
 	if len(m.printlnBuf) > 0 {
-		t.Log("bgExitMsg queued println lines")
+		t.Errorf("bgExitMsg should not queue println lines, got %d", len(m.printlnBuf))
 	}
 }
