@@ -274,14 +274,17 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	skillsManifest := skills.RenderManifest(skillReg)
 	tools.SetSkills(skillReg)
 
-	// Cross-session memory (C9): the store backs the `remember` tool and (below)
-	// renders this session's injection. --no-memory disables both. A store error
-	// (e.g. unresolvable home dir) degrades to no memory rather than failing.
-	var memStore *memory.Store
+	// Cross-session memory (Claude Code model): a per-repo directory of markdown
+	// files the agent manages with its own file tools. memDir is created up
+	// front, injected into the system prompt (below), and whitelisted for writes
+	// when the permission engine is built. --no-memory disables it; a resolve
+	// error degrades to no memory rather than failing.
+	var memDir string
 	if !*noMemory {
-		if store, err := memory.NewStore(); err == nil {
-			memStore = store
-			tools.SetMemoryStore(store)
+		if d, err := memory.Dir(memory.ProjectRoot(cwd)); err == nil {
+			if memory.EnsureDir(d) == nil {
+				memDir = d
+			}
 		}
 	}
 
@@ -428,22 +431,21 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// Boundary memory consolidation runs only for the interactive TUI: a
-	// headless one-shot stays deterministic (no surprise consolidation
-	// sub-agent) and fast. Both paths still get the session-start injection.
-	if useTUI && memStore != nil {
-		maybeProcessMemory(a, memStore)
-	}
+	// Inject the project's MEMORY.md (plus the manage-it-yourself instruction)
+	// into the system prompt. The agent reads/writes the rest of the memory
+	// directory on demand with its file tools — no consolidation pass.
 	var memInjection string
-	if memStore != nil {
-		memInjection, _ = memStore.RenderInjection(memory.ProjectRoot(cwd))
+	if memDir != "" {
+		memInjection = memory.RenderInjection(memDir)
 	}
 	a.System = prompt.Compose(*system, cwd, env, skillsManifest, memInjection)
 
-	// Permission engine — gates every tool call; shared by both paths.
+	// Permission engine — gates every tool call; shared by both paths. The
+	// memory directory (outside CWD) is whitelisted for writes so the agent can
+	// manage its memory files without a prompt on every save.
 	var permEngine *permission.Engine
 	if toolsOn {
-		eng, perr := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(resolvedPermMode))
+		eng, perr := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(resolvedPermMode), memDir)
 		if perr != nil {
 			fmt.Fprintf(stderr, "octo chat: permission config: %v\n", perr)
 			return 1
@@ -472,12 +474,6 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			sess = agent.NewSession(resolvedModel, *system)
 		}
 
-		// Live cross-session memory delta, scoped to the same project root the
-		// startup injection used so the filtering agrees. nil when memory is off.
-		var memRefresh *memoryRefresher
-		if memStore != nil {
-			memRefresh = newMemoryRefresher(memStore, memory.ProjectRoot(cwd))
-		}
 		cfg := replConfig{
 			a:          a,
 			session:    sess,
@@ -488,8 +484,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			stdout:     stdout,
 			stderr:     stderr,
 			skillReg:   skillReg,
-			memStore:   memStore,
-			memRefresh: memRefresh,
+			memDir:     memDir,
 			reader:     replReader,          // shared with the asker / permission gate
 			view:       replView,            // same surface for turn render + Ask prompts
 			hooks:      hooks.LoadFromEnv(), // C9 Phase 3: external retrieval layer hooks
@@ -516,7 +511,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		stdout:     stdout,
 		stderr:     stderr,
 		skillReg:   skillReg,
-		memStore:   memStore,
+		memDir:     memDir,
 		reader:     replReader,
 		view:       replView,
 		hooks:      hooks.LoadFromEnv(),

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/memory"
 )
 
 // stubSender is a deterministic Sender for REPL tests — returns a fixed reply
@@ -401,103 +400,4 @@ func (c *capturingSender) lastUserContent() string {
 		}
 	}
 	return ""
-}
-
-func TestREPL_MemoryNudge_AppendedWhenMemoryAndToolsActive(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-
-	cap := &capturingSender{stubSender: stubSender{reply: "ok"}}
-	a := agent.New(cap, "test-model")
-
-	// Active memory store + a non-empty tools list = nudge should fire.
-	store := memory.NewStoreAt(t.TempDir())
-
-	var stdout, stderr bytes.Buffer
-	cfg := replConfig{
-		a:        a,
-		session:  agent.NewSession("test-model", ""),
-		stdin:    strings.NewReader("hi\n/exit\n"),
-		stdout:   &stdout,
-		stderr:   &stderr,
-		memStore: store,
-		// A dummy tool def is enough to satisfy `len(cfg.tools) > 0`.
-		tools:    []agent.ToolDefinition{{Name: "dummy", Description: "x", Parameters: map[string]any{"type": "object"}}},
-		executor: dummyExecutor{},
-	}
-	if code := runOnce(cfg, "hi", true); code != 0 {
-		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
-	}
-	got := cap.lastUserContent()
-	if !strings.Contains(got, "Memory hygiene check") {
-		t.Errorf("expected nudge in user message, got:\n%s", got)
-	}
-	if !strings.Contains(got, "hi") {
-		t.Errorf("user input lost from message body:\n%s", got)
-	}
-}
-
-func TestREPL_MemoryNudge_AbsentWhenMemoryDisabled(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-
-	cap := &capturingSender{stubSender: stubSender{reply: "ok"}}
-	a := agent.New(cap, "test-model")
-
-	var stdout, stderr bytes.Buffer
-	cfg := replConfig{
-		a:        a,
-		session:  agent.NewSession("test-model", ""),
-		stdin:    strings.NewReader("hi\n/exit\n"),
-		stdout:   &stdout,
-		stderr:   &stderr,
-		memStore: nil, // ← memory off
-		tools:    []agent.ToolDefinition{{Name: "dummy", Description: "x", Parameters: map[string]any{"type": "object"}}},
-		executor: dummyExecutor{},
-	}
-	if code := runOnce(cfg, "hi", true); code != 0 {
-		t.Fatalf("exit = %d", code)
-	}
-	if got := cap.lastUserContent(); strings.Contains(got, "Memory hygiene check") {
-		t.Errorf("nudge should be absent when memory is off; got:\n%s", got)
-	}
-}
-
-func TestREPL_MemoryNudge_AbsentWhenToolsOff(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-
-	cap := &capturingSender{stubSender: stubSender{reply: "ok"}}
-	a := agent.New(cap, "test-model")
-
-	store := memory.NewStoreAt(t.TempDir())
-
-	var stdout, stderr bytes.Buffer
-	cfg := replConfig{
-		a:        a,
-		session:  agent.NewSession("test-model", ""),
-		stdin:    strings.NewReader("hi\n/exit\n"),
-		stdout:   &stdout,
-		stderr:   &stderr,
-		memStore: store,
-		// tools empty: the remember tool can't be called, so the nudge
-		// is pointless and should be omitted.
-	}
-	if code := runOnce(cfg, "hi", true); code != 0 {
-		t.Fatalf("exit = %d", code)
-	}
-	if got := cap.lastUserContent(); strings.Contains(got, "Memory hygiene check") {
-		t.Errorf("nudge should be absent when no tools are advertised; got:\n%s", got)
-	}
-}
-
-// dummyExecutor satisfies the agent.ToolExecutor interface for tests
-// that need cfg.tools to be non-empty but don't actually invoke any tools.
-type dummyExecutor struct{}
-
-func (dummyExecutor) Execute(_ context.Context, name string, _ map[string]any) (agent.ToolResult, error) {
-	return agent.ToolResult{Text: "ok:" + name}, nil
 }

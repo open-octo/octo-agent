@@ -33,8 +33,6 @@ var allTools = []tool{
 	WebFetchTool{},
 	WebSearchTool{},
 	SkillTool{},
-	RememberTool{},
-	ForgetTool{},
 	LaunchAgentTool{},
 	SendMessageTool{},
 	AgentStatusTool{},
@@ -204,19 +202,12 @@ func tokenizeCommand(s string) []string {
 // a slot and confuses the model.
 func DefaultTools() []agent.ToolDefinition {
 	skillsOn := skillsEnabled()
-	memoryOn := memoryEnabled()
 	mgrOn := subAgentManagerEnabled()
 	askerOn := askerEnabled()
 	tasksOn := tasksEnabled()
 	defs := make([]agent.ToolDefinition, 0, len(allTools))
 	for _, t := range allTools {
 		if _, isSkill := t.(SkillTool); isSkill && !skillsOn {
-			continue
-		}
-		if _, isRemember := t.(RememberTool); isRemember && !memoryOn {
-			continue
-		}
-		if _, isForget := t.(ForgetTool); isForget && !memoryOn {
 			continue
 		}
 		if _, isLaunch := t.(LaunchAgentTool); isLaunch && !mgrOn {

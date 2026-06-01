@@ -13,7 +13,6 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/hooks"
-	"github.com/Leihb/octo-agent/internal/memory"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/skills"
 	"github.com/Leihb/octo-agent/internal/tools"
@@ -34,8 +33,7 @@ type replConfig struct {
 	executor    agent.ToolExecutor
 	subAgentMgr *tools.SubAgentManager // nil → sub-agent tools disabled
 	skillReg    *skills.Registry       // discovered skills; backs /skills and /<name>
-	memStore    *memory.Store          // cross-session memory; backs /memory (nil → disabled)
-	memRefresh  *memoryRefresher       // live cross-session memory delta; nil → disabled
+	memDir      string                 // per-repo memory directory; backs /memory ("" → disabled)
 	hooks       *hooks.Runner          // C9 Phase 3 pre/post-turn hooks; nil-safe via Configured()
 	// reader, when non-nil, is the line reader to use instead of building
 	// one fresh inside runREPL. Set by cmd/octo so the same instance is
@@ -164,57 +162,32 @@ func printTuiHelp(w io.Writer) {
 	fmt.Fprintln(w, "every command and skill, so you don't have to remember names.")
 }
 
-// printMemory shows what cross-session memory looks like: active entries
-// (not yet consolidated), the consolidated summary (the actual injection
-// source), and a pointer to the archive. Off / empty states are reported.
-func printMemory(w io.Writer, store *memory.Store) {
-	if store == nil {
+// printMemory lists the project's memory directory: MEMORY.md (the index
+// injected every session) plus any topic files the agent has created. The
+// agent reads/writes/edits these with its file tools; this is just a viewer.
+func printMemory(w io.Writer, memDir string) {
+	if memDir == "" {
 		fmt.Fprintln(w, "Memory is disabled for this session (--no-memory).")
 		return
 	}
-	active, err := store.List()
-	if err != nil {
-		fmt.Fprintf(w, "memory: %v\n", err)
+	fmt.Fprintf(w, "Memory directory: %s\n", memDir)
+	entries, err := os.ReadDir(memDir)
+	if err != nil || len(entries) == 0 {
+		fmt.Fprintln(w, "  (empty — nothing remembered yet)")
 		return
 	}
-	archived, _ := store.ListArchived()
-	buckets, _ := store.Summaries()
-
-	if len(active) == 0 && len(buckets) == 0 && len(archived) == 0 {
-		fmt.Fprintln(w, "Nothing remembered yet.")
-		return
-	}
-
-	if len(active) > 0 {
-		fmt.Fprintln(w, "Active entries (not yet consolidated) — forgettable by name:")
-		for _, e := range active {
-			fmt.Fprintf(w, "  %-22s [%-9s] %s\n", e.Name, e.Type, e.Description)
+	for _, e := range entries {
+		if e.IsDir() {
+			fmt.Fprintf(w, "  %s/\n", e.Name())
+			continue
 		}
-	}
-	for i, sb := range buckets {
-		if i == 0 && len(active) > 0 {
-			fmt.Fprintln(w)
+		info, ierr := e.Info()
+		if ierr != nil {
+			fmt.Fprintf(w, "  %s\n", e.Name())
+			continue
 		}
-		if sb.Cwd == "" {
-			fmt.Fprintln(w, "Consolidated summary — global (injected every session):")
-		} else {
-			fmt.Fprintf(w, "Consolidated summary — %s:\n", sb.Cwd)
-		}
-		for _, line := range strings.Split(sb.Body, "\n") {
-			fmt.Fprintf(w, "  %s\n", line)
-		}
+		fmt.Fprintf(w, "  %-28s %5dB\n", e.Name(), info.Size())
 	}
-	if len(archived) > 0 {
-		fmt.Fprintf(w, "\n(%d archived entr%s — `octo memory list --archive` to view)\n",
-			len(archived), pluralEntries(len(archived)))
-	}
-}
-
-func pluralEntries(n int) string {
-	if n == 1 {
-		return "y"
-	}
-	return "ies"
 }
 
 // printMCP lists the connected MCP servers and the surface they advertised
