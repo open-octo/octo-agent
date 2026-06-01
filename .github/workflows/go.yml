@@ -28,6 +28,10 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
+        env:
+          # Opt into Node 24 early to silence deprecation warnings.
+          # Both actions/checkout@v4 and actions/setup-go@v5 support it.
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       - name: go vet
         run: go vet ./...
