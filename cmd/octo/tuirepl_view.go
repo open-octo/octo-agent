@@ -35,11 +35,35 @@ var (
 	hintStyle         = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
 	userEchoStyle     = lipgloss.NewStyle().Foreground(tui.ColUserMsg).Bold(true)
 	pendingSteerStyle = lipgloss.NewStyle().Foreground(tui.ColMuted)
+	complSelStyle     = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
+	complNameStyle    = lipgloss.NewStyle().Foreground(tui.ColAccent)
 )
 
 func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.modal != nil {
 		return m.handleModalKey(msg)
+	}
+
+	// Slash-command completion menu owns Tab/↑/↓/Enter/Esc while it's open, so
+	// it can navigate and accept without those keys reaching history nav or
+	// submit. Plain typing falls through and re-filters the menu below.
+	if len(m.complItems) > 0 {
+		switch msg.Type {
+		case tea.KeyTab, tea.KeyDown:
+			m.complIdx = (m.complIdx + 1) % len(m.complItems)
+			return m, nil
+		case tea.KeyUp:
+			m.complIdx = (m.complIdx - 1 + len(m.complItems)) % len(m.complItems)
+			return m, nil
+		case tea.KeyEnter:
+			if !msg.Alt {
+				m.acceptCompletion()
+				return m, m.updateTextAreaHeight()
+			}
+		case tea.KeyEsc:
+			m.complItems = nil
+			return m, nil
+		}
 	}
 
 	switch msg.Type {
@@ -176,6 +200,9 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// is handled by bubbles/textarea.
 	var cmd tea.Cmd
 	m.ta, cmd = m.ta.Update(msg)
+	// A fresh edit re-filters the slash-completion menu from the top.
+	m.complIdx = 0
+	m.updateCompletion()
 	if hcmd := m.updateTextAreaHeight(); hcmd != nil {
 		cmd = tea.Batch(cmd, hcmd)
 	}
@@ -415,7 +442,8 @@ func (m *tuiModel) liveHeight() int {
 	if bg := tools.RunningBackground(); len(bg) > 0 {
 		h += 3 + len(bg) // panel border (2) + title (1) + body lines
 	}
-	h += m.ta.Height() // input box (textarea grows with content)
+	h += m.completionHeight() // slash-completion menu (0 when closed)
+	h += m.ta.Height()        // input box (textarea grows with content)
 	if m.turnRunning {
 		h += 3 // status bar with hint: separator + segments + hint
 	} else {
@@ -493,6 +521,9 @@ func (m *tuiModel) View() string {
 			b.WriteByte('\n')
 		}
 	}
+
+	// Slash-command completion menu, right above the input box (Claude Code style).
+	b.WriteString(m.completionView())
 
 	// Input box + status bar
 	b.WriteString(m.renderInputBox())

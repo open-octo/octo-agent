@@ -159,6 +159,9 @@ func printTuiHelp(w io.Writer) {
 	fmt.Fprintln(w, "  /mcp        Show connected MCP servers and their surfaces")
 	fmt.Fprintln(w, "  /goal       Plan + run a goal as a task DAG (also: /goal list, /goal resume <id>)")
 	fmt.Fprintln(w, "  /exit       Save and exit  (also: /quit, Ctrl-C, Ctrl-D)")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Type / to open the completion menu (Tab/↑↓ select, Enter complete) — it lists")
+	fmt.Fprintln(w, "every command and skill, so you don't have to remember names.")
 }
 
 // printMemory shows what cross-session memory looks like: active entries

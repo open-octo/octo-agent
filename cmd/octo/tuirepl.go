@@ -217,6 +217,13 @@ type tuiModel struct {
 	// started browsing history with ↑, so ↓ can restore it.
 	inputDraft string
 
+	// Slash-command completion menu. complItems is the current filtered
+	// candidate set (built-in commands + skills); non-empty means the menu is
+	// open. complIdx is the highlighted row. Recomputed on every keystroke when
+	// the input is a bare "/command" token (see updateCompletion).
+	complItems []complItem
+	complIdx   int
+
 	// turnRunning is true between starting a turn and turnFinishedMsg.
 	turnRunning bool
 	cancelTurn  context.CancelFunc
