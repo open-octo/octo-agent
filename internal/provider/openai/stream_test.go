@@ -244,5 +244,40 @@ func TestSendStream_OpenAI_ValidatesRequest(t *testing.T) {
 	}
 }
 
+// TestSendStream_Kimi_ChoiceUsage verifies that Kimi-style usage embedded
+// inside the final choice object (rather than at the chunk level) is parsed.
+func TestSendStream_Kimi_ChoiceUsage(t *testing.T) {
+	// Kimi puts usage inside choices[0].usage on the final chunk.
+	kimiStream := "" +
+		`data: {"id":"c1","object":"chat.completion.chunk","model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":"assistant"}}]}` + "\n\n" +
+		`data: {"id":"c1","object":"chat.completion.chunk","model":"kimi-k2.6","choices":[{"index":0,"delta":{"content":"hi "}}]}` + "\n\n" +
+		`data: {"id":"c1","object":"chat.completion.chunk","model":"kimi-k2.6","choices":[{"index":0,"delta":{"content":"there"}}]}` + "\n\n" +
+		`data: {"id":"c1","object":"chat.completion.chunk","model":"kimi-k2.6","choices":[{"index":0,"delta":{},"finish_reason":"stop","usage":{"prompt_tokens":19,"completion_tokens":13,"total_tokens":32}}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, kimiStream)
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+
+	resp, err := c.SendStream(context.Background(), provider.Request{
+		Model:    "kimi-k2.6",
+		Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "hi there" {
+		t.Errorf("Content = %q, want %q", resp.Content, "hi there")
+	}
+	if resp.InputTokens != 19 || resp.OutputTokens != 13 {
+		t.Errorf("Usage = (%d, %d), want (19, 13)", resp.InputTokens, resp.OutputTokens)
+	}
+}
+
 // Compile-time assertion.
 var _ provider.StreamingProvider = (*Client)(nil)

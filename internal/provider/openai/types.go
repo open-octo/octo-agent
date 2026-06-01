@@ -211,6 +211,10 @@ type streamChoice struct {
 	Index        int         `json:"index"`
 	Delta        streamDelta `json:"delta"`
 	FinishReason string      `json:"finish_reason,omitempty"`
+	// Usage is populated by some compatible backends (e.g. Kimi) inside the
+	// final choice object rather than at the chunk level. We read it here as
+	// a fallback when the top-level chunk.Usage is absent.
+	Usage *apiUsage `json:"usage,omitempty"`
 }
 
 // streamDelta carries the incremental fields of an assistant message.

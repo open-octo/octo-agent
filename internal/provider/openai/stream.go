@@ -158,6 +158,13 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 			continue
 		}
 		choice := ch.Choices[0]
+		// Some compatible backends (Kimi) embed usage inside the choice object
+		// rather than at the chunk level. Prefer chunk-level but fall back.
+		if choice.Usage != nil {
+			result.InputTokens = choice.Usage.PromptTokens
+			result.OutputTokens = choice.Usage.CompletionTokens
+			result.CacheReadTokens = choice.Usage.cachedTokens()
+		}
 		if choice.Delta.Content != "" {
 			contentB.WriteString(choice.Delta.Content)
 			if onChunk != nil {
