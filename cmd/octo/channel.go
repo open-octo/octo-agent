@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/channel"
@@ -197,11 +198,15 @@ func runChannelStart(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 
 // handleCommand processes slash commands. Returns true if the event was a command.
 func handleCommand(mgr *channel.Manager, ad channel.Adapter, ev channel.InboundEvent) bool {
-	text := ev.Text
-	if len(text) == 0 || text[0] != '/' {
+	text := strings.TrimSpace(ev.Text)
+	if !strings.HasPrefix(text, "/") {
 		return false
 	}
-	return false
+	reply := mgr.CommandRouter(ev)
+	if reply != "" {
+		ad.SendText(ev.ChatID, reply, ev.MessageID)
+	}
+	return true
 }
 
 // handleAgentMessage runs the agent for a non-command inbound message.

@@ -160,7 +160,7 @@ func (m *Manager) IsRunning() bool {
 func (m *Manager) handleInbound(ctx context.Context, ev InboundEvent) {
 	text := strings.TrimSpace(ev.Text)
 	if strings.HasPrefix(text, "/") {
-		reply := m.commandRouter(ev)
+		reply := m.CommandRouter(ev)
 		if reply != "" {
 			m.sendReply(ev, reply)
 		}
@@ -169,8 +169,8 @@ func (m *Manager) handleInbound(ctx context.Context, ev InboundEvent) {
 	m.handleSessionMessage(ctx, ev)
 }
 
-// commandRouter processes slash commands and returns a reply text.
-func (m *Manager) commandRouter(ev InboundEvent) string {
+// CommandRouter processes slash commands and returns a reply text.
+func (m *Manager) CommandRouter(ev InboundEvent) string {
 	parts := strings.Fields(strings.TrimSpace(ev.Text))
 	if len(parts) == 0 {
 		return ""

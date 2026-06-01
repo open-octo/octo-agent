@@ -162,7 +162,7 @@ func TestManager_CommandRouter(t *testing.T) {
 
 	// /bind
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1", Text: "/bind"}
-	reply := mgr.commandRouter(ev)
+	reply := mgr.CommandRouter(ev)
 	if reply == "" {
 		t.Fatal("expected non-empty reply for /bind")
 	}
@@ -172,28 +172,28 @@ func TestManager_CommandRouter(t *testing.T) {
 
 	// /status
 	ev.Text = "/status"
-	reply = mgr.commandRouter(ev)
+	reply = mgr.CommandRouter(ev)
 	if reply == "" {
 		t.Fatal("expected non-empty reply for /status")
 	}
 
 	// /list
 	ev.Text = "/list"
-	reply = mgr.commandRouter(ev)
+	reply = mgr.CommandRouter(ev)
 	if reply == "" {
 		t.Fatal("expected non-empty reply for /list")
 	}
 
 	// /stop (does not delete)
 	ev.Text = "/stop"
-	reply = mgr.commandRouter(ev)
+	reply = mgr.CommandRouter(ev)
 	if reply == "" {
 		t.Fatal("expected non-empty reply for /stop")
 	}
 
 	// /unbind (deletes)
 	ev.Text = "/unbind"
-	reply = mgr.commandRouter(ev)
+	reply = mgr.CommandRouter(ev)
 	if mgr.SessionCount() != 0 {
 		t.Fatalf("expected 0 sessions after /unbind, got %d", mgr.SessionCount())
 	}
@@ -258,7 +258,7 @@ func TestManager_SendReply(t *testing.T) {
 func TestManager_UnknownCommand(t *testing.T) {
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
 	ev := InboundEvent{Text: "/foobar"}
-	reply := mgr.commandRouter(ev)
+	reply := mgr.CommandRouter(ev)
 	if reply == "" {
 		t.Fatal("expected error reply for unknown command")
 	}
