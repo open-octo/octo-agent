@@ -99,8 +99,10 @@ var defaultsYAML []byte
 // New builds an Engine. configPath may be empty (use embedded defaults)
 // or point to a YAML file overriding them. cwd is the working directory
 // used to expand `$CWD` in path rules — pass os.Getwd() unless overriding
-// for tests.
-func New(configPath string, cwd string, mode Mode) (*Engine, error) {
+// for tests. allowWriteRoots are extra directories (e.g. the per-repo memory
+// directory, which lives outside CWD) whose contents the agent may write/edit
+// without a prompt; each gets a prepended allow rule on write_file / edit_file.
+func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*Engine, error) {
 	rules, err := loadRules(defaultsYAML)
 	if err != nil {
 		return nil, fmt.Errorf("permission: parse default rules: %w", err)
@@ -134,6 +136,19 @@ func New(configPath string, cwd string, mode Mode) (*Engine, error) {
 	}
 	if mode == "" {
 		mode = ModeInteractive
+	}
+
+	// Whitelist extra writable roots (e.g. the memory directory) by prepending
+	// an allow rule so it wins over the implicit ask-fallthrough for out-of-CWD
+	// paths. Prepending also means it precedes the secret-path denies, which is
+	// fine: these roots are octo-managed dirs, not places secrets live.
+	for _, root := range allowWriteRoots {
+		if root == "" {
+			continue
+		}
+		allow := Rule{Decision: Allow, Path: []string{root, root + "/**"}}
+		rules["write_file"] = append([]Rule{allow}, rules["write_file"]...)
+		rules["edit_file"] = append([]Rule{allow}, rules["edit_file"]...)
 	}
 
 	return &Engine{

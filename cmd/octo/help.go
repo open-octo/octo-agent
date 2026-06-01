@@ -161,23 +161,23 @@ kill -9 mid-run resumes cleanly via "octo goal resume".`)
 }
 
 func memoryHelp(w io.Writer) {
-	fmt.Fprintln(w, `octo memory — inspect cross-session memory (the durable facts the agent
-remembers between sessions).
+	fmt.Fprintln(w, `octo memory — locate and inspect cross-session memory.
 
-Examples:
-  octo memory list                   Show active memory entries
-  octo memory list --archive         Show entries that have been consolidated into the summary
+Memory is a per-project directory of plain markdown files the agent manages
+itself with its file tools (no dedicated remember/forget tool). MEMORY.md is
+the index, injected into the system prompt each session; topic files beside it
+hold detail and load on demand.
+
+Commands:
+  octo memory list     List the project's memory files (default)
+  octo memory path     Print the project's memory directory
 
 Layout:
-  ~/.octo/memory/<slug>.md            One file per unconsolidated fact
-  ~/.octo/memory/memory_summary.md    The global injected summary
-  ~/.octo/memory/memory_summary__*.md Per-project summaries (injected only in that project)
-  ~/.octo/memory/MEMORY.md            Searchable index of slugs
+  ~/.octo/memory/<repo-slug>/MEMORY.md   Index, injected every session
+  ~/.octo/memory/<repo-slug>/<topic>.md  Detail files the agent reads on demand
 
-Memory is built up by the in-session 'remember' tool and consolidated at chat
-startup once enough entries accumulate. Facts remembered inside a git repo are
-scoped to that project; the rest are global. To disable memory injection for a
-single session, run "octo chat --no-memory".`)
+The directory is keyed by git repo root, so each project has its own memory.
+To disable memory injection for a single session, run "octo chat --no-memory".`)
 }
 
 func initHelp(w io.Writer) {

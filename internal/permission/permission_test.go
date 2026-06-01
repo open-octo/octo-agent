@@ -105,6 +105,30 @@ func TestDefaultRules_WriteFileSensitive(t *testing.T) {
 	}
 }
 
+func TestExtraWriteRoots_AllowedOutsideCWD(t *testing.T) {
+	memDir := "/home/user/.octo/memory/myrepo-deadbeef"
+	e, err := New("", "/work", ModeInteractive, memDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]Decision{
+		memDir + "/MEMORY.md":       Allow, // whitelisted memory dir → allow
+		memDir + "/topics/debug.md": Allow,
+		"/work/src/main.go":         Allow, // CWD still allowed
+		"/home/user/other/file.txt": Ask,   // unrelated out-of-CWD path → ask
+		"/home/user/.ssh/id_rsa":    Deny,  // secret deny still wins elsewhere
+	}
+	for p, want := range cases {
+		if got := e.Check("write_file", map[string]any{"path": p}); got != want {
+			t.Errorf("write_file %q: got %s, want %s", p, got, want)
+		}
+	}
+	// edit_file gets the same whitelist.
+	if got := e.Check("edit_file", map[string]any{"path": memDir + "/MEMORY.md"}); got != Allow {
+		t.Errorf("edit_file in memory dir: got %s, want allow", got)
+	}
+}
+
 func TestDefaultRules_ReadFile(t *testing.T) {
 	e := newDefaultEngine(t)
 	cases := map[string]Decision{

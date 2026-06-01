@@ -3,74 +3,55 @@ package main
 import (
 	"fmt"
 	"io"
-	"strings"
+	"os"
 
 	"github.com/Leihb/octo-agent/internal/memory"
 )
 
-// runMemory handles `octo memory <subcommand>`. Currently `list` (active
-// entries + consolidated summary) and `list --archive` (entries already folded
-// into the summary, kept as authoritative sources).
+// runMemory handles `octo memory <subcommand>`:
+//   - path: print the current project's memory directory
+//   - list: list the files in it (MEMORY.md + topic files)
+//
+// Memory is plain markdown the agent manages with its file tools; this command
+// is just a viewer/locator.
 func runMemory(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "list" {
-		fmt.Fprintln(stderr, "Usage: octo memory list [--archive]")
+	sub := "list"
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	if sub != "list" && sub != "path" {
+		fmt.Fprintln(stderr, "Usage: octo memory [list|path]")
 		return 2
 	}
-	showArchive := false
-	for _, a := range args[1:] {
-		if a == "--archive" {
-			showArchive = true
-		}
-	}
 
-	store, err := memory.NewStore()
+	cwd, _ := os.Getwd()
+	dir, err := memory.Dir(memory.ProjectRoot(cwd))
 	if err != nil {
 		fmt.Fprintf(stderr, "octo memory: %v\n", err)
 		return 1
 	}
 
-	var (
-		entries []memory.Entry
-		header  string
-	)
-	if showArchive {
-		entries, err = store.ListArchived()
-		header = "Archived memories:"
-	} else {
-		entries, err = store.List()
-		header = "Stored memories:"
-	}
-	if err != nil {
-		fmt.Fprintf(stderr, "octo memory: %v\n", err)
-		return 1
+	if sub == "path" {
+		fmt.Fprintln(stdout, dir)
+		return 0
 	}
 
-	switch {
-	case len(entries) == 0 && showArchive:
-		fmt.Fprintln(stdout, "No archived memories.")
-	case len(entries) == 0:
-		fmt.Fprintln(stdout, "No memories stored.")
-	default:
-		fmt.Fprintln(stdout, header)
-		for _, e := range entries {
-			fmt.Fprintf(stdout, "  %-28s [%-9s] %s\n", e.Name, e.Type, e.Description)
+	fmt.Fprintf(stdout, "Memory directory: %s\n", dir)
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		fmt.Fprintln(stdout, "  (empty — nothing remembered yet)")
+		return 0
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() {
+			fmt.Fprintf(stdout, "  %s/\n", name)
+			continue
 		}
-	}
-
-	// In the non-archive view, also show the consolidated summaries (the actual
-	// injection source) so users can see consolidation happened — otherwise they
-	// generate silently. One global bucket + one per project.
-	if !showArchive {
-		buckets, _ := store.Summaries()
-		for _, sb := range buckets {
-			if sb.Cwd == "" {
-				fmt.Fprintln(stdout, "\nConsolidated summary — global (injected every session):")
-			} else {
-				fmt.Fprintf(stdout, "\nConsolidated summary — %s (injected in that project):\n", sb.Cwd)
-			}
-			for _, line := range strings.Split(sb.Body, "\n") {
-				fmt.Fprintf(stdout, "  %s\n", line)
-			}
+		if info, ierr := e.Info(); ierr == nil {
+			fmt.Fprintf(stdout, "  %-28s %6dB\n", name, info.Size())
+		} else {
+			fmt.Fprintf(stdout, "  %s\n", name)
 		}
 	}
 	return 0

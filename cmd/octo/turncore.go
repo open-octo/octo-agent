@@ -64,19 +64,6 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 		turnInput = strings.Join(pending, "\n\n") + "\n\n" + turnInput
 	}
 
-	if cfg.memStore != nil && len(cfg.tools) > 0 {
-		turnInput = appendMemoryNudge(turnInput)
-	}
-
-	// Live cross-session memory: fold any entries written since this session
-	// started (e.g. by another terminal) into the tail of this turn. Tail
-	// injection is cache-free — the new user turn is uncached regardless, so
-	// the system/tools/history prefix stays cached. The session-start snapshot
-	// in the (frozen) system prompt is unaffected.
-	if cfg.memRefresh != nil {
-		turnInput += renderMemoryUpdate(cfg.memRefresh.delta())
-	}
-
 	// Pre-turn hook: feed the raw user input to an external retrieval layer;
 	// whatever it returns is folded into the user message. Hook errors are
 	// surfaced but never block the turn.

@@ -289,7 +289,7 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		case "/skills":
 			printSkills(&b, cfg.skillReg)
 		case "/memory":
-			printMemory(&b, cfg.memStore)
+			printMemory(&b, cfg.memDir)
 		case "/mcp":
 			printMCP(&b)
 		}
