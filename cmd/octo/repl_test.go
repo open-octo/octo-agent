@@ -63,110 +63,54 @@ func makeREPLFixture(t *testing.T, input string) (replConfig, *bytes.Buffer, *by
 	return cfg, &stdout, &stderr, stub
 }
 
-func TestREPL_SingleTurn(t *testing.T) {
-	cfg, stdout, stderr, stub := makeREPLFixture(t, "ping\n/exit\n")
+func TestRunOnce_AgenticTurn(t *testing.T) {
+	cfg, stdout, stderr, stub := makeREPLFixture(t, "")
 
-	code := runREPL(cfg)
+	code := runOnce(cfg, "ping", true)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
 	}
 	if stub.called != 1 {
 		t.Errorf("Sender called %d times, want 1", stub.called)
 	}
-	out := stdout.String()
-	if !strings.Contains(out, "pong") {
+	if out := stdout.String(); !strings.Contains(out, "pong") {
 		t.Errorf("stdout does not contain reply %q:\n%s", "pong", out)
 	}
 }
 
-func TestREPL_MultiTurn(t *testing.T) {
-	cfg, _, stderr, stub := makeREPLFixture(t, "one\ntwo\nthree\n/exit\n")
+func TestRunOnce_BufferedPrintsFinalText(t *testing.T) {
+	cfg, stdout, stderr, stub := makeREPLFixture(t, "")
 
-	code := runREPL(cfg)
+	code := runOnce(cfg, "ping", false) // --stream=false
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
 	}
-	if stub.called != 3 {
-		t.Errorf("Sender called %d times, want 3", stub.called)
-	}
-}
-
-func TestREPL_EmptyLineSkipped(t *testing.T) {
-	cfg, _, _, stub := makeREPLFixture(t, "\n\nhello\n/exit\n")
-
-	runREPL(cfg)
 	if stub.called != 1 {
-		t.Errorf("Sender called %d times, want 1 (empty lines must be skipped)", stub.called)
+		t.Errorf("Sender called %d times, want 1", stub.called)
+	}
+	if out := stdout.String(); !strings.Contains(out, "pong") {
+		t.Errorf("buffered stdout does not contain reply %q:\n%s", "pong", out)
 	}
 }
 
-// Slash commands (/help, /cost, /save, unknown-command handling, skill
-// triggers) now live exclusively in the TUI — see dispatchSlash and its tests
-// in tuirepl_slash_test.go. The plain REPL keeps only /exit (+ /quit alias),
-// covered by the conversation-loop tests above.
+func TestRunOnce_DoesNotPersistSession(t *testing.T) {
+	cfg, stdout, _, _ := makeREPLFixture(t, "")
 
-func TestREPL_PlainSlashIsJustText(t *testing.T) {
-	// In the plain REPL every leading-"/" line except /exit is ordinary message
-	// text, so it reaches the model rather than being intercepted.
-	cfg, _, _, stub := makeREPLFixture(t, "/cost\n/exit\n")
-
-	runREPL(cfg)
-	if stub.called != 1 {
-		t.Errorf("Sender called %d times; /cost should be sent as a message in plain mode, want 1", stub.called)
-	}
-}
-
-func TestREPL_EOFExitsCleanly(t *testing.T) {
-	cfg, _, stderr, _ := makeREPLFixture(t, "") // EOF immediately
-
-	code := runREPL(cfg)
-	if code != 0 {
-		t.Fatalf("EOF exit code = %d, stderr: %s", code, stderr.String())
-	}
-}
-
-func TestREPL_NoSave(t *testing.T) {
-	cfg, stdout, _, _ := makeREPLFixture(t, "hi\n/exit\n")
-	cfg.noSave = true
-
-	runREPL(cfg)
+	runOnce(cfg, "hi", true)
+	// One-shot never persists — no save banner, and no session file under the
+	// temp HOME the fixture redirected to.
 	if strings.Contains(stdout.String(), "Session saved") {
-		t.Error("expected no save message with --no-save")
+		t.Error("one-shot must not print a save banner")
+	}
+	if sessions, err := agent.ListSessions(10); err == nil && len(sessions) != 0 {
+		t.Errorf("one-shot must not write a session file; found %d", len(sessions))
 	}
 }
 
-func TestREPL_AutoSaveAfterTurn(t *testing.T) {
-	cfg, _, stderr, _ := makeREPLFixture(t, "hi\n/exit\n")
-
-	code := runREPL(cfg)
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
-	}
-	// If auto-save failed it writes to stderr.
-	if strings.Contains(stderr.String(), "auto-save failed") {
-		t.Errorf("auto-save failed: %s", stderr.String())
-	}
-}
-
-func TestREPL_ResumedSessionShowsTurnCount(t *testing.T) {
-	cfg, stdout, stderr, _ := makeREPLFixture(t, "/exit\n")
-	// Pre-populate two turns in history to simulate a resumed session.
-	cfg.a.History.Append(agent.NewUserMessage("old q"))
-	cfg.a.History.Append(agent.NewAssistantMessage("old a"))
-	cfg.session.SyncFrom(cfg.a.History)
-
-	code := runREPL(cfg)
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
-	}
-	out := stdout.String()
-	if !strings.Contains(out, "Resumed") {
-		t.Errorf("expected 'Resumed' in output:\n%s", out)
-	}
-	if !strings.Contains(out, "1 turn") {
-		t.Errorf("expected '1 turn' in output:\n%s", out)
-	}
-}
+// Multi-turn, EOF handling, the resumed-session banner, and slash-as-text were
+// behaviours of the interactive plain REPL, which no longer exists: an
+// interactive terminal always drives the TUI, and every headless invocation is
+// a single agentic turn via runOnce. Resume (-c) is now a TUI-only affordance.
 
 // ─── replToolEventHandler tests ─────────────────────────────────────────────
 
@@ -412,39 +356,21 @@ func TestREPLToolEventHandler_PlainForcesEditFileToStatusLine(t *testing.T) {
 	}
 }
 
-func TestREPL_QuietMode_SuppressesChrome(t *testing.T) {
-	cfg, stdout, _, _ := makeREPLFixture(t, "ping\n/exit\n")
+func TestRunOnce_QuietMode_SuppressesChrome(t *testing.T) {
+	cfg, stdout, _, _ := makeREPLFixture(t, "")
 	cfg.verbosity = verbosityQuiet
 
-	if code := runREPL(cfg); code != 0 {
+	if code := runOnce(cfg, "ping", true); code != 0 {
 		t.Fatalf("exit = %d", code)
 	}
 	out := stdout.String()
-	// Quiet mode strips: the "Starting session ..." banner, the "to quit"
-	// hint, and the "Session saved → ..." footer. The model reply itself
-	// must still come through (otherwise quiet would be useless).
-	for _, banned := range []string{"Starting session", "to quit", "Session saved"} {
-		if strings.Contains(out, banned) {
-			t.Errorf("quiet mode should not emit %q:\n%s", banned, out)
-		}
+	// Quiet strips the end-of-turn cache line; the model reply itself must
+	// still come through (otherwise quiet would be useless).
+	if strings.Contains(out, "ⓘ cache") {
+		t.Errorf("quiet mode should not emit the cache line:\n%s", out)
 	}
 	if !strings.Contains(out, "pong") {
 		t.Errorf("quiet mode must still print the model reply; got:\n%s", out)
-	}
-}
-
-func TestREPL_VerboseMode_PrintsModelAndHints(t *testing.T) {
-	cfg, stdout, _, _ := makeREPLFixture(t, "ping\n/exit\n")
-	cfg.verbosity = verbosityVerbose
-
-	if code := runREPL(cfg); code != 0 {
-		t.Fatalf("exit = %d", code)
-	}
-	out := stdout.String()
-	// Verbose mode adds a `model:` line under the banner. permissions/tools
-	// lines only render when configured (not in this fixture).
-	if !strings.Contains(out, "model: test-model") {
-		t.Errorf("verbose mode should print model line; got:\n%s", out)
 	}
 }
 
@@ -500,7 +426,7 @@ func TestREPL_MemoryNudge_AppendedWhenMemoryAndToolsActive(t *testing.T) {
 		tools:    []agent.ToolDefinition{{Name: "dummy", Description: "x", Parameters: map[string]any{"type": "object"}}},
 		executor: dummyExecutor{},
 	}
-	if code := runREPL(cfg); code != 0 {
+	if code := runOnce(cfg, "hi", true); code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
 	}
 	got := cap.lastUserContent()
@@ -531,7 +457,7 @@ func TestREPL_MemoryNudge_AbsentWhenMemoryDisabled(t *testing.T) {
 		tools:    []agent.ToolDefinition{{Name: "dummy", Description: "x", Parameters: map[string]any{"type": "object"}}},
 		executor: dummyExecutor{},
 	}
-	if code := runREPL(cfg); code != 0 {
+	if code := runOnce(cfg, "hi", true); code != 0 {
 		t.Fatalf("exit = %d", code)
 	}
 	if got := cap.lastUserContent(); strings.Contains(got, "Memory hygiene check") {
@@ -560,7 +486,7 @@ func TestREPL_MemoryNudge_AbsentWhenToolsOff(t *testing.T) {
 		// tools empty: the remember tool can't be called, so the nudge
 		// is pointless and should be omitted.
 	}
-	if code := runREPL(cfg); code != 0 {
+	if code := runOnce(cfg, "hi", true); code != 0 {
 		t.Fatalf("exit = %d", code)
 	}
 	if got := cap.lastUserContent(); strings.Contains(got, "Memory hygiene check") {

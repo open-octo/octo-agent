@@ -95,15 +95,15 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	stream := fs.Bool("stream", true, "Stream the reply (chunks printed as they arrive); --stream=false buffers")
 	continueID := fs.String("c", "", "Resume a session — accepts 'last', a short ID, or a substring of an ID")
 	continueIDLong := fs.String("continue", "", "Resume a session — accepts 'last', a short ID, or a substring of an ID")
-	noSave := fs.Bool("no-save", false, "Disable auto-save in REPL mode")
+	noSave := fs.Bool("no-save", false, "Disable session auto-save in the interactive TUI (headless one-shots never persist)")
 	listSessions := fs.Bool("list-sessions", false, "Print the 10 most recent sessions and exit")
 	listSkills := fs.Bool("list-skills", false, "Print available skills (user + project) and exit")
 	enableTools := fs.Bool("tools", true, "Built-in tools (terminal, edit_file, …) for the agentic loop. On by default; use --no-tools to disable.")
 	noTools := fs.Bool("no-tools", false, "Disable the built-in tools (and MCP/skill execution) — plain chat only")
 	noMemory := fs.Bool("no-memory", false, "Disable cross-session memory (the remember tool + memory injection)")
 	plain := fs.Bool("plain", false, "Render tool events as one-line ↳ status lines instead of rich diff cards")
-	promptFile := fs.String("prompt-file", "", "Read a single multi-line prompt from this file and run it as one agentic turn (newlines preserved), then continue reading turns from stdin. For scripting/eval; avoids the one-turn-per-line split of piped multi-line input.")
-	noTUI := fs.Bool("no-tui", false, "Disable the interactive TUI on a terminal; use the plain line-based REPL (also OCTO_TUI=0)")
+	promptFile := fs.String("prompt-file", "", "Read the prompt from this file (newlines preserved) and run it as one headless agentic turn, then exit. For scripting/eval.")
+	noTUI := fs.Bool("no-tui", false, "Force the headless one-shot path on a terminal instead of the interactive TUI (also OCTO_TUI=0). The prompt comes from a positional message, --prompt-file, or piped stdin.")
 	quietFlag := fs.Bool("quiet", false, "Strip all status chrome (no spinner, no banner, no cache line). Also OCTO_VERBOSITY=quiet.")
 	verboseFlag := fs.Bool("verbose", false, "Print extra context (provider/model/endpoint, always-on cache line). Also OCTO_VERBOSITY=verbose.")
 	permMode := fs.String("permission-mode", "", "Tool permission handling: interactive (prompt on ask) | strict (deny on ask) | auto (allow on ask). Empty = use `octo config` value, else interactive.")
@@ -160,9 +160,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	userInput := strings.TrimSpace(strings.Join(fs.Args(), " "))
 	isREPL := userInput == ""
 
-	// --prompt-file seeds the agentic REPL with one multi-line initial turn.
-	// It's mutually exclusive with a positional message (which is single-turn,
-	// tool-free) — accepting both would silently drop one.
+	// --prompt-file supplies the one-shot prompt from a file. It's mutually
+	// exclusive with a positional message — both are prompt sources, and
+	// accepting both would silently drop one.
 	var seedPrompt string
 	if *promptFile != "" {
 		if !isREPL {
@@ -325,94 +325,113 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		replView     ViewSink
 		subAgentMgr  *tools.SubAgentManager
 	)
-	// useTUI: an interactive terminal drives the bubbletea TUI unless the user
-	// (or OCTO_TUI=0) opted out. Piped / redirected stdin always uses the plain
-	// line-based path (tests, mswe-eval, CI). See design §5, §12.
-	// --prompt-file forces the plain line-based path: seeding the turn relies
-	// on the scanner reader, and the TUI owns its own input.
+	// Two surfaces only. An interactive terminal drives the bubbletea TUI;
+	// everything else is a headless one-shot — octo's claude -p mode. A
+	// positional message, --prompt-file, piped/redirected stdin, --no-tui, or
+	// OCTO_TUI=0 all take the one-shot path (tests, mswe-eval, CI included).
 	useTUI := isREPL && stdinIsTTY(stdin) && !*noTUI && !tuiDisabledByEnv() && seedPrompt == ""
-	if isREPL {
-		toolExecutor = tools.NewDefaultRegistry()
-		spawner := newAgentSpawner(a, toolExecutor, tools.DefaultTools)
-		tools.SetSpawner(spawner)
-		subAgentMgr = tools.NewSubAgentManager(spawner)
-		if useTUI {
-			// bubbletea owns stdin and renders its own input; the asker and gate
-			// are wired to the TUI sink inside runTUI. No readline reader or
-			// plainView is built (they'd fight bubbletea for the terminal).
-			defer tools.SetAsker(nil)
-		} else {
-			if stdinIsTTY(stdin) {
-				rl, err := newReadlineReader(defaultHistoryFile())
-				if err != nil {
-					fmt.Fprintf(stderr, "octo chat: line editor unavailable (%v); falling back to plain input\n", err)
-					replReader = newScannerLineReader(stdin, stdout)
-				} else {
-					replReader = rl
-				}
-			} else {
-				replReader = newScannerLineReader(stdin, stdout)
-			}
-			// --prompt-file: deliver the file as the first turn verbatim, then
-			// fall through to stdin. Wrapping here (before the view/asker are
-			// built) means the loop, gate, and asker share the one seeded reader.
-			if seedPrompt != "" {
-				replReader = &seededLineReader{seed: seedPrompt, inner: replReader}
-			}
-			// One view backs the turn loop, the permission gate, and the asker,
-			// so they share a single presentation surface. Built here because
-			// the asker is registered before runREPL constructs its config.
-			replView = newPlainView(replReader, stdout, stderr, resolveVerbosity(*quietFlag, *verboseFlag), *plain)
-			tools.SetAsker(newREPLAsker(replView))
-			defer tools.SetAsker(nil)
+
+	// Resuming a session (-c) is an interactive affordance — it only makes sense
+	// in the TUI. A headless one-shot starts fresh.
+	if resumeID != "" && !useTUI {
+		fmt.Fprintln(stderr, "octo chat: -c/--continue needs an interactive terminal (run it without piping/--no-tui)")
+		return 2
+	}
+
+	// Resolve the single prompt for the one-shot path: positional message →
+	// --prompt-file → all of piped stdin. The TUI reads its own input.
+	var oneShotPrompt string
+	if !useTUI {
+		oneShotPrompt = userInput
+		if oneShotPrompt == "" {
+			oneShotPrompt = seedPrompt
 		}
+		if oneShotPrompt == "" && !stdinIsTTY(stdin) {
+			b, rerr := io.ReadAll(stdin)
+			if rerr != nil {
+				fmt.Fprintf(stderr, "octo chat: read stdin: %v\n", rerr)
+				return 1
+			}
+			oneShotPrompt = strings.TrimSpace(string(b))
+		}
+		if oneShotPrompt == "" {
+			fmt.Fprintln(stderr, "octo chat: no prompt — pass a message, use --prompt-file, or pipe input on stdin")
+			return 2
+		}
+	}
 
-		// Session-scoped task tracker backing the task_create / task_update /
-		// task_list tools. Lost on exit by design (cross-session persistence
-		// is M11 territory).
-		tools.SetTaskStore(tasks.New())
-		defer tools.SetTaskStore(nil)
-
-		// MCP servers: load config, connect, register so DefaultTools and
-		// DefaultRegistry pick them up. Best-effort — a misconfigured or
-		// missing server is logged on stderr and the session keeps going.
-		// Tool-disabled chat doesn't load MCP because the agent would never
-		// invoke the tools anyway and we'd be paying subprocess spawn cost
-		// for nothing.
-		if toolsOn {
-			mcpCfg, err := mcp.LoadConfig(cwd)
+	// Agentic setup — shared by both paths, which each run the full tool loop.
+	toolExecutor = tools.NewDefaultRegistry()
+	spawner := newAgentSpawner(a, toolExecutor, tools.DefaultTools)
+	tools.SetSpawner(spawner)
+	subAgentMgr = tools.NewSubAgentManager(spawner)
+	if useTUI {
+		// bubbletea owns stdin and renders its own input; the asker and gate
+		// are wired to the TUI sink inside runTUI.
+		defer tools.SetAsker(nil)
+	} else {
+		// A TTY reader (a positional message typed at a terminal) makes
+		// permission / Ask prompts interactive. Over a pipe stdin is already
+		// drained into the prompt, so the reader hits EOF and plainView
+		// auto-denies — the headless posture.
+		if stdinIsTTY(stdin) {
+			rl, err := newReadlineReader(defaultHistoryFile())
 			if err != nil {
-				fmt.Fprintf(stderr, "octo chat: mcp config: %v\n", err)
-			} else if len(mcpCfg.Servers) > 0 {
-				mcpReg := mcp.ConnectAll(
-					context.Background(),
-					mcpCfg,
-					mcp.Implementation{Name: "octo", Version: version.Version},
-					func(serverName string) mcp.OAuthPrompt {
-						return newCLIOAuthPrompt(stdout, serverName)
-					},
-					stderr,
-				)
-				if mcpReg.Len() > 0 {
-					tools.SetMCPRegistry(mcpReg)
-					defer func() {
-						tools.SetMCPRegistry(nil)
-						mcpReg.Close()
-					}()
-					if mcpReg.Len() == 1 {
-						fmt.Fprintf(stdout, "Connected 1 MCP server.\n")
-					} else {
-						fmt.Fprintf(stdout, "Connected %d MCP servers.\n", mcpReg.Len())
-					}
+				fmt.Fprintf(stderr, "octo chat: line editor unavailable (%v); falling back to plain input\n", err)
+				replReader = newScannerLineReader(stdin, stdout)
+			} else {
+				replReader = rl
+			}
+		} else {
+			replReader = newScannerLineReader(stdin, stdout)
+		}
+		replView = newPlainView(replReader, stdout, stderr, resolveVerbosity(*quietFlag, *verboseFlag), *plain)
+		tools.SetAsker(newREPLAsker(replView))
+		defer tools.SetAsker(nil)
+	}
+
+	// Session-scoped task tracker backing the task_create / task_update /
+	// task_list tools. Lost on exit by design.
+	tools.SetTaskStore(tasks.New())
+	defer tools.SetTaskStore(nil)
+
+	// MCP servers: load config, connect, register so DefaultTools and
+	// DefaultRegistry pick them up. Best-effort — a misconfigured or missing
+	// server is logged on stderr and the session keeps going. Skipped when
+	// tools are off (the agent would never invoke them).
+	if toolsOn {
+		mcpCfg, err := mcp.LoadConfig(cwd)
+		if err != nil {
+			fmt.Fprintf(stderr, "octo chat: mcp config: %v\n", err)
+		} else if len(mcpCfg.Servers) > 0 {
+			mcpReg := mcp.ConnectAll(
+				context.Background(),
+				mcpCfg,
+				mcp.Implementation{Name: "octo", Version: version.Version},
+				func(serverName string) mcp.OAuthPrompt {
+					return newCLIOAuthPrompt(stdout, serverName)
+				},
+				stderr,
+			)
+			if mcpReg.Len() > 0 {
+				tools.SetMCPRegistry(mcpReg)
+				defer func() {
+					tools.SetMCPRegistry(nil)
+					mcpReg.Close()
+				}()
+				if mcpReg.Len() == 1 {
+					fmt.Fprintf(stdout, "Connected 1 MCP server.\n")
+				} else {
+					fmt.Fprintf(stdout, "Connected %d MCP servers.\n", mcpReg.Len())
 				}
 			}
 		}
 	}
 
-	// Boundary memory (REPL only): consolidate the live-captured entries into
-	// the summary if due, BEFORE rendering this session's injection so freshly
-	// folded facts apply immediately. Best-effort — errors don't block startup.
-	if isREPL && memStore != nil {
+	// Boundary memory consolidation runs only for the interactive TUI: a
+	// headless one-shot stays deterministic (no surprise consolidation
+	// sub-agent) and fast. Both paths still get the session-start injection.
+	if useTUI && memStore != nil {
 		maybeProcessMemory(a, memStore)
 	}
 	var memInjection string
@@ -421,10 +440,20 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	a.System = prompt.Compose(*system, cwd, env, skillsManifest, memInjection)
 
-	// ── REPL mode ────────────────────────────────────────────────────────────
-	if isREPL {
-		var sess *agent.Session
+	// Permission engine — gates every tool call; shared by both paths.
+	var permEngine *permission.Engine
+	if toolsOn {
+		eng, perr := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(resolvedPermMode))
+		if perr != nil {
+			fmt.Fprintf(stderr, "octo chat: permission config: %v\n", perr)
+			return 1
+		}
+		permEngine = eng
+	}
 
+	// ── Interactive TUI ───────────────────────────────────────────────────────
+	if useTUI {
+		var sess *agent.Session
 		if resumeID != "" {
 			sess, err = agent.LoadSession(resumeID)
 			if err != nil {
@@ -464,67 +493,41 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			reader:     replReader,          // shared with the asker / permission gate
 			view:       replView,            // same surface for turn render + Ask prompts
 			hooks:      hooks.LoadFromEnv(), // C9 Phase 3: external retrieval layer hooks
+			permEngine: permEngine,
 		}
 		if toolsOn {
-			// Spawner is already registered above (before the memory pass) so
-			// launch_agent shows up in DefaultTools here. Reuse the executor
-			// built earlier so the spawner and the REPL share the same read
-			// tracker / mutex-guarded state.
 			cfg.tools = tools.DefaultTools()
 			cfg.executor = toolExecutor
 			cfg.subAgentMgr = subAgentMgr
-
-			// Build the permission engine that gates every tool call.
-			cwd, _ := os.Getwd()
-			engine, err := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(resolvedPermMode))
-			if err != nil {
-				fmt.Fprintf(stderr, "octo chat: permission config: %v\n", err)
-				return 1
-			}
-			cfg.permEngine = engine
 		}
-		if useTUI {
-			return runTUI(cfg)
-		}
-		return runREPL(cfg)
+		return runTUI(cfg)
 	}
 
-	// ── Single-turn mode (original M2 behaviour) ──────────────────────────────
-	// Reap any background processes the turn spawned (REPL handles its own).
-	defer tools.KillAllBackground()
-	v := resolveVerbosity(*quietFlag, *verboseFlag)
-	if *stream {
-		var spin *spinner
-		if !v.quiet() {
-			spin = newSpinner(stdout, "thinking…")
-			spin.Start(250 * time.Millisecond)
-		}
-		reply, err := a.TurnStream(context.Background(), userInput, func(d string) {
-			spin.Stop()
-			fmt.Fprint(stdout, d)
-		})
-		spin.Stop()
-		if err != nil {
-			fmt.Fprintf(stderr, "\nocto chat: %v\n", err)
-			return 1
-		}
-		fmt.Fprintln(stdout)
-		if !v.quiet() {
-			printUsageLine(stderr, reply)
-		}
-		return 0
+	// ── Headless one-shot (claude -p) ─────────────────────────────────────────
+	// One agentic turn, then exit. The session is ephemeral — one-shot runs are
+	// not persisted (resuming with -c stays a TUI affordance).
+	replCfg := replConfig{
+		a:          a,
+		session:    agent.NewSession(resolvedModel, *system),
+		noSave:     true,
+		plain:      *plain,
+		verbosity:  resolveVerbosity(*quietFlag, *verboseFlag),
+		stdin:      stdin,
+		stdout:     stdout,
+		stderr:     stderr,
+		skillReg:   skillReg,
+		memStore:   memStore,
+		reader:     replReader,
+		view:       replView,
+		hooks:      hooks.LoadFromEnv(),
+		permEngine: permEngine,
 	}
-
-	reply, err := a.Turn(context.Background(), userInput)
-	if err != nil {
-		fmt.Fprintf(stderr, "octo chat: %v\n", err)
-		return 1
+	if toolsOn {
+		replCfg.tools = tools.DefaultTools()
+		replCfg.executor = toolExecutor
+		replCfg.subAgentMgr = subAgentMgr
 	}
-	fmt.Fprintln(stdout, reply.Content)
-	if !v.quiet() {
-		printUsageLine(stderr, reply)
-	}
-	return 0
+	return runOnce(replCfg, oneShotPrompt, *stream)
 }
 
 // printUsageLine writes a one-line token/cache summary to w when the backend

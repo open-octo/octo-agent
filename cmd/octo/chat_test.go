@@ -17,23 +17,22 @@ import (
 	"github.com/Leihb/octo-agent/internal/provider"
 )
 
-// TestRunChat_NoArgs_EntersREPL verifies that omitting a message starts the
-// interactive REPL (M3) rather than erroring out (M2 behaviour).
-// We supply an immediate EOF on stdin so the REPL exits without blocking.
-func TestRunChat_NoArgs_EntersREPL(t *testing.T) {
+// TestRunChat_NoArgs_NoStdin_Errors verifies the headless routing: with no
+// positional message and nothing on a non-tty stdin, there's no prompt to run,
+// so octo errors instead of blocking. (A real terminal would drive the TUI;
+// that path can't be unit-tested without a pty.)
+func TestRunChat_NoArgs_NoStdin_Errors(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp) // Windows compat
-	// Fake provider so we don't need a real API key.
 	var stdout, stderr bytes.Buffer
-	// Immediate EOF → REPL reads nothing and exits cleanly.
 	code := runChat(nil, strings.NewReader(""), &stdout, &stderr)
-	if code != 0 {
-		t.Errorf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2; stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Starting session") {
-		t.Errorf("stdout should contain REPL banner; got: %q", stdout.String())
+	if !strings.Contains(stderr.String(), "no prompt") {
+		t.Errorf("stderr should explain there's no prompt; got: %q", stderr.String())
 	}
 }
 
@@ -526,9 +525,11 @@ func TestRunChat_ResumedToolSession_DefaultOnNoWarning(t *testing.T) {
 
 	// Resume with no tool flag at all. Provide immediate EOF so the REPL exits.
 	var stdout, stderr bytes.Buffer
+	// Resume is interactive-only; headless -c errors (exit 2). The point of
+	// this test is the absence of the tools-off warning, which is unaffected.
 	code := runChat([]string{"-c", sess.ID}, strings.NewReader(""), &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	if code != 2 {
+		t.Fatalf("headless -c should error (exit 2); got %d, stderr=%q", code, stderr.String())
 	}
 	if strings.Contains(stderr.String(), "may make the model emit tool calls as text") {
 		t.Errorf("tools-on resume should not warn; got stderr:\n%s", stderr.String())
@@ -556,9 +557,11 @@ func TestRunChat_ResumedToolSession_NoToolsWarns(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
+	// The --no-tools warning fires before the interactive-only resume guard, so
+	// it still reaches stderr even though the headless -c then errors (exit 2).
 	code := runChat([]string{"-c", sess.ID, "--no-tools"}, strings.NewReader(""), &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	if code != 2 {
+		t.Fatalf("headless -c should error (exit 2); got %d, stderr=%q", code, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "may make the model emit tool calls as text") {
 		t.Errorf("expected --no-tools warning on a tool session; got stderr:\n%s", stderr.String())
@@ -584,8 +587,8 @@ func TestRunChat_ResumedPlainSession_NoWarning(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := runChat([]string{"-c", sess.ID, "--no-tools"}, strings.NewReader(""), &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	if code != 2 {
+		t.Fatalf("headless -c should error (exit 2); got %d, stderr=%q", code, stderr.String())
 	}
 	if strings.Contains(stderr.String(), "may make the model emit tool calls as text") {
 		t.Errorf("plain session should not warn; got stderr:\n%s", stderr.String())

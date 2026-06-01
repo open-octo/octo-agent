@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
@@ -60,19 +59,28 @@ func isFirstEverSession() bool {
 	return err == nil && len(sessions) == 0
 }
 
-// runREPL runs the interactive multi-turn loop until the user exits or EOF.
-// It returns 0 on clean exit, 1 on unexpected error.
-func runREPL(cfg replConfig) int {
+// runOnce executes a single agentic turn headlessly, then exits — octo's
+// claude -p-style mode. It backs every non-TUI invocation: a positional
+// message, --prompt-file, or piped stdin. The full tool loop runs (tools are
+// on by default); rendering, the spinner, and permission/Ask prompts all flow
+// through the same plainView the interactive path used. Interactive multi-turn
+// now lives only in the TUI.
+//
+// One-shot does not persist a session (matching the original single-turn mode);
+// resuming with -c stays a TUI-only affordance.
+//
+// stream=true (the default) renders the turn live through the view; stream=false
+// runs the same agentic loop but prints only the final reply text to stdout,
+// keeping it clean for capture (`octo chat --stream=false ... > out`).
+func runOnce(cfg replConfig, prompt string, stream bool) int {
 	a := cfg.a
-	sess := cfg.session
 
-	// Kill any background processes (terminal background:true) on exit so none
-	// outlive the session.
+	// Reap background processes the turn spawned so none outlive the run.
 	defer tools.KillAllBackground()
 
-	// Sub-agent manager: wire the onExit hook so completion notifications ride
-	// the same inbox path as background-process notices. Register the manager
-	// globally so the built-in tools pick it up without per-instance injection.
+	// Sub-agent completions and background-process notices ride the inbox, so a
+	// later iteration of this single agentic turn picks them up (the agent
+	// drains the inbox at the start of each loop step).
 	if cfg.subAgentMgr != nil {
 		tools.SetDefaultSubAgentManager(cfg.subAgentMgr)
 		cfg.subAgentMgr.SetOnExit(func(ev tools.SubAgentNotification) {
@@ -84,274 +92,58 @@ func runREPL(cfg replConfig) int {
 			cfg.subAgentMgr.KillAll()
 		}()
 	}
-
-	// Background-completion notice: inject into the conversation via Inbox so
-	// the model is told when a detached command finishes (drained at the start
-	// of the next loop iteration — see agent.go runLoop).
-	// The plain path prints no async UI line (it would interleave with the
-	// synchronous render loop); the TUI path adds a scrollback notice on top.
 	tools.SetBackgroundOnExit(func(e tools.BgExit) { a.Inbox.Enqueue(formatBgNote(e)) })
 	defer tools.SetBackgroundOnExit(nil)
 
-	// Startup banner — fully suppressed in quiet mode, expanded with
-	// provider/endpoint context in verbose mode. Normal keeps today's two
-	// lines because most users use them to confirm the session ID.
-	if !cfg.verbosity.quiet() {
-		turns := sess.TurnCount()
-		if turns > 0 {
-			fmt.Fprintf(cfg.stdout, "Resumed session %s (%d turn", sess.ID, turns)
-			if turns != 1 {
-				fmt.Fprint(cfg.stdout, "s")
-			}
-			fmt.Fprintln(cfg.stdout, ")")
-		} else {
-			fmt.Fprintf(cfg.stdout, "Starting session %s (%s)\n", sess.ID, sess.Model)
-			// First-ever session: orient the newcomer once. Suppressed for
-			// everyone with prior sessions so it doesn't nag, and only shown
-			// when tools are actually on (it describes the tool surface).
-			if len(cfg.tools) > 0 && isFirstEverSession() {
-				fmt.Fprintln(cfg.stdout, "  Tools are on — I can run shell commands, read/edit files, and search.")
-				fmt.Fprintln(cfg.stdout, "  Risky actions ask for your approval first. Run `octo config` to set defaults.")
-			}
-		}
-		if cfg.verbosity.verbose() {
-			fmt.Fprintf(cfg.stdout, "  model: %s\n", a.Model)
-			if cfg.permEngine != nil {
-				fmt.Fprintf(cfg.stdout, "  permissions: %s\n", cfg.permEngine.GetMode())
-			}
-			if len(cfg.tools) > 0 {
-				fmt.Fprintf(cfg.stdout, "  tools: %d enabled\n", len(cfg.tools))
-			}
-		}
-		fmt.Fprintln(cfg.stdout, `/exit, Ctrl-C, or Ctrl-D to quit.`)
-		fmt.Fprintln(cfg.stdout)
+	// The view sink renders the turn (spinner, streamed text, tool-event lines,
+	// cache/error) and raises Ask prompts. With a TTY reader (a positional
+	// message typed at a terminal) permission prompts are interactive; over a
+	// pipe the reader is exhausted, so plainView auto-denies — the headless
+	// posture.
+	view := cfg.view
+	if view == nil {
+		view = newPlainView(cfg.reader, cfg.stdout, cfg.stderr, cfg.verbosity, cfg.plain)
+	}
+	if cfg.permEngine != nil {
+		a.Gate = &cliPermissionGate{engine: cfg.permEngine, ask: view}
 	}
 
-	// Wrap stdout/stderr in a syncWriter so the input goroutine (which prints
-	// prompts) and the turn-rendering goroutine (which prints replies/events)
-	// don't race on the same underlying writer (e.g. bytes.Buffer in tests).
-	out := cfg.stdout
-	errOut := cfg.stderr
-	if _, ok := cfg.stdout.(*syncWriter); !ok {
-		out = &syncWriter{w: cfg.stdout}
-	}
-	if _, ok := cfg.stderr.(*syncWriter); !ok {
-		errOut = &syncWriter{w: cfg.stderr}
-	}
-	cfg.stdout = out
-	cfg.stderr = errOut
-
-	reader := cfg.reader
-	if reader == nil {
-		reader = newScannerLineReader(cfg.stdin, out)
-	}
-	defer reader.Close()
-
-	// Ctrl-C handling: while a turn is running, SIGINT cancels just that turn
-	// (the loop catches context.Canceled, finalizes well-formed history, and
-	// returns to the prompt). At an idle prompt — no turn in flight — SIGINT
-	// behaviour depends on the reader: readline catches it and returns
-	// ErrInterrupt (we just re-prompt), while scanner mode falls through to
-	// the signal handler which saves and exits.
-	var (
-		turnMu     sync.Mutex
-		turnCancel context.CancelFunc
-	)
-	setTurnCancel := func(c context.CancelFunc) {
-		turnMu.Lock()
-		turnCancel = c
-		turnMu.Unlock()
-	}
+	// SIGINT cancels the in-flight turn; the agent finalizes well-formed history
+	// and runTurn returns context.Canceled, which we treat as a clean stop.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
 	defer signal.Stop(sigCh)
 	go func() {
-		for range sigCh {
-			turnMu.Lock()
-			c := turnCancel
-			turnMu.Unlock()
-			if c != nil {
-				c() // interrupt the in-flight turn; the loop returns to prompt
-				continue
-			}
-			// Idle prompt with the scanner reader (no built-in SIGINT
-			// handling): save and exit. The readline reader catches Ctrl-C
-			// itself (returns ErrInterrupt), so this branch never fires in
-			// interactive mode — its loop just re-prompts on the next pass.
-			if _, ok := reader.(*scannerLineReader); ok {
-				fmt.Fprintln(out, "\n^C")
-				if !cfg.noSave {
-					sess.SyncFrom(a.History)
-					_ = sess.Save()
-				}
-				tools.KillAllBackground()
-				os.Exit(0)
-			}
-		}
+		<-sigCh
+		cancel()
 	}()
 
-	// The view sink: renders the turn (spinner, tool-event lines, cache/^C/
-	// error) and raises Ask prompts. cmd/octo supplies it (so the gate and
-	// asker share the same instance); tests leave it nil and get a plainView
-	// over the resolved reader.
-	view := cfg.view
-	if view == nil {
-		view = newPlainView(reader, out, errOut, cfg.verbosity, cfg.plain)
-	}
-
-	// Permission gating raises its approval prompt through the view (stdin
-	// line in plainView, modal in the TUI). Tool dispatch runs synchronously
-	// inside RunStream, so the prompt and the loop never race on input.
-	if cfg.permEngine != nil {
-		a.Gate = &cliPermissionGate{
-			engine: cfg.permEngine,
-			ask:    view,
-		}
-	}
-
-	// inputCh carries user input lines from the read goroutine to the main
-	// loop. Closed on EOF so the select below exits cleanly.
-	//
-	// The goroutine never prints prompts itself — prompt rendering is the
-	// responsibility of the turn-rendering loop (or the terminal driver for
-	// readline). This avoids a data race between prompt printing and turn
-	// output on the shared stdout (bytes.Buffer in tests).
-	inputCh := make(chan string)
-	go func() {
-		defer close(inputCh)
-		for {
-			// Empty prompt so no output is written to stdout from the
-			// goroutine. readline manages its own terminal; scanner mode
-			// just reads lines without printing a prompt.
-			raw, ok := readPromptLine(reader, "", "")
-			if !ok {
-				if reader.Interrupted() {
-					// Ctrl-C at idle: re-prompt. The readline reader already
-					// cleared the line; just loop back for the next input.
-					continue
-				}
-				// EOF (Ctrl-D) or read error.
-				return
+	// Buffered: run the full agentic loop silently, then print just the final
+	// reply text. Bypasses the live view (and its spinner / tool lines) so
+	// captured stdout carries only the answer.
+	if !stream {
+		reply, err := a.Run(ctx, prompt, cfg.tools, cfg.executor)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return 0
 			}
-			inputCh <- raw
-		}
-	}()
-
-	done := false
-	for !done {
-		var line string
-		var isAutoTurn bool
-
-		// Wait for either user input or a background-completion notice that
-		// arrived while we were idle. The inbox path auto-triggers a turn so
-		// the model can react to the event without the user typing anything.
-		select {
-		case raw, ok := <-inputCh:
-			if !ok {
-				// EOF — input goroutine exited.
-				fmt.Fprintln(cfg.stdout)
-				done = true
-				continue
-			}
-			line = strings.TrimSpace(raw)
-			if line == "" {
-				continue
-			}
-			if line == "/exit" || line == "/quit" {
-				done = true
-				continue
-			}
-		case <-idleInboxWait(a):
-			// Background process finished while idle. Drain the inbox
-			// and run an auto-turn so the model sees the notification.
-			msgs := a.Inbox.Drain()
-			if len(msgs) > 0 {
-				line = strings.Join(msgs, "\n\n")
-				isAutoTurn = true
-			}
-		}
-
-		if line == "" {
-			continue
-		}
-
-		// Regular message — streaming turn (or agentic loop when tools enabled).
-		// Each turn gets its own cancellable context so SIGINT can interrupt
-		// just this turn without tearing down the session. Orchestration
-		// (memory nudge, pre/post hooks, the streaming run) lives in runTurn;
-		// all rendering flows through the view sink.
-		turnCtx, cancelTurn := context.WithCancel(context.Background())
-		setTurnCancel(cancelTurn)
-
-		_, err := runTurn(turnCtx, a, cfg, view, line)
-
-		setTurnCancel(nil)
-		cancelTurn()
-
-		// A hard (non-interrupt) error left history rolled back by the agent;
-		// skip the save and re-prompt. An interrupt (context.Canceled) keeps a
-		// well-formed history, so it falls through to auto-save like a success.
-		if err != nil && !errors.Is(err, context.Canceled) {
-			continue
-		}
-
-		// Auto-save after every turn (including interrupted ones — history is
-		// well-formed) unless opted out.
-		if !cfg.noSave {
-			sess.SyncFrom(a.History)
-			if err := sess.Save(); err != nil {
-				// Non-fatal: warn but don't break the session.
-				fmt.Fprintf(cfg.stderr, "(auto-save failed: %v)\n", err)
-			}
-		}
-
-		// After an auto-turn, briefly yield so the user sees the model's
-		// response before we loop back to waiting for input (or another
-		// steer). This prevents a rapid-fire sequence of auto-turns from
-		// feeling like a wall of text.
-		if isAutoTurn {
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
-	// Wait for the input goroutine to finish so we don't leak it on exit.
-	// (It will exit once it sees EOF or the deferred reader.Close() below.)
-	// Drain any remaining input so the goroutine can terminate cleanly.
-	for range inputCh {
-	}
-
-	// Final save on exit.
-	if !cfg.noSave {
-		sess.SyncFrom(a.History)
-		if err := sess.Save(); err != nil {
-			fmt.Fprintf(cfg.stderr, "session save: %v\n", err)
+			fmt.Fprintf(cfg.stderr, "octo chat: %v\n", err)
 			return 1
 		}
+		fmt.Fprintln(cfg.stdout, reply.Content)
 		if !cfg.verbosity.quiet() {
-			path, _ := sess.SavePath()
-			fmt.Fprintf(cfg.stdout, "\nSession saved → %s\n", path)
+			printUsageLine(cfg.stderr, reply)
 		}
+		return 0
+	}
+
+	_, err := runTurn(ctx, a, cfg, view, prompt)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		return 1
 	}
 	return 0
-}
-
-// idleInboxWait returns a channel that receives a single value once a message
-// is pending in the agent's inbox. It polls every 200 ms so the select in
-// runREPL doesn't block indefinitely on user input when a background process
-// completes. The returned channel is closed after firing; callers should not
-// reuse it.
-func idleInboxWait(a *agent.Agent) <-chan struct{} {
-	ch := make(chan struct{}, 1)
-	go func() {
-		for {
-			if a.Inbox.HasPending() {
-				ch <- struct{}{}
-				return
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-	}()
-	return ch
 }
 
 // printTuiHelp lists the slash commands the TUI supports. Slash commands live

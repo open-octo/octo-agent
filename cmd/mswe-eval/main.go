@@ -233,16 +233,12 @@ func generateOne(inst mswe.Instance, octoBin, evalHome, workdir, model, provider
 		return "", fmt.Errorf("checkout %s: %v (%s)", inst.BaseCommit(), err, truncate(out, 200))
 	}
 
-	// Drive octo through REPL mode (the agentic tool-execution loop only runs
-	// in REPL mode — a single-turn `octo chat "msg"` does one model round-trip
-	// WITHOUT executing tools, so it would never edit files). The issue is
-	// delivered via --prompt-file as ONE multi-line turn: octo's piped REPL
-	// reads stdin line-by-line (one turn per line), so passing a multi-line
-	// prompt on stdin shreds the issue body into dozens of fragmented,
-	// low-context turns. Strict perms + the eval HOME's permissive
-	// permissions.yml let tools run without prompts; --no-save keeps the
-	// throwaway session out of history. The prompt file lives in workdir (not
-	// repoDir) so `git add -A` below doesn't sweep it into the patch.
+	// Drive octo as a headless one-shot: --prompt-file delivers the whole issue
+	// as a single agentic turn (the full tool loop runs, so it can edit files),
+	// then octo exits. Strict perms + the eval HOME's permissive permissions.yml
+	// let tools run without prompts; --no-save keeps the throwaway session out of
+	// history. The prompt file lives in workdir (not repoDir) so `git add -A`
+	// below doesn't sweep it into the patch.
 	env := append(os.Environ(), "HOME="+evalHome)
 	promptPath := filepath.Join(workdir, fmt.Sprintf("prompt-%s__%s__%d.txt", inst.Org(), inst.Repo(), inst.Number()))
 	if err := os.WriteFile(promptPath, []byte(octoPrompt(inst)), 0o644); err != nil {
@@ -265,7 +261,7 @@ func generateOne(inst mswe.Instance, octoBin, evalHome, workdir, model, provider
 	}
 	// Per-instance timeout backstops a turn that genuinely won't converge (the
 	// streaming idle-timeout in octo handles a stalled connection); kill octo
-	// after `timeout`. Empty stdin → after the seeded turn, EOF ends the session.
+	// after `timeout`. Stdin is empty — the prompt comes from --prompt-file.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	octoOut, oerr := runStdin(ctx, repoDir, env, "", octoBin, octoArgs...)
@@ -457,9 +453,8 @@ func run(dir string, env []string, name string, args ...string) (string, error) 
 	return string(out), err
 }
 
-// runStdin is like run but feeds stdin to the process and honors ctx (used to
-// drive octo's REPL: the prompt on stdin, EOF ending the session). When ctx's
-// deadline fires, the process is killed.
+// runStdin is like run but feeds stdin to the process and honors ctx. When
+// ctx's deadline fires, the process is killed.
 func runStdin(ctx context.Context, dir string, env []string, stdin, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
