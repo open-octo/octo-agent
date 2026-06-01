@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // StdioTransport speaks JSON-RPC 2.0 over a subprocess's stdin/stdout. One
@@ -52,7 +53,13 @@ func NewStdioTransport(ctx context.Context, cfg StdioConfig) (*StdioTransport, e
 	if cfg.Command == "" {
 		return nil, errors.New("mcp: stdio transport: empty command")
 	}
-	cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
+	// Use exec.Command (not CommandContext) so the child outlives the
+	// connect-time context. connectOne creates a 10s timeout context for the
+	// initialize handshake; if we bound the subprocess to that context the
+	// child would be killed when connectOne returns, breaking every later
+	// tool call with "broken pipe". The transport's Close method handles
+	// graceful shutdown via stdin EOF.
+	cmd := exec.Command(cfg.Command, cfg.Args...)
 	// Inherit env + add/override the configured entries. Building a fresh
 	// slice keeps os.Environ() intact for the parent.
 	if len(cfg.Env) > 0 {
@@ -148,8 +155,20 @@ func (t *StdioTransport) Close() error {
 	// tiny and a failed write surfaces as an error to the caller — fine.
 	_ = t.stdin.Close()
 	_ = t.stdout.Close()
-	// Wait is best-effort: if the child is being killed by ctx (via
-	// CommandContext) it might already be reaped.
-	_ = t.cmd.Wait()
+	// Give the child a moment to exit gracefully after seeing stdin EOF.
+	// If it doesn't, force-kill so Wait doesn't hang on a stuck process.
+	done := make(chan struct{})
+	go func() {
+		_ = t.cmd.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		if t.cmd.Process != nil {
+			_ = t.cmd.Process.Kill()
+		}
+		<-done
+	}
 	return nil
 }
