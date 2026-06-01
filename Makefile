@@ -1,4 +1,4 @@
-# Octo — Go build & test orchestration
+# Octo — Go build & test orchestration (Go 1.22+)
 #
 # Usage:
 #   make            same as `make test`
@@ -7,7 +7,7 @@
 #   make test       go test -race ./...
 #   make cover      generate coverage.out + coverage.html
 #   make vet        go vet ./...
-#   make fmt        gofmt -w on the tree
+#   make fmt        gofmt -w on all .go files
 #   make fmt-check  fail if anything would be reformatted
 #   make tidy       go mod tidy
 #   make clean      remove build artefacts
@@ -28,12 +28,14 @@ GOFLAGS ?=
 # pollute the reported version. Dev builds say "<next>-dev"; release builds
 # should set VERSION explicitly:
 #
-#   VERSION=0.5.0 make build
+#   VERSION=0.6.0 make build
 #
-VERSION ?= 0.5.0-dev
+VERSION ?= 0.6.0-dev
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -X github.com/Leihb/octo-agent/internal/version.Version=$(VERSION) \
            -X github.com/Leihb/octo-agent/internal/version.Commit=$(COMMIT)
+
+GOFILES := $(shell find . -name '*.go' -not -path './vendor/*' -not -path '*/_vendor/*')
 
 .PHONY: all build install test cover vet fmt fmt-check tidy clean \
         eval-mswe-build eval-mswe-inspect eval-mswe
@@ -58,10 +60,10 @@ vet:
 	go vet ./...
 
 fmt:
-	gofmt -w .
+	gofmt -w $(GOFILES)
 
 fmt-check:
-	@unformatted=$$(gofmt -l .); \
+	@unformatted=$$(gofmt -l $(GOFILES)); \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt found unformatted files:"; \
 		echo "$$unformatted"; \
