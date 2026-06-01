@@ -23,14 +23,17 @@ GOFLAGS ?=
 
 # Inject version + commit at build time so `octo version` reports a real SHA.
 #
-# Auto-detection via `git describe` is intentionally avoided here because the
-# repo still carries Ruby-era tags (v0.11.2, v0.11.2-final-ruby) that would
-# pollute the reported version. Dev builds say "<next>-dev"; release builds
-# should set VERSION explicitly:
+# Auto-detection via `git describe` is intentionally avoided because the repo
+# still carries Ruby-era tags (v0.11.2, v0.11.2-final-ruby) that would pollute
+# the reported version. The single source of truth for the version number is
+# internal/version/version.go (what release bumps already edit); dev builds
+# derive "<that>-dev" from it, so the two never drift. Release builds set
+# VERSION explicitly:
 #
-#   VERSION=0.6.0 make build
+#   VERSION=0.12.0 make build
 #
-VERSION ?= 0.6.0-dev
+BASE_VERSION := $(shell sed -n 's/^var Version = "\(.*\)"/\1/p' internal/version/version.go)
+VERSION ?= $(BASE_VERSION)-dev
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -X github.com/Leihb/octo-agent/internal/version.Version=$(VERSION) \
            -X github.com/Leihb/octo-agent/internal/version.Commit=$(COMMIT)
