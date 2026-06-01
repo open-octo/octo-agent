@@ -71,6 +71,57 @@ func TestSpinnerLine_Contents(t *testing.T) {
 	}
 }
 
+// TestTUI_SpinnerShownWhileWaitingBetweenSteps guards the gap that left the
+// TUI frozen with no indicator: after a tool finished and the turn is still
+// running, the agent is waiting on the model's next response — there is no
+// live tool and no streaming text. The activity line must still show a
+// thinking/working spinner so the user can tell the turn isn't idle.
+func TestTUI_SpinnerShownWhileWaitingBetweenSteps(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.turnRunning = true
+	m.turnStart = time.Now()
+	m.spinnerFrame = 0 // thinkingPhrase() == "Thinking"
+
+	// A tool ran and completed earlier this turn (this also latches the old
+	// "streaming" flag true), then the agent loops back to the model.
+	m.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal",
+		Input: map[string]any{"command": "ls"},
+	})
+	m.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolDone, ToolID: "c1", ToolName: "terminal", Output: "file",
+	})
+
+	// Precondition: the silent inter-step wait — no live tool, no partial text.
+	if m.running != nil {
+		t.Fatalf("precondition: running should be nil after tool done")
+	}
+	if m.partial.Len() != 0 {
+		t.Fatalf("precondition: partial should be empty, got %q", m.partial.String())
+	}
+
+	if out := m.View(); !strings.Contains(out, "Thinking") {
+		t.Errorf("expected a thinking spinner while waiting on the next model step; View was:\n%s", out)
+	}
+}
+
+// TestTUI_NoThinkingSpinnerWhileStreamingText is the other half of the
+// contract: while assistant text is actively streaming (partial non-empty),
+// the live text is the feedback, so the thinking spinner stays out of the way.
+func TestTUI_NoThinkingSpinnerWhileStreamingText(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.turnRunning = true
+	m.turnStart = time.Now()
+	m.spinnerFrame = 0 // thinkingPhrase() == "Thinking"
+	m.partial.WriteString("hello world")
+
+	if out := m.View(); strings.Contains(out, "Thinking") {
+		t.Errorf("thinking spinner should be suppressed while text streams; View was:\n%s", out)
+	}
+}
+
 func TestThinkingPhrase_Rotates(t *testing.T) {
 	m := newTestModel()
 	m.spinnerFrame = 0

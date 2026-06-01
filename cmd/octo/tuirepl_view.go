@@ -403,7 +403,7 @@ func (m *tuiModel) liveHeight() int {
 	if m.partial.String() != "" {
 		h++
 	}
-	if m.running != nil || (m.turnRunning && !m.streaming) {
+	if m.running != nil || (m.turnRunning && m.partial.Len() == 0) {
 		h++
 	}
 	if n := len(m.pendingSteer); n > 0 {
@@ -444,7 +444,13 @@ func (m *tuiModel) View() string {
 	if m.running != nil {
 		b.WriteString(m.spinnerLine(m.running.verb+"("+m.running.target+")", m.running.start))
 		b.WriteByte('\n')
-	} else if m.turnRunning && !m.streaming {
+	} else if m.turnRunning && m.partial.Len() == 0 {
+		// Turn is running but nothing is on the activity line right now — no
+		// live tool and no streaming text. That's the wait on the model
+		// (initial prompt, or between steps after a tool result). Show the
+		// thinking spinner so the user can tell the turn isn't idle. While
+		// text is actively streaming (partial non-empty), the text itself is
+		// the feedback, so the spinner stays out of the way.
 		b.WriteString(m.spinnerLine(m.thinkingPhrase(), m.turnStart))
 		b.WriteByte('\n')
 	}

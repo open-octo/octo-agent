@@ -71,7 +71,6 @@ func goalUsage() string {
 // starts while the goal is in flight. The result returns via goalPlannedMsg.
 func (m *tuiModel) startGoalPlan(goal string) tea.Cmd {
 	m.turnRunning = true
-	m.streaming = false
 	m.turnStart = time.Now()
 	m.spinnerFrame = 0
 	m.running = nil
@@ -155,7 +154,6 @@ func (m *tuiModel) onGoalPlanned(msg goalPlannedMsg) (tea.Model, tea.Cmd) {
 // returns via goalDoneMsg. Reused by both fresh-plan confirmation and resume.
 func (m *tuiModel) startGoalRun(taskID string) tea.Cmd {
 	m.turnRunning = true
-	m.streaming = false
 	m.turnStart = time.Now()
 	m.spinnerFrame = 0
 	m.running = nil

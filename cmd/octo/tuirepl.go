@@ -227,9 +227,6 @@ type tuiModel struct {
 	// (identified by splitCommittableMarkdown) are promoted to printlnBuf and
 	// flushed to the terminal scrollback via tea.Println.
 	partial strings.Builder
-	// streaming tracks whether the current turn has emitted any output yet
-	// (drives the "thinking…" placeholder).
-	streaming bool
 
 	// toolInput caches each tool call's input from EventToolStarted so the
 	// matching EventToolDone can render a card (tool_result events don't carry
@@ -341,7 +338,6 @@ func (m *tuiModel) startTurn(line string) tea.Cmd {
 // pass "" to suppress the echo entirely.
 func (m *tuiModel) startTurnEcho(line, echo string) tea.Cmd {
 	m.turnRunning = true
-	m.streaming = false
 	m.turnStart = time.Now()
 	m.spinnerFrame = 0
 	m.running = nil
@@ -496,7 +492,6 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // markdown blocks are promoted to the scrollback via println/flushPrints.
 // Tool events flush any pending text first, then commit their line/card.
 func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
-	m.streaming = true
 	switch ev.Kind {
 	case agent.EventTextDelta:
 		m.appendText(ev.Text)
@@ -668,7 +663,6 @@ func (m *tuiModel) flushPrints() tea.Cmd {
 func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
 	m.turnRunning = false
 	m.cancelTurn = nil
-	m.streaming = false
 	m.running = nil // clear any live tool indicator (e.g. on interrupt)
 
 	// Any steer messages that weren't drained via EventSteerInjected during
