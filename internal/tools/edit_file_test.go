@@ -192,3 +192,128 @@ func TestEditFile_LFFilesStayLF(t *testing.T) {
 		t.Errorf("CRLF leaked into LF-only file: %q", got)
 	}
 }
+
+func TestEditFile_CurlyQuotes_NormalizedMatch(t *testing.T) {
+	// File contains curly quotes; LLM supplies straight quotes.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "quotes.txt")
+	writeTestFile(t, path, "He said \u201chello\u201d to me\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": `"hello"`,
+		"new_string": `"hi there"`,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	// Replacement should preserve the file's curly quote style
+	want := "He said \u201chi there\u201d to me\n"
+	if got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFile_CurlyQuotes_Single(t *testing.T) {
+	// File contains curly single quotes; LLM supplies straight quotes.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "quotes.txt")
+	writeTestFile(t, path, "It\u2019s a nice day\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "It's a nice",
+		"new_string": "It's a great",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	// Apostrophe in contraction should become right single curly quote
+	want := "It\u2019s a great day\n"
+	if got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFile_TrailingWhitespace_Stripped(t *testing.T) {
+	// LLM may add trailing whitespace to new_string; it should be stripped
+	// (except for markdown files).
+	dir := t.TempDir()
+	path := filepath.Join(dir, "code.go")
+	writeTestFile(t, path, "func main() {\n\tprintln(\"hello\")\n}\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "println(\"hello\")",
+		"new_string": "println(\"hi\")   ", // trailing spaces
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	want := "func main() {\n\tprintln(\"hi\")\n}\n"
+	if got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFile_TrailingWhitespace_MarkdownPreserved(t *testing.T) {
+	// Markdown files: trailing double-space is a hard line break — preserve it.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	writeTestFile(t, path, "Line one\nLine two\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "Line one",
+		"new_string": "Line one  ", // trailing double-space (hard break)
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	want := "Line one  \nLine two\n"
+	if got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFile_CurlyQuotes_NotFound(t *testing.T) {
+	// When even quote-normalized match fails, error should hint at it.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.txt")
+	writeTestFile(t, path, "plain text\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "missing",
+		"new_string": "x",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected not-found error, got %v", err)
+	}
+}
+
+func TestEditFile_CurlyQuotes_ReplaceAll(t *testing.T) {
+	// replace_all with curly quotes in file.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "quotes.txt")
+	writeTestFile(t, path, "\u201chello\u201d and \u201chello\u201d\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":        path,
+		"old_string":  `"hello"`,
+		"new_string":  `"hi"`,
+		"replace_all": true,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	want := "\u201chi\u201d and \u201chi\u201d\n"
+	if got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}

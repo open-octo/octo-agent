@@ -14,13 +14,25 @@ import (
 // file if it doesn't exist — use write_file for that.
 type EditFileTool struct{}
 
+// curly quote constants for normalization
+const (
+	leftSingleCurlyQuote  = '\u2018' // '
+	rightSingleCurlyQuote = '\u2019' // '
+	leftDoubleCurlyQuote  = '\u201c' // "
+	rightDoubleCurlyQuote = '\u201d' // "
+)
+
 func (EditFileTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "edit_file",
-		Description: "Replace an exact substring in an existing file. old_string must " +
-			"appear exactly once (or set replace_all=true to swap every occurrence). " +
-			"The file must already exist — use write_file to create. Preserve " +
-			"indentation and surrounding context when picking old_string so it stays unique.",
+		Description: "Replace an exact substring in an existing file. " +
+			"You MUST read the file with read_file before calling this tool. " +
+			"old_string must appear exactly once (or set replace_all=true to swap every occurrence). " +
+			"The file must already exist — use write_file to create. " +
+			"Preserve indentation (tabs/spaces) exactly as it appears in the file. " +
+			"Include enough surrounding context in old_string (typically 2-4 lines) " +
+			"to make it unique. If old_string matches multiple times and replace_all is false, " +
+			"the edit will fail — add more context to disambiguate.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -44,6 +56,110 @@ func (EditFileTool) Definition() agent.ToolDefinition {
 			"required": []string{"path", "old_string", "new_string"},
 		},
 	}
+}
+
+// normalizeQuotes converts curly quotes to straight quotes, handling
+// the common case where LLMs output straight quotes but files contain
+// curly quotes (or vice versa).
+func normalizeQuotes(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case leftSingleCurlyQuote, rightSingleCurlyQuote:
+			b.WriteByte('\'')
+		case leftDoubleCurlyQuote, rightDoubleCurlyQuote:
+			b.WriteByte('"')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// stripTrailingWhitespace removes trailing whitespace from each line
+// while preserving line endings. Skipped for markdown files where
+// trailing double-space is a hard line break.
+func stripTrailingWhitespace(s string) string {
+	lines := strings.SplitAfter(s, "\n")
+	for i, line := range lines {
+		// Preserve empty lines and the last fragment
+		if i == len(lines)-1 && !strings.HasSuffix(s, "\n") {
+			lines[i] = strings.TrimRight(line, " \t\r")
+			continue
+		}
+		lines[i] = strings.TrimRight(line, " \t\r")
+	}
+	return strings.Join(lines, "")
+}
+
+// findActualString attempts to locate the search string in the file content,
+// first with an exact match, then with quote-normalized match.
+// Returns the actual string found in the file (preserving original quotes),
+// or empty string if not found.
+func findActualString(fileContent, searchString string) string {
+	// First try exact match
+	if strings.Contains(fileContent, searchString) {
+		return searchString
+	}
+
+	// Try with normalized quotes
+	normalizedSearch := normalizeQuotes(searchString)
+	normalizedFile := normalizeQuotes(fileContent)
+
+	idx := strings.Index(normalizedFile, normalizedSearch)
+	if idx == -1 {
+		return ""
+	}
+
+	// Map the index back to the original file content.
+	// Since normalization only replaces runes with ASCII equivalents
+	// of the same byte length (UTF-8 curly quotes are 3 bytes each,
+	// straight quotes are 1 byte), we can't use byte offsets directly.
+	// Instead, scan through the original file rune-by-rune.
+	fileRunes := []rune(fileContent)
+	normalizedRunes := []rune(normalizedFile)
+	searchRunes := []rune(normalizedSearch)
+
+	// Verify the match at the rune level in normalized space
+	if idx+len(searchRunes) > len(normalizedRunes) {
+		return ""
+	}
+	for i := 0; i < len(searchRunes); i++ {
+		if normalizedRunes[idx+i] != searchRunes[i] {
+			return ""
+		}
+	}
+
+	// Map rune index back to original file substring
+	// Count runes in original file up to the match position
+	origStart := -1
+	runeCount := 0
+	for i, _ := range fileRunes {
+		if runeCount == idx {
+			origStart = i
+			break
+		}
+		runeCount++
+	}
+	if origStart == -1 {
+		return ""
+	}
+
+	origEnd := -1
+	runeCount = 0
+	for i, _ := range fileRunes {
+		if runeCount == idx+len(searchRunes) {
+			origEnd = i
+			break
+		}
+		runeCount++
+	}
+	if origEnd == -1 {
+		origEnd = len(fileRunes)
+	}
+
+	return string(fileRunes[origStart:origEnd])
 }
 
 func (EditFileTool) Execute(_ context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
@@ -86,16 +202,35 @@ func (EditFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 	// line-ending convention isn't silently flipped.
 	hasCRLF := strings.Contains(body, "\r\n")
 	bodyForMatch := body
-	oldForMatch := oldStr
-	newForReplace := newStr
 	if hasCRLF {
 		bodyForMatch = strings.ReplaceAll(body, "\r\n", "\n")
-		oldForMatch = strings.ReplaceAll(oldStr, "\r\n", "\n")
-		newForReplace = strings.ReplaceAll(newStr, "\r\n", "\n")
 	}
 
-	count := strings.Count(bodyForMatch, oldForMatch)
+	// Strip trailing whitespace from new_string (except for markdown files
+	// where trailing double-space is a hard line break).
+	isMarkdown := strings.HasSuffix(strings.ToLower(abs), ".md") ||
+		strings.HasSuffix(strings.ToLower(abs), ".mdx")
+	newStrClean := newStr
+	if !isMarkdown {
+		newStrClean = stripTrailingWhitespace(newStr)
+	}
+
+	// Use findActualString for quote-normalized matching.
+	actualOldStr := findActualString(bodyForMatch, oldStr)
+	if actualOldStr == "" {
+		// Build a helpful error message showing what we tried
+		msg := fmt.Sprintf("edit_file: old_string not found in %s", path)
+
+		// If quote normalization was attempted but still failed, hint at it
+		if normalizeQuotes(oldStr) != oldStr {
+			msg += " (also tried with normalized quotes)"
+		}
+		return agent.ToolResult{Text: ""}, fmt.Errorf("%s", msg)
+	}
+
+	count := strings.Count(bodyForMatch, actualOldStr)
 	if count == 0 {
+		// Should not happen after findActualString succeeded, but be safe
 		return agent.ToolResult{Text: ""}, fmt.Errorf("edit_file: old_string not found in %s", path)
 	}
 	if count > 1 && !replaceAll {
@@ -105,11 +240,15 @@ func (EditFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 		)
 	}
 
+	// Preserve curly quote style from the matched text when the LLM
+	// provided straight quotes but the file uses curly quotes.
+	actualNewStr := preserveQuoteStyle(oldStr, actualOldStr, newStrClean)
+
 	var updated string
 	if replaceAll {
-		updated = strings.ReplaceAll(bodyForMatch, oldForMatch, newForReplace)
+		updated = strings.ReplaceAll(bodyForMatch, actualOldStr, actualNewStr)
 	} else {
-		updated = strings.Replace(bodyForMatch, oldForMatch, newForReplace, 1)
+		updated = strings.Replace(bodyForMatch, actualOldStr, actualNewStr, 1)
 	}
 	if hasCRLF {
 		updated = strings.ReplaceAll(updated, "\n", "\r\n")
@@ -123,4 +262,85 @@ func (EditFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 		return agent.ToolResult{Text: fmt.Sprintf("Replaced %d occurrence(s) in %s", count, abs)}, nil
 	}
 	return agent.ToolResult{Text: fmt.Sprintf("Replaced 1 occurrence in %s", abs)}, nil
+}
+
+// preserveQuoteStyle copies curly quote style from actualOldStr to newStr
+// when the LLM provided straight quotes but the file uses curly quotes.
+func preserveQuoteStyle(oldStr, actualOldStr, newStr string) string {
+	// If no normalization happened, return as-is
+	if oldStr == actualOldStr {
+		return newStr
+	}
+
+	// Detect which curly quote types were in the file
+	hasDoubleQuotes := strings.ContainsRune(actualOldStr, leftDoubleCurlyQuote) ||
+		strings.ContainsRune(actualOldStr, rightDoubleCurlyQuote)
+	hasSingleQuotes := strings.ContainsRune(actualOldStr, leftSingleCurlyQuote) ||
+		strings.ContainsRune(actualOldStr, rightSingleCurlyQuote)
+
+	if !hasDoubleQuotes && !hasSingleQuotes {
+		return newStr
+	}
+
+	result := newStr
+	if hasDoubleQuotes {
+		result = applyCurlyDoubleQuotes(result)
+	}
+	if hasSingleQuotes {
+		result = applyCurlySingleQuotes(result)
+	}
+	return result
+}
+
+func isOpeningContext(chars []rune, index int) bool {
+	if index == 0 {
+		return true
+	}
+	prev := chars[index-1]
+	return prev == ' ' || prev == '\t' || prev == '\n' || prev == '\r' ||
+		prev == '(' || prev == '[' || prev == '{' ||
+		prev == '\u2014' || prev == '\u2013'
+}
+
+func applyCurlyDoubleQuotes(str string) string {
+	chars := []rune(str)
+	result := make([]rune, len(chars))
+	for i, ch := range chars {
+		if ch == '"' {
+			if isOpeningContext(chars, i) {
+				result[i] = leftDoubleCurlyQuote
+			} else {
+				result[i] = rightDoubleCurlyQuote
+			}
+		} else {
+			result[i] = ch
+		}
+	}
+	return string(result)
+}
+
+func applyCurlySingleQuotes(str string) string {
+	chars := []rune(str)
+	result := make([]rune, len(chars))
+	for i, ch := range chars {
+		if ch == '\'' {
+			// Don't convert apostrophes in contractions (e.g., "don't", "it's")
+			prevIsLetter := i > 0 && isLetter(chars[i-1])
+			nextIsLetter := i < len(chars)-1 && isLetter(chars[i+1])
+			if prevIsLetter && nextIsLetter {
+				result[i] = rightSingleCurlyQuote
+			} else if isOpeningContext(chars, i) {
+				result[i] = leftSingleCurlyQuote
+			} else {
+				result[i] = rightSingleCurlyQuote
+			}
+		} else {
+			result[i] = ch
+		}
+	}
+	return string(result)
+}
+
+func isLetter(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
