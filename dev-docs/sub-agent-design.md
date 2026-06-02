@@ -174,23 +174,29 @@ sequenceDiagram
 - 不给子 agent `launch_agent` / `send_message`(递归防护)。
 - 不做父子之间的双向流式(通知是一次性的,不是流)。
 
-## 计划中:运行时实时显示
+## 运行时实时显示
 
-> 状态:设计已定,尚未实现。当前父 agent 只在子 agent **完成**时收到一条通知,看不到子 agent
-> **运行中**的内部过程。
+TUI 在底部显示一个 sub-agent 面板,实时呈现每个**活跃**子 agent 的 tool 调用链——类比
+background-processes 面板。复用现有事件体系,不改 `agent.AgentEvent`:
 
-目标是让子 agent 运行体验接近 Claude Code:启动即显示、实时显示内部 tool 调用链、底部面板展示所有
-活跃子 agent、可展开/折叠看详情。
+- **执行层**:`agentSpawner.runChild` 用 `RunStream`(而非 `Run`)跑子 agent。当 ctx 里带有事件
+  sink 时,把子 agent 的 `agent.AgentEvent` 中的 `tool_started` / `tool_error` 映射成
+  `tools.SubAgentEvent` 喂给 sink。**只转 tool 级事件**,不转 per-token 的 text/input delta——
+  多个并发子 agent 的 token 流会淹没事件循环,而面板要的是 tool 链。
+- **异步层**:`SubAgentManager` 有 `onEvent func(SubAgentEvent)`(与 `onExit` 完成回调并列)。
+  `Start` / `runContinue` 在调 `Spawn` / `Continue` 前,用 `WithSubAgentEventSink(ctx, sink)` 把一个
+  带 `agent_N` 标记的 sink 注入 ctx,并先发一个 `started` 事件(启动即显示)。没有 `onEvent` 时
+  不注入 sink,执行层不流式——taskgraph/headless 零开销、零行为变化。
+- **传递**:sink 走 **context**(`WithSubAgentEventSink` / `SubAgentEventSink`),所以 `Spawner`
+  接口签名不变,`internal/tools` 与 `cmd/octo` 解耦。
+- **TUI**:`subAgentEventMsg` 把事件投上事件循环;`subAgentUI` 状态(描述、起始时间、tool 计数、
+  最近几个 tool 名、错误标记)按 `agent_N` 聚合,渲染成 `tui.Panel`。子 agent 完成(`subAgentNoteMsg`)
+  时从面板移除;后续 `send_message` 再 `started` 重新加入。
+- **Plain REPL**:不接 `onEvent`——启动行由 `launch_agent` 的工具返回体现,完成由通知体现,不打印
+  内部 tool 链。
 
-落地思路是复用现有事件体系:
+约束:不持久化运行时事件(内存-only)、不改 `agent.AgentEvent` 定义、不在面板里支持
+kill/send_message 操作(仍通过工具调用)。
 
-- `agentSpawner.runChild` 把子 agent 的执行从 `Run` 换成 `RunStream`,传入一个 `EventHandler`,把子
-  agent 的 `agent.AgentEvent`(text_delta / tool_started / tool_done / tool_error / turn_done)映射成
-  一个新的 `tools.SubAgentEvent` 类型。
-- `SubAgentManager` 新增 `onEvent func(SubAgentEvent)` 运行时事件回调(与现有 `onExit` 完成回调并列)。
-- TUI(`cmd/octo/tuirepl*.go`)新增 `subAgentEventMsg` 消息类型与 `subAgentState` 状态映射,在底部新增
-  sub-agent 面板(复用现有 `tui.Panel`,类比 background processes 面板),展开时显示完整 tool 调用历史。
-- Plain REPL 只打印极简的启动/完成行,不显示内部 tool 链。
-
-约束:不持久化运行时事件(内存-only)、不改 `agent.AgentEvent` 定义、不在面板里支持 kill/send_message
-操作(仍通过工具调用)。
+**尚未做**:交互式展开/折叠看某个子 agent 的完整 tool 历史(需要焦点管理 + 按键)。当前面板每行
+内联显示最近几个 tool(`maxSubAgentRecentTools`)+ 累计计数,已覆盖"实时 tool 链"的核心。

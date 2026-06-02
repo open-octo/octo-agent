@@ -68,8 +68,13 @@ func runTUI(cfg replConfig) int {
 			cfg.a.Inbox.Enqueue(formatSubAgentNote(ev))
 			p.Send(subAgentNoteMsg{ev})
 		})
+		// Runtime activity (started + per-tool) for the live bottom panel.
+		cfg.subAgentMgr.SetOnEvent(func(ev tools.SubAgentEvent) {
+			p.Send(subAgentEventMsg{ev})
+		})
 		defer func() {
 			cfg.subAgentMgr.SetOnExit(nil)
+			cfg.subAgentMgr.SetOnEvent(nil)
 			tools.SetDefaultSubAgentManager(nil)
 			cfg.subAgentMgr.KillAll()
 		}()
@@ -118,6 +123,7 @@ type turnFinishedMsg struct{ err error } // the turn goroutine returned
 type noticeMsg struct{ text string }
 type bgExitMsg struct{ e tools.BgExit }                      // a background process finished (async)
 type subAgentNoteMsg struct{ ev tools.SubAgentNotification } // a sub-agent completed (async)
+type subAgentEventMsg struct{ ev tools.SubAgentEvent }       // a sub-agent's runtime activity (async)
 type tickMsg struct{}                                        // animation tick while a turn runs
 type askMsg struct {
 	prompt UserPrompt
@@ -277,6 +283,22 @@ type tuiModel struct {
 
 	// height is the terminal height in cells, updated by WindowSizeMsg.
 	height int
+
+	// subAgents holds the live state of currently-running sub-agents, keyed by
+	// manager handle (agent_N), rendered as a bottom panel. An entry appears on
+	// the "started" event and is removed when its completion note arrives.
+	// subAgentOrder preserves launch order for stable rendering.
+	subAgents     map[string]*subAgentUI
+	subAgentOrder []string
+}
+
+// subAgentUI is the live panel state for one running sub-agent.
+type subAgentUI struct {
+	description string
+	start       time.Time
+	toolCount   int
+	recent      []string // last few tool names, for the live chain
+	errored     bool
 }
 
 // runningTool is the live indicator state for an in-flight card tool.
@@ -320,7 +342,7 @@ func newTUIModel(cfg replConfig) *tuiModel {
 	if !tui.IsDark() {
 		style = "light"
 	}
-	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}}
+	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}}
 	_ = m.updateTextAreaHeight()
 	return m
 }
@@ -389,7 +411,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Animate while a turn runs OR while background processes are still
 		// going (so the live "background (N running)" panel keeps ticking even
 		// between turns); let the ticker die once both are quiet.
-		if !m.turnRunning && len(tools.RunningBackground()) == 0 {
+		if !m.turnRunning && len(tools.RunningBackground()) == 0 && len(m.subAgents) == 0 {
 			return m, m.flushPrints()
 		}
 		m.spinnerFrame++
@@ -420,7 +442,19 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Sequence(tea.Println(notice), m.flushPrints())
 
+	case subAgentEventMsg:
+		m.handleSubAgentEvent(msg.ev)
+		// Ensure the animation ticker is running so the panel's spinner/elapsed
+		// updates even between turns.
+		if !m.turnRunning {
+			return m, tea.Batch(tickCmd(), m.flushPrints())
+		}
+		return m, m.flushPrints()
+
 	case subAgentNoteMsg:
+		// A sub-agent finished this round — drop it from the live panel (it's
+		// idle now; a later send_message re-adds it via a fresh "started").
+		m.removeSubAgent(msg.ev.AgentID)
 		// Async sub-agent completion: the full result rode into the conversation
 		// via Inbox; no scrollback notice needed.
 		// Idle auto-turn: same logic as bgExitMsg — drain inbox and trigger a
@@ -502,6 +536,56 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // are accumulated in m.partial so they render live in View(); only complete
 // markdown blocks are promoted to the scrollback via println/flushPrints.
 // Tool events flush any pending text first, then commit their line/card.
+// maxSubAgentRecentTools bounds the live tool-chain shown per sub-agent.
+const maxSubAgentRecentTools = 4
+
+// handleSubAgentEvent folds one sub-agent runtime event into the live panel
+// state. "started" creates/refreshes the entry; "tool"/"tool_error" append to
+// its chain.
+func (m *tuiModel) handleSubAgentEvent(ev tools.SubAgentEvent) {
+	sa := m.subAgents[ev.AgentID]
+	if sa == nil {
+		sa = &subAgentUI{description: ev.Description, start: time.Now()}
+		m.subAgents[ev.AgentID] = sa
+		m.subAgentOrder = append(m.subAgentOrder, ev.AgentID)
+	}
+	switch ev.Kind {
+	case "started":
+		// A fresh round (launch or send_message): reset the chain, keep the slot.
+		sa.toolCount = 0
+		sa.recent = nil
+		sa.errored = false
+		if ev.Description != "" {
+			sa.description = ev.Description
+		}
+	case "tool", "tool_error":
+		sa.toolCount++
+		name := ev.ToolName
+		if ev.Kind == "tool_error" {
+			sa.errored = true
+			name += " ✗"
+		}
+		sa.recent = append(sa.recent, name)
+		if len(sa.recent) > maxSubAgentRecentTools {
+			sa.recent = sa.recent[len(sa.recent)-maxSubAgentRecentTools:]
+		}
+	}
+}
+
+// removeSubAgent drops a sub-agent from the live panel once it finishes a round.
+func (m *tuiModel) removeSubAgent(id string) {
+	if _, ok := m.subAgents[id]; !ok {
+		return
+	}
+	delete(m.subAgents, id)
+	for i, x := range m.subAgentOrder {
+		if x == id {
+			m.subAgentOrder = append(m.subAgentOrder[:i], m.subAgentOrder[i+1:]...)
+			break
+		}
+	}
+}
+
 func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 	switch ev.Kind {
 	case agent.EventTextDelta:

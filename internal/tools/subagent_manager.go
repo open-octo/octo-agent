@@ -129,6 +129,7 @@ type SubAgentManager struct {
 	seq     int
 	spawner Spawner
 	onExit  func(SubAgentNotification)
+	onEvent func(SubAgentEvent)
 }
 
 // NewSubAgentManager returns an empty manager.
@@ -145,6 +146,33 @@ func (m *SubAgentManager) SetOnExit(fn func(SubAgentNotification)) {
 	m.mu.Lock()
 	m.onExit = fn
 	m.mu.Unlock()
+}
+
+// SetOnEvent registers a runtime-event hook fired as a sub-agent works
+// (started + per-tool activity), for live display. Pass nil to clear. Distinct
+// from onExit, which fires once on completion.
+func (m *SubAgentManager) SetOnEvent(fn func(SubAgentEvent)) {
+	m.mu.Lock()
+	m.onEvent = fn
+	m.mu.Unlock()
+}
+
+// eventSink builds the per-agent sink stamped into the spawn context. Returns
+// nil when no onEvent hook is set, so the spawner skips streaming entirely.
+func (m *SubAgentManager) eventSink(id, description string) func(SubAgentEvent) {
+	m.mu.Lock()
+	onEvent := m.onEvent
+	m.mu.Unlock()
+	if onEvent == nil {
+		return nil
+	}
+	return func(ev SubAgentEvent) {
+		ev.AgentID = id
+		if ev.Description == "" {
+			ev.Description = description
+		}
+		onEvent(ev)
+	}
 }
 
 // Start creates a new sub-agent and runs it asynchronously.
@@ -168,6 +196,13 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 	}
 	m.agents[id] = agent
 	m.mu.Unlock()
+
+	// Stream runtime events (started + per-tool) for live display. nil sink =>
+	// no onEvent hook => the spawner runs without streaming.
+	if sink := m.eventSink(id, req.Description); sink != nil {
+		ctx = WithSubAgentEventSink(ctx, sink)
+		sink(SubAgentEvent{Kind: "started"})
+	}
 
 	go func() {
 		res, err := m.spawner.Spawn(ctx, req)
@@ -250,7 +285,15 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 	agent.mu.Lock()
 	agent.cancel = cancel
 	backingID := agent.backingID
+	desc := agent.description
 	agent.mu.Unlock()
+
+	// Stream runtime events for this round too, so the live panel re-shows the
+	// sub-agent as running while it handles the message.
+	if sink := m.eventSink(agentID, desc); sink != nil {
+		ctx = WithSubAgentEventSink(ctx, sink)
+		sink(SubAgentEvent{Kind: "started"})
+	}
 
 	// Continue addresses the child by its Spawner-side id, not the manager's
 	// agent_N handle — the two id spaces are distinct.

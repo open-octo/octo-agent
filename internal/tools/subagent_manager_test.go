@@ -268,3 +268,90 @@ func TestSubAgentManagerSendToExited(t *testing.T) {
 		t.Fatal("expected error for exited agent")
 	}
 }
+
+// eventSpawner forwards a tool event through the ctx-stamped sink, exercising
+// the manager's onEvent wiring end to end.
+type eventSpawner struct{ sawSink bool }
+
+func (s *eventSpawner) Spawn(ctx context.Context, _ SpawnRequest) (SpawnResult, error) {
+	if sink := SubAgentEventSink(ctx); sink != nil {
+		s.sawSink = true
+		sink(SubAgentEvent{Kind: "tool", ToolName: "grep"})
+	}
+	return SpawnResult{Reply: "ok", AgentID: "backing"}, nil
+}
+
+func (s *eventSpawner) Continue(_ context.Context, _, _ string) (SpawnResult, error) {
+	return SpawnResult{Reply: "ok"}, nil
+}
+
+func TestSubAgentManager_OnEvent(t *testing.T) {
+	sp := &eventSpawner{}
+	mgr := NewSubAgentManager(sp)
+
+	var mu sync.Mutex
+	var events []SubAgentEvent
+	mgr.SetOnEvent(func(ev SubAgentEvent) {
+		mu.Lock()
+		events = append(events, ev)
+		mu.Unlock()
+	})
+	done := make(chan struct{})
+	mgr.SetOnExit(func(SubAgentNotification) { close(done) })
+
+	id, err := mgr.Start(SpawnRequest{Description: "lbl", Prompt: "p"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for completion")
+	}
+
+	if !sp.sawSink {
+		t.Error("spawner never saw an event sink in ctx")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) < 2 {
+		t.Fatalf("want >=2 events (started + tool), got %+v", events)
+	}
+	if events[0].Kind != "started" {
+		t.Errorf("first event Kind = %q, want started", events[0].Kind)
+	}
+	var sawTool bool
+	for _, e := range events {
+		if e.AgentID != id {
+			t.Errorf("event AgentID = %q, want %q", e.AgentID, id)
+		}
+		if e.Description != "lbl" {
+			t.Errorf("event Description = %q, want lbl", e.Description)
+		}
+		if e.Kind == "tool" && e.ToolName == "grep" {
+			sawTool = true
+		}
+	}
+	if !sawTool {
+		t.Error("tool event not forwarded through the ctx sink")
+	}
+}
+
+func TestSubAgentManager_NoOnEvent_NoSink(t *testing.T) {
+	sp := &eventSpawner{}
+	mgr := NewSubAgentManager(sp)
+	done := make(chan struct{})
+	mgr.SetOnExit(func(SubAgentNotification) { close(done) })
+
+	if _, err := mgr.Start(SpawnRequest{Description: "d", Prompt: "p"}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out")
+	}
+	if sp.sawSink {
+		t.Error("sink should be absent from ctx when no onEvent hook is set")
+	}
+}

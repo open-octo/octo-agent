@@ -114,7 +114,24 @@ func (s *agentSpawner) runChild(ctx context.Context, lc *liveChild, prompt strin
 	defer lc.mu.Unlock()
 
 	childCtx := tools.WithSubAgentMarker(ctx)
-	r, err := lc.agent.Run(childCtx, prompt, lc.tools, lc.executor)
+
+	// When the manager stamped an event sink into ctx (TUI live panel), stream
+	// the child's tool-level activity to it. Only tool_started/tool_error are
+	// forwarded — not per-token text — to keep event volume sane with several
+	// sub-agents running at once. No sink (taskgraph/headless) => nil handler =>
+	// RunStream behaves exactly like Run.
+	var handler agent.EventHandler
+	if sink := tools.SubAgentEventSink(ctx); sink != nil {
+		handler = func(ev agent.AgentEvent) {
+			switch ev.Kind {
+			case agent.EventToolStarted:
+				sink(tools.SubAgentEvent{Kind: "tool", ToolName: ev.ToolName})
+			case agent.EventToolError:
+				sink(tools.SubAgentEvent{Kind: "tool_error", ToolName: ev.ToolName})
+			}
+		}
+	}
+	r, err := lc.agent.RunStream(childCtx, prompt, lc.tools, lc.executor, handler)
 	if err != nil {
 		return "", 0, 0, err
 	}
