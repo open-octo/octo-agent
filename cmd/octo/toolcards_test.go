@@ -9,7 +9,7 @@ func TestCardVerbFor(t *testing.T) {
 	cases := map[string]string{
 		"edit_file":    "Update",
 		"terminal":     "Run",
-		"grep":         "Search",
+		"grep":         "Grep",
 		"web_search":   "Search",
 		"glob":         "Glob",
 		"read_file":    "Read",
