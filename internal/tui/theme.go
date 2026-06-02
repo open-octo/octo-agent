@@ -60,22 +60,22 @@ var (
 			Foreground(ColBorder)
 )
 
-// octopusASCII is the pixel-art octo mascot (8x7 grid).
+// octopusASCII is a rounded octopus mascot (7 lines).
 var octopusASCII = []string{
-	"    ████████",
-	"  ████░░░░████",
-	"  ████████████",
-	"████████████████",
-	"████  ████  ████",
-	"██    ████    ██",
-	"      ████",
+	"     ▄▄▄▄▄      ",
+	"   ▄▀     ▀▄    ",
+	"  ▐  ▀▄ ▄▀  ▌   ",
+	"  ▐   █ █   ▌   ",
+	"   ▀▄  ▀  ▄▀    ",
+	"     ▀▀▀▀▀      ",
+	"  ▀▄ ▀▄ ▄▀ ▄▀   ",
 }
 
 // BannerHeight is the number of lines Banner renders (including the separator).
 const BannerHeight = 8
 
-// Banner renders the octo chat welcome header with pixel-art mascot.
-// The icon sits left of the title, Claude Code style.
+// Banner renders the octo chat welcome header with a rounded octopus mascot.
+// The icon sits left of the title, Claude Code style, tinted in blue.
 func Banner(version, model, cwd string, width int) string {
 	if width < 20 {
 		width = 20
@@ -98,7 +98,7 @@ func Banner(version, model, cwd string, width int) string {
 	// Merge art + text side-by-side
 	var b strings.Builder
 	for i, artLine := range octopusASCII {
-		b.WriteString(artLine)
+		b.WriteString(lipgloss.NewStyle().Foreground(ColUserMsg).Render(artLine))
 		switch i {
 		case 1:
 			b.WriteString("  ")
