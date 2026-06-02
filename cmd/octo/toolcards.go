@@ -16,7 +16,9 @@ func cardVerbFor(toolName string) string {
 		return "Update"
 	case "terminal":
 		return "Run"
-	case "grep", "web_search":
+	case "grep":
+		return "Grep"
+	case "web_search":
 		return "Search"
 	case "glob":
 		return "Glob"
