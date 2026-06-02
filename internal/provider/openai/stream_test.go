@@ -79,12 +79,40 @@ func TestSendStream_OpenAI_AggregatesAndCallsBack(t *testing.T) {
 	if resp.StopReason != "stop" {
 		t.Errorf("StopReason = %q", resp.StopReason)
 	}
-	// InputTokens/OutputTokens are expected zero — we don't send
-	// stream_options.include_usage and the canonical transcript carries no
-	// usage block. Document this in the test so a future change doesn't
-	// silently regress the compatibility tradeoff.
+	// We request usage via stream_options.include_usage, but this canonical
+	// transcript carries no usage chunk — a server that omits it just leaves the
+	// counts at zero, no error.
 	if resp.InputTokens != 0 || resp.OutputTokens != 0 {
-		t.Errorf("Usage = (%d, %d), want (0, 0) without stream_options", resp.InputTokens, resp.OutputTokens)
+		t.Errorf("Usage = (%d, %d), want (0, 0) when the server emits no usage chunk", resp.InputTokens, resp.OutputTokens)
+	}
+}
+
+func TestSendStream_SendsIncludeUsage(t *testing.T) {
+	// DashScope / real OpenAI send no usage at all on a stream unless we ask via
+	// stream_options.include_usage. Assert the outgoing body carries it.
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, canonicalOpenAIStream)
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	if _, err := c.SendStream(context.Background(), provider.Request{
+		Model:    "x",
+		Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{}); err != nil {
+		t.Fatalf("SendStream: %v", err)
+	}
+
+	so, ok := gotBody["stream_options"].(map[string]any)
+	if !ok {
+		t.Fatalf("request body missing stream_options; got %v", gotBody["stream_options"])
+	}
+	if so["include_usage"] != true {
+		t.Errorf("stream_options.include_usage = %v, want true", so["include_usage"])
 	}
 }
 

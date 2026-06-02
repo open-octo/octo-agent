@@ -33,9 +33,18 @@ type apiRequest struct {
 	MaxTokens int          `json:"max_tokens,omitempty"`
 	Stream    bool         `json:"stream,omitempty"`
 	Tools     []apiTool    `json:"tools,omitempty"`
+	// StreamOptions carries stream-only flags. We set include_usage on streaming
+	// requests so the server emits a final usage chunk — DashScope (and real
+	// OpenAI) send no usage at all without it. Omitted on non-streaming requests.
+	StreamOptions *apiStreamOptions `json:"stream_options,omitempty"`
 	// PromptCacheKey routes the request to a consistent prompt cache. Stable
 	// across a conversation's turns → higher cache hit-rate. Omitted when empty.
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
+}
+
+// apiStreamOptions is the stream_options object on a streaming request.
+type apiStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 // apiMessage is one element of apiRequest.Messages.
