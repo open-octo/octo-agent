@@ -42,9 +42,9 @@ func RenderOutputCard(verb, target, output string, maxLines int, isErr bool, lan
 
 	dark := IsDark()
 	for _, ln := range shown {
-		body := ln
+		body := expandTabs(ln)
 		if language != "" {
-			body = highlightLine(ln, language, dark)
+			body = highlightLine(body, language, dark)
 		}
 		b.WriteString("\n  " + outGutter.String() + " " + body)
 	}

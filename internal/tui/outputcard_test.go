@@ -43,6 +43,19 @@ func TestRenderOutputCard_SingularMoreLine(t *testing.T) {
 	}
 }
 
+func TestRenderOutputCard_ExpandsTabs(t *testing.T) {
+	// read_file emits "%6d\t<line>" and indents Go with tabs. Raw tabs in a
+	// card row skip cells without painting them, letting the live view below
+	// bleed through. The renderer must expand every tab to spaces.
+	output := "     1\tpackage main\n     2\t\tfield int"
+	for _, lang := range []string{"", "go"} {
+		got := RenderOutputCard("Read", "main.go", output, 0, false, lang)
+		if strings.ContainsRune(got, '\t') {
+			t.Errorf("lang=%q: rendered card still contains a raw tab:\n%q", lang, got)
+		}
+	}
+}
+
 func TestRenderOutputCard_Highlight(t *testing.T) {
 	output := "package main\n\nfunc main() {}"
 	got := RenderOutputCard("Read", "main.go", output, 0, false, "go")
