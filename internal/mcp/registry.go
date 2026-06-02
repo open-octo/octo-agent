@@ -48,7 +48,13 @@ type Connection struct {
 // device-flow card with the server name it's authorising. May be nil
 // when no entry uses OAuth — a nil factory triggers the same "auth
 // required but not wired" error as a missing config.
-func ConnectAll(ctx context.Context, cfg *Config, info Implementation, authPromptFor func(serverName string) OAuthPrompt, warn io.Writer) *Registry {
+//
+// childStderr is where each stdio server's subprocess diagnostics go. It is
+// distinct from warn (startup connect failures, printed before any TUI takes
+// over): a child's stderr streams throughout the session, so under a TUI it
+// must point at a log file or io.Discard, never the terminal. nil falls back to
+// os.Stderr inside the transport.
+func ConnectAll(ctx context.Context, cfg *Config, info Implementation, authPromptFor func(serverName string) OAuthPrompt, warn, childStderr io.Writer) *Registry {
 	r := &Registry{conns: map[string]*Connection{}}
 	if cfg == nil {
 		return r
@@ -59,7 +65,7 @@ func ConnectAll(ctx context.Context, cfg *Config, info Implementation, authPromp
 		if entry.Auth == "oauth" && authPromptFor != nil {
 			prompt = authPromptFor(name)
 		}
-		conn, err := connectOne(ctx, name, entry, info, prompt)
+		conn, err := connectOne(ctx, name, entry, info, prompt, childStderr)
 		if err != nil {
 			if warn != nil {
 				fmt.Fprintf(warn, "mcp: server %q skipped: %v\n", name, err)
@@ -71,7 +77,7 @@ func ConnectAll(ctx context.Context, cfg *Config, info Implementation, authPromp
 	return r
 }
 
-func connectOne(ctx context.Context, name string, entry ServerEntry, info Implementation, authPrompt OAuthPrompt) (*Connection, error) {
+func connectOne(ctx context.Context, name string, entry ServerEntry, info Implementation, authPrompt OAuthPrompt, childStderr io.Writer) (*Connection, error) {
 	// Per-server timeout. OAuth-protected servers get a longer window
 	// because the user has to do the device-flow dance interactively;
 	// stdio + static-auth servers should still snap up in ~10s.
@@ -89,6 +95,7 @@ func connectOne(ctx context.Context, name string, entry ServerEntry, info Implem
 			Command: entry.Command,
 			Args:    entry.Args,
 			Env:     entry.Env,
+			Stderr:  childStderr,
 		})
 		if err != nil {
 			return nil, err

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -81,6 +82,26 @@ func resolveMaxTokensEscalate(flagVal int, provName string) int {
 		return escalateMaxTokensOpenAI
 	}
 	return escalateMaxTokensAnthropic
+}
+
+// openMCPLogFile opens ~/.octo/logs/mcp.log (append) to receive stdio MCP
+// servers' child stderr while the TUI owns the screen, so their diagnostics are
+// recoverable rather than corrupting the frame. Returns nil on any failure; the
+// caller then discards child stderr — never the terminal.
+func openMCPLogFile() *os.File {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	dir := filepath.Join(home, ".octo", "logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "mcp.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil
+	}
+	return f
 }
 
 // tuiDisabledByEnv reports whether OCTO_TUI is set to a falsey value, the env
@@ -460,6 +481,22 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if err != nil {
 			fmt.Fprintf(stderr, "octo chat: mcp config: %v\n", err)
 		} else if len(mcpCfg.Servers) > 0 {
+			// A stdio server's subprocess writes diagnostics to its stderr at
+			// arbitrary times during the session, from an exec copy goroutine.
+			// Under the bubbletea TUI a direct terminal write corrupts the frame,
+			// so route it to a log file (recoverable, never the screen). In
+			// plain/headless mode leave it nil: the transport defaults to
+			// os.Stderr, the only writer that's safe for the goroutine to share
+			// concurrently (the stderr param may be a non-thread-safe buffer).
+			var childStderr io.Writer
+			if useTUI {
+				if f := openMCPLogFile(); f != nil {
+					childStderr = f
+					defer f.Close()
+				} else {
+					childStderr = io.Discard
+				}
+			}
 			mcpReg := mcp.ConnectAll(
 				context.Background(),
 				mcpCfg,
@@ -468,6 +505,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 					return newCLIOAuthPrompt(stdout, serverName)
 				},
 				stderr,
+				childStderr,
 			)
 			if mcpReg.Len() > 0 {
 				tools.SetMCPRegistry(mcpReg)
