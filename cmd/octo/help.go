@@ -14,8 +14,8 @@ func printCommandHelp(name string, w io.Writer) bool {
 	switch name {
 	case "chat":
 		chatHelp(w)
-	case "goal":
-		taskHelp(w)
+	case "conduct":
+		conductHelp(w)
 	case "memory":
 		memoryHelp(w)
 	case "init":
@@ -129,35 +129,37 @@ Environment:
 Run "octo chat --help" for the full flag list.`)
 }
 
-func taskHelp(w io.Writer) {
-	fmt.Fprintln(w, `octo goal — autonomous task orchestration (M11). Plan a goal into a DAG of
-subtasks, then dispatch one sub-agent per ready node in parallel.
+func conductHelp(w io.Writer) {
+	fmt.Fprintln(w, `octo conduct — unattended long-horizon orchestration. Conduct drives a living
+ledger to completion: every unit's worker gets the upstream results + a shared
+conventions doc, and a turn-budget checkpoint resumes instead of failing.
+
+Verification (how a unit becomes Done) is yours to choose:
+  (default)        no gate — the worker's own "done" is trusted
+  --verify         an LLM judge decides whether the output meets the unit's goal
+  --verify-cmd …   a shell gate (e.g. "go build ./... && go test ./..."), the
+                   strongest option for code where compile/test is decidable
 
 Examples:
-  octo goal start "refactor the cache layer"      Plan + run end-to-end
-  octo goal start "..." --plan-only               Just plan; don't execute
-  octo goal list                                  Show every task on disk (alias: ls)
-  octo goal status last                           DAG state of the most recent task
-  octo goal status a3b2c1d4                       DAG state by short ID
-  octo goal show <id> <subtask-id>                Full result/error for one subtask
-  octo goal resume <id>                           Re-run a Failed / Cancelled task
-  octo goal cancel <id>                           Mark a task Cancelled
+  octo conduct "tidy up the docs/ folder"          Plan + conduct, no gate
+  octo conduct "..." --verify                      Judge each unit with an LLM
+  octo conduct "..." --verify-cmd "make ci"        Objective shell gate
+  octo conduct "..." --plan-only                   Seed the ledger; run later
+  octo conduct "..." --concurrency 3               Parallel workers in worktrees
+  octo conduct "..." --replan                      Let it re-plan when stuck
+  octo conduct list                                List conducted goals
+  octo conduct status last                         Per-unit report
+  octo conduct resume <id>                         Resume a stopped/blocked run
+
+Unattended guardrails:
+  --max-attempts N    Verify-fail retries per unit before it blocks (default 3)
+  --max-iterations N  Loop-turn budget backstop (default scales with units)
+  --stall-rounds N    Stop after N rounds with no unit completed (0 = off)
 
 ID shortcuts (every <id> argument accepts these):
-  last                     The most recently created task
-  <8-char hex>             The trailing short ID shown by 'octo goal list'
-  any unique substring     Resolves if it matches exactly one task
-
-Common flags (for start / run / resume):
-  --provider <name>        anthropic (default) | openai
-  --model <name>           Override the default planner / sub-agent model
-  --plan-only              start: produce the plan but don't run subtasks
-
-Environment:
-  ANTHROPIC_API_KEY / OPENAI_API_KEY    Required for the planner + sub-agents
-
-Task state lives at ~/.octo/tasks/<id>.json — fsync'd on every transition, so a
-kill -9 mid-run resumes cleanly via "octo goal resume".`)
+  last                     The most recently created ledger
+  <8-char hex>             The trailing short ID shown by 'octo conduct list'
+  any unique substring     Resolves if it matches exactly one ledger`)
 }
 
 func memoryHelp(w io.Writer) {

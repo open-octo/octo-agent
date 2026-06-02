@@ -9,9 +9,19 @@ import (
 )
 
 // waitFor polls fn until it returns true or the deadline passes.
+//
+// A satisfied check returns within milliseconds, so the deadline only bounds
+// the failure case — making it generous costs nothing on the happy path but
+// prevents spurious timeouts. Windows needs much more slack: every background
+// command pays PowerShell's cold-start cost (seconds, worse under CI load), so
+// a tight deadline there turns a perfectly working process into a flake.
 func waitFor(t *testing.T, what string, fn func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	limit := 10 * time.Second
+	if runtime.GOOS == "windows" {
+		limit = 45 * time.Second
+	}
+	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) {
 		if fn() {
 			return
