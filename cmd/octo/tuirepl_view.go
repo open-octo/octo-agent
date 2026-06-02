@@ -92,6 +92,25 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyEsc:
 		if m.turnRunning {
+			// Take-back: Esc before the model has produced any output (the echo
+			// is still pending in the live area). Drop the not-yet-committed echo
+			// and restore the typed text to the input box for editing — the agent's
+			// interrupt rolls the unanswered user message back out of history, so
+			// it leaves no trace in the scrollback. Once output has streamed the
+			// echo is already committed (echoPending == "") and Esc just interrupts.
+			if m.echoPending != "" {
+				restore := m.echoRestore
+				m.echoPending = ""
+				m.echoRestore = ""
+				m.interrupt()
+				if restore != "" {
+					m.ta.SetValue(restore)
+					m.ta.CursorEnd()
+					m.inputHistoryIdx = -1
+					return m, m.updateTextAreaHeight()
+				}
+				return m, nil
+			}
 			m.interrupt()
 			return m, nil
 		}
@@ -533,6 +552,9 @@ func keyIs(msg tea.KeyMsg, r rune) bool {
 // spinner, queue, background, input box, status bar) occupies.
 func (m *tuiModel) liveHeight() int {
 	h := 0
+	if m.echoPending != "" {
+		h += strings.Count(m.echoPending, "\n") + 1
+	}
 	if m.partial.String() != "" {
 		h++
 	}
@@ -570,6 +592,13 @@ func (m *tuiModel) View() string {
 	}
 
 	var b strings.Builder
+
+	// Deferred user-message echo: shown live above the activity area until the
+	// turn's first output commits it to the scrollback (or Esc takes it back).
+	if m.echoPending != "" {
+		b.WriteString(m.echoPending)
+		b.WriteByte('\n')
+	}
 
 	// Live partial assistant text
 	if p := m.partial.String(); p != "" {
@@ -741,7 +770,11 @@ func (m *tuiModel) renderStatusBar() string {
 
 	var hint string
 	if m.turnRunning {
-		hint = "Enter steer · Shift+Enter/Alt+Enter/Ctrl+J newline · Ctrl+Q queue · Esc interrupt"
+		esc := "Esc interrupt"
+		if m.echoPending != "" {
+			esc = "Esc take back" // no output yet — Esc returns the message to the input
+		}
+		hint = "Enter steer · Shift+Enter/Alt+Enter/Ctrl+J newline · Ctrl+Q queue · " + esc
 		if len(m.queue) > 0 {
 			hint += " · Ctrl+X unqueue"
 		}

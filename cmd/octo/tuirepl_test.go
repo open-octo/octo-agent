@@ -116,6 +116,70 @@ func TestTUI_EscInterruptsRunningTurn(t *testing.T) {
 	}
 }
 
+// Esc before the model produces any output (echo still pending) takes the turn
+// back: the typed text returns to the input box and the deferred echo never
+// reaches the scrollback.
+func TestTUI_EscTakesBackBeforeOutput(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	cancelled := false
+	m.cancelTurn = func() { cancelled = true }
+	m.echoPending = userEchoStyle.Render("> ") + "fix the bug"
+	m.echoRestore = "fix the bug"
+
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if !cancelled {
+		t.Error("Esc should cancel the running turn")
+	}
+	if m.ta.Value() != "fix the bug" {
+		t.Errorf("typed text should return to the input box, got %q", m.ta.Value())
+	}
+	if m.echoPending != "" {
+		t.Error("the deferred echo should be dropped, not committed")
+	}
+	if len(m.printlnBuf) != 0 {
+		t.Errorf("nothing should be flushed to the scrollback, got %v", m.printlnBuf)
+	}
+}
+
+// Once output has streamed the echo is already committed (echoPending == ""), so
+// Esc just interrupts and leaves the input box untouched.
+func TestTUI_EscAfterOutputJustInterrupts(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	cancelled := false
+	m.cancelTurn = func() { cancelled = true }
+	// echoPending already committed by the first output event.
+
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if !cancelled {
+		t.Error("Esc should still interrupt once output has started")
+	}
+	if m.ta.Value() != "" {
+		t.Errorf("input box should stay empty mid-stream, got %q", m.ta.Value())
+	}
+}
+
+// The first streaming event promotes the deferred echo to the scrollback so the
+// message lands just above the assistant reply.
+func TestTUI_FirstOutputCommitsEcho(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.echoPending = userEchoStyle.Render("> ") + "hello"
+	m.echoRestore = "hello"
+
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "hi"})
+
+	if m.echoPending != "" {
+		t.Error("first output should commit (clear) the deferred echo")
+	}
+	if len(m.printlnBuf) != 1 {
+		t.Fatalf("the echo should be queued to the scrollback, got %v", m.printlnBuf)
+	}
+}
+
 func TestTUI_CtrlDQuits(t *testing.T) {
 	m := newTestModel()
 	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})

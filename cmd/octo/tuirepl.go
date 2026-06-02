@@ -29,7 +29,7 @@ import (
 //   - Alt+Enter          → newline (traditional escape sequence)
 //   - Ctrl+J             → newline (LF — works on all terminals)
 //   - Ctrl+Q             → queue  (run as a fresh turn after this one finishes)
-//   - Esc                → interrupt the current turn (queue survives)
+//   - Esc                → take the turn back if no output yet (text returns to the input), else interrupt; queue survives
 //   - Ctrl+C             → interrupt if a turn runs, else save & quit
 //   - Ctrl+D             → save & quit
 func runTUI(cfg replConfig) int {
@@ -248,6 +248,17 @@ type tuiModel struct {
 	turnRunning bool
 	cancelTurn  context.CancelFunc
 
+	// echoPending is the user-message echo held in the live View() area instead
+	// of being committed straight to the scrollback. It commits on the turn's
+	// first output (commitEcho) so the message lands above the assistant reply,
+	// or is dropped if the user hits Esc before the model responds. Empty means
+	// nothing deferred (already committed, or a turn with no user echo).
+	echoPending string
+	// echoRestore is the raw typed text put back into the input box when the
+	// user takes the turn back with Esc before any output. Empty when the turn
+	// isn't a typed user message (e.g. a skill, /init, or a dequeued item).
+	echoRestore string
+
 	// partial holds the in-progress assistant text not yet committed to the
 	// scrollback.  In the TUI the raw partial is rendered live in the View()
 	// area so the user sees tokens arrive in real time; only complete blocks
@@ -390,6 +401,14 @@ func (m *tuiModel) startTurn(line string) tea.Cmd {
 // expanded prompt that shouldn't be dumped verbatim (e.g. /init, /<skill>);
 // pass "" to suppress the echo entirely.
 func (m *tuiModel) startTurnEcho(line, echo string) tea.Cmd {
+	return m.startTurnEchoRestore(line, echo, "")
+}
+
+// startTurnEchoRestore is startTurnEcho plus restore: the raw text put back
+// into the input box if the user hits Esc before the model produces any output.
+// Pass "" for turns that aren't a verbatim typed message (skills, /init,
+// dequeued items) — those can't be meaningfully restored.
+func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
 	m.turnRunning = true
 	m.turnStart = time.Now()
 	m.spinnerFrame = 0
@@ -407,14 +426,31 @@ func (m *tuiModel) startTurnEcho(line, echo string) tea.Cmd {
 		cancel()
 		prog.Send(turnFinishedMsg{err: err})
 	}()
-	// Echo the submitted message into the scrollback so it reads like a
-	// transcript — except a degraded background-notice "turn", which already
-	// surfaced as a bg notice and isn't user input. Either way, start the
-	// animation ticker for the spinner + elapsed clock.
+	// Defer the echo: hold it in the live View() area rather than committing it
+	// to the scrollback now, so an Esc before the model responds can drop it (and
+	// restore the typed text to the input) without leaving an orphan line in the
+	// scrollback. It commits on the turn's first output via commitEcho. Excludes a
+	// degraded background-notice "turn", which already surfaced as a bg notice and
+	// isn't user input. Either way, start the animation ticker for the spinner.
+	m.echoPending = ""
+	m.echoRestore = ""
 	if echo != "" && !strings.HasPrefix(echo, "<system-reminder>") {
-		m.println(userEchoStyle.Render("> ") + echo)
+		m.echoPending = userEchoStyle.Render("> ") + echo
+		m.echoRestore = restore
 	}
 	return tickCmd()
+}
+
+// commitEcho promotes the deferred user-message echo from the live View() area
+// to the scrollback, so it lands just above the turn's first output. Idempotent
+// — a no-op once the echo has been committed or dropped.
+func (m *tuiModel) commitEcho() {
+	if m.echoPending == "" {
+		return
+	}
+	m.println(m.echoPending)
+	m.echoPending = ""
+	m.echoRestore = ""
 }
 
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -501,6 +537,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.flushPrints()
 
 	case turnEndedMsg:
+		// Commit a still-pending echo (a turn that produced no events — error,
+		// or Ctrl+C). The Esc take-back path clears it before cancelling, so this
+		// is a no-op there.
+		m.commitEcho()
 		// Flush any trailing assistant block (markdown-rendered); then render
 		// the cache/error footer.
 		if s, ok := m.flushTextString(); ok {
@@ -674,6 +714,9 @@ func (m *tuiModel) acceptSuggestion() {
 }
 
 func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
+	// Promote the deferred user echo above this turn's first output so the
+	// transcript order (your message → reply) is preserved.
+	m.commitEcho()
 	switch ev.Kind {
 	case agent.EventTextDelta:
 		m.appendText(ev.Text)
