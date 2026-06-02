@@ -443,6 +443,9 @@ func (m *tuiModel) liveHeight() int {
 	if bg := tools.RunningBackground(); len(bg) > 0 {
 		h += 3 + len(bg) // panel border (2) + title (1) + body lines
 	}
+	if n := len(m.subAgentOrder); n > 0 {
+		h += 3 + n // panel border (2) + title (1) + one line per sub-agent
+	}
 	h += m.completionHeight() // slash-completion menu (0 when closed)
 	h += m.ta.Height()        // input box (textarea grows with content)
 	if m.turnRunning {
@@ -518,6 +521,34 @@ func (m *tuiModel) View() string {
 			fmt.Fprintf(&lines, "%c %s (%s)", frame, truncate1Line(p.Command), time.Since(p.Start).Round(time.Second))
 		}
 		b.WriteString(tui.Panel(fmt.Sprintf("background (%d running)", len(bg)), lines.String()))
+		b.WriteByte('\n')
+	}
+
+	// Sub-agents panel — live tool-call chain of each running sub-agent
+	// (Claude-Code style), mirroring the background-processes panel.
+	if len(m.subAgentOrder) > 0 {
+		frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+		var lines strings.Builder
+		for i, id := range m.subAgentOrder {
+			sa := m.subAgents[id]
+			if sa == nil {
+				continue
+			}
+			if i > 0 {
+				lines.WriteByte('\n')
+			}
+			label := id
+			if sa.description != "" {
+				label = fmt.Sprintf("%s (%s)", id, truncate1Line(sa.description))
+			}
+			chain := "starting…"
+			if len(sa.recent) > 0 {
+				chain = strings.Join(sa.recent, " · ")
+			}
+			fmt.Fprintf(&lines, "%c %s — %s  (%d tools, %s)",
+				frame, label, chain, sa.toolCount, time.Since(sa.start).Round(time.Second))
+		}
+		b.WriteString(tui.Panel(fmt.Sprintf("sub-agents (%d running)", len(m.subAgentOrder)), lines.String()))
 		b.WriteByte('\n')
 	}
 
