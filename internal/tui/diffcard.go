@@ -98,7 +98,7 @@ func RenderEditCard(filePath, oldString, newString string) string {
 		Added:    added,
 		Removed:  removed,
 		Lines:    lines,
-		Language: guessLanguage(filePath),
+		Language: GuessLanguage(filePath),
 	}
 	return c.Render()
 }
@@ -240,9 +240,9 @@ func highlightLine(src, language string, dark bool) string {
 	return strings.TrimRight(buf.String(), "\n")
 }
 
-// guessLanguage maps a path extension to a Chroma lexer name. Empty
+// GuessLanguage maps a path extension to a Chroma lexer name. Empty
 // return disables highlighting.
-func guessLanguage(path string) string {
+func GuessLanguage(path string) string {
 	switch {
 	case strings.HasSuffix(path, ".go"):
 		return "go"

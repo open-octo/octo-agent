@@ -114,7 +114,7 @@ func TestGuessLanguage(t *testing.T) {
 		"foo.yaml": "yaml",
 	}
 	for path, want := range cases {
-		if got := guessLanguage(path); got != want {
+		if got := GuessLanguage(path); got != want {
 			t.Errorf("guessLanguage(%q) = %q, want %q", path, got, want)
 		}
 	}

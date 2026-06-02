@@ -6,7 +6,7 @@ import (
 )
 
 func TestRenderOutputCard_HeaderAndBody(t *testing.T) {
-	got := RenderOutputCard("Run", "go test ./...", "ok  pkg/a  0.2s\nok  pkg/b  0.1s", 0, false)
+	got := RenderOutputCard("Run", "go test ./...", "ok  pkg/a  0.2s\nok  pkg/b  0.1s", 0, false, "")
 	for _, want := range []string{"Run(go test ./...)", "ok  pkg/a  0.2s", "ok  pkg/b  0.1s"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
@@ -19,7 +19,7 @@ func TestRenderOutputCard_CapsWithMoreMarker(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		lines = append(lines, "line")
 	}
-	got := RenderOutputCard("Search", "foo", strings.Join(lines, "\n"), 5, false)
+	got := RenderOutputCard("Search", "foo", strings.Join(lines, "\n"), 5, false, "")
 	if !strings.Contains(got, "15 more lines") {
 		t.Errorf("expected '15 more lines' marker; got:\n%s", got)
 	}
@@ -30,15 +30,24 @@ func TestRenderOutputCard_CapsWithMoreMarker(t *testing.T) {
 }
 
 func TestRenderOutputCard_EmptyOutput(t *testing.T) {
-	got := RenderOutputCard("Run", "true", "", 0, false)
+	got := RenderOutputCard("Run", "true", "", 0, false, "")
 	if !strings.Contains(got, "(no output)") {
 		t.Errorf("expected '(no output)'; got:\n%s", got)
 	}
 }
 
 func TestRenderOutputCard_SingularMoreLine(t *testing.T) {
-	got := RenderOutputCard("Run", "x", "a\nb\nc", 2, false)
+	got := RenderOutputCard("Run", "x", "a\nb\nc", 2, false, "")
 	if !strings.Contains(got, "1 more line") || strings.Contains(got, "1 more lines") {
 		t.Errorf("expected singular '1 more line'; got:\n%s", got)
+	}
+}
+
+func TestRenderOutputCard_Highlight(t *testing.T) {
+	output := "package main\n\nfunc main() {}"
+	got := RenderOutputCard("Read", "main.go", output, 0, false, "go")
+	// Chroma highlighting should inject ANSI escape codes.
+	if !strings.Contains(got, "\x1b[") {
+		t.Errorf("expected ANSI escapes from Chroma highlighting; got:\n%s", got)
 	}
 }

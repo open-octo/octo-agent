@@ -19,7 +19,8 @@ var (
 // maxLines (<=0 = no cap) with a "└ N more lines" marker for the remainder.
 // isErr tints the bullet red. Empty output renders "(no output)". The trailing
 // newline is omitted so callers control spacing (mirrors Card.Render).
-func RenderOutputCard(verb, target, output string, maxLines int, isErr bool) string {
+// When language is non-empty, each line is syntax-highlighted with Chroma.
+func RenderOutputCard(verb, target, output string, maxLines int, isErr bool, language string) string {
 	bullet := outBullet
 	if isErr {
 		bullet = outBulletErr
@@ -38,8 +39,14 @@ func RenderOutputCard(verb, target, output string, maxLines int, isErr bool) str
 	if maxLines > 0 && len(lines) > maxLines {
 		shown, extra = lines[:maxLines], len(lines)-maxLines
 	}
+
+	dark := IsDark()
 	for _, ln := range shown {
-		b.WriteString("\n  " + outGutter.String() + " " + ln)
+		body := ln
+		if language != "" {
+			body = highlightLine(ln, language, dark)
+		}
+		b.WriteString("\n  " + outGutter.String() + " " + body)
 	}
 	if extra > 0 {
 		b.WriteString("\n  " + outMore.Render("└ "+pluralise(extra, "more line")))
