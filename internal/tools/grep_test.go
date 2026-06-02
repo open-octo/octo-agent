@@ -134,6 +134,54 @@ func TestGrep_RequiresPattern(t *testing.T) {
 	}
 }
 
+func TestGrep_CapsTotalLines(t *testing.T) {
+	requireRg(t)
+	// A pattern that hits far more than GrepMaxLines lines must be
+	// truncated with a marker naming the total — otherwise a broad search
+	// floods context and the model can't tell it saw only part of the set.
+	dir := t.TempDir()
+	var b strings.Builder
+	for i := 0; i < GrepMaxLines+50; i++ {
+		b.WriteString("needle\n")
+	}
+	writeTestFile(t, filepath.Join(dir, "many.txt"), b.String())
+
+	out, err := GrepTool{}.Execute(context.Background(), "grep", map[string]any{
+		"pattern": "needle",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "truncated to first 200 of") {
+		t.Errorf("expected truncation marker with total, got:\n%s", out.Text[:min(len(out.Text), 300)])
+	}
+	// The kept body is exactly GrepMaxLines content lines; the marker adds
+	// a blank line + one line. Content lines must not exceed the cap.
+	body := strings.SplitN(out.Text, "\n\n[truncated", 2)[0]
+	if got := len(strings.Split(body, "\n")); got != GrepMaxLines {
+		t.Errorf("expected %d content lines before marker, got %d", GrepMaxLines, got)
+	}
+}
+
+func TestGrep_NoMarkerUnderCap(t *testing.T) {
+	requireRg(t)
+	// A result at or under the cap must not claim truncation.
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "few.txt"), "needle\nneedle\nneedle\n")
+
+	out, err := GrepTool{}.Execute(context.Background(), "grep", map[string]any{
+		"pattern": "needle",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(out.Text, "truncated") {
+		t.Errorf("under-cap result should not be marked truncated:\n%s", out.Text)
+	}
+}
+
 func TestGrep_TruncatesLongMatchingLines(t *testing.T) {
 	requireRg(t)
 	// Simulate a minified-bundle hit: one line of 1000 a's containing

@@ -130,9 +130,10 @@ func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 
 	var (
-		out      strings.Builder
-		lineNum  int
-		returned int
+		out       strings.Builder
+		lineNum   int
+		returned  int
+		truncated bool
 	)
 	for scanner.Scan() {
 		lineNum++
@@ -140,6 +141,10 @@ func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 			continue
 		}
 		if returned >= limit {
+			// Hit the line cap with at least one more line in the file.
+			// lineNum already points at that next unshown line, so it is
+			// the offset the caller should resume from.
+			truncated = true
 			break
 		}
 		// Width-6 line number column matches `cat -n` so a 100k-line file
@@ -157,6 +162,15 @@ func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 	}
 	if returned == 0 {
 		return agent.ToolResult{Text: "(empty file)"}, nil
+	}
+	if truncated {
+		// Without this footer the read stops silently at the cap, so the
+		// model can't tell a complete read from a truncated one — it then
+		// either edits against lines it never saw or re-reads the same
+		// window expecting different output. Spelling out the exact resume
+		// offset breaks that loop.
+		fmt.Fprintf(&out, "\n[truncated: shown lines %d-%d; file has more. Continue with offset=%d.]\n",
+			offset, offset+returned-1, lineNum)
 	}
 	return agent.ToolResult{Text: out.String()}, nil
 }
