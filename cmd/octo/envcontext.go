@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -54,6 +55,26 @@ func gitState(cwd string) (branch string, dirty, ok bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+
+	// Verify cwd is actually inside a git repo, not just a subdir of one
+	// reached by git's upward traversal.
+	topLevel, err := gitRun(ctx, cwd, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", false, false
+	}
+	// Normalize paths for comparison (git returns abs paths; cwd may be ".").
+	absCwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", false, false
+	}
+	absTop := strings.TrimSpace(topLevel)
+	if absTop == "" {
+		return "", false, false
+	}
+	// cwd must be inside or equal to the repo root.
+	if !strings.HasPrefix(absCwd, absTop) {
+		return "", false, false
+	}
 
 	branchOut, err := gitRun(ctx, cwd, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
