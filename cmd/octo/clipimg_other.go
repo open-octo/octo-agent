@@ -1,12 +1,14 @@
-//go:build !darwin
+//go:build !darwin && !linux && !windows
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"runtime"
+)
 
-// captureClipboardImage is unsupported off macOS for now. Linux (wl-paste /
-// xclip) and Windows (PowerShell Get-Clipboard) can be added behind the same
-// signature when needed.
+// captureClipboardImage covers the platforms without a dedicated clipboard
+// backend (the BSDs, etc.). macOS, Linux, and Windows have their own files.
 func captureClipboardImage() (data []byte, mime string, err error) {
-	return nil, "", fmt.Errorf("clipboard image paste is only supported on macOS right now")
+	return nil, "", fmt.Errorf("clipboard image paste is not supported on %s", runtime.GOOS)
 }
