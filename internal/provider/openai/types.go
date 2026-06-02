@@ -180,6 +180,20 @@ func (u apiUsage) cachedTokens() int {
 	return 0
 }
 
+// nonCachedInput returns prompt tokens excluding the cached (read-hit) portion.
+// OpenAI/DeepSeek report prompt_tokens as the WHOLE input (cached + uncached),
+// with cached_tokens as a subset; Anthropic instead reports input_tokens as the
+// uncached remainder with cache_read separate. The agent treats InputTokens and
+// CacheReadTokens as non-overlapping buckets (so context occupancy is their sum
+// and they price independently), so we subtract here to match that convention.
+// Clamped at zero in case a backend ever reports cached > prompt.
+func (u apiUsage) nonCachedInput() int {
+	if n := u.PromptTokens - u.cachedTokens(); n > 0 {
+		return n
+	}
+	return 0
+}
+
 // apiError is the body of an OpenAI error response (4xx/5xx).
 type apiError struct {
 	Error struct {

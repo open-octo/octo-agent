@@ -28,3 +28,24 @@ func TestApiUsage_CachedTokens(t *testing.T) {
 		t.Errorf("precedence = %d, want 200", got)
 	}
 }
+
+func TestApiUsage_NonCachedInput(t *testing.T) {
+	// Real DeepSeek warm-cache shape: prompt_tokens is the WHOLE input,
+	// prompt_cache_hit_tokens a subset. InputTokens must exclude the cached
+	// part so it doesn't overlap CacheReadTokens (hit 2688 + miss 20 = 2708).
+	ds := apiUsage{PromptTokens: 2708, PromptCacheHitTokens: 2688, PromptCacheMissTokens: 20}
+	if got := ds.nonCachedInput(); got != 20 {
+		t.Errorf("deepseek nonCachedInput = %d, want 20", got)
+	}
+	if got := ds.cachedTokens(); got != 2688 {
+		t.Errorf("deepseek cachedTokens = %d, want 2688", got)
+	}
+	// Cold turn: no cache, full prompt is uncached.
+	if got := (apiUsage{PromptTokens: 2707}).nonCachedInput(); got != 2707 {
+		t.Errorf("cold nonCachedInput = %d, want 2707", got)
+	}
+	// Defensive: cached > prompt clamps to 0 rather than going negative.
+	if got := (apiUsage{PromptTokens: 10, PromptCacheHitTokens: 99}).nonCachedInput(); got != 0 {
+		t.Errorf("clamp nonCachedInput = %d, want 0", got)
+	}
+}

@@ -145,6 +145,43 @@ func TestSendStream_OpenAI_UsageChunkParsed(t *testing.T) {
 	}
 }
 
+// TestSendStream_DeepSeek_CacheSplitNormalised mirrors a real DeepSeek warm-cache
+// usage chunk: prompt_tokens is the WHOLE input and prompt_cache_hit_tokens a
+// subset. The adapter must report InputTokens as the uncached remainder so it
+// doesn't overlap CacheReadTokens (else context occupancy double-counts).
+func TestSendStream_DeepSeek_CacheSplitNormalised(t *testing.T) {
+	withUsage := strings.Replace(canonicalOpenAIStream, "data: [DONE]\n\n",
+		`data: {"id":"c1","object":"chat.completion.chunk","model":"deepseek-v4-flash","choices":[],"usage":{"prompt_tokens":2708,"completion_tokens":16,"total_tokens":2724,"prompt_cache_hit_tokens":2688,"prompt_cache_miss_tokens":20,"prompt_tokens_details":{"cached_tokens":2688}}}`+"\n\n"+
+			"data: [DONE]\n\n", 1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, withUsage)
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+
+	resp, err := c.SendStream(context.Background(), provider.Request{
+		Model:    "deepseek-v4-flash",
+		Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.InputTokens != 20 {
+		t.Errorf("InputTokens = %d, want 20 (uncached remainder, not the full 2708)", resp.InputTokens)
+	}
+	if resp.CacheReadTokens != 2688 {
+		t.Errorf("CacheReadTokens = %d, want 2688", resp.CacheReadTokens)
+	}
+	// Occupancy (input + cache read) reconstructs the full prompt exactly once.
+	if got := resp.InputTokens + resp.CacheReadTokens; got != 2708 {
+		t.Errorf("input + cache_read = %d, want 2708 (no double-count, no loss)", got)
+	}
+}
+
 // TestStreamingHTTPClient_OpenAI_DropsTimeout ensures the streaming client
 // drops the injected client's end-to-end Timeout while preserving Transport,
 // without mutating the original.

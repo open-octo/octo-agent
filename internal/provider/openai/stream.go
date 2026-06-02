@@ -152,7 +152,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 			result.Model = ch.Model
 		}
 		if ch.Usage != nil {
-			result.InputTokens = ch.Usage.PromptTokens
+			result.InputTokens = ch.Usage.nonCachedInput()
 			result.OutputTokens = ch.Usage.CompletionTokens
 			result.CacheReadTokens = ch.Usage.cachedTokens()
 		}
@@ -163,7 +163,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		// Some compatible backends (Kimi) embed usage inside the choice object
 		// rather than at the chunk level. Prefer chunk-level but fall back.
 		if choice.Usage != nil {
-			result.InputTokens = choice.Usage.PromptTokens
+			result.InputTokens = choice.Usage.nonCachedInput()
 			result.OutputTokens = choice.Usage.CompletionTokens
 			result.CacheReadTokens = choice.Usage.cachedTokens()
 		}
