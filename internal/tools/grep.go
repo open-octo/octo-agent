@@ -12,6 +12,13 @@ import (
 	"github.com/Leihb/octo-agent/internal/tools/rgembed"
 )
 
+// GrepMaxLines caps how many output lines a single grep call returns.
+// Without it a broad pattern (e.g. `func`) on a large repo floods the LLM
+// context with thousands of hits. Past the cap the output is truncated
+// with a marker naming the total, so the model narrows the pattern instead
+// of assuming it saw everything. Mirrors GlobMaxResults' role for glob.
+const GrepMaxLines = 200
+
 // GrepTool is a thin wrapper over `ripgrep` (`rg`). It accepts a regex
 // pattern and one of three output modes: full content lines, file paths
 // only, or per-file match counts.
@@ -29,8 +36,10 @@ func (GrepTool) Definition() agent.ToolDefinition {
 			"Use mode='files_with_matches' for path-only output, mode='count' for " +
 			"per-file counts, or the default mode='content' to see matching lines. " +
 			"Set context_lines (or before/after) to include surrounding lines. " +
-			"Respects .gitignore. Matching lines over 500 chars are truncated " +
-			"with a preview of the first 500 bytes. Requires `rg` on PATH.",
+			"Respects .gitignore. Returns at most 200 output lines — narrow the " +
+			"pattern or set include/path if you hit the cap. Matching lines over " +
+			"500 chars are truncated with a preview of the first 500 bytes. " +
+			"Requires `rg` on PATH.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -148,5 +157,18 @@ func (GrepTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 	if len(out) == 0 {
 		return agent.ToolResult{Text: "(no matches)"}, nil
 	}
-	return agent.ToolResult{Text: strings.TrimRight(string(out), "\n")}, nil
+
+	text := strings.TrimRight(string(out), "\n")
+	lines := strings.Split(text, "\n")
+	if len(lines) > GrepMaxLines {
+		// Truncate and tell the model the total so it doesn't mistake a
+		// capped result for the complete set and re-run the same search.
+		// "lines" not "matches" — in content mode context lines and `--`
+		// separators count too.
+		kept := strings.Join(lines[:GrepMaxLines], "\n")
+		return agent.ToolResult{Text: fmt.Sprintf(
+			"%s\n\n[truncated to first %d of %d lines — narrow the pattern, add include='*.ext', or set a more specific path]",
+			kept, GrepMaxLines, len(lines))}, nil
+	}
+	return agent.ToolResult{Text: text}, nil
 }
