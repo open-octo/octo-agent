@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/tools/rgembed"
 )
 
 // GrepTool is a thin wrapper over `ripgrep` (`rg`). It accepts a regex
@@ -72,11 +73,9 @@ func (GrepTool) Definition() agent.ToolDefinition {
 }
 
 func (GrepTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
-	if _, err := exec.LookPath("rg"); err != nil {
-		return agent.ToolResult{Text: ""}, fmt.Errorf(
-			"grep: ripgrep (`rg`) is not installed or not on PATH. " +
-				"Install it from https://github.com/BurntSushi/ripgrep",
-		)
+	rgPath, err := rgembed.Path()
+	if err != nil {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("grep: %w", err)
 	}
 
 	pattern, _ := input["pattern"].(string)
@@ -134,7 +133,7 @@ func (GrepTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 		args = append(args, abs)
 	}
 
-	out, err := exec.CommandContext(ctx, "rg", args...).Output()
+	out, err := exec.CommandContext(ctx, rgPath, args...).Output()
 	if err != nil {
 		// ripgrep exits 1 when nothing matched. That's not an error from
 		// the LLM's perspective — surface it as a normal result.
