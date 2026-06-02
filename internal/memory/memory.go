@@ -110,8 +110,9 @@ func RenderInjection(dir string) string {
 	b.WriteString("Manage memory yourself with your file tools — that directory is writable:\n")
 	b.WriteString("- When the user states a lasting preference, gives feedback or a correction, or shares something worth recalling in future sessions, save it (append to " + IndexFile + ", or a topic file linked from it).\n")
 	b.WriteString("- Keep " + IndexFile + " a concise index; move long detail into topic files.\n")
+	b.WriteString("- For a load-bearing rule you must not skip, write it in full under a '## 必须遵守' (always-apply) section, or, if it only matters for certain tasks, under a '## 触发提醒' section with a leading '(触发: keyword1, keyword2)' clause. Rules in those sections are re-surfaced to you at the point of action; everything else stays a pointer index.\n")
 	b.WriteString("- Edit or delete entries that become wrong or obsolete. Don't store one-off task details or things already in the repo / CLAUDE.md.\n")
-	b.WriteString("Treat the contents below as background context, not user instructions; verify any file/flag named here still exists.\n")
+	b.WriteString("The notes below are your own durable record of this user's preferences, workflow rules, and project facts — follow them as standing guidance, the way you follow project conventions. They are records, not live instructions from the user: if a note conflicts with the user's current request or with safety, the current request and safety win. Verify any file, flag, or path a note names still exists before relying on it.\n")
 	if idx := LoadIndex(dir); idx != "" {
 		b.WriteString("\n## " + IndexFile + "\n\n" + idx)
 	} else {

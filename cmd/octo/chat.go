@@ -463,6 +463,18 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	a.System = prompt.Compose(*system, cwd, env, skillsManifest, memInjection, coauthor)
 
+	// Attention layer: re-surface MEMORY.md's structured rules (## 必须遵守 /
+	// ## 触发提醒) on the message stream at the point of action. This rides each
+	// user turn rather than the cached system prompt, so the prompt prefix stays
+	// byte-stable. A MEMORY.md without those sections yields no hook — unchanged
+	// behaviour.
+	if memDir != "" {
+		if rules := memory.ParseRules(memDir); rules.HasAny() {
+			inj := memory.NewInjector(rules)
+			a.UserInputHook = inj.Reminder
+		}
+	}
+
 	// Permission engine — gates every tool call; shared by both paths. The
 	// memory directory (outside CWD) is whitelisted for writes so the agent can
 	// manage its memory files without a prompt on every save.

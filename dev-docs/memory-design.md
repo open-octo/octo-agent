@@ -34,9 +34,12 @@ At session start `cmd/octo` resolves the directory, creates it, and injects
 `memory.RenderInjection(dir)` into the composed system prompt (the `memory`
 layer of `prompt.Compose`). The injection is a short instruction block —
 *where* memory lives and *how* to manage it — followed by the current MEMORY.md
-(or an "empty" marker so a fresh project knows where to start). It is framed as
-background context, not user instructions, and is frozen for the session: what
-the agent writes now surfaces in the *next* session, not the current one.
+(or an "empty" marker so a fresh project knows where to start). The notes are
+framed as the agent's own durable record of the user's preferences, workflow
+rules, and project facts, to be followed as standing guidance; the current user
+request and safety override a conflicting note. The block is frozen for the
+session: what the agent writes now surfaces in the *next* session, not the
+current one.
 
 The session-prompt guidance (`internal/prompt/base.md`, "Memory" section)
 covers when to save (lasting preferences, corrections + the why, validated
@@ -44,6 +47,38 @@ judgment, external resources), what not to save (one-off task state, anything
 derivable from the repo, secrets), grounding answers in memory with a brief
 inline attribution, and verifying a remembered file/flag still exists before
 acting on it.
+
+## Attention layer — structured rules, re-surfaced at the point of action
+
+A note buried in the frozen system-prompt block is easy for the model to skim
+past by the time it matters, many turns later. MEMORY.md may therefore carry two
+optional sections whose rules are written **in full** (not as pointer links) and
+re-surfaced on the message stream when they're relevant:
+
+```
+## 必须遵守        always-apply rules — restated every turn
+## 触发提醒        each bullet "(触发: kw1, kw2) rule text" — recalled on a keyword hit
+```
+
+`memory.ParseRules` extracts these tiers (section headings are matched by
+keyword — `必须遵守`/`always`, `触发`/`trigger` — tolerant of emoji and heading
+level). `memory.Injector.Reminder` renders the per-turn `<system-reminder>`:
+always-apply rules on every turn, plus any triggered rules whose keywords occur
+in the user input, each surfaced at most once per session. Trigger matching is
+deliberately conservative and one-directional — *input contains trigger* —
+with ASCII keywords matched on word boundaries (`deploy` does not fire on
+`deployment`) and CJK keywords matched as substrings (`部署` fires inside
+`帮我部署一下`).
+
+`cmd/octo` builds the injector once per session and wires it as
+`agent.UserInputHook`, which folds the reminder into the user message at the
+single `History.Append` choke point in `Turn`/`TurnStream`/`runLoop` (one
+appended message, so the error-path `popLast` rollback still removes exactly one
+turn). The reminder rides the message stream rather than the system prompt, so
+the cached prompt prefix stays byte-stable across the session.
+
+A MEMORY.md without these sections — the plain pointer-index format — parses to
+zero rules, sets no hook, and behaves exactly as before.
 
 ## Writing — file tools, whitelisted directory
 
