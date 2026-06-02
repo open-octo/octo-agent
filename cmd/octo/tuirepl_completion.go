@@ -23,6 +23,7 @@ var builtinSlashCommands = []complItem{
 	{"/mcp", "List connected MCP servers"},
 	{"/memory", "Show cross-session memory"},
 	{"/goal", "Plan + run a goal as a task DAG"},
+	{"/conduct", "Conduct a goal to completion, unattended"},
 	{"/init", "Generate a .octorules guide for this repo"},
 	{"/save", "Save the current session"},
 	{"/sessions", "List recent sessions"},

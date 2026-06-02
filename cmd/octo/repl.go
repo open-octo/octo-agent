@@ -239,7 +239,7 @@ func pluralS(n int) string {
 var reservedReplCommands = map[string]bool{
 	"init": true, "exit": true, "quit": true, "help": true,
 	"save": true, "sessions": true, "skills": true,
-	"memory": true, "mcp": true, "goal": true,
+	"memory": true, "mcp": true, "goal": true, "conduct": true,
 }
 
 // skillTrigger reports whether line is a /<name> invocation of a discovered

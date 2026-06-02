@@ -591,5 +591,12 @@ func (spawnerExecutor) Execute(ctx context.Context, description string) (string,
 	if err != nil {
 		return "", err
 	}
+	// The spawner now surfaces a max-turns checkpoint as a non-error result
+	// (the conductor continues from it). The taskgraph `/goal` scheduler has
+	// no continuation step, so keep its original stop-on-fail contract: a
+	// sub-agent that exhausts its turn budget is a failed subtask here.
+	if res.StopReason == agent.StopReasonMaxTurns {
+		return "", fmt.Errorf("sub-agent reached max-turns limit — task incomplete")
+	}
 	return res.Reply, nil
 }

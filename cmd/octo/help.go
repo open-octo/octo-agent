@@ -16,6 +16,8 @@ func printCommandHelp(name string, w io.Writer) bool {
 		chatHelp(w)
 	case "goal":
 		taskHelp(w)
+	case "conduct":
+		conductHelp(w)
 	case "memory":
 		memoryHelp(w)
 	case "init":
@@ -127,6 +129,34 @@ Environment:
   OCTO_VERBOSITY           quiet | normal | verbose; overridden by --quiet / --verbose
 
 Run "octo chat --help" for the full flag list.`)
+}
+
+func conductHelp(w io.Writer) {
+	fmt.Fprintln(w, `octo conduct — unattended long-horizon orchestration. Unlike 'octo goal'
+(a one-shot DAG fanned out under stop-on-fail), conduct drives a living
+ledger to completion: every unit's worker gets the upstream results + a
+shared conventions doc, a turn-budget checkpoint resumes instead of failing,
+and a unit is only Done once an objective gate (go build/vet/test) is green.
+
+Examples:
+  octo conduct "port the parser package to Go"     Plan + conduct to completion
+  octo conduct "..." --plan-only                   Seed the ledger; run later
+  octo conduct "..." --concurrency 3               Parallel workers in worktrees
+  octo conduct "..." --verify "make ci"            Custom verification gate
+  octo conduct "..." --replan                      Let it re-plan when stuck
+  octo conduct list                                List conducted goals
+  octo conduct status last                         Per-unit report
+  octo conduct resume <id>                         Resume a stopped/blocked run
+
+Unattended guardrails:
+  --max-attempts N    Verify-fail retries per unit before it blocks (default 3)
+  --max-iterations N  Loop-turn budget backstop (default scales with units)
+  --stall-rounds N    Stop after N rounds with no unit completed (0 = off)
+
+ID shortcuts (every <id> argument accepts these):
+  last                     The most recently created ledger
+  <8-char hex>             The trailing short ID shown by 'octo conduct list'
+  any unique substring     Resolves if it matches exactly one ledger`)
 }
 
 func taskHelp(w io.Writer) {

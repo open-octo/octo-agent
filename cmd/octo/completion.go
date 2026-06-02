@@ -82,6 +82,10 @@ func completionCandidates(words []string) []string {
 		return chatCandidates(words, prev)
 	case "goal":
 		return taskCandidates(words, prev)
+	case "conduct":
+		if len(words) == 3 {
+			return []string{"list", "status", "resume"}
+		}
 	case "memory":
 		return memoryCandidates(words)
 	case "init":
@@ -93,7 +97,7 @@ func completionCandidates(words []string) []string {
 	case "help":
 		// `octo help <TAB>` → list of help targets.
 		if len(words) == 3 {
-			return []string{"chat", "config", "goal", "memory", "init", "completion", "mcp"}
+			return []string{"chat", "config", "goal", "conduct", "memory", "init", "completion", "mcp"}
 		}
 	case "completion":
 		if len(words) == 3 {
@@ -241,7 +245,7 @@ new flags / subcommands are added.`))
 // ── Static lists ─────────────────────────────────────────────────────────
 
 var topLevelCommands = []string{
-	"chat", "config", "init", "memory", "goal",
+	"chat", "config", "init", "memory", "goal", "conduct",
 	"version", "help", "completion",
 }
 
