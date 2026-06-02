@@ -1055,3 +1055,29 @@ func TestAccrueChildUsage_FoldsIntoSessionTotals(t *testing.T) {
 		t.Errorf("SessionTokens after two AccrueChildUsage = (%d,%d), want (300,125)", in, out)
 	}
 }
+
+// On a cache hit the provider reports InputTokens as only the non-cached
+// remainder and moves the bulk into CacheReadTokens. ContextUsage must report
+// the whole prompt (input + cache read + cache write), not just InputTokens, or
+// the ctx-usage gauge reads far too low once the cached prefix dominates.
+func TestContextUsage_IncludesCacheTokens(t *testing.T) {
+	send := &fakeSender{reply: Reply{
+		Content:          "ok",
+		InputTokens:      114,  // non-cached remainder (matches observed Kimi streaming)
+		CacheReadTokens:  2304, // cached prefix served this turn
+		CacheWriteTokens: 0,
+	}}
+	a := New(send, "m")
+
+	if _, err := a.Turn(context.Background(), "hi"); err != nil {
+		t.Fatalf("Turn: %v", err)
+	}
+
+	used, window := a.ContextUsage()
+	if used != 2418 {
+		t.Errorf("ContextUsage used = %d, want 2418 (114 input + 2304 cache_read)", used)
+	}
+	if window <= 0 {
+		t.Errorf("ContextUsage window = %d, want > 0", window)
+	}
+}

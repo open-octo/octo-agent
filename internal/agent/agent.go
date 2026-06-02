@@ -841,7 +841,14 @@ func (a *Agent) accrueUsage(reply Reply) {
 	a.sessionOutputTokens += reply.OutputTokens
 	a.sessionCacheReadTokens += reply.CacheReadTokens
 	a.sessionCacheWriteTokens += reply.CacheWriteTokens
-	a.lastInputTokens = reply.InputTokens
+	// Context occupancy is the WHOLE prompt sent, not just the uncached part.
+	// On a cache hit the provider reports InputTokens as only the non-cached
+	// remainder and moves the bulk into CacheReadTokens (cache_read_input_tokens)
+	// / CacheWriteTokens (cache_creation_input_tokens) — e.g. Kimi streaming
+	// returns input=114, cache_read=2304 for a 2418-token prompt. Summing all
+	// three keeps the ctx-usage gauge honest; using InputTokens alone makes it
+	// read far too low once the cached prefix dominates.
+	a.lastInputTokens = reply.InputTokens + reply.CacheReadTokens + reply.CacheWriteTokens
 }
 
 // SessionTokens returns the cumulative input and output token counts for all
