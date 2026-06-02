@@ -706,6 +706,54 @@ func isTransientStreamErr(err error) bool {
 	return errors.As(err, &t) && t.TransientStream()
 }
 
+// suggestMaxTokens caps the follow-up suggestion response — it's one short line.
+const suggestMaxTokens = 256
+
+const suggestInstruction = "Suggest ONE concise, specific next message I (the user) might send to continue this work. " +
+	"Output only that message text — phrased as I would type it, a single line, no preamble, no quotes, no numbering."
+
+// Suggest produces a single follow-up message the user might want to send next,
+// based on the conversation so far. It is a throwaway provider call: the
+// instruction is appended to a snapshot of history (never to the live History),
+// so it doesn't pollute the conversation, and its token usage is not accrued
+// into the session. Returns "" (no error) when there's nothing to suggest.
+//
+// Cheap in practice: the history prefix is prompt-cached, so only the short
+// instruction and the one-line reply are fresh tokens.
+func (a *Agent) Suggest(ctx context.Context) (string, error) {
+	if a.Sender == nil || a.Model == "" {
+		return "", fmt.Errorf("agent: suggest: not configured")
+	}
+	snap := a.History.Snapshot()
+	if len(snap) == 0 {
+		return "", nil
+	}
+	msgs := make([]Message, 0, len(snap)+1)
+	msgs = append(msgs, snap...)
+	msgs = append(msgs, NewUserMessage(suggestInstruction))
+
+	reply, err := a.Sender.SendMessages(ctx, a.Model, a.System, msgs, suggestMaxTokens)
+	if err != nil {
+		return "", err
+	}
+	return cleanSuggestion(reply.Content), nil
+}
+
+// cleanSuggestion picks the first non-empty line and strips list/quote
+// decoration the model sometimes adds despite the instruction.
+func cleanSuggestion(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "- ")
+		line = strings.TrimPrefix(line, "* ")
+		line = strings.TrimSpace(strings.Trim(line, "\"'`"))
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
 // isMaxTokensTooLargeErr best-effort detects a provider rejecting an escalated
 // max_tokens because it exceeds the model's ceiling (e.g. Claude 3 caps at
 // 4096). Both Anthropic and OpenAI-protocol backends name max_tokens in the

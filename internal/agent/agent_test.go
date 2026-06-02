@@ -1293,3 +1293,64 @@ func TestRunLoop_TransientStall_BoundedGivesUp(t *testing.T) {
 		t.Errorf("calls = %d, want %d (budget %d + final)", send.calls, maxStreamStalls+1, maxStreamStalls)
 	}
 }
+
+// ─── Suggest (after-turn follow-up) ────────────────────────────────────────
+
+func TestAgent_Suggest(t *testing.T) {
+	send := &fakeSender{reply: Reply{Content: "  - run the tests now\nignored second line"}}
+	a := New(send, "m")
+	a.System = "sys"
+	a.History.Append(NewUserMessage("do X"))
+	a.History.Append(NewAssistantMessage("did X"))
+
+	s, err := a.Suggest(context.Background())
+	if err != nil {
+		t.Fatalf("Suggest: %v", err)
+	}
+	if s != "run the tests now" {
+		t.Errorf("suggestion = %q, want %q (first line, decoration stripped)", s, "run the tests now")
+	}
+	// Must NOT pollute the conversation.
+	if a.History.Len() != 2 {
+		t.Errorf("history len = %d, want 2 (Suggest must not append)", a.History.Len())
+	}
+	// The instruction rides as the final message, with the small cap.
+	if n := len(send.gotMessages); n == 0 || send.gotMessages[n-1].Content != suggestInstruction {
+		t.Errorf("last sent message = %+v, want the suggest instruction", send.gotMessages)
+	}
+	if send.gotMaxToks != suggestMaxTokens {
+		t.Errorf("maxTokens = %d, want %d", send.gotMaxToks, suggestMaxTokens)
+	}
+}
+
+func TestAgent_Suggest_EmptyHistory(t *testing.T) {
+	a := New(&fakeSender{reply: Reply{Content: "x"}}, "m")
+	s, err := a.Suggest(context.Background())
+	if err != nil || s != "" {
+		t.Errorf("Suggest on empty history = (%q, %v), want (\"\", nil)", s, err)
+	}
+}
+
+func TestAgent_Suggest_NotConfigured(t *testing.T) {
+	a := New(nil, "")
+	if _, err := a.Suggest(context.Background()); err == nil {
+		t.Error("Suggest with no sender/model should error")
+	}
+}
+
+func TestCleanSuggestion(t *testing.T) {
+	cases := map[string]string{
+		"run the tests":        "run the tests",
+		"  \n- commit the fix": "commit the fix",
+		"* add a test":         "add a test",
+		"\"open the PR\"":      "open the PR",
+		"`gofmt the file`":     "gofmt the file",
+		"":                     "",
+		"\n\n":                 "",
+	}
+	for in, want := range cases {
+		if got := cleanSuggestion(in); got != want {
+			t.Errorf("cleanSuggestion(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
