@@ -438,7 +438,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if memDir != "" {
 		memInjection = memory.RenderInjection(memDir)
 	}
-	a.System = prompt.Compose(*system, cwd, env, skillsManifest, memInjection)
+	a.System = prompt.Compose(*system, cwd, env, skillsManifest, memInjection, coauthor)
 
 	// Permission engine — gates every tool call; shared by both paths. The
 	// memory directory (outside CWD) is whitelisted for writes so the agent can

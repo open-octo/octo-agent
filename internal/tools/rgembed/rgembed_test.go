@@ -23,6 +23,10 @@ func TestPath_SystemRG(t *testing.T) {
 }
 
 func TestPath_ExtractEmbedded(t *testing.T) {
+	if len(embeddedRG) == 0 {
+		t.Skip("embeddedRG is nil — build with -tags=embedrg to run this test")
+	}
+
 	// Temporarily shadow PATH so LookPath fails, forcing extraction.
 	origPath := os.Getenv("PATH")
 	os.Setenv("PATH", "/nonexistent")

@@ -1,22 +1,18 @@
 // Package rgembed provides a bundled ripgrep (rg) binary for the current
 // platform. At build time the Makefile downloads the matching release asset
 // from BurntSushi/ripgrep and places it in binaries/rg; go:embed bakes it
-// into the octo binary. At runtime, if the system does not have rg on PATH,
-// the embedded binary is extracted to ~/.octo/bin/rg and used instead.
+// into the octo binary when the "embedrg" build tag is set. At runtime, if
+// the system does not have rg on PATH, the embedded binary is extracted to
+// ~/.octo/bin/rg and used instead.
 package rgembed
 
 import (
-	_ "embed"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 )
-
-//go:embed binaries/rg
-var embeddedRG []byte
 
 // version is the ripgrep release version embedded at build time.
 // Overridden via -ldflags in the Makefile.
@@ -39,6 +35,14 @@ func Path() (string, error) {
 // its path. The destination includes the version so upgrading octo (which
 // bumps the embedded version) automatically extracts a fresh binary.
 func extract() (string, error) {
+	if len(embeddedRG) == 0 {
+		return "", fmt.Errorf(
+			"rgembed: ripgrep (`rg`) is not on PATH and no binary was embedded "+
+				"at build time (build with -tags=embedrg to bundle one). "+
+				"Install rg from https://github.com/BurntSushi/ripgrep",
+		)
+	}
+
 	dir, err := octoBinDir()
 	if err != nil {
 		return "", fmt.Errorf("rgembed: cache dir: %w", err)
@@ -100,11 +104,4 @@ func rgBinName() string {
 		return fmt.Sprintf("rg-%s.exe", version)
 	}
 	return fmt.Sprintf("rg-%s", version)
-}
-
-// CopyTo writes the embedded rg binary to w. Useful for tests or
-// diagnostics that need the raw bytes without the extraction logic.
-func CopyTo(w io.Writer) error {
-	_, err := w.Write(embeddedRG)
-	return err
 }

@@ -21,6 +21,10 @@
 GOTAGS ?=
 GOFLAGS ?=
 
+# Build tag that enables embedding the ripgrep binary. CI builds without
+# this tag so go:embed does not require binaries/rg to be present.
+RG_TAGS := embedrg
+
 # Inject version + commit at build time so `octo version` reports a real SHA.
 #
 # Auto-detection via `git describe` is intentionally avoided because the repo
@@ -56,10 +60,10 @@ all: test
 
 # Download and embed ripgrep for the current GOOS/GOARCH before building.
 build: rg-embed
-	go build $(GOFLAGS) -tags='$(GOTAGS)' -ldflags='$(LDFLAGS)' -o octo ./cmd/octo
+	go build $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' -o octo ./cmd/octo
 
 install: rg-embed
-	go install $(GOFLAGS) -tags='$(GOTAGS)' -ldflags='$(LDFLAGS)' ./cmd/octo
+	go install $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' ./cmd/octo
 
 test:
 	go test -race $(GOFLAGS) -tags='$(GOTAGS)' ./...
