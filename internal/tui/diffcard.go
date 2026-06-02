@@ -174,7 +174,7 @@ func renderSummary(added, removed int) string {
 func renderRow(ln Line, language string, dark bool) string {
 	noCol := renderLineNo(ln)
 	mark := renderMark(ln.Kind)
-	body := ln.Text
+	body := expandTabs(ln.Text)
 	if language != "" {
 		body = highlightLine(body, language, dark)
 	}
@@ -266,6 +266,39 @@ func GuessLanguage(path string) string {
 		return "yaml"
 	}
 	return ""
+}
+
+// tabStop is the column width a tab advances to. 8 matches the terminal
+// default and `cat -n`, so expanded rows line up exactly as a raw tab would
+// have — minus the bleed-through.
+const tabStop = 8
+
+// expandTabs replaces tab characters with spaces up to the next tab stop. A
+// card row must paint every cell it occupies: a raw tab repositions the cursor
+// without overwriting the cells it skips, so stale content from the live view
+// rendered below (spinner, status bar, ghost text) shows through the gap. The
+// read_file "%6d\t" line-number separator and tab-indented source are the
+// common sources. Column counting starts at the body's own column 0; the small
+// shift from the card's gutter prefix doesn't matter once no real tabs remain.
+func expandTabs(s string) string {
+	if !strings.ContainsRune(s, '\t') {
+		return s
+	}
+	var b strings.Builder
+	col := 0
+	for _, r := range s {
+		if r == '\t' {
+			n := tabStop - col%tabStop
+			for i := 0; i < n; i++ {
+				b.WriteByte(' ')
+			}
+			col += n
+			continue
+		}
+		b.WriteRune(r)
+		col++
+	}
+	return b.String()
 }
 
 // splitLinesNoTrail splits s on '\n' but drops the trailing empty element

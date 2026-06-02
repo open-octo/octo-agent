@@ -92,10 +92,33 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyEsc:
 		if m.turnRunning {
+			// Take-back: Esc before the model has produced any output (the echo
+			// is still pending in the live area). Drop the not-yet-committed echo
+			// and restore the typed text to the input box for editing — the agent's
+			// interrupt rolls the unanswered user message back out of history, so
+			// it leaves no trace in the scrollback. Once output has streamed the
+			// echo is already committed (echoPending == "") and Esc just interrupts.
+			if m.echoPending != "" {
+				restore := m.echoRestore
+				m.echoPending = ""
+				m.echoRestore = ""
+				m.interrupt()
+				if restore != "" {
+					m.ta.SetValue(restore)
+					m.ta.CursorEnd()
+					m.inputHistoryIdx = -1
+					return m, m.updateTextAreaHeight()
+				}
+				return m, nil
+			}
 			m.interrupt()
 			return m, nil
 		}
-		// Idle: clear the input line.
+		// Idle: clear the input line and discard any pending attachments.
+		if len(m.pendingAttachments) > 0 {
+			m.pendingAttachments = nil
+			m.println(noticeStyle.Render("📎 attachments discarded"))
+		}
 		m.ta.Reset()
 		m.inputHistoryIdx = -1
 		return m, m.updateTextAreaHeight()
@@ -135,6 +158,12 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.println(queueStyle.Render("✕ unqueued: " + dropped))
 		}
 		return m, nil
+
+	case tea.KeyCtrlV:
+		// Paste an image from the clipboard as an attachment on the next turn.
+		// Normal text paste (Cmd+V on macOS) arrives as bracketed-paste runes
+		// handled by the textarea, so this binding is free for image paste.
+		return m.pasteClipboardImage()
 
 	case tea.KeyShiftTab:
 		// Cycle permission mode: interactive → strict → auto → interactive.
@@ -233,34 +262,106 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// submit acts on Enter. Idle → start a turn. Running → steer. Empty input is
-// ignored.
+// pasteClipboardImage captures an image from the system clipboard and queues
+// it as an attachment for the next turn. With no image in the clipboard (or on
+// an unsupported platform) it surfaces a friendly notice and changes nothing.
+func (m *tuiModel) pasteClipboardImage() (tea.Model, tea.Cmd) {
+	data, mime, err := captureClipboardImage()
+	if err != nil {
+		m.println(noticeStyle.Render("📋 " + err.Error()))
+		return m, nil
+	}
+	label := fmt.Sprintf("image (%s, %s)", shortMIME(mime), humanByteSize(len(data)))
+	m.pendingAttachments = append(m.pendingAttachments, pendingAttachment{
+		block: agent.NewImageBlock(mime, data),
+		label: label,
+	})
+	m.println(noticeStyle.Render("📎 attached " + label + " — it rides your next message"))
+	return m, nil
+}
+
+// attachmentChips renders the pending attachments as a one-line summary for
+// the echo / live view, e.g. "📎 image (PNG, 84 KB)".
+func (m *tuiModel) attachmentChips() string {
+	if len(m.pendingAttachments) == 0 {
+		return ""
+	}
+	parts := make([]string, len(m.pendingAttachments))
+	for i, a := range m.pendingAttachments {
+		parts[i] = "📎 " + a.label
+	}
+	return strings.Join(parts, "  ")
+}
+
+// shortMIME turns "image/png" into "PNG" for the chip.
+func shortMIME(mime string) string {
+	if i := strings.LastIndex(mime, "/"); i >= 0 {
+		return strings.ToUpper(mime[i+1:])
+	}
+	return strings.ToUpper(mime)
+}
+
+// humanByteSize renders a byte count compactly (B / KB / MB).
+func humanByteSize(n int) string {
+	const kb, mb = 1024, 1024 * 1024
+	switch {
+	case n >= mb:
+		return fmt.Sprintf("%.1f MB", float64(n)/mb)
+	case n >= kb:
+		return fmt.Sprintf("%.1f KB", float64(n)/kb)
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
+// submit acts on Enter. Idle → start a turn. Running → steer. Empty input
+// with no attachments is ignored.
 func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	text := strings.TrimSpace(m.ta.Value())
-	if text == "" {
+	if text == "" && len(m.pendingAttachments) == 0 {
 		return m, nil
 	}
 	m.ta.Reset()
 	m.inputHistoryIdx = -1
 	// Save to history for ↑/↓ recall (dedup consecutive identical lines).
-	if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text {
+	// Skip empty text (an image-only submit has nothing to recall).
+	if text != "" && (len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text) {
 		m.inputHistory = append(m.inputHistory, text)
 	}
 
 	// Slash commands are the TUI's alone — the plain REPL is a pure conversation
 	// loop. Only dispatched when idle; mid-turn input still steers / queues.
+	// A leading "/" with attachments is treated as ordinary text, not a command.
 	if !m.turnRunning {
-		if strings.HasPrefix(text, "/") {
+		if strings.HasPrefix(text, "/") && len(m.pendingAttachments) == 0 {
 			return m.dispatchSlash(text)
 		}
-		return m, m.startTurn(text)
+		// Fold any pending image attachments into this turn's user message.
+		echo := text
+		if len(m.pendingAttachments) > 0 {
+			blocks := make([]agent.ContentBlock, 0, len(m.pendingAttachments))
+			for _, a := range m.pendingAttachments {
+				blocks = append(blocks, a.block)
+			}
+			m.a.AttachUserBlocks(blocks)
+			echo = strings.TrimSpace(text + "  " + m.attachmentChips())
+			m.pendingAttachments = nil
+		}
+		return m, m.startTurnEcho(text, echo)
 	}
 
+	// Mid-turn: image attachments can't ride a text-only steer, so keep them
+	// pending for the next new turn and tell the user.
+	if len(m.pendingAttachments) > 0 {
+		m.println(noticeStyle.Render("⚠ image attachments are sent with a new turn, not a mid-turn steer — they'll ride your next message"))
+	}
 	// Mid-turn input goes to the inbox. It will be drained into history at
 	// the start of the next loop iteration, before the LLM call, so the
 	// model sees it as a first-class user message.
-	m.pendingSteer = append(m.pendingSteer, text)
-	m.a.Inbox.Enqueue(text)
+	if text != "" {
+		m.pendingSteer = append(m.pendingSteer, text)
+		m.a.Inbox.Enqueue(text)
+	}
 	return m, nil
 }
 
@@ -451,6 +552,9 @@ func keyIs(msg tea.KeyMsg, r rune) bool {
 // spinner, queue, background, input box, status bar) occupies.
 func (m *tuiModel) liveHeight() int {
 	h := 0
+	if m.echoPending != "" {
+		h += strings.Count(m.echoPending, "\n") + 1
+	}
 	if m.partial.String() != "" {
 		h++
 	}
@@ -488,6 +592,13 @@ func (m *tuiModel) View() string {
 	}
 
 	var b strings.Builder
+
+	// Deferred user-message echo: shown live above the activity area until the
+	// turn's first output commits it to the scrollback (or Esc takes it back).
+	if m.echoPending != "" {
+		b.WriteString(m.echoPending)
+		b.WriteByte('\n')
+	}
 
 	// Live partial assistant text
 	if p := m.partial.String(); p != "" {
@@ -587,6 +698,13 @@ func (m *tuiModel) View() string {
 		}
 	}
 
+	// Pending image attachments — chips above the input so the user knows an
+	// image will ride their next message (Esc discards them).
+	if len(m.pendingAttachments) > 0 {
+		b.WriteString(pendingSteerStyle.Render("  " + m.attachmentChips()))
+		b.WriteByte('\n')
+	}
+
 	// Slash-command completion menu, right above the input box (Claude Code style).
 	b.WriteString(m.completionView())
 
@@ -652,7 +770,11 @@ func (m *tuiModel) renderStatusBar() string {
 
 	var hint string
 	if m.turnRunning {
-		hint = "Enter steer · Shift+Enter/Alt+Enter/Ctrl+J newline · Ctrl+Q queue · Esc interrupt"
+		esc := "Esc interrupt"
+		if m.echoPending != "" {
+			esc = "Esc take back" // no output yet — Esc returns the message to the input
+		}
+		hint = "Enter steer · Shift+Enter/Alt+Enter/Ctrl+J newline · Ctrl+Q queue · " + esc
 		if len(m.queue) > 0 {
 			hint += " · Ctrl+X unqueue"
 		}
