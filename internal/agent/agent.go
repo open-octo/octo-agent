@@ -710,7 +710,8 @@ func isTransientStreamErr(err error) bool {
 const suggestMaxTokens = 256
 
 const suggestInstruction = "Suggest ONE concise, specific next message I (the user) might send to continue this work. " +
-	"Output only that message text — phrased as I would type it, a single line, no preamble, no quotes, no numbering."
+	"Do not call any tools — reply with the message text only, phrased as I would type it, a single line, " +
+	"no preamble, no quotes, no numbering."
 
 // Suggest produces a single follow-up message the user might want to send next,
 // based on the conversation so far. It is a throwaway provider call: the
@@ -718,9 +719,14 @@ const suggestInstruction = "Suggest ONE concise, specific next message I (the us
 // so it doesn't pollute the conversation, and its token usage is not accrued
 // into the session. Returns "" (no error) when there's nothing to suggest.
 //
-// Cheap in practice: the history prefix is prompt-cached, so only the short
-// instruction and the one-line reply are fresh tokens.
-func (a *Agent) Suggest(ctx context.Context) (string, error) {
+// tools should be the SAME toolbelt the agentic loop uses. Anthropic's cache
+// prefix is ordered tools → system → messages, so sending the identical tools
+// makes this call reuse the main conversation's prompt cache (the whole history
+// is billed at the cheap cache-read rate) instead of re-billing it in full.
+// Without tools the prefix diverges at block 0 and nothing is cached. The model
+// is told not to call tools; if it returns a tool_use anyway, Content is empty
+// and we simply produce no suggestion that turn.
+func (a *Agent) Suggest(ctx context.Context, tools []ToolDefinition) (string, error) {
 	if a.Sender == nil || a.Model == "" {
 		return "", fmt.Errorf("agent: suggest: not configured")
 	}
@@ -732,7 +738,13 @@ func (a *Agent) Suggest(ctx context.Context) (string, error) {
 	msgs = append(msgs, snap...)
 	msgs = append(msgs, NewUserMessage(suggestInstruction))
 
-	reply, err := a.Sender.SendMessages(ctx, a.Model, a.System, msgs, suggestMaxTokens)
+	var reply Reply
+	var err error
+	if ts, ok := a.Sender.(ToolSender); ok && len(tools) > 0 {
+		reply, err = ts.SendMessagesWithTools(ctx, a.Model, a.System, msgs, suggestMaxTokens, tools)
+	} else {
+		reply, err = a.Sender.SendMessages(ctx, a.Model, a.System, msgs, suggestMaxTokens)
+	}
 	if err != nil {
 		return "", err
 	}

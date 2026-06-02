@@ -614,10 +614,13 @@ func (m *tuiModel) removeSubAgent(id string) {
 // A nil/empty result yields a nil msg, which bubbletea ignores.
 func (m *tuiModel) suggestCmd() tea.Cmd {
 	a := m.a
+	// Same toolbelt as the agentic loop, so the suggest request's
+	// tools→system→history prefix matches and hits the prompt cache.
+	tools := m.cfg.tools
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		s, err := a.Suggest(ctx)
+		s, err := a.Suggest(ctx, tools)
 		if err != nil || strings.TrimSpace(s) == "" {
 			return nil
 		}

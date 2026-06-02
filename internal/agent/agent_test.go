@@ -247,15 +247,22 @@ type fakeToolSender struct {
 	// gotMaxToks records the maxTokens passed on each call, in order, so tests
 	// can assert escalation re-issued at the higher cap.
 	gotMaxToks []int
+	// gotTools / gotMsgs capture the last tool-aware call's inputs.
+	gotTools []ToolDefinition
+	gotMsgs  []Message
 }
 
-func (f *fakeToolSender) SendMessages(_ context.Context, _, _ string, _ []Message, maxTokens int) (Reply, error) {
+func (f *fakeToolSender) SendMessages(_ context.Context, _, _ string, msgs []Message, maxTokens int) (Reply, error) {
 	f.gotMaxToks = append(f.gotMaxToks, maxTokens)
+	f.gotMsgs = append([]Message(nil), msgs...)
+	f.gotTools = nil
 	return f.nextReply()
 }
 
-func (f *fakeToolSender) SendMessagesWithTools(_ context.Context, _, _ string, _ []Message, maxTokens int, _ []ToolDefinition) (Reply, error) {
+func (f *fakeToolSender) SendMessagesWithTools(_ context.Context, _, _ string, msgs []Message, maxTokens int, tools []ToolDefinition) (Reply, error) {
 	f.gotMaxToks = append(f.gotMaxToks, maxTokens)
+	f.gotMsgs = append([]Message(nil), msgs...)
+	f.gotTools = tools
 	return f.nextReply()
 }
 
@@ -1303,7 +1310,7 @@ func TestAgent_Suggest(t *testing.T) {
 	a.History.Append(NewUserMessage("do X"))
 	a.History.Append(NewAssistantMessage("did X"))
 
-	s, err := a.Suggest(context.Background())
+	s, err := a.Suggest(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Suggest: %v", err)
 	}
@@ -1323,9 +1330,35 @@ func TestAgent_Suggest(t *testing.T) {
 	}
 }
 
+// When a ToolSender + tools are available, Suggest must route through the
+// tool-aware path with the SAME tools, so its tools→system→history prefix
+// matches the agentic loop and reuses the prompt cache.
+func TestAgent_Suggest_UsesToolsForCacheAlignment(t *testing.T) {
+	send := &fakeToolSender{replies: []Reply{{Content: "open the PR"}}}
+	a := New(send, "m")
+	a.History.Append(NewUserMessage("do X"))
+	a.History.Append(NewAssistantMessage("did X"))
+	toolset := []ToolDefinition{{Name: "terminal"}, {Name: "edit_file"}}
+
+	s, err := a.Suggest(context.Background(), toolset)
+	if err != nil {
+		t.Fatalf("Suggest: %v", err)
+	}
+	if s != "open the PR" {
+		t.Errorf("suggestion = %q", s)
+	}
+	if len(send.gotTools) != len(toolset) {
+		t.Errorf("Suggest sent %d tools, want %d (must match the loop's toolbelt for cache reuse)", len(send.gotTools), len(toolset))
+	}
+	// History snapshot + the instruction, in order.
+	if n := len(send.gotMsgs); n < 3 || send.gotMsgs[n-1].Content != suggestInstruction {
+		t.Errorf("last message = %+v, want the suggest instruction after the history", send.gotMsgs)
+	}
+}
+
 func TestAgent_Suggest_EmptyHistory(t *testing.T) {
 	a := New(&fakeSender{reply: Reply{Content: "x"}}, "m")
-	s, err := a.Suggest(context.Background())
+	s, err := a.Suggest(context.Background(), nil)
 	if err != nil || s != "" {
 		t.Errorf("Suggest on empty history = (%q, %v), want (\"\", nil)", s, err)
 	}
@@ -1333,7 +1366,7 @@ func TestAgent_Suggest_EmptyHistory(t *testing.T) {
 
 func TestAgent_Suggest_NotConfigured(t *testing.T) {
 	a := New(nil, "")
-	if _, err := a.Suggest(context.Background()); err == nil {
+	if _, err := a.Suggest(context.Background(), nil); err == nil {
 		t.Error("Suggest with no sender/model should error")
 	}
 }
