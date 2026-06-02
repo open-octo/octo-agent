@@ -40,11 +40,18 @@ type StdioConfig struct {
 	Command string
 	Args    []string
 	Env     map[string]string
+	// Stderr receives the child's diagnostic output. nil defaults to os.Stderr.
+	// Callers running an alternate-screen TUI MUST set this to a non-terminal
+	// sink (a log file or io.Discard): the child writes its stderr at arbitrary
+	// times during the session, and a direct terminal write corrupts the
+	// rendered frame.
+	Stderr io.Writer
 }
 
 // NewStdioTransport spawns the configured subprocess and wires its stdin /
-// stdout to a line-delimited JSON-RPC pipe. stderr is inherited so the
-// child's diagnostic logs appear directly under the parent's stderr.
+// stdout to a line-delimited JSON-RPC pipe. The child's stderr goes to
+// cfg.Stderr (os.Stderr when unset) — callers under a TUI must redirect it
+// off the terminal.
 //
 // The returned transport is already running — Close will signal shutdown
 // by closing stdin (the conventional MCP "I'm done, please exit") and then
@@ -69,7 +76,14 @@ func NewStdioTransport(ctx context.Context, cfg StdioConfig) (*StdioTransport, e
 		}
 		cmd.Env = env
 	}
-	cmd.Stderr = os.Stderr // child's logs flow through to user terminal
+	// Child diagnostics go to cfg.Stderr (a log file under a TUI; os.Stderr in
+	// plain/headless mode). Writing a child's async stderr straight to the
+	// terminal corrupts an alternate-screen TUI frame.
+	if cfg.Stderr != nil {
+		cmd.Stderr = cfg.Stderr
+	} else {
+		cmd.Stderr = os.Stderr
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

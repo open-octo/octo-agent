@@ -2,11 +2,13 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,6 +22,11 @@ func TestHelperProcess(t *testing.T) {
 		return
 	}
 	defer os.Exit(0)
+	// Emit a marker to stderr at startup so a test can assert the transport
+	// routes the child's stderr to the configured sink, not the terminal.
+	if m := os.Getenv("GO_HELPER_STDERR"); m != "" {
+		fmt.Fprint(os.Stderr, m)
+	}
 	dec := json.NewDecoder(bufio.NewReader(os.Stdin))
 	enc := json.NewEncoder(os.Stdout)
 	for {
@@ -70,6 +77,36 @@ func helperCommand() StdioConfig {
 		Command: os.Args[0],
 		Args:    []string{"-test.run=TestHelperProcess"},
 		Env:     map[string]string{"GO_HELPER_PROCESS": "1"},
+	}
+}
+
+// TestStdioTransport_StderrRoutedToConfig verifies the child's stderr goes to
+// cfg.Stderr (a log file / discard under a TUI) instead of the terminal, so it
+// can't corrupt a bubbletea frame.
+func TestStdioTransport_StderrRoutedToConfig(t *testing.T) {
+	if _, err := exec.LookPath(os.Args[0]); err != nil {
+		t.Skip("self-binary not found; running outside a test binary")
+	}
+	const marker = "CHILD-STDERR-MARKER"
+	cfg := helperCommand()
+	cfg.Env["GO_HELPER_STDERR"] = marker
+	var captured bytes.Buffer
+	cfg.Stderr = &captured
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tx, err := NewStdioTransport(ctx, cfg)
+	if err != nil {
+		t.Fatalf("NewStdioTransport: %v", err)
+	}
+	// Close stdin so the helper's decode loop exits; Close Wait()s the child,
+	// which also flushes the exec stderr-copy goroutine into captured — so the
+	// read below is race-free.
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got := captured.String(); !strings.Contains(got, marker) {
+		t.Errorf("child stderr not routed to cfg.Stderr; captured %q, want it to contain %q", got, marker)
 	}
 }
 
