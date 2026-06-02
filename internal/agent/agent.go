@@ -148,6 +148,27 @@ type Agent struct {
 	// call, so messages enter history in chronological order. This mirrors
 	// Ruby octo's @inbox and keeps mid-turn input handling simple.
 	Inbox Inbox
+
+	// UserInputHook, when set, is called with each user input just before it is
+	// appended to history. A non-empty return is prepended to the user message
+	// (separated by a blank line). It exists to re-surface memory rules at the
+	// point of action without touching the cached system prompt; the reminder
+	// rides the message stream instead. The hook must not mutate state the
+	// caller relies on elsewhere — it's invoked once per appended user turn.
+	UserInputHook func(userInput string) string
+}
+
+// appendUserInput appends userInput to history, first prepending any
+// UserInputHook output. It stays a single appended message so the error-path
+// popLast contract in Turn/TurnStream/runLoop still removes exactly one turn.
+func (a *Agent) appendUserInput(userInput string) {
+	text := userInput
+	if a.UserInputHook != nil {
+		if reminder := a.UserInputHook(userInput); reminder != "" {
+			text = reminder + "\n\n" + userInput
+		}
+	}
+	a.History.Append(NewUserMessage(text))
 }
 
 // StopReason sentinels set on the Reply when a loop budget is exhausted.
@@ -189,7 +210,7 @@ func (a *Agent) Turn(ctx context.Context, userInput string) (Reply, error) {
 	}
 
 	// Append user message first so the snapshot the Sender sees includes it.
-	a.History.Append(NewUserMessage(userInput))
+	a.appendUserInput(userInput)
 
 	reply, err := a.Sender.SendMessages(ctx, a.Model, a.System, a.History.Snapshot(), a.MaxTokens)
 	if err != nil {
@@ -231,7 +252,7 @@ func (a *Agent) TurnStream(
 		return Reply{}, fmt.Errorf("agent: userInput must be non-empty")
 	}
 
-	a.History.Append(NewUserMessage(userInput))
+	a.appendUserInput(userInput)
 
 	var (
 		reply Reply
@@ -410,7 +431,7 @@ func (a *Agent) runLoop(
 	// non-fatal — we log nothing and proceed with the full history.
 	_ = a.maybeCompact(ctx)
 
-	a.History.Append(NewUserMessage(userInput))
+	a.appendUserInput(userInput)
 
 	limit := a.turnLimit()
 	for i := 0; limit == unlimitedTurns || i < limit; i++ {
