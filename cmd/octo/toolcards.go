@@ -69,5 +69,11 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 		newS, _ := input["new_string"].(string)
 		return tui.RenderEditCard(path, oldS, newS)
 	}
-	return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, outputCardMaxLines, isErr)
+	lang := ""
+	if toolName == "read_file" {
+		if p, _ := input["path"].(string); p != "" {
+			lang = tui.GuessLanguage(p)
+		}
+	}
+	return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, outputCardMaxLines, isErr, lang)
 }
