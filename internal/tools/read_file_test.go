@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,61 @@ func TestReadFile_OffsetAndLimit(t *testing.T) {
 	}
 	if strings.Contains(out.Text, "     2\tline2") || strings.Contains(out.Text, "     5\tline5") {
 		t.Errorf("offset/limit returned unwanted lines:\n%s", out.Text)
+	}
+}
+
+func TestReadFile_TruncationFooter(t *testing.T) {
+	// A file longer than the requested window must report that it was
+	// truncated and tell the model the exact offset to resume from —
+	// otherwise the model can't tell a partial read from a complete one
+	// and ends up re-reading the same window or editing unseen lines.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "long.txt")
+	var b strings.Builder
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&b, "line%d\n", i)
+	}
+	writeTestFile(t, path, b.String())
+
+	out, err := ReadFileTool{}.Execute(context.Background(), "read_file", map[string]any{
+		"path":   path,
+		"offset": 2,
+		"limit":  3,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	// Showed lines 2-4; the next unread line is 5.
+	if !strings.Contains(out.Text, "truncated") {
+		t.Errorf("expected truncation marker, got:\n%s", out.Text)
+	}
+	if !strings.Contains(out.Text, "offset=5") {
+		t.Errorf("expected resume offset=5, got:\n%s", out.Text)
+	}
+	if !strings.Contains(out.Text, "shown lines 2-4") {
+		t.Errorf("expected shown-range 2-4, got:\n%s", out.Text)
+	}
+}
+
+func TestReadFile_NoFooterWhenComplete(t *testing.T) {
+	// A read that reaches EOF — even when the limit is hit exactly on the
+	// last line — must NOT claim truncation, or the model loops re-reading
+	// a file it already saw in full.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "exact.txt")
+	writeTestFile(t, path, "a\nb\nc\n")
+
+	// Limit equals the line count: last line is the limit-th line, EOF
+	// follows, so no truncation.
+	out, err := ReadFileTool{}.Execute(context.Background(), "read_file", map[string]any{
+		"path":  path,
+		"limit": 3,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(out.Text, "truncated") {
+		t.Errorf("complete read should not be marked truncated:\n%s", out.Text)
 	}
 }
 
