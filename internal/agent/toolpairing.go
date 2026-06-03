@@ -10,6 +10,106 @@ func hasToolUse(m Message) bool {
 	return false
 }
 
+// blocksOf returns m's content blocks, lifting a plain-text Content message into
+// a single text block so callers can treat every message uniformly.
+func blocksOf(m Message) []ContentBlock {
+	if len(m.Blocks) > 0 {
+		return m.Blocks
+	}
+	if m.Content != "" {
+		return []ContentBlock{NewTextBlock(m.Content)}
+	}
+	return nil
+}
+
+// normalizeToolHistory repairs structural corruption in the message log that a
+// provider would reject, rewriting History in place only if something changed.
+// It is a defensive companion to ensureToolPairing: well-formed single-threaded
+// history never triggers it, but if two turn goroutines ever briefly overlap and
+// interleave their History.Append calls (the cae91036 incident), the log can end
+// up with two consecutive assistant messages or a tool_use answered twice — both
+// of which 400 the next send and permanently wedge the session.
+func (a *Agent) normalizeToolHistory() {
+	msgs := a.History.Snapshot()
+	repaired, changed := normalizeMessages(msgs)
+	if changed {
+		a.History.ReplaceAll(repaired)
+	}
+}
+
+// normalizeMessages returns msgs with two structural repairs applied, plus
+// whether anything changed. Pure (no History access) so it is unit-testable.
+//
+//   - Consecutive assistant messages are coalesced into one. The wire format
+//     requires an assistant tool_use message to be immediately followed by the
+//     tool_result(s) answering it; an assistant message followed by another
+//     assistant message orphans the first one's tool calls (HTTP 400
+//     "tool_call_ids did not have response messages").
+//   - Duplicate tool_result blocks sharing a tool_use_id are dropped, keeping
+//     the first occurrence. A single tool_use answered twice is also rejected.
+//
+// New backing arrays are allocated for any message it rewrites, so the caller's
+// snapshot (which shares block slices with the live History) is never mutated.
+func normalizeMessages(msgs []Message) ([]Message, bool) {
+	if len(msgs) == 0 {
+		return msgs, false
+	}
+	changed := false
+
+	// Pass 1 — coalesce consecutive assistant messages.
+	coalesced := make([]Message, 0, len(msgs))
+	for _, m := range msgs {
+		if n := len(coalesced); m.Role == RoleAssistant && n > 0 && coalesced[n-1].Role == RoleAssistant {
+			prev := coalesced[n-1]
+			merged := make([]ContentBlock, 0, len(blocksOf(prev))+len(blocksOf(m)))
+			merged = append(merged, blocksOf(prev)...)
+			merged = append(merged, blocksOf(m)...)
+			coalesced[n-1] = Message{Role: RoleAssistant, Blocks: merged}
+			changed = true
+			continue
+		}
+		coalesced = append(coalesced, m)
+	}
+
+	// Pass 2 — drop duplicate tool_result blocks (keeping the first occurrence
+	// per id), and drop any message left empty as a result. The duplicate may
+	// live in its own message (a second goroutine appended a whole tool_result
+	// message for an id another goroutine had already answered), so emptied
+	// messages are removed rather than left as zero-block stragglers.
+	seen := make(map[string]bool)
+	out := make([]Message, 0, len(coalesced))
+	for _, m := range coalesced {
+		if len(m.Blocks) == 0 {
+			out = append(out, m)
+			continue
+		}
+		kept := make([]ContentBlock, 0, len(m.Blocks))
+		dropped := false
+		for _, b := range m.Blocks {
+			if b.Type == "tool_result" {
+				if seen[b.ToolUseID] {
+					dropped = true
+					continue
+				}
+				seen[b.ToolUseID] = true
+			}
+			kept = append(kept, b)
+		}
+		if !dropped {
+			out = append(out, m)
+			continue
+		}
+		changed = true
+		if len(kept) == 0 && m.Content == "" {
+			continue // message held only duplicate tool_results — drop it
+		}
+		m.Blocks = kept
+		out = append(out, m)
+	}
+
+	return out, changed
+}
+
 // synthesizeInterruptedToolResults creates error tool_result blocks for each
 // tool_use block in the given message. Used when a turn is interrupted and
 // the tool_use has no matching tool_result (either because dispatchTools never
@@ -43,7 +143,13 @@ func synthesizeInterruptedToolResults(blocks []ContentBlock) []ContentBlock {
 //
 // Synthesized tool_results use is_error=true with "[Tool execution was interrupted]"
 // to signal clearly to the LLM that the tool did not complete.
+//
+// It first runs normalizeToolHistory to repair any structurally invalid log
+// (consecutive assistant messages, duplicate tool_results) so the orphan scan
+// below sees a clean message sequence.
 func (a *Agent) ensureToolPairing() {
+	a.normalizeToolHistory()
+
 	msgs := a.History.Snapshot()
 	if len(msgs) == 0 {
 		return

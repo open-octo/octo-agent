@@ -198,6 +198,156 @@ func TestEnsureToolPairing(t *testing.T) {
 	})
 }
 
+func TestNormalizeMessages(t *testing.T) {
+	t.Run("well-formed history unchanged", func(t *testing.T) {
+		msgs := []Message{
+			NewUserMessage("read it"),
+			NewToolUseMessage([]ContentBlock{NewToolUseBlock("c1", "read_file", nil)}),
+			NewToolResultMessage([]ContentBlock{NewToolResultBlock("c1", "content", false)}),
+			NewAssistantMessage("done"),
+		}
+		got, changed := normalizeMessages(msgs)
+		if changed {
+			t.Errorf("changed = true, want false for well-formed history")
+		}
+		if len(got) != 4 {
+			t.Errorf("len = %d, want 4", len(got))
+		}
+	})
+
+	t.Run("coalesces consecutive assistant messages", func(t *testing.T) {
+		msgs := []Message{
+			NewUserMessage("go"),
+			NewToolUseMessage([]ContentBlock{NewToolUseBlock("a", "terminal", nil)}),
+			NewToolUseMessage([]ContentBlock{NewToolUseBlock("b", "terminal", nil)}),
+		}
+		got, changed := normalizeMessages(msgs)
+		if !changed {
+			t.Fatal("changed = false, want true")
+		}
+		if len(got) != 2 {
+			t.Fatalf("len = %d, want 2 (assistants merged)", len(got))
+		}
+		if got[1].Role != RoleAssistant || len(got[1].Blocks) != 2 {
+			t.Fatalf("merged assistant should have 2 blocks, got %d", len(got[1].Blocks))
+		}
+		if got[1].Blocks[0].ID != "a" || got[1].Blocks[1].ID != "b" {
+			t.Errorf("block order = %q,%q, want a,b", got[1].Blocks[0].ID, got[1].Blocks[1].ID)
+		}
+	})
+
+	t.Run("does not alias the input backing array", func(t *testing.T) {
+		first := NewToolUseMessage([]ContentBlock{NewToolUseBlock("a", "terminal", nil)})
+		msgs := []Message{
+			NewUserMessage("go"),
+			first,
+			NewToolUseMessage([]ContentBlock{NewToolUseBlock("b", "terminal", nil)}),
+		}
+		normalizeMessages(msgs)
+		// The original message's block slice must be untouched.
+		if len(first.Blocks) != 1 || first.Blocks[0].ID != "a" {
+			t.Errorf("input message mutated: %+v", first.Blocks)
+		}
+	})
+
+	t.Run("dedupes tool_result within one message, keeping first", func(t *testing.T) {
+		msgs := []Message{
+			NewToolUseMessage([]ContentBlock{NewToolUseBlock("c1", "terminal", nil)}),
+			NewToolResultMessage([]ContentBlock{
+				NewToolResultBlock("c1", "first", false),
+				NewToolResultBlock("c1", "second", false),
+			}),
+		}
+		got, changed := normalizeMessages(msgs)
+		if !changed {
+			t.Fatal("changed = false, want true")
+		}
+		if len(got[1].Blocks) != 1 {
+			t.Fatalf("blocks = %d, want 1", len(got[1].Blocks))
+		}
+		if got[1].Blocks[0].Result != "first" {
+			t.Errorf("kept Result = %q, want first", got[1].Blocks[0].Result)
+		}
+	})
+
+	t.Run("drops a message emptied by dedupe", func(t *testing.T) {
+		msgs := []Message{
+			NewToolUseMessage([]ContentBlock{NewToolUseBlock("c1", "terminal", nil)}),
+			NewToolResultMessage([]ContentBlock{NewToolResultBlock("c1", "real", false)}),
+			NewToolResultMessage([]ContentBlock{NewToolResultBlock("c1", "dup", false)}),
+		}
+		got, changed := normalizeMessages(msgs)
+		if !changed {
+			t.Fatal("changed = false, want true")
+		}
+		if len(got) != 2 {
+			t.Fatalf("len = %d, want 2 (duplicate result message dropped)", len(got))
+		}
+	})
+
+	t.Run("repairs the cae91036 interleaved-turns shape", func(t *testing.T) {
+		// Two terminal tool_use messages back-to-back (the second turn raced in),
+		// then results out of order, with tool 0bQ answered twice — once by an
+		// ensureToolPairing placeholder, once by the real (late) dispatch result.
+		msgs := []Message{
+			NewToolUseMessage([]ContentBlock{NewToolUseBlock("0bQ", "terminal", nil)}),
+			NewToolUseMessage([]ContentBlock{NewToolUseBlock("SXl", "terminal", nil)}),
+			NewToolResultMessage([]ContentBlock{NewToolResultBlock("SXl", "{json}", false)}),
+			NewToolResultMessage([]ContentBlock{NewToolResultBlock("0bQ", "[interrupted]", true)}),
+			NewToolResultMessage([]ContentBlock{NewToolResultBlock("0bQ", "Refreshing checks...", false)}),
+		}
+		got, changed := normalizeMessages(msgs)
+		if !changed {
+			t.Fatal("changed = false, want true")
+		}
+		// Expect: one assistant(2 tool_use), then result messages — no two
+		// assistant messages in a row, and 0bQ answered exactly once.
+		if got[0].Role != RoleAssistant || len(got[0].Blocks) != 2 {
+			t.Fatalf("got[0] should be merged assistant with 2 tool_use, got role=%q blocks=%d", got[0].Role, len(got[0].Blocks))
+		}
+		for i := 1; i < len(got); i++ {
+			if got[i].Role == RoleAssistant {
+				t.Fatalf("got[%d] is a second assistant message; coalescing failed", i)
+			}
+		}
+		results := map[string]int{}
+		for _, m := range got {
+			for _, b := range m.Blocks {
+				if b.Type == "tool_result" {
+					results[b.ToolUseID]++
+				}
+			}
+		}
+		if results["0bQ"] != 1 {
+			t.Errorf("0bQ answered %d times, want 1", results["0bQ"])
+		}
+		if results["SXl"] != 1 {
+			t.Errorf("SXl answered %d times, want 1", results["SXl"])
+		}
+	})
+}
+
+func TestEnsureToolPairing_HealsInterleavedHistory(t *testing.T) {
+	a := New(&summarizeFake{}, "m")
+	a.History.Append(NewToolUseMessage([]ContentBlock{NewToolUseBlock("0bQ", "terminal", nil)}))
+	a.History.Append(NewToolUseMessage([]ContentBlock{NewToolUseBlock("SXl", "terminal", nil)}))
+	a.History.Append(NewToolResultMessage([]ContentBlock{NewToolResultBlock("SXl", "{json}", false)}))
+	a.History.Append(NewToolResultMessage([]ContentBlock{NewToolResultBlock("0bQ", "[interrupted]", true)}))
+	a.History.Append(NewToolResultMessage([]ContentBlock{NewToolResultBlock("0bQ", "real", false)}))
+
+	a.ensureToolPairing()
+
+	msgs := a.History.Snapshot()
+	if msgs[0].Role != RoleAssistant || len(msgs[0].Blocks) != 2 {
+		t.Fatalf("first message should be a merged assistant turn, got role=%q blocks=%d", msgs[0].Role, len(msgs[0].Blocks))
+	}
+	for i := 1; i < len(msgs); i++ {
+		if msgs[i].Role == RoleAssistant {
+			t.Fatalf("msgs[%d] is a stray second assistant message", i)
+		}
+	}
+}
+
 func TestFinishInterrupted_OrphanedToolUse(t *testing.T) {
 	a := New(&summarizeFake{}, "m")
 	a.History.Append(NewUserMessage("read it"))

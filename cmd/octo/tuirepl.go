@@ -609,31 +609,20 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if c := cacheLine(m.cfg.verbosity, msg.reply); c != "" {
 			m.println(c)
 		}
-		// On interrupt, eagerly reset turnRunning so background-process
-		// auto-turn (bgExitMsg) can fire immediately instead of waiting for
-		// turnFinishedMsg. The inbox drain and dequeue still happen in
-		// handleTurnFinished when the goroutine actually returns.
-		if msg.err == context.Canceled {
-			m.turnRunning = false
-			m.running = nil
-			// Eagerly drain inbox so a pending message (or background-process
-			// notice that raced in via Inbox) starts immediately rather than
-			// waiting for turnFinishedMsg.
-			if items := m.a.Inbox.Drain(); len(items) > 0 {
-				it := pendingFromInbox(items)
-				for _, line := range strings.Split(it.text, "\n\n") {
-					if line != "" && !strings.HasPrefix(line, "<system-reminder>") {
-						m.println(userEchoStyle.Render("> ") + line)
-					}
-				}
-				m.queue = append([]pendingItem{it}, m.queue...)
-			}
-			if len(m.queue) > 0 {
-				next := m.queue[0]
-				m.queue = m.queue[1:]
-				return m, tea.Sequence(m.flushPrints(), m.startQueued(next))
-			}
-		}
+		// turnEndedMsg only marks the end of the agent loop's output; the turn
+		// goroutine is still alive until turnFinishedMsg. Do NOT reset turnRunning
+		// or start the next queued/inbox turn here — that is handleTurnFinished's
+		// job, and it fires the moment the goroutine actually returns. Starting a
+		// turn now (the old eager-restart path) launched a second runTurn goroutine
+		// while the interrupted one was still draining a blocking tool dispatch;
+		// the two then interleaved their History.Append calls and produced a
+		// structurally invalid log (consecutive assistant messages, a tool_use
+		// answered twice) that permanently 400'd the session. Keeping turnRunning
+		// true until the goroutine returns makes every `!turnRunning` start-gate a
+		// correct single-turn guardrail. A background notice that races in via the
+		// Inbox during this window is drained by handleTurnFinished, so nothing is
+		// lost — only deferred by the few ms it takes the cancelled turn to unwind.
+
 		// On a clean completion, ask for one follow-up suggestion (off the event
 		// loop). Skipped on error/interrupt and when disabled (--no-suggest).
 		if m.cfg.suggest && msg.err == nil {
