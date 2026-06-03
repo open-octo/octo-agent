@@ -70,10 +70,9 @@ var bannerHints = []string{
 	"Shift+Tab perm-mode · Esc interrupt · Ctrl+C quit",
 }
 
-// octopusASCII is the pixel-art octo mascot — a rounded blue octopus with a
-// domed head, two eyes, and eight tentacles fanning out to both sides with
-// curled tips. The ● glyphs are the eyes; everything else is the body.
-// renderOcto colours them.
+// octopusASCII is the pixel-art octo mascot — a rounded octopus with a domed
+// head, two eyes, and eight tentacles fanning out to both sides with curled
+// tips. It renders in the terminal's default foreground colour.
 var octopusASCII = []string{
 	"      ▄████▄",
 	"    ▟████████▙",
@@ -86,27 +85,6 @@ var octopusASCII = []string{
 // octoArtWidth is the column the banner text starts at — wide enough to clear
 // the widest art line plus a two-space gutter, so the title/info/hints align.
 const octoArtWidth = 19
-
-var (
-	octoBodyStyle = lipgloss.NewStyle().Foreground(ColUserMsg).Bold(true)
-	octoEyeStyle  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#FFFFFF"})
-)
-
-// renderOcto colours one mascot line: the body in blue, the ● eyes in white.
-func renderOcto(line string) string {
-	if !strings.Contains(line, "●") {
-		return octoBodyStyle.Render(line)
-	}
-	parts := strings.Split(line, "●")
-	var sb strings.Builder
-	for i, p := range parts {
-		sb.WriteString(octoBodyStyle.Render(p))
-		if i < len(parts)-1 {
-			sb.WriteString(octoEyeStyle.Render("●"))
-		}
-	}
-	return sb.String()
-}
 
 // BannerHeight is the number of lines Banner renders (including the separator).
 const BannerHeight = 7
@@ -132,11 +110,12 @@ func Banner(version, model, cwd string, width int) string {
 		info += cwd
 	}
 
-	// Merge art + text side-by-side. The art is colourised; each text line is
-	// pushed to a fixed column so the title/info/hints align past the mascot.
+	// Merge art + text side-by-side. The mascot renders in the terminal's
+	// default colour; each text line is pushed to a fixed column so the
+	// title/info/hints align past the variable-width art.
 	var b strings.Builder
 	for i, artLine := range octopusASCII {
-		b.WriteString(renderOcto(artLine))
+		b.WriteString(artLine)
 		gap := octoArtWidth - lipgloss.Width(artLine)
 		if gap < 2 {
 			gap = 2
