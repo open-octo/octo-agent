@@ -31,6 +31,13 @@ type conductDoneMsg struct {
 	err error
 }
 
+// conductShowMsg carries the user's answer to the post-run "view details?"
+// prompt. show=true → print the full results to scrollback.
+type conductShowMsg struct {
+	id   string
+	show bool
+}
+
 func (m *tuiModel) dispatchConduct(args string) (tea.Model, tea.Cmd) {
 	fields := strings.Fields(args)
 	if len(fields) == 0 || strings.ToLower(fields[0]) == "help" {
@@ -186,12 +193,14 @@ func (m *tuiModel) onConductDone(msg conductDoneMsg) (tea.Model, tea.Cmd) {
 	m.turnRunning = false
 	m.cancelTurn = nil
 	var b strings.Builder
+	hasResults := false
 	store, serr := conductor.NewStore()
 	if serr == nil {
 		if led, gerr := store.Get(msg.id); gerr == nil {
 			var rb bytes.Buffer
 			conductor.Report(&rb, led)
 			b.WriteString(strings.TrimRight(rb.String(), "\n"))
+			hasResults = led.HasResults()
 		}
 	}
 	switch {
@@ -210,6 +219,50 @@ func (m *tuiModel) onConductDone(msg conductDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	if b.Len() > 0 {
 		m.println(b.String())
+	}
+
+	// Proactively offer the full results — otherwise the worker's actual output
+	// is buried in the ledger and the user has to know to run `conduct show`.
+	if hasResults {
+		ch := make(chan UserResponse, 1)
+		m.openModal(askMsg{
+			prompt: UserPrompt{
+				Kind:     KindQuestion,
+				Header:   "conduct",
+				Question: "结果已出 — 要看详细结果吗?",
+				Options:  []string{"看详细结果", "不用了"},
+			},
+			resp: ch,
+		})
+		id := msg.id
+		prog := m.sink.prog
+		go func() {
+			r := <-ch
+			show := !r.Cancelled && len(r.Choices) > 0 && r.Choices[0] == "看详细结果"
+			prog.Send(conductShowMsg{id: id, show: show})
+		}()
+	}
+	return m, m.flushPrints()
+}
+
+// onConductShow handles the answer to the post-run "view details?" prompt:
+// prints the full result text if asked, and always points at the CLI command
+// for looking it up again later.
+func (m *tuiModel) onConductShow(msg conductShowMsg) (tea.Model, tea.Cmd) {
+	short := msg.id
+	if len(short) > 8 {
+		short = short[len(short)-8:]
+	}
+	if msg.show {
+		if store, err := conductor.NewStore(); err == nil {
+			if led, gerr := store.Get(msg.id); gerr == nil {
+				var b bytes.Buffer
+				conductor.ShowResults(&b, led, 0)
+				m.println(strings.TrimRight(b.String(), "\n"))
+			}
+		}
+	} else {
+		m.println(noticeStyle.Render("好的。随时用  octo conduct show " + short + "  查看完整结果。"))
 	}
 	return m, m.flushPrints()
 }

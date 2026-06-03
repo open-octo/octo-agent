@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/Leihb/octo-agent/internal/conductor"
 )
 
 // ── dispatchSlash routing ──
@@ -122,9 +124,59 @@ func TestTUI_ConductDoneReleasesSession(t *testing.T) {
 
 	m := newTestModel()
 	m.turnRunning = true
+	// Unknown id → no ledger → no results → no modal, session released.
 	_, _ = m.onConductDone(conductDoneMsg{id: "t-12345678"})
 	if m.turnRunning {
 		t.Error("conduct completion must release the session")
+	}
+	if m.modal != nil {
+		t.Error("no results → no 'view details?' modal")
+	}
+}
+
+// A finished run with results proactively offers to show them, and onConductShow
+// emits the full result when the user says yes.
+func TestTUI_ConductDoneOffersResultDetails(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	store, err := conductor.NewStore()
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	led, err := store.Create("g", []conductor.Unit{{ID: 1, Description: "x"}})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.Update(led.ID, func(l *conductor.Ledger) error {
+		l.Units[0].Status = conductor.UnitDone
+		l.Units[0].ResultSummary = "THE ANSWER 42"
+		l.Status = conductor.LedgerDone
+		return nil
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	m := newTestModel()
+	m.turnRunning = true
+	_, _ = m.onConductDone(conductDoneMsg{id: led.ID})
+	if m.modal == nil {
+		t.Fatal("a finished run with results should offer a 'view details?' modal")
+	}
+	if m.turnRunning {
+		t.Error("session should be released once the run is done")
+	}
+	// Unblock the bridge goroutine waiting on the modal answer.
+	m.answerModal(UserResponse{Cancelled: true})
+
+	// Saying yes flushes the full result to scrollback.
+	_, cmd := m.onConductShow(conductShowMsg{id: led.ID, show: true})
+	if cmd == nil {
+		t.Error("onConductShow(show=true) should return a flush Cmd with the results")
+	}
+	if len(m.printlnBuf) != 0 {
+		t.Errorf("results left buffered (%d lines) instead of flushed", len(m.printlnBuf))
 	}
 }
 

@@ -126,11 +126,11 @@ func chatCandidates(words []string, prev string) []string {
 func conductCandidates(words []string, prev string) []string {
 	// `octo conduct <TAB>` → subcommand list (or the start of a goal string).
 	if len(words) == 3 {
-		return []string{"list", "status", "resume"}
+		return []string{"list", "status", "show", "resume"}
 	}
 	sub := words[2]
 	switch sub {
-	case "status", "resume":
+	case "status", "show", "resume":
 		// First positional after the verb is the ledger ID.
 		if len(words) == 4 {
 			return conductIDCandidates()

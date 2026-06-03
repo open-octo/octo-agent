@@ -610,6 +610,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case conductDoneMsg:
 		return m.onConductDone(msg)
+
+	case conductShowMsg:
+		return m.onConductShow(msg)
 	}
 	return m, m.flushPrints()
 }

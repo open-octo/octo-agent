@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/Leihb/octo-agent/internal/agent"
@@ -28,6 +29,8 @@ func runConduct(args []string, _ io.Reader, stdout, stderr io.Writer) int {
 		return runConductList(stdout, stderr)
 	case "status", "report":
 		return runConductStatus(args[1:], stdout, stderr)
+	case "show":
+		return runConductShow(args[1:], stdout, stderr)
 	case "resume":
 		return runConductResume(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
@@ -45,6 +48,7 @@ func printConductUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage: octo conduct \"<goal>\" [flags]   Plan + run a goal to completion, unattended")
 	fmt.Fprintln(w, "       octo conduct list                List every conducted goal, newest first")
 	fmt.Fprintln(w, "       octo conduct status <id>         Show one ledger's per-unit state + report")
+	fmt.Fprintln(w, "       octo conduct show <id> [unit]    Print the full result text of done units")
 	fmt.Fprintln(w, "       octo conduct resume <id>         Re-run a stopped/blocked ledger")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Flags (start):")
@@ -310,6 +314,43 @@ func runConductStatus(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	conductor.Report(stdout, led)
+	return 0
+}
+
+// runConductShow prints the full result text of done units (and errors of
+// blocked units). `octo conduct show <id>` shows all; an optional unit-id
+// narrows to one. This is where the worker's actual output lives — `status`
+// only previews it.
+func runConductShow(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "Usage: octo conduct show <id> [unit-id]")
+		return 2
+	}
+	store, err := conductor.NewStore()
+	if err != nil {
+		fmt.Fprintf(stderr, "octo conduct: %v\n", err)
+		return 1
+	}
+	id, err := store.ResolveID(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "octo conduct: %v\n", err)
+		return 1
+	}
+	unitID := 0
+	if len(args) >= 2 {
+		n, convErr := strconv.Atoi(args[1])
+		if convErr != nil || n <= 0 {
+			fmt.Fprintf(stderr, "octo conduct: unit-id must be a positive integer, got %q\n", args[1])
+			return 2
+		}
+		unitID = n
+	}
+	led, err := store.Get(id)
+	if err != nil {
+		fmt.Fprintf(stderr, "octo conduct: %v\n", err)
+		return 1
+	}
+	conductor.ShowResults(stdout, led, unitID)
 	return 0
 }
 

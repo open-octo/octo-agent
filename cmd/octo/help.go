@@ -148,7 +148,9 @@ Examples:
   octo conduct "..." --concurrency 3               Parallel workers in worktrees
   octo conduct "..." --replan                      Let it re-plan when stuck
   octo conduct list                                List conducted goals
-  octo conduct status last                         Per-unit report
+  octo conduct status last                         Per-unit state + result preview
+  octo conduct show last                           Full result text of every done unit
+  octo conduct show last 1                          Full result of just unit #1
   octo conduct resume <id>                         Resume a stopped/blocked run
 
 Unattended guardrails:
