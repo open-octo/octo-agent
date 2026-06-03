@@ -923,18 +923,21 @@ func (m *tuiModel) appendThinking(text string) {
 	m.thinkPartial.WriteString(buf)
 }
 
-// flushThinking commits any buffered trailing reasoning line. No-op when the
-// turn produced no reasoning.
+// flushThinking commits any buffered trailing reasoning line and ends the
+// current reasoning block. A turn's agentic loop produces a fresh block of
+// reasoning before each model round-trip (between tool calls); resetting
+// thinkingStarted here means every block gets its own 💭 marker, matching the
+// plain/headless renderer.
 func (m *tuiModel) flushThinking() {
-	if m.thinkPartial.Len() == 0 {
-		return
+	if m.thinkPartial.Len() > 0 {
+		m.println(m.styleThinking(m.thinkPartial.String()))
+		m.thinkPartial.Reset()
 	}
-	m.println(m.styleThinking(m.thinkPartial.String()))
-	m.thinkPartial.Reset()
+	m.thinkingStarted = false
 }
 
 // styleThinking renders one reasoning line dimmed, prefixing 💭 on the first
-// line of the turn's trace so the block reads as one unit.
+// line of each reasoning block so the block reads as one unit.
 func (m *tuiModel) styleThinking(line string) string {
 	if !m.thinkingStarted {
 		m.thinkingStarted = true

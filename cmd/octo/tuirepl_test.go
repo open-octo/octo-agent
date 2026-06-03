@@ -198,10 +198,30 @@ func TestTUI_ThinkingRendersBeforeAnswer(t *testing.T) {
 		t.Fatalf("thinking trace should be committed to scrollback; got %q", joined)
 	}
 	if n := strings.Count(joined, "💭"); n != 1 {
-		t.Errorf("💭 should prefix only the first thinking line; got %d in %q", n, joined)
+		t.Errorf("💭 should prefix only the first line of the block; got %d in %q", n, joined)
 	}
 	if m.thinkPartial.Len() != 0 {
 		t.Errorf("thinking buffer should be flushed once the answer starts; still holds %q", m.thinkPartial.String())
+	}
+}
+
+// A turn's agentic loop produces a fresh reasoning block before each model
+// round-trip (between tool calls); every block must get its own 💭, not just
+// the turn's first one.
+func TestTUI_ThinkingMarkerPerBlock(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+
+	// Block 1 → a tool runs → block 2 → the answer.
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: "first thought\n"})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal", Input: map[string]any{"command": "ls"}})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "c1", ToolName: "terminal", Output: "ok"})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: "second thought\n"})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "answer"})
+
+	joined := strings.Join(m.printlnBuf, "\n")
+	if n := strings.Count(joined, "💭"); n != 2 {
+		t.Errorf("each reasoning block should get a 💭; got %d in:\n%s", n, joined)
 	}
 }
 
