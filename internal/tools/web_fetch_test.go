@@ -10,6 +10,54 @@ import (
 	"time"
 )
 
+// A non-text response (e.g. an image) must not be stringified into garbage:
+// readBody returns a clean notice pointing at the right tool, with no raw bytes.
+func TestReadBody_BinaryContentTypeGuarded(t *testing.T) {
+	png := "\x89PNG\r\n\x1a\nBINARY-PIXEL-JUNK"
+	res, err := readBody(strings.NewReader(png), "https://x.test/logo.png", "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Text, "PNG") || strings.Contains(res.Text, "BINARY-PIXEL-JUNK") {
+		t.Errorf("binary bytes must not leak into the result; got:\n%s", res.Text)
+	}
+	for _, want := range []string{"image/png", "read_file", ".png", "curl"} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("image notice should mention %q; got:\n%s", want, res.Text)
+		}
+	}
+	if len(res.Blocks) != 0 {
+		t.Errorf("guard must not emit content blocks (text-only notice); got %d", len(res.Blocks))
+	}
+}
+
+func TestReadBody_TextContentTypePassesThrough(t *testing.T) {
+	res, err := readBody(strings.NewReader("# hello world"), "https://x.test", "text/markdown; charset=utf-8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "hello world") {
+		t.Errorf("text content should pass through unchanged; got:\n%s", res.Text)
+	}
+}
+
+func TestIsTextualContentType(t *testing.T) {
+	textual := []string{"", "text/html", "text/plain; charset=utf-8", "application/json",
+		"application/xhtml+xml", "image/svg+xml", "application/atom+xml", "application/x-ndjson"}
+	for _, ct := range textual {
+		if !isTextualContentType(ct) {
+			t.Errorf("%q should be treated as textual", ct)
+		}
+	}
+	binary := []string{"image/png", "image/jpeg", "application/pdf", "application/octet-stream",
+		"audio/mpeg", "video/mp4", "font/woff2", "application/zip"}
+	for _, ct := range binary {
+		if isTextualContentType(ct) {
+			t.Errorf("%q should NOT be treated as textual", ct)
+		}
+	}
+}
+
 // withJinaHost swaps JinaReaderHost for the test server URL. Since
 // JinaReaderHost is a const, we test by directly hitting the helper that
 // uses the URL passed in. Instead, we mock at the network layer by setting
