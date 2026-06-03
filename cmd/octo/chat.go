@@ -527,11 +527,6 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 					tools.SetMCPRegistry(nil)
 					mcpReg.Close()
 				}()
-				if mcpReg.Len() == 1 {
-					fmt.Fprintf(stdout, "Connected 1 MCP server.\n")
-				} else {
-					fmt.Fprintf(stdout, "Connected %d MCP servers.\n", mcpReg.Len())
-				}
 			}
 		}
 	}

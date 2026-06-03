@@ -160,8 +160,8 @@ func (r *Registry) Get(name string) *Connection {
 	return r.conns[name]
 }
 
-// Len reports how many servers connected successfully — useful for the
-// "Connected N MCP servers" startup line.
+// Len reports how many servers connected successfully — used to decide
+// whether to register the MCP tool surface at all.
 func (r *Registry) Len() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
