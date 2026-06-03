@@ -17,7 +17,6 @@ coverage.html
 /.vscode/
 
 # Local agent / config
-/.claude/settings.local.json
+/.claude/
 .codegraph/
-/.claude/scheduled_tasks.lock
 /.worktrees/
