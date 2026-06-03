@@ -11,6 +11,12 @@ version: 2
 
 project_name: octo
 
+# ripgrep release bundled into every binary (see internal/tools/rgembed). Keep
+# in sync with RG_VERSION in the Makefile — this value drives both the per-target
+# download hook below and the rgembed.version ldflag.
+env:
+  - RG_VERSION=15.1.0
+
 before:
   hooks:
     - go mod download
@@ -21,15 +27,32 @@ builds:
     binary: octo
     env:
       - CGO_ENABLED=0
+    # Each target downloads the matching ripgrep before building so the grep
+    # tool works out of the box without rg on PATH. The hook writes a single
+    # shared file (internal/tools/rgembed/binaries/rg), so builds MUST run
+    # serially — release.yml passes `-p 1`; without it, parallel targets would
+    # embed each other's rg. rg-embed-clean forces a fresh download per target
+    # (the file target is otherwise a no-op once present).
+    hooks:
+      pre:
+        - cmd: make rg-embed-clean rg-embed RG_VERSION={{ .Env.RG_VERSION }}
+          env:
+            - GOOS={{ .Os }}
+            - GOARCH={{ .Arch }}
     flags:
       - -trimpath
+    # embedrg bakes the downloaded ripgrep into the binary (go:embed).
+    tags:
+      - embedrg
     # -s -w strip the symbol table + DWARF (smaller binary). Version/Commit are
     # the same -ldflags the Makefile injects, so `octo version` reports the tag
-    # and the build's short SHA.
+    # and the build's short SHA. rgembed.version names the extracted rg cache
+    # file so an octo upgrade re-extracts a fresh binary.
     ldflags:
       - -s -w
       - -X github.com/Leihb/octo-agent/internal/version.Version={{ .Version }}
       - -X github.com/Leihb/octo-agent/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/Leihb/octo-agent/internal/tools/rgembed.version={{ .Env.RG_VERSION }}
     goos:
       - linux
       - darwin

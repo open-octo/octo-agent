@@ -118,7 +118,7 @@ func TestCompletionCandidates_HelpTargets(t *testing.T) {
 
 func TestCompletionCandidates_CompletionShells(t *testing.T) {
 	got := completionCandidates([]string{"octo", "completion", ""})
-	if !sliceEq(got, []string{"bash", "zsh", "fish"}) {
+	if !sliceEq(got, []string{"bash", "zsh", "fish", "powershell"}) {
 		t.Errorf("completion shell list = %v", got)
 	}
 }
@@ -166,9 +166,22 @@ func TestRunCompletion_FishScript(t *testing.T) {
 	}
 }
 
+func TestRunCompletion_PowershellScript(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runCompletion([]string{"powershell"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"Register-ArgumentCompleter", "-CommandName octo", "octo __complete"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("powershell script missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRunCompletion_UnknownShell(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := runCompletion([]string{"powershell"}, &stdout, &stderr); code != 2 {
+	if code := runCompletion([]string{"nushell"}, &stdout, &stderr); code != 2 {
 		t.Errorf("exit = %d, want 2", code)
 	}
 	if !strings.Contains(stderr.String(), "unsupported shell") {

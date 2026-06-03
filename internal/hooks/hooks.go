@@ -36,6 +36,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -147,17 +148,17 @@ func (r *Runner) Post(ctx context.Context, userInput, assistantReply string) err
 	return err
 }
 
-// run executes cmd, piping payload to its stdin, with a deadline. The
-// command is invoked via "sh -c" so users can write `OCTO_HOOK_PRE_TURN="./script | filter"`
-// pipelines without quoting the shell themselves. On Windows the user
-// is responsible for an sh-compatible runner being on PATH (Git Bash,
-// WSL, msys2) — same constraint as the terminal tool.
+// run executes cmd, piping payload to its stdin, with a deadline. The command
+// is invoked through the platform shell — POSIX `sh -c` on macOS/Linux,
+// PowerShell on Windows (same selection the terminal tool makes) — so users can
+// write `OCTO_HOOK_PRE_TURN="./script | filter"` pipelines without quoting the
+// shell themselves, in that platform's syntax.
 func (r *Runner) run(ctx context.Context, cmd string, stdin []byte) ([]byte, error) {
 	deadline := r.timeout()
 	rctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
-	c := exec.CommandContext(rctx, "sh", "-c", cmd)
+	c := shellCmd(rctx, cmd)
 	c.Stdin = bytes.NewReader(stdin)
 	var out, errBuf bytes.Buffer
 	c.Stdout = &out
@@ -182,6 +183,21 @@ func (r *Runner) run(ctx context.Context, cmd string, stdin []byte) ([]byte, err
 		return out.Bytes(), fmt.Errorf("hooks: %s: %w", cmd, err)
 	}
 	return out.Bytes(), nil
+}
+
+// shellCmd wraps cmd in the platform shell: PowerShell on Windows (preferring
+// pwsh 7+, falling back to the always-present powershell 5.1), POSIX sh -c
+// elsewhere. Mirrors internal/tools' shell selection so a hook script behaves
+// like a command the terminal tool would run.
+func shellCmd(ctx context.Context, cmd string) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		shell := "powershell"
+		if _, err := exec.LookPath("pwsh"); err == nil {
+			shell = "pwsh"
+		}
+		return exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", cmd)
+	}
+	return exec.CommandContext(ctx, "sh", "-c", cmd)
 }
 
 // parsePreOutput accepts either a JSON object with an additional_context
