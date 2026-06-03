@@ -473,6 +473,24 @@ func lastRunes(s string, n int) string {
 	return string(r[len(r)-n:])
 }
 
+// streamVerbFor labels the live tool-argument-streaming indicator with a
+// gerund so it reads as an action in progress ("Writing… 12.3 KB"). Falls back
+// to the card verb, then the raw tool name for tools without a friendly verb.
+func streamVerbFor(toolName string) string {
+	switch toolName {
+	case "write_file":
+		return "Writing"
+	case "edit_file":
+		return "Editing"
+	case "terminal":
+		return "Preparing command"
+	}
+	if v := cardVerbFor(toolName); v != "" {
+		return v
+	}
+	return toolName
+}
+
 // humanByteSize renders a byte count compactly (B / KB / MB).
 func humanByteSize(n int) string {
 	const kb, mb = 1024, 1024 * 1024
@@ -794,6 +812,14 @@ func (m *tuiModel) View() string {
 		}
 	} else if m.running != nil {
 		b.WriteString(m.spinnerLine(m.running.verb+"("+m.running.target+")", m.running.start))
+		b.WriteByte('\n')
+	} else if m.turnRunning && m.toolStreamName != "" {
+		// The model is streaming a tool call's arguments (e.g. a large
+		// write_file body). Show a live byte counter so a multi-second argument
+		// stream reads as progress, not a freeze. The count is JSON-stream bytes
+		// (a touch larger than the final value), which is fine for a heartbeat.
+		label := fmt.Sprintf("%s… %s", streamVerbFor(m.toolStreamName), humanByteSize(m.toolStreamBytes))
+		b.WriteString(m.spinnerLine(label, m.turnStart))
 		b.WriteByte('\n')
 	} else if m.turnRunning && m.partial.Len() == 0 {
 		// Turn is running but nothing is on the activity line right now — no

@@ -332,6 +332,16 @@ type tuiModel struct {
 	// until completion.)
 	running *runningTool
 
+	// toolStream* track a tool call whose arguments are still streaming from the
+	// model — e.g. a large write_file whose whole content arrives as one long
+	// input_json_delta. Without a readout the turn shows only the generic
+	// "Thinking" spinner for many seconds, reading as a freeze; instead View
+	// shows a live "Writing… N KB" line whose byte counter visibly grows.
+	// toolStreamID detects when a new tool's args start (reset the counter).
+	toolStreamID    string
+	toolStreamName  string
+	toolStreamBytes int
+
 	// compacting is set between EventCompactStarted and EventCompactDone while
 	// history compaction runs. It drives a dedicated live spinner line so the
 	// user sees the conversation isn't frozen while the summary streams in.
@@ -509,6 +519,7 @@ func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
 	m.partial.Reset()
 	m.thinkPartial.Reset()
 	m.thinkingStarted = false
+	m.toolStreamName, m.toolStreamID, m.toolStreamBytes = "", "", 0
 	m.clearSuggestion() // a new turn supersedes any pending follow-up
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancelTurn = cancel
@@ -886,11 +897,26 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		m.appendThinking(ev.Text)
 		return
 
+	case agent.EventToolInputDelta:
+		// The model is still streaming this tool call's arguments (e.g. a large
+		// write_file content). Surface a live byte counter so the wait reads as
+		// progress, not a freeze. Reset when a different tool's args begin.
+		if ev.ToolID != m.toolStreamID {
+			m.toolStreamID = ev.ToolID
+			m.toolStreamBytes = 0
+		}
+		m.toolStreamName = ev.ToolName
+		m.toolStreamBytes += len(ev.InputDelta)
+		return
+
 	case agent.EventTextDelta:
 		m.appendText(ev.Text)
 		return
 
 	case agent.EventToolStarted:
+		// Args finished streaming; the tool now executes. Clear the stream
+		// readout so the running-card spinner (or one-line status) takes over.
+		m.toolStreamName, m.toolStreamID, m.toolStreamBytes = "", "", 0
 		if m.toolInput == nil {
 			m.toolInput = map[string]map[string]any{}
 		}
