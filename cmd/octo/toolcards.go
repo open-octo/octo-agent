@@ -1,6 +1,11 @@
 package main
 
-import "github.com/Leihb/octo-agent/internal/tui"
+import (
+	"strings"
+
+	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/Leihb/octo-agent/internal/tui"
+)
 
 // outputCardMaxLines caps how many output lines a tool-result card shows
 // before collapsing the rest into a "N more lines" marker.
@@ -74,6 +79,12 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 		if p, _ := input["path"].(string); p != "" {
 			lang = tui.GuessLanguage(p)
 		}
+	}
+	if toolName == "terminal" {
+		// The background-launch result carries a model-only "don't poll"
+		// instruction appended after a blank line. It's noise for the human, so
+		// drop it from the card — the "Started background process N" line stays.
+		output = strings.TrimRight(strings.TrimSuffix(output, tools.BgPollNotice), "\n")
 	}
 	return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, outputCardMaxLines, isErr, lang)
 }
