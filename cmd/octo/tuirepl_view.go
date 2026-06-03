@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
 	"unsafe"
@@ -266,64 +267,150 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// imageExts are the file extensions tryAttachDroppedImage recognises.
+var imageExts = []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".heic", ".ico"}
+
 // tryAttachDroppedImage checks whether the textarea currently contains an
 // image file path (some terminals paste a dragged file's path as text).  The
 // path may be surrounded by ordinary text, e.g. "look at /path/to/img.png and
-// tell me", and may contain escaped spaces ("\ ").  If a valid image file
-// path is found, it is removed from the textarea, queued as a pending
-// attachment, and true is returned.
+// tell me", may be backslash-escaped (terminal drag escapes spaces and parens),
+// or wrapped in quotes.  If a valid image file path is found, it is removed
+// from the textarea, queued as a pending attachment, and true is returned.
 func (m *tuiModel) tryAttachDroppedImage() bool {
 	full := m.ta.Value()
-	// Unescape common shell escapes so paths with spaces are whole.
-	unescaped := strings.ReplaceAll(full, `\ `, " ")
-	unescaped = strings.ReplaceAll(unescaped, `\(`, "(")
-	unescaped = strings.ReplaceAll(unescaped, `\)`, ")")
+	path, start, end, ok := findImagePath(full)
+	if !ok {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	mime := "image/" + strings.TrimPrefix(ext, ".")
+	switch ext {
+	case ".jpg":
+		mime = "image/jpeg"
+	case ".tif":
+		mime = "image/tiff"
+	}
+	label := fmt.Sprintf("image (%s, %s)", shortMIME(mime), humanByteSize(len(data)))
+	m.pendingAttachments = append(m.pendingAttachments, pendingAttachment{
+		block: agent.NewImageBlock(mime, data),
+		label: label,
+	})
+	// Splice the path token out of the (original) textarea value.
+	before := strings.TrimSpace(full[:start])
+	after := strings.TrimSpace(full[end:])
+	if before != "" && after != "" {
+		m.ta.SetValue(before + " " + after)
+	} else {
+		m.ta.SetValue(before + after)
+	}
+	m.ta.CursorEnd()
+	return true
+}
 
-	// Scan for potential paths by looking for image extensions.
-	lower := strings.ToLower(unescaped)
-	for _, ext := range []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".heic", ".ico"} {
-		idx := strings.Index(lower, ext)
-		if idx == -1 {
-			continue
+// findImagePath scans s for a token that resolves to an existing image file. It
+// operates on the raw string (no early unescaping, so a backslash-escaped space
+// is not mistaken for a token boundary) and returns the cleaned filesystem path
+// plus the [start,end) byte range it occupies in s, so the caller can splice it
+// out. It first tries the whole trimmed input — the common case where a file is
+// dropped into an otherwise-empty box — which also catches quoted paths whose
+// internal spaces aren't backslash-escaped, then falls back to scanning for a
+// path embedded in surrounding text.
+func findImagePath(s string) (path string, start, end int, ok bool) {
+	if trimmed := strings.TrimSpace(s); trimmed != "" {
+		if clean := cleanDroppedPath(trimmed); hasImageExt(clean) {
+			if info, err := os.Stat(clean); err == nil && !info.IsDir() {
+				st := strings.Index(s, trimmed)
+				return clean, st, st + len(trimmed), true
+			}
 		}
-		// Extract the candidate path: walk back to the preceding space or
-		// start of string, and forward to the following space or end.
-		start := idx
-		for start > 0 && unescaped[start-1] != ' ' && unescaped[start-1] != '\t' && unescaped[start-1] != '\n' {
-			start--
+	}
+
+	lower := strings.ToLower(s)
+	for _, ext := range imageExts {
+		for from := 0; ; {
+			rel := strings.Index(lower[from:], ext)
+			if rel == -1 {
+				break
+			}
+			idx := from + rel
+			from = idx + len(ext)
+
+			e := idx + len(ext)
+			for e < len(s) && !isUnescapedBoundary(s, e) {
+				e++
+			}
+			st := idx
+			for st > 0 && !isUnescapedBoundary(s, st-1) {
+				st--
+			}
+			clean := cleanDroppedPath(s[st:e])
+			if !hasImageExt(clean) {
+				continue
+			}
+			if info, err := os.Stat(clean); err == nil && !info.IsDir() {
+				return clean, st, e, true
+			}
 		}
-		end := idx + len(ext)
-		for end < len(unescaped) && unescaped[end] != ' ' && unescaped[end] != '\t' && unescaped[end] != '\n' {
-			end++
-		}
-		path := strings.Trim(unescaped[start:end], `"'`)
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		mime := "image/" + strings.TrimPrefix(filepath.Ext(path), ".")
-		if filepath.Ext(path) == ".jpg" {
-			mime = "image/jpeg"
-		}
-		label := fmt.Sprintf("image (%s, %s)", shortMIME(mime), humanByteSize(len(data)))
-		m.pendingAttachments = append(m.pendingAttachments, pendingAttachment{
-			block: agent.NewImageBlock(mime, data),
-			label: label,
-		})
-		// Remove the path from the original (escaped) textarea value.
-		before := strings.TrimSpace(full[:start])
-		after := strings.TrimSpace(full[end:])
-		if before != "" && after != "" {
-			m.ta.SetValue(before + " " + after)
-		} else {
-			m.ta.SetValue(before + after)
-		}
-		m.ta.CursorEnd()
+	}
+	return "", 0, 0, false
+}
+
+// isUnescapedBoundary reports whether s[i] is whitespace that delimits a path
+// token. On POSIX a backslash escapes the following space ("foo\ bar" is one
+// token), so a space preceded by an odd number of backslashes is not a
+// boundary; on Windows the backslash is the path separator, not an escape, so
+// every space is a boundary (spaced paths arrive quoted and are handled by the
+// whole-input fast path instead).
+func isUnescapedBoundary(s string, i int) bool {
+	if c := s[i]; c != ' ' && c != '\t' && c != '\n' {
+		return false
+	}
+	if runtime.GOOS == "windows" {
 		return true
+	}
+	bs := 0
+	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
+		bs++
+	}
+	return bs%2 == 0
+}
+
+// cleanDroppedPath strips one layer of matching surrounding quotes and, on
+// POSIX, removes backslash escapes, turning a terminal-dropped token into a real
+// filesystem path. On Windows backslashes are path separators (spaces are
+// quoted, not escaped), so they are left intact.
+func cleanDroppedPath(raw string) string {
+	p := strings.TrimSpace(raw)
+	if len(p) >= 2 {
+		if (p[0] == '\'' && p[len(p)-1] == '\'') || (p[0] == '"' && p[len(p)-1] == '"') {
+			p = p[1 : len(p)-1]
+		}
+	}
+	if runtime.GOOS == "windows" {
+		return p
+	}
+	var b strings.Builder
+	b.Grow(len(p))
+	for i := 0; i < len(p); i++ {
+		if p[i] == '\\' && i+1 < len(p) {
+			i++
+		}
+		b.WriteByte(p[i])
+	}
+	return b.String()
+}
+
+// hasImageExt reports whether path ends with a recognised image extension.
+func hasImageExt(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, e := range imageExts {
+		if ext == e {
+			return true
+		}
 	}
 	return false
 }
@@ -401,11 +488,6 @@ func humanByteSize(n int) string {
 // submit acts on Enter. Idle → start a turn. Running → steer. Empty input
 // with no attachments is ignored.
 func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
-	// Last-chance catch for image file paths that were pasted/dropped into the
-	// textarea without triggering the per-keystroke detection (e.g. bracketed
-	// paste from a terminal drag-and-drop).
-	m.tryAttachDroppedImage()
-
 	text := strings.TrimSpace(m.ta.Value())
 	if text == "" && len(m.pendingAttachments) == 0 {
 		return m, nil
