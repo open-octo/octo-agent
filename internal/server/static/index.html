@@ -1,1 +1,773 @@
-<!DOCTYPE html><html><head><meta charset=utf-8><title>Octo</title></head><body><h1>Octo Web UI</h1></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Octo Agent</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --sidebar: #0d1117;
+  --border: #30363d;
+  --text: #c9d1d9;
+  --text-secondary: #8b949e;
+  --accent: #58a6ff;
+  --accent-hover: #79b8ff;
+  --user-bg: #238636;
+  --user-bg-soft: rgba(35, 134, 54, 0.15);
+  --bot-bg: #161b22;
+  --error: #f85149;
+  --success: #3fb950;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* Layout: sidebar + main */
+.app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 260px;
+  min-width: 260px;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sidebar-header .new-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sidebar-header .new-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.session-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+
+.session-item:hover {
+  background: rgba(88, 166, 255, 0.1);
+}
+
+.session-item.active {
+  background: rgba(88, 166, 255, 0.15);
+  border-left: 3px solid var(--accent);
+}
+
+.session-item .sess-id {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.session-item .sess-date {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Main area */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg);
+}
+
+/* Header */
+.header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+}
+
+.header h1 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.header .status {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header .status::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.header .status.error::before {
+  background: var(--error);
+}
+
+.header .status.thinking::before {
+  background: var(--accent);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Chat area */
+.chat-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.welcome {
+  text-align: center;
+  color: var(--text-secondary);
+  margin: auto;
+  max-width: 480px;
+}
+
+.welcome h2 {
+  margin-bottom: 12px;
+  color: var(--text);
+  font-size: 20px;
+}
+
+.welcome p {
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+/* Messages */
+.message {
+  max-width: 85%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  line-height: 1.6;
+  word-break: break-word;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message.user {
+  align-self: flex-end;
+  background: var(--user-bg-soft);
+  border: 1px solid var(--user-bg);
+  color: var(--text);
+  border-bottom-right-radius: 4px;
+}
+
+.message.bot {
+  align-self: flex-start;
+  background: var(--bot-bg);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+
+.message .meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.message.user .meta {
+  color: var(--user-bg);
+}
+
+.message.bot .meta {
+  color: var(--accent);
+}
+
+.message .content {
+  white-space: pre-wrap;
+}
+
+.message .content code {
+  background: rgba(0,0,0,0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 90%;
+}
+
+.message .content pre {
+  background: rgba(0,0,0,0.3);
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.message .content pre code {
+  background: none;
+  padding: 0;
+}
+
+.message .content blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 12px;
+  margin: 8px 0;
+  color: var(--text-secondary);
+}
+
+/* Typing indicator */
+.typing {
+  align-self: flex-start;
+  color: var(--text-secondary);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+}
+
+.typing span {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  animation: blink 1.4s infinite both;
+}
+
+.typing span:nth-child(2) { animation-delay: 0.2s; }
+.typing span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.3; }
+  40% { opacity: 1; }
+}
+
+/* Input area */
+.input-area {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.input-area textarea {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  max-height: 120px;
+  min-height: 44px;
+  font-family: inherit;
+}
+
+.input-area textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input-area button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.input-area button:hover {
+  background: var(--accent-hover);
+}
+
+.input-area button:disabled {
+  background: var(--border);
+  cursor: not-allowed;
+}
+
+/* Tool calls */
+.tool-call {
+  background: rgba(88, 166, 255, 0.08);
+  border: 1px solid rgba(88, 166, 255, 0.25);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.tool-call .tool-name {
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.tool-call .tool-args {
+  color: var(--text-secondary);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+
+.error-msg {
+  color: var(--error);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+/* Session info bar */
+.session-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>🐙 Octo</h2>
+      <button class="new-btn" id="newSessionBtn">+ New</button>
+    </div>
+    <div class="session-list" id="sessionList"></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="header">
+      <h1>Chat</h1>
+      <div class="status" id="status">Ready</div>
+    </div>
+    <div class="session-info" id="sessionInfo" style="display:none"></div>
+    <div class="chat-container" id="chat"></div>
+    <div class="input-area">
+      <textarea id="input" rows="1" placeholder="Type a message... (Shift+Enter for newline)"></textarea>
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const chat = document.getElementById('chat');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('sendBtn');
+const status = document.getElementById('status');
+const sessionInfo = document.getElementById('sessionInfo');
+const sessionList = document.getElementById('sessionList');
+const newSessionBtn = document.getElementById('newSessionBtn');
+
+let sessionId = null;
+let isTyping = false;
+let sessions = [];
+
+// Auto-resize textarea
+function resetInputHeight() {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+}
+input.addEventListener('input', resetInputHeight);
+
+input.addEventListener('keydown', (e) => {
+  // Don't send while an IME composition is active — pressing Enter to commit
+  // Chinese/Japanese/Korean candidates would otherwise fire the message early.
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+sendBtn.addEventListener('click', sendMessage);
+newSessionBtn.addEventListener('click', startNewSession);
+
+function setStatus(text, isError = false) {
+  status.textContent = text;
+  status.className = 'status' + (isError ? ' error' : text === 'Thinking...' ? ' thinking' : '');
+}
+
+// True when the chat is scrolled (near) the bottom. Used to avoid yanking the
+// view down while the user is reading scrolled-up history during a stream.
+function isNearBottom() {
+  return chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
+}
+function scrollToBottomIfNeeded(force) {
+  if (force || isNearBottom()) chat.scrollTop = chat.scrollHeight;
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// addMessage appends a plain user/bot bubble. content is treated as text
+// unless html is true. Returns the message element.
+function addMessage(role, content, html = false) {
+  const atBottom = isNearBottom();
+  const div = document.createElement('div');
+  div.className = `message ${role}`;
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = role === 'user' ? 'You' : 'Octo';
+  const body = document.createElement('div');
+  body.className = 'content';
+  if (html) body.innerHTML = content; else body.textContent = content;
+  div.appendChild(meta);
+  div.appendChild(body);
+  chat.appendChild(div);
+  scrollToBottomIfNeeded(atBottom);
+  return div;
+}
+
+// createBotStream builds a bot bubble that grows as SSE events arrive. Text
+// and tool cards are interleaved in arrival order: each tool card "closes"
+// the current text block so following text starts a fresh paragraph below it.
+function createBotStream() {
+  const div = document.createElement('div');
+  div.className = 'message bot';
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = 'Octo';
+  div.appendChild(meta);
+  chat.appendChild(div);
+
+  let textEl = null;     // current open text block
+  let textBuf = '';      // accumulated markdown source for textEl
+
+  function appendText(delta) {
+    const atBottom = isNearBottom();
+    if (!textEl) {
+      textEl = document.createElement('div');
+      textEl.className = 'content';
+      div.appendChild(textEl);
+      textBuf = '';
+    }
+    textBuf += delta;
+    textEl.innerHTML = renderMarkdown(textBuf);
+    scrollToBottomIfNeeded(atBottom);
+  }
+  function appendCard(node) {
+    const atBottom = isNearBottom();
+    div.appendChild(node);
+    textEl = null; // next text starts a new block under the card
+    scrollToBottomIfNeeded(atBottom);
+  }
+  // setFull replaces the whole bubble with the final reply (turn_done). It
+  // discards streamed fragments in favour of the authoritative full text.
+  function setFull(content) {
+    div.querySelectorAll('.content').forEach(el => el.remove());
+    textEl = null;
+    if (content) appendText(content);
+  }
+  return { el: div, appendText, appendCard, setFull };
+}
+
+function toolCard(emoji, title, body, errorStyle) {
+  const card = document.createElement('div');
+  card.className = 'tool-call';
+  if (errorStyle) card.style.borderColor = 'rgba(248,81,73,.3)';
+  const name = document.createElement('div');
+  name.className = 'tool-name';
+  if (errorStyle) name.style.color = '#f85149';
+  name.textContent = `${emoji} ${title}`;
+  card.appendChild(name);
+  if (body) {
+    const args = document.createElement('div');
+    args.className = 'tool-args';
+    args.textContent = body; // textContent: never inject tool output as HTML
+    card.appendChild(args);
+  }
+  return card;
+}
+
+function startNewSession() {
+  if (isTyping) return;
+  sessionId = null;
+  chat.innerHTML = `
+    <div class="welcome">
+      <h2>👋 Welcome</h2>
+      <p>Start a conversation by typing below. The first message creates a new session.</p>
+      <p>Responses stream in real-time, including tool calls.</p>
+    </div>
+  `;
+  sessionInfo.style.display = 'none';
+  input.focus();
+  renderSessionList();
+}
+
+async function loadSessions() {
+  try {
+    const res = await fetch('/api/sessions');
+    if (!res.ok) return;
+    sessions = await res.json();
+    renderSessionList();
+  } catch (e) {
+    console.error('Failed to load sessions:', e);
+  }
+}
+
+function renderSessionList() {
+  sessionList.innerHTML = '';
+  if (sessions.length === 0) {
+    sessionList.innerHTML = '<div style="padding: 20px; color: var(--text-secondary); font-size: 13px; text-align: center;">No sessions yet</div>';
+    return;
+  }
+  sessions.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'session-item' + (s.id === sessionId ? ' active' : '');
+    const title = s.title || s.id.slice(0, 8);
+    const idEl = document.createElement('div');
+    idEl.className = 'sess-id';
+    idEl.textContent = title;
+    const dateEl = document.createElement('div');
+    dateEl.className = 'sess-date';
+    dateEl.textContent = new Date(s.created_at).toLocaleString();
+    div.appendChild(idEl);
+    div.appendChild(dateEl);
+    div.addEventListener('click', () => switchSession(s.id));
+    sessionList.appendChild(div);
+  });
+}
+
+async function switchSession(id) {
+  if (isTyping) return;
+  try {
+    const res = await fetch(`/api/sessions/${id}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const sess = await res.json();
+    sessionId = id;
+    sessionInfo.style.display = 'block';
+    sessionInfo.textContent = `Session: ${id}`;
+    chat.innerHTML = '';
+    sess.messages.forEach(m => {
+      if (m.role === 'user') {
+        addMessage('user', m.content);
+      } else if (m.role === 'assistant' && m.content) {
+        addMessage('bot', renderMarkdown(m.content), true);
+      }
+    });
+    renderSessionList();
+    chat.scrollTop = chat.scrollHeight;
+  } catch (err) {
+    setStatus('Error loading session', true);
+  }
+}
+
+function showTyping() {
+  const div = document.createElement('div');
+  div.className = 'typing';
+  div.id = 'typing';
+  div.innerHTML = 'Thinking<span></span><span></span><span></span>';
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function hideTyping() {
+  const el = document.getElementById('typing');
+  if (el) el.remove();
+}
+
+function renderMarkdown(text) {
+  let html = escapeHTML(text)
+    .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
+    .replace(/\n/g, '<br>');
+  return html;
+}
+
+async function sendMessage() {
+  const text = input.value.trim();
+  if (!text || isTyping) return;
+
+  input.value = '';
+  resetInputHeight();
+  addMessage('user', text);
+  isTyping = true;
+  sendBtn.disabled = true;
+  showTyping();
+  setStatus('Thinking...');
+
+  try {
+    if (!sessionId) {
+      // First message: POST /api/chat creates the session and runs the first
+      // turn. This path is non-streaming (the session id doesn't exist yet).
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      sessionId = data.session_id;
+      sessionInfo.style.display = 'block';
+      sessionInfo.textContent = `Session: ${sessionId}`;
+      hideTyping();
+      addMessage('bot', renderMarkdown(data.reply), true);
+      setStatus('Ready');
+      loadSessions();
+    } else {
+      const res = await fetch(`/api/chat/${sessionId}/turn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+        body: JSON.stringify({ message: text })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      hideTyping();
+      const stream = createBotStream();
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6);
+          if (!data) continue;
+          try {
+            handleEvent(JSON.parse(data), stream);
+          } catch (e) {
+            // ignore malformed SSE lines
+          }
+        }
+      }
+      setStatus('Ready');
+      loadSessions();
+    }
+  } catch (err) {
+    hideTyping();
+    const errDiv = document.createElement('div');
+    errDiv.className = 'error-msg';
+    errDiv.textContent = `Error: ${err.message}`;
+    chat.lastElementChild?.appendChild(errDiv);
+    setStatus('Error', true);
+  } finally {
+    isTyping = false;
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
+
+// handleEvent maps a streamed AgentEvent to UI. Event kinds and field names
+// mirror internal/agent/event.go exactly — keep them in sync.
+function handleEvent(ev, stream) {
+  switch (ev.kind) {
+    case 'text_delta':
+      stream.appendText(ev.text || '');
+      break;
+    case 'tool_started':
+      stream.appendCard(toolCard('🔧', ev.tool_name || 'tool',
+        ev.input ? JSON.stringify(ev.input, null, 2) : ''));
+      break;
+    case 'tool_done':
+      stream.appendCard(toolCard('✅', `${ev.tool_name || 'tool'} result`, ev.output || ''));
+      break;
+    case 'tool_error':
+      stream.appendCard(toolCard('❌', `${ev.tool_name || 'tool'} error`,
+        ev.err || ev.output || 'Unknown error', true));
+      break;
+    case 'turn_done':
+      if (ev.reply?.content) stream.setFull(ev.reply.content);
+      break;
+    // thinking_delta / tool_input_delta / compact_* are intentionally ignored.
+  }
+}
+
+// Init
+loadSessions();
+chat.innerHTML = `
+  <div class="welcome">
+    <h2>👋 Welcome to Octo Agent</h2>
+    <p>Start a conversation by typing below. The first message creates a new session.</p>
+    <p>Responses stream in real-time, including tool calls.</p>
+  </div>
+`;
+</script>
+</body>
+</html>

@@ -275,6 +275,14 @@ func skillTrigger(reg *skills.Registry, line string) (skills.Skill, string, bool
 	}
 	s, ok := reg.Get(name)
 	if !ok {
+		// Re-scan once in case the skill was added after session start: the
+		// frozen manifest won't list it, but the user can still trigger it by
+		// name. Mirrors the skill tool's reload-on-miss; the rescan only runs
+		// on a non-reserved /command that didn't match a known skill.
+		reg.Reload()
+		s, ok = reg.Get(name)
+	}
+	if !ok {
 		return skills.Skill{}, "", false
 	}
 	args := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))

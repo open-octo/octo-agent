@@ -34,6 +34,7 @@ type sessionSummary struct {
 	CreatedAt time.Time `json:"created_at"`
 	Model     string    `json:"model"`
 	TurnCount int       `json:"turn_count"`
+	Title     string    `json:"title"`
 }
 
 type sessionDetail struct {
@@ -159,6 +160,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: sess.CreatedAt,
 			Model:     sess.Model,
 			TurnCount: sess.TurnCount(),
+			Title:     sess.DisplayTitle(),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

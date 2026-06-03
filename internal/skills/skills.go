@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -39,9 +40,14 @@ type Skill struct {
 	Source      string // "project" | "user" (display only, for --list-skills)
 }
 
-// Registry holds the skills discovered for a session, indexed by name.
+// Registry holds the skills discovered for a session, indexed by name. It is
+// safe for concurrent use (sub-agents share one registry and call the skill
+// tool from separate goroutines). cwd is remembered so Reload can re-scan the
+// same roots a session was discovered from.
 type Registry struct {
+	mu     sync.RWMutex
 	skills map[string]Skill
+	cwd    string
 }
 
 // userSkillsRoot returns ~/.octo/skills, or "" when the home dir can't be
@@ -59,7 +65,7 @@ var userSkillsRoot = func() string {
 // root is scanned last, overwriting the map entry). A missing root is not an
 // error — most environments won't have both.
 func Discover(cwd string) *Registry {
-	r := &Registry{skills: make(map[string]Skill)}
+	r := &Registry{skills: make(map[string]Skill), cwd: cwd}
 	// Lowest precedence first; scanRoot overwrites by name, so user then
 	// project win. Default skills (shipped with the binary, materialized to
 	// ~/.octo/skills-default) are the floor — a user overrides one by dropping
@@ -158,8 +164,26 @@ func (r *Registry) Get(name string) (Skill, bool) {
 	if r == nil {
 		return Skill{}, false
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	s, ok := r.skills[name]
 	return s, ok
+}
+
+// Reload re-scans the skill roots in place, picking up skills added, removed, or
+// edited since the registry was first discovered. The system-prompt manifest is
+// intentionally NOT refreshed (recomputing it mid-session would change the
+// cached prompt prefix); this only refreshes what the `skill` tool can load, so
+// a skill dropped into ~/.octo/skills mid-session becomes loadable without a
+// restart. Safe to call concurrently with Get/List/Len.
+func (r *Registry) Reload() {
+	if r == nil {
+		return
+	}
+	fresh := Discover(r.cwd) // build off the lock, then swap atomically
+	r.mu.Lock()
+	r.skills = fresh.skills
+	r.mu.Unlock()
 }
 
 // Len reports how many skills were discovered.
@@ -167,6 +191,8 @@ func (r *Registry) Len() int {
 	if r == nil {
 		return 0
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return len(r.skills)
 }
 
@@ -176,10 +202,12 @@ func (r *Registry) List() []Skill {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
 	out := make([]Skill, 0, len(r.skills))
 	for _, s := range r.skills {
 		out = append(out, s)
 	}
+	r.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Source != out[j].Source {
 			return out[i].Source == "project" // project before user

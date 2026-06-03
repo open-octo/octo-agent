@@ -182,6 +182,35 @@ func TestTUI_FirstOutputCommitsEcho(t *testing.T) {
 	}
 }
 
+// While the model streams a large tool argument (e.g. a big write_file body),
+// the view must show a live byte counter so the wait reads as progress, not a
+// freeze. EventToolStarted (args complete) clears the readout.
+func TestTUI_ToolInputStreamProgress(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolInputDelta, ToolID: "c1", ToolName: "write_file", InputDelta: strings.Repeat("x", 2048)})
+	if m.toolStreamName != "write_file" || m.toolStreamBytes != 2048 {
+		t.Fatalf("after first delta: name=%q bytes=%d", m.toolStreamName, m.toolStreamBytes)
+	}
+	out := m.View()
+	if !strings.Contains(out, "Writing") || !strings.Contains(out, "2.0 KB") {
+		t.Errorf("view should show a live write progress line; got:\n%s", out)
+	}
+
+	// A second fragment of the same call accumulates.
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolInputDelta, ToolID: "c1", ToolName: "write_file", InputDelta: strings.Repeat("x", 1024)})
+	if m.toolStreamBytes != 3072 {
+		t.Fatalf("bytes should accumulate within one call, got %d", m.toolStreamBytes)
+	}
+
+	// Args complete → tool dispatches → readout clears.
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "write_file", Input: map[string]any{"path": "x.html"}})
+	if m.toolStreamName != "" || m.toolStreamBytes != 0 {
+		t.Errorf("EventToolStarted should clear the stream readout; name=%q bytes=%d", m.toolStreamName, m.toolStreamBytes)
+	}
+}
+
 // Reasoning deltas must commit to the scrollback (dimmed) before the answer,
 // with the 💭 marker on the first line only — so the trace stays in the
 // transcript above the reply instead of vanishing into a spinner.
