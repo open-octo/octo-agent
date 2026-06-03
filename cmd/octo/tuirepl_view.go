@@ -269,19 +269,34 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // tryAttachDroppedImage checks whether the textarea currently contains an
 // image file path (some terminals paste a dragged file's path as text).  The
 // path may be surrounded by ordinary text, e.g. "look at /path/to/img.png and
-// tell me".  If a valid image file path is found, it is removed from the
-// textarea, queued as a pending attachment, and true is returned.
+// tell me", and may contain escaped spaces ("\ ").  If a valid image file
+// path is found, it is removed from the textarea, queued as a pending
+// attachment, and true is returned.
 func (m *tuiModel) tryAttachDroppedImage() bool {
 	full := m.ta.Value()
-	// Find candidate tokens that look like file paths with image extensions.
-	for _, tok := range strings.Fields(full) {
-		path := strings.Trim(tok, `"'`) // some terminals quote the path
-		ext := strings.ToLower(filepath.Ext(path))
-		switch ext {
-		case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".heic", ".ico":
-		default:
+	// Unescape common shell escapes so paths with spaces are whole.
+	unescaped := strings.ReplaceAll(full, `\ `, " ")
+	unescaped = strings.ReplaceAll(unescaped, `\(`, "(")
+	unescaped = strings.ReplaceAll(unescaped, `\)`, ")")
+
+	// Scan for potential paths by looking for image extensions.
+	lower := strings.ToLower(unescaped)
+	for _, ext := range []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".heic", ".ico"} {
+		idx := strings.Index(lower, ext)
+		if idx == -1 {
 			continue
 		}
+		// Extract the candidate path: walk back to the preceding space or
+		// start of string, and forward to the following space or end.
+		start := idx
+		for start > 0 && unescaped[start-1] != ' ' && unescaped[start-1] != '\t' && unescaped[start-1] != '\n' {
+			start--
+		}
+		end := idx + len(ext)
+		for end < len(unescaped) && unescaped[end] != ' ' && unescaped[end] != '\t' && unescaped[end] != '\n' {
+			end++
+		}
+		path := strings.Trim(unescaped[start:end], `"'`)
 		info, err := os.Stat(path)
 		if err != nil || info.IsDir() {
 			continue
@@ -290,8 +305,8 @@ func (m *tuiModel) tryAttachDroppedImage() bool {
 		if err != nil {
 			continue
 		}
-		mime := "image/" + strings.TrimPrefix(ext, ".")
-		if ext == ".jpg" {
+		mime := "image/" + strings.TrimPrefix(filepath.Ext(path), ".")
+		if filepath.Ext(path) == ".jpg" {
 			mime = "image/jpeg"
 		}
 		label := fmt.Sprintf("image (%s, %s)", shortMIME(mime), humanByteSize(len(data)))
@@ -299,16 +314,15 @@ func (m *tuiModel) tryAttachDroppedImage() bool {
 			block: agent.NewImageBlock(mime, data),
 			label: label,
 		})
-		// Remove the path token (and surrounding spaces) from the textarea.
-		before, after, found := strings.Cut(full, tok)
-		if found {
-			m.ta.SetValue(strings.TrimSpace(before) + " " + strings.TrimSpace(after))
-			m.ta.CursorEnd()
+		// Remove the path from the original (escaped) textarea value.
+		before := strings.TrimSpace(full[:start])
+		after := strings.TrimSpace(full[end:])
+		if before != "" && after != "" {
+			m.ta.SetValue(before + " " + after)
 		} else {
-			// Fallback: shouldn't happen since we extracted tok from full.
-			m.ta.SetValue(strings.Replace(full, tok, "", 1))
-			m.ta.CursorEnd()
+			m.ta.SetValue(before + after)
 		}
+		m.ta.CursorEnd()
 		return true
 	}
 	return false
@@ -402,10 +416,8 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	}
 
 	// Mid-turn: image attachments can't ride a text-only steer, so keep them
-	// pending for the next new turn and tell the user.
-	if len(m.pendingAttachments) > 0 {
-		m.println(noticeStyle.Render("⚠ image attachments are sent with a new turn, not a mid-turn steer — they'll ride your next message"))
-	}
+	// pending for the next new turn. The chip above the input box already shows
+	// the attachment state, no extra echo needed.
 	// Mid-turn input goes to the inbox. It will be drained into history at
 	// the start of the next loop iteration, before the LLM call, so the
 	// model sees it as a first-class user message.
