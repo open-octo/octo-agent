@@ -54,7 +54,11 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "octo server listening on http://%s\n", *addr)
+	host := *addr
+	if strings.HasPrefix(host, ":") {
+		host = "localhost" + host
+	}
+	fmt.Fprintf(stdout, "octo server listening on http://%s\n", host)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
