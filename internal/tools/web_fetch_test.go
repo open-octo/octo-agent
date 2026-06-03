@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -158,8 +159,81 @@ func TestWebFetch_Truncates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
+	// Large responses are now spilled to a temp file; the preview should
+	// mention truncation and provide a file path.
 	if !strings.Contains(out.Text, "truncated") {
 		t.Errorf("expected truncation marker, got tail: %q", out.Text[max(0, len(out.Text)-100):])
+	}
+	if !strings.Contains(out.Text, "Saved to:") {
+		t.Errorf("expected spilled file path in preview, got: %q", out.Text)
+	}
+}
+
+func TestWebFetch_SmallResponseNotSpilled(t *testing.T) {
+	// A tiny body should be returned inline (old behaviour).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("hello world"))
+	}))
+	defer srv.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = srv.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	out, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
+		"url": "https://example.com/small",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out.Text != "hello world" {
+		t.Errorf("expected inline small response, got: %q", out.Text)
+	}
+}
+
+func TestWebFetch_LargeResponseSpilled(t *testing.T) {
+	// A body larger than WebFetchPreviewBytes should be spilled.
+	// Each line is short so we have many lines (line-based preview is useful).
+	line := strings.Repeat("x", 50) + "\n"
+	repeatCount := (WebFetchPreviewBytes / len(line)) + 20
+	big := strings.Repeat(line, repeatCount)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(big))
+	}))
+	defer srv.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = srv.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	out, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
+		"url": "https://example.com/large",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "Saved to:") {
+		t.Errorf("expected spilled file path, got: %q", out.Text)
+	}
+	if !strings.Contains(out.Text, "Content-Type:") {
+		t.Errorf("expected content-type in preview, got: %q", out.Text)
+	}
+	if !strings.Contains(out.Text, "first 30 lines") {
+		t.Errorf("expected head preview, got: %q", out.Text)
+	}
+	// Make sure the file actually exists and contains the full body.
+	pathLine := strings.SplitN(out.Text, "Saved to: ", 2)
+	if len(pathLine) < 2 {
+		t.Fatalf("could not extract file path from output")
+	}
+	path := strings.SplitN(pathLine[1], "\n", 2)[0]
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("spill file not readable: %v", err)
+	}
+	if string(data) != big {
+		t.Errorf("spill file content mismatch")
 	}
 }
 
