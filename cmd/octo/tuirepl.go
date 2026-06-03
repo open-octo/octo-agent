@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/mcp"
 	"github.com/Leihb/octo-agent/internal/tools"
 	"github.com/Leihb/octo-agent/internal/tui"
 	"github.com/charmbracelet/bubbles/key"
@@ -35,6 +36,16 @@ import (
 func runTUI(cfg replConfig) int {
 	defer tools.KillAllBackground()
 	defer tools.CleanSpillFiles()
+	// MCP connects in the background (mcpBoot → connectMCPCmd → mcpReadyMsg),
+	// which installs the registry globally. Tear it down here on exit since the
+	// TUI path owns its lifecycle (chat.go only defers cleanup for the
+	// synchronous headless connect). nil-safe when no servers connected.
+	defer func() {
+		if reg := tools.ActiveMCPRegistry(); reg != nil {
+			tools.SetMCPRegistry(nil)
+			reg.Close()
+		}
+	}()
 
 	m := newTUIModel(cfg)
 	p := tea.NewProgram(m, tea.WithFilter(shiftEnterFilter))
@@ -128,6 +139,7 @@ type turnFinishedMsg struct{ err error } // the turn goroutine returned
 type noticeMsg struct{ text string }
 type bgExitMsg struct{ e tools.BgExit }                      // a background process finished (async)
 type subAgentNoteMsg struct{ ev tools.SubAgentNotification } // a sub-agent completed (async)
+type mcpReadyMsg struct{ reg *mcp.Registry }                 // background MCP connect finished (async)
 type subAgentEventMsg struct{ ev tools.SubAgentEvent }       // a sub-agent's runtime activity (async)
 type suggestionMsg struct{ text string }                     // an after-turn follow-up suggestion (async)
 type titleMsg struct{ text string }                          // a generated session title (async)
@@ -415,10 +427,38 @@ func newTUIModel(cfg replConfig) *tuiModel {
 }
 
 func (m *tuiModel) Init() tea.Cmd {
-	return tea.Sequence(
+	boot := tea.Sequence(
 		tea.Println(tui.Banner("", m.a.Model, m.cwd, m.width)),
 		textarea.Blink,
 	)
+	// Connect MCP concurrently with the first paint (tea.Batch, not Sequence)
+	// so the banner + input appear immediately and the servers' handshake cost
+	// is hidden. The result lands as mcpReadyMsg.
+	if m.cfg.mcpBoot != nil {
+		return tea.Batch(boot, m.connectMCPCmd())
+	}
+	return boot
+}
+
+// connectMCPCmd returns a tea.Cmd that runs the (slow) MCP handshake off the
+// event loop and reports the live registry back as mcpReadyMsg. Bubbletea runs
+// each Cmd in its own goroutine, so this overlaps the rest of startup. The
+// OAuth device-flow prompt and connect-failure warnings are routed to the TUI
+// sink — never the raw terminal, which bubbletea owns.
+func (m *tuiModel) connectMCPCmd() tea.Cmd {
+	boot := m.cfg.mcpBoot
+	sink := m.sink
+	return func() tea.Msg {
+		reg := mcp.ConnectAll(
+			context.Background(),
+			boot.cfg,
+			boot.info,
+			func(serverName string) mcp.OAuthPrompt { return newTUIOAuthPrompt(sink, serverName) },
+			sinkWriter{sink: sink},
+			boot.childErr,
+		)
+		return mcpReadyMsg{reg: reg}
+	}
 }
 
 // startTurn launches a turn whose transcript echo is the submitted line itself.
@@ -547,6 +587,23 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case noticeMsg:
 		m.println(noticeStyle.Render(msg.text))
+		return m, m.flushPrints()
+
+	case mcpReadyMsg:
+		// Background MCP connect finished. Install the registry and refresh the
+		// tool list so the next turn carries the MCP surface. Only when built-in
+		// tools were enabled (executor wired); plain chat keeps an empty surface.
+		// Recomputing cfg.tools busts the provider's tools-prompt cache once —
+		// acceptable, and only if the user already sent a turn this first second.
+		if msg.reg != nil && msg.reg.Len() > 0 {
+			tools.SetMCPRegistry(msg.reg)
+			if m.cfg.executor != nil {
+				m.cfg.tools = tools.DefaultTools()
+			}
+			if !m.cfg.verbosity.quiet() {
+				m.println(noticeStyle.Render(fmt.Sprintf("● MCP ready — %d server(s) connected", msg.reg.Len())))
+			}
+		}
 		return m, m.flushPrints()
 
 	case bgExitMsg:

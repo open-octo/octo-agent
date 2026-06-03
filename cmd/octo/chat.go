@@ -553,43 +553,55 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// DefaultRegistry pick them up. Best-effort — a misconfigured or missing
 	// server is logged on stderr and the session keeps going. Skipped when
 	// tools are off (the agent would never invoke them).
+	//
+	// Connecting is synchronous for the headless one-shot — its single turn
+	// needs the full tool surface before it runs. The interactive TUI instead
+	// defers connection to a background tea.Cmd (mcpBoot, handled in runTUI) so
+	// the banner + input paint immediately; tools register when the registry
+	// arrives a moment later.
+	var mcpBoot *mcpBootstrap
 	if toolsOn {
 		mcpCfg, err := mcp.LoadConfig(cwd)
 		if err != nil {
 			fmt.Fprintf(stderr, "octo chat: mcp config: %v\n", err)
 		} else if len(mcpCfg.Servers) > 0 {
-			// A stdio server's subprocess writes diagnostics to its stderr at
-			// arbitrary times during the session, from an exec copy goroutine.
-			// Under the bubbletea TUI a direct terminal write corrupts the frame,
-			// so route it to a log file (recoverable, never the screen). In
-			// plain/headless mode leave it nil: the transport defaults to
-			// os.Stderr, the only writer that's safe for the goroutine to share
-			// concurrently (the stderr param may be a non-thread-safe buffer).
-			var childStderr io.Writer
+			info := mcp.Implementation{Name: "octo", Version: version.Version}
 			if useTUI {
+				// A stdio server's subprocess writes diagnostics to its stderr at
+				// arbitrary times during the session, from an exec copy goroutine.
+				// Under the bubbletea TUI a direct terminal write corrupts the
+				// frame, so route it to a log file (recoverable, never the
+				// screen). The file is closed when runChat returns, i.e. after
+				// runTUI exits.
+				var childStderr io.Writer
 				if f := openMCPLogFile(); f != nil {
 					childStderr = f
 					defer f.Close()
 				} else {
 					childStderr = io.Discard
 				}
-			}
-			mcpReg := mcp.ConnectAll(
-				context.Background(),
-				mcpCfg,
-				mcp.Implementation{Name: "octo", Version: version.Version},
-				func(serverName string) mcp.OAuthPrompt {
-					return newCLIOAuthPrompt(stdout, serverName)
-				},
-				stderr,
-				childStderr,
-			)
-			if mcpReg.Len() > 0 {
-				tools.SetMCPRegistry(mcpReg)
-				defer func() {
-					tools.SetMCPRegistry(nil)
-					mcpReg.Close()
-				}()
+				mcpBoot = &mcpBootstrap{cfg: mcpCfg, info: info, childErr: childStderr}
+			} else {
+				// Headless: connect now and register before the one-shot turn.
+				// Leave childStderr nil — the transport defaults to os.Stderr, the
+				// only writer safe for the copy goroutine to share concurrently.
+				mcpReg := mcp.ConnectAll(
+					context.Background(),
+					mcpCfg,
+					info,
+					func(serverName string) mcp.OAuthPrompt {
+						return newCLIOAuthPrompt(stdout, serverName)
+					},
+					stderr,
+					nil,
+				)
+				if mcpReg.Len() > 0 {
+					tools.SetMCPRegistry(mcpReg)
+					defer func() {
+						tools.SetMCPRegistry(nil)
+						mcpReg.Close()
+					}()
+				}
 			}
 		}
 	}
@@ -665,8 +677,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			view:       replView,            // same surface for turn render + Ask prompts
 			hooks:      hooks.LoadFromEnv(), // C9 Phase 3: external retrieval layer hooks
 			permEngine: permEngine,
+			mcpBoot:    mcpBoot, // nil unless tools on with servers configured
 		}
 		if toolsOn {
+			// Built-ins only at first paint — the MCP registry is still nil
+			// (mcpBoot connects it in the background). mcpReadyMsg recomputes
+			// this list once the servers are live.
 			cfg.tools = tools.DefaultTools()
 			cfg.executor = toolExecutor
 			cfg.subAgentMgr = subAgentMgr

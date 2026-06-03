@@ -13,6 +13,7 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/Leihb/octo-agent/internal/mcp"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/skills"
 	"github.com/Leihb/octo-agent/internal/tools"
@@ -48,6 +49,20 @@ type replConfig struct {
 	// permission gate, and the asker. Tests leave it nil; runREPL builds a
 	// plainView over the resolved reader.
 	view ViewSink
+	// mcpBoot, when non-nil, tells runTUI to connect the MCP servers in the
+	// background after first paint instead of blocking startup on them. Only
+	// the TUI path sets it; the headless one-shot connects synchronously
+	// (its single turn needs the full tool surface up front). nil → no MCP.
+	mcpBoot *mcpBootstrap
+}
+
+// mcpBootstrap carries the inputs runTUI needs to connect MCP servers from a
+// background tea.Cmd: the resolved config, our client identity, and the writer
+// that receives stdio servers' child stderr (a log file under the TUI).
+type mcpBootstrap struct {
+	cfg      *mcp.Config
+	info     mcp.Implementation
+	childErr io.Writer
 }
 
 // isFirstEverSession reports whether no sessions exist on disk yet — the
