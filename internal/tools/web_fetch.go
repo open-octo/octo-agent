@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +31,17 @@ var jinaReaderHostForTest = JinaReaderHost
 // targeted slices via grep / a follow-up fetch.
 const WebFetchMaxBytes = 200_000
 
+// WebFetchPreviewBytes is the size past which web_fetch writes the full
+// response to a temp file and returns only a preview summary. Below this
+// the body is returned inline (same behaviour as before).
+const WebFetchPreviewBytes = 8 * 1024
+
+// WebFetchPreviewLines bounds the head+tail preview when output is spilled.
+const (
+	webFetchPreviewHeadLines = 30
+	webFetchPreviewTailLines = 10
+)
+
 // WebFetchTool fetches a URL and returns its body as Markdown. It prefers
 // the Jina AI Reader proxy for JS-rendered pages and clean HTML-to-Markdown
 // conversion, but falls back to a direct HTTP fetch when the proxy fails.
@@ -39,8 +52,12 @@ func (WebFetchTool) Definition() agent.ToolDefinition {
 		Name: "web_fetch",
 		Description: "Fetch a URL and return its content. Prefers the Jina Reader proxy " +
 			"for JS-rendered pages and clean HTML-to-Markdown conversion; falls back to " +
-			"a direct HTTP fetch when the proxy is unavailable. Response is truncated at " +
-			"~200 KB; for long pages, fetch a more specific URL or grep the returned text. " +
+			"a direct HTTP fetch when the proxy is unavailable. " +
+			"Responses larger than ~8 KB are saved to a temp file; the tool returns a " +
+			"preview summary (size, content-type, first/last lines) plus the file path. " +
+			"Use read_file or grep on that path to inspect the full content. " +
+			"Returns text only — for a binary/image URL it returns a short notice (download " +
+			"it with the terminal tool, then read_file an image for multimodal viewing). " +
 			"Public web only — no authentication.",
 		Parameters: map[string]any{
 			"type": "object",
@@ -156,7 +173,7 @@ func fetchViaJina(ctx context.Context, rawURL string) (agent.ToolResult, error) 
 		return agent.ToolResult{Text: ""}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	return readBody(resp.Body)
+	return readBody(resp.Body, rawURL, resp.Header.Get("Content-Type"))
 }
 
 // fetchDirect performs a direct HTTP GET against the original URL. It uses
@@ -193,12 +210,21 @@ func fetchDirect(ctx context.Context, rawURL string) (agent.ToolResult, error) {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	return readBody(resp.Body)
+	return readBody(resp.Body, rawURL, resp.Header.Get("Content-Type"))
 }
 
-// readBody reads up to WebFetchMaxBytes+1 from r, truncating if necessary
-// and appending a clear marker.
-func readBody(r io.Reader) (agent.ToolResult, error) {
+// readBody reads the full body, caps it at WebFetchMaxBytes, then either
+// returns it inline (if small) or spills it to a temp file and returns a
+// preview summary.
+func readBody(r io.Reader, sourceURL, contentType string) (agent.ToolResult, error) {
+	// Content-type guard: web_fetch only returns text. A binary response
+	// (image, PDF, audio/video, archive, …) would otherwise be stringified into
+	// garbage that wastes the model's context. Return a clean pointer to the
+	// right tool instead of reading the body at all.
+	if !isTextualContentType(contentType) {
+		return agent.ToolResult{Text: binaryContentNotice(sourceURL, contentType)}, nil
+	}
+
 	body, err := io.ReadAll(io.LimitReader(r, WebFetchMaxBytes+1))
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("read body: %w", err)
@@ -209,11 +235,164 @@ func readBody(r io.Reader) (agent.ToolResult, error) {
 		truncated = true
 	}
 
-	out := string(body)
-	if truncated {
-		out += "\n\n…[truncated at " + strconv.Itoa(WebFetchMaxBytes) + " bytes]"
+	// Small enough — return inline (preserves old behaviour for tiny pages).
+	if len(body) <= WebFetchPreviewBytes {
+		out := string(body)
+		if truncated {
+			out += "\n\n…[truncated at " + strconv.Itoa(WebFetchMaxBytes) + " bytes]"
+		}
+		return agent.ToolResult{Text: out}, nil
 	}
-	return agent.ToolResult{Text: out}, nil
+
+	// Large — spill to temp file and return preview summary.
+	return spillWebFetch(body, sourceURL, contentType, truncated)
+}
+
+// mediaType returns the lowercased media type of a Content-Type header,
+// stripping any ";charset=…" / boundary parameters and surrounding space.
+func mediaType(contentType string) string {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	return ct
+}
+
+// isTextualContentType reports whether a Content-Type names text web_fetch can
+// usefully return. An empty type is treated as text — many servers omit it and
+// the body is usually HTML/markdown. Covers text/*, JSON/XML/JS, and the
+// +json / +xml structured-syntax suffixes.
+func isTextualContentType(contentType string) bool {
+	ct := mediaType(contentType)
+	if ct == "" {
+		return true
+	}
+	if strings.HasPrefix(ct, "text/") {
+		return true
+	}
+	if strings.HasSuffix(ct, "+json") || strings.HasSuffix(ct, "+xml") {
+		return true
+	}
+	switch ct {
+	case "application/json", "application/xml", "application/javascript",
+		"application/ecmascript", "application/markdown", "application/x-ndjson",
+		"application/x-www-form-urlencoded", "application/yaml", "application/x-yaml":
+		return true
+	}
+	return false
+}
+
+// imageTypeExtension maps an image media type to the file extension read_file
+// recognises (so a downloaded image is rendered visually, not refused). Returns
+// "" for non-image or unknown types.
+func imageTypeExtension(ct string) string {
+	switch mediaType(ct) {
+	case "image/png":
+		return ".png"
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/bmp":
+		return ".bmp"
+	case "image/tiff":
+		return ".tiff"
+	case "image/heic":
+		return ".heic"
+	case "image/x-icon", "image/vnd.microsoft.icon":
+		return ".ico"
+	}
+	return ""
+}
+
+// binaryContentNotice is the message web_fetch returns for a non-text response:
+// it names the type and points at the tool that can actually handle it, instead
+// of dumping garbled bytes into the model's context.
+func binaryContentNotice(sourceURL, contentType string) string {
+	shown := strings.TrimSpace(contentType)
+	if shown == "" {
+		shown = "non-text"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "web_fetch: %s returned %s content — web_fetch only handles text, so the bytes are not shown.\n", sourceURL, shown)
+	if ext := imageTypeExtension(contentType); ext != "" {
+		fmt.Fprintf(&b, "To view this image, download it and open it with read_file (which returns images for multimodal viewing):\n")
+		fmt.Fprintf(&b, "  terminal: curl -sL %q -o /tmp/web_fetch_image%s\n  read_file: /tmp/web_fetch_image%s", sourceURL, ext, ext)
+	} else {
+		b.WriteString("If you need its contents, download it with the terminal tool (curl/wget) and use the appropriate tool on the saved file.")
+	}
+	return b.String()
+}
+
+// spillWebFetch writes body to a temp file and returns a preview summary
+// with file path, size, content-type, and head+tail lines.
+func spillWebFetch(body []byte, sourceURL, contentType string, truncated bool) (agent.ToolResult, error) {
+	text := string(body)
+	lines := strings.Split(text, "\n")
+
+	path, err := writeWebFetchSpillFile(sourceURL, body)
+	if err != nil {
+		// Degrade gracefully: return inline on write failure.
+		out := text
+		if truncated {
+			out += "\n\n…[truncated at " + strconv.Itoa(WebFetchMaxBytes) + " bytes]"
+		}
+		return agent.ToolResult{Text: out}, nil
+	}
+
+	headCount := webFetchPreviewHeadLines
+	if headCount > len(lines) {
+		headCount = len(lines)
+	}
+	tailCount := webFetchPreviewTailLines
+	if tailCount > len(lines)-headCount {
+		tailCount = len(lines) - headCount
+	}
+
+	var preview strings.Builder
+	fmt.Fprintf(&preview, "URL: %s\n", sourceURL)
+	fmt.Fprintf(&preview, "Size: %s (%d lines)\n", formatBytes(int64(len(body))), len(lines))
+	if contentType != "" {
+		fmt.Fprintf(&preview, "Content-Type: %s\n", contentType)
+	}
+	fmt.Fprintf(&preview, "Saved to: %s\n", path)
+	if truncated {
+		fmt.Fprintf(&preview, "Note: response truncated at %s (server sent more)\n", formatBytes(int64(WebFetchMaxBytes)))
+	}
+	fmt.Fprintf(&preview, "\n--- first %d lines ---\n", headCount)
+	preview.WriteString(strings.Join(lines[:headCount], "\n"))
+	if tailCount > 0 {
+		fmt.Fprintf(&preview, "\n\n--- last %d lines ---\n", tailCount)
+		preview.WriteString(strings.Join(lines[len(lines)-tailCount:], "\n"))
+	}
+	fmt.Fprintf(&preview, "\n\n[Full content saved to %s — use read_file or grep to inspect.]", path)
+
+	return agent.ToolResult{Text: preview.String()}, nil
+}
+
+// writeWebFetchSpillFile persists body under ~/.octo/tmp and returns the
+// absolute path. The filename is derived from the URL host + a timestamp
+// so concurrent fetches never collide.
+func writeWebFetchSpillFile(sourceURL string, body []byte) (string, error) {
+	dir, err := spillDir()
+	if err != nil {
+		return "", err
+	}
+	sweepOldSpillFiles(dir)
+
+	u, _ := url.Parse(sourceURL)
+	host := "unknown"
+	if u != nil && u.Host != "" {
+		host = sanitizeSpillID(u.Host)
+	}
+	name := fmt.Sprintf("webfetch-%s-%d.log", host, time.Now().UnixNano())
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // webHTTPClient is the shared http.Client used by the network backends of
