@@ -118,7 +118,7 @@ func (m *tuiModel) onConductPlanned(msg conductPlannedMsg) (tea.Model, tea.Cmd) 
 		m.turnRunning = false
 		m.cancelTurn = nil
 		m.println(errorStyle.Render("conduct: " + msg.err.Error()))
-		return m, nil
+		return m, m.flushPrints()
 	}
 	m.println(msg.report)
 
@@ -146,7 +146,11 @@ func (m *tuiModel) onConductPlanned(msg conductPlannedMsg) (tea.Model, tea.Cmd) 
 		}
 		prog.Send(conductRunMsg{id: id})
 	}()
-	return m, nil
+	// Flush the planned-DAG report to scrollback BEFORE the confirm modal
+	// becomes interactive — otherwise View() renders only the modal and the
+	// user is asked to approve a plan they never saw. Every other Update branch
+	// flushes the same way; this async handler must too.
+	return m, m.flushPrints()
 }
 
 // startConductRun drives the conductor loop in the background, streaming
@@ -207,7 +211,7 @@ func (m *tuiModel) onConductDone(msg conductDoneMsg) (tea.Model, tea.Cmd) {
 	if b.Len() > 0 {
 		m.println(b.String())
 	}
-	return m, nil
+	return m, m.flushPrints()
 }
 
 // teaScrollbackWriter adapts an io.Writer (the conductor's progress stream)

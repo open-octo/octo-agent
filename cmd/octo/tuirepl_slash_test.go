@@ -92,7 +92,7 @@ func TestTUI_ConductPlannedErrorReleasesSession(t *testing.T) {
 func TestTUI_ConductPlannedSuccessOpensConfirmModal(t *testing.T) {
 	m := newTestModel()
 	m.turnRunning = true
-	_, _ = m.onConductPlanned(conductPlannedMsg{
+	_, cmd := m.onConductPlanned(conductPlannedMsg{
 		id:     "20260529-120000-abcd1234",
 		report: "Ledger abcd1234 [pending]\nGoal: do the thing",
 	})
@@ -101,6 +101,15 @@ func TestTUI_ConductPlannedSuccessOpensConfirmModal(t *testing.T) {
 	}
 	if !m.turnRunning {
 		t.Error("session stays occupied until the plan is confirmed or cancelled")
+	}
+	// The plan report must be FLUSHED to scrollback before the modal becomes
+	// interactive — otherwise the user is asked to approve a plan they can't
+	// see (View renders only the modal, hiding the still-buffered lines).
+	if cmd == nil {
+		t.Error("onConductPlanned must return a flush Cmd so the report reaches scrollback")
+	}
+	if len(m.printlnBuf) != 0 {
+		t.Errorf("plan report left buffered (%d lines) — it won't show under the modal", len(m.printlnBuf))
 	}
 	// Unblock the bridge goroutine waiting on the modal answer.
 	m.answerModal(UserResponse{Cancelled: true})
