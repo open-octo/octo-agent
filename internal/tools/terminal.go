@@ -17,6 +17,12 @@ import (
 // synchronously before it is automatically promoted to a background process.
 var TerminalTimeout = 30 * time.Second
 
+// BgPollNotice is the model-facing instruction appended to a background-launch
+// tool result. It steers the model away from polling terminal_output and
+// carries no information for the human, so the TUI strips it from result cards
+// (see renderToolCard) rather than printing it to the scrollback.
+const BgPollNotice = "DO NOT poll terminal_output. The system will automatically notify you when this process finishes, carrying its full output. You can continue with other tasks while it runs."
+
 // TerminalTool is an agent.ToolExecutor that runs shell commands through the
 // system shell (`sh -c` on macOS/Linux, PowerShell on Windows; see
 // shellCommand). Stdout and stderr are combined and returned as the tool
@@ -110,7 +116,7 @@ func (t TerminalTool) ExecuteStream(
 		if err != nil {
 			return agent.ToolResult{Text: ""}, err
 		}
-		return agent.ToolResult{Text: fmt.Sprintf("Started background process %s.\n\nDO NOT poll terminal_output. The system will automatically notify you when this process finishes, carrying its full output. You can continue with other tasks while it runs.", id)}, nil
+		return agent.ToolResult{Text: fmt.Sprintf("Started background process %s.\n\n%s", id, BgPollNotice)}, nil
 	}
 
 	// Synchronous path: start as a background process so that if we hit the
@@ -150,7 +156,7 @@ func (t TerminalTool) ExecuteStream(
 			outMu.Unlock()
 			body = strings.ReplaceAll(body, "\t", "    ")
 			body = MaybeSpillOutput(id, body)
-			return agent.ToolResult{Text: fmt.Sprintf("%s\n\n[timeout: command exceeded %s and continues as background process %s]\n\nDO NOT poll terminal_output. The system will automatically notify you when this process finishes, carrying its full output. You can continue with other tasks while it runs.", body, TerminalTimeout, id)}, nil
+			return agent.ToolResult{Text: fmt.Sprintf("%s\n\n[timeout: command exceeded %s and continues as background process %s]\n\n%s", body, TerminalTimeout, id, BgPollNotice)}, nil
 		case <-ctx.Done():
 			// User cancelled (Esc / Ctrl-C): kill the background process.
 			t.manager().Kill(id)
