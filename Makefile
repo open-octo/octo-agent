@@ -120,7 +120,7 @@ $(RG_EMBED_BIN):
 		if [ "$${GOOS}" = "windows" ]; then \
 			curl -sL "$$url" -o /tmp/rg-embed.zip; \
 			unzip -q -o /tmp/rg-embed.zip -d /tmp/rg-embed; \
-			cp /tmp/rg-embed/ripgrep-$${RG_VERSION}-*/rg.exe $(RG_EMBED_BIN).exe; \
+			cp /tmp/rg-embed/ripgrep-$${RG_VERSION}-*/rg.exe $(RG_EMBED_BIN); \
 			rm -rf /tmp/rg-embed.zip /tmp/rg-embed; \
 		else \
 			curl -sL "$$url" | tar -xzf - -C /tmp; \

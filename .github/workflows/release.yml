@@ -31,6 +31,8 @@ jobs:
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: '~> v2'
-          args: release --clean
+          # -p 1 serializes builds: the per-target rg-embed hook writes a single
+          # shared binaries/rg file, so parallel targets would clobber it.
+          args: release --clean -p 1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

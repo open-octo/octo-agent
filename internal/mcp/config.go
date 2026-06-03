@@ -27,6 +27,15 @@ import (
 //
 // A server entry is classified as stdio if Command is non-empty, HTTP if
 // URL is non-empty. Both set is an error.
+//
+// Windows note: npm-based stdio servers launch through a batch shim (npx.cmd,
+// not a bare npx). Go's exec resolves the .cmd via PATHEXT, but if a server
+// fails to start, wrap the launch in cmd /c — the reliable form on Windows:
+//
+//	"filesystem": {
+//	  "command": "cmd",
+//	  "args":    ["/c", "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\path"]
+//	}
 type Config struct {
 	Servers map[string]ServerEntry `json:"mcpServers"`
 }
