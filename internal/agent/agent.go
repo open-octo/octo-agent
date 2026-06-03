@@ -485,12 +485,25 @@ func (a *Agent) runLoop(
 		// Drain inbox messages that arrived since the last iteration.
 		// Done before the LLM call so the model sees mid-turn user input
 		// as a first-class message boundary, not folded into tool output.
-		if steerMsgs := a.Inbox.Drain(); len(steerMsgs) > 0 {
-			for _, m := range steerMsgs {
-				a.History.Append(NewUserMessage(m))
+		if steerItems := a.Inbox.Drain(); len(steerItems) > 0 {
+			for _, it := range steerItems {
+				if len(it.Blocks) > 0 {
+					blocks := make([]ContentBlock, 0, 1+len(it.Blocks))
+					if it.Text != "" {
+						blocks = append(blocks, NewTextBlock(it.Text))
+					}
+					blocks = append(blocks, it.Blocks...)
+					a.History.Append(Message{Role: RoleUser, Blocks: blocks})
+				} else {
+					a.History.Append(NewUserMessage(it.Text))
+				}
 			}
 			if handler != nil {
-				handler(AgentEvent{Kind: EventSteerInjected, Messages: steerMsgs})
+				msgs := make([]string, len(steerItems))
+				for i, it := range steerItems {
+					msgs[i] = it.Text
+				}
+				handler(AgentEvent{Kind: EventSteerInjected, Messages: msgs})
 			}
 		}
 

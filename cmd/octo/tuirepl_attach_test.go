@@ -46,10 +46,9 @@ func TestTUI_EscDiscardsAttachments(t *testing.T) {
 	}
 }
 
-// TestTUI_MidTurnKeepsAttachments verifies that submitting while a turn runs
-// keeps the attachment pending (it can't ride a text-only steer) and still
-// enqueues the steer text.
-func TestTUI_MidTurnKeepsAttachments(t *testing.T) {
+// TestTUI_MidTurnSendsAttachments verifies that submitting while a turn runs
+// folds pending attachments into the steer message (they ride via Inbox).
+func TestTUI_MidTurnSendsAttachments(t *testing.T) {
 	m := newTestModel()
 	m.turnRunning = true
 	m.pendingAttachments = []pendingAttachment{fakeAttachment()}
@@ -57,10 +56,20 @@ func TestTUI_MidTurnKeepsAttachments(t *testing.T) {
 
 	_, _ = m.submit()
 
-	if len(m.pendingAttachments) != 1 {
-		t.Errorf("attachment should stay pending mid-turn, got %d", len(m.pendingAttachments))
+	if len(m.pendingAttachments) != 0 {
+		t.Errorf("attachment should be consumed on mid-turn submit, still have %d", len(m.pendingAttachments))
 	}
 	if !m.a.Inbox.HasPending() {
-		t.Error("steer text should still be enqueued mid-turn")
+		t.Fatal("steer text should still be enqueued mid-turn")
+	}
+	items := m.a.Inbox.Drain()
+	if len(items) != 1 {
+		t.Fatalf("inbox len = %d, want 1", len(items))
+	}
+	if items[0].Text != "also look here" {
+		t.Errorf("inbox text = %q, want 'also look here'", items[0].Text)
+	}
+	if len(items[0].Blocks) != 1 {
+		t.Errorf("inbox blocks = %d, want 1 (the image)", len(items[0].Blocks))
 	}
 }

@@ -61,7 +61,7 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 	// This is the idle counterpart to the in-turn drain that RunStream does at
 	// the start of each loop iteration.
 	if pending := a.Inbox.Drain(); len(pending) > 0 {
-		turnInput = strings.Join(pending, "\n\n") + "\n\n" + turnInput
+		turnInput = strings.Join(agent.Texts(pending), "\n\n") + "\n\n" + turnInput
 	}
 
 	// Pre-turn hook: feed the raw user input to an external retrieval layer;

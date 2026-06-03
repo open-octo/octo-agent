@@ -415,15 +415,19 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 		return m, m.startTurnEcho(text, echo)
 	}
 
-	// Mid-turn: image attachments can't ride a text-only steer, so keep them
-	// pending for the next new turn. The chip above the input box already shows
-	// the attachment state, no extra echo needed.
-	// Mid-turn input goes to the inbox. It will be drained into history at
-	// the start of the next loop iteration, before the LLM call, so the
-	// model sees it as a first-class user message.
-	if text != "" {
+	// Mid-turn: enqueue the steer text, folding in any pending image
+	// attachments so they ride this message rather than being stranded.
+	if text != "" || len(m.pendingAttachments) > 0 {
 		m.pendingSteer = append(m.pendingSteer, text)
-		m.a.Inbox.Enqueue(text)
+		var blocks []agent.ContentBlock
+		if len(m.pendingAttachments) > 0 {
+			blocks = make([]agent.ContentBlock, 0, len(m.pendingAttachments))
+			for _, a := range m.pendingAttachments {
+				blocks = append(blocks, a.block)
+			}
+			m.pendingAttachments = nil
+		}
+		m.a.Inbox.EnqueueWithBlocks(text, blocks)
 	}
 	return m, nil
 }

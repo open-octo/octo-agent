@@ -52,9 +52,9 @@ func TestTUI_RunningEnterEnqueues(t *testing.T) {
 	if !m.a.Inbox.HasPending() {
 		t.Fatal("Enter while running should enqueue to inbox")
 	}
-	msgs := m.a.Inbox.Drain()
-	if len(msgs) != 1 || msgs[0] != "also handle errors" {
-		t.Errorf("inbox = %v", msgs)
+	items := m.a.Inbox.Drain()
+	if len(items) != 1 || items[0].Text != "also handle errors" {
+		t.Errorf("inbox = %v", items)
 	}
 	if len(m.queue) != 0 {
 		t.Errorf("inbox must not enqueue to queue, queue = %+v", m.queue)

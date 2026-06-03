@@ -31,7 +31,7 @@ func TestSteerRecall_UpRetractsLastPending(t *testing.T) {
 	if len(m.pendingSteer) != 1 || m.pendingSteer[0] != "first steer" {
 		t.Errorf("pendingSteer = %v, want [first steer]", m.pendingSteer)
 	}
-	if drained := m.a.Inbox.Drain(); len(drained) != 1 || drained[0] != "first steer" {
+	if drained := m.a.Inbox.Drain(); len(drained) != 1 || drained[0].Text != "first steer" {
 		t.Errorf("inbox after retract = %v, want [first steer]", drained)
 	}
 }

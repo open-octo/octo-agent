@@ -27,17 +27,49 @@ func TestInbox_EnqueueDrain(t *testing.T) {
 		t.Fatal("expected pending messages after two enqueues")
 	}
 
-	msgs := ib.Drain()
-	if len(msgs) != 2 {
-		t.Fatalf("Drain len = %d, want 2", len(msgs))
+	items := ib.Drain()
+	if len(items) != 2 {
+		t.Fatalf("Drain len = %d, want 2", len(items))
 	}
-	if msgs[0] != "first" || msgs[1] != "second" {
-		t.Errorf("Drain = %v, want [first second]", msgs)
+	if items[0].Text != "first" || items[1].Text != "second" {
+		t.Errorf("Drain = %v, want [first second]", items)
 	}
 
 	// Drain must clear.
 	if ib.HasPending() || ib.Drain() != nil {
 		t.Error("Drain did not clear the inbox")
+	}
+}
+
+func TestInbox_EnqueueWithBlocks(t *testing.T) {
+	var ib Inbox
+	img := NewImageBlock("image/png", []byte{0x89, 'P', 'N', 'G'})
+	ib.EnqueueWithBlocks("look at this", []ContentBlock{img})
+	ib.Enqueue("plain text")
+
+	items := ib.Drain()
+	if len(items) != 2 {
+		t.Fatalf("Drain len = %d, want 2", len(items))
+	}
+	if items[0].Text != "look at this" || len(items[0].Blocks) != 1 {
+		t.Errorf("item[0] = %+v, want text + 1 block", items[0])
+	}
+	if items[1].Text != "plain text" || len(items[1].Blocks) != 0 {
+		t.Errorf("item[1] = %+v, want text + 0 blocks", items[1])
+	}
+}
+
+func TestInbox_EnqueueWithBlocks_ImageOnly(t *testing.T) {
+	var ib Inbox
+	img := NewImageBlock("image/png", []byte{1, 2, 3})
+	ib.EnqueueWithBlocks("", []ContentBlock{img})
+
+	items := ib.Drain()
+	if len(items) != 1 {
+		t.Fatalf("Drain len = %d, want 1", len(items))
+	}
+	if items[0].Text != "" || len(items[0].Blocks) != 1 {
+		t.Errorf("item[0] = %+v, want empty text + 1 block", items[0])
 	}
 }
 
@@ -51,8 +83,9 @@ func TestInbox_Remove(t *testing.T) {
 	if !ib.Remove("a") {
 		t.Fatal("Remove(a) = false, want true")
 	}
-	if got := ib.Drain(); len(got) != 2 || got[0] != "a" || got[1] != "b" {
-		t.Errorf("after Remove(a) drain = %v, want [a b]", got)
+	items := ib.Drain()
+	if len(items) != 2 || items[0].Text != "a" || items[1].Text != "b" {
+		t.Errorf("after Remove(a) drain = %v, want [a b]", items)
 	}
 }
 

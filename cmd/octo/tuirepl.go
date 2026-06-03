@@ -496,8 +496,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// turn so the model sees the completion immediately — matching the plain
 		// REPL's idleInboxWait behaviour.
 		if !m.turnRunning && len(m.queue) == 0 {
-			if msgs := m.a.Inbox.Drain(); len(msgs) > 0 {
-				s := strings.Join(msgs, "\n\n")
+			if items := m.a.Inbox.Drain(); len(items) > 0 {
+				s := strings.Join(agent.Texts(items), "\n\n")
 				return m, tea.Sequence(tea.Println(notice), m.startTurnEcho(s, ""))
 			}
 		}
@@ -529,8 +529,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Idle auto-turn: same logic as bgExitMsg — drain inbox and trigger a
 		// turn so the model sees the notification immediately.
 		if !m.turnRunning && len(m.queue) == 0 {
-			if msgs := m.a.Inbox.Drain(); len(msgs) > 0 {
-				s := strings.Join(msgs, "\n\n")
+			if items := m.a.Inbox.Drain(); len(items) > 0 {
+				s := strings.Join(agent.Texts(items), "\n\n")
 				return m, m.startTurnEcho(s, "")
 			}
 		}
@@ -561,8 +561,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Eagerly drain inbox so a pending message (or background-process
 			// notice that raced in via Inbox) starts immediately rather than
 			// waiting for turnFinishedMsg.
-			if msgs := m.a.Inbox.Drain(); len(msgs) > 0 {
-				s := strings.Join(msgs, "\n\n")
+			if items := m.a.Inbox.Drain(); len(items) > 0 {
+				s := strings.Join(agent.Texts(items), "\n\n")
 				for _, line := range strings.Split(s, "\n\n") {
 					if !strings.HasPrefix(line, "<system-reminder>") {
 						m.println(userEchoStyle.Render("> ") + line)
@@ -917,8 +917,8 @@ func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
 
 	// Drain any inbox messages that weren't consumed during the turn and
 	// run them as the next turn, ahead of explicitly-queued items.
-	if msgs := m.a.Inbox.Drain(); len(msgs) > 0 {
-		s := strings.Join(msgs, "\n\n")
+	if items := m.a.Inbox.Drain(); len(items) > 0 {
+		s := strings.Join(agent.Texts(items), "\n\n")
 		for _, line := range strings.Split(s, "\n\n") {
 			if !strings.HasPrefix(line, "<system-reminder>") {
 				m.println(userEchoStyle.Render("> ") + line)
