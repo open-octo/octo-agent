@@ -271,6 +271,86 @@ func TestWebFetch_MediumResponseInline(t *testing.T) {
 	}
 }
 
+func TestMarkdownOutline(t *testing.T) {
+	src := []string{
+		"# Title",
+		"intro text",
+		"## Section A",
+		"body",
+		"### Sub A.1",
+		"```",
+		"## NotAHeading (inside fence)",
+		"```",
+		"## Section B",
+		"#nospace is not a heading",
+		"####### too many hashes",
+	}
+	got := markdownOutline(src, 50)
+	for _, want := range []string{"Title", "Section A", "Sub A.1", "Section B"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("outline missing %q; got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "NotAHeading") {
+		t.Errorf("headings inside code fences must be ignored; got:\n%s", got)
+	}
+	if strings.Contains(got, "nospace") || strings.Contains(got, "too many hashes") {
+		t.Errorf("non-ATX lines must not count as headings; got:\n%s", got)
+	}
+	// Indentation reflects level: "## Section A" sits one indent below "# Title".
+	if !strings.Contains(got, "\n  Section A\n") {
+		t.Errorf("level-2 heading should be indented two spaces; got:\n%s", got)
+	}
+
+	// No headings (e.g. raw HTML / plain text) → empty outline.
+	if out := markdownOutline([]string{"<html>", "plain text", "more"}, 50); out != "" {
+		t.Errorf("no-heading input should yield empty outline, got %q", out)
+	}
+
+	// Cap respected with a "+N more" tail.
+	many := make([]string, 0, 10)
+	for i := 0; i < 10; i++ {
+		many = append(many, "# H")
+	}
+	if out := markdownOutline(many, 3); !strings.Contains(out, "+7 more") {
+		t.Errorf("expected '+7 more' when capped at 3 of 10; got:\n%s", out)
+	}
+}
+
+// A spilled markdown page surfaces a heading outline in its preview.
+func TestWebFetch_SpillIncludesOutline(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("# Main Title\n")
+	for i := 0; i < 3000; i++ { // push well past the 64 KB inline cap
+		sb.WriteString("filler line of body content\n")
+		if i == 1000 {
+			sb.WriteString("## Halfway Section\n")
+		}
+	}
+	body := sb.String()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/markdown")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = srv.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	out, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
+		"url": "https://example.com/doc",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, want := range []string{"outline (headings)", "Main Title", "Halfway Section", "Saved to:"} {
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("spilled preview missing %q; got:\n%s", want, out.Text)
+		}
+	}
+}
+
 func TestWebFetch_LargeResponseSpilled(t *testing.T) {
 	// A body larger than WebFetchInlineBytes should be spilled.
 	// Each line is short so we have many lines (line-based preview is useful).
@@ -299,7 +379,7 @@ func TestWebFetch_LargeResponseSpilled(t *testing.T) {
 	if !strings.Contains(out.Text, "Content-Type:") {
 		t.Errorf("expected content-type in preview, got: %q", out.Text)
 	}
-	if !strings.Contains(out.Text, "first 30 lines") {
+	if !strings.Contains(out.Text, "first 40 lines") {
 		t.Errorf("expected head preview, got: %q", out.Text)
 	}
 	// Make sure the file actually exists and contains the full body.

@@ -35,14 +35,17 @@ const WebFetchMaxBytes = 5 * 1024 * 1024 // 5 MB
 
 // WebFetchInlineBytes is the size up to which a fetched body is returned
 // inline. Larger responses (up to WebFetchMaxBytes) are written to a temp file
-// and summarised with a head+tail preview, so a big page never floods the
+// and summarised with an outline + head preview, so a big page never floods the
 // model's context while its full content stays one read_file away.
 const WebFetchInlineBytes = 64 * 1024
 
-// WebFetchPreviewLines bounds the head+tail preview when output is spilled.
+// Preview bounds when a spilled response is summarised: a markdown-heading
+// outline (so the page structure is visible for targeted read_file/grep) plus
+// the opening lines. The tail is omitted — for a web page it's usually footer
+// noise, while the substance sits in the body the outline maps.
 const (
-	webFetchPreviewHeadLines = 30
-	webFetchPreviewTailLines = 10
+	webFetchPreviewHeadLines   = 40
+	webFetchOutlineMaxHeadings = 50
 )
 
 // WebFetchTool fetches a URL and returns its body as Markdown. It prefers
@@ -326,8 +329,9 @@ func binaryContentNotice(sourceURL, contentType string) string {
 	return b.String()
 }
 
-// spillWebFetch writes body to a temp file and returns a preview summary
-// with file path, size, content-type, and head+tail lines.
+// spillWebFetch writes body to a temp file and returns a preview summary with
+// file path, size, content-type, a markdown-heading outline, and the opening
+// lines.
 func spillWebFetch(body []byte, sourceURL, contentType string, truncated bool) (agent.ToolResult, error) {
 	text := string(body)
 	lines := strings.Split(text, "\n")
@@ -346,10 +350,6 @@ func spillWebFetch(body []byte, sourceURL, contentType string, truncated bool) (
 	if headCount > len(lines) {
 		headCount = len(lines)
 	}
-	tailCount := webFetchPreviewTailLines
-	if tailCount > len(lines)-headCount {
-		tailCount = len(lines) - headCount
-	}
 
 	var preview strings.Builder
 	fmt.Fprintf(&preview, "URL: %s\n", sourceURL)
@@ -361,15 +361,60 @@ func spillWebFetch(body []byte, sourceURL, contentType string, truncated bool) (
 	if truncated {
 		fmt.Fprintf(&preview, "Note: response truncated at %s (server sent more)\n", formatBytes(int64(WebFetchMaxBytes)))
 	}
+	if outline := markdownOutline(lines, webFetchOutlineMaxHeadings); outline != "" {
+		preview.WriteString("\n--- outline (headings) ---\n")
+		preview.WriteString(outline)
+	}
 	fmt.Fprintf(&preview, "\n--- first %d lines ---\n", headCount)
 	preview.WriteString(strings.Join(lines[:headCount], "\n"))
-	if tailCount > 0 {
-		fmt.Fprintf(&preview, "\n\n--- last %d lines ---\n", tailCount)
-		preview.WriteString(strings.Join(lines[len(lines)-tailCount:], "\n"))
-	}
 	fmt.Fprintf(&preview, "\n\n[Full content saved to %s — use read_file or grep to inspect.]", path)
 
 	return agent.ToolResult{Text: preview.String()}, nil
+}
+
+// markdownOutline extracts ATX markdown headings (#, ##, … up to ######) and
+// renders them as an indented outline, so a spilled page's structure is visible
+// at a glance for targeted read_file/grep. Headings inside fenced code blocks
+// are ignored. Returns "" when there are no headings (raw HTML, plain text,
+// JSON); at most maxHeadings are listed, with a trailing "+N more" count.
+func markdownOutline(lines []string, maxHeadings int) string {
+	var b strings.Builder
+	shown, total := 0, 0
+	inFence := false
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		level := 0
+		for level < len(t) && t[level] == '#' {
+			level++
+		}
+		// An ATX heading is 1–6 '#' followed by a space and some text.
+		if level < 1 || level > 6 || level >= len(t) || t[level] != ' ' {
+			continue
+		}
+		title := strings.TrimSpace(t[level+1:])
+		if title == "" {
+			continue
+		}
+		total++
+		if shown < maxHeadings {
+			fmt.Fprintf(&b, "%s%s\n", strings.Repeat("  ", level-1), title)
+			shown++
+		}
+	}
+	if total == 0 {
+		return ""
+	}
+	if total > shown {
+		fmt.Fprintf(&b, "… +%d more heading(s)\n", total-shown)
+	}
+	return b.String()
 }
 
 // writeWebFetchSpillFile persists body under ~/.octo/tmp and returns the
