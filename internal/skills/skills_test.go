@@ -27,6 +27,35 @@ func useUserRoot(t *testing.T, dir string) {
 	t.Cleanup(func() { userSkillsRoot = orig })
 }
 
+// Reload re-scans the same roots in place, so a skill added (or edited) after
+// Discover becomes available without rebuilding the registry — the mechanism
+// that lets the `skill` tool load a skill dropped in mid-session.
+func TestReload_PicksUpLateSkill(t *testing.T) {
+	useDefaultRoot(t, t.TempDir()) // isolate from real ~/.octo/skills-default
+	userRoot := t.TempDir()
+	useUserRoot(t, userRoot)
+
+	r := Discover("")
+	if _, ok := r.Get("latecomer"); ok {
+		t.Fatal("latecomer should not exist before it is written")
+	}
+
+	writeSkill(t, userRoot, "latecomer", "---\nname: latecomer\ndescription: added after discover\n---\nbody here")
+
+	// Still absent until a reload — the registry is a frozen snapshot.
+	if _, ok := r.Get("latecomer"); ok {
+		t.Fatal("Get should not see the new skill before Reload")
+	}
+	r.Reload()
+	s, ok := r.Get("latecomer")
+	if !ok {
+		t.Fatal("Reload should pick up the late-added skill")
+	}
+	if s.Description != "added after discover" {
+		t.Errorf("Description = %q", s.Description)
+	}
+}
+
 func TestDiscover_Empty(t *testing.T) {
 	useUserRoot(t, filepath.Join(t.TempDir(), "nonexistent"))
 	r := Discover(filepath.Join(t.TempDir(), "alsogone"))
