@@ -26,15 +26,18 @@ const JinaReaderHost = "https://r.jina.ai/"
 // out to a local httptest server; production reads the const default.
 var jinaReaderHostForTest = JinaReaderHost
 
-// WebFetchMaxBytes caps the response size returned to the LLM. Past this,
-// the body is truncated with a clear marker so the LLM can ask for more
-// targeted slices via grep / a follow-up fetch.
-const WebFetchMaxBytes = 200_000
+// WebFetchMaxBytes is the absolute ceiling on a single fetched body, whether
+// returned inline or spilled to a temp file. It bounds memory and disk for a
+// pathological response; past it the body is truncated with a clear marker.
+// Set well above any real page so the spilled file holds the full content in
+// practice.
+const WebFetchMaxBytes = 5 * 1024 * 1024 // 5 MB
 
-// WebFetchPreviewBytes is the size past which web_fetch writes the full
-// response to a temp file and returns only a preview summary. Below this
-// the body is returned inline (same behaviour as before).
-const WebFetchPreviewBytes = 8 * 1024
+// WebFetchInlineBytes is the size up to which a fetched body is returned
+// inline. Larger responses (up to WebFetchMaxBytes) are written to a temp file
+// and summarised with a head+tail preview, so a big page never floods the
+// model's context while its full content stays one read_file away.
+const WebFetchInlineBytes = 64 * 1024
 
 // WebFetchPreviewLines bounds the head+tail preview when output is spilled.
 const (
@@ -53,7 +56,7 @@ func (WebFetchTool) Definition() agent.ToolDefinition {
 		Description: "Fetch a URL and return its content. Prefers the Jina Reader proxy " +
 			"for JS-rendered pages and clean HTML-to-Markdown conversion; falls back to " +
 			"a direct HTTP fetch when the proxy is unavailable. " +
-			"Responses larger than ~8 KB are saved to a temp file; the tool returns a " +
+			"Responses larger than ~64 KB are saved to a temp file; the tool returns a " +
 			"preview summary (size, content-type, first/last lines) plus the file path. " +
 			"Use read_file or grep on that path to inspect the full content. " +
 			"Returns text only — for a binary/image URL it returns a short notice (download " +
@@ -213,9 +216,9 @@ func fetchDirect(ctx context.Context, rawURL string) (agent.ToolResult, error) {
 	return readBody(resp.Body, rawURL, resp.Header.Get("Content-Type"))
 }
 
-// readBody reads the full body, caps it at WebFetchMaxBytes, then either
-// returns it inline (if small) or spills it to a temp file and returns a
-// preview summary.
+// readBody reads the body (capped at WebFetchMaxBytes), then either returns it
+// inline (≤ WebFetchInlineBytes) or spills the full content to a temp file and
+// returns a head+tail preview summary.
 func readBody(r io.Reader, sourceURL, contentType string) (agent.ToolResult, error) {
 	// Content-type guard: web_fetch only returns text. A binary response
 	// (image, PDF, audio/video, archive, …) would otherwise be stringified into
@@ -235,16 +238,13 @@ func readBody(r io.Reader, sourceURL, contentType string) (agent.ToolResult, err
 		truncated = true
 	}
 
-	// Small enough — return inline (preserves old behaviour for tiny pages).
-	if len(body) <= WebFetchPreviewBytes {
-		out := string(body)
-		if truncated {
-			out += "\n\n…[truncated at " + strconv.Itoa(WebFetchMaxBytes) + " bytes]"
-		}
-		return agent.ToolResult{Text: out}, nil
+	// Within the inline budget — return it directly. An inline body is always
+	// well under WebFetchMaxBytes, so it is never truncated here.
+	if len(body) <= WebFetchInlineBytes {
+		return agent.ToolResult{Text: string(body)}, nil
 	}
 
-	// Large — spill to temp file and return preview summary.
+	// Larger — spill the full body to a temp file and return a preview summary.
 	return spillWebFetch(body, sourceURL, contentType, truncated)
 }
 
