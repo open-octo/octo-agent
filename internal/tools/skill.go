@@ -58,6 +58,15 @@ func (SkillTool) Execute(_ context.Context, _ string, input map[string]any) (age
 	}
 	s, ok := activeSkills.Get(name)
 	if !ok {
+		// Miss: the skill may have been added or renamed after session start.
+		// The system-prompt manifest is frozen (for prompt-cache stability), but
+		// the tool re-scans disk so a freshly-dropped skill is still loadable
+		// without restarting the session. The fast path above means this disk
+		// scan only runs on a miss, not on every load.
+		activeSkills.Reload()
+		s, ok = activeSkills.Get(name)
+	}
+	if !ok {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("skill: unknown skill %q", name)
 	}
 	// RenderSkill prefixes the skill's directory so the model can read any
