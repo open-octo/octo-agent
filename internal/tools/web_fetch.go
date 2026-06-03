@@ -26,20 +26,26 @@ const JinaReaderHost = "https://r.jina.ai/"
 // out to a local httptest server; production reads the const default.
 var jinaReaderHostForTest = JinaReaderHost
 
-// WebFetchMaxBytes caps the response size returned to the LLM. Past this,
-// the body is truncated with a clear marker so the LLM can ask for more
-// targeted slices via grep / a follow-up fetch.
-const WebFetchMaxBytes = 200_000
+// WebFetchMaxBytes is the absolute ceiling on a single fetched body, whether
+// returned inline or spilled to a temp file. It bounds memory and disk for a
+// pathological response; past it the body is truncated with a clear marker.
+// Set well above any real page so the spilled file holds the full content in
+// practice.
+const WebFetchMaxBytes = 5 * 1024 * 1024 // 5 MB
 
-// WebFetchPreviewBytes is the size past which web_fetch writes the full
-// response to a temp file and returns only a preview summary. Below this
-// the body is returned inline (same behaviour as before).
-const WebFetchPreviewBytes = 8 * 1024
+// WebFetchInlineBytes is the size up to which a fetched body is returned
+// inline. Larger responses (up to WebFetchMaxBytes) are written to a temp file
+// and summarised with an outline + head preview, so a big page never floods the
+// model's context while its full content stays one read_file away.
+const WebFetchInlineBytes = 64 * 1024
 
-// WebFetchPreviewLines bounds the head+tail preview when output is spilled.
+// Preview bounds when a spilled response is summarised: a markdown-heading
+// outline (so the page structure is visible for targeted read_file/grep) plus
+// the opening lines. The tail is omitted — for a web page it's usually footer
+// noise, while the substance sits in the body the outline maps.
 const (
-	webFetchPreviewHeadLines = 30
-	webFetchPreviewTailLines = 10
+	webFetchPreviewHeadLines   = 40
+	webFetchOutlineMaxHeadings = 50
 )
 
 // WebFetchTool fetches a URL and returns its body as Markdown. It prefers
@@ -53,7 +59,7 @@ func (WebFetchTool) Definition() agent.ToolDefinition {
 		Description: "Fetch a URL and return its content. Prefers the Jina Reader proxy " +
 			"for JS-rendered pages and clean HTML-to-Markdown conversion; falls back to " +
 			"a direct HTTP fetch when the proxy is unavailable. " +
-			"Responses larger than ~8 KB are saved to a temp file; the tool returns a " +
+			"Responses larger than ~64 KB are saved to a temp file; the tool returns a " +
 			"preview summary (size, content-type, first/last lines) plus the file path. " +
 			"Use read_file or grep on that path to inspect the full content. " +
 			"Returns text only — for a binary/image URL it returns a short notice (download " +
@@ -213,9 +219,9 @@ func fetchDirect(ctx context.Context, rawURL string) (agent.ToolResult, error) {
 	return readBody(resp.Body, rawURL, resp.Header.Get("Content-Type"))
 }
 
-// readBody reads the full body, caps it at WebFetchMaxBytes, then either
-// returns it inline (if small) or spills it to a temp file and returns a
-// preview summary.
+// readBody reads the body (capped at WebFetchMaxBytes), then either returns it
+// inline (≤ WebFetchInlineBytes) or spills the full content to a temp file and
+// returns a head+tail preview summary.
 func readBody(r io.Reader, sourceURL, contentType string) (agent.ToolResult, error) {
 	// Content-type guard: web_fetch only returns text. A binary response
 	// (image, PDF, audio/video, archive, …) would otherwise be stringified into
@@ -235,16 +241,13 @@ func readBody(r io.Reader, sourceURL, contentType string) (agent.ToolResult, err
 		truncated = true
 	}
 
-	// Small enough — return inline (preserves old behaviour for tiny pages).
-	if len(body) <= WebFetchPreviewBytes {
-		out := string(body)
-		if truncated {
-			out += "\n\n…[truncated at " + strconv.Itoa(WebFetchMaxBytes) + " bytes]"
-		}
-		return agent.ToolResult{Text: out}, nil
+	// Within the inline budget — return it directly. An inline body is always
+	// well under WebFetchMaxBytes, so it is never truncated here.
+	if len(body) <= WebFetchInlineBytes {
+		return agent.ToolResult{Text: string(body)}, nil
 	}
 
-	// Large — spill to temp file and return preview summary.
+	// Larger — spill the full body to a temp file and return a preview summary.
 	return spillWebFetch(body, sourceURL, contentType, truncated)
 }
 
@@ -326,8 +329,9 @@ func binaryContentNotice(sourceURL, contentType string) string {
 	return b.String()
 }
 
-// spillWebFetch writes body to a temp file and returns a preview summary
-// with file path, size, content-type, and head+tail lines.
+// spillWebFetch writes body to a temp file and returns a preview summary with
+// file path, size, content-type, a markdown-heading outline, and the opening
+// lines.
 func spillWebFetch(body []byte, sourceURL, contentType string, truncated bool) (agent.ToolResult, error) {
 	text := string(body)
 	lines := strings.Split(text, "\n")
@@ -346,10 +350,6 @@ func spillWebFetch(body []byte, sourceURL, contentType string, truncated bool) (
 	if headCount > len(lines) {
 		headCount = len(lines)
 	}
-	tailCount := webFetchPreviewTailLines
-	if tailCount > len(lines)-headCount {
-		tailCount = len(lines) - headCount
-	}
 
 	var preview strings.Builder
 	fmt.Fprintf(&preview, "URL: %s\n", sourceURL)
@@ -361,15 +361,60 @@ func spillWebFetch(body []byte, sourceURL, contentType string, truncated bool) (
 	if truncated {
 		fmt.Fprintf(&preview, "Note: response truncated at %s (server sent more)\n", formatBytes(int64(WebFetchMaxBytes)))
 	}
+	if outline := markdownOutline(lines, webFetchOutlineMaxHeadings); outline != "" {
+		preview.WriteString("\n--- outline (headings) ---\n")
+		preview.WriteString(outline)
+	}
 	fmt.Fprintf(&preview, "\n--- first %d lines ---\n", headCount)
 	preview.WriteString(strings.Join(lines[:headCount], "\n"))
-	if tailCount > 0 {
-		fmt.Fprintf(&preview, "\n\n--- last %d lines ---\n", tailCount)
-		preview.WriteString(strings.Join(lines[len(lines)-tailCount:], "\n"))
-	}
 	fmt.Fprintf(&preview, "\n\n[Full content saved to %s — use read_file or grep to inspect.]", path)
 
 	return agent.ToolResult{Text: preview.String()}, nil
+}
+
+// markdownOutline extracts ATX markdown headings (#, ##, … up to ######) and
+// renders them as an indented outline, so a spilled page's structure is visible
+// at a glance for targeted read_file/grep. Headings inside fenced code blocks
+// are ignored. Returns "" when there are no headings (raw HTML, plain text,
+// JSON); at most maxHeadings are listed, with a trailing "+N more" count.
+func markdownOutline(lines []string, maxHeadings int) string {
+	var b strings.Builder
+	shown, total := 0, 0
+	inFence := false
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		level := 0
+		for level < len(t) && t[level] == '#' {
+			level++
+		}
+		// An ATX heading is 1–6 '#' followed by a space and some text.
+		if level < 1 || level > 6 || level >= len(t) || t[level] != ' ' {
+			continue
+		}
+		title := strings.TrimSpace(t[level+1:])
+		if title == "" {
+			continue
+		}
+		total++
+		if shown < maxHeadings {
+			fmt.Fprintf(&b, "%s%s\n", strings.Repeat("  ", level-1), title)
+			shown++
+		}
+	}
+	if total == 0 {
+		return ""
+	}
+	if total > shown {
+		fmt.Fprintf(&b, "… +%d more heading(s)\n", total-shown)
+	}
+	return b.String()
 }
 
 // writeWebFetchSpillFile persists body under ~/.octo/tmp and returns the
