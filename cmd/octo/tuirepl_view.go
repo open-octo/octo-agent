@@ -634,6 +634,9 @@ func (m *tuiModel) openModal(msg askMsg) {
 		st.options = append(st.options, msg.prompt.Options...)
 		st.options = append(st.options, "Other (free text)")
 	}
+	st.cursor = 0
+	st.otherActive = false
+	st.otherInput = ""
 	m.modal = st
 }
 
@@ -659,6 +662,29 @@ func (m *tuiModel) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.answerModal(UserResponse{Allow: true, Always: true})
 		case msg.Type == tea.KeyEsc, keyIs(msg, 'n'):
 			m.answerModal(UserResponse{Allow: false})
+		}
+		return m, nil
+	}
+
+	// Inline free-text input for the "Other" option.
+	if st.otherActive {
+		switch msg.Type {
+		case tea.KeyEsc:
+			m.answerModal(UserResponse{Cancelled: true})
+		case tea.KeyEnter:
+			if trimmed := strings.TrimSpace(st.otherInput); trimmed != "" {
+				m.answerModal(UserResponse{Custom: trimmed})
+			} else {
+				m.answerModal(UserResponse{Cancelled: true})
+			}
+		case tea.KeyBackspace:
+			if len(st.otherInput) > 0 {
+				// Remove the last UTF-8 rune.
+				r := []rune(st.otherInput)
+				st.otherInput = string(r[:len(r)-1])
+			}
+		case tea.KeyRunes:
+			st.otherInput += string(msg.Runes)
 		}
 		return m, nil
 	}
@@ -697,14 +723,18 @@ func (m *tuiModel) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// confirmQuestion maps the modal selection onto a UserResponse. The trailing
-// "Other" slot can't be resolved to free text without a second input step; for
-// now picking it cancels (the model can ask again or pick a default). A future
-// pass can add an inline free-text field.
+// confirmQuestion maps the modal selection onto a UserResponse. Selecting the
+// trailing "Other" slot switches the modal into inline free-text input rather
+// than cancelling.
 func (m *tuiModel) confirmQuestion(st *modalState) {
 	otherIdx := len(st.options) - 1
 
 	if st.prompt.MultiSelect {
+		wantOther := st.selected[otherIdx]
+		if wantOther {
+			st.otherActive = true
+			return
+		}
 		var picks []string
 		for i := range st.options {
 			if i == otherIdx {
@@ -723,7 +753,7 @@ func (m *tuiModel) confirmQuestion(st *modalState) {
 	}
 
 	if st.cursor == otherIdx {
-		m.answerModal(UserResponse{Cancelled: true})
+		st.otherActive = true
 		return
 	}
 	m.answerModal(UserResponse{Choices: []string{st.prompt.Options[st.cursor]}})
@@ -1041,6 +1071,11 @@ func (m *tuiModel) modalView() string {
 			}
 		}
 		b.WriteString(fmt.Sprintf("  %s%s%s\n", cursor, mark, opt))
+	}
+	if st.otherActive {
+		b.WriteString("  Other: " + st.otherInput + "▋" + "\n")
+		b.WriteString(hintStyle.Render("Enter confirm · Esc cancel · Backspace delete"))
+		return tui.Box(b.String())
 	}
 	hint := "↑/↓ move · Enter select · Esc cancel"
 	if st.prompt.MultiSelect {

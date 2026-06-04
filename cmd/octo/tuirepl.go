@@ -406,6 +406,10 @@ type modalState struct {
 	cursor   int
 	options  []string // rendered option labels (questions only)
 	selected map[int]bool
+	// otherActive is true when the user has selected "Other" and is now typing
+	// free text inline inside the modal.
+	otherActive bool
+	otherInput  string
 }
 
 func newTUIModel(cfg replConfig) *tuiModel {
