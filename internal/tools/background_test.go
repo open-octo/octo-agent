@@ -123,6 +123,31 @@ func TestTerminalTool_BackgroundLaunch(t *testing.T) {
 	}
 }
 
+func TestTerminalTool_SyncCommandIsReaped(t *testing.T) {
+	// A synchronous command runs as a hidden background process; once it exits
+	// and its output is returned, the manager must drop it so its retained
+	// buffer doesn't leak for the life of the session.
+	m := NewBackgroundManager()
+	tool := TerminalTool{mgr: m}
+
+	res, err := tool.Execute(context.Background(), "terminal", map[string]any{
+		"command": "echo reaped",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(res.Text, "reaped") {
+		t.Errorf("result = %q, want it to contain the output", res.Text)
+	}
+	// bg_1 was the hidden process — after a clean sync exit it must be gone.
+	if _, _, found, _ := m.Read("bg_1"); found {
+		t.Error("synchronous command's process should have been reaped from the manager")
+	}
+	if got := m.ListRunning(); len(got) != 0 {
+		t.Errorf("ListRunning = %v, want empty after a sync command", got)
+	}
+}
+
 func TestTerminalOutputTool(t *testing.T) {
 	m := NewBackgroundManager()
 	term := TerminalTool{mgr: m}

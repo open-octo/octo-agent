@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,24 @@ import (
 	"testing"
 	"time"
 )
+
+// blockedFetchIP must reject the cloud metadata / link-local range (the
+// high-value SSRF target) while still allowing loopback and private-LAN
+// addresses, since fetching a local dev server is a legitimate use.
+func TestBlockedFetchIP(t *testing.T) {
+	blocked := []string{"169.254.169.254", "169.254.0.1", "fe80::1"}
+	for _, s := range blocked {
+		if !blockedFetchIP(net.ParseIP(s)) {
+			t.Errorf("blockedFetchIP(%s) = false, want true", s)
+		}
+	}
+	allowed := []string{"127.0.0.1", "::1", "10.0.0.5", "192.168.1.20", "8.8.8.8"}
+	for _, s := range allowed {
+		if blockedFetchIP(net.ParseIP(s)) {
+			t.Errorf("blockedFetchIP(%s) = true, want false", s)
+		}
+	}
+}
 
 // A non-text response (e.g. an image) must not be stringified into garbage:
 // readBody returns a clean notice pointing at the right tool, with no raw bytes.

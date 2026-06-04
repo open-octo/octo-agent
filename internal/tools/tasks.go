@@ -227,7 +227,8 @@ func FormatTaskList(items []tasks.Task) string {
 		return "No tasks yet."
 	}
 	var b strings.Builder
-	b.WriteString("Tasks:\n")
+	b.WriteString(taskCountHeader(items))
+	b.WriteByte('\n')
 	for _, t := range items {
 		marker := statusMarker(t.Status)
 		title := t.Subject
@@ -242,6 +243,38 @@ func FormatTaskList(items []tasks.Task) string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// taskCountHeader builds the "Tasks: N in progress, M pending, K completed"
+// summary line, listing only the non-zero buckets (and falling back to a bare
+// "Tasks:" when every task is deleted). Matches the layout documented on
+// FormatTaskList.
+func taskCountHeader(items []tasks.Task) string {
+	var inProgress, pending, completed int
+	for _, t := range items {
+		switch t.Status {
+		case tasks.InProgress:
+			inProgress++
+		case tasks.Pending:
+			pending++
+		case tasks.Completed:
+			completed++
+		}
+	}
+	var parts []string
+	if inProgress > 0 {
+		parts = append(parts, fmt.Sprintf("%d in progress", inProgress))
+	}
+	if pending > 0 {
+		parts = append(parts, fmt.Sprintf("%d pending", pending))
+	}
+	if completed > 0 {
+		parts = append(parts, fmt.Sprintf("%d completed", completed))
+	}
+	if len(parts) == 0 {
+		return "Tasks:"
+	}
+	return "Tasks: " + strings.Join(parts, ", ")
 }
 
 // statusMarker returns the one-rune glyph used in FormatTaskList. Chosen to

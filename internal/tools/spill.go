@@ -27,6 +27,22 @@ const (
 // only catches the leftovers of a crashed session.
 const spillMaxAge = 24 * time.Hour
 
+// spillPrefixes are the filename prefixes used by everything that writes into
+// ~/.octo/tmp: terminal output (`term-`) and web_fetch bodies (`webfetch-`).
+// Both the age-sweep and the shutdown clean must cover every prefix, else a
+// kind whose prefix is missing leaks files forever.
+var spillPrefixes = []string{"term-", "webfetch-"}
+
+// hasSpillPrefix reports whether name is one of our spill files.
+func hasSpillPrefix(name string) bool {
+	for _, p := range spillPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // MaybeSpillOutput returns body unchanged when it is small enough to give the
 // LLM directly. When body exceeds TerminalSpillBytes — and has more lines than
 // the preview would show — it writes the full body to a temp file and returns
@@ -118,7 +134,7 @@ func sweepOldSpillFiles(dir string) {
 	}
 	cutoff := time.Now().Add(-spillMaxAge)
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), "term-") {
+		if e.IsDir() || !hasSpillPrefix(e.Name()) {
 			continue
 		}
 		info, err := e.Info()
@@ -144,7 +160,7 @@ func CleanSpillFiles() {
 	}
 	suffix := fmt.Sprintf("-%d.log", os.Getpid())
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "term-") && strings.HasSuffix(e.Name(), suffix) {
+		if hasSpillPrefix(e.Name()) && strings.HasSuffix(e.Name(), suffix) {
 			_ = os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}

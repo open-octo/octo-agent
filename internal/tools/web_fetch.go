@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
@@ -195,17 +197,7 @@ func fetchDirect(ctx context.Context, rawURL string) (agent.ToolResult, error) {
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("stopped after 10 redirects")
-			}
-			return nil
-		},
-	}
-
-	resp, err := client.Do(req)
+	resp, err := directFetchHTTPClient().Do(req)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, err
 	}
@@ -418,8 +410,9 @@ func markdownOutline(lines []string, maxHeadings int) string {
 }
 
 // writeWebFetchSpillFile persists body under ~/.octo/tmp and returns the
-// absolute path. The filename is derived from the URL host + a timestamp
-// so concurrent fetches never collide.
+// absolute path. The filename is derived from the URL host + a timestamp (so
+// concurrent fetches never collide) and ends with the pid so CleanSpillFiles
+// reclaims it on a clean exit, the same way it does for `term-` files.
 func writeWebFetchSpillFile(sourceURL string, body []byte) (string, error) {
 	dir, err := spillDir()
 	if err != nil {
@@ -432,7 +425,7 @@ func writeWebFetchSpillFile(sourceURL string, body []byte) (string, error) {
 	if u != nil && u.Host != "" {
 		host = sanitizeSpillID(u.Host)
 	}
-	name := fmt.Sprintf("webfetch-%s-%d.log", host, time.Now().UnixNano())
+	name := fmt.Sprintf("webfetch-%s-%d-%d.log", host, time.Now().UnixNano(), os.Getpid())
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		return "", err
@@ -447,15 +440,58 @@ func webHTTPClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
 }
 
-// webFetchHTTPClient is web_fetch's dedicated client. It refuses to follow a
-// cross-host 3xx redirect: web_fetch always targets r.jina.ai, so a redirect
-// to a different host means the proxy is bouncing us somewhere unexpected —
-// a classic SSRF / data-exfil vector. Same-host redirects (path changes) are
-// still followed. web_search keeps the plain webHTTPClient because search
-// backends legitimately redirect across hosts.
+// blockedFetchIP reports whether ip sits in a link-local range — the block that
+// includes the cloud instance-metadata endpoint (IPv4 169.254.169.254 and the
+// IPv6 fe80::/10 equivalents). A prompt-injected URL aimed at metadata is the
+// highest-value SSRF target — it can leak cloud credentials — so web_fetch
+// refuses to dial it. Loopback and private-LAN ranges stay reachable on
+// purpose: fetching your own dev server (http://localhost:3000, a LAN box) is a
+// legitimate, common use of the tool on a developer machine.
+func blockedFetchIP(ip net.IP) bool {
+	return ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+}
+
+// secureFetchTransport builds an http.Transport whose dialer rejects link-local
+// destinations. The check runs in net.Dialer.Control, which fires AFTER DNS
+// resolution with the concrete remote IP — so a hostname that resolves to a
+// blocked address (DNS rebinding) is refused too, and every redirect hop is
+// re-dialed through the same hook. Shared by both web_fetch clients.
+func secureFetchTransport() *http.Transport {
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				host = address
+			}
+			if ip := net.ParseIP(host); ip != nil && blockedFetchIP(ip) {
+				return fmt.Errorf("refusing to connect to link-local/metadata address %s", host)
+			}
+			return nil
+		},
+	}
+	return &http.Transport{
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
+
+// webFetchHTTPClient is the client used for the Jina-proxy path. On top of the
+// shared link-local block it refuses to follow a cross-host 3xx redirect: the
+// proxy always targets r.jina.ai, so a redirect to a different host means it is
+// bouncing us somewhere unexpected — a classic SSRF / data-exfil vector.
+// Same-host redirects (path changes) are still followed. web_search keeps the
+// plain webHTTPClient because search backends legitimately redirect across
+// hosts.
 func webFetchHTTPClient() *http.Client {
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout:   30 * time.Second,
+		Transport: secureFetchTransport(),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) == 0 {
 				return nil
@@ -465,6 +501,24 @@ func webFetchHTTPClient() *http.Client {
 				return fmt.Errorf("refusing cross-host redirect to %q (from %q); "+
 					"re-issue web_fetch against the final URL if that destination is intended",
 					req.URL.Host, prev)
+			}
+			return nil
+		},
+	}
+}
+
+// directFetchHTTPClient is the client for the direct-fetch fallback. Unlike the
+// proxy client it MUST allow cross-host redirects (URL shorteners, www-canonical
+// hops, http→https on another host are all normal for an arbitrary URL), but it
+// shares the link-local block via secureFetchTransport and caps the redirect
+// chain so a redirect loop can't hang the agent.
+func directFetchHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: secureFetchTransport(),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
 			}
 			return nil
 		},

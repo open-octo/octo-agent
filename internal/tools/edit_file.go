@@ -77,18 +77,20 @@ func normalizeQuotes(s string) string {
 	return b.String()
 }
 
-// stripTrailingWhitespace removes trailing whitespace from each line
-// while preserving line endings. Skipped for markdown files where
-// trailing double-space is a hard line break.
+// stripTrailingWhitespace removes trailing spaces/tabs from every line while
+// preserving line endings. SplitAfter keeps the trailing "\n" on each fragment;
+// we peel that newline off before TrimRight and re-attach it, otherwise the
+// "\n" (not in the cutset) shields the spaces in front of it and only the final
+// line would ever be trimmed. Skipped for markdown files where a trailing
+// double-space is a hard line break.
 func stripTrailingWhitespace(s string) string {
 	lines := strings.SplitAfter(s, "\n")
 	for i, line := range lines {
-		// Preserve empty lines and the last fragment
-		if i == len(lines)-1 && !strings.HasSuffix(s, "\n") {
+		if nl := strings.HasSuffix(line, "\n"); nl {
+			lines[i] = strings.TrimRight(line[:len(line)-1], " \t\r") + "\n"
+		} else {
 			lines[i] = strings.TrimRight(line, " \t\r")
-			continue
 		}
-		lines[i] = strings.TrimRight(line, " \t\r")
 	}
 	return strings.Join(lines, "")
 }
@@ -213,6 +215,16 @@ func (EditFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 	newStrClean := newStr
 	if !isMarkdown {
 		newStrClean = stripTrailingWhitespace(newStr)
+	}
+
+	// Refuse to inject a live-credential shape — same guard write_file applies,
+	// so a secret can't slip in through the edit path instead. Only the new text
+	// is scanned (not the whole file): a pre-existing match the model didn't
+	// introduce shouldn't block an unrelated edit elsewhere in the file.
+	if secret := scanForSecrets(newStrClean); secret != "" {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("edit_file: refusing to write new_string that contains a %s. "+
+			"If this is genuinely intended (e.g. a test fixture), remove the live-credential "+
+			"shape or create the file outside the agent.", secret)
 	}
 
 	// Use findActualString for quote-normalized matching.
