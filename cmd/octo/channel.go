@@ -262,18 +262,20 @@ func handleAgentMessage(ctx context.Context, mgr *channel.Manager, ad channel.Ad
 		executor = tools.NewDefaultRegistry()
 		toolDefs = tools.DefaultToolsFor(sess.Agent.Model)
 
-		// Per-message sub-agent manager + task store bound to THIS chat's agent,
-		// stamped into ctx so the sub-agent / task tools dispatch to them rather
-		// than the process-global gating sentinels. Synchronous — a chat message
-		// is request/response with no follow-up channel for an async result — and
-		// each message gets a private store, so concurrent chats stay isolated.
+		// Per-message sub-agent manager bound to THIS chat's agent, stamped into
+		// ctx so the sub-agent tools dispatch to it rather than the process-global
+		// gating sentinel. Synchronous — a chat message is request/response with no
+		// follow-up channel for an async result — and bound to sess.Agent so
+		// concurrent chats stay isolated.
 		spawner := app.NewSpawner(sess.Agent, executor, func() []agent.ToolDefinition {
 			return tools.DefaultToolsFor(sess.Agent.Model)
 		})
 		subMgr := tools.NewSubAgentManager(spawner)
 		subMgr.SetSynchronous(true)
 		ctx = tools.WithSubAgentManager(ctx, subMgr)
-		ctx = tools.WithTaskStore(ctx, tasks.New())
+		// The task store lives on the session, so the task list persists across
+		// messages in this chat (a fresh per-message store would reset it).
+		ctx = tools.WithTaskStore(ctx, sess.Tasks)
 	}
 
 	_, _ = channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, ev.Text)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/tasks"
 )
 
 // BindingMode determines how an inbound message maps to an agent session.
@@ -44,8 +45,13 @@ func sessionKeyFor(mode BindingMode, ev InboundEvent) SessionKey {
 
 // Session holds the agent and its binding state for one conversation.
 type Session struct {
-	Key     SessionKey
-	Agent   *agent.Agent
+	Key   SessionKey
+	Agent *agent.Agent
+	// Tasks is the conversation's task store. It lives as long as the session,
+	// so task_* state persists across messages within one chat (a fresh
+	// per-message store would reset the list every turn). Stamped into the turn
+	// ctx by the IM handler; *tasks.Store satisfies tools.TaskStore.
+	Tasks   *tasks.Store
 	ChatID  string
 	UserID  string
 	BoundAt time.Time
@@ -53,6 +59,20 @@ type Session struct {
 
 // AgentFactory creates a new agent.Agent for a session.
 type AgentFactory func() *agent.Agent
+
+// newSession builds a Session with a fresh agent and per-conversation task
+// store. Centralised so every binding path (explicit /bind, auto-create on
+// first message, GetOrCreateSession) wires sessions identically.
+func (m *Manager) newSession(key SessionKey, ev InboundEvent) *Session {
+	return &Session{
+		Key:     key,
+		Agent:   m.factory(),
+		Tasks:   tasks.New(),
+		ChatID:  ev.ChatID,
+		UserID:  ev.UserID,
+		BoundAt: time.Now(),
+	}
+}
 
 // Manager owns the lifecycle of adapters and their bound sessions.
 type Manager struct {
@@ -200,13 +220,7 @@ func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
 	if _, loaded := m.sessions.Load(key); loaded {
 		m.sessions.Delete(key)
 	}
-	sess := &Session{
-		Key:     key,
-		Agent:   m.factory(),
-		ChatID:  ev.ChatID,
-		UserID:  ev.UserID,
-		BoundAt: time.Now(),
-	}
+	sess := m.newSession(key, ev)
 	m.sessions.Store(key, sess)
 	modeStr := string(m.mode)
 	if modeStr == "" {
@@ -267,13 +281,7 @@ func (m *Manager) handleSessionMessage(ctx context.Context, ev InboundEvent) {
 	val, loaded := m.sessions.Load(key)
 	if !loaded {
 		// Auto-create session on first message.
-		sess := &Session{
-			Key:     key,
-			Agent:   m.factory(),
-			ChatID:  ev.ChatID,
-			UserID:  ev.UserID,
-			BoundAt: time.Now(),
-		}
+		sess := m.newSession(key, ev)
 		val, _ = m.sessions.LoadOrStore(key, sess)
 	}
 	sess := val.(*Session)
@@ -325,13 +333,7 @@ func (m *Manager) GetOrCreateSession(ev InboundEvent) *Session {
 	key := sessionKeyFor(m.mode, ev)
 	val, loaded := m.sessions.Load(key)
 	if !loaded {
-		sess := &Session{
-			Key:     key,
-			Agent:   m.factory(),
-			ChatID:  ev.ChatID,
-			UserID:  ev.UserID,
-			BoundAt: time.Now(),
-		}
+		sess := m.newSession(key, ev)
 		val, _ = m.sessions.LoadOrStore(key, sess)
 	}
 	return val.(*Session)
