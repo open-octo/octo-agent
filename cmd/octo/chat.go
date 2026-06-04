@@ -158,22 +158,10 @@ func resolveShowReasoning(flagSet, flagVal bool, cfg config.Config) bool {
 }
 
 // toolSearchConfigFrom maps the persisted tools.tool_search block onto the
-// tools-package config. Unknown/empty "enabled" defaults to auto; numeric zero
-// values are left for SetToolSearchConfig to backfill with documented defaults.
+// tools-package config. Delegates to app.ToolSearchConfigFrom so every entry
+// point shares one conversion.
 func toolSearchConfigFrom(c config.ToolSearchConfig) tools.ToolSearchConfig {
-	mode := tools.ToolSearchAuto
-	switch c.Enabled {
-	case "on":
-		mode = tools.ToolSearchOn
-	case "off":
-		mode = tools.ToolSearchOff
-	}
-	return tools.ToolSearchConfig{
-		Mode:           mode,
-		ThresholdPct:   c.ThresholdPct,
-		SearchLimit:    c.SearchDefaultLimit,
-		MaxSearchLimit: c.MaxSearchLimit,
-	}
+	return app.ToolSearchConfigFrom(c)
 }
 
 // resolveReasoningEffort picks the reasoning intensity: --reasoning-effort flag
