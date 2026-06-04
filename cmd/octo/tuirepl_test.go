@@ -429,6 +429,106 @@ func TestTUI_QuestionModalMultiSelect(t *testing.T) {
 	}
 }
 
+func TestTUI_QuestionModalOtherFreeText(t *testing.T) {
+	m := newTestModel()
+	resp := make(chan UserResponse, 1)
+	m.openModal(askMsg{prompt: UserPrompt{
+		Kind:     KindQuestion,
+		Question: "pick",
+		Options:  []string{"alpha", "beta"},
+	}, resp: resp})
+
+	// Move to "Other" and confirm to enter free-text mode.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.modal.otherActive {
+		t.Fatal("selecting Other should activate free-text input")
+	}
+
+	// Type "custom", backspace once, then confirm.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c', 'u', 's', 't', 'o', 'm'}})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	got := <-resp
+	if got.Custom != "custo" {
+		t.Errorf("custom = %q, want custo", got.Custom)
+	}
+	if got.Cancelled {
+		t.Error("should not be cancelled after confirming non-empty text")
+	}
+}
+
+func TestTUI_QuestionModalOtherEmptyCancels(t *testing.T) {
+	m := newTestModel()
+	resp := make(chan UserResponse, 1)
+	m.openModal(askMsg{prompt: UserPrompt{
+		Kind:     KindQuestion,
+		Question: "pick",
+		Options:  []string{"alpha"},
+	}, resp: resp})
+
+	// Select Other (Enter), then confirm empty input (Enter) to cancel.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	got := <-resp
+	if !got.Cancelled {
+		t.Errorf("empty Other should cancel, got %+v", got)
+	}
+}
+
+func TestTUI_QuestionModalOtherEscCancels(t *testing.T) {
+	m := newTestModel()
+	resp := make(chan UserResponse, 1)
+	m.openModal(askMsg{prompt: UserPrompt{
+		Kind:     KindQuestion,
+		Question: "pick",
+		Options:  []string{"alpha"},
+	}, resp: resp})
+
+	// Select Other (Enter), type something, then press Esc.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	got := <-resp
+	if !got.Cancelled {
+		t.Errorf("Esc in Other input should cancel, got %+v", got)
+	}
+}
+
+func TestTUI_QuestionModalMultiSelectOther(t *testing.T) {
+	m := newTestModel()
+	resp := make(chan UserResponse, 1)
+	m.openModal(askMsg{prompt: UserPrompt{
+		Kind:        KindQuestion,
+		Question:    "pick",
+		Options:     []string{"alpha", "beta"},
+		MultiSelect: true,
+	}, resp: resp})
+
+	// Toggle Other and confirm to enter free-text mode.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeySpace})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.modal.otherActive {
+		t.Fatal("selecting Other in multi-select should activate free-text input")
+	}
+
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m', 'y'}})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	got := <-resp
+	if got.Custom != "my" {
+		t.Errorf("custom = %q, want my", got.Custom)
+	}
+}
+
 func TestTUI_AppendText_BlockBufferingNonPlain(t *testing.T) {
 	m := newTestModel() // cfg.plain == false → markdown block buffering
 	m.appendText("hello ")
