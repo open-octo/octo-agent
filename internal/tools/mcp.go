@@ -50,14 +50,6 @@ func ActiveMCPRegistry() *mcp.Registry {
 	return mcpRegistry
 }
 
-// mcpEnabled is the DefaultTools gating function — true when SetMCPRegistry
-// has been called with a non-nil registry AND that registry has at least
-// one live connection.
-func mcpEnabled() bool {
-	r := ActiveMCPRegistry()
-	return r != nil && r.Len() > 0
-}
-
 // mcpToolDefs synthesises one ToolDefinition per MCP surface for every live
 // connection. Called from DefaultTools at session start; returns empty if
 // MCP is off so the caller can splice it in unconditionally.

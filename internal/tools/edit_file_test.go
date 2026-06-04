@@ -317,3 +317,35 @@ func TestEditFile_CurlyQuotes_ReplaceAll(t *testing.T) {
 		t.Errorf("file = %q, want %q", got, want)
 	}
 }
+
+func TestEditFile_RefusesSecretInNewString(t *testing.T) {
+	// edit_file must apply the same secret guard write_file does, so a
+	// credential can't be injected through the edit path. The original file is
+	// left untouched on refusal.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.go")
+	original := "const token = \"REPLACE_ME\"\n"
+	writeTestFile(t, path, original)
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "REPLACE_ME",
+		"new_string": "ghp_0123456789abcdefghijklmnopqrstuvwxyz", // GitHub PAT shape (36 chars)
+	})
+	if err == nil || !strings.Contains(err.Error(), "GitHub token") {
+		t.Fatalf("expected refusal naming the secret, got %v", err)
+	}
+	if got := readTestFile(t, path); got != original {
+		t.Errorf("file should be unchanged on refusal, got %q", got)
+	}
+}
+
+func TestStripTrailingWhitespace_EveryLine(t *testing.T) {
+	// Trailing spaces/tabs must be stripped on every line, not just the last \u2014
+	// a "\n" must not shield the whitespace in front of it.
+	in := "a  \nb\t\nc   "
+	want := "a\nb\nc"
+	if got := stripTrailingWhitespace(in); got != want {
+		t.Errorf("stripTrailingWhitespace(%q) = %q, want %q", in, got, want)
+	}
+}

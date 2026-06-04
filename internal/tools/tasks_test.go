@@ -274,6 +274,21 @@ func TestActiveTaskStore_Roundtrip(t *testing.T) {
 
 // ── formatter ────────────────────────────────────────────────────────────
 
+func TestFormatTaskList_CountHeader(t *testing.T) {
+	out := FormatTaskList([]tasks.Task{
+		{ID: 1, Subject: "A", Status: tasks.InProgress},
+		{ID: 2, Subject: "B", Status: tasks.Pending},
+		{ID: 3, Subject: "C", Status: tasks.Pending},
+		{ID: 4, Subject: "D", Status: tasks.Completed},
+		{ID: 5, Subject: "E", Status: tasks.Deleted},
+	})
+	header := strings.SplitN(out, "\n", 2)[0]
+	want := "Tasks: 1 in progress, 2 pending, 1 completed"
+	if header != want {
+		t.Errorf("header = %q, want %q", header, want)
+	}
+}
+
 func TestFormatTaskList_DescriptionIndented(t *testing.T) {
 	id := 7
 	out := FormatTaskList([]tasks.Task{{

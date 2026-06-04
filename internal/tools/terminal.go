@@ -123,13 +123,24 @@ func (t TerminalTool) ExecuteStream(
 	// timeout the original process simply keeps running — no kill, no restart.
 	// We attach an onLine callback to collect output and stream to progress in
 	// real time. The polling loop only checks status (exited/running).
+	//
+	// The collector is capped at maxBgOutputBytes: a command that floods stdout
+	// faster than the 30s timeout (e.g. a runaway `yes`) would otherwise grow an
+	// unbounded buffer and OOM the agent. Past the cap we keep the most recent
+	// bytes and flag that earlier output was dropped — the same tail-retention
+	// policy bgProcess.append uses for the background buffer.
 	var (
-		outMu sync.Mutex
-		out   strings.Builder
+		outMu   sync.Mutex
+		out     []byte
+		dropped bool
 	)
 	onLine := func(line string) {
 		outMu.Lock()
-		out.WriteString(line)
+		out = append(out, line...)
+		if len(out) > maxBgOutputBytes {
+			out = out[len(out)-maxBgOutputBytes:]
+			dropped = true
+		}
 		outMu.Unlock()
 		if progress != nil {
 			progress(strings.TrimRight(line, "\n"))
@@ -141,6 +152,20 @@ func (t TerminalTool) ExecuteStream(
 		return agent.ToolResult{Text: ""}, err
 	}
 
+	// snapshot returns the collected output so far, tab-expanded and with the
+	// truncation marker prepended when the cap dropped earlier bytes.
+	snapshot := func() string {
+		outMu.Lock()
+		body := strings.TrimRight(string(out), "\n")
+		d := dropped
+		outMu.Unlock()
+		body = strings.ReplaceAll(body, "\t", "    ")
+		if d {
+			body = "[... earlier output truncated ...]\n" + body
+		}
+		return body
+	}
+
 	// Poll until the process exits or the timeout fires.
 	timer := time.NewTimer(TerminalTimeout)
 	defer timer.Stop()
@@ -149,32 +174,28 @@ func (t TerminalTool) ExecuteStream(
 		select {
 		case <-timer.C:
 			// Timeout: promote the hidden process to visible so it shows up
-			// in the TUI "background (N running)" panel, then return.
+			// in the TUI "background (N running)" panel, then return. NOT
+			// reaped — it's now a real background task and its output must stay
+			// readable via terminal_output.
 			t.manager().Promote(id)
-			outMu.Lock()
-			body := strings.TrimRight(out.String(), "\n")
-			outMu.Unlock()
-			body = strings.ReplaceAll(body, "\t", "    ")
-			body = MaybeSpillOutput(id, body)
+			body := MaybeSpillOutput(id, snapshot())
 			return agent.ToolResult{Text: fmt.Sprintf("%s\n\n[timeout: command exceeded %s and continues as background process %s]\n\n%s", body, TerminalTimeout, id, BgPollNotice)}, nil
 		case <-ctx.Done():
-			// User cancelled (Esc / Ctrl-C): kill the background process.
+			// User cancelled (Esc / Ctrl-C): kill the hidden process and reap
+			// it — the output is returned here and now, nothing will poll it.
 			t.manager().Kill(id)
-			outMu.Lock()
-			body := strings.TrimRight(out.String(), "\n")
-			outMu.Unlock()
-			body = strings.ReplaceAll(body, "\t", "    ")
+			body := snapshot()
+			t.manager().Remove(id)
 			return agent.ToolResult{Text: body + "\n[exit: signal: killed]"}, nil
 		default:
 		}
 
 		_, status, _, _ := t.manager().Read(id)
 		if strings.HasPrefix(status, "exited") {
-			outMu.Lock()
-			body := strings.TrimRight(out.String(), "\n")
-			outMu.Unlock()
-			body = strings.ReplaceAll(body, "\t", "    ")
-			body = MaybeSpillOutput(id, body)
+			body := MaybeSpillOutput(id, snapshot())
+			// Reap the hidden process: its output has been captured and
+			// returned, so the bgProcess (and its retained buffer) can go.
+			t.manager().Remove(id)
 			if status != "exited: 0" {
 				return agent.ToolResult{Text: body + "\n[exit: " + strings.TrimPrefix(status, "exited: ") + "]"}, nil
 			}

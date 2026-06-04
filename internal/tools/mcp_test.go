@@ -88,21 +88,6 @@ func TestFormatToolResult_MixedContent(t *testing.T) {
 	}
 }
 
-func TestMCPEnabledGate(t *testing.T) {
-	// Before any registration the gate is off so DefaultTools won't
-	// advertise MCP surfaces.
-	SetMCPRegistry(nil)
-	if mcpEnabled() {
-		t.Error("expected mcpEnabled=false with no registry")
-	}
-	// Empty registry: still disabled — Len() == 0.
-	SetMCPRegistry(&mcp.Registry{})
-	if mcpEnabled() {
-		t.Error("expected mcpEnabled=false with empty registry")
-	}
-	SetMCPRegistry(nil) // clean up for other tests
-}
-
 func TestMCPToolDefs_NilRegistryYieldsNone(t *testing.T) {
 	SetMCPRegistry(nil)
 	defer SetMCPRegistry(nil)

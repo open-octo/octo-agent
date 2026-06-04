@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -95,6 +96,34 @@ func TestGlob_SkipsGitAndNodeModules(t *testing.T) {
 	}
 	if strings.Contains(out.Text, ".git/") || strings.Contains(out.Text, "node_modules/") {
 		t.Errorf("noise directories should be skipped:\n%s", out.Text)
+	}
+}
+
+func TestGlob_RespectsGitignore(t *testing.T) {
+	// glob enumerates via ripgrep, so a .gitignore'd file is excluded even
+	// though it isn't under one of the hardcoded noise dirs. ripgrep only
+	// applies .gitignore at a detected repo root, so the test dir gets a .git
+	// marker — the normal case, since glob runs inside real repos.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	writeTestFile(t, filepath.Join(dir, ".gitignore"), "ignored.go\n")
+	writeTestFile(t, filepath.Join(dir, "kept.go"), "")
+	writeTestFile(t, filepath.Join(dir, "ignored.go"), "")
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "**/*.go",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "kept.go") {
+		t.Errorf("kept.go missing:\n%s", out.Text)
+	}
+	if strings.Contains(out.Text, "ignored.go") {
+		t.Errorf("gitignored file should be excluded:\n%s", out.Text)
 	}
 }
 

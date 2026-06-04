@@ -2,8 +2,10 @@ package tools
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // spillHome points ~/.octo at a temp dir so spill files don't touch the real
@@ -74,6 +76,40 @@ func TestMaybeSpillOutput_FewLongLinesPassThrough(t *testing.T) {
 	body := strings.Repeat("x", TerminalSpillBytes+100) + "\n" + strings.Repeat("y", 100)
 	if got := MaybeSpillOutput("bg_7", body); got != body {
 		t.Errorf("few long lines should pass through unchanged")
+	}
+}
+
+func TestSpillCleanup_CoversWebFetchPrefix(t *testing.T) {
+	// web_fetch spill files (webfetch-…) must be reclaimed by the same age-sweep
+	// and shutdown-clean that handle term- files — otherwise they leak forever.
+	spillHome(t)
+	dir, err := spillDir()
+	if err != nil {
+		t.Fatalf("spillDir: %v", err)
+	}
+
+	// A web_fetch spill file for THIS process (pid suffix), plus a stale one
+	// from a long-dead session that the age-sweep should reap.
+	mine, err := writeWebFetchSpillFile("https://example.com/page", []byte("body"))
+	if err != nil {
+		t.Fatalf("writeWebFetchSpillFile: %v", err)
+	}
+	stale := filepath.Join(dir, "webfetch-old-host-1-999999.log")
+	if err := os.WriteFile(stale, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write stale: %v", err)
+	}
+	if err := os.Chtimes(stale, time.Now().Add(-48*time.Hour), time.Now().Add(-48*time.Hour)); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	sweepOldSpillFiles(dir)
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("age-sweep should have removed the stale webfetch file (err=%v)", err)
+	}
+
+	CleanSpillFiles()
+	if _, err := os.Stat(mine); !os.IsNotExist(err) {
+		t.Errorf("CleanSpillFiles should have removed this process's webfetch file (err=%v)", err)
 	}
 }
 

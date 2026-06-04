@@ -312,6 +312,24 @@ func (m *BackgroundManager) Kill(id string) bool {
 	return true
 }
 
+// Remove drops a process from the tracking map, releasing its retained output
+// buffer. Used by the synchronous terminal path to reap a hidden command once
+// it has exited and its output has been returned to the caller — otherwise
+// every synchronous command would leak a bgProcess (up to maxBgOutputBytes
+// each) for the life of the session. Visible background tasks are NOT reaped
+// this way: their output stays readable via terminal_output after they exit.
+func (m *BackgroundManager) Remove(id string) {
+	m.mu.Lock()
+	p, ok := m.procs[id]
+	delete(m.procs, id)
+	m.mu.Unlock()
+	// Belt-and-suspenders: if Remove is ever called on a still-running id,
+	// cancel it so the process can't outlive its map entry.
+	if ok && p != nil {
+		p.cancel()
+	}
+}
+
 // KillAll terminates every tracked process. Called on session shutdown so no
 // background command is orphaned.
 func (m *BackgroundManager) KillAll() {
