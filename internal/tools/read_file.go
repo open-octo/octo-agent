@@ -49,6 +49,8 @@ func (ReadFileTool) Definition() agent.ToolDefinition {
 		Name: "read_file",
 		Description: "Read a UTF-8 text file and return its content with cat-n-style " +
 			"line numbers. Up to 2000 lines per call — use offset/limit to paginate. " +
+			"When the response includes '[end of file: N lines total]' the entire file " +
+			"has been read; do not call read_file again for the same path. " +
 			"Absolute paths are preferred; relative paths resolve against the current " +
 			"working directory. Refuses binary extensions (executables, archives, " +
 			"PDFs, DBs) and blocking device files (/dev/random, /dev/tty etc). " +
@@ -158,10 +160,15 @@ func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 	}
 
 	if returned == 0 && lineNum > 0 {
-		return agent.ToolResult{}, fmt.Errorf("read_file: offset %d is past end of file (only %d lines)", offset, lineNum)
+		// A past-end offset used to be an error, which made agents retry
+		// the same file or backtrack. Returning a clear "already at EOF"
+		// result lets them stop paginating instead of looping.
+		return agent.ToolResult{
+			Text: fmt.Sprintf("[end of file: %d lines total. Offset %d is past the end — no more content to read.]", lineNum, offset),
+		}, nil
 	}
 	if returned == 0 {
-		return agent.ToolResult{Text: "(empty file)"}, nil
+		return agent.ToolResult{Text: "[empty file]"}, nil
 	}
 	if truncated {
 		// Without this footer the read stops silently at the cap, so the
@@ -169,8 +176,12 @@ func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 		// either edits against lines it never saw or re-reads the same
 		// window expecting different output. Spelling out the exact resume
 		// offset breaks that loop.
-		fmt.Fprintf(&out, "\n[truncated: shown lines %d-%d; file has more. Continue with offset=%d.]\n",
-			offset, offset+returned-1, lineNum)
+		fmt.Fprintf(&out, "\n[truncated: shown lines %d-%d. Next unread line is %d. Continue with offset=%d if needed.]\n",
+			offset, offset+returned-1, lineNum, lineNum)
+	} else {
+		// Explicit EOF marker prevents agents from re-reading a file they
+		// already consumed just to confirm whether more content exists.
+		fmt.Fprintf(&out, "\n[end of file: %d lines total]\n", lineNum)
 	}
 	return agent.ToolResult{Text: out.String()}, nil
 }

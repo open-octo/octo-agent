@@ -29,6 +29,8 @@ func cardVerbFor(toolName string) string {
 		return "Glob"
 	case "read_file":
 		return "Read"
+	case "write_file":
+		return "Write"
 	case "web_fetch":
 		return "Fetch"
 	}
@@ -46,7 +48,7 @@ func cardTargetFor(toolName string, input map[string]any) string {
 		key = "pattern"
 	case "web_search":
 		key = "query"
-	case "read_file", "edit_file":
+	case "read_file", "edit_file", "write_file":
 		key = "path"
 	case "web_fetch":
 		key = "url"
@@ -75,7 +77,7 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 		return tui.RenderEditCard(path, oldS, newS)
 	}
 	lang := ""
-	if toolName == "read_file" {
+	if toolName == "read_file" || toolName == "write_file" {
 		if p, _ := input["path"].(string); p != "" {
 			lang = tui.GuessLanguage(p)
 		}
@@ -85,6 +87,12 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 		// instruction appended after a blank line. It's noise for the human, so
 		// drop it from the card — the "Started background process N" line stays.
 		output = strings.TrimRight(strings.TrimSuffix(output, tools.BgPollNotice), "\n")
+	}
+	if toolName == "write_file" {
+		// write_file's own output is already a human-readable summary
+		// ("Wrote N bytes (M lines) to /path"); show that instead of a
+		// redundant content preview.
+		return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, 0, isErr, "")
 	}
 	return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, outputCardMaxLines, isErr, lang)
 }
