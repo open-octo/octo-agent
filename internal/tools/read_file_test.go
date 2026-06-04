@@ -83,18 +83,18 @@ func TestReadFile_TruncationFooter(t *testing.T) {
 	if !strings.Contains(out.Text, "shown lines 2-4") {
 		t.Errorf("expected shown-range 2-4, got:\n%s", out.Text)
 	}
+	if !strings.Contains(out.Text, "Next unread line is 5") {
+		t.Errorf("expected 'Next unread line is 5', got:\n%s", out.Text)
+	}
 }
 
-func TestReadFile_NoFooterWhenComplete(t *testing.T) {
-	// A read that reaches EOF — even when the limit is hit exactly on the
-	// last line — must NOT claim truncation, or the model loops re-reading
-	// a file it already saw in full.
+func TestReadFile_EndOfFileFooterWhenComplete(t *testing.T) {
+	// A read that reaches EOF must report completion explicitly so the
+	// model knows not to re-read the file.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "exact.txt")
 	writeTestFile(t, path, "a\nb\nc\n")
 
-	// Limit equals the line count: last line is the limit-th line, EOF
-	// follows, so no truncation.
 	out, err := ReadFileTool{}.Execute(context.Background(), "read_file", map[string]any{
 		"path":  path,
 		"limit": 3,
@@ -105,19 +105,30 @@ func TestReadFile_NoFooterWhenComplete(t *testing.T) {
 	if strings.Contains(out.Text, "truncated") {
 		t.Errorf("complete read should not be marked truncated:\n%s", out.Text)
 	}
+	if !strings.Contains(out.Text, "[end of file: 3 lines total]") {
+		t.Errorf("complete read should include end-of-file footer:\n%s", out.Text)
+	}
 }
 
 func TestReadFile_PastEnd(t *testing.T) {
+	// Reading past EOF should return a friendly marker, not an error,
+	// so agents stop paginating instead of looping on the same file.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "short.txt")
 	writeTestFile(t, path, "only\n")
 
-	_, err := ReadFileTool{}.Execute(context.Background(), "read_file", map[string]any{
+	out, err := ReadFileTool{}.Execute(context.Background(), "read_file", map[string]any{
 		"path":   path,
 		"offset": 100,
 	})
-	if err == nil || !strings.Contains(err.Error(), "past end") {
-		t.Errorf("expected past-end error, got %v", err)
+	if err != nil {
+		t.Fatalf("past-end read should not error, got %v", err)
+	}
+	if !strings.Contains(out.Text, "end of file") {
+		t.Errorf("expected end-of-file marker, got %q", out.Text)
+	}
+	if !strings.Contains(out.Text, "no more content") {
+		t.Errorf("expected 'no more content' hint, got %q", out.Text)
 	}
 }
 
@@ -139,8 +150,8 @@ func TestReadFile_EmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(out.Text, "empty") {
-		t.Errorf("expected empty-file marker, got %q", out.Text)
+	if !strings.Contains(out.Text, "[empty file]") {
+		t.Errorf("expected [empty file] marker, got %q", out.Text)
 	}
 }
 
@@ -263,8 +274,8 @@ func TestReadFile_AllowsDevNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("/dev/null should be readable (returns EOF): %v", err)
 	}
-	if !strings.Contains(out.Text, "empty") {
-		t.Errorf("expected empty-file marker, got %q", out.Text)
+	if !strings.Contains(out.Text, "[empty file]") {
+		t.Errorf("expected [empty file] marker, got %q", out.Text)
 	}
 }
 
