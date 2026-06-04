@@ -65,6 +65,10 @@ type Server struct {
 	// session-scoped turn locks: one turn per session at a time.
 	turnLocks map[string]*sync.Mutex
 	turnMu    sync.Mutex
+
+	// mcpCleanup unregisters + closes the MCP registry connected at start.
+	// Always non-nil after New (a no-op when no servers connected).
+	mcpCleanup func()
 }
 
 // New builds a Server. It resolves provider/model, discovers skills, and
@@ -101,6 +105,7 @@ func New(cfg Config) (*Server, error) {
 
 	s.registerRoutes()
 	s.enableSubAgentTools()
+	s.enableMCP()
 
 	s.http = &http.Server{
 		Addr:         cfg.Addr,
@@ -136,6 +141,27 @@ func (s *Server) enableSubAgentTools() {
 	tools.SetTaskStore(tasks.New())
 }
 
+// enableMCP applies the Tool Search config and connects the configured MCP
+// servers non-interactively, registering their surface so DefaultToolsFor
+// advertises them (or the Tool Search bridge). Best-effort: a misconfigured or
+// unreachable server is logged and skipped. No-op when tools are disabled.
+// mcpCleanup is always set (a no-op when nothing connected) so Shutdown can call
+// it unconditionally.
+func (s *Server) enableMCP() {
+	s.mcpCleanup = func() {}
+	if !s.cfg.Tools {
+		return
+	}
+	if cfg, err := config.Load(); err == nil {
+		tools.SetToolSearchConfig(app.ToolSearchConfigFrom(cfg.Tools.ToolSearch))
+	}
+	cleanup, err := app.ConnectMCP(context.Background(), s.cwd, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "octo serve: mcp: %v\n", err)
+	}
+	s.mcpCleanup = cleanup
+}
+
 // ListenAndServe starts the HTTP server.
 func (s *Server) ListenAndServe() error {
 	return s.http.ListenAndServe()
@@ -146,6 +172,9 @@ func (s *Server) ListenAndServe() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	tools.SetDefaultSubAgentManager(nil)
 	tools.SetTaskStore(nil)
+	if s.mcpCleanup != nil {
+		s.mcpCleanup()
+	}
 	return s.http.Shutdown(ctx)
 }
 

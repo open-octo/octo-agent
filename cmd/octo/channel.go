@@ -168,12 +168,19 @@ func runChannelStart(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 		return a
 	}
 
-	// Advertise sub-agent + task tools by registering the process-global gating
-	// sentinels. Each message overrides them with a ctx-scoped manager + store
-	// (see handleAgentMessage), so this is gating-only + a never-hit fallback.
-	// Skipped when tools are off.
+	// Tool environment, skipped when tools are off:
+	//   - sub-agent + task gating sentinels (each message overrides them with a
+	//     ctx-scoped manager + store; see handleAgentMessage),
+	//   - Tool Search config + MCP servers, connected non-interactively so the
+	//     bridge gets the same MCP surface as the CLI.
 	if !*noTools {
 		defer registerChannelSubAgentTools(agentFactory())()
+		tools.SetToolSearchConfig(app.ToolSearchConfigFrom(cfg.Tools.ToolSearch))
+		mcpCleanup, mcpErr := app.ConnectMCP(context.Background(), cwd, stderr)
+		if mcpErr != nil {
+			fmt.Fprintf(stderr, "octo channel: mcp: %v\n", mcpErr)
+		}
+		defer mcpCleanup()
 	}
 
 	mode := channel.BindingMode(*bindMode)
