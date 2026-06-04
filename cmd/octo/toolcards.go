@@ -88,5 +88,11 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 		// drop it from the card — the "Started background process N" line stays.
 		output = strings.TrimRight(strings.TrimSuffix(output, tools.BgPollNotice), "\n")
 	}
+	if toolName == "write_file" {
+		// write_file's own output is already a human-readable summary
+		// ("Wrote N bytes (M lines) to /path"); show that instead of a
+		// redundant content preview.
+		return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, 0, isErr, "")
+	}
 	return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, outputCardMaxLines, isErr, lang)
 }
