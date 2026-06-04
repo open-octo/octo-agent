@@ -122,6 +122,23 @@ func TestCLIGate_AutoApproveModeNeverPrompts(t *testing.T) {
 	}
 }
 
+func TestCLIGate_UnwrapsToolCallToRealName(t *testing.T) {
+	// A Tool Search tool_call must be evaluated against the wrapped tool, not
+	// the opaque "tool_call" bridge: wrapping a dangerous terminal command must
+	// still be denied on the inner name.
+	g, _ := newGate(t, permission.ModeInteractive, "")
+	ok, reason := g.Check(context.Background(), "tool_call", map[string]any{
+		"name":      "terminal",
+		"arguments": map[string]any{"command": "rm -rf /"},
+	})
+	if ok {
+		t.Error("tool_call wrapping 'rm -rf /' must be denied via the unwrapped name")
+	}
+	if !strings.Contains(reason, "permission_denied") {
+		t.Errorf("expected denial reason, got %q", reason)
+	}
+}
+
 func TestResolvePermissionMode(t *testing.T) {
 	if resolvePermissionMode("strict") != permission.ModeStrict {
 		t.Error("strict should map to ModeStrict")

@@ -317,6 +317,12 @@ type serverPermissionGate struct {
 }
 
 func (g *serverPermissionGate) Check(ctx context.Context, name string, input map[string]any) (bool, string) {
+	// Keep parity with the CLI gate: if a Tool Search tool_call ever reaches the
+	// server (once MCP is wired here), evaluate policy against the wrapped real
+	// tool, not the opaque "tool_call" bridge.
+	if real, realInput, ok := tools.ToolCallTarget(name, input); ok {
+		name, input = real, realInput
+	}
 	switch g.engine.Check(name, input) {
 	case permission.Allow:
 		return true, ""

@@ -21,6 +21,10 @@ const compactThresholdFraction = 0.75
 // slightly earlier — never overflow — so unknown models stay safe.
 const defaultContextWindow = 128_000
 
+// ContextWindow exposes contextWindow to other packages (e.g. the tools layer's
+// Tool Search threshold) without duplicating the model→window table.
+func ContextWindow(model string) int { return contextWindow(model) }
+
 // contextWindow returns the approximate context-window size (in tokens) for a
 // model. Values are deliberately conservative; matched case-insensitively by
 // substring so dated/aliased names ("claude-haiku-4-5-2025…") still resolve.

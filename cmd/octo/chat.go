@@ -160,6 +160,25 @@ func resolveShowReasoning(flagSet, flagVal bool, cfg config.Config) bool {
 	return true
 }
 
+// toolSearchConfigFrom maps the persisted tools.tool_search block onto the
+// tools-package config. Unknown/empty "enabled" defaults to auto; numeric zero
+// values are left for SetToolSearchConfig to backfill with documented defaults.
+func toolSearchConfigFrom(c config.ToolSearchConfig) tools.ToolSearchConfig {
+	mode := tools.ToolSearchAuto
+	switch c.Enabled {
+	case "on":
+		mode = tools.ToolSearchOn
+	case "off":
+		mode = tools.ToolSearchOff
+	}
+	return tools.ToolSearchConfig{
+		Mode:           mode,
+		ThresholdPct:   c.ThresholdPct,
+		SearchLimit:    c.SearchDefaultLimit,
+		MaxSearchLimit: c.MaxSearchLimit,
+	}
+}
+
 // resolveReasoningEffort picks the reasoning intensity: --reasoning-effort flag
 // > config file > "" (off).
 func resolveReasoningEffort(flagVal string, cfg config.Config) string {
@@ -339,6 +358,10 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// Install the Tool Search config so DefaultToolsFor can decide whether to
+	// defer MCP schemas behind the search/describe/call bridge for this model.
+	tools.SetToolSearchConfig(toolSearchConfigFrom(cfg.Tools.ToolSearch))
+
 	// Resolve reasoning controls: --reasoning-effort sets the intensity (OpenAI
 	// reasoning_effort / mapped Anthropic budget); --show-reasoning gates whether
 	// the trace is streamed to the terminal. Both fall back to `octo config`.
@@ -516,7 +539,11 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	// Agentic setup — shared by both paths, which each run the full tool loop.
 	toolExecutor = tools.NewDefaultRegistry()
-	spawner := newAgentSpawner(a, toolExecutor, tools.DefaultTools)
+	// Sub-agents share the parent's model for the Tool Search threshold decision
+	// (a model override is rare and still resolves to a sane window).
+	spawner := newAgentSpawner(a, toolExecutor, func() []agent.ToolDefinition {
+		return tools.DefaultToolsFor(a.Model)
+	})
 	tools.SetSpawner(spawner)
 	subAgentMgr = tools.NewSubAgentManager(spawner)
 	if useTUI {
@@ -683,7 +710,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			// Built-ins only at first paint — the MCP registry is still nil
 			// (mcpBoot connects it in the background). mcpReadyMsg recomputes
 			// this list once the servers are live.
-			cfg.tools = tools.DefaultTools()
+			cfg.tools = tools.DefaultToolsFor(resolvedModel)
 			cfg.executor = toolExecutor
 			cfg.subAgentMgr = subAgentMgr
 		}
@@ -710,7 +737,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		permEngine: permEngine,
 	}
 	if toolsOn {
-		replCfg.tools = tools.DefaultTools()
+		replCfg.tools = tools.DefaultToolsFor(resolvedModel)
 		replCfg.executor = toolExecutor
 		replCfg.subAgentMgr = subAgentMgr
 	}

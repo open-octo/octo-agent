@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/Leihb/octo-agent/internal/permission"
+	"github.com/Leihb/octo-agent/internal/tools"
 )
 
 // cliPermissionGate adapts a permission.Engine into an agent.PermissionGate.
@@ -23,6 +24,12 @@ type cliPermissionGate struct {
 
 // Check implements agent.PermissionGate.
 func (g *cliPermissionGate) Check(ctx context.Context, name string, input map[string]any) (bool, string) {
+	// A Tool Search tool_call wraps the real MCP tool — evaluate policy and
+	// prompt against that real tool, not the "tool_call" bridge, so per-tool
+	// allow/deny rules and the approval prompt show the right name.
+	if real, realInput, ok := tools.ToolCallTarget(name, input); ok {
+		name, input = real, realInput
+	}
 	switch g.engine.Check(name, input) {
 	case permission.Allow:
 		return true, ""

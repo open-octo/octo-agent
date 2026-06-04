@@ -71,6 +71,18 @@ func (r DefaultRegistry) Execute(ctx context.Context, name string, input map[str
 		return agent.ToolResult{Text: out}, err
 	}
 
+	// Tool Search bridge: search/describe the deferred MCP catalog, or invoke
+	// a tool through tool_call (which routes back into executeMCP on the real
+	// name). Handled here because the bridge tools aren't in allTools.
+	switch name {
+	case toolSearchName:
+		return execToolSearch(input)
+	case toolDescribeName:
+		return execToolDescribe(input)
+	case toolCallName:
+		return execToolCall(ctx, input)
+	}
+
 	// Read-before-write pre-check (skipped when no tracker is configured).
 	if r.tracker != nil && (name == "write_file" || name == "edit_file") {
 		if path, ok := input["path"].(string); ok {
@@ -194,13 +206,24 @@ func tokenizeCommand(s string) []string {
 	return tokens
 }
 
-// DefaultTools returns the slice of ToolDefinitions sent to the LLM when
-// `--tools` is on. Order matches allTools. Each capability-gated tool is
-// withheld unless the corresponding registration call has been made —
-// SkillTool needs SetSkills, RememberTool needs SetMemoryStore, sub-agent
-// tools need a SubAgentManager. Advertising a tool that can only error wastes
-// a slot and confuses the model.
-func DefaultTools() []agent.ToolDefinition {
+// DefaultTools returns the tool list with no model context — equivalent to
+// DefaultToolsFor(""). MCP schemas are always uploaded in full (the Tool Search
+// bridge needs the model to evaluate its auto threshold), so unmigrated callers
+// keep the original behaviour.
+func DefaultTools() []agent.ToolDefinition { return DefaultToolsFor("") }
+
+// DefaultToolsFor returns the slice of ToolDefinitions sent to the LLM when
+// `--tools` is on, for the given model. Order matches allTools. Each
+// capability-gated tool is withheld unless the corresponding registration call
+// has been made — SkillTool needs SetSkills, sub-agent tools need a
+// SubAgentManager. Advertising a tool that can only error wastes a slot and
+// confuses the model.
+//
+// MCP surfaces ride alongside the built-ins. When Tool Search is active for
+// this model (see toolSearchActive) the full per-tool catalog is replaced by
+// the three search/describe/call bridge tools, so the model's tools array
+// carries three small schemas instead of every MCP tool's schema every turn.
+func DefaultToolsFor(model string) []agent.ToolDefinition {
 	skillsOn := skillsEnabled()
 	mgrOn := subAgentManagerEnabled()
 	askerOn := askerEnabled()
@@ -239,9 +262,14 @@ func DefaultTools() []agent.ToolDefinition {
 		}
 		defs = append(defs, t.Definition())
 	}
-	// MCP-advertised surfaces ride alongside built-ins, gated on a non-nil
-	// registry registered via SetMCPRegistry. Synthesised per-connection so
-	// each server's tools/resources/prompts surface together.
-	defs = append(defs, mcpToolDefs()...)
+	// MCP-advertised surfaces. Synthesised per-connection (one def per
+	// tool/resource/prompt) when uploaded in full; collapsed to the three
+	// bridge tools when Tool Search is active for this model.
+	mcpDefs := mcpCatalog()
+	if toolSearchActive(model, mcpDefs) {
+		defs = append(defs, toolSearchBridgeDefs()...)
+	} else {
+		defs = append(defs, mcpDefs...)
+	}
 	return defs
 }
