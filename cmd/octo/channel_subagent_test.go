@@ -20,7 +20,7 @@ func TestRegisterChannelSubAgentToolsAdvertises(t *testing.T) {
 	for _, d := range tools.DefaultToolsFor("") {
 		names[d.Name] = true
 	}
-	for _, want := range []string{"launch_agent", "send_message", "task_create", "task_list"} {
+	for _, want := range []string{"Agent", "Agent", "task_create", "task_list"} {
 		if !names[want] {
 			t.Errorf("expected %q advertised after registerChannelSubAgentTools", want)
 		}
@@ -31,7 +31,7 @@ func TestRegisterChannelSubAgentToolsAdvertises(t *testing.T) {
 	for _, d := range tools.DefaultToolsFor("") {
 		cleared[d.Name] = true
 	}
-	if cleared["launch_agent"] {
-		t.Error("expected launch_agent withdrawn after cleanup")
+	if cleared["Agent"] {
+		t.Error("expected Agent withdrawn after cleanup")
 	}
 }

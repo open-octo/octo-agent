@@ -117,9 +117,13 @@ func truncateSubAgentResult(s string) string {
 // when no manager is injected.
 var defaultSubAgentMgr *SubAgentManager
 
-// SetDefaultSubAgentManager registers the global manager used by LaunchAgentTool
-// and SendMessageTool when no local manager is set.
+// SetDefaultSubAgentManager registers the global manager used by AgentTool
+// when no local manager is set.
 func SetDefaultSubAgentManager(m *SubAgentManager) { defaultSubAgentMgr = m }
+
+// subAgentManagerEnabled reports whether a SubAgentManager is registered,
+// which is required for the Agent tool.
+func subAgentManagerEnabled() bool { return defaultSubAgentMgr != nil }
 
 // SubAgentManager owns the set of async sub-agents for a session.
 // Methods are safe for concurrent use.

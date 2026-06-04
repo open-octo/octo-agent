@@ -55,7 +55,7 @@ func TestTUI_RunningToolIndicator(t *testing.T) {
 func TestTUI_NonCardToolNoIndicator(t *testing.T) {
 	m := newTestModel()
 	m.handleEvent(agent.AgentEvent{
-		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "launch_agent",
+		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "Agent",
 		Input: map[string]any{},
 	})
 	if m.running != nil {

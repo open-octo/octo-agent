@@ -449,13 +449,13 @@ func TestAgentSpawner_MarksContextSoRecursionRefused(t *testing.T) {
 	tools.SetSpawner(sp)
 	t.Cleanup(func() { tools.SetSpawner(nil) })
 
-	// Simulating a launch_agent execution from inside a sub-agent's ctx:
+	// Simulating an Agent tool execution from inside a sub-agent's ctx:
 	ctx := tools.WithSubAgentMarker(context.Background())
-	_, err := (tools.LaunchAgentTool{}).Execute(ctx, "launch_agent", map[string]any{
+	_, err := (tools.AgentTool{}).Execute(ctx, "Agent", map[string]any{
 		"description": "nested",
 		"prompt":      "recurse",
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot spawn") {
-		t.Errorf("recursive launch_agent should be refused, got %v", err)
+		t.Errorf("recursive Agent should be refused, got %v", err)
 	}
 }

@@ -74,7 +74,7 @@ func TestSubAgentPanel_StartedResetsChain(t *testing.T) {
 	m := newPanelModel()
 	m.handleSubAgentEvent(tools.SubAgentEvent{AgentID: "agent_1", Kind: "started"})
 	m.handleSubAgentEvent(tools.SubAgentEvent{AgentID: "agent_1", Kind: "tool", ToolName: "grep"})
-	// A second round (send_message) re-starts: chain resets, slot stays.
+	// A second round (Agent) re-starts: chain resets, slot stays.
 	m.handleSubAgentEvent(tools.SubAgentEvent{AgentID: "agent_1", Kind: "started"})
 	sa := m.subAgents["agent_1"]
 	if sa.toolCount != 0 || len(sa.recent) != 0 {

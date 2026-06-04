@@ -176,7 +176,7 @@ func filterChildTools(parent []agent.ToolDefinition, allowed []string, readOnly 
 	}
 	out := make([]agent.ToolDefinition, 0, len(parent))
 	for _, td := range parent {
-		if td.Name == "launch_agent" || td.Name == "send_message" {
+		if td.Name == "Agent" {
 			continue
 		}
 		if readOnly && (td.Name == "write_file" || td.Name == "edit_file") {

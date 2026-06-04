@@ -1,6 +1,9 @@
 package tools
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func advertisedNames() map[string]bool {
 	m := map[string]bool{}
@@ -10,33 +13,40 @@ func advertisedNames() map[string]bool {
 	return m
 }
 
-// TestSyncModeWithholdsStatusKill verifies a synchronous manager (server / IM)
-// advertises launch_agent + send_message but withholds agent_status /
-// kill_agent — those have nothing to act on once sub-agents run inline.
-func TestSyncModeWithholdsStatusKill(t *testing.T) {
-	mgr := NewSubAgentManager(&mockSpawner{})
+// TestSyncModeAdvertisesAgent verifies a synchronous manager (server / IM)
+// advertises the Agent tool.
+func TestSyncModeAdvertisesAgent(t *testing.T) {
+	mgr := NewSubAgentManager(&fakeSpawner{})
 	mgr.SetSynchronous(true)
 	SetDefaultSubAgentManager(mgr)
 	t.Cleanup(func() { SetDefaultSubAgentManager(nil) })
 
 	names := advertisedNames()
-	if !names["launch_agent"] || !names["send_message"] {
-		t.Error("launch_agent and send_message should be advertised in sync mode")
-	}
-	if names["agent_status"] || names["kill_agent"] {
-		t.Error("agent_status / kill_agent should be withheld in sync mode")
+	if !names["Agent"] {
+		t.Error("Agent should be advertised in sync mode")
 	}
 }
 
-// TestAsyncModeAdvertisesStatusKill verifies the interactive (async) default
-// still advertises the full set, including agent_status / kill_agent.
-func TestAsyncModeAdvertisesStatusKill(t *testing.T) {
-	mgr := NewSubAgentManager(&mockSpawner{}) // async
+// TestAsyncModeAdvertisesAgent verifies the interactive (async) default
+// also advertises the Agent tool.
+func TestAsyncModeAdvertisesAgent(t *testing.T) {
+	mgr := NewSubAgentManager(&fakeSpawner{}) // async
 	SetDefaultSubAgentManager(mgr)
 	t.Cleanup(func() { SetDefaultSubAgentManager(nil) })
 
 	names := advertisedNames()
-	if !names["agent_status"] || !names["kill_agent"] {
-		t.Error("agent_status / kill_agent should be advertised in async mode")
+	if !names["Agent"] {
+		t.Error("Agent should be advertised in async mode")
 	}
+}
+
+// fakeSpawner is a minimal Spawner implementation for tests.
+type fakeSpawner struct{}
+
+func (f *fakeSpawner) Spawn(_ context.Context, _ SpawnRequest) (SpawnResult, error) {
+	return SpawnResult{}, nil
+}
+
+func (f *fakeSpawner) Continue(_ context.Context, _, _ string) (SpawnResult, error) {
+	return SpawnResult{}, nil
 }
