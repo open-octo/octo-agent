@@ -15,6 +15,7 @@ import (
 	_ "github.com/Leihb/octo-agent/internal/channel/adapters/weixin"
 	"github.com/Leihb/octo-agent/internal/channel/adapters/weixin/ilink"
 	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/prompt"
 	"github.com/Leihb/octo-agent/internal/skills"
 	"github.com/Leihb/octo-agent/internal/tools"
@@ -137,6 +138,17 @@ func runChannelStart(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 	skillsManifest := skills.RenderManifest(skillReg)
 	tools.SetSkills(skillReg)
 
+	// Permission gate — the IM bridge's first enforcement. A chat channel has
+	// no one to prompt, so the gate is non-interactive (ask → deny) in strict
+	// mode: safe tools run, risky ones are refused with a reason the model
+	// sees. Same posture as the HTTP server. One engine is shared across all
+	// sessions (Check is concurrency-safe; ask=nil never calls Remember).
+	gate, err := newChannelGate(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "octo channel: %v\n", err)
+		return 1
+	}
+
 	agentFactory := func() *agent.Agent {
 		// The key was validated above; NewSender only re-errors on client
 		// construction, which doesn't happen for an already-resolved key.
@@ -151,6 +163,7 @@ func runChannelStart(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 		a.MaxTokens = *maxTokens
 		a.MaxTurns = *maxTurns
 		a.System = prompt.Compose(*system, cwd, env, skillsManifest, "", true)
+		a.Gate = gate
 		return a
 	}
 
@@ -235,4 +248,17 @@ func handleAgentMessage(ctx context.Context, mgr *channel.Manager, ad channel.Ad
 	}
 
 	_, _ = channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, ev.Text)
+}
+
+// newChannelGate builds the IM bridge's permission gate: strict mode with a nil
+// asker, so ask-class verdicts resolve to deny (a chat channel has no
+// interactive prompt). It reads ~/.octo/permissions.yml when present, falling
+// back to the built-in defaults otherwise — the same engine the CLI and HTTP
+// server use.
+func newChannelGate(cwd string) (agent.PermissionGate, error) {
+	engine, err := permission.New(permissionConfigPath(), cwd, permission.ModeStrict)
+	if err != nil {
+		return nil, fmt.Errorf("permission engine: %w", err)
+	}
+	return app.NewPermissionGate(engine, nil), nil
 }
