@@ -54,7 +54,7 @@ func TestAgentSpawner_RunsChildAndRollsTokensIntoParent(t *testing.T) {
 	parentTools := []agent.ToolDefinition{
 		{Name: "read_file"},
 		{Name: "grep"},
-		{Name: "launch_agent"},
+		{Name: "sub_agent"},
 	}
 	sp := NewSpawner(parent, nilExecutor{}, func() []agent.ToolDefinition { return parentTools })
 
@@ -94,11 +94,11 @@ func TestAgentSpawner_AppliesToolAllowlist(t *testing.T) {
 		{Name: "read_file"},
 		{Name: "grep"},
 		{Name: "terminal"},
-		{Name: "launch_agent"},
+		{Name: "sub_agent"},
 	}
 	sp := NewSpawner(parent, nilExecutor{}, func() []agent.ToolDefinition { return parentTools })
 
-	// Allowlist restricts to read_file + grep. launch_agent always excluded.
+	// Allowlist restricts to read_file + grep. sub_agent always excluded.
 	got := filterChildTools(parentTools, []string{"read_file", "grep"}, false)
 	if len(got) != 2 {
 		t.Fatalf("filtered tools len = %d, want 2: %+v", len(got), got)
@@ -108,14 +108,14 @@ func TestAgentSpawner_AppliesToolAllowlist(t *testing.T) {
 		t.Errorf("allowlist not applied: %v", names)
 	}
 
-	// No allowlist → all parent tools minus launch_agent.
+	// No allowlist → all parent tools minus sub_agent.
 	got = filterChildTools(parentTools, nil, false)
 	if len(got) != 3 {
-		t.Errorf("nil allowlist should keep all non-launch_agent tools: %+v", got)
+		t.Errorf("nil allowlist should keep all non-sub_agent tools: %+v", got)
 	}
 	for _, td := range got {
-		if td.Name == "launch_agent" {
-			t.Errorf("launch_agent must always be filtered out (no recursion)")
+		if td.Name == "sub_agent" {
+			t.Errorf("sub_agent must always be filtered out (no recursion)")
 		}
 	}
 
@@ -310,12 +310,11 @@ func TestAgentSpawner_ConcurrentContinueSerialized(t *testing.T) {
 func TestFilterChildTools_DropsSendMessage(t *testing.T) {
 	parentTools := []agent.ToolDefinition{
 		{Name: "read_file"},
-		{Name: "launch_agent"},
-		{Name: "send_message"},
+		{Name: "sub_agent"},
 	}
 	got := filterChildTools(parentTools, nil, false)
 	for _, td := range got {
-		if td.Name == "send_message" || td.Name == "launch_agent" {
+		if td.Name == "sub_agent" {
 			t.Errorf("child toolbelt must not contain %q", td.Name)
 		}
 	}
@@ -449,13 +448,13 @@ func TestAgentSpawner_MarksContextSoRecursionRefused(t *testing.T) {
 	tools.SetSpawner(sp)
 	t.Cleanup(func() { tools.SetSpawner(nil) })
 
-	// Simulating an Agent tool execution from inside a sub-agent's ctx:
+	// Simulating a sub_agent tool execution from inside a sub-agent's ctx:
 	ctx := tools.WithSubAgentMarker(context.Background())
-	_, err := (tools.AgentTool{}).Execute(ctx, "Agent", map[string]any{
+	_, err := (tools.AgentTool{}).Execute(ctx, "sub_agent", map[string]any{
 		"description": "nested",
 		"prompt":      "recurse",
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot spawn") {
-		t.Errorf("recursive Agent should be refused, got %v", err)
+		t.Errorf("recursive sub_agent should be refused, got %v", err)
 	}
 }

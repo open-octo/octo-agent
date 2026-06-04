@@ -27,7 +27,7 @@ type AgentTool struct{}
 
 func (AgentTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
-		Name: "Agent",
+		Name: "sub_agent",
 		Description: "Launch an autonomous sub-agent to handle a focused sub-task. " +
 			"The sub-agent runs with its own context window and tool budget. " +
 			"Use when you need parallel investigation, a fresh context for an isolated " +
@@ -67,7 +67,7 @@ func (AgentTool) Definition() agent.ToolDefinition {
 				"tools": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "Optional tool-name allowlist for the sub-agent. Omit to inherit your tools (minus Agent itself — no recursion).",
+					"description": "Optional tool-name allowlist for the sub-agent. Omit to inherit your tools (minus sub_agent itself — no recursion).",
 				},
 			},
 			"required": []string{"description", "prompt"},
@@ -77,13 +77,13 @@ func (AgentTool) Definition() agent.ToolDefinition {
 
 func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	if IsSubAgent(ctx) {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("Agent: a sub-agent cannot spawn another sub-agent")
+		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: a sub-agent cannot spawn another sub-agent")
 	}
 
 	desc := strings.TrimSpace(stringArg(input, "description"))
 	prompt := strings.TrimSpace(stringArg(input, "prompt"))
 	if prompt == "" {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("Agent: prompt is required")
+		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: prompt is required")
 	}
 	if desc == "" {
 		desc = firstLine(prompt)
@@ -91,7 +91,7 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 
 	mgr := resolveSubAgentManager(ctx, nil)
 	if mgr == nil {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("Agent: sub-agent dispatch is not configured for this session")
+		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: sub-agent dispatch is not configured for this session")
 	}
 
 	// Resolve subagent_type → preset or fork
@@ -100,7 +100,7 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	if subagentType != "" {
 		p, ok := lookupAgentPreset(subagentType)
 		if !ok {
-			return agent.ToolResult{Text: ""}, fmt.Errorf("Agent: unknown subagent_type %q. Available: %s", subagentType, listPresetNames())
+			return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: unknown subagent_type %q. Available: %s", subagentType, listPresetNames())
 		}
 		preset = &p
 	}
@@ -128,7 +128,7 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	if runInBackground {
 		id, err := mgr.Start(req)
 		if err != nil {
-			return agent.ToolResult{Text: ""}, fmt.Errorf("Agent: %w", err)
+			return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: %w", err)
 		}
 		return agent.ToolResult{
 			Text: fmt.Sprintf("Started sub-agent %s. You will be notified when it completes.", id),
@@ -138,7 +138,7 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	// Synchronous path — block and return the result
 	res, err := mgr.RunSync(ctx, req)
 	if err != nil {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("Agent: %w", err)
+		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: %w", err)
 	}
 	return agent.ToolResult{Text: withAgentTag(res.AgentID, res.Reply)}, nil
 }

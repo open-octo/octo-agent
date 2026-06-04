@@ -33,18 +33,18 @@ func TestCanParallelize(t *testing.T) {
 			true,
 		},
 		{
-			// launch_agent is in the parallel-safe set even though sub-agents can
-			// have side effects — the LLM is supposed to fan out unrelated
-			// research/sub-tasks via this tool, and the dispatcher running them
-			// concurrently is the whole point. See readOnlyTools' comment.
-			"two launch_agent calls → parallel",
-			[]toolCall{ro("launch_agent"), ro("launch_agent")},
-			true,
+			// sub_agent is NOT in the parallel-safe set because sub-agents can have
+			// side effects and run for a long time. Serial dispatch preserves
+			// EventToolProgress for streaming tools and keeps the event order
+			// predictable.
+			"two sub_agent calls → serial",
+			[]toolCall{ro("sub_agent"), ro("sub_agent")},
+			false,
 		},
 		{
-			"launch_agent + read_file → parallel",
-			[]toolCall{ro("launch_agent"), ro("read_file")},
-			true,
+			"sub_agent + read_file → serial",
+			[]toolCall{ro("sub_agent"), ro("read_file")},
+			false,
 		},
 	}
 	for _, tc := range cases {

@@ -112,6 +112,8 @@ web_search:
 # the task_* tools are in-memory bookkeeping. Without an allow here they fall
 # through to the implicit ask, which a non-interactive transport (HTTP server,
 # IM bridge) resolves to deny — silently disabling sub-agents and tasks there.
+sub_agent:
+  - allow: { pattern: "" }
 launch_agent:
   - allow: { pattern: "" }
 send_message:

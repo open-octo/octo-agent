@@ -159,13 +159,13 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	return r.Content, in, out, r.StopReason, nil
 }
 
-// filterChildTools drops launch_agent and send_message (a sub-agent can
-// neither spawn nor wake another sub-agent — those stay top-level-only) and,
-// when allowed is non-empty, intersects with that allowlist so the parent can
-// hand the child a restricted toolbelt (e.g. read-only research). When readOnly
-// is set, the mutating tools (write_file, edit_file) are dropped too — used by
-// read-only presets so the child keeps terminal/MCP/codegraph but can't change
-// files. The two filters compose: a readOnly preset still honours allowed.
+// filterChildTools drops Agent (a sub-agent cannot spawn another sub-agent —
+// that stays top-level-only) and, when allowed is non-empty, intersects with
+// that allowlist so the parent can hand the child a restricted toolbelt (e.g.
+// read-only research). When readOnly is set, the mutating tools (write_file,
+// edit_file) are dropped too — used by read-only presets so the child keeps
+// terminal/MCP/codegraph but can't change files. The two filters compose: a
+// readOnly preset still honours allowed.
 func filterChildTools(parent []agent.ToolDefinition, allowed []string, readOnly bool) []agent.ToolDefinition {
 	var allowSet map[string]bool
 	if len(allowed) > 0 {
@@ -176,7 +176,7 @@ func filterChildTools(parent []agent.ToolDefinition, allowed []string, readOnly 
 	}
 	out := make([]agent.ToolDefinition, 0, len(parent))
 	for _, td := range parent {
-		if td.Name == "Agent" {
+		if td.Name == "sub_agent" {
 			continue
 		}
 		if readOnly && (td.Name == "write_file" || td.Name == "edit_file") {

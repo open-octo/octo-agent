@@ -30,7 +30,7 @@ func TestEnableSubAgentToolsAdvertises(t *testing.T) {
 	for _, d := range tools.DefaultToolsFor("") {
 		names[d.Name] = true
 	}
-	for _, want := range []string{"Agent", "task_create", "task_list"} {
+	for _, want := range []string{"sub_agent", "task_create", "task_list"} {
 		if !names[want] {
 			t.Errorf("expected %q to be advertised after enableSubAgentTools", want)
 		}
@@ -39,7 +39,7 @@ func TestEnableSubAgentToolsAdvertises(t *testing.T) {
 
 // scriptedSender returns a fixed sequence of replies across all sender methods,
 // sharing one counter between the parent turn and any sub-agent it spawns (both
-// run against the same sender). It lets a test drive a Agent tool_use
+// run against the same sender). It lets a test drive a sub_agent tool_use
 // and observe the sub-agent run inline.
 type scriptedSender struct {
 	mu      sync.Mutex
@@ -85,19 +85,19 @@ func (s *scriptedSender) StreamMessagesWithTools(_ context.Context, _, _ string,
 }
 
 // TestServerRunsSubAgentSynchronously drives a full turn whose first reply asks
-// for a sub-agent: the synchronous Agent path must run the child inline
+// for a sub-agent: the synchronous sub_agent path must run the child inline
 // (against the same scripted sender) and feed its reply back so the turn
 // finishes in one request. Three sender calls prove it: parent → child → parent.
 func TestServerRunsSubAgentSynchronously(t *testing.T) {
 	// Isolate HOME so the permission engine uses the embedded defaults (which
-	// allow Agent), not a developer's ~/.octo/permissions.yml.
+	// allow sub_agent), not a developer's ~/.octo/permissions.yml.
 	t.Setenv("HOME", t.TempDir())
 
 	sender := &scriptedSender{replies: []agent.Reply{
 		// 1. Parent asks to spawn a sub-agent.
 		{
 			Blocks: []agent.ContentBlock{
-				agent.NewToolUseBlock("tu1", "Agent", map[string]any{
+				agent.NewToolUseBlock("tu1", "sub_agent", map[string]any{
 					"description": "sub task",
 					"prompt":      "do the sub task",
 				}),

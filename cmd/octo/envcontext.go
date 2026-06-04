@@ -70,10 +70,14 @@ func gitState(cwd string) (branch string, dirty, ok bool) {
 		return "", false, false
 	}
 	absCwd = filepath.Clean(absCwd)
+	// Resolve symlinks so worktrees on macOS (/tmp → /private/tmp) compare
+	// correctly with git's --show-toplevel output.
+	absCwd, _ = filepath.EvalSymlinks(absCwd)
 	absTop := filepath.Clean(strings.TrimSpace(topLevel))
 	if absTop == "" {
 		return "", false, false
 	}
+	absTop, _ = filepath.EvalSymlinks(absTop)
 	// cwd must be inside or equal to the repo root.
 	if !strings.HasPrefix(absCwd, absTop) {
 		return "", false, false

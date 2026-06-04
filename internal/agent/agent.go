@@ -991,22 +991,12 @@ func emitToolResultEvents(handler EventHandler, useBlocks, resultBlocks []Conten
 // composed entirely of these can be executed concurrently (see dispatchTools).
 // Conservative by design: anything that writes, edits, or shells out is absent,
 // so adding a new mutating tool can never accidentally be parallelised.
-//
-// launch_agent is included even though a sub-agent can itself write/edit. The
-// parallelism here is *between* sub-agents — two simultaneous launch_agent
-// calls share only the LLM transport (Sender, safe for concurrent use) and
-// the executor (DefaultRegistry's only shared state is mutex-guarded). The
-// parent prompt is responsible for ensuring the sub-agents don't conflict on
-// shared filesystem targets, the same way the user is responsible when they
-// run two terminals at once. The point of including it is to let the model
-// fire "investigate A and B in parallel" as one batch — Codex/CC's pattern.
 var readOnlyTools = map[string]bool{
-	"read_file":    true,
-	"glob":         true,
-	"grep":         true,
-	"web_fetch":    true,
-	"web_search":   true,
-	"launch_agent": true,
+	"read_file":  true,
+	"glob":       true,
+	"grep":       true,
+	"web_fetch":  true,
+	"web_search": true,
 }
 
 // toolCall pairs a tool_use block with the gate's verdict.

@@ -13,30 +13,30 @@ func advertisedNames() map[string]bool {
 	return m
 }
 
-// TestSyncModeAdvertisesAgent verifies a synchronous manager (server / IM)
-// advertises the Agent tool.
-func TestSyncModeAdvertisesAgent(t *testing.T) {
+// TestSyncModeAdvertisesSubAgent verifies a synchronous manager (server / IM)
+// advertises the sub_agent tool.
+func TestSyncModeAdvertisesSubAgent(t *testing.T) {
 	mgr := NewSubAgentManager(&fakeSpawner{})
 	mgr.SetSynchronous(true)
 	SetDefaultSubAgentManager(mgr)
 	t.Cleanup(func() { SetDefaultSubAgentManager(nil) })
 
 	names := advertisedNames()
-	if !names["Agent"] {
-		t.Error("Agent should be advertised in sync mode")
+	if !names["sub_agent"] {
+		t.Error("sub_agent should be advertised in sync mode")
 	}
 }
 
-// TestAsyncModeAdvertisesAgent verifies the interactive (async) default
-// also advertises the Agent tool.
-func TestAsyncModeAdvertisesAgent(t *testing.T) {
+// TestAsyncModeAdvertisesSubAgent verifies the interactive (async) default
+// also advertises the sub_agent tool.
+func TestAsyncModeAdvertisesSubAgent(t *testing.T) {
 	mgr := NewSubAgentManager(&fakeSpawner{}) // async
 	SetDefaultSubAgentManager(mgr)
 	t.Cleanup(func() { SetDefaultSubAgentManager(nil) })
 
 	names := advertisedNames()
-	if !names["Agent"] {
-		t.Error("Agent should be advertised in async mode")
+	if !names["sub_agent"] {
+		t.Error("sub_agent should be advertised in async mode")
 	}
 }
 
