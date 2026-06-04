@@ -121,7 +121,7 @@ func runOnce(cfg replConfig, prompt string, stream bool) int {
 		view = newPlainView(cfg.reader, cfg.stdout, cfg.stderr, cfg.verbosity, cfg.plain)
 	}
 	if cfg.permEngine != nil {
-		a.Gate = &cliPermissionGate{engine: cfg.permEngine, ask: view}
+		a.Gate = newCLIGate(cfg.permEngine, view)
 	}
 
 	// SIGINT cancels the in-flight turn; the agent finalizes well-formed history

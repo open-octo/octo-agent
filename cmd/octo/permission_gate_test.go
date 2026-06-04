@@ -6,10 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/permission"
 )
 
-func newGate(t *testing.T, mode permission.Mode, stdin string) (*cliPermissionGate, *bytes.Buffer) {
+// newGate builds the CLI-wired shared gate over a scripted-stdin plain view, so
+// these tests exercise newCLIGate + the userPrompter→PermissionAsk adapter end
+// to end (the gate's pure policy logic is covered in internal/app/gate_test.go).
+func newGate(t *testing.T, mode permission.Mode, stdin string) (agent.PermissionGate, *bytes.Buffer) {
 	t.Helper()
 	eng, err := permission.New("", "/work", mode)
 	if err != nil {
@@ -17,11 +21,7 @@ func newGate(t *testing.T, mode permission.Mode, stdin string) (*cliPermissionGa
 	}
 	var out bytes.Buffer
 	view := newPlainView(newScannerLineReader(strings.NewReader(stdin), &out), &out, &out, verbosityNormal, false)
-	g := &cliPermissionGate{
-		engine: eng,
-		ask:    view,
-	}
-	return g, &out
+	return newCLIGate(eng, view), &out
 }
 
 func TestCLIGate_AllowPassesThrough(t *testing.T) {

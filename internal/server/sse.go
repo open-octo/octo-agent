@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/tools"
 )
@@ -66,7 +67,7 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 		toolDefs = tools.DefaultTools()
 		engine, err := permission.New(permissionConfigPath(), s.cwd, permission.ModeStrict)
 		if err == nil {
-			a.Gate = &serverPermissionGate{engine: engine}
+			a.Gate = app.NewPermissionGate(engine, nil)
 		}
 	}
 

@@ -2,59 +2,36 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/permission"
-	"github.com/Leihb/octo-agent/internal/tools"
 )
 
-// cliPermissionGate adapts a permission.Engine into an agent.PermissionGate.
-// It resolves allow/deny verdicts directly and, for ask verdicts in
-// interactive mode, raises a KindPermission prompt through the view (stdin
-// line today, modal in the TUI) and maps the structured answer.
-//
-// In strict mode the engine has already collapsed ask → deny, so the prompt
-// path is never reached — Check just returns the denial with its reason.
-type cliPermissionGate struct {
-	engine *permission.Engine
-	ask    userPrompter // the view; raises the approval prompt
+// newCLIGate builds the shared app permission gate wired to an interactive
+// prompter: ask-class verdicts raise a KindPermission prompt through the view
+// (stdin line today, modal in the TUI) and map the structured answer. A nil
+// prompter yields a non-interactive gate (ask → deny). In strict mode the
+// engine has already collapsed ask → deny, so the prompt path is never reached.
+func newCLIGate(engine *permission.Engine, ask userPrompter) agent.PermissionGate {
+	return app.NewPermissionGate(engine, permissionAskFrom(ask))
 }
 
-// Check implements agent.PermissionGate.
-func (g *cliPermissionGate) Check(ctx context.Context, name string, input map[string]any) (bool, string) {
-	// A Tool Search tool_call wraps the real MCP tool — evaluate policy and
-	// prompt against that real tool, not the "tool_call" bridge, so per-tool
-	// allow/deny rules and the approval prompt show the right name.
-	if real, realInput, ok := tools.ToolCallTarget(name, input); ok {
-		name, input = real, realInput
+// permissionAskFrom adapts a userPrompter (the view) into an app.PermissionAsk.
+// A nil prompter returns nil, which the gate treats as non-interactive.
+func permissionAskFrom(ask userPrompter) app.PermissionAsk {
+	if ask == nil {
+		return nil
 	}
-	switch g.engine.Check(name, input) {
-	case permission.Allow:
-		return true, ""
-	case permission.Deny:
-		return false, g.engine.DenialReason(name, input)
-	case permission.Ask:
-		return g.prompt(ctx, name, input)
+	return func(ctx context.Context, name string, input map[string]any) (bool, bool, error) {
+		resp, err := ask.Ask(ctx, UserPrompt{Kind: KindPermission, ToolName: name, ToolInput: input})
+		if err != nil {
+			return false, false, err
+		}
+		return resp.Allow, resp.Always, nil
 	}
-	return false, g.engine.DenialReason(name, input)
-}
-
-// prompt raises the approval request and maps the answer: allow once, allow +
-// remember for the session, or deny (incl. empty / no view).
-func (g *cliPermissionGate) prompt(ctx context.Context, name string, input map[string]any) (bool, string) {
-	if g.ask == nil {
-		return false, fmt.Sprintf("permission_denied: user declined to run %s", name)
-	}
-	resp, err := g.ask.Ask(ctx, UserPrompt{Kind: KindPermission, ToolName: name, ToolInput: input})
-	if err != nil || !resp.Allow {
-		return false, fmt.Sprintf("permission_denied: user declined to run %s", name)
-	}
-	if resp.Always {
-		g.engine.Remember(name, input, permission.Allow)
-	}
-	return true, ""
 }
 
 // permissionConfigPath returns ~/.octo/permissions.yml. An empty string is

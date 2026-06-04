@@ -87,7 +87,7 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	initView := newPlainView(newScannerLineReader(stdin, stdout), stdout, stderr, verbosityNormal, *plain)
-	a.Gate = &cliPermissionGate{engine: engine, ask: initView}
+	a.Gate = newCLIGate(engine, initView)
 
 	fmt.Fprintln(stdout, "Analyzing the repository to generate .octorules…")
 	handler := replToolEventHandler(stdout, *plain)

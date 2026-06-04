@@ -67,7 +67,7 @@ func runTUI(cfg replConfig) int {
 	// as modals on this event loop instead of reading stdin (which bubbletea
 	// owns). Overrides whatever the plain path wired.
 	if cfg.permEngine != nil {
-		cfg.a.Gate = &cliPermissionGate{engine: cfg.permEngine, ask: sink}
+		cfg.a.Gate = newCLIGate(cfg.permEngine, sink)
 	}
 	tools.SetAsker(newREPLAsker(sink))
 

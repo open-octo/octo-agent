@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/tools"
 )
@@ -298,7 +299,7 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 	if err != nil {
 		return "", fmt.Errorf("permission engine: %w", err)
 	}
-	a.Gate = &serverPermissionGate{engine: engine}
+	a.Gate = app.NewPermissionGate(engine, nil)
 
 	reply, err := a.Run(ctx, userInput, toolDefs, executor)
 	if err != nil {
@@ -307,31 +308,6 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 
 	sess.SyncFrom(a.History)
 	return reply.Content, nil
-}
-
-// serverPermissionGate adapts permission.Engine into agent.PermissionGate.
-// In server mode, "ask" resolves to "deny" (strict mode already does this,
-// but we double-check here for clarity).
-type serverPermissionGate struct {
-	engine *permission.Engine
-}
-
-func (g *serverPermissionGate) Check(ctx context.Context, name string, input map[string]any) (bool, string) {
-	// Keep parity with the CLI gate: if a Tool Search tool_call ever reaches the
-	// server (once MCP is wired here), evaluate policy against the wrapped real
-	// tool, not the opaque "tool_call" bridge.
-	if real, realInput, ok := tools.ToolCallTarget(name, input); ok {
-		name, input = real, realInput
-	}
-	switch g.engine.Check(name, input) {
-	case permission.Allow:
-		return true, ""
-	case permission.Deny:
-		return false, g.engine.DenialReason(name, input)
-	case permission.Ask:
-		return false, g.engine.DenialReason(name, input)
-	}
-	return false, g.engine.DenialReason(name, input)
 }
 
 func permissionConfigPath() string {
