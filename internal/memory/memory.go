@@ -121,6 +121,36 @@ func RenderInjection(dir string) string {
 	return b.String()
 }
 
+// IsMemoryPath reports whether absPath is inside the per-repo memory
+// directory (~/.octo/memory/<repo-slug>/). Used by the file tools to
+// emit friendlier output when the agent reads or writes its own notes.
+func IsMemoryPath(absPath string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	prefix := filepath.Join(home, ".octo", "memory")
+	return strings.HasPrefix(absPath, prefix+string(filepath.Separator))
+}
+
+// CountMemories estimates how many "memory entries" a markdown file
+// contains by counting top-level headings (# or ##). This is a rough
+// heuristic — good enough for progress UI but not a semantic parser.
+func CountMemories(content string) int {
+	var count int
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "## ") {
+			count++
+		}
+	}
+	if count == 0 && strings.TrimSpace(content) != "" {
+		// A non-empty file with no headings still holds at least one memory.
+		return 1
+	}
+	return count
+}
+
 // Slugify reduces s to a lowercase kebab token usable as a path segment.
 func Slugify(s string) string {
 	var b strings.Builder
