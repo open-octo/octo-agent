@@ -207,11 +207,16 @@ func (TaskUpdateTool) Execute(ctx context.Context, _ string, input map[string]an
 		return agent.ToolResult{Text: ""}, fmt.Errorf("task_update: nothing to update (provide status, subject, description, or active_form)")
 	}
 
+	oldTask, _ := store.Get(id)
 	got, err := store.Update(id, u)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("task_update: %w", err)
 	}
-	return agent.ToolResult{Text: fmt.Sprintf("Updated task #%d (%s): %s", got.ID, got.Status, got.Subject)}, nil
+	statusClause := string(got.Status)
+	if u.Status != nil && oldTask.Status != got.Status {
+		statusClause = fmt.Sprintf("%s → %s", oldTask.Status, got.Status)
+	}
+	return agent.ToolResult{Text: fmt.Sprintf("Updated task #%d (%s): %s", got.ID, statusClause, got.Subject)}, nil
 }
 
 // ============================================================================
