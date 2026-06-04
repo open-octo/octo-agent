@@ -15,9 +15,9 @@ type agentPreset struct {
 // always available even when no user-defined agents are loaded.
 var builtInPresets = []agentPreset{
 	{
-		name:  "explore",
+		name:        "explore",
 		description: "Read-only exploration agent",
-		readOnly: true,
+		readOnly:    true,
 		persona: "You are a read-only exploration sub-agent. Your job is to locate and understand " +
 			"code, then report findings — not to modify anything. Use read_file, grep, glob, " +
 			"read-only terminal commands (git, find, ls), and any code-intelligence tools available. " +
@@ -26,9 +26,9 @@ var builtInPresets = []agentPreset{
 			"quoted to make the point. Don't dump whole files.",
 	},
 	{
-		name:  "plan",
+		name:        "plan",
 		description: "Read-only planning agent",
-		readOnly: true,
+		readOnly:    true,
 		persona: "You are a planning sub-agent. Investigate the codebase read-only, then produce a " +
 			"concrete, step-by-step implementation plan. Do NOT modify files. Deliverable: an ordered " +
 			"plan — the files to change and what changes in each, in dependency order; the key design " +
@@ -36,17 +36,17 @@ var builtInPresets = []agentPreset{
 			"actually inspected (cite file:line). Do not write speculative steps you couldn't verify.",
 	},
 	{
-		name:  "general",
+		name:        "general",
 		description: "General-purpose agent with full toolbelt",
-		readOnly: false,
+		readOnly:    false,
 		persona: "You are an autonomous general-purpose sub-agent handling a delegated task end-to-end. " +
 			"You have the full toolbelt. Complete the task, verify your work, and return a clear, " +
 			"self-contained result the caller can act on without seeing your intermediate steps.",
 	},
 	{
-		name:  "code-review",
+		name:        "code-review",
 		description: "Read-only code review agent",
-		readOnly: true,
+		readOnly:    true,
 		persona: "You are a code-review sub-agent. Review the changes — use `git diff`, `git status`, " +
 			"and read the touched files — for correctness bugs, convention violations, performance " +
 			"issues, missing tests, and security problems. Do NOT modify files. Deliverable: a " +

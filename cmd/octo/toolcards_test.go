@@ -7,15 +7,15 @@ import (
 
 func TestCardVerbFor(t *testing.T) {
 	cases := map[string]string{
-		"edit_file":    "Update",
-		"terminal":     "Run",
-		"grep":         "Grep",
-		"web_search":   "Search",
-		"glob":         "Glob",
-		"read_file":    "Read",
-		"web_fetch":    "Fetch",
-		"sub_agent": "", // not a card tool → one-liner
-		"remember":     "",
+		"edit_file":  "Update",
+		"terminal":   "Run",
+		"grep":       "Grep",
+		"web_search": "Search",
+		"glob":       "Glob",
+		"read_file":  "Read",
+		"web_fetch":  "Fetch",
+		"sub_agent":  "", // not a card tool → one-liner
+		"remember":   "",
 	}
 	for tool, want := range cases {
 		if got := cardVerbFor(tool); got != want {
