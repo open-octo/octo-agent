@@ -96,8 +96,8 @@ func TestTaskUpdateTool_Execute_StatusChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.Text, "in_progress") {
-		t.Errorf("Execute = %q", out.Text)
+	if !strings.Contains(out.Text, "pending → in_progress") {
+		t.Errorf("status transition missing, got %q", out.Text)
 	}
 	got, _ := store.Get(id)
 	if got.Status != tasks.InProgress {
@@ -109,7 +109,7 @@ func TestTaskUpdateTool_Execute_PartialUpdate(t *testing.T) {
 	store := useTaskStore(t)
 	id, _ := store.Create("orig", "orig desc", "")
 
-	_, err := TaskUpdateTool{}.Execute(context.Background(), "task_update", map[string]any{
+	out, err := TaskUpdateTool{}.Execute(context.Background(), "task_update", map[string]any{
 		"task_id": float64(id),
 		"subject": "new subject",
 	})
@@ -122,6 +122,10 @@ func TestTaskUpdateTool_Execute_PartialUpdate(t *testing.T) {
 	}
 	if got.Description != "orig desc" {
 		t.Errorf("Description should be untouched: %q", got.Description)
+	}
+	// No status change → output shows current status, not a transition arrow.
+	if !strings.Contains(out.Text, "(pending): new subject") {
+		t.Errorf("subject-only update should show current status, got %q", out.Text)
 	}
 }
 
