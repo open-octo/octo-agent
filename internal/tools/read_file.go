@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/memory"
 )
 
 // imageExtensions maps file extensions to their MIME types for images
@@ -111,6 +112,8 @@ func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 		return agent.ToolResult{}, fmt.Errorf("read_file: refusing to read %s — %s", path, reason)
 	}
 
+	isMemory := memory.IsMemoryPath(abs)
+
 	offset := intArg(input, "offset", 1)
 	if offset < 1 {
 		offset = 1
@@ -183,7 +186,13 @@ func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 		// already consumed just to confirm whether more content exists.
 		fmt.Fprintf(&out, "\n[end of file: %d lines total]\n", lineNum)
 	}
-	return agent.ToolResult{Text: out.String()}, nil
+
+	result := agent.ToolResult{Text: out.String()}
+	if isMemory {
+		memCount := memory.CountMemories(out.String())
+		result.Text = fmt.Sprintf("Recalled %d %s from %s\n\n%s", memCount, pluralize(memCount, "memory", "memories"), filepath.Base(abs), out.String())
+	}
+	return result, nil
 }
 
 // imageMIMEType returns the MIME type for known image extensions, or "".

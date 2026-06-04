@@ -35,6 +35,14 @@ func stringSliceArg(input map[string]any, key string) []string {
 	return nil
 }
 
+// pluralize returns singular when n == 1, otherwise plural.
+func pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
+}
+
 func firstLine(s string) string {
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)
