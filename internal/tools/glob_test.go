@@ -10,6 +10,7 @@ import (
 )
 
 func TestGlob_FlatStarPattern(t *testing.T) {
+	requireRg(t)
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "a.go"), "")
 	writeTestFile(t, filepath.Join(dir, "b.go"), "")
@@ -31,6 +32,7 @@ func TestGlob_FlatStarPattern(t *testing.T) {
 }
 
 func TestGlob_DoubleStarRecursive(t *testing.T) {
+	requireRg(t)
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "top.go"), "")
 	writeTestFile(t, filepath.Join(dir, "sub", "mid.go"), "")
@@ -55,6 +57,7 @@ func TestGlob_DoubleStarRecursive(t *testing.T) {
 }
 
 func TestGlob_SortedByMtimeDescending(t *testing.T) {
+	requireRg(t)
 	dir := t.TempDir()
 	older := filepath.Join(dir, "older.txt")
 	newer := filepath.Join(dir, "newer.txt")
@@ -79,6 +82,7 @@ func TestGlob_SortedByMtimeDescending(t *testing.T) {
 }
 
 func TestGlob_SkipsGitAndNodeModules(t *testing.T) {
+	requireRg(t)
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "src", "real.go"), "")
 	writeTestFile(t, filepath.Join(dir, ".git", "objects", "ignored.go"), "")
@@ -100,6 +104,7 @@ func TestGlob_SkipsGitAndNodeModules(t *testing.T) {
 }
 
 func TestGlob_RespectsGitignore(t *testing.T) {
+	requireRg(t)
 	// glob enumerates via ripgrep, so a .gitignore'd file is excluded even
 	// though it isn't under one of the hardcoded noise dirs. ripgrep only
 	// applies .gitignore at a detected repo root, so the test dir gets a .git
@@ -128,6 +133,7 @@ func TestGlob_RespectsGitignore(t *testing.T) {
 }
 
 func TestGlob_NoMatches(t *testing.T) {
+	requireRg(t)
 	dir := t.TempDir()
 	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
 		"pattern": "*.nonsense",
