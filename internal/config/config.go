@@ -41,6 +41,29 @@ type Config struct {
 	// env var is empty. Opt-in via `octo config` and stored mode 0600. Prefer
 	// the env var.
 	APIKey string `yaml:"api_key,omitempty"`
+	// Tools holds opt-in tooling behaviour (Tool Search for MCP, etc.). A
+	// missing block leaves the built-in defaults.
+	Tools ToolsConfig `yaml:"tools,omitempty"`
+}
+
+// ToolsConfig groups per-tool behaviour knobs under the `tools:` block.
+type ToolsConfig struct {
+	// ToolSearch defers MCP tool schemas behind a search/describe/call bridge.
+	ToolSearch ToolSearchConfig `yaml:"tool_search,omitempty"`
+}
+
+// ToolSearchConfig mirrors the documented tools.tool_search block. Empty fields
+// fall back to the tools-package defaults (auto / 10% / 5 / 20).
+type ToolSearchConfig struct {
+	// Enabled is "auto" (default), "on", or "off".
+	Enabled string `yaml:"enabled,omitempty"`
+	// ThresholdPct is the auto-mode activation threshold as a percent of the
+	// model's context window.
+	ThresholdPct int `yaml:"threshold_pct,omitempty"`
+	// SearchDefaultLimit is how many hits tool_search returns by default.
+	SearchDefaultLimit int `yaml:"search_default_limit,omitempty"`
+	// MaxSearchLimit caps the caller-supplied limit.
+	MaxSearchLimit int `yaml:"max_search_limit,omitempty"`
 }
 
 // Path returns the absolute path to the config file (~/.octo/config.yaml).
