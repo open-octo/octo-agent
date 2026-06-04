@@ -35,8 +35,12 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	spawner := NewSpawner(a, executor, toolsFor)
 	tools.SetSpawner(spawner)
 	mgr := tools.NewSubAgentManager(spawner)
+	tools.SetDefaultSubAgentManager(mgr)
 
-	cleanup := func() { tools.SetSpawner(nil) }
+	cleanup := func() {
+		tools.SetDefaultSubAgentManager(nil)
+		tools.SetSpawner(nil)
+	}
 	if enableTasks {
 		tools.SetTaskStore(tasks.New())
 		prev := cleanup
