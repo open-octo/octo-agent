@@ -75,6 +75,9 @@ archives:
       - README_CN.md
       - LICENSE.txt
       - CHANGELOG.md
+      # Windows double-click launcher: opens PowerShell with octo on PATH and
+      # starts a session. Harmless in the tar.gz archives; meant for the zip.
+      - packaging/windows/start-octo.cmd
 
 checksum:
   name_template: checksums.txt
