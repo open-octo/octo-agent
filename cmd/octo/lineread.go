@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -92,6 +93,15 @@ type readlineLineReader struct {
 }
 
 func newReadlineReader(historyFile string) (*readlineLineReader, error) {
+	// chzyer/readline drives the Windows console through its own raw-mode ANSI
+	// emulation, which mangles pasted input (a pasted URL comes through garbled
+	// or not at all). Decline on Windows so callers fall back to the cooked-mode
+	// scanner, where PowerShell/Conhost handle paste natively. Editing/history
+	// is lost there, but interactive Windows sessions use the bubbletea TUI for
+	// the REPL anyway — the only readline consumer left is the config wizard.
+	if runtime.GOOS == "windows" {
+		return nil, errors.New("interactive line editing is unavailable on Windows")
+	}
 	if historyFile != "" {
 		if err := os.MkdirAll(filepath.Dir(historyFile), 0o755); err != nil {
 			// Non-fatal: fall through with history disabled rather than
