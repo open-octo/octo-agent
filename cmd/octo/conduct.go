@@ -60,10 +60,10 @@ func printConductUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --verify-cmd \"<cmd>\"       Gate each unit with a shell command (e.g. go build/test)")
 	fmt.Fprintln(w, "  --max-attempts N           Verify-fail retries per unit before it blocks (default 3)")
 	fmt.Fprintln(w, "  --max-iterations N         Loop-turn budget backstop (default scales with units)")
-	fmt.Fprintln(w, "  --stall-rounds N           Stop after N rounds with no unit completed (0 = off)")
+	fmt.Fprintln(w, "  --stall-rounds N           Stop after N rounds with no unit completed (default 5, 0 = off)")
 	fmt.Fprintln(w, "  --concurrency N            Parallel workers in isolated worktrees (default 1)")
 	fmt.Fprintln(w, "  --no-worktree              Run workers in the main tree even when concurrency=1")
-	fmt.Fprintln(w, "  --replan                   Let the conductor revise the plan as it learns")
+	fmt.Fprintln(w, "  --replan=false             Disable automatic re-planning when stuck")
 }
 
 // conductFlags holds the parsed start-flags shared across the start/resume paths.
@@ -91,10 +91,10 @@ func conductFlagSet(name string, f *conductFlags, stderr io.Writer) *flag.FlagSe
 	fs.StringVar(&f.verifyCmd, "verify-cmd", "", "Gate each unit with a shell command, e.g. \"go build ./... && go test ./...\" (overrides --verify)")
 	fs.IntVar(&f.maxAttempts, "max-attempts", 0, "Verify-fail retries per unit before blocking")
 	fs.IntVar(&f.maxIterations, "max-iterations", 0, "Loop-turn budget backstop")
-	fs.IntVar(&f.stallRounds, "stall-rounds", 0, "Stop after N rounds with no progress (0=off)")
+	fs.IntVar(&f.stallRounds, "stall-rounds", 5, "Stop after N rounds with no progress (0=off)")
 	fs.IntVar(&f.concurrency, "concurrency", 1, "Parallel workers in isolated worktrees")
 	fs.BoolVar(&f.noWorktree, "no-worktree", false, "Run workers in the main tree")
-	fs.BoolVar(&f.replan, "replan", false, "Let the conductor revise the plan as it learns")
+	fs.BoolVar(&f.replan, "replan", true, "Let the conductor revise the plan as it learns (disable with --replan=false)")
 	return fs
 }
 
