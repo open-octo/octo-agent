@@ -4,8 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
-
-	"github.com/Leihb/octo-agent/internal/tui/themes"
 )
 
 // markdownRenderer wraps a glamour TermRenderer, lazily (re)built when the wrap
@@ -33,9 +31,8 @@ func (m *markdownRenderer) render(src string, width int) string {
 		if style == "" {
 			style = "dark"
 		}
-		styleBytes := themes.GetStyle(style)
 		r, err := glamour.NewTermRenderer(
-			glamour.WithStylesFromJSONBytes(styleBytes),
+			glamour.WithStandardStyle(style),
 			glamour.WithWordWrap(w),
 		)
 		if err != nil {
