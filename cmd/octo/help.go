@@ -26,6 +26,8 @@ func printCommandHelp(name string, w io.Writer) bool {
 		completionHelp(w)
 	case "mcp":
 		mcpHelp(w)
+	case "serve":
+		serveHelp(w)
 	default:
 		return false
 	}
@@ -203,6 +205,45 @@ Common flags:
 
 Environment:
   ANTHROPIC_API_KEY / OPENAI_API_KEY    Required for the chosen provider.`)
+}
+
+func serveHelp(w io.Writer) {
+	fmt.Fprintln(w, `octo serve — start the HTTP server (REST API + SSE + Web UI).
+
+The server binds to localhost:8080 by default. All API and WebSocket routes
+require an access key; /api/health is public (used by the Web UI to validate
+the key before storing it).
+
+Examples:
+  octo serve                           Start on :8080 with auto-generated key
+  octo serve --addr 127.0.0.1:3000     Bind to a specific address
+  octo serve --access-key my-secret    Use a fixed key (printed on startup)
+  octo serve --no-channel              Skip IM platform bridges
+  octo serve --no-tools                Disable the agentic tool loop
+
+Common flags:
+  --addr <host:port>       Bind address (default :8080)
+  --access-key <key>       Shared secret for Web UI / API auth
+  --provider <name>        anthropic (default) | openai
+  --model <name>           Override the default model
+  --system <text>          Custom system prompt
+  --max-tokens <n>         Per-response token cap
+  --tools                  Enable agentic tool loop (default true)
+  --no-tools               Disable agentic tool loop
+  --cors <origins>         CORS allowed origins (comma-separated, * for any)
+  --no-channel             Disable IM channel startup
+
+Environment:
+  OCTO_ACCESS_KEY          Override the config access_key, per run
+  ANTHROPIC_API_KEY        Required when --provider=anthropic
+  OPENAI_API_KEY           Required when --provider=openai
+  ANTHROPIC_BASE_URL       Override the Anthropic endpoint
+  OPENAI_BASE_URL          Override the OpenAI endpoint
+
+Key resolution (highest first):
+  --access-key flag > OCTO_ACCESS_KEY env > config file > auto-generated 64-char hex
+
+Run "octo serve --help" for the full flag list.`)
 }
 
 func configHelp(w io.Writer) {
