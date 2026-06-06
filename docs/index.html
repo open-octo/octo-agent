@@ -3,169 +3,543 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Octo — a functionality-first AI agent</title>
-  <meta name="description" content="A functionality-first AI agent, distributed as a single Go binary. Speaks Anthropic Messages and OpenAI Chat Completions natively, plus any compatible third party. Three equal interfaces: CLI, web UI, IM.">
+  <title>Octo — A functionality-first AI agent</title>
+  <meta name="description" content="A single Go binary that brings AI agents to your terminal, browser, and chat apps. Anthropic + OpenAI native. Built-in tools, MCP, skills, sandboxing, and persistent memory.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='52' font-size='52'%3E🐙%3C/text%3E%3C/svg%3E">
   <style>
     :root {
-      --bg: #fdfdfd;
-      --fg: #1a1a1a;
+      --bg: #fafafa;
+      --fg: #111827;
+      --fg-secondary: #374151;
       --muted: #6b7280;
       --accent: #4f46e5;
-      --code-bg: #f5f5f4;
-      --border: #e5e5e5;
+      --accent-soft: #e0e7ff;
+      --accent-hover: #4338ca;
+      --code-bg: #f3f4f6;
+      --code-fg: #1f2937;
+      --border: #e5e7eb;
+      --card-bg: #ffffff;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.08), 0 4px 10px -2px rgba(0,0,0,0.04);
+      --radius: 12px;
+      --radius-sm: 8px;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #0d1117;
-        --fg: #e6edf3;
-        --muted: #8b949e;
+        --bg: #0b0f19;
+        --fg: #f3f4f6;
+        --fg-secondary: #d1d5db;
+        --muted: #9ca3af;
         --accent: #818cf8;
-        --code-bg: #161b22;
-        --border: #30363d;
+        --accent-soft: rgba(129,140,248,0.12);
+        --accent-hover: #a5b4fc;
+        --code-bg: #111827;
+        --code-fg: #e5e7eb;
+        --border: #1f2937;
+        --card-bg: #111827;
+        --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+        --shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.4), 0 4px 10px -2px rgba(0,0,0,0.3);
       }
     }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
     body {
-      margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
       background: var(--bg);
       color: var(--fg);
-      line-height: 1.6;
+      line-height: 1.65;
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
-    .wrap { max-width: 760px; margin: 0 auto; padding: 4rem 1.5rem 6rem; }
-    h1 { font-size: 2.5rem; font-weight: 700; margin: 0 0 .5rem; letter-spacing: -0.02em; }
-    h1 .emoji { margin-right: .4rem; }
-    .tagline { font-size: 1.15rem; color: var(--muted); margin: 0 0 2.5rem; }
-    section { margin: 2.5rem 0; }
-    h2 { font-size: 1.15rem; font-weight: 600; margin: 0 0 .75rem; }
-    p { margin: .5rem 0; }
-    code, pre {
-      font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-      font-size: 0.95em;
+
+    /* Hero */
+    .hero {
+      padding: 6rem 1.5rem 5rem;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
     }
-    pre {
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem 1.25rem;
-      overflow-x: auto;
-      margin: .75rem 0;
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 800px;
+      background: radial-gradient(circle, var(--accent-soft) 0%, transparent 70%);
+      opacity: 0.6;
+      pointer-events: none;
     }
-    .install pre { font-size: 1.05em; }
-    code.inline {
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 0.1em 0.4em;
-      font-size: 0.9em;
+    .hero-inner { position: relative; max-width: 720px; margin: 0 auto; }
+    .hero-logo {
+      font-size: 4rem;
+      line-height: 1;
+      margin-bottom: 1.25rem;
+      display: inline-block;
+      animation: float 4s ease-in-out infinite;
     }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 1rem;
-      margin-top: 1rem;
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
     }
-    .card {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem 1.15rem;
+    .hero h1 {
+      font-size: clamp(2.4rem, 6vw, 3.6rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 1rem;
     }
-    .card h3 {
+    .hero h1 span { color: var(--accent); }
+    .hero-tagline {
+      font-size: clamp(1.05rem, 2.5vw, 1.25rem);
+      color: var(--fg-secondary);
+      max-width: 560px;
+      margin: 0 auto 2rem;
+      line-height: 1.6;
+    }
+    .hero-actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.65rem 1.4rem;
+      border-radius: var(--radius-sm);
       font-size: 0.95rem;
       font-weight: 600;
-      margin: 0 0 .35rem;
+      text-decoration: none;
+      transition: all 0.15s ease;
+      border: none;
+      cursor: pointer;
     }
-    .card p {
-      font-size: 0.9rem;
-      color: var(--muted);
-      margin: 0;
-    }
-    .cta {
-      display: inline-block;
+    .btn-primary {
       background: var(--accent);
       color: #fff;
-      text-decoration: none;
-      padding: 0.6rem 1.1rem;
-      border-radius: 8px;
-      font-weight: 500;
-      margin-right: .5rem;
-      margin-top: 1rem;
     }
-    .cta.secondary {
+    .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    .btn-secondary {
       background: transparent;
       color: var(--accent);
-      border: 1px solid var(--accent);
+      border: 1.5px solid var(--accent);
     }
-    a { color: var(--accent); }
+    .btn-secondary:hover { background: var(--accent-soft); }
+    .install-hint {
+      margin-top: 2rem;
+      display: inline-block;
+    }
+    .install-hint code {
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.85rem;
+      background: var(--code-bg);
+      color: var(--code-fg);
+      padding: 0.5rem 1rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+    }
+
+    /* Layout */
+    .container { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
+    section { padding: 4rem 0; }
+    section + section { border-top: 1px solid var(--border); }
+    .section-header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+    .section-header h2 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+    }
+    .section-header p {
+      color: var(--muted);
+      font-size: 1.05rem;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    /* Feature grid */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+    }
+    .feature {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .feature:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-lg);
+    }
+    .feature-icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.75rem;
+      display: block;
+    }
+    .feature h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+      color: var(--fg);
+    }
+    .feature p {
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    /* Interfaces */
+    .interfaces {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+    }
+    @media (max-width: 640px) {
+      .interfaces { grid-template-columns: 1fr; }
+    }
+    .iface {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.75rem 1.5rem;
+      text-align: center;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .iface:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-lg);
+    }
+    .iface-icon {
+      font-size: 2rem;
+      margin-bottom: 0.75rem;
+    }
+    .iface h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+    }
+    .iface p {
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    /* Code demo */
+    .demo-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+    @media (max-width: 720px) {
+      .demo-grid { grid-template-columns: 1fr; }
+    }
+    .demo-block {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .demo-header {
+      padding: 0.6rem 1rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--muted);
+      background: var(--code-bg);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .demo-header .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+    .demo-header .dot:first-child { background: #ef4444; }
+    .demo-header .dot:nth-child(2) { background: #f59e0b; }
+    .demo-header .dot:nth-child(3) { background: #22c55e; }
+    pre.demo-code {
+      margin: 0;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.82rem;
+      line-height: 1.65;
+      background: var(--code-bg);
+      color: var(--code-fg);
+    }
+    pre.demo-code .comment { color: var(--muted); font-style: italic; }
+    pre.demo-code .cmd { color: var(--accent); font-weight: 600; }
+    pre.demo-code .arg { color: #059669; }
+    @media (prefers-color-scheme: dark) {
+      pre.demo-code .arg { color: #34d399; }
+    }
+
+    /* Philosophy / not-list */
+    .philosophy {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2.5rem;
+      align-items: start;
+    }
+    @media (max-width: 720px) {
+      .philosophy { grid-template-columns: 1fr; }
+    }
+    .philosophy-block h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+    .philosophy-block ul {
+      list-style: none;
+      padding: 0;
+    }
+    .philosophy-block li {
+      padding: 0.5rem 0;
+      color: var(--fg-secondary);
+      font-size: 0.95rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.6rem;
+    }
+    .philosophy-block li::before {
+      content: '→';
+      color: var(--accent);
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .philosophy-block.positive li::before { content: '✓'; }
+
+    /* Footer */
     footer {
-      margin-top: 4rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid var(--border);
+      padding: 3rem 1.5rem;
+      text-align: center;
       color: var(--muted);
       font-size: 0.85rem;
+      border-top: 1px solid var(--border);
     }
-    footer a { color: var(--muted); }
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: var(--accent); text-decoration: underline; }
+    .footer-links {
+      display: flex;
+      gap: 1.25rem;
+      justify-content: center;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+
+    /* Scroll reveal */
+    .reveal {
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <h1><span class="emoji">🐙</span>Octo</h1>
-      <p class="tagline">A functionality-first AI agent with three equal interfaces.</p>
-    </header>
 
-    <section class="install">
-      <h2>Install</h2>
-      <p style="color: var(--muted); font-size: 0.9rem; margin-top: 0;">Download a prebuilt binary for macOS / Linux / Windows (amd64 + arm64) — no Go toolchain needed:</p>
-      <pre><code><a href="https://github.com/Leihb/octo-agent/releases/latest" style="color: inherit;">github.com/Leihb/octo-agent/releases/latest</a></code></pre>
-      <p style="color: var(--muted); font-size: 0.9rem;">Or, with Go ≥ 1.22:</p>
-      <pre><code>go install github.com/Leihb/octo-agent/cmd/octo@latest</code></pre>
-      <p style="color: var(--muted); font-size: 0.9rem;">Single binary, no runtime dependencies. Run <code class="inline">octo config</code> once to set your provider/key, then <code class="inline">octo chat</code>. Web UI and IM bridges land in later milestones.</p>
-    </section>
+  <!-- Hero -->
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="hero-logo">🐙</div>
+      <h1>Meet <span>Octo</span></h1>
+      <p class="hero-tagline">
+        A functionality-first AI agent in a single Go binary.
+        Bring it to your terminal, browser, or chat app — it speaks
+        Anthropic and OpenAI natively, and actually gets things done.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://github.com/Leihb/octo-agent">⭐ Star on GitHub</a>
+        <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent/blob/main/README.md">📖 Read the Docs</a>
+      </div>
+      <div class="install-hint">
+        <code>go install github.com/Leihb/octo-agent/cmd/octo@latest</code>
+      </div>
+    </div>
+  </header>
 
-    <section>
-      <h2>Three faces, one agent</h2>
-      <div class="grid">
-        <div class="card">
-          <h3>Terminal</h3>
-          <p>First-class CLI. Streaming, tool calls, sessions, skills, MCP.</p>
+  <!-- Features -->
+  <section>
+    <div class="container">
+      <div class="section-header reveal">
+        <h2>Built for people who ship</h2>
+        <p>Octo is not a thin wrapper around an API. It is a full agent loop with tools, memory, sandboxing, and autonomy — packaged as one file you can drop anywhere.</p>
+      </div>
+      <div class="features">
+        <div class="feature reveal">
+          <span class="feature-icon">📦</span>
+          <h3>Single binary, zero deps</h3>
+          <p>One Go executable. No Python, no Node, no Docker. Download a prebuilt for macOS, Linux, or Windows and run it immediately.</p>
         </div>
-        <div class="card">
-          <h3>Web UI</h3>
-          <p>Local web app at <code class="inline">:8888</code>. Same agent, richer rendering, browse and delete sessions.</p>
+        <div class="feature reveal">
+          <span class="feature-icon">🔌</span>
+          <h3>Two protocols, every provider</h3>
+          <p>Speaks Anthropic Messages and OpenAI Chat Completions natively. DeepSeek, Kimi, Bailian, OpenRouter, vLLM — if it exposes either shape, it just works.</p>
         </div>
-        <div class="card">
-          <h3>IM bridges</h3>
-          <p>Feishu, WeCom, WeChat, Discord, Telegram, DingTalk.</p>
+        <div class="feature reveal">
+          <span class="feature-icon">🛠️</span>
+          <h3>Real tools, not toy examples</h3>
+          <p>File read/write/edit, terminal (with background jobs), glob, grep, web fetch/search. Plus MCP servers and reusable Skills in Claude Code format.</p>
+        </div>
+        <div class="feature reveal">
+          <span class="feature-icon">🧠</span>
+          <h3>Persistent memory</h3>
+          <p>Octo remembers your preferences, project conventions, and past corrections across sessions — stored locally in <code>~/.octo/memory/</code>, not in the cloud.</p>
+        </div>
+        <div class="feature reveal">
+          <span class="feature-icon">🔒</span>
+          <h3>OS-level sandboxing</h3>
+          <p>Enable <code>--sandbox</code> to confine terminal commands to the project directory with no network access. macOS Seatbelt and Linux Landlock + seccomp.</p>
+        </div>
+        <div class="feature reveal">
+          <span class="feature-icon">🤖</span>
+          <h3>Autonomous orchestration</h3>
+          <p><code>octo conduct</code> plans a goal into a subtask DAG, delegates to parallel sub-agents, and resumes after crashes. Long-horizon tasks without babysitting.</p>
         </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section>
-      <h2>Two native API protocols</h2>
-      <p style="color: var(--muted);">Speaks <strong>Anthropic Messages</strong> and <strong>OpenAI Chat Completions</strong> natively — dispatched per-provider, per-model. Any service that exposes one of these shapes (DeepSeek, Kimi, Bailian, OpenRouter, vLLM, …) works out of the box.</p>
-    </section>
+  <!-- Three interfaces -->
+  <section>
+    <div class="container">
+      <div class="section-header reveal">
+        <h2>Three faces, one agent</h2>
+        <p>Each interface is a first-class citizen. Use the one that fits your workflow — the agent underneath is identical.</p>
+      </div>
+      <div class="interfaces">
+        <div class="iface reveal">
+          <div class="iface-icon">💻</div>
+          <h3>Terminal</h3>
+          <p>Rich interactive TUI with streaming, tool-call cards, session history, and readline editing. Or run headless one-shots in scripts and CI.</p>
+        </div>
+        <div class="iface reveal">
+          <div class="iface-icon">🌐</div>
+          <h3>Web UI</h3>
+          <p>Local dashboard at <code>:8080</code>. Browse sessions, inspect tool output, manage skills — same agent, richer visuals.</p>
+        </div>
+        <div class="iface reveal">
+          <div class="iface-icon">💬</div>
+          <h3>IM Bridge</h3>
+          <p>WeChat iLink today. Scan a QR code, add Octo to your group chat, and delegate tasks from your phone without opening a terminal.</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
-    <section>
-      <h2>What Octo is not</h2>
-      <ul style="color: var(--muted); padding-left: 1.25rem;">
-        <li>Not a token-minimization obsession — functionality comes first.</li>
-        <li>Not web-first — no master-worker architecture imposed on local CLI usage.</li>
-        <li>Not a marketplace — no encrypted skills, no commercial skill ecosystem.</li>
-      </ul>
-    </section>
+  <!-- Demo -->
+  <section>
+    <div class="container">
+      <div class="section-header reveal">
+        <h2>See it in action</h2>
+        <p>A few commands to get a feel for what Octo can do.</p>
+      </div>
+      <div class="demo-grid">
+        <div class="demo-block reveal">
+          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>One-shot agentic task</div>
+          <pre class="demo-code"><span class="comment"># Headless: one prompt → full tool loop → exit</span>
+<span class="cmd">octo chat</span> <span class="arg">"Add a --json flag to octo config show"</span>
 
-    <section>
-      <a class="cta" href="https://github.com/Leihb/octo-agent">GitHub</a>
-      <a class="cta secondary" href="https://github.com/Leihb/octo-agent/blob/main/README.md">README</a>
-      <a class="cta secondary" href="https://github.com/Leihb/octo-agent/blob/main/CHANGELOG.md">Changelog</a>
-    </section>
+<span class="comment"># Pipe-friendly for scripts</span>
+echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">octo chat</span></pre>
+        </div>
+        <div class="demo-block reveal">
+          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Interactive session</div>
+          <pre class="demo-code"><span class="comment"># TUI with history, tool cards, and /commands</span>
+<span class="cmd">octo chat</span>
+<span class="cmd">octo chat</span> --list-sessions
+<span class="cmd">octo chat</span> -c &lt;session-id&gt;
 
-    <footer>
-      MIT licensed. See <a href="https://github.com/Leihb/octo-agent/blob/main/LICENSE.txt">LICENSE.txt</a>.
-    </footer>
-  </div>
+<span class="comment"># With reasoning and sandbox</span>
+<span class="cmd">octo chat</span> --reasoning-effort high --sandbox</pre>
+        </div>
+        <div class="demo-block reveal">
+          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Autonomous execution</div>
+          <pre class="demo-code"><span class="comment"># Plan, delegate, and run without babysitting</span>
+<span class="cmd">octo conduct</span> <span class="arg">"Refactor error handling in internal/agent"</span>
+<span class="cmd">octo conduct</span> status &lt;id&gt;
+<span class="cmd">octo conduct</span> resume &lt;id&gt;</pre>
+        </div>
+        <div class="demo-block reveal">
+          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Configuration layers</div>
+          <pre class="demo-code"><span class="comment"># Octo learns who you are and how you work</span>
+~/.octo/soul.md      <span class="comment"># agent persona</span>
+~/.octo/user.md      <span class="comment"># your profile</span>
+~/.octo/octorules.md <span class="comment"># global rules</span>
+.octorules           <span class="comment"># project conventions</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Philosophy -->
+  <section>
+    <div class="container">
+      <div class="philosophy">
+        <div class="philosophy-block positive reveal">
+          <h3>What Octo is</h3>
+          <ul>
+            <li>A tool that gets out of the way and lets you work</li>
+            <li>Functionality over token-counting minimalism</li>
+            <li>Open, inspectable, and hackable — MIT licensed</li>
+            <li>Local-first: your data stays on your machine</li>
+            <li>Composable: MCP, skills, hooks, sub-agents</li>
+          </ul>
+        </div>
+        <div class="philosophy-block reveal">
+          <h3>What Octo is not</h3>
+          <ul>
+            <li>Not a web-only SaaS with a tacked-on CLI</li>
+            <li>Not a closed marketplace for encrypted skills</li>
+            <li>Not obsessed with shaving tokens at the cost of capability</li>
+            <li>Not a black box — every tool call is visible and gated</li>
+            <li>Not trying to replace your IDE (it pairs beautifully with one)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section style="text-align: center;">
+    <div class="container">
+      <div class="reveal">
+        <h2 style="font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem;">Ready to try it?</h2>
+        <p style="color: var(--muted); margin-bottom: 1.5rem;">Install in seconds, configure in a minute, ship in an hour.</p>
+        <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+          <a class="btn btn-primary" href="https://github.com/Leihb/octo-agent/releases/latest">⬇️ Download</a>
+          <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent">🐙 GitHub</a>
+          <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent/blob/main/CHANGELOG.md">📋 Changelog</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-links">
+      <a href="https://github.com/Leihb/octo-agent">GitHub</a>
+      <a href="https://github.com/Leihb/octo-agent/blob/main/README.md">README</a>
+      <a href="https://github.com/Leihb/octo-agent/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/Leihb/octo-agent/blob/main/LICENSE.txt">License</a>
+    </div>
+    <p>MIT licensed · Built with curiosity and a lot of ☕</p>
+  </footer>
+
+  <script>
+    // Simple scroll-reveal
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+  </script>
 </body>
 </html>
