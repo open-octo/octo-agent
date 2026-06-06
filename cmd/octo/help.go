@@ -214,16 +214,19 @@ Precedence (highest first): CLI flag (--provider/--model) > env var > this file
 here is opt-in and lands in plaintext (mode 0600) — prefer the env var.
 
 Usage:
-  octo config             Interactive setup wizard (writes the file)
-  octo config show        Print the effective provider/model and where each
-                          comes from (never prints the key itself)
-  octo config path        Print the config file path
+  octo config                      Interactive setup wizard (writes the file)
+  octo config show                 Print the effective provider/model and where each
+                                   comes from (never prints the key itself)
+  octo config path                 Print the config file path
+  octo config --access-key <key>   Set the Web UI / API access key
 
 File (~/.octo/config.yaml):
   provider: openai
   model: gpt-4o-mini
   base_url: https://api.deepseek.com   # optional, for compatible 3rd parties
+  access_key: my-secret-key            # optional, for octo serve auth
 
 Environment:
-  ANTHROPIC_API_KEY / OPENAI_API_KEY    Override any stored key, per run.`)
+  ANTHROPIC_API_KEY / OPENAI_API_KEY    Override any stored key, per run.
+  OCTO_ACCESS_KEY                       Override the config access_key, per run.`)
 }

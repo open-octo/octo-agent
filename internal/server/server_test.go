@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/skills"
 )
 
@@ -167,7 +168,7 @@ func TestAccessKey_ConfigWinsEnv(t *testing.T) {
 func TestHandleListSessions(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions?access_key="+srv.AccessKey(), nil)
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
 
@@ -186,7 +187,7 @@ func TestHandleListSessions(t *testing.T) {
 func TestHandleGetSession_NotFound(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/nonexistent?access_key="+srv.AccessKey(), nil)
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
 
@@ -208,7 +209,7 @@ func TestHandleDeleteSession(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+sess.ID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+sess.ID+"?access_key="+srv.AccessKey(), nil)
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
 
@@ -238,7 +239,7 @@ func TestHandleDeleteSessions_Batch(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(deleteSessionsRequest{IDs: ids})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete?access_key="+srv.AccessKey(), bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
@@ -266,7 +267,7 @@ func TestHandleDeleteSessions_Batch(t *testing.T) {
 func TestHandleDeleteSessions_EmptyIDs(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete", bytes.NewReader([]byte(`{"ids":[]}`)))
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete?access_key="+srv.AccessKey(), bytes.NewReader([]byte(`{"ids":[]}`)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
@@ -280,7 +281,7 @@ func TestHandleCreateChat_MissingMessage(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	body := bytes.NewReader([]byte(`{}`))
-	req := httptest.NewRequest(http.MethodPost, "/api/chat", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat?access_key="+srv.AccessKey(), body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
@@ -294,7 +295,7 @@ func TestHandleTurn_MissingSession(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	body := bytes.NewReader([]byte(`{"message":"hello"}`))
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/nonexistent/turn", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/nonexistent/turn?access_key="+srv.AccessKey(), body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
@@ -385,6 +386,7 @@ func mustServer(t *testing.T, cfg Config) *Server {
 		envCtx:         "",
 		turnLocks:      map[string]*sync.Mutex{},
 		sender:         &stubSender{},
+		accessKey:      resolveAccessKey(cfg.AccessKey, config.Config{}),
 	}
 	srv.registerRoutes()
 	// Wrap with CORS middleware so tests that exercise CORS hit the right layer.

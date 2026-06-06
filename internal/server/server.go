@@ -137,7 +137,8 @@ func New(cfg Config) (*Server, error) {
 	skillsManifest := skills.RenderManifest(skillReg)
 	tools.SetSkills(skillReg)
 
-	accessKey := resolveAccessKey(cfg.AccessKey)
+	fileCfg, _ := config.Load()
+	accessKey := resolveAccessKey(cfg.AccessKey, fileCfg)
 
 	s := &Server{
 		cfg:            cfg,
@@ -462,13 +463,17 @@ func resolveBaseURL(provider string, cfg config.Config) string {
 }
 
 // resolveAccessKey returns the access key to use: explicit config value,
-// OCTO_ACCESS_KEY env var, or a freshly generated random 32-byte hex string.
-func resolveAccessKey(cfgValue string) string {
+// OCTO_ACCESS_KEY env var, config file access_key field, or a freshly
+// generated random 32-byte hex string.
+func resolveAccessKey(cfgValue string, fileCfg config.Config) string {
 	if cfgValue != "" {
 		return cfgValue
 	}
 	if env := os.Getenv("OCTO_ACCESS_KEY"); env != "" {
 		return env
+	}
+	if fileCfg.AccessKey != "" {
+		return fileCfg.AccessKey
 	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
