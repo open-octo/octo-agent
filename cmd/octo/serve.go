@@ -24,6 +24,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	maxTokens := fs.Int("max-tokens", 0, "max_tokens for responses")
 	tools := fs.Bool("tools", true, "Enable agentic tool loop")
 	cors := fs.String("cors", "", "CORS allowed origins (comma-separated, * for any)")
+	noChannel := fs.Bool("no-channel", false, "Disable IM channel (DingTalk, Feishu)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -46,6 +47,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		MaxTokens:   *maxTokens,
 		Tools:       *tools,
 		CORSOrigins: corsOrigins,
+		NoChannel:   *noChannel,
 	}
 
 	srv, err := server.New(cfg)
