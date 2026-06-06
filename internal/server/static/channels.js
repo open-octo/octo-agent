@@ -197,13 +197,14 @@ const Channels = (() => {
     const desired = checkbox.checked;
     checkbox.disabled = true;
     try {
-      const res = await fetch(`/api/channels/${encodeURIComponent(platform)}/enabled`, {
-        method:  "PATCH",
+      // Backend route is POST /api/channels/{platform} (not PATCH /enabled).
+      const res = await fetch(`/api/channels/${encodeURIComponent(platform)}`, {
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ enabled: desired }),
+        body:    JSON.stringify({ enabled: desired, fields: {} }),
       });
       const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "toggle failed");
+      if (!res.ok) throw new Error(data.error || "toggle failed");
       await _load({ silent: true });
     } catch (e) {
       checkbox.checked = !desired;

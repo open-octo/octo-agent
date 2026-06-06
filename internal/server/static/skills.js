@@ -500,11 +500,10 @@ const SkillAC = (() => {
     _currentSession = sessionId || null;
   }
 
-  /** Fetch live skill list from server for the current session. */
+  /** Fetch live skill list from server. */
   async function _fetchSkills() {
-    if (!_currentSession) return [];
     try {
-      const res  = await fetch(`/api/sessions/${_currentSession}/skills`);
+      const res  = await fetch("/api/skills");
       const data = await res.json();
       return data.skills || [];
     } catch (e) {

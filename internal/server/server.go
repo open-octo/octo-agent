@@ -277,6 +277,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/config", s.requireAuth(s.handleGetConfig))
 	s.mux.HandleFunc("POST /api/config/test", s.requireAuth(s.handleTestConfig))
 	s.mux.HandleFunc("POST /api/config/models", s.requireAuth(s.handleSaveModelConfig))
+	s.mux.HandleFunc("PATCH /api/config/models/{id}", s.requireAuth(s.handleUpdateModelConfig))
+	s.mux.HandleFunc("DELETE /api/config/models/{id}", s.requireAuth(s.handleDeleteModelConfig))
+	s.mux.HandleFunc("POST /api/config/models/{id}/default", s.requireAuth(s.handleSetDefaultModelConfig))
 
 	// Upload
 	s.mux.HandleFunc("POST /api/upload", s.requireAuth(s.handleUpload))

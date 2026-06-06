@@ -229,6 +229,7 @@ type configResponse struct {
 }
 
 type modelConfig struct {
+	ID              string `json:"id"`
 	Type            string `json:"type"`
 	Model           string `json:"model"`
 	BaseURL         string `json:"base_url"`
@@ -244,6 +245,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 	if cfg.Model != "" || cfg.BaseURL != "" {
 		models = append(models, modelConfig{
+			ID:              "default",
 			Type:            "default",
 			Model:           cfg.Model,
 			BaseURL:         cfg.BaseURL,
@@ -344,5 +346,71 @@ func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": "default"})
+}
+
+// handleUpdateModelConfig updates an existing model config (same as save for single-model).
+func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing model id")
+		return
+	}
+
+	var req saveModelRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	cfg, _ := config.Load()
+	cfg.Model = req.Model
+	cfg.BaseURL = req.BaseURL
+	if req.APIKey != "" {
+		cfg.APIKey = req.APIKey
+	}
+	if req.AnthropicFormat {
+		cfg.Provider = "anthropic"
+	} else {
+		cfg.Provider = "openai"
+	}
+
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleDeleteModelConfig removes the single model config.
+func (s *Server) handleDeleteModelConfig(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing model id")
+		return
+	}
+
+	cfg, _ := config.Load()
+	cfg.Model = ""
+	cfg.BaseURL = ""
+	cfg.APIKey = ""
+	cfg.Provider = ""
+
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleSetDefaultModelConfig sets the model as default (no-op in single-model system).
+func (s *Server) handleSetDefaultModelConfig(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing model id")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
