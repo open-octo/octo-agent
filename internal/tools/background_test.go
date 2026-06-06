@@ -105,8 +105,8 @@ func TestTerminalTool_BackgroundLaunch(t *testing.T) {
 	m := NewBackgroundManager()
 	tool := TerminalTool{mgr: m}
 	resTool, err := tool.Execute(context.Background(), "terminal", map[string]any{
-		"command":    "echo hi",
-		"background": true,
+		"command":           "echo hi",
+		"run_in_background": true,
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -116,8 +116,8 @@ func TestTerminalTool_BackgroundLaunch(t *testing.T) {
 	}
 	// The terminal guard (e.g. in-place sed) still applies to background launches.
 	if _, err := tool.Execute(context.Background(), "terminal", map[string]any{
-		"command":    "sed -i 's/a/b/' file.txt",
-		"background": true,
+		"command":           "sed -i 's/a/b/' file.txt",
+		"run_in_background": true,
 	}); err == nil {
 		t.Error("guarded command should be refused even in background mode")
 	}
@@ -154,8 +154,8 @@ func TestTerminalOutputTool(t *testing.T) {
 	outTool := TerminalOutputTool{mgr: m}
 
 	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
-		"command":    "echo from-bg",
-		"background": true,
+		"command":           "echo from-bg",
+		"run_in_background": true,
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -194,8 +194,8 @@ func TestKillShellTool(t *testing.T) {
 	killTool := KillShellTool{mgr: m}
 
 	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
-		"command":    "sleep 30",
-		"background": true,
+		"command":           "sleep 30",
+		"run_in_background": true,
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -280,8 +280,8 @@ func TestTerminalOutputTool_AntiPolling(t *testing.T) {
 	outTool := TerminalOutputTool{mgr: m}
 
 	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
-		"command":    "sleep 30",
-		"background": true,
+		"command":           "sleep 30",
+		"run_in_background": true,
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -311,8 +311,8 @@ func TestTerminalOutputTool_ReadOnly(t *testing.T) {
 	outTool := TerminalOutputTool{mgr: m}
 
 	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
-		"command":    "sleep 30",
-		"background": true,
+		"command":           "sleep 30",
+		"run_in_background": true,
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
