@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -516,4 +518,75 @@ func permissionConfigPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".octo", "permissions.yml")
+}
+
+// ─── POST /api/file-action ────────────────────────────────────────────────
+
+// fileActionRequest is sent when the user clicks a file:// link in chat.
+type fileActionRequest struct {
+	Path   string `json:"path"`
+	Action string `json:"action"` // "open" or "download"
+}
+
+// handleFileAction handles file:// links from the chat UI.
+// When action is "open" and the server is running on localhost,
+// it attempts to open the file with the OS default handler.
+// When action is "download", it streams the file contents back.
+func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
+	var req fileActionRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Path == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	switch req.Action {
+	case "open":
+		// Only allow opening files on localhost for security.
+		host := r.Host
+		if idx := strings.LastIndex(host, ":"); idx != -1 {
+			host = host[:idx]
+		}
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			writeError(w, http.StatusForbidden, "open action only allowed on localhost")
+			return
+		}
+		var cmd string
+		switch runtime.GOOS {
+		case "darwin":
+			cmd = "open"
+		case "windows":
+			cmd = "start"
+		default:
+			cmd = "xdg-open"
+		}
+		if err := exec.Command(cmd, req.Path).Start(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "opened"})
+
+	case "download":
+		f, err := os.Open(req.Path)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(req.Path)+"\"")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+		http.ServeContent(w, r, filepath.Base(req.Path), info.ModTime(), f)
+
+	default:
+		writeError(w, http.StatusBadRequest, "unknown action")
+	}
 }

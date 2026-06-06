@@ -126,11 +126,14 @@ const Profile = (() => {
 
   async function _loadProfile() {
     try {
-      const res  = await fetch("/api/profile");
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Load failed");
-      _data.user = data.user;
-      _data.soul = data.soul;
+      const [soulRes, userRes] = await Promise.all([
+        fetch("/api/profile/soul"),
+        fetch("/api/profile/user")
+      ]);
+      const soulData = await soulRes.json().catch(() => ({}));
+      const userData = await userRes.json().catch(() => ({}));
+      _data.soul = soulRes.ok ? { content: soulData.content || "", path: soulData.path || "" } : null;
+      _data.user = userRes.ok ? { content: userData.content || "", path: userData.path || "" } : null;
     } catch (e) {
       console.error("[Profile] load profile failed", e);
       _data.user = null;

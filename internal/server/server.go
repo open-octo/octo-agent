@@ -268,6 +268,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/trash", s.requireAuth(s.handleGetTrash))
 	s.mux.HandleFunc("POST /api/trash/empty", s.requireAuth(s.handleEmptyTrash))
 	s.mux.HandleFunc("POST /api/trash/{id}/restore", s.requireAuth(s.handleRestoreTrash))
+	s.mux.HandleFunc("DELETE /api/trash/{id}", s.requireAuth(s.handleDeleteTrash))
 
 	// Onboard & config
 	s.mux.HandleFunc("GET /api/onboard/status", s.requireAuth(s.handleOnboardStatus))
@@ -279,6 +280,9 @@ func (s *Server) registerRoutes() {
 
 	// Upload
 	s.mux.HandleFunc("POST /api/upload", s.requireAuth(s.handleUpload))
+
+	// File action (open / download)
+	s.mux.HandleFunc("POST /api/file-action", s.requireAuth(s.handleFileAction))
 
 	// Skill toggle
 	s.mux.HandleFunc("PATCH /api/skills/{name}/toggle", s.requireAuth(s.handleToggleSkill))

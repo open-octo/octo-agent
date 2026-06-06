@@ -160,13 +160,15 @@ func List() ([]Entry, error) {
 
 // Empty removes trashed files. Modes: "all", "old" (>7 days), "orphans"
 // (project directory no longer exists).
-func Empty(mode string) (int, error) {
+// Returns (deleted count, freed bytes, error).
+func Empty(mode string) (int, int64, error) {
 	entries, err := List()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	cutoff := time.Now().Add(-7 * 24 * time.Hour)
 	count := 0
+	var freed int64
 	for _, e := range entries {
 		remove := false
 		switch mode {
@@ -186,9 +188,10 @@ func Empty(mode string) (int, error) {
 			os.Remove(e.TrashPath)
 			os.Remove(e.TrashPath + ".meta.json")
 			count++
+			freed += e.Size
 		}
 	}
-	return count, nil
+	return count, freed, nil
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
