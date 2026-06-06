@@ -1,14 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" id="html-root">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Octo Agent</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="stylesheet" href="/css/app.css">
 <style>
+/* Inline critical CSS — theme init must run before stylesheet loads
+   to prevent flash of wrong theme. */
 :root {
   --bg: #0d1117;
   --surface: #161b22;
-  --sidebar: #0d1117;
+  --sidebar-bg: #0d1117;
   --border: #30363d;
   --text: #c9d1d9;
   --text-secondary: #8b949e;
@@ -19,932 +23,455 @@
   --bot-bg: #161b22;
   --error: #f85149;
   --success: #3fb950;
+  --warning: #d29922;
+  --muted: #484f58;
+  --hover: rgba(88, 166, 255, 0.1);
+  --modal-overlay: rgba(0, 0, 0, 0.6);
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-html, body {
-  height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--text);
-  background: var(--bg);
-}
-
-/* Layout: sidebar + main */
-.app {
-  display: flex;
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
-}
-
-/* Sidebar */
-.sidebar {
-  width: 260px;
-  min-width: 260px;
-  background: var(--sidebar);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.sidebar-header h2 {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.sidebar-header .new-btn {
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.sidebar-header .new-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.session-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.session-item {
-  padding: 10px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  margin-bottom: 4px;
-  font-size: 13px;
-  transition: background 0.15s;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.session-item:hover {
-  background: rgba(88, 166, 255, 0.1);
-}
-
-/* The text column grows; checkbox / delete button sit on the sides. */
-.session-item .sess-body { flex: 1; min-width: 0; }
-
-.session-item .sess-check {
-  margin-top: 2px;
-  flex: 0 0 auto;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-/* Per-item delete button: hidden until the row is hovered. */
-.session-item .sess-del {
-  flex: 0 0 auto;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1;
-  padding: 2px 4px;
-  border-radius: 4px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
-}
-
-.session-item:hover .sess-del { opacity: 1; }
-
-.session-item .sess-del:hover { color: var(--error); }
-
-/* Selection toolbar (shown only in select mode). */
-.select-bar {
-  display: flex;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  align-items: center;
-}
-
-.select-bar button {
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.select-bar button.danger {
-  border-color: var(--error);
-  color: var(--error);
-}
-
-.select-bar button.danger:disabled {
-  border-color: var(--border);
-  color: var(--text-secondary);
-  cursor: not-allowed;
-}
-
-.select-bar .spacer { flex: 1; }
-
-.session-item.active {
-  background: rgba(88, 166, 255, 0.15);
-  border-left: 3px solid var(--accent);
-}
-
-.session-item .sess-id {
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-bottom: 2px;
-}
-
-.session-item .sess-date {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-/* Main area */
-.main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  background: var(--bg);
-}
-
-/* Header */
-.header {
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--surface);
-}
-
-.header h1 {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.header .status {
-  font-size: 12px;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.header .status::before {
-  content: "";
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success);
-}
-
-.header .status.error::before {
-  background: var(--error);
-}
-
-.header .status.thinking::before {
-  background: var(--accent);
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-/* Chat area */
-.chat-container {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.welcome {
-  text-align: center;
-  color: var(--text-secondary);
-  margin: auto;
-  max-width: 480px;
-}
-
-.welcome h2 {
-  margin-bottom: 12px;
-  color: var(--text);
-  font-size: 20px;
-}
-
-.welcome p {
-  margin-bottom: 8px;
-  line-height: 1.6;
-}
-
-/* Messages */
-.message {
-  max-width: 85%;
-  padding: 12px 16px;
-  border-radius: 12px;
-  line-height: 1.6;
-  word-break: break-word;
-  animation: fadeIn 0.2s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.message.user {
-  align-self: flex-end;
-  background: var(--user-bg-soft);
-  border: 1px solid var(--user-bg);
-  color: var(--text);
-  border-bottom-right-radius: 4px;
-}
-
-.message.bot {
-  align-self: flex-start;
-  background: var(--bot-bg);
-  border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
-}
-
-.message .meta {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.message.user .meta {
-  color: var(--user-bg);
-}
-
-.message.bot .meta {
-  color: var(--accent);
-}
-
-.message .content {
-  white-space: pre-wrap;
-}
-
-.message .content code {
-  background: rgba(0,0,0,0.3);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 90%;
-}
-
-.message .content pre {
-  background: rgba(0,0,0,0.3);
-  padding: 12px;
-  border-radius: 6px;
-  overflow-x: auto;
-  margin: 8px 0;
-}
-
-.message .content pre code {
-  background: none;
-  padding: 0;
-}
-
-.message .content blockquote {
-  border-left: 3px solid var(--border);
-  padding-left: 12px;
-  margin: 8px 0;
-  color: var(--text-secondary);
-}
-
-/* Typing indicator */
-.typing {
-  align-self: flex-start;
-  color: var(--text-secondary);
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 12px 16px;
-}
-
-.typing span {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  background: var(--text-secondary);
-  border-radius: 50%;
-  animation: blink 1.4s infinite both;
-}
-
-.typing span:nth-child(2) { animation-delay: 0.2s; }
-.typing span:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes blink {
-  0%, 80%, 100% { opacity: 0.3; }
-  40% { opacity: 1; }
-}
-
-/* Input area */
-.input-area {
-  padding: 16px 20px;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-}
-
-.input-area textarea {
-  flex: 1;
-  resize: none;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 14px;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.5;
-  max-height: 120px;
-  min-height: 44px;
-  font-family: inherit;
-}
-
-.input-area textarea:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.input-area button {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.input-area button:hover {
-  background: var(--accent-hover);
-}
-
-.input-area button:disabled {
-  background: var(--border);
-  cursor: not-allowed;
-}
-
-/* Tool calls */
-.tool-call {
-  background: rgba(88, 166, 255, 0.08);
-  border: 1px solid rgba(88, 166, 255, 0.25);
-  border-radius: 8px;
-  padding: 10px 14px;
-  margin-top: 8px;
-  font-size: 13px;
-}
-
-.tool-call .tool-name {
-  color: var(--accent);
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.tool-call .tool-args {
-  color: var(--text-secondary);
-  font-family: "SFMono-Regular", Consolas, monospace;
-  white-space: pre-wrap;
-  font-size: 12px;
-}
-
-.error-msg {
-  color: var(--error);
-  font-size: 13px;
-  margin-top: 4px;
-}
-
-/* Session info bar */
-.session-info {
-  font-size: 12px;
-  color: var(--text-secondary);
-  padding: 6px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  font-family: "SFMono-Regular", Consolas, monospace;
-}
-
-/* Reduced motion */
-@media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
+[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f6f8fa;
+  --sidebar-bg: #f6f8fa;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --text-secondary: #656d76;
+  --accent: #0969da;
+  --accent-hover: #0550ae;
+  --user-bg: #1a7f37;
+  --user-bg-soft: rgba(26, 127, 55, 0.08);
+  --bot-bg: #f6f8fa;
+  --hover: rgba(9, 105, 218, 0.08);
 }
 </style>
+<script>
+// Inline theme init — runs before CSS renders to prevent flash.
+(function() {
+  var saved = localStorage.getItem("octo-theme");
+  var theme = saved || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  document.documentElement.setAttribute("data-theme", theme);
+})();
+</script>
 </head>
 <body>
-<div class="app">
-  <!-- Sidebar -->
-  <div class="sidebar">
-    <div class="sidebar-header">
-      <h2>🐙 Octo</h2>
-      <div style="display:flex;gap:6px">
-        <button class="new-btn" id="selectBtn">Select</button>
-        <button class="new-btn" id="newSessionBtn">+ New</button>
+<div id="offline-banner" style="display:none">Connection lost. Reconnecting…</div>
+<div id="app" style="visibility:hidden">
+
+  <!-- ── TOP HEADER ────────────────────────────────────────────────────── -->
+  <header id="top-header">
+    <div id="header-left">
+      <button id="btn-toggle-sidebar" class="sidebar-toggle-btn" title="Toggle sidebar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect width="18" height="18" x="3" y="3" rx="2"/>
+          <path d="M9 3v18"/>
+        </svg>
+      </button>
+      <div id="header-brand" style="cursor:pointer" onclick="Router.navigate('welcome')">
+        <span class="header-logo">🐙 Octo</span>
       </div>
     </div>
-    <div class="select-bar" id="selectBar" style="display:none">
-      <button id="selectAllBtn">All</button>
-      <span class="spacer"></span>
-      <button class="danger" id="deleteSelectedBtn" disabled>Delete</button>
-      <button id="cancelSelectBtn">Cancel</button>
+    <div id="header-right">
+      <button id="theme-toggle-header" class="theme-toggle-btn" title="Toggle theme">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+        </svg>
+      </button>
     </div>
-    <div class="session-list" id="sessionList"></div>
-  </div>
+  </header>
 
-  <!-- Main -->
-  <div class="main">
-    <div class="header">
-      <h1>Chat</h1>
-      <div class="status" id="status">Ready</div>
+  <!-- ── Sidebar overlay (mobile) ──────────────────────────────────────── -->
+  <div id="sidebar-overlay"></div>
+
+  <!-- ── CONTENT ROW ───────────────────────────────────────────────────── -->
+  <div id="content-row">
+
+  <!-- ── SIDEBAR ────────────────────────────────────────────────────── -->
+  <aside id="sidebar">
+    <div id="sidebar-list">
+
+      <!-- Sessions Section -->
+      <div id="chat-section">
+        <div class="sidebar-divider">
+          <span>Sessions</span>
+          <div class="sidebar-divider-actions">
+            <button id="btn-session-search-toggle" class="btn-icon-sm" title="Search sessions" style="display:none">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.6"/>
+                <line x1="10.3" y1="10.3" x2="14" y2="14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <div class="btn-split-wrap">
+              <button id="btn-new-session-inline" class="btn-split-main" title="New Session">+ New Session</button>
+              <button id="btn-new-session-arrow" class="btn-split-arrow" title="Options">▾</button>
+              <div id="new-session-dropdown" class="new-session-dropdown" hidden>
+                <div class="dropdown-item" id="btn-new-session-modal">More Options</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Search panel -->
+        <div id="session-search-bar" class="session-search-panel" hidden>
+          <div class="search-panel-card">
+            <div class="search-input-row">
+              <span class="search-icon">🔍</span>
+              <input id="session-search-q" type="text" class="search-input"
+                     placeholder="Search sessions…" autocomplete="off" />
+              <button id="btn-search-q-clear" class="btn-search-q-clear" hidden>✕</button>
+            </div>
+            <div class="search-filter-row">
+              <select id="session-search-type" class="search-select">
+                <option value="">All types</option>
+                <option value="manual">Default</option>
+                <option value="cron">Scheduled</option>
+                <option value="channel">Channel</option>
+                <option value="setup">Setup</option>
+                <option value="coding">Coding</option>
+              </select>
+              <div class="search-date-wrap">
+                <button id="session-search-date" class="search-date" type="button">Date</button>
+              </div>
+              <button id="btn-search-clear-all" class="btn-search-clear-all" hidden>✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Session list -->
+        <div id="session-list"></div>
+      </div>
+
+      <!-- Config Section -->
+      <div id="config-section">
+        <div class="sidebar-divider"><span>Config</span></div>
+        <div id="config-nav-items">
+          <div id="tasks-sidebar-item" class="task-item task-item-summary">
+            <div class="task-row">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="task-icon">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+              <div class="task-info"><span class="task-name">Scheduled Tasks</span></div>
+            </div>
+          </div>
+          <div id="skills-sidebar-item" class="task-item task-item-summary">
+            <div class="task-row">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="task-icon">
+                <path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"/>
+              </svg>
+              <div class="task-info"><span class="task-name">Skills</span></div>
+            </div>
+          </div>
+          <div id="channels-sidebar-item" class="task-item task-item-summary">
+            <div class="task-row">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="task-icon">
+                <rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>
+              </svg>
+              <div class="task-info"><span class="task-name">Channels</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- My Data Section -->
+      <div id="data-section">
+        <div class="sidebar-divider"><span>My Data</span></div>
+        <div id="data-nav-items">
+          <div id="profile-sidebar-item" class="task-item task-item-summary">
+            <div class="task-row">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="task-icon">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+              </svg>
+              <div class="task-info"><span class="task-name">Profile &amp; Soul</span></div>
+            </div>
+          </div>
+          <div id="trash-sidebar-item" class="task-item task-item-summary">
+            <div class="task-row">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="task-icon">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                <path d="M10 11v6"/><path d="M14 11v6"/>
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+              </svg>
+              <div class="task-info"><span class="task-name">File Recall</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="session-info" id="sessionInfo" style="display:none"></div>
-    <div class="chat-container" id="chat"></div>
-    <div class="input-area">
-      <textarea id="input" rows="1" placeholder="Type a message... (Shift+Enter for newline)"></textarea>
-      <button id="sendBtn">Send</button>
+
+    <!-- Sidebar Footer -->
+    <div id="sidebar-footer">
+      <div class="sidebar-nav-row">
+        <button id="btn-settings" class="sidebar-nav-btn" title="Settings">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          <span>Settings</span>
+        </button>
+        <span id="version-badge" class="version-badge" style="display:none">
+          <span id="version-text" class="version-text"></span>
+        </span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ───────────────────────────────────────────────────────── -->
+  <main id="main">
+
+    <!-- Welcome screen -->
+    <div id="welcome" class="centered" style="display:none">
+      <h2>👋 Welcome to Octo</h2>
+      <p>Create a new session or select one from the sidebar.</p>
+      <button id="btn-welcome-new">New Session</button>
+    </div>
+
+    <!-- Chat panel -->
+    <div id="chat-panel" style="display:none">
+      <div id="messages"></div>
+
+      <!-- New message notification banner -->
+      <div id="new-message-banner" class="new-message-banner" style="display:none">
+        <span>New messages ↓</span>
+      </div>
+
+      <!-- Session info bar -->
+      <div id="session-info-bar" style="display:none">
+        <span id="sib-status"></span>
+        <span class="sib-sep">│</span>
+        <span id="sib-id" class="sib-id-clickable" title="Click for session actions"></span>
+        <span class="sib-sep">│</span>
+        <span id="sib-dir" title="Click to change directory"></span>
+        <span class="sib-sep">│</span>
+        <span id="sib-model" class="sib-model-clickable" title="Click to switch model"></span>
+        <span class="sib-sep">│</span>
+        <span id="sib-mode"></span>
+      </div>
+
+      <!-- Input area -->
+      <div id="input-area">
+        <div id="ws-disconnect-hint" style="display:none"></div>
+
+        <!-- Image preview strip -->
+        <div id="image-preview-strip" style="display:none"></div>
+
+        <!-- Input bar -->
+        <div id="input-bar">
+          <input type="file" id="image-file-input"
+                 accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,application/zip,text/plain,.md,.csv,.log"
+                 multiple style="display:none">
+          <button id="btn-attach" title="Attach file">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            </svg>
+          </button>
+          <textarea id="user-input" rows="1" placeholder="Message… (Enter to send, Shift+Enter for newline)"></textarea>
+          <button id="btn-send">Send</button>
+          <button id="btn-interrupt" style="display:none" title="Stop">■</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scheduled Tasks panel -->
+    <div id="task-detail-panel" style="display:none">
+      <div id="task-detail-body">
+        <div class="task-page-header">
+          <h2 class="task-page-title">Scheduled Tasks</h2>
+          <p class="task-page-subtitle">Manage and schedule automated tasks for your assistant</p>
+          <button id="btn-create-task" class="btn-create-task">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14"/><path d="M12 5v14"/>
+            </svg>
+            <span>Create Task</span>
+          </button>
+        </div>
+        <div id="task-list-table"></div>
+      </div>
+    </div>
+
+    <!-- Skills panel -->
+    <div id="skills-panel" style="display:none">
+      <div id="skills-body">
+        <div class="skills-page-header">
+          <h2 class="skills-page-title">Skills</h2>
+          <p class="skills-page-subtitle">Extend your assistant's capabilities with custom skills</p>
+          <div class="skill-action-btns">
+            <button id="btn-import-skill" class="btn-import-skill">Import</button>
+            <button id="btn-create-skill" class="btn-create-skill">Create</button>
+          </div>
+        </div>
+        <div id="skills-tabs">
+          <div class="skills-tabs-left">
+            <button class="skills-tab active" data-tab="my-skills">My Skills</button>
+          </div>
+        </div>
+        <div id="skill-import-bar" class="skill-import-bar" style="display:none">
+          <input id="skill-import-input" class="skill-import-input" type="text"
+                 placeholder="Paste ZIP or GitHub URL…" />
+          <button id="btn-skill-import-confirm" class="btn-skill-import-confirm">Install</button>
+          <button id="btn-skill-import-cancel" class="btn-skill-import-cancel">✕</button>
+        </div>
+        <div id="skills-list"></div>
+      </div>
+    </div>
+
+    <!-- Channels panel -->
+    <div id="channels-panel" style="display:none">
+      <div id="channels-body">
+        <div class="channels-page-header">
+          <h2 class="channels-page-title">Channels</h2>
+          <p class="channels-page-subtitle">Connect IM platforms so your users can chat with the assistant</p>
+        </div>
+        <div id="channels-list"></div>
+      </div>
+    </div>
+
+    <!-- Trash/File Recall panel -->
+    <div id="trash-panel" style="display:none">
+      <div id="trash-body">
+        <div class="channels-page-header">
+          <h2>File Recall</h2>
+          <p>Files the agent moved to trash across all projects.</p>
+        </div>
+        <div class="trash-toolbar">
+          <span class="trash-summary" id="trash-summary"></span>
+          <div class="trash-actions">
+            <button id="btn-trash-refresh" class="btn-trash-action">Refresh</button>
+            <button id="btn-trash-empty-old" class="btn-trash-action">Empty &gt;7 days</button>
+            <button id="btn-trash-empty-all" class="btn-trash-action btn-trash-danger">Empty all</button>
+          </div>
+        </div>
+        <div id="trash-list"></div>
+      </div>
+    </div>
+
+    <!-- Profile panel -->
+    <div id="profile-panel" style="display:none">
+      <div id="profile-body">
+        <div class="channels-page-header">
+          <h2>Assistant Memory</h2>
+          <p>A window into the assistant's inner life.</p>
+        </div>
+        <div class="profile-tabs" role="tablist">
+          <button class="profile-tab active" data-tab="soul">Soul</button>
+          <button class="profile-tab" data-tab="user">User</button>
+          <button class="profile-tab" data-tab="memories">Memories</button>
+        </div>
+        <section class="profile-tab-panel active" id="profile-pane-soul">
+          <header class="profile-section-head">
+            <h3>Who I am</h3>
+          </header>
+          <div id="profile-soul-body" class="profile-markdown"></div>
+        </section>
+        <section class="profile-tab-panel" id="profile-pane-user" style="display:none">
+          <header class="profile-section-head">
+            <h3>Who you are</h3>
+          </header>
+          <div id="profile-user-body" class="profile-markdown"></div>
+        </section>
+        <section class="profile-tab-panel" id="profile-pane-memories" style="display:none">
+          <header class="profile-section-head">
+            <h3>Memories</h3>
+          </header>
+          <div id="memories-list"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Settings panel -->
+    <div id="settings-panel" style="display:none">
+      <header id="settings-header"><span>Settings</span></header>
+      <div id="settings-body">
+        <section class="settings-section">
+          <div class="settings-section-title">
+            <span>AI Models</span>
+            <button id="btn-add-model" class="btn-settings-add">+ Add Model</button>
+          </div>
+          <div id="model-cards"></div>
+        </section>
+        <section class="settings-section">
+          <div class="settings-section-title"><span>Personalize</span></div>
+          <div class="settings-personalize">
+            <p>Re-run the onboarding to update your assistant's personality.</p>
+            <button id="btn-rerun-onboard" class="btn-settings-action">✨ Re-run Onboard</button>
+          </div>
+        </section>
+        <section class="settings-section">
+          <div class="settings-section-title"><span>Language</span></div>
+          <div class="settings-lang-btns">
+            <button class="settings-lang-btn" data-lang="en">English</button>
+            <button class="settings-lang-btn" data-lang="zh">中文</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+  </main>
+  </div><!-- end #content-row -->
+</div><!-- end #app -->
+
+<!-- New Session Modal -->
+<div id="new-session-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box new-session-modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Create New Session</h3>
+    </div>
+    <div class="modal-body">
+      <div class="modal-field">
+        <label class="modal-label">Agent</label>
+        <select id="new-session-agent" class="modal-select">
+          <option value="general">General</option>
+          <option value="coding">Coding</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label class="modal-label">Session Name</label>
+        <input id="new-session-name" type="text" class="modal-input"
+               placeholder="Leave empty to auto-generate">
+      </div>
+      <div class="modal-field">
+        <label class="modal-label">Model</label>
+        <select id="new-session-model" class="modal-select"></select>
+      </div>
+      <div class="modal-field">
+        <label class="modal-label">Working Directory</label>
+        <input id="new-session-directory" type="text" class="modal-input"
+               placeholder="~/workspace/my-project">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="new-session-cancel" class="btn-secondary">Cancel</button>
+      <button id="new-session-create" class="btn-primary">Create Session</button>
     </div>
   </div>
 </div>
 
-<script>
-const chat = document.getElementById('chat');
-const input = document.getElementById('input');
-const sendBtn = document.getElementById('sendBtn');
-const status = document.getElementById('status');
-const sessionInfo = document.getElementById('sessionInfo');
-const sessionList = document.getElementById('sessionList');
-const newSessionBtn = document.getElementById('newSessionBtn');
-const selectBtn = document.getElementById('selectBtn');
-const selectBar = document.getElementById('selectBar');
-const selectAllBtn = document.getElementById('selectAllBtn');
-const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
-const cancelSelectBtn = document.getElementById('cancelSelectBtn');
-
-let sessionId = null;
-let isTyping = false;
-let sessions = [];
-
-// Selection mode: when on, the list shows checkboxes and a delete toolbar.
-let selectMode = false;
-const selectedIds = new Set();
-
-// Auto-resize textarea
-function resetInputHeight() {
-  input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-}
-input.addEventListener('input', resetInputHeight);
-
-input.addEventListener('keydown', (e) => {
-  // Don't send while an IME composition is active — pressing Enter to commit
-  // Chinese/Japanese/Korean candidates would otherwise fire the message early.
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
-    e.preventDefault();
-    sendMessage();
-  }
-});
-
-sendBtn.addEventListener('click', sendMessage);
-newSessionBtn.addEventListener('click', startNewSession);
-selectBtn.addEventListener('click', () => setSelectMode(!selectMode));
-cancelSelectBtn.addEventListener('click', () => setSelectMode(false));
-selectAllBtn.addEventListener('click', toggleSelectAll);
-deleteSelectedBtn.addEventListener('click', deleteSelected);
-
-function setSelectMode(on) {
-  selectMode = on;
-  selectedIds.clear();
-  selectBar.style.display = on ? 'flex' : 'none';
-  selectBtn.textContent = on ? 'Done' : 'Select';
-  renderSessionList();
-  updateDeleteButton();
-}
-
-function updateDeleteButton() {
-  deleteSelectedBtn.disabled = selectedIds.size === 0;
-  deleteSelectedBtn.textContent = selectedIds.size ? `Delete (${selectedIds.size})` : 'Delete';
-}
-
-function toggleSelectAll() {
-  if (selectedIds.size === sessions.length) {
-    selectedIds.clear();
-  } else {
-    sessions.forEach(s => selectedIds.add(s.id));
-  }
-  renderSessionList();
-  updateDeleteButton();
-}
-
-// deleteSessions calls the batch endpoint, then refreshes the list. If the
-// currently open session was among those removed, the view resets to the
-// new-session welcome screen.
-async function deleteSessions(ids) {
-  if (!ids.length) return;
-  try {
-    const res = await fetch('/api/sessions/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids })
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    if (ids.includes(sessionId)) startNewSession();
-    await loadSessions();
-  } catch (err) {
-    setStatus('Error deleting session', true);
-  }
-}
-
-async function deleteSelected() {
-  const ids = [...selectedIds];
-  if (!ids.length) return;
-  if (!confirm(`Delete ${ids.length} session${ids.length > 1 ? 's' : ''}? This cannot be undone.`)) return;
-  await deleteSessions(ids);
-  setSelectMode(false);
-}
-
-function setStatus(text, isError = false) {
-  status.textContent = text;
-  status.className = 'status' + (isError ? ' error' : text === 'Thinking...' ? ' thinking' : '');
-}
-
-// True when the chat is scrolled (near) the bottom. Used to avoid yanking the
-// view down while the user is reading scrolled-up history during a stream.
-function isNearBottom() {
-  return chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
-}
-function scrollToBottomIfNeeded(force) {
-  if (force || isNearBottom()) chat.scrollTop = chat.scrollHeight;
-}
-
-function escapeHTML(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-// addMessage appends a plain user/bot bubble. content is treated as text
-// unless html is true. Returns the message element.
-function addMessage(role, content, html = false) {
-  const atBottom = isNearBottom();
-  const div = document.createElement('div');
-  div.className = `message ${role}`;
-  const meta = document.createElement('div');
-  meta.className = 'meta';
-  meta.textContent = role === 'user' ? 'You' : 'Octo';
-  const body = document.createElement('div');
-  body.className = 'content';
-  if (html) body.innerHTML = content; else body.textContent = content;
-  div.appendChild(meta);
-  div.appendChild(body);
-  chat.appendChild(div);
-  scrollToBottomIfNeeded(atBottom);
-  return div;
-}
-
-// createBotStream builds a bot bubble that grows as SSE events arrive. Text
-// and tool cards are interleaved in arrival order: each tool card "closes"
-// the current text block so following text starts a fresh paragraph below it.
-function createBotStream() {
-  const div = document.createElement('div');
-  div.className = 'message bot';
-  const meta = document.createElement('div');
-  meta.className = 'meta';
-  meta.textContent = 'Octo';
-  div.appendChild(meta);
-  chat.appendChild(div);
-
-  let textEl = null;     // current open text block
-  let textBuf = '';      // accumulated markdown source for textEl
-
-  function appendText(delta) {
-    const atBottom = isNearBottom();
-    if (!textEl) {
-      textEl = document.createElement('div');
-      textEl.className = 'content';
-      div.appendChild(textEl);
-      textBuf = '';
-    }
-    textBuf += delta;
-    textEl.innerHTML = renderMarkdown(textBuf);
-    scrollToBottomIfNeeded(atBottom);
-  }
-  function appendCard(node) {
-    const atBottom = isNearBottom();
-    div.appendChild(node);
-    textEl = null; // next text starts a new block under the card
-    scrollToBottomIfNeeded(atBottom);
-  }
-  // setFull replaces the whole bubble with the final reply (turn_done). It
-  // discards streamed fragments in favour of the authoritative full text.
-  function setFull(content) {
-    div.querySelectorAll('.content').forEach(el => el.remove());
-    textEl = null;
-    if (content) appendText(content);
-  }
-  return { el: div, appendText, appendCard, setFull };
-}
-
-function toolCard(emoji, title, body, errorStyle) {
-  const card = document.createElement('div');
-  card.className = 'tool-call';
-  if (errorStyle) card.style.borderColor = 'rgba(248,81,73,.3)';
-  const name = document.createElement('div');
-  name.className = 'tool-name';
-  if (errorStyle) name.style.color = '#f85149';
-  name.textContent = `${emoji} ${title}`;
-  card.appendChild(name);
-  if (body) {
-    const args = document.createElement('div');
-    args.className = 'tool-args';
-    args.textContent = body; // textContent: never inject tool output as HTML
-    card.appendChild(args);
-  }
-  return card;
-}
-
-function startNewSession() {
-  if (isTyping) return;
-  sessionId = null;
-  chat.innerHTML = `
-    <div class="welcome">
-      <h2>👋 Welcome</h2>
-      <p>Start a conversation by typing below. The first message creates a new session.</p>
-      <p>Responses stream in real-time, including tool calls.</p>
+<!-- Prompt Modal (for confirmations) -->
+<div id="prompt-modal-overlay" class="modal-overlay" style="display:none">
+  <div class="modal-box sm">
+    <div class="modal-title" id="prompt-modal-title"></div>
+    <div class="modal-body" id="prompt-modal-body"></div>
+    <div class="modal-actions">
+      <button id="prompt-modal-cancel" class="btn-secondary">Cancel</button>
+      <button id="prompt-modal-ok" class="btn-primary">OK</button>
     </div>
-  `;
-  sessionInfo.style.display = 'none';
-  input.focus();
-  renderSessionList();
-}
-
-async function loadSessions() {
-  try {
-    const res = await fetch('/api/sessions');
-    if (!res.ok) return;
-    sessions = await res.json();
-    renderSessionList();
-  } catch (e) {
-    console.error('Failed to load sessions:', e);
-  }
-}
-
-function renderSessionList() {
-  sessionList.innerHTML = '';
-  if (sessions.length === 0) {
-    sessionList.innerHTML = '<div style="padding: 20px; color: var(--text-secondary); font-size: 13px; text-align: center;">No sessions yet</div>';
-    return;
-  }
-  sessions.forEach(s => {
-    const div = document.createElement('div');
-    div.className = 'session-item' + (s.id === sessionId ? ' active' : '');
-
-    if (selectMode) {
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.className = 'sess-check';
-      cb.checked = selectedIds.has(s.id);
-      cb.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (cb.checked) selectedIds.add(s.id); else selectedIds.delete(s.id);
-        updateDeleteButton();
-      });
-      div.appendChild(cb);
-    }
-
-    const body = document.createElement('div');
-    body.className = 'sess-body';
-    const title = s.title || s.id.slice(0, 8);
-    const idEl = document.createElement('div');
-    idEl.className = 'sess-id';
-    idEl.textContent = title;
-    const dateEl = document.createElement('div');
-    dateEl.className = 'sess-date';
-    dateEl.textContent = new Date(s.created_at).toLocaleString();
-    body.appendChild(idEl);
-    body.appendChild(dateEl);
-    div.appendChild(body);
-
-    if (!selectMode) {
-      const del = document.createElement('button');
-      del.className = 'sess-del';
-      del.textContent = '✕';
-      del.title = 'Delete session';
-      del.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (!confirm('Delete this session? This cannot be undone.')) return;
-        await deleteSessions([s.id]);
-      });
-      div.appendChild(del);
-    }
-
-    // In select mode the whole row toggles the checkbox; otherwise it opens.
-    div.addEventListener('click', () => {
-      if (selectMode) {
-        if (selectedIds.has(s.id)) selectedIds.delete(s.id); else selectedIds.add(s.id);
-        renderSessionList();
-        updateDeleteButton();
-      } else {
-        switchSession(s.id);
-      }
-    });
-    sessionList.appendChild(div);
-  });
-}
-
-async function switchSession(id) {
-  if (isTyping) return;
-  try {
-    const res = await fetch(`/api/sessions/${id}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const sess = await res.json();
-    sessionId = id;
-    sessionInfo.style.display = 'block';
-    sessionInfo.textContent = `Session: ${id}`;
-    chat.innerHTML = '';
-    sess.messages.forEach(m => {
-      if (m.role === 'user') {
-        addMessage('user', m.content);
-      } else if (m.role === 'assistant' && m.content) {
-        addMessage('bot', renderMarkdown(m.content), true);
-      }
-    });
-    renderSessionList();
-    chat.scrollTop = chat.scrollHeight;
-  } catch (err) {
-    setStatus('Error loading session', true);
-  }
-}
-
-function showTyping() {
-  const div = document.createElement('div');
-  div.className = 'typing';
-  div.id = 'typing';
-  div.innerHTML = 'Thinking<span></span><span></span><span></span>';
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-}
-
-function hideTyping() {
-  const el = document.getElementById('typing');
-  if (el) el.remove();
-}
-
-function renderMarkdown(text) {
-  let html = escapeHTML(text)
-    .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
-    .replace(/\n/g, '<br>');
-  return html;
-}
-
-async function sendMessage() {
-  const text = input.value.trim();
-  if (!text || isTyping) return;
-
-  input.value = '';
-  resetInputHeight();
-  addMessage('user', text);
-  isTyping = true;
-  sendBtn.disabled = true;
-  showTyping();
-  setStatus('Thinking...');
-
-  try {
-    if (!sessionId) {
-      // First message: POST /api/chat creates the session and runs the first
-      // turn. This path is non-streaming (the session id doesn't exist yet).
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      sessionId = data.session_id;
-      sessionInfo.style.display = 'block';
-      sessionInfo.textContent = `Session: ${sessionId}`;
-      hideTyping();
-      addMessage('bot', renderMarkdown(data.reply), true);
-      setStatus('Ready');
-      loadSessions();
-    } else {
-      const res = await fetch(`/api/chat/${sessionId}/turn`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-        body: JSON.stringify({ message: text })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      hideTyping();
-      const stream = createBotStream();
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
-          if (!data) continue;
-          try {
-            handleEvent(JSON.parse(data), stream);
-          } catch (e) {
-            // ignore malformed SSE lines
-          }
-        }
-      }
-      setStatus('Ready');
-      loadSessions();
-    }
-  } catch (err) {
-    hideTyping();
-    const errDiv = document.createElement('div');
-    errDiv.className = 'error-msg';
-    errDiv.textContent = `Error: ${err.message}`;
-    chat.lastElementChild?.appendChild(errDiv);
-    setStatus('Error', true);
-  } finally {
-    isTyping = false;
-    sendBtn.disabled = false;
-    input.focus();
-  }
-}
-
-// handleEvent maps a streamed AgentEvent to UI. Event kinds and field names
-// mirror internal/agent/event.go exactly — keep them in sync.
-function handleEvent(ev, stream) {
-  switch (ev.kind) {
-    case 'text_delta':
-      stream.appendText(ev.text || '');
-      break;
-    case 'tool_started':
-      stream.appendCard(toolCard('🔧', ev.tool_name || 'tool',
-        ev.input ? JSON.stringify(ev.input, null, 2) : ''));
-      break;
-    case 'tool_done':
-      stream.appendCard(toolCard('✅', `${ev.tool_name || 'tool'} result`, ev.output || ''));
-      break;
-    case 'tool_error':
-      stream.appendCard(toolCard('❌', `${ev.tool_name || 'tool'} error`,
-        ev.err || ev.output || 'Unknown error', true));
-      break;
-    case 'turn_done':
-      if (ev.reply?.content) stream.setFull(ev.reply.content);
-      break;
-    // thinking_delta / tool_input_delta / compact_* are intentionally ignored.
-  }
-}
-
-// Init
-loadSessions();
-chat.innerHTML = `
-  <div class="welcome">
-    <h2>👋 Welcome to Octo Agent</h2>
-    <p>Start a conversation by typing below. The first message creates a new session.</p>
-    <p>Responses stream in real-time, including tool calls.</p>
   </div>
-`;
-</script>
+</div>
+
+<!-- Scripts: load order matters -->
+<script src="/vendor/marked.min.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/theme.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/ws.js"></script>
+<script src="/js/ws-dispatcher.js"></script>
+<script src="/js/sessions.js"></script>
+<script src="/js/skills.js"></script>
+<script src="/js/tasks.js"></script>
+<script src="/js/channels.js"></script>
+<script src="/js/settings.js"></script>
+<script src="/js/profile.js"></script>
+<script src="/js/trash.js"></script>
+<script src="/js/version.js"></script>
+<script src="/js/app.js"></script>
 </body>
 </html>

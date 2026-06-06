@@ -21,10 +21,16 @@ import (
 	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/prompt"
+	"github.com/Leihb/octo-agent/internal/scheduler"
 	"github.com/Leihb/octo-agent/internal/skills"
 	"github.com/Leihb/octo-agent/internal/tasks"
 	"github.com/Leihb/octo-agent/internal/tools"
 )
+
+// getDefaultToolsFor bridges to tools.DefaultToolsFor for ws_handlers.go.
+func getDefaultToolsFor(model string) []agent.ToolDefinition {
+	return tools.DefaultToolsFor(model)
+}
 
 // Config holds server-level settings.
 type Config struct {
@@ -66,6 +72,24 @@ type Server struct {
 	turnLocks map[string]*sync.Mutex
 	turnMu    sync.Mutex
 
+	// WebSocket hub for real-time browser communication.
+	wsHub *wsHub
+
+	// interrupt cancellation per session.
+	interrupts  map[string]context.CancelFunc
+	interruptMu sync.Mutex
+
+	// confirmation channels (from request_user_feedback in browser).
+	confirmations map[string]chan string
+	confirmMu     sync.Mutex
+
+	// live state tracking per session for WS replay on subscribe.
+	liveStates  map[string]*sessionLiveState
+	liveStateMu sync.RWMutex
+
+	// scheduler for cron-based background tasks.
+	scheduler *scheduler.Scheduler
+
 	// mcpCleanup unregisters + closes the MCP registry connected at start.
 	// Always non-nil after New (a no-op when no servers connected).
 	mcpCleanup func()
@@ -104,6 +128,7 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s.registerRoutes()
+	s.initWS()
 	s.enableSubAgentTools()
 	s.enableMCP()
 
@@ -189,6 +214,17 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
 	s.mux.HandleFunc("GET /api/skills", s.handleListSkills)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/tasks", s.handleListTasks)
+	s.mux.HandleFunc("POST /api/tasks", s.handleCreateTask)
+	s.mux.HandleFunc("DELETE /api/tasks/{id}", s.handleDeleteTask)
+	s.mux.HandleFunc("POST /api/tasks/{id}/run", s.handleRunTask)
+	s.mux.HandleFunc("GET /api/profile/soul", s.handleGetProfileSoul)
+	s.mux.HandleFunc("GET /api/profile/user", s.handleGetProfileUser)
+	s.mux.HandleFunc("GET /api/memories", s.handleGetMemories)
+	s.mux.HandleFunc("GET /api/trash", s.handleGetTrash)
+	s.mux.HandleFunc("POST /api/trash/empty", s.handleEmptyTrash)
+	s.mux.HandleFunc("POST /api/trash/{id}/restore", s.handleRestoreTrash)
+	s.mux.HandleFunc("GET /ws", s.handleWS)
 
 	// Static files (Web UI) — served from embedded filesystem.
 	s.mux.Handle("/", s.staticHandler())
