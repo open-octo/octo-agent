@@ -68,7 +68,15 @@ func (s *Server) handleGetTrash(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []trash.Entry{}
 	}
-	writeJSON(w, http.StatusOK, entries)
+	var totalSize int64
+	for _, e := range entries {
+		totalSize += e.Size
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"files":       entries,
+		"total_count": len(entries),
+		"total_size":  totalSize,
+	})
 }
 
 type emptyTrashRequest struct {
@@ -80,12 +88,16 @@ func (s *Server) handleEmptyTrash(w http.ResponseWriter, r *http.Request) {
 	if err := readBodyJSON(r, &req); err != nil {
 		req.Mode = "all"
 	}
-	count, err := trash.Empty(req.Mode)
+	count, freed, err := trash.Empty(req.Mode)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"removed": count})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"removed":    count,
+		"freed_size": freed,
+	})
 }
 
 func (s *Server) handleRestoreTrash(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +111,35 @@ func (s *Server) handleRestoreTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
+}
+
+func (s *Server) handleDeleteTrash(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing file id")
+		return
+	}
+	entries, err := trash.List()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, e := range entries {
+		if e.ID == id {
+			var freed int64
+			if info, err := os.Stat(e.TrashPath); err == nil {
+				freed = info.Size()
+			}
+			os.Remove(e.TrashPath)
+			os.Remove(e.TrashPath + ".meta.json")
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":         true,
+				"freed_size": freed,
+			})
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, "trash entry not found")
 }
 
 func readProfileFile(name string) (string, error) {

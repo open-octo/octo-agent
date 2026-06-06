@@ -67,8 +67,21 @@ const Trash = (() => {
       const res  = await fetch("/api/trash");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Load failed");
-      _files  = data.files  || [];
-      _totals = { count: data.total_count || 0, size: data.total_size || 0 };
+      // Backend returns {files: [...], total_count, total_size}
+      // but trash.List() returns plain []Entry with fields: id, original, project, size, deleted_at
+      const rawFiles = Array.isArray(data) ? data : (data.files || []);
+      _files  = rawFiles.map(e => ({
+        id:            e.id || "",
+        original_path: e.original || "",
+        project_root:  e.project || "",
+        file_size:     e.size || 0,
+        deleted_at:    e.deleted_at || "",
+        project_name:  e.project_name || ""
+      }));
+      _totals = {
+        count: data.total_count || _files.length,
+        size:  data.total_size  || _files.reduce((sum, f) => sum + (f.file_size || 0), 0)
+      };
       _render();
     } catch (e) {
       console.error("[Trash] load failed", e);
@@ -122,17 +135,12 @@ const Trash = (() => {
 
     const original = file.original_path || "";
     const basename = original.split("/").pop() || original;
-    // Show last two path segments after basename to give agents context when
-    // many files share the same basename (very common: "package.json", "index.js").
     const parts    = original.split("/").filter(Boolean);
     const shortPath = parts.length > 3
       ? ".../" + parts.slice(-3).join("/")
       : original;
     const sizeStr  = _humanBytes(file.file_size || 0);
     const whenStr  = _humanTime(file.deleted_at);
-    // Heuristic: if project_root starts with /var/folders or /tmp, or contains
-    // a tempdir-style name (d20260502-...), the original project is gone.
-    // We still show it, but mark it so the user can clean it up confidently.
     const orphan = /^\/(?:var\/folders|tmp|private\/var\/folders)\b/.test(file.project_root || "") ||
                    /\/d\d{8}-\d+-[a-z0-9]+(?:\/|$)/.test(file.project_root || "");
 
@@ -181,23 +189,16 @@ const Trash = (() => {
     const btn = card.querySelector(".btn-trash-restore");
     btn.disabled = true;
     try {
-      const res = await fetch("/api/trash/restore", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project_root:  file.project_root,
-          original_path: file.original_path
-        })
+      const res = await fetch("/api/trash/" + encodeURIComponent(file.id) + "/restore", {
+        method: "POST"
       });
       const data = await res.json();
-      if (!res.ok || !data.ok) {
+      if (!res.ok) {
         alert(I18n.t("trash.restoreFail", {
           msg: data.error || res.statusText
         }));
       } else {
-        // Remove card, update totals locally for instant feedback.
-        _files = _files.filter(f =>
-          !(f.project_root === file.project_root && f.original_path === file.original_path));
+        _files = _files.filter(f => f.id !== file.id);
         _totals = {
           count: Math.max(0, _totals.count - 1),
           size:  Math.max(0, _totals.size - (file.file_size || 0))
@@ -218,20 +219,14 @@ const Trash = (() => {
     );
     if (!confirmed) return;
 
-    const url = "/api/trash?" + new URLSearchParams({
-      project: file.project_root,
-      file:    file.original_path
-    }).toString();
-
     try {
-      const res  = await fetch(url, { method: "DELETE" });
+      const res  = await fetch("/api/trash/" + encodeURIComponent(file.id), { method: "DELETE" });
       const data = await res.json();
-      if (!res.ok || !data.ok) {
+      if (!res.ok) {
         alert(data.error || res.statusText);
         return;
       }
-      _files = _files.filter(f =>
-        !(f.project_root === file.project_root && f.original_path === file.original_path));
+      _files = _files.filter(f => f.id !== file.id);
       _totals = {
         count: Math.max(0, _totals.count - 1),
         size:  Math.max(0, _totals.size - (file.file_size || 0))
@@ -242,26 +237,27 @@ const Trash = (() => {
     }
   }
 
-  async function _emptyBulk(daysOld, confirmKey) {
+  async function _emptyBulk(mode, confirmKey) {
     const confirmed = await Modal.confirm(_t(confirmKey));
     if (!confirmed) return;
 
-    const qs  = new URLSearchParams();
-    qs.set("days_old", String(daysOld));
-    const url = "/api/trash?" + qs.toString();
-
     try {
-      const res  = await fetch(url, { method: "DELETE" });
+      const res  = await fetch("/api/trash/empty", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode })
+      });
       const data = await res.json();
-      if (!res.ok || !data.ok) {
+      if (!res.ok) {
         alert(data.error || res.statusText);
         return;
       }
-      if (data.deleted_count === 0 && daysOld > 0) {
+      const removed = data.removed || 0;
+      if (removed === 0 && mode === "old") {
         alert(_t("trash.nothingOld"));
       } else {
         alert(I18n.t("trash.emptied", {
-          count: data.deleted_count || 0,
+          count: removed,
           size:  _humanBytes(data.freed_size || 0)
         }));
       }
@@ -271,9 +267,6 @@ const Trash = (() => {
     }
   }
 
-  // Detects trash entries whose original project_root clearly no longer
-  // exists (test temp dirs under /var/folders, /tmp, or dir-format "dYYYYMMDD-...").
-  // The delete API does permanent deletion on a per-file basis.
   async function _emptyOrphans() {
     const orphans = _files.filter(f => {
       const root = f.project_root || "";
@@ -289,31 +282,7 @@ const Trash = (() => {
     );
     if (!confirmed) return;
 
-    let deleted = 0, freed = 0, failed = 0;
-    for (const f of orphans) {
-      const url = "/api/trash?" + new URLSearchParams({
-        project: f.project_root,
-        file:    f.original_path
-      }).toString();
-      try {
-        const r = await fetch(url, { method: "DELETE" });
-        const d = await r.json();
-        if (r.ok && d.ok) {
-          deleted += 1;
-          freed   += d.freed_size || 0;
-        } else {
-          failed += 1;
-        }
-      } catch (_e) {
-        failed += 1;
-      }
-    }
-    alert(I18n.t("trash.orphansCleaned", {
-      count:  deleted,
-      size:   _humanBytes(freed),
-      failed: failed
-    }));
-    await _load();
+    await _emptyBulk("orphans", "trash.confirmEmptyOrphans");
   }
 
   function _wire() {
@@ -325,10 +294,10 @@ const Trash = (() => {
     const btnAll     = $("btn-trash-empty-all");
     if (btnRefresh) btnRefresh.addEventListener("click", () => _load());
     if (btnOld)     btnOld.addEventListener("click",
-      () => _emptyBulk(7, "trash.confirmEmptyOld"));
+      () => _emptyBulk("old", "trash.confirmEmptyOld"));
     if (btnOrphans) btnOrphans.addEventListener("click", () => _emptyOrphans());
     if (btnAll)     btnAll.addEventListener("click",
-      () => _emptyBulk(0, "trash.confirmEmptyAll"));
+      () => _emptyBulk("all", "trash.confirmEmptyAll"));
   }
 
   // ── Public API ────────────────────────────────────────────────────────
