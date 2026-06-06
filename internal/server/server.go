@@ -7,6 +7,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -57,6 +59,11 @@ type Config struct {
 	// When false (default), channels are started from ~/.octo/channels.yml
 	// alongside the HTTP server.
 	NoChannel bool
+
+	// AccessKey is the shared secret used to authenticate Web UI and API
+	// requests. When empty, the server looks for OCTO_ACCESS_KEY env var.
+	// If still empty, a random key is generated and printed on startup.
+	AccessKey string
 }
 
 // Server is the HTTP server skeleton. It owns the mux, the agent factory,
@@ -106,6 +113,9 @@ type Server struct {
 	// mcpCleanup unregisters + closes the MCP registry connected at start.
 	// Always non-nil after New (a no-op when no servers connected).
 	mcpCleanup func()
+
+	// accessKey is the shared secret for Web UI / API authentication.
+	accessKey string
 }
 
 // New builds a Server. It resolves provider/model, discovers skills, and
@@ -127,6 +137,9 @@ func New(cfg Config) (*Server, error) {
 	skillsManifest := skills.RenderManifest(skillReg)
 	tools.SetSkills(skillReg)
 
+	fileCfg, _ := config.Load()
+	accessKey := resolveAccessKey(cfg.AccessKey, fileCfg)
+
 	s := &Server{
 		cfg:            cfg,
 		mux:            http.NewServeMux(),
@@ -138,6 +151,7 @@ func New(cfg Config) (*Server, error) {
 		cwd:            cwd,
 		envCtx:         envCtx,
 		turnLocks:      map[string]*sync.Mutex{},
+		accessKey:      accessKey,
 	}
 
 	s.registerRoutes()
@@ -201,6 +215,11 @@ func (s *Server) enableMCP() {
 	s.mcpCleanup = cleanup
 }
 
+// AccessKey returns the server's current access key.
+func (s *Server) AccessKey() string {
+	return s.accessKey
+}
+
 // ListenAndServe starts the HTTP server.
 func (s *Server) ListenAndServe() error {
 	s.startChannels()
@@ -219,34 +238,34 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
 }
 
-// registerRoutes wires all handlers.
+// registerRoutes wires all handlers. API and WS routes require auth.
 func (s *Server) registerRoutes() {
-	s.mux.HandleFunc("POST /api/chat", s.handleCreateChat)
-	s.mux.HandleFunc("POST /api/chat/{id}/turn", s.handleTurnOrSSE)
-	s.mux.HandleFunc("GET /api/sessions", s.handleListSessions)
-	s.mux.HandleFunc("POST /api/sessions/delete", s.handleDeleteSessions)
-	s.mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
-	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
-	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
-	s.mux.HandleFunc("GET /api/skills", s.handleListSkills)
+	s.mux.HandleFunc("POST /api/chat", s.requireAuth(s.handleCreateChat))
+	s.mux.HandleFunc("POST /api/chat/{id}/turn", s.requireAuth(s.handleTurnOrSSE))
+	s.mux.HandleFunc("GET /api/sessions", s.requireAuth(s.handleListSessions))
+	s.mux.HandleFunc("POST /api/sessions/delete", s.requireAuth(s.handleDeleteSessions))
+	s.mux.HandleFunc("GET /api/sessions/{id}", s.requireAuth(s.handleGetSession))
+	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireAuth(s.handleDeleteSession))
+	s.mux.HandleFunc("GET /api/tools", s.requireAuth(s.handleListTools))
+	s.mux.HandleFunc("GET /api/skills", s.requireAuth(s.handleListSkills))
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
-	s.mux.HandleFunc("GET /api/channels", s.handleListChannels)
-	s.mux.HandleFunc("GET /api/channels/available", s.handleAvailableChannels)
-	s.mux.HandleFunc("GET /api/channels/{platform}", s.handleGetChannel)
-	s.mux.HandleFunc("POST /api/channels/{platform}", s.handleSaveChannel)
-	s.mux.HandleFunc("DELETE /api/channels/{platform}", s.handleDeleteChannel)
-	s.mux.HandleFunc("POST /api/channels/{platform}/test", s.handleTestChannel)
-	s.mux.HandleFunc("GET /api/tasks", s.handleListTasks)
-	s.mux.HandleFunc("POST /api/tasks", s.handleCreateTask)
-	s.mux.HandleFunc("DELETE /api/tasks/{id}", s.handleDeleteTask)
-	s.mux.HandleFunc("POST /api/tasks/{id}/run", s.handleRunTask)
-	s.mux.HandleFunc("GET /api/profile/soul", s.handleGetProfileSoul)
-	s.mux.HandleFunc("GET /api/profile/user", s.handleGetProfileUser)
-	s.mux.HandleFunc("GET /api/memories", s.handleGetMemories)
-	s.mux.HandleFunc("GET /api/trash", s.handleGetTrash)
-	s.mux.HandleFunc("POST /api/trash/empty", s.handleEmptyTrash)
-	s.mux.HandleFunc("POST /api/trash/{id}/restore", s.handleRestoreTrash)
-	s.mux.HandleFunc("GET /ws", s.handleWS)
+	s.mux.HandleFunc("GET /api/channels", s.requireAuth(s.handleListChannels))
+	s.mux.HandleFunc("GET /api/channels/available", s.requireAuth(s.handleAvailableChannels))
+	s.mux.HandleFunc("GET /api/channels/{platform}", s.requireAuth(s.handleGetChannel))
+	s.mux.HandleFunc("POST /api/channels/{platform}", s.requireAuth(s.handleSaveChannel))
+	s.mux.HandleFunc("DELETE /api/channels/{platform}", s.requireAuth(s.handleDeleteChannel))
+	s.mux.HandleFunc("POST /api/channels/{platform}/test", s.requireAuth(s.handleTestChannel))
+	s.mux.HandleFunc("GET /api/tasks", s.requireAuth(s.handleListTasks))
+	s.mux.HandleFunc("POST /api/tasks", s.requireAuth(s.handleCreateTask))
+	s.mux.HandleFunc("DELETE /api/tasks/{id}", s.requireAuth(s.handleDeleteTask))
+	s.mux.HandleFunc("POST /api/tasks/{id}/run", s.requireAuth(s.handleRunTask))
+	s.mux.HandleFunc("GET /api/profile/soul", s.requireAuth(s.handleGetProfileSoul))
+	s.mux.HandleFunc("GET /api/profile/user", s.requireAuth(s.handleGetProfileUser))
+	s.mux.HandleFunc("GET /api/memories", s.requireAuth(s.handleGetMemories))
+	s.mux.HandleFunc("GET /api/trash", s.requireAuth(s.handleGetTrash))
+	s.mux.HandleFunc("POST /api/trash/empty", s.requireAuth(s.handleEmptyTrash))
+	s.mux.HandleFunc("POST /api/trash/{id}/restore", s.requireAuth(s.handleRestoreTrash))
+	s.mux.HandleFunc("GET /ws", s.requireAuth(s.handleWS))
 
 	// Static files (Web UI) — served from embedded filesystem.
 	s.mux.Handle("/", s.staticHandler())
@@ -443,6 +462,27 @@ func resolveBaseURL(provider string, cfg config.Config) string {
 	return ""
 }
 
+// resolveAccessKey returns the access key to use: explicit config value,
+// OCTO_ACCESS_KEY env var, config file access_key field, or a freshly
+// generated random 32-byte hex string.
+func resolveAccessKey(cfgValue string, fileCfg config.Config) string {
+	if cfgValue != "" {
+		return cfgValue
+	}
+	if env := os.Getenv("OCTO_ACCESS_KEY"); env != "" {
+		return env
+	}
+	if fileCfg.AccessKey != "" {
+		return fileCfg.AccessKey
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to a timestamp-based key if crypto/rand fails.
+		return fmt.Sprintf("octo-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
 // buildEnvContext mirrors cmd/octo's env context builder.
 func buildEnvContext(cwd string) string {
 	var b strings.Builder
@@ -452,6 +492,34 @@ func buildEnvContext(cwd string) string {
 	}
 	fmt.Fprintf(&b, "- Today's date: %s\n", time.Now().Format("2006-01-02"))
 	return b.String()
+}
+
+// validateAccessKey checks whether the request carries the correct access key
+// via query parameter or Authorization header. Returns true when the key matches.
+func (s *Server) validateAccessKey(r *http.Request) bool {
+	key := r.URL.Query().Get("access_key")
+	if key == "" {
+		key = r.Header.Get("X-Access-Key")
+	}
+	if key == "" {
+		auth := r.Header.Get("Authorization")
+		if strings.HasPrefix(auth, "Bearer ") {
+			key = strings.TrimPrefix(auth, "Bearer ")
+		}
+	}
+	return key == s.accessKey
+}
+
+// requireAuth wraps a handler, rejecting requests without a valid access key.
+func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.validateAccessKey(r) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			return
+		}
+		next(w, r)
+	}
 }
 
 // validateBindAddr enforces the M6.5 security rule: non-localhost binds

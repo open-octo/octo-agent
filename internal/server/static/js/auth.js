@@ -54,13 +54,28 @@ const Auth = (() => {
       const errorEl = document.getElementById("auth-error");
       const submitBtn = document.getElementById("auth-submit-btn");
 
-      function doSubmit() {
+      async function doSubmit() {
         const val = input.value.trim();
         if (!val) {
           errorEl.style.display = "block";
           errorEl.setAttribute("data-i18n", "auth.required");
           if (window.I18N) errorEl.textContent = I18N.t("auth.required");
           else errorEl.textContent = "Access key is required";
+          return;
+        }
+        // Validate key against server before accepting.
+        try {
+          const resp = await fetch("/api/health?access_key=" + encodeURIComponent(val));
+          if (!resp.ok) {
+            errorEl.style.display = "block";
+            errorEl.setAttribute("data-i18n", "auth.invalid");
+            if (window.I18N) errorEl.textContent = I18N.t("auth.invalid");
+            else errorEl.textContent = "Invalid access key";
+            return;
+          }
+        } catch (e) {
+          errorEl.style.display = "block";
+          errorEl.textContent = "Cannot reach server";
           return;
         }
         overlay.remove();

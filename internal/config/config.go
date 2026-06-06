@@ -41,6 +41,10 @@ type Config struct {
 	// env var is empty. Opt-in via `octo config` and stored mode 0600. Prefer
 	// the env var.
 	APIKey string `yaml:"api_key,omitempty"`
+	// AccessKey is the shared secret for Web UI / API authentication.
+	// When empty, `octo serve` falls back to OCTO_ACCESS_KEY env var or
+	// generates a random key on startup.
+	AccessKey string `yaml:"access_key,omitempty"`
 	// Tools holds opt-in tooling behaviour (Tool Search for MCP, etc.). A
 	// missing block leaves the built-in defaults.
 	Tools ToolsConfig `yaml:"tools,omitempty"`
