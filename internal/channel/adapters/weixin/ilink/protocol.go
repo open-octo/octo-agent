@@ -279,3 +279,26 @@ func newUUID() string {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		buf[0:4], buf[4:6], buf[6:8], buf[8:10], buf[10:16])
 }
+
+// DownloadMedia downloads a file from the WeChat CDN using the given CDNMedia reference.
+// If FullURL is set, it uses that directly. Otherwise constructs the URL from EncryptQueryParam.
+func (c *Client) DownloadMedia(ctx context.Context, media *CDNMedia) ([]byte, error) {
+	if media == nil {
+		return nil, fmt.Errorf("nil CDN media")
+	}
+	if media.FullURL != "" {
+		return c.downloadRaw(ctx, media.FullURL)
+	}
+	url := fmt.Sprintf("%s/downloadfile?%s", CDNBaseURL, media.EncryptQueryParam)
+	return c.downloadRaw(ctx, url)
+}
+
+func (c *Client) downloadRaw(ctx context.Context, url string) ([]byte, error) {
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}

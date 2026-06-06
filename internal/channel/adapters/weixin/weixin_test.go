@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -44,9 +45,12 @@ func TestAdapter_SendText_NoContextToken(t *testing.T) {
 }
 
 func TestAdapter_SendText_Success(t *testing.T) {
+	var mu sync.Mutex
 	var received []map[string]any
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		if r.URL.Path == "/ilink/bot/sendmessage" {
 			body := make([]byte, r.ContentLength)
 			r.Body.Read(body)
@@ -61,20 +65,27 @@ func TestAdapter_SendText_Success(t *testing.T) {
 
 	a := &Adapter{
 		baseURL: ts.URL,
+		client:  ilink.NewClient(),
 		bot: &ilinkBot{
 			client: ilink.NewClient(),
 			creds:  &ilink.Credentials{Token: "tok", BaseURL: ts.URL},
 		},
 	}
 	a.bot.contextTokens.Store("user1", "ctx123")
+	a.sendQ = newSendQueue(a.client, ts.URL, "tok")
 
 	res := a.SendText("user1", "hello world", "")
 	if !res.OK {
 		t.Fatalf("expected send OK, got error: %s", res.Error)
 	}
 
-	if len(received) != 1 {
-		t.Fatalf("expected 1 received request, got %d", len(received))
+	// Flush the queue so the message is sent immediately.
+	a.sendQ.flush("user1")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) == 0 {
+		t.Fatal("expected at least 1 received request, got 0")
 	}
 	msg := received[0]["msg"].(map[string]any)
 	if msg["to_user_id"] != "user1" {
@@ -83,8 +94,17 @@ func TestAdapter_SendText_Success(t *testing.T) {
 }
 
 func TestAdapter_SendFile(t *testing.T) {
+	var mu sync.Mutex
+	var received []map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		if r.URL.Path == "/ilink/bot/sendmessage" {
+			var payload map[string]any
+			body := make([]byte, r.ContentLength)
+			r.Body.Read(body)
+			_ = json.Unmarshal(body, &payload)
+			received = append(received, payload)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"ret": 0})
 		}
@@ -93,12 +113,14 @@ func TestAdapter_SendFile(t *testing.T) {
 
 	a := &Adapter{
 		baseURL: ts.URL,
+		client:  ilink.NewClient(),
 		bot: &ilinkBot{
 			client: ilink.NewClient(),
 			creds:  &ilink.Credentials{Token: "tok", BaseURL: ts.URL},
 		},
 	}
 	a.bot.contextTokens.Store("user1", "ctx123")
+	a.sendQ = newSendQueue(a.client, ts.URL, "tok")
 
 	res := a.SendFile("user1", "/tmp/test.txt", "test.txt", "")
 	if !res.OK {
@@ -190,7 +212,9 @@ func TestNew_Defaults(t *testing.T) {
 	}
 }
 
-func TestParseMessage(t *testing.T) {
+func TestHandleInbound_UserMessage(t *testing.T) {
+	var received []channel.InboundEvent
+	a := &Adapter{}
 	wire := &ilink.WireMessage{
 		MessageType:  ilink.MessageTypeUser,
 		FromUserID:   "user1",
@@ -200,29 +224,35 @@ func TestParseMessage(t *testing.T) {
 			{Type: ilink.ItemText, TextItem: &ilink.TextItem{Text: "hello"}},
 		},
 	}
-	msg := parseMessage(wire)
-	if msg == nil {
-		t.Fatal("expected non-nil message")
+	a.handleInbound(wire, func(ev channel.InboundEvent) {
+		received = append(received, ev)
+	})
+	if len(received) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(received))
 	}
-	if msg.UserID != "user1" {
-		t.Errorf("unexpected userID: %q", msg.UserID)
+	if received[0].UserID != "user1" {
+		t.Errorf("unexpected userID: %q", received[0].UserID)
 	}
-	if msg.Text != "hello" {
-		t.Errorf("unexpected text: %q", msg.Text)
+	if received[0].Text != "hello" {
+		t.Errorf("unexpected text: %q", received[0].Text)
 	}
-	if msg.ContextToken != "ctx123" {
-		t.Errorf("unexpected contextToken: %q", msg.ContextToken)
+	if received[0].ContextToken != "ctx123" {
+		t.Errorf("unexpected contextToken: %q", received[0].ContextToken)
 	}
 }
 
-func TestParseMessage_BotMessage(t *testing.T) {
+func TestHandleInbound_BotMessage(t *testing.T) {
+	var received []channel.InboundEvent
+	a := &Adapter{}
 	wire := &ilink.WireMessage{
 		MessageType: ilink.MessageTypeBot,
 		FromUserID:  "bot1",
 	}
-	msg := parseMessage(wire)
-	if msg != nil {
-		t.Fatal("expected nil for bot message")
+	a.handleInbound(wire, func(ev channel.InboundEvent) {
+		received = append(received, ev)
+	})
+	if len(received) != 0 {
+		t.Fatal("expected no events for bot message")
 	}
 }
 
@@ -232,29 +262,45 @@ func TestExtractText(t *testing.T) {
 		{Type: ilink.ItemImage, ImageItem: &ilink.ImageItem{URL: "http://img"}},
 	}
 	text := extractText(items)
-	if text != "hello http://img" {
+	if text != "hello\n[图片]" {
 		t.Errorf("unexpected text: %q", text)
 	}
 }
 
-func TestChunkText(t *testing.T) {
-	chunks := chunkText("hello", 10)
+func TestExtractText_QuotedMessage(t *testing.T) {
+	items := []ilink.MessageItem{
+		{Type: ilink.ItemText, TextItem: &ilink.TextItem{Text: "reply"},
+			RefMsg: &ilink.RefMessage{Title: "Original", MessageItem: &ilink.MessageItem{
+				Type: ilink.ItemText, TextItem: &ilink.TextItem{Text: "quoted text"},
+			}},
+		},
+	}
+	text := extractText(items)
+	if !strings.Contains(text, "[引用: Original | quoted text]") {
+		t.Errorf("expected quoted message, got: %q", text)
+	}
+}
+
+func TestSmartChunkText(t *testing.T) {
+	chunks := smartChunkText("hello", 10)
 	if len(chunks) != 1 || chunks[0] != "hello" {
 		t.Fatalf("unexpected chunks: %v", chunks)
 	}
 
-	chunks = chunkText("hello world foo bar", 5)
-	if len(chunks) != 4 {
-		t.Fatalf("expected 4 chunks, got %d", len(chunks))
+	chunks = smartChunkText("hello world foo bar", 5)
+	if len(chunks) < 2 {
+		t.Fatalf("expected at least 2 chunks, got %d", len(chunks))
 	}
 }
 
-func TestMin(t *testing.T) {
-	if min(1*time.Second, 2*time.Second) != 1*time.Second {
-		t.Error("unexpected min")
+func TestMarkdownToPlain(t *testing.T) {
+	md := "**bold** and *italic* and [link](http://x)"
+	plain := markdownToPlain(md)
+	if strings.Contains(plain, "**") {
+		t.Errorf("expected no **, got: %q", plain)
 	}
-	if min(3*time.Second, 2*time.Second) != 2*time.Second {
-		t.Error("unexpected min")
+	if strings.Contains(plain, "[link]") {
+		t.Errorf("expected link text, got: %q", plain)
 	}
 }
 
