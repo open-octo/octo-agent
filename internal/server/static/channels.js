@@ -1,9 +1,8 @@
 // channels.js — Channels panel (Agent-First design)
 //
 // Design principle: no configuration forms here.
-// This page shows platform status only. All setup is done via Agent with browser automation.
-// "Auto Setup" opens a chat session with /channel-manager pre-filled — the Agent will use
-// browser automation to complete the entire setup on the platform's web console.
+// This page shows platform status only. All setup is done via Agent.
+// "Auto Setup" opens a chat session with /channel-manager pre-filled.
 // "Test" runs /channel-manager doctor via the Agent and streams results.
 
 const Channels = (() => {

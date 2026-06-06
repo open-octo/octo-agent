@@ -11,7 +11,6 @@ const Settings = (() => {
 
   function open() {
     _load();
-    _loadBrowserStatus();
   }
 
   // ── Data Loading ────────────────────────────────────────────────────────────
@@ -752,79 +751,6 @@ const Settings = (() => {
     }
   }
 
-  // ── Browser Setup ─────────────────────────────────────────────────────────────
-
-  async function _loadBrowserStatus() {
-    try {
-      const res  = await fetch("/api/browser/status");
-      const data = await res.json();
-      const desc        = document.getElementById("browser-status-desc");
-      const btn         = document.getElementById("btn-browser-setup");
-      const toggleWrap  = document.getElementById("browser-toggle-wrap");
-      const toggleInput = document.getElementById("browser-toggle-input");
-
-      // File doesn't exist → not set up yet
-      if (data.enabled === undefined || data.enabled === null) {
-        desc.textContent = I18n.t("settings.browser.desc");
-        btn.textContent  = I18n.t("settings.browser.btn");
-        toggleWrap.style.display = "none";
-        return;
-      }
-
-      // Configured — show toggle + reconfigure button
-      const version = data.chrome_version ? ` (Chrome v${data.chrome_version})` : "";
-      desc.textContent     = I18n.t(data.enabled ? "settings.browser.configured" : "settings.browser.disabled") + version;
-      btn.textContent      = I18n.t("settings.browser.btn.reconfigure");
-      toggleWrap.style.display = "inline-block";
-      toggleInput.checked  = data.enabled;
-
-      // Only bind once
-      if (!toggleInput.dataset.bound) {
-        toggleInput.dataset.bound = "1";
-        toggleInput.addEventListener("change", _toggleBrowser);
-      }
-    } catch (_) { /* non-critical */ }
-  }
-
-  async function _toggleBrowser() {
-    const toggleInput = document.getElementById("browser-toggle-input");
-    toggleInput.disabled = true;
-    try {
-      const res  = await fetch("/api/browser/toggle", { method: "POST" });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "toggle failed");
-      await _loadBrowserStatus();
-    } catch (_) {
-      // Revert on failure
-      toggleInput.checked  = !toggleInput.checked;
-    } finally {
-      toggleInput.disabled = false;
-    }
-  }
-
-  async function _setupBrowser() {
-    const btn = document.getElementById("btn-browser-setup");
-    btn.disabled    = true;
-    btn.textContent = I18n.t("settings.browser.btn.starting");
-    try {
-      const res = await fetch("/api/sessions", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ name: "🌐 Browser Setup", source: "setup" })
-      });
-      const data    = await res.json();
-      const session = data.session;
-      if (!session) throw new Error("No session returned");
-      Sessions.add(session);
-      Sessions.renderList();
-      Sessions.setPendingMessage(session.id, "/browser-setup");
-      Sessions.select(session.id);
-    } catch (e) {
-      btn.disabled    = false;
-      btn.textContent = I18n.t("settings.browser.btn");
-    }
-  }
-
   // ── Init ──────────────────────────────────────────────────────────────────────
 
   function _initLangBtns() {
@@ -843,7 +769,6 @@ const Settings = (() => {
   function init() {
     document.getElementById("btn-add-model").addEventListener("click", _addModel);
     document.getElementById("btn-rerun-onboard").addEventListener("click", _rerunOnboard);
-    document.getElementById("btn-browser-setup").addEventListener("click", _setupBrowser);
 
     _initLangBtns();
     _initFontBtns();

@@ -1152,8 +1152,6 @@ const Sessions = (() => {
         return _renderWriteResult(payload);
       case "todo":
         return _renderTodoResult(payload);
-      case "browser":
-        return _renderBrowserResult(payload);
       default:
         return null;
     }
@@ -1292,10 +1290,6 @@ const Sessions = (() => {
     }
     html += `</div>`;
     return html;
-  }
-
-  function _renderBrowserResult(p) {
-    return `<div class="tr-card tr-browser"><div class="tr-header"><span class="tr-icon">🌐</span><span class="tr-action">${escapeHtml(p.action || "")}</span><span class="tr-meta">${escapeHtml(p.url || "")}</span></div></div>`;
   }
 
   // Produce a short one-line summary of tool arguments for the compact view.
