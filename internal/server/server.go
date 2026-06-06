@@ -290,10 +290,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/cron-tasks/{name}/run", s.requireAuth(s.handleRunCronTask))
 	s.mux.HandleFunc("PATCH /api/cron-tasks/{name}", s.requireAuth(s.handlePatchCronTask))
 
-	// Browser automation (stub)
-	s.mux.HandleFunc("GET /api/browser/status", s.requireAuth(s.handleBrowserStatus))
-	s.mux.HandleFunc("POST /api/browser/toggle", s.requireAuth(s.handleBrowserToggle))
-
 	// Version & restart
 	s.mux.HandleFunc("POST /api/version/upgrade", s.requireAuth(s.handleVersionUpgrade))
 	s.mux.HandleFunc("POST /api/restart", s.requireAuth(s.handleRestart))

@@ -3459,13 +3459,6 @@ body {
 }
 .settings-error { color: var(--color-error); }
 
-/* ── Browser toggle switch ───────────────────────────────────────────────── */
-.settings-browser-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  flex-shrink: 0;
-}
 .toggle-switch {
   position: relative;
   display: inline-block;

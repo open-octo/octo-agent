@@ -595,23 +595,6 @@ func TestHandleGetMemory_NotFound(t *testing.T) {
 	}
 }
 
-func TestHandleBrowserStatus(t *testing.T) {
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodGet, "/api/browser/status?access_key="+srv.AccessKey(), nil)
-	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["enabled"] != false {
-		t.Fatalf("enabled = %v, want false", body["enabled"])
-	}
-}
-
 func TestHandleVersionUpgrade(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	req := httptest.NewRequest(http.MethodPost, "/api/version/upgrade?access_key="+srv.AccessKey(), nil)
