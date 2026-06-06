@@ -536,6 +536,11 @@ func (s *Server) validateAccessKey(r *http.Request) bool {
 			key = strings.TrimPrefix(auth, "Bearer ")
 		}
 	}
+	if key == "" {
+		if c, err := r.Cookie("octo_access_key"); err == nil {
+			key = c.Value
+		}
+	}
 	return key == s.accessKey
 }
 

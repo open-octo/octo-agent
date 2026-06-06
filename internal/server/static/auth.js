@@ -30,8 +30,19 @@ const Auth = (() => {
   };
 
   function _getStoredKey() {
+    // Prefer the canonical underscore key; fall back to the legacy hyphenated
+    // key so users who authenticated with an older frontend version are not
+    // locked out. When the legacy key is found, migrate it in place.
+    let key = localStorage.getItem(STORAGE_KEY);
+    if (!key) {
+      key = localStorage.getItem('octo-access-key');
+      if (key) {
+        localStorage.setItem(STORAGE_KEY, key);
+        localStorage.removeItem('octo-access-key');
+      }
+    }
     return (
-      localStorage.getItem(STORAGE_KEY) ||
+      key ||
       new URLSearchParams(location.search).get('access_key') ||
       null
     );
