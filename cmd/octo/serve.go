@@ -61,6 +61,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		host = "localhost" + host
 	}
 	fmt.Fprintf(stdout, "octo server listening on http://%s\n", host)
+	fmt.Fprintf(stdout, "access key: %s\n", srv.AccessKey())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -166,7 +166,8 @@ func (h *wsHub) broadcast(sessionID string, event any) {
 }
 
 // handleWS upgrades an HTTP connection to WebSocket and registers it with
-// the hub.
+// the hub. Auth is already checked by requireAuth middleware; this handler
+// only upgrades the connection.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
