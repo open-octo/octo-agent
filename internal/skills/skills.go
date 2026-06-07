@@ -45,9 +45,10 @@ type Skill struct {
 // tool from separate goroutines). cwd is remembered so Reload can re-scan the
 // same roots a session was discovered from.
 type Registry struct {
-	mu     sync.RWMutex
-	skills map[string]Skill
-	cwd    string
+	mu       sync.RWMutex
+	skills   map[string]Skill
+	disabled map[string]bool // names toggled off by the user
+	cwd      string
 }
 
 // userSkillsRoot returns ~/.octo/skills, or "" when the home dir can't be
@@ -159,7 +160,8 @@ func splitFrontmatter(content string) (front, body string, ok bool) {
 	return "", "", false
 }
 
-// Get returns the skill with the given name.
+// Get returns the skill with the given name. Disabled skills are treated as
+// non-existent so the model can't load them.
 func (r *Registry) Get(name string) (Skill, bool) {
 	if r == nil {
 		return Skill{}, false
@@ -167,7 +169,10 @@ func (r *Registry) Get(name string) (Skill, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	s, ok := r.skills[name]
-	return s, ok
+	if !ok || r.disabled[name] {
+		return Skill{}, false
+	}
+	return s, true
 }
 
 // Reload re-scans the skill roots in place, picking up skills added, removed, or
@@ -175,7 +180,8 @@ func (r *Registry) Get(name string) (Skill, bool) {
 // intentionally NOT refreshed (recomputing it mid-session would change the
 // cached prompt prefix); this only refreshes what the `skill` tool can load, so
 // a skill dropped into ~/.octo/skills mid-session becomes loadable without a
-// restart. Safe to call concurrently with Get/List/Len.
+// restart. Safe to call concurrently with Get/List/Len. The disabled set is
+// preserved across reloads.
 func (r *Registry) Reload() {
 	if r == nil {
 		return
@@ -186,19 +192,50 @@ func (r *Registry) Reload() {
 	r.mu.Unlock()
 }
 
-// Len reports how many skills were discovered.
+// Len reports how many enabled skills were discovered (disabled skills are
+// excluded so the system-prompt manifest and tool advertisement stay accurate).
 func (r *Registry) Len() int {
 	if r == nil {
 		return 0
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return len(r.skills)
+	n := 0
+	for name := range r.skills {
+		if !r.disabled[name] {
+			n++
+		}
+	}
+	return n
 }
 
-// List returns all discovered skills in a stable order: project skills first,
+// List returns enabled skills only, in a stable order: project skills first,
 // then user skills, each group sorted by name.
 func (r *Registry) List() []Skill {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	out := make([]Skill, 0, len(r.skills))
+	for _, s := range r.skills {
+		if !r.disabled[s.Name] {
+			out = append(out, s)
+		}
+	}
+	r.mu.RUnlock()
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Source != out[j].Source {
+			return out[i].Source == "project" // project before user
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// All returns every discovered skill, including disabled ones, in the same
+// order as List. Use this when the caller needs the full catalog (e.g. a UI
+// that shows every skill with an on/off toggle).
+func (r *Registry) All() []Skill {
 	if r == nil {
 		return nil
 	}
@@ -215,6 +252,34 @@ func (r *Registry) List() []Skill {
 		return out[i].Name < out[j].Name
 	})
 	return out
+}
+
+// SetDisabled replaces the set of disabled skill names. The registry filters
+// them out of List, Len, Get and RenderManifest automatically.
+func (r *Registry) SetDisabled(names []string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.disabled = make(map[string]bool, len(names))
+	for _, n := range names {
+		r.disabled[n] = true
+	}
+}
+
+// IsEnabled reports whether a skill by name exists and is not disabled.
+func (r *Registry) IsEnabled(name string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, exists := r.skills[name]
+	if !exists {
+		return false
+	}
+	return !r.disabled[name]
 }
 
 // RenderManifest builds the L1 manifest injected into the system prompt: each

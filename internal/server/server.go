@@ -134,10 +134,11 @@ func New(cfg Config) (*Server, error) {
 	envCtx := buildEnvContext(cwd)
 
 	skillReg := skills.Discover(cwd)
+	fileCfg, _ := config.Load()
+	skillReg.SetDisabled(fileCfg.Tools.DisabledSkills)
 	skillsManifest := skills.RenderManifest(skillReg)
 	tools.SetSkills(skillReg)
 
-	fileCfg, _ := config.Load()
 	accessKey := resolveAccessKey(cfg.AccessKey, fileCfg)
 
 	s := &Server{
@@ -289,6 +290,9 @@ func (s *Server) registerRoutes() {
 
 	// Skill toggle
 	s.mux.HandleFunc("PATCH /api/skills/{name}/toggle", s.requireAuth(s.handleToggleSkill))
+
+	// Benchmark
+	s.mux.HandleFunc("POST /api/sessions/{id}/benchmark", s.requireAuth(s.handleBenchmark))
 
 	// Memory detail
 	s.mux.HandleFunc("GET /api/memories/{filename}", s.requireAuth(s.handleGetMemory))

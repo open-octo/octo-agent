@@ -115,6 +115,7 @@ type skillInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Source      string `json:"source"`
+	Enabled     bool   `json:"enabled"`
 }
 
 // ─── POST /api/chat ─────────────────────────────────────────────────────────
@@ -413,13 +414,14 @@ func (s *Server) handleListTools(w http.ResponseWriter, r *http.Request) {
 // ─── GET /api/skills ────────────────────────────────────────────────────────
 
 func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
-	list := s.skillReg.List()
+	list := s.skillReg.All()
 	out := make([]skillInfo, 0, len(list))
 	for _, sk := range list {
 		out = append(out, skillInfo{
 			Name:        sk.Name,
 			Description: sk.Description,
 			Source:      sk.Source,
+			Enabled:     s.skillReg.IsEnabled(sk.Name),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"skills": out})
