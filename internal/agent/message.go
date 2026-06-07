@@ -7,6 +7,8 @@
 // provider streaming aggregators and the tool registry.
 package agent
 
+import "time"
+
 // Role is the message author role, mirroring the role string used by both
 // supported LLM API protocols (Anthropic Messages, OpenAI Chat Completions).
 type Role string
@@ -25,24 +27,25 @@ const (
 // prefer Blocks; when only Content is set the adapter encodes it as a single
 // text block.
 type Message struct {
-	Role    Role           `json:"role"`
-	Content string         `json:"content,omitempty"`
-	Blocks  []ContentBlock `json:"blocks,omitempty"`
+	Role      Role           `json:"role"`
+	Content   string         `json:"content,omitempty"`
+	Blocks    []ContentBlock `json:"blocks,omitempty"`
+	CreatedAt time.Time      `json:"created_at,omitempty"`
 }
 
-// NewUserMessage constructs a Message with RoleUser.
+// NewUserMessage constructs a Message with RoleUser and a current timestamp.
 func NewUserMessage(content string) Message {
-	return Message{Role: RoleUser, Content: content}
+	return Message{Role: RoleUser, Content: content, CreatedAt: time.Now()}
 }
 
-// NewAssistantMessage constructs a Message with RoleAssistant.
-// If content is empty, it falls back to a non-empty placeholder so the
-// message is valid for providers (Anthropic rejects empty assistant content).
+// NewAssistantMessage constructs a Message with RoleAssistant and a current
+// timestamp. If content is empty, it falls back to a non-empty placeholder so
+// the message is valid for providers (Anthropic rejects empty assistant content).
 func NewAssistantMessage(content string) Message {
 	if content == "" {
 		content = "[no content]"
 	}
-	return Message{Role: RoleAssistant, Content: content}
+	return Message{Role: RoleAssistant, Content: content, CreatedAt: time.Now()}
 }
 
 // NewSystemMessage constructs a Message with RoleSystem.
@@ -51,7 +54,7 @@ func NewAssistantMessage(content string) Message {
 // rather than as a role within the messages array; the agent's provider
 // adapter is responsible for that translation.
 func NewSystemMessage(content string) Message {
-	return Message{Role: RoleSystem, Content: content}
+	return Message{Role: RoleSystem, Content: content, CreatedAt: time.Now()}
 }
 
 // NewToolUseMessage constructs an assistant Message whose content is a slice
@@ -59,7 +62,7 @@ func NewSystemMessage(content string) Message {
 // contains one or more tool_use blocks (and optionally a preceding text block
 // with the model's reasoning).
 func NewToolUseMessage(blocks []ContentBlock) Message {
-	return Message{Role: RoleAssistant, Blocks: blocks}
+	return Message{Role: RoleAssistant, Blocks: blocks, CreatedAt: time.Now()}
 }
 
 // NewToolResultMessage constructs a user Message that carries tool execution
@@ -67,5 +70,5 @@ func NewToolUseMessage(blocks []ContentBlock) Message {
 // block whose ToolUseID matches a tool_use block in the preceding assistant
 // message.
 func NewToolResultMessage(results []ContentBlock) Message {
-	return Message{Role: RoleUser, Blocks: results}
+	return Message{Role: RoleUser, Blocks: results, CreatedAt: time.Now()}
 }

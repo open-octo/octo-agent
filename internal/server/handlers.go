@@ -314,13 +314,22 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 	// For now we translate the persisted message list into user/assistant
 	// events; tool calls are not reconstructed from the transcript.
 	events := make([]map[string]any, 0, len(sess.Messages))
-	for _, m := range sess.Messages {
+	for i, m := range sess.Messages {
 		switch m.Role {
 		case agent.RoleUser:
+			// Use the message's own CreatedAt when available.  Older session
+			// files don't have per-message timestamps, so fall back to the
+			// array index as a unique cursor (not sess.CreatedAt — that
+			// collides with the Web UI's dedup logic and drops everything
+			// after the first user message).
+			createdAt := m.CreatedAt.Unix()
+			if m.CreatedAt.IsZero() {
+				createdAt = int64(i + 1)
+			}
 			events = append(events, map[string]any{
 				"type":       "history_user_message",
 				"content":    m.Content,
-				"created_at": sess.CreatedAt,
+				"created_at": createdAt,
 			})
 		case agent.RoleAssistant:
 			events = append(events, map[string]any{
