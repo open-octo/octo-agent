@@ -150,6 +150,52 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": task.ID})
 }
 
+func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	s.initScheduler()
+	if s.scheduler == nil {
+		writeError(w, http.StatusInternalServerError, "scheduler not available")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing task id")
+		return
+	}
+
+	task, err := s.scheduler.Get(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	var req taskRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Name != "" {
+		task.Name = req.Name
+	}
+	if req.Cron != "" {
+		task.Cron = req.Cron
+	}
+	if req.Prompt != "" {
+		task.Prompt = req.Prompt
+	}
+	if req.Model != "" {
+		task.Model = req.Model
+	}
+	if req.Agent != "" {
+		task.Agent = req.Agent
+	}
+
+	if err := s.scheduler.Update(*task); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
 func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	s.initScheduler()
 	if s.scheduler == nil {

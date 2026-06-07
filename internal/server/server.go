@@ -261,6 +261,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/channels/{platform}/test", s.requireAuth(s.handleTestChannel))
 	s.mux.HandleFunc("GET /api/tasks", s.requireAuth(s.handleListTasks))
 	s.mux.HandleFunc("POST /api/tasks", s.requireAuth(s.handleCreateTask))
+	s.mux.HandleFunc("PATCH /api/tasks/{id}", s.requireAuth(s.handleUpdateTask))
 	s.mux.HandleFunc("DELETE /api/tasks/{id}", s.requireAuth(s.handleDeleteTask))
 	s.mux.HandleFunc("POST /api/tasks/{id}/run", s.requireAuth(s.handleRunTask))
 	s.mux.HandleFunc("GET /api/profile/soul", s.requireAuth(s.handleGetProfileSoul))
