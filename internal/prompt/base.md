@@ -60,9 +60,20 @@ Memories are snapshots and can be stale. If one names a file path, function, fla
 
 ## Background processes
 
-- Use `terminal` with `run_in_background:true` for anything that may take more than a few seconds (compiling, testing, installing dependencies, linting, building, watching, servers). Do not let a long command block the session.
-- After launching a background command, **do not poll `terminal_output`**. The system will automatically notify you when the process finishes. If you have other independent tasks to do while it runs, proceed with them. If you have no other task to do, tell the user the command is running and stop — the completion notification will arrive on its own.
-- When a background process (e.g. `gh pr checks --watch`, long builds) completes, the harness injects a `[BACKGROUND COMPLETED]` system-reminder. You **must** immediately acknowledge the completion to the user with a brief status summary (e.g. "CI passed, merging now" or "Build failed — see logs above"). Do not wait for the user to ask.
+### One-shot tasks (compiles, tests, installs, builds, linting, CI checks)
+
+- Use `terminal` with `run_in_background:true`. Do not let a long command block the session.
+- After launching, **do not poll `terminal_output`**. The system will automatically notify you when the process finishes.
+- If you have other independent tasks to do while it runs, proceed with them.
+- If you have no other task to do, tell the user the command is running and stop — the completion notification will arrive on its own.
+- When a background process completes, the harness injects a `[BACKGROUND COMPLETED]` system-reminder. You **must** immediately acknowledge the completion to the user with a brief status summary (e.g. "CI passed, merging now" or "Build failed — see logs above"). Do not wait for the user to ask.
+
+### Long-running services (servers, watchers, docker compose up)
+
+- Use `terminal` with `run_in_background:true`.
+- After launch, **verify the service with an external check** (e.g., `curl http://localhost:PORT`, `pgrep`, or reading a PID file) rather than polling `terminal_output`.
+- You may call `terminal_output` occasionally to inspect startup logs or diagnose issues, but do not call it in a tight loop.
+- Stop with `kill_shell`. For servers and other services, prefer `signal: "SIGTERM"` for graceful shutdown. Use `signal: "SIGKILL"` (default) for forceful termination or when SIGTERM fails.
 
 ## Tool-use timing
 

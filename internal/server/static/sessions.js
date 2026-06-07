@@ -1474,10 +1474,12 @@ const Sessions = (() => {
       case "assistant_message": {
         // Collapse tool group before assistant reply
         if (historyCtx.group) { _collapseToolGroup(historyCtx.group); historyCtx.group = null; }
+        const content = (ev.content || "").trim();
+        if (!content) break; // skip empty assistant messages
         const el = document.createElement("div");
         el.className = "msg msg-assistant";
-        el.dataset.raw = ev.content || "";
-        el.innerHTML = _renderMarkdown(ev.content || "");
+        el.dataset.raw = content;
+        el.innerHTML = _renderMarkdown(content);
         _appendCopyButton(el);
         container.appendChild(el);
         break;
@@ -3191,6 +3193,9 @@ const Sessions = (() => {
       if (type === "error") {
         messages.querySelectorAll(".msg-error").forEach(el => el.remove());
       }
+
+      // Skip empty assistant messages — don't render an air bubble.
+      if (type === "assistant" && (!html || !html.trim())) return;
 
       const el = document.createElement("div");
       el.className = `msg msg-${type}`;

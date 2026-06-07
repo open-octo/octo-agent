@@ -271,9 +271,9 @@ func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
 	t.Fatal("timed out waiting for background process to exit")
 }
 
-// TestTerminalOutputTool_AntiPolling verifies that after two consecutive empty
-// polls on a running background process, terminal_output returns an error to
-// force the LLM to stop polling.
+// TestTerminalOutputTool_AntiPolling verifies that after three empty polls
+// within the time window on a running background process, terminal_output
+// returns an error to force the LLM to stop polling.
 func TestTerminalOutputTool_AntiPolling(t *testing.T) {
 	m := NewBackgroundManager()
 	term := TerminalTool{mgr: m}
@@ -286,19 +286,21 @@ func TestTerminalOutputTool_AntiPolling(t *testing.T) {
 		t.Fatalf("launch: %v", err)
 	}
 
-	// First empty poll: should warn but succeed.
-	res1, err := outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
-	if err != nil {
-		t.Fatalf("first poll should succeed: %v", err)
-	}
-	if !strings.Contains(res1.Text, "STOP POLLING") {
-		t.Errorf("first poll should warn, got %q", res1.Text)
+	// First and second empty polls should warn but succeed (within the 30s window).
+	for i := 1; i <= 2; i++ {
+		res, err := outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
+		if err != nil {
+			t.Fatalf("poll %d should succeed: %v", i, err)
+		}
+		if !strings.Contains(res.Text, "STOP POLLING") {
+			t.Errorf("poll %d should warn, got %q", i, res.Text)
+		}
 	}
 
-	// Second empty poll: should be blocked with an error.
-	_, err = outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
+	// Third empty poll within the window: should be blocked with an error.
+	_, err := outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
 	if err == nil {
-		t.Fatal("second poll should error")
+		t.Fatal("third poll should error")
 	}
 	if !strings.Contains(err.Error(), "polling blocked") {
 		t.Errorf("error should mention 'polling blocked', got %v", err)

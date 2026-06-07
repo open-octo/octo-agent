@@ -25,13 +25,18 @@ type bgProcess struct {
 	proc    *os.Process // set after Start; used for hard-kill
 	start   time.Time
 
-	mu        sync.Mutex
-	buf       []byte // most recent <= maxBgOutputBytes of combined stdout+stderr
-	produced  int64  // total bytes ever written to the logical stream
-	readOff   int64  // absolute offset already returned by Read
-	done      bool
-	exitErr   error
-	pollCount int // consecutive empty reads while running
+	mu       sync.Mutex
+	buf      []byte // most recent <= maxBgOutputBytes of combined stdout+stderr
+	produced int64  // total bytes ever written to the logical stream
+	readOff  int64  // absolute offset already returned by Read
+	done     bool
+	exitErr  error
+
+	// Anti-polling: time-window based. Within a 30-second window, 3 or more
+	// empty reads on a running process trigger a block. This allows occasional
+	// status checks on long-running services without penalising the model.
+	firstEmptyPoll time.Time
+	emptyPollCount int
 
 	onLine func(string) // optional real-time callback for sync-mode streaming
 
@@ -88,16 +93,28 @@ func (p *bgProcess) readNew() (string, string, bool) {
 		}
 	}
 
-	// Anti-polling: if running and no new output, increment poll count.
-	// After 2 consecutive empty polls, report that polling is blocked.
+	// Anti-polling: time-window based. Within a 30-second window, 3 or more
+	// empty reads on a running process trigger a block. This is lenient enough
+	// for occasional status checks on long-running services while still stopping
+	// tight polling loops on one-shot tasks.
+	const pollWindow = 30 * time.Second
+	const maxEmptyPolls = 3
 	blocked := false
 	if !p.done && len(out) == 0 {
-		p.pollCount++
-		if p.pollCount >= 2 {
-			blocked = true
+		now := time.Now()
+		if p.emptyPollCount == 0 || now.Sub(p.firstEmptyPoll) > pollWindow {
+			// Start a new window.
+			p.firstEmptyPoll = now
+			p.emptyPollCount = 1
+		} else {
+			p.emptyPollCount++
+			if p.emptyPollCount >= maxEmptyPolls {
+				blocked = true
+			}
 		}
 	} else {
-		p.pollCount = 0
+		p.emptyPollCount = 0
+		p.firstEmptyPoll = time.Time{}
 	}
 	return string(out), status, blocked
 }
@@ -297,17 +314,30 @@ func (m *BackgroundManager) Promote(id string) bool {
 	return true
 }
 
-// Kill terminates the process for id. Returns false when id is unknown.
+// Kill terminates the process for id with SIGKILL. Returns false when id is unknown.
 func (m *BackgroundManager) Kill(id string) bool {
+	return m.KillWithSignal(id, "SIGKILL")
+}
+
+// KillWithSignal terminates the process for id with the named signal.
+// Supported signals: SIGKILL, SIGTERM, SIGINT. Returns false when id is unknown.
+//
+// For SIGKILL we also cancel the context so exec.CommandContext sends its own
+// SIGKILL as a belt-and-suspenders fallback.  For SIGTERM/SIGINT we skip the
+// context cancellation — otherwise exec would race in with an automatic SIGKILL
+// and defeat the graceful shutdown.
+func (m *BackgroundManager) KillWithSignal(id string, sigName string) bool {
 	m.mu.Lock()
 	p := m.procs[id]
 	m.mu.Unlock()
 	if p == nil {
 		return false
 	}
-	p.cancel()
+	if sigName == "SIGKILL" {
+		p.cancel() // CommandContext will also fire SIGKILL
+	}
 	if p.proc != nil {
-		_ = killProcessGroup(p.proc)
+		_ = killProcessGroup(p.proc, sigName)
 	}
 	return true
 }
