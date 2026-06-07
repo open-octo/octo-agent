@@ -227,6 +227,15 @@ func joinNonEmpty(parts []string, sep string) string {
 // streams events to WS, saves the session, and cleans up live state.
 
 func (s *Server) runAgentTurn(sess *agent.Session, content string) {
+	// Confirm the user message immediately so the frontend can swap the
+	// ghost (.msg-pending) bubble for the real one before streaming starts.
+	s.wsHub.broadcast(sess.ID, map[string]any{
+		"type":       "history_user_message",
+		"session_id": sess.ID,
+		"content":    content,
+		"created_at": time.Now().UnixMilli(),
+	})
+
 	sw := s.newWSStreamWriter(sess.ID)
 
 	if err := s.ensureSender(); err != nil {
