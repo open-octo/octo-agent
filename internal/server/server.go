@@ -7,8 +7,6 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -216,9 +214,10 @@ func (s *Server) enableMCP() {
 	s.mcpCleanup = cleanup
 }
 
-// AccessKey returns the server's current access key.
+// AccessKey always returns an empty string: access-key authentication was
+// removed in v0.16.0. Kept for backward compatibility.
 func (s *Server) AccessKey() string {
-	return s.accessKey
+	return ""
 }
 
 // ListenAndServe starts the HTTP server.
@@ -504,25 +503,13 @@ func resolveBaseURL(provider string, cfg config.Config) string {
 	return ""
 }
 
-// resolveAccessKey returns the access key to use: explicit config value,
-// OCTO_ACCESS_KEY env var, config file access_key field, or a freshly
-// generated random 32-byte hex string.
+// resolveAccessKey is a no-op: access-key authentication was removed in
+// v0.16.0. The field is kept on Server for backward compatibility but
+// always returns an empty string.
 func resolveAccessKey(cfgValue string, fileCfg config.Config) string {
-	if cfgValue != "" {
-		return cfgValue
-	}
-	if env := os.Getenv("OCTO_ACCESS_KEY"); env != "" {
-		return env
-	}
-	if fileCfg.AccessKey != "" {
-		return fileCfg.AccessKey
-	}
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to a timestamp-based key if crypto/rand fails.
-		return fmt.Sprintf("octo-%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b)
+	_ = cfgValue
+	_ = fileCfg
+	return ""
 }
 
 // buildEnvContext mirrors cmd/octo's env context builder.
@@ -536,37 +523,16 @@ func buildEnvContext(cwd string) string {
 	return b.String()
 }
 
-// validateAccessKey checks whether the request carries the correct access key
-// via query parameter or Authorization header. Returns true when the key matches.
+// validateAccessKey is a no-op: access-key authentication was removed in
+// v0.16.0. Kept as a placeholder so callers do not need to change.
 func (s *Server) validateAccessKey(r *http.Request) bool {
-	key := r.URL.Query().Get("access_key")
-	if key == "" {
-		key = r.Header.Get("X-Access-Key")
-	}
-	if key == "" {
-		auth := r.Header.Get("Authorization")
-		if strings.HasPrefix(auth, "Bearer ") {
-			key = strings.TrimPrefix(auth, "Bearer ")
-		}
-	}
-	if key == "" {
-		if c, err := r.Cookie("octo_access_key"); err == nil {
-			key = c.Value
-		}
-	}
-	return key == s.accessKey
+	_ = r
+	return true
 }
 
-// requireAuth wraps a handler, rejecting requests without a valid access key.
+// requireAuth is a no-op wrapper: access-key authentication was removed.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.validateAccessKey(r) {
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
-			return
-		}
-		next(w, r)
-	}
+	return next
 }
 
 // validateBindAddr enforces the M6.5 security rule: non-localhost binds

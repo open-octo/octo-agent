@@ -276,6 +276,22 @@ func replyFromResponse(resp provider.Response) agent.Reply {
 	}
 }
 
+// TestConnection pings the provider with a minimal request to verify that
+// the API key, base URL, and model all work. It returns a descriptive error
+// on failure (auth, model not found, network, etc.).
+func TestConnection(ctx context.Context, providerName, apiKey, baseURL, model string) error {
+	p, err := buildClient(providerName, apiKey, baseURL)
+	if err != nil {
+		return err
+	}
+	_, err = p.Send(ctx, provider.Request{
+		Model:     model,
+		Messages:  []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
+		MaxTokens: 1,
+	})
+	return err
+}
+
 // Compile-time assertions: sender satisfies all agent sender interfaces.
 var (
 	_ agent.Sender              = sender{}

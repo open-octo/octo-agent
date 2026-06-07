@@ -2,9 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/provider"
@@ -183,6 +188,108 @@ func TestSender_StreamingFallback_NonStreamingProvider(t *testing.T) {
 
 func TestNewSender_UnknownProvider(t *testing.T) {
 	if _, err := NewSender(SenderOptions{Provider: "nope", APIKey: "k"}); err == nil {
+		t.Error("expected error for unknown provider")
+	}
+}
+
+func TestTestConnection_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if auth := r.Header.Get("Authorization"); auth != "Bearer test-key" {
+			t.Errorf("Authorization = %q, want Bearer test-key", auth)
+		}
+		bodyBytes, _ := io.ReadAll(r.Body)
+		var req struct {
+			Model    string `json:"model"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+			MaxTokens int `json:"max_tokens"`
+		}
+		_ = json.Unmarshal(bodyBytes, &req)
+		if req.Model != "gpt-4o-mini" {
+			t.Errorf("model = %q, want gpt-4o-mini", req.Model)
+		}
+		if len(req.Messages) != 1 || req.Messages[0].Role != "user" || req.Messages[0].Content != "hi" {
+			t.Errorf("messages = %+v, want single user 'hi'", req.Messages)
+		}
+		if req.MaxTokens != 1 {
+			t.Errorf("max_tokens = %d, want 1", req.MaxTokens)
+		}
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := TestConnection(ctx, ProviderOpenAI, "test-key", srv.URL, "gpt-4o-mini"); err != nil {
+		t.Fatalf("TestConnection: %v", err)
+	}
+}
+
+func TestTestConnection_AuthFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"Incorrect API key","type":"invalid_request_error"}}`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := TestConnection(ctx, ProviderOpenAI, "bad-key", srv.URL, "gpt-4o-mini")
+	if err == nil {
+		t.Fatal("expected error for bad key")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error should mention 401: %v", err)
+	}
+}
+
+func TestTestConnection_InvalidModel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"model not found","type":"invalid_request_error"}}`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := TestConnection(ctx, ProviderOpenAI, "test-key", srv.URL, "unknown-model")
+	if err == nil {
+		t.Fatal("expected error for unknown model")
+	}
+}
+
+func TestTestConnection_Timeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Slow response to trigger timeout
+		time.Sleep(100 * time.Millisecond)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := TestConnection(ctx, ProviderOpenAI, "test-key", srv.URL, "gpt-4o-mini")
+	if err == nil {
+		t.Fatal("expected error for timeout")
+	}
+}
+
+func TestTestConnection_EmptyKey(t *testing.T) {
+	ctx := context.Background()
+	if err := TestConnection(ctx, ProviderOpenAI, "", "http://localhost", "x"); err == nil {
+		t.Error("expected error for empty key")
+	}
+}
+
+func TestTestConnection_UnknownProvider(t *testing.T) {
+	ctx := context.Background()
+	if err := TestConnection(ctx, "nope", "k", "http://localhost", "x"); err == nil {
 		t.Error("expected error for unknown provider")
 	}
 }

@@ -63,12 +63,6 @@ const WS = (() => {
   }
 
   function _onClose(e) {
-    // 1006 = abnormal closure (server rejected handshake, likely 401)
-    if (e.code === 1006 && !Auth.passed) {
-      Auth.reset();
-      Auth.check();
-      return;
-    }
     _ready  = false;
     _socket = null;
     console.warn(`[WS] closed — retry in ${_retryDelay}ms`);
@@ -90,11 +84,8 @@ const WS = (() => {
     if (_socket && (_socket.readyState === WebSocket.OPEN ||
                     _socket.readyState === WebSocket.CONNECTING)) return;
 
-    const accessKey = Auth.getKey();
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const url = accessKey
-      ? `${protocol}//${location.host}/ws?access_key=${encodeURIComponent(accessKey)}`
-      : `${protocol}//${location.host}/ws`;
+    const url = `${protocol}//${location.host}/ws`;
     _socket = new WebSocket(url);
     _socket.onopen    = _onOpen;
     _socket.onmessage = _onMessage;

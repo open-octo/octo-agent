@@ -36,11 +36,15 @@ const Onboard = (() => {
 
       if (phase === "soul_setup") {
         // Skip any blocking panel — just auto-launch the /onboard session.
-        // If the user already has an onboard session in progress (hash has a
-        // session id), restore it instead of creating a duplicate.
+        // Guard against duplicates: check sessionStorage (survives refresh)
+        // and the URL hash (session already active).
+        if (sessionStorage.getItem('octo-onboard-launched')) {
+          return { needsOnboard: false, phase: null };
+        }
         if (window.location.hash.includes("session/")) {
           return { needsOnboard: false, phase: null };
         }
+        sessionStorage.setItem('octo-onboard-launched', '1');
         await _launchOnboardSession();
         return { needsOnboard: true, phase };
       }
@@ -264,6 +268,7 @@ const Onboard = (() => {
 
       const value = opt.dataset.value;
       valueSpan.textContent = opt.dataset.label || opt.textContent;
+      valueSpan.dataset.value = value;
       valueSpan.classList.toggle("placeholder", !value);
       dropdown.querySelectorAll(".custom-select-option").forEach(o => o.classList.remove("selected"));
       opt.classList.add("selected");
@@ -375,10 +380,9 @@ const Onboard = (() => {
     const model   = $("setup-model").value.trim();
     const baseUrl = $("setup-base-url").value.trim();
     const apiKey  = $("setup-api-key").value.trim();
-    const zh      = _selectedLang === "zh";
 
     if (!model || !baseUrl || !apiKey) {
-      _setResult(false, zh ? "请填写模型、Base URL 和 API Key。" : "Please fill in Model, Base URL and API Key.");
+      _setResult(false, I18n.t("onboard.key.error.required"));
       return;
     }
 
@@ -386,16 +390,24 @@ const Onboard = (() => {
     btn.textContent = I18n.t("onboard.key.testing");
     _setResult(null, "");
 
+    // Determine provider preset and anthropic_format
+    const valueSpan = $("setup-provider-wrapper")?.querySelector(".custom-select-value");
+    const providerValue = valueSpan?.dataset.value || '';
+    const preset = providerValue && providerValue !== '__custom__'
+      ? _providers.find(p => p.id === providerValue)
+      : null;
+    const anthropicFormat = preset && preset.api === 'anthropic-messages';
+
     // Step 1: test connection
     try {
       const res  = await fetch("/api/config/test", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ model, base_url: baseUrl, api_key: apiKey, index: 0 })
+        body:    JSON.stringify({ model, base_url: baseUrl, api_key: apiKey, index: 0, anthropic_format: anthropicFormat })
       });
       const data = await res.json();
       if (!data.ok) {
-        _setResult(false, data.message || (zh ? "连接失败。" : "Connection failed."));
+        _setResult(false, data.message || I18n.t("onboard.key.error.connection"));
         btn.disabled    = false;
         btn.textContent = I18n.t("onboard.key.btn.test");
         return;
@@ -417,7 +429,7 @@ const Onboard = (() => {
       });
       const data = await res.json();
       if (!data.ok) {
-        _setResult(false, data.error || (zh ? "保存失败。" : "Save failed."));
+        _setResult(false, data.error || I18n.t("onboard.key.error.save"));
         btn.disabled    = false;
         btn.textContent = I18n.t("onboard.key.btn.test");
         return;
@@ -430,7 +442,7 @@ const Onboard = (() => {
     }
 
     // Success — show brief feedback then auto-launch /onboard session
-    _setResult(true, zh ? "连接成功！" : "Connected!");
+    _setResult(true, I18n.t("onboard.key.success"));
     setTimeout(() => _launchOnboardSession(), 600);
   }
 

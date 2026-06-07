@@ -1,12 +1,15 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/config"
 )
 
@@ -276,10 +279,11 @@ func maskKey(k string) string {
 // ─── POST /api/config/test ──────────────────────────────────────────────────
 
 type testConfigRequest struct {
-	Model   string `json:"model"`
-	BaseURL string `json:"base_url"`
-	APIKey  string `json:"api_key"`
-	Index   int    `json:"index"`
+	Model           string `json:"model"`
+	BaseURL         string `json:"base_url"`
+	APIKey          string `json:"api_key"`
+	Index           int    `json:"index"`
+	AnthropicFormat bool   `json:"anthropic_format"`
 }
 
 func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +297,6 @@ func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Best-effort connectivity test: try to build a provider client.
 	key := req.APIKey
 	if key == "" {
 		key = os.Getenv("ANTHROPIC_API_KEY")
@@ -306,10 +309,20 @@ func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// We don't have a lightweight ping endpoint, so we just validate that
-	// the provider can be constructed. A full connectivity test would need
-	// to make an actual API call.
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Configuration looks valid"})
+	providerName := app.ProviderOpenAI
+	if req.AnthropicFormat {
+		providerName = app.ProviderAnthropic
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	if err := app.TestConnection(ctx, providerName, key, req.BaseURL, req.Model); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Connection successful"})
 }
 
 // ─── POST /api/config/models ────────────────────────────────────────────────
