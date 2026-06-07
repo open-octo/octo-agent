@@ -5,12 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased — 0.6.0-dev]
+## [Unreleased — 0.16.0-dev]
 
 ### Changed
 - **Diff / output cards adapt to light & dark terminals.** The `internal/tui` cards were github-dark-tuned only; their colours now come from an adaptive palette (`lipgloss.AdaptiveColor`, GitHub light/dark values) and the diff row washes + Chroma syntax style switch together on a one-time terminal-background probe (pale washes + the `github` style on light terminals, deep washes + `github-dark` on dark). Resolves the last TUI-upgrade follow-up; the dark rendering is unchanged.
 
 ### Added
+- **History compaction threshold is now configurable as a percentage, with a separate batch-level trigger.** The previously hard-coded 75% auto-compaction threshold can now be set via `--compact-auto-pct N` (CLI flag), `compact_auto_pct: N` (`~/.octo/config.yaml`), or `Agent.CompactAutoFraction`. The batch-level check (after a tool batch, before the next LLM call) is independently controllable via `--compact-batch-threshold` / `compact_batch_threshold` / `Agent.CompactBatchThreshold`; it defaults to **85%** of the context window (vs 75% for between-turns compaction), giving tool batches more headroom before interrupting the loop. Token counts for compaction decisions now prefer the provider's real `lastInputTokens` (including cache read/write) over the heuristic estimate, so triggers fire closer to actual context usage.
 - **TUI live background-process panel.** A `background (N running)` panel now appears in the TUI while detached `terminal background:true` commands are in flight — each line shows a spinner, the command, and elapsed time, refreshed by the same tick loop (which now keeps animating between turns while any background process is alive). Completion still drops a scrollback notice (and injects the result into the conversation); the panel just makes the *running* set visible, which the prior fire-and-forget flow couldn't show. New `BackgroundManager.ListRunning()` / package-level `tools.RunningBackground()`. Follow-up to the terminal-notify work + the TUI UX upgrade.
 - **TUI panels + theme (TUI UX upgrade, P5 — final).** The queue and the permission / question modals now render as rounded-border panels (the queue gets a titled `queue (N)` panel; modals get a bordered box) instead of loose text. A shared `internal/tui.Panel` / `Box` helper and an adaptive `ColBorder` (light/dark) centralise the chrome, and the input box border now references it too. The true-colour diff/output cards stay github-dark-tuned for now (re-theming those to adaptive is noted as future work). Completes the phased TUI UX upgrade (P1 cards → P2 status bar + input box → P3 spinner → P4 markdown → P5 panels) from `dev-docs/tui-ux-upgrade-design.md`.
 - **TUI markdown rendering (TUI UX upgrade, P4).** Assistant replies in the interactive TUI are now rendered as markdown via `glamour` — headings, bold/italic, lists, blockquotes, and syntax-highlighted code blocks. To keep streaming smooth without rendering half a block, text accumulates and is committed one block at a time at the last blank line outside a code fence (the in-progress block stays raw in the live region until it closes); the final block flushes at turn end, and the pre-tool block flushes when a tool starts. Best-effort: any glamour error falls back to the raw text so a turn never breaks over formatting. `--plain` keeps the previous raw line-by-line output. New dependency: `github.com/charmbracelet/glamour` (shares chroma with the diff cards).
@@ -34,6 +35,191 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`octo chat --prompt-file <path>` — run a multi-line prompt as one agentic turn.** Piped stdin is read line-by-line, one REPL turn per line, so feeding a multi-line prompt (an issue body, a spec) shredded it into dozens of fragmented, low-context turns — the model would burn its budget asking "what's the task?" because the body arrived one line at a time *after* the instruction. `--prompt-file` seeds a single multi-line turn (newlines intact) via a `seededLineReader`, then continues reading further turns from stdin. For scripting / eval / any headless agentic run.
 - **mswe-eval delivers the issue coherently and gives octo room to finish.** The harness now writes each issue to a prompt file (outside the clone, so `git add -A` doesn't capture it) and drives octo with `--prompt-file` instead of piping the multi-line prompt; and a new `--max-turns` flag (default 50) lifts octo's interactive 20-round-trip default, which an unattended run can't extend with "continue" and which was stopping octo mid-task with an empty patch. Net effect of these three fixes on the cli/cli×5 slice: octo now completes every instance with a real patch (was 4/5 timing out or empty), turning a luck-dependent score into an honest measure of model capability.
 - **Streaming responses now have a read/idle timeout — a stalled model stream no longer hangs octo forever (#146).** The streaming HTTP client deliberately carries no end-to-end `Timeout` (streams are long-lived), and the SSE reader did a plain blocking `read()` with no per-read deadline — so a server that accepted the connection and then went silent without closing it left `scanner.Scan()` blocked indefinitely (observed as an 11-minute, ~0-CPU hang on an idle ESTABLISHED socket during an unattended eval batch). Both providers now wrap the response body in a new `retry.IdleTimeoutReader`: each read is raced against a per-read timer that resets on every received chunk, and if no bytes arrive within the idle window (`DefaultStreamIdleTimeout`, 120s; per-client override via `StreamIdleTimeout`, negative disables) the request context is cancelled and the turn fails cleanly with `retry.ErrStreamIdle`. This is distinct from the #138 request-establishment retry, which doesn't cover a mid-stream stall. A mid-stream stall is intentionally **not** auto-retried — the turn has already emitted tokens, so a retry would duplicate them; failing cleanly lets the agent loop roll back and an unattended caller decide whether to re-run. The eval harness's `--octo-timeout` is now a backstop rather than the only guard.
+
+## [0.15.0]
+
+### Added
+- **Layer 2 truncation recovery (resume-and-chunk).** When a turn hits the output-token cap and escalation (layer 1) doesn't help, the agent now keeps the partial reply in history, prompts the model to continue from exactly where it left off, and retries — up to 3 times per turn. This covers long prose replies that exceed even an escalated cap, without requiring the user to manually type "continue". Partial tool_use truncation is skipped (unsafe to resume), and the resume budget is bounded so a persistently truncated model can't loop forever. See `dev-docs/truncation-recovery.md`.
+- **Skill creator (`skill-creator`) bundled as a default skill.** Creates, edits, and improves skills from the REPL via `/skill-creator`. Ships in the binary and materializes on first run.
+- **Onboard skill migrated from Ruby to Go.** The first-run wizard now runs natively in the Go binary.
+- **User-defined agent presets from `~/.octo/agents/*.md`.** Custom agent definitions (persona, capabilities, constraints) can be loaded at session start. The model is told which preset is active and how it modifies the default toolbelt.
+- **WeChat CDN file upload for `SendFile`.** The WeChat IM adapter can now send files via CDN upload, matching the full Ruby feature set.
+- **Interactive expand/collapse for the sub-agent panel.** Running sub-agents' tool chains can be expanded/collapsed in the TUI live panel.
+
+### Fixed
+- **Web frontend-backend contract mismatches** (4 rounds of fixes). REST and WebSocket APIs aligned with frontend expectations after the Ruby→Go migration.
+- **Skill toggle persistence + benchmark API** in the web server.
+- **Slash-command routing in IM channels.** Only messages starting with `/` are routed to `CommandRouter`; plain messages go to the agent.
+
+## [0.14.2]
+
+### Added
+- **Ruby Web UI migrated to Go with WebSocket real-time architecture.** Full feature parity: sessions, skills, channels, benchmark, settings panels. SSE over WebSocket for live agent events.
+- **DingTalk and Feishu IM adapters.** New channel adapters integrated into `octo serve`, alongside the existing WeChat adapter.
+- **Channels configuration panel with CRUD API.** Web UI can create, edit, and delete IM channel configurations.
+- **WeChat adapter aligned with full Ruby feature set.** Including CDN upload, file send, and complete iLink protocol support.
+- **Access-key authentication on API/WebSocket + config integration.** `octo serve` enforces access-key auth on all API and WebSocket endpoints; the key can be set via `octo config` or `OCTO_ACCESS_KEY` env var.
+- **Landing page redesign.** Richer content and modern styling for the project website.
+
+### Changed
+- **Terminal timeout increased from 30s to 120s.** Long-running commands (builds, tests) no longer time out prematurely.
+- **Terminal parameter `background` renamed to `run_in_background`.** More explicit naming.
+- **MCP bridge tools renamed to `mcp_search`/`mcp_describe`/`mcp_call`.** Clearer namespace.
+- **`sub_agent` becomes the unified tool name.** `launch_agent` / `send_message` stale references cleaned up.
+
+### Fixed
+- **Web UI authentication, API endpoints, and panel rendering.** Multiple fixes restoring the Ruby frontend on the Go server.
+- **Server REST APIs aligned with frontend expectations.** Cookie auth, legacy localStorage key migration, health check with access-key validation.
+- **Browser automation removed from Go rewrite.** The server-side browser automation was a Ruby-only feature; removed from the Go port.
+- **`write_file` rendered as a rich card.** Previously showed raw content; now shows a summary card like other tools.
+- **`read_file` pagination loops prevented.** Explicit EOF markers stop the model from endlessly paginating.
+- **Grep output includes line numbers.** More useful for the model to reference specific lines.
+- **`ask_user_question` modal allows free-text "Other" input.** The "Other" option now accepts free text instead of being a no-op.
+- **Replan and stall detection enabled by default in `conduct`.**
+
+## [0.13.1]
+
+### Added
+- **`internal/app` session bootstrap refactor.** Provider construction, permission gate, sub-agent spawner, and `WireTools` unified in `internal/app` so the HTTP server and IM bridge share the same bootstrap path as the CLI.
+- **Sub-agent + task parity for the HTTP server and IM bridge.** Context-scoped, synchronous dispatch for sub-agents via the server and channel adapters.
+- **MCP + Tool Search parity for HTTP server and IM bridge.** MCP servers and Tool Search now work in the web UI and IM contexts, not just the CLI.
+- **Permission enforcement on the IM bridge.** Tool calls from IM channels now go through the same permission gate as the CLI.
+- **Per-session task store for the IM bridge.** Each IM session gets its own task list, independent of other sessions.
+
+### Fixed
+- **8 built-in tool issues closed.** Leaks, SSRF gap in `web_fetch`, and 6 other fixes.
+- **Tool Search for MCP (deferred schema loading).** Large MCP servers no longer blow context by loading all schemas upfront; Tool Search loads them on demand.
+- **Config docs updated.** `config.json` → `config.yaml` references fixed in README.
+
+## [0.13.0]
+
+### Added
+- **`octo-eval`: lightweight Docker-free eval harness.** Retires `mswe-eval`; runs benchmarks directly against the agent without container overhead.
+- **Output-token truncation recovery (layer 1).** When a turn is cut off by the output-token cap, the agent retries once at an escalated cap from unchanged history. If the model's ceiling is below the escalation target, the truncated reply is kept and the turn ends cleanly.
+- **Transient mid-stream stall recovery.** A stalled streaming server (silent mid-response) is now retried up to 3 times; idle timeout raised to 5m.
+- **Live task list under the activity spinner.** Running tasks (sub-agents, background processes) shown in a live list.
+- **Claude-Code-style background task completion notice.** A scrollback notice when a background process or sub-agent finishes.
+- **After-turn follow-up suggestion as ghost text.** The TUI shows a suggested next message as dim ghost text; accepted with Tab/→.
+- **`↑` retracts a pending steer message.** A queued mid-turn message can be pulled back into the input box.
+- **`Esc` takes the turn back before the model responds.** Cancels the in-flight request and returns to the prompt.
+- **Syntax-highlighted `read_file` output cards.** Code blocks in read_file cards get Chroma highlighting.
+- **Paste clipboard images with `Ctrl+V`.** Image attachments from clipboard.
+- **Drag-and-drop image file paths as attachments.** Dropping image files into the TUI attaches them to the next turn.
+- **Session replay on resume.** Prior turns are replayed into the scrollback when continuing a saved session.
+- **`conduct`: autonomous long-horizon orchestrator (conductor).** `octo conduct "goal"` plans a DAG of steps, executes them with verification, replans on stall, and resumes from checkpoints.
+- **`conduct show`, status preview, post-run prompt.** View orchestrator results after a run.
+- **Reasoning effort unified across providers.** `--reasoning-effort low|medium|high` maps to OpenAI `reasoning_effort` and Anthropic thinking budget; `--show-reasoning` streams the trace.
+- **`update_config` and `product_help` default skills.** Bundled skills for config management and product help.
+
+### Changed
+- **Complexity-adaptive recap.** Multi-step sessions get a mid-session recap injected into the system prompt to keep the model oriented.
+- **Config migrated from JSON to YAML.** `~/.octo/config.yaml` replaces `config.json`.
+- **MCP stdio stderr kept off TUI screen.** Server stderr no longer pollutes the terminal.
+
+### Fixed
+- **Silent truncation in `read_file` & grep bounded.** Prevents the model from looping/flooding on truncated output.
+- **Terminal overlong output spills to a temp file.** Large outputs are written to disk and referenced by path instead of flooding context.
+- **Tab expansion in output/diff cards.** Stops live region bleeding through.
+- **Attachment echo lines suppressed.** Cleaner scrollback.
+- **Dropped image paths with spaces handled.** Fixes multiple edge cases in drag-and-drop.
+- **Mid-turn steer carries image attachments via Inbox.** Images sent while a turn is running are properly queued.
+- **SPWA entrypoint served directly.** `octo serve` UI loads correctly on deep links.
+- **"Connected N MCP servers" startup line dropped.** Less noise.
+- **Model-only "do not poll" notice stripped from terminal cards.**
+- **Direct-fetch fallback on "connection reset by peer".** `web_fetch` retries on transient TCP resets.
+- **`💭` marker on every reasoning block.** Not just the first.
+
+## [0.12.1]
+
+### Added
+- **Slash commands wired up in IM channel.** `/help`, `/cost`, `/save`, `/sessions`, `/exit`, `/skills`, `/memory`, `/init`, etc. work in WeChat/DingTalk/Feishu.
+- **Skill directory communicated to the model.** Bundled skill references resolve correctly.
+- **`forget` tool + `Store.Delete`.** Symmetric with `remember`; removes a memory entry.
+- **File-based memory model (Claude Code style).** Typed store and tools dropped; memories are markdown files with YAML frontmatter, simpler and more portable.
+- **Attention layer — re-surface MEMORY.md rules at point of action.** Critical/high-priority memory rules are injected into the conversation as `<system-reminder>` blocks when relevant.
+- **Embedded ripgrep binary.** Zero-dependency `grep` tool on all platforms; no external `rg` installation needed.
+- **Co-authored-by trailer in git commits.** Configurable via `--no-coauthor` / `OCTO_COAUTHOR=0`.
+
+### Changed
+- **Memory design docs consolidated.** `memory-design.md` replaces stale C9 docs.
+- **MCP stdio connect timeout fixed.** Subprocess no longer bound to the connect timeout context.
+
+### Fixed
+- **Sub-agent bridge manager handle aligned.** `agent_N` handle maps correctly to registry backing ID.
+- **Thinking spinner stays up while waiting.** No more premature spinner dismissal.
+- **Headless agentic one-shot (`claude -p` mode).** `octo chat "message"` runs a full agentic turn with tools, then exits; the plain REPL is retired. Interactive mode is TUI-only.
+- **Slash-command completion menu.** Commands and skills autocomplete in the TUI.
+- **Dev version derived from `version.go`.** `make build` matches the tag.
+- **Grep `--max-columns-preview` prevents retry loops.**
+- **`edit_file` robustness improved.** Quote normalization and whitespace handling.
+- **Token-usage accounting corrected.** All 4 provider endpoints report accurate counts.
+- **System-reminder inbox suppression.** Prevents duplicate echo in scrollback.
+- **Windows path separators normalized.** `gitState` works on Windows.
+
+## [0.12.0]
+
+### Added
+- **`octo serve` — Web UI + API server (M8).** Full REST API, WebSocket real-time events, session management, skill toggles, benchmark dashboard. Serves the static frontend and proxies agent events over WebSocket.
+
+### Changed
+- **Background-process panel removes scrollback notices.** Sub-agent and bg completions no longer spam the scrollback.
+- **Node 24 early opt-in.** Silences CI deprecation warnings.
+
+### Fixed
+- **Invisible sync processes suppressed in onExit.** Prevents spurious notifications.
+
+## [0.11.2]
+
+### Added
+- **TUI UX upgrade (P1–P5) — full Claude Code parity.**
+  - **P1: Rich tool cards.** `edit_file` shows diff cards with Chroma syntax highlighting; `terminal`/`grep`/`read_file` show output-preview cards.
+  - **P2: Status bar + bordered input box.** Model, cwd, context usage (`ctx N%`), cost, permission mode, elapsed time.
+  - **P3: Animated spinner + live running-tool indicator.** Braille spinner, "Thinking (3s)", live `Run(go test)` indicator.
+  - **P4: Glamour markdown rendering.** Assistant replies render as markdown with headings, lists, code blocks.
+  - **P5: Bordered panels + adaptive theme.** Queue, modals, and panels get rounded-border styling; adaptive light/dark palette.
+- **Default skills shipped in the binary.** `web-access`, `product_help`, `update_config`, `skill-creator` materialize on first run.
+- **Live "background (N running)" panel.** Visible set of detached `terminal background:true` processes.
+- **Ctrl+X cancels the most-recently queued message.**
+- **`/goal` slash command + `octo goal` CLI rename.** Task-oriented entry point.
+- **Bubbles/textinput replaces hand-rolled input.** Proper line editing, history, cursor support.
+- **Context overflow recovery with insert-then-compress.** On "context too long" 400, the agent compresses history and retries automatically.
+- **`read_file` image support for multimodal models.** Image blocks in read_file output.
+- **Permission mode `auto` (allow on ask).** Non-interactive contexts where "ask" would block now auto-allow instead.
+- **Max-turns raised to 100 interactive, unlimited unattended.** Headless runs (`--prompt-file`, piped stdin) no longer stop at 20 turns.
+- **Background-process completion auto-triggers turn.** When a bg process finishes, the REPL automatically starts a new turn with the result.
+- **Terminal subprocess killed on context cancel.** Clean shutdown when the user interrupts.
+- **Config wizard prompts for API key on provider switch.**
+
+### Changed
+- **TUI cards become TUI-only; plain path is always one-line.** Rich cards are noise in pipes/CI; `--plain` forces terse output everywhere.
+- **Memory model rewritten as file-based.** Per-project (cwd) summary buckets; structured injection with priorities; attention layer re-surfaces rules.
+- **Live cross-session memory.** Another session's writes are surfaced in the current session.
+
+### Fixed
+- **Idle timeout on streaming reads.** A stalled model stream can't hang octo forever (120s per-read idle timeout).
+- **Streaming + agentic loop unblocked for unattended runs.** Long headless runs no longer break.
+- **Adaptive light/dark theme for diff/output cards.**
+- **CJK slugify fallback.** Non-ASCII text in memory tools handled correctly.
+- **File reads tracked from terminal commands.** `read-before-write` enforcement now sees files read via `cat`, `less`, etc.
+- **Permission mode read from config file.**
+
+## [0.5.0]
+
+### Added
+- **Persisted defaults via `octo config`.** Interactive wizard saves provider, model, base URL to `~/.octo/config.json` (mode 0600). `octo config show` prints effective settings; `octo config path` prints the file location. Precedence: CLI flag > env var > config file > built-in default.
+- **Tools on by default; `--no-tools` opt-out.** `octo chat` is a full agentic REPL out of the box; `--no-tools` disables tools, MCP, and skills for a plain-chat session.
+- **Prebuilt binaries via goreleaser + GitHub Releases.** One-line install without building from source.
+- **Multi-SWE-bench eval harness scaffold.** Docker-free benchmark harness for measuring agent capability on real issues.
+- **Native PowerShell for the terminal tool on Windows.** `powershell -Command` instead of `sh -c` on Windows hosts.
+- **Retry transient API failures with backoff + Retry-After.** Both providers now retry on 429/5xx with exponential backoff, respecting the server's `Retry-After` header.
+- **Turn-boundary memory nudge.** A `<system-reminder>` appended to each user message reminds the model to call `remember` when it sees preferences, corrections, or validated approaches.
+- **Per-project (cwd) memory summary buckets.** Memories are organized by working directory; fresh entries from other sessions are injected at turn start.
+
+### Changed
+- **Memory model refactored.** Dropped boundary extraction + `memoryd` daemon; simpler file-based model.
+
+### Fixed
+- **Multi-SWE-bench harness actually runs.** Validated resolved 1/1 on first real issue.
 
 ## [0.4.0] — 2026-05-28
 
