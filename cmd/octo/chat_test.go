@@ -85,6 +85,9 @@ func TestRunChat_HonoursAnthropicBaseURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "k")
 	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
 
@@ -148,6 +151,9 @@ func TestRunChat_PromptFile_SingleTurn(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "k")
 	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
 
@@ -363,6 +369,9 @@ func TestRunChat_Anthropic_StreamingEndToEnd(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "k")
 	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
 
