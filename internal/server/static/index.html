@@ -274,10 +274,8 @@
       </div>
       <!-- Session info bar — mirrors CLI bottom status bar -->
       <div id="session-info-bar" style="display:none">
-        <!-- Order: status | id | dir | model | mode | tasks -->
+        <!-- Order: id | dir | model | reasoning | signal | mode -->
         <!-- Pattern: element + separator-after-element (except last) -->
-        <span id="sib-status"></span>
-        <span class="sib-sep sib-sep-after-status">│</span>
         <span id="sib-bgtasks" class="sib-bgtasks" style="display:none" tabindex="0"
               role="status" aria-live="polite"></span>
         <span class="sib-sep sib-sep-after-bgtasks" style="display:none">│</span>
@@ -307,12 +305,8 @@
           </span>
         </span>
         <span class="sib-sep sib-sep-after-signal" style="display:none">│</span>
-        <!-- Detail fields: mode, tasks -->
-        <span class="sib-detail">
-          <span id="sib-mode"></span>
-          <span class="sib-sep sib-sep-after-mode">│</span>
-          <span id="sib-tasks"></span>
-        </span>
+        <!-- Permission mode -->
+        <span id="sib-mode"></span>
       </div>
 
       <div id="input-area">

@@ -2491,16 +2491,6 @@ body {
   transition: opacity 0.15s ease;
 }
 
-/* Status colors (Tier 1) */
-.sib-status-idle    { color: var(--color-text-secondary); opacity: 1; }
-.sib-status-running { color: var(--color-accent-primary); animation: sib-pulse 1s ease-in-out infinite; }
-.sib-status-error   { color: #e05f5f; }
-
-@keyframes sib-pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.35; }
-}
-
 #sib-dir {
   flex-shrink: 0;
   cursor: pointer;
@@ -2516,7 +2506,6 @@ body {
 
 #sib-mode  { opacity: 0.45; flex-shrink: 0; }   /* tier 3 */
 #sib-model { opacity: 1;    flex-shrink: 0; }   /* tier 1 — the model is primary */
-#sib-tasks { opacity: 0.75; flex-shrink: 0; }   /* tier 2 */
 
 /* ── Latency signal (right after model name) ──────────────────────────────
    A compact 4-bar signal + TTFT value. Placed adjacent to #sib-model so the
@@ -5890,7 +5879,6 @@ body {
   #sib-dir,
   .sib-sep-after-dir,
   #sib-mode,
-  .sib-sep-after-mode,
   #sib-reasoning-wrap,
   .sib-sep-after-reasoning {
     display: none;
