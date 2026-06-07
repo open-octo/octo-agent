@@ -54,6 +54,11 @@ type replConfig struct {
 	// the TUI path sets it; the headless one-shot connects synchronously
 	// (its single turn needs the full tool surface up front). nil → no MCP.
 	mcpBoot *mcpBootstrap
+	// modelName is the resolved model displayed in the TUI status bar.
+	modelName string
+	// reasoningEffort is the resolved reasoning level ("low" | "medium" | "high" | "")
+	// displayed in the TUI status bar; empty means off.
+	reasoningEffort string
 }
 
 // mcpBootstrap carries the inputs runTUI needs to connect MCP servers from a

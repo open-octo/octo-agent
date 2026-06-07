@@ -1052,11 +1052,17 @@ func (m *tuiModel) renderInputBox() string {
 	return m.ta.View()
 }
 
-// renderStatusBar renders the cwd / context% / permission / elapsed segments,
-// with a separator line above and the contextual key hint below (Claude Code
-// style).
+// renderStatusBar renders the model / thinking / cwd / context% / permission
+// segments, with a separator line above and the contextual key hint below
+// (Claude Code style).
 func (m *tuiModel) renderStatusBar() string {
 	var segs [][2]string
+	if m.cfg.modelName != "" {
+		segs = append(segs, [2]string{"model", m.cfg.modelName})
+	}
+	if m.cfg.reasoningEffort != "" {
+		segs = append(segs, [2]string{"think", m.cfg.reasoningEffort})
+	}
 	if m.cwd != "" {
 		segs = append(segs, [2]string{"cwd", m.cwd})
 	}
@@ -1073,7 +1079,7 @@ func (m *tuiModel) renderStatusBar() string {
 
 	// Key hints live in the startup banner, not here, and the running-turn
 	// duration is intentionally omitted — the status bar stays a compact
-	// cwd / context% / perm-mode strip.
+	// model / cwd / context% / perm-mode strip.
 	return tui.StatusBar(segs, "", m.width)
 }
 
