@@ -37,9 +37,9 @@ func (s *Server) handleRunCronTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find task by name and run it.
+	// Find task by name or id and run it.
 	for _, t := range s.scheduler.List() {
-		if t.Name == name {
+		if t.Name == name || t.ID == name {
 			sessionID, err := s.scheduler.RunNow(r.Context(), t.ID)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
@@ -77,9 +77,9 @@ func (s *Server) handlePatchCronTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find task by name and update.
+	// Find task by name or id and update.
 	for _, t := range s.scheduler.List() {
-		if t.Name == name {
+		if t.Name == name || t.ID == name {
 			if req.Enabled != nil {
 				t.Enabled = *req.Enabled
 				_ = s.scheduler.Update(t)

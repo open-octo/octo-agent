@@ -346,15 +346,17 @@ const Skills = (() => {
 
             try {
               const form = new FormData();
-              form.append("file", file);
+              form.append("files", file);
               const res  = await fetch("/api/upload", { method: "POST", body: form });
               const data = await res.json();
-              if (res.ok && data.path) {
+              const files = data.files || [];
+              const uploaded = files[0];
+              if (res.ok && uploaded && uploaded.url) {
                 // Fill the server-side temp path — /skill-add will read it directly
-                input.value = data.path;
+                input.value = uploaded.url;
               } else {
                 input.value = "";
-                alert(data.error || "Upload failed");
+                alert(uploaded?.error || data.error || "Upload failed");
               }
             } catch (e) {
               input.value = "";

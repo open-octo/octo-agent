@@ -389,8 +389,8 @@ const Profile = (() => {
         "/api/memories/" + encodeURIComponent(m.filename),
         { method: "DELETE" }
       );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       // Optimistic local remove + re-render.

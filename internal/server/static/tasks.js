@@ -97,18 +97,18 @@ const Tasks = (() => {
 
     row.querySelector(".task-btn-run").addEventListener("click", e => {
       e.stopPropagation();
-      Tasks.run(t.name);
+      Tasks.run(t.id);
     });
     const toggleBtn = row.querySelector(".task-btn-toggle");
     if (toggleBtn) {
       toggleBtn.addEventListener("click", e => {
         e.stopPropagation();
-        Tasks.toggleEnabled(t.name, isPaused);  // isPaused=true means we want to enable
+        Tasks.toggleEnabled(t.id, isPaused);  // isPaused=true means we want to enable
       });
     }
     row.querySelector(".task-btn-edit").addEventListener("click", e => {
       e.stopPropagation();
-      Tasks.editInSession(t.name);
+      Tasks.editInSession(t.id, t.name);
     });
     row.querySelector(".task-btn-del").addEventListener("click", e => {
       e.stopPropagation();
@@ -192,28 +192,24 @@ const Tasks = (() => {
 
     // ── CRUD ─────────────────────────────────────────────────────────────
 
-    async run(name) {
-      const res = await fetch(`/api/cron-tasks/${encodeURIComponent(name)}/run`, {
+    async run(id) {
+      const res = await fetch(`/api/cron-tasks/${encodeURIComponent(id)}/run`, {
         method: "POST"
       });
       const data = await res.json();
       if (!res.ok) { alert(I18n.t("tasks.runError") + (data.error || "unknown")); return; }
 
-      if (data.session) {
+      if (data.session_id) {
         await Tasks.load();
-        Sessions.add(data.session);
-        Sessions.renderList();
-        Sessions.setPendingRunTask(data.session.id);
-        Sessions.select(data.session.id);
       }
     },
 
     /** Toggle a scheduled task's enabled flag. `wasPaused` is the current
      *  paused-state before the click; if true, we resume (enabled: true).
      *  Optimistic: we update local state first, then reload on success. */
-    async toggleEnabled(name, wasPaused) {
+    async toggleEnabled(id, wasPaused) {
       const nextEnabled = wasPaused; // paused → resume(true); running → pause(false)
-      const res = await fetch(`/api/cron-tasks/${encodeURIComponent(name)}`, {
+      const res = await fetch(`/api/cron-tasks/${encodeURIComponent(id)}`, {
         method:  "PATCH",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ enabled: nextEnabled })
@@ -259,7 +255,7 @@ const Tasks = (() => {
     },
 
     /** Edit a task by creating a new session and auto-sending the edit command. */
-    async editInSession(name) {
+    async editInSession(id, name) {
       const maxN = Sessions.all.reduce((max, s) => {
         const m = s.name.match(/^Session (\d+)$/);
         return m ? Math.max(max, parseInt(m[1], 10)) : max;
@@ -282,7 +278,7 @@ const Tasks = (() => {
 
       Sessions.add(session);
       Sessions.renderList();
-      Sessions.setPendingMessage(session.id, `/cron-task-creator I'm editing ${name} task`);
+      Sessions.setPendingMessage(session.id, `/cron-task-creator edit ${id} "${name || ''}"`);
       Sessions.select(session.id);
     },
 
