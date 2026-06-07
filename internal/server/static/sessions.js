@@ -2812,8 +2812,9 @@ const Sessions = (() => {
     },
 
     updateStatusBar(status) {
-      // chat-header was removed; status text is now shown in the bottom session-info-bar (#sib-status).
-      // Here we only update the interrupt button visibility.
+      // Updates the interrupt button visibility and input placeholder based on
+      // whether the agent is currently running a turn.
+      // The status dot was removed from the info bar (see PR #471); this method
       const interrupt = $("btn-interrupt");
       if (interrupt) interrupt.style.display = status === "running" ? "" : "none";
 
@@ -2845,7 +2846,7 @@ const Sessions = (() => {
       this._lastSession = s;
       if (!s) {
         // Hide all spans when no session
-        ["sib-id", "sib-status", "sib-dir", "sib-mode", "sib-model", "sib-reasoning", "sib-tasks"].forEach(id => {
+        ["sib-id", "sib-dir", "sib-mode", "sib-model", "sib-reasoning"].forEach(id => {
           const el = $(id); if (el) el.textContent = "";
         });
         const sibIdEl = $("sib-id");
@@ -2853,13 +2854,6 @@ const Sessions = (() => {
         const bar = $("session-info-bar");
         if (bar) bar.style.display = "none";
         return;
-      }
-
-      // Status dot + text — first
-      const sibStatus = $("sib-status");
-      if (sibStatus) {
-        sibStatus.textContent = `● ${s.status || "idle"}`;
-        sibStatus.className = `sib-status-${s.status || "idle"}`;
       }
 
       // Session ID (short — first 8 chars).
@@ -2883,15 +2877,11 @@ const Sessions = (() => {
         sibDir.dataset.sessionId = s.id;
       }
 
-      // Permission mode — hide element and its separator if empty
+      // Permission mode — hide element if empty
       const sibMode = $("sib-mode");
-      const sibSepAfterMode = document.querySelector(".sib-sep-after-mode");
       if (sibMode) {
         sibMode.textContent = s.permission_mode || "";
         sibMode.style.display = s.permission_mode ? "" : "none";
-      }
-      if (sibSepAfterMode) {
-        sibSepAfterMode.style.display = s.permission_mode ? "" : "none";
       }
 
       // Model — hide wrap entirely if empty
@@ -2927,10 +2917,6 @@ const Sessions = (() => {
       // Hidden entirely when no latency recorded yet (fresh session, or old
       // pre-feature sessions that have never made an LLM call this run).
       this._renderSignal(s.latest_latency);
-
-      // Tasks
-      const sibTasks = $("sib-tasks");
-      if (sibTasks) sibTasks.textContent = I18n.t("sessions.metaTasks", { n: s.total_tasks || 0 });
 
       const bar = $("session-info-bar");
       if (bar) bar.style.display = "flex";
