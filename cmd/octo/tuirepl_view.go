@@ -48,6 +48,11 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleModalKey(msg)
 	}
 
+	// Sub-agent panel navigation mode takes over ↑/↓/Enter/Esc when active.
+	if m.subAgentFocus >= 0 {
+		return m.handleSubAgentPanelKey(msg)
+	}
+
 	// Slash-command completion menu owns Tab/↑/↓/Enter/Esc while it's open, so
 	// it can navigate and accept without those keys reaching history nav or
 	// submit. Plain typing falls through and re-filters the menu below.
@@ -223,6 +228,12 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.ta.CursorEnd()
 			return m, m.updateTextAreaHeight()
 		}
+		// History exhausted and input empty — shift focus to the sub-agent panel
+		// when there are running agents.
+		if strings.TrimSpace(m.ta.Value()) == "" && len(m.subAgentOrder) > 0 {
+			m.subAgentFocus = len(m.subAgentOrder) - 1
+			return m, nil
+		}
 		return m, nil
 
 	case tea.KeyDown:
@@ -266,6 +277,38 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(cmd, hcmd)
 	}
 	return m, cmd
+}
+
+// handleSubAgentPanelKey routes keys when the sub-agent panel has focus.
+// ↑/↓ moves between agents, Enter toggles expand/collapse, Esc returns to input.
+func (m *tuiModel) handleSubAgentPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.subAgentFocus > 0 {
+			m.subAgentFocus--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.subAgentFocus < len(m.subAgentOrder)-1 {
+			m.subAgentFocus++
+		} else {
+			// ↓ past the last agent returns focus to the input box.
+			m.subAgentFocus = -1
+		}
+		return m, nil
+	case tea.KeyEnter:
+		if m.subAgentFocus >= 0 && m.subAgentFocus < len(m.subAgentOrder) {
+			id := m.subAgentOrder[m.subAgentFocus]
+			if sa := m.subAgents[id]; sa != nil {
+				sa.expanded = !sa.expanded
+			}
+		}
+		return m, nil
+	case tea.KeyEsc:
+		m.subAgentFocus = -1
+		return m, nil
+	}
+	return m, nil
 }
 
 // imageExts are the file extensions tryAttachDroppedImage recognises.
@@ -793,7 +836,17 @@ func (m *tuiModel) liveHeight() int {
 		h += 3 + len(bg) // panel border (2) + title (1) + body lines
 	}
 	if n := len(m.subAgentOrder); n > 0 {
-		h += 3 + n // panel border (2) + title (1) + one line per sub-agent
+		h += 3 // panel border (2) + title (1)
+		for _, id := range m.subAgentOrder {
+			sa := m.subAgents[id]
+			if sa == nil {
+				continue
+			}
+			h++ // header line
+			if sa.expanded {
+				h += len(sa.history) // one line per tool in history
+			}
+		}
 	}
 	h += m.completionHeight() // slash-completion menu (0 when closed)
 	h += m.ta.Height()        // input box (textarea grows with content)
@@ -916,14 +969,29 @@ func (m *tuiModel) View() string {
 			if sa.description != "" {
 				label = fmt.Sprintf("%s (%s)", id, truncate1Line(sa.description))
 			}
+			focus := "  "
+			if m.subAgentFocus == i {
+				focus = "▸ "
+			}
 			chain := "starting…"
 			if len(sa.recent) > 0 {
 				chain = strings.Join(sa.recent, " · ")
 			}
-			fmt.Fprintf(&lines, "%c %s — %s  (%d tools, %s)",
-				frame, label, chain, sa.toolCount, time.Since(sa.start).Round(time.Second))
+			elapsed := time.Since(sa.start).Round(time.Second)
+			fmt.Fprintf(&lines, "%s%c %s — %s  (%d tools, %s)",
+				focus, frame, label, chain, sa.toolCount, elapsed)
+			if sa.expanded && len(sa.history) > 0 {
+				for _, h := range sa.history {
+					lines.WriteByte('\n')
+					lines.WriteString("    ▸ " + h)
+				}
+			}
 		}
-		b.WriteString(tui.Panel(fmt.Sprintf("sub-agents (%d running)", len(m.subAgentOrder)), lines.String()))
+		title := fmt.Sprintf("sub-agents (%d running)", len(m.subAgentOrder))
+		if m.subAgentFocus >= 0 {
+			title += "  [↑/↓ nav · Enter expand · Esc back]"
+		}
+		b.WriteString(tui.Panel(title, lines.String()))
 		b.WriteByte('\n')
 	}
 

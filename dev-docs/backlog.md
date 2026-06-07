@@ -83,13 +83,17 @@
 
 ## P3 — 低影响 / 未来工作
 
-### 5. TUI 子 Agent 面板交互式展开/折叠
+### 5. TUI 子 Agent 面板交互式展开/折叠 ✅
 
 - **位置**：`dev-docs/sub-agent-design.md:201`
 - **现状**：TUI 底部有 sub-agent 实时面板，每行内联显示最近几个 tool 名 + 累计计数
-- **尚未做**：按某个键（如 Enter）展开某个子 agent 的完整 tool 调用历史（需要焦点管理 + 按键处理）
-- **影响**：低——核心信息已显示，展开是锦上添花
-- **建议**：如果后续 TUI 做更多“可交互面板”重构时一并处理。
+- **已完成**：
+  - `subAgentUI` 新增 `history []string` 记录完整 tool 调用链（`recent` 仍保留用于折叠时的内联预览）
+  - `subAgentFocus int` 焦点管理：↑/↓ 在子 agent 间导航，Enter 展开/折叠，Esc 返回输入框
+  - 进入焦点模式：输入框为空、光标在第一行、按 ↑ 且 history 已到顶时自动进入
+  - 展开时渲染完整 history（每行一个 tool，缩进显示），`liveHeight` 动态计算展开后的高度
+  - 面板标题在焦点模式下显示快捷键提示 `[↑/↓ nav · Enter expand · Esc back]`
+  - `removeSubAgent` 自动调整焦点索引，避免焦点悬空
 
 ### 6. 截断恢复 Layer 2（resume-and-chunk）
 
