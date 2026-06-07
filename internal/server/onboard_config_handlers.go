@@ -143,6 +143,9 @@ type modelConfig struct {
 	APIKey          string `json:"api_key,omitempty"`
 	Provider        string `json:"provider,omitempty"`
 	AnthropicFormat bool   `json:"anthropic_format"`
+	PermissionMode  string `json:"permission_mode,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +163,9 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 			APIKey:          maskKey(cfg.APIKey),
 			Provider:        cfg.Provider,
 			AnthropicFormat: app.IsAnthropicProtocol(cfg.Provider),
+			PermissionMode:  cfg.PermissionMode,
+			ReasoningEffort: cfg.ReasoningEffort,
+			ShowReasoning:   cfg.ShowReasoning,
 		})
 	}
 
@@ -240,16 +246,12 @@ type saveModelRequest struct {
 	APIKey          string `json:"api_key"`
 	Provider        string `json:"provider,omitempty"`
 	AnthropicFormat bool   `json:"anthropic_format"`
+	PermissionMode  string `json:"permission_mode,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
 }
 
-func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
-	var req saveModelRequest
-	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-
-	cfg, _ := config.Load()
+func applyModelRequestToConfig(req saveModelRequest, cfg *config.Config) {
 	cfg.Model = req.Model
 	cfg.BaseURL = req.BaseURL
 	if req.APIKey != "" {
@@ -262,6 +264,26 @@ func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
 	} else {
 		cfg.Provider = "openai"
 	}
+	if req.PermissionMode != "" {
+		cfg.PermissionMode = req.PermissionMode
+	}
+	if req.ReasoningEffort != "" {
+		cfg.ReasoningEffort = req.ReasoningEffort
+	}
+	if req.ShowReasoning != nil {
+		cfg.ShowReasoning = req.ShowReasoning
+	}
+}
+
+func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
+	var req saveModelRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	cfg, _ := config.Load()
+	applyModelRequestToConfig(req, &cfg)
 
 	if err := cfg.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
@@ -286,18 +308,7 @@ func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request)
 	}
 
 	cfg, _ := config.Load()
-	cfg.Model = req.Model
-	cfg.BaseURL = req.BaseURL
-	if req.APIKey != "" {
-		cfg.APIKey = req.APIKey
-	}
-	if req.Provider != "" {
-		cfg.Provider = req.Provider
-	} else if req.AnthropicFormat {
-		cfg.Provider = "anthropic"
-	} else {
-		cfg.Provider = "openai"
-	}
+	applyModelRequestToConfig(req, &cfg)
 
 	if err := cfg.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
