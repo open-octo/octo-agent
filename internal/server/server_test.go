@@ -569,7 +569,25 @@ func TestHandleSaveModelConfig(t *testing.T) {
 }
 
 func TestHandleToggleSkill(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	// Create a real skill so the toggle has something to act on.
+	skillDir := filepath.Join(tmp, ".octo", "skills", "test-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test\ndescription: a test skill\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	// Replace the skillReg with one that sees our temp skill.
+	srv.skillReg = skills.Discover("")
+	srv.skillsManifest = skills.RenderManifest(srv.skillReg)
+
+	// Toggle off (disable).
 	req := httptest.NewRequest(http.MethodPatch, "/api/skills/test-skill/toggle?access_key="+srv.AccessKey(), nil)
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
@@ -580,8 +598,77 @@ func TestHandleToggleSkill(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
+	if body["enabled"] != false {
+		t.Fatalf("enabled = %v, want false", body["enabled"])
+	}
+
+	// Verify config was persisted.
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Tools.DisabledSkills) != 1 || cfg.Tools.DisabledSkills[0] != "test-skill" {
+		t.Fatalf("disabled skills = %v, want [test-skill]", cfg.Tools.DisabledSkills)
+	}
+
+	// Toggle back on (enable).
+	req = httptest.NewRequest(http.MethodPatch, "/api/skills/test-skill/toggle?access_key="+srv.AccessKey(), nil)
+	w = httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
 	if body["enabled"] != true {
 		t.Fatalf("enabled = %v, want true", body["enabled"])
+	}
+
+	cfg, _ = config.Load()
+	if len(cfg.Tools.DisabledSkills) != 0 {
+		t.Fatalf("disabled skills = %v, want empty", cfg.Tools.DisabledSkills)
+	}
+}
+
+func TestHandleToggleSkill_NotFound(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	req := httptest.NewRequest(http.MethodPatch, "/api/skills/nonexistent/toggle?access_key="+srv.AccessKey(), nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleBenchmark_Success(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/test-session/benchmark?access_key="+srv.AccessKey(), nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var body benchmarkResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.OK {
+		t.Fatalf("ok = false, want true")
+	}
+	if len(body.Results) != 1 {
+		t.Fatalf("results = %d, want 1", len(body.Results))
+	}
+	res := body.Results[0]
+	if !res.OK {
+		t.Fatalf("result.ok = false, want true")
+	}
+	if res.ModelID != "stub-model" {
+		t.Fatalf("model_id = %q, want stub-model", res.ModelID)
+	}
+	// stubSender fires the chunk immediately, so TTFT should be ≥ 0 and very small.
+	if res.TTFTMs < 0 {
+		t.Fatalf("ttft_ms = %d, want >= 0", res.TTFTMs)
 	}
 }
 

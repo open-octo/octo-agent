@@ -15,7 +15,7 @@ func TestLoad_MissingFileIsZeroNotError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() on missing file = %v, want nil", err)
 	}
-	if (c != Config{}) {
+	if c.Provider != "" || c.Model != "" || c.BaseURL != "" {
 		t.Errorf("Load() on missing file = %+v, want zero Config", c)
 	}
 }
@@ -34,7 +34,7 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got != want {
+	if got.Provider != want.Provider || got.Model != want.Model || got.BaseURL != want.BaseURL {
 		t.Errorf("round-trip = %+v, want %+v", got, want)
 	}
 }

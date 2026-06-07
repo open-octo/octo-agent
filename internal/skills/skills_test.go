@@ -223,3 +223,82 @@ func TestRenderSkill(t *testing.T) {
 		t.Errorf("body should follow the header; got:\n%s", got)
 	}
 }
+
+func TestSetDisabled(t *testing.T) {
+	useDefaultRoot(t, t.TempDir()) // isolate from real ~/.octo/skills-default
+	userRoot := t.TempDir()
+	useUserRoot(t, userRoot)
+	writeSkill(t, userRoot, "alpha", "---\ndescription: a\n---\nbody")
+	writeSkill(t, userRoot, "beta", "---\ndescription: b\n---\nbody")
+
+	r := Discover("")
+	if r.Len() != 2 {
+		t.Fatalf("Len = %d, want 2", r.Len())
+	}
+
+	r.SetDisabled([]string{"alpha"})
+	if r.Len() != 1 {
+		t.Errorf("Len = %d, want 1", r.Len())
+	}
+	if _, ok := r.Get("alpha"); ok {
+		t.Error("alpha should be hidden when disabled")
+	}
+	if _, ok := r.Get("beta"); !ok {
+		t.Error("beta should still be visible")
+	}
+	if !r.IsEnabled("beta") {
+		t.Error("beta should be enabled")
+	}
+	if r.IsEnabled("alpha") {
+		t.Error("alpha should be disabled")
+	}
+
+	// List should not include disabled.
+	list := r.List()
+	if len(list) != 1 || list[0].Name != "beta" {
+		t.Errorf("List = %v, want [beta]", list)
+	}
+
+	// All should include both.
+	all := r.All()
+	if len(all) != 2 {
+		t.Errorf("All = %v, want 2 items", all)
+	}
+
+	// RenderManifest should not include disabled.
+	m := RenderManifest(r)
+	if strings.Contains(m, "alpha") {
+		t.Error("manifest should not mention disabled skill")
+	}
+	if !strings.Contains(m, "beta") {
+		t.Error("manifest should mention enabled skill")
+	}
+
+	// Re-enable.
+	r.SetDisabled(nil)
+	if r.Len() != 2 {
+		t.Errorf("Len = %d, want 2 after re-enable", r.Len())
+	}
+}
+
+func TestSetDisabled_ReloadPreserves(t *testing.T) {
+	useDefaultRoot(t, t.TempDir())
+	userRoot := t.TempDir()
+	useUserRoot(t, userRoot)
+	writeSkill(t, userRoot, "keep", "---\ndescription: k\n---\nbody")
+
+	r := Discover("")
+	r.SetDisabled([]string{"keep"})
+	if r.Len() != 0 {
+		t.Fatalf("Len = %d, want 0", r.Len())
+	}
+
+	// Reload should keep the disabled set.
+	r.Reload()
+	if r.Len() != 0 {
+		t.Errorf("Len = %d, want 0 after reload", r.Len())
+	}
+	if r.IsEnabled("keep") {
+		t.Error("keep should still be disabled after reload")
+	}
+}

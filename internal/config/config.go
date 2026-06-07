@@ -54,6 +54,10 @@ type Config struct {
 type ToolsConfig struct {
 	// ToolSearch defers MCP tool schemas behind a search/describe/call bridge.
 	ToolSearch ToolSearchConfig `yaml:"tool_search,omitempty"`
+	// DisabledSkills lists skill names the user has toggled off. Disabled skills
+	// are hidden from the model (not injected into the system prompt) and from
+	// the UI, but remain on disk.
+	DisabledSkills []string `yaml:"disabled_skills,omitempty"`
 }
 
 // ToolSearchConfig mirrors the documented tools.tool_search block. Empty fields
