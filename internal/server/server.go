@@ -293,8 +293,9 @@ func (s *Server) registerRoutes() {
 	// File action (open / download)
 	s.mux.HandleFunc("POST /api/file-action", s.requireAuth(s.handleFileAction))
 
-	// Skill toggle
+	// Skill toggle & delete
 	s.mux.HandleFunc("PATCH /api/skills/{name}/toggle", s.requireAuth(s.handleToggleSkill))
+	s.mux.HandleFunc("DELETE /api/skills/{name}", s.requireAuth(s.handleDeleteSkill))
 
 	// Benchmark
 	s.mux.HandleFunc("POST /api/sessions/{id}/benchmark", s.requireAuth(s.handleBenchmark))

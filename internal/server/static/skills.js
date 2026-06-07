@@ -63,6 +63,13 @@ const Skills = (() => {
       ? ""
       : `<button class="btn-skill-use" data-name="${escapeHtml(skill.name)}">${I18n.t("skills.btn.use")}</button>`;
 
+    // Delete button: only for non-system skills
+    const deleteButtonHtml = isSystem
+      ? ""
+      : `<button class="btn-skill-delete" data-name="${escapeHtml(skill.name)}" title="${escapeHtml(I18n.t("skills.btn.deleteTitle"))}">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>`;
+
     card.innerHTML = `
       <div class="skill-card-main">
         <div class="skill-card-info">
@@ -80,6 +87,7 @@ const Skills = (() => {
             <span class="skill-toggle-track"></span>
           </label>
           ${useButtonHtml}
+          ${deleteButtonHtml}
         </div>
       </div>
       ${errorNoticeHtml}`;
@@ -110,6 +118,12 @@ const Skills = (() => {
     const useBtn = card.querySelector(".btn-skill-use");
     if (useBtn) {
       useBtn.addEventListener("click", () => _useInstalledSkill(skill.name));
+    }
+
+    // Bind "Delete" button event
+    const deleteBtn = card.querySelector(".btn-skill-delete");
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", () => Skills.delete(skill.name));
     }
 
     return card;
@@ -280,6 +294,22 @@ const Skills = (() => {
         await Skills.load();
       } catch (e) {
         console.error("[Skills] toggle failed", e);
+      }
+    },
+
+    /** Delete a skill. */
+    async delete(name) {
+      const confirmed = await Modal.confirm(I18n.t("skills.confirmDelete", { name }));
+      if (!confirmed) return;
+
+      try {
+        const res = await fetch(`/api/skills/${encodeURIComponent(name)}`, { method: "DELETE" });
+        const data = await res.json();
+        if (!res.ok) { alert(I18n.t("skills.deleteError") + (data.error || "unknown")); return; }
+        await Skills.load();
+      } catch (e) {
+        console.error("[Skills] delete failed", e);
+        alert(I18n.t("skills.deleteError") + e.message);
       }
     },
 

@@ -282,6 +282,36 @@ func (r *Registry) IsEnabled(name string) bool {
 	return !r.disabled[name]
 }
 
+// Delete removes a skill from the registry and its on-disk directory.
+// System (source=default) skills cannot be deleted.
+func (r *Registry) Delete(name string) error {
+	if r == nil {
+		return fmt.Errorf("skill %q not found", name)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	s, exists := r.skills[name]
+	if !exists {
+		return fmt.Errorf("skill %q not found", name)
+	}
+	if s.Source == "default" {
+		return fmt.Errorf("cannot delete system skill %q", name)
+	}
+
+	// Remove from registry first
+	delete(r.skills, name)
+	delete(r.disabled, name)
+
+	// Remove the on-disk directory
+	if s.Dir != "" {
+		if err := os.RemoveAll(s.Dir); err != nil {
+			return fmt.Errorf("remove skill directory %s: %w", s.Dir, err)
+		}
+	}
+	return nil
+}
+
 // RenderManifest builds the L1 manifest injected into the system prompt: each
 // skill's name and description, plus a note on how to load the full body.
 // Returns "" for a nil/empty registry so the caller can skip the prompt layer.

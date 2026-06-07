@@ -74,3 +74,36 @@ func (s *Server) handleToggleSkill(w http.ResponseWriter, r *http.Request) {
 		"enabled": currentlyDisabled, // toggle: disabled → enabled, enabled → disabled
 	})
 }
+
+// ─── DELETE /api/skills/{name} ──────────────────────────────────────────────
+
+func (s *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "missing skill name")
+		return
+	}
+
+	// Verify the skill exists (including disabled ones).
+	found := false
+	for _, sk := range s.skillReg.All() {
+		if sk.Name == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+
+	if err := s.skillReg.Delete(name); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Update in-memory manifest so new sessions see the change immediately.
+	s.skillsManifest = skills.RenderManifest(s.skillReg)
+
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": name})
+}

@@ -379,6 +379,66 @@ body {
 }
 #session-list { padding: 0.375rem 0.5rem 0.5rem; min-height: 6.75rem; }
 
+/* ── Batch select toolbar ───────────────────────────────────────────────── */
+.session-batch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+.session-batch-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+.session-batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.session-batch-btn {
+  padding: 0.25rem 0.625rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  background: transparent;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.session-batch-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.session-batch-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.session-batch-btn--danger {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+.session-batch-btn--danger:hover {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+
+/* ── Session select checkbox ────────────────────────────────────────────── */
+.session-select-checkbox {
+  width: 1rem;
+  height: 1rem;
+  margin-right: 0.5rem;
+  accent-color: var(--color-accent-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 /* ── Sidebar divider (Section Labels) ───────────────────────────────────── */
 .sidebar-divider {
   display: flex;
@@ -4466,6 +4526,24 @@ body {
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+}
+.btn-skill-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.btn-skill-delete:hover {
+  background: var(--color-error-bg);
+  color: var(--color-error);
 }
 .skill-card-title {
   display: flex;

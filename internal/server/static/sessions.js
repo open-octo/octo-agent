@@ -29,6 +29,9 @@ const Sessions = (() => {
   let   _cronCount         = 0;      // total cron sessions from server
   let   _pendingRunTaskId  = null;  // session_id waiting to send "run_task" after subscribe
   let   _pendingMessage    = null;  // { session_id, content } — slash command to send after subscribe
+  // Batch selection state
+  let   _selectMode        = false;  // is batch-select mode active?
+  const _selectedIds       = new Set(); // session ids selected for batch delete
   // Buffer for tool_stdout lines that arrive before history has finished rendering.
   // This happens on session switch: WS replay fires before the HTTP history fetch completes.
   // Flushed in _fetchHistory after the fragment is appended to the DOM.
@@ -1909,36 +1912,66 @@ const Sessions = (() => {
       ? `<span class="session-dot dot-${s.status}"></span>`
       : "";
 
+    const isSelected = _selectedIds.has(s.id);
+    const checkboxHtml = _selectMode
+      ? `<input type="checkbox" class="session-select-checkbox" ${isSelected ? "checked" : ""} data-session-id="${escapeHtml(s.id)}">`
+      : "";
+    const actionsBtnHtml = _selectMode
+      ? ""
+      : `<button class="session-actions-btn" title="Actions"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="2.5" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="11.5" cy="7" r="1.2" fill="currentColor"/></svg></button>`;
+
     el.innerHTML = `
+      ${checkboxHtml}
       <div class="session-body">
         <div class="session-name">${dotHtml}<span class="session-name__text">${escapeHtml(displayName)}</span>${badgeHtml}${codingBadgeHtml}${pinIcon}</div>
         <div class="session-meta">${metaText}</div>
       </div>
-      <button class="session-actions-btn" title="Actions"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="2.5" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="11.5" cy="7" r="1.2" fill="currentColor"/></svg></button>`;
+      ${actionsBtnHtml}`;
 
-    // Use a click timer to distinguish single-click (select) from double-click (old rename behavior).
-    let clickTimer = null;
-    el.onclick = (e) => {
-      // Ignore clicks on the actions button
-      if (e.target.closest(".session-actions-btn")) return;
-      
-      if (clickTimer) {
-        clearTimeout(clickTimer);
-        clickTimer = null;
-        return;
+    if (_selectMode) {
+      // In select mode: checkbox toggles selection; body click also toggles
+      const checkbox = el.querySelector(".session-select-checkbox");
+      const body = el.querySelector(".session-body");
+      const toggle = () => {
+        if (_selectedIds.has(s.id)) {
+          _selectedIds.delete(s.id);
+        } else {
+          _selectedIds.add(s.id);
+        }
+        Sessions.renderList();
+      };
+      if (checkbox) checkbox.addEventListener("change", toggle);
+      if (body) body.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggle();
+      });
+    } else {
+      // Normal mode: use a click timer to distinguish single-click (select) from double-click
+      let clickTimer = null;
+      el.onclick = (e) => {
+        // Ignore clicks on the actions button
+        if (e.target.closest(".session-actions-btn")) return;
+
+        if (clickTimer) {
+          clearTimeout(clickTimer);
+          clickTimer = null;
+          return;
+        }
+        clickTimer = setTimeout(() => {
+          clickTimer = null;
+          Sessions.select(s.id);
+        }, 200);
+      };
+
+      // Actions button - show menu
+      const actionsBtn = el.querySelector(".session-actions-btn");
+      if (actionsBtn) {
+        actionsBtn.onclick = (e) => {
+          e.stopPropagation();
+          Sessions._showActionsMenu(e.target, s);
+        };
       }
-      clickTimer = setTimeout(() => {
-        clickTimer = null;
-        Sessions.select(s.id);
-      }, 200);
-    };
-
-    // Actions button - show menu
-    const actionsBtn = el.querySelector(".session-actions-btn");
-    actionsBtn.onclick = (e) => {
-      e.stopPropagation();
-      Sessions._showActionsMenu(e.target, s);
-    };
+    }
 
     container.appendChild(el);
   }
@@ -2469,6 +2502,33 @@ const Sessions = (() => {
       const list = $("session-list");
       list.innerHTML = "";
 
+      // ── Batch-select toolbar ────────────────────────────────────────────
+      if (_selectMode) {
+        const toolbar = document.createElement("div");
+        toolbar.className = "session-batch-toolbar";
+        const selectedCount = _selectedIds.size;
+        toolbar.innerHTML = `
+          <div class="session-batch-info">
+            <button class="session-batch-btn" data-action="cancel">${escapeHtml(I18n.t("sessions.batch.cancel"))}</button>
+            <span class="session-batch-count">${escapeHtml(I18n.t("sessions.batch.selected", { n: selectedCount }))}</span>
+          </div>
+          <div class="session-batch-actions">
+            <button class="session-batch-btn" data-action="select-all">${escapeHtml(I18n.t("sessions.batch.selectAll"))}</button>
+            <button class="session-batch-btn session-batch-btn--danger" data-action="delete" ${selectedCount === 0 ? "disabled" : ""}>${escapeHtml(I18n.t("sessions.batch.delete"))}</button>
+          </div>
+        `;
+        toolbar.querySelectorAll("[data-action]").forEach(btn => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const action = btn.dataset.action;
+            if (action === "cancel") Sessions.toggleSelectMode();
+            else if (action === "select-all") Sessions.selectAll();
+            else if (action === "delete") Sessions.deleteSelectedSessions();
+          });
+        });
+        list.appendChild(toolbar);
+      }
+
       if (hasActiveFilter) {
         // Filter active: show all matching results flat, no group entry
         visible.forEach(s => _renderSessionItem(list, s));
@@ -2555,6 +2615,7 @@ const Sessions = (() => {
       const iconTrash = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>`;
 
       const pinLabel = session.pinned ? I18n.t("sessions.actions.unpin") : I18n.t("sessions.actions.pin");
+      const iconSelect = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`;
 
       const menu = document.createElement("div");
       menu.className = "session-actions-menu";
@@ -2566,6 +2627,10 @@ const Sessions = (() => {
         <div class="session-actions-menu-item" data-action="rename">
           <span class="session-actions-menu-icon">${iconRename}</span>
           <span class="session-actions-menu-label">${escapeHtml(I18n.t("sessions.actions.rename"))}</span>
+        </div>
+        <div class="session-actions-menu-item" data-action="select-multiple">
+          <span class="session-actions-menu-icon">${iconSelect}</span>
+          <span class="session-actions-menu-label">${escapeHtml(I18n.t("sessions.actions.selectMultiple"))}</span>
         </div>
         <div class="session-actions-menu-item session-actions-menu-item--danger" data-action="delete">
           <span class="session-actions-menu-icon">${iconTrash}</span>
@@ -2599,6 +2664,8 @@ const Sessions = (() => {
             const nameDiv = sessionItem.querySelector(".session-name");
             Sessions._startRename(session.id, nameDiv, session.name);
           }
+        } else if (action === "select-multiple") {
+          Sessions.toggleSelectMode();
         } else if (action === "delete") {
           // Close sidebar on mobile so the delete dialog isn't obscured
           window.mobileCloseSidebar?.();
@@ -2671,6 +2738,72 @@ const Sessions = (() => {
         }
       } catch (err) {
         console.error("Delete error:", err);
+      }
+    },
+
+    // ── Batch selection ───────────────────────────────────────────────────
+
+    /** Toggle batch-select mode on/off. */
+    toggleSelectMode() {
+      _selectMode = !_selectMode;
+      if (!_selectMode) {
+        _selectedIds.clear();
+      }
+      Sessions.renderList();
+    },
+
+    /** Select all currently visible sessions. */
+    selectAll() {
+      const visibleIds = new Set(_sessions.map(s => s.id));
+      // If all visible are already selected, deselect all; otherwise select all visible.
+      const allSelected = [...visibleIds].every(id => _selectedIds.has(id));
+      if (allSelected) {
+        _selectedIds.clear();
+      } else {
+        visibleIds.forEach(id => _selectedIds.add(id));
+      }
+      Sessions.renderList();
+    },
+
+    /** Delete all selected sessions via batch API. */
+    async deleteSelectedSessions() {
+      if (_selectedIds.size === 0) return;
+
+      const names = [..._selectedIds].map(id => {
+        const s = _sessions.find(x => x.id === id);
+        return s ? (s.name || id) : id;
+      });
+      const listText = names.slice(0, 5).join("\n") + (names.length > 5 ? `\n… and ${names.length - 5} more` : "");
+      const confirmed = await Modal.confirm(
+        I18n.t("sessions.batch.confirmDelete", { n: _selectedIds.size, list: listText })
+      );
+      if (!confirmed) return;
+
+      try {
+        const ids = [..._selectedIds];
+        const res = await fetch("/api/sessions/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const deleted = data.deleted || [];
+          deleted.forEach(id => {
+            Sessions.remove(id);
+            if (id === _activeId) Router.navigate("welcome");
+          });
+          _selectedIds.clear();
+          if (deleted.length === 0 && data.failed && Object.keys(data.failed).length > 0) {
+            alert(I18n.t("sessions.batch.deleteFailed"));
+          }
+          Sessions.renderList();
+        } else {
+          alert(I18n.t("sessions.batch.deleteFailed") + (data.error || res.status));
+        }
+      } catch (err) {
+        console.error("Batch delete error:", err);
+        alert(I18n.t("sessions.batch.deleteFailed") + err.message);
       }
     },
 
