@@ -341,6 +341,18 @@ const defaultMaxTurns = 100
 // unlimitedTurns signals no cap (used for unattended runs).
 const unlimitedTurns = -1
 
+// maxTruncationResumes caps how many times layer-2 resume-and-chunk fires per
+// run. Each resume appends the partial reply + a recovery prompt, consuming
+// another iteration of the loop budget. Three resumes is enough for most
+// large prose without risking an infinite loop.
+const maxTruncationResumes = 3
+
+// truncationResumePrompt is injected as a user message when a text reply is
+// cut off by the output-token cap and escalation (layer 1) didn't help.
+// The model sees its own partial output in history and is asked to continue
+// from exactly where it left off.
+const truncationResumePrompt = "You were cut off mid-thought. Continue exactly where you left off and complete your response. Do not repeat what you've already written."
+
 // Run is the agentic loop: it appends the user message to history then
 // repeatedly calls the provider until the model reaches end_turn (no more
 // tool calls) or the iteration cap is hit. Run is the buffered, no-event
@@ -498,7 +510,9 @@ func (a *Agent) runLoop(
 	a.appendUserInput(userInput)
 
 	limit := a.turnLimit()
-	streamStalls := 0 // transient mid-stream stalls re-issued for the current round
+	streamStalls := 0      // transient mid-stream stalls re-issued for the current round
+	truncationResumes := 0 // layer-2 resume-and-chunk budget
+	escalateExhausted := false
 	for i := 0; limit == unlimitedTurns || i < limit; i++ {
 		// Interrupt (Ctrl-C) between iterations — e.g. right after a tool batch.
 		if ctx.Err() != nil {
@@ -585,12 +599,14 @@ func (a *Agent) runLoop(
 		// regenerated with more room — no provider-specific partial-tool_use
 		// handling needed. Fires only when escalation raises the cap.
 		// See dev-docs/truncation-recovery.md.
-		if isTruncated(reply.StopReason) && a.MaxTokensEscalate > a.MaxTokens {
+		if isTruncated(reply.StopReason) && !escalateExhausted && a.MaxTokensEscalate > a.MaxTokens {
 			escalated, eerr := send(ctx, a.History.Snapshot(), a.MaxTokensEscalate)
 			switch {
 			case eerr == nil:
 				reply = escalated
 				a.accrueUsage(reply)
+				truncationResumes = 0 // escalation solved it — reset resume budget
+				escalateExhausted = false
 			case ctx.Err() != nil:
 				return a.finishInterrupted(handler)
 			case isMaxTokensTooLargeErr(eerr):
@@ -605,10 +621,27 @@ func (a *Agent) runLoop(
 			}
 		}
 
-		// Still truncated (escalation disabled, model ceiling hit, or even the
-		// escalated cap fell short): end the turn cleanly rather than dispatching
-		// a half-formed tool call or returning an empty reply. History keeps the
-		// progress; the caller gets a non-error explanation.
+		// ── Output-truncation recovery (layer 2) ──
+		// When escalation was attempted (cap raised) but the reply is still
+		// truncated, keep the partial text in history and prompt the model to
+		// continue. This covers long prose replies that exceed even the escalated
+		// cap. Limited to maxTruncationResumes to prevent infinite loops. Skipped
+		// for truncated tool_use blocks (partial tool calls are unsafe in
+		// OpenAI-protocol history) and when escalation is disabled.
+		if isTruncated(reply.StopReason) && a.MaxTokensEscalate > a.MaxTokens && reply.Content != "" && truncationResumes < maxTruncationResumes {
+			a.History.Append(NewAssistantMessage(reply.Content))
+			a.History.Append(NewUserMessage(truncationResumePrompt))
+			truncationResumes++
+			escalateExhausted = true
+			if handler != nil {
+				handler(AgentEvent{Kind: EventTextDelta, Text: "\n[octo] response truncated — resuming…\n"})
+			}
+			continue
+		}
+
+		// Still truncated and ineligible for layer-2 resume (tool_use truncation
+		// or resume budget exhausted): end the turn cleanly rather than dispatching
+		// a half-formed tool call or returning an empty reply.
 		if isTruncated(reply.StopReason) {
 			return a.budgetStop(handler, StopReasonMaxTokens,
 				"[octo] Stopped: the response was truncated at the output-token cap. "+

@@ -1261,6 +1261,115 @@ func TestRunLoop_Truncation_ModelCeilingBackoff(t *testing.T) {
 	}
 }
 
+// ─── Output-truncation recovery (layer 2) ──────────────────────────────────
+
+func TestRunLoop_Truncation_Layer2ResumesText(t *testing.T) {
+	// Three replies: truncated at default cap, truncated after escalation,
+	// then end_turn after layer-2 resume.
+	send := &fakeToolSender{replies: []Reply{
+		{StopReason: StopReasonMaxTokens, Content: "First part of a very long explanation..."},
+		{StopReason: StopReasonMaxTokens, Content: "Still truncated even at escalated cap..."},
+		{StopReason: "end_turn", Content: " and here is the continuation that completes the thought."},
+	}}
+	a := New(send, "m")
+	a.MaxTokens = 4096
+	a.MaxTokensEscalate = 16384
+	defs, exec := truncSetup()
+
+	reply, err := a.Run(context.Background(), "explain everything", defs, exec)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reply.StopReason != "end_turn" {
+		t.Errorf("StopReason = %q, want end_turn", reply.StopReason)
+	}
+
+	// History: user, assistant(escalated partial), user(resume), assistant(complete)
+	// The first truncated reply is NOT in history (layer 1 drops it); the
+	// escalated-but-still-truncated reply becomes the partial that layer 2 keeps.
+	snap := a.History.Snapshot()
+	if len(snap) != 4 {
+		t.Fatalf("History len = %d, want 4 (user + assistant partial + user resume + assistant complete)", len(snap))
+	}
+	if snap[1].Role != RoleAssistant {
+		t.Errorf("snap[1].Role = %q, want assistant", snap[1].Role)
+	}
+	partial := snap[1].Content
+	if !strings.Contains(partial, "Still truncated") {
+		t.Errorf("partial text = %q, want 'Still truncated'", partial)
+	}
+	if snap[2].Role != RoleUser {
+		t.Errorf("snap[2].Role = %q, want user (resume prompt)", snap[2].Role)
+	}
+}
+
+func TestRunLoop_Truncation_Layer2BudgetExhausted(t *testing.T) {
+	// Replies: truncated at default, truncated after escalation, then three
+	// more truncated replies that exhaust maxTruncationResumes, then graceful stop.
+	// After layer 2 fires once, escalateExhausted is set so subsequent loops skip
+	// escalation and go straight to layer 2 (or budgetStop when exhausted).
+	replies := []Reply{
+		{StopReason: StopReasonMaxTokens, Content: "part1..."}, // 4096
+		{StopReason: StopReasonMaxTokens, Content: "part2..."}, // 16384 escalate
+		{StopReason: StopReasonMaxTokens, Content: "part3..."}, // 4096 resume #1
+		{StopReason: StopReasonMaxTokens, Content: "part4..."}, // 4096 resume #2
+		{StopReason: StopReasonMaxTokens, Content: "part5..."}, // 4096 resume #3
+	}
+	send := &fakeToolSender{replies: replies}
+	a := New(send, "m")
+	a.MaxTokens = 4096
+	a.MaxTokensEscalate = 16384
+	defs, exec := truncSetup()
+
+	reply, err := a.Run(context.Background(), "long story", defs, exec)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reply.StopReason != StopReasonMaxTokens {
+		t.Errorf("StopReason = %q, want %q", reply.StopReason, StopReasonMaxTokens)
+	}
+	if !strings.Contains(reply.Content, "truncated") {
+		t.Errorf("expected graceful-stop message, got %q", reply.Content)
+	}
+
+	// History: user + assistant(part1) + user(resume) + assistant(part2) + user(resume)
+	// + assistant(part3) + user(resume) + assistant(part4) + user(resume)
+	// + assistant(part5) + user(resume) + budgetStop assistant
+	// = 1 + 5*2 + 1 = 12
+	snap := a.History.Snapshot()
+	// user(1) + assistant_part2(1) + user_resume(1) + assistant_part3(1) + user_resume(1)
+	// + assistant_part4(1) + user_resume(1) + budgetStop(1) = 8
+	if len(snap) != 8 {
+		t.Errorf("History len = %d, want 12", len(snap))
+	}
+}
+
+func TestRunLoop_Truncation_Layer2SkipsToolUse(t *testing.T) {
+	// Truncated tool_use (Content empty) is unsafe for layer 2.
+	// Two truncated replies so escalation fires then falls to graceful stop.
+	send := &fakeToolSender{replies: []Reply{
+		{StopReason: StopReasonMaxTokens, Content: ""},
+		{StopReason: StopReasonMaxTokens, Content: ""},
+	}}
+	a := New(send, "m")
+	a.MaxTokens = 4096
+	a.MaxTokensEscalate = 16384
+	defs, exec := truncSetup()
+
+	reply, err := a.Run(context.Background(), "write a big file", defs, exec)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reply.StopReason != StopReasonMaxTokens {
+		t.Errorf("StopReason = %q, want %q", reply.StopReason, StopReasonMaxTokens)
+	}
+	// Should NOT have appended the truncated reply or resume prompt.
+	snap := a.History.Snapshot()
+	if len(snap) != 2 {
+		t.Errorf("History len = %d, want 2 (user + budgetStop assistant)", len(snap))
+	}
+}
+
 func TestIsMaxTokensTooLargeErr(t *testing.T) {
 	yes := []string{
 		"400 max_tokens: 99999 is greater than the maximum allowed",

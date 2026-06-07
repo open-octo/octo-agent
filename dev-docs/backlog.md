@@ -84,13 +84,11 @@
   - 面板标题在焦点模式下显示快捷键提示 `[↑/↓ nav · Enter expand · Esc back]`
   - `removeSubAgent` 自动调整焦点索引，避免焦点悬空
 
-### 6. 截断恢复 Layer 2（resume-and-chunk）
+### 6. 截断恢复 Layer 2（resume-and-chunk）✅
 
 - **位置**：`dev-docs/truncation-recovery.md:105`
 - **现状**：Layer 1（escalate-and-retry）已实现——遇到 `max_tokens` 时自动提升 cap 重试一次
-- **尚未做**：Layer 2——保留部分输出，喂回 "you were cut off; resume mid-thought and write in smaller pieces" 提示并继续（Claude Code 式多轮恢复）。需要处理 provider 对不完整 `tool_use` block 的兼容性。
-- **影响**：低——Layer 1 已覆盖绝大多数大文件写入场景
-- **建议**：等有大模型在 escalate 后仍然截断的真实案例时再起工。
+- **已完成**：Layer 2 实装——当 escalate 后仍然截断时，将 partial text 追加到 history，注入 recovery user message，继续 loop 让模型完成剩余内容。限制最多 3 次恢复，防止无限循环。跳过了截断的 tool_use（OpenAI 协议中 partial tool_use 在 history 中不安全）。引入 `escalateExhausted` 标志避免 resume 后重复 escalate。
 
 ### 7. Conductor Phase 2 / Phase 3（渐进交付的后续阶段）
 

@@ -102,12 +102,46 @@ case — a `write_file` call, whose content surfaces as a tool card rather than
 prose — the visible result is the final file, so impact is minor. Suppressing
 the re-emit is left to a later change.
 
-## Not yet implemented: resume-and-chunk
+## Layer 2: resume-and-chunk
 
-A second tier — keep the partial output, feed back a "you were cut off; resume
-mid-thought and write in smaller pieces" message, and continue (à la Claude
-Code's multi-turn recovery) — is **not** built. It needs per-provider handling
-of the partial `tool_use` block (safe on Anthropic, needs cleanup on
-OpenAI-compatible backends) and is a separate change. Layer 1 (escalate-retry)
-covers the common large-artifact case without it.
+When escalation (layer 1) is disabled, hits a model ceiling, or the escalated
+cap is still not enough, the loop falls back to **resume-and-chunk** instead of
+ending the turn immediately.
+
+### How it works
+
+1. The **partial text** from the truncated reply is appended to history as a
+   regular assistant message.
+2. A **recovery user message** is appended:
+   > "You were cut off mid-thought. Continue exactly where you left off and
+   > complete your response. Do not repeat what you've already written."
+3. The loop `continue`s to the next iteration, where the model sees its own
+   partial output followed by the recovery prompt and completes the remaining
+   content.
+
+### Safety guards
+
+- **Only text replies** (`reply.Content != ""`). Truncated `tool_use` blocks
+  are skipped because partial tool calls in OpenAI-protocol history can 400;
+  Layer 1 (escalate-retry) already covers the large-artifact case for tools.
+- **Resume budget**: `maxTruncationResumes = 3`. After three resumes the loop
+  gives up and falls through to the existing `budgetStop` graceful stop.
+- **Escalate exhaustion tracking**: `escalateExhausted` is set once Layer 2
+  fires, preventing redundant escalate attempts on subsequent iterations — the
+  loop goes straight to Layer 2 (or budgetStop when the resume budget is out).
+- **Token accounting**: every truncated attempt and every resume round accrues
+  real tokens into the session total.
+
+### When each layer fires
+
+| Scenario | Layer 1 (escalate) | Layer 2 (resume) |
+|---|---|---|
+| Default cap too small, escalated cap works | ✅ retries once | — |
+| Escalation disabled (`MaxTokensEscalate == 0`) | — | ❌ skipped; budgetStop |
+| Escalated cap still not enough | ✅ tried | ✅ resume up to 3× |
+| Model ceiling below escalation target | ❌ error caught | — |
+| Truncated `tool_use` (empty Content) | ✅ if cap allows | ❌ skipped (unsafe) |
+
+Layer 2 is particularly useful for long prose explanations, documentation, or
+multi-file write plans that exceed even a generous escalated cap.
 ```
