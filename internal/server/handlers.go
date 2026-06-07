@@ -493,7 +493,7 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.Context, agent.ToolExecutor, error) {
 	executor := tools.NewDefaultRegistry()
 
-	engine, err := permission.New(permissionConfigPath(), s.cwd, permission.ModeInteractive)
+	engine, err := permission.New(permissionConfigPath(), s.cwd, resolvePermissionMode())
 	if err != nil {
 		return ctx, nil, fmt.Errorf("permission engine: %w", err)
 	}
@@ -516,6 +516,20 @@ func permissionConfigPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".octo", "permissions.yml")
+}
+
+// resolvePermissionMode reads the persisted config and returns the configured
+// permission mode (or ModeInteractive as the default). This lets the server
+// pick up mode changes written by the setup panel / onboard skill without
+// restarting.
+func resolvePermissionMode() permission.Mode {
+	cfg, _ := config.Load()
+	switch cfg.PermissionMode {
+	case string(permission.ModeAutoApprove):
+		return permission.ModeAutoApprove
+	default:
+		return permission.ModeInteractive
+	}
 }
 
 // ─── POST /api/file-action ────────────────────────────────────────────────

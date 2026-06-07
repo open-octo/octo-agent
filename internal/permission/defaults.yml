@@ -120,3 +120,9 @@ task_update:
   - allow: { pattern: "" }
 task_list:
   - allow: { pattern: "" }
+
+# Skill invocation is a dispatch to a markdown instruction file — no direct side
+# effect beyond what the skill's own tools (already gated) do. Allow without
+# prompting so the onboard and other skill flows work over HTTP / IM.
+skill:
+  - allow: { pattern: "" }

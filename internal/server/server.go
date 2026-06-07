@@ -626,7 +626,7 @@ func (s *Server) initChannels() {
 
 // buildChannelGate creates a non-interactive permission gate for the IM bridge.
 func (s *Server) buildChannelGate() (agent.PermissionGate, error) {
-	engine, err := permission.New(permissionConfigPath(), s.cwd, permission.ModeInteractive)
+	engine, err := permission.New(permissionConfigPath(), s.cwd, resolvePermissionMode())
 	if err != nil {
 		return nil, fmt.Errorf("permission engine: %w", err)
 	}
