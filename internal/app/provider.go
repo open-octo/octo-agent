@@ -23,7 +23,7 @@ type Vendor struct {
 	DisplayName      string            // human label, e.g. "Kimi (Moonshot)"
 	Protocol         string            // "anthropic" or "openai"
 	API              string            // "anthropic-messages" or "openai-completions" or "openai-responses"
-	DefaultBaseURL   string            // vendor's official endpoint
+	DefaultBaseURL   string            // vendor's official endpoint (host only; the client appends the protocol path)
 	DefaultModel     string            // cheapest/reasoning-capable default
 	Models           []string          // available models (for UI dropdown)
 	LiteModel        string            // lightweight/cheaper model variant
@@ -40,7 +40,7 @@ var Registry = []Vendor{
 		DisplayName:    "OpenRouter",
 		Protocol:       "openai",
 		API:            "openai-responses",
-		DefaultBaseURL: "https://openrouter.ai/api/v1",
+		DefaultBaseURL: "https://openrouter.ai/api",
 		DefaultModel:   "anthropic/claude-sonnet-4-6",
 		Models: []string{
 			"anthropic/claude-sonnet-4-6",
@@ -71,14 +71,14 @@ var Registry = []Vendor{
 		DisplayName:    "Minimax",
 		Protocol:       "openai",
 		API:            "openai-completions",
-		DefaultBaseURL: "https://api.minimaxi.com/v1",
+		DefaultBaseURL: "https://api.minimaxi.com",
 		DefaultModel:   "MiniMax-M2.7",
 		Models:         []string{"MiniMax-M2.5", "MiniMax-M2.7"},
 		APIKeyEnvVar:   "MINIMAX_API_KEY",
 		WebsiteURL:     "https://www.minimaxi.com/user-center/basic-information/interface-key",
 		EndpointVariants: []EndpointVariant{
-			{Label: "Mainland China", LabelKey: "settings.models.baseurl.variant.mainland_cn", BaseURL: "https://api.minimaxi.com/v1", Region: "cn"},
-			{Label: "International", LabelKey: "settings.models.baseurl.variant.international", BaseURL: "https://api.minimax.io/v1", Region: "intl"},
+			{Label: "Mainland China", LabelKey: "settings.models.baseurl.variant.mainland_cn", BaseURL: "https://api.minimaxi.com", Region: "cn"},
+			{Label: "International", LabelKey: "settings.models.baseurl.variant.international", BaseURL: "https://api.minimax.io", Region: "intl"},
 		},
 	},
 	{
@@ -86,21 +86,21 @@ var Registry = []Vendor{
 		DisplayName:    "Kimi (Moonshot)",
 		Protocol:       "openai",
 		API:            "openai-completions",
-		DefaultBaseURL: "https://api.moonshot.cn/v1",
+		DefaultBaseURL: "https://api.moonshot.cn",
 		DefaultModel:   "kimi-k2.6",
 		Models:         []string{"kimi-k2.6", "kimi-k2.5"},
 		APIKeyEnvVar:   "MOONSHOT_API_KEY",
 		WebsiteURL:     "https://platform.moonshot.cn/console/api-keys",
 		EndpointVariants: []EndpointVariant{
-			{Label: "Mainland China", LabelKey: "settings.models.baseurl.variant.mainland_cn", BaseURL: "https://api.moonshot.cn/v1", Region: "cn"},
-			{Label: "International", LabelKey: "settings.models.baseurl.variant.international", BaseURL: "https://api.moonshot.ai/v1", Region: "intl"},
+			{Label: "Mainland China", LabelKey: "settings.models.baseurl.variant.mainland_cn", BaseURL: "https://api.moonshot.cn", Region: "cn"},
+			{Label: "International", LabelKey: "settings.models.baseurl.variant.international", BaseURL: "https://api.moonshot.ai", Region: "intl"},
 		},
 	},
 	{
 		ID:             "kimi-coding",
 		DisplayName:    "Kimi Coding",
-		Protocol:       "openai",
-		API:            "openai-completions",
+		Protocol:       "anthropic",
+		API:            "anthropic-messages",
 		DefaultBaseURL: "https://api.kimi.com/coding",
 		DefaultModel:   "kimi-for-coding",
 		Models:         []string{"kimi-for-coding"},
@@ -120,7 +120,7 @@ var Registry = []Vendor{
 		WebsiteURL:     "https://open.bigmodel.cn/usercenter/apikey",
 		EndpointVariants: []EndpointVariant{
 			{Label: "Mainland China", LabelKey: "settings.models.baseurl.variant.mainland_cn", BaseURL: "https://open.bigmodel.cn/api/paas/v4", Region: "cn"},
-			{Label: "International", LabelKey: "settings.models.baseurl.variant.international", BaseURL: "https://api.z.ai/v1", Region: "intl"},
+			{Label: "International", LabelKey: "settings.models.baseurl.variant.international", BaseURL: "https://api.z.ai", Region: "intl"},
 		},
 	},
 	{
@@ -128,7 +128,7 @@ var Registry = []Vendor{
 		DisplayName:    "OpenAI",
 		Protocol:       "openai",
 		API:            "openai-responses",
-		DefaultBaseURL: "https://api.openai.com/v1",
+		DefaultBaseURL: "https://api.openai.com",
 		DefaultModel:   "gpt-5.4",
 		Models:         []string{"gpt-5.5", "gpt-5.4", "gpt-5.4-mini"},
 		LiteModel:      "gpt-5.4-mini",
@@ -152,7 +152,7 @@ var Registry = []Vendor{
 		DisplayName:    "SiliconFlow",
 		Protocol:       "openai",
 		API:            "openai-completions",
-		DefaultBaseURL: "https://api.siliconflow.cn/v1",
+		DefaultBaseURL: "https://api.siliconflow.cn",
 		DefaultModel:   "deepseek-ai/DeepSeek-V3",
 		Models:         []string{"deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1"},
 		APIKeyEnvVar:   "SILICONFLOW_API_KEY",
@@ -163,7 +163,7 @@ var Registry = []Vendor{
 		DisplayName:    "Mistral",
 		Protocol:       "openai",
 		API:            "openai-completions",
-		DefaultBaseURL: "https://api.mistral.ai/v1",
+		DefaultBaseURL: "https://api.mistral.ai",
 		DefaultModel:   "mistral-large-latest",
 		Models:         []string{"mistral-large-latest", "mistral-medium-latest"},
 		APIKeyEnvVar:   "MISTRAL_API_KEY",
@@ -174,7 +174,7 @@ var Registry = []Vendor{
 		DisplayName:    "Groq",
 		Protocol:       "openai",
 		API:            "openai-completions",
-		DefaultBaseURL: "https://api.groq.com/openai/v1",
+		DefaultBaseURL: "https://api.groq.com/openai",
 		DefaultModel:   "llama-4-scout",
 		Models:         []string{"llama-4-scout", "llama-4-maverick"},
 		APIKeyEnvVar:   "GROQ_API_KEY",
