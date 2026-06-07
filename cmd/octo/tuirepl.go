@@ -379,6 +379,12 @@ type tuiModel struct {
 	// subAgentOrder preserves launch order for stable rendering.
 	subAgents     map[string]*subAgentUI
 	subAgentOrder []string
+
+	// subAgentFocus is the index into subAgentOrder of the currently-focused
+	// sub-agent in the panel (-1 when the input box has focus). Navigation with
+	// ↑/↓ moves the focus; Enter toggles expand/collapse; Esc returns focus to
+	// the input box.
+	subAgentFocus int
 }
 
 // subAgentUI is the live panel state for one running sub-agent.
@@ -386,8 +392,10 @@ type subAgentUI struct {
 	description string
 	start       time.Time
 	toolCount   int
-	recent      []string // last few tool names, for the live chain
+	recent      []string // last few tool names, for the live chain (collapsed view)
+	history     []string // complete tool history (expanded view)
 	errored     bool
+	expanded    bool // true when the panel shows the full history
 }
 
 // runningTool is the live indicator state for an in-flight card tool.
@@ -435,7 +443,7 @@ func newTUIModel(cfg replConfig) *tuiModel {
 	if !tui.IsDark() {
 		style = "light"
 	}
-	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}}
+	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1}
 	_ = m.updateTextAreaHeight()
 	return m
 }
@@ -780,6 +788,7 @@ func (m *tuiModel) handleSubAgentEvent(ev tools.SubAgentEvent) {
 		// A fresh round (sub_agent): reset the chain, keep the slot.
 		sa.toolCount = 0
 		sa.recent = nil
+		sa.history = nil
 		sa.errored = false
 		if ev.Description != "" {
 			sa.description = ev.Description
@@ -795,6 +804,7 @@ func (m *tuiModel) handleSubAgentEvent(ev tools.SubAgentEvent) {
 		if len(sa.recent) > maxSubAgentRecentTools {
 			sa.recent = sa.recent[len(sa.recent)-maxSubAgentRecentTools:]
 		}
+		sa.history = append(sa.history, name)
 	}
 }
 
@@ -804,10 +814,25 @@ func (m *tuiModel) removeSubAgent(id string) {
 		return
 	}
 	delete(m.subAgents, id)
+	removedIdx := -1
 	for i, x := range m.subAgentOrder {
 		if x == id {
 			m.subAgentOrder = append(m.subAgentOrder[:i], m.subAgentOrder[i+1:]...)
+			removedIdx = i
 			break
+		}
+	}
+	// Adjust focus if the removed agent had focus.
+	if m.subAgentFocus >= 0 {
+		if removedIdx < m.subAgentFocus {
+			m.subAgentFocus--
+		} else if removedIdx == m.subAgentFocus {
+			if m.subAgentFocus >= len(m.subAgentOrder) {
+				m.subAgentFocus = len(m.subAgentOrder) - 1
+			}
+			if m.subAgentFocus < 0 {
+				m.subAgentFocus = -1
+			}
 		}
 	}
 }
