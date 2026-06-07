@@ -1,0 +1,4 @@
+.DS_Store
+*.log
+references/site-patterns/*.md
+config.env
