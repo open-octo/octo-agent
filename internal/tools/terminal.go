@@ -21,7 +21,7 @@ var TerminalTimeout = 120 * time.Second
 // tool result. It steers the model away from polling terminal_output and
 // carries no information for the human, so the TUI strips it from result cards
 // (see renderToolCard) rather than printing it to the scrollback.
-const BgPollNotice = "DO NOT poll terminal_output. The system will automatically notify you when this process finishes, carrying its full output. You can continue with other tasks while it runs."
+const BgPollNotice = "DO NOT poll terminal_output. The system will automatically notify you when this process finishes, carrying its final output. While it runs, you may continue with other independent tasks. If you have no other task to do, report the launch to the user and stop — do not spin in a polling loop."
 
 // TerminalTool is an agent.ToolExecutor that runs shell commands through the
 // system shell (`sh -c` on macOS/Linux, PowerShell on Windows; see
@@ -52,7 +52,7 @@ func (t TerminalTool) manager() *BackgroundManager {
 func (TerminalTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal",
-		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, grep, glob) over raw shell commands when they exist.\n\nIMPORTANT — background mode:\n- ALWAYS set run_in_background:true for commands that may take more than a few seconds (compiling, testing, installing dependencies, linting, building, watching, servers).\n- Common examples that MUST use run_in_background:true: `go test ./...`, `npm install`, `make build`, `gh pr checks --watch`, `docker compose up`, any server or watcher.\n- run_in_background:true returns immediately with a process id (no 120s timeout).\n- After launching a background command, DO NOT poll terminal_output. The system will automatically notify you when the process finishes, carrying its final output.\n- While the background command runs, you can continue with other tasks (read files, run other commands, etc.).\n- Use terminal_output only if you explicitly want to check progress mid-run, or use kill_shell to stop the process early.",
+		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, grep, glob) over raw shell commands when they exist.\n\nChoosing sync vs background:\n- Default (no run_in_background): runs synchronously with a 120s timeout. Use for fast commands whose output you need immediately (e.g. `ls`, `git status`, `grep`, short scripts).\n- run_in_background:true: detaches immediately, returns a process id, no timeout. Use for anything that may take more than a few seconds: compiling, testing, installing dependencies, linting, building, watching, servers, CI checks.\n- Common examples that MUST use run_in_background:true: `go test ./...`, `npm install`, `make build`, `gh pr checks --watch`, `docker compose up`, any server or watcher.\n\nAfter launching a background command:\n- DO NOT poll terminal_output. The system will automatically notify you when the process finishes.\n- If you have other independent tasks to do while it runs, proceed with them.\n- If you have NO other task to do, tell the user the command is running in the background and stop. Do not loop waiting — the completion notification will arrive automatically.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -62,7 +62,7 @@ func (TerminalTool) Definition() agent.ToolDefinition {
 				},
 				"run_in_background": map[string]any{
 					"type":        "boolean",
-					"description": "Run detached in the background (no 120s timeout, non-blocking). Returns a process id. The system will automatically notify you when the process completes — you do not need to poll terminal_output unless you want mid-run progress.",
+					"description": "Run detached in the background (no 120s timeout, non-blocking). Returns a process id. You do not need to poll terminal_output — the system will automatically notify you when the process completes. Only set this to true when the command may take more than a few seconds (compiling, testing, installing, building, servers, watchers, CI checks).",
 				},
 			},
 			"required": []string{"command"},
@@ -222,7 +222,7 @@ func (t TerminalOutputTool) manager() *BackgroundManager {
 func (TerminalOutputTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal_output",
-		Description: "Read output produced since the last check from a background process (the id returned by terminal with run_in_background:true), along with its status (running / exited). To terminate the process, use the kill_shell tool.\n\nIMPORTANT: You do NOT need to poll this tool. When a background process finishes, the system automatically sends you a notification with its final output. Only call terminal_output if you want to check progress while the process is still running.",
+		Description: "Read output produced since the last check from a background process (the id returned by terminal with run_in_background:true), along with its status (running / exited). To terminate the process, use the kill_shell tool.\n\nIMPORTANT: You do NOT need to poll this tool. When a background process finishes, the system automatically sends you a notification with its final output. Only call terminal_output if you explicitly want to check progress mid-run or need to decide whether to kill the process early. Do NOT call it repeatedly in a loop waiting for completion.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
