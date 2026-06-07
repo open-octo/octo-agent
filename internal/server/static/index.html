@@ -723,6 +723,36 @@
         <a id="setup-docs-link" href="https://www.octo.com/docs/ai-key-guide" target="_blank" rel="noopener" style="margin-left:0.25rem;color:var(--accent,#6366f1);text-decoration:none;" data-i18n="onboard.key.docsGuide.cta">See the guide →</a>
       </div>
 
+      <!-- Behaviour Preferences (collapsible, default open) -->
+      <details class="setup-prefs" open>
+        <summary data-i18n="onboard.prefs.title">Behaviour Preferences</summary>
+        <div class="setup-prefs-body">
+          <div class="setup-field setup-field-inline">
+            <label class="setup-label" data-i18n="onboard.prefs.permissionMode">Permission mode</label>
+            <select id="setup-permission-mode" class="setup-select">
+              <option value="interactive" data-i18n="onboard.prefs.permissionMode.interactive">🙋 interactive — ask me each time</option>
+              <option value="auto" data-i18n="onboard.prefs.permissionMode.auto">✅ auto — auto-approve</option>
+            </select>
+          </div>
+          <div class="setup-field setup-field-inline">
+            <label class="setup-label" data-i18n="onboard.prefs.reasoningEffort">Reasoning effort</label>
+            <select id="setup-reasoning-effort" class="setup-select">
+              <option value="" data-i18n="onboard.prefs.reasoningEffort.off">Off (default)</option>
+              <option value="low" data-i18n="onboard.prefs.reasoningEffort.low">Low</option>
+              <option value="medium" data-i18n="onboard.prefs.reasoningEffort.medium">Medium</option>
+              <option value="high" data-i18n="onboard.prefs.reasoningEffort.high">High</option>
+            </select>
+          </div>
+          <div class="setup-field setup-field-inline">
+            <label class="setup-label" data-i18n="onboard.prefs.showReasoning">Show reasoning trace</label>
+            <label class="setup-toggle">
+              <input id="setup-show-reasoning" type="checkbox" checked>
+              <span class="setup-toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </details>
+
       <div id="setup-test-result" class="setup-test-result" style="min-height:0;"></div>
 
       <div class="setup-key-actions">

@@ -422,11 +422,24 @@ const Onboard = (() => {
 
     // Step 2: save config
     btn.textContent = I18n.t("onboard.key.saving");
+    const permissionMode = $("setup-permission-mode").value;
+    const reasoningEffort = $("setup-reasoning-effort").value;
+    const showReasoning = $("setup-show-reasoning").checked;
     try {
       const res  = await fetch("/api/config/models", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ type: "default", model, base_url: baseUrl, api_key: apiKey, provider: providerID, anthropic_format: anthropicFormat })
+        body:    JSON.stringify({
+          type: "default",
+          model,
+          base_url: baseUrl,
+          api_key: apiKey,
+          provider: providerID,
+          anthropic_format: anthropicFormat,
+          permission_mode: permissionMode,
+          reasoning_effort: reasoningEffort,
+          show_reasoning: showReasoning
+        })
       });
       const data = await res.json();
       if (!data.ok) {
