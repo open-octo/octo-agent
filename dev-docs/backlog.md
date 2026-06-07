@@ -68,16 +68,16 @@
   ```
 - **已完成**：新增 `internal/tools/agents.go`，扫描 `~/.octo/agents/*.md`，YAML frontmatter 格式（`name` / `description` / `read_only`），正文为 persona。`lookupAgentPreset` 优先用户定义、再回退内置；`listPresetNames` 合并两者去重。
 
-### 4. 微信 CDN 文件上传
+### 4. 微信 CDN 文件上传 ✅
 
 - **位置**：`internal/channel/adapters/weixin/weixin.go:411`
-- **现状**：用户发文件时，目前只回复一条文本提示：
-  ```go
-  // TODO: implement CDN file upload. For now fall through to text hint.
-  return a.SendText(chatID, fmt.Sprintf("📎 File: %s", name), replyTo)
-  ```
-- **影响**：IM 桥的文件传输体验不完整，用户收到的是文件名文本而非真实文件
-- **建议**：实现微信 CDN 文件上传接口（先获取 media_id，再发文件消息）。这是 iLink 协议已支持的常规能力。
+- **现状**：`SendFile` 之前是 TODO stub，只回复文本提示
+- **已完成**：
+  - 新增 `ilink/crypto.go`：AES-128-ECB + PKCS7 加解密（参考 corespeed-io/wechatbot 实现）
+  - 扩展 `ilink/protocol.go`：`GetUploadURL`、`UploadToCDN`（带 3 次重试）、`BuildMediaMessage`、`BuildCDNUploadURL`
+  - `weixin.go` 的 `SendFile` 实现完整 CDN 上传流程：生成 AES key → 加密文件 → getuploadurl → POST 到 CDN → 构造 file_item 消息发送
+  - 按扩展名自动路由 media type（image/video/file）
+  - `CDNBaseURL` 改为 var，方便测试 mock
 
 ---
 

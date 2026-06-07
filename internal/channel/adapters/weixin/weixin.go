@@ -7,13 +7,17 @@ package weixin
 
 import (
 	"context"
+	"crypto/md5"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -408,9 +412,145 @@ func (a *Adapter) SendFile(chatID, path, name, replyTo string) channel.SendResul
 	// Flush pending text first (Ruby convention).
 	a.sendQ.flush(chatID)
 
-	// TODO: implement CDN file upload. For now fall through to text hint.
-	_ = ct
-	return a.SendText(chatID, fmt.Sprintf("📎 File: %s", name), replyTo)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("read file: %v", err)}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	result, err := a.cdnUpload(ctx, chatID, data, name)
+	if err != nil {
+		log.Printf("[weixin] cdn upload %s failed: %v", name, err)
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("cdn upload: %v", err)}
+	}
+
+	items, err := a.buildMediaItems(result, name, data)
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+
+	msg := ilink.BuildMediaMessage(chatID, ct.(string), items)
+	if err := a.client.SendMessage(ctx, a.bot.creds.BaseURL, a.bot.creds.Token, msg); err != nil {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("send message: %v", err)}
+	}
+	return channel.SendResult{OK: true}
+}
+
+// cdnUpload uploads data to WeChat CDN and returns the media reference.
+func (a *Adapter) cdnUpload(ctx context.Context, userID string, data []byte, fileName string) (*cdnUploadResult, error) {
+	aesKey, err := ilink.GenerateAESKey()
+	if err != nil {
+		return nil, fmt.Errorf("generate aes key: %w", err)
+	}
+	ciphertext, err := ilink.EncryptAESECB(data, aesKey)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt: %w", err)
+	}
+
+	var fileKeyBuf [16]byte
+	if _, err := rand.Read(fileKeyBuf[:]); err != nil {
+		return nil, fmt.Errorf("generate file key: %w", err)
+	}
+	fileKey := hex.EncodeToString(fileKeyBuf[:])
+
+	rawMD5 := md5.Sum(data)
+	rawMD5Hex := hex.EncodeToString(rawMD5[:])
+
+	mediaType := mediaTypeForFile(fileName)
+
+	uploadResp, err := a.client.GetUploadURL(ctx, a.bot.creds.BaseURL, a.bot.creds.Token, ilink.GetUploadURLRequest{
+		FileKey:     fileKey,
+		MediaType:   mediaType,
+		ToUserID:    userID,
+		RawSize:     len(data),
+		RawFileMD5:  rawMD5Hex,
+		FileSize:    len(ciphertext),
+		NoNeedThumb: true,
+		AESKey:      ilink.EncodeAESKeyHex(aesKey),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("getuploadurl: %w", err)
+	}
+	if uploadResp.UploadParam == "" {
+		return nil, fmt.Errorf("getuploadurl did not return upload_param")
+	}
+
+	cdnURL := ilink.BuildCDNUploadURL(ilink.CDNBaseURL, uploadResp.UploadParam, fileKey)
+	encryptParam, err := a.client.UploadToCDN(ctx, cdnURL, ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("cdn upload: %w", err)
+	}
+
+	return &cdnUploadResult{
+		Media: ilink.CDNMedia{
+			EncryptQueryParam: encryptParam,
+			AESKey:            ilink.EncodeAESKeyBase64(aesKey),
+			EncryptType:       1,
+		},
+		AESKey:            aesKey,
+		EncryptedFileSize: len(ciphertext),
+		MediaType:         mediaType,
+	}, nil
+}
+
+// buildMediaItems constructs the item_list for a media message based on upload result.
+func (a *Adapter) buildMediaItems(result *cdnUploadResult, fileName string, data []byte) ([]map[string]interface{}, error) {
+	mediaMap := map[string]interface{}{
+		"encrypt_query_param": result.Media.EncryptQueryParam,
+		"aes_key":             result.Media.AESKey,
+		"encrypt_type":        result.Media.EncryptType,
+	}
+
+	switch result.MediaType {
+	case int(ilink.MediaImage):
+		return []map[string]interface{}{
+			{"type": ilink.ItemImage, "image_item": map[string]interface{}{
+				"media":    mediaMap,
+				"mid_size": result.EncryptedFileSize,
+			}},
+		}, nil
+	case int(ilink.MediaVideo):
+		return []map[string]interface{}{
+			{"type": ilink.ItemVideo, "video_item": map[string]interface{}{
+				"media":      mediaMap,
+				"video_size": result.EncryptedFileSize,
+			}},
+		}, nil
+	default:
+		return []map[string]interface{}{
+			{"type": ilink.ItemFile, "file_item": map[string]interface{}{
+				"media":     mediaMap,
+				"file_name": fileName,
+				"len":       strconv.Itoa(len(data)),
+			}},
+		}, nil
+	}
+}
+
+// cdnUploadResult holds the outcome of a CDN upload.
+type cdnUploadResult struct {
+	Media             ilink.CDNMedia
+	AESKey            []byte
+	EncryptedFileSize int
+	MediaType         int
+}
+
+var (
+	imageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".bmp": true}
+	videoExts = map[string]bool{".mp4": true, ".mov": true, ".webm": true, ".mkv": true, ".avi": true}
+)
+
+func mediaTypeForFile(fileName string) int {
+	ext := strings.ToLower(filepath.Ext(fileName))
+	if imageExts[ext] {
+		return int(ilink.MediaImage)
+	}
+	if videoExts[ext] {
+		return int(ilink.MediaVideo)
+	}
+	return int(ilink.MediaFile)
 }
 
 // UpdateMessage is not supported.
