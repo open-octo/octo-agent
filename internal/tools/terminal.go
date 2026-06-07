@@ -23,6 +23,12 @@ var TerminalTimeout = 120 * time.Second
 // (see renderToolCard) rather than printing it to the scrollback.
 const BgPollNotice = "DO NOT poll terminal_output. The system will automatically notify you when this process finishes, carrying its final output. While it runs, you may continue with other independent tasks. If you have no other task to do, report the launch to the user and stop — do not spin in a polling loop."
 
+// ServiceModeNotice is the model-facing instruction appended to a background
+// launch of a long-running service (servers, watchers, etc.). It tells the
+// model to verify the service externally (curl, pgrep) rather than polling
+// terminal_output.
+const ServiceModeNotice = "After launching a long-running service, verify it with an external check (e.g., `curl http://localhost:PORT` or `pgrep`) rather than polling terminal_output. terminal_output is for inspecting startup logs or diagnosing issues — do not call it in a tight loop."
+
 // TerminalTool is an agent.ToolExecutor that runs shell commands through the
 // system shell (`sh -c` on macOS/Linux, PowerShell on Windows; see
 // shellCommand). Stdout and stderr are combined and returned as the tool
@@ -52,7 +58,7 @@ func (t TerminalTool) manager() *BackgroundManager {
 func (TerminalTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal",
-		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, grep, glob) over raw shell commands when they exist.\n\nChoosing sync vs background:\n- Default (no run_in_background): runs synchronously with a 120s timeout. Use for fast commands whose output you need immediately (e.g. `ls`, `git status`, `grep`, short scripts).\n- run_in_background:true: detaches immediately, returns a process id, no timeout. Use for anything that may take more than a few seconds: compiling, testing, installing dependencies, linting, building, watching, servers, CI checks.\n- Common examples that MUST use run_in_background:true: `go test ./...`, `npm install`, `make build`, `gh pr checks --watch`, `docker compose up`, any server or watcher.\n\nAfter launching a background command:\n- DO NOT poll terminal_output. The system will automatically notify you when the process finishes.\n- If you have other independent tasks to do while it runs, proceed with them.\n- If you have NO other task to do, tell the user the command is running in the background and stop. Do not loop waiting — the completion notification will arrive automatically.",
+		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, write_file, edit_file, glob, grep) over raw shell commands when they exist.\n\nChoosing sync vs background:\n- Default (no run_in_background): runs synchronously with a 120s timeout. Use for fast commands whose output you need immediately (e.g. `ls`, `git status`, `grep`, short scripts).\n- run_in_background:true — ONE-SHOT tasks (compiling, testing, installing, building, linting, CI checks): detaches immediately, returns a process id. The system automatically notifies you on completion. DO NOT poll terminal_output.\n- run_in_background:true — LONG-RUNNING services (servers, watchers, docker compose up): detaches immediately, returns a process id. After launch, verify the service with an external check (e.g., `curl http://localhost:PORT`, `pgrep`) rather than polling terminal_output. Use terminal_output only to inspect startup logs or diagnose issues — do not call it in a tight loop.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -62,7 +68,7 @@ func (TerminalTool) Definition() agent.ToolDefinition {
 				},
 				"run_in_background": map[string]any{
 					"type":        "boolean",
-					"description": "Run detached in the background (no 120s timeout, non-blocking). Returns a process id. You do not need to poll terminal_output — the system will automatically notify you when the process completes. Only set this to true when the command may take more than a few seconds (compiling, testing, installing, building, servers, watchers, CI checks).",
+					"description": "Run detached in the background (no 120s timeout, non-blocking). Returns a process id. Use for one-shot tasks that take more than a few seconds (compiling, testing, installing, building, CI checks) or for long-running services (servers, watchers). For one-shot tasks the system auto-notifies on completion. For long-running services, verify with an external check (e.g., curl, pgrep) rather than polling terminal_output.",
 				},
 			},
 			"required": []string{"command"},
@@ -222,7 +228,7 @@ func (t TerminalOutputTool) manager() *BackgroundManager {
 func (TerminalOutputTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal_output",
-		Description: "Read output produced since the last check from a background process (the id returned by terminal with run_in_background:true), along with its status (running / exited). To terminate the process, use the kill_shell tool.\n\nIMPORTANT: You do NOT need to poll this tool. When a background process finishes, the system automatically sends you a notification with its final output. Only call terminal_output if you explicitly want to check progress mid-run or need to decide whether to kill the process early. Do NOT call it repeatedly in a loop waiting for completion.",
+		Description: "Read output produced since the last check from a background process (the id returned by terminal with run_in_background:true), along with its status (running / exited). To terminate the process, use the kill_shell tool.\n\nFor ONE-SHOT tasks (compiles, tests, builds): you do NOT need to poll this tool. The system automatically notifies you when the process finishes.\n\nFor LONG-RUNNING services (servers, watchers): you may call this tool occasionally to inspect startup logs or diagnose issues, but do not call it in a tight loop. Prefer verifying the service with an external check (e.g., curl, pgrep) instead.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -277,13 +283,18 @@ func (t KillShellTool) manager() *BackgroundManager {
 func (KillShellTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "kill_shell",
-		Description: "Terminate a background process started by terminal with run_in_background:true (the id it returned), and return its final output. Use to stop a server, watcher, or other long-running command you no longer need. To read output without stopping it, use terminal_output.",
+		Description: "Terminate a background process started by terminal with run_in_background:true (the id it returned), and return its final output. Use to stop a server, watcher, or other long-running command you no longer need. To read output without stopping it, use terminal_output.\n\nFor long-running services (servers, watchers), prefer signal 'SIGTERM' for graceful shutdown so the process can clean up connections and release ports. Use 'SIGKILL' (default) for one-shot tasks or when SIGTERM fails.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"id": map[string]any{
 					"type":        "string",
 					"description": "The background process id to terminate (e.g. \"bg_1\").",
+				},
+				"signal": map[string]any{
+					"type":        "string",
+					"enum":        []string{"SIGTERM", "SIGKILL", "SIGINT"},
+					"description": "Signal to send. Defaults to SIGKILL. Use SIGTERM for graceful shutdown of servers and long-running services.",
 				},
 			},
 			"required": []string{"id"},
@@ -299,8 +310,12 @@ func (t KillShellTool) Execute(_ context.Context, _ string, input map[string]any
 	if id == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("kill_shell: id is required")
 	}
+	sig, _ := input["signal"].(string)
+	if sig == "" {
+		sig = "SIGKILL"
+	}
 	mgr := t.manager()
-	if !mgr.Kill(id) {
+	if !mgr.KillWithSignal(id, sig) {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("kill_shell: no background process %q", id)
 	}
 	// Give the process a moment to flush and the waiter to record exit.

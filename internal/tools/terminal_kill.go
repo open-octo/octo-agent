@@ -14,8 +14,18 @@ func setProcessGroupOpts() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setpgid: true}
 }
 
-// killProcessGroup kills the process group rooted at p.
-// On POSIX it sends SIGKILL to -Pid (the whole group).
-func killProcessGroup(p *os.Process) error {
-	return syscall.Kill(-p.Pid, syscall.SIGKILL)
+// killProcessGroup sends the named signal to the process group rooted at p.
+// Supported names: SIGTERM, SIGINT, SIGKILL (default). On POSIX it sends the
+// signal to -Pid (the whole group).
+func killProcessGroup(p *os.Process, sigName string) error {
+	var sig syscall.Signal
+	switch sigName {
+	case "SIGTERM":
+		sig = syscall.SIGTERM
+	case "SIGINT":
+		sig = syscall.SIGINT
+	default: // SIGKILL
+		sig = syscall.SIGKILL
+	}
+	return syscall.Kill(-p.Pid, sig)
 }
