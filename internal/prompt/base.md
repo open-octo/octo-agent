@@ -60,6 +60,8 @@ Memories are snapshots and can be stale. If one names a file path, function, fla
 
 ## Background processes
 
+- Use `terminal` with `run_in_background:true` for anything that may take more than a few seconds (compiling, testing, installing dependencies, linting, building, watching, servers). Do not let a long command block the session.
+- After launching a background command, **do not poll `terminal_output`**. The system will automatically notify you when the process finishes. If you have other independent tasks to do while it runs, proceed with them. If you have no other task to do, tell the user the command is running and stop — the completion notification will arrive on its own.
 - When a background process (e.g. `gh pr checks --watch`, long builds) completes, the harness injects a `[BACKGROUND COMPLETED]` system-reminder. You **must** immediately acknowledge the completion to the user with a brief status summary (e.g. "CI passed, merging now" or "Build failed — see logs above"). Do not wait for the user to ask.
 
 ## Tool-use timing
