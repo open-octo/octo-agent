@@ -94,12 +94,27 @@ func TestAdapter_SendText_Success(t *testing.T) {
 }
 
 func TestAdapter_SendFile(t *testing.T) {
+	// Create a real temp file to upload.
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpFile.WriteString("hello world")
+	tmpFile.Close()
+
 	var mu sync.Mutex
 	var received []map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
-		if r.URL.Path == "/ilink/bot/sendmessage" {
+		switch r.URL.Path {
+		case "/ilink/bot/getuploadurl":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ret":          0,
+				"upload_param": "mock-upload-param",
+			})
+		case "/ilink/bot/sendmessage":
 			var payload map[string]any
 			body := make([]byte, r.ContentLength)
 			r.Body.Read(body)
@@ -107,9 +122,17 @@ func TestAdapter_SendFile(t *testing.T) {
 			received = append(received, payload)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"ret": 0})
+		case "/upload":
+			w.Header().Set("x-encrypted-param", "mock-encrypt-param")
+			w.WriteHeader(http.StatusOK)
 		}
 	}))
 	defer ts.Close()
+
+	// Point CDNBaseURL at our test server.
+	origCDN := ilink.CDNBaseURL
+	ilink.CDNBaseURL = ts.URL
+	defer func() { ilink.CDNBaseURL = origCDN }()
 
 	a := &Adapter{
 		baseURL: ts.URL,
@@ -122,9 +145,24 @@ func TestAdapter_SendFile(t *testing.T) {
 	a.bot.contextTokens.Store("user1", "ctx123")
 	a.sendQ = newSendQueue(a.client, ts.URL, "tok")
 
-	res := a.SendFile("user1", "/tmp/test.txt", "test.txt", "")
+	res := a.SendFile("user1", tmpFile.Name(), "test.txt", "")
 	if !res.OK {
 		t.Fatalf("expected send OK, got error: %s", res.Error)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) == 0 {
+		t.Fatal("expected sendmessage request")
+	}
+	msg := received[0]["msg"].(map[string]any)
+	items := msg["item_list"].([]any)
+	if len(items) == 0 {
+		t.Fatal("expected at least one item")
+	}
+	item := items[0].(map[string]any)
+	if item["type"] != float64(ilink.ItemFile) {
+		t.Errorf("expected file item type, got %v", item["type"])
 	}
 }
 

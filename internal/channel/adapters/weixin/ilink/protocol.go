@@ -23,8 +23,6 @@ import (
 const (
 	// DefaultBaseURL is the iLink API host.
 	DefaultBaseURL = "https://ilinkai.weixin.qq.com"
-	// CDNBaseURL is the media CDN host.
-	CDNBaseURL = "https://novac2c.cdn.weixin.qq.com/c2c"
 	// ChannelVersion is the protocol version.
 	ChannelVersion = "0.1.0"
 	// iLinkAppID is the iLink-App-Id header value.
@@ -32,6 +30,9 @@ const (
 	// iLinkClientVer is the iLink-App-ClientVersion header value (0x00MMNNPP for 0.1.0 = 256).
 	iLinkClientVer = "256"
 )
+
+// CDNBaseURL is the media CDN host. It is a var so tests can redirect uploads.
+var CDNBaseURL = "https://novac2c.cdn.weixin.qq.com/c2c"
 
 // APIError is returned when the iLink API returns a non-zero ret or HTTP error.
 type APIError struct {
@@ -301,4 +302,105 @@ func (c *Client) downloadRaw(ctx context.Context, url string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	return io.ReadAll(resp.Body)
+}
+
+// GetUploadURLRequest holds parameters for getuploadurl.
+type GetUploadURLRequest struct {
+	FileKey     string `json:"filekey"`
+	MediaType   int    `json:"media_type"`
+	ToUserID    string `json:"to_user_id"`
+	RawSize     int    `json:"rawsize"`
+	RawFileMD5  string `json:"rawfilemd5"`
+	FileSize    int    `json:"filesize"`
+	NoNeedThumb bool   `json:"no_need_thumb,omitempty"`
+	AESKey      string `json:"aeskey,omitempty"`
+}
+
+// GetUploadURLResponse from getuploadurl.
+type GetUploadURLResponse struct {
+	UploadParam      string `json:"upload_param"`
+	ThumbUploadParam string `json:"thumb_upload_param,omitempty"`
+	UploadFullURL    string `json:"upload_full_url,omitempty"`
+}
+
+// GetUploadURL requests an upload URL for CDN media upload.
+func (c *Client) GetUploadURL(ctx context.Context, baseURL, token string, req GetUploadURLRequest) (*GetUploadURLResponse, error) {
+	body := map[string]interface{}{
+		"filekey":       req.FileKey,
+		"media_type":    req.MediaType,
+		"to_user_id":    req.ToUserID,
+		"rawsize":       req.RawSize,
+		"rawfilemd5":    req.RawFileMD5,
+		"filesize":      req.FileSize,
+		"no_need_thumb": req.NoNeedThumb,
+		"aeskey":        req.AESKey,
+		"base_info":     baseInfo(),
+	}
+	raw, err := c.apiPost(ctx, baseURL, "/ilink/bot/getuploadurl", token, body, 15*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	var result GetUploadURLResponse
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("getuploadurl decode: %w", err)
+	}
+	return &result, nil
+}
+
+// UploadToCDN uploads encrypted bytes to the CDN with retry (up to 3 attempts).
+// Returns the download encrypted_query_param from the x-encrypted-param header.
+func (c *Client) UploadToCDN(ctx context.Context, cdnURL string, ciphertext []byte) (string, error) {
+	const maxRetries = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", cdnURL, bytes.NewReader(ciphertext))
+		if err != nil {
+			return "", fmt.Errorf("cdn upload request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/octet-stream")
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("cdn upload attempt %d: %w", attempt, err)
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			errMsg := resp.Header.Get("x-error-message")
+			if errMsg == "" {
+				errMsg = string(body)
+			}
+			return "", fmt.Errorf("cdn upload client error %d: %s", resp.StatusCode, errMsg)
+		}
+		if resp.StatusCode != 200 {
+			errMsg := resp.Header.Get("x-error-message")
+			lastErr = fmt.Errorf("cdn upload server error %d: %s", resp.StatusCode, errMsg)
+			continue
+		}
+		downloadParam := resp.Header.Get("x-encrypted-param")
+		if downloadParam == "" {
+			lastErr = fmt.Errorf("cdn upload response missing x-encrypted-param header")
+			continue
+		}
+		return downloadParam, nil
+	}
+	return "", fmt.Errorf("cdn upload failed after %d attempts: %w", maxRetries, lastErr)
+}
+
+// BuildCDNUploadURL constructs a CDN upload URL from params.
+func BuildCDNUploadURL(cdnBaseURL, uploadParam, filekey string) string {
+	return cdnBaseURL + "/upload?encrypted_query_param=" + url.QueryEscape(uploadParam) + "&filekey=" + url.QueryEscape(filekey)
+}
+
+// BuildMediaMessage creates a media message payload.
+func BuildMediaMessage(userID, contextToken string, itemList []map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"from_user_id":  "",
+		"to_user_id":    userID,
+		"client_id":     newUUID(),
+		"message_type":  2,
+		"message_state": 2,
+		"context_token": contextToken,
+		"item_list":     itemList,
+	}
 }
