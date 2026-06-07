@@ -386,6 +386,104 @@ function showConfirmModal(confId, message) {
   $("modal-no").onclick  = () => answer("no");
 }
 
+// ── User Question modal (ask_user_question) ───────────────────────────────
+function showUserQuestionModal(qid, question, options, multiSelect, header) {
+  const overlay   = $("question-modal-overlay");
+  const hdrEl     = $("question-modal-header");
+  const msgEl     = $("question-modal-message");
+  const optsEl    = $("question-modal-options");
+  const otherEl   = $("question-modal-other");
+  const otherInp  = $("question-modal-other-input");
+  const cancelBtn = $("question-modal-cancel");
+  const submitBtn = $("question-modal-submit");
+
+  hdrEl.textContent = header || "";
+  hdrEl.style.display = header ? "block" : "none";
+  msgEl.textContent = question;
+  optsEl.innerHTML = "";
+  otherInp.value = "";
+
+  let selected = new Set();
+  let otherSelected = false;
+
+  const render = () => {
+    optsEl.innerHTML = "";
+    options.forEach((opt, idx) => {
+      const row = document.createElement("label");
+      row.className = "question-modal-option";
+      const input = document.createElement("input");
+      input.type = multiSelect ? "checkbox" : "radio";
+      input.name = "question-opt";
+      input.checked = selected.has(opt);
+      input.onchange = () => {
+        if (multiSelect) {
+          selected.has(opt) ? selected.delete(opt) : selected.add(opt);
+        } else {
+          selected = new Set([opt]);
+          otherSelected = false;
+          otherEl.style.display = "none";
+        }
+        render();
+      };
+      row.appendChild(input);
+      row.appendChild(document.createTextNode(opt));
+      optsEl.appendChild(row);
+    });
+
+    // "Other (free text)" tail
+    const otherRow = document.createElement("label");
+    otherRow.className = "question-modal-option";
+    const otherInput = document.createElement("input");
+    otherInput.type = multiSelect ? "checkbox" : "radio";
+    otherInput.name = "question-opt";
+    otherInput.checked = otherSelected;
+    otherInput.onchange = () => {
+      otherSelected = !otherSelected;
+      if (!multiSelect) {
+        selected = new Set();
+      }
+      otherEl.style.display = otherSelected ? "block" : "none";
+      if (otherSelected) otherInp.focus();
+      render();
+    };
+    otherRow.appendChild(otherInput);
+    otherRow.appendChild(document.createTextNode("Other (free text)"));
+    optsEl.appendChild(otherRow);
+  };
+
+  render();
+  otherEl.style.display = "none";
+  overlay.style.display = "flex";
+
+  const cleanup = () => {
+    overlay.style.display = "none";
+    cancelBtn.onclick = null;
+    submitBtn.onclick = null;
+  };
+
+  cancelBtn.onclick = () => {
+    cleanup();
+    WS.send({ type: "user_question_answer", question_id: qid, cancelled: true });
+  };
+
+  submitBtn.onclick = () => {
+    if (otherSelected) {
+      const custom = otherInp.value.trim();
+      if (!custom) return; // require text when Other is chosen
+      cleanup();
+      const payload = { type: "user_question_answer", question_id: qid, custom };
+      if (multiSelect && selected.size > 0) {
+        payload.choices = Array.from(selected);
+      }
+      WS.send(payload);
+      return;
+    }
+    if (selected.size === 0) return; // require at least one selection
+    cleanup();
+    WS.send({ type: "user_question_answer", question_id: qid, choices: Array.from(selected) });
+  };
+}
+
 
 // ── WS event dispatcher ───────────────────────────────────────────────────
 // Moved to ws-dispatcher.js.

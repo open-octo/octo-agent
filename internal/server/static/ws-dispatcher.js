@@ -329,6 +329,11 @@ WS.onEvent(ev => {
       showConfirmModal(ev.id, ev.message);
       break;
 
+    case "request_user_question":
+      if (ev.session_id !== Sessions.activeId) break;
+      showUserQuestionModal(ev.question_id, ev.question, ev.options || [], ev.multi_select, ev.header);
+      break;
+
     case "interrupted":
       if (ev.session_id !== Sessions.activeId) break;
       Sessions.clearProgress();

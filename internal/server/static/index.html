@@ -818,6 +818,22 @@
   </div>
 </div>
 
+<!-- ── USER QUESTION MODAL (ask_user_question) ─────────────────────────────── -->
+<div id="question-modal-overlay" class="modal-overlay" style="display:none">
+  <div class="modal-box sm">
+    <div id="question-modal-header" class="question-modal-header"></div>
+    <div id="question-modal-message" class="modal-confirm-message"></div>
+    <div id="question-modal-options"></div>
+    <div id="question-modal-other" class="question-modal-other" style="display:none">
+      <input type="text" id="question-modal-other-input" class="prompt-modal-input" placeholder="Your answer…" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button id="question-modal-cancel" class="btn-secondary">Cancel</button>
+      <button id="question-modal-submit" class="btn-primary">OK</button>
+    </div>
+  </div>
+</div>
+
 <!-- Prompt modal for text input -->
 <div id="prompt-modal-overlay" class="modal-overlay" style="display:none">
   <div class="modal-box sm">

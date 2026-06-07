@@ -39,6 +39,13 @@ type wsMsgConfirmation struct {
 	Result string `json:"result"`
 }
 
+type wsMsgUserQuestionAnswer struct {
+	QuestionID string   `json:"question_id"`
+	Choices    []string `json:"choices,omitempty"`
+	Custom     string   `json:"custom,omitempty"`
+	Cancelled  bool     `json:"cancelled,omitempty"`
+}
+
 type wsMsgRetry struct {
 	SessionID string `json:"session_id"`
 }
@@ -163,6 +170,15 @@ type wsEventRequestConfirmation struct {
 	ConfID  string `json:"conf_id"`
 	Message string `json:"message"`
 	Kind    string `json:"kind"` // "yes_no" | "ok"
+}
+
+type wsEventRequestUserQuestion struct {
+	Type        string   `json:"type"`
+	QuestionID  string   `json:"question_id"`
+	Question    string   `json:"question"`
+	Options     []string `json:"options"`
+	MultiSelect bool     `json:"multi_select"`
+	Header      string   `json:"header,omitempty"`
 }
 
 type wsEventBackgroundTaskUpdate struct {

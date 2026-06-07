@@ -317,6 +317,13 @@ func (c *wsConn) dispatch(msgType string, raw []byte) {
 		}
 		c.hub.s.handleWSConfirmation(msg.ConfID, msg.Result)
 
+	case "user_question_answer":
+		var msg wsMsgUserQuestionAnswer
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			return
+		}
+		c.hub.s.handleWSUserQuestionAnswer(msg.QuestionID, msg.Choices, msg.Custom, msg.Cancelled)
+
 	default:
 		log.Printf("[ws] unknown message type: %q", msgType)
 	}
@@ -333,6 +340,7 @@ type wsHubOwner interface {
 	handleWSRetry(conn *wsConn, sessionID string)
 	handleWSRunTask(conn *wsConn, sessionID string)
 	handleWSConfirmation(confID, result string)
+	handleWSUserQuestionAnswer(qid string, choices []string, custom string, cancelled bool)
 	replayLiveState(sessionID string, conn *wsConn)
 	SetSubscribed(conn *wsConn, sessionID string)
 }

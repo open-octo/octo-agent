@@ -84,6 +84,15 @@ type Server struct {
 	turnLocks map[string]*sync.Mutex
 	turnMu    sync.Mutex
 
+	// turnRunning tracks which sessions have an active turn goroutine.
+	// Guarded by the session's turnLocks mutex.
+	turnRunning map[string]bool
+
+	// steerQueues holds mid-turn user messages (steer) that arrive while a
+	// turn is in flight.  Consumed by the turn loop after each iteration.
+	steerQueues map[string][]string
+	steerMu     sync.Mutex
+
 	// WebSocket hub for real-time browser communication.
 	wsHub *wsHub
 
@@ -94,6 +103,10 @@ type Server struct {
 	// confirmation channels (from request_user_feedback in browser).
 	confirmations map[string]chan string
 	confirmMu     sync.Mutex
+
+	// question channels (from request_user_question in browser).
+	questionChans map[string]chan tools.AskResponse
+	questionMu    sync.Mutex
 
 	// live state tracking per session for WS replay on subscribe.
 	liveStates  map[string]*sessionLiveState
@@ -154,8 +167,15 @@ func New(cfg Config) (*Server, error) {
 		cwd:            cwd,
 		envCtx:         envCtx,
 		turnLocks:      map[string]*sync.Mutex{},
+		turnRunning:    make(map[string]bool),
+		steerQueues:    make(map[string][]string),
 		accessKey:      accessKey,
+		questionChans:  make(map[string]chan tools.AskResponse),
 	}
+
+	// Register the WebSocket-backed asker so ask_user_question appears in the
+	// tool catalog and can be dispatched through the browser.
+	tools.SetAsker(s.wsAsker())
 
 	s.registerRoutes()
 	s.initWS()
@@ -551,6 +571,94 @@ func (s *Server) validateAccessKey(r *http.Request) bool {
 // requireAuth is a no-op wrapper: access-key authentication was removed.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return next
+}
+
+// ─── WebSocket Asker (ask_user_question bridge) ─────────────────────────────
+
+// ctxKeySessionID is the context key used to pass the active session ID from
+// the turn runner down to the wsAsker so it knows which browser tab to prompt.
+type ctxKeySessionID struct{}
+
+// wsAsker implements tools.Asker by broadcasting a structured question over
+// WebSocket and blocking until the user answers (or the context is cancelled).
+// It is safe for concurrent use across sessions because each question gets a
+// unique ID and a private channel.
+func (s *Server) wsAsker() tools.Asker {
+	return wsAsker{s: s}
+}
+
+type wsAsker struct {
+	s *Server
+}
+
+func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse, error) {
+	sessionID, ok := ctx.Value(ctxKeySessionID{}).(string)
+	if !ok || sessionID == "" {
+		return tools.AskResponse{}, fmt.Errorf("ask_user_question: no active WebSocket session")
+	}
+
+	qid := fmt.Sprintf("q_%d", time.Now().UnixNano())
+	ch := make(chan tools.AskResponse, 1)
+
+	a.s.questionMu.Lock()
+	a.s.questionChans[qid] = ch
+	a.s.questionMu.Unlock()
+
+	a.s.wsHub.broadcast(sessionID, wsEventRequestUserQuestion{
+		Type:        "request_user_question",
+		QuestionID:  qid,
+		Question:    q.Question,
+		Options:     q.Options,
+		MultiSelect: q.MultiSelect,
+		Header:      q.Header,
+	})
+
+	select {
+	case res := <-ch:
+		a.s.questionMu.Lock()
+		delete(a.s.questionChans, qid)
+		a.s.questionMu.Unlock()
+		return res, nil
+	case <-ctx.Done():
+		a.s.questionMu.Lock()
+		delete(a.s.questionChans, qid)
+		a.s.questionMu.Unlock()
+		return tools.AskResponse{Cancelled: true}, nil
+	case <-time.After(5 * time.Minute):
+		a.s.questionMu.Lock()
+		delete(a.s.questionChans, qid)
+		a.s.questionMu.Unlock()
+		return tools.AskResponse{}, fmt.Errorf("ask_user_question: timed out waiting for user answer")
+	}
+}
+
+// handleWSUserQuestionAnswer delivers a user answer from the browser to a
+// pending wsAsker.Ask call.
+func (s *Server) handleWSUserQuestionAnswer(qid string, choices []string, custom string, cancelled bool) {
+	s.questionMu.Lock()
+	if ch, ok := s.questionChans[qid]; ok {
+		ch <- tools.AskResponse{
+			Choices:   choices,
+			Custom:    custom,
+			Cancelled: cancelled,
+		}
+	}
+	s.questionMu.Unlock()
+}
+
+// permissionAskFrom adapts the server's requestConfirmation into an
+// app.PermissionAsk so the Web UI can resolve "ask" class policy verdicts
+// interactively. remember is always false; a future enhancement could add a
+// "Always allow" checkbox to the confirmation modal.
+func (s *Server) permissionAskFrom(sessionID string) app.PermissionAsk {
+	return func(ctx context.Context, toolName string, toolInput map[string]any) (bool, bool, error) {
+		msg := fmt.Sprintf("Allow %s?", toolName)
+		result, err := s.requestConfirmation(ctx, sessionID, msg, "yes_no")
+		if err != nil {
+			return false, false, err
+		}
+		return result == "yes", false, nil
+	}
 }
 
 // validateBindAddr enforces the M6.5 security rule: non-localhost binds

@@ -3992,6 +3992,39 @@ body {
   border-color: var(--color-accent-primary);
 }
 
+/* ── User Question Modal ──────────────────────────────────────────────────── */
+.question-modal-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-accent-primary);
+  margin-bottom: 0.5rem;
+}
+.question-modal-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.25rem;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+  font-size: 0.9375rem;
+  color: var(--color-text-primary);
+}
+.question-modal-option:hover {
+  background: var(--color-bg-tertiary);
+}
+.question-modal-option input {
+  accent-color: var(--color-accent-primary);
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+.question-modal-other {
+  margin-top: 0.5rem;
+}
+
 /* New Session Modal */
 .new-session-modal {
   max-width: 32.5rem;

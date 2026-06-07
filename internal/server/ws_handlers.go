@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,6 +82,8 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 }
 
 // handleWSUserMessage processes a user message from the WebSocket.
+// When a turn is already running the message is enqueued as steer and surfaced
+// to the frontend as a pending ghost; the turn loop consumes it automatically.
 func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	sid := msg.SessionID
 	if sid == "" {
@@ -103,11 +107,30 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	mu := s.sessionTurnLock(sess.ID)
 	mu.Lock()
 
-	s.runAgentTurn(sess, content)
+	if s.turnRunning[sess.ID] {
+		mu.Unlock()
+		s.enqueueSteer(sess.ID, content)
+		// The frontend already rendered a ghost bubble in _sendMessage;
+		// history_user_message (broadcast when the turn drains steer) will
+		// replace it.  No need for a separate pending_user_messages event.
+		return
+	}
+
+	s.turnRunning[sess.ID] = true
 	mu.Unlock()
+
+	go func() {
+		defer func() {
+			mu.Lock()
+			s.turnRunning[sess.ID] = false
+			mu.Unlock()
+		}()
+		s.runAgentTurnLoop(sess, content)
+	}()
 }
 
-// handleWSInterrupt sends an interrupt signal for a session.
+// handleWSInterrupt sends an interrupt signal for a session and broadcasts
+// the interrupted event so the frontend shows the cancellation to the user.
 func (s *Server) handleWSInterrupt(sessionID string) {
 	s.interruptMu.Lock()
 	if cancel, ok := s.interrupts[sessionID]; ok {
@@ -115,6 +138,11 @@ func (s *Server) handleWSInterrupt(sessionID string) {
 		delete(s.interrupts, sessionID)
 	}
 	s.interruptMu.Unlock()
+
+	s.wsHub.broadcast(sessionID, map[string]any{
+		"type":       "interrupted",
+		"session_id": sessionID,
+	})
 }
 
 // handleWSRetry re-runs the last turn by stripping the last assistant reply
@@ -145,15 +173,33 @@ func (s *Server) handleWSRetry(conn *wsConn, sessionID string) {
 		return
 	}
 
+	mu := s.sessionTurnLock(sess.ID)
+	mu.Lock()
+
+	if s.turnRunning[sess.ID] {
+		mu.Unlock()
+		s.wsHub.broadcast(sessionID, map[string]string{
+			"type":    "error",
+			"message": "Cannot retry while a turn is running. Please interrupt first.",
+		})
+		return
+	}
+
 	userMsg := sess.Messages[lastUserIdx]
 	sess.Messages = sess.Messages[:lastUserIdx]
 	_ = sess.Save()
 
-	mu := s.sessionTurnLock(sess.ID)
-	mu.Lock()
-
-	s.runAgentTurn(sess, userMsg.Content)
+	s.turnRunning[sess.ID] = true
 	mu.Unlock()
+
+	go func() {
+		defer func() {
+			mu.Lock()
+			s.turnRunning[sess.ID] = false
+			mu.Unlock()
+		}()
+		s.runAgentTurnLoop(sess, userMsg.Content)
+	}()
 }
 
 // handleWSRunTask triggers a scheduled task run immediately from the Web UI.
@@ -221,12 +267,41 @@ func joinNonEmpty(parts []string, sep string) string {
 	return result
 }
 
-// ─── runAgentTurn ───────────────────────────────────────────────────────────
+// ─── runAgentTurnLoop / doAgentTurn ────────────────────────────────────────
 //
-// Shared by handleWSUserMessage and handleWSRetry. Runs the agent turn,
-// streams events to WS, saves the session, and cleans up live state.
+// runAgentTurnLoop consumes steer messages queued mid-turn and chains turns
+// until the queue is empty.  This mirrors the TUI's behaviour where inbox
+// messages drained after a turn are automatically fed into the next one.
+//
+// doAgentTurn is the single-turn body shared by the loop and retry paths.
 
-func (s *Server) runAgentTurn(sess *agent.Session, content string) {
+func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string) {
+	content := initialContent
+	for {
+		s.doAgentTurn(sess, content)
+		steerMsgs := s.drainSteer(sess.ID)
+		if len(steerMsgs) == 0 {
+			break
+		}
+		content = strings.Join(steerMsgs, "\n\n")
+	}
+}
+
+func (s *Server) enqueueSteer(sessionID, content string) {
+	s.steerMu.Lock()
+	s.steerQueues[sessionID] = append(s.steerQueues[sessionID], content)
+	s.steerMu.Unlock()
+}
+
+func (s *Server) drainSteer(sessionID string) []string {
+	s.steerMu.Lock()
+	msgs := s.steerQueues[sessionID]
+	s.steerQueues[sessionID] = nil
+	s.steerMu.Unlock()
+	return msgs
+}
+
+func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 	// Confirm the user message immediately so the frontend can swap the
 	// ghost (.msg-pending) bubble for the real one before streaming starts.
 	s.wsHub.broadcast(sess.ID, map[string]any{
@@ -255,7 +330,15 @@ func (s *Server) runAgentTurn(sess *agent.Session, content string) {
 		s.liveStateMu.Unlock()
 	}()
 
-	runCtx := context.Background()
+	runCtx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKeySessionID{}, sess.ID))
+	s.registerInterrupt(sess.ID, cancel)
+	defer func() {
+		cancel()
+		s.interruptMu.Lock()
+		delete(s.interrupts, sess.ID)
+		s.interruptMu.Unlock()
+	}()
+
 	a := s.buildAgent(sess)
 
 	var toolDefs []agent.ToolDefinition
@@ -271,21 +354,51 @@ func (s *Server) runAgentTurn(sess *agent.Session, content string) {
 	}
 
 	reply, err := a.RunStream(runCtx, content, toolDefs, executor, sw.handleEvent)
-	if err != nil {
-		sw.error(err.Error())
-		return
-	}
 
+	// Save history even on interrupt — finishInterrupted repairs it so the
+	// session stays well-formed for the next turn.
 	sess.SyncFrom(a.History)
 	_ = sess.Save()
 
-	rCopy := reply
-	b, _ := json.Marshal(map[string]any{
-		"type":       "turn_done",
-		"session_id": sess.ID,
-		"reply":      map[string]any{"content": rCopy.Content},
-	})
-	sw.sendRaw(b)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			// Interrupted — finishInterrupted already emitted EventTurnDone,
+			// so turn_done + assistant_message were broadcast by the handler.
+			// Nothing more for the reply itself.
+		} else {
+			sw.error(err.Error())
+			s.wsHub.broadcast(sess.ID, map[string]any{
+				"type":       "session_update",
+				"session_id": sess.ID,
+				"status":     "idle",
+			})
+			return
+		}
+	} else {
+		// Normal completion: emit the final turn_done explicitly so the
+		// frontend gets the aggregated reply even when the provider path
+		// doesn't fire EventTurnDone (fallback buffered sender).
+		rCopy := reply
+		b, _ := json.Marshal(map[string]any{
+			"type":       "turn_done",
+			"session_id": sess.ID,
+			"reply":      map[string]any{"content": rCopy.Content},
+		})
+		sw.sendRaw(b)
+	}
+
+	// Drain inbox (steer/queued messages that arrived mid-turn). Surface them
+	// as user bubbles so they don't vanish from the transcript.
+	if items := a.Inbox.Drain(); len(items) > 0 {
+		for _, it := range items {
+			s.wsHub.broadcast(sess.ID, map[string]any{
+				"type":       "history_user_message",
+				"session_id": sess.ID,
+				"content":    it.Text,
+				"created_at": time.Now().UnixMilli(),
+			})
+		}
+	}
 
 	s.wsHub.broadcast(sess.ID, map[string]any{
 		"type":       "complete",
@@ -454,8 +567,9 @@ func (s *Server) registerInterrupt(sessionID string, cancel context.CancelFunc) 
 	s.interruptMu.Unlock()
 }
 
-// Request confirmation from user (blocks until user responds in browser).
-func (s *Server) requestConfirmation(sessionID, message, kind string) (string, error) {
+// Request confirmation from user (blocks until user responds in browser or ctx
+// is cancelled).
+func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, kind string) (string, error) {
 	confID := fmt.Sprintf("conf_%d", time.Now().UnixNano())
 	ch := make(chan string, 1)
 
@@ -470,13 +584,18 @@ func (s *Server) requestConfirmation(sessionID, message, kind string) (string, e
 		Kind:    kind,
 	})
 
-	// Wait for response or timeout.
+	// Wait for response, timeout, or cancellation.
 	select {
 	case result := <-ch:
 		s.confirmMu.Lock()
 		delete(s.confirmations, confID)
 		s.confirmMu.Unlock()
 		return result, nil
+	case <-ctx.Done():
+		s.confirmMu.Lock()
+		delete(s.confirmations, confID)
+		s.confirmMu.Unlock()
+		return "", fmt.Errorf("confirmation cancelled")
 	case <-time.After(5 * time.Minute):
 		s.confirmMu.Lock()
 		delete(s.confirmations, confID)

@@ -464,6 +464,7 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 // runTurn executes one user message against a session. It builds the agent,
 // runs the tool loop if enabled, and returns the assistant's text reply.
 func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput string) (string, error) {
+	ctx = context.WithValue(ctx, ctxKeySessionID{}, sess.ID)
 	a := s.buildAgent(sess)
 
 	if !s.cfg.Tools {
@@ -506,7 +507,12 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.C
 	if err != nil {
 		return ctx, nil, fmt.Errorf("permission engine: %w", err)
 	}
-	a.Gate = app.NewPermissionGate(engine, nil)
+	// Wire interactive permission confirmation when we know the session.
+	var ask app.PermissionAsk
+	if sid, ok := ctx.Value(ctxKeySessionID{}).(string); ok && sid != "" {
+		ask = s.permissionAskFrom(sid)
+	}
+	a.Gate = app.NewPermissionGate(engine, ask)
 
 	spawner := app.NewSpawner(a, executor, func() []agent.ToolDefinition {
 		return tools.DefaultToolsFor(a.Model)
