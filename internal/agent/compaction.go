@@ -405,20 +405,15 @@ func hasToolResult(m Message) bool {
 // tool batch, before the next LLM call. This catches history growth within a
 // turn that lastInputTokens (from the previous provider call) doesn't reflect.
 //
-// The check is aggressive: if the token count exceeds 90% of the model's
-// context window, we compact. This prevents the next send() from 400-ing. The
-// count prefers the provider's real lastInputTokens and falls back to a
-// heuristic estimate.
+// It uses the same threshold as between-turns compaction (compactTriggerTokens),
+// so the batch-level check stays in sync with the user's configured auto-pct
+// or explicit threshold.
 func (a *Agent) shouldCompactBetweenBatches() bool {
 	trigger := a.compactTriggerTokens()
 	if trigger <= 0 {
 		return false
 	}
-	tokens := a.historyTokens(a.History.Snapshot())
-	window := contextWindow(a.Model)
-	// Compact if we're within 10% of the window (more aggressive than the
-	// between-turns trigger, which uses compactThresholdFraction = 75%).
-	return tokens > int(float64(window)*0.9)
+	return a.historyTokens(a.History.Snapshot()) > trigger
 }
 
 // ── Token estimation (fast heuristic) ──────────────────────────────────────
