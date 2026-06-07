@@ -1,17 +1,18 @@
 ---
 name: update-config
-description: Update octo's persisted configuration files — ~/.octo/config.yaml (provider, model, etc.), ~/.octo/mcp.json (MCP servers), and ~/.octo/permissions.yml (permission rules). Use when the user wants to change any octo setting without running the setup wizard manually.
+description: Update octo's persisted configuration files — ~/.octo/config.yaml (provider, model, etc.), ~/.octo/mcp.json (MCP servers), ~/.octo/permissions.yml (permission rules), and ~/.octo/channels.yml (IM platform bridges). Use when the user wants to change any octo setting without running the setup wizard manually.
 ---
 
 # Update octo configuration
 
-octo has three persisted configuration files. Read with `read_file`, modify, and write back with `write_file`.
+octo has four persisted configuration files. Read with `read_file`, modify, and write back with `write_file`.
 
 | File | Format | What it controls |
 |------|--------|------------------|
 | `~/.octo/config.yaml` | YAML | Provider, model, base URL, permission mode, coauthor, reasoning |
 | `~/.octo/mcp.json` | JSON | MCP servers (stdio and HTTP) |
 | `~/.octo/permissions.yml` | YAML | Custom permission rules per-tool |
+| `~/.octo/channels.yml` | YAML | IM platform bridges (Weixin iLink, DingTalk, Feishu) |
 
 ## Rules (all files)
 
@@ -151,3 +152,63 @@ tool_name:
 
 **User:** "show my permission rules"
 → Read permissions.yml → Pretty-print, or say "using defaults" if missing
+
+**User:** "enable weixin channel"
+→ Read channels.yml, see `weixin: {enabled: false}`
+→ Toggle enabled to true, keep all other fields untouched
+→ Write back, chmod 600
+
+---
+
+## 4. ~/.octo/channels.yml
+
+### Schema
+
+```yaml
+channels:
+  weixin:
+    enabled: true | false
+    base_url: string (optional, default https://ilinkai.weixin.qq.com)
+    token: string (bot token from iLink login)
+    cred_path: string (optional, path to credentials JSON file)
+    timeout_sec: integer (optional, HTTP timeout)
+    allowed_users: string (optional, comma-separated user IDs)
+  dingtalk:
+    enabled: true | false
+    client_id: string (app key / client ID)
+    client_secret: string (app secret)
+    allowed_users: string (optional, comma-separated user IDs)
+  feishu:
+    enabled: true | false
+    app_id: string
+    app_secret: string
+    domain: string (optional, e.g. "open.feishu.cn")
+    allowed_users: string (optional, comma-separated user IDs)
+```
+
+- `enabled`: `true` to start the bridge on next `octo serve`; `false` to keep the config but skip loading.
+- `allowed_users`: optional allow-list; if set, only listed users can interact with the bot. Empty = allow all.
+
+### Supported platforms
+
+| Platform | Required fields | Optional fields |
+|----------|-----------------|-----------------|
+| `weixin` | `token` (or `cred_path`) | `base_url`, `timeout_sec`, `allowed_users` |
+| `dingtalk` | `client_id`, `client_secret` | `allowed_users` |
+| `feishu` | `app_id`, `app_secret` | `domain`, `allowed_users` |
+
+### Steps
+
+1. Read `~/.octo/channels.yml`. If missing, treat as `channels: {}`.
+2. Determine the operation:
+   - **Enable/disable** a platform — toggle `enabled`; preserve all other fields.
+   - **Add** a new platform — ask which platform, then collect required fields.
+   - **Edit** an existing platform — show current config (hide secrets), ask which fields to change.
+   - **Remove** a platform — confirm, then delete the entire entry under `channels`.
+3. Validate:
+   - Reject unknown platform names.
+   - Reject missing required fields for the chosen platform.
+   - Reject malformed URLs in `base_url`.
+4. Merge the new value into the existing `channels` object; preserve fields the user did not touch.
+5. Write back with `write_file`, then `chmod 600 ~/.octo/channels.yml`.
+6. Confirm what changed and remind: channel changes take effect on the next `octo serve` (or immediately if the server is already running with `--no-channel` omitted).
