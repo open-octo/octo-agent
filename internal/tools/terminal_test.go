@@ -2,8 +2,8 @@ package tools
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -248,6 +248,11 @@ func TestTerminalInputTool_SendInput(t *testing.T) {
 	// Use a small Go program as the test subject so it works on every OS
 	// (Windows CI doesn't have head/sed). The program reads a line from
 	// stdin and prints it back with a prefix.
+	//
+	// We compile it first with "go build" and then run the binary directly.
+	// "go run" triggers a compilation on every launch; on Windows CI that
+	// takes 1-3 s, which is longer than the 200 ms sleep below, so the
+	// input arrives before the process is ready and is silently dropped.
 	tmpDir := t.TempDir()
 	prog := filepath.Join(tmpDir, "stdin_echo.go")
 	src := `package main
@@ -265,12 +270,21 @@ func main() {
 		t.Fatalf("write helper: %v", err)
 	}
 
-	id, err := mgr.Start(fmt.Sprintf("go run %s", prog))
+	bin := filepath.Join(tmpDir, "stdin_echo")
+	if os.PathSeparator == '\\' {
+		bin += ".exe"
+	}
+	buildOut, err := exec.Command("go", "build", "-o", bin, prog).CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build helper: %v\n%s", err, buildOut)
+	}
+
+	id, err := mgr.Start(bin)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// Give the Go runtime a moment to start the program.
+	// Give the program a moment to start and open its stdin reader.
 	time.Sleep(200 * time.Millisecond)
 
 	// Send input including a newline so the scanner can proceed.
