@@ -718,22 +718,24 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 
 		cfg := replConfig{
-			a:          a,
-			session:    sess,
-			noSave:     *noSave,
-			suggest:    suggestEnabled(*noSuggest),
-			plain:      *plain,
-			verbosity:  resolveVerbosity(*quietFlag, *verboseFlag),
-			stdin:      stdin,
-			stdout:     stdout,
-			stderr:     stderr,
-			skillReg:   skillReg,
-			memDir:     memDir,
-			reader:     replReader,          // shared with the asker / permission gate
-			view:       replView,            // same surface for turn render + Ask prompts
-			hooks:      hooks.LoadFromEnv(), // C9 Phase 3: external retrieval layer hooks
-			permEngine: permEngine,
-			mcpBoot:    mcpBoot, // nil unless tools on with servers configured
+			a:               a,
+			session:         sess,
+			noSave:          *noSave,
+			suggest:         suggestEnabled(*noSuggest),
+			plain:           *plain,
+			verbosity:       resolveVerbosity(*quietFlag, *verboseFlag),
+			stdin:           stdin,
+			stdout:          stdout,
+			stderr:          stderr,
+			skillReg:        skillReg,
+			memDir:          memDir,
+			reader:          replReader,          // shared with the asker / permission gate
+			view:            replView,            // same surface for turn render + Ask prompts
+			hooks:           hooks.LoadFromEnv(), // C9 Phase 3: external retrieval layer hooks
+			permEngine:      permEngine,
+			mcpBoot:         mcpBoot, // nil unless tools on with servers configured
+			modelName:       resolvedModel,
+			reasoningEffort: resolvedEffort,
 		}
 		if toolsOn {
 			// Built-ins only at first paint — the MCP registry is still nil
@@ -750,20 +752,22 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// One agentic turn, then exit. The session is ephemeral — one-shot runs are
 	// not persisted (resuming with -c stays a TUI affordance).
 	replCfg := replConfig{
-		a:          a,
-		session:    agent.NewSession(resolvedModel, *system),
-		noSave:     true,
-		plain:      *plain,
-		verbosity:  resolveVerbosity(*quietFlag, *verboseFlag),
-		stdin:      stdin,
-		stdout:     stdout,
-		stderr:     stderr,
-		skillReg:   skillReg,
-		memDir:     memDir,
-		reader:     replReader,
-		view:       replView,
-		hooks:      hooks.LoadFromEnv(),
-		permEngine: permEngine,
+		a:               a,
+		session:         agent.NewSession(resolvedModel, *system),
+		noSave:          true,
+		plain:           *plain,
+		verbosity:       resolveVerbosity(*quietFlag, *verboseFlag),
+		stdin:           stdin,
+		stdout:          stdout,
+		stderr:          stderr,
+		skillReg:        skillReg,
+		memDir:          memDir,
+		reader:          replReader,
+		view:            replView,
+		hooks:           hooks.LoadFromEnv(),
+		permEngine:      permEngine,
+		modelName:       resolvedModel,
+		reasoningEffort: resolvedEffort,
 	}
 	if toolsOn {
 		replCfg.tools = tools.DefaultToolsFor(resolvedModel)
