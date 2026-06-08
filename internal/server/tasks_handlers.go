@@ -83,7 +83,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 	var executor agent.ToolExecutor
 	if s.cfg.Tools {
 		var perr error
-		ctx, executor, perr = s.prepareToolTurn(ctx, a)
+		ctx, executor, _, perr = s.prepareToolTurn(ctx, a)
 		if perr != nil {
 			return sess.ID, fmt.Errorf("prepare tools: %w", perr)
 		}

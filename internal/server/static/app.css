@@ -5227,6 +5227,100 @@ body {
   opacity: 0.6;
   font-size: 11px;
 }
+
+/* ── Sub-agent badge in #session-info-bar ────────────────────────────── */
+.sib-subagents {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--color-bg-tertiary, rgba(120, 120, 120, 0.12));
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: default;
+  user-select: none;
+}
+.sib-subagents .subagents-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.6);
+  animation: subagents-pulse 1.4s ease-out infinite;
+}
+@keyframes subagents-pulse {
+  0%   { box-shadow: 0 0 0 0   rgba(59, 130, 246, 0.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0);   }
+  100% { box-shadow: 0 0 0 0   rgba(59, 130, 246, 0);   }
+}
+
+.sib-subagents-popover {
+  position: fixed;
+  z-index: 1000;
+  min-width: 280px;
+  max-width: 520px;
+  padding: 6px 0;
+  background: var(--color-bg-primary, #fff);
+  border: 1px solid var(--color-border-primary, #e0e0e0);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.sib-subagents-popover-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 12px;
+}
+.sib-subagents-popover-row:not(:last-child) {
+  border-bottom: 1px solid var(--color-border-secondary, #f0f0f0);
+}
+.sib-subagents-popover-row.sib-subagents-popover-errored {
+  color: #dc2626;
+}
+.sib-subagents-popover-desc {
+  color: var(--color-text-primary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sib-subagents-popover-elapsed {
+  color: var(--color-text-tertiary, #999);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Sub-agent transition bubble in #messages ────────────────────────── */
+.msg-subagent-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 6px 10px;
+  border-left: 3px solid #3b82f6;
+  background: var(--color-bg-secondary, rgba(59, 130, 246, 0.05));
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  border-radius: 4px;
+  opacity: 0.9;
+}
+.msg-subagent-notice .subagent-icon  { flex: 0 0 auto; font-weight: 600; }
+.msg-subagent-notice .subagent-text  { flex: 0 0 auto; }
+.msg-subagent-notice .subagent-desc  {
+  flex: 1 1 auto;
+  font-size: 12px;
+  padding: 1px 5px;
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 #profile-panel {
   flex: 1;
   display: flex;
