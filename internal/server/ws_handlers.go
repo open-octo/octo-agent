@@ -323,6 +323,14 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 		"created_at": time.Now().UnixMilli(),
 	})
 
+	// Persist the user message right away so a page refresh mid-turn doesn't
+	// lose it.  We append it for Save(), then pop it back off so buildAgent
+	// doesn't double-count it — RunStream will add the same message to
+	// a.History via appendUserInput.
+	sess.Messages = append(sess.Messages, agent.NewUserMessage(content))
+	_ = sess.Save()
+	sess.Messages = sess.Messages[:len(sess.Messages)-1]
+
 	sw := s.newWSStreamWriter(sess.ID)
 
 	if err := s.ensureSender(); err != nil {
