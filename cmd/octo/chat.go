@@ -477,11 +477,17 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// front, injected into the system prompt (below), and whitelisted for writes
 	// when the permission engine is built. --no-memory disables it; a resolve
 	// error degrades to no memory rather than failing.
-	var memDir string
+	// Home-directory memories are inherited into every project.
+	var memDir, homeMemDir string
 	if !*noMemory {
 		if d, err := memory.Dir(memory.ProjectRoot(cwd)); err == nil {
 			if memory.EnsureDir(d) == nil {
 				memDir = d
+			}
+		}
+		if d, err := memory.HomeDir(); err == nil {
+			if memory.EnsureDir(d) == nil {
+				homeMemDir = d
 			}
 		}
 	}
@@ -667,7 +673,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// directory on demand with its file tools — no consolidation pass.
 	var memInjection string
 	if memDir != "" {
-		memInjection = memory.RenderInjection(memDir)
+		memInjection = memory.RenderInjection(memDir, homeMemDir)
 	}
 	a.System = prompt.Compose(*system, cwd, env, skillsManifest, memInjection, coauthor)
 
@@ -677,7 +683,11 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// byte-stable. A MEMORY.md without those sections yields no hook — unchanged
 	// behaviour.
 	if memDir != "" {
-		if rules := memory.ParseRules(memDir); rules.HasAny() {
+		rules := memory.ParseRules(memDir)
+		if homeMemDir != "" {
+			rules.Merge(memory.ParseRules(homeMemDir))
+		}
+		if rules.HasAny() {
 			inj := memory.NewInjector(rules)
 			a.UserInputHook = inj.Reminder
 		}
@@ -688,7 +698,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// manage its memory files without a prompt on every save.
 	var permEngine *permission.Engine
 	if toolsOn {
-		eng, perr := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(resolvedPermMode), memDir)
+		eng, perr := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(resolvedPermMode), memDir, homeMemDir)
 		if perr != nil {
 			fmt.Fprintf(stderr, "octo chat: permission config: %v\n", perr)
 			return 1

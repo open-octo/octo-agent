@@ -84,6 +84,7 @@ type Server struct {
 	cwd            string
 	envCtx         string
 	memDir         string
+	homeMemDir     string
 
 	// session-scoped turn locks: one turn per session at a time.
 	turnLocks map[string]*sync.Mutex
@@ -172,11 +173,16 @@ func New(cfg Config) (*Server, error) {
 	accessKey := resolveAccessKey(cfg.AccessKey, fileCfg)
 
 	// Resolve cross-session memory directory.
-	var memDir string
+	var memDir, homeMemDir string
 	if !cfg.NoMemory {
 		if d, err := memory.Dir(memory.ProjectRoot(cwd)); err == nil {
 			if memory.EnsureDir(d) == nil {
 				memDir = d
+			}
+		}
+		if d, err := memory.HomeDir(); err == nil {
+			if memory.EnsureDir(d) == nil {
+				homeMemDir = d
 			}
 		}
 	}
@@ -192,6 +198,7 @@ func New(cfg Config) (*Server, error) {
 		cwd:              cwd,
 		envCtx:           envCtx,
 		memDir:           memDir,
+		homeMemDir:       homeMemDir,
 		turnLocks:        map[string]*sync.Mutex{},
 		turnRunning:      make(map[string]bool),
 		steerQueues:      make(map[string][]string),
@@ -238,7 +245,7 @@ func (s *Server) enableSubAgentTools() {
 	template := agent.New(s.sender, s.model)
 	var memInjection string
 	if s.memDir != "" {
-		memInjection = memory.RenderInjection(s.memDir)
+		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
 	template.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, memInjection, true)
 	executor := tools.NewDefaultRegistry()
@@ -439,7 +446,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// L1: project memory embedded in the system prompt (stable across turns).
 	var memInjection string
 	if s.memDir != "" {
-		memInjection = memory.RenderInjection(s.memDir)
+		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
 	a.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, memInjection, true)
 
@@ -449,6 +456,9 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		inj, ok := s.sessionInjectors[sess.ID]
 		if !ok {
 			rules := memory.ParseRules(s.memDir)
+			if s.homeMemDir != "" {
+				rules.Merge(memory.ParseRules(s.homeMemDir))
+			}
 			if rules.HasAny() {
 				inj = memory.NewInjector(rules)
 				s.sessionInjectors[sess.ID] = inj
@@ -781,7 +791,7 @@ func (s *Server) initChannels() {
 	gate, _ := s.buildChannelGate()
 	var memInjection string
 	if s.memDir != "" {
-		memInjection = memory.RenderInjection(s.memDir)
+		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
 	factory := func() *agent.Agent {
 		a := agent.New(s.sender, s.model)
@@ -802,7 +812,7 @@ func (s *Server) initChannels() {
 
 // buildChannelGate creates a non-interactive permission gate for the IM bridge.
 func (s *Server) buildChannelGate() (agent.PermissionGate, error) {
-	engine, err := permission.New(permissionConfigPath(), s.cwd, resolvePermissionMode())
+	engine, err := permission.New(permissionConfigPath(), s.cwd, resolvePermissionMode(), s.memDir, s.homeMemDir)
 	if err != nil {
 		return nil, fmt.Errorf("permission engine: %w", err)
 	}

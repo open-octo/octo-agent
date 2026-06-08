@@ -50,6 +50,23 @@ func TestLoadIndex_TruncatesToBudget(t *testing.T) {
 	}
 }
 
+func TestHomeDir_ResolvesUnderHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	d, err := HomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(d, filepath.Join(home, ".octo", "memories")) {
+		t.Errorf("HomeDir %q not under ~/.octo/memories", d)
+	}
+	if !strings.Contains(filepath.Base(d), filepath.Base(home)) {
+		t.Errorf("HomeDir slug %q should carry home basename", filepath.Base(d))
+	}
+}
+
 func TestRenderInjection(t *testing.T) {
 	dir := t.TempDir()
 
@@ -73,6 +90,36 @@ func TestRenderInjection(t *testing.T) {
 	}
 	if !strings.Contains(out, "## "+IndexFile) {
 		t.Errorf("injection should head the content with the index name; got:\n%s", out)
+	}
+}
+
+func TestRenderInjection_Inherited(t *testing.T) {
+	proj := t.TempDir()
+	inherited := t.TempDir()
+
+	// Only inherited has content.
+	if err := os.WriteFile(filepath.Join(inherited, IndexFile), []byte("- global pref\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := RenderInjection(proj, inherited)
+	if !strings.Contains(out, "global pref") {
+		t.Errorf("injection should include inherited MEMORY.md content; got:\n%s", out)
+	}
+	if !strings.Contains(out, "inherited from") {
+		t.Errorf("injection should label inherited memories; got:\n%s", out)
+	}
+	if !strings.Contains(out, "is empty") {
+		t.Errorf("project memory should still be marked empty; got:\n%s", out)
+	}
+
+	// When dir == inherited (e.g. running in home), dedupe so content
+	// appears only once under the project heading.
+	if err := os.WriteFile(filepath.Join(proj, IndexFile), []byte("- local rule\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out = RenderInjection(proj, proj)
+	if strings.Count(out, "## "+IndexFile) != 1 {
+		t.Errorf("duplicate dir should dedupe; got %d headings:\n%s", strings.Count(out, "## "+IndexFile), out)
 	}
 }
 

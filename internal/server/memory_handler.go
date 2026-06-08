@@ -19,12 +19,11 @@ func (s *Server) handleGetMemory(w http.ResponseWriter, r *http.Request) {
 
 	// Security: prevent path traversal.
 	fname = filepath.Base(fname)
-	dir := s.memDir
-	if dir == "" {
+	p, ok := s.resolveMemoryPath(fname)
+	if !ok {
 		writeError(w, http.StatusNotFound, "memory not found")
 		return
 	}
-	p := filepath.Join(dir, fname)
 
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -49,12 +48,11 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fname = filepath.Base(fname)
-	dir := s.memDir
-	if dir == "" {
+	p, ok := s.resolveMemoryPath(fname)
+	if !ok {
 		writeError(w, http.StatusNotFound, "memory not found")
 		return
 	}
-	p := filepath.Join(dir, fname)
 
 	if _, err := os.Stat(p); err != nil {
 		if os.IsNotExist(err) {
@@ -64,10 +62,22 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := trash.Move(p, dir); err != nil {
+	if err := trash.Move(p, filepath.Dir(p)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// resolveMemoryPath looks for fname first in the project memory dir, then in
+// the inherited (home) memory dir. The bool reports whether a valid dir was
+// found (not whether the file exists).
+func (s *Server) resolveMemoryPath(fname string) (string, bool) {
+	for _, dir := range []string{s.memDir, s.homeMemDir} {
+		if dir != "" {
+			return filepath.Join(dir, fname), true
+		}
+	}
+	return "", false
 }

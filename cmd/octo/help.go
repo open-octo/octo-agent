@@ -175,15 +175,17 @@ the index, injected into the system prompt each session; topic files beside it
 hold detail and load on demand.
 
 Commands:
-  octo memory list     List the project's memory files (default)
-  octo memory path     Print the project's memory directory
+  octo memory list     List the project's and inherited memory files (default)
+  octo memory path     Print the project's and inherited memory directories
 
 Layout:
-  ~/.octo/memories/<repo-slug>/MEMORY.md   Index, injected every session
-  ~/.octo/memories/<repo-slug>/<topic>.md  Detail files the agent reads on demand
+  ~/.octo/memories/<repo-slug>/MEMORY.md   Project index, injected every session
+  ~/.octo/memories/<repo-slug>/<topic>.md  Project detail files
+  ~/.octo/memories/<home-slug>/MEMORY.md   Inherited (home) index, available in every project
 
-The directory is keyed by git repo root, so each project has its own memory.
-To disable memory injection for a single session, run "octo chat --no-memory".`)
+The project directory is keyed by git repo root. Home-directory memories are
+inherited into every project. To disable memory injection for a single session,
+run "octo chat --no-memory".`)
 }
 
 func initHelp(w io.Writer) {

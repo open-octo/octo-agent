@@ -92,6 +92,49 @@ func TestParseRules_TriggeredBulletWithoutClause(t *testing.T) {
 	}
 }
 
+func TestRules_Merge(t *testing.T) {
+	// Project rules (receiving side).
+	proj := &Rules{
+		Always:    []Rule{{Text: "rule A"}, {Text: "rule B"}},
+		Triggered: []Rule{{Text: "rule C", Triggers: []string{"c"}}},
+	}
+	// Inherited rules (merging side).
+	inherited := &Rules{
+		Always:    []Rule{{Text: "rule B"}, {Text: "rule D"}},                          // B duplicates project Always
+		Triggered: []Rule{{Text: "rule C"}, {Text: "rule E", Triggers: []string{"e"}}}, // C duplicates project Triggered
+	}
+	proj.Merge(inherited)
+
+	// Always should keep A, B (project) + D (inherited); skip duplicate B.
+	if len(proj.Always) != 3 {
+		t.Fatalf("Always = %d, want 3: %+v", len(proj.Always), proj.Always)
+	}
+	if proj.Always[0].Text != "rule A" || proj.Always[1].Text != "rule B" || proj.Always[2].Text != "rule D" {
+		t.Errorf("Always texts = %v", proj.Always)
+	}
+
+	// Triggered should keep C (project) + E (inherited); skip duplicate C.
+	if len(proj.Triggered) != 2 {
+		t.Fatalf("Triggered = %d, want 2: %+v", len(proj.Triggered), proj.Triggered)
+	}
+	if proj.Triggered[0].Text != "rule C" || proj.Triggered[1].Text != "rule E" {
+		t.Errorf("Triggered texts = %v", proj.Triggered)
+	}
+
+	// Cross-section dedup: a project Triggered rule should block an inherited
+	// Always rule with the same text.
+	proj2 := &Rules{
+		Triggered: []Rule{{Text: "shared"}},
+	}
+	inherited2 := &Rules{
+		Always: []Rule{{Text: "shared"}},
+	}
+	proj2.Merge(inherited2)
+	if len(proj2.Always) != 0 {
+		t.Errorf("cross-section dedup failed: Always = %v", proj2.Always)
+	}
+}
+
 func TestTriggerHit(t *testing.T) {
 	cases := []struct {
 		input, trigger string
