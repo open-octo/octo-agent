@@ -19,7 +19,12 @@ func (s *Server) handleGetMemory(w http.ResponseWriter, r *http.Request) {
 
 	// Security: prevent path traversal.
 	fname = filepath.Base(fname)
-	p := filepath.Join(octoDir(), "memories", fname)
+	dir := s.memDir
+	if dir == "" {
+		writeError(w, http.StatusNotFound, "memory not found")
+		return
+	}
+	p := filepath.Join(dir, fname)
 
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -44,7 +49,12 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fname = filepath.Base(fname)
-	p := filepath.Join(octoDir(), "memories", fname)
+	dir := s.memDir
+	if dir == "" {
+		writeError(w, http.StatusNotFound, "memory not found")
+		return
+	}
+	p := filepath.Join(dir, fname)
 
 	if _, err := os.Stat(p); err != nil {
 		if os.IsNotExist(err) {
@@ -54,8 +64,7 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	memDir := filepath.Join(octoDir(), "memories")
-	if err := trash.Move(p, memDir); err != nil {
+	if err := trash.Move(p, dir); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
