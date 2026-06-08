@@ -932,13 +932,6 @@ const Sessions = (() => {
       }
     });
 
-    // Close button inside panel
-    document.addEventListener("click", (e) => {
-      if (e.target && e.target.id === "btn-session-search-close") {
-        if (Sessions.searchOpen) Sessions.toggleSearch();
-      }
-    });
-
     // Enter key → commit search (fires whichever input has focus)
     document.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && e.target && e.target.id === "session-search-q") {

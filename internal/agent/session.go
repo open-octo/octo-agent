@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Leihb/octo-agent/internal/trash"
 )
 
 // Session is a named conversation that persists to disk as a JSONL transcript
@@ -540,8 +542,12 @@ func DeleteSession(id string) error {
 		return err
 	}
 	path := filepath.Join(dir, stem+".jsonl")
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("session: remove %s: %w", path, err)
+	if _, err := os.Stat(path); err == nil {
+		if err := trash.Move(path, dir); err != nil {
+			return fmt.Errorf("session: trash %s: %w", path, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("session: stat %s: %w", path, err)
 	}
 	return nil
 }

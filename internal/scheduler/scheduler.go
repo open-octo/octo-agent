@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Leihb/octo-agent/internal/trash"
 	"github.com/robfig/cron/v3"
 )
 
@@ -134,7 +135,14 @@ func (s *Scheduler) Delete(id string) error {
 	delete(s.tasks, id)
 	s.mu.Unlock()
 	p := filepath.Join(s.dir, id+".json")
-	return os.Remove(p)
+	if _, err := os.Stat(p); err == nil {
+		if err := trash.Move(p, s.dir); err != nil {
+			return fmt.Errorf("trash task %s: %w", p, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // List returns all tasks sorted by creation time.
