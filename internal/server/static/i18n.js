@@ -105,7 +105,6 @@ const I18n = (() => {
       "sessions.actions.rename": "Rename",
       "sessions.actions.delete": "Delete",
       "sessions.actions.selectMultiple": "Select Multiple",
-      "sessions.newSessionAdvanced": "More Options",
       "sessions.batch.cancel":    "Cancel",
       "sessions.batch.selectAll": "Select All",
       "sessions.batch.delete":    "Delete Selected",

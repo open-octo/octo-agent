@@ -429,30 +429,6 @@ const Sessions = (() => {
     document.getElementById("btn-new-session-inline")
       .addEventListener("click", () => Sessions.create("general"));
 
-    // Split button: arrow (toggle dropdown)
-    document.getElementById("btn-new-session-arrow")
-      .addEventListener("click", (e) => {
-        e.stopPropagation();
-        const dd = document.getElementById("new-session-dropdown");
-        dd.hidden = !dd.hidden;
-      });
-
-    // Dropdown item "Advanced Options…" — delegated because the dropdown
-    // panel may be re-rendered; this keeps the binding stable.
-    document.addEventListener("click", (e) => {
-      if (e.target && e.target.id === "btn-new-session-modal") {
-        e.stopPropagation();
-        document.getElementById("new-session-dropdown").hidden = true;
-        Sessions.openNewSessionModal();
-      }
-    });
-
-    // Close dropdown when clicking anywhere else
-    document.addEventListener("click", () => {
-      const dd = document.getElementById("new-session-dropdown");
-      if (dd && !dd.hidden) dd.hidden = true;
-    });
-
     // Welcome screen "+ New Session" button
     document.getElementById("btn-welcome-new")
       .addEventListener("click", () => Sessions.create("general"));
