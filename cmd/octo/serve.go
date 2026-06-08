@@ -25,6 +25,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	tools := fs.Bool("tools", true, "Enable agentic tool loop")
 	cors := fs.String("cors", "", "CORS allowed origins (comma-separated, * for any)")
 	noChannel := fs.Bool("no-channel", false, "Disable IM channel (DingTalk, Feishu)")
+	noMemory := fs.Bool("no-memory", false, "Disable cross-session memory injection")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -48,6 +49,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		Tools:       *tools,
 		CORSOrigins: corsOrigins,
 		NoChannel:   *noChannel,
+		NoMemory:    *noMemory,
 	}
 
 	srv, err := server.New(cfg)
