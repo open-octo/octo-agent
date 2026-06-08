@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/tools"
 	"github.com/Leihb/octo-agent/internal/tui"
@@ -630,6 +631,10 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "/conduct":
 		return m.dispatchConduct(strings.TrimSpace(strings.TrimPrefix(text, first)))
+	case "/model":
+		return m.dispatchModel(strings.TrimSpace(strings.TrimPrefix(text, first)))
+	case "/thinking":
+		return m.dispatchThinking(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/help", "/save", "/sessions", "/skills", "/memory", "/mcp":
 		var b bytes.Buffer
 		switch cmd {
@@ -657,6 +662,65 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		// paths, regexes, and other /-prefixed messages reach the model.
 		return m, m.startTurn(text)
 	}
+}
+
+// dispatchModel handles "/model <name>" — switch the active model for the
+// current session. The provider stays the same; only the model identifier
+// changes, so the sender does not need rebuilding.
+func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
+	if name == "" {
+		m.println(errorStyle.Render("Usage: /model <model-name>"))
+		return m, nil
+	}
+	m.a.Model = name
+	m.cfg.modelName = name
+	// Tool surface may differ per model (e.g. vision vs non-vision).
+	if m.cfg.tools != nil {
+		m.cfg.tools = tools.DefaultToolsFor(name)
+	}
+	m.println(noticeStyle.Render(fmt.Sprintf("Model: %s", name)))
+	return m, nil
+}
+
+// dispatchThinking handles "/thinking <off|low|medium|high>" — change the
+// reasoning effort level. This rebuilds the sender because thinkingBudget and
+// reasoningEffort are set at construction time.
+func (m *tuiModel) dispatchThinking(level string) (tea.Model, tea.Cmd) {
+	level = strings.ToLower(level)
+	if level == "" {
+		level = "off"
+	}
+	if level != "off" && level != "low" && level != "medium" && level != "high" {
+		m.println(errorStyle.Render("Usage: /thinking off | low | medium | high"))
+		return m, nil
+	}
+
+	// Load current config to rebuild the sender with the new tuning.
+	cfg, _ := config.Load()
+	if m.cfg.providerName == "" {
+		m.println(errorStyle.Render("Provider not set — cannot rebuild sender"))
+		return m, nil
+	}
+
+	tuning := senderTuning{}
+	if level != "off" {
+		tuning.reasoningEffort = level
+		tuning.thinkingBudget = anthropicThinkingBudget(level)
+	}
+
+	newSender, err := buildSender(m.cfg.providerName, cfg, m.cfg.stderr, tuning)
+	if err != nil {
+		m.println(errorStyle.Render(fmt.Sprintf("Failed to rebuild sender: %v", err)))
+		return m, nil
+	}
+
+	m.a.Sender = newSender
+	m.cfg.reasoningEffort = level
+	if level == "off" {
+		level = "off"
+	}
+	m.println(noticeStyle.Render(fmt.Sprintf("Thinking: %s", level)))
+	return m, nil
 }
 
 func (m *tuiModel) interrupt() {

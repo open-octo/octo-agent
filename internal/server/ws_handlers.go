@@ -415,10 +415,10 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 		}
 	}
 	s.wsHub.broadcast(sess.ID, map[string]any{
-		"type":           "session_update",
-		"session_id":     sess.ID,
-		"status":         "idle",
-		"context_usage":  ctxPct,
+		"type":          "session_update",
+		"session_id":    sess.ID,
+		"status":        "idle",
+		"context_usage": ctxPct,
 	})
 }
 

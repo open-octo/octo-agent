@@ -736,6 +736,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			mcpBoot:         mcpBoot, // nil unless tools on with servers configured
 			modelName:       resolvedModel,
 			reasoningEffort: resolvedEffort,
+			providerName:    provName,
 		}
 		if toolsOn {
 			// Built-ins only at first paint — the MCP registry is still nil
@@ -768,6 +769,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		permEngine:      permEngine,
 		modelName:       resolvedModel,
 		reasoningEffort: resolvedEffort,
+		providerName:    provName,
 	}
 	if toolsOn {
 		replCfg.tools = tools.DefaultToolsFor(resolvedModel)

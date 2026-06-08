@@ -59,6 +59,9 @@ type replConfig struct {
 	// reasoningEffort is the resolved reasoning level ("low" | "medium" | "high" | "")
 	// displayed in the TUI status bar; empty means off.
 	reasoningEffort string
+	// providerName is the resolved provider (e.g. "anthropic", "openai") used
+	// to rebuild the sender when the user switches model or thinking level.
+	providerName string
 }
 
 // mcpBootstrap carries the inputs runTUI needs to connect MCP servers from a
