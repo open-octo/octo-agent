@@ -45,12 +45,33 @@ const Profile = (() => {
       .replace(/'/g, "&#39;");
   }
 
+  function _renderLink(href, text) {
+    // Strip hash/leading ./ for internal memory references.
+    const rawHref = href.split("#")[0].replace(/^\.\//, "");
+    const safeHref = _escapeHtml(href);
+    const safeText = text;
+
+    // Reject obvious unsafe schemes.
+    if (/^(javascript|data|vbscript):/i.test(href)) {
+      return safeText;
+    }
+
+    // Internal link to another memory file: hand it to the UI expand handler.
+    if (/\.md$/i.test(rawHref)) {
+      return `<a href="#" class="memory-link" data-memory="${_escapeHtml(rawHref)}">${safeText}</a>`;
+    }
+
+    // External or absolute link: open safely in a new tab.
+    return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeText}</a>`;
+  }
+
   function _renderInline(text) {
-    // Inline: **bold**, *em*, `code`. Text is already HTML-escaped by caller.
+    // Inline: **bold**, *em*, `code`, [text](href). Text is already HTML-escaped by caller.
     return text
       .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-      .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>");
+      .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, txt, href) => _renderLink(href, txt));
   }
 
   function _renderMarkdown(raw) {
@@ -257,6 +278,23 @@ const Profile = (() => {
     body.className = "memory-card-body";
     body.style.display = "none";
     card.appendChild(body);
+
+    // Clicking a link to another memory file expands that card.
+    body.addEventListener("click", (e) => {
+      const a = e.target.closest(".memory-link");
+      if (!a) return;
+      e.preventDefault();
+      const target = a.dataset.memory;
+      if (!target) return;
+      const el = document.querySelector(`.memory-card[data-filename="${CSS.escape(target)}"]`);
+      if (el) {
+        const btn = el.querySelector(".btn-memory-expand");
+        if (btn && btn.getAttribute("aria-expanded") !== "true") btn.click();
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else {
+        alert(_t("memories.linkNotFound", { name: target }));
+      }
+    });
 
     head.querySelector(".btn-memory-curate")
       .addEventListener("click", (e) => { e.stopPropagation(); _curateMemory(m); });

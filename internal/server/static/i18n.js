@@ -294,6 +294,7 @@ const I18n = (() => {
       "memories.empty":         "No memories yet. The assistant will create them as you work.",
       "memories.emptyHint":     "",
       "memories.summary":       "{{count}} memory file(s)",
+      "memories.linkNotFound":  "Linked memory file not found: {{name}}",
       // Legacy keys — kept for compatibility with any external callers.
       "memories.refresh":       "Curate",
       "memories.refreshTitle":  "Open a session and let the assistant tidy this memory with you",
@@ -766,6 +767,7 @@ const I18n = (() => {
       "memories.empty":         "还没有记忆。助手会在后续工作中自动创建。",
       "memories.emptyHint":     "",
       "memories.summary":       "共 {{count}} 条记忆",
+      "memories.linkNotFound":  "找不到链接的记忆文件：{{name}}",
       // 旧 keys（兼容保留）
       "memories.refresh":       "整理",
       "memories.refreshTitle":  "开启一个会话，让助理和你一起整理这条记忆",

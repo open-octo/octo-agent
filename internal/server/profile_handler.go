@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/trash"
 )
@@ -35,7 +36,11 @@ func (s *Server) handleGetProfileUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetMemories(w http.ResponseWriter, r *http.Request) {
-	dir := filepath.Join(octoDir(), "memories")
+	dir := s.memDir
+	if dir == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"files": []any{}})
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"files": []any{}})
@@ -43,17 +48,25 @@ func (s *Server) handleGetMemories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type memFile struct {
-		Name string `json:"name"`
-		Path string `json:"path"`
+		Name      string `json:"name"`
+		Path      string `json:"path"`
+		Size      int64  `json:"size"`
+		UpdatedAt string `json:"updated_at"`
 	}
 	files := make([]memFile, 0)
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
 			continue
 		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
 		files = append(files, memFile{
-			Name: e.Name(),
-			Path: filepath.Join(dir, e.Name()),
+			Name:      e.Name(),
+			Path:      filepath.Join(dir, e.Name()),
+			Size:      info.Size(),
+			UpdatedAt: info.ModTime().UTC().Format(time.RFC3339),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"files": files})
