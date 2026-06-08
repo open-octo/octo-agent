@@ -21,6 +21,7 @@ import (
 	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/channel"
 	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/Leihb/octo-agent/internal/memory"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/prompt"
 	"github.com/Leihb/octo-agent/internal/scheduler"
@@ -62,6 +63,9 @@ type Config struct {
 	// requests. When empty, the server looks for OCTO_ACCESS_KEY env var.
 	// If still empty, a random key is generated and printed on startup.
 	AccessKey string
+
+	// NoMemory disables cross-session memory injection.
+	NoMemory bool
 }
 
 // Server is the HTTP server skeleton. It owns the mux, the agent factory,
@@ -79,10 +83,16 @@ type Server struct {
 	skillsManifest string
 	cwd            string
 	envCtx         string
+	memDir         string
 
 	// session-scoped turn locks: one turn per session at a time.
 	turnLocks map[string]*sync.Mutex
 	turnMu    sync.Mutex
+
+	// session-scoped memory injectors: one injector per session so triggered
+	// rules are recalled at most once per session. Deleted alongside turnLocks.
+	sessionInjectors map[string]*memory.Injector
+	injectorMu       sync.Mutex
 
 	// turnRunning tracks which sessions have an active turn goroutine.
 	// Guarded by the session's turnLocks mutex.
@@ -161,22 +171,34 @@ func New(cfg Config) (*Server, error) {
 
 	accessKey := resolveAccessKey(cfg.AccessKey, fileCfg)
 
+	// Resolve cross-session memory directory.
+	var memDir string
+	if !cfg.NoMemory {
+		if d, err := memory.Dir(memory.ProjectRoot(cwd)); err == nil {
+			if memory.EnsureDir(d) == nil {
+				memDir = d
+			}
+		}
+	}
+
 	s := &Server{
-		cfg:            cfg,
-		mux:            http.NewServeMux(),
-		sender:         sender,
-		model:          model,
-		system:         cfg.System,
-		skillReg:       skillReg,
-		skillsManifest: skillsManifest,
-		cwd:            cwd,
-		envCtx:         envCtx,
-		turnLocks:      map[string]*sync.Mutex{},
-		turnRunning:    make(map[string]bool),
-		steerQueues:    make(map[string][]string),
-		sessionAgents:  make(map[string]*agent.Agent),
-		accessKey:      accessKey,
-		questionChans:  make(map[string]chan tools.AskResponse),
+		cfg:              cfg,
+		mux:              http.NewServeMux(),
+		sender:           sender,
+		model:            model,
+		system:           cfg.System,
+		skillReg:         skillReg,
+		skillsManifest:   skillsManifest,
+		cwd:              cwd,
+		envCtx:           envCtx,
+		memDir:           memDir,
+		turnLocks:        map[string]*sync.Mutex{},
+		turnRunning:      make(map[string]bool),
+		steerQueues:      make(map[string][]string),
+		sessionAgents:    make(map[string]*agent.Agent),
+		accessKey:        accessKey,
+		questionChans:    make(map[string]chan tools.AskResponse),
+		sessionInjectors: make(map[string]*memory.Injector),
 	}
 
 	// Register the WebSocket-backed asker so ask_user_question appears in the
@@ -214,7 +236,11 @@ func (s *Server) enableSubAgentTools() {
 		return
 	}
 	template := agent.New(s.sender, s.model)
-	template.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, "", true)
+	var memInjection string
+	if s.memDir != "" {
+		memInjection = memory.RenderInjection(s.memDir)
+	}
+	template.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, memInjection, true)
 	executor := tools.NewDefaultRegistry()
 	spawner := app.NewSpawner(template, executor, func() []agent.ToolDefinition {
 		return tools.DefaultToolsFor(s.model)
@@ -397,6 +423,10 @@ func (s *Server) forgetTurnLock(id string) {
 	s.turnMu.Lock()
 	defer s.turnMu.Unlock()
 	delete(s.turnLocks, id)
+
+	s.injectorMu.Lock()
+	defer s.injectorMu.Unlock()
+	delete(s.sessionInjectors, id)
 }
 
 // buildAgent creates a fresh agent for a turn. The caller must have locked
@@ -405,7 +435,31 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	a := agent.New(s.sender, s.model)
 	a.CWD = s.cwd
 	a.MaxTokens = s.cfg.MaxTokens
-	a.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, "", true)
+
+	// L1: project memory embedded in the system prompt (stable across turns).
+	var memInjection string
+	if s.memDir != "" {
+		memInjection = memory.RenderInjection(s.memDir)
+	}
+	a.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, memInjection, true)
+
+	// L2: attention-layer rules injected per user turn (triggered keywords).
+	if s.memDir != "" {
+		s.injectorMu.Lock()
+		inj, ok := s.sessionInjectors[sess.ID]
+		if !ok {
+			rules := memory.ParseRules(s.memDir)
+			if rules.HasAny() {
+				inj = memory.NewInjector(rules)
+				s.sessionInjectors[sess.ID] = inj
+			}
+		}
+		s.injectorMu.Unlock()
+		if inj != nil {
+			a.UserInputHook = inj.Reminder
+		}
+	}
+
 	if sess.Model != "" {
 		a.Model = sess.Model
 	}
@@ -725,11 +779,15 @@ func (s *Server) initChannels() {
 
 	// Build agent factory that mirrors the server's agent setup.
 	gate, _ := s.buildChannelGate()
+	var memInjection string
+	if s.memDir != "" {
+		memInjection = memory.RenderInjection(s.memDir)
+	}
 	factory := func() *agent.Agent {
 		a := agent.New(s.sender, s.model)
 		a.CWD = s.cwd
 		a.MaxTokens = s.cfg.MaxTokens
-		a.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, "", true)
+		a.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, memInjection, true)
 		if gate != nil {
 			a.Gate = gate
 		}
