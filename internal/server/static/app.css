@@ -465,19 +465,12 @@ body {
   white-space: nowrap;
 }
 
-/* ── Split button [+ ▾] ─────────────────────────────────────────────────── */
-.btn-split-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-  border-radius: 5px;
-  overflow: visible;
-}
-.btn-split-main {
+/* ── New session button ──────────────────────────────────────────────────── */
+#btn-new-session-inline {
   height: 1.375rem;
   padding: 0 0.5rem;
   border: none;
-  border-radius: 5px 0 0 5px;
+  border-radius: 5px;
   background: var(--color-accent-primary);
   color: #fff;
   font-size: 0.6875rem;
@@ -487,54 +480,9 @@ body {
   cursor: pointer;
   transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
-.btn-split-main:hover {
+#btn-new-session-inline:hover {
   background: var(--color-button-primary-hover);
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-.btn-split-arrow {
-  height: 1.375rem;
-  padding: 0 0.25rem;
-  border: none;
-  border-left: 1px solid rgba(255,255,255,0.3);
-  border-radius: 0 5px 5px 0;
-  background: var(--color-accent-primary);
-  color: #fff;
-  font-size: 0.625rem;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.btn-split-arrow:hover {
-  background: var(--color-button-primary-hover);
-}
-
-/* ── Dropdown menu ───────────────────────────────────────────────────────── */
-.new-session-dropdown {
-  position: absolute;
-  top: calc(100% + 0.25rem);
-  right: 0;
-  min-width: 11.25rem;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border-primary);
-  border-radius: 7px;
-  box-shadow: var(--shadow-md);
-  z-index: 200;
-  padding: 0.25rem 0;
-  overflow: hidden;
-}
-.new-session-dropdown[hidden] { display: none; }
-.dropdown-item {
-  padding: 0.25rem 0.625rem;
-  font-size: 0.6875rem;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.12s;
-  display: flex;
-  align-items: center;
-}
-.dropdown-item:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-accent-primary);
 }
 
 /* ── Session source badge ────────────────────────────────────────────────── */
