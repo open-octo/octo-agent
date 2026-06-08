@@ -23,6 +23,12 @@ separate and described in `identity-files-design.md`.
   facts don't bleed across repos. Outside a git repo the working directory is
   used. The slug is the repo basename plus a short hash of the full path, so two
   checkouts that share a basename don't collide.
+- **Inheritance.** The home directory (`~`) also has its own memory slot.
+  When running inside any project, the home MEMORY.md is injected *before* the
+  project MEMORY.md, so cross-project preferences and personal facts are
+  available everywhere. The agent is instructed to sort new memories by scope:
+  project-specific facts go to the project memory; cross-project or personal
+  preferences go to the home (inherited) memory.
 - **MEMORY.md is the index.** It is loaded into the system prompt at session
   start, truncated to the first 200 lines / 25 KB (whichever comes first),
   mirroring Claude Code's cap. Topic files are not loaded up front — the agent
@@ -31,15 +37,15 @@ separate and described in `identity-files-design.md`.
 ## Injection
 
 At session start `cmd/octo` resolves the directory, creates it, and injects
-`memory.RenderInjection(dir)` into the composed system prompt (the `memory`
-layer of `prompt.Compose`). The injection is a short instruction block —
-*where* memory lives and *how* to manage it — followed by the current MEMORY.md
-(or an "empty" marker so a fresh project knows where to start). The notes are
-framed as the agent's own durable record of the user's preferences, workflow
-rules, and project facts, to be followed as standing guidance; the current user
-request and safety override a conflicting note. The block is frozen for the
-session: what the agent writes now surfaces in the *next* session, not the
-current one.
+`memory.RenderInjection(dir, inheritedDirs...)` into the composed system prompt
+(the `memory` layer of `prompt.Compose`). The injection is a short instruction
+block — *where* memory lives and *how* to manage it — followed by inherited
+MEMORY.md files (home directory first) and then the project MEMORY.md (or an
+"empty" marker so a fresh project knows where to start). The notes are framed
+as the agent's own durable record of the user's preferences, workflow rules,
+and project facts, to be followed as standing guidance; the current user request
+and safety override a conflicting note. The block is frozen for the session:
+what the agent writes now surfaces in the *next* session, not the current one.
 
 The session-prompt guidance (`internal/prompt/base.md`, "Memory" section)
 covers when to save (lasting preferences, corrections + the why, validated
@@ -86,7 +92,8 @@ The agent saves with `write_file` (append to MEMORY.md or a topic file), edits
 with `edit_file`, and removes with `terminal` (`rm`/`mv`). The memory directory
 lives outside the working directory, where the permission engine's default
 `write_file`/`edit_file` rules only auto-allow `$CWD/**`. So `cmd/octo` passes
-the directory to `permission.New(..., allowWriteRoots...)`, which prepends an
+both the project memory directory and the inherited home memory directory to
+`permission.New(..., allowWriteRoots...)`, which prepends an
 `allow { path: [<memDir>, <memDir>/**] }` rule to those tools — the agent
 manages its memory without a prompt on every save, while CWD and
 secret-path rules still apply everywhere else.

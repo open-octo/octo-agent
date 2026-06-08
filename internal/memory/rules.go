@@ -34,6 +34,35 @@ type Rules struct {
 // HasAny reports whether there is anything to inject.
 func (r *Rules) HasAny() bool { return len(r.Always) > 0 || len(r.Triggered) > 0 }
 
+// Merge merges other into r (in-place). Duplicate rules (by Text) are skipped
+// so project rules take precedence over inherited ones. De-duplication is
+// cross-section: if a project Triggered rule and an inherited Always rule share
+// the same text, the project rule wins.
+func (r *Rules) Merge(other *Rules) {
+	if other == nil {
+		return
+	}
+	seen := make(map[string]bool)
+	for _, rule := range r.Always {
+		seen[rule.Text] = true
+	}
+	for _, rule := range r.Triggered {
+		seen[rule.Text] = true
+	}
+	for _, rule := range other.Always {
+		if !seen[rule.Text] {
+			r.Always = append(r.Always, rule)
+			seen[rule.Text] = true
+		}
+	}
+	for _, rule := range other.Triggered {
+		if !seen[rule.Text] {
+			r.Triggered = append(r.Triggered, rule)
+			seen[rule.Text] = true
+		}
+	}
+}
+
 // section classifies a markdown heading into one of the actionable tiers.
 type section int
 

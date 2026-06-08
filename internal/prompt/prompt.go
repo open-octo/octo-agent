@@ -62,7 +62,7 @@ var userRulesPath = func() string {
 //  2. soul    — ~/.octo/soul.md, if present (agent identity & behavior)
 //  3. env     — environment snapshot (cwd, git, date, OS) the caller renders
 //  4. skills  — the available-skills manifest the caller renders, if any
-//  5. memory  — cross-session memory the caller renders, if any (C9)
+//  5. memory  — cross-session memory the caller renders, if any (C9; includes inherited home-dir memories)
 //  6. profile — ~/.octo/user.md, if present (who the user is)
 //  7. user    — ~/.octo/octorules.md, if present (cross-project user rules)
 //  8. project — ProjectContextFile in cwd, if present (repo conventions)
