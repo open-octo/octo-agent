@@ -177,9 +177,23 @@ func subAgentsSynchronous() bool {
 // RunSync spawns a sub-agent and blocks until it completes, returning its
 // reply. Used by the synchronous sub_agent path; the spawner stamps the
 // sub-agent marker and keeps the child resumable for a later ContinueSync.
+// When an onEvent hook is registered the child's tool-level activity is
+// streamed the same way async sub-agents are, so live panels work for both
+// sync and async modes.
 func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnResult, error) {
 	if m.spawner == nil {
 		return SpawnResult{}, fmt.Errorf("subagent: no spawner configured")
+	}
+	// Give this sync sub-agent a temporary ID so the event stream can track
+	// it the same way async agents are tracked.
+	m.mu.Lock()
+	m.seq++
+	id := fmt.Sprintf("sync_%d", m.seq)
+	m.mu.Unlock()
+
+	if sink := m.eventSink(id, req.Description); sink != nil {
+		ctx = WithSubAgentEventSink(ctx, sink)
+		sink(SubAgentEvent{Kind: "started"})
 	}
 	return m.spawner.Spawn(ctx, req)
 }

@@ -375,14 +375,28 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 
 	var toolDefs []agent.ToolDefinition
 	var executor agent.ToolExecutor
+	var subMgr *tools.SubAgentManager
 	if s.cfg.Tools {
 		var perr error
-		runCtx, executor, perr = s.prepareToolTurn(runCtx, a)
+		runCtx, executor, subMgr, perr = s.prepareToolTurn(runCtx, a)
 		if perr != nil {
 			sw.error(perr.Error())
 			return
 		}
 		toolDefs = tools.DefaultToolsFor(a.Model)
+		// Wire sub-agent live-panel events into the WebSocket stream.
+		if subMgr != nil {
+			subMgr.SetOnEvent(func(ev tools.SubAgentEvent) {
+				s.wsHub.broadcast(sess.ID, map[string]any{
+					"type":        "sub_agent_event",
+					"session_id":  sess.ID,
+					"agent_id":    ev.AgentID,
+					"description": ev.Description,
+					"kind":        ev.Kind,
+					"tool_name":   ev.ToolName,
+				})
+			})
+		}
 	}
 
 	reply, err := a.RunStream(runCtx, content, toolDefs, executor, sw.handleEvent)
@@ -541,6 +555,13 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			"session_id": w.sessionID,
 			"result":     ev.Output,
 		})
+		// Signal sub-agent completion so the frontend can clear the live panel.
+		if ev.ToolName == "sub_agent" {
+			w.hub.broadcast(w.sessionID, map[string]any{
+				"type":       "sub_agent_done",
+				"session_id": w.sessionID,
+			})
+		}
 		// Clear live state on tool done.
 		w.server.liveStateMu.Lock()
 		if ls, ok := w.server.liveStates[w.sessionID]; ok {
