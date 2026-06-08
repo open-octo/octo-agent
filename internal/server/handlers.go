@@ -539,7 +539,7 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 
 	// Tool-enabled path: wire the per-turn tool environment (gate + ctx-scoped
 	// sub-agent manager + task store) bound to this turn's agent.
-	ctx, executor, err := s.prepareToolTurn(ctx, a)
+	ctx, executor, _, err := s.prepareToolTurn(ctx, a)
 	if err != nil {
 		return "", err
 	}
@@ -559,14 +559,14 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 // dispatch to them rather than the process-global gating sentinels. The manager
 // runs synchronously — a request/response turn has no follow-up channel for an
 // async sub-agent result — and each turn gets a private store, so concurrent
-// sessions never share sub-agent or task state. Returns the augmented ctx and
-// the executor to run the turn with.
-func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.Context, agent.ToolExecutor, error) {
+// sessions never share sub-agent or task state. Returns the augmented ctx, the
+// executor, and the manager so callers can wire live-panel event hooks.
+func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, error) {
 	executor := tools.NewDefaultRegistry()
 
 	engine, err := permission.New(permissionConfigPath(), s.cwd, resolvePermissionMode())
 	if err != nil {
-		return ctx, nil, fmt.Errorf("permission engine: %w", err)
+		return ctx, nil, nil, fmt.Errorf("permission engine: %w", err)
 	}
 	// Wire interactive permission confirmation when we know the session.
 	var ask app.PermissionAsk
@@ -583,7 +583,7 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.C
 	ctx = tools.WithSubAgentManager(ctx, mgr)
 	ctx = tools.WithTaskStore(ctx, tasks.New())
 
-	return ctx, executor, nil
+	return ctx, executor, mgr, nil
 }
 
 func permissionConfigPath() string {

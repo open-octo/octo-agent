@@ -66,9 +66,10 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 	runCtx := r.Context()
 	var toolDefs []agent.ToolDefinition
 	var executor agent.ToolExecutor
+	var mgr *tools.SubAgentManager
 	if s.cfg.Tools {
 		var perr error
-		runCtx, executor, perr = s.prepareToolTurn(runCtx, a)
+		runCtx, executor, mgr, perr = s.prepareToolTurn(runCtx, a)
 		if perr != nil {
 			ev := agent.AgentEvent{Kind: agent.EventToolError, Err: perr.Error()}
 			b, _ := json.Marshal(ev)
@@ -81,6 +82,22 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 	eventHandler := func(ev agent.AgentEvent) {
 		b, _ := json.Marshal(ev)
 		sseEvent(w, string(b))
+	}
+
+	// Wire sub-agent events into the SSE stream so the live panel shows
+	// sub-agent activity even on the SSE transport.
+	if mgr != nil {
+		mgr.SetOnEvent(func(ev tools.SubAgentEvent) {
+			b, _ := json.Marshal(map[string]any{
+				"type":        "sub_agent_event",
+				"session_id":  sess.ID,
+				"agent_id":    ev.AgentID,
+				"description": ev.Description,
+				"kind":        ev.Kind,
+				"tool_name":   ev.ToolName,
+			})
+			sseEvent(w, string(b))
+		})
 	}
 
 	reply, err := a.RunStream(runCtx, req.Message, toolDefs, executor, eventHandler)

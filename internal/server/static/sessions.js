@@ -51,6 +51,12 @@ const Sessions = (() => {
   let   _suggestionText     = null;
   let   _defaultPlaceholder = null;  // captured lazily so i18n changes still work
 
+  // Sub-agent live panel state — mirrors TUI subAgentUI.
+  // Keyed by agent_id; each entry tracks description, start time, recent
+  // tools, and whether any tool errored.
+  const _subAgents = {};  // { [agent_id]: { description, start, recent:[], errored } }
+  const _maxSubAgentRecentTools = 4;
+
   // ── Markdown renderer ──────────────────────────────────────────────────
   //
   // Renders assistant message text as Markdown HTML using the marked library.
@@ -2123,6 +2129,102 @@ const Sessions = (() => {
       messages.appendChild(el);
       _scrollToBottomIfNeeded(messages);
     },
+
+    // ── Sub-agent live panel ──────────────────────────────────────────────
+    // Mirrors the TUI sub-agent panel: tracks running sub-agents, their
+    // description, elapsed time, and recent tool chain.
+
+    handleSubAgentEvent(agentID, description, kind, toolName) {
+      let sa = _subAgents[agentID];
+      if (!sa) {
+        sa = { description: description || agentID, start: Date.now(), recent: [], errored: false };
+        _subAgents[agentID] = sa;
+      }
+      switch (kind) {
+        case "started":
+          sa.recent = [];
+          sa.errored = false;
+          if (description) sa.description = description;
+          break;
+        case "tool":
+          sa.recent.push(toolName || "tool");
+          if (sa.recent.length > _maxSubAgentRecentTools) {
+            sa.recent = sa.recent.slice(sa.recent.length - _maxSubAgentRecentTools);
+          }
+          break;
+        case "tool_error":
+          sa.errored = true;
+          sa.recent.push((toolName || "tool") + " ✗");
+          if (sa.recent.length > _maxSubAgentRecentTools) {
+            sa.recent = sa.recent.slice(sa.recent.length - _maxSubAgentRecentTools);
+          }
+          break;
+      }
+      this._updateSubAgentBadge();
+    },
+
+    handleSubAgentDone(agentID) {
+      if (agentID && _subAgents[agentID]) {
+        delete _subAgents[agentID];
+      } else {
+        // Sync mode sends sub_agent_done without agent_id — clear all.
+        Object.keys(_subAgents).forEach(k => delete _subAgents[k]);
+      }
+      this._updateSubAgentBadge();
+    },
+
+    _updateSubAgentBadge() {
+      const badge = $("sib-subagents");
+      const sep   = document.querySelector(".sib-sep-after-subagents");
+      if (!badge) return;
+
+      const ids = Object.keys(_subAgents);
+      if (ids.length === 0) {
+        badge.style.display = "none";
+        if (sep) sep.style.display = "none";
+        const pop = $("sib-subagents-popover");
+        if (pop) pop.style.display = "none";
+        return;
+      }
+
+      const label = I18n.t("subagents.badge", { n: ids.length });
+      badge.innerHTML = `<span class="subagents-dot" aria-hidden="true"></span><span class="subagents-count">${escapeHtml(label)}</span>`;
+      badge.style.display = "";
+      if (sep) sep.style.display = "";
+
+      // Build tooltip lines.
+      const lines = ids.map(id => {
+        const sa = _subAgents[id];
+        const elapsed = Math.floor((Date.now() - sa.start) / 1000);
+        const elapsedStr = elapsed >= 60
+          ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+          : `${elapsed}s`;
+        const chain = sa.recent.length > 0 ? ` → ${sa.recent.join(" → ")}` : "";
+        return `${sa.description}${chain}  (${elapsedStr})`;
+      });
+      badge.title = lines.join("\n");
+    },
+
+    appendSubAgentNotice(description, status) {
+      Sessions.collapseToolGroup();
+      const messages = $("messages");
+      const el = document.createElement("div");
+      el.className = `msg msg-subagent-notice msg-subagent-${status || "done"}`;
+
+      const iconMap = { done: "✓", error: "⚠" };
+      const icon = iconMap[status] || "✓";
+
+      const descShort = (description || "").length > 60
+        ? (description.slice(0, 60) + "…")
+        : (description || "");
+
+      el.innerHTML = `<span class="subagent-icon">${icon}</span>` +
+        `<span class="subagent-text">${I18n.t("subagents.notice", { status: status || "done" })}</span> ` +
+        `<span class="subagent-desc" title="${escapeHtml(description || '')}">${escapeHtml(descShort)}</span>`;
+      messages.appendChild(el);
+      _scrollToBottomIfNeeded(messages);
+    },
+
     // ── Init ──────────────────────────────────────────────────────────────
     init() {
       _initNewMessageBanner();
@@ -4371,15 +4473,28 @@ const Sessions = (() => {
       return;
     }
 
-    // Click outside — close bg-tasks popover if open.
+    // Toggle sub-agents popover when clicking the badge in the SIB.
+    if (e.target.closest("#sib-subagents")) {
+      e.stopPropagation();
+      _toggleSubAgentsPopover(e.target.closest("#sib-subagents"));
+      return;
+    }
+
+    // Click outside — close popovers if open.
     if (!e.target.closest("#sib-bgtasks-popover") && !e.target.closest("#sib-bgtasks")) {
       _closeBgTasksPopover();
+    }
+    if (!e.target.closest("#sib-subagents-popover") && !e.target.closest("#sib-subagents")) {
+      _closeSubAgentsPopover();
     }
   });
 
   // Close popover on Escape.
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { _closeBgTasksPopover(); }
+    if (e.key === "Escape") {
+      _closeBgTasksPopover();
+      _closeSubAgentsPopover();
+    }
   });
 
   // ── Background-tasks popover ──────────────────────────────────────────
@@ -4447,6 +4562,73 @@ const Sessions = (() => {
       return `<div class="sib-bgtasks-popover-row">
         <code class="sib-bgtasks-popover-cmd">${cmd}</code>
         <span class="sib-bgtasks-popover-elapsed">${elapsedStr}</span>
+      </div>`;
+    }).join("");
+    pop.innerHTML = rows;
+  }
+
+  // ── Sub-agents popover ────────────────────────────────────────────────
+
+  function _ensureSubAgentsPopover() {
+    let pop = document.getElementById("sib-subagents-popover");
+    if (pop) return pop;
+    pop = document.createElement("div");
+    pop.id = "sib-subagents-popover";
+    pop.className = "sib-subagents-popover";
+    pop.setAttribute("role", "tooltip");
+    pop.style.display = "none";
+    document.body.appendChild(pop);
+    return pop;
+  }
+
+  function _toggleSubAgentsPopover(anchorEl) {
+    const pop = _ensureSubAgentsPopover();
+    if (pop.style.display !== "none") {
+      pop.style.display = "none";
+      return;
+    }
+
+    const ids = Object.keys(_subAgents);
+    if (ids.length === 0) return;
+
+    _renderSubAgentsPopover(pop, ids);
+
+    pop.style.display = "block";
+    pop.style.visibility = "hidden";
+    const popHeight = pop.offsetHeight;
+
+    const rect = anchorEl.getBoundingClientRect();
+    const gap = 6;
+    const vh = window.innerHeight;
+    const fitsBelow = rect.bottom + gap + popHeight <= vh;
+
+    pop.style.left = `${rect.left + rect.width / 2}px`;
+    pop.style.transform = "translate(-50%, 0)";
+    if (fitsBelow) {
+      pop.style.top = `${rect.bottom + gap}px`;
+    } else {
+      pop.style.top = `${rect.top - popHeight - gap}px`;
+    }
+    pop.style.visibility = "";
+  }
+
+  function _closeSubAgentsPopover() {
+    const pop = document.getElementById("sib-subagents-popover");
+    if (pop && pop.style.display !== "none") pop.style.display = "none";
+  }
+
+  function _renderSubAgentsPopover(pop, ids) {
+    const rows = ids.map(id => {
+      const sa = _subAgents[id];
+      const elapsed = Math.floor((Date.now() - sa.start) / 1000);
+      const elapsedStr = elapsed >= 60
+        ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+        : `${elapsed}s`;
+      const chain = sa.recent.length > 0 ? ` → ${sa.recent.join(" → ")}` : "";
+      const errCls = sa.errored ? " sib-subagents-popover-errored" : "";
+      return `<div class="sib-subagents-popover-row${errCls}">
+        <span class="sib-subagents-popover-desc">${escapeHtml(sa.description)}${chain}</span>
+        <span class="sib-subagents-popover-elapsed">${elapsedStr}</span>
       </div>`;
     }).join("");
     pop.innerHTML = rows;
