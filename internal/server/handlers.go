@@ -379,9 +379,23 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 					})
 				}
 			}
+			// Pull reasoning/thinking trace from blocks ( Anthropic "thinking"
+			// or OpenAI reasoning stashed on "tool_use").
+			thinking := ""
+			for _, b := range m.Blocks {
+				if b.Type == "thinking" && b.Thinking != "" {
+					thinking = b.Thinking
+					break
+				}
+				if b.Type == "tool_use" && b.Reasoning != "" {
+					thinking = b.Reasoning
+					break
+				}
+			}
 			events = append(events, map[string]any{
-				"type":    "assistant_message",
-				"content": m.Content,
+				"type":     "assistant_message",
+				"content":  m.Content,
+				"thinking": thinking,
 			})
 		}
 	}

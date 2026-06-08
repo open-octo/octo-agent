@@ -239,7 +239,7 @@ WS.onEvent(ev => {
       // the first time the message appears.
       if (ev.session_id !== Sessions.activeId) break;
       Sessions.clearProgress();
-      Sessions.finalizeAssistantMessage(ev.content);
+      Sessions.finalizeAssistantMessage(ev.content, ev.thinking);
       break;
 
     case "tool_call":

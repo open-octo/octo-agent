@@ -618,6 +618,7 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 				"type":       "assistant_message",
 				"session_id": w.sessionID,
 				"content":    ev.Reply.Content,
+				"thinking":   extractThinking(ev.Reply),
 			})
 		}
 		// Clear live state.
@@ -686,4 +687,23 @@ func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, ki
 		s.confirmMu.Unlock()
 		return "", fmt.Errorf("confirmation timed out")
 	}
+}
+
+// extractThinking pulls a reasoning/thinking trace from a Reply's Blocks so the
+// web UI can render it alongside the final assistant message. Anthropic models
+// return it as a standalone "thinking" block; OpenAI models stash it on the
+// first "tool_use" block (Reasoning field). Empty string when none is present.
+func extractThinking(reply *agent.Reply) string {
+	if reply == nil {
+		return ""
+	}
+	for _, b := range reply.Blocks {
+		if b.Type == "thinking" && b.Thinking != "" {
+			return b.Thinking
+		}
+		if b.Type == "tool_use" && b.Reasoning != "" {
+			return b.Reasoning
+		}
+	}
+	return ""
 }

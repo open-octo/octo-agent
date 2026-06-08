@@ -1465,13 +1465,21 @@ const Sessions = (() => {
 
       case "assistant_message": {
         const content = (ev.content || "").trim();
-        if (!content) break; // skip empty assistant messages
+        const thinking = (ev.thinking || "").trim();
+        if (!content && !thinking) break; // skip empty assistant messages
         // Collapse tool group before assistant reply
         if (historyCtx.group) { _collapseToolGroup(historyCtx.group); historyCtx.group = null; }
         const el = document.createElement("div");
         el.className = "msg msg-assistant";
         el.dataset.raw = content;
-        el.innerHTML = _renderMarkdown(content);
+        let html = "";
+        if (thinking) {
+          html += _buildThinkingBlock(_markedParse(thinking));
+        }
+        if (content) {
+          html += _renderMarkdown(content);
+        }
+        el.innerHTML = html;
         _appendCopyButton(el);
         container.appendChild(el);
         break;
@@ -3478,23 +3486,26 @@ const Sessions = (() => {
     // Finalize the assistant message when the turn completes.
     // Replaces the live streaming bubble with a fully-rendered markdown version.
     // If no streaming happened, falls back to creating a new bubble.
-    finalizeAssistantMessage(content) {
+    finalizeAssistantMessage(content, thinking) {
       const sid = _activeId;
       if (!sid) return;
 
       const state = Sessions._getLiveAssistant(sid);
 
-      // Remove any live thinking block (it will be re-rendered inside the
-      // final markdown if <think> tags are present).
+      // Remove any live thinking block (replaced by the final collapsed version).
       if (state.thinkingEl && state.thinkingEl.parentNode) {
         state.thinkingEl.remove();
       }
+
+      const thinkingHtml = thinking ? _buildThinkingBlock(_markedParse(thinking)) : "";
+      const contentHtml = _renderMarkdown(content || "");
+      const finalHtml = thinkingHtml + contentHtml;
 
       // If we have a live bubble, replace it with the final rendered version
       if (state.el && state.el.parentNode) {
         state.el.classList.remove("msg-streaming");
         state.el.dataset.raw = content || "";
-        state.el.innerHTML = _renderMarkdown(content || "");
+        state.el.innerHTML = finalHtml;
         _appendCopyButton(state.el);
         _scrollToBottomIfNeeded($("messages"));
         Sessions._clearLiveAssistant(sid);
@@ -3503,7 +3514,18 @@ const Sessions = (() => {
 
       // No live bubble (non-streaming path or late subscribe) — create fresh
       Sessions._clearLiveAssistant(sid);
-      Sessions.appendMsg("assistant", content);
+      if (thinking) {
+        const messages = $("messages");
+        const el = document.createElement("div");
+        el.className = "msg msg-assistant";
+        el.dataset.raw = content || "";
+        el.innerHTML = finalHtml;
+        _appendCopyButton(el);
+        messages.appendChild(el);
+        _scrollToBottomIfNeeded(messages);
+      } else {
+        Sessions.appendMsg("assistant", content);
+      }
     },
 
     /**
