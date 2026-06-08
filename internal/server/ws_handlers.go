@@ -323,6 +323,14 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 		"created_at": time.Now().UnixMilli(),
 	})
 
+	// Persist the user message right away so a page refresh mid-turn doesn't
+	// lose it.  We append it for Save(), then pop it back off so buildAgent
+	// doesn't double-count it — RunStream will add the same message to
+	// a.History via appendUserInput.
+	sess.Messages = append(sess.Messages, agent.NewUserMessage(content))
+	_ = sess.Save()
+	sess.Messages = sess.Messages[:len(sess.Messages)-1]
+
 	sw := s.newWSStreamWriter(sess.ID)
 
 	if err := s.ensureSender(); err != nil {
@@ -375,14 +383,28 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 
 	var toolDefs []agent.ToolDefinition
 	var executor agent.ToolExecutor
+	var subMgr *tools.SubAgentManager
 	if s.cfg.Tools {
 		var perr error
-		runCtx, executor, perr = s.prepareToolTurn(runCtx, a)
+		runCtx, executor, subMgr, perr = s.prepareToolTurn(runCtx, a)
 		if perr != nil {
 			sw.error(perr.Error())
 			return
 		}
 		toolDefs = tools.DefaultToolsFor(a.Model)
+		// Wire sub-agent live-panel events into the WebSocket stream.
+		if subMgr != nil {
+			subMgr.SetOnEvent(func(ev tools.SubAgentEvent) {
+				s.wsHub.broadcast(sess.ID, map[string]any{
+					"type":        "sub_agent_event",
+					"session_id":  sess.ID,
+					"agent_id":    ev.AgentID,
+					"description": ev.Description,
+					"kind":        ev.Kind,
+					"tool_name":   ev.ToolName,
+				})
+			})
+		}
 	}
 
 	reply, err := a.RunStream(runCtx, content, toolDefs, executor, sw.handleEvent)
@@ -559,6 +581,13 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			"session_id": w.sessionID,
 			"result":     ev.Output,
 		})
+		// Signal sub-agent completion so the frontend can clear the live panel.
+		if ev.ToolName == "sub_agent" {
+			w.hub.broadcast(w.sessionID, map[string]any{
+				"type":       "sub_agent_done",
+				"session_id": w.sessionID,
+			})
+		}
 		// Clear live state on tool done.
 		w.server.liveStateMu.Lock()
 		if ls, ok := w.server.liveStates[w.sessionID]; ok {
@@ -607,6 +636,7 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 				"type":       "assistant_message",
 				"session_id": w.sessionID,
 				"content":    ev.Reply.Content,
+				"thinking":   extractThinking(ev.Reply),
 			})
 		}
 		// Clear live state.
@@ -675,4 +705,23 @@ func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, ki
 		s.confirmMu.Unlock()
 		return "", fmt.Errorf("confirmation timed out")
 	}
+}
+
+// extractThinking pulls a reasoning/thinking trace from a Reply's Blocks so the
+// web UI can render it alongside the final assistant message. Anthropic models
+// return it as a standalone "thinking" block; OpenAI models stash it on the
+// first "tool_use" block (Reasoning field). Empty string when none is present.
+func extractThinking(reply *agent.Reply) string {
+	if reply == nil {
+		return ""
+	}
+	for _, b := range reply.Blocks {
+		if b.Type == "thinking" && b.Thinking != "" {
+			return b.Thinking
+		}
+		if b.Type == "tool_use" && b.Reasoning != "" {
+			return b.Reasoning
+		}
+	}
+	return ""
 }

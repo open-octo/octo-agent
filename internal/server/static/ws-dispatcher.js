@@ -239,7 +239,7 @@ WS.onEvent(ev => {
       // the first time the message appears.
       if (ev.session_id !== Sessions.activeId) break;
       Sessions.clearProgress();
-      Sessions.finalizeAssistantMessage(ev.content);
+      Sessions.finalizeAssistantMessage(ev.content, ev.thinking);
       break;
 
     case "tool_call":
@@ -358,6 +358,16 @@ WS.onEvent(ev => {
     case "background_task_notice":
       if (ev.session_id !== Sessions.activeId) break;
       Sessions.appendBgTaskNotice(ev.command, ev.handle_id, ev.status);
+      break;
+
+    case "sub_agent_event":
+      if (ev.session_id !== Sessions.activeId) break;
+      Sessions.handleSubAgentEvent(ev.agent_id, ev.description, ev.kind, ev.tool_name);
+      break;
+
+    case "sub_agent_done":
+      if (ev.session_id !== Sessions.activeId) break;
+      Sessions.handleSubAgentDone(ev.agent_id);
       break;
 
     case "user_message_queue_status":

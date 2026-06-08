@@ -38,6 +38,10 @@ const I18n = (() => {
       "bgtasks.badge":   "🔄 {{n}} background task(s)",
       "bgtasks.tooltip": "Hover for details · click to expand",
       "bgtasks.notice":  "Background task {{status}}:",
+      // ── Sub-agents ──
+      "subagents.badge":    "🤖 {{n}} sub-agent(s)",
+      "subagents.tooltip":  "Hover for details · click to expand",
+      "subagents.notice":   "Sub-agent {{status}}:",
       // ── Inbox queue hint (above the input bar) ──
       "inbox.queue.one":   "1 message waiting — the agent will read it next.",
       "inbox.queue.many":  "{{n}} messages waiting — the agent will read them next.",
@@ -511,6 +515,10 @@ const I18n = (() => {
       "bgtasks.badge":   "🔄 {{n}} 个后台任务",
       "bgtasks.tooltip": "悬浮查看详情 · 点击展开",
       "bgtasks.notice":  "后台任务 {{status}}：",
+      // ── Sub-agents ──
+      "subagents.badge":    "🤖 {{n}} 个子代理",
+      "subagents.tooltip":  "悬浮查看详情 · 点击展开",
+      "subagents.notice":   "子代理 {{status}}：",
       // ── Inbox queue hint (above the input bar) ──
       "inbox.queue.one":   "1 条消息排队中 — agent 处理完手头的事会马上看。",
       "inbox.queue.many":  "{{n}} 条消息排队中 — agent 处理完手头的事会马上看。",
