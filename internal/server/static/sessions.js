@@ -1898,15 +1898,20 @@ const Sessions = (() => {
       : "";
 
     const isSelected = _selectedIds.has(s.id);
-    const checkboxHtml = _selectMode
-      ? `<input type="checkbox" class="session-select-checkbox" ${isSelected ? "checked" : ""} data-session-id="${escapeHtml(s.id)}">`
+    el.className = "session-item"
+      + (s.id === _activeId ? " active" : "")
+      + (isSelected ? " selected" : "");
+    if (s.pinned) el.classList.add("pinned");
+
+    const circleHtml = _selectMode
+      ? `<span class="session-select-circle" data-session-id="${escapeHtml(s.id)}"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>`
       : "";
     const actionsBtnHtml = _selectMode
       ? ""
       : `<button class="session-actions-btn" title="Actions"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="2.5" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="11.5" cy="7" r="1.2" fill="currentColor"/></svg></button>`;
 
     el.innerHTML = `
-      ${checkboxHtml}
+      ${circleHtml}
       <div class="session-body">
         <div class="session-name">${dotHtml}<span class="session-name__text">${escapeHtml(displayName)}</span>${badgeHtml}${codingBadgeHtml}${pinIcon}</div>
         <div class="session-meta">${metaText}</div>
@@ -1914,8 +1919,8 @@ const Sessions = (() => {
       ${actionsBtnHtml}`;
 
     if (_selectMode) {
-      // In select mode: checkbox toggles selection; body click also toggles
-      const checkbox = el.querySelector(".session-select-checkbox");
+      // In select mode: circle + body click toggles selection
+      const circle = el.querySelector(".session-select-circle");
       const body = el.querySelector(".session-body");
       const toggle = () => {
         if (_selectedIds.has(s.id)) {
@@ -1925,7 +1930,10 @@ const Sessions = (() => {
         }
         Sessions.renderList();
       };
-      if (checkbox) checkbox.addEventListener("change", toggle);
+      if (circle) circle.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggle();
+      });
       if (body) body.addEventListener("click", (e) => {
         e.stopPropagation();
         toggle();
@@ -2487,33 +2495,6 @@ const Sessions = (() => {
       const list = $("session-list");
       list.innerHTML = "";
 
-      // ── Batch-select toolbar ────────────────────────────────────────────
-      if (_selectMode) {
-        const toolbar = document.createElement("div");
-        toolbar.className = "session-batch-toolbar";
-        const selectedCount = _selectedIds.size;
-        toolbar.innerHTML = `
-          <div class="session-batch-info">
-            <button class="session-batch-btn" data-action="cancel">${escapeHtml(I18n.t("sessions.batch.cancel"))}</button>
-            <span class="session-batch-count">${escapeHtml(I18n.t("sessions.batch.selected", { n: selectedCount }))}</span>
-          </div>
-          <div class="session-batch-actions">
-            <button class="session-batch-btn" data-action="select-all">${escapeHtml(I18n.t("sessions.batch.selectAll"))}</button>
-            <button class="session-batch-btn session-batch-btn--danger" data-action="delete" ${selectedCount === 0 ? "disabled" : ""}>${escapeHtml(I18n.t("sessions.batch.delete"))}</button>
-          </div>
-        `;
-        toolbar.querySelectorAll("[data-action]").forEach(btn => {
-          btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const action = btn.dataset.action;
-            if (action === "cancel") Sessions.toggleSelectMode();
-            else if (action === "select-all") Sessions.selectAll();
-            else if (action === "delete") Sessions.deleteSelectedSessions();
-          });
-        });
-        list.appendChild(toolbar);
-      }
-
       if (hasActiveFilter) {
         // Filter active: show all matching results flat, no group entry
         visible.forEach(s => _renderSessionItem(list, s));
@@ -2550,6 +2531,33 @@ const Sessions = (() => {
       }
 
       if (_hasMore) list.appendChild(_makeLoadMoreBtn());
+
+      // ── Batch-select toolbar (sticky bottom bar) ────────────────────────
+      if (_selectMode) {
+        const toolbar = document.createElement("div");
+        toolbar.className = "session-batch-toolbar";
+        const selectedCount = _selectedIds.size;
+        toolbar.innerHTML = `
+          <div class="session-batch-info">
+            <button class="session-batch-btn" data-action="cancel">${escapeHtml(I18n.t("sessions.batch.cancel"))}</button>
+            <span class="session-batch-count">${escapeHtml(I18n.t("sessions.batch.selected", { n: selectedCount }))}</span>
+          </div>
+          <div class="session-batch-actions">
+            <button class="session-batch-btn" data-action="select-all">${escapeHtml(I18n.t("sessions.batch.selectAll"))}</button>
+            <button class="session-batch-btn session-batch-btn--danger" data-action="delete" ${selectedCount === 0 ? "disabled" : ""}>${escapeHtml(I18n.t("sessions.batch.delete"))}</button>
+          </div>
+        `;
+        toolbar.querySelectorAll("[data-action]").forEach(btn => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const action = btn.dataset.action;
+            if (action === "cancel") Sessions.toggleSelectMode();
+            else if (action === "select-all") Sessions.selectAll();
+            else if (action === "delete") Sessions.deleteSelectedSessions();
+          });
+        });
+        list.appendChild(toolbar);
+      }
 
       // Scroll active session into view so the sidebar always shows the current session.
       if (!skipScrollToActive) {

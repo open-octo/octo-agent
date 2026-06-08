@@ -379,15 +379,21 @@ body {
 }
 #session-list { padding: 0.375rem 0.5rem 0.5rem; min-height: 6.75rem; }
 
-/* ── Batch select toolbar ───────────────────────────────────────────────── */
+/* ── Batch select toolbar (sticky bottom bar) ───────────────────────────── */
 .session-batch-toolbar {
+  position: sticky;
+  bottom: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.375rem 0.5rem;
-  margin-bottom: 0.25rem;
-  border-bottom: 1px solid var(--color-border-primary);
+  padding: 0.5rem 0.75rem;
+  margin: 0.25rem -0.5rem -0.5rem;
+  background: color-mix(in srgb, var(--color-bg-primary) 80%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--color-border-primary);
+  z-index: 10;
 }
 .session-batch-info {
   display: flex;
@@ -429,14 +435,44 @@ body {
   color: var(--color-error);
 }
 
-/* ── Session select checkbox ────────────────────────────────────────────── */
-.session-select-checkbox {
-  width: 1rem;
-  height: 1rem;
-  margin-right: 0.5rem;
-  accent-color: var(--color-accent-primary);
-  cursor: pointer;
+/* ── Custom select circle (Gmail-style) ─────────────────────────────────── */
+.session-select-circle {
+  width: 1.125rem;
+  height: 1.125rem;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-text-muted);
+  background: transparent;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.session-select-circle svg {
+  width: 0.625rem;
+  height: 0.625rem;
+  stroke: white;
+  stroke-width: 2.5;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all .15s ease;
+}
+
+/* Selected item state */
+.session-item.selected {
+  background: color-mix(in srgb, var(--color-accent-primary) 6%, transparent);
+}
+.session-item.selected .session-select-circle {
+  background: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+}
+.session-item.selected .session-select-circle svg {
+  opacity: 1;
+  transform: scale(1);
 }
 
 /* ── Sidebar divider (Section Labels) ───────────────────────────────────── */
