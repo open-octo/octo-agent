@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -311,12 +312,23 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	// The Web UI expects an event stream that mirrors the live WS traffic.
-	// For now we translate the persisted message list into user/assistant
-	// events; tool calls are not reconstructed from the transcript.
-	events := make([]map[string]any, 0, len(sess.Messages))
+	// We translate the persisted message list into user/assistant events and
+	// reconstruct tool_call / tool_result pairs from tool_use / tool_result
+	// blocks so the history replay is visually complete.
+	events := make([]map[string]any, 0, len(sess.Messages)*2)
 	for i, m := range sess.Messages {
 		switch m.Role {
 		case agent.RoleUser:
+			// Emit tool_result events for any tool_result blocks before the
+			// user message (they carry the actual output).
+			for _, b := range m.Blocks {
+				if b.Type == "tool_result" {
+					events = append(events, map[string]any{
+						"type":   "tool_result",
+						"result": b.Result,
+					})
+				}
+			}
 			// Use the message's own CreatedAt when available.  Older session
 			// files don't have per-message timestamps, so fall back to the
 			// array index as a unique cursor (not sess.CreatedAt — that
@@ -326,12 +338,33 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 			if m.CreatedAt.IsZero() {
 				createdAt = int64(i + 1)
 			}
-			events = append(events, map[string]any{
-				"type":       "history_user_message",
-				"content":    m.Content,
-				"created_at": createdAt,
-			})
+			// Only emit history_user_message if there is actual text content
+			// (tool_result-only messages are bookkeeping, not user-visible).
+			if m.Content != "" {
+				events = append(events, map[string]any{
+					"type":       "history_user_message",
+					"content":    m.Content,
+					"created_at": createdAt,
+				})
+			}
 		case agent.RoleAssistant:
+			// Emit tool_call events for any tool_use blocks.
+			for _, b := range m.Blocks {
+				if b.Type == "tool_use" {
+					inputJSON := ""
+					if b.Input != nil {
+						if jb, err := json.Marshal(b.Input); err == nil {
+							inputJSON = string(jb)
+						}
+					}
+					events = append(events, map[string]any{
+						"type":    "tool_call",
+						"name":    b.Name,
+						"args":    b.Input,
+						"summary": fmt.Sprintf("🔧 %s %s", b.Name, inputJSON),
+					})
+				}
+			}
 			events = append(events, map[string]any{
 				"type":    "assistant_message",
 				"content": m.Content,

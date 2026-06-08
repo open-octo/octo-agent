@@ -1422,11 +1422,16 @@ const Sessions = (() => {
         // Remove any pending (ghost) user bubbles — the real bubble from
         // the server replaces them, keeping the timeline clean.
         container.querySelectorAll(".msg-pending").forEach(el => el.remove());
+        // Skip empty user messages (no text, no images) — these are steer
+        // placeholders or internal bookkeeping entries that shouldn't render.
+        const hasText = !!(ev.content && ev.content.trim());
+        const hasImages = Array.isArray(ev.images) && ev.images.length > 0;
+        if (!hasText && !hasImages) break;
         const el = document.createElement("div");
         el.className = "msg msg-user";
         // Render image thumbnails and PDF badges (if any) followed by the text content
         let bubbleHtml = "";
-        if (Array.isArray(ev.images) && ev.images.length > 0) {
+        if (hasImages) {
           bubbleHtml += ev.images.map(src => {
             if (src && src.startsWith("pdf:")) {
               // File badge — extract filename and extension from sentinel "pdf:<name>"
