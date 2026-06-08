@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/Leihb/octo-agent/internal/trash"
 )
 
 // ─── GET /api/memories/{filename} ───────────────────────────────────────────
@@ -44,8 +46,17 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	fname = filepath.Base(fname)
 	p := filepath.Join(octoDir(), "memories", fname)
 
-	if err := os.Remove(p); err != nil {
-		writeError(w, http.StatusNotFound, "memory not found")
+	if _, err := os.Stat(p); err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "memory not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	memDir := filepath.Join(octoDir(), "memories")
+	if err := trash.Move(p, memDir); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
