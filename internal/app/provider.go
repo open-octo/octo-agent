@@ -216,6 +216,24 @@ func VendorDefaultModel(id string) string {
 	return ""
 }
 
+// VendorModels returns the catalogue of model IDs offered for a vendor (for a
+// UI dropdown), or nil if the vendor is unknown.
+func VendorModels(id string) []string {
+	if v := vendorByID(id); v != nil {
+		return v.Models
+	}
+	return nil
+}
+
+// VendorEndpointVariants returns the regional endpoint alternatives for a
+// vendor, or nil if it has none / is unknown.
+func VendorEndpointVariants(id string) []EndpointVariant {
+	if v := vendorByID(id); v != nil {
+		return v.EndpointVariants
+	}
+	return nil
+}
+
 // VendorAPIKeyEnvVar returns the environment-variable name for a vendor's API key.
 func VendorAPIKeyEnvVar(id string) string {
 	if v := vendorByID(id); v != nil {
