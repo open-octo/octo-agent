@@ -199,10 +199,17 @@ func apiKeyStatus(provider string, cfg config.Config) string {
 func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer) int {
 	existing, _ := config.Load() // a malformed file is treated as empty here — the wizard overwrites it
 
+	// An arrow-key menu needs an editable terminal on both ends. When stdin is
+	// piped, the output isn't a TTY, or readline declines (Windows), fall back
+	// to the typed-answer flow so scripts and tests keep working unchanged.
+	tty := stdinIsTTY(stdin) && writerIsTTY(stdout)
+
 	var reader lineReader
-	if stdinIsTTY(stdin) {
+	if tty {
 		if rl, err := newReadlineReader(defaultHistoryFile()); err == nil {
 			reader = rl
+		} else {
+			tty = false
 		}
 	}
 	if reader == nil {
@@ -211,55 +218,136 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer) int {
 	defer reader.Close()
 
 	fmt.Fprintln(stdout, "octo config — set your default provider and model (~/.octo/config.yaml).")
-	fmt.Fprintln(stdout, "Press Enter to keep the shown default. CLI flags and env vars still override per run.")
+	if tty {
+		fmt.Fprintln(stdout, "Use ↑/↓ to choose, Enter to confirm. CLI flags and env vars still override per run.")
+	} else {
+		fmt.Fprintln(stdout, "Press Enter to keep the shown default. CLI flags and env vars still override per run.")
+	}
 	fmt.Fprintln(stdout)
 
-	provider := promptDefault(reader, stdout, "Provider (anthropic | openai | kimi | deepseek | ...)", firstNonEmpty(existing.Provider, app.ProviderAnthropic))
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	if !app.IsKnownVendor(provider) {
-		fmt.Fprintf(stderr, "octo config: unknown provider %q\n", provider)
-		return 2
+	// Provider.
+	var provider string
+	if tty {
+		items := make([]selectItem, len(app.Registry))
+		for i, v := range app.Registry {
+			items[i] = selectItem{label: v.DisplayName, desc: v.ID, value: v.ID}
+		}
+		choice, ok := runSelect(stdin, stdout, "Provider", items, firstNonEmpty(existing.Provider, app.ProviderAnthropic))
+		if !ok {
+			return cancelWizard(stderr)
+		}
+		provider = choice.value
+		fmt.Fprintf(stdout, "Provider: %s (%s)\n\n", app.VendorDisplayName(provider), provider)
+	} else {
+		provider = strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
+			"Provider (anthropic | openai | kimi | deepseek | ...)", firstNonEmpty(existing.Provider, app.ProviderAnthropic))))
+		if !app.IsKnownVendor(provider) {
+			fmt.Fprintf(stderr, "octo config: unknown provider %q\n", provider)
+			return 2
+		}
 	}
 
-	modelDefault := firstNonEmpty(existing.Model, defaultModels[provider])
-	model := strings.TrimSpace(promptDefault(reader, stdout, "Model", modelDefault))
+	// Model.
+	var model string
+	if tty {
+		def := defaultModels[provider]
+		startVal := def
+		if existing.Provider == provider && existing.Model != "" {
+			startVal = existing.Model
+		}
+		items := buildModelItems(app.VendorModels(provider), def, startVal)
+		items = append(items, selectItem{label: "Custom model…", desc: "enter a model id", value: customSentinel})
+		choice, ok := runSelect(stdin, stdout, "Model", items, startVal)
+		if !ok {
+			return cancelWizard(stderr)
+		}
+		if choice.value == customSentinel {
+			model = strings.TrimSpace(promptDefault(reader, stdout, "Model", startVal))
+		} else {
+			model = choice.value
+		}
+		shown := model
+		if shown == "" || shown == def {
+			shown = def + " (default)"
+		}
+		fmt.Fprintf(stdout, "Model: %s\n\n", shown)
+	} else {
+		model = strings.TrimSpace(promptDefault(reader, stdout, "Model", firstNonEmpty(existing.Model, defaultModels[provider])))
+	}
 	// Accepting the provider's built-in default leaves Model unset so it floats
 	// with future releases (and never contaminates a different --provider).
 	if model == defaultModels[provider] {
 		model = ""
 	}
 
-	baseURL := strings.TrimSpace(promptDefault(reader, stdout, "Custom base URL (optional, for DeepSeek/Kimi/etc.)", existing.BaseURL))
+	// Base URL / endpoint. Vendors with regional variants get a menu; everyone
+	// else is offered a free-text custom URL.
+	baseURL := existing.BaseURL
+	variants := app.VendorEndpointVariants(provider)
+	if tty && len(variants) > 0 {
+		items := []selectItem{{label: "Default endpoint", desc: app.DefaultBaseURL(provider), value: ""}}
+		for _, v := range variants {
+			items = append(items, selectItem{label: v.Label, desc: v.BaseURL, value: v.BaseURL})
+		}
+		items = append(items, selectItem{label: "Custom base URL…", desc: "enter a URL", value: customSentinel})
+		choice, ok := runSelect(stdin, stdout, "Endpoint", items, existing.BaseURL)
+		if !ok {
+			return cancelWizard(stderr)
+		}
+		if choice.value == customSentinel {
+			baseURL = strings.TrimSpace(promptDefault(reader, stdout, "Custom base URL", existing.BaseURL))
+		} else {
+			baseURL = choice.value
+		}
+		if baseURL == "" {
+			fmt.Fprintf(stdout, "Endpoint: default\n\n")
+		} else {
+			fmt.Fprintf(stdout, "Endpoint: %s\n\n", baseURL)
+		}
+	} else {
+		baseURL = strings.TrimSpace(promptDefault(reader, stdout, "Custom base URL (optional, for DeepSeek/Kimi/etc.)", existing.BaseURL))
+	}
 
 	out := config.Config{Provider: provider, Model: model, BaseURL: baseURL, APIKey: existing.APIKey}
 
 	// Co-authored-by: default on; ask once in wizard.
-	coauthorDefault := "y"
-	if existing.Coauthor != nil && !*existing.Coauthor {
-		coauthorDefault = "n"
+	coauthorDefault := existing.Coauthor == nil || *existing.Coauthor
+	coauthorVal, ok := pickYesNo(tty, reader, stdin, stdout,
+		"Append Co-authored-by to git commits?", coauthorDefault)
+	if !ok {
+		return cancelWizard(stderr)
 	}
-	coauthorAns := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
-		"Append Co-authored-by to git commits? (Y/n)", coauthorDefault)))
-	coauthorVal := coauthorAns != "n" && coauthorAns != "no"
 	out.Coauthor = &coauthorVal
 
-	// Reasoning effort: empty (off) by default; offer the existing value.
-	effortAns := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
-		"Reasoning effort (low | medium | high, empty = off)", existing.ReasoningEffort)))
-	if !validReasoningEffort(effortAns) {
-		fmt.Fprintf(stderr, "octo config: invalid reasoning effort %q (use 'low', 'medium', 'high', or empty)\n", effortAns)
-		return 2
+	// Reasoning effort: off (empty) by default; offer the existing value.
+	if tty {
+		choice, ok := runSelect(stdin, stdout, "Reasoning effort", []selectItem{
+			{label: "Off", value: ""},
+			{label: "Low", value: "low"},
+			{label: "Medium", value: "medium"},
+			{label: "High", value: "high"},
+		}, existing.ReasoningEffort)
+		if !ok {
+			return cancelWizard(stderr)
+		}
+		out.ReasoningEffort = choice.value
+	} else {
+		effortAns := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
+			"Reasoning effort (low | medium | high, empty = off)", existing.ReasoningEffort)))
+		if !validReasoningEffort(effortAns) {
+			fmt.Fprintf(stderr, "octo config: invalid reasoning effort %q (use 'low', 'medium', 'high', or empty)\n", effortAns)
+			return 2
+		}
+		out.ReasoningEffort = effortAns
 	}
-	out.ReasoningEffort = effortAns
 
 	// Show the reasoning/thinking trace: default on.
-	showDefault := "y"
-	if existing.ShowReasoning != nil && !*existing.ShowReasoning {
-		showDefault = "n"
+	showDefault := existing.ShowReasoning == nil || *existing.ShowReasoning
+	showVal, ok := pickYesNo(tty, reader, stdin, stdout,
+		"Show the reasoning/thinking trace while streaming?", showDefault)
+	if !ok {
+		return cancelWizard(stderr)
 	}
-	showAns := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
-		"Show the reasoning/thinking trace while streaming? (Y/n)", showDefault)))
-	showVal := showAns != "n" && showAns != "no"
 	out.ShowReasoning = &showVal
 
 	// API key: env is the recommended home for it. Offer to store it only if
@@ -298,6 +386,59 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "Run `octo chat` to start.")
 	}
 	return 0
+}
+
+// customSentinel is the menu value standing in for "let me type my own". It
+// uses a NUL byte so it can never collide with a real model id or URL.
+const customSentinel = "\x00custom"
+
+// cancelWizard reports the wizard was aborted (Esc/Ctrl-C at a menu) and
+// returns the process exit code for that.
+func cancelWizard(stderr io.Writer) int {
+	fmt.Fprintln(stderr, "octo config: cancelled, nothing saved.")
+	return 1
+}
+
+// buildModelItems turns a vendor's model catalogue into menu rows, marking the
+// built-in default and folding in the user's current pick when it isn't part
+// of the catalogue (so re-running the wizard shows it pre-selected).
+func buildModelItems(models []string, def, current string) []selectItem {
+	items := make([]selectItem, 0, len(models)+1)
+	seen := make(map[string]bool, len(models))
+	for _, m := range models {
+		seen[m] = true
+		desc := ""
+		if m == def {
+			desc = "default"
+		}
+		items = append(items, selectItem{label: m, desc: desc, value: m})
+	}
+	if current != "" && current != def && !seen[current] {
+		items = append(items, selectItem{label: current, desc: "current", value: current})
+	}
+	return items
+}
+
+// pickYesNo asks a boolean question: an arrow-key Yes/No menu on a TTY, the
+// typed "(Y/n)" prompt otherwise. ok is false only when a TTY menu is
+// cancelled.
+func pickYesNo(tty bool, reader lineReader, stdin io.Reader, stdout io.Writer, prompt string, def bool) (val, ok bool) {
+	defVal := "n"
+	if def {
+		defVal = "y"
+	}
+	if tty {
+		choice, ok := runSelect(stdin, stdout, prompt, []selectItem{
+			{label: "Yes", value: "y"},
+			{label: "No", value: "n"},
+		}, defVal)
+		if !ok {
+			return false, false
+		}
+		return choice.value == "y", true
+	}
+	ans := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout, prompt+" (Y/n)", defVal)))
+	return ans != "n" && ans != "no", true
 }
 
 // promptDefault asks one question, showing def as the value used on empty input.
