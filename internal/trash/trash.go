@@ -43,11 +43,13 @@ func ProjectDir(projectDir string) string {
 	return filepath.Join(Dir(), hashProject(projectDir))
 }
 
-// Move moves a file or directory to the trash, preserving its original path for
-// later restoration. It creates the project subdirectory under the trash root,
-// copies the item there, and writes a .meta.json sidecar. On success the
-// original is removed.
-func Move(originalPath, projectDir string) error {
+// Backup copies a file or directory into the trash with a .meta.json sidecar,
+// preserving its original path for later restoration, WITHOUT removing the
+// original. It's the copy-only half of Move: the Windows safe-delete wrapper
+// uses it to make a delete recoverable while letting the real Remove-Item
+// perform the delete (mirroring the POSIX rm wrapper — copy to trash, then
+// delete).
+func Backup(originalPath, projectDir string) error {
 	fi, err := os.Stat(originalPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -95,12 +97,17 @@ func Move(originalPath, projectDir string) error {
 		}
 		return err
 	}
+	return nil
+}
 
-	// Remove original.
-	if fi.IsDir() {
-		return os.RemoveAll(originalPath)
+// Move backs a file or directory up to the trash and then removes the original.
+// On success the original is gone but recoverable from the trash.
+func Move(originalPath, projectDir string) error {
+	if err := Backup(originalPath, projectDir); err != nil {
+		return err
 	}
-	return os.Remove(originalPath)
+	// os.RemoveAll handles both files and directories.
+	return os.RemoveAll(originalPath)
 }
 
 // Restore moves a trashed file back to its original location.

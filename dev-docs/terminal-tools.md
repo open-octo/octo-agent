@@ -165,9 +165,14 @@ processes run at once, but the agent loop still takes one turn at a time.
 ## Cross-platform shell
 
 `shellInvocation` / `shellCommand` select the shell once: `sh -c` on
-macOS/Linux (with the safe-rm trash wrapper when a project dir is known),
-PowerShell (`pwsh`, else `powershell`) on Windows. Process-group and detach
-options are platform-specific (`internal/tools/terminal_kill.go` for POSIX,
-`terminal_kill_windows.go` for Windows). `terminal_input`'s stdin delivery is
-reliable only on POSIX — PowerShell's `-Command` mode does not deterministically
-forward redirected stdin to a spawned native process.
+macOS/Linux, PowerShell (`pwsh`, else `powershell`) on Windows. Both wrap
+deletes to the trash when a project dir is known, so an agent-issued delete is
+recoverable: POSIX prepends an `rm()` shell function (`safeRmWrapper`); Windows
+shadows `Remove-Item` (and its aliases `rm`/`del`) with a function that calls
+`octo __trash-backup` to copy the targets in first (`windowsSafeRmWrapper`).
+Both are best-effort and copy-then-delete, so the real delete still runs.
+Process-group and detach options are platform-specific
+(`internal/tools/terminal_kill.go` for POSIX, `terminal_kill_windows.go` for
+Windows). `terminal_input`'s stdin delivery is reliable only on POSIX —
+PowerShell's `-Command` mode does not deterministically forward redirected
+stdin to a spawned native process.

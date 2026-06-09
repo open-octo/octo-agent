@@ -170,6 +170,15 @@ octo chat --sandbox --sandbox-write ./build      # extra writable dir (repeatabl
 octo chat --sandbox --sandbox-read /opt/data     # extra readable dir (repeatable)
 ```
 
+## Platform notes
+
+octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
+
+- **Shell is PowerShell.** The `terminal` tool runs commands through PowerShell (`pwsh`, else Windows PowerShell 5.1), not POSIX `sh` — use PowerShell syntax (`Get-ChildItem`, `Select-String`, `Remove-Item`, `$env:VAR`) and chain with `;` (5.1 has no `&&`). The agent is told this, and the built-in `read_file` / `glob` / `grep` / `write_file` / `edit_file` tools are cross-platform and don't shell out, so prefer them.
+- **Deletes go to the trash, like POSIX.** Agent-issued `Remove-Item` / `rm` / `del` are intercepted and the targets copied to `~/.octo/trash/` before deletion, so they're recoverable from the Web UI trash panel — the same protection as the POSIX `rm` wrapper. Best-effort: literal and globbed filesystem paths are backed up; provider paths (`Env:`, registry), pipeline input, and anything that fails to copy fall through to a normal delete.
+- **`--sandbox` is unavailable on Windows.** OS confinement is macOS Seatbelt / Linux Landlock only; on Windows `--sandbox` fails closed (refuses to run). The permission engine (interactive prompts) is the safety layer there.
+- **`terminal_input`** (writing to a background process's stdin) is reliable only on POSIX shells; PowerShell's `-Command` mode doesn't deterministically forward stdin to a spawned process.
+
 ## What's implemented
 
 | Area | Status | Description |

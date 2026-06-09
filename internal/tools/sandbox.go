@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/Leihb/octo-agent/internal/sandbox"
@@ -61,6 +62,29 @@ rm() { __octo_safe_rm "$@"; command rm "$@"; }
 %s
 `
 
+// windowsSafeRmWrapper is the PowerShell counterpart of safeRmWrapper. It
+// shadows Remove-Item (and therefore its aliases rm / del / ri / rd / erase,
+// which resolve to the cmdlet name and so hit this function — functions take
+// precedence over cmdlets) with one that first copies any existing filesystem
+// paths in the arguments into the trash (via `octo __trash-backup`), then calls
+// the real cmdlet to perform the delete. Best-effort, mirroring the POSIX rm
+// wrapper: only literal/globbed filesystem paths are backed up; provider paths
+// (Env:, Registry), pipeline input, and any backup failure fall straight
+// through to the real delete unchanged. The module-qualified cmdlet name avoids
+// recursing into this function. First %s is the octo binary, second is the
+// user command.
+const windowsSafeRmWrapper = `function Remove-Item {
+  foreach ($a in $args) {
+    if (($a -is [string]) -and (-not $a.StartsWith('-'))) {
+      foreach ($rp in (Microsoft.PowerShell.Management\Resolve-Path -Path $a -ErrorAction SilentlyContinue)) {
+        if ($rp.Provider.Name -eq 'FileSystem') { & '%s' __trash-backup -- $rp.Path 2>$null }
+      }
+    }
+  }
+  Microsoft.PowerShell.Management\Remove-Item @args
+}
+%s`
+
 // shellCommand builds the *exec.Cmd that runs `command` via the shell, wrapped
 // in the active sandbox when one is set. Both TerminalTool and the background
 // manager route through here so confinement is uniform.
@@ -79,7 +103,21 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 	if runtime.GOOS == "windows" {
 		// -NoProfile: reproducible env (don't run the user's $PROFILE).
 		// -NonInteractive: never block on a PowerShell prompt mid-command.
-		cmd = exec.CommandContext(ctx, resolvePowerShell(), "-NoProfile", "-NonInteractive", "-Command", command)
+		ps := resolvePowerShell()
+		projectDir := WorkingDir(ctx)
+		if projectDir == "" {
+			projectDir, _ = os.Getwd()
+		}
+		// Wrap Remove-Item to copy to trash first (parity with the POSIX rm
+		// wrapper), but only when we can locate the octo binary and a project
+		// dir; otherwise run the command bare (no protection, but never broken).
+		if exe, err := os.Executable(); err == nil && projectDir != "" {
+			wrapped := fmt.Sprintf(windowsSafeRmWrapper, strings.ReplaceAll(exe, "'", "''"), command)
+			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", wrapped)
+			cmd.Env = append(os.Environ(), "OCTO_TRASH_PROJECT="+projectDir)
+		} else {
+			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", command)
+		}
 	} else {
 		projectDir := WorkingDir(ctx)
 		if projectDir == "" {

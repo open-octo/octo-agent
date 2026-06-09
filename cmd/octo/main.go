@@ -43,6 +43,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		// Internal: the OS-sandbox re-exec shim (Linux). Applies confinement to
 		// itself, then execs the real command. Not user-facing.
 		return sandbox.ShimMain()
+	case "__trash-backup":
+		// Internal: the Windows safe-delete wrapper calls this to copy paths
+		// into the trash before the real Remove-Item deletes them. Not
+		// user-facing.
+		return runTrashBackup(args[1:])
 	case "version", "--version", "-v":
 		fmt.Fprintf(stdout, "octo %s\n", version.String())
 		return 0
