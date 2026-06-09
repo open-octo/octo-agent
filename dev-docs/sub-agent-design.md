@@ -1,89 +1,110 @@
 # Sub-Agent 设计
 
-父 agent 可以派生隔离的子 agent 来处理聚焦的子任务。子 agent 异步运行——`launch_agent`
-立即返回一个句柄,子 agent 在后台跑,完成后结果经通知注入对话;`send_message` 给一个仍存活
-的子 agent 追加指令,同样异步。父 agent 在子 agent 工作期间可以继续回应用户、起更多子 agent
-或调别的工具。
-
-对标 Claude Code 的 `Agent` + `SendMessage` 续话模型,而非 Codex 式 fire-and-forget。
+父 agent 可以派生隔离的子 agent 来处理聚焦的子任务,通过一个统一的 `sub_agent` 工具。子 agent
+跑在自己的 context window 与 loop 预算里;父 agent 可以同步等它的结果,或让它在后台异步跑、完成时
+经通知拿回结果。对标 Claude Code 的 `Agent` 续话模型。
 
 ## 三层架构
 
 ```
-工具面            launch_agent / send_message / agent_status / kill_agent
-  │               （LLM 可见,异步语义）
+工具面            sub_agent（唯一的模型可见工具）
+  │               参数选择 fork/fresh、sync/async、preset、model、tools
   ▼
-SubAgentManager   异步层：每个调用在独立 goroutine 跑，立即返回 agent_N 句柄；
-  │               完成时触发 onExit 通知。busy/pending 队列、Kill、ListRunning。
+SubAgentManager   异步层：每个 async 调用在独立 goroutine 跑，立即返回 agent_N 句柄；
+  │               完成时触发 onExit 通知。busy/pending 队列、并发上限、Kill、ListRunning。
   ▼
-agentSpawner      执行层：构造隔离 child，登记进 childRegistry 保活，
+Spawner           执行层：构造隔离 child，登记进 childRegistry 保活，
 + childRegistry   同步跑 Spawn / Continue，串行化 + 增量计费 + 防递归。
 ```
 
 - **`internal/agent/` 零改动**。`Agent.Run` 本身续话友好——每次 `Run` 把输入追加进**同一个**
-  `a.History` 而非重置,并重发一份 `MaxTurns` 预算。"子 agent 完成后续话"在 agent 层天然支持,
-  只要还持有那个 `child *agent.Agent` 再 `Run` 一次即可。
-- 执行层(`cmd/octo/sub_agent.go`)与异步层(`internal/tools/subagent_manager.go`)解耦:执行层只懂
-  同步的 `Spawn` / `Continue`;异步层用 goroutine 把它们包成 fire-and-forget + 通知。
+  `a.History`,并重发一份 `MaxTurns` 预算,所以"子 agent 完成后续话"只要再 `Run` 一次即可。
+- 执行层(`internal/app/spawner.go`)只懂同步的 `Spawn` / `Continue`;异步层
+  (`internal/tools/subagent_manager.go`)用 goroutine 把它们包成 fire-and-forget + 通知。两层解耦,
+  `internal/tools` 与 `internal/app` 之间只经 `Spawner` 接口耦合。
 
-## 工具面
+## `sub_agent` 工具
 
-四个工具,全部经 `spawnerEnabled()` 门控——spawner 未配置时不出现在 `DefaultTools` 里。
+唯一的模型可见子 agent 工具(`internal/tools/agent.go`),经 spawner 注册门控——未配置
+`SubAgentManager` 时不出现在 `DefaultToolsFor` 里。它取代了早期的 `launch_agent` /
+`send_message` / `agent_status` / `kill_agent` + 四个 preset 工具的拆分。
 
-| 工具 | 作用 | 返回 |
+| 参数 | 作用 |
+|------|------|
+| `description` | UI/日志用的短标签,不影响行为 |
+| `prompt` | 任务,**自包含**:子 agent 看不到本对话,所有上下文都得写在这里 |
+| `subagent_type` | 可选 preset(见下);省略则 **fork** |
+| `run_in_background` | true=异步(完成后通知);false/省略=同步阻塞返回结果 |
+| `model` | 可选,覆盖父模型(如指定更便宜的) |
+| `tools` | 可选工具名白名单,与父 toolbelt 取交集 |
+
+### Fork vs Fresh
+
+- **Fork**(省略 `subagent_type`):child 继承父的 **system prompt**——共享的 harness 身份(base
+  规则、env、skills、memory),并共享其 prompt cache,所以便宜。**它不复制本对话的消息历史**(fresh
+  History),所以 `prompt` 仍要带全任务所需上下文。用于把噪声大的中间工具输出隔离出去、只把结论收回。
+- **Fresh**(给 `subagent_type`):child 零上下文 + 一个 preset persona。用于独立视角(如 code
+  review)或专门角色。
+
+### Sync vs Async
+
+- 默认 **async**(CLI/TUI):`run_in_background:true` 起后台、立即返回句柄,完成经通知注入对话。
+- **同步 transport**(HTTP server / IM 桥)没有后续回合通道,`SetSynchronous(true)` 让 `sub_agent`
+  走 `RunSync` 阻塞、把结果直接作为 tool_result 返回。此时即使模型传了 `run_in_background:true`
+  也被强制为同步,且**结果里明说**降级了(不静默吞掉模型的选择)。
+
+### 防递归
+
+子 agent 不能再起子 agent:`filterChildTools` 从 child 的 toolbelt 里丢掉 `sub_agent`(结构性保证),
+`IsSubAgent(ctx)` / `WithSubAgentMarker(ctx)` 是第二层兜底(防模型幻觉出不在 schema 里的工具)。递归
+一层封顶。
+
+## Preset(subagent_type)
+
+内置四个(`internal/tools/agent_presets.go`),`readOnly` 的会从 child toolbelt 过滤掉
+`write_file` / `edit_file`:
+
+| 名称 | 只读 | 用途 |
 |------|------|------|
-| `launch_agent` | 起一个自主子 agent 处理聚焦子任务,立即在后台运行 | `Started sub-agent <id>. You will be notified when it completes.` |
-| `send_message` | 给之前 `launch_agent` 起的、仍存活的子 agent 发新消息(它记得之前做的事) | `Message sent to <id>. You will be notified when it replies.` |
-| `agent_status` | 读子 agent 当前状态与最新结果 | 状态(`running`/`idle`/`exited`)+ 结果 |
-| `kill_agent` | 终止一个子 agent | 终止确认 |
+| `explore` | 是 | 只读调研:定位、理解代码 |
+| `plan` | 是 | 只读调研后产出计划 |
+| `general` | 否 | 全工具,端到端处理委派任务 |
+| `code-review` | 是 | 用 `git diff` 等审查改动 |
 
-`launch_agent` / `send_message` 的结果**不在工具返回里**——它们立即返回一句"已通知",真正的结果稍后
-经通知到达(见下文)。`agent_status` 是逃生舱:模型**不应轮询**它,只在用户显式询问或需要中途
-查进度时用。
-
-`launch_agent` 在 `readOnlyTools` 里为 `true`,所以模型一个 tool_use batch 可并行起多个子 agent。
-
-### 子 agent 拿不到 `launch_agent` / `send_message`
-
-`filterChildTools` 给子 agent 过滤工具时丢弃 `launch_agent` 和 `send_message`——子 agent **既不能
-spawn 也不能唤醒**别的子 agent,这两个工具是顶层专属。结构上(toolbelt 里没有)保证,
-`WithSubAgentMarker(ctx)` / `IsSubAgent(ctx)` 是第二层兜底(防模型幻觉出不在 schema 里的工具)。
+用户可在 `~/.octo/agents/*.md` 用 frontmatter(name / description / tools / read_only / model + persona
+正文)自定义 preset,`discoverAgents` 在查找前刷新,覆盖/补充内置集。
 
 ## 子 agent 的隔离与构造
 
-`agentSpawner.Spawn` 每次构造一个新 child:
+`Spawner.Spawn` 每次构造一个新 child:
 
 ```go
 child := agent.New(parent.Sender, model)   // 复用父的 Sender = 一条 provider 连接
 child.System = parent.System               // 共享 harness 身份（base + soul + env + skills + memory）
 child.MaxTokens = parent.MaxTokens
 child.Gate = parent.Gate                    // 续用同一权限门控
-child.MaxTurns = childMaxTurns              // 100，与父默认相同；每次 Continue 重新发这份预算
+child.MaxTurns = childMaxTurns              // child 专属 loop 预算
 ```
 
-隔离点:**fresh History**(子 agent 看不到父对话)、自己的 loop 预算。共享点:Sender(一条连接)、
-System(同一身份)、Gate(同一权限)、计费(子 agent token 累加进父 session 总数,`/cost` 报一个
-合并数字)。
-
-- `req.Model` 为空时继承父模型;非空可覆盖(如给子 agent 指定更便宜的模型)。
-- `req.Tools` 非空时与父 toolbelt 取交集,父可以给子 agent 一个受限工具集(如只读调研)。
-- 子 agent 跑到 `MaxTurns` 上限视为**失败**:`runChild` 返回 `sub-agent reached max-turns limit
-  — task incomplete`,而非把半成品当成功结果返回。
+- **隔离点**:fresh History(子 agent 看不到父对话)、自己的 loop 预算。
+- **共享点**:Sender(一条连接)、System(同一身份,fork 时连 cache 一起共享)、Gate(同一权限——
+  子 agent 不绕过权限)、计费(子 agent token 累加进父 session 总数,`/cost` 报合并数字)。
+- `req.Tools` 非空时与父 toolbelt 取交集;`req.Model` 非空时覆盖父模型。
+- **max-turns 不是失败**:child 跑到 `childMaxTurns` 上限时,`runChild` 返回**部分 reply** +
+  `StopReason="max_turns"`(而非报错)。`sub_agent` 的同步结果和异步完成通知都会把它标成
+  `[INCOMPLETE]`,这样父 agent 不会把半成品当完整答案——而不是静默丢掉这个信号。
 
 ## 可寻话与生命周期(childRegistry)
 
-子 agent `Spawn` 跑完**不丢弃**,而是留在 `childRegistry` 里保活,这样后续 `send_message`(经
-`Spawner.Continue`)能带着完整 history 再唤醒它。
+子 agent `Spawn` 跑完**不丢弃**,留在 `childRegistry` 里保活,后续续话(经 `Spawner.Continue`)能带
+完整 history 再唤醒它。
 
-- **id**:8 位 hex,与 `agent.Session` / `taskgraph` 短 id 同风格。
-- **保活范围**:纯 in-memory,生命周期 = 一个 REPL 会话。不写盘、不进 session JSON、不跨进程。
-  进程退出即清空。
-- **驱逐**:LRU 上限 8 个 + 30 分钟空闲 TTL。`put` / `get` 前都先 `evict`:先删 TTL 过期项,
-  再按最久未用(单调 `seq` 计数,与时钟无关)trim 到 8 个。被驱逐的 child 无需清理(无文件、无连接,
-  GC 即回收)。
+- **id**:8 位 hex,与 `agent.Session` 短 id 同风格。
+- **保活范围**:纯 in-memory,生命周期 = 一个会话。不写盘、不进 session JSON、不跨进程。
+- **驱逐**:LRU 上限 8 + 30 分钟空闲 TTL。`put` / `get` 前先 `evict`:先删 TTL 过期项,再按最久未用
+  (单调 `seq`,与时钟无关)trim 到 8。被驱逐的 child 无需清理(无文件、无连接,GC 即回收)。
 - **未知 / 已驱逐 id**:`Continue` 返回 `agent <id> is no longer alive (idle-expired or evicted);
-  launch a fresh sub-agent instead`,错误文案引导模型重新 `launch_agent`。
-- **无显式 close**:只靠 LRU/TTL 自动回收。
+  launch a fresh sub-agent instead`,引导模型重起。
 
 `runChild` 是 `Spawn` / `Continue` 共用的核心,处理三个并发/计费要点:
 
@@ -91,26 +112,28 @@ System(同一身份)、Gate(同一权限)、计费(子 agent token 累加进父 
 |------|------|
 | 同一 child 不能并发 `Run`(history 不能交替) | `liveChild.mu` 串行化对同一 child 的调用 |
 | `SessionTokens` 是累计值,多轮 accrue 会双计 | `liveChild.accruedIn/Out` 记上次累计,每轮只把增量 `AccrueChildUsage` 进父 |
-| 续话漏打递归 marker | `runChild` 统一 `WithSubAgentMarker(ctx)`,`Spawn` / `Continue` 共用 |
+| 续话漏打递归 marker | `runChild` 统一 `WithSubAgentMarker(ctx)` |
 
 ## 异步执行与通知(SubAgentManager)
 
 `SubAgentManager` 把执行层包成异步,对外句柄是顺序编号 `agent_1` / `agent_2` / …
 
-- **`Start(req)`**:登记一个 `asyncSubAgent`,起 goroutine 跑 `spawner.Spawn`,立即返回 `agent_N`。
-- **`Send(agentID, msg)`**:起 goroutine 跑 `spawner.Continue`,立即返回。
-- **busy / pending 队列**:一个子 agent 同时只处理一个请求。`Send` 时若它 busy,把消息存进
-  `pending`(深度 1);已有 pending 则报 `already has a pending message`。当前请求结束后自动发
-  pending。
-- **`Kill(id)`** / **`KillAll()`**:取消子 agent 的 ctx;`KillAll` 在会话关闭时调,清掉所有在途子
-  agent。
-- **`Read(id)`** / **`ListRunning()`**:供 `agent_status` 和 UI 查询;结果文本截断到 1 MiB。
+- **`Start(req)`**:登记一个 `asyncSubAgent`,起 goroutine 跑 `Spawn`,立即返回 `agent_N`。
+- **`Send(agentID, msg)`**:起 goroutine 跑 `Continue`,立即返回。
+- **busy / pending 队列**:一个子 agent 同时只处理一个请求。`Send` 时它 busy 则存进 `pending`(深度
+  1);已有 pending 则报 `already has a pending message`;当前请求结束后自动发 pending。
+- **并发上限**:`maxConcurrentSubAgents`(8)限制同时在跑的 async spawn——模型一次发一大批
+  `run_in_background:true` 也不会起无界个并发 agent loop。超限的新 spawn 被明确拒绝(让模型等),
+  续话(`Send`/`Continue`)轮不计入此上限(受 live-child 上限约束)。`activeAsync` 在 manager 锁下
+  计数,每个 spawn goroutine 结束时递减。
+- **`Kill(id)` / `KillAll()`**:取消子 agent 的 ctx;`KillAll` 在会话关闭时清掉所有在途子 agent。
+- **`Read(id)` / `ListRunning()`**:供 UI(TUI 面板)与关停查询,**不作为模型工具暴露**——async 子
+  agent 是纯 fire-and-forget + 完成通知,没有模型可见的 status/kill 工具。
 
 ### 通知投递
 
-子 agent 完成(`Spawn` 或 `Continue`)时,manager 触发 `onExit(SubAgentNotification)`。REPL 把这个
-hook 接到 **inbox/steer 路径**:通知格式化成一个 `<system-reminder>` 块注入对话,模型在下一轮把它
-当**环境事件**读(而非用户发言)。
+子 agent 完成(`Spawn` 或 `Continue`)时,manager 触发 `onExit(SubAgentNotification)`。REPL 把这个 hook
+接到 **inbox/steer 路径**:格式化成 `<system-reminder>` 注入对话,模型下一轮当**环境事件**读。
 
 ```
 <system-reminder>
@@ -118,25 +141,27 @@ hook 接到 **inbox/steer 路径**:通知格式化成一个 `<system-reminder>` 
 Sub-agent agent_1 (Find Banner TUI code) has completed.
 Result:
 <子 agent 的 final reply>
+[INCOMPLETE: this sub-agent hit its turn limit — the result above is partial, not a finished answer.]
 [usage] in 1234 / out 567
 </system-reminder>
 ```
 
-`Kind` 区分 `spawn_done`(首个任务完成)与 `message_reply`(回复了 send_message)。通知经 inbox 队列
-而非自动起新回合——不引入"agent 无人触发就自己开口"的意外行为,下一个自然回合自然把它处理掉。
+- `Kind` 区分 `spawn_done`(首个任务完成)与 `message_reply`(回复了续话)。
+- `StopReason="max_turns"` 时附 `[INCOMPLETE]` 行。
+- 通知经 inbox 队列,**不自动起新回合**——下一个自然回合处理掉,不引入"无人触发就自己开口"的行为。
 
 ## 时序图
 
 ```mermaid
 sequenceDiagram
     participant M as 父模型 (LLM)
-    participant T as launch_agent
+    participant T as sub_agent
     participant MGR as SubAgentManager
-    participant SP as agentSpawner
+    participant SP as Spawner
     participant C as child Agent
     participant IB as Inbox
 
-    M->>T: tool_use launch_agent(prompt)
+    M->>T: tool_use sub_agent(prompt, run_in_background:true)
     T->>MGR: Start(req)
     MGR-->>T: agent_1（立即）
     T-->>M: "Started sub-agent agent_1. You will be notified..."
@@ -149,54 +174,29 @@ sequenceDiagram
     SP-->>MGR: SpawnResult
     MGR->>IB: onExit → <system-reminder>[BACKGROUND COMPLETED]
     Note over M,IB: 下一回合，模型读到通知与结果
-
-    M->>MGR: tool_use send_message(agent_1, msg2)
-    MGR-->>M: "Message sent..."（立即）
-    MGR->>SP: [goroutine] Continue(agent_1, msg2)
-    Note over C: History 续上首轮之后
-    SP-->>MGR: reply2
-    MGR->>IB: onExit → message_reply 通知
 ```
 
-## 隔离边界与兼容性
+同步路径省去 MGR↔IB 的通知环节:`sub_agent` 直接 `RunSync` → `Spawn`,把结果作为 tool_result 返回。
 
-- **taskgraph(`octo goal`)**:只调 `Spawn`,不涉及续话/异步通知。其 spawner 的 registry 没人调
-  `Continue`,留存的 child 随该次前台进程退出释放。
-- **session JSON 持久化**:不涉及。registry 与 manager 都是纯 in-memory。
-- **provider / wire 格式**:不涉及。child 复用父的 `Sender`,与单 agent 多轮对话走同一路径。
+## 隔离边界与非目标
+
+- **session JSON 持久化**:不涉及——registry 与 manager 都是纯 in-memory,进程退出即清空。
+- **provider / wire 格式**:不涉及——child 复用父的 `Sender`,与单 agent 多轮对话走同一路径。
 - **权限门控**:子 agent 的 `Gate` 继承自父,续话续用同一 Gate。
+- 不做跨进程 / 跨会话持久化续话;不做父子之间的双向流式(通知是一次性的,不是流);递归一层封顶。
 
-## 非目标
+## 运行时实时显示(TUI)
 
-- 不做跨进程 / 跨会话持久化续话(需要时另设计:序列化 child History,复用
-  `internal/agent/session.go`)。
-- 不让 taskgraph 的 subtask 之间续话(DAG 仍靠 `Subtask.Result` 文本传递)。
-- 不给子 agent `launch_agent` / `send_message`(递归防护)。
-- 不做父子之间的双向流式(通知是一次性的,不是流)。
+TUI 底部一个 sub-agent 面板,实时呈现每个**活跃**子 agent 的 tool 调用链(类比 background-processes
+面板)。复用现有事件体系,不改 `agent.AgentEvent`:
 
-## 运行时实时显示
-
-TUI 在底部显示一个 sub-agent 面板,实时呈现每个**活跃**子 agent 的 tool 调用链——类比
-background-processes 面板。复用现有事件体系,不改 `agent.AgentEvent`:
-
-- **执行层**:`agentSpawner.runChild` 用 `RunStream`(而非 `Run`)跑子 agent。当 ctx 里带有事件
-  sink 时,把子 agent 的 `agent.AgentEvent` 中的 `tool_started` / `tool_error` 映射成
-  `tools.SubAgentEvent` 喂给 sink。**只转 tool 级事件**,不转 per-token 的 text/input delta——
-  多个并发子 agent 的 token 流会淹没事件循环,而面板要的是 tool 链。
-- **异步层**:`SubAgentManager` 有 `onEvent func(SubAgentEvent)`(与 `onExit` 完成回调并列)。
-  `Start` / `runContinue` 在调 `Spawn` / `Continue` 前,用 `WithSubAgentEventSink(ctx, sink)` 把一个
-  带 `agent_N` 标记的 sink 注入 ctx,并先发一个 `started` 事件(启动即显示)。没有 `onEvent` 时
-  不注入 sink,执行层不流式——taskgraph/headless 零开销、零行为变化。
-- **传递**:sink 走 **context**(`WithSubAgentEventSink` / `SubAgentEventSink`),所以 `Spawner`
-  接口签名不变,`internal/tools` 与 `cmd/octo` 解耦。
-- **TUI**:`subAgentEventMsg` 把事件投上事件循环;`subAgentUI` 状态(描述、起始时间、tool 计数、
-  最近几个 tool 名、错误标记)按 `agent_N` 聚合,渲染成 `tui.Panel`。子 agent 完成(`subAgentNoteMsg`)
-  时从面板移除;后续 `send_message` 再 `started` 重新加入。
-- **Plain REPL**:不接 `onEvent`——启动行由 `launch_agent` 的工具返回体现,完成由通知体现,不打印
-  内部 tool 链。
-
-约束:不持久化运行时事件(内存-only)、不改 `agent.AgentEvent` 定义、不在面板里支持
-kill/send_message 操作(仍通过工具调用)。
-
-**尚未做**:交互式展开/折叠看某个子 agent 的完整 tool 历史(需要焦点管理 + 按键)。当前面板每行
-内联显示最近几个 tool(`maxSubAgentRecentTools`)+ 累计计数,已覆盖"实时 tool 链"的核心。
+- **执行层**:`runChild` 用 `RunStream` 跑子 agent;ctx 里带事件 sink 时,把子 agent 的
+  `tool_started` / `tool_error` 映射成 `tools.SubAgentEvent` 喂 sink。**只转 tool 级事件**——多个并发
+  子 agent 的 token 流会淹没事件循环。
+- **异步层**:`SubAgentManager.onEvent`(与 `onExit` 并列)。`Start` / `runContinue` 调
+  `Spawn` / `Continue` 前用 `WithSubAgentEventSink(ctx, sink)` 注入带 `agent_N` 标记的 sink,并先发
+  `started`。没有 `onEvent` 时不注入 sink、执行层不流式——headless 零开销、零行为变化。
+- **传递**:sink 走 context,`Spawner` 接口签名不变,`internal/tools` 与 `cmd/octo` 解耦。
+- **TUI**:`subAgentUI` 状态按 `agent_N` 聚合,渲染成 `tui.Panel`;子 agent 完成时移除,续话再
+  `started` 重新加入。Web UI 有镜像同一事件流的 sub-agent 面板。
+- 约束:不持久化运行时事件、不在面板里支持 kill/续话(仍通过工具调用)。
