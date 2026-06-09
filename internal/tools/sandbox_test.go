@@ -17,9 +17,10 @@ func TestShellCommand_PlatformShell(t *testing.T) {
 	}
 	args := cmd.Args
 	if runtime.GOOS == "windows" {
-		// pwsh/powershell ... -Command "echo hi"
-		if len(args) < 2 || args[len(args)-2] != "-Command" || args[len(args)-1] != "echo hi" {
-			t.Errorf("windows shell should end with -Command \"echo hi\", got %v", args)
+		// pwsh/powershell ... -Command "<safe-rm wrapper>\n echo hi" — the
+		// command is embedded at the end of the Remove-Item trash wrapper.
+		if len(args) < 2 || args[len(args)-2] != "-Command" || !strings.Contains(args[len(args)-1], "echo hi") {
+			t.Errorf("windows shell should end with -Command containing \"echo hi\", got %v", args)
 		}
 		base := strings.ToLower(filepath.Base(args[0]))
 		if !strings.Contains(base, "pwsh") && !strings.Contains(base, "powershell") {
