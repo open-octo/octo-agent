@@ -413,11 +413,20 @@ func (m *BackgroundManager) Remove(id string) {
 
 // KillAll terminates every tracked process. Called on session shutdown so no
 // background command is orphaned.
+//
+// Cancelling the context alone only SIGKILLs the direct child — the shell
+// wrapper (sh -c / pwsh) that shellCommand spawns. Any process that wrapper
+// started (the actual long-running server) would be reparented and survive.
+// So, like Kill, we signal the whole process group (POSIX kill(-pid); Windows
+// taskkill /T) to take the wrapper's children down with it.
 func (m *BackgroundManager) KillAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, p := range m.procs {
 		p.cancel()
+		if p.proc != nil {
+			_ = killProcessGroup(p.proc, "SIGKILL")
+		}
 	}
 }
 
