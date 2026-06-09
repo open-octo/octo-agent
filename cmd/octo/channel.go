@@ -233,6 +233,9 @@ func runChannelStart(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 
 	fmt.Fprintln(stdout, "\nocto channel: shutting down...")
 	_ = mgr.Stop()
+	// Reap any background processes the IM sessions started so they don't
+	// outlive the bridge — parity with the CLI/TUI and web-server shutdown.
+	tools.KillAllBackground()
 	return 0
 }
 

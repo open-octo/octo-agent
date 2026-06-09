@@ -296,6 +296,11 @@ func (s *Server) ListenAndServe() error {
 // sub-agent + task registrations installed by enableSubAgentTools.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.stopChannels()
+	// Kill background processes started via web/IM sessions so they don't
+	// outlive the daemon — the same orphan-prevention the CLI/TUI do on exit.
+	// terminal background commands run through the process-global manager
+	// regardless of which session launched them, so one call covers all.
+	tools.KillAllBackground()
 	tools.SetDefaultSubAgentManager(nil)
 	tools.SetTaskStore(nil)
 	if s.mcpCleanup != nil {
