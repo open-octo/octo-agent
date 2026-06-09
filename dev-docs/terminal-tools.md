@@ -111,9 +111,17 @@ wire).
 Two distinct needs, two distinct mechanisms:
 
 - **Completion is pushed.** When a tracked process exits, the manager's
-  `onExit` hook fires with the final output; the REPL injects a
-  `[BACKGROUND COMPLETED]` system-reminder into the conversation. The model
-  never needs to poll to learn that a process finished or to get its result.
+  `onExit` hook fires with its exit status and the output produced since the
+  last read. The REPL (`formatBgNote`) wraps that as a `<system-reminder>`
+  `[BACKGROUND COMPLETED]` block and rides the existing steer path
+  (`Agent.Steer`): folded into the next `tool_result` when a turn is running,
+  or prepended to the next turn when idle. It is a `<system-reminder>` so the
+  model reads it as an environment event, not user speech — and idle delivery
+  never auto-starts a turn (the notice waits for the next turn the user
+  initiates; the process is also visible in `terminal_list` meanwhile). The
+  model never needs to poll to learn a process finished or to get its result.
+  The hook reads via the cursor (`readNew`), so anything pushed is already
+  consumed and won't reappear in a later read. Wired in the CLI/TUI REPL only.
 
 - **Progress is pulled, as a snapshot.** `terminal_output` returns the last N
   lines (`lines`, default 50) plus status via `bgProcess.tail`, which does
@@ -125,6 +133,34 @@ Two distinct needs, two distinct mechanisms:
 The internal cursor read (`readNew`) still exists for the synchronous poll loop
 and the completion push; only the model-facing `terminal_output` uses the
 non-advancing snapshot.
+
+## Parallelism
+
+The model's concurrency is **process-parallel, turn-serial**: many background
+processes run at once, but the agent loop still takes one turn at a time.
+
+- `BackgroundManager` is a `map[id]*bgProcess` with two goroutines per process
+  (reader + waiter), so N `run_in_background` launches run concurrently. The
+  agent fires several off, continues other work, and reacts to each completion
+  as its push arrives — in completion order. Multiple completions drained in
+  one iteration are surfaced together.
+- Within a single tool batch, the agent loop dispatches calls concurrently
+  **only when every call is read-only** (`readOnlyTools`: `read_file`, `glob`,
+  `grep`, `web_fetch`, `web_search`) — see `dispatchTools` / `canParallelize`.
+  A batch containing any writing or shell-out tool runs serially, and the
+  permission gate always runs serially first so two prompts can't race stdin.
+
+## Non-goals
+
+- **Parallel dispatch of mutating tools.** Concurrent `edit_file` / `terminal`
+  in one batch would need a write-conflict policy, serialized permission
+  prompts, and `tool_use_id`-keyed result alignment — out of scope; mutating
+  batches stay serial.
+- **Multiple in-flight turns.** Always one turn at a time; background
+  completions queue and are consumed by subsequent turns.
+- **Desktop/system notifications and persistent background state.** Background
+  tracking is in-memory and dies with the host process (after the shutdown
+  reap).
 
 ## Cross-platform shell
 
