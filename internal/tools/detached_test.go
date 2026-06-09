@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Leihb/octo-agent/internal/sandbox"
 )
 
 var pidRe = regexp.MustCompile(`pid (\d+)`)
@@ -97,4 +99,55 @@ func TestTerminal_Detached_DefaultLogIsNohupOut(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("default log %s never received output", want)
+}
+
+// TestTerminal_Detached_HonorsSandbox proves detached is NOT special-cased out
+// of the OS sandbox: when a sandbox is active, a detached daemon is confined
+// just like any terminal command — a write inside the project root succeeds, a
+// write outside it is blocked. Skipped where the OS can't enforce a sandbox.
+func TestTerminal_Detached_HonorsSandbox(t *testing.T) {
+	if !sandbox.Available() {
+		t.Skip("no OS sandbox available on this host")
+	}
+	cwd := t.TempDir()
+	p := sandbox.DefaultPolicy(cwd)
+	SetSandbox(&p)
+	defer SetSandbox(nil)
+
+	home, _ := os.UserHomeDir()
+	outside := filepath.Join(home, ".octo_detached_sbx_probe")
+	_ = os.Remove(outside)
+	defer os.Remove(outside)
+	inside := filepath.Join(cwd, "inside.txt")
+
+	// Attempt the forbidden write FIRST, then the allowed one — so once
+	// inside.txt appears we know the outside write was already attempted (and,
+	// if the sandbox is applied, blocked).
+	ctx := WithWorkingDir(context.Background(), cwd)
+	res, err := TerminalTool{}.Execute(ctx, "terminal", map[string]any{
+		"command":  "echo out > " + outside + "; echo in > " + inside,
+		"detached": true,
+		"log_file": filepath.Join(cwd, "d.log"),
+	})
+	if err != nil {
+		t.Fatalf("detached launch: %v", err)
+	}
+	if m := pidRe.FindStringSubmatch(res.Text); m != nil {
+		pid, _ := strconv.Atoi(m[1])
+		defer func() { _ = syscall.Kill(pid, syscall.SIGKILL) }()
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(inside); err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if _, err := os.Stat(inside); err != nil {
+		t.Fatalf("allowed write inside the sandbox root never happened: %v", err)
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Errorf("detached process wrote %s outside the sandbox root — sandbox was not applied", outside)
+	}
 }

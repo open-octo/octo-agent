@@ -75,10 +75,24 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 		}
 		return cmd, err
 	}
-	name, args, env := shellInvocation(ctx, command)
-	cmd := exec.CommandContext(ctx, name, args...)
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		// -NoProfile: reproducible env (don't run the user's $PROFILE).
+		// -NonInteractive: never block on a PowerShell prompt mid-command.
+		cmd = exec.CommandContext(ctx, resolvePowerShell(), "-NoProfile", "-NonInteractive", "-Command", command)
+	} else {
+		projectDir := WorkingDir(ctx)
+		if projectDir == "" {
+			projectDir, _ = os.Getwd()
+		}
+		if projectDir != "" {
+			trashDir := trash.ProjectDir(projectDir)
+			wrapped := fmt.Sprintf(safeRmWrapper, command)
+			cmd = exec.CommandContext(ctx, "sh", "-c", wrapped)
+			cmd.Env = append(os.Environ(), "OCTO_TRASH_DIR="+trashDir)
+		} else {
+			cmd = exec.CommandContext(ctx, "sh", "-c", command)
+		}
 	}
 	if attr := setProcessGroupOpts(); attr != nil {
 		cmd.SysProcAttr = attr
@@ -87,53 +101,27 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// shellInvocation returns the shell program, its argv, and any extra env needed
-// to run `command` via the platform shell: POSIX `sh -c` (with the safe-rm
-// trash wrapper when a project dir is known) on macOS/Linux, PowerShell on
-// Windows. Both shellCommand and detachedCommand build their *exec.Cmd from
-// this so the wrapping stays identical regardless of how the process is bound.
-func shellInvocation(ctx context.Context, command string) (name string, args []string, env []string) {
-	if runtime.GOOS == "windows" {
-		// -NoProfile: reproducible env (don't run the user's $PROFILE).
-		// -NonInteractive: never block on a PowerShell prompt mid-command.
-		return resolvePowerShell(), []string{"-NoProfile", "-NonInteractive", "-Command", command}, nil
-	}
-	projectDir := WorkingDir(ctx)
-	if projectDir == "" {
-		projectDir, _ = os.Getwd()
-	}
-	if projectDir != "" {
-		trashDir := trash.ProjectDir(projectDir)
-		wrapped := fmt.Sprintf(safeRmWrapper, command)
-		return "sh", []string{"-c", wrapped}, []string{"OCTO_TRASH_DIR=" + trashDir}
-	}
-	return "sh", []string{"-c", command}, nil
-}
-
 // detachedCommand builds an *exec.Cmd that runs `command` fully detached from
-// the agent harness. Two things make it outlive octo, unlike shellCommand:
-//   - setDetachedProcessOpts starts it in a NEW session (setsid on POSIX,
-//     DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP on Windows), so it has its own
-//     process group and the harness's kill(-pgid) / taskkill can't reach it;
-//   - it is NOT bound to a cancelable context, so a turn ending — or the agent
-//     loop tearing down ctx — can't kill it.
+// the agent harness, while otherwise behaving exactly like a normal terminal
+// command — same shell wrapping, same OS-sandbox confinement when one is
+// active. It differs from shellCommand in only two ways:
+//   - it builds on context.WithoutCancel(ctx), so the daemon keeps the working
+//     dir but a turn ending (ctx cancellation) can't kill it;
+//   - it overrides SysProcAttr to start the process in a NEW session (setsid on
+//     POSIX, DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP on Windows), so the
+//     harness's kill(-pgid) / taskkill can't reach it.
 //
 // The caller wires stdio (a detached daemon must not hold the harness's pipes)
-// and must not track it in the BackgroundManager: it is fire-and-forget.
-// Deliberately bypasses the OS sandbox — detaching is an explicit "escape the
-// harness" action, and confining a process you're handing back to the user is
-// contradictory.
-func detachedCommand(ctx context.Context, command string) *exec.Cmd {
-	name, args, env := shellInvocation(ctx, command)
-	cmd := exec.Command(name, args...)
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
+// and must not track it in the BackgroundManager: it is fire-and-forget. The
+// sandbox sets confinement via the wrapper exe/profile, not SysProcAttr, so
+// overriding the latter doesn't weaken it.
+func detachedCommand(ctx context.Context, command string) (*exec.Cmd, error) {
+	cmd, err := shellCommand(context.WithoutCancel(ctx), command)
+	if err != nil {
+		return nil, err
 	}
-	if attr := setDetachedProcessOpts(); attr != nil {
-		cmd.SysProcAttr = attr
-	}
-	applyWorkingDir(ctx, cmd)
-	return cmd
+	cmd.SysProcAttr = setDetachedProcessOpts()
+	return cmd, nil
 }
 
 // applyWorkingDir roots the command in the conductor-stamped working directory
