@@ -14,6 +14,14 @@ func setProcessGroupOpts() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setpgid: true}
 }
 
+// setDetachedProcessOpts starts the child in a NEW session (setsid), making it
+// a session+group leader detached from the harness. Unlike a Setpgid child, the
+// harness's kill(-pgid) can't reach it, so it survives session exit — used for
+// deliberately detached daemons (terminal detached:true).
+func setDetachedProcessOpts() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{Setsid: true}
+}
+
 // killProcessGroup sends the named signal to the process group rooted at p.
 // Supported names: SIGTERM, SIGINT, SIGKILL (default). On POSIX it sends the
 // signal to -Pid (the whole group).

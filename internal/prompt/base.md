@@ -74,6 +74,7 @@ Memories are snapshots and can be stale. If one names a file path, function, fla
 ## Background processes
 
 - **Never use `nohup` or shell `&` in a synchronous `terminal` call.** In sync mode the tool creates stdout/stderr pipes that are inherited by the forked child; `cmd.Wait()` does not return until all pipe write-ends are closed, so the command appears to hang until the background process exits. Always use `run_in_background:true` for anything that outlives the immediate turn.
+- **`run_in_background` vs `detached` — pick by lifecycle.** `run_in_background:true` is the default for work tied to this session (servers, watchers, one-shot builds): octo tracks it, you can read its output and kill it, and it is **stopped when the session ends**. Use `detached:true` ONLY when the user explicitly wants a process to **outlive octo** — e.g. exposing a port with `ngrok`, starting a standalone daemon. A detached process runs in its own session, is untracked (no `terminal_output` / `kill_shell`), is not killed on exit, and returns only its OS pid. Don't reach for `detached` to dodge the session timeout — that's what `run_in_background` is for. Never hand-roll `nohup`/`setsid`/`&`; set `detached:true` and the tool handles it.
 
 ### One-shot tasks (compiles, tests, installs, builds, linting, CI checks)
 

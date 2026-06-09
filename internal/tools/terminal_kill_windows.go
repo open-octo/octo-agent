@@ -16,6 +16,21 @@ import (
 // Child-tree termination is handled in killProcessGroup via taskkill instead.
 func setProcessGroupOpts() *syscall.SysProcAttr { return nil }
 
+// Windows process-creation flags for a fully detached daemon. DETACHED_PROCESS
+// gives the child no console; CREATE_NEW_PROCESS_GROUP makes it the root of a
+// new group so it isn't tied to the harness's console/Ctrl events.
+const (
+	detachedProcess       = 0x00000008
+	createNewProcessGroup = 0x00000200
+)
+
+// setDetachedProcessOpts starts the child detached from the harness console in
+// its own process group, so it survives session exit — the Windows counterpart
+// of setsid, used for terminal detached:true.
+func setDetachedProcessOpts() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{CreationFlags: detachedProcess | createNewProcessGroup}
+}
+
 // processExists checks whether a process with the given PID is still running.
 func processExists(pid int) bool {
 	out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH").Output()

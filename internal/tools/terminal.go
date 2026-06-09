@@ -73,7 +73,15 @@ func (TerminalTool) Definition() agent.ToolDefinition {
 				},
 				"run_in_background": map[string]any{
 					"type":        "boolean",
-					"description": "Run detached in the background (no 120s timeout, non-blocking). Returns a process id. Use for one-shot tasks that take more than a few seconds (compiling, testing, installing, building, CI checks) or for long-running services (servers, watchers). For one-shot tasks the system auto-notifies on completion. For long-running services, verify with an external check (e.g., curl, pgrep) rather than polling terminal_output.",
+					"description": "Run detached in the background (no 120s timeout, non-blocking). Returns a process id. Use for one-shot tasks that take more than a few seconds (compiling, testing, installing, building, CI checks) or for long-running services (servers, watchers). For one-shot tasks the system auto-notifies on completion. For long-running services, verify with an external check (e.g., curl, pgrep) rather than polling terminal_output. The process is tracked by octo and KILLED when the session ends — for a daemon meant to outlive octo, use detached:true instead.",
+				},
+				"detached": map[string]any{
+					"type":        "boolean",
+					"description": "Launch the command as a daemon that DELIBERATELY outlives octo: it runs in its own session, is NOT tracked, and is NOT killed when the session ends. Returns only the OS pid — terminal_output and kill_shell cannot see it, so the user manages it themselves (e.g. `kill <pid>`). Use ONLY when the user explicitly wants a process to survive the agent (e.g. exposing a port with ngrok, starting a standalone server). For tasks that should be cleaned up with the session, use run_in_background instead. No `nohup`/`&` needed — detachment is handled for you. stdout+stderr go to log_file.",
+				},
+				"log_file": map[string]any{
+					"type":        "string",
+					"description": "Where a detached:true process writes stdout+stderr. Relative paths resolve against the working dir; ~ is expanded. Defaults to ./nohup.out. Ignored unless detached:true.",
 				},
 			},
 			"required": []string{"command"},
@@ -118,6 +126,20 @@ func (t TerminalTool) ExecuteStream(
 	}
 	if err := guardCommand(command); err != nil {
 		return agent.ToolResult{Text: ""}, err
+	}
+
+	// Detached launch: a daemon that deliberately outlives octo. Not tracked, not
+	// killed on exit — fire-and-forget. The guard above still applies. Checked
+	// before run_in_background so detached wins if both are set.
+	if det, _ := input["detached"].(bool); det {
+		logFile, _ := input["log_file"].(string)
+		pid, logPath, err := startDetached(ctx, command, logFile)
+		if err != nil {
+			return agent.ToolResult{Text: ""}, err
+		}
+		return agent.ToolResult{Text: fmt.Sprintf(
+			"Started detached process (pid %d). It runs independently of octo and will NOT be tracked or stopped when this session ends — manage it yourself (e.g. `kill %d`). stdout+stderr → %s",
+			pid, pid, logPath)}, nil
 	}
 
 	// Background launch: detach, no timeout, return the id immediately. The
