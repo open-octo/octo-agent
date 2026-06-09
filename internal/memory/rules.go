@@ -14,9 +14,43 @@ package memory
 
 import (
 	"bufio"
+	"fmt"
 	"regexp"
 	"strings"
 )
+
+// Lint inspects a memory dir's MEMORY.md for problems that silently degrade
+// recall, returning human-readable warnings (nil when clean):
+//   - the index exceeds the injection budget, so entries past the cut are not
+//     loaded into the session;
+//   - a bullet under a 触发提醒 (triggered) section has no parseable
+//     "(触发: …)" clause, so it can never be recalled — the most common
+//     silent failure, since the rule still looks present in the file.
+//
+// It lints the injected view (truncated to the budget), matching what is
+// actually active this session.
+func Lint(dir string) []string {
+	raw, truncated := loadIndex(dir)
+	var warns []string
+	if truncated {
+		warns = append(warns, "MEMORY.md exceeds the injection budget (200 lines / 25KB) — entries past the cut are not loaded. Prune it or move detail into topic files.")
+	}
+	for _, r := range parseRules(raw).Triggered {
+		if len(r.Triggers) == 0 {
+			warns = append(warns, fmt.Sprintf("rule under 触发提醒 has no (触发: …) clause and will never be recalled — add one or move it to 必须遵守: %q", oneLine(r.Text)))
+		}
+	}
+	return warns
+}
+
+// oneLine collapses a rule to a short single-line form for warning output.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 60 {
+		s = s[:57] + "…"
+	}
+	return s
+}
 
 // Rule is one actionable memory item parsed from MEMORY.md's structured
 // sections. Text is the full rule; Triggers is empty for always-apply rules.

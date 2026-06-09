@@ -240,7 +240,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	listSkills := fs.Bool("list-skills", false, "Print available skills (user + project) and exit")
 	enableTools := fs.Bool("tools", true, "Built-in tools (terminal, edit_file, …) for the agentic loop. On by default; use --no-tools to disable.")
 	noTools := fs.Bool("no-tools", false, "Disable the built-in tools (and MCP/skill execution) — plain chat only")
-	noMemory := fs.Bool("no-memory", false, "Disable cross-session memory (the remember tool + memory injection)")
+	noMemory := fs.Bool("no-memory", false, "Disable cross-session memory (MEMORY.md injection + the writable memory directory)")
 	plain := fs.Bool("plain", false, "Render tool events as one-line ↳ status lines instead of rich diff cards")
 	promptFile := fs.String("prompt-file", "", "Read the prompt from this file (newlines preserved) and run it as one headless agentic turn, then exit. For scripting/eval.")
 	noTUI := fs.Bool("no-tui", false, "Force the headless one-shot path on a terminal instead of the interactive TUI (also OCTO_TUI=0). The prompt comes from a positional message, --prompt-file, or piped stdin.")

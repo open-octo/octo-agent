@@ -34,18 +34,53 @@ const (
 	maxInjectBytes = 25 * 1024
 )
 
-// ProjectRoot returns the git top-level containing dir, or dir itself when it's
-// not in a git repo (or git is unavailable). Memory is scoped per repo root.
+// ProjectRoot returns the repo root that memory is scoped to for dir, or dir
+// itself when it's not in a git repo (or git is unavailable).
+//
+// It derives the root from the git *common* dir rather than the per-worktree
+// top-level, so every linked worktree of a repo shares one memory scope (a
+// worktree checkout doesn't start with empty project memory). The common dir is
+// `<root>/.git`, shared by the main worktree and all linked ones:
+//   - main worktree → ".git" (relative to dir) → root = dir
+//   - linked worktree → "<root>/.git" (absolute) → root = <root>
+//
+// Either way the main-checkout result is unchanged from the old --show-toplevel
+// behavior, so existing memory dirs keep their slug.
 func ProjectRoot(dir string) string {
 	if dir == "" {
 		return ""
 	}
+	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output(); err == nil {
+		common := strings.TrimSpace(string(out))
+		if common != "" {
+			if !filepath.IsAbs(common) {
+				common = filepath.Join(dir, common) // relative paths are relative to `dir` (the -C target)
+			}
+			common = filepath.Clean(common)
+			if filepath.Base(common) == ".git" {
+				return resolveSymlinks(filepath.Dir(common))
+			}
+			// Bare repo or unusual layout — fall through to the top-level.
+		}
+	}
 	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output(); err == nil {
 		if root := strings.TrimSpace(string(out)); root != "" {
-			return root
+			return resolveSymlinks(root)
 		}
 	}
 	return dir
+}
+
+// resolveSymlinks returns the symlink-free form of p so the same repo always
+// maps to one slug — git reports a resolved absolute path for a linked
+// worktree's common dir, and the old --show-toplevel was likewise resolved, so
+// the main checkout and its worktrees must normalize the same way. Falls back
+// to p when it can't be resolved.
+func resolveSymlinks(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
 }
 
 // Dir returns the memory directory for repoRoot: ~/.octo/memories/<repo-slug>.
@@ -86,26 +121,49 @@ func EnsureDir(dir string) error { return os.MkdirAll(dir, 0o755) }
 // LoadIndex returns MEMORY.md truncated to the injection budget, or "" when the
 // file is absent or empty.
 func LoadIndex(dir string) string {
+	s, _ := loadIndex(dir)
+	return s
+}
+
+// loadIndex returns the truncated index and whether truncation dropped any
+// content (the file exceeded maxInjectBytes or maxInjectLines).
+func loadIndex(dir string) (string, bool) {
 	b, err := os.ReadFile(filepath.Join(dir, IndexFile))
 	if err != nil {
-		return ""
+		return "", false
 	}
 	return truncateForInjection(string(b))
 }
 
-func truncateForInjection(s string) string {
+// truncateForInjection clamps s to the injection budget and reports whether
+// anything was dropped.
+func truncateForInjection(s string) (string, bool) {
+	truncated := false
 	if len(s) > maxInjectBytes {
 		s = s[:maxInjectBytes]
+		truncated = true
 	}
 	sc := bufio.NewScanner(strings.NewReader(s))
 	sc.Buffer(make([]byte, 0, 64*1024), maxInjectBytes+1024)
 	var b strings.Builder
-	for n := 0; n < maxInjectLines && sc.Scan(); n++ {
+	n := 0
+	for n < maxInjectLines && sc.Scan() {
 		b.WriteString(sc.Text())
 		b.WriteByte('\n')
+		n++
 	}
-	return strings.TrimRight(b.String(), "\n")
+	if sc.Scan() { // a line remains past the cap
+		truncated = true
+	}
+	return strings.TrimRight(b.String(), "\n"), truncated
 }
+
+// truncationWarning is appended inside an injected index that was cut to the
+// budget, so the model (and the user via `octo memory`) knows entries are
+// missing rather than silently losing them.
+const truncationWarning = "\n\n⚠ This MEMORY.md exceeds the injection budget (" +
+	"200 lines / 25KB); entries past the cut are NOT loaded this session. " +
+	"Prune it or move detail into topic files."
 
 // RenderInjection builds the memory section for the system prompt: an
 // instruction block telling the model where its memory lives and how to manage
@@ -146,13 +204,19 @@ func RenderInjection(dir string, inheritedDirs ...string) string {
 
 	// Inject inherited memories first (global / home-dir), then project-specific.
 	for _, d := range inheritedDirs {
-		if idx := LoadIndex(d); idx != "" {
+		if idx, trunc := loadIndex(d); idx != "" {
 			b.WriteString("\n## " + IndexFile + " (inherited from " + d + ")\n\n" + idx)
+			if trunc {
+				b.WriteString(truncationWarning)
+			}
 		}
 	}
 
-	if idx := LoadIndex(dir); idx != "" {
+	if idx, trunc := loadIndex(dir); idx != "" {
 		b.WriteString("\n## " + IndexFile + "\n\n" + idx)
+		if trunc {
+			b.WriteString(truncationWarning)
+		}
 	} else {
 		b.WriteString("\n(" + IndexFile + " is empty — start it when there's something worth remembering.)")
 	}

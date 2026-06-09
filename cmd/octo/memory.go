@@ -45,12 +45,22 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 
 	fmt.Fprintf(stdout, "Memory directory: %s\n", dir)
 	printDirEntries(stdout, dir)
+	printLint(stdout, dir)
 
 	if homeDir != "" {
 		fmt.Fprintf(stdout, "\nInherited memories: %s\n", homeDir)
 		printDirEntries(stdout, homeDir)
+		printLint(stdout, homeDir)
 	}
 	return 0
+}
+
+// printLint surfaces MEMORY.md problems that would otherwise fail silently
+// (over-budget truncation, un-recallable triggered rules).
+func printLint(w io.Writer, dir string) {
+	for _, warn := range memory.Lint(dir) {
+		fmt.Fprintf(w, "  ⚠ %s\n", warn)
+	}
 }
 
 func printDirEntries(w io.Writer, dir string) {

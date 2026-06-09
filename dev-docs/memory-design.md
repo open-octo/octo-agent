@@ -18,11 +18,14 @@ separate and described in `identity-files-design.md`.
   <topic>.md     detail files the agent creates and reads on demand
 ```
 
-- **Per repo.** The directory is keyed by the git top-level of the working
-  directory (`memory.ProjectRoot`), so each project has its own memory and
-  facts don't bleed across repos. Outside a git repo the working directory is
-  used. The slug is the repo basename plus a short hash of the full path, so two
-  checkouts that share a basename don't collide.
+- **Per repo, shared across worktrees.** The directory is keyed by the repo
+  root (`memory.ProjectRoot`), so each project has its own memory and facts
+  don't bleed across repos. The root is derived from the git *common* dir
+  (`<root>/.git`), which the main checkout and every linked worktree share, so a
+  worktree doesn't start with empty project memory; the result is symlink-
+  resolved so one repo always maps to one slug. Outside a git repo the working
+  directory is used. The slug is the repo basename plus a short hash of the full
+  path, so two checkouts that share a basename don't collide.
 - **Inheritance.** The home directory (`~`) also has its own memory slot.
   When running inside any project, the home MEMORY.md is injected *before* the
   project MEMORY.md, so cross-project preferences and personal facts are
@@ -31,8 +34,11 @@ separate and described in `identity-files-design.md`.
   preferences go to the home (inherited) memory.
 - **MEMORY.md is the index.** It is loaded into the system prompt at session
   start, truncated to the first 200 lines / 25 KB (whichever comes first),
-  mirroring Claude Code's cap. Topic files are not loaded up front — the agent
-  reads them on demand with its file tools when MEMORY.md points at one.
+  mirroring Claude Code's cap. When the file exceeds that budget the injected
+  block carries an explicit truncation warning (so entries past the cut aren't
+  dropped silently), and `octo memory` lints for it. Topic files are not loaded
+  up front — the agent reads them on demand with its file tools when MEMORY.md
+  points at one.
 
 ## Injection
 
