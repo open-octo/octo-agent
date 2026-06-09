@@ -12,9 +12,11 @@ import (
 
 // channelInfo is the safe-for-frontend view of a platform config (secrets masked).
 type channelInfo struct {
-	Platform string            `json:"platform"`
-	Enabled  bool              `json:"enabled"`
-	Fields   map[string]string `json:"fields"`
+	Platform  string            `json:"platform"`
+	Enabled   bool              `json:"enabled"`
+	Running   bool              `json:"running"`
+	HasConfig bool              `json:"has_config"`
+	Fields    map[string]string `json:"fields"`
 }
 
 var secretKeys = map[string]bool{
@@ -37,6 +39,7 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	out := make([]channelInfo, 0, len(cfg.Channels))
 	for name, pc := range cfg.Channels {
 		info := platformToInfo(name, pc)
+		info.Running = s.isAdapterRunning(name)
 		out = append(out, info)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"channels": out})
@@ -62,7 +65,9 @@ func (s *Server) handleGetChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, platformToInfo(platform, pc))
+	info := platformToInfo(platform, pc)
+	info.Running = s.isAdapterRunning(platform)
+	writeJSON(w, http.StatusOK, info)
 }
 
 type channelUpdateRequest struct {
@@ -234,10 +239,22 @@ func platformToInfo(name string, pc channel.PlatformConfig) channelInfo {
 	}
 
 	return channelInfo{
-		Platform: name,
-		Enabled:  enabled,
-		Fields:   fields,
+		Platform:  name,
+		Enabled:   enabled,
+		HasConfig: true,
+		Fields:    fields,
 	}
+}
+
+// isAdapterRunning reports whether the platform adapter is currently active.
+func (s *Server) isAdapterRunning(platform string) bool {
+	if s.channelMgr == nil {
+		return false
+	}
+	if !s.channelMgr.IsRunning() {
+		return false
+	}
+	return s.channelMgr.AdapterFor(platform) != nil
 }
 
 func maskSecret(s string) string {
