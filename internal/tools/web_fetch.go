@@ -89,6 +89,15 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 	if strings.TrimSpace(raw) == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: url is required")
 	}
+	// Strip a mistakenly-passed Jina prefix so both the proxy and fallback
+	// paths operate on the original URL.
+	jinaHost := jinaReaderHostForTest
+	if !strings.HasSuffix(jinaHost, "/") {
+		jinaHost += "/"
+	}
+	if strings.HasPrefix(raw, jinaHost) {
+		raw = strings.TrimPrefix(raw, jinaHost)
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: parse url: %w", err)
