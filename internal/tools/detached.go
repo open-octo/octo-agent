@@ -29,7 +29,11 @@ func startDetached(ctx context.Context, command, logFile string) (pid int, logPa
 		return 0, "", fmt.Errorf("detached: open log %q: %w", logPath, err)
 	}
 
-	cmd := detachedCommand(ctx, command)
+	cmd, err := detachedCommand(ctx, command)
+	if err != nil {
+		_ = f.Close()
+		return 0, "", fmt.Errorf("detached: build command: %w", err)
+	}
 	cmd.Stdout = f
 	cmd.Stderr = f
 	cmd.Stdin = nil // nil Stdin = /dev/null; a detached daemon must not hold the harness's stdin
