@@ -27,8 +27,7 @@ func main() {
 // lets the test harness drive the CLI without spawning a subprocess.
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		printUsage(stdout)
-		return 0
+		return runChat(args, stdin, stdout, stderr)
 	}
 
 	// Materialize the binary's default skills to ~/.octo/skills-default so
@@ -98,7 +97,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "octo — a functionality-first AI agent in a single Go binary.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Usage: octo <command>")
+	fmt.Fprintln(w, "Usage: octo [command]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "With no command, octo starts an interactive chat session (same as `octo chat`).")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  chat       Start an interactive session (or single-turn with a message)")
