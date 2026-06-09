@@ -337,11 +337,6 @@ func (m *BackgroundManager) Kill(id string) bool {
 
 // KillWithSignal terminates the process for id with the named signal.
 // Supported signals: SIGKILL, SIGTERM, SIGINT. Returns false when id is unknown.
-//
-// For SIGKILL we also cancel the context so exec.CommandContext sends its own
-// SIGKILL as a belt-and-suspenders fallback.  For SIGTERM/SIGINT we skip the
-// context cancellation — otherwise exec would race in with an automatic SIGKILL
-// and defeat the graceful shutdown.
 func (m *BackgroundManager) KillWithSignal(id string, sigName string) bool {
 	m.mu.Lock()
 	p := m.procs[id]
@@ -349,13 +344,30 @@ func (m *BackgroundManager) KillWithSignal(id string, sigName string) bool {
 	if p == nil {
 		return false
 	}
+	terminate(p, sigName)
+	return true
+}
+
+// terminate is the single chokepoint for taking a background process down — the
+// one place that knows how to do it correctly, so Kill / KillAll / Remove can't
+// drift apart (every past orphan/leak bug came from one of them forgetting a
+// step). Two rules live here and nowhere else:
+//   - Always signal the whole process GROUP (POSIX kill(-pid); Windows
+//     taskkill /T), not just the direct child — otherwise the shell wrapper
+//     (sh -c / pwsh) dies and the real process it spawned is orphaned.
+//   - Only cancel the context on SIGKILL (exec.CommandContext fires its own
+//     SIGKILL as a backstop). For SIGTERM/SIGINT we must NOT cancel, or exec
+//     would race in with an automatic SIGKILL and defeat the graceful stop.
+func terminate(p *bgProcess, sigName string) {
+	if p == nil {
+		return
+	}
 	if sigName == "SIGKILL" {
-		p.cancel() // CommandContext will also fire SIGKILL
+		p.cancel()
 	}
 	if p.proc != nil {
 		_ = killProcessGroup(p.proc, sigName)
 	}
-	return true
 }
 
 // WriteStdin sends text to the stdin of a running background process.
@@ -404,35 +416,22 @@ func (m *BackgroundManager) Remove(id string) {
 	p, ok := m.procs[id]
 	delete(m.procs, id)
 	m.mu.Unlock()
-	// Belt-and-suspenders: if Remove is ever called on a still-running id,
-	// take it down so it can't outlive its map entry. Cancelling alone only
-	// SIGKILLs the shell wrapper and orphans its children, so — like Kill and
-	// KillAll — also signal the whole process group. A no-op on an already
-	// exited process (the common reap path), where the group is gone.
-	if ok && p != nil {
-		p.cancel()
-		if p.proc != nil {
-			_ = killProcessGroup(p.proc, "SIGKILL")
-		}
+	// Belt-and-suspenders: if Remove is ever called on a still-running id, take
+	// it (and its process group) down so it can't outlive its map entry. A no-op
+	// on an already-exited process — the common reap path — where the group is
+	// already gone.
+	if ok {
+		terminate(p, "SIGKILL")
 	}
 }
 
 // KillAll terminates every tracked process. Called on session shutdown so no
 // background command is orphaned.
-//
-// Cancelling the context alone only SIGKILLs the direct child — the shell
-// wrapper (sh -c / pwsh) that shellCommand spawns. Any process that wrapper
-// started (the actual long-running server) would be reparented and survive.
-// So, like Kill, we signal the whole process group (POSIX kill(-pid); Windows
-// taskkill /T) to take the wrapper's children down with it.
 func (m *BackgroundManager) KillAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, p := range m.procs {
-		p.cancel()
-		if p.proc != nil {
-			_ = killProcessGroup(p.proc, "SIGKILL")
-		}
+		terminate(p, "SIGKILL")
 	}
 }
 
