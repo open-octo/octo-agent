@@ -33,14 +33,17 @@ func (AgentTool) Definition() agent.ToolDefinition {
 			"Use when you need parallel investigation, a fresh context for an isolated " +
 			"sub-problem, or when the task is well-defined enough to delegate.\n\n" +
 			"Two modes:\n" +
-			"- **Fork** (omit subagent_type): the child inherits your full conversation " +
-			"context and system prompt. Cheap — shares your prompt cache. Use when the " +
-			"intermediate tool output isn't worth keeping in your context.\n" +
-			"- **Fresh agent** (set subagent_type): the child starts with zero context. " +
-			"Provide a complete task description. Use when you want an independent read " +
-			"(e.g. code review) or a specialized persona.\n\n" +
+			"- **Fork** (omit subagent_type): the child inherits your system prompt — the " +
+			"shared harness identity (base rules, env, skills, memory) — and shares its " +
+			"prompt cache, so it's cheap. It does NOT see this conversation's messages, so " +
+			"still put everything the task needs in `prompt`. Use when the intermediate " +
+			"tool output isn't worth keeping in your context.\n" +
+			"- **Fresh agent** (set subagent_type): the child starts with zero context and a " +
+			"specialized persona. Provide a complete task description. Use when you want an " +
+			"independent read (e.g. code review).\n\n" +
 			"Set run_in_background=true to run asynchronously — you will be notified when " +
-			"it completes. Leave it false (default) to block and receive the result directly.",
+			"it completes. Leave it false (default) to block and receive the result directly. " +
+			"(Some transports run every sub-agent synchronously; the result says so when it does.)",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -54,7 +57,7 @@ func (AgentTool) Definition() agent.ToolDefinition {
 				},
 				"subagent_type": map[string]any{
 					"type":        "string",
-					"description": "Optional agent type. 'explore' (read-only research), 'plan' (read-only planning), 'general' (full toolbelt), 'code-review' (read-only review). Omit to fork yourself — inherits your context.",
+					"description": "Optional agent type. 'explore' (read-only research), 'plan' (read-only planning), 'general' (full toolbelt), 'code-review' (read-only review). Omit to fork yourself — the child inherits your system prompt (not this conversation's messages).",
 				},
 				"run_in_background": map[string]any{
 					"type":        "boolean",
@@ -119,10 +122,13 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 
 	// Determine sync vs async
 	runInBackground := boolArg(input, "run_in_background")
-	// Synchronous transports (server / IM) have no follow-up-turn channel,
-	// so force sync even if the model asked for background.
-	if mgr.Synchronous() {
+	// Synchronous transports (server / IM) have no follow-up-turn channel, so
+	// force sync even if the model asked for background — and tell the model,
+	// rather than silently downgrading its choice.
+	forcedSync := false
+	if runInBackground && mgr.Synchronous() {
 		runInBackground = false
+		forcedSync = true
 	}
 
 	if runInBackground {
@@ -135,12 +141,21 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		}, nil
 	}
 
-	// Synchronous path — block and return the result
+	// Synchronous path — block and return the result.
 	res, err := mgr.RunSync(ctx, req)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: %w", err)
 	}
-	return agent.ToolResult{Text: withAgentTag(res.AgentID, res.Reply)}, nil
+	text := withAgentTag(res.AgentID, res.Reply)
+	// Surface a truncated result rather than passing a partial reply off as
+	// complete: a sub-agent that hit its turn limit returns partial work.
+	if res.StopReason == "max_turns" {
+		text += "\n\n[INCOMPLETE: this sub-agent hit its turn limit — the result above is partial. Re-launch with a narrower task, or treat it as unfinished.]"
+	}
+	if forcedSync {
+		text += "\n\n[note: ran synchronously and returned its full result here — this transport doesn't support background sub-agents, so run_in_background was ignored.]"
+	}
+	return agent.ToolResult{Text: text}, nil
 }
 
 // boolArg pulls a boolean argument, defaulting to false.

@@ -125,6 +125,14 @@ func SetDefaultSubAgentManager(m *SubAgentManager) { defaultSubAgentMgr = m }
 // which is required for the Agent tool.
 func subAgentManagerEnabled() bool { return defaultSubAgentMgr != nil }
 
+// maxConcurrentSubAgents caps how many async sub-agents may run at once, so a
+// model that fires off a large fan-out of run_in_background:true calls can't
+// spawn an unbounded number of concurrent agent loops (each making API calls).
+// New spawns past the cap are rejected with a clear error so the model waits
+// for some to finish; it does not bound resumed (Send/Continue) rounds, which
+// are limited by the live-child cap.
+const maxConcurrentSubAgents = 8
+
 // SubAgentManager owns the set of async sub-agents for a session.
 // Methods are safe for concurrent use.
 type SubAgentManager struct {
@@ -135,6 +143,7 @@ type SubAgentManager struct {
 	onExit      func(SubAgentNotification)
 	onEvent     func(SubAgentEvent)
 	synchronous bool
+	activeAsync int // running async spawns, for the concurrency cap
 }
 
 // NewSubAgentManager returns an empty manager.
@@ -286,6 +295,13 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m.mu.Lock()
+	if m.activeAsync >= maxConcurrentSubAgents {
+		n := m.activeAsync // read under the lock; don't touch m.activeAsync after Unlock
+		m.mu.Unlock()
+		cancel()
+		return "", fmt.Errorf("too many sub-agents running (%d/%d) — wait for some to finish (you'll be notified) before launching more", n, maxConcurrentSubAgents)
+	}
+	m.activeAsync++
 	m.seq++
 	id := fmt.Sprintf("agent_%d", m.seq)
 	agent := &asyncSubAgent{
@@ -306,6 +322,11 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 	}
 
 	go func() {
+		defer func() {
+			m.mu.Lock()
+			m.activeAsync--
+			m.mu.Unlock()
+		}()
 		res, err := m.spawner.Spawn(ctx, req)
 		stopReason := ""
 		if err == nil {
