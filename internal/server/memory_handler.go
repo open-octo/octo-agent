@@ -19,7 +19,7 @@ func (s *Server) handleGetMemory(w http.ResponseWriter, r *http.Request) {
 
 	// Security: prevent path traversal.
 	fname = filepath.Base(fname)
-	p, ok := s.resolveMemoryPath(fname)
+	p, ok := s.resolveMemoryPath(fname, r.URL.Query().Get("source"))
 	if !ok {
 		writeError(w, http.StatusNotFound, "memory not found")
 		return
@@ -48,7 +48,7 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fname = filepath.Base(fname)
-	p, ok := s.resolveMemoryPath(fname)
+	p, ok := s.resolveMemoryPath(fname, r.URL.Query().Get("source"))
 	if !ok {
 		writeError(w, http.StatusNotFound, "memory not found")
 		return
@@ -70,10 +70,13 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// resolveMemoryPath looks for fname first in the project memory dir, then in
-// the inherited (home) memory dir. The bool reports whether a valid dir was
-// found (not whether the file exists).
-func (s *Server) resolveMemoryPath(fname string) (string, bool) {
+// resolveMemoryPath resolves fname to an absolute path. If source is
+// "inherited" it looks only in homeMemDir; otherwise it looks first in
+// memDir then in homeMemDir.
+func (s *Server) resolveMemoryPath(fname, source string) (string, bool) {
+	if source == "inherited" && s.homeMemDir != "" {
+		return filepath.Join(s.homeMemDir, fname), true
+	}
 	for _, dir := range []string{s.memDir, s.homeMemDir} {
 		if dir != "" {
 			return filepath.Join(dir, fname), true

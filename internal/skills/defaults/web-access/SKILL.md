@@ -3,8 +3,8 @@ name: web-access
 license: MIT
 github: https://github.com/eze-is/web-access
 description:
-  所有联网操作必须通过此 skill 处理，包括：搜索、网页抓取、登录后操作、网络交互等。
-  触发场景：用户要求搜索信息、查看网页内容、访问需要登录的网站、操作网页界面、抓取社交媒体内容（小红书、微博、推特等）、读取动态渲染页面、以及任何需要真实浏览器环境的网络任务。
+  所有联网操作必须通过此 skill 处理，包括：搜索、网页抓取、浏览器自动化操作、登录后操作、网络交互等。
+  触发场景：用户要求搜索信息、查看网页内容、通过 CDP 操控浏览器操作网页界面、访问需要登录的网站、抓取社交媒体内容（小红书、微博、推特等）、读取动态渲染页面、以及任何需要真实浏览器环境的网络任务。
 metadata:
   author: 一泽Eze
   version: "2.5.3"
@@ -65,7 +65,7 @@ node "<SKILL_DIR>/scripts/check-deps.mjs"
 
 浏览器 CDP 不要求 URL 已知——可从任意入口出发，通过页面内搜索、点击、跳转等方式找到目标内容。web_search、web_fetch、terminal（curl）均不处理登录态。
 
-**Jina**（可选预处理层，可与 web_fetch/terminal（curl）组合使用，由于其特性可节省 tokens 消耗，请积极在任务合适时组合使用）：第三方网络服务，可将网页转为 Markdown，大幅节省 token 但可能有信息损耗。调用方式为 `r.jina.ai/example.com`（URL 前加前缀，不保留原网址 http 前缀），限 20 RPM。适合文章、博客、文档、PDF 等以正文为核心的页面；对数据面板、商品页等非文章结构页面可能提取到错误区块。
+**Jina**（可选预处理层，可与 web_fetch/terminal（curl）组合使用，由于其特性可节省 tokens 消耗，请积极在任务合适时组合使用）：第三方网络服务，可将网页转为 Markdown，大幅节省 token 但可能有信息损耗。`web_fetch` 工具内部会自动优先通过 Jina 拉取，失败后再直接访问原始页面，因此**调用 `web_fetch` 时直接传入原始 URL 即可，不要自行拼接 `r.jina.ai/` 前缀**。限 20 RPM。适合文章、博客、文档、PDF 等以正文为核心的页面；对数据面板、商品页等非文章结构页面可能提取到错误区块。
 
 进入浏览器层后，通过 curl 调用 CDP Proxy API（`localhost:3456`）获取页面信息和执行操作：
 

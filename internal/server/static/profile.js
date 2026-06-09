@@ -230,6 +230,7 @@ const Profile = (() => {
     const card = document.createElement("div");
     card.className = "memory-card";
     card.dataset.filename = m.filename;
+    card.dataset.source = m.source || "project";
 
     const topic   = m.topic || m.filename;
     const desc    = m.description || "";
@@ -246,6 +247,7 @@ const Profile = (() => {
           <span class="memory-filename">${_escapeHtml(m.filename)}</span>
           <span>${_escapeHtml(updated)}</span>
           <span>${size}</span>
+          ${m.source === "inherited" ? '<span class="memory-source-tag">inherited</span>' : ""}
         </div>
       </div>
       <div class="memory-card-actions">
@@ -286,7 +288,8 @@ const Profile = (() => {
       e.preventDefault();
       const target = a.dataset.memory;
       if (!target) return;
-      const el = document.querySelector(`.memory-card[data-filename="${CSS.escape(target)}"]`);
+      const el = document.querySelector(`.memory-card[data-filename="${CSS.escape(target)}"]`)
+        || document.querySelectorAll(`.memory-card[data-filename="${CSS.escape(target)}"]`)[0];
       if (el) {
         const btn = el.querySelector(".btn-memory-expand");
         if (btn && btn.getAttribute("aria-expanded") !== "true") btn.click();
@@ -312,7 +315,8 @@ const Profile = (() => {
       } else {
         if (!body.dataset.loaded) {
           body.innerHTML = `<div class="memory-card-loading">${_t("memories.loading")}</div>`;
-          fetch("/api/memories/" + encodeURIComponent(m.filename))
+          const src = m.source || "project";
+          fetch("/api/memories/" + encodeURIComponent(m.filename) + "?source=" + encodeURIComponent(src))
             .then(r => r.json())
             .then(d => {
               const stripped = _stripFrontmatter(d.content || "");
@@ -423,16 +427,17 @@ const Profile = (() => {
     if (!confirm(_t("memories.confirmDelete", { name: label }))) return;
 
     try {
+      const src = m.source || "project";
       const res = await fetch(
-        "/api/memories/" + encodeURIComponent(m.filename),
+        "/api/memories/" + encodeURIComponent(m.filename) + "?source=" + encodeURIComponent(src),
         { method: "DELETE" }
       );
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
-      // Optimistic local remove + re-render.
-      _data.memories = _data.memories.filter(x => x.filename !== m.filename);
+      // Optimistic local remove + re-render (consider source for duplicate filenames).
+      _data.memories = _data.memories.filter(x => !(x.filename === m.filename && (x.source || "project") === src));
       _renderMemories();
     } catch (e) {
       console.error("[Profile] delete memory failed", e);
