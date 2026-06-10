@@ -3155,6 +3155,10 @@ const Sessions = (() => {
     // Append a tool_call as a compact item inside the live tool group.
     // Creates the group if it doesn't exist yet.
     appendToolCall(name, args, summary) {
+      // Commit any pre-tool streamed text as its own bubble. Without this the
+      // live bubble stays tracked across the tool phase, so the next turn's
+      // text_delta appends the final answer into it — ABOVE the tool group.
+      Sessions._flushLiveText();
       const messages = $("messages");
       if (!Sessions._liveToolGroup) {
         Sessions._liveToolGroup = _makeToolGroup();
