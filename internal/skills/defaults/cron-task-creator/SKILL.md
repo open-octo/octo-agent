@@ -110,8 +110,12 @@ curl -s -X PATCH  http://127.0.0.1:8080/api/cron-tasks/{name} \
   fails silently at load (logged to stderr only) — double-check the 6-field
   format when writing files directly.
 - **IM notification (`notify`) requires the platform to support proactive
-  sends.** Feishu works (app credentials from `~/.octo/channels.yml`);
-  DingTalk and Weixin cannot push without a prior inbound message, so a
-  `notify` pointing at them fails (logged on the server, run unaffected). The
-  Feishu `chat_id` looks like `oc_…` — get it from the chat's settings or by
-  messaging the bot and reading the server log.
+  sends.** Feishu works with app credentials alone (`~/.octo/channels.yml`);
+  its `chat_id` looks like `oc_…` — get it from the chat's settings or by
+  messaging the bot and reading the server log. Weixin works too: `chat_id`
+  is the iLink user id, and the user must have messaged the bot at least once
+  (the receive loop persists each user's latest `context_token` to
+  `~/.octo/weixin-contexts.json`, which the push reads; a long-stale token may
+  be rejected by WeChat — chatting with the bot refreshes it). DingTalk cannot
+  push without a prior inbound webhook; a `notify` pointing at it fails
+  (logged on the server, run unaffected).

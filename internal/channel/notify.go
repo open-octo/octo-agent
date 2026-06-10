@@ -5,10 +5,12 @@ import "fmt"
 // SendOnce delivers a single outbound message to an IM chat by constructing
 // the platform adapter from ~/.octo/channels.yml on the fly. It exists for
 // proactive pushes (e.g. scheduled-task results) from processes that don't run
-// inbound adapters, such as octo serve. Only platforms whose SendText works
-// without inbound context can deliver this way — Feishu does (app credentials
-// → tenant token → REST); DingTalk needs a session webhook from a prior
-// inbound message and Weixin a login, both of which surface as adapter errors.
+// inbound adapters, such as octo serve. Feishu sends with app credentials
+// alone (tenant token → REST). Weixin sends with the on-disk login credentials
+// plus the chat's last context_token from the write-through store the receive
+// loop maintains — so the target user must have messaged the bot at least
+// once. DingTalk needs a session webhook from a prior inbound message and
+// cannot push this way; that surfaces as an adapter error.
 func SendOnce(platform, chatID, text string) error {
 	cfg, err := LoadConfig()
 	if err != nil {

@@ -381,11 +381,18 @@ func (a *Adapter) Stop() error {
 // SendText enqueues text for buffered delivery.
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 	if a.bot == nil || a.bot.creds == nil {
-		return channel.SendResult{OK: false, Error: "not logged in"}
+		return a.sendStandalone(chatID, text)
 	}
 
-	ct, ok := a.bot.contextTokens.Load(chatID)
-	if !ok {
+	var token string
+	if ct, ok := a.bot.contextTokens.Load(chatID); ok {
+		token = ct.(string)
+	} else if a.credPath != "" {
+		// Memory miss (e.g. the process restarted since the user last wrote):
+		// fall back to the write-through store.
+		token = loadContextTokens(contextStorePath(a.credPath))[chatID]
+	}
+	if token == "" {
 		return channel.SendResult{OK: false, Error: "no context_token for user " + chatID}
 	}
 
@@ -394,7 +401,42 @@ func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 		return channel.SendResult{OK: true}
 	}
 
-	a.sendQ.enqueue(chatID, plain, ct.(string))
+	a.sendQ.enqueue(chatID, plain, token)
+	return channel.SendResult{OK: true}
+}
+
+// sendStandalone delivers one message without Start(): credentials from disk
+// and the chat's last context_token from the write-through store maintained
+// by the receive loop. This is the path channel.SendOnce takes when octo
+// serve pushes a scheduled-task result — the inbound adapter runs in a
+// different process (octo channel start), so neither bot state nor the send
+// queue exist here. The send is synchronous; the caller owns retries.
+func (a *Adapter) sendStandalone(chatID, text string) channel.SendResult {
+	if a.credPath == "" {
+		return channel.SendResult{OK: false, Error: "not logged in"}
+	}
+	creds, err := ilink.LoadCredentials(a.credPath)
+	if err != nil || creds == nil {
+		return channel.SendResult{OK: false, Error: "not logged in (run `octo channel login` first)"}
+	}
+
+	token := loadContextTokens(contextStorePath(a.credPath))[chatID]
+	if token == "" {
+		return channel.SendResult{OK: false, Error: "no stored context_token for " + chatID +
+			" — the user must message the bot at least once while `octo channel start` is running"}
+	}
+
+	plain := markdownToPlain(text)
+	if plain == "" {
+		return channel.SendResult{OK: true}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := a.client.SendMessage(ctx, creds.BaseURL, creds.Token,
+		ilink.BuildTextMessage(chatID, token, plain)); err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
 	return channel.SendResult{OK: true}
 }
 
@@ -623,9 +665,13 @@ func (a *Adapter) handleInbound(wire *ilink.WireMessage, onMessage func(channel.
 		return
 	}
 
-	// Store context_token.
+	// Store context_token in memory and write it through to disk so other
+	// processes (octo serve pushing task results) can send to this user too.
 	if a.bot != nil {
 		a.bot.contextTokens.Store(userID, wire.ContextToken)
+	}
+	if a.credPath != "" {
+		saveContextToken(contextStorePath(a.credPath), userID, wire.ContextToken)
 	}
 
 	// Extract text and files.
