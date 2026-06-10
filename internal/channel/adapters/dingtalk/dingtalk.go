@@ -43,6 +43,7 @@ func init() {
 const (
 	cfgClientID     = "client_id"
 	cfgClientSecret = "client_secret"
+	cfgRobotCode    = "robot_code"
 	cfgAllowedUsers = "allowed_users"
 )
 
@@ -50,6 +51,8 @@ const (
 type Adapter struct {
 	clientID     string
 	clientSecret string
+	robotCode    string // defaults to clientID — they coincide for enterprise-internal robots
+	apiBase      string
 	allowedUsers map[string]bool
 
 	http        *http.Client
@@ -87,9 +90,16 @@ func New(cfg channel.PlatformConfig) (channel.Adapter, error) {
 		}
 	}
 
+	robotCode, _ := cfg[cfgRobotCode].(string)
+	if robotCode == "" {
+		robotCode = cid
+	}
+
 	return &Adapter{
 		clientID:     cid,
 		clientSecret: secret,
+		robotCode:    robotCode,
+		apiBase:      apiBase,
 		allowedUsers: allowed,
 		http:         &http.Client{Timeout: 30 * time.Second},
 		webhooks:     make(map[string]webhookEntry),
@@ -138,13 +148,15 @@ func (a *Adapter) Stop() error {
 	return nil
 }
 
-// SendText sends a Markdown message via sessionWebhook.
+// SendText sends a Markdown message. It prefers the chat's sessionWebhook
+// (free, no extra permissions, but only exists after an inbound message and
+// expires); without one it falls back to the proactive robot API, which is
+// what a standalone push (channel.SendOnce from octo serve) always uses.
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
-	url := a.resolveWebhook(chatID)
-	if url == "" {
-		return channel.SendResult{OK: false, Error: "no valid webhook (expired or never received)"}
+	if url := a.resolveWebhook(chatID); url != "" {
+		return a.sendWebhook(url, text)
 	}
-	return a.sendWebhook(url, text)
+	return a.sendProactive(chatID, text)
 }
 
 // SendFile is not yet implemented for DingTalk.
@@ -178,7 +190,7 @@ func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 func (a *Adapter) refreshToken() error {
 	body := map[string]string{"appKey": a.clientID, "appSecret": a.clientSecret}
 	b, _ := json.Marshal(body)
-	resp, err := a.http.Post(apiBase+"/v1.0/oauth2/accessToken", "application/json", bytes.NewReader(b))
+	resp, err := a.http.Post(a.apiBase+"/v1.0/oauth2/accessToken", "application/json", bytes.NewReader(b))
 	if err != nil {
 		return err
 	}
@@ -206,12 +218,25 @@ func (a *Adapter) refreshToken() error {
 
 func (a *Adapter) getToken() string {
 	a.tokenMu.Lock()
-	defer a.tokenMu.Unlock()
-	if time.Now().After(a.tokenExpiry) {
+	tok := a.accessToken
+	expired := time.Now().After(a.tokenExpiry)
+	a.tokenMu.Unlock()
+
+	// No token yet: the adapter is being used for an outbound send without
+	// Start() (e.g. channel.SendOnce). Fetch synchronously or the request
+	// goes out with an empty token header.
+	if tok == "" {
+		_ = a.refreshToken()
+		a.tokenMu.Lock()
+		tok = a.accessToken
+		a.tokenMu.Unlock()
+		return tok
+	}
+	if expired {
 		// Best-effort refresh — don't block.
 		go a.refreshToken()
 	}
-	return a.accessToken
+	return tok
 }
 
 // ─── Gateway ───────────────────────────────────────────────────────────────
@@ -222,7 +247,7 @@ func (a *Adapter) openGateway() (string, error) {
 		"clientSecret": a.clientSecret,
 	}
 	b, _ := json.Marshal(body)
-	resp, err := a.http.Post(apiBase+"/v1.0/gateway/connections/open", "application/json", bytes.NewReader(b))
+	resp, err := a.http.Post(a.apiBase+"/v1.0/gateway/connections/open", "application/json", bytes.NewReader(b))
 	if err != nil {
 		return "", err
 	}
@@ -411,6 +436,50 @@ func (a *Adapter) resolveWebhook(chatID string) string {
 		return ""
 	}
 	return e.URL
+}
+
+// sendProactive pushes a message through the robot send APIs, which need no
+// sessionWebhook — only the app credentials and the "robot message send"
+// permission granted in the DingTalk admin console. An openConversationId
+// (always "cid"-prefixed) routes to the group API; anything else is treated
+// as a staff/user id and routed to the one-on-one batch API. Note the cid
+// form only works for group chats — a 1:1 push must target the user id, not
+// the DM conversation id.
+func (a *Adapter) sendProactive(chatID, text string) channel.SendResult {
+	tok := a.getToken()
+	if tok == "" {
+		return channel.SendResult{OK: false, Error: "no access token"}
+	}
+
+	msgParam, _ := json.Marshal(map[string]string{"title": "Octo", "text": text})
+	body := map[string]any{
+		"robotCode": a.robotCode,
+		"msgKey":    "sampleMarkdown",
+		"msgParam":  string(msgParam),
+	}
+	path := "/v1.0/robot/oToMessages/batchSend"
+	if strings.HasPrefix(chatID, "cid") {
+		path = "/v1.0/robot/groupMessages/send"
+		body["openConversationId"] = chatID
+	} else {
+		body["userIds"] = []string{chatID}
+	}
+
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", a.apiBase+path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-acs-dingtalk-access-token", tok)
+
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode/100 != 2 {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("robot api %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))}
+	}
+	return channel.SendResult{OK: true}
 }
 
 func (a *Adapter) sendWebhook(url, text string) channel.SendResult {

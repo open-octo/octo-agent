@@ -6,11 +6,12 @@ import "fmt"
 // the platform adapter from ~/.octo/channels.yml on the fly. It exists for
 // proactive pushes (e.g. scheduled-task results) from processes that don't run
 // inbound adapters, such as octo serve. Feishu sends with app credentials
-// alone (tenant token → REST). Weixin sends with the on-disk login credentials
-// plus the chat's last context_token from the write-through store the receive
-// loop maintains — so the target user must have messaged the bot at least
-// once. DingTalk needs a session webhook from a prior inbound message and
-// cannot push this way; that surfaces as an adapter error.
+// alone (tenant token → REST). DingTalk sends through the proactive robot
+// APIs (app credentials; needs the robot-message-send permission, and the
+// chat id must be a staff id or a "cid…" openConversationId). Weixin sends
+// with the on-disk login credentials plus the chat's last context_token from
+// the write-through store the receive loop maintains — so the target user
+// must have messaged the bot at least once.
 func SendOnce(platform, chatID, text string) error {
 	cfg, err := LoadConfig()
 	if err != nil {

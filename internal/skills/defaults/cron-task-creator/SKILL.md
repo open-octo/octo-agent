@@ -119,13 +119,18 @@ curl -s -X PATCH  http://127.0.0.1:8080/api/cron-tasks/{name} \
   creation time by the API, but a hand-written JSON file with a bad expression
   fails silently at load (logged to stderr only) — double-check the 6-field
   format when writing files directly.
-- **IM notification (`notify`) requires the platform to support proactive
-  sends.** Feishu works with app credentials alone (`~/.octo/channels.yml`);
-  its `chat_id` looks like `oc_…` — get it from the chat's settings or by
-  messaging the bot and reading the server log. Weixin works too: `chat_id`
-  is the iLink user id, and the user must have messaged the bot at least once
-  (the receive loop persists each user's latest `context_token` to
-  `~/.octo/weixin-contexts.json`, which the push reads; a long-stale token may
-  be rejected by WeChat — chatting with the bot refreshes it). DingTalk cannot
-  push without a prior inbound webhook; a `notify` pointing at it fails
-  (logged on the server, run unaffected).
+- **IM notification (`notify`) — per-platform `chat_id` rules.** All three
+  platforms can be pushed to; a failed push is logged on the server and never
+  affects the run.
+  - **Feishu**: works with app credentials alone (`~/.octo/channels.yml`);
+    `chat_id` looks like `oc_…` — get it from the chat's settings or by
+    messaging the bot and reading the server log.
+  - **DingTalk**: pushes via the proactive robot APIs. `chat_id` is a staff
+    id (one-on-one) or a `cid…` openConversationId (group) — a DM's
+    conversation id does NOT work, use the user's staff id. Requires the
+    "robot message send" permission on the app in the DingTalk admin console.
+  - **Weixin**: `chat_id` is the iLink user id, and the user must have
+    messaged the bot at least once (the receive loop persists each user's
+    latest `context_token` to `~/.octo/weixin-contexts.json`, which the push
+    reads; a long-stale token may be rejected by WeChat — chatting with the
+    bot refreshes it).
