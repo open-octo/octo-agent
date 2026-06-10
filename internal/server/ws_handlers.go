@@ -688,6 +688,34 @@ func (w *wsStreamWriter) error(msg string) {
 	})
 }
 
+// reseedThinkingProgress broadcasts a fresh "thinking" progress phase and
+// records it as the session's live state. Called after a tool finishes (or
+// errors): the next LLM round is already running but stays silent until its
+// first delta, so without this the indicator the frontend cleared at
+// tool_call never comes back between rounds.
+func (w *wsStreamWriter) reseedThinkingProgress() {
+	startedAt := time.Now().UnixMilli()
+	w.server.liveStateMu.Lock()
+	if ls, ok := w.server.liveStates[w.sessionID]; ok {
+		ls.toolCall = nil
+		ls.progress = &wsEventProgress{
+			Type:         "progress",
+			ProgressType: "thinking",
+			Phase:        "active",
+			StartedAt:    startedAt,
+		}
+	}
+	w.server.liveStateMu.Unlock()
+	w.hub.broadcast(w.sessionID, map[string]any{
+		"type":          "progress",
+		"session_id":    w.sessionID,
+		"progress_type": "thinking",
+		"phase":         "active",
+		"status":        "start",
+		"started_at":    startedAt,
+	})
+}
+
 // handleEvent converts agent.AgentEvent to WS JSON events and broadcasts them.
 // It also updates the server's live state for late-subscriber replay.
 func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
@@ -746,13 +774,13 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 				"session_id": w.sessionID,
 			})
 		}
-		// Clear live state on tool done.
-		w.server.liveStateMu.Lock()
-		if ls, ok := w.server.liveStates[w.sessionID]; ok {
-			ls.progress = nil
-			ls.toolCall = nil
-		}
-		w.server.liveStateMu.Unlock()
+		// The agent immediately starts the next LLM round after a tool result,
+		// and that round emits no event until its first delta (or the next
+		// tool_call). Re-seed the "thinking" indicator so the UI animates
+		// across the gap instead of the next tool popping out of dead air —
+		// same rationale as the turn-start seed in doAgentTurn. The frontend
+		// clears it on the next tool_call / assistant_message / complete.
+		w.reseedThinkingProgress()
 		// A tool call is the only place a turn starts or kills a background
 		// process — refresh the badge.
 		w.server.broadcastBackgroundTasks(w.sessionID)
@@ -763,9 +791,11 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			"session_id": w.sessionID,
 			"error":      ev.Err,
 		})
-		w.server.liveStateMu.Lock()
-		delete(w.server.liveStates, w.sessionID)
-		w.server.liveStateMu.Unlock()
+		// A tool error does not end the turn — the error result goes back to
+		// the model, which keeps running. Re-seed the indicator just like
+		// EventToolDone (deleting the live state here would also blank the
+		// progress replay for late-subscribing tabs mid-turn).
+		w.reseedThinkingProgress()
 		w.server.broadcastBackgroundTasks(w.sessionID)
 
 	case agent.EventThinkingDelta:

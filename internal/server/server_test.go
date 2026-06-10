@@ -1005,3 +1005,90 @@ drain:
 			firstProgressIdx, firstTextIdx, types)
 	}
 }
+
+// TestWSStreamWriter_ReseedsThinkingAfterTool is the regression guard for the
+// web-UI "tools pop out of dead air" gap. The frontend clears the progress
+// indicator when a tool_call renders, and the next LLM round emits nothing
+// until its first delta — so after every tool_result (and recoverable
+// tool_error) the stream writer must broadcast a fresh "thinking" progress
+// and keep it in live state for late-subscriber replay.
+func TestWSStreamWriter_ReseedsThinkingAfterTool(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "sess-reseed"
+	srv.liveStateMu.Lock()
+	srv.liveStates[sid] = &sessionLiveState{}
+	srv.liveStateMu.Unlock()
+
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 256),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
+	srv.wsHub.subscribe(conn, sid)
+
+	sw := srv.newWSStreamWriter(sid)
+
+	// drainUntilProgress reads broadcasts until a progress event (or deadline)
+	// and returns it along with every event type seen on the way.
+	drainUntilProgress := func() (map[string]any, []string) {
+		deadline := time.After(2 * time.Second)
+		var types []string
+		for {
+			select {
+			case b := <-conn.send:
+				var ev map[string]any
+				if err := json.Unmarshal(b, &ev); err != nil {
+					continue
+				}
+				typ, _ := ev["type"].(string)
+				types = append(types, typ)
+				if typ == "progress" {
+					return ev, types
+				}
+			case <-deadline:
+				return nil, types
+			}
+		}
+	}
+
+	for _, tc := range []struct {
+		name  string
+		event agent.AgentEvent
+	}{
+		{"tool_done", agent.AgentEvent{Kind: agent.EventToolDone, ToolName: "terminal", Output: "ok"}},
+		{"tool_error", agent.AgentEvent{Kind: agent.EventToolError, ToolName: "terminal", Err: "exit 1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sw.handleEvent(tc.event)
+
+			ev, types := drainUntilProgress()
+			if ev == nil {
+				t.Fatalf("no progress broadcast after %s; got %v", tc.name, types)
+			}
+			if pt, _ := ev["progress_type"].(string); pt != "thinking" {
+				t.Errorf("progress_type = %q, want \"thinking\"", pt)
+			}
+			if ph, _ := ev["phase"].(string); ph != "active" {
+				t.Errorf("phase = %q, want \"active\"", ph)
+			}
+			if at, _ := ev["started_at"].(float64); at <= 0 {
+				t.Errorf("started_at = %v, want > 0", ev["started_at"])
+			}
+
+			// Live state must carry the reseeded progress so a tab subscribing
+			// mid-gap replays an indicator instead of a blank screen.
+			srv.liveStateMu.Lock()
+			ls := srv.liveStates[sid]
+			srv.liveStateMu.Unlock()
+			if ls == nil {
+				t.Fatalf("live state deleted after %s; replay would be blank", tc.name)
+			}
+			if ls.progress == nil || ls.progress.ProgressType != "thinking" {
+				t.Errorf("live state progress = %+v, want reseeded thinking phase", ls.progress)
+			}
+		})
+	}
+}
