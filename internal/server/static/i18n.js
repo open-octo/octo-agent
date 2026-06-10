@@ -388,8 +388,6 @@ const I18n = (() => {
       "settings.models.field.baseurl":    "Base URL",
       "settings.models.field.apikey":     "API Key",
       "settings.models.field.getApiKey":  "How to get →",
-      "settings.models.field.docsGuide.question": "New to AI keys?",
-      "settings.models.field.docsGuide.cta":      "See the guide →",
       "settings.models.placeholder.provider": "— Choose provider —",
       "settings.models.placeholder.model":    "e.g. claude-sonnet-4-5",
       "settings.models.placeholder.baseurl":  "https://api.anthropic.com",
@@ -435,9 +433,6 @@ const I18n = (() => {
       "settings.fontSize.medium":          "Medium",
       "settings.fontSize.large":           "Large",
 
-      "settings.currency.title":           "Currency",
-      "settings.currency.usd":             "$ USD",
-      "settings.currency.cny":             "¥ CNY",
 
       // ── Onboard ──
       "onboard.title":              "Welcome to {{brand}}",
@@ -861,8 +856,6 @@ const I18n = (() => {
       "settings.models.field.baseurl":    "Base URL",
       "settings.models.field.apikey":     "API Key",
       "settings.models.field.getApiKey":  "如何获取 →",
-      "settings.models.field.docsGuide.question": "不会配置 AI 模型？",
-      "settings.models.field.docsGuide.cta":      "查看指南 →",
       "settings.models.placeholder.provider": "— 选择服务商 —",
       "settings.models.placeholder.model":    "如 claude-sonnet-4-5",
       "settings.models.placeholder.baseurl":  "https://api.anthropic.com",
@@ -908,9 +901,6 @@ const I18n = (() => {
       "settings.fontSize.medium":          "中",
       "settings.fontSize.large":           "大",
 
-      "settings.currency.title":           "货币",
-      "settings.currency.usd":             "$ 美元",
-      "settings.currency.cny":             "¥ 人民币",
 
       // ── Onboard ──
       "onboard.title":              "欢迎使用 {{brand}}",

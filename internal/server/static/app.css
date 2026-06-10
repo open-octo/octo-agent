@@ -1113,7 +1113,7 @@ body {
   white-space: normal;
   flex: 1;
 }
-/* Meta: second row — tasks + cost */
+/* Meta: second row — tasks */
 .session-meta {
   display: block;
   font-size: 0.625rem;
@@ -2426,7 +2426,7 @@ body {
  * Visual hierarchy (3 tiers):
  *   Tier 1 primary   (opacity 1.00)  — status, model      → "what am I and is it running"
  *   Tier 2 secondary (opacity ~0.75) — dir, tasks         → "contextual info"
- *   Tier 3 tertiary  (opacity ~0.45) — id, mode, cost, │  → "can be glanced over"
+ *   Tier 3 tertiary  (opacity ~0.45) — id, mode, │       → "can be glanced over"
  * Base bar opacity is kept high so primary tier stays fully readable; the
  * hover :hover rule lifts everything to 1.0 for detail inspection.
  */
@@ -6304,8 +6304,6 @@ body {
 /* ═════════════════════════════════════════════════════════════════════════
  * RESTORED STYLES (removed by accident in 51b11f3 — brand/creator cleanup)
  * ═════════════════════════════════════════════════════════════════════════ */
-.tu-cost  { color: var(--color-text-tertiary); }
-
 #skill-list-items { padding: 0 0.5rem 0.5rem; display: flex; flex-direction: column; gap: 2px; }
 
 /* ── Setup panel (full-screen, covers sidebar — mandatory first-run) ─────── */

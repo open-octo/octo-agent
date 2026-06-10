@@ -140,10 +140,6 @@ const Settings = (() => {
       </div>
 
       <div class="model-card-footer">
-        ${!model.api_key_masked ? `<span class="model-card-docs-link" style="font-size:0.75rem;">
-          <span style="color:var(--muted,#6b7280);">${I18n.t("settings.models.field.docsGuide.question")}</span>
-          <a href="https://www.octo.com/docs/ai-key-guide" target="_blank" rel="noopener" style="margin-left:0.25rem;color:var(--accent,#6366f1);text-decoration:none;">${I18n.t("settings.models.field.docsGuide.cta")}</a>
-        </span>` : ""}
         <span class="model-test-result" data-index="${index}"></span>
         <div class="model-card-actions-row">
           ${!isDefault ? `<button class="btn-set-default" data-index="${index}" title="${I18n.t("settings.models.btn.setDefault")}">${I18n.t("settings.models.btn.setDefault")}</button>` : ""}
@@ -772,38 +768,9 @@ const Settings = (() => {
 
     _initLangBtns();
     _initFontBtns();
-    _initCurrencyBtns();
 
     // Re-render model cards when language changes (dynamic HTML, not data-i18n)
     document.addEventListener("langchange", () => _renderCards());
-  }
-
-  // ── Currency ──────────────────────────────────────────────────────────
-  const CURRENCY_STORAGE_KEY = "octo-currency";
-  const CURRENCY_DEFAULT     = "USD";
-
-  function _applyCurrency(currency) {
-    try { localStorage.setItem(CURRENCY_STORAGE_KEY, currency); } catch (_) {}
-    // Update active state on all currency buttons
-    document.querySelectorAll("#currency-section .settings-lang-btn").forEach(btn => {
-      btn.classList.toggle("active", btn.dataset.currency === currency);
-    });
-    // Currency change saved to localStorage; visual state updated above
-  }
-
-  function _initCurrencyBtns() {
-    // Apply saved preference (or default) on page load
-    let saved = null;
-    try { saved = localStorage.getItem(CURRENCY_STORAGE_KEY); } catch (_) {}
-    const current = saved || CURRENCY_DEFAULT;
-
-    // Wire up button clicks
-    document.querySelectorAll("#currency-section .settings-lang-btn").forEach(btn => {
-      btn.classList.toggle("active", btn.dataset.currency === current);
-      btn.addEventListener("click", () => {
-        _applyCurrency(btn.dataset.currency);
-      });
-    });
   }
 
   // ── Font Size ──────────────────────────────────────────────────────────

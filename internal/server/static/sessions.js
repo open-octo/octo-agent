@@ -1881,7 +1881,6 @@ const Sessions = (() => {
 
     // Meta line — prefer relative time of last activity. Tasks count is
     // only shown when > 0 to avoid visual noise on fresh sessions.
-    // Cost is intentionally dropped from the list (move to hover/details).
     const metaParts = [];
     if (s.total_tasks && s.total_tasks > 0) {
       metaParts.push(I18n.t("sessions.metaTasks", { n: s.total_tasks }));
@@ -3227,7 +3226,7 @@ const Sessions = (() => {
     // Append a token usage line directly to the message list.
     // Server guarantees this event arrives AFTER assistant_message, so no buffering needed.
     // Format mirrors CLI:
-    //   [Tokens] | +409 | [*] | Input: 69,977 (cache: 69,566 read, 410 write) | Output: 101 | Total: 70,078 | Cost: $0.02392
+    //   [Tokens] | +409 | [*] | Input: 69,977 (cache: 69,566 read, 410 write) | Output: 101 | Total: 70,078
     appendTokenUsage(ev, container) {
       const messages = container || $("messages");
       const el = document.createElement("div");
@@ -4765,9 +4764,5 @@ const Sessions = (() => {
 })();
 
 document.addEventListener("langchange", () => {
-  if (Sessions._lastSession) Sessions.updateInfoBar(Sessions._lastSession);
-});
-
-document.addEventListener("currencychange", () => {
   if (Sessions._lastSession) Sessions.updateInfoBar(Sessions._lastSession);
 });

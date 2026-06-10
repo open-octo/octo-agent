@@ -18,7 +18,7 @@ import (
 // fresh History, no visibility into the parent's conversation, its own
 // loop budget. The final child reply text is returned to the parent as the
 // sub_agent tool_result; the child's token usage is rolled into the
-// parent's session totals so /cost reports one consolidated number.
+// parent's session totals so they report one consolidated number.
 //
 // toolsFn is a deferred lookup of the LLM-facing tool catalog (DefaultTools).
 // Resolving it on each Spawn — rather than capturing a slice at construction

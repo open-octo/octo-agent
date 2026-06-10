@@ -131,7 +131,6 @@ type configResponse struct {
 	Models          []modelConfig `json:"models,omitempty"`
 	DefaultModelIdx int           `json:"default_model_idx,omitempty"`
 	FontSize        string        `json:"font_size,omitempty"`
-	Currency        string        `json:"currency,omitempty"`
 	Language        string        `json:"language,omitempty"`
 }
 
@@ -173,7 +172,6 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		Models:          models,
 		DefaultModelIdx: defaultIdx,
 		FontSize:        "medium",
-		Currency:        "USD",
 		Language:        "en",
 	})
 }

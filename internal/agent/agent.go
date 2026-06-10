@@ -1220,7 +1220,7 @@ func (a *Agent) SessionTokens() (inputTokens, outputTokens int) {
 }
 
 // AccrueChildUsage folds tokens spent by a spawned sub-agent into this
-// agent's session totals, so /cost and SessionTokens still report one
+// agent's session totals, so SessionTokens still reports one
 // consolidated number even when the LLM used sub_agent. cache totals are
 // left untouched — the child runs against the same provider but reports its
 // own cache hits internally; the parent only sees the bottom-line counts here.
@@ -1267,10 +1267,6 @@ func (a *Agent) SessionCacheTokens() (readTokens, writeTokens int) {
 	return a.sessionCacheReadTokens, a.sessionCacheWriteTokens
 }
 
-// SessionCostUSD returns a rough USD estimate for the tokens used so far.
-// Pricing is based on publicly listed rates as of May 2026 and is best-effort
-// — it uses a prefix match on the model name and falls back to a conservative
-// mid-tier estimate for unknown models.
 // popLast is an internal helper used by Turn to undo the user-message append
 // when the Sender call fails. Exported users should not need this.
 func (h *History) popLast() {
