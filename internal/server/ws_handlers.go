@@ -730,11 +730,15 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 		w.server.liveStateMu.Unlock()
 
 	case agent.EventToolDone:
-		w.hub.broadcast(w.sessionID, map[string]any{
+		toolResult := map[string]any{
 			"type":       "tool_result",
 			"session_id": w.sessionID,
 			"result":     ev.Output,
-		})
+		}
+		if ev.UI != nil {
+			toolResult["ui_payload"] = ev.UI
+		}
+		w.hub.broadcast(w.sessionID, toolResult)
 		// Signal sub-agent completion so the frontend can clear the live panel.
 		if ev.ToolName == "sub_agent" {
 			w.hub.broadcast(w.sessionID, map[string]any{

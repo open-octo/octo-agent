@@ -346,10 +346,14 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 			for _, b := range m.Blocks {
 				if b.Type == "tool_result" {
 					hasToolResult = true
-					events = append(events, map[string]any{
+					ev := map[string]any{
 						"type":   "tool_result",
 						"result": b.Result,
-					})
+					}
+					if b.UI != nil {
+						ev["ui_payload"] = b.UI
+					}
+					events = append(events, ev)
 				}
 			}
 			// Use the message's own CreatedAt when available.  Older session

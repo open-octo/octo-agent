@@ -760,6 +760,11 @@ func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
+	// res1 carries a structured UI payload; res2 doesn't. The replay must
+	// surface the payload as ui_payload after the session JSON round-trip.
+	res1 := agent.NewToolResultBlock("call_1", "file.txt\n", false)
+	res1.UI = map[string]any{"type": "file_list", "total": 1}
+
 	sess := agent.NewSession("stub-model", "")
 	sess.Messages = []agent.Message{
 		{Role: agent.RoleUser, Content: "list and grep"},
@@ -768,7 +773,7 @@ func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {
 			agent.NewToolUseBlock("call_2", "grep", map[string]any{"pattern": "foo"}),
 		}),
 		agent.NewToolResultMessage([]agent.ContentBlock{
-			agent.NewToolResultBlock("call_1", "file.txt\n", false),
+			res1,
 			agent.NewToolResultBlock("call_2", "file.txt:1:foo\n", false),
 		}),
 		agent.NewAssistantMessage("Found it"),
@@ -816,6 +821,15 @@ func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {
 		if gotTypes[i] != want {
 			t.Fatalf("event[%d].type = %q, want %q; full=%v", i, gotTypes[i], want, gotTypes)
 		}
+	}
+
+	// events[4] / events[5] are the two tool_results: only the first has UI.
+	ui, ok := body.Events[4]["ui_payload"].(map[string]any)
+	if !ok || ui["type"] != "file_list" {
+		t.Errorf("events[4].ui_payload = %#v, want file_list payload", body.Events[4]["ui_payload"])
+	}
+	if _, present := body.Events[5]["ui_payload"]; present {
+		t.Errorf("events[5].ui_payload present, want absent: %#v", body.Events[5]["ui_payload"])
 	}
 }
 
