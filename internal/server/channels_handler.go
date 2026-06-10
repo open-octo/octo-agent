@@ -188,7 +188,7 @@ func (s *Server) handleAvailableChannels(w http.ResponseWriter, r *http.Request)
 		"discord":  {"bot_token", "allowed_users"},
 		"feishu":   {"app_id", "app_secret", "domain", "allowed_users"},
 		"telegram": {"bot_token", "base_url", "parse_mode", "allowed_users"},
-		"wecom":    {"bot_id", "secret", "allowed_users"},
+		"wecom":    {"bot_id", "secret", "webhook_key", "allowed_users"},
 		"weixin":   {"base_url", "cred_path"},
 	}
 

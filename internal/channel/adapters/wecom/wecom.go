@@ -17,12 +17,14 @@
 package wecom
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -54,15 +56,23 @@ const (
 	cfgBotID        = "bot_id"
 	cfgSecret       = "secret"
 	cfgAllowedUsers = "allowed_users"
+	// Group-robot webhook for proactive pushes (either the full URL or just
+	// the key from the webhook URL the WeCom admin shows).
+	cfgWebhookURL = "webhook_url"
+	cfgWebhookKey = "webhook_key"
 	// cfgWSURL is a test seam, not user-facing config.
 	cfgWSURL = "ws_url"
 )
+
+// defaultWebhookBase is the group-robot webhook endpoint webhook_key expands to.
+const defaultWebhookBase = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
 
 // Adapter implements channel.Adapter for WeCom intelligent robots.
 type Adapter struct {
 	botID        string
 	secret       string
 	wsURL        string
+	webhookURL   string
 	allowedUsers map[string]bool
 
 	conn   *websocket.Conn
@@ -71,15 +81,28 @@ type Adapter struct {
 	pendingAcks map[string]chan *wsFrame
 	ackMu       sync.Mutex
 
+	http   *http.Client
 	cancel context.CancelFunc
 }
 
-// New creates a WeCom adapter from platform config.
+// New creates a WeCom adapter from platform config. The aibot credentials
+// (bot_id + secret) drive the interactive WebSocket channel; a group-robot
+// webhook (webhook_url / webhook_key) drives proactive pushes when the
+// WebSocket isn't connected — e.g. channel.SendOnce from octo serve, which
+// runs no inbound adapters. Either is sufficient on its own.
 func New(cfg channel.PlatformConfig) (channel.Adapter, error) {
 	botID, _ := cfg[cfgBotID].(string)
 	secret, _ := cfg[cfgSecret].(string)
-	if botID == "" || secret == "" {
-		return nil, fmt.Errorf("wecom: bot_id and secret are required")
+
+	webhookURL, _ := cfg[cfgWebhookURL].(string)
+	if webhookURL == "" {
+		if key, _ := cfg[cfgWebhookKey].(string); key != "" {
+			webhookURL = defaultWebhookBase + "?key=" + key
+		}
+	}
+
+	if (botID == "" || secret == "") && webhookURL == "" {
+		return nil, fmt.Errorf("wecom: bot_id+secret (aibot) or webhook_key/webhook_url (group robot) is required")
 	}
 
 	wsURL, _ := cfg[cfgWSURL].(string)
@@ -100,8 +123,10 @@ func New(cfg channel.PlatformConfig) (channel.Adapter, error) {
 		botID:        botID,
 		secret:       secret,
 		wsURL:        wsURL,
+		webhookURL:   webhookURL,
 		allowedUsers: allowed,
 		pendingAcks:  make(map[string]chan *wsFrame),
+		http:         &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
@@ -111,6 +136,9 @@ func (a *Adapter) Platform() string { return platformName }
 // Start connects to the WeCom WebSocket and blocks until ctx is cancelled.
 // Transient connection errors reconnect; an auth rejection aborts.
 func (a *Adapter) Start(ctx context.Context, onMessage func(channel.InboundEvent)) error {
+	if a.botID == "" || a.secret == "" {
+		return fmt.Errorf("wecom: bot_id and secret are required for the interactive channel (webhook-only config can still push notifications)")
+	}
 	ctx, a.cancel = context.WithCancel(ctx)
 
 	for {
@@ -146,8 +174,19 @@ func (a *Adapter) Stop() error {
 	return nil
 }
 
-// SendText sends a markdown message via aibot_send_msg.
+// SendText sends a markdown message via aibot_send_msg when the WebSocket is
+// connected. Without a connection — channel.SendOnce from octo serve, which
+// runs no inbound adapters — it falls back to the group-robot webhook, which
+// delivers to the webhook's bound group (chatID cannot select a chat there).
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
+	a.connMu.Lock()
+	connected := a.conn != nil
+	a.connMu.Unlock()
+
+	if !connected {
+		return a.sendWebhook(text)
+	}
+
 	_, err := a.sendFrameAndWait("aibot_send_msg", map[string]any{
 		"chatid":   chatID,
 		"msgtype":  "markdown",
@@ -155,6 +194,34 @@ func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 	})
 	if err != nil {
 		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	return channel.SendResult{OK: true}
+}
+
+// sendWebhook posts a markdown message to the configured group-robot webhook.
+func (a *Adapter) sendWebhook(text string) channel.SendResult {
+	if a.webhookURL == "" {
+		return channel.SendResult{OK: false, Error: "not connected and no webhook_key/webhook_url configured for proactive pushes"}
+	}
+	body, _ := json.Marshal(map[string]any{
+		"msgtype":  "markdown",
+		"markdown": map[string]string{"content": text},
+	})
+	resp, err := a.http.Post(a.webhookURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	var r struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("bad webhook response: %v", err)}
+	}
+	if r.ErrCode != 0 {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("webhook error %d: %s", r.ErrCode, r.ErrMsg)}
 	}
 	return channel.SendResult{OK: true}
 }
@@ -176,12 +243,25 @@ func (a *Adapter) SendTyping(chatID, contextToken string) error { return nil }
 
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
-	var errs []string
-	if v, _ := cfg[cfgBotID].(string); v == "" {
-		errs = append(errs, "bot_id is required")
+	botID, _ := cfg[cfgBotID].(string)
+	secret, _ := cfg[cfgSecret].(string)
+	whURL, _ := cfg[cfgWebhookURL].(string)
+	whKey, _ := cfg[cfgWebhookKey].(string)
+
+	hasAibot := botID != "" || secret != ""
+	hasWebhook := whURL != "" || whKey != ""
+	if !hasAibot && !hasWebhook {
+		return []string{"bot_id+secret (aibot) or webhook_key/webhook_url (group robot) is required"}
 	}
-	if v, _ := cfg[cfgSecret].(string); v == "" {
-		errs = append(errs, "secret is required")
+
+	var errs []string
+	if hasAibot {
+		if botID == "" {
+			errs = append(errs, "bot_id is required")
+		}
+		if secret == "" {
+			errs = append(errs, "secret is required")
+		}
 	}
 	return errs
 }

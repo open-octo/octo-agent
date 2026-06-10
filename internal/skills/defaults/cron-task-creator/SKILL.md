@@ -134,3 +134,12 @@ curl -s -X PATCH  http://127.0.0.1:8080/api/cron-tasks/{name} \
     latest `context_token` to `~/.octo/weixin-contexts.json`, which the push
     reads; a long-stale token may be rejected by WeChat — chatting with the
     bot refreshes it).
+  - **Telegram**: `chat_id` is the Telegram chat id (user, group, or
+    channel); the bot must be able to message it (user has started the bot,
+    or bot is a member of the group/channel).
+  - **Discord**: `chat_id` is the channel id; the bot needs the Send
+    Messages permission in that channel.
+  - **WeCom**: pushes go through a group-robot webhook — set `webhook_key`
+    (or full `webhook_url`) in the channel config. The webhook is bound to
+    one group, so `chat_id` is ignored for pushes (use the group name as a
+    label).

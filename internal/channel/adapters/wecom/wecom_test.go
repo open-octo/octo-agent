@@ -2,6 +2,7 @@ package wecom
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -244,10 +245,76 @@ func TestSendText_WaitsForAck(t *testing.T) {
 
 func TestValidateConfig(t *testing.T) {
 	a := &Adapter{}
-	if errs := a.ValidateConfig(channel.PlatformConfig{}); len(errs) != 2 {
-		t.Fatalf("expected 2 errors, got %v", errs)
+	if errs := a.ValidateConfig(channel.PlatformConfig{}); len(errs) != 1 {
+		t.Fatalf("expected 1 error for empty config, got %v", errs)
 	}
 	if errs := a.ValidateConfig(channel.PlatformConfig{"bot_id": "x", "secret": "y"}); len(errs) != 0 {
 		t.Fatalf("expected no errors, got %v", errs)
+	}
+	// Webhook-only (push notifications) is a valid configuration.
+	if errs := a.ValidateConfig(channel.PlatformConfig{"webhook_key": "k"}); len(errs) != 0 {
+		t.Fatalf("expected no errors for webhook-only, got %v", errs)
+	}
+	// A half-filled aibot pair is flagged even when the webhook is present.
+	if errs := a.ValidateConfig(channel.PlatformConfig{"bot_id": "x", "webhook_key": "k"}); len(errs) != 1 {
+		t.Fatalf("expected 1 error for half aibot pair, got %v", errs)
+	}
+}
+
+// TestSendText_WebhookFallback covers the proactive-push path used by
+// channel.SendOnce from octo serve: no WebSocket connection, message goes to
+// the configured group-robot webhook.
+func TestSendText_WebhookFallback(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("key") != "k1" {
+			t.Errorf("key = %q, want k1", r.URL.Query().Get("key"))
+		}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "errmsg": "ok"})
+	}))
+	defer ts.Close()
+
+	a, err := New(channel.PlatformConfig{"webhook_url": ts.URL + "?key=k1"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res := a.SendText("ignored-chat", "task done", "")
+	if !res.OK {
+		t.Fatalf("send: %s", res.Error)
+	}
+	if got["msgtype"] != "markdown" {
+		t.Errorf("msgtype = %v", got["msgtype"])
+	}
+	md, _ := got["markdown"].(map[string]any)
+	if md["content"] != "task done" {
+		t.Errorf("content = %v", md["content"])
+	}
+}
+
+func TestSendText_WebhookErrcode(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 93000, "errmsg": "invalid webhook url"})
+	}))
+	defer ts.Close()
+
+	a, err := New(channel.PlatformConfig{"webhook_url": ts.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if res := a.SendText("c", "x", ""); res.OK {
+		t.Fatal("want failure on non-zero errcode")
+	}
+}
+
+func TestSendText_NoConnectionNoWebhook(t *testing.T) {
+	a, err := New(channel.PlatformConfig{"bot_id": "x", "secret": "y"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res := a.SendText("c", "x", "")
+	if res.OK {
+		t.Fatal("want failure when not connected and no webhook configured")
 	}
 }
