@@ -8,6 +8,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
@@ -181,6 +183,11 @@ type Server struct {
 	// accessKey is the shared secret for Web UI / API authentication.
 	accessKey string
 
+	// restartPending is set by Restart and read after the listener closes to
+	// distinguish a restart-driven shutdown (exit ExitRestart) from a plain
+	// one (exit 0).
+	restartPending atomic.Bool
+
 	// senderMu serialises lazy initialisation of sender when the server starts
 	// in onboarding mode (API key missing) and the user completes setup later.
 	senderMu sync.Mutex
@@ -334,9 +341,29 @@ func (s *Server) AccessKey() string {
 // serving so persisted tasks fire from server start, not from the first hit
 // on a task endpoint.
 func (s *Server) ListenAndServe() error {
+	ln, err := net.Listen("tcp", s.http.Addr)
+	if err != nil {
+		return err
+	}
+	return s.serveOn(ln)
+}
+
+// serveOn runs the server on an already-bound listener (split from
+// ListenAndServe so tests can use an ephemeral port). A stop via Shutdown is
+// reported as nil — it is the expected end of a server's life, not an error —
+// unless a restart was requested, in which case ErrRestartRequested tells the
+// caller to exit with ExitRestart.
+func (s *Server) serveOn(ln net.Listener) error {
 	s.initScheduler()
 	s.startChannels()
-	return s.http.ListenAndServe()
+	err := s.http.Serve(ln)
+	if errors.Is(err, http.ErrServerClosed) {
+		if s.restartPending.Load() {
+			return ErrRestartRequested
+		}
+		return nil
+	}
+	return err
 }
 
 // Shutdown gracefully shuts down the server, releasing the process-global
