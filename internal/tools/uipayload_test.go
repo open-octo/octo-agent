@@ -80,6 +80,7 @@ func TestReadFile_UIPayload(t *testing.T) {
 }
 
 func TestGlob_UIPayload(t *testing.T) {
+	requireRg(t)
 	dir := t.TempDir()
 	for _, name := range []string{"a.go", "b.go", "c.txt"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
@@ -107,6 +108,7 @@ func TestGlob_UIPayload(t *testing.T) {
 }
 
 func TestGrep_UIPayload_ContentMode(t *testing.T) {
+	requireRg(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hit here\nmiss\nanother hit\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -128,6 +130,7 @@ func TestGrep_UIPayload_ContentMode(t *testing.T) {
 }
 
 func TestGrep_UIPayload_SkippedForContextRuns(t *testing.T) {
+	requireRg(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hit\nctx\n"), 0o644); err != nil {
 		t.Fatal(err)
