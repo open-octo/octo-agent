@@ -6,19 +6,11 @@ import (
 	"testing"
 )
 
-func defaultToolNames(model string) map[string]bool {
-	names := map[string]bool{}
-	for _, d := range DefaultToolsFor(model) {
-		names[d.Name] = true
-	}
-	return names
-}
-
 func TestRestartServerTool_HiddenWithoutRestarter(t *testing.T) {
 	SetRestarter(nil)
 	t.Cleanup(func() { SetRestarter(nil) })
 
-	if defaultToolNames("")["restart_server"] {
+	if advertisedNames()["restart_server"] {
 		t.Error("restart_server advertised with no restarter registered (CLI/TUI mode)")
 	}
 }
@@ -27,7 +19,7 @@ func TestRestartServerTool_AdvertisedWithRestarter(t *testing.T) {
 	SetRestarter(func(reason string) {})
 	t.Cleanup(func() { SetRestarter(nil) })
 
-	if !defaultToolNames("")["restart_server"] {
+	if !advertisedNames()["restart_server"] {
 		t.Error("restart_server missing from DefaultToolsFor with a restarter registered")
 	}
 }

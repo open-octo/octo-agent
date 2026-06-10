@@ -10,8 +10,11 @@ import (
 
 // activeRestarter, when non-nil, backs the restart_server tool and gates its
 // advertisement in DefaultToolsFor. The server registers it (the restart
-// goes through Server.Restart's drain); it stays nil in CLI/TUI/sub-agent
-// processes, where there is no supervisor contract to honour.
+// goes through Server.Restart's drain); it stays nil in CLI/TUI processes,
+// where there is no supervisor contract to honour. Within the server
+// process the global is shared, so server sub-agents see the tool too —
+// they inherit the parent's permission gate, which asks (web) or denies
+// (IM strict) the same way it would for the parent.
 var activeRestarter func(reason string)
 
 // SetRestarter registers the function the restart_server tool delegates to.
@@ -52,7 +55,8 @@ func (RestartServerTool) Definition() agent.ToolDefinition {
 }
 
 func (RestartServerTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
-	if !restarterEnabled() {
+	restarter := activeRestarter
+	if restarter == nil {
 		return agent.ToolResult{}, fmt.Errorf("restart_server: not available in this mode (server only)")
 	}
 	reason := strings.TrimSpace(stringArg(input, "reason"))
@@ -60,7 +64,7 @@ func (RestartServerTool) Execute(ctx context.Context, _ string, input map[string
 		return agent.ToolResult{}, fmt.Errorf("restart_server: reason is required")
 	}
 
-	activeRestarter(reason)
+	restarter(reason)
 
 	return agent.ToolResult{
 		Text: "Restart scheduled: the server will drain in-flight turns and restart after this turn completes. " +

@@ -126,3 +126,12 @@ task_list:
 # prompting so the onboard and other skill flows work over HTTP / IM.
 skill:
   - allow: { pattern: "" }
+
+# Process restart — always confirm. The implicit default would already be
+# ask, but the rule is explicit so nobody pattern-matches this block and
+# adds an allow: an unconfirmed restart_server call would bounce the whole
+# server. Non-interactive transports (IM bridge's strict gate) resolve ask
+# to deny — restart from IM stays refused until an interactive ask exists
+# there. Auto-approve mode runs it without prompting, like everything else.
+restart_server:
+  - ask: { pattern: "" }

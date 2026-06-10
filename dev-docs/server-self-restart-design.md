@@ -86,9 +86,13 @@ that is already doomed.
   drain naturally waits for the calling turn to finish, so the agent's final
   reply ("restarting now…") reaches the user before the connection drops.
 
-The tool goes through the per-turn permission gate like any other
-state-changing tool; on IM channels the interactive ask flow covers
-confirmation.
+The tool is ask-class in `internal/permission/defaults.yml` (explicitly, so
+nobody relaxes it by accident). On the web that means the browser
+confirmation prompt; the IM channel gate runs strict with no asker, so
+ask resolves to deny — an IM-triggered restart is refused until an
+interactive IM ask flow exists. Server sub-agents see the tool (the
+restarter registration is process-global) but inherit the parent's gate,
+so they face the same confirmation or denial.
 
 ## Drain sequence
 

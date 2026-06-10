@@ -271,10 +271,13 @@ func New(cfg Config) (*Server, error) {
 	// tool catalog and can be dispatched through the browser.
 	tools.SetAsker(s.wsAsker())
 
-	// Register the restarter so restart_server appears in the tool catalog —
-	// the agent can then honour "重启一下服务" from web or IM. The restart
-	// drains in-flight turns (including the one calling the tool) before the
-	// worker exits with ExitRestart for the supervisor to respawn.
+	// Register the restarter so restart_server appears in the tool catalog.
+	// Permission is ask-class (defaults.yml): the web UI confirms via the
+	// browser prompt; the IM channel gate runs strict with no asker, so an
+	// IM-triggered restart resolves to deny until an interactive ask flow
+	// exists there. The restart drains in-flight turns (including the one
+	// calling the tool) before the worker exits with ExitRestart for the
+	// supervisor to respawn.
 	tools.SetRestarter(s.Restart)
 
 	s.registerRoutes()
