@@ -20,6 +20,16 @@ import (
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/channel"
+
+	// The IM adapters self-register into the channel registry at init time.
+	// The server is what runs them (startChannels) and looks them up by name
+	// (channel.Find for task-notify pushes), so it owns the imports.
+	_ "github.com/Leihb/octo-agent/internal/channel/adapters/dingtalk"
+	_ "github.com/Leihb/octo-agent/internal/channel/adapters/discord"
+	_ "github.com/Leihb/octo-agent/internal/channel/adapters/feishu"
+	_ "github.com/Leihb/octo-agent/internal/channel/adapters/telegram"
+	_ "github.com/Leihb/octo-agent/internal/channel/adapters/wecom"
+	_ "github.com/Leihb/octo-agent/internal/channel/adapters/weixin"
 	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/memory"
 	"github.com/Leihb/octo-agent/internal/permission"
@@ -151,6 +161,9 @@ type Server struct {
 	channelMgr      *channel.Manager
 	channelCancel   context.CancelFunc
 	runningAdapters sync.Map // string -> channel.Adapter
+
+	// weixinLogin tracks the in-flight web QR login flow (one at a time).
+	weixinLogin weixinLoginFlow
 
 	// mcpCleanup unregisters + closes the MCP registry connected at start.
 	// Always non-nil after New (a no-op when no servers connected).
@@ -368,6 +381,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/channels/{platform}", s.requireAuth(s.handleSaveChannel))
 	s.mux.HandleFunc("DELETE /api/channels/{platform}", s.requireAuth(s.handleDeleteChannel))
 	s.mux.HandleFunc("POST /api/channels/{platform}/test", s.requireAuth(s.handleTestChannel))
+	s.mux.HandleFunc("POST /api/channels/weixin/login", s.requireAuth(s.handleWeixinLoginStart))
+	s.mux.HandleFunc("GET /api/channels/weixin/login", s.requireAuth(s.handleWeixinLoginStatus))
+	s.mux.HandleFunc("DELETE /api/channels/weixin/login", s.requireAuth(s.handleWeixinLoginCancel))
 	s.mux.HandleFunc("GET /api/tasks", s.requireAuth(s.handleListTasks))
 	s.mux.HandleFunc("POST /api/tasks", s.requireAuth(s.handleCreateTask))
 	s.mux.HandleFunc("DELETE /api/tasks/{id}", s.requireAuth(s.handleDeleteTask))

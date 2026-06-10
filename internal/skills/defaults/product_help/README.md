@@ -13,7 +13,7 @@ A functionality-first AI agent, distributed as a single Go binary. Speaks two na
 
 ## Status
 
-> **Pre-1.0.** All three interfaces are live: the CLI (an interactive TUI in a terminal, a headless agentic one-shot everywhere else), a local web server (`octo serve`), and an IM bridge (`octo channel`, WeChat iLink). On top of the agent loop there are skills, MCP clients, OS-level sandboxing, persistent memory, sub-agents, and a task graph for autonomous multi-step goals.
+> **Pre-1.0.** All three interfaces are live: the CLI (an interactive TUI in a terminal, a headless agentic one-shot everywhere else), a local web server (`octo serve`), and an IM bridge (running inside `octo serve`; WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram). On top of the agent loop there are skills, MCP clients, OS-level sandboxing, persistent memory, sub-agents, and a task graph for autonomous multi-step goals.
 
 ## Install
 
@@ -99,8 +99,7 @@ octo chat --list-skills
 octo serve --addr 127.0.0.1:8080
 
 # IM bridge (WeChat iLink): scan-to-login; channels run inside `octo serve`
-octo channel login
-octo serve
+octo serve   # WeChat login: Channels panel in the web UI (scan QR)
 
 # Autonomous long-horizon goal: plan into a subtask DAG and run it to completion
 octo conduct "Add a --json flag to octo config show"
@@ -187,7 +186,7 @@ octo chat --sandbox --sandbox-read /opt/data     # extra readable dir (repeatabl
 | Sub-agents | done | `launch_agent` fan-out, async + resumable (`send_message`, `agent_status`, `kill_agent`) |
 | Orchestration | done | `octo conduct` — plan a goal into a subtask DAG, run it via sub-agents, resume after crash |
 | Web server | done | `octo serve` — REST + SSE, embedded dashboard UI (bind localhost) |
-| IM bridge | done | `octo channel` — WeChat iLink adapter (QR login, per-user sessions, slash commands) |
+| IM bridge | done | runs inside `octo serve` — WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram adapters (web QR login, per-user sessions, slash commands) |
 
 ## Architecture
 

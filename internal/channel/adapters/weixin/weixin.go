@@ -293,7 +293,7 @@ func (a *Adapter) Start(ctx context.Context, onMessage func(channel.InboundEvent
 
 	creds, err := ilink.LoadCredentials(a.credPath)
 	if err != nil || creds == nil {
-		return fmt.Errorf("weixin: no credentials (run `octo channel login` first)")
+		return fmt.Errorf("weixin: no credentials (log in via the web Channels panel)")
 	}
 
 	a.bot = &ilinkBot{client: a.client, creds: creds}
@@ -416,7 +416,7 @@ func (a *Adapter) sendStandalone(chatID, text string) channel.SendResult {
 	}
 	creds, err := ilink.LoadCredentials(a.credPath)
 	if err != nil || creds == nil {
-		return channel.SendResult{OK: false, Error: "not logged in (run `octo channel login` first)"}
+		return channel.SendResult{OK: false, Error: "not logged in (log in via the web Channels panel)"}
 	}
 
 	token := loadContextTokens(contextStorePath(a.credPath))[chatID]
