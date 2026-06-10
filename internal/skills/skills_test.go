@@ -226,8 +226,13 @@ func TestRenderSkill(t *testing.T) {
 	// User/project skills get the Claude Code → octo bridging note; octo-native
 	// defaults don't.
 	u := Skill{Name: "ext", Body: "B", Dir: "/d", Source: "user"}
-	if got := RenderSkill(u, ""); !strings.Contains(got, "Bash → terminal") {
-		t.Errorf("user skill should carry the compat note; got:\n%s", got)
+	uGot := RenderSkill(u, "")
+	if !strings.Contains(uGot, "Bash → terminal") {
+		t.Errorf("user skill should carry the compat note; got:\n%s", uGot)
+	}
+	// Runtime-dependency preflight: verify before use, ask before installing.
+	if !strings.Contains(uGot, "ask the user before installing") {
+		t.Errorf("compat note should carry the dependency-preflight guidance; got:\n%s", uGot)
 	}
 	d := Skill{Name: "wt", Body: "B", Dir: "/d", Source: "default"}
 	if got := RenderSkill(d, ""); strings.Contains(got, "Bash → terminal") {
