@@ -559,7 +559,7 @@ func (a *Agent) runLoop(
 				for i, it := range steerItems {
 					msgs[i] = it.Text
 				}
-				handler(AgentEvent{Kind: EventSteerInjected, Messages: msgs})
+				handler(AgentEvent{Kind: EventSteerInjected, Messages: msgs, Steer: steerItems})
 			}
 		}
 

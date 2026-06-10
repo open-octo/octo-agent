@@ -104,8 +104,14 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	}
 
 	content := extractTextContent(msg.Content)
-	if content == "" {
+	att := parseUserFiles(msg.Files)
+	if content == "" && len(att.blocks) == 0 && len(att.notes) == 0 {
 		return
+	}
+	// Document attachments ride as path notes in the text so the model can
+	// read_file them and the transcript keeps a visible record.
+	if len(att.notes) > 0 {
+		content = strings.TrimSpace(content + "\n\n" + strings.Join(att.notes, "\n"))
 	}
 
 	sess, err := agent.LoadSession(sid)
@@ -122,14 +128,20 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 
 	if s.turnRunning[sess.ID] {
 		mu.Unlock()
-		s.enqueueSteer(sess.ID, content)
-		// Also inject into the running Agent's Inbox so the runLoop can
-		// drain it between tool-call iterations.
+		// A mid-turn message has exactly one home: the running Agent's Inbox
+		// when it is registered (the runLoop drains it between iterations —
+		// attachment blocks and all), the steer queue otherwise (consumed by
+		// runAgentTurnLoop as the next chained turn). Enqueueing into both,
+		// as this branch once did, processed the same message twice.
 		s.sessionAgentsMu.Lock()
-		if a := s.sessionAgents[sess.ID]; a != nil {
-			a.Inbox.Enqueue(content)
+		a := s.sessionAgents[sess.ID]
+		if a != nil {
+			a.Inbox.EnqueueWithBlocks(content, att.blocks)
 		}
 		s.sessionAgentsMu.Unlock()
+		if a == nil {
+			s.enqueueSteer(sess.ID, agent.InboxItem{Text: content, Blocks: att.blocks})
+		}
 		// The frontend already rendered a ghost bubble in _sendMessage;
 		// history_user_message (broadcast when the turn drains steer) will
 		// replace it.  No need for a separate pending_user_messages event.
@@ -145,7 +157,7 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 			s.turnRunning[sess.ID] = false
 			mu.Unlock()
 		}()
-		s.runAgentTurnLoop(sess, content)
+		s.runAgentTurnLoop(sess, content, att.blocks, att.images)
 	}()
 }
 
@@ -209,6 +221,23 @@ func (s *Server) handleWSRetry(conn *wsConn, sessionID string) {
 	sess.Messages = sess.Messages[:lastUserIdx]
 	_ = sess.Save()
 
+	// A multipart user message (image attachments) keeps its text in a text
+	// block; re-attach the image blocks (rehydrated by LoadSession) so the
+	// retried turn re-sends them.
+	content := userMsg.Content
+	var blocks []agent.ContentBlock
+	for _, b := range userMsg.Blocks {
+		switch b.Type {
+		case "text":
+			if content == "" {
+				content = b.Text
+			}
+		case "image":
+			blocks = append(blocks, b)
+		}
+	}
+	images := imageRefsFromBlocks(blocks)
+
 	s.turnRunning[sess.ID] = true
 	mu.Unlock()
 
@@ -218,7 +247,7 @@ func (s *Server) handleWSRetry(conn *wsConn, sessionID string) {
 			s.turnRunning[sess.ID] = false
 			mu.Unlock()
 		}()
-		s.runAgentTurnLoop(sess, userMsg.Content)
+		s.runAgentTurnLoop(sess, content, blocks, images)
 	}()
 }
 
@@ -295,47 +324,72 @@ func joinNonEmpty(parts []string, sep string) string {
 //
 // doAgentTurn is the single-turn body shared by the loop and retry paths.
 
-func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string) {
+func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, blocks []agent.ContentBlock, images []string) {
 	content := initialContent
 	for {
-		s.doAgentTurn(sess, content)
-		steerMsgs := s.drainSteer(sess.ID)
-		if len(steerMsgs) == 0 {
+		s.doAgentTurn(sess, content, blocks, images)
+		steerItems := s.drainSteer(sess.ID)
+		if len(steerItems) == 0 {
 			break
 		}
-		content = strings.Join(steerMsgs, "\n\n")
+		// Fold the queued steer items into one chained turn: texts joined,
+		// attachment blocks carried over, thumbnails re-derived.
+		var texts []string
+		blocks = nil
+		for _, it := range steerItems {
+			if strings.TrimSpace(it.Text) != "" {
+				texts = append(texts, it.Text)
+			}
+			blocks = append(blocks, it.Blocks...)
+		}
+		content = strings.Join(texts, "\n\n")
+		images = imageRefsFromBlocks(blocks)
 	}
 }
 
-func (s *Server) enqueueSteer(sessionID, content string) {
+func (s *Server) enqueueSteer(sessionID string, items ...agent.InboxItem) {
 	s.steerMu.Lock()
-	s.steerQueues[sessionID] = append(s.steerQueues[sessionID], content)
+	s.steerQueues[sessionID] = append(s.steerQueues[sessionID], items...)
 	s.steerMu.Unlock()
 }
 
-func (s *Server) drainSteer(sessionID string) []string {
+func (s *Server) drainSteer(sessionID string) []agent.InboxItem {
 	s.steerMu.Lock()
-	msgs := s.steerQueues[sessionID]
+	items := s.steerQueues[sessionID]
 	s.steerQueues[sessionID] = nil
 	s.steerMu.Unlock()
-	return msgs
+	return items
 }
 
-func (s *Server) doAgentTurn(sess *agent.Session, content string) {
+func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent.ContentBlock, images []string) {
 	// Confirm the user message immediately so the frontend can swap the
 	// ghost (.msg-pending) bubble for the real one before streaming starts.
-	s.wsHub.broadcast(sess.ID, map[string]any{
+	userEvent := map[string]any{
 		"type":       "history_user_message",
 		"session_id": sess.ID,
 		"content":    content,
 		"created_at": time.Now().UnixMilli(),
-	})
+	}
+	if len(images) > 0 {
+		userEvent["images"] = images
+	}
+	s.wsHub.broadcast(sess.ID, userEvent)
 
 	// Persist the user message right away so a page refresh mid-turn doesn't
 	// lose it.  We append it for Save(), then pop it back off so buildAgent
 	// doesn't double-count it — RunStream will add the same message to
-	// a.History via appendUserInput.
-	sess.Messages = append(sess.Messages, agent.NewUserMessage(content))
+	// a.History via appendUserInput. Mirror appendUserInput's multipart shape
+	// (optional text block, then attachments) so the persisted line matches.
+	userMsg := agent.NewUserMessage(content)
+	if len(blocks) > 0 {
+		multi := make([]agent.ContentBlock, 0, len(blocks)+1)
+		if content != "" {
+			multi = append(multi, agent.NewTextBlock(content))
+		}
+		userMsg.Content = ""
+		userMsg.Blocks = append(multi, blocks...)
+	}
+	sess.Messages = append(sess.Messages, userMsg)
 	_ = sess.Save()
 	sess.Messages = sess.Messages[:len(sess.Messages)-1]
 
@@ -392,15 +446,16 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 	}()
 
 	a := s.buildAgent(sess)
+	if len(blocks) > 0 {
+		// Image attachments fold into the same user turn as the text when
+		// RunStream appends the user input.
+		a.AttachUserBlocks(blocks)
+	}
 
 	// Flush any steer messages that arrived before the Agent was built into
 	// the Agent's Inbox so the runLoop can drain them between iterations.
-	s.steerMu.Lock()
-	steerBacklog := s.steerQueues[sess.ID]
-	s.steerQueues[sess.ID] = nil
-	s.steerMu.Unlock()
-	for _, m := range steerBacklog {
-		a.Inbox.Enqueue(m)
+	for _, it := range s.drainSteer(sess.ID) {
+		a.Inbox.EnqueueWithBlocks(it.Text, it.Blocks)
 	}
 
 	// Register this Agent so concurrent mid-turn messages can reach its Inbox.
@@ -411,6 +466,16 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 		s.sessionAgentsMu.Lock()
 		delete(s.sessionAgents, sess.ID)
 		s.sessionAgentsMu.Unlock()
+	}()
+	// Messages still in the Inbox when the turn ends — they arrived during the
+	// final LLM round, or the turn errored out before draining them — go back
+	// to the steer queue so runAgentTurnLoop chains them into the next turn,
+	// which answers, broadcasts, and persists them exactly once. (Runs before
+	// the deregistration defer above, so no message slips past both homes.)
+	defer func() {
+		if items := a.Inbox.Drain(); len(items) > 0 {
+			s.enqueueSteer(sess.ID, items...)
+		}
 	}()
 
 	var toolDefs []agent.ToolDefinition
@@ -477,22 +542,6 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 			"reply":      map[string]any{"content": rCopy.Content},
 		})
 		sw.sendRaw(b)
-	}
-
-	// Drain inbox (steer/queued messages that arrived mid-turn). Surface them
-	// as user bubbles so they don't vanish from the transcript, and persist
-	// them into session history so they survive a page reload.
-	if items := a.Inbox.Drain(); len(items) > 0 {
-		for _, it := range items {
-			s.wsHub.broadcast(sess.ID, map[string]any{
-				"type":       "history_user_message",
-				"session_id": sess.ID,
-				"content":    it.Text,
-				"created_at": time.Now().UnixMilli(),
-			})
-			sess.Messages = append(sess.Messages, agent.NewUserMessage(it.Text))
-		}
-		_ = sess.Save()
 	}
 
 	s.wsHub.broadcast(sess.ID, map[string]any{
@@ -652,13 +701,26 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 		})
 
 	case agent.EventSteerInjected:
-		for _, msg := range ev.Messages {
-			w.hub.broadcast(w.sessionID, map[string]any{
+		// Prefer the full inbox items (text + attachment blocks) so a steer
+		// message's image thumbnails reach the bubble; Messages is the
+		// text-only fallback for events from older emitters.
+		items := ev.Steer
+		if len(items) == 0 {
+			for _, msg := range ev.Messages {
+				items = append(items, agent.InboxItem{Text: msg})
+			}
+		}
+		for _, it := range items {
+			evt := map[string]any{
 				"type":       "history_user_message",
 				"session_id": w.sessionID,
-				"content":    msg,
+				"content":    it.Text,
 				"created_at": time.Now().UnixMilli(),
-			})
+			}
+			if imgs := imageRefsFromBlocks(it.Blocks); len(imgs) > 0 {
+				evt["images"] = imgs
+			}
+			w.hub.broadcast(w.sessionID, evt)
 		}
 
 	case agent.EventTurnDone:
