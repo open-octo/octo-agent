@@ -19,7 +19,15 @@ import (
 type Registry struct {
 	mu     sync.RWMutex
 	conns  map[string]*Connection // server name → live client
+	errs   map[string]string      // server name → last connect error (no live conn)
 	closed bool
+}
+
+// NewRegistry returns an empty registry ready for incremental Connect calls.
+// ConnectAll builds on it; management UIs use it directly when the first
+// server is added at runtime to a session that started with none.
+func NewRegistry() *Registry {
+	return &Registry{conns: map[string]*Connection{}, errs: map[string]string{}}
 }
 
 // Connection is the per-server bundle of state the adapters need: the
@@ -55,7 +63,7 @@ type Connection struct {
 // must point at a log file or io.Discard, never the terminal. nil falls back to
 // os.Stderr inside the transport.
 func ConnectAll(ctx context.Context, cfg *Config, info Implementation, authPromptFor func(serverName string) OAuthPrompt, warn, childStderr io.Writer) *Registry {
-	r := &Registry{conns: map[string]*Connection{}}
+	r := NewRegistry()
 	if cfg == nil {
 		return r
 	}
@@ -67,6 +75,7 @@ func ConnectAll(ctx context.Context, cfg *Config, info Implementation, authPromp
 		}
 		conn, err := connectOne(ctx, name, entry, info, prompt, childStderr)
 		if err != nil {
+			r.errs[name] = err.Error()
 			if warn != nil {
 				fmt.Fprintf(warn, "mcp: server %q skipped: %v\n", name, err)
 			}
@@ -139,6 +148,62 @@ func connectOne(ctx context.Context, name string, entry ServerEntry, info Implem
 		conn.Prompts = prompts
 	}
 	return conn, nil
+}
+
+// Connect (re)connects one server and installs the connection, replacing —
+// and closing — any previous connection under the same name. On failure the
+// stale connection (if any) is dropped and the error is recorded so
+// ConnectError can report it; the error is also returned. Safe for concurrent
+// use; the dial itself runs outside the lock so a slow server doesn't block
+// readers.
+func (r *Registry) Connect(ctx context.Context, name string, entry ServerEntry, info Implementation, authPrompt OAuthPrompt, childStderr io.Writer) error {
+	conn, err := connectOne(ctx, name, entry, info, authPrompt, childStderr)
+
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		if conn != nil {
+			_ = conn.Client.Close()
+		}
+		return fmt.Errorf("mcp: registry closed")
+	}
+	old := r.conns[name]
+	if err != nil {
+		delete(r.conns, name)
+		r.errs[name] = err.Error()
+	} else {
+		r.conns[name] = conn
+		delete(r.errs, name)
+	}
+	r.mu.Unlock()
+
+	if old != nil {
+		_ = old.Client.Close()
+	}
+	return err
+}
+
+// Remove closes and forgets the named connection (and any recorded connect
+// error). Removing an unknown name is a no-op.
+func (r *Registry) Remove(name string) {
+	r.mu.Lock()
+	old := r.conns[name]
+	delete(r.conns, name)
+	delete(r.errs, name)
+	r.mu.Unlock()
+	if old != nil {
+		_ = old.Client.Close()
+	}
+}
+
+// ConnectError reports the last connect failure for a server that has no live
+// connection. ok is false when the server either connected fine or was never
+// attempted.
+func (r *Registry) ConnectError(name string) (msg string, ok bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	msg, ok = r.errs[name]
+	return
 }
 
 // Connections returns the live connections in stable order so /mcp output

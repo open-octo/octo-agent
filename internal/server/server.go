@@ -133,6 +133,11 @@ type Server struct {
 	// Always non-nil after New (a no-op when no servers connected).
 	mcpCleanup func()
 
+	// mcpMu serialises MCP config mutations + registry swaps from the web
+	// management API (and Shutdown) — SwapMCP must not run concurrently
+	// with itself or with incremental connects.
+	mcpMu sync.Mutex
+
 	// accessKey is the shared secret for Web UI / API authentication.
 	accessKey string
 
@@ -263,11 +268,16 @@ func (s *Server) enableMCP() {
 	if cfg, err := config.Load(); err == nil {
 		tools.SetToolSearchConfig(app.ToolSearchConfigFrom(cfg.Tools.ToolSearch))
 	}
-	cleanup, err := app.ConnectMCP(context.Background(), s.cwd, os.Stderr)
-	if err != nil {
+	s.mcpMu.Lock()
+	defer s.mcpMu.Unlock()
+	if err := app.SwapMCP(context.Background(), s.cwd, os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "octo serve: mcp: %v\n", err)
 	}
-	s.mcpCleanup = cleanup
+	s.mcpCleanup = func() {
+		s.mcpMu.Lock()
+		defer s.mcpMu.Unlock()
+		app.ShutdownMCP()
+	}
 }
 
 // AccessKey always returns an empty string: access-key authentication was
@@ -353,6 +363,17 @@ func (s *Server) registerRoutes() {
 	// Skill toggle & delete
 	s.mux.HandleFunc("PATCH /api/skills/{name}/toggle", s.requireAuth(s.handleToggleSkill))
 	s.mux.HandleFunc("DELETE /api/skills/{name}", s.requireAuth(s.handleDeleteSkill))
+
+	// MCP server management
+	s.mux.HandleFunc("GET /api/mcp/servers", s.requireAuth(s.handleListMCPServers))
+	s.mux.HandleFunc("POST /api/mcp/servers", s.requireAuth(s.handleCreateMCPServer))
+	s.mux.HandleFunc("PATCH /api/mcp/servers/{name}", s.requireAuth(s.handleUpdateMCPServer))
+	s.mux.HandleFunc("DELETE /api/mcp/servers/{name}", s.requireAuth(s.handleDeleteMCPServer))
+	s.mux.HandleFunc("PATCH /api/mcp/servers/{name}/toggle", s.requireAuth(s.handleToggleMCPServer))
+	s.mux.HandleFunc("POST /api/mcp/servers/{name}/reconnect", s.requireAuth(s.handleReconnectMCPServer))
+	s.mux.HandleFunc("POST /api/mcp/reload", s.requireAuth(s.handleReloadMCP))
+	s.mux.HandleFunc("GET /api/config/toolsearch", s.requireAuth(s.handleGetToolSearch))
+	s.mux.HandleFunc("PUT /api/config/toolsearch", s.requireAuth(s.handlePutToolSearch))
 
 	// Benchmark
 	s.mux.HandleFunc("POST /api/sessions/{id}/benchmark", s.requireAuth(s.handleBenchmark))
