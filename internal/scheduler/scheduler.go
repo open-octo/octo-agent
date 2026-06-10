@@ -6,6 +6,7 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -28,6 +29,29 @@ type NotifyTarget struct {
 	ChatID   string `json:"chat_id"`
 }
 
+// NotifyTargets is a list of notify destinations; each run is pushed to every
+// entry. It unmarshals from either a JSON array or a bare object, so task
+// files written when notify was a single target keep loading.
+type NotifyTargets []NotifyTarget
+
+func (n *NotifyTargets) UnmarshalJSON(b []byte) error {
+	trimmed := bytes.TrimSpace(b)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var one NotifyTarget
+		if err := json.Unmarshal(trimmed, &one); err != nil {
+			return err
+		}
+		*n = NotifyTargets{one}
+		return nil
+	}
+	var many []NotifyTarget
+	if err := json.Unmarshal(trimmed, &many); err != nil {
+		return err
+	}
+	*n = many
+	return nil
+}
+
 // Task represents a scheduled agent task.
 type Task struct {
 	ID        string        `json:"id"`
@@ -37,7 +61,7 @@ type Task struct {
 	Model     string        `json:"model,omitempty"`
 	Agent     string        `json:"agent,omitempty"` // "general" | "coding"
 	Directory string        `json:"directory,omitempty"`
-	Notify    *NotifyTarget `json:"notify,omitempty"`
+	Notify    NotifyTargets `json:"notify,omitempty"`
 	Enabled   bool          `json:"enabled"`
 	CreatedAt time.Time     `json:"created_at"`
 	LastRun   time.Time     `json:"last_run,omitempty"`

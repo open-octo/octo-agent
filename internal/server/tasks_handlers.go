@@ -22,7 +22,7 @@ type taskRequest struct {
 	Prompt string                  `json:"prompt"`
 	Model  string                  `json:"model,omitempty"`
 	Agent  string                  `json:"agent,omitempty"`
-	Notify *scheduler.NotifyTarget `json:"notify,omitempty"`
+	Notify scheduler.NotifyTargets `json:"notify,omitempty"`
 }
 
 type taskResponse struct {
@@ -32,7 +32,7 @@ type taskResponse struct {
 	Prompt    string                  `json:"prompt"`
 	Model     string                  `json:"model,omitempty"`
 	Agent     string                  `json:"agent,omitempty"`
-	Notify    *scheduler.NotifyTarget `json:"notify,omitempty"`
+	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
 	Enabled   bool                    `json:"enabled"`
 	CreatedAt string                  `json:"created_at,omitempty"`
 	LastRun   string                  `json:"last_run,omitempty"`
@@ -124,15 +124,15 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 	return sess.ID, nil
 }
 
-// notifyTaskResult pushes a task run's outcome to its IM notify target, if
-// one is configured. Delivery failures are logged, never fatal — the run
-// itself already happened and is recorded in the session.
+// notifyTaskResult pushes a task run's outcome to every configured IM notify
+// target. Delivery failures are logged per target, never fatal — the run
+// itself already happened and is recorded in the session, and one channel
+// failing must not silence the others.
 func (s *Server) notifyTaskResult(task scheduler.Task, text string) {
-	if task.Notify == nil {
-		return
-	}
-	if err := channel.SendOnce(task.Notify.Platform, task.Notify.ChatID, text); err != nil {
-		log.Printf("[scheduler] task %q notify: %v", task.Name, err)
+	for _, n := range task.Notify {
+		if err := channel.SendOnce(n.Platform, n.ChatID, text); err != nil {
+			log.Printf("[scheduler] task %q notify %s/%s: %v", task.Name, n.Platform, n.ChatID, err)
+		}
 	}
 }
 

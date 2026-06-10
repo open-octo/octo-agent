@@ -21,7 +21,7 @@ history from previous executions.
 | `model` | no | Model override; defaults to the server's model |
 | `agent` | no | `"general"` or `"coding"` |
 | `directory` | no | Working directory hint, prepended to the task session's system prompt |
-| `notify` | no | `{"platform": "feishu", "chat_id": "oc_..."}` — push each run's final reply (or a failure note) to an IM chat |
+| `notify` | no | IM chats to push each run's final reply (or a failure note) to: `[{"platform": "feishu", "chat_id": "oc_..."}, {"platform": "weixin", "chat_id": "..."}]` — every entry gets the push. A bare object (single target) is also accepted. |
 | `enabled` | yes | Whether the schedule is active |
 
 ## Cron expression format — 6 fields, seconds first

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -281,5 +282,37 @@ func TestLoadAllRegistersEnabledTasks(t *testing.T) {
 	}
 	if got := len(s2.cron.Entries()); got != 1 {
 		t.Fatalf("cron entries after reload = %d, want 1 (only the enabled task)", got)
+	}
+}
+
+func TestNotifyTargetsUnmarshal_ObjectAndArray(t *testing.T) {
+	// A task file written when notify was a single object must keep loading.
+	var fromObject Task
+	if err := json.Unmarshal([]byte(`{"id":"t1","notify":{"platform":"feishu","chat_id":"oc_1"}}`), &fromObject); err != nil {
+		t.Fatalf("unmarshal object form: %v", err)
+	}
+	if len(fromObject.Notify) != 1 || fromObject.Notify[0].ChatID != "oc_1" {
+		t.Fatalf("object form: notify = %v", fromObject.Notify)
+	}
+
+	var fromArray Task
+	if err := json.Unmarshal([]byte(`{"id":"t2","notify":[{"platform":"feishu","chat_id":"oc_1"},{"platform":"weixin","chat_id":"u_2"}]}`), &fromArray); err != nil {
+		t.Fatalf("unmarshal array form: %v", err)
+	}
+	if len(fromArray.Notify) != 2 || fromArray.Notify[1].Platform != "weixin" {
+		t.Fatalf("array form: notify = %v", fromArray.Notify)
+	}
+
+	// Round-trip: marshal writes an array, which unmarshals back unchanged.
+	b, err := json.Marshal(fromArray)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var again Task
+	if err := json.Unmarshal(b, &again); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	if len(again.Notify) != 2 {
+		t.Fatalf("round-trip: notify = %v", again.Notify)
 	}
 }
