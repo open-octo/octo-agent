@@ -38,9 +38,11 @@ const Artifacts = (() => {
   }
 
   /** Ingest one tool ui_payload. opts.live distinguishes live turns from
-   *  history replay (only live arrivals auto-open the panel). */
+   *  history replay (only live arrivals auto-open the panel). "artifact" is
+   *  show_artifact's payload — script-produced files surfaced explicitly. */
   function observe(uiPayload, opts) {
-    if (!uiPayload || (uiPayload.type !== "write" && uiPayload.type !== "edit")) return;
+    if (!uiPayload) return;
+    if (uiPayload.type !== "write" && uiPayload.type !== "edit" && uiPayload.type !== "artifact") return;
     const path = uiPayload.path;
     if (!path) return;
     const kind = _kindOf(path);

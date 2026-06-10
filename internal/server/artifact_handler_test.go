@@ -129,6 +129,38 @@ func TestHandleGetArtifact_SizeCap(t *testing.T) {
 	}
 }
 
+func TestHandleGetArtifact_ShowArtifactCountsAsWrite(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	// Simulates a script-built file surfaced via the show_artifact tool: no
+	// write_file in the transcript, only the show_artifact tool_use.
+	p := filepath.Join(t.TempDir(), "bundle.html")
+	if err := os.WriteFile(p, []byte("<h1>built</h1>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess := agent.NewSession("stub-model", "")
+	sess.Messages = append(sess.Messages, agent.Message{
+		Role: agent.RoleAssistant,
+		Blocks: []agent.ContentBlock{{
+			Type: "tool_use", ID: "t1", Name: "show_artifact",
+			Input: map[string]any{"path": p},
+		}}})
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := getArtifact(t, srv, sess.ID, p)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "<h1>built</h1>" {
+		t.Errorf("body = %q", w.Body.String())
+	}
+}
+
 func TestHandleGetArtifact_EditCountsAsWrite(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
