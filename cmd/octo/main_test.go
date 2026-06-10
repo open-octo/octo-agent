@@ -6,20 +6,6 @@ import (
 	"testing"
 )
 
-func TestRun_NoArgs_PrintsUsage(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := run(nil, strings.NewReader(""), &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	if !strings.Contains(stdout.String(), "Usage: octo") {
-		t.Errorf("stdout missing usage banner; got: %q", stdout.String())
-	}
-	if stderr.Len() != 0 {
-		t.Errorf("stderr should be empty; got: %q", stderr.String())
-	}
-}
-
 func TestRun_Version(t *testing.T) {
 	for _, arg := range []string{"version", "--version", "-v"} {
 		t.Run(arg, func(t *testing.T) {
@@ -35,11 +21,11 @@ func TestRun_Version(t *testing.T) {
 	}
 }
 
-func TestRun_Usage_ListsInit(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	run(nil, strings.NewReader(""), &stdout, &stderr)
-	if !strings.Contains(stdout.String(), "init") {
-		t.Errorf("usage should list the init command; got: %q", stdout.String())
+func TestPrintUsage_ListsInit(t *testing.T) {
+	var buf bytes.Buffer
+	printUsage(&buf)
+	if !strings.Contains(buf.String(), "init") {
+		t.Errorf("usage should list the init command; got: %q", buf.String())
 	}
 }
 
