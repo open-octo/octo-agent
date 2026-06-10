@@ -4,6 +4,7 @@
 //   - Render the MCP panel: tool_search switch + server list
 //   - Add / edit / delete / enable-disable servers via /api/mcp/*
 //   - Bulk import from a pasted Claude Code-style mcp.json
+//   - AI-guided setup by opening a session with /mcp-creator
 //   - Per-server reconnect + full reload
 //
 // Project-level entries (source=project) are read-only here — they belong to
@@ -13,7 +14,7 @@
 // Panel switching is delegated to Router — MCP only manages data + rendering.
 //
 // Depends on: Router (app.js), Modal (app.js), I18n (i18n.js),
-//             global $ / escapeHtml helpers
+//             Skills (skills.js, createInSession), global $ / escapeHtml helpers
 // ─────────────────────────────────────────────────────────────────────────
 
 const MCP = (() => {
@@ -411,6 +412,9 @@ const MCP = (() => {
     _domWired = true;
 
     $("btn-mcp-add").addEventListener("click", () => _openForm(null));
+    // AI-guided setup: open a fresh session driving the mcp-creator skill,
+    // same flow as the Skills panel's Create button.
+    $("btn-mcp-create").addEventListener("click", () => Skills.createInSession("/mcp-creator"));
     $("btn-mcp-import").addEventListener("click", () => {
       _closeForm();
       const bar = $("mcp-import-bar");
