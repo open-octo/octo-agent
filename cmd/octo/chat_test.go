@@ -276,6 +276,12 @@ func TestRunChat_OpenAI_EndToEnd(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// Isolate HOME so the tools-on session reads an empty mcp.json instead of
+	// the developer's real ~/.octo/mcp.json — connecting to live MCP servers
+	// would block the headless turn indefinitely (no connect timeout).
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("OPENAI_BASE_URL", srv.URL)
 	t.Setenv("ANTHROPIC_API_KEY", "") // ensure we're testing the openai branch
@@ -400,6 +406,11 @@ func TestRunChat_OpenAI_StreamingEndToEnd(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// See TestRunChat_OpenAI_EndToEnd: isolate HOME so the tools-on session
+	// doesn't connect to the developer's real MCP servers and hang.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("OPENAI_API_KEY", "k")
 	t.Setenv("OPENAI_BASE_URL", srv.URL)
 	t.Setenv("ANTHROPIC_API_KEY", "")
