@@ -3388,6 +3388,13 @@ const Sessions = (() => {
     },
 
     _clearLiveAssistant(id) {
+      const state = Sessions._liveAssistant[id];
+      // Cancel any pending throttled stream render so a late timer can't
+      // overwrite the finalized bubble (and re-add the typing cursor).
+      if (state && state.renderTimer) {
+        clearTimeout(state.renderTimer);
+        state.renderTimer = null;
+      }
       delete Sessions._liveAssistant[id];
     },
 
@@ -3441,19 +3448,38 @@ const Sessions = (() => {
       state.rawText += text;
       state.el.dataset.raw = state.rawText;
 
-      // Render: escape the raw text and append as plain text nodes.
-      // We use a live text approach rather than full markdown re-render
-      // on every delta for performance. A typing cursor is shown at the end.
-      const contentEl = state.el;
-      // Simple streaming render: plain text with auto-linking, no full markdown
-      // (avoids re-parsing markdown on every 50ms delta).
-      // We render line-breaks as <br> and preserve whitespace.
-      const escaped = escapeHtml(state.rawText);
-      const withBreaks = escaped.replace(/\n/g, "<br>");
-      contentEl.innerHTML = withBreaks +
-        '<span class="stream-cursor" aria-hidden="true"></span>';
+      // Live markdown rendering, throttled: re-render the accumulated buffer
+      // at most once per 150ms window so the streaming bubble matches the
+      // final render (no plain-text → markdown jump at turn end) without
+      // re-running marked + hljs + KaTeX on every token-sized delta.
+      Sessions._scheduleStreamRender(state, messages);
+    },
 
-      _scrollToBottomIfNeeded(messages);
+    // Schedule a throttled markdown render of the live streaming bubble.
+    // Every delta calls this; a timer is only ever pending once, and the
+    // trailing render after the last delta is guaranteed because the timer
+    // always fires with the latest rawText.
+    _scheduleStreamRender(state, messages) {
+      if (state.renderTimer) return;
+      const interval = 150;
+      const since = Date.now() - (state.lastRenderAt || 0);
+      state.renderTimer = setTimeout(() => {
+        state.renderTimer = null;
+        state.lastRenderAt = Date.now();
+        if (!state.el || !state.el.parentNode) return;
+        state.el.innerHTML = _renderMarkdown(state.rawText);
+        // Typing cursor: inline at the end of the last block when that makes
+        // sense; below the content for blocks that can't host inline children
+        // (tables, lists, code blocks).
+        const cursor = document.createElement("span");
+        cursor.className = "stream-cursor";
+        cursor.setAttribute("aria-hidden", "true");
+        const last = state.el.lastElementChild;
+        const inlineHost = last && !/^(TABLE|PRE|UL|OL|HR)$/.test(last.tagName) &&
+          !last.classList.contains("code-block") ? last : state.el;
+        inlineHost.appendChild(cursor);
+        _scrollToBottomIfNeeded(messages);
+      }, Math.max(0, interval - since));
     },
 
     // Append a thinking/reasoning trace delta.
