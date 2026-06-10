@@ -55,10 +55,11 @@ what the agent writes now surfaces in the *next* session, not the current one.
 
 The session-prompt guidance (`internal/prompt/base.md`, "Memory" section)
 covers when to save (lasting preferences, corrections + the why, validated
-judgment, external resources), what not to save (one-off task state, anything
-derivable from the repo, secrets), grounding answers in memory with a brief
-inline attribution, and verifying a remembered file/flag still exists before
-acting on it.
+judgment, project decisions and milestones — the rationale and the
+alternatives ruled out, not the diff — and external resources), what not to
+save (one-off task state, the content of code changes, secrets), grounding
+answers in memory with a brief inline attribution, and verifying a remembered
+file/flag still exists before acting on it.
 
 ## Attention layer — structured rules, re-surfaced at the point of action
 
@@ -90,7 +91,32 @@ turn). The reminder rides the message stream rather than the system prompt, so
 the cached prompt prefix stays byte-stable across the session.
 
 A MEMORY.md without these sections — the plain pointer-index format — parses to
-zero rules, sets no hook, and behaves exactly as before.
+zero rules and the per-turn reminder stays silent; the injector is still wired,
+because it also carries the save-nudge below.
+
+## Save-nudge — a one-shot reminder when a milestone lands
+
+The reverse of recall: prompting the agent to *write* memory at the moment
+there is something worth writing. When a terminal command matching
+`gh pr create` / `gh pr merge` succeeds, `memory.Injector.SaveNudge` appends a
+`<system-reminder>` to that tool call's result asking the agent to record any
+durable decision — the rationale, the alternatives ruled out, constraints
+future sessions must respect — and to stay quiet if nothing qualifies. The
+nudge rides the tool result, so the model reads it in the same turn the
+milestone happened rather than next session, and the cached prompt prefix
+stays untouched.
+
+The match is deliberately narrow (a noisy nudge trains the model to ignore
+it): only the `terminal` tool, only those two `gh` subcommands, and at most
+once per user turn — the latch re-arms on the next `Reminder` call, so a long
+session nudges once per milestone-bearing turn, not once ever.
+
+Delivery uses `agent.ToolResultHook`, the tool-result counterpart of
+`UserInputHook`: the run loop invokes it serially after each tool batch is
+dispatched (never inside the parallel read-only path, so the latch needs no
+locking), skips denied and errored calls, and appends a non-empty return to
+the matching tool_result text. `cmd/octo` and the server wire both hooks to
+the same injector whenever a memory directory exists.
 
 ## Writing — file tools, whitelisted directory
 

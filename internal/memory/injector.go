@@ -5,16 +5,26 @@ package memory
 // the system prompt, so the cached prompt prefix stays byte-stable across the
 // session. Always-apply rules are restated every turn; triggered rules surface
 // only when user input hits one of their keywords, and at most once per session.
+//
+// The injector also carries the save-nudge: a one-shot reminder appended to a
+// tool result when the session just did something milestone-shaped (a PR was
+// created or merged), prompting the agent to record durable decisions in its
+// memory directory while the moment is still in front of it.
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Injector holds session-scoped recall state for a parsed rule set.
 type Injector struct {
 	rules    *Rules
 	recalled map[string]bool // triggered rules already surfaced this session, keyed by text
+	nudged   bool            // save-nudge already emitted this turn; reset on the next user input
 }
 
-// NewInjector builds an injector over the given rules.
+// NewInjector builds an injector over the given rules. rules may be nil or
+// empty — the injector then serves only the save-nudge.
 func NewInjector(rules *Rules) *Injector {
 	return &Injector{rules: rules, recalled: make(map[string]bool)}
 }
@@ -23,7 +33,13 @@ func NewInjector(rules *Rules) *Injector {
 // there is nothing to surface this turn. It combines the always-apply tier
 // (every turn) with any newly-triggered rules matched against userInput.
 func (in *Injector) Reminder(userInput string) string {
-	if in == nil || in.rules == nil {
+	if in == nil {
+		return ""
+	}
+	// A new user turn re-arms the save-nudge: at most one nudge per turn, not
+	// one per session — a long session can hit several milestones.
+	in.nudged = false
+	if in.rules == nil {
 		return ""
 	}
 
@@ -131,4 +147,31 @@ func isWordByte(b byte) bool {
 		(b >= 'a' && b <= 'z') ||
 		(b >= 'A' && b <= 'Z') ||
 		(b >= '0' && b <= '9')
+}
+
+// milestoneCommand matches terminal commands that mark a unit of work landing:
+// a PR created or merged via the gh CLI. Deliberately narrow — a noisy nudge
+// trains the model to ignore it.
+var milestoneCommand = regexp.MustCompile(`(^|[^[:alnum:]_])gh\s+pr\s+(create|merge)\b`)
+
+// saveNudgeText is appended to the milestone tool call's result, so the model
+// reads it in the same turn the milestone happened, not next session.
+const saveNudgeText = "<system-reminder>\n" +
+	"A pull request was just created or merged. If this work settled anything durable — a decision (especially an approach ruled OUT), a milestone, or a constraint future sessions must respect — record it in your memory directory now, per the Memory section of your instructions. The diff and git log already hold WHAT changed; memory is for the why, the alternatives rejected, and the don't-redo-this. If nothing here is durable, carry on.\n" +
+	"</system-reminder>"
+
+// SaveNudge is the agent's ToolResultHook: it returns the save-nudge reminder
+// when toolName/input is a milestone-shaped terminal command, at most once per
+// user turn (Reminder re-arms it). It is called serially from the agent run
+// loop, so the latch needs no locking.
+func (in *Injector) SaveNudge(toolName string, input map[string]any) string {
+	if in == nil || in.nudged || toolName != "terminal" {
+		return ""
+	}
+	cmd, _ := input["command"].(string)
+	if !milestoneCommand.MatchString(cmd) {
+		return ""
+	}
+	in.nudged = true
+	return saveNudgeText
 }

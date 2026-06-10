@@ -74,3 +74,62 @@ func TestReminder_NilSafe(t *testing.T) {
 		t.Errorf("nil injector should return empty, got %q", got)
 	}
 }
+
+// ─── Save-nudge ─────────────────────────────────────────────────────────────
+
+func term(cmd string) map[string]any { return map[string]any{"command": cmd} }
+
+func TestSaveNudge_FiresOnMilestoneCommands(t *testing.T) {
+	for _, cmd := range []string{
+		"gh pr create --title x",
+		"gh pr merge 42 --squash",
+		"cd /repo && gh pr merge",
+	} {
+		in := NewInjector(nil)
+		got := in.SaveNudge("terminal", term(cmd))
+		if !strings.Contains(got, "<system-reminder>") {
+			t.Errorf("command %q: expected nudge, got %q", cmd, got)
+		}
+	}
+}
+
+func TestSaveNudge_SilentOnEverythingElse(t *testing.T) {
+	in := NewInjector(nil)
+	cases := []struct {
+		tool string
+		in   map[string]any
+	}{
+		{"terminal", term("git status")},
+		{"terminal", term("gh pr view 42")},
+		{"terminal", term("gh pr list")},
+		{"terminal", term("echo gh prX merge")},
+		{"terminal", map[string]any{}}, // no command key
+		{"write_file", term("gh pr merge")},
+	}
+	for _, c := range cases {
+		if got := in.SaveNudge(c.tool, c.in); got != "" {
+			t.Errorf("tool %s input %v: expected silence, got %q", c.tool, c.in, got)
+		}
+	}
+}
+
+func TestSaveNudge_OncePerTurn_RearmedByReminder(t *testing.T) {
+	in := NewInjector(nil)
+	if in.SaveNudge("terminal", term("gh pr create")) == "" {
+		t.Fatal("first milestone should nudge")
+	}
+	if got := in.SaveNudge("terminal", term("gh pr merge 1")); got != "" {
+		t.Errorf("second milestone in same turn should be silent, got %q", got)
+	}
+	in.Reminder("next user turn") // new turn re-arms the latch
+	if in.SaveNudge("terminal", term("gh pr merge 2")) == "" {
+		t.Error("milestone on a later turn should nudge again")
+	}
+}
+
+func TestSaveNudge_NilSafe(t *testing.T) {
+	var in *Injector
+	if got := in.SaveNudge("terminal", term("gh pr merge")); got != "" {
+		t.Errorf("nil injector should return empty, got %q", got)
+	}
+}
