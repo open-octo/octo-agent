@@ -14,13 +14,19 @@ metadata:
 
 ## 前置检查
 
-在开始联网操作前，先检查 CDP 模式可用性：
+CDP 模式必需 **Node.js 22+**（使用原生 WebSocket）。check-deps 脚本自身也要靠 node 运行，所以先确认 node 存在（`node -v`）。**node 缺失或版本过低时不要擅自安装**——告诉用户 CDP 模式需要 Node.js 22+，并给出对应平台的安装方式，等用户确认：
+
+- Windows: `winget install OpenJS.NodeJS.LTS`（或 https://nodejs.org 下载安装包）
+- macOS: `brew install node`
+- Linux: 发行版包管理器或 https://nodejs.org
+
+没有 Node 时本技能并非不可用：静态层（内置 `web_fetch` / `web_search`）不依赖 Node，可先用静态层完成任务，仅在确需浏览器操作时再请用户安装。
+
+node 就绪后，检查 CDP 模式可用性：
 
 ```bash
 node "<SKILL_DIR>/scripts/check-deps.mjs"
 ```
-
-**Node.js 22+** 必需（使用原生 WebSocket）。
 
 按脚本输出处理：
 - `exit 0` → 继续
