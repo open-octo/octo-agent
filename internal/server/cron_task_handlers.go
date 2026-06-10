@@ -55,7 +55,12 @@ func (s *Server) handleRunCronTask(w http.ResponseWriter, r *http.Request) {
 // ─── PATCH /api/cron-tasks/{name} ───────────────────────────────────────────
 
 type patchCronTaskRequest struct {
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled   *bool   `json:"enabled,omitempty"`
+	Cron      *string `json:"cron,omitempty"`
+	Prompt    *string `json:"prompt,omitempty"`
+	Model     *string `json:"model,omitempty"`
+	Agent     *string `json:"agent,omitempty"`
+	Directory *string `json:"directory,omitempty"`
 }
 
 func (s *Server) handlePatchCronTask(w http.ResponseWriter, r *http.Request) {
@@ -80,9 +85,36 @@ func (s *Server) handlePatchCronTask(w http.ResponseWriter, r *http.Request) {
 	// Find task by name or id and update.
 	for _, t := range s.scheduler.List() {
 		if t.Name == name || t.ID == name {
+			changed := false
 			if req.Enabled != nil {
 				t.Enabled = *req.Enabled
-				_ = s.scheduler.Update(t)
+				changed = true
+			}
+			if req.Cron != nil {
+				t.Cron = *req.Cron
+				changed = true
+			}
+			if req.Prompt != nil {
+				t.Prompt = *req.Prompt
+				changed = true
+			}
+			if req.Model != nil {
+				t.Model = *req.Model
+				changed = true
+			}
+			if req.Agent != nil {
+				t.Agent = *req.Agent
+				changed = true
+			}
+			if req.Directory != nil {
+				t.Directory = *req.Directory
+				changed = true
+			}
+			if changed {
+				if err := s.scheduler.Update(t); err != nil {
+					writeError(w, http.StatusBadRequest, err.Error())
+					return
+				}
 			}
 			writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 			return
