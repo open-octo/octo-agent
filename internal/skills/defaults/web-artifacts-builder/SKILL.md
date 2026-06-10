@@ -65,7 +65,7 @@ This creates `bundle.html` — a self-contained file with all JavaScript, CSS, a
 
 ### Step 4: Deliver the Artifact
 
-Report the absolute path of `bundle.html` to the user. The file is fully self-contained — it opens directly in any browser with no server and no network.
+Call the `show_artifact` tool with the absolute path of `bundle.html` — in the web UI this renders it in the Artifacts panel. Then report the path to the user. The file is fully self-contained — it opens directly in any browser with no server and no network.
 
 ### Step 5: Testing/Visualizing the Artifact (Optional)
 

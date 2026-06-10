@@ -30,6 +30,7 @@ var allTools = []tool{
 	ReadFileTool{},
 	WriteFileTool{},
 	EditFileTool{},
+	ShowArtifactTool{},
 	GlobTool{},
 	GrepTool{},
 	WebFetchTool{},

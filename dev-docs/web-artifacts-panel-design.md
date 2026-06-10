@@ -34,7 +34,9 @@ Both transport paths already deliver everything the panel needs; detection is fr
 - **Live**: the WS `tool_result` event carries `ui_payload` (`ws_handlers.go`, `wsEventToolResult.UIPayload` in `ws_types.go`). `write_file` emits `{type: "write", path, size_bytes}` (`internal/tools/write_file.go`); `edit_file` emits `{type: "edit", path, occurrences, diff}` (`internal/tools/edit_file.go`).
 - **History**: `GET /api/sessions/:id/messages` reconstructs the same `tool_result` events from persisted `ContentBlock.UI` (`handlers.go`), so the panel rebuilds identically on page reload and session switch.
 
-A single frontend hook inspects each `ui_payload` with `type === "write" || type === "edit"`, matches the path extension against the table above, and upserts the artifact entry. No backend state, no new conventions for the model to learn.
+A single frontend hook inspects each `ui_payload` with `type` of `write`, `edit`, or `artifact`, matches the path extension against the table above, and upserts the artifact entry. No backend state.
+
+**Script-produced files** (built rather than written through the file tools — e.g. web-artifacts-builder's Parcel-bundled `bundle.html`) don't pass through `write_file`, so the `show_artifact` tool (`internal/tools/artifact.go`) covers them: the model calls it with the file's absolute path, it validates existence and previewability, and emits the `{type: "artifact", path, size_bytes}` payload the same hook ingests. The previewable-extension table is owned by the tools package (`tools.ArtifactContentType`) so the tool's validation and the endpoint's gate cannot drift apart.
 
 ## Content endpoint
 
@@ -44,7 +46,7 @@ The payload carries only the path; the panel needs bytes.
 GET /api/sessions/{id}/artifacts?path=<absolute path>
 ```
 
-**Authorization beyond the access key: the path must be one this session's agent wrote.** The handler loads the session transcript and scans `tool_use` blocks (persisted with their `Input` maps, `internal/agent/content.go`) for `write_file`/`edit_file` calls; the requested path must equal one of their `path` inputs after `filepath.Clean`. Anything else is 404. This derives the whitelist from the transcript on each request — no extra state, survives server restarts, and caps disclosure at "files the user already watched the agent write in this very session".
+**Authorization beyond the access key: the path must be one this session's agent wrote or explicitly presented.** The handler loads the session transcript and scans `tool_use` blocks (persisted with their `Input` maps, `internal/agent/content.go`) for `write_file`/`edit_file`/`show_artifact` calls; the requested path must equal one of their `path` inputs after `filepath.Clean`. Anything else is 404. This derives the whitelist from the transcript on each request — no extra state, survives server restarts, and caps disclosure at "files the user already watched the agent write in this very session".
 
 Response headers:
 

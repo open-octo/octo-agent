@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/tools"
 )
 
 // ─── GET /api/sessions/{id}/artifacts?path=… ────────────────────────────────
@@ -23,22 +24,6 @@ import (
 // 413 and the panel offers no preview. Artifact HTML bundles run 200 KB–2 MB.
 const artifactMaxBytes = 10 << 20
 
-// artifactContentTypes maps the previewable extensions to the explicit
-// Content-Type the response carries (never sniffed). Extensions outside this
-// table are not artifacts and are refused.
-var artifactContentTypes = map[string]string{
-	".html":     "text/html; charset=utf-8",
-	".htm":      "text/html; charset=utf-8",
-	".md":       "text/markdown; charset=utf-8",
-	".markdown": "text/markdown; charset=utf-8",
-	".png":      "image/png",
-	".jpg":      "image/jpeg",
-	".jpeg":     "image/jpeg",
-	".gif":      "image/gif",
-	".svg":      "image/svg+xml",
-	".webp":     "image/webp",
-}
-
 func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	reqPath := strings.TrimSpace(r.URL.Query().Get("path"))
@@ -47,7 +32,9 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctype, ok := artifactContentTypes[strings.ToLower(filepath.Ext(reqPath))]
+	// The previewable-extension table lives in the tools package so this gate
+	// and the show_artifact tool's validation can't drift apart.
+	ctype, ok := tools.ArtifactContentType(reqPath)
 	if !ok {
 		writeError(w, http.StatusNotFound, "not a previewable artifact type")
 		return
@@ -90,14 +77,16 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 
-// sessionWrotePath reports whether the transcript contains a write_file or
-// edit_file tool_use whose path input matches reqPath (after Clean on both
-// sides — the payloads carry absolute paths, so no base-dir join is needed).
+// sessionWrotePath reports whether the transcript contains a write_file,
+// edit_file, or show_artifact tool_use whose path input matches reqPath
+// (after Clean on both sides — the payloads carry absolute paths, so no
+// base-dir join is needed). show_artifact is how script-produced files
+// (built rather than written through the file tools) enter the whitelist.
 func sessionWrotePath(sess *agent.Session, reqPath string) bool {
 	want := filepath.Clean(reqPath)
 	for _, m := range sess.Messages {
 		for _, b := range m.Blocks {
-			if b.Type != "tool_use" || (b.Name != "write_file" && b.Name != "edit_file") {
+			if b.Type != "tool_use" || (b.Name != "write_file" && b.Name != "edit_file" && b.Name != "show_artifact") {
 				continue
 			}
 			p, ok := b.Input["path"].(string)
