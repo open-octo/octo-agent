@@ -105,7 +105,13 @@ func TestHandleImportSkill_LocalDir(t *testing.T) {
 	}
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	w := postImport(t, srv, `{"source":"`+src+`"}`)
+	// json.Marshal, not string concatenation — Windows paths contain
+	// backslashes that must be escaped to survive as JSON.
+	body, err := json.Marshal(map[string]any{"source": src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := postImport(t, srv, string(body))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}

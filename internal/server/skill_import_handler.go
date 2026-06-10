@@ -79,7 +79,9 @@ func importSkill(source string, force bool) (name, desc string, err error) {
 		return skills.InstallZip(p, destRoot, force)
 
 	// Local path on the server machine: a zip or a skill directory.
-	case strings.HasPrefix(source, "/"), strings.HasPrefix(source, "~"):
+	// filepath.IsAbs covers Windows drive paths (C:\…) that the "/" prefix
+	// check misses.
+	case strings.HasPrefix(source, "/"), strings.HasPrefix(source, "~"), filepath.IsAbs(source):
 		p := source
 		if strings.HasPrefix(p, "~") {
 			home, err := os.UserHomeDir()
