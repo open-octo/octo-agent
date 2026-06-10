@@ -40,8 +40,7 @@ func ConnectMCP(ctx context.Context, cwd string, warn io.Writer) (func(), error)
 	connectCtx, cancel := context.WithTimeout(ctx, mcpConnectTimeout)
 	defer cancel() // only bounds the connect pass; live connections aren't tied to it
 
-	info := mcp.Implementation{Name: "octo", Version: version.Version}
-	reg := mcp.ConnectAll(connectCtx, cfg, info, nil /* no interactive OAuth */, warn, nil)
+	reg := mcp.ConnectAll(connectCtx, cfg, mcpInfo(), nil /* no interactive OAuth */, warn, nil)
 	if reg.Len() == 0 {
 		reg.Close()
 		return func() {}, nil
@@ -52,6 +51,75 @@ func ConnectMCP(ctx context.Context, cwd string, warn io.Writer) (func(), error)
 		tools.SetMCPRegistry(nil)
 		reg.Close()
 	}, nil
+}
+
+// mcpInfo is the client identity every octo entry point presents in the MCP
+// initialize handshake.
+func mcpInfo() mcp.Implementation {
+	return mcp.Implementation{Name: "octo", Version: version.Version}
+}
+
+// SwapMCP reloads the MCP config under cwd, connects a fresh registry, and
+// atomically replaces the active one (closing the old registry after the
+// swap so in-flight readers holding it can finish dialing). Unlike ConnectMCP
+// it installs the registry even when zero servers connected — the per-server
+// connect errors it records are what a management UI displays. With zero
+// servers configured the active registry is cleared. On config error the
+// active registry is left untouched.
+//
+// Callers that expose this concurrently (the web server) must serialise calls
+// themselves; two overlapping swaps would race on which registry survives.
+func SwapMCP(ctx context.Context, cwd string, warn io.Writer) error {
+	cfg, err := mcp.LoadConfig(cwd)
+	if err != nil {
+		return err
+	}
+	old := tools.ActiveMCPRegistry()
+	var reg *mcp.Registry
+	if cfg != nil && len(cfg.Servers) > 0 {
+		connectCtx, cancel := context.WithTimeout(ctx, mcpConnectTimeout)
+		defer cancel()
+		reg = mcp.ConnectAll(connectCtx, cfg, mcpInfo(), nil /* no interactive OAuth */, warn, nil)
+	}
+	tools.SetMCPRegistry(reg)
+	if old != nil {
+		old.Close()
+	}
+	return nil
+}
+
+// ConnectMCPServer connects (or reconnects) a single named server into the
+// active registry, installing an empty registry first if none is active —
+// the incremental path the web management API uses so adding one server
+// doesn't restart every other connection. The connect error (if any) is
+// recorded on the registry and returned.
+func ConnectMCPServer(ctx context.Context, name string, entry mcp.ServerEntry, childStderr io.Writer) error {
+	reg := tools.ActiveMCPRegistry()
+	if reg == nil {
+		reg = mcp.NewRegistry()
+		tools.SetMCPRegistry(reg)
+	}
+	connectCtx, cancel := context.WithTimeout(ctx, mcpConnectTimeout)
+	defer cancel()
+	return reg.Connect(connectCtx, name, entry, mcpInfo(), nil /* no interactive OAuth */, childStderr)
+}
+
+// DisconnectMCPServer drops one server's live connection (and recorded
+// connect error) from the active registry, if any.
+func DisconnectMCPServer(name string) {
+	if reg := tools.ActiveMCPRegistry(); reg != nil {
+		reg.Remove(name)
+	}
+}
+
+// ShutdownMCP clears the active registry and closes it. The counterpart of
+// SwapMCP for process shutdown.
+func ShutdownMCP() {
+	old := tools.ActiveMCPRegistry()
+	tools.SetMCPRegistry(nil)
+	if old != nil {
+		old.Close()
+	}
 }
 
 // ToolSearchConfigFrom maps the persisted tools.tool_search config block onto
