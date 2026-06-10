@@ -193,6 +193,34 @@ func TestSetTitle_AppendsAndReloads(t *testing.T) {
 	}
 }
 
+func TestSetTitle_NeverCreatesOrphanFile(t *testing.T) {
+	// A session that believes it is persisted but whose transcript is gone
+	// (deleted meanwhile, or the path resolves to a different HOME than the
+	// one it was saved under) must NOT materialize a file holding nothing but
+	// a title record — those show up as ghost sessions in list views.
+	setTempHome(t)
+
+	s := NewSession("m", "")
+	s.Messages = []Message{NewUserMessage("ping"), NewAssistantMessage("pong")}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	path, err := s.SavePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetTitle("ghost"); err == nil {
+		t.Fatal("SetTitle on a missing transcript: want error, got nil")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("SetTitle created an orphan title-only file at %s", path)
+	}
+}
+
 func TestSetTitle_LastWins(t *testing.T) {
 	setTempHome(t)
 	s := NewSession("m", "")
