@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -173,6 +174,10 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	defer mu.Unlock()
 
 	reply, err := s.runTurn(r.Context(), sess, req.Message)
+	if errors.Is(err, errDraining) {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -233,6 +238,10 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 	defer mu.Unlock()
 
 	reply, err := s.runTurn(r.Context(), sess, req.Message)
+	if errors.Is(err, errDraining) {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -598,6 +607,11 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 // runTurn executes one user message against a session. It builds the agent,
 // runs the tool loop if enabled, and returns the assistant's text reply.
 func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput string) (string, error) {
+	if err := s.drain.begin(); err != nil {
+		return "", err
+	}
+	defer s.drain.end()
+
 	ctx = context.WithValue(ctx, ctxKeySessionID{}, sess.ID)
 	a := s.buildAgent(sess)
 

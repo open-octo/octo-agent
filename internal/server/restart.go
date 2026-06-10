@@ -23,16 +23,29 @@ var ErrRestartRequested = errors.New("server restart requested")
 // shutdownTimeout bounds the http.Shutdown wait during a restart.
 const shutdownTimeout = 10 * time.Second
 
+// defaultDrainTimeout is the hard bound on waiting for in-flight turns
+// before a restart proceeds anyway. Round-granularity session persistence
+// plus the SSE replay buffer cap the damage of a forced cut at one round.
+const defaultDrainTimeout = 30 * time.Second
+
 // Restart requests a graceful restart. It is idempotent — only the first
-// call wins — and returns immediately; the shutdown runs in the background
-// so the caller (an HTTP handler or a tool executing inside a turn) is not
-// blocked. reason is logged for the operator.
+// call wins — and returns immediately; the drain and shutdown run in the
+// background so the caller (an HTTP handler or a tool executing inside a
+// turn, whose own turn the drain waits for) is not blocked. reason is
+// logged for the operator.
 func (s *Server) Restart(reason string) {
 	if !s.restartPending.CompareAndSwap(false, true) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "octo serve: restart requested (%s)\n", reason)
 	go func() {
+		timeout := s.drainTimeout
+		if timeout <= 0 {
+			timeout = defaultDrainTimeout
+		}
+		if clean := s.drain.drain(timeout); !clean {
+			fmt.Fprintf(os.Stderr, "octo serve: drain timed out after %s; restarting with turns in flight\n", timeout)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		_ = s.Shutdown(ctx)

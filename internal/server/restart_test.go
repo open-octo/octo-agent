@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -8,6 +9,9 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/scheduler"
 )
 
 func TestHandleRestart_Returns202AndMarksPending(t *testing.T) {
@@ -115,5 +119,103 @@ func TestListenAndServe_PlainShutdownIsClean(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("serveOn did not return within 5s of Shutdown")
+	}
+}
+
+// TestRestart_WaitsForInflightTurn: restart must not shut the server down
+// while a turn is active; it proceeds as soon as the turn ends.
+func TestRestart_WaitsForInflightTurn(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.serveOn(ln) }()
+
+	if err := srv.drain.begin(); err != nil { // simulate an in-flight turn
+		t.Fatal(err)
+	}
+	srv.Restart("test")
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("server stopped (%v) while a turn was in flight", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	srv.drain.end()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrRestartRequested) {
+			t.Fatalf("serveOn = %v, want ErrRestartRequested", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not stop after the in-flight turn ended")
+	}
+}
+
+// TestRestart_DrainTimeoutForcesShutdown: a turn that outlives the drain
+// timeout must not block the restart forever.
+func TestRestart_DrainTimeoutForcesShutdown(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.drainTimeout = 100 * time.Millisecond
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.serveOn(ln) }()
+
+	if err := srv.drain.begin(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.drain.end() // never ends within the timeout
+
+	srv.Restart("test")
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrRestartRequested) {
+			t.Fatalf("serveOn = %v, want ErrRestartRequested", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not force shutdown after drain timeout")
+	}
+}
+
+// TestHandleTurn_DrainingReturns503: new turn requests during a drain get a
+// retryable 503 instead of starting work that the shutdown would cut short.
+func TestHandleTurn_DrainingReturns503(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.drain.drain(0)
+
+	body := bytes.NewBufferString(`{"message":"hello"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/"+sess.ID+"/turn", body)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+// TestRunTask_DrainingRefused: scheduled task runs are refused during drain.
+func TestRunTask_DrainingRefused(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.drain.drain(0)
+
+	_, err := srv.RunTask(context.Background(), scheduler.Task{Name: "t", Prompt: "p"})
+	if !errors.Is(err, errDraining) {
+		t.Fatalf("RunTask during drain = %v, want errDraining", err)
 	}
 }

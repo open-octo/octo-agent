@@ -48,6 +48,14 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refuse new turns during a restart drain — before the SSE headers go
+	// out, so the client gets a plain retryable 503.
+	if err := s.drain.begin(); err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	defer s.drain.end()
+
 	mu := s.sessionTurnLock(sess.ID)
 	mu.Lock()
 	defer mu.Unlock()

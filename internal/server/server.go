@@ -195,6 +195,11 @@ type Server struct {
 	shutdownDone chan struct{}
 	shutdownErr  error
 
+	// drain gates every turn execution path during a restart. drainTimeout
+	// overrides the 30s default in tests; zero means the default.
+	drain        drainGate
+	drainTimeout time.Duration
+
 	// senderMu serialises lazy initialisation of sender when the server starts
 	// in onboarding mode (API key missing) and the user completes setup later.
 	senderMu sync.Mutex
@@ -1042,6 +1047,15 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 
 // handleChannelMessage runs an agent turn for a channel inbound event.
 func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, ev channel.InboundEvent) {
+	if err := s.drain.begin(); err != nil {
+		// Restart drain in progress. The adapter is still up (it stops only
+		// after the drain, so in-flight replies get delivered) — tell the
+		// user to retry instead of silently dropping the message.
+		ad.SendText(ev.ChatID, "The server is restarting — please send that again in a moment.", ev.MessageID)
+		return
+	}
+	defer s.drain.end()
+
 	sess := s.channelMgr.GetOrCreateSession(ev)
 	if sess == nil {
 		return

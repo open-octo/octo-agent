@@ -448,6 +448,19 @@ func joinNonEmpty(parts []string, sep string) string {
 // doAgentTurn is the single-turn body shared by the loop and retry paths.
 
 func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, blocks []agent.ContentBlock, images []string) {
+	if err := s.drain.begin(); err != nil {
+		// Restart drain in progress: surface a retryable error to the
+		// browser instead of starting a turn the shutdown would cut short.
+		if s.wsHub != nil {
+			s.wsHub.broadcast(sess.ID, map[string]string{
+				"type":    "error",
+				"message": err.Error(),
+			})
+		}
+		return
+	}
+	defer s.drain.end()
+
 	content := initialContent
 	for {
 		s.doAgentTurn(sess, content, blocks, images)
