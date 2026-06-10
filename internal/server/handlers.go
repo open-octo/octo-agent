@@ -385,6 +385,11 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 					}
 				}
 			}
+			// <system-reminder> spans (background-process completion notes,
+			// recalled memories) are model-facing context persisted inside
+			// user turns — strip them so replay matches the TUI, which never
+			// shows them.
+			text = strings.TrimSpace(agent.StripSystemReminders(text))
 			// Only emit history_user_message if there is user-visible content
 			// (tool_result-only messages are bookkeeping, not user-visible).
 			if text != "" || len(images) > 0 {

@@ -753,6 +753,63 @@ func TestHandleGetSessionMessages_IncludesToolCalls(t *testing.T) {
 	}
 }
 
+// History replay must never render <system-reminder> spans (background
+// completion notes, recalled memories) as user bubbles — the TUI skips them
+// and the web transcript must match.
+func TestHandleGetSessionMessages_StripsSystemReminders(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: "run the build in the background"},
+		agent.NewAssistantMessage("Started."),
+		// A background-completion note injected via steer: pure reminder, no
+		// user speech. Must produce NO history_user_message.
+		{Role: agent.RoleUser, Content: "<system-reminder>\n[BACKGROUND COMPLETED]\nBackground process bg_1 (`make build`) exited: 0.\nOutput since last check:\nhuge build log…\n</system-reminder>"},
+		agent.NewAssistantMessage("Build finished."),
+		// Mixed turn: reminder prepended to real user text. Only the user
+		// text survives.
+		{Role: agent.RoleUser, Content: "<system-reminder>recalled memory</system-reminder>\nnow run the tests"},
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+
+	var userTexts []string
+	for _, ev := range body.Events {
+		if ev["type"] == "history_user_message" {
+			userTexts = append(userTexts, ev["content"].(string))
+		}
+	}
+	want := []string{"run the build in the background", "now run the tests"}
+	if len(userTexts) != len(want) {
+		t.Fatalf("user messages = %q, want %q", userTexts, want)
+	}
+	for i := range want {
+		if userTexts[i] != want[i] {
+			t.Errorf("user message[%d] = %q, want %q", i, userTexts[i], want[i])
+		}
+	}
+}
+
 // TestHandleGetSessionMessages_MultiToolUse verifies the full event sequence
 // for a session with multiple tool_use blocks and tool_results.
 func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {

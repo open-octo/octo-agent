@@ -786,13 +786,21 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			}
 		}
 		for _, it := range items {
+			// <system-reminder> blocks (background-process completion notes,
+			// recalled memories) are model-facing context, not user speech —
+			// the TUI skips them and the web transcript must too.
+			text := strings.TrimSpace(agent.StripSystemReminders(it.Text))
+			imgs := imageRefsFromBlocks(it.Blocks)
+			if text == "" && len(imgs) == 0 {
+				continue
+			}
 			evt := map[string]any{
 				"type":       "history_user_message",
 				"session_id": w.sessionID,
-				"content":    it.Text,
+				"content":    text,
 				"created_at": time.Now().UnixMilli(),
 			}
-			if imgs := imageRefsFromBlocks(it.Blocks); len(imgs) > 0 {
+			if len(imgs) > 0 {
 				evt["images"] = imgs
 			}
 			w.hub.broadcast(w.sessionID, evt)
