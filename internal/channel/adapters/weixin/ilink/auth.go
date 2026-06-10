@@ -58,9 +58,12 @@ func ClearCredentials(path string) error {
 
 // LoginOptions configures the login flow.
 type LoginOptions struct {
-	BaseURL   string
-	CredPath  string
-	Force     bool
+	BaseURL  string
+	CredPath string
+	Force    bool
+	// QRBaseURL overrides the host used for QR issue/poll. Tests point it at
+	// a stub; empty means the production fixedQRBaseURL.
+	QRBaseURL string
 	OnQRURL   func(url string)
 	OnScanned func()
 	OnExpired func()
@@ -87,6 +90,11 @@ func Login(ctx context.Context, client *Client, opts LoginOptions) (*Credentials
 		}
 	}
 
+	qrBaseURL := opts.QRBaseURL
+	if qrBaseURL == "" {
+		qrBaseURL = fixedQRBaseURL
+	}
+
 	qrRefreshCount := 0
 	for {
 		qrRefreshCount++
@@ -94,7 +102,7 @@ func Login(ctx context.Context, client *Client, opts LoginOptions) (*Credentials
 			return nil, fmt.Errorf("QR code expired %d times — login aborted", maxQRRefreshCount)
 		}
 
-		qr, err := client.GetQRCode(ctx, fixedQRBaseURL)
+		qr, err := client.GetQRCode(ctx, qrBaseURL)
 		if err != nil {
 			return nil, fmt.Errorf("get QR code: %w", err)
 		}
@@ -106,7 +114,7 @@ func Login(ctx context.Context, client *Client, opts LoginOptions) (*Credentials
 		}
 
 		lastStatus := ""
-		currentPollBaseURL := fixedQRBaseURL
+		currentPollBaseURL := qrBaseURL
 		for {
 			status, err := client.PollQRStatus(ctx, currentPollBaseURL, qr.QRCode)
 			if err != nil {

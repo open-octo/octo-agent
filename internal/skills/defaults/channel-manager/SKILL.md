@@ -23,7 +23,7 @@ Configure IM platform channels for octo. Supported platforms: `feishu`, `weixin`
   `--no-channel`). channels.yml is read once at serve startup, so after any config
   change the user must restart `octo serve`.
 - Weixin login state lives separately in `~/.octo/weixin-credentials.json`, written by
-  `octo channel login --platform weixin`.
+  the web QR-login flow (`POST /api/channels/weixin/login` on the running serve).
 
 `channels.yml` schema:
 
@@ -183,17 +183,23 @@ Ask with `ask_user_question`:
 
 Weixin uses a QR-code login — no app credentials needed.
 
-1. Run the built-in login command (it prints a QR link and blocks until the user scans and confirms — use `timeout: 300`):
+1. Start the QR login flow via the serve API (the response carries the QR link):
    ```bash
-   octo channel login --platform weixin
+   curl -s -X POST http://127.0.0.1:8080/api/channels/weixin/login
+   # → {"status":"pending","qr_url":"https://…"}      (or "already_logged_in")
    ```
-2. As soon as the command prints the QR link, relay it to the user:
+   Pass `-d '{"force":true}'` to re-login over existing credentials.
+2. Relay the QR link to the user:
    > Open this link and scan the QR code with WeChat, then confirm login in the app:
-   > `<QR URL from the command output>`
-3. Wait for the command to exit:
-   - Exit 0 — credentials are saved to `~/.octo/weixin-credentials.json`. Continue.
-   - QR expired — the command requests a new QR automatically; relay the new link.
-   - Non-zero exit — show the error and offer to retry from step 1.
+   > `<qr_url from the response>`
+3. Poll until the flow finishes (every ~3s, up to 5 minutes):
+   ```bash
+   curl -s http://127.0.0.1:8080/api/channels/weixin/login
+   ```
+   - `"status":"done"` — credentials are saved to `~/.octo/weixin-credentials.json`. Continue.
+   - `"status":"pending"` with a new `qr_url` — the QR expired and was refreshed; relay the new link.
+   - `"status":"failed"` — show the `error` and offer to retry from step 1.
+   (The web Channels panel's weixin card offers the same flow with an inline QR image.)
 4. Enable the platform in `~/.octo/channels.yml` (preserve other platforms), then `chmod 600`:
    ```yaml
    channels:
@@ -329,7 +335,7 @@ Check each item, report ✅ / ❌ with remediation:
    - Telegram: `bot_token` non-empty.
 3. **Feishu credentials** (if enabled) — run the tenant_access_token curl from setup Phase 5; `"code":0` → ✅, else ❌ "Feishu credentials rejected — re-run setup".
 4. **DingTalk credentials** (if enabled) — run the accessToken curl from setup step 4; `accessToken` present → ✅, else ❌ "DingTalk credentials invalid — re-run setup".
-5. **Weixin credentials** (if enabled) — credential file exists and contains a non-empty `token` → ✅, else ❌ "Run `octo channel login --platform weixin` to log in again".
+5. **Weixin credentials** (if enabled) — credential file exists and contains a non-empty `token` → ✅, else ❌ "Re-run the weixin QR login (web Channels panel, or `POST /api/channels/weixin/login`)".
 6. **Discord credentials** (if enabled) — run the `/users/@me` curl from Discord setup step 2; an `id` in the response → ✅, else ❌ "Discord token invalid or revoked — re-run setup".
 7. **Telegram credentials** (if enabled) — run the `getMe` curl from Telegram setup step 2; `"ok":true` → ✅, else ❌ "Telegram token rejected by getMe — re-run setup".
 8. **WeCom credentials** (if enabled) — no public REST validation endpoint; check the `octo serve` output for `[wecom] authentication failed` → ❌ "WeCom credentials incorrect — re-run setup", or `[wecom] connected, authenticating` with no auth error → ✅.
