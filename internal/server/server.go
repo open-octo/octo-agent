@@ -102,6 +102,11 @@ type Server struct {
 	sessionAgents   map[string]*agent.Agent
 	sessionAgentsMu sync.Mutex
 
+	// titlePending guards one in-flight title generation per session
+	// (lazily initialised by claimTitleGeneration).
+	titlePending map[string]bool
+	titleMu      sync.Mutex
+
 	// WebSocket hub for real-time browser communication.
 	wsHub *wsHub
 

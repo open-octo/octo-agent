@@ -569,6 +569,32 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		"reasoning_effort": re,
 	})
 
+	// Once per session, after its first successful turn: generate a sidebar
+	// title (matches TUI titleCmd behaviour). Fire-and-forget; a failure is
+	// silent and simply retried after a later turn.
+	if err == nil && sess.Title == "" && s.claimTitleGeneration(sess.ID) {
+		go func() {
+			defer s.releaseTitleGeneration(sess.ID)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			t, terr := a.GenerateTitle(ctx, toolDefs)
+			if terr != nil || strings.TrimSpace(t) == "" {
+				return
+			}
+			if sess.SetTitle(t) != nil {
+				return
+			}
+			// Global broadcast: the sidebar lists every session, so every
+			// connected tab needs the rename, not just this session's
+			// subscribers.
+			s.wsHub.broadcast("", map[string]any{
+				"type":       "session_renamed",
+				"session_id": sess.ID,
+				"name":       t,
+			})
+		}()
+	}
+
 	// After-turn follow-up suggestion (matches TUI suggestCmd behaviour).
 	// Fire-and-forget: the frontend shows it as ghost text; failures are silent.
 	if err == nil {
@@ -586,6 +612,29 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			})
 		}()
 	}
+}
+
+// claimTitleGeneration marks a title generation in flight for the session;
+// it returns false when one is already running so concurrent turn ends don't
+// spend duplicate provider calls. The map is lazily initialised because tests
+// build minimal Servers by hand.
+func (s *Server) claimTitleGeneration(sessionID string) bool {
+	s.titleMu.Lock()
+	defer s.titleMu.Unlock()
+	if s.titlePending == nil {
+		s.titlePending = make(map[string]bool)
+	}
+	if s.titlePending[sessionID] {
+		return false
+	}
+	s.titlePending[sessionID] = true
+	return true
+}
+
+func (s *Server) releaseTitleGeneration(sessionID string) {
+	s.titleMu.Lock()
+	delete(s.titlePending, sessionID)
+	s.titleMu.Unlock()
 }
 
 // ─── wsStreamWriter ────────────────────────────────────────────────────────
