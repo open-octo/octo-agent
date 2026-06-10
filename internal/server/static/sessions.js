@@ -1364,6 +1364,9 @@ const Sessions = (() => {
       case "search":     return `${p.total_matches || 0} matches`;
       case "file_list":  return `${p.total || (p.entries || []).length || 0} items`;
       case "file_read":  return p.lines_read != null ? `${p.lines_read} lines` : "";
+      case "edit":       return `${p.occurrences || 1} change(s)`;
+      case "write":      return p.size_bytes != null ? `${p.size_bytes} bytes` : "";
+      case "todo":       return p.progress || "";
       default:           return "";
     }
   }
