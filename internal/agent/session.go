@@ -217,7 +217,13 @@ func (s *Session) SetTitle(title string) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	// No O_CREATE: persisted > 0 means the transcript should already exist.
+	// If it doesn't (session deleted meanwhile, or the path resolves
+	// differently than when it was saved — e.g. an async title goroutine
+	// outliving a test's HOME override), creating a file holding nothing but
+	// a title record would leave an orphan "session" in list views. Fail
+	// instead; a later turn retries title generation.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("session: open %s: %w", path, err)
 	}
