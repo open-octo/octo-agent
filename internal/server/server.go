@@ -8,6 +8,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
@@ -181,6 +183,23 @@ type Server struct {
 	// accessKey is the shared secret for Web UI / API authentication.
 	accessKey string
 
+	// restartPending is set by Restart and read after the listener closes to
+	// distinguish a restart-driven shutdown (exit ExitRestart) from a plain
+	// one (exit 0).
+	restartPending atomic.Bool
+
+	// shutdownMu/shutdownDone/shutdownErr make Shutdown single-flight: the
+	// first caller runs it, later callers wait on shutdownDone and read
+	// shutdownErr. All zero-valued until the first Shutdown call.
+	shutdownMu   sync.Mutex
+	shutdownDone chan struct{}
+	shutdownErr  error
+
+	// drain gates every turn execution path during a restart. drainTimeout
+	// overrides the 30s default in tests; zero means the default.
+	drain        drainGate
+	drainTimeout time.Duration
+
 	// senderMu serialises lazy initialisation of sender when the server starts
 	// in onboarding mode (API key missing) and the user completes setup later.
 	senderMu sync.Mutex
@@ -251,6 +270,15 @@ func New(cfg Config) (*Server, error) {
 	// Register the WebSocket-backed asker so ask_user_question appears in the
 	// tool catalog and can be dispatched through the browser.
 	tools.SetAsker(s.wsAsker())
+
+	// Register the restarter so restart_server appears in the tool catalog.
+	// Permission is ask-class (defaults.yml): the web UI confirms via the
+	// browser prompt; the IM channel gate runs strict with no asker, so an
+	// IM-triggered restart resolves to deny until an interactive ask flow
+	// exists there. The restart drains in-flight turns (including the one
+	// calling the tool) before the worker exits with ExitRestart for the
+	// supervisor to respawn.
+	tools.SetRestarter(s.Restart)
 
 	s.registerRoutes()
 	s.initWS()
@@ -334,14 +362,68 @@ func (s *Server) AccessKey() string {
 // serving so persisted tasks fire from server start, not from the first hit
 // on a task endpoint.
 func (s *Server) ListenAndServe() error {
+	ln, err := net.Listen("tcp", s.http.Addr)
+	if err != nil {
+		return err
+	}
+	return s.serveOn(ln)
+}
+
+// serveOn runs the server on an already-bound listener (split from
+// ListenAndServe so tests can use an ephemeral port). A stop via Shutdown is
+// reported as nil — it is the expected end of a server's life, not an error —
+// unless a restart was requested, in which case ErrRestartRequested tells the
+// caller to exit with ExitRestart.
+func (s *Server) serveOn(ln net.Listener) error {
 	s.initScheduler()
 	s.startChannels()
-	return s.http.ListenAndServe()
+	err := s.http.Serve(ln)
+	if errors.Is(err, http.ErrServerClosed) {
+		if s.restartPending.Load() {
+			return ErrRestartRequested
+		}
+		return nil
+	}
+	return err
 }
 
 // Shutdown gracefully shuts down the server, releasing the process-global
 // sub-agent + task registrations installed by enableSubAgentTools.
+//
+// It is single-flight: Restart's background shutdown and the Ctrl-C signal
+// path can race here, and the body mutates process-global registries that
+// must not be torn down twice concurrently. The first caller runs the
+// shutdown; later callers wait for it to finish (or their ctx to expire)
+// and return the same error.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.shutdownMu.Lock()
+	if s.shutdownDone == nil {
+		done := make(chan struct{})
+		s.shutdownDone = done
+		s.shutdownMu.Unlock()
+
+		err := s.doShutdown(ctx)
+
+		s.shutdownMu.Lock()
+		s.shutdownErr = err
+		s.shutdownMu.Unlock()
+		close(done)
+		return err
+	}
+	done := s.shutdownDone
+	s.shutdownMu.Unlock()
+
+	select {
+	case <-done:
+		s.shutdownMu.Lock()
+		defer s.shutdownMu.Unlock()
+		return s.shutdownErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Server) doShutdown(ctx context.Context) error {
 	s.stopChannels()
 	// Kill background processes started via web/IM sessions so they don't
 	// outlive the daemon — the same orphan-prevention the CLI/TUI do on exit.
@@ -974,6 +1056,15 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 
 // handleChannelMessage runs an agent turn for a channel inbound event.
 func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, ev channel.InboundEvent) {
+	if err := s.drain.begin(); err != nil {
+		// Restart drain in progress. The adapter is still up (it stops only
+		// after the drain, so in-flight replies get delivered) — tell the
+		// user to retry instead of silently dropping the message.
+		ad.SendText(ev.ChatID, "The server is restarting — please send that again in a moment.", ev.MessageID)
+		return
+	}
+	defer s.drain.end()
+
 	sess := s.channelMgr.GetOrCreateSession(ev)
 	if sess == nil {
 		return

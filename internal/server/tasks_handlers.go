@@ -66,6 +66,11 @@ func (s *Server) initScheduler() {
 // RunTask implements scheduler.Runner. It executes a scheduled task by
 // creating (or reusing) a session and running a single turn.
 func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, error) {
+	if err := s.drain.begin(); err != nil {
+		return "", err
+	}
+	defer s.drain.end()
+
 	// Try to load an existing session for this task.
 	sess, err := agent.LoadSession(task.SessionID)
 	if err != nil {

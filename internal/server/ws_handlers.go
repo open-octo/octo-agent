@@ -448,9 +448,36 @@ func joinNonEmpty(parts []string, sep string) string {
 // doAgentTurn is the single-turn body shared by the loop and retry paths.
 
 func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, blocks []agent.ContentBlock, images []string) {
+	if err := s.drain.begin(); err != nil {
+		// Restart drain in progress: surface a retryable error to the
+		// browser instead of starting a turn the shutdown would cut short.
+		if s.wsHub != nil {
+			s.wsHub.broadcast(sess.ID, map[string]string{
+				"type":       "error",
+				"message":    err.Error(),
+				"session_id": sess.ID,
+			})
+		}
+		return
+	}
+	defer s.drain.end()
+
 	content := initialContent
 	for {
 		s.doAgentTurn(sess, content, blocks, images)
+		if s.drain.isDraining() {
+			// Don't chain queued steer messages into fresh turns during a
+			// drain — they'd start work the shutdown cuts at the timeout.
+			// Tell the user to resend instead of eating the input silently.
+			if items := s.drainSteer(sess.ID); len(items) > 0 && s.wsHub != nil {
+				s.wsHub.broadcast(sess.ID, map[string]string{
+					"type":       "error",
+					"message":    errDraining.Error(),
+					"session_id": sess.ID,
+				})
+			}
+			break
+		}
 		steerItems := s.drainSteer(sess.ID)
 		if len(steerItems) == 0 {
 			break

@@ -42,14 +42,15 @@ mechanism behind two scenarios:
 
 1. Spawns the worker: same binary path (captured via `os.Executable` at
    startup), same argv, with `OCTO_SERVE_WORKER=1` in the environment.
-   stdin/stdout/stderr pass through, so logs look exactly like today.
+   stdout/stderr pass through, so logs look exactly like today (stdin is not
+   wired — the server never reads it).
 2. Waits for the worker to exit.
 3. Dispatches on the exit code:
    - `42` (`server.ExitRestart`) — re-spawn from the stored binary path and
      loop. The path is re-opened on each spawn, so a replaced binary takes
      effect.
    - anything else — exit with the same code. `0` stays `0`, crashes
-     propagate.
+     propagate (a signal-killed worker's `-1` normalises to `1`).
 
 When `OCTO_SERVE_WORKER=1` is set, `runServe` skips the supervisor and runs
 the server directly — this is both how the parent's child runs and the opt-out
@@ -64,36 +65,55 @@ group, so parent and worker both receive it. The parent treats a received
 SIGINT/SIGTERM as "quitting": it stops respawning, waits for the worker (whose
 existing signal handler runs `Shutdown`), and exits with the worker's code.
 When the parent is signalled directly (e.g. `kill <parent-pid>`), it forwards
-the signal to the worker. On Windows the parent kills the worker process on
-interrupt; the drain guarantees below make that safe.
+the signal to the worker. On Windows forwarding is a no-op: the worker already
+received the console Ctrl-C event (same console group), and the only
+alternative, `Process.Kill`, would land before the worker's graceful Shutdown
+and orphan its background processes. A signal that races the worker's exit is
+drained before the respawn decision, so the supervisor never spawns a worker
+that is already doomed.
 
 ## Restart triggers
 
-- `POST /api/restart` — `requireAuth`, responds `202 Accepted` immediately,
-  then starts the drain. This is the endpoint the web UI calls.
-- `restart_server` tool — registered only by the server, injected through the
-  same setter pattern as the WebSocket asker (`tools.SetAsker`), so the CLI
-  and sub-agents never see it. The tool returns success text immediately
-  ("restart scheduled after this turn"); the drain naturally waits for the
-  calling turn to finish, so the agent's final reply ("restarting now…")
-  reaches the user before the connection drops.
+- `POST /api/restart` — responds `202 Accepted` immediately, then starts the
+  drain. This is the endpoint the web UI's version popover calls. It sits on
+  the API mux with the same auth posture as every other endpoint (the
+  `requireAuth` wrapper is currently a pass-through; the API's trust model is
+  the localhost-by-default bind address).
+- `restart_server` tool — registered only by the server via
+  `tools.SetRestarter` (the same setter pattern as the WebSocket asker), so
+  the CLI and TUI never advertise it. The tool requires a `reason`, returns
+  success text immediately ("restart scheduled after this turn"), and the
+  drain naturally waits for the calling turn to finish, so the agent's final
+  reply ("restarting now…") reaches the user before the connection drops.
 
-The tool goes through the per-turn permission gate like any other
-state-changing tool; on IM channels the interactive ask flow covers
-confirmation.
+The tool is ask-class in `internal/permission/defaults.yml` (explicitly, so
+nobody relaxes it by accident). On the web that means the browser
+confirmation prompt; the IM channel gate runs strict with no asker, so
+ask resolves to deny — an IM-triggered restart is refused until an
+interactive IM ask flow exists. Server sub-agents see the tool (the
+restarter registration is process-global) but inherit the parent's gate,
+so they face the same confirmation or denial.
 
 ## Drain sequence
 
-A restart request flips the server into draining state:
+A restart request flips the server into draining state (`drainGate` in
+`internal/server/drain.go` counts in-flight turns; every turn-execution path
+registers with it):
 
-1. **Stop intake.** New turn requests get `503` with a retry hint; IM
-   adapters stop (`stopChannels`) so no new IM turns start.
-2. **Wait for in-flight turns**, tracked by the existing `turnRunning` map,
-   bounded by a drain timeout (default 30s).
-3. **Shutdown.** The existing `Shutdown` path runs: kill background
-   processes, kill session sub-agents, MCP cleanup, `http.Shutdown`.
+1. **Gate intake.** New turns are refused at every entry point, each in its
+   transport's retryable shape: HTTP turn endpoints and SSE return `503`, the
+   WS path broadcasts an error event, scheduled task runs return an error,
+   and an IM message gets a polite "send that again in a moment" reply. IM
+   adapters deliberately stay up through the drain — the turn that triggered
+   the restart must deliver its final reply through a live adapter. Turn
+   loops also stop chaining queued steer messages into fresh turns once the
+   drain starts.
+2. **Wait for in-flight turns**, bounded by a drain timeout (default 30s).
+3. **Shutdown.** The existing single-flight `Shutdown` path runs: stop IM
+   adapters, kill background processes, kill session sub-agents, MCP
+   cleanup, `http.Shutdown`.
 4. `ListenAndServe` returns `ErrRestartRequested`; `runServe` returns exit
-   code `42`.
+   code `42`. (A plain shutdown — Ctrl-C — surfaces as `nil` and exit 0.)
 
 The timeout is a hard bound, not a negotiation: a turn still running at 30s is
 abandoned. Round-granularity session persistence plus the SSE replay buffer
@@ -130,20 +150,23 @@ catch-all for everything else.
 
 | Piece | Where | What |
 |---|---|---|
-| Supervisor loop | `cmd/octo/serve.go` | spawn/wait/dispatch, signal handling, `OCTO_SERVE_WORKER` detection, `--no-supervisor` |
-| Exit code | `internal/server` | `ExitRestart = 42`, `ErrRestartRequested` |
-| Drain state | `internal/server/server.go` | draining flag, 503 gate, turn-drain wait, timeout |
-| Restart endpoint | `internal/server` | `POST /api/restart` behind `requireAuth` |
-| Restart tool | `internal/tools` + server wiring | `restart_server`, server-injected, permission-gated |
+| Supervisor loop | `cmd/octo/serve_supervisor.go` + `serve.go` | spawn/wait/dispatch, signal handling, `OCTO_SERVE_WORKER` detection, `--no-supervisor` |
+| Exit code | `internal/server/restart.go` | `ExitRestart = 42`, `ErrRestartRequested`, `Restart()` |
+| Drain state | `internal/server/drain.go` | `drainGate`: in-flight count, intake refusal, drain wait + timeout |
+| Restart endpoint | `internal/server/restart.go` | `POST /api/restart`, 202 then background drain |
+| Restart tool | `internal/tools/restart.go` + server wiring | `restart_server`, `SetRestarter`-injected, permission-gated |
 
 ## Testing
 
-- Drain logic: unit tests with fake in-flight turns covering finish-before-
-  timeout and timeout-abandons paths.
-- Supervisor loop: re-exec helper-process pattern (`TestMain` dispatching on
-  an env var, the same trick `os/exec` tests use) — child exits 42 then 0,
-  parent observed to respawn exactly once. No live network, per project rule.
-- Endpoint: `httptest` — auth required, 202 response, draining 503 on
-  subsequent turn requests.
+- Drain gate: unit tests cover begin/end pairing, drain-waits-for-active-turn,
+  timeout-reports-dirty, and multi-turn ordering.
+- Supervisor loop: the spawn/wait/signal mechanics sit behind an injectable
+  spawn function, so the loop's respawn/propagate/signal semantics are covered
+  by in-process fakes. No live network, per project rule.
+- Endpoint + wiring: `httptest` through the real mux — 202 on restart,
+  draining 503 on turn endpoints, scheduled-run refusal, polite IM reply via a
+  fake adapter, restart-vs-plain-shutdown sentinel on a real ephemeral-port
+  listener, single-flight `Shutdown` under `-race`.
 - CI matrix (Linux/macOS/Windows) exercises the spawn/wait path on all three;
-  the Windows rename dance is covered by the upgrade step's own test.
+  the Windows rename dance belongs to the (future) upgrade flow, not this
+  machinery.

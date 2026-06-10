@@ -52,6 +52,16 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
 
+	// Refuse new turns during a restart drain — after the turn lock (so a
+	// queued SSE turn admitted before the drain doesn't slip through) but
+	// before the SSE headers go out, so the client gets a plain retryable
+	// 503 instead of a corrupted stream.
+	if err := s.drain.begin(); err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	defer s.drain.end()
+
 	// Set up SSE headers.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
