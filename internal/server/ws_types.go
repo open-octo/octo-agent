@@ -195,9 +195,10 @@ type wsEventRequestUserQuestion struct {
 }
 
 type wsEventBackgroundTaskUpdate struct {
-	Type    string             `json:"type"`
-	Running int                `json:"running"`
-	Tasks   []wsBackgroundTask `json:"tasks"`
+	Type      string             `json:"type"`
+	SessionID string             `json:"session_id"`
+	Running   int                `json:"running"`
+	Tasks     []wsBackgroundTask `json:"tasks"`
 }
 
 type wsBackgroundTask struct {
@@ -207,10 +208,11 @@ type wsBackgroundTask struct {
 }
 
 type wsEventBackgroundTaskNotice struct {
-	Type     string `json:"type"`
-	Command  string `json:"command"`
-	HandleID string `json:"handle_id"`
-	Status   string `json:"status"`
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+	Command   string `json:"command"`
+	HandleID  string `json:"handle_id"`
+	Status    string `json:"status"`
 }
 
 type wsEventUserMessageQueueStatus struct {
