@@ -345,7 +345,11 @@ const ccCompatNote = "This skill may have been written for Claude Code. In this 
 	"directory across terminal calls — use absolute paths, or chain `cd … && …` " +
 	"inside one command. If the skill depends on a Claude Code feature with no " +
 	"equivalent here (hooks, plan mode, output styles), tell the user instead of " +
-	"improvising."
+	"improvising. Skills are often authored for managed sandboxes with interpreters " +
+	"and libraries preinstalled — this machine makes no such guarantee. Before the " +
+	"first step that needs a runtime, verify it (e.g. `python3 -c 'import openpyxl'`, " +
+	"`node -v`, `soffice --version`); if anything is missing, list what's needed and " +
+	"ask the user before installing — never install into their environment unasked."
 
 // RenderSkill produces the text handed to the model when a skill is loaded —
 // via the `skill` tool (model-initiated) or a /<name> trigger (user-initiated).
