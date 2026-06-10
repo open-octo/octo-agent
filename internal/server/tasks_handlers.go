@@ -71,6 +71,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 			model = s.model
 		}
 		sess = agent.NewSession(model, s.system)
+		sess.Source = "cron"
 		task.SessionID = sess.ID
 		// If the task specifies a directory, note it in system prompt.
 		if task.Directory != "" {

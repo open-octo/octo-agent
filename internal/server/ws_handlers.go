@@ -32,7 +32,10 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 	wd, pm, re, ctxUsage := s.sessionStatusFields()
 	out := make([]wsSessionInfo, 0, len(sessions))
 	for _, sess := range sessions {
-		source := "manual"
+		source := sess.Source
+		if source == "" {
+			source = "manual"
+		}
 		out = append(out, wsSessionInfo{
 			ID:              sess.ID,
 			Name:            sess.DisplayTitle(),

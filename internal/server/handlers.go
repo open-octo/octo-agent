@@ -258,9 +258,14 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	out := make([]sessionItem, 0, len(sessions))
 	cronCount := 0
 	for _, sess := range sessions {
-		// Source and agent_profile are not persisted on the session itself in
-		// the Go rewrite; default to "manual" / "general" so the UI renders.
-		item := s.toSessionItem(sess, "manual", "general")
+		// agent_profile is not persisted on the session; default to "general"
+		// so the UI renders. Sessions from before source was persisted load
+		// with an empty Source and fall back to "manual".
+		source := sess.Source
+		if source == "" {
+			source = "manual"
+		}
+		item := s.toSessionItem(sess, source, "general")
 		out = append(out, item)
 		if item.Source == "cron" {
 			cronCount++
@@ -307,6 +312,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := agent.NewSession(model, "")
+	sess.Source = source
 	if req.Name != "" {
 		sess.Title = req.Name
 	}

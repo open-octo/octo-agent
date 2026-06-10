@@ -33,6 +33,22 @@ func TestNewSession(t *testing.T) {
 	}
 }
 
+func TestSessionSourceRoundTrip(t *testing.T) {
+	setTempHome(t)
+	s := NewSession("m", "")
+	s.Source = "cron"
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got.Source != "cron" {
+		t.Fatalf("Source = %q, want %q", got.Source, "cron")
+	}
+}
+
 func TestSessionIDFormat(t *testing.T) {
 	s := NewSession("m", "")
 	// YYYYMMDD-HHMMSS-xxxxxxxx — 24 chars (15 timestamp + '-' + 8 hex suffix).

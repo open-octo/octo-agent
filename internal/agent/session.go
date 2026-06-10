@@ -30,6 +30,7 @@ type Session struct {
 	Model     string    `json:"model"`
 	System    string    `json:"system,omitempty"`
 	Title     string    `json:"title,omitempty"`
+	Source    string    `json:"source,omitempty"` // how the session was created: "" (manual) | "cron" | "channel" | "setup"
 	Messages  []Message `json:"messages"`
 
 	// persisted is how many messages are already on disk. Save appends
@@ -119,11 +120,12 @@ type sessionRecord struct {
 	Model     string    `json:"model,omitempty"`
 	System    string    `json:"system,omitempty"`
 	Title     string    `json:"title,omitempty"`
+	Source    string    `json:"source,omitempty"`
 	Message   *Message  `json:"message,omitempty"`
 }
 
 func (s *Session) metaRecord() sessionRecord {
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source}
 }
 
 func messageRecord(m Message) sessionRecord {
@@ -338,6 +340,7 @@ func LoadSession(id string) (*Session, error) {
 		case "meta":
 			s.ID, s.CreatedAt, s.Model, s.System = rec.ID, rec.CreatedAt, rec.Model, rec.System
 			s.Title = rec.Title // a compacted file carries the title in its meta header
+			s.Source = rec.Source
 		case "title":
 			s.Title = rec.Title // last one wins
 		case "message":
