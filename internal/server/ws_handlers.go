@@ -573,15 +573,24 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// title (matches TUI titleCmd behaviour). Fire-and-forget; a failure is
 	// silent and simply retried after a later turn.
 	if err == nil && sess.Title == "" && s.claimTitleGeneration(sess.ID) {
+		sid := sess.ID
 		go func() {
-			defer s.releaseTitleGeneration(sess.ID)
+			defer s.releaseTitleGeneration(sid)
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			t, terr := a.GenerateTitle(ctx, toolDefs)
 			if terr != nil || strings.TrimSpace(t) == "" {
 				return
 			}
-			if sess.SetTitle(t) != nil {
+			// Apply the title to a freshly loaded Session, not the live one —
+			// chained steer turns keep appending to sess on the loop
+			// goroutine, and Session isn't goroutine-safe. A load that races
+			// a concurrent append just errors out and a later turn retries.
+			fresh, lerr := agent.LoadSession(sid)
+			if lerr != nil || fresh.Title != "" {
+				return
+			}
+			if fresh.SetTitle(t) != nil {
 				return
 			}
 			// Global broadcast: the sidebar lists every session, so every
@@ -589,7 +598,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// subscribers.
 			s.wsHub.broadcast("", map[string]any{
 				"type":       "session_renamed",
-				"session_id": sess.ID,
+				"session_id": sid,
 				"name":       t,
 			})
 		}()
