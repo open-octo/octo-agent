@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -572,7 +573,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// Once per session, after its first successful turn: generate a sidebar
 	// title (matches TUI titleCmd behaviour). Fire-and-forget; a failure is
 	// silent and simply retried after a later turn.
-	if err == nil && sess.Title == "" && s.claimTitleGeneration(sess.ID) {
+	if err == nil && isAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
 		sid := sess.ID
 		go func() {
 			defer s.releaseTitleGeneration(sid)
@@ -587,7 +588,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// goroutine, and Session isn't goroutine-safe. A load that races
 			// a concurrent append just errors out and a later turn retries.
 			fresh, lerr := agent.LoadSession(sid)
-			if lerr != nil || fresh.Title != "" {
+			if lerr != nil || !isAutoNamePlaceholder(fresh.Title) {
 				return
 			}
 			if fresh.SetTitle(t) != nil {
@@ -621,6 +622,18 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			})
 		}()
 	}
+}
+
+// sessionPlaceholderRe matches the frontend's auto-assigned "Session N"
+// default name on freshly created web sessions.
+var sessionPlaceholderRe = regexp.MustCompile(`^Session \d+$`)
+
+// isAutoNamePlaceholder reports whether a session title is absent or still the
+// frontend's "Session N" placeholder — both get replaced by a generated title
+// after the first completed turn. A name the user typed themselves is kept.
+func isAutoNamePlaceholder(title string) bool {
+	t := strings.TrimSpace(title)
+	return t == "" || sessionPlaceholderRe.MatchString(t)
 }
 
 // claimTitleGeneration marks a title generation in flight for the session;

@@ -8,10 +8,30 @@ import (
 	"github.com/Leihb/octo-agent/internal/agent"
 )
 
+func TestIsAutoNamePlaceholder(t *testing.T) {
+	cases := []struct {
+		title string
+		want  bool
+	}{
+		{"", true},
+		{"  ", true},
+		{"Session 1", true},
+		{"Session 42", true},
+		{"Session", false},
+		{"修复登录问题", false},
+		{"My Session 2", false},
+	}
+	for _, c := range cases {
+		if got := isAutoNamePlaceholder(c.title); got != c.want {
+			t.Errorf("isAutoNamePlaceholder(%q) = %v, want %v", c.title, got, c.want)
+		}
+	}
+}
+
 // TestDoAgentTurn_GeneratesSessionTitle is the regression guard for web
-// sessions never getting an auto-generated title: only the TUI called
-// GenerateTitle after the first turn, so web-created sessions stayed on the
-// first-message-snippet fallback forever.
+// sessions never getting an auto-generated title. Two historical gaps: only
+// the TUI called GenerateTitle, and web sessions are created with a
+// "Session N" placeholder title that blocked the untitled-only gate.
 func TestDoAgentTurn_GeneratesSessionTitle(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -23,7 +43,10 @@ func TestDoAgentTurn_GeneratesSessionTitle(t *testing.T) {
 	srv.steerQueues = make(map[string][]agent.InboxItem)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
+	// Born with the frontend's auto-assigned placeholder, like every session
+	// created via POST /api/sessions.
 	sess := agent.NewSession("stub-model", "")
+	sess.Title = "Session 2"
 	if err := sess.Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
