@@ -732,6 +732,44 @@ func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ─── PATCH /api/sessions/{id} ───────────────────────────────────────────────
+
+// updateSessionRequest carries the user-editable session fields. Only the
+// title (the sidebar "name") is editable today.
+type updateSessionRequest struct {
+	Name string `json:"name"`
+}
+
+// handleUpdateSession renames a session — the sidebar's rename action.
+func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+	var req updateSessionRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	sess, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err := sess.SetTitle(name); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("set title: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"session": s.toSessionItem(sess, "manual", "general")})
+}
+
 // ─── PATCH /api/sessions/{id}/model ─────────────────────────────────────────
 
 type updateSessionModelRequest struct {

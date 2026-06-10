@@ -1149,3 +1149,45 @@ func TestWSStreamWriter_ReseedsThinkingAfterTool(t *testing.T) {
 		})
 	}
 }
+
+// PATCH /api/sessions/{id} is the sidebar rename action — the title must
+// persist through a session reload, and bad input must not slip through.
+func TestHandleUpdateSession_Rename(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Messages = []agent.Message{{Role: agent.RoleUser, Content: "hi"}}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	do := func(id, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+id, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := do(sess.ID, `{"name":"My research session"}`); w.Code != http.StatusOK {
+		t.Fatalf("rename status = %d; body=%s", w.Code, w.Body.String())
+	}
+	loaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.Title != "My research session" {
+		t.Errorf("Title = %q, want the new name", loaded.Title)
+	}
+
+	if w := do(sess.ID, `{"name":"  "}`); w.Code != http.StatusBadRequest {
+		t.Errorf("blank name status = %d, want 400", w.Code)
+	}
+	if w := do("no-such-session", `{"name":"x"}`); w.Code != http.StatusNotFound {
+		t.Errorf("unknown id status = %d, want 404", w.Code)
+	}
+}
