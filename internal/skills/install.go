@@ -131,26 +131,43 @@ func Install(src Source, destRoot string, force bool) (name, desc string, err er
 		return "", "", fmt.Errorf("extract %s: %w", src, err)
 	}
 
+	fallback := path.Base(src.Subpath)
+	if fallback == "" || fallback == "." || fallback == "/" {
+		fallback = src.Repo
+	}
+	return placeStaged(tmp, destRoot, fallback, force)
+}
+
+// ErrExists reports an install refused because a same-named skill is already
+// present and force was not set. Callers branch on it: the CLI appends a
+// --force hint, the web API maps it to HTTP 409.
+var ErrExists = fmt.Errorf("skill already exists")
+
+// placeStaged validates a fully-staged skill directory (tmp must contain
+// SKILL.md) and renames it to destRoot/<name>. The name comes from the
+// SKILL.md frontmatter, falling back to fallbackName. Shared by the GitHub,
+// zip, and directory installers.
+func placeStaged(tmp, destRoot, fallbackName string, force bool) (name, desc string, err error) {
 	b, err := os.ReadFile(filepath.Join(tmp, SkillFile))
 	if err != nil {
-		return "", "", fmt.Errorf("%s has no readable %s — not a skill directory", src, SkillFile)
+		return "", "", fmt.Errorf("no readable %s — not a skill directory", SkillFile)
 	}
 	fmName, fmDesc, ok := parseNamed(b)
 	if !ok || fmDesc == "" {
-		return "", "", fmt.Errorf("%s: %s is missing frontmatter name/description", src, SkillFile)
+		return "", "", fmt.Errorf("%s is missing frontmatter name/description", SkillFile)
 	}
 	name = fmName
 	if name == "" {
-		name = path.Base(src.Subpath)
+		name = fallbackName
 	}
 	if name == "" || name == "." || name == "/" {
-		name = src.Repo
+		return "", "", fmt.Errorf("cannot determine a skill name")
 	}
 
 	dest := filepath.Join(destRoot, name)
 	if _, err := os.Stat(dest); err == nil {
 		if !force {
-			return "", "", fmt.Errorf("skill %q already exists at %s (use --force to replace)", name, dest)
+			return "", "", fmt.Errorf("%w: %q at %s", ErrExists, name, dest)
 		}
 		if err := os.RemoveAll(dest); err != nil {
 			return "", "", err

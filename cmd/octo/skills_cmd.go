@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -68,6 +69,9 @@ func skillsAdd(args []string, stdout, stderr io.Writer) int {
 	name, desc, err := skills.Install(src, skills.UserRoot(), force)
 	if err != nil {
 		fmt.Fprintf(stderr, "octo skills add: %v\n", err)
+		if errors.Is(err, skills.ErrExists) {
+			fmt.Fprintln(stderr, "  re-run with --force to replace it")
+		}
 		return 1
 	}
 	fmt.Fprintf(stdout, "Installed /%s → %s\n", name, filepath.Join(skills.UserRoot(), name))

@@ -382,7 +382,8 @@ const Skills = (() => {
               const files = data.files || [];
               const uploaded = files[0];
               if (res.ok && uploaded && uploaded.url) {
-                // Fill the server-side temp path — /skill-add will read it directly
+                // Fill the /api/uploads/<name> path — the import endpoint
+                // maps it back to the file on disk.
                 input.value = uploaded.url;
               } else {
                 input.value = "";
@@ -402,10 +403,14 @@ const Skills = (() => {
       }
     },
 
-    /** Execute import: validate URL, open a session and send /skill-add <url>. */
-    async _doImportFromBar() {
+    /** Execute import: POST /api/skills/import installs directly on the
+     *  server (GitHub URL / owner-repo shorthand / uploaded zip / local path).
+     *  A 409 means a same-named skill exists — confirm, then retry with force.
+     */
+    async _doImportFromBar(force = false) {
       const input = $("skill-import-input");
       const bar   = $("skill-import-bar");
+      const confirmBtn = $("btn-skill-import-confirm");
       const url   = (input ? input.value : "").trim();
 
       if (!url) {
@@ -413,46 +418,46 @@ const Skills = (() => {
         return;
       }
 
-      // Validate: accept http(s) URLs or absolute local paths (from upload)
+      // Accept http(s) URLs, owner/repo[/sub/path] shorthand, or local paths
+      // (typed, or the /api/uploads/… path Browse filled in).
       const isUrl       = /^https?:\/\//i.test(url);
       const isLocalPath = url.startsWith("/") || url.startsWith("~");
-      if (!isUrl && !isLocalPath) {
+      const isShorthand = /^[\w.-]+\/[\w.-]+(\/|$)/.test(url);
+      if (!isUrl && !isLocalPath && !isShorthand) {
         input.classList.add("skill-import-input-error");
         setTimeout(() => input.classList.remove("skill-import-input-error"), 1200);
         input.focus();
         return;
       }
 
-      // Close the bar immediately — the session takes over from here
-      if (bar) bar.style.display = "none";
-      if (input) input.value = "";
-
-      // Create a new session and queue the /skill-add command
+      if (confirmBtn) confirmBtn.disabled = true;
       try {
-        const maxN = Sessions.all.reduce((max, s) => {
-          const m = s.name.match(/^Session (\d+)$/);
-          return m ? Math.max(max, parseInt(m[1], 10)) : max;
-        }, 0);
-        const res  = await fetch("/api/sessions", {
+        const res  = await fetch("/api/skills/import", {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ name: "Session " + (maxN + 1), source: "manual" })
+          body:    JSON.stringify({ source: url, force })
         });
         const data = await res.json();
-        if (!res.ok) { alert(I18n.t("tasks.sessionError") + (data.error || "unknown")); return; }
 
-        const session = data.session;
-        if (!session) return;
+        if (res.status === 409 && !force) {
+          if (confirmBtn) confirmBtn.disabled = false;
+          const ok = await Modal.confirm(I18n.t("skills.import.confirmReplace"));
+          if (ok) return Skills._doImportFromBar(true);
+          return;
+        }
+        if (!res.ok) {
+          alert(I18n.t("skills.import.error") + (data.error || "unknown"));
+          return;
+        }
 
-        if (!WS.ready) { WS.connect(); Tasks.load(); }
-
-        Sessions.add(session);
-        Sessions.renderList();
-        Sessions.setPendingMessage(session.id, `/skill-add ${url}`);
-        Sessions.select(session.id);
+        if (bar) bar.style.display = "none";
+        if (input) input.value = "";
+        await Skills.load();
       } catch (e) {
         console.error("[Skills] import failed", e);
-        alert(I18n.lang() === "zh" ? "导入技能时网络错误。" : "Network error while importing skill.");
+        alert(I18n.t("skills.import.error") + e.message);
+      } finally {
+        if (confirmBtn) confirmBtn.disabled = false;
       }
     },
 

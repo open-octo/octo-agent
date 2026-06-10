@@ -384,6 +384,7 @@ func (s *Server) registerRoutes() {
 	// Skill toggle & delete
 	s.mux.HandleFunc("PATCH /api/skills/{name}/toggle", s.requireAuth(s.handleToggleSkill))
 	s.mux.HandleFunc("DELETE /api/skills/{name}", s.requireAuth(s.handleDeleteSkill))
+	s.mux.HandleFunc("POST /api/skills/import", s.requireAuth(s.handleImportSkill))
 
 	// MCP server management
 	s.mux.HandleFunc("GET /api/mcp/servers", s.requireAuth(s.handleListMCPServers))
