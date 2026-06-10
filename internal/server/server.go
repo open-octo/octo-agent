@@ -366,6 +366,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/sessions/delete", s.requireAuth(s.handleDeleteSessions))
 	s.mux.HandleFunc("GET /api/sessions/{id}", s.requireAuth(s.handleGetSession))
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.requireAuth(s.handleGetSessionMessages))
+	s.mux.HandleFunc("GET /api/sessions/{id}/artifacts", s.requireAuth(s.handleGetArtifact))
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireAuth(s.handleDeleteSession))
 	s.mux.HandleFunc("PATCH /api/sessions/{id}", s.requireAuth(s.handleUpdateSession))
 	s.mux.HandleFunc("PATCH /api/sessions/{id}/model", s.requireAuth(s.handleUpdateSessionModel))

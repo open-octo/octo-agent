@@ -1545,6 +1545,7 @@ const Sessions = (() => {
       }
 
       case "tool_result": {
+        if (window.Artifacts) Artifacts.observe(ev.ui_payload, { live: false });
         // tool_result pairs with the most recent tool_call (lastItem).
         // We intentionally do NOT require historyCtx.group here: an intervening
         // assistant_message collapses the group and clears it, but the lastItem
@@ -2555,6 +2556,8 @@ const Sessions = (() => {
     /** Set _activeId directly (called by Router when activating a session). */
     _setActiveId(id) {
       _activeId = id;
+      // Artifacts are per-session; the new session's history replay repopulates.
+      if (window.Artifacts) Artifacts.reset(id);
       // Suggestions are scoped to whoever owned the input at the time of
       // emission; switching session means the previous suggestion no longer
       // applies. The new session's most recent suggestion (if any) will
@@ -3203,6 +3206,7 @@ const Sessions = (() => {
     // Update the last tool-item with a result status tick.
     // If uiPayload is provided, renders a rich structured card instead of plain text.
     appendToolResult(result, uiPayload) {
+      if (window.Artifacts) Artifacts.observe(uiPayload, { live: true });
       if (Sessions._liveToolGroup && Sessions._liveLastToolItem) {
         _completeLastToolItem(Sessions._liveToolGroup, result, uiPayload);
         Sessions._liveLastToolItem = null;

@@ -703,6 +703,27 @@
 
   </main>
 
+  <!-- Artifacts panel: previewable files written by the active session.
+       Hidden until the session produces one (see artifacts.js). -->
+  <aside id="artifacts-panel" hidden>
+    <div id="artifacts-header">
+      <span id="artifacts-title" data-i18n="artifacts.title">Artifacts</span>
+      <div class="artifacts-header-actions">
+        <button id="btn-artifacts-refresh" title="Refresh preview">⟳</button>
+        <button id="btn-artifacts-close" title="Close">×</button>
+      </div>
+    </div>
+    <div id="artifacts-list"></div>
+    <div id="artifacts-empty" data-i18n="artifacts.empty" hidden>No artifacts yet.</div>
+    <div id="artifacts-preview"></div>
+  </aside>
+
+  <!-- Floating reopen pill, shown when the panel is closed but has items -->
+  <button id="artifacts-pill" hidden>
+    <span data-i18n="artifacts.title">Artifacts</span>
+    <span id="artifacts-pill-count"></span>
+  </button>
+
   </div><!-- end #content-row -->
 
 </div><!-- end #app -->
@@ -968,6 +989,7 @@
 <script src="/theme.js"></script>
 <script src="/ws.js"></script>
 <script src="/ws-dispatcher.js"></script>
+<script src="/artifacts.js"></script>
 <script src="/sessions.js"></script>
 <script src="/datepicker.js"></script>
 <script src="/tasks.js"></script>
