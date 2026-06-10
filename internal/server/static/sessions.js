@@ -1496,7 +1496,11 @@ const Sessions = (() => {
       }
 
       case "tool_result": {
-        if (historyCtx.group && historyCtx.lastItem) {
+        // tool_result pairs with the most recent tool_call (lastItem).
+        // We intentionally do NOT require historyCtx.group here: an intervening
+        // assistant_message collapses the group and clears it, but the lastItem
+        // is still the correct target for the result.
+        if (historyCtx.lastItem) {
           const status = historyCtx.lastItem.querySelector(".tool-item-status");
           if (status) {
             const st = ev.ui_payload && ev.ui_payload.status ? ev.ui_payload.status : "ok";

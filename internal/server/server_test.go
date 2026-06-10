@@ -700,6 +700,124 @@ func TestHandleUpdateSessionModel(t *testing.T) {
 	}
 }
 
+// TestHandleGetSessionMessages_IncludesToolCalls verifies that assistant
+// messages carrying tool_use blocks are translated into tool_call events in
+// the history response.
+func TestHandleGetSessionMessages_IncludesToolCalls(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: "list files"},
+		agent.NewToolUseMessage([]agent.ContentBlock{
+			agent.NewToolUseBlock("call_1", "terminal", map[string]any{"command": "ls"}),
+		}),
+		agent.NewToolResultMessage([]agent.ContentBlock{
+			agent.NewToolResultBlock("call_1", "file.txt\n", false),
+		}),
+		agent.NewAssistantMessage("Here are the files: file.txt"),
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		HasMore bool             `json:"has_more"`
+		Events  []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+
+	var toolCallCount int
+	for _, ev := range body.Events {
+		if ev["type"] == "tool_call" {
+			toolCallCount++
+		}
+	}
+	if toolCallCount != 1 {
+		t.Fatalf("tool_call events = %d, want 1; events=%v", toolCallCount, body.Events)
+	}
+}
+
+// TestHandleGetSessionMessages_MultiToolUse verifies the full event sequence
+// for a session with multiple tool_use blocks and tool_results.
+func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: "list and grep"},
+		agent.NewToolUseMessage([]agent.ContentBlock{
+			agent.NewToolUseBlock("call_1", "terminal", map[string]any{"command": "ls"}),
+			agent.NewToolUseBlock("call_2", "grep", map[string]any{"pattern": "foo"}),
+		}),
+		agent.NewToolResultMessage([]agent.ContentBlock{
+			agent.NewToolResultBlock("call_1", "file.txt\n", false),
+			agent.NewToolResultBlock("call_2", "file.txt:1:foo\n", false),
+		}),
+		agent.NewAssistantMessage("Found it"),
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		HasMore bool             `json:"has_more"`
+		Events  []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotTypes []string
+	for _, ev := range body.Events {
+		gotTypes = append(gotTypes, ev["type"].(string))
+	}
+
+	wantTypes := []string{
+		"history_user_message",
+		"tool_call",
+		"tool_call",
+		"assistant_message",
+		"tool_result",
+		"tool_result",
+		"assistant_message",
+	}
+	if len(gotTypes) != len(wantTypes) {
+		t.Fatalf("event types = %v, want %v", gotTypes, wantTypes)
+	}
+	for i, want := range wantTypes {
+		if gotTypes[i] != want {
+			t.Fatalf("event[%d].type = %q, want %q; full=%v", i, gotTypes[i], want, gotTypes)
+		}
+	}
+}
+
 // TestRunTurnForwardsTools is the regression guard for the web-UI bug where the
 // server's sender only implemented the base Sender, so the agent loop fell back
 // to a tool-less Turn and every tool (web_search included) vanished.
