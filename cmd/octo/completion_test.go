@@ -46,6 +46,49 @@ func TestCompletionCandidates_ChatFlags(t *testing.T) {
 	}
 }
 
+func TestCompletionCandidates_DefaultChatMode(t *testing.T) {
+	// octo with no subcommand defaults to chat, so flags and their values
+	// should complete even without an explicit "chat" subcommand.
+	cases := []struct {
+		words []string
+		want  []string
+	}{
+		// Dash-partial at position 1 → chat flags (user is typing a flag).
+		{[]string{"octo", "-"}, []string{"-c", "--continue", "--provider", "--quiet"}},
+		{[]string{"octo", "--"}, []string{"--continue", "--provider", "--quiet"}},
+		// Flag values after "octo --provider ".
+		{[]string{"octo", "--provider", ""}, []string{"anthropic", "openai"}},
+	}
+	for _, tc := range cases {
+		got := completionCandidates(tc.words)
+		for _, w := range tc.want {
+			if !sliceContains(got, w) {
+				t.Errorf("words=%v missing %q; got %v", tc.words, w, got)
+			}
+		}
+	}
+}
+
+func TestCompletionCandidates_DefaultChatMode_SessionIDs(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	s1 := agent.NewSession("test-model", "")
+	if err := s1.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	got := completionCandidates([]string{"octo", "-c", ""})
+	if len(got) < 1 || got[0] != "last" {
+		t.Errorf("expected 'last' as first candidate; got %v", got)
+	}
+	for _, want := range []string{s1.ShortID(), s1.ID} {
+		if !sliceContains(got, want) {
+			t.Errorf("expected %q in candidates; got %v", want, got)
+		}
+	}
+}
+
 func TestCompletionCandidates_ProviderValueAfterFlag(t *testing.T) {
 	got := completionCandidates([]string{"octo", "chat", "--provider", ""})
 	if !sliceEq(got, []string{"anthropic", "openai"}) {

@@ -72,8 +72,13 @@ func completionCandidates(words []string) []string {
 		return topLevelCommands
 	}
 	// Still typing the subcommand itself — offer the full top-level list
-	// (shell will prefix-match against the partial).
+	// (shell will prefix-match against the partial). If the partial starts
+	// with a dash the user is typing a flag, which means default chat mode
+	// (octo with no subcommand behaves like octo chat).
 	if len(words) == 2 {
+		if strings.HasPrefix(words[1], "-") {
+			return chatCandidates(words, "")
+		}
 		return topLevelCommands
 	}
 	prev := words[len(words)-2]
@@ -102,7 +107,10 @@ func completionCandidates(words []string) []string {
 			return []string{"bash", "zsh", "fish", "powershell"}
 		}
 	}
-	return nil
+	// No recognised subcommand: default chat mode. Any positional text after
+	// "octo" is treated as the chat message, so flags and their values still
+	// complete exactly as they do for "octo chat ...".
+	return chatCandidates(words, prev)
 }
 
 func chatCandidates(words []string, prev string) []string {
