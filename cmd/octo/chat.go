@@ -688,17 +688,18 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Attention layer: re-surface MEMORY.md's structured rules (## 必须遵守 /
 	// ## 触发提醒) on the message stream at the point of action. This rides each
 	// user turn rather than the cached system prompt, so the prompt prefix stays
-	// byte-stable. A MEMORY.md without those sections yields no hook — unchanged
-	// behaviour.
+	// byte-stable. The same injector carries the save-nudge, appended to a tool
+	// result when a milestone-shaped command (gh pr create/merge) lands, so the
+	// injector is wired even when MEMORY.md has no structured rules — Reminder
+	// is silent then.
 	if memDir != "" {
 		rules := memory.ParseRules(memDir)
 		if homeMemDir != "" {
 			rules.Merge(memory.ParseRules(homeMemDir))
 		}
-		if rules.HasAny() {
-			inj := memory.NewInjector(rules)
-			a.UserInputHook = inj.Reminder
-		}
+		inj := memory.NewInjector(rules)
+		a.UserInputHook = inj.Reminder
+		a.ToolResultHook = inj.SaveNudge
 	}
 
 	// Permission engine — gates every tool call; shared by both paths. The

@@ -524,7 +524,10 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	}
 	a.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, memInjection, true)
 
-	// L2: attention-layer rules injected per user turn (triggered keywords).
+	// L2: attention-layer rules injected per user turn (triggered keywords),
+	// plus the save-nudge appended to milestone tool results. The injector is
+	// created even when MEMORY.md has no structured rules — Reminder is silent
+	// then, but the nudge still needs the per-session latch.
 	if s.memDir != "" {
 		s.injectorMu.Lock()
 		inj, ok := s.sessionInjectors[sess.ID]
@@ -533,15 +536,12 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			if s.homeMemDir != "" {
 				rules.Merge(memory.ParseRules(s.homeMemDir))
 			}
-			if rules.HasAny() {
-				inj = memory.NewInjector(rules)
-				s.sessionInjectors[sess.ID] = inj
-			}
+			inj = memory.NewInjector(rules)
+			s.sessionInjectors[sess.ID] = inj
 		}
 		s.injectorMu.Unlock()
-		if inj != nil {
-			a.UserInputHook = inj.Reminder
-		}
+		a.UserInputHook = inj.Reminder
+		a.ToolResultHook = inj.SaveNudge
 	}
 
 	if sess.Model != "" {

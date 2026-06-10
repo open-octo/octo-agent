@@ -189,6 +189,16 @@ type Agent struct {
 	// caller relies on elsewhere — it's invoked once per appended user turn.
 	UserInputHook func(userInput string) string
 
+	// ToolResultHook, when set, is called once per successfully executed tool
+	// call, after the whole batch has been dispatched. A non-empty return is
+	// appended to that call's tool_result text (separated by a blank line) —
+	// the channel for surfacing a reminder at the exact moment an action
+	// completed (e.g. the memory save-nudge after a PR merge). It is invoked
+	// serially from the run loop even when the batch itself ran in parallel,
+	// so implementations need no locking of their own. Denied and errored
+	// calls are skipped — a failed action is not a milestone.
+	ToolResultHook func(name string, input map[string]any) string
+
 	// pendingUserBlocks holds content blocks (e.g. images pasted in the TUI)
 	// to merge into the next user message. Set via AttachUserBlocks and
 	// consumed exactly once by the next appendUserInput, alongside the text.
@@ -681,6 +691,10 @@ func (a *Agent) runLoop(
 			if err != nil {
 				return Reply{}, fmt.Errorf("agent: dispatch tools[%d]: %w", i, err)
 			}
+
+			// Decorate results before events and history so every surface
+			// (model, UI stream, persisted session) sees the same text.
+			applyToolResultHook(a.ToolResultHook, reply.Blocks, resultBlocks)
 
 			// Emit EventToolDone / EventToolError per result, pairing
 			// each result with the originating tool_use block so ToolName
@@ -1188,6 +1202,39 @@ func toolResultBlocks(id string, result ToolResult, err error) []ContentBlock {
 	blocks = append(blocks, rb)
 	blocks = append(blocks, result.Blocks...)
 	return blocks
+}
+
+// applyToolResultHook appends the hook's output to each matching successful
+// tool_result block. It runs serially after dispatchTools returns — never
+// inside the parallel read-only batch — so a stateful hook (the memory
+// save-nudge latch) needs no locking. Denied and errored calls carry
+// IsError=true and are skipped.
+func applyToolResultHook(hook func(name string, input map[string]any) string, uses, results []ContentBlock) {
+	if hook == nil {
+		return
+	}
+	byID := make(map[string]*ContentBlock, len(results))
+	for i := range results {
+		if results[i].Type == "tool_result" && !results[i].IsError {
+			byID[results[i].ToolUseID] = &results[i]
+		}
+	}
+	for _, u := range uses {
+		if u.Type != "tool_use" {
+			continue
+		}
+		rb := byID[u.ID]
+		if rb == nil {
+			continue
+		}
+		if extra := hook(u.Name, u.Input); extra != "" {
+			if rb.Result == "" {
+				rb.Result = extra
+			} else {
+				rb.Result += "\n\n" + extra
+			}
+		}
+	}
 }
 
 // flattenResults collapses a per-tool slice-of-slices into a single flat slice.
