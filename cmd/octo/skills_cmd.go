@@ -6,12 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/Leihb/octo-agent/internal/skills"
 	"github.com/Leihb/octo-agent/internal/version"
 )
 
-// runSkills handles `octo skills [list|update|path]`. Bare `octo skills`
+// runSkills handles `octo skills [list|add|update|path]`. Bare `octo skills`
 // defaults to list. Skills are discovered from three roots (default < user <
 // project); the default set ships embedded in the binary and is materialized to
 // disk on startup (see internal/skills/defaults.go).
@@ -23,14 +24,56 @@ func runSkills(args []string, stdout, stderr io.Writer) int {
 	switch sub {
 	case "list":
 		return skillsList(stdout)
+	case "add":
+		return skillsAdd(args[1:], stdout, stderr)
 	case "update":
 		return skillsUpdate(stdout, stderr)
 	case "path":
 		return skillsPath(stdout)
 	default:
-		fmt.Fprintf(stderr, "octo skills: unknown subcommand %q (want list | update | path)\n", sub)
+		fmt.Fprintf(stderr, "octo skills: unknown subcommand %q (want list | add | update | path)\n", sub)
 		return 2
 	}
+}
+
+// skillsAdd installs a skill from a public GitHub repository into the
+// user-level root (~/.octo/skills). The skill's content is fetched directly
+// from the source repository onto this machine — octo redistributes nothing,
+// so source-available skills (e.g. the document skills in anthropics/skills)
+// can be installed without octo shipping their content.
+func skillsAdd(args []string, stdout, stderr io.Writer) int {
+	var source string
+	force, bad := false, false
+	for _, a := range args {
+		switch {
+		case a == "--force" || a == "-f":
+			force = true
+		case strings.HasPrefix(a, "-") || source != "":
+			bad = true
+		default:
+			source = a
+		}
+	}
+	if bad || source == "" {
+		fmt.Fprintln(stderr, "usage: octo skills add <owner/repo[/sub/path] | github.com tree URL> [--force]")
+		fmt.Fprintln(stderr, "  e.g. octo skills add anthropics/skills/skills/docx")
+		fmt.Fprintln(stderr, "       octo skills add https://github.com/anthropics/skills/tree/main/skills/pdf")
+		return 2
+	}
+	src, err := skills.ParseSource(source)
+	if err != nil {
+		fmt.Fprintf(stderr, "octo skills add: %v\n", err)
+		return 2
+	}
+	name, desc, err := skills.Install(src, skills.UserRoot(), force)
+	if err != nil {
+		fmt.Fprintf(stderr, "octo skills add: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Installed /%s → %s\n", name, filepath.Join(skills.UserRoot(), name))
+	fmt.Fprintf(stdout, "  %s\n", desc)
+	fmt.Fprintln(stdout, "The skill was fetched from its source repository for your local use; check that repository's license before redistributing it.")
+	return 0
 }
 
 func skillsList(stdout io.Writer) int {
