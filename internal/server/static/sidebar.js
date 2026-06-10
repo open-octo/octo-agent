@@ -23,6 +23,7 @@ const Sidebar = (() => {
     // Primary navigation items — each just swaps the current route.
     document.getElementById("tasks-sidebar-item").addEventListener("click", () => Router.navigate("tasks"));
     document.getElementById("skills-sidebar-item").addEventListener("click", () => Router.navigate("skills"));
+    document.getElementById("mcp-sidebar-item").addEventListener("click", () => Router.navigate("mcp"));
     document.getElementById("channels-sidebar-item").addEventListener("click", () => Router.navigate("channels"));
     document.getElementById("trash-sidebar-item").addEventListener("click", () => Router.navigate("trash"));
     document.getElementById("profile-sidebar-item").addEventListener("click", () => Router.navigate("profile"));

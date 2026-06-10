@@ -44,6 +44,7 @@ const PANELS = [
   "chat-panel",
   "task-detail-panel",
   "skills-panel",
+  "mcp-panel",
   "channels-panel",
   "trash-panel",
   "profile-panel",
@@ -75,6 +76,7 @@ const Router = (() => {
     if (!h)                           return { view: "welcome",  params: {} };
     if (h === "tasks")                return { view: "tasks",    params: {} };
     if (h === "skills")               return { view: "skills",   params: {} };
+    if (h === "mcp")                  return { view: "mcp",      params: {} };
     if (h === "channels")             return { view: "channels", params: {} };
     if (h === "trash")                return { view: "trash",    params: {} };
     if (h === "profile")              return { view: "profile",  params: {} };
@@ -93,6 +95,7 @@ const Router = (() => {
   const SIDEBAR_ITEMS = {
     tasks:    "tasks-sidebar-item",
     skills:   "skills-sidebar-item",
+    mcp:      "mcp-sidebar-item",
     channels: "channels-sidebar-item",
     trash:    "trash-sidebar-item",
     profile:  "profile-sidebar-item",
@@ -185,6 +188,13 @@ const Router = (() => {
         _setHash("skills");
         $("skills-panel").style.display = "flex";
         Skills.onPanelShow();
+        Sessions.renderList();
+        break;
+
+      case "mcp":
+        _setHash("mcp");
+        $("mcp-panel").style.display = "flex";
+        MCP.onPanelShow();
         Sessions.renderList();
         break;
 
