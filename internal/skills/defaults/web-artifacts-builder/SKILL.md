@@ -15,7 +15,10 @@ To build a powerful frontend artifact — a self-contained single HTML file that
 
 **Stack**: React 18 + TypeScript + Vite + Parcel (bundling) + Tailwind CSS + shadcn/ui
 
-**Requirements**: Node.js 18+ on PATH (the init script checks and reports if missing).
+**Requirements**: `bash` and Node.js 18+ on PATH. Verify both before starting (`bash --version`, `node -v`). If either is missing, tell the user what to install and wait for their go-ahead — never install unasked:
+
+- Node.js — Windows: `winget install OpenJS.NodeJS.LTS` (or https://nodejs.org); macOS: `brew install node`; Linux: distro package manager or https://nodejs.org
+- bash on Windows — the scripts are bash; Git for Windows provides it (`winget install Git.Git`, then use Git Bash's `bash.exe`). Without bash or WSL this skill cannot run on Windows — say so plainly; do not attempt to translate the scripts to PowerShell.
 
 Note: the `scripts/` paths are relative to this skill's directory (its absolute path is in the header above) — invoke them as `bash <skill-dir>/scripts/init-artifact.sh`. Run the project itself in the user's working directory, not inside the skill directory.
 
