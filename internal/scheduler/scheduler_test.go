@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // recordRunner records every RunTask call for assertions.
@@ -44,7 +45,7 @@ func (s *Scheduler) entryCount() int {
 
 func TestAddRegistersCronEntry(t *testing.T) {
 	s, _ := newTestScheduler(t)
-	if err := s.Add(Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}); err != nil {
+	if err := s.Add(&Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	if got := len(s.cron.Entries()); got != 1 {
@@ -60,7 +61,7 @@ func TestAddRejectsInvalidCron(t *testing.T) {
 	// A standard 5-field crontab line is invalid (seconds field required) —
 	// it must be rejected even for a disabled task, so a later enable doesn't
 	// surface a parse error long after the user typed the expression.
-	err := s.Add(Task{ID: "t1", Name: "n", Cron: "0 9 * * *", Prompt: "p", Enabled: false})
+	err := s.Add(&Task{ID: "t1", Name: "n", Cron: "0 9 * * *", Prompt: "p", Enabled: false})
 	if err == nil || !strings.Contains(err.Error(), "invalid cron expression") {
 		t.Fatalf("Add with 5-field cron: got %v, want invalid-expression error", err)
 	}
@@ -72,7 +73,7 @@ func TestAddRejectsInvalidCron(t *testing.T) {
 func TestUpdateReschedulesEntry(t *testing.T) {
 	s, _ := newTestScheduler(t)
 	task := Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}
-	if err := s.Add(task); err != nil {
+	if err := s.Add(&task); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	s.mu.Lock()
@@ -104,7 +105,7 @@ func TestUpdateReschedulesEntry(t *testing.T) {
 func TestUpdateRejectsInvalidCron(t *testing.T) {
 	s, _ := newTestScheduler(t)
 	task := Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}
-	if err := s.Add(task); err != nil {
+	if err := s.Add(&task); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	task.Cron = "not a cron"
@@ -124,7 +125,7 @@ func TestUpdateRejectsInvalidCron(t *testing.T) {
 func TestDisableRemovesEntryAndStopsRuns(t *testing.T) {
 	s, r := newTestScheduler(t)
 	task := Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}
-	if err := s.Add(task); err != nil {
+	if err := s.Add(&task); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	fire := s.wrap("t1") // simulate the registered cron callback
@@ -154,7 +155,7 @@ func TestDisableRemovesEntryAndStopsRuns(t *testing.T) {
 
 func TestDeleteRemovesEntryAndStopsRuns(t *testing.T) {
 	s, r := newTestScheduler(t)
-	if err := s.Add(Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}); err != nil {
+	if err := s.Add(&Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	fire := s.wrap("t1")
@@ -174,7 +175,7 @@ func TestDeleteRemovesEntryAndStopsRuns(t *testing.T) {
 func TestFireUsesCurrentTaskState(t *testing.T) {
 	s, r := newTestScheduler(t)
 	task := Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "old prompt", Enabled: true}
-	if err := s.Add(task); err != nil {
+	if err := s.Add(&task); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	fire := s.wrap("t1")
@@ -197,6 +198,65 @@ func TestFireUsesCurrentTaskState(t *testing.T) {
 	}
 }
 
+func TestRunNowUnknownTask(t *testing.T) {
+	s, r := newTestScheduler(t)
+	if err := s.RunNow("nope"); err == nil {
+		t.Fatal("RunNow on unknown id: want error, got nil")
+	}
+	if got := len(r.calls()); got != 0 {
+		t.Fatalf("runner calls = %d, want 0", got)
+	}
+}
+
+// waitFor polls cond until it returns true or the deadline passes.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestRunNowFiresDisabledTaskAndPersistsBookkeeping(t *testing.T) {
+	dir := t.TempDir()
+	r := &recordRunner{}
+	s, err := New(dir, r)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Disabled on purpose: a manual run must fire regardless — the user
+	// explicitly asked for it.
+	if err := s.Add(&Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: false}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if err := s.RunNow("t1"); err != nil {
+		t.Fatalf("RunNow: %v", err)
+	}
+
+	waitFor(t, "runner call", func() bool { return len(r.calls()) == 1 })
+	waitFor(t, "run bookkeeping", func() bool {
+		got, err := s.Get("t1")
+		return err == nil && !got.LastRun.IsZero() && got.SessionID == "sess_t1"
+	})
+
+	// The bookkeeping must survive a restart, i.e. the JSON file was rewritten.
+	s2, err := New(dir, r)
+	if err != nil {
+		t.Fatalf("New (reload): %v", err)
+	}
+	got, err := s2.Get("t1")
+	if err != nil {
+		t.Fatalf("Get after reload: %v", err)
+	}
+	if got.LastRun.IsZero() || got.SessionID != "sess_t1" {
+		t.Fatalf("persisted bookkeeping: lastRun=%v session=%q", got.LastRun, got.SessionID)
+	}
+}
+
 func TestLoadAllRegistersEnabledTasks(t *testing.T) {
 	dir := t.TempDir()
 	r := &recordRunner{}
@@ -204,10 +264,10 @@ func TestLoadAllRegistersEnabledTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := s.Add(Task{ID: "t1", Name: "a", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}); err != nil {
+	if err := s.Add(&Task{ID: "t1", Name: "a", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}); err != nil {
 		t.Fatalf("Add enabled: %v", err)
 	}
-	if err := s.Add(Task{ID: "t2", Name: "b", Cron: "@daily", Prompt: "p", Enabled: false}); err != nil {
+	if err := s.Add(&Task{ID: "t2", Name: "b", Cron: "@daily", Prompt: "p", Enabled: false}); err != nil {
 		t.Fatalf("Add disabled: %v", err)
 	}
 

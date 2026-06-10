@@ -262,8 +262,7 @@ func (s *Server) handleWSRunTask(conn *wsConn, sessionID string) {
 		})
 		return
 	}
-	_, err := s.scheduler.RunNow(context.Background(), sessionID)
-	if err != nil {
+	if err := s.scheduler.RunNow(sessionID); err != nil {
 		s.wsHub.broadcast(sessionID, map[string]string{
 			"type":    "error",
 			"message": err.Error(),

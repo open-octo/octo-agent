@@ -93,8 +93,10 @@ func (s *Scheduler) Stop() {
 	<-ctx.Done()
 }
 
-// Add creates a new task and schedules it.
-func (s *Scheduler) Add(task Task) error {
+// Add creates a new task and schedules it. The generated ID and CreatedAt are
+// written back into task so the caller can report them (e.g. in the create
+// API response).
+func (s *Scheduler) Add(task *Task) error {
 	if _, err := exprParser.Parse(task.Cron); err != nil {
 		return fmt.Errorf("invalid cron expression %q: %w", task.Cron, err)
 	}
@@ -104,14 +106,15 @@ func (s *Scheduler) Add(task Task) error {
 	if task.CreatedAt.IsZero() {
 		task.CreatedAt = time.Now()
 	}
-	if err := s.save(task); err != nil {
+	if err := s.save(*task); err != nil {
 		return err
 	}
+	cp := *task
 	s.mu.Lock()
-	s.tasks[task.ID] = &task
+	s.tasks[cp.ID] = &cp
 	s.mu.Unlock()
-	if task.Enabled {
-		s.schedule(task.ID, task.Cron)
+	if cp.Enabled {
+		s.schedule(cp.ID, cp.Cron)
 	}
 	return nil
 }
@@ -190,13 +193,20 @@ func (s *Scheduler) Get(id string) (*Task, error) {
 	return &cp, nil
 }
 
-// RunNow immediately executes a task by ID.
-func (s *Scheduler) RunNow(ctx context.Context, id string) (string, error) {
-	t, err := s.Get(id)
-	if err != nil {
-		return "", err
+// RunNow starts an immediate background run of the task, mirroring a cron
+// firing (own 30-minute context, LastRun/SessionID bookkeeping) — except that
+// a manual run also fires when the task is disabled, since the user asked for
+// it explicitly. It returns once the run is accepted, not when it finishes,
+// so an HTTP handler calling it never blocks for the whole agent turn.
+func (s *Scheduler) RunNow(id string) error {
+	s.mu.Lock()
+	_, ok := s.tasks[id]
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("task %q not found", id)
 	}
-	return s.runner.RunTask(ctx, *t)
+	go s.fire(id, true)
+	return nil
 }
 
 // ─── Private methods ─────────────────────────────────────────────────────
@@ -231,29 +241,42 @@ func (s *Scheduler) unschedule(id string) {
 // or disabled task stops running immediately and prompt/model edits apply to
 // the very next run.
 func (s *Scheduler) wrap(id string) func() {
-	return func() {
-		s.mu.Lock()
-		t, ok := s.tasks[id]
-		if !ok || !t.Enabled {
-			s.mu.Unlock()
-			return
-		}
-		task := *t
-		s.mu.Unlock()
+	return func() { s.fire(id, false) }
+}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-
-		sessionID, err := s.runner.RunTask(ctx, task)
-		s.mu.Lock()
-		if t, ok := s.tasks[id]; ok {
-			t.LastRun = time.Now()
-			t.SessionID = sessionID
-			if err != nil {
-				log.Printf("[scheduler] task %q failed: %v", t.Name, err)
-			}
-		}
+// fire executes the task by ID and records LastRun/SessionID, persisting them
+// so the bookkeeping survives a restart. A manual fire ignores the Enabled
+// flag; a cron fire skips disabled (or since-deleted) tasks.
+func (s *Scheduler) fire(id string, manual bool) {
+	s.mu.Lock()
+	t, ok := s.tasks[id]
+	if !ok || (!manual && !t.Enabled) {
 		s.mu.Unlock()
+		return
+	}
+	task := *t
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	sessionID, err := s.runner.RunTask(ctx, task)
+	if err != nil {
+		log.Printf("[scheduler] task %q failed: %v", task.Name, err)
+	}
+
+	s.mu.Lock()
+	t, ok = s.tasks[id]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	t.LastRun = time.Now()
+	t.SessionID = sessionID
+	cp := *t
+	s.mu.Unlock()
+	if err := s.save(cp); err != nil {
+		log.Printf("[scheduler] save task %q: %v", task.Name, err)
 	}
 }
 

@@ -37,15 +37,15 @@ func (s *Server) handleRunCronTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find task by name or id and run it.
+	// Find task by name or id and run it. The run happens in the background —
+	// an agent turn can take minutes, far longer than a browser fetch survives.
 	for _, t := range s.scheduler.List() {
 		if t.Name == name || t.ID == name {
-			sessionID, err := s.scheduler.RunNow(r.Context(), t.ID)
-			if err != nil {
+			if err := s.scheduler.RunNow(t.ID); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]string{"session_id": sessionID})
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "id": t.ID})
 			return
 		}
 	}

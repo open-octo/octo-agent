@@ -148,7 +148,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Agent:   req.Agent,
 		Enabled: true,
 	}
-	if err := s.scheduler.Add(task); err != nil {
+	if err := s.scheduler.Add(&task); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -184,12 +184,11 @@ func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing task id")
 		return
 	}
-	sessionID, err := s.scheduler.RunNow(r.Context(), id)
-	if err != nil {
+	if err := s.scheduler.RunNow(id); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"session_id": sessionID})
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "id": id})
 }
 
 func taskToResponse(t scheduler.Task) taskResponse {

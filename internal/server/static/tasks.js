@@ -14,7 +14,7 @@
 
 const Tasks = (() => {
   // ── Private state ──────────────────────────────────────────────────────
-  let _tasks = [];   // [{ name, content, cron, enabled, scheduled }]
+  let _tasks = [];   // [{ id, name, cron, prompt, enabled, ... }] — taskResponse from the Go server
 
   // ── Private helpers ────────────────────────────────────────────────────
 
@@ -24,18 +24,19 @@ const Tasks = (() => {
     row.className = "task-table-row";
     row.dataset.name = t.name;
 
-    const schedLabel = t.scheduled
+    const scheduled = !!(t.cron && t.cron.trim());
+    const schedLabel = scheduled
       ? escapeHtml(t.cron)
       : `<span class="sched-manual">${I18n.t("tasks.manual")}</span>`;
 
     // Visual hint: dim the schedule + prepend a "Paused" badge when disabled.
-    const isPaused = t.scheduled && t.enabled === false;
+    const isPaused = scheduled && t.enabled === false;
     const schedCell = isPaused
       ? `<span class="sched-paused-badge">${I18n.t("tasks.paused")}</span>
          <span class="sched-paused-cron">${schedLabel}</span>`
       : schedLabel;
 
-          const preview = (t.content || "")
+    const preview = (t.prompt || "")
       .split("\n")
       .map(l => l.trim())
       .find(l => l.length > 0) || I18n.t("tasks.empty");
@@ -45,7 +46,7 @@ const Tasks = (() => {
 
     // Build the pause/resume button only for *scheduled* tasks. Manual tasks
     // have no cron to disable.
-    const toggleBtnHtml = t.scheduled ? (isPaused
+    const toggleBtnHtml = scheduled ? (isPaused
       ? `<button class="task-btn task-btn-toggle task-btn-resume" title="${I18n.t("tasks.btn.resume")}">
            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-sm">
              <polygon points="6 3 20 12 6 21 6 3"/>
@@ -97,7 +98,7 @@ const Tasks = (() => {
 
     row.querySelector(".task-btn-run").addEventListener("click", e => {
       e.stopPropagation();
-      Tasks.run(t.id);
+      Tasks.run(t.id, e.currentTarget);
     });
     const toggleBtn = row.querySelector(".task-btn-toggle");
     if (toggleBtn) {
@@ -192,15 +193,39 @@ const Tasks = (() => {
 
     // ── CRUD ─────────────────────────────────────────────────────────────
 
-    async run(id) {
-      const res = await fetch(`/api/cron-tasks/${encodeURIComponent(id)}/run`, {
-        method: "POST"
-      });
-      const data = await res.json();
-      if (!res.ok) { alert(I18n.t("tasks.runError") + (data.error || "unknown")); return; }
+    /** Start a background run of the task. The server replies as soon as the
+     *  run is accepted (202) — the agent turn itself can take minutes — so
+     *  the button flashes a "Started" state as the user-visible feedback. */
+    async run(id, btn) {
+      const label = btn ? btn.querySelector(".btn-label") : null;
+      if (btn) btn.disabled = true;
 
-      if (data.session_id) {
-        await Tasks.load();
+      let res, data = {};
+      try {
+        res = await fetch(`/api/cron-tasks/${encodeURIComponent(id)}/run`, {
+          method: "POST"
+        });
+        try { data = await res.json(); } catch (_) {}
+      } catch (e) {
+        if (btn) btn.disabled = false;
+        alert(I18n.t("tasks.runError") + e);
+        return;
+      }
+      if (!res.ok) {
+        if (btn) btn.disabled = false;
+        alert(I18n.t("tasks.runError") + (data.error || "unknown"));
+        return;
+      }
+
+      if (label) {
+        const orig = label.textContent;
+        label.textContent = " " + I18n.t("tasks.btn.started");
+        setTimeout(() => {
+          label.textContent = orig;
+          if (btn) btn.disabled = false;
+        }, 2000);
+      } else if (btn) {
+        btn.disabled = false;
       }
     },
 
