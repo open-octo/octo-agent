@@ -55,6 +55,14 @@ func (s *Server) SetSubscribed(conn *wsConn, sessionID string) {}
 // replayLiveState replays in-progress agent state (progress + stdout) to a
 // newly-subscribing browser tab so it catches up with what it missed.
 func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
+	// Bring the background-task badge up to date for this tab regardless of
+	// whether a turn is in flight — background processes outlive turns. Always
+	// sent (even with zero running) so switching sessions clears a stale badge.
+	infos := tools.SessionBackgroundManager(sessionID).ListRunning()
+	if b, err := json.Marshal(backgroundTasksUpdate(sessionID, infos, time.Now())); err == nil {
+		conn.send <- b
+	}
+
 	s.liveStateMu.RLock()
 	state, ok := s.liveStates[sessionID]
 	s.liveStateMu.RUnlock()
@@ -416,6 +424,8 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 			return
 		}
 		toolDefs = tools.DefaultToolsFor(a.Model)
+		// Surface background-process completions (badge + chat notice).
+		s.wireBackgroundTaskNotices(sess.ID)
 		// Wire sub-agent live-panel events into the WebSocket stream.
 		if subMgr != nil {
 			subMgr.SetOnEvent(func(ev tools.SubAgentEvent) {
@@ -619,6 +629,9 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			ls.toolCall = nil
 		}
 		w.server.liveStateMu.Unlock()
+		// A tool call is the only place a turn starts or kills a background
+		// process — refresh the badge.
+		w.server.broadcastBackgroundTasks(w.sessionID)
 
 	case agent.EventToolError:
 		w.hub.broadcast(w.sessionID, map[string]any{
@@ -629,6 +642,7 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 		w.server.liveStateMu.Lock()
 		delete(w.server.liveStates, w.sessionID)
 		w.server.liveStateMu.Unlock()
+		w.server.broadcastBackgroundTasks(w.sessionID)
 
 	case agent.EventThinkingDelta:
 		w.hub.broadcast(w.sessionID, map[string]string{
