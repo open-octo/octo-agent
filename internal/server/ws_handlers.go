@@ -338,10 +338,34 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string) {
 		return
 	}
 
-	// Set up progress tracking for this session.
+	// Set up progress tracking for this session, seeded with an initial
+	// "thinking" phase that is broadcast immediately. Building the agent,
+	// connecting to the provider, and the model's pre-text reasoning can take
+	// several seconds during which no tool or text event fires. Without this
+	// seed the frontend swaps the ghost bubble for the real one and then sits
+	// with no indicator until the first delta — the session looks hung. The
+	// real tool/text events adopt this progress element in place (the frontend
+	// keys on started_at), so there is no flicker, and a late-subscribing tab
+	// replays it via replayLiveState.
+	startedAt := time.Now().UnixMilli()
 	s.liveStateMu.Lock()
-	s.liveStates[sess.ID] = &sessionLiveState{}
+	s.liveStates[sess.ID] = &sessionLiveState{
+		progress: &wsEventProgress{
+			Type:         "progress",
+			ProgressType: "thinking",
+			Phase:        "active",
+			StartedAt:    startedAt,
+		},
+	}
 	s.liveStateMu.Unlock()
+	s.wsHub.broadcast(sess.ID, map[string]any{
+		"type":          "progress",
+		"session_id":    sess.ID,
+		"progress_type": "thinking",
+		"phase":         "active",
+		"status":        "start",
+		"started_at":    startedAt,
+	})
 
 	defer func() {
 		// Clear live state at the end of the turn.

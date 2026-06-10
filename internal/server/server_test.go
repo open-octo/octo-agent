@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/config"
@@ -847,5 +848,87 @@ func TestRunTurnForwardsTools(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("web_search not among forwarded tools: %v", rec.lastTools)
+	}
+}
+
+// TestDoAgentTurn_SeedsThinkingProgress is the regression guard for the web-UI
+// "no spinner after send" gap. doAgentTurn must broadcast an initial "thinking"
+// progress immediately — before any text streams — so the frontend keeps an
+// indicator on screen between swapping the ghost bubble for the real one and
+// the first delta. Provider connect + pre-text reasoning fire no events, so
+// without the seed the session looks hung.
+func TestDoAgentTurn_SeedsThinkingProgress(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+	// Maps doAgentTurn touches that the full constructor sets up but mustServer
+	// (a minimal hand-built Server) does not.
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]string)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Subscribe a fake connection so we capture what the turn broadcasts.
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 256),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
+	srv.wsHub.subscribe(conn, sess.ID)
+
+	srv.doAgentTurn(sess, "hi")
+
+	// Broadcast is async through the hub's event loop; drain until the turn's
+	// terminal "complete" event (or a safety deadline).
+	var types []string
+	firstProgressIdx, firstTextIdx := -1, -1
+	progressType := ""
+	deadline := time.After(2 * time.Second)
+drain:
+	for {
+		select {
+		case b := <-conn.send:
+			var ev map[string]any
+			if err := json.Unmarshal(b, &ev); err != nil {
+				continue
+			}
+			typ, _ := ev["type"].(string)
+			switch typ {
+			case "progress":
+				if firstProgressIdx < 0 {
+					firstProgressIdx = len(types)
+					progressType, _ = ev["progress_type"].(string)
+				}
+			case "text_delta":
+				if firstTextIdx < 0 {
+					firstTextIdx = len(types)
+				}
+			}
+			types = append(types, typ)
+			if typ == "complete" {
+				break drain
+			}
+		case <-deadline:
+			break drain
+		}
+	}
+
+	if firstProgressIdx < 0 {
+		t.Fatalf("turn broadcast no progress event; got %v", types)
+	}
+	if progressType != "thinking" {
+		t.Errorf("first progress_type = %q, want \"thinking\"; events=%v", progressType, types)
+	}
+	if firstTextIdx >= 0 && firstProgressIdx > firstTextIdx {
+		t.Errorf("thinking progress must precede first text_delta; progress@%d text@%d; events=%v",
+			firstProgressIdx, firstTextIdx, types)
 	}
 }

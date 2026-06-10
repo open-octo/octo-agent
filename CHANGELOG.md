@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased — 0.18.0-dev]
 
+### Fixed
+- **Web UI now shows a "thinking" spinner the whole time the agent is working.** After the user sent a message the frontend swapped the ghost bubble for the real one and then sat with no indicator until the first streamed token — provider connect and the model's pre-text reasoning fire no events, so a multi-second turn looked hung. The server now broadcasts an initial `thinking` progress the moment a turn starts (and stores it in live state so a reconnecting tab replays it); the real tool/text events adopt the same progress element in place, so there's no flicker.
+
 ### Added
 - **Strict permission mode is back.** Removing `ModeStrict` (#461) broke the unattended surfaces that depended on it: `octo init`'s default `--permission-mode strict` failed its own flag validation, the eval harness passed `strict` to `octo chat` and got exit 2, and on a TTY `strict` silently became `interactive` (prompting — the opposite of the documented "deny on ask"). `ModeStrict` again resolves `ask` → `deny` in the engine itself, independent of whether a prompter is wired; the IM channel gate uses it explicitly, and the denial reason now says strict mode denied the call instead of claiming the user declined.
 
