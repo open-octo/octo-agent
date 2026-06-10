@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -184,11 +185,14 @@ func TestManager_CommandRouter(t *testing.T) {
 		t.Fatal("expected non-empty reply for /list")
 	}
 
-	// /stop (does not delete)
+	// /stop with no turn in flight (does not delete the session)
 	ev.Text = "/stop"
 	reply = mgr.CommandRouter(ev)
-	if reply == "" {
-		t.Fatal("expected non-empty reply for /stop")
+	if !strings.Contains(reply, "No task is running") {
+		t.Fatalf("expected idle /stop reply, got %q", reply)
+	}
+	if mgr.SessionCount() != 1 {
+		t.Fatalf("expected session to survive /stop, got %d", mgr.SessionCount())
 	}
 
 	// /unbind (deletes)
@@ -197,6 +201,73 @@ func TestManager_CommandRouter(t *testing.T) {
 	if mgr.SessionCount() != 0 {
 		t.Fatalf("expected 0 sessions after /unbind, got %d", mgr.SessionCount())
 	}
+}
+
+func TestManager_StopInterruptsRunningTurn(t *testing.T) {
+	cfg := &Config{Channels: map[string]PlatformConfig{}}
+	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
+
+	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
+	sess := mgr.GetOrCreateSession(ev)
+
+	runCtx, done := sess.BeginRun(context.Background())
+	defer done()
+
+	ev.Text = "/stop"
+	reply := mgr.CommandRouter(ev)
+	if !strings.Contains(reply, "Task interrupted") {
+		t.Fatalf("expected interrupt reply, got %q", reply)
+	}
+	if runCtx.Err() == nil {
+		t.Fatal("expected the run context to be cancelled by /stop")
+	}
+
+	// A second /stop finds nothing to interrupt.
+	if reply := mgr.CommandRouter(ev); !strings.Contains(reply, "No task is running") {
+		t.Fatalf("expected idle reply on second /stop, got %q", reply)
+	}
+}
+
+func TestSession_BeginRunSerialisesTurns(t *testing.T) {
+	sess := &Session{}
+
+	_, done1 := sess.BeginRun(context.Background())
+
+	second := make(chan struct{})
+	go func() {
+		_, done2 := sess.BeginRun(context.Background())
+		done2()
+		close(second)
+	}()
+
+	select {
+	case <-second:
+		t.Fatal("second turn started before the first finished")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	done1()
+	select {
+	case <-second:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second turn never started after the first finished")
+	}
+}
+
+func TestSession_InterruptIdleIsNoop(t *testing.T) {
+	sess := &Session{}
+	if sess.Interrupt() {
+		t.Fatal("Interrupt on an idle session should report false")
+	}
+	// done() after Interrupt must not double-release or panic.
+	ctx, done := sess.BeginRun(context.Background())
+	if !sess.Interrupt() {
+		t.Fatal("Interrupt on a running session should report true")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("expected cancelled ctx")
+	}
+	done()
 }
 
 func TestManager_AutoSessionCreation(t *testing.T) {

@@ -222,7 +222,11 @@ func runChannelStart(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 				if handleCommand(mgr, a, ev) {
 					return
 				}
-				handleAgentMessage(ctx, mgr, a, ev, !*noTools)
+				// Run the agent off the adapter's read loop so commands —
+				// notably /stop — are still processed while a turn is in
+				// flight. Session.BeginRun serialises turns per session, so
+				// concurrent messages in one chat can't interleave.
+				go handleAgentMessage(ctx, mgr, a, ev, !*noTools)
 			})
 		}(ad, name)
 	}
@@ -261,6 +265,11 @@ func handleAgentMessage(ctx context.Context, mgr *channel.Manager, ad channel.Ad
 	if sess == nil {
 		return
 	}
+
+	// Waits for any in-flight turn in this session, then makes this turn
+	// cancellable by /stop (Session.Interrupt).
+	ctx, done := sess.BeginRun(ctx)
+	defer done()
 
 	ctrl := channel.NewUIController(ad, ev.ChatID, ev.MessageID)
 

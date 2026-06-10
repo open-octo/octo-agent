@@ -55,6 +55,46 @@ type Session struct {
 	ChatID  string
 	UserID  string
 	BoundAt time.Time
+
+	// runMu serialises agent turns within this session: the IM dispatcher runs
+	// each message in its own goroutine, and two interleaved turns would
+	// corrupt the agent's user/assistant history alternation. runCancel
+	// (guarded by cancelMu, not runMu — /stop must not queue behind the very
+	// turn it is trying to cancel) aborts the in-flight turn.
+	runMu     sync.Mutex
+	cancelMu  sync.Mutex
+	runCancel context.CancelFunc
+}
+
+// BeginRun prepares one agent turn: it blocks until any previous turn in this
+// session finishes, then returns a cancellable ctx for the run and a done
+// func that releases the session. Always call done (typically deferred).
+func (s *Session) BeginRun(ctx context.Context) (context.Context, func()) {
+	s.runMu.Lock()
+	ctx, cancel := context.WithCancel(ctx)
+	s.cancelMu.Lock()
+	s.runCancel = cancel
+	s.cancelMu.Unlock()
+	return ctx, func() {
+		s.cancelMu.Lock()
+		s.runCancel = nil
+		s.cancelMu.Unlock()
+		cancel()
+		s.runMu.Unlock()
+	}
+}
+
+// Interrupt cancels the session's in-flight agent turn, if any. It reports
+// whether a turn was actually running.
+func (s *Session) Interrupt() bool {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if s.runCancel == nil {
+		return false
+	}
+	s.runCancel()
+	s.runCancel = nil
+	return true
 }
 
 // AgentFactory creates a new agent.Agent for a session.
@@ -229,13 +269,19 @@ func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
 	return fmt.Sprintf("Session bound (%s). Key: %s", modeStr, key)
 }
 
-// cmdStop stops the current session (pauses it without deleting history).
+// cmdStop interrupts the session's in-flight agent turn (mirrors the Ctrl-C /
+// web "interrupt" semantics; history is repaired by finishInterrupted and the
+// session stays usable).
 func (m *Manager) cmdStop(ev InboundEvent) string {
 	key := sessionKeyFor(m.mode, ev)
-	if _, loaded := m.sessions.Load(key); !loaded {
+	val, loaded := m.sessions.Load(key)
+	if !loaded {
 		return "No active session for this context."
 	}
-	return "Session stopped. Use /bind to resume or start a new one."
+	if val.(*Session).Interrupt() {
+		return "Task interrupted."
+	}
+	return "No task is running."
 }
 
 // cmdUnbind deletes the current session and its history.
