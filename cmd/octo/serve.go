@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,8 +27,16 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	cors := fs.String("cors", "", "CORS allowed origins (comma-separated, * for any)")
 	noChannel := fs.Bool("no-channel", false, "Disable IM channel (DingTalk, Feishu)")
 	noMemory := fs.Bool("no-memory", false, "Disable cross-session memory injection")
+	noSupervisor := fs.Bool("no-supervisor", false, "Run the server directly, without the self-restart supervisor (exit code 42 still signals a restart request to an external supervisor)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	if shouldSupervise(*noSupervisor, os.Getenv(serveWorkerEnv)) {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
+		return superviseLoop(spawnServeWorker(args, stdout, stderr), sigCh, stderr)
 	}
 
 	var corsOrigins []string
@@ -75,11 +84,37 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		_ = srv.Shutdown(ctx)
 	}()
 
-	if err := srv.ListenAndServe(); err != nil {
+	err = srv.ListenAndServe()
+	switch {
+	case err == nil:
+	case errors.Is(err, server.ErrRestartRequested):
+		fmt.Fprintln(stdout, "octo serve: restarting...")
+	default:
 		fmt.Fprintf(stderr, "octo serve: %v\n", err)
+	}
+	return serveExitCode(err)
+}
+
+// shouldSupervise decides whether `octo serve` runs as the supervisor parent
+// (the default) or as the worker. The worker marker env covers both the
+// supervisor's own child and users running under an external supervisor;
+// --no-supervisor is the explicit flag form of the same opt-out.
+func shouldSupervise(noSupervisor bool, workerEnv string) bool {
+	return !noSupervisor && workerEnv != "1"
+}
+
+// serveExitCode maps the worker's ListenAndServe result onto the process
+// exit-code contract: clean stop → 0, restart request → ExitRestart,
+// anything else → 1.
+func serveExitCode(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, server.ErrRestartRequested):
+		return server.ExitRestart
+	default:
 		return 1
 	}
-	return 0
 }
 
 func splitComma(s string) []string {

@@ -144,3 +144,37 @@ func TestSuperviseLoop_SpawnErrorReturns1(t *testing.T) {
 		t.Error("expected an error message on stderr")
 	}
 }
+
+func TestShouldSupervise(t *testing.T) {
+	cases := []struct {
+		noSupervisor bool
+		workerEnv    string
+		want         bool
+	}{
+		{false, "", true},   // default: supervise
+		{false, "1", false}, // spawned worker, or external supervisor
+		{true, "", false},   // explicit opt-out
+		{true, "1", false},
+	}
+	for _, c := range cases {
+		if got := shouldSupervise(c.noSupervisor, c.workerEnv); got != c.want {
+			t.Errorf("shouldSupervise(%v, %q) = %v, want %v", c.noSupervisor, c.workerEnv, got, c.want)
+		}
+	}
+}
+
+func TestServeExitCode(t *testing.T) {
+	cases := []struct {
+		err  error
+		want int
+	}{
+		{nil, 0},
+		{server.ErrRestartRequested, server.ExitRestart},
+		{os.ErrClosed, 1},
+	}
+	for _, c := range cases {
+		if got := serveExitCode(c.err); got != c.want {
+			t.Errorf("serveExitCode(%v) = %d, want %d", c.err, got, c.want)
+		}
+	}
+}
