@@ -96,6 +96,27 @@ filename must equal `<id>.json`):
 
 The file is picked up the next time `octo serve` starts.
 
+## Editing a task
+
+**Always use the API.** After you edit a task file with `edit_file` or `write_file`,
+you **must** immediately PATCH the same change through the API so the running
+scheduler picks it up. File edits alone are ignored until the next restart.
+
+```bash
+# 1. Edit the file (example: change the prompt)
+edit_file ~/.octo/tasks/task_1781090471651.json  # or write_file
+
+# 2. PATCH the same field via API so the change takes effect NOW
+curl -s -X PATCH http://127.0.0.1:8080/api/cron-tasks/<name-or-id> \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"new prompt ..."}'
+
+# Verify
+curl -s http://127.0.0.1:8080/api/tasks
+```
+
+Supported PATCH fields: `enabled`, `cron`, `prompt`, `model`, `agent`, `directory`.
+
 ## Other operations
 
 ```bash
