@@ -343,8 +343,10 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	// Validate up front. Fail closed on a typo rather than silently falling
 	// back to the more-permissive interactive mode.
-	if resolvedPermMode != string(permission.ModeInteractive) && resolvedPermMode != string(permission.ModeAutoApprove) {
-		fmt.Fprintf(stderr, "octo chat: invalid --permission-mode %q (want 'interactive' or 'auto')\n", resolvedPermMode)
+	if resolvedPermMode != string(permission.ModeInteractive) &&
+		resolvedPermMode != string(permission.ModeAutoApprove) &&
+		resolvedPermMode != string(permission.ModeStrict) {
+		fmt.Fprintf(stderr, "octo chat: invalid --permission-mode %q (want 'interactive', 'strict' or 'auto')\n", resolvedPermMode)
 		return 2
 	}
 
@@ -597,11 +599,17 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		// auto-denies — the headless posture.
 		if stdinIsTTY(stdin) {
 			rl, err := newReadlineReader(defaultHistoryFile())
-			if err != nil {
+			switch {
+			case err == nil:
+				replReader = rl
+			case errors.Is(err, errReadlineUnsupported):
+				// Expected on Windows: cooked-mode conhost handles paste and
+				// basic editing natively, so degrade silently — this is the
+				// designed posture, not an error worth announcing every run.
+				replReader = newScannerLineReader(stdin, stdout)
+			default:
 				fmt.Fprintf(stderr, "octo chat: line editor unavailable (%v); falling back to plain input\n", err)
 				replReader = newScannerLineReader(stdin, stdout)
-			} else {
-				replReader = rl
 			}
 		} else {
 			replReader = newScannerLineReader(stdin, stdout)

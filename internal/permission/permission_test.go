@@ -195,6 +195,29 @@ func TestAutoApproveMode_TurnsAskIntoAllow(t *testing.T) {
 	}
 }
 
+func TestStrictMode_TurnsAskIntoDeny(t *testing.T) {
+	e, err := New("", "/work", ModeStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf node_modules"}); got != Deny {
+		t.Errorf("strict ask→deny: got %s, want Deny", got)
+	}
+	// Explicit allows still allow.
+	if got := e.Check("terminal", map[string]any{"command": "ls"}); got != Allow {
+		t.Errorf("strict still allows allow rules: got %s", got)
+	}
+	// Explicit denies still deny.
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Deny {
+		t.Errorf("strict still denies deny rules: got %s", got)
+	}
+	// The denial reason must not claim the user declined — nobody was asked.
+	reason := e.DenialReason("terminal", map[string]any{"command": "some-unknown-cmd"})
+	if !strings.Contains(reason, "strict") {
+		t.Errorf("strict denial reason should mention strict mode, got %q", reason)
+	}
+}
+
 // ─── Remember cache ────────────────────────────────────────────────────────
 
 func TestRemember_ShortCircuits(t *testing.T) {

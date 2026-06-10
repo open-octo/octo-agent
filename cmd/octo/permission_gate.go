@@ -48,8 +48,12 @@ func permissionConfigPath() string {
 // permission.Mode. Unknown values fall back to interactive (the safe,
 // CLI-friendly default) and the caller is expected to have validated.
 func resolvePermissionMode(s string) permission.Mode {
-	if s == string(permission.ModeAutoApprove) {
+	switch s {
+	case string(permission.ModeAutoApprove):
 		return permission.ModeAutoApprove
+	case string(permission.ModeStrict):
+		return permission.ModeStrict
+	default:
+		return permission.ModeInteractive
 	}
-	return permission.ModeInteractive
 }
