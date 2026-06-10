@@ -609,6 +609,8 @@ func resolvePermissionMode() permission.Mode {
 	switch cfg.PermissionMode {
 	case string(permission.ModeAutoApprove):
 		return permission.ModeAutoApprove
+	case string(permission.ModeStrict):
+		return permission.ModeStrict
 	default:
 		return permission.ModeInteractive
 	}

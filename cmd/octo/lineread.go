@@ -92,6 +92,12 @@ type readlineLineReader struct {
 	interrupted bool
 }
 
+// errReadlineUnsupported marks the expected, by-design refusal to use
+// chzyer/readline on a platform (today: Windows). Callers use it to fall back
+// to the scanner silently — it is not a user-facing error, unlike a genuine
+// readline init failure.
+var errReadlineUnsupported = errors.New("interactive line editing is unavailable on Windows")
+
 func newReadlineReader(historyFile string) (*readlineLineReader, error) {
 	// chzyer/readline drives the Windows console through its own raw-mode ANSI
 	// emulation, which mangles pasted input (a pasted URL comes through garbled
@@ -100,7 +106,7 @@ func newReadlineReader(historyFile string) (*readlineLineReader, error) {
 	// is lost there, but interactive Windows sessions use the bubbletea TUI for
 	// the REPL anyway — the only readline consumer left is the config wizard.
 	if runtime.GOOS == "windows" {
-		return nil, errors.New("interactive line editing is unavailable on Windows")
+		return nil, errReadlineUnsupported
 	}
 	if historyFile != "" {
 		if err := os.MkdirAll(filepath.Dir(historyFile), 0o755); err != nil {

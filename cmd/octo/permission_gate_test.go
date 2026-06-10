@@ -106,6 +106,27 @@ func TestCLIGate_AutoApproveModeNeverPrompts(t *testing.T) {
 	}
 }
 
+func TestCLIGate_StrictModeDeniesAskWithoutPrompting(t *testing.T) {
+	// In strict mode the engine collapses ask → deny, so a command that would
+	// normally prompt is refused without touching stdin — even though a
+	// prompter IS wired (a TTY must not weaken the strict posture).
+	g, out := newGate(t, permission.ModeStrict, "y\n") // a prompt would read "y" and allow
+	ok, reason := g.Check(context.Background(), "terminal", map[string]any{"command": "sudo apt update"})
+	if ok {
+		t.Error("strict mode must deny ask-class commands")
+	}
+	if !strings.Contains(reason, "permission_denied") {
+		t.Errorf("expected structured denial reason, got %q", reason)
+	}
+	if out.Len() != 0 {
+		t.Errorf("strict mode must not prompt; got %q", out.String())
+	}
+	// Explicit allow rules still pass through.
+	if ok, reason := g.Check(context.Background(), "terminal", map[string]any{"command": "ls"}); !ok {
+		t.Errorf("strict mode must not block allow-listed commands; reason=%q", reason)
+	}
+}
+
 func TestCLIGate_UnwrapsToolCallToRealName(t *testing.T) {
 	// A Tool Search mcp_call must be evaluated against the wrapped tool, not
 	// the opaque "mcp_call" bridge: wrapping a dangerous terminal command must
@@ -130,11 +151,11 @@ func TestResolvePermissionMode(t *testing.T) {
 	if resolvePermissionMode("auto") != permission.ModeAutoApprove {
 		t.Error("auto should map to ModeAutoApprove")
 	}
-	// Unknown values (including the former "strict") fall back to interactive.
+	if resolvePermissionMode("strict") != permission.ModeStrict {
+		t.Error("strict should map to ModeStrict")
+	}
+	// Unknown values fall back to interactive.
 	if resolvePermissionMode("garbage") != permission.ModeInteractive {
 		t.Error("unknown should fall back to ModeInteractive")
-	}
-	if resolvePermissionMode("strict") != permission.ModeInteractive {
-		t.Error("deprecated strict should fall back to ModeInteractive")
 	}
 }

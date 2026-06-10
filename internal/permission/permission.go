@@ -47,12 +47,15 @@ const (
 //
 // Interactive (CLI default) returns Ask as-is so the caller can prompt the
 // user. AutoApprove converts Ask → Allow, so no interactive prompt is shown.
-// Allow / Deny pass through unchanged in both modes.
+// Strict converts Ask → Deny — the unattended posture (evals, the IM channel
+// bridge, scripted runs) where nobody can answer a prompt and blanket
+// approval is unacceptable. Allow / Deny pass through unchanged in all modes.
 type Mode string
 
 const (
 	ModeInteractive Mode = "interactive"
 	ModeAutoApprove Mode = "auto"
+	ModeStrict      Mode = "strict"
 )
 
 // Rule is one entry in the rule list for a tool. Exactly one of Pattern /
@@ -165,7 +168,8 @@ func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*
 //  1. Session-remembered decision (set by Remember) short-circuits.
 //  2. Rules for the tool are scanned in order; first match wins.
 //  3. No match → implicit Ask.
-//  4. Mode adjustment: ModeAutoApprove turns Ask into Allow.
+//  4. Mode adjustment: ModeAutoApprove turns Ask into Allow; ModeStrict
+//     turns Ask into Deny.
 func (e *Engine) Check(toolName string, input map[string]any) Decision {
 	sig := signature(toolName, input)
 
@@ -211,17 +215,28 @@ func (e *Engine) DenialReason(toolName string, input map[string]any) string {
 			return formatRuleReason(toolName, r)
 		}
 	}
+	if e.mode == ModeStrict {
+		return fmt.Sprintf("permission_denied: %s — requires confirmation, and strict mode denies without prompting.", toolName)
+	}
 	return fmt.Sprintf("permission_denied: %s — user declined the interactive prompt.", toolName)
 }
 
 // applyMode adjusts Ask decisions based on the engine mode:
 //   - ModeAutoApprove: Ask → Allow
+//   - ModeStrict: Ask → Deny
 //   - ModeInteractive: Ask passes through unchanged
 func (e *Engine) applyMode(d Decision) Decision {
-	if e.mode == ModeAutoApprove && d == Ask {
-		return Allow
+	if d != Ask {
+		return d
 	}
-	return d
+	switch e.mode {
+	case ModeAutoApprove:
+		return Allow
+	case ModeStrict:
+		return Deny
+	default:
+		return d
+	}
 }
 
 // matches reports whether rule r applies to the tool invocation. The

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased — 0.18.0-dev]
 
+### Added
+- **Strict permission mode is back.** Removing `ModeStrict` (#461) broke the unattended surfaces that depended on it: `octo init`'s default `--permission-mode strict` failed its own flag validation, the eval harness passed `strict` to `octo chat` and got exit 2, and on a TTY `strict` silently became `interactive` (prompting — the opposite of the documented "deny on ask"). `ModeStrict` again resolves `ask` → `deny` in the engine itself, independent of whether a prompter is wired; the IM channel gate uses it explicitly, and the denial reason now says strict mode denied the call instead of claiming the user declined.
+
 ## [0.17.0] — 2026-06-09
 
 ## [0.16.0] — 2026-06-09
