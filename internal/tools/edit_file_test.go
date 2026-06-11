@@ -419,9 +419,9 @@ func TestNormalizeLeadingWhitespace(t *testing.T) {
 		{"\tcase:", "    case:"},
 		{"\t\tchatHelp(w)", "        chatHelp(w)"},
 		{"no indent", "no indent"},
-		{"  spaces", "  spaces"},         // spaces unchanged
-		{"\t  mixed", "      mixed"},     // tab + spaces
-		{"a\n\tb\nc", "a\n    b\nc"},     // multi-line
+		{"  spaces", "  spaces"},     // spaces unchanged
+		{"\t  mixed", "      mixed"}, // tab + spaces
+		{"a\n\tb\nc", "a\n    b\nc"}, // multi-line
 	}
 	for _, tc := range tests {
 		got := normalizeLeadingWhitespace(tc.in)
