@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Leihb/octo-agent/internal/agent"
@@ -256,11 +257,16 @@ func (TaskListTool) Execute(ctx context.Context, _ string, _ map[string]any) (ag
 }
 
 // taskUI builds the "todo" UI payload: the current list (deleted tasks
-// hidden) plus a done-count progress line for the collapsed summary.
+// hidden) plus a done-count progress line for the collapsed summary. Rows
+// are in creation order so the card reads top-to-bottom as progress —
+// completed head, active middle, pending tail — matching the TUI checklist
+// (List() itself stays status-sorted for other consumers).
 func taskUI(action string, store TaskStore) map[string]any {
+	list := store.List()
+	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
 	var todos []map[string]any
 	done, total := 0, 0
-	for _, t := range store.List() {
+	for _, t := range list {
 		if t.Status == tasks.Deleted {
 			continue
 		}

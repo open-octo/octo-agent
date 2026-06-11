@@ -2269,7 +2269,11 @@ body {
   font-size: 0.6875rem;
   color: var(--color-text-secondary);
 }
-.tr-list-item.done { opacity: 0.6; text-decoration: line-through; }
+.tr-list-item .tr-glyph { flex: none; }
+.tr-list-item.done .tr-glyph { color: var(--color-success); }
+.tr-list-item.done .tr-task { opacity: 0.6; text-decoration: line-through; }
+.tr-list-item.active .tr-glyph { color: var(--color-accent-primary); }
+.tr-list-item.active .tr-task { font-weight: 600; color: var(--color-text-primary); }
 .tr-list-more {
   padding: 2px 0;
   font-size: 0.625rem;
