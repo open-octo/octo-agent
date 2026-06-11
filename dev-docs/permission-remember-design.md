@@ -29,10 +29,19 @@ mutex-guarded decision store:
   shared one.
 - The server keeps one store per session (`rememberedFor`, keyed by web
   session ID or `im:<session key>`), attaches it in `prepareToolTurn` /
-  `handleChannelMessage`, and drops it with the rest of the session state
-  in `forgetTurnLock`.
+  `handleChannelMessage`, and drops it with the rest of the session state:
+  web stores in `forgetTurnLock` (session delete), IM stores when the chat
+  runs `/unbind` or `/bind` — "history cleared" includes the always-allows,
+  and the deterministic session key would otherwise hand them to the next
+  bound session.
 - The gate (`app.NewPermissionGate`) already called `engine.Remember` when
   an ask returned `remember=true`; nothing changed on that surface.
+- A matched **deny rule beats the cache**: `Check` scans rules first and
+  only consults remembered decisions when the verdict isn't Deny. Engines
+  are rebuilt per turn precisely so policy edits apply mid-session; a deny
+  added to `permissions.yml` after the user said "always" must win. A mode
+  flip to strict does NOT revoke remembered allows — they were explicit
+  user grants, and strict mode only changes how *unanswered* asks resolve.
 
 ## Answer mapping
 

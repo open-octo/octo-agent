@@ -285,6 +285,11 @@ const Modal = (() => {
     return new Promise(resolve => {
       $("modal-message").textContent   = message;
       $("modal-overlay").style.display = "flex";
+      // The overlay is shared with the permission prompt (showConfirmModal);
+      // make sure its "Always allow" button never leaks into a local
+      // yes/no confirmation.
+      $("modal-always").style.display = "none";
+      $("modal-always").onclick = null;
 
       const cleanup = (result) => {
         $("modal-overlay").style.display = "none";
@@ -394,6 +399,8 @@ function showConfirmModal(confId, message, kind) {
 
   const answer = result => {
     $("modal-overlay").style.display = "none";
+    always.style.display = "none"; // shared overlay: don't leak into Modal.confirm
+    always.onclick = null;
     WS.send({ type: "confirmation", session_id: Sessions.activeId, id: confId, result });
   };
   $("modal-yes").onclick = () => answer("yes");

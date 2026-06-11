@@ -109,3 +109,22 @@ func TestIMTurnGate_RemembersAcrossEngines(t *testing.T) {
 		t.Error("remembered allow did not survive the per-turn engine rebuild")
 	}
 }
+
+// TestChannelCommand_UnbindDropsRemembered: /unbind promises "history
+// cleared" — the session's always-allows are part of that history, and the
+// deterministic session key would otherwise hand them to the next session.
+func TestChannelCommand_UnbindDropsRemembered(t *testing.T) {
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+	ev := evFor("/unbind")
+
+	key := "im:" + string(srv.channelMgr.KeyFor(ev))
+	before := srv.rememberedFor(key)
+
+	if !srv.handleChannelCommand(ad, ev) {
+		t.Fatal("/unbind not handled as a command")
+	}
+	if srv.rememberedFor(key) == before {
+		t.Error("/unbind must drop the session's remembered permission store")
+	}
+}

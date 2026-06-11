@@ -23,7 +23,7 @@ func TestReplayLiveState_ReplaysPendingPrompts(t *testing.T) {
 	defer tools.CloseSessionBackgroundManager(sid)
 
 	srv.pendingQuestions[sid] = wsEventRequestUserQuestion{
-		Type: "request_user_question", QuestionID: "q_1", Question: "pick one", Options: []string{"a", "b"},
+		Type: "request_user_question", SessionID: sid, QuestionID: "q_1", Question: "pick one", Options: []string{"a", "b"},
 	}
 	srv.pendingConfirms[sid] = wsEventRequestConfirmation{
 		Type: "request_confirmation", SessionID: sid, ConfID: "conf_1", Message: "Allow terminal?", Kind: "yes_no",
@@ -43,6 +43,9 @@ func TestReplayLiveState_ReplaysPendingPrompts(t *testing.T) {
 			gotQ = true
 			if ev["question_id"] != "q_1" {
 				t.Errorf("question_id = %v, want q_1", ev["question_id"])
+			}
+			if ev["session_id"] == nil || ev["session_id"] == "" {
+				t.Error("replayed question must carry session_id (the dispatcher filters on it)")
 			}
 		case "request_confirmation":
 			gotC = true
