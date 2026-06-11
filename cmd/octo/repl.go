@@ -181,7 +181,6 @@ func printTuiHelp(w io.Writer) {
 	fmt.Fprintln(w, "  /skills     List available skills (trigger one with /<name>)")
 	fmt.Fprintln(w, "  /memory     List what's remembered across sessions")
 	fmt.Fprintln(w, "  /mcp        Show connected MCP servers and their surfaces")
-	fmt.Fprintln(w, "  /conduct    Conduct a goal to completion, unattended (also: /conduct list, /conduct resume <id>)")
 	fmt.Fprintln(w, "  /exit       Save and exit  (also: /quit, Ctrl-C, Ctrl-D)")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Keys:")
@@ -266,7 +265,7 @@ func pluralS(n int) string {
 var reservedReplCommands = map[string]bool{
 	"init": true, "exit": true, "quit": true, "help": true,
 	"save": true, "sessions": true, "skills": true,
-	"memory": true, "mcp": true, "conduct": true,
+	"memory": true, "mcp": true,
 }
 
 // skillTrigger reports whether line is a /<name> invocation of a discovered

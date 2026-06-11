@@ -116,7 +116,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`read_file` pagination loops prevented.** Explicit EOF markers stop the model from endlessly paginating.
 - **Grep output includes line numbers.** More useful for the model to reference specific lines.
 - **`ask_user_question` modal allows free-text "Other" input.** The "Other" option now accepts free text instead of being a no-op.
-- **Replan and stall detection enabled by default in `conduct`.**
 
 ## [0.13.1]
 
@@ -147,8 +146,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Paste clipboard images with `Ctrl+V`.** Image attachments from clipboard.
 - **Drag-and-drop image file paths as attachments.** Dropping image files into the TUI attaches them to the next turn.
 - **Session replay on resume.** Prior turns are replayed into the scrollback when continuing a saved session.
-- **`conduct`: autonomous long-horizon orchestrator (conductor).** `octo conduct "goal"` plans a DAG of steps, executes them with verification, replans on stall, and resumes from checkpoints.
-- **`conduct show`, status preview, post-run prompt.** View orchestrator results after a run.
 - **Reasoning effort unified across providers.** `--reasoning-effort low|medium|high` maps to OpenAI `reasoning_effort` and Anthropic thinking budget; `--show-reasoning` streams the trace.
 - **`update_config` and `product_help` default skills.** Bundled skills for config management and product help.
 

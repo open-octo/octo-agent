@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/conductor"
 )
 
 // `octo completion <shell>` and the hidden `octo __complete <words…>` work
@@ -25,7 +24,6 @@ import (
 //
 // Dynamic completion sources:
 //   - session IDs (full + short) for `octo chat -c <TAB>`
-//   - ledger IDs (full + short) for `octo conduct status|resume <TAB>`
 // Both always include "last" as the first candidate.
 
 // runCompletion handles `octo completion <shell>`: prints the shell snippet
@@ -87,8 +85,6 @@ func completionCandidates(words []string) []string {
 	switch cmd {
 	case "chat":
 		return chatCandidates(words, prev)
-	case "conduct":
-		return conductCandidates(words, prev)
 	case "memory":
 		return memoryCandidates(words)
 	case "init":
@@ -100,7 +96,7 @@ func completionCandidates(words []string) []string {
 	case "help":
 		// `octo help <TAB>` → list of help targets.
 		if len(words) == 3 {
-			return []string{"chat", "config", "conduct", "memory", "init", "completion", "mcp"}
+			return []string{"chat", "config", "memory", "init", "completion", "mcp"}
 		}
 	case "completion":
 		if len(words) == 3 {
@@ -133,42 +129,6 @@ func chatCandidates(words []string, prev string) []string {
 	// Default: offer the flag set for chat.
 	_ = words
 	return chatFlags
-}
-
-func conductCandidates(words []string, prev string) []string {
-	// `octo conduct <TAB>` → subcommand list (or the start of a goal string).
-	if len(words) == 3 {
-		return []string{"list", "status", "show", "resume"}
-	}
-	sub := words[2]
-	switch sub {
-	case "status", "show", "resume":
-		// First positional after the verb is the ledger ID.
-		if len(words) == 4 {
-			return conductIDCandidates()
-		}
-		if sub == "resume" {
-			return conductFlagCandidates(prev)
-		}
-	case "list":
-		return nil
-	default:
-		// `octo conduct "<goal>" [flags]` — the goal is freeform.
-		return conductFlagCandidates(prev)
-	}
-	return nil
-}
-
-func conductFlagCandidates(prev string) []string {
-	switch prev {
-	case "--provider":
-		return []string{"anthropic", "openai"}
-	case "--model", "--verify-cmd":
-		return nil
-	}
-	return []string{"--provider", "--model", "--plan-only", "--verify", "--verify-cmd",
-		"--max-attempts", "--max-iterations", "--stall-rounds", "--concurrency",
-		"--no-worktree", "--replan"}
 }
 
 func memoryCandidates(words []string) []string {
@@ -207,23 +167,6 @@ func sessionIDCandidates() []string {
 	return out
 }
 
-// conductIDCandidates is the symmetric helper for conducted ledgers.
-func conductIDCandidates() []string {
-	out := []string{"last"}
-	store, err := conductor.NewStore()
-	if err != nil {
-		return out
-	}
-	leds, err := store.List()
-	if err != nil {
-		return out
-	}
-	for _, l := range leds {
-		out = append(out, l.ShortID(), l.ID)
-	}
-	return out
-}
-
 // completionHelp prints the user-facing instructions for `octo help
 // completion`. Kept here rather than in help.go so the strings sit next to
 // the scripts they reference.
@@ -239,10 +182,9 @@ Examples:
   octo completion powershell | Out-String | Invoke-Expression   # PowerShell; add to $PROFILE to persist
 
 What it completes:
-  - Top-level subcommands (chat, task, memory, init, …).
-  - Subcommands of task / memory / help / completion.
+  - Top-level subcommands (chat, memory, init, …).
+  - Subcommands of memory / help / completion.
   - Session IDs after "octo chat -c " — full + short + "last".
-  - Ledger IDs after "octo conduct status|resume " — full + short + "last".
   - Fixed values for --provider (anthropic|openai) and --permission-mode
     (interactive|strict|auto).
 
@@ -255,7 +197,7 @@ new flags / subcommands are added.`))
 // ── Static lists ─────────────────────────────────────────────────────────
 
 var topLevelCommands = []string{
-	"chat", "config", "init", "memory", "conduct",
+	"chat", "config", "init", "memory",
 	"version", "help", "completion",
 }
 

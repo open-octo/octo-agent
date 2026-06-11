@@ -739,29 +739,6 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openModal(msg)
 		return m, m.flushPrints()
 
-	case conductPlannedMsg:
-		return m.onConductPlanned(msg)
-
-	case conductRunMsg:
-		return m, m.startConductRun(msg.id)
-
-	case conductCancelledMsg:
-		m.turnRunning = false
-		m.cancelTurn = nil
-		short := msg.id
-		if len(short) > 8 {
-			short = short[len(short)-8:]
-		}
-		m.println(noticeStyle.Render(fmt.Sprintf(
-			"Cancelled. Seeded as %s — conduct later with /conduct resume %s (or octo conduct resume %s).",
-			short, short, short)))
-		return m, m.flushPrints()
-
-	case conductDoneMsg:
-		return m.onConductDone(msg)
-
-	case conductShowMsg:
-		return m.onConductShow(msg)
 	}
 	return m, m.flushPrints()
 }

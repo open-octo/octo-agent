@@ -629,8 +629,6 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	case "/exit", "/quit":
 		m.quit = true
 		return m, tea.Quit
-	case "/conduct":
-		return m.dispatchConduct(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/model":
 		return m.dispatchModel(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/thinking":

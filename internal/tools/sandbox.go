@@ -162,9 +162,9 @@ func detachedCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// applyWorkingDir roots the command in the conductor-stamped working directory
-// (a unit's worktree) when one is present in ctx. No-op otherwise, so every
-// other caller keeps running in the process CWD.
+// applyWorkingDir roots the command in a context-stamped working directory when
+// one is present in ctx. No-op otherwise, so every other caller keeps running in
+// the process CWD.
 func applyWorkingDir(ctx context.Context, cmd *exec.Cmd) {
 	if dir := WorkingDir(ctx); dir != "" {
 		cmd.Dir = dir

@@ -14,8 +14,6 @@ func printCommandHelp(name string, w io.Writer) bool {
 	switch name {
 	case "chat":
 		chatHelp(w)
-	case "conduct":
-		conductHelp(w)
 	case "memory":
 		memoryHelp(w)
 	case "init":
@@ -131,40 +129,6 @@ Environment:
 Run "octo chat --help" for the full flag list.`)
 }
 
-func conductHelp(w io.Writer) {
-	fmt.Fprintln(w, `octo conduct — unattended long-horizon orchestration. Conduct drives a living
-ledger to completion: every unit's worker gets the upstream results + a shared
-conventions doc, and a turn-budget checkpoint resumes instead of failing.
-
-Verification (how a unit becomes Done) is yours to choose:
-  (default)        no gate — the worker's own "done" is trusted
-  --verify         an LLM judge decides whether the output meets the unit's goal
-  --verify-cmd …   a shell gate (e.g. "go build ./... && go test ./..."), the
-                   strongest option for code where compile/test is decidable
-
-Examples:
-  octo conduct "tidy up the docs/ folder"          Plan + conduct, no gate
-  octo conduct "..." --verify                      Judge each unit with an LLM
-  octo conduct "..." --verify-cmd "make ci"        Objective shell gate
-  octo conduct "..." --plan-only                   Seed the ledger; run later
-  octo conduct "..." --concurrency 3               Parallel workers in worktrees
-  octo conduct "..." --replan                      Let it re-plan when stuck
-  octo conduct list                                List conducted goals
-  octo conduct status last                         Per-unit state + result preview
-  octo conduct show last                           Full result text of every done unit
-  octo conduct show last 1                          Full result of just unit #1
-  octo conduct resume <id>                         Resume a stopped/blocked run
-
-Unattended guardrails:
-  --max-attempts N    Verify-fail retries per unit before it blocks (default 3)
-  --max-iterations N  Loop-turn budget backstop (default scales with units)
-  --stall-rounds N    Stop after N rounds with no unit completed (0 = off)
-
-ID shortcuts (every <id> argument accepts these):
-  last                     The most recently created ledger
-  <8-char hex>             The trailing short ID shown by 'octo conduct list'
-  any unique substring     Resolves if it matches exactly one ledger`)
-}
 
 func memoryHelp(w io.Writer) {
 	fmt.Fprintln(w, `octo memory — locate and inspect cross-session memory.

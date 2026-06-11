@@ -15,7 +15,6 @@ Type `/` to open the completion menu (Tab/↑/↓ to navigate, Enter to accept).
 | `/skills` | List available skills (trigger with `/<name>`) |
 | `/memory` | List what's remembered across sessions |
 | `/mcp` | Show connected MCP servers and their surfaces |
-| `/conduct` | Conduct a goal to completion (`/conduct list`, `/conduct resume <id>`) |
 | `/exit` or `/quit` | Save and exit |
 
 ## Keyboard shortcuts

@@ -63,7 +63,6 @@ type SpawnResult struct {
 	InputTokens  int
 	OutputTokens int
 	// Turns is the number of provider round-trips the sub-agent executed.
-	// Used by the conductor to charge its global iteration budget.
 	Turns int
 	// StopReason carries why the sub-agent stopped. Empty for normal
 	// completion; "max_turns" when the loop budget was exhausted.
