@@ -643,21 +643,9 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	a.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, memInjection, true)
 
 	// L2: attention-layer rules injected per user turn (triggered keywords),
-	// plus the save-nudge appended to milestone tool results. The injector is
-	// created even when MEMORY.md has no structured rules — Reminder is silent
-	// then, but the nudge still needs the per-session latch.
+	// plus the save-nudge appended to milestone tool results.
 	if s.memDir != "" {
-		s.injectorMu.Lock()
-		inj, ok := s.sessionInjectors[sess.ID]
-		if !ok {
-			rules := memory.ParseRules(s.memDir)
-			if s.homeMemDir != "" {
-				rules.Merge(memory.ParseRules(s.homeMemDir))
-			}
-			inj = memory.NewInjector(rules)
-			s.sessionInjectors[sess.ID] = inj
-		}
-		s.injectorMu.Unlock()
+		inj := s.injectorFor(sess.ID)
 		a.UserInputHook = inj.Reminder
 		a.ToolResultHook = inj.SaveNudge
 	}
@@ -666,6 +654,30 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		a.History = sess.ToHistory()
 	}
 	return a
+}
+
+// injectorFor returns the session's memory injector, creating it on first
+// use. The injector carries the once-per-session recall latch, so it must
+// survive turns; it is created even when MEMORY.md has no structured rules —
+// Reminder is silent then, but the save-nudge still needs the latch. Keyed
+// by web session ID or "im:<session key>"; dropped via forgetTurnLock (web)
+// or /unbind //bind (IM).
+func (s *Server) injectorFor(key string) *memory.Injector {
+	s.injectorMu.Lock()
+	defer s.injectorMu.Unlock()
+	if s.sessionInjectors == nil {
+		s.sessionInjectors = make(map[string]*memory.Injector)
+	}
+	inj, ok := s.sessionInjectors[key]
+	if !ok {
+		rules := memory.ParseRules(s.memDir)
+		if s.homeMemDir != "" {
+			rules.Merge(memory.ParseRules(s.homeMemDir))
+		}
+		inj = memory.NewInjector(rules)
+		s.sessionInjectors[key] = inj
+	}
+	return inj
 }
 
 // writeJSON is a convenience helper for JSON responses.
@@ -1240,13 +1252,18 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		return false
 	}
 	// /unbind promises "history cleared" and /bind "start fresh" — the
-	// session's remembered permission allows are part of that history. The
-	// manager doesn't know about the server-side store, so drop it here.
+	// session's remembered permission allows and its memory-injector latch
+	// are part of that history. The manager doesn't know about the
+	// server-side stores, so drop them here.
 	switch strings.ToLower(strings.Fields(text)[0]) {
 	case "/unbind", "/bind":
+		imKey := "im:" + string(s.channelMgr.KeyFor(ev))
 		s.rememberedMu.Lock()
-		delete(s.rememberedStores, "im:"+string(s.channelMgr.KeyFor(ev)))
+		delete(s.rememberedStores, imKey)
 		s.rememberedMu.Unlock()
+		s.injectorMu.Lock()
+		delete(s.sessionInjectors, imKey)
+		s.injectorMu.Unlock()
 	}
 	if reply := s.channelMgr.CommandRouter(ev); reply != "" {
 		ad.SendText(ev.ChatID, reply, ev.MessageID)
@@ -1285,6 +1302,15 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
 	sess.Agent.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, memInjection, true)
+
+	// L2 memory hooks, same pair buildAgent gives web turns: keyword
+	// reminders on user input, save-nudge on milestone tool results. The
+	// injector is session-sticky (recall latch) and dropped on /unbind.
+	if s.memDir != "" {
+		inj := s.injectorFor("im:" + string(sess.Key))
+		sess.Agent.UserInputHook = inj.Reminder
+		sess.Agent.ToolResultHook = inj.SaveNudge
+	}
 
 	// Per-turn permission gate, the same shape prepareToolTurn gives web
 	// turns: configured mode + an interactive ask that prompts in the chat
