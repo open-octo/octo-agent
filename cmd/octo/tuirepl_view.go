@@ -105,7 +105,8 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// and restore the typed text to the input box for editing — the agent's
 			// interrupt rolls the unanswered user message back out of history, so
 			// it leaves no trace in the scrollback. Once output has streamed the
-			// echo is already committed (echoPending == "") and Esc just interrupts.
+			// echo is already committed (echoPending == "") and Esc interrupts +
+			// recalls the last submitted message from history.
 			if m.echoPending != "" {
 				restore := m.echoRestore
 				m.echoPending = ""
@@ -119,7 +120,16 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			// After output has streamed the echo is committed; Esc interrupts
+			// and recalls the last submitted message into the input box so the
+			// user can edit and resubmit without pressing ↑ manually.
 			m.interrupt()
+			if n := len(m.inputHistory); n > 0 && m.ta.Value() == "" {
+				m.ta.SetValue(m.inputHistory[n-1])
+				m.ta.CursorEnd()
+				m.inputHistoryIdx = -1
+				return m, m.updateTextAreaHeight()
+			}
 			return m, nil
 		}
 		// Idle: clear the input line and discard any pending attachments.
