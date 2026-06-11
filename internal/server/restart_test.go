@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -222,17 +223,27 @@ func TestRunTask_DrainingRefused(t *testing.T) {
 	}
 }
 
-// drainTestAdapter records SendText calls; every other Adapter method is
-// unused on the draining path and inherited from the embedded nil interface
-// (calling one would panic, which is what we want in this test).
+// drainTestAdapter records SendText calls (mutex-guarded — tests poll from
+// another goroutine); every other Adapter method is unused on the paths under
+// test and inherited from the embedded nil interface (calling one would
+// panic, which is what we want in these tests).
 type drainTestAdapter struct {
 	channel.Adapter
+	mu   sync.Mutex
 	sent []string
 }
 
 func (a *drainTestAdapter) SendText(chatID, text, replyTo string) channel.SendResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.sent = append(a.sent, text)
 	return channel.SendResult{}
+}
+
+func (a *drainTestAdapter) texts() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.sent...)
 }
 
 // TestHandleChannelMessage_DrainingRepliesPolitely pins the design deviation:
@@ -245,10 +256,10 @@ func TestHandleChannelMessage_DrainingRepliesPolitely(t *testing.T) {
 	ad := &drainTestAdapter{}
 	srv.handleChannelMessage(context.Background(), ad, channel.InboundEvent{ChatID: "c1", Text: "hi"})
 
-	if len(ad.sent) != 1 {
-		t.Fatalf("SendText calls = %d, want 1", len(ad.sent))
+	if len(ad.texts()) != 1 {
+		t.Fatalf("SendText calls = %d, want 1", len(ad.texts()))
 	}
-	if !strings.Contains(ad.sent[0], "restarting") {
-		t.Errorf("reply %q should mention the restart", ad.sent[0])
+	if !strings.Contains(ad.texts()[0], "restarting") {
+		t.Errorf("reply %q should mention the restart", ad.texts()[0])
 	}
 }

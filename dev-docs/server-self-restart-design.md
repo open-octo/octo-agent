@@ -88,11 +88,10 @@ that is already doomed.
 
 The tool is ask-class in `internal/permission/defaults.yml` (explicitly, so
 nobody relaxes it by accident). On the web that means the browser
-confirmation prompt; the IM channel gate runs strict with no asker, so
-ask resolves to deny — an IM-triggered restart is refused until an
-interactive IM ask flow exists. Server sub-agents see the tool (the
-restarter registration is process-global) but inherit the parent's gate,
-so they face the same confirmation or denial.
+confirmation prompt; on IM channels the in-chat reply prompt (see
+`im-interactive-ask-design.md` — explicit affirmative only). Server
+sub-agents see the tool (the restarter registration is process-global) but
+inherit the parent's gate, so they face the same confirmation.
 
 ## Drain sequence
 

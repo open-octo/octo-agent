@@ -13,8 +13,9 @@ import (
 // goes through Server.Restart's drain); it stays nil in CLI/TUI processes,
 // where there is no supervisor contract to honour. Within the server
 // process the global is shared, so server sub-agents see the tool too —
-// they inherit the parent's permission gate, which asks (web) or denies
-// (IM strict) the same way it would for the parent.
+// they inherit the parent's permission gate, which confirms interactively
+// (browser modal on web, in-chat reply on IM) the same way it would for
+// the parent.
 var activeRestarter func(reason string)
 
 // SetRestarter registers the function the restart_server tool delegates to.

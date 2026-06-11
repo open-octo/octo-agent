@@ -64,6 +64,15 @@ type Session struct {
 	runMu     sync.Mutex
 	cancelMu  sync.Mutex
 	runCancel context.CancelFunc
+
+	// pendingAsk, while non-nil, claims the session's next plain message as
+	// the answer to an interactive permission prompt (see ask.go). Guarded by
+	// askMu, not runMu — the reply arrives while the asking turn holds runMu.
+	// askChatID/askUserID pin which chat+user may answer.
+	askMu      sync.Mutex
+	pendingAsk chan string
+	askChatID  string
+	askUserID  string
 }
 
 // BeginRun prepares one agent turn: it blocks until any previous turn in this
