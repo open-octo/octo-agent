@@ -220,8 +220,11 @@ const Sessions = (() => {
 
   // Build the collapsible thinking block HTML for a given rendered-HTML content string.
   // Called by _renderMarkdown after the think-block content has been parsed by marked.
+  // Collapsed by default: the live trace is visible while it streams
+  // (appendThinkingDelta); in the committed transcript the answer is the
+  // content and the trace stays one click away.
   function _buildThinkingBlock(renderedHtml) {
-    return `<details class="thinking-block" open>` +
+    return `<details class="thinking-block">` +
       `<summary class="thinking-summary">` +
         `<span class="thinking-chevron">›</span>` +
         `<span class="thinking-label">Thoughts</span>` +
@@ -1297,9 +1300,12 @@ const Sessions = (() => {
     html += `<div class="tr-header"><span class="tr-icon">✅</span><span class="tr-action">${escapeHtml(p.action || "")}</span>${progress}</div>`;
     if (todos.length) {
       html += `<div class="tr-list">`;
+      // Glyphs mirror the TUI checklist: green ✓ struck through when done,
+      // filled accent ■ + bold while in progress, hollow □ when pending.
       todos.forEach(t => {
-        const icon = t.status === "completed" ? "☑" : "☐";
-        html += `<div class="tr-list-item ${t.status === "completed" ? "done" : ""}">${icon} <span>${escapeHtml(t.task || "")}</span></div>`;
+        const st = t.status === "completed" ? "done" : t.status === "in_progress" ? "active" : "pending";
+        const icon = st === "done" ? "✓" : st === "active" ? "■" : "□";
+        html += `<div class="tr-list-item ${st}"><span class="tr-glyph">${icon}</span><span class="tr-task">${escapeHtml(t.task || "")}</span></div>`;
       });
       html += `</div>`;
     }
