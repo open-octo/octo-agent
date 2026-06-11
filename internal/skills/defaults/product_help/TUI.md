@@ -4,7 +4,7 @@ octo's TUI is a bubbletea-based interactive interface launched by `octo` with no
 
 ## Slash commands
 
-Type `/` to open the completion menu (Tab/↑/↓ to navigate, Enter to accept). Available commands:
+Type `/` to open the completion menu (↑/↓ to navigate, Enter to run, Tab to fill in for arguments). Available commands:
 
 | Command | Description |
 |---------|-------------|
@@ -50,9 +50,9 @@ Type `/` to open the completion menu (Tab/↑/↓ to navigate, Enter to accept).
 
 | Key | Action |
 |-----|--------|
-| **Tab** / **↓** | Next item |
-| **↑** | Previous item |
-| **Enter** | Accept selected item |
+| **↓** / **↑** | Next / previous item |
+| **Enter** | Run the selected command immediately |
+| **Tab** | Fill the selected command into the input (to add arguments) |
 | **Esc** | Dismiss menu |
 | **Type `/`** | Open completion menu (lists all commands and skills) |
 
