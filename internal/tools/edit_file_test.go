@@ -349,3 +349,106 @@ func TestStripTrailingWhitespace_EveryLine(t *testing.T) {
 		t.Errorf("stripTrailingWhitespace(%q) = %q, want %q", in, got, want)
 	}
 }
+
+func TestEditFile_TabIndent_NormalizedMatch(t *testing.T) {
+	// File uses tabs for indentation; LLM supplies spaces.
+	// The whitespace-normalized match should find it and map back
+	// to the actual tab-indented text.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tabbed.go")
+	writeTestFile(t, path, "\tcase \"chat\":\n\t\tchatHelp(w)\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "    case \"chat\":\n        chatHelp(w)", // spaces, not tabs
+		"new_string": "    case \"chat\":\n        chatHelp(w)\n        // new",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	// File should keep its tab convention
+	want := "\tcase \"chat\":\n\t\tchatHelp(w)\n\t\t// new\n"
+	if got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFile_TabIndent_ReplaceAll(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "many.go")
+	writeTestFile(t, path, "\tfoo\n\tfoo\n\tbar\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":        path,
+		"old_string":  "    foo", // 4 spaces
+		"new_string":  "    baz", // 4 spaces
+		"replace_all": true,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	// File keeps tabs, but all "foo" lines become "baz"
+	want := "\tbaz\n\tbaz\n\tbar\n"
+	if got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFile_TabIndent_NotFound_StillErrors(t *testing.T) {
+	// When even whitespace normalization can't find the string, error.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.go")
+	writeTestFile(t, path, "\tpackage main\n\n\tfunc main() {}\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "nonexistent",
+		"new_string": "x",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected not-found error, got %v", err)
+	}
+}
+
+func TestNormalizeLeadingWhitespace(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"\tcase:", "    case:"},
+		{"\t\tchatHelp(w)", "        chatHelp(w)"},
+		{"no indent", "no indent"},
+		{"  spaces", "  spaces"},     // spaces unchanged
+		{"\t  mixed", "      mixed"}, // tab + spaces
+		{"a\n\tb\nc", "a\n    b\nc"}, // multi-line
+	}
+	for _, tc := range tests {
+		got := normalizeLeadingWhitespace(tc.in)
+		if got != tc.want {
+			t.Errorf("normalizeLeadingWhitespace(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestFindWithIndentNorm(t *testing.T) {
+	file := "\tcase \"chat\":\n\t\tchatHelp(w)\n"
+	search := "    case \"chat\":\n        chatHelp(w)"
+
+	actual := findWithIndentNorm(file, search)
+	// search has no trailing \n, so actual should also lack it
+	want := "\tcase \"chat\":\n\t\tchatHelp(w)"
+	if actual != want {
+		t.Errorf("findWithIndentNorm = %q, want %q", actual, want)
+	}
+}
+
+func TestFindWithIndentNorm_NotFound(t *testing.T) {
+	file := "\tfoo\n\tbar\n"
+	search := "        missing"
+
+	actual := findWithIndentNorm(file, search)
+	if actual != "" {
+		t.Errorf("expected empty for non-matching search, got %q", actual)
+	}
+}

@@ -29,7 +29,6 @@ func (EditFileTool) Definition() agent.ToolDefinition {
 			"You MUST read the file with read_file before calling this tool. " +
 			"old_string must appear exactly once (or set replace_all=true to swap every occurrence). " +
 			"The file must already exist — use write_file to create. " +
-			"Preserve indentation (tabs/spaces) exactly as it appears in the file. " +
 			"Include enough surrounding context in old_string (typically 2-4 lines) " +
 			"to make it unique. If old_string matches multiple times and replace_all is false, " +
 			"the edit will fail — add more context to disambiguate.",
@@ -96,8 +95,10 @@ func stripTrailingWhitespace(s string) string {
 }
 
 // findActualString attempts to locate the search string in the file content,
-// first with an exact match, then with quote-normalized match.
-// Returns the actual string found in the file (preserving original quotes),
+// first with an exact match, then with quote-normalized match, and finally
+// with leading-whitespace normalization (tab → space expansion) so that
+// space-indented old_string from the LLM still matches tab-indented files.
+// Returns the actual string found in the file (preserving original formatting),
 // or empty string if not found.
 func findActualString(fileContent, searchString string) string {
 	// First try exact match
@@ -110,58 +111,135 @@ func findActualString(fileContent, searchString string) string {
 	normalizedFile := normalizeQuotes(fileContent)
 
 	idx := strings.Index(normalizedFile, normalizedSearch)
-	if idx == -1 {
-		return ""
-	}
+	if idx != -1 {
+		// Map the index back to the original file content.
+		// Since normalization only replaces runes with ASCII equivalents
+		// of the same byte length (UTF-8 curly quotes are 3 bytes each,
+		// straight quotes are 1 byte), we can't use byte offsets directly.
+		// Instead, scan through the original file rune-by-rune.
+		fileRunes := []rune(fileContent)
+		normalizedRunes := []rune(normalizedFile)
+		searchRunes := []rune(normalizedSearch)
 
-	// Map the index back to the original file content.
-	// Since normalization only replaces runes with ASCII equivalents
-	// of the same byte length (UTF-8 curly quotes are 3 bytes each,
-	// straight quotes are 1 byte), we can't use byte offsets directly.
-	// Instead, scan through the original file rune-by-rune.
-	fileRunes := []rune(fileContent)
-	normalizedRunes := []rune(normalizedFile)
-	searchRunes := []rune(normalizedSearch)
-
-	// Verify the match at the rune level in normalized space
-	if idx+len(searchRunes) > len(normalizedRunes) {
-		return ""
-	}
-	for i := 0; i < len(searchRunes); i++ {
-		if normalizedRunes[idx+i] != searchRunes[i] {
+		// Verify the match at the rune level in normalized space
+		if idx+len(searchRunes) > len(normalizedRunes) {
 			return ""
 		}
+		for i := 0; i < len(searchRunes); i++ {
+			if normalizedRunes[idx+i] != searchRunes[i] {
+				return ""
+			}
+		}
+
+		// Map rune index back to original file substring
+		// Count runes in original file up to the match position
+		origStart := -1
+		runeCount := 0
+		for i := range fileRunes {
+			if runeCount == idx {
+				origStart = i
+				break
+			}
+			runeCount++
+		}
+		if origStart == -1 {
+			return ""
+		}
+
+		origEnd := -1
+		runeCount = 0
+		for i := range fileRunes {
+			if runeCount == idx+len(searchRunes) {
+				origEnd = i
+				break
+			}
+			runeCount++
+		}
+		if origEnd == -1 {
+			origEnd = len(fileRunes)
+		}
+
+		return string(fileRunes[origStart:origEnd])
 	}
 
-	// Map rune index back to original file substring
-	// Count runes in original file up to the match position
-	origStart := -1
-	runeCount := 0
-	for i, _ := range fileRunes {
-		if runeCount == idx {
-			origStart = i
-			break
-		}
-		runeCount++
+	// Try with normalized leading whitespace (tab → space expansion).
+	// This is line-based because indentation differences only affect
+	// leading whitespace, and the matching needs to map lines back
+	// to the original file.
+	if actual := findWithIndentNorm(fileContent, searchString); actual != "" {
+		return actual
 	}
-	if origStart == -1 {
+
+	return ""
+}
+
+// normalizeLeadingWhitespace expands tabs in leading whitespace of each line
+// to 4-space stops, making tab-indented and space-indented text comparable.
+// Only leading whitespace is touched — tabs inside line content are left alone.
+func normalizeLeadingWhitespace(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + len(s)/10)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if trimmed != line {
+			leadingLen := len(line) - len(trimmed)
+			leading := line[:leadingLen]
+			b.WriteString(strings.ReplaceAll(leading, "\t", "    "))
+		}
+		b.WriteString(trimmed)
+		if i < len(lines)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// findWithIndentNorm matches searchString against fileContent after
+// normalizing leading whitespace in both. Returns the corresponding substring
+// from the original (unnormalized) fileContent so the edit preserves the
+// file's actual whitespace convention.
+func findWithIndentNorm(fileContent, searchString string) string {
+	normFile := normalizeLeadingWhitespace(fileContent)
+	normSearch := normalizeLeadingWhitespace(searchString)
+
+	if !strings.Contains(normFile, normSearch) {
 		return ""
 	}
 
-	origEnd := -1
-	runeCount = 0
-	for i, _ := range fileRunes {
-		if runeCount == idx+len(searchRunes) {
-			origEnd = i
+	fileLines := strings.Split(fileContent, "\n")
+	normFileLines := strings.Split(normFile, "\n")
+	normSearchLines := strings.Split(normSearch, "\n")
+	searchLines := strings.Split(searchString, "\n")
+
+	start := -1
+	for i := 0; i <= len(normFileLines)-len(normSearchLines); i++ {
+		match := true
+		for j := 0; j < len(normSearchLines); j++ {
+			if normFileLines[i+j] != normSearchLines[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			start = i
 			break
 		}
-		runeCount++
-	}
-	if origEnd == -1 {
-		origEnd = len(fileRunes)
 	}
 
-	return string(fileRunes[origStart:origEnd])
+	if start == -1 {
+		return ""
+	}
+
+	end := start + len(searchLines)
+	actual := strings.Join(fileLines[start:end], "\n")
+
+	// Preserve trailing newline if the search string had one
+	if strings.HasSuffix(searchString, "\n") && !strings.HasSuffix(actual, "\n") {
+		actual += "\n"
+	}
+
+	return actual
 }
 
 func (EditFileTool) Execute(_ context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
@@ -255,6 +333,9 @@ func (EditFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 	// Preserve curly quote style from the matched text when the LLM
 	// provided straight quotes but the file uses curly quotes.
 	actualNewStr := preserveQuoteStyle(oldStr, actualOldStr, newStrClean)
+	// Preserve file indent convention (tabs vs spaces) — when the file
+	// uses tabs but the LLM supplied space-indented new_string.
+	actualNewStr = preserveIndentStyle(actualOldStr, actualNewStr)
 
 	var updated string
 	if replaceAll {
@@ -381,4 +462,30 @@ func applyCurlySingleQuotes(str string) string {
 
 func isLetter(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
+// preserveIndentStyle converts leading whitespace in newStr to match the
+// file's indentation convention (detected from actualOldStr). When the file
+// uses tabs and the LLM supplied space-indented new_string, each 4-space
+// indent level is converted to one tab. This keeps the file's whitespace
+// convention consistent after the edit.
+func preserveIndentStyle(actualOldStr, newStr string) string {
+	// Only convert when the file uses tabs for indentation
+	if !strings.Contains(actualOldStr, "\n\t") && !strings.HasPrefix(actualOldStr, "\t") {
+		return newStr
+	}
+
+	newLines := strings.Split(newStr, "\n")
+	for i, line := range newLines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if trimmed == line {
+			continue
+		}
+		leadingLen := len(line) - len(trimmed)
+		leading := line[:leadingLen]
+		// Count indent level: each tab = 1 level, 4 spaces = 1 level
+		level := strings.Count(leading, "\t") + (len(leading)-strings.Count(leading, "\t"))/4
+		newLines[i] = strings.Repeat("\t", level) + trimmed
+	}
+	return strings.Join(newLines, "\n")
 }
