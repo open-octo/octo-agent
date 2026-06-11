@@ -20,7 +20,6 @@
 | Skills | Claude Code 格式 SKILL.md、默认 skills 嵌入 + materialize |
 | Sandbox | macOS Seatbelt / Linux Landlock + seccomp |
 | Sub-agent (`sub_agent`) | 统一工具（fork / fresh / background）、异步通知 |
-| 自主编排 (`octo conduct`) | LEDGER + worktree 隔离 + verifier 闸门 + resume |
 | Web Server (`octo serve`) | REST + SSE + WebSocket + 内嵌 dashboard |
 | IM Bridge | 微信 iLink、钉钉、飞书 |
 | Tool Search (MCP) | `mcp_search` / `mcp_describe` / `mcp_call` 桥 |
@@ -86,23 +85,6 @@
 
 ### 6. 截断恢复 Layer 2（resume-and-chunk）✅
 
-- **位置**：`dev-docs/truncation-recovery.md:105`
-- **现状**：Layer 1（escalate-and-retry）已实现——遇到 `max_tokens` 时自动提升 cap 重试一次
-- **已完成**：Layer 2 实装——当 escalate 后仍然截断时，将 partial text 追加到 history，注入 recovery user message，继续 loop 让模型完成剩余内容。限制最多 3 次恢复，防止无限循环。跳过了截断的 tool_use（OpenAI 协议中 partial tool_use 在 history 中不安全）。引入 `escalateExhausted` 标志避免 resume 后重复 escalate。
-
-### 7. Conductor Phase 2 / Phase 3（渐进交付的后续阶段）
-
-- **位置**：`dev-docs/autonomous-orchestrator-design.md:182`
-- **现状**：Conductor 已实现 Phase 1（最小可用单线程），具备 LEDGER、Verifier、Continue 续跑
-- **Phase 2 未做**：WorktreeManager + 有界并行 + 串行合并 + 冲突处理（`WorkSpec.Workdir` 字段已预留，但 conductor 主循环目前仍跑在主工作区）
-- **Phase 3 未做**：自动重规划 + 停滞检测 + 预算/终止/恢复全套护栏 + 结构化报告
-- **影响**：中——Phase 1 已能让大任务“跑得下去、不崩”，Phase 2/3 是性能和鲁棒性的提升
-- **建议**：有真实的大型无人值守任务需求（如批量代码迁移）时再推进。
-
----
-
-## 快速索引
-
 | 待办项 | 优先级 | 代码位置 | 类型 |
 |--------|--------|----------|------|
 | Skill Toggle 持久化 | P1 | `internal/server/skill_toggle_handler.go` | stub → 实装 |
@@ -111,4 +93,3 @@
 | 微信 CDN 文件上传 | P2 | `internal/channel/adapters/weixin/weixin.go:411` | TODO |
 | TUI 子 Agent 面板展开 | P3 | `dev-docs/sub-agent-design.md:201` | 体验优化 |
 | 截断恢复 Layer 2 | P3 | `dev-docs/truncation-recovery.md:105` | 未来工作 |
-| Conductor Phase 2/3 | P3 | `dev-docs/autonomous-orchestrator-design.md:182` | 渐进交付 |

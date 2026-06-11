@@ -100,10 +100,6 @@ octo serve --addr 127.0.0.1:8080
 
 # IM bridge (WeChat iLink): scan-to-login; channels run inside `octo serve`
 octo serve   # WeChat login: Channels panel in the web UI (scan QR)
-
-# Autonomous long-horizon goal: plan into a subtask DAG and run it to completion
-octo conduct "Add a --json flag to octo config show"
-octo conduct status <id>
 ```
 
 ## Configuration
@@ -193,7 +189,6 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 | MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, device-flow OAuth |
 | Memory | done | Persistent cross-session memory under `~/.octo/memories/`, auto extract/consolidate |
 | Sub-agents | done | `launch_agent` fan-out, async + resumable (`send_message`, `agent_status`, `kill_agent`) |
-| Orchestration | done | `octo conduct` — plan a goal into a subtask DAG, run it via sub-agents, resume after crash |
 | Web server | done | `octo serve` — REST + SSE, embedded dashboard UI with session browse/delete (bind localhost) |
 | IM bridge | done | runs inside `octo serve` — WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram adapters (web QR login, per-user sessions, slash commands) |
 
@@ -202,7 +197,7 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 Layered, one-directional dependency graph:
 
 ```
-cmd/octo/          CLI entry (chat one-shot + TUI, serve, channel, conduct, mcp, slash commands)
+cmd/octo/          CLI entry (chat one-shot + TUI, serve, channel, mcp, slash commands)
    ↓
 internal/agent/    History, sessions, content blocks, Sender interface,
                    Agent.Turn / TurnStream / Run (tool-calling loop)
@@ -218,7 +213,6 @@ internal/permission/  allow/deny/ask rule engine gating every tool call
 internal/mcp/      MCP client (stdio + HTTP, OAuth)
 internal/server/   octo serve — HTTP REST + SSE + embedded dashboard
 internal/channel/  IM bridge — adapter interface + WeChat iLink adapter
-internal/conductor/  octo conduct — subtask DAG planner + scheduler
 ```
 
 Each provider implements both **buffered** (`Send`) and **streaming** (`SendStream`) variants. The agent layer mirrors with `Sender` / `StreamingSender` / `ToolSender` / `ToolStreamingSender` — interfaces are added incrementally so non-streaming providers still work.

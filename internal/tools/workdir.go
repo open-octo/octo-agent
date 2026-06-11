@@ -3,9 +3,8 @@ package tools
 import "context"
 
 // workingDirKey carries an optional working directory for terminal commands.
-// The conductor stamps it (via WithWorkingDir) so a worker's shell runs inside
-// that unit's isolated git worktree rather than the process CWD — the basis
-// for parallel, non-colliding workers. Unset ⇒ commands run in the process
+// Callers stamp it (via WithWorkingDir) to redirect terminal commands to an
+// isolated directory rather than the process CWD. Unset ⇒ commands run in the process
 // CWD, the default everywhere else.
 type workingDirCtxKey struct{}
 

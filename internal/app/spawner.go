@@ -129,10 +129,9 @@ func (s *Spawner) Continue(ctx context.Context, agentID, message string) (tools.
 // out) are this round's delta; turns is the child's TurnIterations count.
 //
 // A max-turns checkpoint is NOT an error: the partial reply and StopReason
-// ("max_turns") are returned so a caller (the conductor) can checkpoint and
-// Continue. Tokens spent on the partial round are still accrued. Callers that
-// drive a continuation (the conductor) inspect
-// StopReason themselves.
+// ("max_turns") are returned so the caller can checkpoint and Continue.
+// Tokens spent on the partial round are still accrued. Callers that
+// drive a continuation can inspect the child StopReason themselves.
 func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (reply string, in, out int, stopReason string, turns int, err error) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
@@ -142,7 +141,7 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	// When the manager stamped an event sink into ctx (TUI live panel), stream
 	// the child's tool-level activity to it. Only tool_started/tool_error are
 	// forwarded — not per-token text — to keep event volume sane with several
-	// sub-agents running at once. No sink (conductor/headless) => nil handler =>
+	// sub-agents running at once. No sink (headless) => nil handler =>
 	// RunStream behaves exactly like Run.
 	var handler agent.EventHandler
 	if sink := tools.SubAgentEventSink(ctx); sink != nil {
@@ -248,7 +247,7 @@ type liveChild struct {
 	seq      uint64    // monotonic touch order, for LRU eviction (clock-independent)
 
 	// sessionDir + session persist the sub-agent transcript when the caller
-	// (conductor) wants post-mortem traceability. Empty sessionDir means no
+	// (the caller) wants post-mortem traceability. Empty sessionDir means no
 	// persistence (the default for chat/REPL sub-agents).
 	sessionDir string
 	session    *agent.Session
@@ -324,7 +323,7 @@ func (r *childRegistry) evictLocked() {
 }
 
 // freshIDLocked returns an 8-hex-char id not currently in use. Same shape as
-// agent.Session / conductor short ids. Caller holds r.mu.
+// agent.Session / short ids. Caller holds r.mu.
 func (r *childRegistry) freshIDLocked() string {
 	for {
 		var b [4]byte
