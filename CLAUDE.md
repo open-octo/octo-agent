@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-Guidance for Claude Code and other AI coding agents working in this repository. See `.octorules` for the human-facing project rules — this file expands them with the operational details an agent needs.
+Guidance for Claude Code working in this repository. The octo-agent equivalent is `.octorules`.
 
 ## Project
 
-`octo-agent` — a Go 1.22+ AI agent CLI distributed as a single binary. Module path: `github.com/Leihb/octo-agent`. Per-feature design notes live under `dev-docs/`.
+`octo-agent` — a Go 1.22+ AI agent CLI distributed as a single binary. Module path: `github.com/Leihb/octo-agent`. Ships as CLI + embedded Web UI + IM bridges via `octo serve`. Per-feature design notes live under `dev-docs/`.
 
 ## Commands
 
@@ -21,15 +21,15 @@ go test ./internal/provider/anthropic/ -run TestSendStream  # single test
 go test -race -v ./internal/tools/                          # verbose race
 ```
 
-`bundle`, `rspec`, `rubocop`, `rake` no longer apply — this is a Go-only project.
-
 ## Architecture
 
-Four-layer stack with one-directional dependencies:
+Five-layer stack with one-directional dependencies:
 
-1. **CLI (`cmd/octo/`)** — entry point (`main.go`), flag parsing, REPL loop (`repl.go`), session resume/list flags, slash-command dispatch, output streaming. The only package allowed to import `provider` directly. Adapts a `provider.Provider` into an `agent.Sender` via `providerSender` so the agent package stays provider-agnostic.
+1. **CLI (`cmd/octo/`)** — entry point (`main.go`), flag parsing, REPL loop (`repl.go`), session resume/list flags, slash-command dispatch, output streaming. Reaches the LLM through `internal/app` rather than importing `provider` directly.
 
-2. **Agent core (`internal/agent/`)** — the loop, plus everything stateful:
+2. **App bootstrap (`internal/app/`)** — the single place that constructs provider clients and adapts them to `agent.Sender`. Every entry point (`cmd/octo`, `internal/server`, IM channels) reaches the LLM through it rather than importing `provider` directly. Also owns the permission gate, sub-agent spawner, and `WireTools` unification.
+
+3. **Agent core (`internal/agent/`)** — the loop, plus everything stateful:
    - `agent.go` — `Agent`, `Turn`, `TurnStream`, `Run`, `RunStream`. History rollback on error.
    - `history.go` — message log; goroutine-safe.
    - `content.go` — `ContentBlock` union (text / tool_use / tool_result). `Message.Blocks` overrides `Message.Content` when set; nil falls back to plain string for backward-compatible session JSON.
@@ -37,15 +37,15 @@ Four-layer stack with one-directional dependencies:
    - `tool.go` — `ToolDefinition`, `ToolExecutor` interfaces.
    - `Sender` interface stack: `Sender` → `StreamingSender` → `ToolSender` → `ToolStreamingSender`. Each builds on the previous; type-assertion in callers picks the highest available capability.
 
-3. **Providers (`internal/provider/`)** — per-vendor wire-format adapters. `provider.go` defines the interfaces; each subdirectory implements one protocol:
+4. **Providers (`internal/provider/`)** — per-vendor wire-format adapters. `provider.go` defines the interfaces; each subdirectory implements one protocol:
    - `anthropic/` — Messages API. `x-api-key` + `anthropic-version` headers. `system` as top-level field. Content blocks `[{type:"text", text}]`. SSE aggregator dispatches on `message_start`/`content_block_delta`/`message_delta`. Tool calls land as `content_block_start` of type `tool_use` with subsequent `input_json_delta` deltas.
    - `openai/` — Chat Completions. `Authorization: Bearer`. `system` carried as `messages[0]`. SSE aggregator parses `chat.completion.chunk`; tolerates missing `[DONE]` sentinel (some third-party servers omit it). Tool calls arrive in `delta.tool_calls[]` with chunked JSON arguments.
 
    Provider wire quirks are encapsulated here — the agent layer never branches on protocol.
 
-4. **Tools (`internal/tools/`)** — concrete `ToolExecutor` implementations.
+5. **Tools (`internal/tools/`)** — concrete `ToolExecutor` implementations.
    - `terminal.go` — current canonical example. Tool name `terminal` rather than `bash` because the implementation shells out via the platform shell — `sh -c` on macOS/Linux, PowerShell (`pwsh`, else `powershell`) on Windows — not a hard `/bin/bash` dependency. The shell is selected in one place: `shellCommand` in `sandbox.go`. The model is told which shell it's on via the environment context (`cmd/octo/envcontext.go`).
-   - `DefaultRegistry` dispatches by tool name. `DefaultTools()` returns the set sent to the LLM when `--tools` is on.
+   - `DefaultRegistry` dispatches by tool name. `DefaultTools()` returns the set sent to the LLM (tools are on by default; `--no-tools` disables them).
 
 ## Conventions
 
@@ -68,5 +68,5 @@ From `.octorules`:
 
 ## When in doubt
 
-- Verify external claims (API endpoints, third-party SDK existence, dates) before committing them. The WeChat iLink integration is a deliberate example: every claim about the protocol was checked against the npm registry and live API hosts before landing.
+- Verify external claims (API endpoints, third-party SDK existence, dates) before committing them.
 - If `go test ./...` fails because of an environment issue (missing key, blocked network), say so explicitly rather than commenting out the test.
