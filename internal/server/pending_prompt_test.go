@@ -23,10 +23,10 @@ func TestReplayLiveState_ReplaysPendingPrompts(t *testing.T) {
 	defer tools.CloseSessionBackgroundManager(sid)
 
 	srv.pendingQuestions[sid] = wsEventRequestUserQuestion{
-		Type: "request_user_question", QuestionID: "q_1", Question: "pick one", Options: []string{"a", "b"},
+		Type: "request_user_question", SessionID: sid, QuestionID: "q_1", Question: "pick one", Options: []string{"a", "b"},
 	}
 	srv.pendingConfirms[sid] = wsEventRequestConfirmation{
-		Type: "request_confirmation", ConfID: "conf_1", Message: "Allow terminal?", Kind: "yes_no",
+		Type: "request_confirmation", SessionID: sid, ConfID: "conf_1", Message: "Allow terminal?", Kind: "yes_no",
 	}
 
 	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
@@ -44,10 +44,18 @@ func TestReplayLiveState_ReplaysPendingPrompts(t *testing.T) {
 			if ev["question_id"] != "q_1" {
 				t.Errorf("question_id = %v, want q_1", ev["question_id"])
 			}
+			if ev["session_id"] == nil || ev["session_id"] == "" {
+				t.Error("replayed question must carry session_id (the dispatcher filters on it)")
+			}
 		case "request_confirmation":
 			gotC = true
-			if ev["conf_id"] != "conf_1" {
-				t.Errorf("conf_id = %v, want conf_1", ev["conf_id"])
+			// `id` + `session_id` are what the dispatcher reads — the old
+			// conf_id/session-less shape made the frontend drop the event.
+			if ev["id"] != "conf_1" {
+				t.Errorf("id = %v, want conf_1", ev["id"])
+			}
+			if ev["session_id"] == nil || ev["session_id"] == "" {
+				t.Error("replayed confirmation must carry session_id")
 			}
 		}
 	}

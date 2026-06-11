@@ -92,7 +92,7 @@ type Engine struct {
 	cwd   string
 
 	mu       sync.Mutex
-	remember map[string]Decision // input-signature → decision
+	remember *Remembered // session decisions; swappable via AttachRemembered
 }
 
 //go:embed defaults.yml
@@ -157,7 +157,7 @@ func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*
 		rules:    rules,
 		mode:     mode,
 		cwd:      cwd,
-		remember: map[string]Decision{},
+		remember: NewRemembered(),
 	}, nil
 }
 
@@ -173,19 +173,26 @@ func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*
 func (e *Engine) Check(toolName string, input map[string]any) Decision {
 	sig := signature(toolName, input)
 
-	e.mu.Lock()
-	cached, ok := e.remember[sig]
-	e.mu.Unlock()
-	if ok {
-		return e.applyMode(cached)
-	}
-
 	d := Ask // implicit default
 	for _, r := range e.rules[toolName] {
 		if e.matches(toolName, r, input) {
 			d = r.Decision
 			break
 		}
+	}
+	// A matched deny always wins. The remembered store only short-circuits
+	// Ask: engines are rebuilt per turn precisely so policy edits take
+	// effect mid-session, and a deny rule added after the user said
+	// "always allow" must not be bypassed by the cache.
+	if d == Deny {
+		return e.applyMode(d)
+	}
+
+	e.mu.Lock()
+	store := e.remember
+	e.mu.Unlock()
+	if cached, ok := store.get(sig); ok {
+		return e.applyMode(cached)
 	}
 	return e.applyMode(d)
 }
@@ -195,8 +202,9 @@ func (e *Engine) Check(toolName string, input map[string]any) Decision {
 // user answers "always allow this turn / this session".
 func (e *Engine) Remember(toolName string, input map[string]any, decision Decision) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.remember[signature(toolName, input)] = decision
+	store := e.remember
+	e.mu.Unlock()
+	store.set(signature(toolName, input), decision)
 }
 
 // Mode returns the engine's current mode (for callers that need to branch

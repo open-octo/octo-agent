@@ -20,13 +20,24 @@ var channelAskTimeout = 5 * time.Minute
 
 // imAffirmatives are the only replies that approve an IM permission prompt.
 // Anything else denies — over chat, silence and ambiguity must fail closed.
+// imAlways additionally remembers the decision for the session ("stop
+// asking me about this exact call").
 var imAffirmatives = map[string]bool{
 	"yes": true, "y": true, "ok": true, "allow": true,
 	"是": true, "可以": true, "同意": true, "允许": true,
 }
 
+var imAlways = map[string]bool{
+	"always": true, "always allow": true, "总是允许": true, "一直允许": true,
+}
+
 func isAffirmative(text string) bool {
-	return imAffirmatives[strings.ToLower(strings.TrimSpace(text))]
+	t := strings.ToLower(strings.TrimSpace(text))
+	return imAffirmatives[t] || imAlways[t]
+}
+
+func isAlways(text string) bool {
+	return imAlways[strings.ToLower(strings.TrimSpace(text))]
 }
 
 // askInputSummary renders the part of toolInput the user is actually
@@ -62,10 +73,10 @@ func truncateForAsk(s string, maxLen int) string {
 // a confirmation prompt into the chat and consumes the requesting user's next
 // plain message in that chat as the answer (routed by the inbound dispatcher
 // via DeliverAskReply, ahead of the turn path — see routeChannelEvent).
-// Approval requires an explicit affirmative; any other reply, the turn being
-// cancelled (/stop), or the timeout denies. remember is always false: chat
-// approvals are one-shot, a lingering allow in a group chat would outlive
-// the person who granted it.
+// Approval requires an explicit affirmative; the "always" variants also
+// remember the decision in the session's Remembered store (exact tool+input
+// signature, session lifetime, never persisted to permissions.yml). Any
+// other reply, the turn being cancelled (/stop), or the timeout denies.
 func (s *Server) channelPermissionAsk(sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent) app.PermissionAsk {
 	return func(ctx context.Context, toolName string, toolInput map[string]any) (bool, bool, error) {
 		replyCh, release, err := sess.BeginAsk(ev.ChatID, ev.UserID)
@@ -79,7 +90,7 @@ func (s *Server) channelPermissionAsk(sess *channel.Session, ad channel.Adapter,
 			what = fmt.Sprintf("%s — %q", toolName, detail)
 		}
 		prompt := fmt.Sprintf(
-			"⚠️ Allow %s? Reply yes / 允许 to approve — any other reply denies; only the requester's reply counts. (Auto-deny in %s; /stop cancels the task.)",
+			"⚠️ Allow %s? Reply yes / 允许 to approve once, always / 总是允许 to stop asking for this exact call — any other reply denies; only the requester's reply counts. (Auto-deny in %s; /stop cancels the task.)",
 			what, channelAskTimeout)
 		ad.SendText(ev.ChatID, prompt, ev.MessageID)
 
@@ -87,7 +98,7 @@ func (s *Server) channelPermissionAsk(sess *channel.Session, ad channel.Adapter,
 		defer timer.Stop()
 		select {
 		case text := <-replyCh:
-			return isAffirmative(text), false, nil
+			return isAffirmative(text), isAlways(text), nil
 		case <-ctx.Done():
 			return false, false, ctx.Err()
 		case <-timer.C:
