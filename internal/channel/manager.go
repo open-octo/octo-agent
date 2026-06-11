@@ -410,6 +410,13 @@ func (m *Manager) sendTyping(ev InboundEvent) {
 	_ = ad.SendTyping(ev.ChatID, ev.ContextToken)
 }
 
+// KeyFor exposes the session key an inbound event maps to under this
+// manager's binding mode, for callers that keep per-session state outside
+// the manager (e.g. the server's remembered-permission stores).
+func (m *Manager) KeyFor(ev InboundEvent) SessionKey {
+	return sessionKeyFor(m.mode, ev)
+}
+
 // GetSession returns the session for the given inbound event, or nil if none exists.
 func (m *Manager) GetSession(ev InboundEvent) *Session {
 	key := sessionKeyFor(m.mode, ev)

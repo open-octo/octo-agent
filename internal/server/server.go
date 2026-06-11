@@ -1217,6 +1217,15 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 	if !strings.HasPrefix(text, "/") {
 		return false
 	}
+	// /unbind promises "history cleared" and /bind "start fresh" — the
+	// session's remembered permission allows are part of that history. The
+	// manager doesn't know about the server-side store, so drop it here.
+	switch strings.ToLower(strings.Fields(text)[0]) {
+	case "/unbind", "/bind":
+		s.rememberedMu.Lock()
+		delete(s.rememberedStores, "im:"+string(s.channelMgr.KeyFor(ev)))
+		s.rememberedMu.Unlock()
+	}
 	if reply := s.channelMgr.CommandRouter(ev); reply != "" {
 		ad.SendText(ev.ChatID, reply, ev.MessageID)
 	}
