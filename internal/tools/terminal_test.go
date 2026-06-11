@@ -397,3 +397,54 @@ func TestTerminalInputTool_MissingID(t *testing.T) {
 		t.Error("expected error for missing id")
 	}
 }
+
+func TestTerminalTool_Stdin_PipedVerbatim(t *testing.T) {
+	// stdin text containing backticks, quotes, and special chars
+	// must reach the process verbatim without shell interpretation.
+	stdinBody := "line with `backticks` and \"double quotes\"\nsecond line\n"
+
+	result, err := TerminalTool{}.Execute(context.Background(), "terminal", map[string]any{
+		"command": "cat", // echoes stdin to stdout
+		"stdin":   stdinBody,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Text != strings.TrimRight(stdinBody, "\n") {
+		t.Errorf("stdin should reach process verbatim (trailing newline stripped by output trim).\ngot:  %q\nwant: %q", result.Text, strings.TrimRight(stdinBody, "\n"))
+	}
+}
+
+func TestTerminalTool_Stdin_Background(t *testing.T) {
+	mgr := NewBackgroundManager()
+	term := TerminalTool{mgr: mgr}
+	kill := KillShellTool{mgr: mgr}
+
+	stdinBody := "hello stdin\n"
+
+	id, err := term.ExecuteStream(context.Background(), "terminal", map[string]any{
+		"command":           "cat",
+		"run_in_background": true,
+		"stdin":             stdinBody,
+	}, nil)
+	if err != nil {
+		t.Fatalf("ExecuteStream bg: %v", err)
+	}
+	if !strings.Contains(id.Text, "Started background process") {
+		t.Fatalf("expected background start, got: %s", id.Text)
+	}
+
+	// Wait for process to finish
+	for i := 0; i < 50; i++ {
+		out, status, _, _ := mgr.Read("bg_1")
+		if strings.HasPrefix(status, "exited") {
+			if out != stdinBody {
+				t.Errorf("bg stdin should reach process verbatim.\ngot:  %q\nwant: %q", out, stdinBody)
+			}
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	kill.Execute(context.Background(), "kill_shell", map[string]any{"id": "bg_1"})
+}

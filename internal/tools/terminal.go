@@ -116,6 +116,7 @@ func (t TerminalTool) ExecuteStream(
 	if command == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal: command is required")
 	}
+	stdinText, _ := input["stdin"].(string)
 	if err := guardCommand(command); err != nil {
 		return agent.ToolResult{Text: ""}, err
 	}
@@ -143,6 +144,9 @@ func (t TerminalTool) ExecuteStream(
 		id, err := t.managerFor(ctx).Start(command)
 		if err != nil {
 			return agent.ToolResult{Text: ""}, err
+		}
+		if stdinText != "" {
+			t.managerFor(ctx).WriteStdinAndClose(id, stdinText)
 		}
 		return agent.ToolResult{
 			Text: fmt.Sprintf("Started background process %s.\n\n%s", id, BgPollNotice),
@@ -181,6 +185,9 @@ func (t TerminalTool) ExecuteStream(
 	id, err := t.managerFor(ctx).Start(command, WithOnLine(onLine), WithVisible(false))
 	if err != nil {
 		return agent.ToolResult{Text: ""}, err
+	}
+	if stdinText != "" {
+		t.managerFor(ctx).WriteStdinAndClose(id, stdinText)
 	}
 
 	// snapshot returns the collected output so far, tab-expanded and with the
