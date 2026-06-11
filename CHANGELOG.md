@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `octo serve` now binds `127.0.0.1:8080` by default (was `:8080`, all interfaces). LAN/phone access needs an explicit `-addr :8080` — which activates the key requirement for those clients.
 - **Breaking:** the `permissions.yml`-existence gate on non-localhost binds is retired; the access key replaces it (the old gate also ignored the empty-host `:8080` form entirely).
 - Served uploads (`/api/uploads/{name}`) carry `X-Content-Type-Options: nosniff`.
+- **Custom base URLs are now exclusive to two catch-all vendors.** New `openai_compatible` / `anthropic_compatible` providers take — and require — a free-form `base_url`; every other vendor is pinned to its official endpoint plus declared regional variants, so the config wizard and web settings no longer offer free-text URLs for them. Existing configs with a custom `base_url` on a named vendor (and `<PROVIDER>_BASE_URL` env vars) keep working on read. An unknown endpoint saved from the web now classifies as the protocol-matching compatible vendor instead of masquerading as real `openai`/`anthropic`. (#623)
+- **Vendor registry refresh.** Added Bailian (Alibaba DashScope compatible mode, mainland/US endpoints, qwen3.5-flash lite compaction) and MiMo (Xiaomi); removed Groq and SiliconFlow. (#623)
 
 ## [0.18.0] — 2026-06-11
 

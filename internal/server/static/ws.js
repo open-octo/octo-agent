@@ -76,9 +76,13 @@ const WS = (() => {
       // A dial that never reached open may have been rejected by auth
       // (expired cookie, key changed server-side). Re-run the auth probe —
       // it prompts on a real 401 and is a no-op when the server is just
-      // down — instead of blind-reconnecting into the same rejection.
+      // down — instead of blind-reconnecting into the same rejection. A
+      // cancelled prompt stops the retry loop entirely; reconnecting would
+      // re-prompt every backoff interval forever. Reload to try again.
       if (handshakeFailed && typeof Auth !== "undefined" && Auth.recheck) {
-        try { await Auth.recheck(); } catch (err) { /* keep reconnecting */ }
+        let ok = true;
+        try { ok = await Auth.recheck(); } catch (err) { /* server down — retry */ }
+        if (ok === false) return;
       }
       _connect();
     }, _retryDelay);

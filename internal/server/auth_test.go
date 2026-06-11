@@ -3,7 +3,10 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -205,6 +208,92 @@ func TestRequireAuth_RouteCoverage(t *testing.T) {
 	}
 }
 
+// TestRegisterRoutes_OnlyKnownUnauthenticated scans the registration source
+// for direct mux registrations: the apiRoutes loop above can't catch a route
+// that bypasses api() entirely, because bypassing api() is exactly what
+// keeps a route out of apiRoutes. Only health, version, and the static
+// handler may register directly.
+func TestRegisterRoutes_OnlyKnownUnauthenticated(t *testing.T) {
+	src, err := os.ReadFile("server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := regexp.MustCompile(`s\.mux\.Handle(?:Func)?\(\s*"([^"]+)"`).FindAllStringSubmatch(string(src), -1)
+	allowed := map[string]bool{
+		"GET /api/health":  true,
+		"GET /api/version": true,
+		"/":                true,
+	}
+	if len(direct) != len(allowed) {
+		t.Errorf("expected exactly %d direct mux registrations, got %d", len(allowed), len(direct))
+	}
+	for _, m := range direct {
+		if !allowed[m[1]] {
+			t.Errorf("direct mux registration %q bypasses requireAuth — register via s.api()", m[1])
+		}
+	}
+}
+
+// TestNew_PersistsGeneratedKey covers the restart-stability contract: the
+// first start generates and persists the key; later starts re-read it.
+func TestNew_PersistsGeneratedKey(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("OCTO_ACCESS_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	srv, err := New(Config{Addr: "127.0.0.1:0", NoChannel: true, NoMemory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := srv.AccessKey()
+	if len(key) != 64 {
+		t.Fatalf("expected generated 64-hex key, got %q", key)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AccessKey != key {
+		t.Errorf("config.yml access_key = %q, want %q", cfg.AccessKey, key)
+	}
+
+	srv2, err := New(Config{Addr: "127.0.0.1:0", NoChannel: true, NoMemory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if srv2.AccessKey() != key {
+		t.Errorf("key churned across restarts: %q != %q", srv2.AccessKey(), key)
+	}
+}
+
+// TestNew_SaveFailureKeepsInMemoryKey: an unpersistable key must not stop
+// the server — it stays valid for the process lifetime.
+func TestNew_SaveFailureKeepsInMemoryKey(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only dir permissions don't block subdir creation on Windows")
+	}
+	tmp := t.TempDir()
+	ro := filepath.Join(tmp, "ro")
+	if err := os.Mkdir(ro, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ro, 0o700) })
+	t.Setenv("HOME", ro)
+	t.Setenv("USERPROFILE", ro)
+	t.Setenv("OCTO_ACCESS_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	srv, err := New(Config{Addr: "127.0.0.1:0", NoChannel: true, NoMemory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(srv.AccessKey()) != 64 {
+		t.Errorf("expected in-memory generated key despite save failure, got %q", srv.AccessKey())
+	}
+}
+
 func TestHealthVersionUnauthenticated(t *testing.T) {
 	srv := mustServer(t, Config{AccessKey: testAccessKey})
 	for _, path := range []string{"/api/health", "/api/version"} {
@@ -261,7 +350,10 @@ func TestWSCheckOrigin(t *testing.T) {
 	}{
 		{"no origin", mkReq("127.0.0.1:8080", "", ""), true},
 		{"local origin", mkReq("127.0.0.1:8080", "http://localhost:8080", ""), true},
-		{"same origin non-local", mkReq("192.168.1.5:8080", "http://192.168.1.5:8080", ""), true},
+		// A non-local same-origin dial only reaches CheckOrigin with a valid
+		// key (requireAuth rejected it otherwise) — the key is what passes.
+		{"same origin non-local with key", mkReq("192.168.1.5:8080", "http://192.168.1.5:8080", testAccessKey), true},
+		{"same origin non-local keyless", mkReq("192.168.1.5:8080", "http://192.168.1.5:8080", ""), false},
 		{"foreign origin", mkReq("127.0.0.1:8080", "https://evil.example", ""), false},
 		{"foreign origin with key", mkReq("127.0.0.1:8080", "https://evil.example", testAccessKey), true},
 	}

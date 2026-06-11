@@ -67,7 +67,10 @@ func keyFromRequest(r *http.Request) string {
 		return k
 	}
 	if c, err := r.Cookie(accessKeyCookie); err == nil && c.Value != "" {
-		if v, uerr := url.QueryUnescape(c.Value); uerr == nil {
+		// PathUnescape, not QueryUnescape: the frontend encodes with
+		// encodeURIComponent (%XX only), and QueryUnescape would corrupt a
+		// raw '+' in a user-chosen key set by a non-browser client.
+		if v, uerr := url.PathUnescape(c.Value); uerr == nil {
 			return v
 		}
 		return c.Value
@@ -198,19 +201,15 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // wsCheckOrigin is the WebSocket upgrader's CheckOrigin. A key-authenticated
-// dial passes regardless of Origin (same precedence as HTTP); a same-origin
-// dial passes (requireAuth's Host gate already ran on the upgrade request);
-// otherwise the loopback Origin predicate decides. Absent Origin
-// (non-browser client) passes.
+// dial passes regardless of Origin (same precedence as HTTP); otherwise the
+// loopback Origin predicate decides — the same gate requireAuth already
+// applied to the upgrade request. Absent Origin (non-browser client) passes.
 func (s *Server) wsCheckOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
 	}
 	if s.validateAccessKey(r) {
-		return true
-	}
-	if u, err := url.Parse(origin); err == nil && strings.EqualFold(u.Host, r.Host) {
 		return true
 	}
 	return s.originAllowed(origin)

@@ -50,7 +50,7 @@ func TestHandleHealth(t *testing.T) {
 func TestHandleListSessions(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 
@@ -69,7 +69,7 @@ func TestHandleListSessions(t *testing.T) {
 func TestHandleGetSession_NotFound(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions/nonexistent?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/nonexistent", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 
@@ -91,7 +91,7 @@ func TestHandleDeleteSession(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+sess.ID+"?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+sess.ID, nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 
@@ -121,7 +121,7 @@ func TestHandleDeleteSessions_Batch(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(deleteSessionsRequest{IDs: ids})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -149,7 +149,7 @@ func TestHandleDeleteSessions_Batch(t *testing.T) {
 func TestHandleDeleteSessions_EmptyIDs(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete?access_key="+srv.AccessKey(), bytes.NewReader([]byte(`{"ids":[]}`)))
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete", bytes.NewReader([]byte(`{"ids":[]}`)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -163,7 +163,7 @@ func TestHandleCreateChat_MissingMessage(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	body := bytes.NewReader([]byte(`{}`))
-	req := httptest.NewRequest(http.MethodPost, "/api/chat?access_key="+srv.AccessKey(), body)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -177,7 +177,7 @@ func TestHandleTurn_MissingSession(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	body := bytes.NewReader([]byte(`{"message":"hello"}`))
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/nonexistent/turn?access_key="+srv.AccessKey(), body)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/nonexistent/turn", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -344,7 +344,7 @@ func (s *recordingSender) StreamMessagesWithTools(_ context.Context, _, _ string
 
 func TestHandleOnboardStatus(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodGet, "/api/onboard/status?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/onboard/status", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
@@ -361,7 +361,7 @@ func TestHandleOnboardStatus(t *testing.T) {
 
 func TestHandleListProviders(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodGet, "/api/providers?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/providers", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
@@ -379,7 +379,7 @@ func TestHandleListProviders(t *testing.T) {
 
 func TestHandleGetConfig(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodGet, "/api/config?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
@@ -397,7 +397,7 @@ func TestHandleGetConfig(t *testing.T) {
 func TestHandleTestConfig(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	payload, _ := json.Marshal(testConfigRequest{Model: "gpt-4", BaseURL: "https://api.openai.com/v1"})
-	req := httptest.NewRequest(http.MethodPost, "/api/config/test?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/config/test", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -421,7 +421,7 @@ func TestHandleSaveModelConfig(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	payload, _ := json.Marshal(saveModelRequest{Type: "default", Model: "gpt-4", BaseURL: "https://api.openai.com/v1", APIKey: "sk-test"})
-	req := httptest.NewRequest(http.MethodPost, "/api/config/models?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/config/models", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -457,7 +457,7 @@ func TestHandleToggleSkill(t *testing.T) {
 	srv.skillsManifest = skills.RenderManifest(srv.skillReg)
 
 	// Toggle off (disable).
-	req := httptest.NewRequest(http.MethodPatch, "/api/skills/test-skill/toggle?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodPatch, "/api/skills/test-skill/toggle", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
@@ -481,7 +481,7 @@ func TestHandleToggleSkill(t *testing.T) {
 	}
 
 	// Toggle back on (enable).
-	req = httptest.NewRequest(http.MethodPatch, "/api/skills/test-skill/toggle?access_key="+srv.AccessKey(), nil)
+	req = httptest.NewRequest(http.MethodPatch, "/api/skills/test-skill/toggle", nil)
 	w = httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
@@ -502,7 +502,7 @@ func TestHandleToggleSkill(t *testing.T) {
 
 func TestHandleToggleSkill_NotFound(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodPatch, "/api/skills/nonexistent/toggle?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodPatch, "/api/skills/nonexistent/toggle", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusNotFound {
@@ -523,7 +523,7 @@ func TestHandleListSkills_RescansDisk(t *testing.T) {
 
 	hasSkill := func(name string) bool {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/api/skills?access_key="+srv.AccessKey(), nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/skills", nil)
 		w := httptest.NewRecorder()
 		serveLoopback(srv.mux, w, req)
 		if w.Code != http.StatusOK {
@@ -569,7 +569,7 @@ func TestHandleListSkills_RescansDisk(t *testing.T) {
 
 func TestHandleBenchmark_Success(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/test-session/benchmark?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/test-session/benchmark", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
@@ -600,7 +600,7 @@ func TestHandleBenchmark_Success(t *testing.T) {
 
 func TestHandleGetMemory_NotFound(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodGet, "/api/memories/nonexistent.md?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/memories/nonexistent.md", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusNotFound {
@@ -610,7 +610,7 @@ func TestHandleGetMemory_NotFound(t *testing.T) {
 
 func TestHandleVersionUpgrade(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodPost, "/api/version/upgrade?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/version/upgrade", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
@@ -638,7 +638,7 @@ func TestHandleUpdateSessionReasoningEffort(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(updateSessionReasoningEffortRequest{ReasoningEffort: "high"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/reasoning_effort?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/reasoning_effort", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -676,7 +676,7 @@ func TestHandleUpdateSessionWorkingDir(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(updateSessionWorkingDirRequest{WorkingDir: tmp})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -709,7 +709,7 @@ func TestHandleUpdateSessionModel_RawStringIsPerSession(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(updateSessionModelRequest{ModelID: "kimi-for-coding"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/model?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/model", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -767,7 +767,7 @@ func TestHandleUpdateSessionModel_EntryNameBindsSession(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(updateSessionModelRequest{ModelID: "kimi"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/model?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/model", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -1173,7 +1173,7 @@ drainDedup:
 	}
 
 	// Fetch history and find the same user message.
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {

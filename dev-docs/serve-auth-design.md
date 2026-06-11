@@ -97,7 +97,9 @@ predicate as rule 2. Browser dials need no URL change — the
 `SameSite=Strict` cookie rides the same-origin WS handshake automatically;
 the `access_key` query parameter exists for non-browser WS clients. When a
 dial is rejected, `ws.js` re-runs the auth probe instead of blind
-reconnecting, so an expired/cleared cookie funnels back into the key prompt.
+reconnecting, so an expired/cleared cookie funnels back into the key
+prompt; cancelling that prompt stops the retry loop rather than re-prompting
+every backoff interval.
 
 ### Key resolution
 
@@ -113,7 +115,10 @@ Precedence, first non-empty wins:
    logged-in browser on each restart. `server.New` therefore writes
    `~/.octo/config.yml` on a first start with no configured key; if the
    save fails, the generated key is kept for the process lifetime and a
-   warning is printed (a fresh key is generated on next start).
+   warning is printed (a fresh key is generated on next start). The save
+   rewrites the file from the normalized struct — hand-written comments are
+   lost and a legacy flat layout migrates to the `models:` list, the same
+   behavior every config-mutating handler already has.
 
 Generation happens on any start where no key is configured, regardless of
 bind address, so a later switch to a non-loopback bind doesn't change the
@@ -225,5 +230,6 @@ a separate-origin frontend authenticates with explicit headers.
   TLS guidance, reporting contact.
 - CHANGELOG: two breaking entries (default bind, non-loopback auth) plus
   the permissions.yml bind-gate retirement.
-- `docs/` serve page: document `-access-key`, `OCTO_ACCESS_KEY`,
-  `access_key`, and the exposure workflow.
+- README: serve quickstart shows the loopback default and the exposure
+  workflow (`-addr :8080` + printed bootstrap URL); the feature table
+  points at SECURITY.md.

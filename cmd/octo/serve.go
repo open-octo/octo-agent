@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -80,7 +81,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		// The bootstrap URL is the distribution channel — the web UI adopts
 		// the query parameter into a cookie and strips it from the URL.
 		fmt.Fprintln(stdout, "access key required for non-localhost clients")
-		fmt.Fprintf(stdout, "open: http://%s/?access_key=%s\n", displayURLHost(*addr), srv.AccessKey())
+		fmt.Fprintf(stdout, "open: http://%s/?access_key=%s\n", displayURLHost(*addr), url.QueryEscape(srv.AccessKey()))
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
