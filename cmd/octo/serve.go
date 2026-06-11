@@ -63,6 +63,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		NoChannel:   *noChannel,
 		NoMemory:    *noMemory,
 		AccessKey:   *accessKey,
+		UpdateCheck: true,
 	}
 
 	srv, err := server.New(cfg)

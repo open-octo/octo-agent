@@ -608,9 +608,48 @@ func TestHandleGetMemory_NotFound(t *testing.T) {
 	}
 }
 
-func TestHandleVersionUpgrade(t *testing.T) {
+func TestHandleVersionUpgrade_AcceptedAndConflict(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// While an upgrade runs, a second POST conflicts.
+	srv.upgradeRunning = true
 	req := httptest.NewRequest(http.MethodPost, "/api/version/upgrade", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 while running", w.Code)
+	}
+	srv.upgradeRunning = false
+
+	// A fresh POST is accepted; the background run (a dev test binary with
+	// no UpdateCheck network stub) refuses internally and resets the
+	// single-flight latch — poll for that so the goroutine's lifecycle is
+	// covered too. Broadcasts go through the nil-safe helper (no WS hub in
+	// mustServer).
+	req = httptest.NewRequest(http.MethodPost, "/api/version/upgrade", nil)
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", w.Code)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		srv.upgradeMu.Lock()
+		running := srv.upgradeRunning
+		srv.upgradeMu.Unlock()
+		if !running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("upgradeRunning never reset after background run")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestHandleVersion_NoUpdateCheck(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
@@ -620,8 +659,19 @@ func TestHandleVersionUpgrade(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["ok"] != false {
-		t.Fatalf("ok = %v, want false", body["ok"])
+	if body["version"] == "" || body["current"] == "" {
+		t.Errorf("version/current missing: %v", body)
+	}
+	// UpdateCheck off (the default for every test-constructed server):
+	// degrade to current==latest, no outbound call.
+	if body["latest"] != body["current"] {
+		t.Errorf("latest = %v, want current %v without UpdateCheck", body["latest"], body["current"])
+	}
+	if body["needs_update"] != false {
+		t.Errorf("needs_update = %v, want false", body["needs_update"])
+	}
+	if body["cli_command"] != "octo" {
+		t.Errorf("cli_command = %v, want the constant octo", body["cli_command"])
 	}
 }
 

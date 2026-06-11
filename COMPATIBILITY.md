@@ -74,7 +74,7 @@ a newer octo may not load in an older one.
 ### CLI
 
 - **Subcommands** (`serve`, `config`, `skills`, `memory`, `init`,
-  `completion`, `version`, `help`, and bare `octo` as chat) and their
+  `upgrade`, `completion`, `version`, `help`, and bare `octo` as chat) and their
   **documented flags** keep their names and semantics. New flags are
   additive; renames keep the old spelling working through the deprecation
   window.

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased — 0.19.0-dev]
 
 ### Added
+- **octo upgrades itself.** `octo upgrade` downloads the latest GitHub release, verifies its SHA-256 against the release's `checksums.txt`, and atomically swaps the binary in place (`--check` only compares; `--force` overrides the dev-build refusal). The web UI's version badge now works end to end: `/api/version` reports update availability (1h-cached check, enabled only under `octo serve`), the upgrade button streams progress over WS, and the existing restart button boots the new binary via the supervisor. Windows uses unique `.old.<ts>` aside names since the running image stays locked. (#630)
 - **`COMPATIBILITY.md` — the public-contract declaration ahead of 1.0.** Stable (SemVer-covered): config.yml / permissions.yml / mcp.json / channels.yml formats, the Claude-Code-compatible SKILL.md format, identity & memory files, a read guarantee on sessions and tasks, documented CLI commands + flags + exit codes (incl. serve's 42), and `OCTO_*` / vendor env vars. Best-effort: the embedded Web UI's HTTP API + WS events, default rules/skills content. Migration policy: auto-migrate on read, ≥1 minor deprecation window, removing read support = major. The policy is in force now; pre-1.0 minors may still break Stable surfaces with a CHANGELOG callout.
 
 ### Security
