@@ -22,7 +22,7 @@ func TestHandleRestart_Returns202AndMarksPending(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/restart", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 (body: %s)", w.Code, w.Body.String())
@@ -205,7 +205,7 @@ func TestHandleTurn_DrainingReturns503(t *testing.T) {
 	body := bytes.NewBufferString(`{"message":"hello"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/"+sess.ID+"/turn", body)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503 (body: %s)", w.Code, w.Body.String())

@@ -78,7 +78,7 @@ func doJSON(t *testing.T, srv *Server, method, path, body string) *httptest.Resp
 		req = httptest.NewRequest(method, path, nil)
 	}
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	return w
 }
 

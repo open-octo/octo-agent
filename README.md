@@ -97,8 +97,10 @@ octo init
 # List discovered skills
 octo --list-skills
 
-# Web server + dashboard (binds localhost by default)
-octo serve --addr 127.0.0.1:8080
+# Web server + dashboard (binds 127.0.0.1:8080 by default)
+octo serve
+octo serve -addr :8080   # expose on the LAN — non-localhost clients need the
+                         # access key; startup prints a ready-to-open URL
 
 # IM bridge (WeChat iLink): scan-to-login; channels run inside `octo serve`
 octo serve   # WeChat login: Channels panel in the web UI (scan QR)
@@ -191,7 +193,7 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 | MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, device-flow OAuth |
 | Memory | done | Persistent cross-session memory under `~/.octo/memories/`, auto extract/consolidate |
 | Sub-agents | done | `launch_agent` fan-out, async + resumable (`send_message`, `agent_status`, `kill_agent`) |
-| Web server | done | `octo serve` — REST + SSE, embedded dashboard UI with session browse/delete (bind localhost) |
+| Web server | done | `octo serve` — REST + SSE, embedded dashboard UI with session browse/delete (loopback bind by default; access-key auth for exposed binds, see SECURITY.md) |
 | IM bridge | done | runs inside `octo serve` — WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram adapters (web QR login, per-user sessions, slash commands) |
 
 ## Architecture

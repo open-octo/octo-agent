@@ -21,6 +21,7 @@ const WS = (() => {
   let _queue        = [];          // messages queued while disconnected
   let _handlers     = [];          // event handler callbacks
   let _subscribedId = null;        // currently subscribed session id
+  let _openedConn   = false;       // did the current connection reach open?
 
   const MAX_DELAY = 30_000;
 
@@ -41,6 +42,7 @@ const WS = (() => {
 
   function _onOpen() {
     _ready      = true;
+    _openedConn = true;
     _retryDelay = 1000;           // reset backoff on successful connect
 
     // Always request fresh session list on (re)connect
@@ -65,11 +67,23 @@ const WS = (() => {
   function _onClose(e) {
     _ready  = false;
     _socket = null;
+    const handshakeFailed = !_openedConn;
     console.warn(`[WS] closed — retry in ${_retryDelay}ms`);
     _dispatch({ type: "_ws_disconnected" });
 
-    _retryTimer = setTimeout(() => {
+    _retryTimer = setTimeout(async () => {
       _retryDelay = Math.min(_retryDelay * 2, MAX_DELAY);
+      // A dial that never reached open may have been rejected by auth
+      // (expired cookie, key changed server-side). Re-run the auth probe —
+      // it prompts on a real 401 and is a no-op when the server is just
+      // down — instead of blind-reconnecting into the same rejection. A
+      // cancelled prompt stops the retry loop entirely; reconnecting would
+      // re-prompt every backoff interval forever. Reload to try again.
+      if (handshakeFailed && typeof Auth !== "undefined" && Auth.recheck) {
+        let ok = true;
+        try { ok = await Auth.recheck(); } catch (err) { /* server down — retry */ }
+        if (ok === false) return;
+      }
       _connect();
     }, _retryDelay);
   }
@@ -86,6 +100,7 @@ const WS = (() => {
 
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const url = `${protocol}//${location.host}/ws`;
+    _openedConn = false;
     _socket = new WebSocket(url);
     _socket.onopen    = _onOpen;
     _socket.onmessage = _onMessage;

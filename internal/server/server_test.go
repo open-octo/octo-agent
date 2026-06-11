@@ -18,52 +18,14 @@ import (
 	"github.com/Leihb/octo-agent/internal/skills"
 )
 
-func TestValidateBindAddr_LocalhostAllowed(t *testing.T) {
-	cases := []string{
-		"127.0.0.1:8080",
-		"localhost:8080",
-		"[::1]:8080",
-		":8080",
-	}
-	for _, addr := range cases {
-		if err := validateBindAddr(addr); err != nil {
-			t.Errorf("validateBindAddr(%q) = %v, want nil", addr, err)
-		}
-	}
-}
-
-func TestValidateBindAddr_NonLocalhostRequiresPermissions(t *testing.T) {
-	// Point HOME to a temp dir without permissions.yml.
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp) // Windows uses USERPROFILE
-
-	addr := "0.0.0.0:8080"
-	if err := validateBindAddr(addr); err == nil {
-		t.Errorf("validateBindAddr(%q) = nil, want error", addr)
-	} else if !strings.Contains(err.Error(), "permissions.yml") {
-		t.Errorf("error should mention permissions.yml: %v", err)
-	}
-}
-
-func TestValidateBindAddr_NonLocalhostWithPermissions(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp) // Windows uses USERPROFILE
-
-	octoDir := filepath.Join(tmp, ".octo")
-	if err := os.MkdirAll(octoDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	permFile := filepath.Join(octoDir, "permissions.yml")
-	if err := os.WriteFile(permFile, []byte("terminal:\n  - allow: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	addr := "0.0.0.0:8080"
-	if err := validateBindAddr(addr); err != nil {
-		t.Errorf("validateBindAddr(%q) = %v, want nil", addr, err)
-	}
+// serveLoopback dispatches through the given handler as a local browser
+// would: loopback peer, local Host — so handler tests exercise their
+// endpoint, not the auth middleware. Auth-specific tests craft their own
+// RemoteAddr/Host (see auth_test.go).
+func serveLoopback(h http.Handler, w http.ResponseWriter, req *http.Request) {
+	req.RemoteAddr = "127.0.0.1:54321"
+	req.Host = "127.0.0.1:8080"
+	h.ServeHTTP(w, req)
 }
 
 func TestHandleHealth(t *testing.T) {
@@ -71,7 +33,7 @@ func TestHandleHealth(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -88,9 +50,9 @@ func TestHandleHealth(t *testing.T) {
 func TestHandleListSessions(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -107,9 +69,9 @@ func TestHandleListSessions(t *testing.T) {
 func TestHandleGetSession_NotFound(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions/nonexistent?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/nonexistent", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
@@ -129,9 +91,9 @@ func TestHandleDeleteSession(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+sess.ID+"?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+sess.ID, nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
@@ -159,10 +121,10 @@ func TestHandleDeleteSessions_Batch(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(deleteSessionsRequest{IDs: ids})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
@@ -187,10 +149,10 @@ func TestHandleDeleteSessions_Batch(t *testing.T) {
 func TestHandleDeleteSessions_EmptyIDs(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete?access_key="+srv.AccessKey(), bytes.NewReader([]byte(`{"ids":[]}`)))
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete", bytes.NewReader([]byte(`{"ids":[]}`)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
@@ -201,10 +163,10 @@ func TestHandleCreateChat_MissingMessage(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	body := bytes.NewReader([]byte(`{}`))
-	req := httptest.NewRequest(http.MethodPost, "/api/chat?access_key="+srv.AccessKey(), body)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
@@ -215,10 +177,10 @@ func TestHandleTurn_MissingSession(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	body := bytes.NewReader([]byte(`{"message":"hello"}`))
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/nonexistent/turn?access_key="+srv.AccessKey(), body)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/nonexistent/turn", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
@@ -230,7 +192,7 @@ func TestStaticHandler_IndexFallback(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
+	serveLoopback(srv.http.Handler, w, req)
 
 	// The static handler must serve the SPA entrypoint at "/" with a 200 and
 	// HTML body. It must never reply with a redirect: http.FileServer's
@@ -252,7 +214,7 @@ func TestStaticHandler_APIFallback(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/unknown", nil)
 	w := httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
+	serveLoopback(srv.http.Handler, w, req)
 
 	// The mux handles API 404s; accept 404 Not Found.
 	if w.Code != http.StatusNotFound {
@@ -266,7 +228,7 @@ func TestCORS(t *testing.T) {
 	req := httptest.NewRequest(http.MethodOptions, "/api/health", nil)
 	req.Header.Set("Origin", "http://localhost:3000")
 	w := httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
+	serveLoopback(srv.http.Handler, w, req)
 
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", w.Code)
@@ -282,11 +244,18 @@ func TestCORS_DisallowedOrigin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	req.Header.Set("Origin", "http://evil.com")
 	w := httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
+	serveLoopback(srv.http.Handler, w, req)
 
 	if w.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatal("expected no CORS header for disallowed origin")
 	}
+}
+
+// mustAccessKey resolves the test server's key without ever persisting —
+// generation is in-memory only here; only server.New writes config.yml.
+func mustAccessKey(cfg Config) string {
+	key, _ := resolveAccessKey(cfg.AccessKey, config.Config{})
+	return key
 }
 
 // mustServer creates a Server for testing. It skips tests that need a real
@@ -306,7 +275,7 @@ func mustServer(t *testing.T, cfg Config) *Server {
 		envCtx:         "",
 		turnLocks:      map[string]*sync.Mutex{},
 		sender:         &stubSender{},
-		accessKey:      resolveAccessKey(cfg.AccessKey, config.Config{}),
+		accessKey:      mustAccessKey(cfg),
 		sessionAgents:  make(map[string]*agent.Agent),
 		steerQueues:    make(map[string][]agent.InboxItem),
 	}
@@ -375,9 +344,9 @@ func (s *recordingSender) StreamMessagesWithTools(_ context.Context, _, _ string
 
 func TestHandleOnboardStatus(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodGet, "/api/onboard/status?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/onboard/status", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -392,9 +361,9 @@ func TestHandleOnboardStatus(t *testing.T) {
 
 func TestHandleListProviders(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodGet, "/api/providers?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/providers", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -410,9 +379,9 @@ func TestHandleListProviders(t *testing.T) {
 
 func TestHandleGetConfig(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodGet, "/api/config?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -428,10 +397,10 @@ func TestHandleGetConfig(t *testing.T) {
 func TestHandleTestConfig(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	payload, _ := json.Marshal(testConfigRequest{Model: "gpt-4", BaseURL: "https://api.openai.com/v1"})
-	req := httptest.NewRequest(http.MethodPost, "/api/config/test?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/config/test", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
@@ -452,10 +421,10 @@ func TestHandleSaveModelConfig(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	payload, _ := json.Marshal(saveModelRequest{Type: "default", Model: "gpt-4", BaseURL: "https://api.openai.com/v1", APIKey: "sk-test"})
-	req := httptest.NewRequest(http.MethodPost, "/api/config/models?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/config/models", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
@@ -488,9 +457,9 @@ func TestHandleToggleSkill(t *testing.T) {
 	srv.skillsManifest = skills.RenderManifest(srv.skillReg)
 
 	// Toggle off (disable).
-	req := httptest.NewRequest(http.MethodPatch, "/api/skills/test-skill/toggle?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodPatch, "/api/skills/test-skill/toggle", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -512,9 +481,9 @@ func TestHandleToggleSkill(t *testing.T) {
 	}
 
 	// Toggle back on (enable).
-	req = httptest.NewRequest(http.MethodPatch, "/api/skills/test-skill/toggle?access_key="+srv.AccessKey(), nil)
+	req = httptest.NewRequest(http.MethodPatch, "/api/skills/test-skill/toggle", nil)
 	w = httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -533,9 +502,9 @@ func TestHandleToggleSkill(t *testing.T) {
 
 func TestHandleToggleSkill_NotFound(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodPatch, "/api/skills/nonexistent/toggle?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodPatch, "/api/skills/nonexistent/toggle", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
 	}
@@ -554,9 +523,9 @@ func TestHandleListSkills_RescansDisk(t *testing.T) {
 
 	hasSkill := func(name string) bool {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/api/skills?access_key="+srv.AccessKey(), nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/skills", nil)
 		w := httptest.NewRecorder()
-		srv.mux.ServeHTTP(w, req)
+		serveLoopback(srv.mux, w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 		}
@@ -600,9 +569,9 @@ func TestHandleListSkills_RescansDisk(t *testing.T) {
 
 func TestHandleBenchmark_Success(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/test-session/benchmark?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/test-session/benchmark", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
@@ -631,9 +600,9 @@ func TestHandleBenchmark_Success(t *testing.T) {
 
 func TestHandleGetMemory_NotFound(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodGet, "/api/memories/nonexistent.md?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/memories/nonexistent.md", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
 	}
@@ -641,9 +610,9 @@ func TestHandleGetMemory_NotFound(t *testing.T) {
 
 func TestHandleVersionUpgrade(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodPost, "/api/version/upgrade?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/version/upgrade", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -669,10 +638,10 @@ func TestHandleUpdateSessionReasoningEffort(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(updateSessionReasoningEffortRequest{ReasoningEffort: "high"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/reasoning_effort?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/reasoning_effort", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
@@ -707,10 +676,10 @@ func TestHandleUpdateSessionWorkingDir(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(updateSessionWorkingDirRequest{WorkingDir: tmp})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
@@ -740,10 +709,10 @@ func TestHandleUpdateSessionModel_RawStringIsPerSession(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(updateSessionModelRequest{ModelID: "kimi-for-coding"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/model?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/model", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
@@ -798,10 +767,10 @@ func TestHandleUpdateSessionModel_EntryNameBindsSession(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	payload, _ := json.Marshal(updateSessionModelRequest{ModelID: "kimi"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/model?access_key="+srv.AccessKey(), bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/model", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
@@ -870,7 +839,7 @@ func TestHandleGetSessionMessages_IncludesToolCalls(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
@@ -923,7 +892,7 @@ func TestHandleGetSessionMessages_StripsSystemReminders(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
@@ -985,7 +954,7 @@ func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
@@ -1204,9 +1173,9 @@ drainDedup:
 	}
 
 	// Fetch history and find the same user message.
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages?access_key="+srv.AccessKey(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("messages status = %d; body=%s", w.Code, w.Body.String())
 	}
@@ -1339,7 +1308,7 @@ func TestHandleUpdateSession_Rename(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+id, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		srv.mux.ServeHTTP(w, req)
+		serveLoopback(srv.mux, w, req)
 		return w
 	}
 

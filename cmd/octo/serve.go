@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,7 +20,8 @@ import (
 func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	addr := fs.String("addr", ":8080", "Bind address (e.g. :8080, 127.0.0.1:8080)")
+	addr := fs.String("addr", "127.0.0.1:8080", "Bind address (e.g. 127.0.0.1:8080; :8080 to expose on all interfaces)")
+	accessKey := fs.String("access-key", "", "Access key for non-localhost clients (default: from OCTO_ACCESS_KEY / config.yml, else auto-generated and persisted)")
 	provider := fs.String("provider", "", "Provider: anthropic | openai")
 	model := fs.String("model", "", "Model name")
 	system := fs.String("system", "", "System prompt")
@@ -59,6 +62,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		CORSOrigins: corsOrigins,
 		NoChannel:   *noChannel,
 		NoMemory:    *noMemory,
+		AccessKey:   *accessKey,
 	}
 
 	srv, err := server.New(cfg)
@@ -72,6 +76,13 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		host = "localhost" + host
 	}
 	fmt.Fprintf(stdout, "octo server listening on http://%s\n", host)
+	if !bindIsLoopback(*addr) {
+		// Exposed bind: non-loopback clients must present the access key.
+		// The bootstrap URL is the distribution channel — the web UI adopts
+		// the query parameter into a cookie and strips it from the URL.
+		fmt.Fprintln(stdout, "access key required for non-localhost clients")
+		fmt.Fprintf(stdout, "open: http://%s/?access_key=%s\n", displayURLHost(*addr), url.QueryEscape(srv.AccessKey()))
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -119,4 +130,57 @@ func serveExitCode(err error) int {
 
 func splitComma(s string) []string {
 	return strings.Split(s, ",")
+}
+
+// bindIsLoopback reports whether a bind address only accepts loopback
+// clients. An empty host (":8080") and the wildcard addresses listen on all
+// interfaces, so they are not loopback.
+func bindIsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// displayURLHost picks the host clients should use to reach the server: a
+// specific bind host as-is; for a wildcard bind, the machine's primary
+// non-loopback IPv4, falling back to a placeholder.
+func displayURLHost(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	if host != "" && host != "0.0.0.0" && host != "::" {
+		return net.JoinHostPort(host, port)
+	}
+	if ip := primaryLANIP(); ip != "" {
+		return net.JoinHostPort(ip, port)
+	}
+	return "<host>:" + port
+}
+
+// primaryLANIP returns the first non-loopback IPv4 interface address, or ""
+// when none is up.
+func primaryLANIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipn.IP
+		if ip.IsLoopback() || ip.To4() == nil || !ip.IsGlobalUnicast() {
+			continue
+		}
+		return ip.String()
+	}
+	return ""
 }
