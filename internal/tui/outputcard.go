@@ -16,7 +16,7 @@ var (
 
 // RenderOutputCard renders a tool's textual output as a card: a header row
 // (● verb(target)) above the output, each line behind a "│" gutter, capped to
-// maxLines (<=0 = no cap) with a "└ N more lines" marker for the remainder.
+// maxLines (<=0 = no cap) with an "… +N lines" marker for the remainder.
 // isErr tints the bullet red. Empty output renders "(no output)". The trailing
 // newline is omitted so callers control spacing (mirrors Card.Render).
 // When language is non-empty, each line is syntax-highlighted with Chroma.
@@ -49,7 +49,22 @@ func RenderOutputCard(verb, target, output string, maxLines int, isErr bool, lan
 		b.WriteString("\n  " + outGutter.String() + " " + body)
 	}
 	if extra > 0 {
-		b.WriteString("\n  " + outMore.Render("└ "+pluralise(extra, "more line")))
+		b.WriteString("\n  " + outMore.Render("… +"+pluralise(extra, "line")))
 	}
 	return b.String()
+}
+
+// RenderToolStatus renders a tool call that has no body card as a single
+// header-style line — "● name(target)" — so card and non-card tools share one
+// visual language. isErr tints the bullet red and appends errText dimmed.
+func RenderToolStatus(name, target string, isErr bool, errText string) string {
+	bullet := outBullet
+	if isErr {
+		bullet = outBulletErr
+	}
+	s := fmt.Sprintf("%s %s", bullet, headerVerb.Render(fmt.Sprintf("%s(%s)", name, target)))
+	if isErr && errText != "" {
+		s += " " + outMore.Render("— "+errText)
+	}
+	return s
 }

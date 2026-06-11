@@ -20,8 +20,8 @@ func TestRenderOutputCard_CapsWithMoreMarker(t *testing.T) {
 		lines = append(lines, "line")
 	}
 	got := RenderOutputCard("Search", "foo", strings.Join(lines, "\n"), 5, false, "")
-	if !strings.Contains(got, "15 more lines") {
-		t.Errorf("expected '15 more lines' marker; got:\n%s", got)
+	if !strings.Contains(got, "… +15 lines") {
+		t.Errorf("expected '… +15 lines' marker; got:\n%s", got)
 	}
 	// Exactly 5 body lines shown (count the gutter glyph occurrences).
 	if n := strings.Count(got, "│"); n != 5 {
@@ -38,8 +38,19 @@ func TestRenderOutputCard_EmptyOutput(t *testing.T) {
 
 func TestRenderOutputCard_SingularMoreLine(t *testing.T) {
 	got := RenderOutputCard("Run", "x", "a\nb\nc", 2, false, "")
-	if !strings.Contains(got, "1 more line") || strings.Contains(got, "1 more lines") {
-		t.Errorf("expected singular '1 more line'; got:\n%s", got)
+	if !strings.Contains(got, "… +1 line") || strings.Contains(got, "1 lines") {
+		t.Errorf("expected singular '… +1 line'; got:\n%s", got)
+	}
+}
+
+func TestRenderToolStatus(t *testing.T) {
+	got := RenderToolStatus("mcp_thing", "q=x", false, "")
+	if !strings.Contains(got, "mcp_thing(q=x)") {
+		t.Errorf("missing header in:\n%s", got)
+	}
+	gotErr := RenderToolStatus("mcp_thing", "q=x", true, "boom")
+	if !strings.Contains(gotErr, "— boom") {
+		t.Errorf("error status should append the error; got:\n%s", gotErr)
 	}
 }
 

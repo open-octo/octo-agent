@@ -52,14 +52,17 @@ func TestTUI_RunningToolIndicator(t *testing.T) {
 	}
 }
 
-func TestTUI_NonCardToolNoIndicator(t *testing.T) {
+func TestTUI_NonCardToolIndicator(t *testing.T) {
 	m := newTestModel()
 	m.handleEvent(agent.AgentEvent{
 		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "sub_agent",
 		Input: map[string]any{},
 	})
-	if m.running != nil {
-		t.Error("non-card tools commit a started line; they must not set the live indicator")
+	if m.running == nil || m.running.verb != "sub_agent" {
+		t.Errorf("non-card tools suppress their started line and show the live indicator instead; got %+v", m.running)
+	}
+	if len(m.printlnBuf) != 0 {
+		t.Errorf("started must not commit a scrollback line; got %v", m.printlnBuf)
 	}
 }
 

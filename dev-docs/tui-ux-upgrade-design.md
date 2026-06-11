@@ -28,7 +28,7 @@
   │  ● Run(go test ./...)  ← 输出预览卡片                              │
   │  完成。                                                            │
   ├─ View() — 钉在底部，不随内容滚动 ──────────────────────────────────┤
-  │  ⠹ Thinking (2.3s)                    ← live 区                    │
+  │  ⠹ Thinking… (2.3s · ↑ ~1.2k tokens)  ← live 区                    │
   │  ┌ queue (2) ──────────────┐          ← 边框面板                   │
   │  │ 1. add error handling    │                                      │
   │  │ 2. write tests           │                                      │
@@ -77,10 +77,22 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 | AgentEvent | 处理 |
 |---|---|
-| `EventTextDelta` | 累积到 `m.partial`；block 边界经 glamour 渲染后 `m.println()` |
-| `EventToolStarted` | 卡片工具：`m.running` 设为 live spinner；非卡片：`m.println("↳ tool: input")` |
-| `EventToolProgress` | 卡片工具：忽略；非卡片：`m.println("│ chunk")` |
-| `EventToolDone/Error` | 清除 `m.running`；卡片：`renderToolCard()` → `m.println()`；非卡片：`m.println("↳ tool ✓/✗")` |
+| `EventThinkingDelta` | 不进 scrollback；只累积 `turnOutChars`，喂给 live 区 `thinkingLine` 的「↑ ~N tokens」读数 |
+| `EventTextDelta` | 累积到 `m.partial`；block 边界经 glamour 渲染后 `m.printlnBlock()` |
+| `EventToolStarted` | 所有工具：`m.running` 设为 live spinner（不提交 started 行）；`--plain` 保留 `↳ tool: input` 行 |
+| `EventToolProgress` | 忽略（live spinner 已示活动）；`--plain` 保留 `│ chunk` 行 |
+| `EventToolDone/Error` | 清除 `m.running`；卡片：`renderToolCard()`；非卡片：`tui.RenderToolStatus` 单行 `● tool(input)`；`--plain` 保留 `↳ tool ✓/✗` |
+
+### 降噪规则（对标 Claude Code）
+
+- **思考过程不落盘**：reasoning trace 不进 scrollback，等待期的活动行显示
+  `⠹ Thinking… (12s · ↑ ~3.2k tokens)`（token 数 = 本回合输出字符 / 4 估算）。
+- **块间空行**：所有 block 级内容（用户 echo、markdown block、卡片、通知）经
+  `printlnBlock()` 提交，块与块之间恰好一个空行；`--plain` 保持紧凑行布局。
+- **卡片行数上限**：输出卡 `outputCardMaxLines = 4`；diff 卡每侧（删除/新增）
+  `diffCardMaxRows = 6`；折叠标记统一为 `… +N lines`。
+- **cache 行仅 verbose**：`ⓘ cache: …` 回合页脚只在 `--verbose` 下输出，默认
+  靠状态栏 ctx% 感知。
 
 ---
 

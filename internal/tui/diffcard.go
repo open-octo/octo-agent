@@ -61,6 +61,16 @@ func (c Card) Render() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// diffCardMaxRows caps each side (removed, added) of an edit_file diff card;
+// the remainder collapses into an "… +N lines" row so a large edit doesn't
+// fill the screen. Per side rather than total, so a big rewrite still shows
+// the head of both the old and the new text.
+const diffCardMaxRows = 6
+
+// ellipsisKind marks a Line as a collapsed-rows "… +N lines" marker rather
+// than diff content; renderRow draws it dimmed, with no wash or highlighting.
+const ellipsisKind = '…'
+
 // RenderEditCard builds and renders a card for an `edit_file` invocation.
 // It reads filePath to compute the line number where newString lands; if
 // the read fails (file moved, perms, etc.) the card still renders, just
@@ -77,20 +87,8 @@ func RenderEditCard(filePath, oldString, newString string) string {
 	}
 
 	lines := make([]Line, 0, removed+added)
-	for i, t := range splitLinesNoTrail(oldString) {
-		num := 0
-		if startLine > 0 {
-			num = startLine + i
-		}
-		lines = append(lines, Line{Num: num, Kind: '-', Text: t})
-	}
-	for i, t := range splitLinesNoTrail(newString) {
-		num := 0
-		if startLine > 0 {
-			num = startLine + i
-		}
-		lines = append(lines, Line{Num: num, Kind: '+', Text: t})
-	}
+	lines = appendDiffRows(lines, splitLinesNoTrail(oldString), '-', startLine)
+	lines = appendDiffRows(lines, splitLinesNoTrail(newString), '+', startLine)
 
 	c := Card{
 		Verb:     "Update",
@@ -101,6 +99,27 @@ func RenderEditCard(filePath, oldString, newString string) string {
 		Language: GuessLanguage(filePath),
 	}
 	return c.Render()
+}
+
+// appendDiffRows appends one side of the diff, capped at diffCardMaxRows with
+// an ellipsis row for the remainder. Rows are numbered from startLine (0 =
+// no number column).
+func appendDiffRows(lines []Line, src []string, kind rune, startLine int) []Line {
+	shown, extra := src, 0
+	if len(src) > diffCardMaxRows {
+		shown, extra = src[:diffCardMaxRows], len(src)-diffCardMaxRows
+	}
+	for i, t := range shown {
+		num := 0
+		if startLine > 0 {
+			num = startLine + i
+		}
+		lines = append(lines, Line{Num: num, Kind: kind, Text: t})
+	}
+	if extra > 0 {
+		lines = append(lines, Line{Kind: ellipsisKind, Text: "… +" + pluralise(extra, "line")})
+	}
+	return lines
 }
 
 // ─── internals ────────────────────────────────────────────────────────────
@@ -172,6 +191,9 @@ func renderSummary(added, removed int) string {
 }
 
 func renderRow(ln Line, language string, dark bool) string {
+	if ln.Kind == ellipsisKind {
+		return "  " + outMore.Render(ln.Text)
+	}
 	noCol := renderLineNo(ln)
 	mark := renderMark(ln.Kind)
 	body := expandTabs(ln.Text)

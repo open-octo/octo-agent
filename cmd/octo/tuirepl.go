@@ -284,13 +284,12 @@ type tuiModel struct {
 	// flushed to the terminal scrollback via tea.Println.
 	partial strings.Builder
 
-	// thinkPartial holds the in-progress reasoning trace not yet committed to
-	// the scrollback. Complete lines are flushed dimmed; the trailing partial
-	// line is flushed when the answer (or a tool event) begins.
-	thinkPartial strings.Builder
-	// thinkingStarted marks that this turn's reasoning trace has begun, so the
-	// 💭 prefix is emitted once rather than per line. Reset each turn.
-	thinkingStarted bool
+	// turnOutChars counts this turn's streamed output characters (reasoning +
+	// answer text + tool arguments). The reasoning trace itself never lands in
+	// the scrollback — over a long agentic turn it would dominate the transcript
+	// — the count just feeds the activity line's "↑ ~N tokens" readout so the
+	// wait still reads as progress (Claude Code style).
+	turnOutChars int
 
 	// toolInput caches each tool call's input from EventToolStarted so the
 	// matching EventToolDone can render a card (tool_result events don't carry
@@ -355,6 +354,10 @@ type tuiModel struct {
 	// Update cycle. In inline mode, committed output goes to the terminal
 	// scrollback above the live View() area — no alt-screen buffer needed.
 	printlnBuf []string
+	// lastPrintBlank tracks whether the last queued scrollback line was blank,
+	// so printlnBlock can separate block-level items with exactly one blank
+	// line instead of stacking them edge-to-edge.
+	lastPrintBlank bool
 
 	// historyReplayed guards the one-time replay of a resumed session's prior
 	// turns into the scrollback. Done on the first WindowSizeMsg so markdown
@@ -529,8 +532,7 @@ func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
 	m.spinnerFrame = 0
 	m.running = nil
 	m.partial.Reset()
-	m.thinkPartial.Reset()
-	m.thinkingStarted = false
+	m.turnOutChars = 0
 	m.toolStreamName, m.toolStreamID, m.toolStreamBytes = "", "", 0
 	m.clearSuggestion() // a new turn supersedes any pending follow-up
 	ctx, cancel := context.WithCancel(context.Background())
@@ -566,7 +568,7 @@ func (m *tuiModel) commitEcho() {
 	if m.echoPending == "" {
 		return
 	}
-	m.println(m.echoPending)
+	m.printlnBlock(m.echoPending)
 	m.echoPending = ""
 	m.echoRestore = ""
 }
@@ -609,7 +611,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.flushPrints()
 
 	case noticeMsg:
-		m.println(noticeStyle.Render(msg.text))
+		m.printlnBlock(noticeStyle.Render(msg.text))
 		return m, m.flushPrints()
 
 	case mcpReadyMsg:
@@ -624,7 +626,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.tools = tools.DefaultToolsFor(m.cfg.a.Model)
 			}
 			if !m.cfg.verbosity.quiet() {
-				m.println(noticeStyle.Render(fmt.Sprintf("● MCP ready — %d server(s) connected", msg.reg.Len())))
+				m.printlnBlock(noticeStyle.Render(fmt.Sprintf("● MCP ready — %d server(s) connected", msg.reg.Len())))
 			}
 		}
 		return m, m.flushPrints()
@@ -633,7 +635,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Print a concise, Claude-Code-style scrollback notice so the user
 		// sees the completion even when the model-facing <system-reminder>
 		// is folded into a later turn.
-		notice := bgDoneStyle.Render(fmt.Sprintf("● Background process %s (`%s`) %s", msg.e.ID, msg.e.Command, msg.e.Status))
+		m.printlnBlock(bgDoneStyle.Render(fmt.Sprintf("● Background process %s (`%s`) %s", msg.e.ID, msg.e.Command, msg.e.Status)))
 		// Idle auto-turn: if no turn is running and nothing is queued, drain the
 		// inbox (which holds the full <system-reminder> notice) and start a
 		// turn so the model sees the completion immediately — matching the plain
@@ -641,10 +643,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.turnRunning && len(m.queue) == 0 {
 			if items := m.a.Inbox.Drain(); len(items) > 0 {
 				s := strings.Join(agent.Texts(items), "\n\n")
-				return m, tea.Sequence(tea.Println(notice), m.startTurnEcho(s, ""))
+				return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(s, ""))
 			}
 		}
-		return m, tea.Sequence(tea.Println(notice), m.flushPrints())
+		return m, m.flushPrints()
 
 	case subAgentEventMsg:
 		m.handleSubAgentEvent(msg.ev)
@@ -695,12 +697,12 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Flush any trailing assistant block (markdown-rendered); then render
 		// the cache/error footer.
 		if s, ok := m.flushTextString(); ok {
-			m.println(s)
+			m.printlnBlock(s)
 		}
 		if msg.err != nil && msg.err != context.Canceled {
-			m.println(errorStyle.Render("error: " + msg.err.Error()))
+			m.printlnBlock(errorStyle.Render("error: " + msg.err.Error()))
 		} else if c := cacheLine(m.cfg.verbosity, msg.reply); c != "" {
-			m.println(c)
+			m.printlnBlock(c)
 		}
 		// turnEndedMsg only marks the end of the agent loop's output; the turn
 		// goroutine is still alive until turnFinishedMsg. Do NOT reset turnRunning
@@ -900,14 +902,11 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 	// Promote the deferred user echo above this turn's first output so the
 	// transcript order (your message → reply) is preserved.
 	m.commitEcho()
-	// The reasoning trace precedes the answer; flush any buffered thinking
-	// before rendering the first non-thinking output of the turn.
-	if ev.Kind != agent.EventThinkingDelta {
-		m.flushThinking()
-	}
 	switch ev.Kind {
 	case agent.EventThinkingDelta:
-		m.appendThinking(ev.Text)
+		// The reasoning trace stays out of the scrollback; only its size feeds
+		// the live activity line's token readout.
+		m.turnOutChars += len(ev.Text)
 		return
 
 	case agent.EventToolInputDelta:
@@ -920,9 +919,11 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		}
 		m.toolStreamName = ev.ToolName
 		m.toolStreamBytes += len(ev.InputDelta)
+		m.turnOutChars += len(ev.InputDelta)
 		return
 
 	case agent.EventTextDelta:
+		m.turnOutChars += len(ev.Text)
 		m.appendText(ev.Text)
 		return
 
@@ -934,27 +935,30 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 			m.toolInput = map[string]map[string]any{}
 		}
 		m.toolInput[ev.ToolID] = ev.Input
-		// Card tools render their whole story in the done card; suppress the
-		// started line and instead show a live spinner indicator in the View
-		// region (animated by the ticker) until the done event commits the card.
-		if m.rendersCard(ev.ToolName) {
-			m.running = &runningTool{
-				verb:   cardVerbFor(ev.ToolName),
-				target: cardTargetFor(ev.ToolName, ev.Input),
-				start:  time.Now(),
-			}
+		// The plain path keeps the dense one-liner transcript (started line now,
+		// ✓/✗ later) — it matches the headless renderer.
+		if m.cfg.plain {
+			m.commitToolLine(fmt.Sprintf("↳ %s: %s", ev.ToolName, summariseInput(ev.Input)))
 			return
 		}
-		m.commitToolLine(fmt.Sprintf("↳ %s: %s", ev.ToolName, summariseInput(ev.Input)))
+		// Rich TUI: every tool suppresses its started line and shows a live
+		// spinner indicator in the View region (animated by the ticker) until
+		// the done event commits the card (card tools) or status line (others).
+		verb, target := cardVerbFor(ev.ToolName), ""
+		if verb == "" {
+			verb, target = ev.ToolName, summariseInput(ev.Input)
+		} else {
+			target = cardTargetFor(ev.ToolName, ev.Input)
+		}
+		m.running = &runningTool{verb: verb, target: target, start: time.Now()}
 		return
 
 	case agent.EventToolProgress:
-		// Card tools defer all output to the done card; dropping progress avoids
-		// noise above the card.
-		if m.rendersCard(ev.ToolName) {
-			return
+		// Rich TUI: progress is deferred to the done card / status line so the
+		// transcript stays quiet; the live spinner already shows activity.
+		if m.cfg.plain {
+			m.commitToolLine("│ " + ev.Chunk)
 		}
-		m.commitToolLine("│ " + ev.Chunk)
 		return
 
 	case agent.EventToolDone:
@@ -965,7 +969,11 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 			m.commitToolLine(renderToolCard(ev.ToolName, input, ev.Output, false))
 			return
 		}
-		m.commitToolLine(fmt.Sprintf("↳ %s ✓", ev.ToolName))
+		if m.cfg.plain {
+			m.commitToolLine(fmt.Sprintf("↳ %s ✓", ev.ToolName))
+			return
+		}
+		m.commitToolLine(tui.RenderToolStatus(ev.ToolName, summariseInput(input), false, ""))
 		return
 
 	case agent.EventToolError:
@@ -976,7 +984,11 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 			m.commitToolLine(renderToolCard(ev.ToolName, input, firstNonEmpty(ev.Output, ev.Err), true))
 			return
 		}
-		m.commitToolLine(toolErrStyle.Render(fmt.Sprintf("↳ %s ✗ — %s", ev.ToolName, truncate1Line(ev.Err))))
+		if m.cfg.plain {
+			m.commitToolLine(toolErrStyle.Render(fmt.Sprintf("↳ %s ✗ — %s", ev.ToolName, truncate1Line(ev.Err))))
+			return
+		}
+		m.commitToolLine(tui.RenderToolStatus(ev.ToolName, summariseInput(input), true, truncate1Line(ev.Err)))
 		return
 
 	case agent.EventCompactStarted:
@@ -1003,7 +1015,7 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		// Only announce a real reduction; a no-op (summary failed / unchanged)
 		// clears the indicator silently rather than implying work was done.
 		if c := ev.Compact; c != nil && c.AfterTokens > 0 && c.AfterTokens < c.BeforeTokens {
-			m.println(noticeStyle.Render(fmt.Sprintf(
+			m.printlnBlock(noticeStyle.Render(fmt.Sprintf(
 				"✦ compacted context · folded %d message(s) · ~%s → ~%s tokens",
 				c.FoldedMsgs, humanTokens(c.BeforeTokens), humanTokens(c.AfterTokens))))
 		}
@@ -1017,13 +1029,13 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		// paragraph stays above the steer line (e.g. when a steer lands right
 		// after the model finished a text answer and the turn loops to answer it).
 		if s, ok := m.flushTextString(); ok {
-			m.println(s)
+			m.printlnBlock(s)
 		}
 		// Skip <system-reminder> blocks (model-facing context) and empty text
 		// (an image-only steer carries its payload in blocks, not Messages).
 		for _, s := range ev.Messages {
 			if s != "" && !strings.HasPrefix(s, "<system-reminder>") {
-				m.println(userEchoStyle.Render("> ") + s)
+				m.printlnBlock(userEchoStyle.Render("> ") + s)
 			}
 		}
 		// pendingSteer is FIFO and mirrors the inbox, so the drained messages
@@ -1043,53 +1055,6 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 // plain/headless path; otherwise card tools (cardVerbFor) get a card.
 func (m *tuiModel) rendersCard(toolName string) bool {
 	return !m.cfg.plain && cardVerbFor(toolName) != ""
-}
-
-// appendText buffers a streamed text delta into m.partial.  The partial is
-// rendered live in View() so the user sees tokens arrive in real time.
-// When a complete block boundary is found (blank line outside a code fence),
-// that prefix is promoted to the scrollback via println/flushPrints so it
-// becomes part of the terminal's native scrollback history.
-// appendThinking buffers a streamed reasoning-trace delta and commits each
-// completed line to the scrollback, dimmed, so the trace stays in the
-// transcript above the answer. The trailing partial line is held until
-// flushThinking (called when the answer or a tool event begins).
-func (m *tuiModel) appendThinking(text string) {
-	m.thinkPartial.WriteString(text)
-	buf := m.thinkPartial.String()
-	for {
-		idx := strings.IndexByte(buf, '\n')
-		if idx < 0 {
-			break
-		}
-		m.println(m.styleThinking(buf[:idx]))
-		buf = buf[idx+1:]
-	}
-	m.thinkPartial.Reset()
-	m.thinkPartial.WriteString(buf)
-}
-
-// flushThinking commits any buffered trailing reasoning line and ends the
-// current reasoning block. A turn's agentic loop produces a fresh block of
-// reasoning before each model round-trip (between tool calls); resetting
-// thinkingStarted here means every block gets its own 💭 marker, matching the
-// plain/headless renderer.
-func (m *tuiModel) flushThinking() {
-	if m.thinkPartial.Len() > 0 {
-		m.println(m.styleThinking(m.thinkPartial.String()))
-		m.thinkPartial.Reset()
-	}
-	m.thinkingStarted = false
-}
-
-// styleThinking renders one reasoning line dimmed, prefixing 💭 on the first
-// line of each reasoning block so the block reads as one unit.
-func (m *tuiModel) styleThinking(line string) string {
-	if !m.thinkingStarted {
-		m.thinkingStarted = true
-		return thinkingStyle.Render("💭 " + line)
-	}
-	return thinkingStyle.Render("   " + line)
 }
 
 // replayHistoryLines renders a resumed session's prior turns into scrollback
@@ -1185,6 +1150,11 @@ func replayToolLine(use, result agent.ContentBlock) string {
 	return label + " ✓"
 }
 
+// appendText buffers a streamed text delta into m.partial. The partial is
+// rendered live in View() so the user sees tokens arrive in real time. When a
+// complete block boundary is found (blank line outside a code fence), that
+// prefix is promoted to the scrollback via printlnBlock/flushPrints so it
+// becomes part of the terminal's native scrollback history.
 func (m *tuiModel) appendText(text string) {
 	m.partial.WriteString(text)
 
@@ -1207,7 +1177,7 @@ func (m *tuiModel) appendText(text string) {
 	}
 	m.partial.Reset()
 	m.partial.WriteString(rest)
-	m.println(m.md.render(commit, m.width))
+	m.printlnBlock(m.md.render(commit, m.width))
 }
 
 // flushText commits whatever assistant text is still buffered (the final or
@@ -1218,7 +1188,7 @@ func (m *tuiModel) flushText() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	m.println(s)
+	m.printlnBlock(s)
 	return nil
 }
 
@@ -1241,9 +1211,9 @@ func (m *tuiModel) flushTextString() (string, bool) {
 // the tool line/card.
 func (m *tuiModel) commitToolLine(line string) {
 	if s, ok := m.flushTextString(); ok {
-		m.println(s)
+		m.printlnBlock(s)
 	}
-	m.println(line)
+	m.printlnBlock(line)
 }
 
 // println queues a line for output to the terminal scrollback via
@@ -1251,6 +1221,21 @@ func (m *tuiModel) commitToolLine(line string) {
 // In inline mode, committed lines scroll naturally above the live View() area.
 func (m *tuiModel) println(line string) {
 	m.printlnBuf = append(m.printlnBuf, line)
+	m.lastPrintBlank = line == ""
+}
+
+// printlnBlock queues a block-level item (card, message echo, markdown block,
+// notice) preceded by one blank separator line, so blocks breathe instead of
+// stacking edge-to-edge (Claude Code style). Plain mode keeps the dense
+// line-oriented layout, matching the headless renderer.
+func (m *tuiModel) printlnBlock(line string) {
+	if line == "" {
+		return
+	}
+	if !m.cfg.plain && !m.lastPrintBlank {
+		m.println("")
+	}
+	m.println(line)
 }
 
 // flushPrints returns a Cmd that prints all queued lines to the terminal
@@ -1276,7 +1261,7 @@ func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
 	// the turn (e.g. typed after the last loop iteration) are printed now so
 	// they don't vanish from the transcript.
 	for _, s := range m.pendingSteer {
-		m.println(userEchoStyle.Render("> ") + s)
+		m.printlnBlock(userEchoStyle.Render("> ") + s)
 	}
 	m.pendingSteer = nil
 
@@ -1292,7 +1277,7 @@ func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
 		it := pendingFromInbox(items)
 		for _, line := range strings.Split(it.text, "\n\n") {
 			if line != "" && !strings.HasPrefix(line, "<system-reminder>") {
-				m.println(userEchoStyle.Render("> ") + line)
+				m.printlnBlock(userEchoStyle.Render("> ") + line)
 			}
 		}
 		m.queue = append([]pendingItem{it}, m.queue...)

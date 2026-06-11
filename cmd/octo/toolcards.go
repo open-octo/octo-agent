@@ -9,8 +9,9 @@ import (
 )
 
 // outputCardMaxLines caps how many output lines a tool-result card shows
-// before collapsing the rest into a "N more lines" marker.
-const outputCardMaxLines = 12
+// before collapsing the rest into an "… +N lines" marker. Kept small (Claude
+// Code shows ~3) — the full output went to the model, the card is a glimpse.
+const outputCardMaxLines = 4
 
 // cardVerbFor maps a tool name to the verb shown in its result card, or ""
 // for tools that render as a terse one-line status instead of a card. This is

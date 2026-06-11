@@ -177,7 +177,8 @@ func TestTUI_FirstOutputCommitsEcho(t *testing.T) {
 	if m.echoPending != "" {
 		t.Error("first output should commit (clear) the deferred echo")
 	}
-	if len(m.printlnBuf) != 1 {
+	// printlnBlock prefixes the echo with one blank separator line.
+	if len(m.printlnBuf) == 0 || !strings.Contains(m.printlnBuf[len(m.printlnBuf)-1], "hello") {
 		t.Fatalf("the echo should be queued to the scrollback, got %v", m.printlnBuf)
 	}
 }
@@ -211,47 +212,81 @@ func TestTUI_ToolInputStreamProgress(t *testing.T) {
 	}
 }
 
-// Reasoning deltas must commit to the scrollback (dimmed) before the answer,
-// with the 💭 marker on the first line only — so the trace stays in the
-// transcript above the reply instead of vanishing into a spinner.
-func TestTUI_ThinkingRendersBeforeAnswer(t *testing.T) {
+// The reasoning trace stays out of the scrollback — only its size feeds the
+// live activity line's "↑ ~N tokens" readout, so a long agentic turn doesn't
+// fill the transcript with thinking text.
+func TestTUI_ThinkingStaysOutOfScrollback(t *testing.T) {
 	m := newTestModel()
 	m.turnRunning = true
 
-	// One complete thinking line, then a partial; the answer flushes the rest.
 	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: "step one\n"})
-	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: "step two"})
-	m.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "answer"})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: strings.Repeat("x", 3999)})
 
-	joined := strings.Join(m.printlnBuf, "\n")
-	if !strings.Contains(joined, "step one") || !strings.Contains(joined, "step two") {
-		t.Fatalf("thinking trace should be committed to scrollback; got %q", joined)
+	if joined := strings.Join(m.printlnBuf, "\n"); joined != "" {
+		t.Fatalf("thinking must not reach the scrollback; got %q", joined)
 	}
-	if n := strings.Count(joined, "💭"); n != 1 {
-		t.Errorf("💭 should prefix only the first line of the block; got %d in %q", n, joined)
+	if m.turnOutChars != 4008 {
+		t.Errorf("turnOutChars = %d, want 4008", m.turnOutChars)
 	}
-	if m.thinkPartial.Len() != 0 {
-		t.Errorf("thinking buffer should be flushed once the answer starts; still holds %q", m.thinkPartial.String())
+	// The wait-on-model activity line shows the running token estimate (chars/4).
+	out := m.View()
+	if !strings.Contains(out, "↑ ~1.0k tokens") {
+		t.Errorf("view should show the output-token readout; got:\n%s", out)
 	}
 }
 
-// A turn's agentic loop produces a fresh reasoning block before each model
-// round-trip (between tool calls); every block must get its own 💭, not just
-// the turn's first one.
-func TestTUI_ThinkingMarkerPerBlock(t *testing.T) {
+// A new turn resets the output-token readout.
+func TestTUI_TurnStartResetsOutChars(t *testing.T) {
+	m := newTestModel()
+	m.turnOutChars = 999
+	_ = m.startTurnEcho("hi", "hi")
+	if m.turnOutChars != 0 {
+		t.Errorf("turnOutChars after turn start = %d, want 0", m.turnOutChars)
+	}
+}
+
+// Non-card tools (MCP tools, sub_agent, …) commit a single header-style status
+// line on completion — no started line, no progress lines.
+func TestTUI_NonCardToolOneLine(t *testing.T) {
 	m := newTestModel()
 	m.turnRunning = true
 
-	// Block 1 → a tool runs → block 2 → the answer.
-	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: "first thought\n"})
-	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal", Input: map[string]any{"command": "ls"}})
-	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "c1", ToolName: "terminal", Output: "ok"})
-	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: "second thought\n"})
-	m.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "answer"})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "mcp_thing", Input: map[string]any{"q": "x"}})
+	if len(m.printlnBuf) != 0 {
+		t.Fatalf("started must not print; got %v", m.printlnBuf)
+	}
+	if m.running == nil || m.running.verb != "mcp_thing" {
+		t.Fatalf("started should set the live indicator; got %+v", m.running)
+	}
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", ToolName: "mcp_thing", Chunk: "partial"})
+	if len(m.printlnBuf) != 0 {
+		t.Fatalf("progress must not print; got %v", m.printlnBuf)
+	}
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "c1", ToolName: "mcp_thing", Output: "done"})
 
-	joined := strings.Join(m.printlnBuf, "\n")
-	if n := strings.Count(joined, "💭"); n != 2 {
-		t.Errorf("each reasoning block should get a 💭; got %d in:\n%s", n, joined)
+	joined := stripANSI(strings.Join(m.printlnBuf, "\n"))
+	if !strings.Contains(joined, "● mcp_thing(q=x)") {
+		t.Errorf("done should commit one status line; got %q", joined)
+	}
+	if m.running != nil {
+		t.Error("done should clear the live indicator")
+	}
+}
+
+// Block-level scrollback items are separated by exactly one blank line; the
+// separator is not duplicated when the previous line is already blank.
+func TestTUI_PrintlnBlockSeparation(t *testing.T) {
+	m := newTestModel()
+	m.printlnBlock("first")
+	m.printlnBlock("second")
+	want := []string{"", "first", "", "second"}
+	if len(m.printlnBuf) != len(want) {
+		t.Fatalf("printlnBuf = %q, want %q", m.printlnBuf, want)
+	}
+	for i, w := range want {
+		if m.printlnBuf[i] != w {
+			t.Fatalf("printlnBuf[%d] = %q, want %q", i, m.printlnBuf[i], w)
+		}
 	}
 }
 

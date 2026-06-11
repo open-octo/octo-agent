@@ -36,7 +36,6 @@ var (
 	queueStyle        = lipgloss.NewStyle().Foreground(tui.ColAccent)
 	modalStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
 	hintStyle         = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
-	thinkingStyle     = lipgloss.NewStyle().Foreground(tui.ColDim).Italic(true)
 	userEchoStyle     = lipgloss.NewStyle().Foreground(tui.ColUserMsg).Bold(true)
 	pendingSteerStyle = lipgloss.NewStyle().Foreground(tui.ColMuted)
 	complSelStyle     = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
@@ -970,7 +969,7 @@ func (m *tuiModel) View() string {
 		// thinking spinner so the user can tell the turn isn't idle. While
 		// text is actively streaming (partial non-empty), the text itself is
 		// the feedback, so the spinner stays out of the way.
-		b.WriteString(m.spinnerLine(m.thinkingPhrase(), m.turnStart))
+		b.WriteString(m.thinkingLine())
 		b.WriteByte('\n')
 	}
 
@@ -1219,16 +1218,11 @@ func (m *tuiModel) modalView() string {
 }
 
 // cacheLine formats the per-turn cache footer, or "" when nothing to show.
-// Mirrors plainView's rule: shown when cache moved, always in verbose.
+// Verbose-only: at default verbosity the footer would land after every turn
+// (cache moves on essentially every Anthropic-protocol call) and the status
+// bar's ctx% already covers the at-a-glance need.
 func cacheLine(v verbosity, reply agent.Reply) string {
-	if v.quiet() {
-		return ""
-	}
-	show := reply.CacheReadTokens > 0 || reply.CacheWriteTokens > 0
-	if v.verbose() {
-		show = true
-	}
-	if !show {
+	if !v.verbose() {
 		return ""
 	}
 	return noticeStyle.Render(fmt.Sprintf("  ⓘ cache: %d read, %d write (in %d / out %d)",
@@ -1248,4 +1242,17 @@ func (m *tuiModel) thinkingPhrase() string {
 func (m *tuiModel) spinnerLine(label string, since time.Time) string {
 	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
 	return hintStyle.Render(fmt.Sprintf("%c %s (%s)", frame, label, time.Since(since).Round(time.Second)))
+}
+
+// thinkingLine is the wait-on-the-model activity line. Since the reasoning
+// trace itself is not shown, the line carries the turn's elapsed time and a
+// rough output-token count ("↑ ~N tokens", chars/4) so a long silent stretch
+// still reads as the model working, Claude Code style.
+func (m *tuiModel) thinkingLine() string {
+	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+	meta := time.Since(m.turnStart).Round(time.Second).String()
+	if m.turnOutChars > 0 {
+		meta += fmt.Sprintf(" · ↑ ~%s tokens", humanTokens(m.turnOutChars/4))
+	}
+	return hintStyle.Render(fmt.Sprintf("%c %s… (%s)", frame, m.thinkingPhrase(), meta))
 }
