@@ -85,6 +85,13 @@ func buildClient(name, apiKey, baseURL string) (provider.Provider, error) {
 		return nil, fmt.Errorf("provider %q requires a base URL (set %s_BASE_URL or base_url in config)",
 			name, strings.ToUpper(name))
 	}
+	// An empty override means "the vendor's own endpoint". The wire clients'
+	// zero-value defaults point at api.openai.com / api.anthropic.com, which is
+	// wrong for every other vendor speaking the same protocol — so resolve the
+	// registry endpoint here instead of leaving it to the client.
+	if baseURL == "" {
+		baseURL = v.DefaultBaseURL
+	}
 
 	switch v.Protocol {
 	case "anthropic":

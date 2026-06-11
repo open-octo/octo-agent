@@ -2,6 +2,9 @@ package app
 
 import (
 	"testing"
+
+	"github.com/Leihb/octo-agent/internal/provider/anthropic"
+	"github.com/Leihb/octo-agent/internal/provider/openai"
 )
 
 func TestVendor_KimiCoding(t *testing.T) {
@@ -117,6 +120,36 @@ func TestBuildClient_CompatibleRequiresBaseURL(t *testing.T) {
 	// Pinned vendors still build with no override.
 	if _, err := buildClient("anthropic", "sk-dummy", ""); err != nil {
 		t.Errorf("buildClient(anthropic) without base URL: %v", err)
+	}
+}
+
+// An empty base-URL override must resolve to the vendor's registry endpoint,
+// not the wire client's built-in default (api.openai.com / api.anthropic.com).
+// Regression: a bailian config with no base_url sent its DashScope key to
+// OpenAI and got a foreign 401 back.
+func TestBuildClient_EmptyBaseURL_UsesVendorEndpoint(t *testing.T) {
+	for _, v := range Registry {
+		if v.CustomEndpoint {
+			continue
+		}
+		client, err := buildClient(v.ID, "sk-dummy", "")
+		if err != nil {
+			t.Errorf("buildClient(%s): %v", v.ID, err)
+			continue
+		}
+		var got string
+		switch c := client.(type) {
+		case *openai.Client:
+			got = c.BaseURL
+		case *anthropic.Client:
+			got = c.BaseURL
+		default:
+			t.Errorf("buildClient(%s): unexpected client type %T", v.ID, client)
+			continue
+		}
+		if got != v.DefaultBaseURL {
+			t.Errorf("buildClient(%s) BaseURL = %q, want vendor default %q", v.ID, got, v.DefaultBaseURL)
+		}
 	}
 }
 
