@@ -453,6 +453,34 @@ func (m *BackgroundManager) WriteStdin(id string, input string) error {
 	return err
 }
 
+// WriteStdinAndClose sends text to the process's stdin and then closes it,
+// signalling EOF. Use for one-shot initial stdin (e.g. piping a PR body
+// through --body-file - instead of embedding it in the shell command where
+// backticks and quotes would be interpreted by the shell).
+func (m *BackgroundManager) WriteStdinAndClose(id string, input string) error {
+	m.mu.Lock()
+	p := m.procs[id]
+	m.mu.Unlock()
+	if p == nil {
+		return fmt.Errorf("no background process %q", id)
+	}
+	p.mu.Lock()
+	done := p.done
+	stdin := p.stdin
+	p.mu.Unlock()
+	if done {
+		return fmt.Errorf("background process %q has already exited", id)
+	}
+	if stdin == nil {
+		return fmt.Errorf("background process %q does not accept input", id)
+	}
+	if _, err := stdin.Write([]byte(input)); err != nil {
+		stdin.Close()
+		return err
+	}
+	return stdin.Close()
+}
+
 // Command returns the original command string for a background process id,
 // or ("", false) if the id is unknown or has been removed.
 func (m *BackgroundManager) Command(id string) (string, bool) {
