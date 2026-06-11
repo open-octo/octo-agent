@@ -67,7 +67,7 @@ var (
 // bottom status bar can stay free of a persistent hint line.
 var bannerHints = []string{
 	"Enter send · Shift+Enter/Ctrl+J newline · Ctrl+Q queue",
-	"Shift+Tab perm-mode · Esc interrupt · Ctrl+C quit",
+	"Shift+Tab perm-mode · Ctrl+T tasks · Esc interrupt · Ctrl+C quit",
 }
 
 // octopusASCII is the pixel-art octo mascot — a rounded octopus with a domed

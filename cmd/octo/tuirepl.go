@@ -313,6 +313,11 @@ type tuiModel struct {
 	// modal, when non-nil, is an active Ask prompt (design §6).
 	modal *modalState
 
+	// showTasks pins the task checklist in the live area regardless of turn
+	// state (Ctrl+T toggle, Claude Code style). The pinned view also shows a
+	// fully-completed list (normally hidden once nothing is outstanding).
+	showTasks bool
+
 	width int
 	quit  bool
 
