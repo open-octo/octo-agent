@@ -47,6 +47,11 @@ func sessionKeyFor(mode BindingMode, ev InboundEvent) SessionKey {
 type Session struct {
 	Key   SessionKey
 	Agent *agent.Agent
+
+	// Store is the on-disk history backing this conversation (persist.go).
+	// Loaded/initialised at session creation, written via Persist after
+	// each turn so the conversation survives server restarts.
+	Store *agent.Session
 	// Tasks is the conversation's task store. It lives as long as the session,
 	// so task_* state persists across messages within one chat (a fresh
 	// per-message store would reset the list every turn). Stamped into the turn
@@ -93,6 +98,15 @@ func (s *Session) BeginRun(ctx context.Context) (context.Context, func()) {
 	}
 }
 
+// IsRunning reports whether an agent turn is currently in flight. The
+// inbound dispatcher uses it to steer a mid-turn message into the running
+// turn's Inbox instead of queueing a whole new turn behind runMu.
+func (s *Session) IsRunning() bool {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	return s.runCancel != nil
+}
+
 // Interrupt cancels the session's in-flight agent turn, if any. It reports
 // whether a turn was actually running.
 func (s *Session) Interrupt() bool {
@@ -113,7 +127,7 @@ type AgentFactory func() *agent.Agent
 // store. Centralised so every binding path (explicit /bind, auto-create on
 // first message, GetOrCreateSession) wires sessions identically.
 func (m *Manager) newSession(key SessionKey, ev InboundEvent) *Session {
-	return &Session{
+	s := &Session{
 		Key:     key,
 		Agent:   m.factory(),
 		Tasks:   tasks.New(),
@@ -121,6 +135,8 @@ func (m *Manager) newSession(key SessionKey, ev InboundEvent) *Session {
 		UserID:  ev.UserID,
 		BoundAt: time.Now(),
 	}
+	s.restoreOrInitStore()
+	return s
 }
 
 // Manager owns the lifecycle of adapters and their bound sessions.
@@ -263,11 +279,17 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 	}
 }
 
-// cmdBind explicitly binds the current chat/user to a new session.
+// cmdBind explicitly binds the current chat/user to a new session. The
+// persisted store is deleted first — /bind means "start fresh", and without
+// the delete the new session would just rehydrate the old history.
 func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
 	key := sessionKeyFor(m.mode, ev)
-	if _, loaded := m.sessions.Load(key); loaded {
-		m.sessions.Delete(key)
+	if val, loaded := m.sessions.LoadAndDelete(key); loaded {
+		val.(*Session).deleteStore()
+	} else {
+		// No live session, but a persisted store from a previous process
+		// may still exist; /bind must clear that too.
+		_ = agent.DeleteSession(sessionStoreID(key))
 	}
 	sess := m.newSession(key, ev)
 	m.sessions.Store(key, sess)
@@ -293,12 +315,15 @@ func (m *Manager) cmdStop(ev InboundEvent) string {
 	return "No task is running."
 }
 
-// cmdUnbind deletes the current session and its history.
+// cmdUnbind deletes the current session and its history, including the
+// persisted store — "history cleared" must survive a restart too.
 func (m *Manager) cmdUnbind(ev InboundEvent) string {
 	key := sessionKeyFor(m.mode, ev)
-	if _, loaded := m.sessions.LoadAndDelete(key); !loaded {
+	val, loaded := m.sessions.LoadAndDelete(key)
+	if !loaded {
 		return "No active session for this context."
 	}
+	val.(*Session).deleteStore()
 	return "Session unbound and history cleared."
 }
 

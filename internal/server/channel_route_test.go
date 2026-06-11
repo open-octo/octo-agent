@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -190,5 +191,129 @@ func TestRouteChannelEvent_EmptyTextNeverAnswers(t *testing.T) {
 	case got := <-replyCh:
 		t.Fatalf("empty text %q answered the ask", got)
 	default:
+	}
+}
+
+// blockingSender lets a test hold a turn open: the first call blocks until
+// release is closed; inputs records the last user message of each call.
+type blockingSender struct {
+	mu      sync.Mutex
+	calls   int
+	inputs  []string
+	started chan struct{} // signalled once per call
+	release chan struct{} // first call blocks on this
+}
+
+func (b *blockingSender) record(msgs []agent.Message) (first bool) {
+	b.mu.Lock()
+	b.calls++
+	first = b.calls == 1
+	if len(msgs) > 0 {
+		last := msgs[len(msgs)-1]
+		text := last.Content
+		if text == "" {
+			for _, blk := range last.Blocks {
+				if blk.Type == "text" {
+					text = blk.Text
+				}
+			}
+		}
+		b.inputs = append(b.inputs, text)
+	}
+	b.mu.Unlock()
+	b.started <- struct{}{}
+	return first
+}
+
+func (b *blockingSender) SendMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int) (agent.Reply, error) {
+	if b.record(msgs) {
+		<-b.release
+	}
+	return agent.Reply{Content: "blocking reply"}, nil
+}
+
+func (b *blockingSender) StreamMessages(ctx context.Context, model, system string, msgs []agent.Message, maxTokens int, onChunk func(string), _ func(string)) (agent.Reply, error) {
+	return b.SendMessages(ctx, model, system, msgs, maxTokens)
+}
+
+func (b *blockingSender) snapshot() (int, []string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls, append([]string(nil), b.inputs...)
+}
+
+// TestRouteChannelEvent_MidTurnMessageSteers: a message during a running IM
+// turn rides the turn's Inbox and chains into a follow-up turn — it must not
+// queue as an independent second turn, and it must not be lost.
+func TestRouteChannelEvent_MidTurnMessageSteers(t *testing.T) {
+	sender := &blockingSender{started: make(chan struct{}, 8), release: make(chan struct{})}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+		return agent.New(sender, "stub-model")
+	}, channel.BindByChat)
+	ad := &fullFakeAdapter{}
+
+	srv.routeChannelEvent(context.Background(), ad, evFor("first message"))
+	<-sender.started // turn 1 is now blocked inside the sender
+
+	srv.routeChannelEvent(context.Background(), ad, evFor("steer me in"))
+	sess := srv.channelMgr.GetSession(evFor("x"))
+	if !sess.Agent.Inbox.HasPending() {
+		t.Fatal("mid-turn message did not land in the running turn's Inbox")
+	}
+
+	close(sender.release) // let turn 1 finish; the leftover steers must chain
+	<-sender.started      // the chained turn hit the sender
+
+	waitFor(t, func() bool { calls, _ := sender.snapshot(); return calls >= 2 })
+	_, inputs := sender.snapshot()
+	found := false
+	for _, in := range inputs {
+		if strings.Contains(in, "steer me in") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("steer text never reached the model; inputs = %q", inputs)
+	}
+}
+
+// TestHandleChannelMessage_PersistsTurn: an IM turn's history must land on
+// disk so a fresh manager (post-restart) restores the conversation.
+func TestHandleChannelMessage_PersistsTurn(t *testing.T) {
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("please remember 42"))
+
+	fresh := channel.NewManager(&channel.Config{}, func() *agent.Agent {
+		return agent.New(&stubSender{}, "stub-model")
+	}, channel.BindByChat)
+	restored := fresh.GetOrCreateSession(evFor("x"))
+	msgs := restored.Agent.History.Snapshot()
+	if len(msgs) < 2 {
+		t.Fatalf("restored history has %d messages, want >=2 (user+assistant)", len(msgs))
+	}
+}
+
+// TestHandleChannelMessage_RefreshesSystemPerTurn: memory written after the
+// session was created must be visible on the next turn without a restart.
+func TestHandleChannelMessage_RefreshesSystemPerTurn(t *testing.T) {
+	srv := chanServer(t)
+	srv.memDir = t.TempDir()
+	ad := &fullFakeAdapter{}
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("turn one"))
+	sess := srv.channelMgr.GetSession(evFor("x"))
+	if strings.Contains(sess.Agent.System, "fresh-fact-9000") {
+		t.Fatal("memory marker present before it was written")
+	}
+
+	if err := os.WriteFile(srv.memDir+"/MEMORY.md", []byte("- fresh-fact-9000"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv.handleChannelMessage(context.Background(), ad, evFor("turn two"))
+	if !strings.Contains(sess.Agent.System, "fresh-fact-9000") {
+		t.Error("system prompt not recomposed: memory written mid-session is invisible to IM turns")
 	}
 }
