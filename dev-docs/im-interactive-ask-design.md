@@ -33,10 +33,16 @@ deadlock. Instead:
 - `channel.Session` carries a single ask slot (`ask.go`): `BeginAsk` claims
   it and returns a reply channel; `DeliverAskReply` routes text to it and
   reports whether it was consumed. One ask at a time, one reply per ask.
+- The slot records the asking chat and user, and only a matching reply is
+  accepted. Session keying (`BindByChatUser` in production) usually
+  guarantees this already, but the slot enforces it directly so a group
+  member can't answer someone else's prompt under shared-session binding
+  modes, and the asker can't be answered from another chat.
 - The server's inbound dispatcher (`routeChannelEvent`) checks, in order:
   slash commands (so `/stop` still cancels the asking turn), then a pending
   ask (the message is the answer, consumed inline off the adapter read
-  loop), then the normal turn path.
+  loop), then the normal turn path. Text-less events (stickers, images)
+  never answer an ask.
 
 A known, accepted race: a genuine steer message that arrives exactly while
 an ask is pending is consumed as the answer. A non-affirmative answer just
@@ -47,14 +53,23 @@ denies — the cost is one denied tool call and a resent message.
 `channelPermissionAsk` (server) sends:
 
 ```
-⚠️ Allow <tool>? Reply yes / 允许 to approve — any other reply denies.
-(Auto-deny in 5m0s; /stop cancels the task.)
+⚠️ Allow terminal — "sudo rm /tmp/x"? Reply yes / 允许 to approve — any
+other reply denies; only the requester's reply counts. (Auto-deny in 5m0s;
+/stop cancels the task.)
 ```
 
-Approval requires an explicit affirmative — one of `yes y ok allow 是 可以
-同意 允许` (case-insensitive, trimmed). Everything else denies: arbitrary
-replies, the 5-minute timeout, and turn cancellation (`/stop` cancels the
-turn ctx, which the ask select observes). `remember` is always false.
+The prompt always shows *what* is being approved, not just the tool name:
+the IM transport renders no tool cards before the gate fires, so without
+the input summary (`askInputSummary` — command/path/url first, JSON head
+otherwise, truncated) the user would approve blind. Approval requires an
+explicit affirmative — one of `yes y ok allow 是 可以 同意 允许`
+(case-insensitive, trimmed). Everything else denies: arbitrary replies,
+the 5-minute timeout, and turn cancellation (`/stop` cancels the turn ctx,
+which the ask select observes). `remember` is always false.
+
+A pending ask keeps its turn in flight, so it holds a restart-drain slot;
+the drain's 30-second hard bound cuts an unanswered prompt rather than
+waiting out the full 5 minutes.
 
 ## Per-turn gate
 

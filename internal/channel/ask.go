@@ -11,10 +11,14 @@ import "fmt"
 
 // BeginAsk claims the session's single ask slot and returns the channel on
 // which the answer text will arrive, plus a release func the caller must run
-// when the ask resolves (answer, timeout, or cancellation). A second BeginAsk
-// while one is pending is refused — within a session turns are serialised, so
-// this only guards against misuse.
-func (s *Session) BeginAsk() (<-chan string, func(), error) {
+// when the ask resolves (answer, timeout, or cancellation). chatID and userID
+// pin who may answer: only a reply from the same chat by the same user is
+// accepted — session keying usually guarantees this already (BindByChatUser),
+// but the slot enforces it so the property survives other binding modes,
+// where a session is shared across users or chats. A second BeginAsk while
+// one is pending is refused — within a session turns are serialised, so this
+// only guards against misuse.
+func (s *Session) BeginAsk(chatID, userID string) (<-chan string, func(), error) {
 	s.askMu.Lock()
 	defer s.askMu.Unlock()
 	if s.pendingAsk != nil {
@@ -22,6 +26,7 @@ func (s *Session) BeginAsk() (<-chan string, func(), error) {
 	}
 	ch := make(chan string, 1)
 	s.pendingAsk = ch
+	s.askChatID, s.askUserID = chatID, userID
 	release := func() {
 		s.askMu.Lock()
 		if s.pendingAsk == ch {
@@ -33,12 +38,16 @@ func (s *Session) BeginAsk() (<-chan string, func(), error) {
 }
 
 // DeliverAskReply routes text to a pending ask and reports whether it was
-// consumed. False means no ask is waiting — the caller should treat the
-// message as normal chat input. Each ask consumes exactly one reply.
-func (s *Session) DeliverAskReply(text string) bool {
+// consumed. False means no ask is waiting (or the reply came from the wrong
+// chat or user) — the caller should treat the message as normal chat input.
+// Each ask consumes exactly one reply.
+func (s *Session) DeliverAskReply(chatID, userID, text string) bool {
 	s.askMu.Lock()
 	defer s.askMu.Unlock()
 	if s.pendingAsk == nil {
+		return false
+	}
+	if chatID != s.askChatID || userID != s.askUserID {
 		return false
 	}
 	s.pendingAsk <- text // buffered (cap 1); never blocks

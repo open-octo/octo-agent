@@ -51,7 +51,10 @@ func TestChannelPerTurnGate(t *testing.T) {
 	if !strings.Contains(ad.texts()[0], "terminal") {
 		t.Errorf("prompt %q should name the tool", ad.texts()[0])
 	}
-	if !sess.DeliverAskReply("不行") {
+	if !strings.Contains(ad.texts()[0], "sudo rm /tmp/x") {
+		t.Errorf("prompt %q must show the command being approved", ad.texts()[0])
+	}
+	if !sess.DeliverAskReply("c1", "", "不行") {
 		t.Fatal("ask slot not armed")
 	}
 	<-checkDone

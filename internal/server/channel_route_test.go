@@ -66,7 +66,7 @@ func TestRouteChannelEvent_PendingAskConsumesMessage(t *testing.T) {
 	ad := &fullFakeAdapter{}
 
 	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"))
-	replyCh, release, err := sess.BeginAsk()
+	replyCh, release, err := sess.BeginAsk("c1", "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestRouteChannelEvent_CommandBeatsPendingAsk(t *testing.T) {
 	ad := &fullFakeAdapter{}
 
 	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"))
-	replyCh, release, err := sess.BeginAsk()
+	replyCh, release, err := sess.BeginAsk("c1", "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,5 +143,52 @@ func TestHandleChannelMessage_SetsPerTurnGate(t *testing.T) {
 
 	if sess.Agent.Gate == nil {
 		t.Error("handleChannelMessage must set a per-turn permission gate")
+	}
+}
+
+// TestRouteChannelEvent_OtherUserCannotAnswer pins the reply-scoping rule
+// under a shared-session binding (BindByChat): a second user's "yes" in the
+// same chat must not answer the requester's prompt.
+func TestRouteChannelEvent_OtherUserCannotAnswer(t *testing.T) {
+	srv := chanServer(t) // BindByChat: one session per chat, shared by users
+	ad := &fullFakeAdapter{}
+
+	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"))
+	replyCh, release, err := sess.BeginAsk("c1", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	other := evFor("yes")
+	other.UserID = "u2"
+	srv.routeChannelEvent(context.Background(), ad, other)
+
+	select {
+	case got := <-replyCh:
+		t.Fatalf("another user's reply %q answered the ask", got)
+	default:
+	}
+}
+
+// TestRouteChannelEvent_EmptyTextNeverAnswers: a text-less event (sticker,
+// image) must not consume — and thereby deny — a pending ask.
+func TestRouteChannelEvent_EmptyTextNeverAnswers(t *testing.T) {
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"))
+	replyCh, release, err := sess.BeginAsk("c1", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	srv.routeChannelEvent(context.Background(), ad, evFor("   "))
+
+	select {
+	case got := <-replyCh:
+		t.Fatalf("empty text %q answered the ask", got)
+	default:
 	}
 }

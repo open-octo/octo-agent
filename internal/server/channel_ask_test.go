@@ -50,7 +50,10 @@ func TestChannelPermissionAsk_AffirmativeAllows(t *testing.T) {
 	if !strings.Contains(ad.texts()[0], "terminal") {
 		t.Errorf("prompt %q should name the tool", ad.texts()[0])
 	}
-	if !sess.DeliverAskReply("允许") {
+	if !strings.Contains(ad.texts()[0], "sudo ls") {
+		t.Errorf("prompt %q must show the input being approved", ad.texts()[0])
+	}
+	if !sess.DeliverAskReply("c1", "", "允许") {
 		t.Fatal("ask slot not armed when the prompt was already sent")
 	}
 
@@ -77,7 +80,7 @@ func TestChannelPermissionAsk_NonAffirmativeDenies(t *testing.T) {
 		close(done)
 	}()
 	waitFor(t, func() bool { return len(ad.texts()) == 1 })
-	sess.DeliverAskReply("先等等，我看看")
+	sess.DeliverAskReply("c1", "", "先等等，我看看")
 	<-done
 
 	if allow {
@@ -108,7 +111,7 @@ func TestChannelPermissionAsk_ContextCancelDenies(t *testing.T) {
 	if allow || err == nil {
 		t.Errorf("cancelled ask: allow=%v err=%v, want deny with error", allow, err)
 	}
-	if sess.DeliverAskReply("yes") {
+	if sess.DeliverAskReply("c1", "", "yes") {
 		t.Error("ask slot must be released after cancellation")
 	}
 }
@@ -128,7 +131,6 @@ func TestChannelPermissionAsk_TimeoutDenies(t *testing.T) {
 	if allow {
 		t.Error("timeout must deny")
 	}
-	_ = sess
 	if len(ad.texts()) == 0 {
 		t.Error("prompt was never sent")
 	}

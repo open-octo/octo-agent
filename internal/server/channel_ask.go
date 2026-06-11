@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -26,25 +27,58 @@ func isAffirmative(text string) bool {
 	return imAffirmatives[strings.ToLower(strings.TrimSpace(text))]
 }
 
+// askInputSummary renders the part of toolInput the user is actually
+// approving. The IM transport shows no tool cards before the gate fires, so
+// without this the user would approve blind — "Allow terminal?" tells them
+// nothing about WHICH command. Known primary fields come first; anything
+// else falls back to a JSON head.
+func askInputSummary(toolInput map[string]any) string {
+	const maxLen = 160
+	for _, key := range []string{"command", "path", "url", "reason", "pattern"} {
+		if v, ok := toolInput[key].(string); ok && strings.TrimSpace(v) != "" {
+			return truncateForAsk(v, maxLen)
+		}
+	}
+	if len(toolInput) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(toolInput)
+	if err != nil {
+		return ""
+	}
+	return truncateForAsk(string(b), maxLen)
+}
+
+func truncateForAsk(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "…"
+}
+
 // channelPermissionAsk builds the app.PermissionAsk for one IM turn: it sends
-// a confirmation prompt into the chat and consumes the session's next plain
-// message as the answer (routed by the inbound dispatcher via
-// DeliverAskReply, ahead of the turn path — see routeChannelEvent). Approval
-// requires an explicit affirmative; any other reply, the turn being cancelled
-// (/stop), or the timeout denies. remember is always false: chat approvals
-// are one-shot, a lingering allow in a group chat would outlive the person
-// who granted it.
+// a confirmation prompt into the chat and consumes the requesting user's next
+// plain message in that chat as the answer (routed by the inbound dispatcher
+// via DeliverAskReply, ahead of the turn path — see routeChannelEvent).
+// Approval requires an explicit affirmative; any other reply, the turn being
+// cancelled (/stop), or the timeout denies. remember is always false: chat
+// approvals are one-shot, a lingering allow in a group chat would outlive
+// the person who granted it.
 func (s *Server) channelPermissionAsk(sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent) app.PermissionAsk {
 	return func(ctx context.Context, toolName string, toolInput map[string]any) (bool, bool, error) {
-		replyCh, release, err := sess.BeginAsk()
+		replyCh, release, err := sess.BeginAsk(ev.ChatID, ev.UserID)
 		if err != nil {
 			return false, false, err
 		}
 		defer release()
 
+		what := toolName
+		if detail := askInputSummary(toolInput); detail != "" {
+			what = fmt.Sprintf("%s — %q", toolName, detail)
+		}
 		prompt := fmt.Sprintf(
-			"⚠️ Allow %s? Reply yes / 允许 to approve — any other reply denies. (Auto-deny in %s; /stop cancels the task.)",
-			toolName, channelAskTimeout)
+			"⚠️ Allow %s? Reply yes / 允许 to approve — any other reply denies; only the requester's reply counts. (Auto-deny in %s; /stop cancels the task.)",
+			what, channelAskTimeout)
 		ad.SendText(ev.ChatID, prompt, ev.MessageID)
 
 		timer := time.NewTimer(channelAskTimeout)

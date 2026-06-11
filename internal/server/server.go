@@ -1032,8 +1032,12 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 	if s.handleChannelCommand(ad, ev) {
 		return
 	}
-	if sess := s.channelMgr.GetSession(ev); sess != nil && sess.DeliverAskReply(ev.Text) {
-		return
+	// Text-less events (stickers, images, voice) never answer an ask — an
+	// empty reply would consume the slot and deny for nothing.
+	if strings.TrimSpace(ev.Text) != "" {
+		if sess := s.channelMgr.GetSession(ev); sess != nil && sess.DeliverAskReply(ev.ChatID, ev.UserID, ev.Text) {
+			return
+		}
 	}
 	go s.handleChannelMessage(ctx, ad, ev)
 }
@@ -1080,7 +1084,10 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	// turn — running ungated is never an acceptable fallback.
 	engine, err := permission.New(permissionConfigPath(), s.cwd, resolvePermissionMode(), s.memDir, s.homeMemDir)
 	if err != nil {
-		ad.SendText(ev.ChatID, "⚠️ Permission engine unavailable, message not processed: "+err.Error(), ev.MessageID)
+		// Generic chat reply — err.Error() can leak local paths into a
+		// group chat; the operator gets the detail on the server console.
+		fmt.Fprintf(os.Stderr, "octo serve: channel %s: permission engine: %v\n", ev.Platform, err)
+		ad.SendText(ev.ChatID, "⚠️ Permission engine unavailable — message not processed. Check the server logs.", ev.MessageID)
 		return
 	}
 	sess.Agent.Gate = app.NewPermissionGate(engine, s.channelPermissionAsk(sess, ad, ev))
