@@ -105,7 +105,7 @@ func runTUI(cfg replConfig) int {
 
 	_, err := p.Run()
 	if err != nil {
-		fmt.Fprintf(cfg.stderr, "octo chat: tui: %v\n", err)
+		fmt.Fprintf(cfg.stderr, "octo: tui: %v\n", err)
 		return 1
 	}
 
@@ -118,7 +118,7 @@ func runTUI(cfg replConfig) int {
 		}
 	}
 	if !cfg.verbosity.quiet() {
-		fmt.Fprintf(cfg.stdout, "\nSession saved. Resume anytime with: octo chat -c %s\n", cfg.session.ShortID())
+		fmt.Fprintf(cfg.stdout, "\nSession saved. Resume anytime with: octo -c %s\n", cfg.session.ShortID())
 	}
 	return 0
 }
@@ -312,6 +312,11 @@ type tuiModel struct {
 
 	// modal, when non-nil, is an active Ask prompt (design §6).
 	modal *modalState
+
+	// showTasks pins the task checklist in the live area regardless of turn
+	// state (Ctrl+T toggle, Claude Code style). The pinned view also shows a
+	// fully-completed list (normally hidden once nothing is outstanding).
+	showTasks bool
 
 	width int
 	quit  bool

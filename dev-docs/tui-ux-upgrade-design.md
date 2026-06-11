@@ -108,6 +108,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 | 富 spinner（Braille + 轮转提示词） | ✅ | `tuirepl_view.go:spinnerLine/thinkingPhrase`, `spinner.go` |
 | glamour markdown（流式 block 边界提交） | ✅ | `markdown.go` |
 | 面板化（队列/sub-agent/模态；后台 shell 已改单行） | ✅ | `internal/tui/theme.go:Panel/Box` |
+| Live 任务检查单（创建序 ✓/■/□，spinner 显示进行中任务 ActiveForm，超长先折叠已完成头部为「✓ N done」再尾部「… N more」；Ctrl+T 在空闲时也钉住显示，含全完成列表与「no tasks」占位） | ✅ | `tuirepl_tasks.go` |
 | 统一自适应主题 | ✅ | `internal/tui/theme.go` |
 | 章鱼像素-art 横幅 | ✅ | `internal/tui/theme.go:Banner`（Init 时打印一次） |
 | 卡片归属 TUI-only（plainView 纯文本） | ✅ | `toolcards.go`, `repl.go` |

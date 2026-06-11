@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/config"
 )
 
@@ -258,5 +259,98 @@ func TestConfigModels_UniqueNameGeneration(t *testing.T) {
 	cfg, _ := config.Load()
 	if len(cfg.Models) != 3 {
 		t.Fatalf("entries = %d, want 3", len(cfg.Models))
+	}
+}
+
+func TestCreateSession_EntryIDBindsSession(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			{Name: "kimi", Provider: "kimi", Model: "kimi-k2.6"},
+		},
+		DefaultModel: "main",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/sessions", `{"model":"kimi"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/sessions = %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Session struct {
+			ID    string `json:"id"`
+			Model string `json:"model"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Session.Model != "kimi-k2.6" {
+		t.Errorf("session model = %q, want kimi-k2.6 (entry id resolved)", resp.Session.Model)
+	}
+	sess, err := agent.LoadSession(resp.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.ModelConfig != "kimi" {
+		t.Errorf("model_config = %q, want kimi", sess.ModelConfig)
+	}
+
+	// A raw model string stays unbound.
+	w = doJSON(t, srv, http.MethodPost, "/api/sessions", `{"model":"some-other-model"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST raw = %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	sess, err = agent.LoadSession(resp.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.ModelConfig != "" || sess.Model != "some-other-model" {
+		t.Errorf("raw session = (%q, %q), want (some-other-model, \"\")", sess.Model, sess.ModelConfig)
+	}
+}
+
+func TestConfigModels_SetLiteToggles(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Name: "main", Provider: "anthropic", Model: "m1"},
+			{Name: "cheap", Provider: "deepseek", Model: "m2"},
+		},
+		DefaultModel: "main",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	// Set.
+	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/cheap/lite", ""); w.Code != http.StatusOK {
+		t.Fatalf("set-lite = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.LiteModel != "cheap" {
+		t.Fatalf("lite = %q, want cheap", cfg.LiteModel)
+	}
+	// The badge surfaces in GET /api/config.
+	resp := getConfigResponse(t, srv)
+	for _, m := range resp.Models {
+		if m.ID == "cheap" && m.Type != "lite" {
+			t.Errorf("cheap type = %q, want lite", m.Type)
+		}
+	}
+
+	// Toggle off.
+	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/cheap/lite", ""); w.Code != http.StatusOK {
+		t.Fatalf("unset-lite = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ = config.Load()
+	if cfg.LiteModel != "" {
+		t.Fatalf("lite = %q, want cleared", cfg.LiteModel)
+	}
+
+	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/ghost/lite", ""); w.Code != http.StatusNotFound {
+		t.Errorf("set-lite unknown id = %d, want 404", w.Code)
 	}
 }

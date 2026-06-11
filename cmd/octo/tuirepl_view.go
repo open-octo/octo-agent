@@ -35,6 +35,7 @@ var (
 	queueStyle        = lipgloss.NewStyle().Foreground(tui.ColAccent)
 	modalStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
 	hintStyle         = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
+	activityStyle     = lipgloss.NewStyle().Foreground(tui.ColBrand)
 	userEchoStyle     = lipgloss.NewStyle().Foreground(tui.ColUserMsg).Bold(true)
 	pendingSteerStyle = lipgloss.NewStyle().Foreground(tui.ColMuted)
 	complSelStyle     = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
@@ -168,6 +169,13 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Normal text paste (Cmd+V on macOS) arrives as bracketed-paste runes
 		// handled by the textarea, so this binding is free for image paste.
 		return m.pasteClipboardImage()
+
+	case tea.KeyCtrlT:
+		// Toggle the pinned task checklist (Claude Code's ctrl+t). While a turn
+		// runs the list shows anyway; the pin keeps it visible when idle and
+		// includes a fully-completed list.
+		m.showTasks = !m.showTasks
+		return m, nil
 
 	case tea.KeyShiftTab:
 		// Cycle permission mode: interactive → auto → interactive.
@@ -606,7 +614,7 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 	// /init: generate .octorules as a normal tool-enabled turn.
 	if text == "/init" {
 		if len(cfg.tools) == 0 || cfg.executor == nil {
-			m.println(noticeStyle.Render("/init needs tools — restart with: octo chat --tools"))
+			m.println(noticeStyle.Render("/init needs tools — restart with: octo --tools"))
 			return m, nil
 		}
 		return m, m.startTurnEcho(initInstruction, "/init")
@@ -971,9 +979,9 @@ func (m *tuiModel) View() string {
 	}
 
 	// Live task list — attached under the activity area while a turn runs
-	// (Claude Code style). Hidden when idle, and self-suppressing when there's
-	// no outstanding work (see taskListView).
-	if m.turnRunning {
+	// (Claude Code style), or pinned via Ctrl+T. Self-suppressing when there's
+	// no outstanding work, unless pinned (see taskListView).
+	if m.turnRunning || m.showTasks {
 		if tl := m.taskListView(); tl != "" {
 			b.WriteString(tl)
 			b.WriteByte('\n')
@@ -1258,12 +1266,21 @@ func (m *tuiModel) spinnerLine(label string, since time.Time) string {
 // thinkingLine is the wait-on-the-model activity line. Since the reasoning
 // trace itself is not shown, the line carries the turn's elapsed time and a
 // rough output-token count ("↑ ~N tokens", chars/4) so a long silent stretch
-// still reads as the model working, Claude Code style.
+// still reads as the model working, Claude Code style. When a task is in
+// progress its present-continuous form replaces the generic thinking verb
+// ("Migrating config readers…" instead of "Thinking…").
 func (m *tuiModel) thinkingLine() string {
 	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+	phrase := m.activeTaskPhrase()
+	if phrase == "" {
+		phrase = m.thinkingPhrase()
+	}
 	meta := time.Since(m.turnStart).Round(time.Second).String()
 	if m.turnOutChars > 0 {
 		meta += fmt.Sprintf(" · ↑ ~%s tokens", humanTokens(m.turnOutChars/4))
 	}
-	return hintStyle.Render(fmt.Sprintf("%c %s… (%s)", frame, m.thinkingPhrase(), meta))
+	return fmt.Sprintf("%s %s %s",
+		hintStyle.Render(string(frame)),
+		activityStyle.Render(phrase+"…"),
+		hintStyle.Render("("+meta+")"))
 }

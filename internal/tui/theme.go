@@ -67,7 +67,7 @@ var (
 // bottom status bar can stay free of a persistent hint line.
 var bannerHints = []string{
 	"Enter send · Shift+Enter/Ctrl+J newline · Ctrl+Q queue",
-	"Shift+Tab perm-mode · Esc interrupt · Ctrl+C quit",
+	"Shift+Tab perm-mode · Ctrl+T tasks · Esc interrupt · Ctrl+C quit",
 }
 
 // octopusASCII is the pixel-art octo mascot — a rounded octopus with a domed
@@ -89,7 +89,7 @@ const octoArtWidth = 19
 // BannerHeight is the number of lines Banner renders (including the separator).
 const BannerHeight = 7
 
-// Banner renders the octo chat welcome header with pixel-art mascot.
+// Banner renders the octo welcome header with pixel-art mascot.
 // The icon sits left of the title, Claude Code style.
 func Banner(version, model, cwd string, width int) string {
 	if width < 20 {
@@ -97,7 +97,7 @@ func Banner(version, model, cwd string, width int) string {
 	}
 
 	// Build text lines
-	title := "◆ octo chat"
+	title := "◆ octo"
 	if version != "" {
 		title += "  " + version
 	}
