@@ -118,7 +118,7 @@ func runTUI(cfg replConfig) int {
 		}
 	}
 	if !cfg.verbosity.quiet() {
-		fmt.Fprintf(cfg.stdout, "\nSession saved. Resume anytime with: octo -c %s\n", cfg.session.ShortID())
+		fmt.Fprintf(cfg.stdout, "\nResume: octo -c %s\n", cfg.session.ShortID())
 	}
 	return 0
 }
