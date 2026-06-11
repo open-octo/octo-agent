@@ -56,18 +56,23 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Slash-command completion menu owns Tab/↑/↓/Enter/Esc while it's open, so
 	// it can navigate and accept without those keys reaching history nav or
 	// submit. Plain typing falls through and re-filters the menu below.
+	// Key semantics mirror Claude Code: Enter runs the highlighted command
+	// immediately; Tab fills it into the input to add arguments first.
 	if len(m.complItems) > 0 {
 		switch msg.Type {
-		case tea.KeyTab, tea.KeyDown:
+		case tea.KeyDown:
 			m.complIdx = (m.complIdx + 1) % len(m.complItems)
 			return m, nil
 		case tea.KeyUp:
 			m.complIdx = (m.complIdx - 1 + len(m.complItems)) % len(m.complItems)
 			return m, nil
+		case tea.KeyTab:
+			m.acceptCompletion()
+			return m, m.updateTextAreaHeight()
 		case tea.KeyEnter:
 			if !msg.Alt {
 				m.acceptCompletion()
-				return m, m.updateTextAreaHeight()
+				return m.submit()
 			}
 		case tea.KeyEsc:
 			m.complItems = nil

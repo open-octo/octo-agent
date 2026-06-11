@@ -67,7 +67,8 @@ func (m *tuiModel) updateCompletion() {
 }
 
 // acceptCompletion fills the input with the highlighted command plus a trailing
-// space (so the user can type args or press Enter to run) and closes the menu.
+// space and closes the menu. Tab calls it alone (fill, then type args); Enter
+// calls it and submits in the same keystroke (run immediately).
 func (m *tuiModel) acceptCompletion() {
 	if m.complIdx < 0 || m.complIdx >= len(m.complItems) {
 		return
@@ -122,7 +123,7 @@ func (m *tuiModel) completionView() string {
 		}
 		b.WriteByte('\n')
 	}
-	hint := "Tab/↑↓ select · Enter complete · Esc dismiss"
+	hint := "↑↓ select · Enter run · Tab complete · Esc dismiss"
 	if n := len(m.complItems); n > maxComplVisible {
 		hint = fmt.Sprintf("…%d more · %s", n-maxComplVisible, hint)
 	}

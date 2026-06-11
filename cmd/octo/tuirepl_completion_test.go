@@ -92,7 +92,7 @@ func TestCompletion_ViewRendersMenuAndHint(t *testing.T) {
 	if !strings.Contains(out, "/skills") {
 		t.Errorf("View should render the matching command; got:\n%s", out)
 	}
-	if !strings.Contains(out, "Enter complete") {
+	if !strings.Contains(out, "Enter run") {
 		t.Errorf("View should render the completion key hint; got:\n%s", out)
 	}
 	if h := m.completionHeight(); h != 2 { // 1 row + hint line
@@ -106,15 +106,15 @@ func TestCompletion_NavigationCycles(t *testing.T) {
 	if len(m.complItems) != 3 {
 		t.Fatalf("setup: want 3 matches, got %d", len(m.complItems))
 	}
-	tab := func() { m.handleKey(tea.KeyMsg{Type: tea.KeyTab}) }
-	tab()
+	down := func() { m.handleKey(tea.KeyMsg{Type: tea.KeyDown}) }
+	down()
 	if m.complIdx != 1 {
-		t.Errorf("Tab → idx 1, got %d", m.complIdx)
+		t.Errorf("Down → idx 1, got %d", m.complIdx)
 	}
-	tab()
-	tab() // 2 → 0 (cycle)
+	down()
+	down() // 2 → 0 (cycle)
 	if m.complIdx != 0 {
-		t.Errorf("Tab should cycle back to 0; got %d", m.complIdx)
+		t.Errorf("Down should cycle back to 0; got %d", m.complIdx)
 	}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyUp}) // 0 → 2 (wrap up)
 	if m.complIdx != 2 {
@@ -122,7 +122,30 @@ func TestCompletion_NavigationCycles(t *testing.T) {
 	}
 }
 
-func TestCompletion_EnterAcceptsWithoutSubmitting(t *testing.T) {
+// Tab fills the highlighted command into the input (to add arguments) without
+// running it — Claude Code semantics.
+func TestCompletion_TabFillsWithoutSubmitting(t *testing.T) {
+	m := newTestModel()
+	setInputAndComplete(m, "/sk") // → /skills, idx 0
+	if len(m.complItems) == 0 {
+		t.Fatal("setup: expected an open menu")
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+
+	if m.turnRunning {
+		t.Error("Tab must fill the completion, not start a turn")
+	}
+	if got := m.ta.Value(); got != "/skills " {
+		t.Errorf("filled value = %q, want %q", got, "/skills ")
+	}
+	if m.complItems != nil {
+		t.Error("menu should close after filling")
+	}
+}
+
+// Enter runs the highlighted command in one keystroke — no second Enter. The
+// double-Enter flow (accept, then submit) was the main "sticky" complaint.
+func TestCompletion_EnterRunsImmediately(t *testing.T) {
 	m := newTestModel()
 	setInputAndComplete(m, "/sk") // → /skills, idx 0
 	if len(m.complItems) == 0 {
@@ -130,13 +153,27 @@ func TestCompletion_EnterAcceptsWithoutSubmitting(t *testing.T) {
 	}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 
-	if m.turnRunning {
-		t.Error("Enter on an open menu must accept the completion, not start a turn")
-	}
-	if got := m.ta.Value(); got != "/skills " {
-		t.Errorf("accepted value = %q, want %q", got, "/skills ")
+	if got := m.ta.Value(); got != "" {
+		t.Errorf("input should be consumed by the dispatch, got %q", got)
 	}
 	if m.complItems != nil {
-		t.Error("menu should close after accepting")
+		t.Error("menu should close after running")
+	}
+	if m.turnRunning {
+		t.Error("/skills is a local command — no turn should start")
+	}
+}
+
+// A partial prefix + Enter must run the highlighted command, not send the
+// half-typed prefix to the model as a prompt.
+func TestCompletion_EnterRunsHighlightedNotPrefix(t *testing.T) {
+	m := newTestModel()
+	setInputAndComplete(m, "/exi") // → /exit, idx 0
+	if len(m.complItems) != 1 {
+		t.Fatalf("setup: want 1 match for /exi, got %v", complNames(m))
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.quit {
+		t.Error("Enter on /exi should run /exit and quit")
 	}
 }
