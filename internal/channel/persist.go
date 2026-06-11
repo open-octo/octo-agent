@@ -3,6 +3,7 @@ package channel
 import (
 	"fmt"
 	"hash/fnv"
+	"os"
 	"strings"
 	"time"
 
@@ -64,7 +65,15 @@ func (s *Session) restoreOrInitStore() {
 // Persist writes the agent's current history to the session store. Called by
 // the server after each IM turn; errors are the caller's to log — losing one
 // round of persistence must not fail the chat reply.
+//
+// storeMu makes deleteStore a tombstone: /unbind and /bind run on the
+// adapter callback goroutine while a turn may still be in flight, and that
+// zombie turn's Persist would otherwise recreate the just-deleted file
+// (Save's append path opens with O_CREATE) — resurrecting history the user
+// explicitly cleared, as a malformed meta-less session file.
 func (s *Session) Persist() error {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
 	if s.Store == nil {
 		return nil
 	}
@@ -72,11 +81,20 @@ func (s *Session) Persist() error {
 	return s.Store.Save()
 }
 
-// deleteStore removes the persisted history; used by /unbind, whose contract
-// is "history cleared".
-func (s *Session) deleteStore() {
+// deleteStore removes the persisted history and tombstones the store so an
+// in-flight turn can't write it back; used by /unbind and /bind, whose
+// contracts are "history cleared" / "start fresh". Returns the delete error
+// for callers that want to warn the user (a missing file is not an error).
+func (s *Session) deleteStore() error {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
 	if s.Store == nil {
-		return
+		return nil
 	}
-	_ = agent.DeleteSession(s.Store.ID)
+	id := s.Store.ID
+	s.Store = nil
+	if err := agent.DeleteSession(id); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }

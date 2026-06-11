@@ -281,6 +281,9 @@ func TestRouteChannelEvent_MidTurnMessageSteers(t *testing.T) {
 // TestHandleChannelMessage_PersistsTurn: an IM turn's history must land on
 // disk so a fresh manager (post-restart) restores the conversation.
 func TestHandleChannelMessage_PersistsTurn(t *testing.T) {
+	tmp := t.TempDir() // isolated HOME: deterministic store IDs cross-pollinate otherwise
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	srv := chanServer(t)
 	ad := &fullFakeAdapter{}
 

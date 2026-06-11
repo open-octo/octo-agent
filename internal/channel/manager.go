@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -50,8 +51,11 @@ type Session struct {
 
 	// Store is the on-disk history backing this conversation (persist.go).
 	// Loaded/initialised at session creation, written via Persist after
-	// each turn so the conversation survives server restarts.
-	Store *agent.Session
+	// each turn so the conversation survives server restarts. storeMu
+	// guards it: deleteStore tombstones the field while a turn may still
+	// be running, and that turn's Persist must observe the nil.
+	Store   *agent.Session
+	storeMu sync.Mutex
 	// Tasks is the conversation's task store. It lives as long as the session,
 	// so task_* state persists across messages within one chat (a fresh
 	// per-message store would reset the list every turn). Stamped into the turn
@@ -284,12 +288,18 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 // the delete the new session would just rehydrate the old history.
 func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
 	key := sessionKeyFor(m.mode, ev)
+	var delErr error
 	if val, loaded := m.sessions.LoadAndDelete(key); loaded {
-		val.(*Session).deleteStore()
+		delErr = val.(*Session).deleteStore()
 	} else {
 		// No live session, but a persisted store from a previous process
 		// may still exist; /bind must clear that too.
-		_ = agent.DeleteSession(sessionStoreID(key))
+		if err := agent.DeleteSession(sessionStoreID(key)); err != nil && !os.IsNotExist(err) {
+			delErr = err
+		}
+	}
+	if delErr != nil {
+		return fmt.Sprintf("Cannot start fresh: clearing the previous history failed: %v", delErr)
 	}
 	sess := m.newSession(key, ev)
 	m.sessions.Store(key, sess)
@@ -323,7 +333,9 @@ func (m *Manager) cmdUnbind(ev InboundEvent) string {
 	if !loaded {
 		return "No active session for this context."
 	}
-	val.(*Session).deleteStore()
+	if err := val.(*Session).deleteStore(); err != nil {
+		return fmt.Sprintf("Session unbound, but clearing the persisted history failed: %v", err)
+	}
 	return "Session unbound and history cleared."
 }
 

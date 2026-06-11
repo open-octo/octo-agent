@@ -21,21 +21,29 @@ config changes), every restart wiped every conversation.
   the web session list; the title defaults to the key.
 - **Restore is best-effort**: a corrupt or missing file degrades to a fresh
   conversation, never blocks the chat.
-- **`/unbind` and `/bind` delete the store.** Their contracts ("history
-  cleared", "start fresh") must hold across restarts too — without the
-  delete, `/bind`'s new session would just rehydrate the history the user
-  asked to drop. `/bind` also clears a leftover store when no live session
-  exists.
-- Persist failures are logged to the server console and never eat the reply
-  the user already received.
+- **`/unbind` and `/bind` delete the store — and tombstone it.** Their
+  contracts ("history cleared", "start fresh") must hold across restarts
+  too. Commands run on the adapter callback goroutine while a turn may
+  still be in flight, so `deleteStore` nils the store under a mutex: the
+  zombie turn's post-turn `Persist` observes the tombstone and no-ops
+  instead of recreating the just-deleted file. A failed delete is reported
+  in the chat rather than silently claiming the history is gone.
+- **Persist runs after every turn, including each chained steer turn** — a
+  crash costs at most one turn, not a whole chain. Failures are logged to
+  the server console and never eat the reply the user already received.
 
 ## Per-turn memory freshness
 
 `handleChannelMessage` recomposes the agent's system prompt (memory
-injection included) at the start of every turn. Web turns always had this —
-`buildAgent` runs per turn — but the IM factory composed the prompt once at
-session creation, so memory written mid-session was invisible to IM until a
-restart.
+injection and the skills manifest included) at the start of every turn. Web
+turns always had this — `buildAgent` runs per turn — but the IM factory
+composed the prompt once at session creation, so memory written and skills
+imported mid-session were invisible to IM until a restart.
+
+Known remaining gap: IM agents don't carry the L2 memory hooks
+(`UserInputHook` keyword reminders, `ToolResultHook` save-nudges) that
+`buildAgent` wires for web sessions — only the L1 system-prompt injection
+reaches IM.
 
 ## Mid-turn steer
 

@@ -133,3 +133,35 @@ func TestCmdBind_StartsFresh(t *testing.T) {
 		t.Errorf("history after /bind = %d messages, want 0 (fresh session)", got)
 	}
 }
+
+// TestDeleteStore_TombstonesAgainstZombiePersist pins the /unbind-during-turn
+// contract: a turn that finishes after the user cleared the history must not
+// recreate the file via its post-turn Persist.
+func TestDeleteStore_TombstonesAgainstZombiePersist(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	m := testManager()
+	sess := m.GetOrCreateSession(ev)
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "private"})
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	path, err := sess.Store.SavePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if reply := m.cmdUnbind(ev); !strings.Contains(reply, "cleared") {
+		t.Fatalf("unexpected unbind reply %q", reply)
+	}
+
+	// The zombie turn finishes now and persists — the tombstone must hold.
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleAssistant, Content: "late reply"})
+	if err := sess.Persist(); err != nil {
+		t.Fatalf("zombie Persist should no-op, got %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("zombie turn resurrected the deleted history file")
+	}
+}
