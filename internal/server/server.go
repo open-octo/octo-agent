@@ -1139,11 +1139,28 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 	if s.handleChannelCommand(ad, ev) {
 		return
 	}
-	// Text-less events (stickers, images, voice) never answer an ask — an
-	// empty reply would consume the slot and deny for nothing.
+	// Text-less events (stickers, images, voice) never answer an ask or
+	// steer — an empty reply would consume the ask slot and deny for
+	// nothing, and an empty steer adds noise.
 	if strings.TrimSpace(ev.Text) != "" {
-		if sess := s.channelMgr.GetSession(ev); sess != nil && sess.DeliverAskReply(ev.ChatID, ev.UserID, ev.Text) {
-			return
+		if sess := s.channelMgr.GetSession(ev); sess != nil {
+			if sess.DeliverAskReply(ev.ChatID, ev.UserID, ev.Text) {
+				return
+			}
+			// Steer: a message arriving mid-turn rides the running turn's
+			// Inbox (drained between loop iterations; leftovers chain in
+			// handleChannelMessage) — web/CLI parity, instead of queueing a
+			// whole second turn. Known small race: a turn that finishes
+			// between this check and the enqueue leaves the message in the
+			// Inbox until the chat's next turn — delayed, not lost. Under
+			// shared-session bindings (BindByChat/BindByUser) this folds
+			// OTHER users' messages into the running turn too — coherent
+			// for a shared conversation, but a behavior those modes should
+			// revisit if the server ever stops hardcoding BindByChatUser.
+			if sess.IsRunning() {
+				sess.Agent.Inbox.Enqueue(ev.Text)
+				return
+			}
 		}
 	}
 	go s.handleChannelMessage(ctx, ad, ev)
@@ -1183,6 +1200,17 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	// cancellable by /stop (Session.Interrupt).
 	ctx, done := sess.BeginRun(ctx)
 	defer done()
+
+	// Recompose the system prompt every turn so memory written and skills
+	// imported/toggled since server start are visible — web turns get this
+	// for free from buildAgent; the IM factory's compose-once snapshot went
+	// stale until restart. Unconditional: the skills manifest changes at
+	// runtime even when memory is disabled.
+	var memInjection string
+	if s.memDir != "" {
+		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
+	}
+	sess.Agent.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.skillsManifest, memInjection, true)
 
 	// Per-turn permission gate, the same shape prepareToolTurn gives web
 	// turns: configured mode + an interactive ask that prompts in the chat
@@ -1227,9 +1255,47 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 			sess.Agent.Inbox.Enqueue(tools.FormatBgNote(e))
 		})
 		ctx = tools.WithBackgroundManager(ctx, bgMgr)
+		// Turn-scoped asker: ask_user_question prompts in this chat instead
+		// of falling back to the process-global wsAsker, which broadcasts to
+		// browser tabs an IM session doesn't have (the question would hang
+		// until /stop).
+		ctx = tools.WithAsker(ctx, s.channelAsker(sess, ad, ev))
 	}
 
-	_, _ = channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, ev.Text)
+	persist := func() {
+		// Persist the conversation so it survives server restarts. Failure
+		// must not eat the reply the user already got — log and move on.
+		if err := sess.Persist(); err != nil {
+			fmt.Fprintf(os.Stderr, "octo serve: channel %s: persist session: %v\n", ev.Platform, err)
+		}
+	}
+
+	_, runErr := channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, ev.Text)
+	persist()
+
+	// Steer messages that arrived after the turn's final inbox drain chain
+	// into follow-up turns (web runAgentTurnLoop parity). Still inside
+	// BeginRun, so no new turn can interleave. Persist after each chained
+	// turn — one crash must cost at most one turn, not the whole chain. A
+	// chained error stops the chain (its rollback already dropped the steer
+	// message; looping would re-fail forever).
+	for runErr == nil && ctx.Err() == nil {
+		items := sess.Agent.Inbox.Drain()
+		if len(items) == 0 {
+			break
+		}
+		_, runErr = channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, strings.Join(agent.Texts(items), "\n\n"))
+		persist()
+	}
+
+	// A steer that arrived during a restart drain would die with the
+	// process (the Inbox is memory-only) — give it the same retry notice a
+	// non-steered message gets. Leftovers outside a drain stay queued for
+	// the chat's next turn: delayed, not lost.
+	if s.drain.isDraining() && sess.Agent.Inbox.HasPending() {
+		sess.Agent.Inbox.Drain()
+		ad.SendText(ev.ChatID, "The server is restarting — please send that again in a moment.", ev.MessageID)
+	}
 }
 
 // stopChannels shuts down all channel adapters and their sessions.
