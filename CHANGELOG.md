@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased — 0.18.0-dev]
 
 ### Changed
+- **Command-shaped flags became real subcommands.** `--list-sessions` is now `octo sessions` (prints the recent list plus a resume hint), and `--list-skills` is gone — `octo skills list` already covers it with richer output. Both flags did a job and exited, which is what subcommands are for; the session flag surface keeps only behavior knobs. `octo sessions` and `octo skills` now appear in `octo help` and shell completion.
 - **`octo chat` is gone — bare `octo` does it all.** The chat surface is now the top-level command: `octo "message"` runs a headless one-shot, `octo` alone opens the TUI, and every session flag (`-c`, `--no-tools`, `--provider`, …) attaches directly to `octo`. Any first argument that isn't a named subcommand is treated as the prompt (mirroring `claude -p`), so the old "unknown command" error is gone too. `octo help` now documents the session usage, flags, and env vars at the top level; shell completion, the docs, and the eval harness were updated, and `octo help chat` / the `chat` completion target are removed. **Breaking:** scripts invoking `octo chat …` must drop the word `chat` — left in place it would be sent to the model as part of the prompt.
 
 ### Fixed
