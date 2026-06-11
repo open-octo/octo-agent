@@ -40,7 +40,7 @@ func getArtifact(t *testing.T, srv *Server, sessionID, path string) *httptest.Re
 	q := url.Values{"path": {path}}.Encode()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/artifacts?"+q, nil)
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	return w
 }
 
@@ -106,7 +106,7 @@ func TestHandleGetArtifact(t *testing.T) {
 	// Missing path param → 400.
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+id+"/artifacts", nil)
 	rec := httptest.NewRecorder()
-	srv.mux.ServeHTTP(rec, req)
+	serveLoopback(srv.mux, rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("missing path: status = %d, want 400", rec.Code)
 	}

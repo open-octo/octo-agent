@@ -55,14 +55,6 @@ const (
 	wsMaxMessageSize = 512 * 1024 // 512 KB
 )
 
-var wsUpgrader = websocket.Upgrader{
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // allow all origins for local dev
-	},
-}
-
 // newWSHub creates and starts a WebSocket hub.
 func newWSHub() *wsHub {
 	h := &wsHub{
@@ -166,10 +158,15 @@ func (h *wsHub) broadcast(sessionID string, event any) {
 }
 
 // handleWS upgrades an HTTP connection to WebSocket and registers it with
-// the hub. Auth is already checked by requireAuth middleware; this handler
-// only upgrades the connection.
+// the hub. requireAuth has already run (key / loopback-exemption checks);
+// CheckOrigin adds the Origin gate for browser dials.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	up := websocket.Upgrader{
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+		CheckOrigin:     s.wsCheckOrigin,
+	}
+	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("[ws] upgrade: %v", err)
 		return

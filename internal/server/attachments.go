@@ -179,5 +179,8 @@ func (s *Server) handleGetUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Uploads are user-supplied bytes served from our origin; without nosniff
+	// a no-Origin <script src> include could read one as JS (XSSI).
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeFile(w, r, filepath.Join(dir, name))
 }

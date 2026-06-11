@@ -48,7 +48,7 @@ func postImport(t *testing.T, srv *Server, body string) *httptest.ResponseRecord
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.mux.ServeHTTP(w, req)
+	serveLoopback(srv.mux, w, req)
 	return w
 }
 

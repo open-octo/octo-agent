@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -190,6 +189,11 @@ type Server struct {
 	// accessKey is the shared secret for Web UI / API authentication.
 	accessKey string
 
+	// apiRoutes records every pattern registered through api(), so the
+	// route-coverage test can assert each one rejects keyless non-loopback
+	// requests.
+	apiRoutes []string
+
 	// restartPending is set by Restart and read after the listener closes to
 	// distinguish a restart-driven shutdown (exit ExitRestart) from a plain
 	// one (exit 0).
@@ -220,12 +224,8 @@ type Server struct {
 }
 
 // New builds a Server. It resolves provider/model, discovers skills, and
-// validates the bind address against security rules.
+// resolves the access key that gates non-loopback requests.
 func New(cfg Config) (*Server, error) {
-	if err := validateBindAddr(cfg.Addr); err != nil {
-		return nil, err
-	}
-
 	sender, model, provName, err := resolveProviderAndModel(cfg.Provider, cfg.Model)
 	if err != nil {
 		return nil, err
@@ -240,7 +240,17 @@ func New(cfg Config) (*Server, error) {
 	skillsManifest := skills.RenderManifest(skillReg)
 	tools.SetSkills(skillReg)
 
-	accessKey := resolveAccessKey(cfg.AccessKey, fileCfg)
+	accessKey, generatedKey := resolveAccessKey(cfg.AccessKey, fileCfg)
+	if generatedKey {
+		// Persist so the key survives restarts — in particular the
+		// self-restart supervisor's worker respawns, which would otherwise
+		// log every browser out. On save failure the in-memory key still
+		// works for this process lifetime.
+		fileCfg.AccessKey = accessKey
+		if err := fileCfg.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "octo serve: persist access key to config.yml: %v (a new key will be generated next start)\n", err)
+		}
+	}
 
 	// Resolve cross-session memory directory.
 	var memDir, homeMemDir string
@@ -366,12 +376,6 @@ func (s *Server) enableMCP() {
 	}
 }
 
-// AccessKey always returns an empty string: access-key authentication was
-// removed in v0.16.0. Kept for backward compatibility.
-func (s *Server) AccessKey() string {
-	return ""
-}
-
 // ListenAndServe starts the HTTP server. The cron scheduler is armed before
 // serving so persisted tasks fire from server start, not from the first hit
 // on a task endpoint.
@@ -453,100 +457,109 @@ func (s *Server) doShutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
 }
 
+// api registers an authenticated route. The requireAuth wrapper is applied
+// here, in one place, so a new route cannot forget it; /api/health,
+// /api/version, and static files are the only handlers registered directly
+// on the mux.
+func (s *Server) api(pattern string, h http.HandlerFunc) {
+	s.apiRoutes = append(s.apiRoutes, pattern)
+	s.mux.HandleFunc(pattern, s.requireAuth(h))
+}
+
 // registerRoutes wires all handlers. API and WS routes require auth.
 func (s *Server) registerRoutes() {
-	s.mux.HandleFunc("POST /api/chat", s.requireAuth(s.handleCreateChat))
-	s.mux.HandleFunc("POST /api/chat/{id}/turn", s.requireAuth(s.handleTurnOrSSE))
-	s.mux.HandleFunc("GET /api/sessions", s.requireAuth(s.handleListSessions))
-	s.mux.HandleFunc("POST /api/sessions", s.requireAuth(s.handleCreateSession))
-	s.mux.HandleFunc("POST /api/sessions/delete", s.requireAuth(s.handleDeleteSessions))
-	s.mux.HandleFunc("GET /api/sessions/{id}", s.requireAuth(s.handleGetSession))
-	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.requireAuth(s.handleGetSessionMessages))
-	s.mux.HandleFunc("GET /api/sessions/{id}/artifacts", s.requireAuth(s.handleGetArtifact))
-	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireAuth(s.handleDeleteSession))
-	s.mux.HandleFunc("PATCH /api/sessions/{id}", s.requireAuth(s.handleUpdateSession))
-	s.mux.HandleFunc("PATCH /api/sessions/{id}/model", s.requireAuth(s.handleUpdateSessionModel))
-	s.mux.HandleFunc("PATCH /api/sessions/{id}/reasoning_effort", s.requireAuth(s.handleUpdateSessionReasoningEffort))
-	s.mux.HandleFunc("PATCH /api/sessions/{id}/working_dir", s.requireAuth(s.handleUpdateSessionWorkingDir))
-	s.mux.HandleFunc("GET /api/tools", s.requireAuth(s.handleListTools))
-	s.mux.HandleFunc("GET /api/skills", s.requireAuth(s.handleListSkills))
+	s.api("POST /api/chat", s.handleCreateChat)
+	s.api("POST /api/chat/{id}/turn", s.handleTurnOrSSE)
+	s.api("GET /api/sessions", s.handleListSessions)
+	s.api("POST /api/sessions", s.handleCreateSession)
+	s.api("POST /api/sessions/delete", s.handleDeleteSessions)
+	s.api("GET /api/sessions/{id}", s.handleGetSession)
+	s.api("GET /api/sessions/{id}/messages", s.handleGetSessionMessages)
+	s.api("GET /api/sessions/{id}/artifacts", s.handleGetArtifact)
+	s.api("DELETE /api/sessions/{id}", s.handleDeleteSession)
+	s.api("PATCH /api/sessions/{id}", s.handleUpdateSession)
+	s.api("PATCH /api/sessions/{id}/model", s.handleUpdateSessionModel)
+	s.api("PATCH /api/sessions/{id}/reasoning_effort", s.handleUpdateSessionReasoningEffort)
+	s.api("PATCH /api/sessions/{id}/working_dir", s.handleUpdateSessionWorkingDir)
+	s.api("GET /api/tools", s.handleListTools)
+	s.api("GET /api/skills", s.handleListSkills)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/version", s.handleVersion)
-	s.mux.HandleFunc("GET /api/channels", s.requireAuth(s.handleListChannels))
-	s.mux.HandleFunc("GET /api/channels/available", s.requireAuth(s.handleAvailableChannels))
-	s.mux.HandleFunc("GET /api/channels/{platform}", s.requireAuth(s.handleGetChannel))
-	s.mux.HandleFunc("POST /api/channels/{platform}", s.requireAuth(s.handleSaveChannel))
-	s.mux.HandleFunc("DELETE /api/channels/{platform}", s.requireAuth(s.handleDeleteChannel))
-	s.mux.HandleFunc("POST /api/channels/{platform}/test", s.requireAuth(s.handleTestChannel))
-	s.mux.HandleFunc("POST /api/channels/weixin/login", s.requireAuth(s.handleWeixinLoginStart))
-	s.mux.HandleFunc("GET /api/channels/weixin/login", s.requireAuth(s.handleWeixinLoginStatus))
-	s.mux.HandleFunc("DELETE /api/channels/weixin/login", s.requireAuth(s.handleWeixinLoginCancel))
-	s.mux.HandleFunc("GET /api/tasks", s.requireAuth(s.handleListTasks))
-	s.mux.HandleFunc("POST /api/tasks", s.requireAuth(s.handleCreateTask))
-	s.mux.HandleFunc("DELETE /api/tasks/{id}", s.requireAuth(s.handleDeleteTask))
-	s.mux.HandleFunc("POST /api/tasks/{id}/run", s.requireAuth(s.handleRunTask))
-	s.mux.HandleFunc("GET /api/profile/soul", s.requireAuth(s.handleGetProfileSoul))
-	s.mux.HandleFunc("GET /api/profile/user", s.requireAuth(s.handleGetProfileUser))
-	s.mux.HandleFunc("GET /api/memories", s.requireAuth(s.handleGetMemories))
-	s.mux.HandleFunc("GET /api/trash", s.requireAuth(s.handleGetTrash))
-	s.mux.HandleFunc("POST /api/trash/empty", s.requireAuth(s.handleEmptyTrash))
-	s.mux.HandleFunc("POST /api/trash/{id}/restore", s.requireAuth(s.handleRestoreTrash))
-	s.mux.HandleFunc("DELETE /api/trash/{id}", s.requireAuth(s.handleDeleteTrash))
+	s.api("GET /api/channels", s.handleListChannels)
+	s.api("GET /api/channels/available", s.handleAvailableChannels)
+	s.api("GET /api/channels/{platform}", s.handleGetChannel)
+	s.api("POST /api/channels/{platform}", s.handleSaveChannel)
+	s.api("DELETE /api/channels/{platform}", s.handleDeleteChannel)
+	s.api("POST /api/channels/{platform}/test", s.handleTestChannel)
+	s.api("POST /api/channels/weixin/login", s.handleWeixinLoginStart)
+	s.api("GET /api/channels/weixin/login", s.handleWeixinLoginStatus)
+	s.api("DELETE /api/channels/weixin/login", s.handleWeixinLoginCancel)
+	s.api("GET /api/tasks", s.handleListTasks)
+	s.api("POST /api/tasks", s.handleCreateTask)
+	s.api("DELETE /api/tasks/{id}", s.handleDeleteTask)
+	s.api("POST /api/tasks/{id}/run", s.handleRunTask)
+	s.api("GET /api/profile/soul", s.handleGetProfileSoul)
+	s.api("GET /api/profile/user", s.handleGetProfileUser)
+	s.api("GET /api/memories", s.handleGetMemories)
+	s.api("GET /api/trash", s.handleGetTrash)
+	s.api("POST /api/trash/empty", s.handleEmptyTrash)
+	s.api("POST /api/trash/{id}/restore", s.handleRestoreTrash)
+	s.api("DELETE /api/trash/{id}", s.handleDeleteTrash)
 
 	// Onboard & config
-	s.mux.HandleFunc("GET /api/onboard/status", s.requireAuth(s.handleOnboardStatus))
-	s.mux.HandleFunc("POST /api/onboard/complete", s.requireAuth(s.handleOnboardComplete))
-	s.mux.HandleFunc("GET /api/providers", s.requireAuth(s.handleListProviders))
-	s.mux.HandleFunc("GET /api/config", s.requireAuth(s.handleGetConfig))
-	s.mux.HandleFunc("POST /api/config/test", s.requireAuth(s.handleTestConfig))
-	s.mux.HandleFunc("POST /api/config/models", s.requireAuth(s.handleSaveModelConfig))
-	s.mux.HandleFunc("PATCH /api/config/models/{id}", s.requireAuth(s.handleUpdateModelConfig))
-	s.mux.HandleFunc("DELETE /api/config/models/{id}", s.requireAuth(s.handleDeleteModelConfig))
-	s.mux.HandleFunc("POST /api/config/models/{id}/default", s.requireAuth(s.handleSetDefaultModelConfig))
-	s.mux.HandleFunc("POST /api/config/models/{id}/lite", s.requireAuth(s.handleSetLiteModelConfig))
+	s.api("GET /api/onboard/status", s.handleOnboardStatus)
+	s.api("POST /api/onboard/complete", s.handleOnboardComplete)
+	s.api("GET /api/providers", s.handleListProviders)
+	s.api("GET /api/config", s.handleGetConfig)
+	s.api("POST /api/config/test", s.handleTestConfig)
+	s.api("POST /api/config/models", s.handleSaveModelConfig)
+	s.api("PATCH /api/config/models/{id}", s.handleUpdateModelConfig)
+	s.api("DELETE /api/config/models/{id}", s.handleDeleteModelConfig)
+	s.api("POST /api/config/models/{id}/default", s.handleSetDefaultModelConfig)
+	s.api("POST /api/config/models/{id}/lite", s.handleSetLiteModelConfig)
 
 	// Upload
-	s.mux.HandleFunc("POST /api/upload", s.requireAuth(s.handleUpload))
-	s.mux.HandleFunc("GET /api/uploads/{name}", s.requireAuth(s.handleGetUpload))
+	s.api("POST /api/upload", s.handleUpload)
+	s.api("GET /api/uploads/{name}", s.handleGetUpload)
 
 	// File action (open / download)
-	s.mux.HandleFunc("POST /api/file-action", s.requireAuth(s.handleFileAction))
+	s.api("POST /api/file-action", s.handleFileAction)
 
 	// Skill toggle & delete
-	s.mux.HandleFunc("PATCH /api/skills/{name}/toggle", s.requireAuth(s.handleToggleSkill))
-	s.mux.HandleFunc("DELETE /api/skills/{name}", s.requireAuth(s.handleDeleteSkill))
-	s.mux.HandleFunc("POST /api/skills/import", s.requireAuth(s.handleImportSkill))
+	s.api("PATCH /api/skills/{name}/toggle", s.handleToggleSkill)
+	s.api("DELETE /api/skills/{name}", s.handleDeleteSkill)
+	s.api("POST /api/skills/import", s.handleImportSkill)
 
 	// MCP server management
-	s.mux.HandleFunc("GET /api/mcp/servers", s.requireAuth(s.handleListMCPServers))
-	s.mux.HandleFunc("POST /api/mcp/servers", s.requireAuth(s.handleCreateMCPServer))
-	s.mux.HandleFunc("PATCH /api/mcp/servers/{name}", s.requireAuth(s.handleUpdateMCPServer))
-	s.mux.HandleFunc("DELETE /api/mcp/servers/{name}", s.requireAuth(s.handleDeleteMCPServer))
-	s.mux.HandleFunc("PATCH /api/mcp/servers/{name}/toggle", s.requireAuth(s.handleToggleMCPServer))
-	s.mux.HandleFunc("POST /api/mcp/servers/{name}/reconnect", s.requireAuth(s.handleReconnectMCPServer))
-	s.mux.HandleFunc("POST /api/mcp/servers/{name}/oauth/start", s.requireAuth(s.handleStartMCPOAuth))
-	s.mux.HandleFunc("GET /api/mcp/servers/{name}/oauth/status", s.requireAuth(s.handleMCPOAuthStatus))
-	s.mux.HandleFunc("POST /api/mcp/reload", s.requireAuth(s.handleReloadMCP))
-	s.mux.HandleFunc("GET /api/config/toolsearch", s.requireAuth(s.handleGetToolSearch))
-	s.mux.HandleFunc("PUT /api/config/toolsearch", s.requireAuth(s.handlePutToolSearch))
+	s.api("GET /api/mcp/servers", s.handleListMCPServers)
+	s.api("POST /api/mcp/servers", s.handleCreateMCPServer)
+	s.api("PATCH /api/mcp/servers/{name}", s.handleUpdateMCPServer)
+	s.api("DELETE /api/mcp/servers/{name}", s.handleDeleteMCPServer)
+	s.api("PATCH /api/mcp/servers/{name}/toggle", s.handleToggleMCPServer)
+	s.api("POST /api/mcp/servers/{name}/reconnect", s.handleReconnectMCPServer)
+	s.api("POST /api/mcp/servers/{name}/oauth/start", s.handleStartMCPOAuth)
+	s.api("GET /api/mcp/servers/{name}/oauth/status", s.handleMCPOAuthStatus)
+	s.api("POST /api/mcp/reload", s.handleReloadMCP)
+	s.api("GET /api/config/toolsearch", s.handleGetToolSearch)
+	s.api("PUT /api/config/toolsearch", s.handlePutToolSearch)
 
 	// Benchmark
-	s.mux.HandleFunc("POST /api/sessions/{id}/benchmark", s.requireAuth(s.handleBenchmark))
+	s.api("POST /api/sessions/{id}/benchmark", s.handleBenchmark)
 
 	// Memory detail
-	s.mux.HandleFunc("GET /api/memories/{filename}", s.requireAuth(s.handleGetMemory))
-	s.mux.HandleFunc("DELETE /api/memories/{filename}", s.requireAuth(s.handleDeleteMemory))
+	s.api("GET /api/memories/{filename}", s.handleGetMemory)
+	s.api("DELETE /api/memories/{filename}", s.handleDeleteMemory)
 
 	// Cron tasks (alias for scheduler tasks)
-	s.mux.HandleFunc("GET /api/cron-tasks", s.requireAuth(s.handleListCronTasks))
-	s.mux.HandleFunc("POST /api/cron-tasks/{name}/run", s.requireAuth(s.handleRunCronTask))
-	s.mux.HandleFunc("PATCH /api/cron-tasks/{name}", s.requireAuth(s.handlePatchCronTask))
+	s.api("GET /api/cron-tasks", s.handleListCronTasks)
+	s.api("POST /api/cron-tasks/{name}/run", s.handleRunCronTask)
+	s.api("PATCH /api/cron-tasks/{name}", s.handlePatchCronTask)
 
 	// Version & restart
-	s.mux.HandleFunc("POST /api/version/upgrade", s.requireAuth(s.handleVersionUpgrade))
-	s.mux.HandleFunc("POST /api/restart", s.requireAuth(s.handleRestart))
+	s.api("POST /api/version/upgrade", s.handleVersionUpgrade)
+	s.api("POST /api/restart", s.handleRestart)
 
-	s.mux.HandleFunc("GET /ws", s.requireAuth(s.handleWS))
+	s.api("GET /ws", s.handleWS)
 
 	// Static files (Web UI) — served from embedded filesystem.
 	s.mux.Handle("/", s.staticHandler())
@@ -568,8 +581,8 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		}
 		if allowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Access-Key")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -883,15 +896,6 @@ func (s *Server) invalidateSenderCache() {
 	s.senderCacheMu.Unlock()
 }
 
-// resolveAccessKey is a no-op: access-key authentication was removed in
-// v0.16.0. The field is kept on Server for backward compatibility but
-// always returns an empty string.
-func resolveAccessKey(cfgValue string, fileCfg config.Config) string {
-	_ = cfgValue
-	_ = fileCfg
-	return ""
-}
-
 // buildEnvContext mirrors cmd/octo's env context builder.
 func buildEnvContext(cwd string) string {
 	var b strings.Builder
@@ -933,18 +937,6 @@ func (s *Server) ensureSender() error {
 		s.enableSubAgentTools()
 	}
 	return nil
-}
-
-// validateAccessKey is a no-op: access-key authentication was removed in
-// v0.16.0. Kept as a placeholder so callers do not need to change.
-func (s *Server) validateAccessKey(r *http.Request) bool {
-	_ = r
-	return true
-}
-
-// requireAuth is a no-op wrapper: access-key authentication was removed.
-func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return next
 }
 
 // ─── WebSocket Asker (ask_user_question bridge) ─────────────────────────────
@@ -1076,35 +1068,6 @@ func (s *Server) rememberedFor(key string) *permission.Remembered {
 		s.rememberedStores[key] = r
 	}
 	return r
-}
-
-// validateBindAddr enforces the M6.5 security rule: non-localhost binds
-// require a permissions.yml file to exist.
-func validateBindAddr(addr string) error {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		// Try adding a default port for bare IPs.
-		host, _, err = net.SplitHostPort(addr + ":8080")
-		if err != nil {
-			return fmt.Errorf("invalid bind address %q", addr)
-		}
-	}
-
-	// localhost, 127.0.0.1, ::1, and empty (all interfaces shorthand) are
-	// allowed without a permissions file. Any other host requires one.
-	if host == "" || host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		return nil
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("cannot verify permissions.yml: %w", err)
-	}
-	permPath := filepath.Join(home, ".octo", "permissions.yml")
-	if _, err := os.Stat(permPath); os.IsNotExist(err) {
-		return fmt.Errorf("bind address %q is not localhost: create %s to enable non-localhost binds", addr, permPath)
-	}
-	return nil
 }
 
 // ─── Channel (IM Bridge) ───────────────────────────────────────────────────

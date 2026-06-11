@@ -52,7 +52,10 @@ public statement of this threat model.
 ### Request classification (`requireAuth`)
 
 `requireAuth` wraps every `/api/*` route except `/api/health` and
-`/api/version`, plus `/ws`. Decision order:
+`/api/version`, plus `/ws`. Routes register through the `Server.api` helper,
+which applies the wrapper in one place — a new route structurally cannot
+forget it; only health, version, and static files register directly on the
+mux. Decision order:
 
 1. **Valid key presented → allow.** Sources checked in order:
    `Authorization: Bearer <key>`, `X-Access-Key` header, `octo_access_key`
@@ -114,8 +117,9 @@ Precedence, first non-empty wins:
 
 Generation happens on any start where no key is configured, regardless of
 bind address, so a later switch to a non-loopback bind doesn't change the
-key. `resolveAccessKey`, `validateAccessKey`, and `Server.AccessKey()`
-carry these semantics with their existing signatures.
+key. `resolveAccessKey` returns `(key, generated)`; only `server.New`
+persists on `generated` — test constructors resolve keys in-memory and
+never write the user's config.
 
 ### Startup UX
 
