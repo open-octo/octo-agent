@@ -76,6 +76,46 @@ func TestToolResultHook_EmptyReturnLeavesResultUntouched(t *testing.T) {
 	}
 }
 
+// A <system-reminder> span appended by the hook (memory save-nudge) is
+// model-facing: it must stay on the persisted block but never reach the UI
+// event stream, where it would render inside the tool card.
+func TestToolResultHook_ReminderStrippedFromEventOutput(t *testing.T) {
+	uses := []ContentBlock{
+		NewToolUseBlock("call-1", "terminal", map[string]any{"command": "gh pr create"}),
+	}
+	results := []ContentBlock{NewToolResultBlock("call-1", "created PR #7", false)}
+	applyToolResultHook(func(string, map[string]any) string {
+		return "<system-reminder>\nsave a memory\n</system-reminder>"
+	}, uses, results)
+
+	if !strings.Contains(results[0].Result, "<system-reminder>") {
+		t.Fatalf("block must keep the reminder for the model: %q", results[0].Result)
+	}
+
+	var events []AgentEvent
+	emitToolResultEvents(func(ev AgentEvent) { events = append(events, ev) }, uses, results)
+	if len(events) != 1 || events[0].Kind != EventToolDone {
+		t.Fatalf("events = %+v, want one EventToolDone", events)
+	}
+	if strings.Contains(events[0].Output, "system-reminder") || strings.Contains(events[0].Output, "save a memory") {
+		t.Errorf("event Output leaks the reminder: %q", events[0].Output)
+	}
+	if want := "created PR #7"; events[0].Output != want {
+		t.Errorf("event Output = %q, want %q (no trailing blank lines)", events[0].Output, want)
+	}
+}
+
+func TestStripRemindersForDisplay(t *testing.T) {
+	clean := "plain output\nwith trailing newline\n"
+	if got := StripRemindersForDisplay(clean); got != clean {
+		t.Errorf("clean text must be byte-identical, got %q", got)
+	}
+	decorated := "merged\n\n<system-reminder>\nnudge\n</system-reminder>"
+	if got := StripRemindersForDisplay(decorated); got != "merged" {
+		t.Errorf("decorated = %q, want %q", got, "merged")
+	}
+}
+
 func TestApplyToolResultHook_SkipsErroredAndUnmatched(t *testing.T) {
 	uses := []ContentBlock{
 		NewToolUseBlock("ok", "terminal", map[string]any{"command": "gh pr create"}),

@@ -932,6 +932,10 @@ func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {
 	// surface the payload as ui_payload after the session JSON round-trip.
 	res1 := agent.NewToolResultBlock("call_1", "file.txt\n", false)
 	res1.UI = map[string]any{"type": "file_list", "total": 1}
+	// res2 carries a model-facing <system-reminder> appended by the
+	// tool-result hook (memory save-nudge); replay must strip it.
+	res2 := agent.NewToolResultBlock("call_2",
+		"file.txt:1:foo\n\n<system-reminder>\nsave a memory\n</system-reminder>", false)
 
 	sess := agent.NewSession("stub-model", "")
 	sess.Messages = []agent.Message{
@@ -942,7 +946,7 @@ func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {
 		}),
 		agent.NewToolResultMessage([]agent.ContentBlock{
 			res1,
-			agent.NewToolResultBlock("call_2", "file.txt:1:foo\n", false),
+			res2,
 		}),
 		agent.NewAssistantMessage("Found it"),
 	}
@@ -998,6 +1002,10 @@ func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {
 	}
 	if _, present := body.Events[5]["ui_payload"]; present {
 		t.Errorf("events[5].ui_payload present, want absent: %#v", body.Events[5]["ui_payload"])
+	}
+	// The save-nudge reminder on res2 is model-facing — replay must strip it.
+	if got, _ := body.Events[5]["result"].(string); got != "file.txt:1:foo" {
+		t.Errorf("events[5].result = %q, want reminder stripped", got)
 	}
 }
 

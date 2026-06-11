@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Vendor registry refresh.** Added Bailian (Alibaba DashScope compatible mode, mainland/US endpoints, qwen3.5-flash lite compaction) and MiMo (Xiaomi); removed Groq and SiliconFlow. (#623)
 
 ### Fixed
+- The memory save-nudge no longer leaks into tool cards. The `<system-reminder>` the tool-result hook appends after `gh pr create`/`merge` is model-facing, but every UI surface rendered it verbatim — the TUI card, the headless one-shot output, the web's live `tool_result` broadcast, and the web history replay. Tool-result events and the replay now strip reminder spans for display; the persisted blocks keep them so the model still reads the nudge, including on session resume.
 - A bare `octo` with no API key no longer prints the manual export-a-key walkthrough right before auto-launching the config wizard — the wizard path shows one intro line; non-interactive runs keep the full actionable help. The help's numbered steps also no longer start at "2." for vendors without a key-management URL. (#625)
 
 ## [0.18.0] — 2026-06-11

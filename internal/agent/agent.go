@@ -699,8 +699,10 @@ func (a *Agent) runLoop(
 				return Reply{}, fmt.Errorf("agent: dispatch tools[%d]: %w", i, err)
 			}
 
-			// Decorate results before events and history so every surface
-			// (model, UI stream, persisted session) sees the same text.
+			// Decorate results before events and history so the model and
+			// the persisted session see the same text. UI events strip the
+			// <system-reminder> spans (emitToolResultEvents) — hook output
+			// is model-facing, not part of the tool's visible result.
 			applyToolResultHook(a.ToolResultHook, reply.Blocks, resultBlocks)
 
 			// Emit EventToolDone / EventToolError per result, pairing
@@ -1060,7 +1062,7 @@ func emitToolResultEvents(handler EventHandler, useBlocks, resultBlocks []Conten
 		ev := AgentEvent{
 			ToolID:   r.ToolUseID,
 			ToolName: nameByID[r.ToolUseID],
-			Output:   truncateOutput(r.Result),
+			Output:   truncateOutput(StripRemindersForDisplay(r.Result)),
 			UI:       r.UI,
 		}
 		if r.IsError {

@@ -387,9 +387,13 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 			for _, b := range m.Blocks {
 				if b.Type == "tool_result" {
 					hasToolResult = true
+					// Persisted results may carry model-facing
+					// <system-reminder> spans appended by the tool-result
+					// hook (memory save-nudge) — strip them for display,
+					// matching the live EventToolDone path.
 					ev := map[string]any{
 						"type":   "tool_result",
-						"result": b.Result,
+						"result": agent.StripRemindersForDisplay(b.Result),
 					}
 					if b.UI != nil {
 						ev["ui_payload"] = b.UI
