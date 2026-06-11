@@ -5,18 +5,50 @@ import (
 	"testing"
 
 	"github.com/Leihb/octo-agent/internal/tasks"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestRenderTaskLines_HidesWhenNothingOutstanding(t *testing.T) {
-	if got := renderTaskLines(nil, 80); got != "" {
+	if got := renderTaskLines(nil, 80, false); got != "" {
 		t.Errorf("empty list: want \"\", got %q", got)
 	}
 	allDone := []tasks.Task{
 		{ID: 1, Subject: "a", Status: tasks.Completed},
 		{ID: 2, Subject: "b", Status: tasks.Completed},
 	}
-	if got := renderTaskLines(allDone, 80); got != "" {
+	if got := renderTaskLines(allDone, 80, false); got != "" {
 		t.Errorf("all-completed list should be hidden, got %q", got)
+	}
+}
+
+// The pinned (Ctrl+T) view renders an all-completed list instead of hiding it.
+func TestRenderTaskLines_ShowAllRendersCompleted(t *testing.T) {
+	allDone := []tasks.Task{
+		{ID: 1, Subject: "a", Status: tasks.Completed},
+		{ID: 2, Subject: "b", Status: tasks.Completed},
+	}
+	out := renderTaskLines(allDone, 80, true)
+	if !strings.Contains(out, "✓") || !strings.Contains(out, "a") {
+		t.Errorf("pinned view should render the completed list, got %q", out)
+	}
+	if got := renderTaskLines(nil, 80, true); got != "" {
+		t.Errorf("empty list renders nothing even pinned (taskListView shows the placeholder), got %q", got)
+	}
+}
+
+// Ctrl+T toggles the pin; the pinned empty view shows a placeholder.
+func TestTUI_CtrlTTogglesTaskPin(t *testing.T) {
+	m := newTestModel()
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+	if !m.showTasks {
+		t.Fatal("Ctrl+T should pin the task list")
+	}
+	if got := m.taskListView(); !strings.Contains(got, "no tasks") {
+		t.Errorf("pinned view with no store should show the placeholder, got %q", got)
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+	if m.showTasks {
+		t.Error("second Ctrl+T should unpin")
 	}
 }
 
@@ -29,7 +61,7 @@ func TestRenderTaskLines_Layout(t *testing.T) {
 		{ID: 3, Subject: "Add test", Status: tasks.Pending},
 		{ID: 1, Subject: "Update docs", Status: tasks.Completed},
 	}
-	out := renderTaskLines(items, 80)
+	out := renderTaskLines(items, 80, false)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
 		t.Fatalf("want 3 rows, got %d:\n%s", len(lines), out)
@@ -59,7 +91,7 @@ func TestRenderTaskLines_FoldsCompletedHead(t *testing.T) {
 	for i := 7; i <= 12; i++ {
 		items = append(items, tasks.Task{ID: i, Subject: "todo", Status: tasks.Pending})
 	}
-	out := renderTaskLines(items, 80)
+	out := renderTaskLines(items, 80, false)
 	lines := strings.Split(out, "\n")
 	if len(lines) > maxTaskRows {
 		t.Fatalf("block must stay within %d lines, got %d:\n%s", maxTaskRows, len(lines), out)
@@ -79,7 +111,7 @@ func TestRenderTaskLines_CollapsesLongList(t *testing.T) {
 	for i := 1; i <= 12; i++ {
 		items = append(items, tasks.Task{ID: i, Subject: "task", Status: tasks.Pending})
 	}
-	out := renderTaskLines(items, 80)
+	out := renderTaskLines(items, 80, false)
 	lines := strings.Split(out, "\n")
 	if len(lines) != maxTaskRows {
 		t.Fatalf("want %d rows (capped), got %d:\n%s", maxTaskRows, len(lines), out)

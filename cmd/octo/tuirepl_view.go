@@ -170,6 +170,13 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// handled by the textarea, so this binding is free for image paste.
 		return m.pasteClipboardImage()
 
+	case tea.KeyCtrlT:
+		// Toggle the pinned task checklist (Claude Code's ctrl+t). While a turn
+		// runs the list shows anyway; the pin keeps it visible when idle and
+		// includes a fully-completed list.
+		m.showTasks = !m.showTasks
+		return m, nil
+
 	case tea.KeyShiftTab:
 		// Cycle permission mode: interactive → auto → interactive.
 		if m.cfg.permEngine != nil {
@@ -972,9 +979,9 @@ func (m *tuiModel) View() string {
 	}
 
 	// Live task list — attached under the activity area while a turn runs
-	// (Claude Code style). Hidden when idle, and self-suppressing when there's
-	// no outstanding work (see taskListView).
-	if m.turnRunning {
+	// (Claude Code style), or pinned via Ctrl+T. Self-suppressing when there's
+	// no outstanding work, unless pinned (see taskListView).
+	if m.turnRunning || m.showTasks {
 		if tl := m.taskListView(); tl != "" {
 			b.WriteString(tl)
 			b.WriteByte('\n')

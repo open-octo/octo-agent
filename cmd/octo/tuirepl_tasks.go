@@ -31,16 +31,22 @@ var (
 const maxTaskRows = 8
 
 // taskListView renders the live task block shown under the activity spinner
-// while a turn runs. It returns "" when there's nothing worth showing: no
-// store, no tasks, or every task already completed — the block tracks
-// outstanding work, so an all-done list would just clutter the live area
-// (the committed transcript still holds the history).
+// while a turn runs, or pinned via Ctrl+T. Unpinned, it returns "" when
+// there's nothing worth showing: no store, no tasks, or every task already
+// completed — the block tracks outstanding work, so an all-done list would
+// just clutter the live area (the committed transcript still holds the
+// history). Pinned, the user asked for it explicitly: an all-done list still
+// renders, and an empty one shows a placeholder instead of silently nothing.
 func (m *tuiModel) taskListView() string {
 	store := tools.ActiveTaskStore()
-	if store == nil {
-		return ""
+	var items []tasks.Task
+	if store != nil {
+		items = store.List()
 	}
-	return renderTaskLines(store.List(), m.width)
+	if m.showTasks && len(items) == 0 {
+		return taskConnStyle.Render("└ no tasks")
+	}
+	return renderTaskLines(items, m.width, m.showTasks)
 }
 
 // activeTaskPhrase returns the in-progress task's present-continuous form (or
@@ -63,17 +69,24 @@ func (m *tuiModel) activeTaskPhrase() string {
 
 // renderTaskLines is the pure formatter behind taskListView, split out so it
 // can be tested without the global store. width <= 0 disables truncation.
-func renderTaskLines(items []tasks.Task, width int) string {
-	// Hide the block once nothing is outstanding (all completed / empty).
-	outstanding := false
-	for _, t := range items {
-		if t.Status == tasks.Pending || t.Status == tasks.InProgress {
-			outstanding = true
-			break
-		}
-	}
-	if !outstanding {
+// showAll renders a list with nothing outstanding too (the pinned Ctrl+T
+// view); otherwise such a list is hidden.
+func renderTaskLines(items []tasks.Task, width int, showAll bool) string {
+	if len(items) == 0 {
 		return ""
+	}
+	// Hide the block once nothing is outstanding (all completed).
+	if !showAll {
+		outstanding := false
+		for _, t := range items {
+			if t.Status == tasks.Pending || t.Status == tasks.InProgress {
+				outstanding = true
+				break
+			}
+		}
+		if !outstanding {
+			return ""
+		}
 	}
 
 	// Checklist order: by creation (ID), so the block reads top-to-bottom as
