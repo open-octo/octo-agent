@@ -40,10 +40,13 @@ turns always had this — `buildAgent` runs per turn — but the IM factory
 composed the prompt once at session creation, so memory written and skills
 imported mid-session were invisible to IM until a restart.
 
-Known remaining gap: IM agents don't carry the L2 memory hooks
-(`UserInputHook` keyword reminders, `ToolResultHook` save-nudges) that
-`buildAgent` wires for web sessions — only the L1 system-prompt injection
-reaches IM.
+IM turns also carry the L2 memory hooks, the same pair `buildAgent` wires
+for web sessions: `UserInputHook` keyword reminders and the
+`ToolResultHook` save-nudge. The injector comes from the shared
+`injectorFor` store (keyed `im:<session key>`), is session-sticky — the
+once-per-session recall latch must survive turns — and is dropped on
+`/unbind` and `/bind` alongside the remembered-permission store, so a fresh
+session gets a fresh latch.
 
 ## Mid-turn steer
 

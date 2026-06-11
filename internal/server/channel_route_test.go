@@ -320,3 +320,44 @@ func TestHandleChannelMessage_RefreshesSystemPerTurn(t *testing.T) {
 		t.Error("system prompt not recomposed: memory written mid-session is invisible to IM turns")
 	}
 }
+
+// TestHandleChannelMessage_WiresMemoryHooks: IM turns carry the L2 memory
+// hooks (keyword reminders + save-nudge) like web turns do via buildAgent.
+func TestHandleChannelMessage_WiresMemoryHooks(t *testing.T) {
+	srv := chanServer(t)
+	srv.memDir = t.TempDir()
+	ad := &fullFakeAdapter{}
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+
+	sess := srv.channelMgr.GetSession(evFor("x"))
+	if sess.Agent.UserInputHook == nil {
+		t.Error("IM agent missing UserInputHook (keyword reminders)")
+	}
+	if sess.Agent.ToolResultHook == nil {
+		t.Error("IM agent missing ToolResultHook (save-nudge)")
+	}
+}
+
+// TestInjectorFor_SessionStickyAndDroppedOnUnbind: the injector's
+// once-per-session recall latch must survive turns but reset with /unbind.
+func TestInjectorFor_SessionStickyAndDroppedOnUnbind(t *testing.T) {
+	srv := chanServer(t)
+	srv.memDir = t.TempDir()
+	ad := &fullFakeAdapter{}
+	ev := evFor("/unbind")
+
+	key := "im:" + string(srv.channelMgr.KeyFor(ev))
+	first := srv.injectorFor(key)
+	if first == nil {
+		t.Fatal("injectorFor returned nil")
+	}
+	if srv.injectorFor(key) != first {
+		t.Error("injector must be sticky across turns in one session")
+	}
+
+	srv.handleChannelCommand(ad, ev)
+	if srv.injectorFor(key) == first {
+		t.Error("/unbind must drop the session injector (fresh recall latch)")
+	}
+}
