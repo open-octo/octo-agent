@@ -73,10 +73,10 @@ func truncateForAsk(s string, maxLen int) string {
 // a confirmation prompt into the chat and consumes the requesting user's next
 // plain message in that chat as the answer (routed by the inbound dispatcher
 // via DeliverAskReply, ahead of the turn path — see routeChannelEvent).
-// Approval requires an explicit affirmative; any other reply, the turn being
-// cancelled (/stop), or the timeout denies. remember is always false: chat
-// approvals are one-shot, a lingering allow in a group chat would outlive
-// the person who granted it.
+// Approval requires an explicit affirmative; the "always" variants also
+// remember the decision in the session's Remembered store (exact tool+input
+// signature, session lifetime, never persisted to permissions.yml). Any
+// other reply, the turn being cancelled (/stop), or the timeout denies.
 func (s *Server) channelPermissionAsk(sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent) app.PermissionAsk {
 	return func(ctx context.Context, toolName string, toolInput map[string]any) (bool, bool, error) {
 		replyCh, release, err := sess.BeginAsk(ev.ChatID, ev.UserID)

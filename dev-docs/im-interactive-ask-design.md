@@ -20,8 +20,10 @@ to permission parity with the web UI's confirmation modal.
 - No platform buttons or interactive cards. Plain text works identically on
   all six platforms; buttons would need six adapter implementations for a
   marginal UX gain.
-- No "remember this decision". Chat approvals are one-shot — in a group
-  chat, a remembered allow would outlive the person who granted it.
+- No persistent policy edits from chat. An `always / 总是允许` reply
+  remembers the decision for the session (see
+  `permission-remember-design.md`), but nothing a chat reply does ever
+  writes `permissions.yml`.
 
 ## Answer = the next message
 
