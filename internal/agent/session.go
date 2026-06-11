@@ -414,6 +414,19 @@ func StripSystemReminders(s string) string {
 	return s
 }
 
+// StripRemindersForDisplay removes <system-reminder> spans from a tool result
+// before it reaches a UI surface (event stream, web history replay). The spans
+// stay in the persisted blocks — the model must still read them — but a hook
+// like the memory save-nudge must not render in tool cards. Text without
+// reminders is returned byte-identical, so ordinary tool output is untouched.
+func StripRemindersForDisplay(s string) string {
+	stripped := StripSystemReminders(s)
+	if stripped == s {
+		return s
+	}
+	return strings.TrimRight(stripped, " \t\n")
+}
+
 // LoadSession reads ~/.octo/sessions/<id>.jsonl. id may be a bare session id,
 // an id with a .jsonl/.json suffix, or an absolute path to a transcript file.
 func LoadSession(id string) (*Session, error) {
