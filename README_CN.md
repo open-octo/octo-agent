@@ -32,6 +32,9 @@ octo version
 提供 linux / darwin / windows × amd64 + arm64 的压缩包；每个 release 附带的
 `checksums.txt` 可校验下载完整性。
 
+**升级：**`octo upgrade` 原地安装最新 release（SHA-256 对照 `checksums.txt`
+校验）；`octo upgrade --check` 仅比较版本。Web UI 的版本徽标提供同样的流程。
+
 **用 Go 安装：**
 
 ```bash

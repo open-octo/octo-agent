@@ -33,6 +33,10 @@ octo version
 Archives ship for linux / darwin / windows on amd64 + arm64; `checksums.txt`
 in each release verifies the download.
 
+**Upgrading:** `octo upgrade` installs the latest release in place (SHA-256
+verified against `checksums.txt`); `octo upgrade --check` only compares
+versions. The web UI's version badge offers the same flow.
+
 **From Go:**
 
 ```bash

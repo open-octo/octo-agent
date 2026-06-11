@@ -56,10 +56,14 @@ The logic lives in one package used by both the CLI and the server.
   No GitHub API, no JSON, no rate-limit coupling. The base URL is a
   package var so tests point it at `httptest`.
 
-- **`Run(ctx, Options) error`** with
+- **`Prepare(ctx, Options) (*Prepared, error)`** /
+  **`Prepared.Install() error`** with
   `Options{Force bool, Log func(string), TargetPath string}` —
   `TargetPath` defaults to `os.Executable()` and exists so tests can swap a
-  temp file instead of the running test binary:
+  temp file instead of the running test binary. The split lets the server
+  run the slow part outside the restart drain gate and hold the gate only
+  for Install (local renames, seconds). `Run` composes the two for callers
+  with no gate to scope (the CLI). Prepare:
   1. **Eligibility.** A `-dev`/`-snapshot` version or empty `Commit`
      refuses with a pointer to `--force` (a local build would be silently
      replaced by an older release otherwise). Already-at-latest refuses
@@ -72,18 +76,22 @@ The logic lives in one package used by both the CLI and the server.
      missing entry or mismatch aborts.
   5. **Extract** the binary member (`octo` / `octo.exe`) from the tar.gz /
      zip.
-  6. **Swap.** Target is the executable path with symlinks resolved. A
-     lock file (`<target>.upgrade.lock`, `O_CREATE|O_EXCL`, stale after 10
-     minutes) excludes a concurrent CLI and server upgrade racing on the
-     same path. The new binary is written next to the target (same
-     filesystem, so renames are atomic), fsynced, chmod 0755; then
-     `target → target.old.<unixtime>`, `new → target`. If the second
-     rename fails, the first is reversed. The aside name is unique because
-     Windows keeps the *running* image locked against delete and
-     rename-over — a fixed `.old` name would make every upgrade after the
-     first fail there. Stale `.old.*` siblings are swept best-effort on
-     each run (the locked one survives the sweep until the process is
-     gone).
+
+  Install then **swaps**: target is the executable path with symlinks
+  resolved. A lock file (`<target>.upgrade.lock`, `O_CREATE|O_EXCL`,
+  stale after 10 minutes, stolen via rename so two stealers can't both
+  win) excludes a concurrent CLI and server upgrade racing on the same
+  path; a non-contention create failure (unwritable install dir) reports
+  the real error. The new binary is written next to the target (same
+  filesystem, so renames are atomic), fsynced, chmod 0755 explicitly
+  (umask would mask an OpenFile mode); then
+  `target → target.old.<unixtime>.<pid>`, `new → target`. If the second
+  rename fails, the first is reversed. The aside name is unique because
+  Windows keeps the *running* image locked against delete and
+  rename-over — a fixed `.old` name would make every upgrade after the
+  first fail there. Stale `.old.*` asides and orphaned `.new.*` staging
+  files are swept best-effort on each run, under the lock (the aside a
+  running process occupies survives the sweep until that process exits).
 
   Every step reports through `Log` — the CLI prints lines, the server
   broadcasts them.
@@ -127,13 +135,16 @@ date"), 1 failure, 2 flag errors.
   "no live network in `go test`" rule intact for every existing test that
   hits `/api/version`. Disabled means the degraded response.
 - **`POST /api/version/upgrade`** (auth required, like restart) replaces
-  the stub: it 202s and runs `upgrade.Run` in a goroutine, single-flight —
-  a second POST while one runs gets 409. The goroutine holds
-  `drain.begin()/end()` for the duration of the swap, the same gate turn
-  execution holds: a restart drains behind an in-flight upgrade instead of
-  exiting between the two renames (which would leave **no file at the
-  target path** and make the supervisor respawn fail outright), and an
-  upgrade attempted during a restart is refused. `Log` lines broadcast as
+  the stub: it 202s and runs `upgrade.Prepare` + `Install` in a goroutine,
+  single-flight — a second POST while one runs gets 409. The download
+  happens **outside** the drain gate (a restart only waits 30 seconds for
+  gate holders before proceeding, so holding it across a download would
+  reopen the very window the gate closes); the goroutine then holds
+  `drain.begin()/end()` only for Install, the same gate turn execution
+  holds: a restart drains behind the seconds-long swap instead of exiting
+  between the two renames (which would leave **no file at the target
+  path** and make the supervisor respawn fail outright), and an install
+  attempted during a restart is refused. `Log` lines broadcast as
   `{type: "upgrade_log", line}` WS events; completion as
   `{type: "upgrade_complete", success}` — the events version.js handles.
   Every refusal past auth — dev build, already-latest, drain in progress —

@@ -273,7 +273,18 @@ const Version = (() => {
     _renderProgressState(pop);
 
     try {
-      await fetch("/api/version/upgrade", { method: "POST" });
+      const res = await fetch("/api/version/upgrade", { method: "POST" });
+      // A synchronous refusal (401 expired cookie, etc.) sends no WS
+      // completion event, so unwind here instead of spinning forever. 409
+      // means another upgrade is mid-flight — its broadcasts drive the UI.
+      if (!res.ok && res.status !== 409) {
+        console.warn("[Version] upgrade refused:", res.status);
+        _upgrading = false;
+        _renderBadge();
+        if (pop && _popoverOpen) {
+          pop.innerHTML = `<p class="vup-error">${I18n.t("upgrade.failed")}</p>`;
+        }
+      }
     } catch (e) {
       console.warn("[Version] upgrade request failed:", e);
       _upgrading = false;

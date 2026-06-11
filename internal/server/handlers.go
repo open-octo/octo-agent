@@ -19,7 +19,6 @@ import (
 	"github.com/Leihb/octo-agent/internal/skills"
 	"github.com/Leihb/octo-agent/internal/tasks"
 	"github.com/Leihb/octo-agent/internal/tools"
-	"github.com/Leihb/octo-agent/internal/version"
 )
 
 // ─── Request/Response types ─────────────────────────────────────────────────
@@ -611,12 +610,6 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = r
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// ─── GET /api/version ───────────────────────────────────────────────────────
-
-func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"version": version.Version})
 }
 
 // ─── Turn execution ─────────────────────────────────────────────────────────

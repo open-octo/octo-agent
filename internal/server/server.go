@@ -77,6 +77,12 @@ type Config struct {
 
 	// NoMemory disables cross-session memory injection.
 	NoMemory bool
+
+	// UpdateCheck enables the outbound latest-release lookup behind
+	// GET /api/version. Only `octo serve` sets it; every other Server
+	// constructor (tests included) stays network-silent and the endpoint
+	// degrades to "current is latest".
+	UpdateCheck bool
 }
 
 // Server is the HTTP server skeleton. It owns the mux, the agent factory,
@@ -193,6 +199,16 @@ type Server struct {
 	// route-coverage test can assert each one rejects keyless non-loopback
 	// requests.
 	apiRoutes []string
+
+	// Latest-release cache behind GET /api/version (see latestVersion).
+	versionCheckMu   sync.Mutex
+	versionLatest    string
+	versionCheckedAt time.Time
+	versionFailedAt  time.Time
+
+	// upgradeRunning single-flights POST /api/version/upgrade.
+	upgradeMu      sync.Mutex
+	upgradeRunning bool
 
 	// restartPending is set by Restart and read after the listener closes to
 	// distinguish a restart-driven shutdown (exit ExitRestart) from a plain

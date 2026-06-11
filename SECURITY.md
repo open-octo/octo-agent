@@ -60,6 +60,17 @@ only unauthenticated API routes; they carry no secrets.
 To rotate the key: edit `access_key` in `~/.octo/config.yml` and restart
 (or `POST /api/restart`).
 
+## The update channel
+
+`octo upgrade` (and the web UI's upgrade button) installs the latest GitHub
+release after verifying the archive's SHA-256 against the same release's
+`checksums.txt`. Both are fetched over GitHub's TLS — the verification
+catches transport corruption and mirror tampering, **not** a compromised
+GitHub account publishing a malicious release; there is no signature layer
+yet. Upgrades run only on explicit user action (the version *check* behind
+the web badge is automatic; the install never is), and the web trigger
+sits behind the access-key auth like every other mutating endpoint.
+
 ## Reporting a vulnerability
 
 Open a [GitHub security advisory](https://github.com/Leihb/octo-agent/security/advisories/new)
