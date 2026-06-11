@@ -314,10 +314,13 @@ func main() {
 	}
 
 	// Wait for the process to finish, accumulating output as we poll.
+	// Read is cursor-advancing: each call returns only the chunk produced
+	// since the previous call, so the chunks must be concatenated — keeping
+	// only the last one drops output that arrived before the exit was seen.
 	var out string
 	for i := 0; i < 100; i++ {
-		var status string
-		out, status, _, _ = mgr.Read(id)
+		chunk, status, _, _ := mgr.Read(id)
+		out += chunk
 		if strings.HasPrefix(status, "exited") {
 			break
 		}
