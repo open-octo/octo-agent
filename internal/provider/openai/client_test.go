@@ -55,9 +55,10 @@ func TestSend_Success(t *testing.T) {
 		if req.Messages[1].Role != "user" || req.Messages[1].Content != "hello" {
 			t.Errorf("second message = %+v, want {user, hello}", req.Messages[1])
 		}
-		// The prompt-cache key is forwarded for prefix-cache routing.
-		if req.PromptCacheKey != "octo-test-key" {
-			t.Errorf("prompt_cache_key = %q, want 'octo-test-key'", req.PromptCacheKey)
+		// prompt_cache_key is OpenAI-proprietary and omitted for non-official
+		// endpoints (this httptest server). See TestPromptCacheKey_GatedByBaseURL.
+		if req.PromptCacheKey != "" {
+			t.Errorf("prompt_cache_key = %q, want omitted for a non-official BaseURL", req.PromptCacheKey)
 		}
 
 		// Response
@@ -263,6 +264,78 @@ func TestSend_NoChoices(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected error when response has no choices")
+	}
+}
+
+// TestPromptCacheKey_GatedByBaseURL verifies prompt_cache_key is sent only to
+// the official OpenAI endpoint. Compatible gateways that proxy to Bedrock reject
+// the unknown field with a 400, so it must be omitted for any custom BaseURL.
+func TestPromptCacheKey_GatedByBaseURL(t *testing.T) {
+	var gotKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req apiRequest
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &req)
+		gotKey = req.PromptCacheKey
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","model":"x","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer srv.Close()
+
+	// Custom (compatible) BaseURL → key omitted.
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	if _, err := c.Send(context.Background(), provider.Request{
+		Model: "m", Messages: []agent.Message{agent.NewUserMessage("hi")}, CacheKey: "should-be-dropped",
+	}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if gotKey != "" {
+		t.Errorf("custom BaseURL: prompt_cache_key = %q, want omitted", gotKey)
+	}
+
+	// The gate itself: official endpoint keeps the key, custom drops it.
+	official := &Client{BaseURL: DefaultBaseURL}
+	if official.promptCacheKey("k1") != "k1" {
+		t.Error("official endpoint should forward prompt_cache_key")
+	}
+	empty := &Client{BaseURL: ""}
+	if empty.promptCacheKey("k2") != "k2" {
+		t.Error("empty BaseURL (defaults to official) should forward prompt_cache_key")
+	}
+	custom := &Client{BaseURL: "https://gateway.example/v1"}
+	if custom.promptCacheKey("k3") != "" {
+		t.Error("custom BaseURL should drop prompt_cache_key")
+	}
+}
+
+// TestSend_ToolCallWithStopFinishReason verifies a response carrying tool calls
+// is treated as a tool-use turn even when the backend reports finish_reason
+// "stop" (as a gateway proxying Gemini does) rather than "tool_calls".
+func TestSend_ToolCallWithStopFinishReason(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"edit_file","arguments":"{\"path\":\"a.go\"}"}}]},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	resp, err := c.Send(context.Background(), provider.Request{
+		Model: "m", Messages: []agent.Message{agent.NewUserMessage("edit it")},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if resp.StopReason != "tool_use" {
+		t.Errorf("StopReason = %q, want tool_use (tool calls present despite finish_reason stop)", resp.StopReason)
+	}
+	gotTool := false
+	for _, b := range resp.Blocks {
+		if b.Type == "tool_use" && b.Name == "edit_file" {
+			gotTool = true
+		}
+	}
+	if !gotTool {
+		t.Error("expected an edit_file tool_use block")
 	}
 }
 

@@ -475,5 +475,47 @@ func TestSendStream_Kimi_ChoiceUsage(t *testing.T) {
 	}
 }
 
+// toolCallStopStream mimics a gateway proxying Gemini: a tool call streams in,
+// but the final chunk reports finish_reason "stop" instead of "tool_calls".
+const toolCallStopStream = "" +
+	`data: {"id":"c1","object":"chat.completion.chunk","model":"gemini","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"edit_file","arguments":""}}]}}]}` + "\n\n" +
+	`data: {"id":"c1","object":"chat.completion.chunk","model":"gemini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"a.go\"}"}}]}}]}` + "\n\n" +
+	`data: {"id":"c1","object":"chat.completion.chunk","model":"gemini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n" +
+	"data: [DONE]\n\n"
+
+// TestSendStream_ToolCallWithStopFinishReason verifies the streaming path treats
+// accumulated tool calls as a tool-use turn even when finish_reason is "stop".
+func TestSendStream_ToolCallWithStopFinishReason(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, toolCallStopStream)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	resp, err := c.SendStream(context.Background(), provider.Request{
+		Model: "gemini", Messages: []agent.Message{agent.NewUserMessage("edit it")},
+	}, provider.StreamCallbacks{})
+	if err != nil {
+		t.Fatalf("SendStream: %v", err)
+	}
+	if resp.StopReason != "tool_use" {
+		t.Errorf("StopReason = %q, want tool_use (tool call present despite finish_reason stop)", resp.StopReason)
+	}
+	gotTool := false
+	for _, b := range resp.Blocks {
+		if b.Type == "tool_use" && b.Name == "edit_file" {
+			gotTool = true
+		}
+	}
+	if !gotTool {
+		t.Error("expected an edit_file tool_use block")
+	}
+}
+
 // Compile-time assertion.
 var _ provider.StreamingProvider = (*Client)(nil)

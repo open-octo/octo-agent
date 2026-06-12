@@ -119,7 +119,7 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		MaxTokens:       req.MaxTokens,
 		Messages:        msgs,
 		Tools:           toAPITools(req.Tools),
-		PromptCacheKey:  req.CacheKey,
+		PromptCacheKey:  c.promptCacheKey(req.CacheKey),
 		ReasoningEffort: req.ReasoningEffort,
 	}
 	if body.MaxTokens <= 0 {
@@ -202,8 +202,13 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 			}
 			blocks = append(blocks, agent.NewToolUseBlock(tc.ID, tc.Function.Name, input))
 		}
-		// Normalize finish_reason to Anthropic's naming.
-		if stopReason == "tool_calls" {
+		// A response carrying tool calls is a tool-use turn — dispatch them
+		// regardless of finish_reason. The expected signal is "tool_calls", but
+		// some OpenAI-compatible backends (e.g. a gateway proxying Gemini) emit
+		// the calls while reporting "stop"; trusting finish_reason alone would
+		// silently drop the call. Leave a genuine truncation ("max_tokens")
+		// intact, since a partial tool call is unsafe to dispatch.
+		if stopReason != "max_tokens" {
 			stopReason = "tool_use"
 		}
 	}
@@ -224,6 +229,19 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		// OpenAI/DeepSeek report only cached (read) input; no write count.
 		CacheReadTokens: apiResp.Usage.cachedTokens(),
 	}, nil
+}
+
+// promptCacheKey returns the prompt-cache routing key only when the client
+// targets the official OpenAI endpoint. prompt_cache_key is an OpenAI-proprietary
+// field: OpenAI-compatible gateways that proxy to other backends (e.g. AWS
+// Bedrock for Anthropic models) reject unknown body fields with a 400
+// ("Extra inputs are not permitted"), so it is omitted for any non-official
+// BaseURL while official OpenAI keeps its prompt-cache routing.
+func (c *Client) promptCacheKey(key string) string {
+	if c.BaseURL == "" || c.BaseURL == DefaultBaseURL {
+		return key
+	}
+	return ""
 }
 
 // endpointURL returns BaseURL + ChatCompletionsPath, applying defaults and
