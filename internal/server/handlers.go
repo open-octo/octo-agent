@@ -591,7 +591,7 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	s.skillReg.Reload()
 	// Refresh the manifest for sessions built after this point, same as the
 	// toggle/delete handlers do.
-	s.skillsManifest = skills.RenderManifest(s.skillReg)
+	s.setSkillsManifest(skills.RenderManifest(s.skillReg))
 	list := s.skillReg.All()
 	out := make([]skillInfo, 0, len(list))
 	for _, sk := range list {

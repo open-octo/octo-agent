@@ -67,7 +67,7 @@ func (s *Server) handleToggleSkill(w http.ResponseWriter, r *http.Request) {
 
 	// Update in-memory state so new sessions see the change immediately.
 	s.skillReg.SetDisabled(cfg.Tools.DisabledSkills)
-	s.skillsManifest = skills.RenderManifest(s.skillReg)
+	s.setSkillsManifest(skills.RenderManifest(s.skillReg))
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":    name,
@@ -103,7 +103,7 @@ func (s *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update in-memory manifest so new sessions see the change immediately.
-	s.skillsManifest = skills.RenderManifest(s.skillReg)
+	s.setSkillsManifest(skills.RenderManifest(s.skillReg))
 
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": name})
 }

@@ -52,7 +52,7 @@ func (s *Server) handleImportSkill(w http.ResponseWriter, r *http.Request) {
 	// Refresh the registry and manifest so the list — and new sessions — see
 	// the skill immediately (same pattern as toggle/delete).
 	s.skillReg.Reload()
-	s.skillsManifest = skills.RenderManifest(s.skillReg)
+	s.setSkillsManifest(skills.RenderManifest(s.skillReg))
 
 	writeJSON(w, http.StatusOK, map[string]any{"name": name, "description": desc})
 }

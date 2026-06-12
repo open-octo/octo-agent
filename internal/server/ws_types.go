@@ -179,10 +179,15 @@ type wsEventSessionDeleted struct {
 }
 
 type wsEventRequestFeedback struct {
-	Type     string   `json:"type"`
-	Question string   `json:"question"`
-	Context  string   `json:"context,omitempty"`
-	Options  []string `json:"options,omitempty"`
+	Type string `json:"type"`
+	// SessionID is required: the ws-dispatcher drops any event whose session_id
+	// doesn't match the active session, so without it a request_feedback event
+	// would always be discarded — the same session-less footgun #613 fixed for
+	// request_confirmation.
+	SessionID string   `json:"session_id"`
+	Question  string   `json:"question"`
+	Context   string   `json:"context,omitempty"`
+	Options   []string `json:"options,omitempty"`
 }
 
 type wsEventRequestConfirmation struct {
