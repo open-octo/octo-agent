@@ -64,6 +64,14 @@ type Options struct {
 	Budget int64
 	// MaxConcurrent caps in-flight agent() calls; <= 0 = unlimited.
 	MaxConcurrent int
+
+	// JournalDir is the directory for workflow journal files. When empty,
+	// Run uses ~/.octo/workflow-journals/. Pass a temp dir in tests.
+	JournalDir string
+	// ResumeFrom, when non-empty, is the RunID of a prior run whose journal
+	// provides cached results for already-completed agent() calls. The script
+	// must match the original run's script exactly; a mismatch returns an error.
+	ResumeFrom string
 }
 
 // Result is a finished workflow run.
@@ -72,6 +80,10 @@ type Result struct {
 	InputTokens  int
 	OutputTokens int
 	Canceled     bool
+	// RunID identifies the journal written for this run. Pass it as
+	// Options.ResumeFrom to replay completed calls on a subsequent run.
+	// Empty when journaling is disabled or the journal directory is unavailable.
+	RunID string
 }
 
 // cancelToken is the sentinel agent_wait_any returns when ctx is canceled; the
@@ -84,7 +96,51 @@ func Run(ctx context.Context, script string, opt Options) (Result, error) {
 	if opt.Agent == nil {
 		return Result{}, fmt.Errorf("workflow: Options.Agent is required")
 	}
-	be := newBackend(ctx, opt)
+
+	hash := scriptHash(script)
+
+	// Resolve the journal directory (best-effort; journaling is non-fatal).
+	jDir := opt.JournalDir
+	if jDir == "" {
+		if d, err := journalsDir(); err == nil {
+			jDir = d
+		}
+	}
+
+	// Load cached entries from a prior run when resuming.
+	var cached []JournalEntry
+	if opt.ResumeFrom != "" {
+		if jDir == "" {
+			return Result{}, fmt.Errorf("workflow: resume_from requires a writable journal directory")
+		}
+		entries, prevHash, err := LoadJournal(jDir, opt.ResumeFrom)
+		if err != nil {
+			return Result{}, fmt.Errorf("workflow: load resume journal: %w", err)
+		}
+		if prevHash != hash {
+			return Result{}, fmt.Errorf("workflow: resume_from %q was created with a different script; omit resume_from to start fresh", opt.ResumeFrom)
+		}
+		cached = entries
+	}
+
+	// Create a fresh journal for this run. Pre-populate with the replayed
+	// entries so the new run ID is self-contained.
+	runID := NewRunID()
+	var j *Journal
+	if jDir != "" {
+		var err error
+		j, err = CreateJournal(jDir, runID, hash)
+		if err == nil && len(cached) > 0 {
+			for _, e := range cached {
+				_ = j.Append(e) // copy replayed entries; best-effort
+			}
+		}
+		if err != nil {
+			j = nil // journaling unavailable; run without it
+		}
+	}
+
+	be := newBackend(ctx, opt, cached, j)
 
 	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
 		WithCoreFeatures(api.CoreFeaturesV2|experimental.CoreFeaturesExceptionHandling))
@@ -103,8 +159,12 @@ func Run(ctx context.Context, script string, opt Options) (Result, error) {
 		WithStderr(&stderr)
 
 	_, err := r.InstantiateWithConfig(ctx, mrubyWasm, mc)
+	if j != nil {
+		_ = j.Close()
+	}
+
 	in, out := be.usage()
-	res := Result{InputTokens: in, OutputTokens: out, Canceled: be.canceled()}
+	res := Result{InputTokens: in, OutputTokens: out, Canceled: be.canceled(), RunID: runID}
 
 	if err != nil {
 		var ee *sys.ExitError
@@ -143,15 +203,24 @@ type backend struct {
 	inTok     int
 	outTok    int
 	wasCancel bool
+
+	// cached holds pre-loaded results from a resume_from journal. Tokens
+	// 1..len(cached) map to cached[tok-1]; tokens beyond that are fresh.
+	cached []JournalEntry
+	// journal, when non-nil, receives a record for every fresh (non-replayed)
+	// agent() call as it completes.
+	journal *Journal
 }
 
-func newBackend(ctx context.Context, opt Options) *backend {
+func newBackend(ctx context.Context, opt Options, cached []JournalEntry, j *Journal) *backend {
 	b := &backend{
 		ctx:     ctx,
 		opt:     opt,
 		done:    make(chan uint32, 1024),
 		results: map[uint32]AgentResult{},
 		prompts: map[uint32]string{},
+		cached:  cached,
+		journal: j,
 	}
 	if opt.MaxConcurrent > 0 {
 		b.sem = make(chan struct{}, opt.MaxConcurrent)
@@ -180,8 +249,10 @@ func (b *backend) register(ctx context.Context, r wazero.Runtime) (api.Module, e
 		Instantiate(ctx)
 }
 
-// agentStart kicks off one agent() call on a goroutine and returns its token
-// immediately (non-blocking). Returns -1 (cast) when the budget is exhausted.
+// agentStart kicks off one agent() call and returns its token immediately
+// (non-blocking). When the call maps to a cached journal entry it delivers the
+// stored result on a goroutine without invoking Agent. Returns -1 (cast) when
+// the budget is exhausted.
 func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length uint32) uint32 {
 	promptBytes, _ := mod.Memory().Read(ptr, length)
 	prompt := string(promptBytes)
@@ -193,11 +264,29 @@ func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length uint
 	}
 	b.next++
 	tok := b.next
+	seq := int(tok) - 1
 	b.prompts[tok] = prompt
 	b.mu.Unlock()
 
 	if b.opt.Progress != nil {
 		b.opt.Progress("→ " + label(prompt))
+	}
+
+	if seq < len(b.cached) {
+		// Replayed from journal: deliver without calling Agent.
+		ce := b.cached[seq]
+		go func() {
+			var res AgentResult
+			if ce.ErrMsg != "" {
+				res.Err = errors.New(ce.ErrMsg)
+			} else {
+				res.Reply = ce.Reply
+				res.InputTokens = ce.InputTokens
+				res.OutputTokens = ce.OutputTokens
+			}
+			b.deliver(tok, res)
+		}()
+		return tok
 	}
 
 	go func() {
@@ -221,7 +310,24 @@ func (b *backend) deliver(tok uint32, res AgentResult) {
 	b.results[tok] = res
 	b.inTok += res.InputTokens
 	b.outTok += res.OutputTokens
+	prompt := b.prompts[tok]
 	b.mu.Unlock()
+
+	// Journal fresh (non-replayed) calls so they can be resumed later.
+	if b.journal != nil && int(tok) > len(b.cached) {
+		e := JournalEntry{
+			Seq:          int(tok) - 1,
+			Prompt:       prompt,
+			Reply:        res.Reply,
+			InputTokens:  res.InputTokens,
+			OutputTokens: res.OutputTokens,
+		}
+		if res.Err != nil {
+			e.ErrMsg = res.Err.Error()
+		}
+		_ = b.journal.Append(e) // best-effort; a write failure doesn't break the run
+	}
+
 	b.done <- tok
 }
 

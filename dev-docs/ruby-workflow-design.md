@@ -5,6 +5,7 @@
 | 版本号 | 日期 | 修订人 | 描述 |
 |---|---|---|---|
 | 1.0 | 2026-06-12 | roy.lei | 初稿。基于 mruby→WASM→wazero 可行性验证（已落地为下列实现）。 |
+| 1.1 | 2026-06-13 | roy.lei | resume/journal 落地（`internal/workflow/journal.go`）。 |
 
 ## 相关文档
 
@@ -48,7 +49,7 @@ WASM 路线把 Ruby 解释器编成一个平台无关的 `.wasm` 工件，用纯
 | 专门的 workflow 进度树面板（TUI/web） | ⬜ 不做（投机性 UI；待真实使用频率证明需要再议） |
 | `agent` 富 opts（tools/model/schema/read_only） | ⬜ 设计完成，未实现（ABI 仅传 prompt 字符串） |
 | worktree 隔离 | ⬜ 设计完成，未实现 |
-| resume / journal | ⬜ 设计完成，未实现 |
+| resume / journal | ✅ 已实现（`internal/workflow/journal.go`：JSONL 落盘 + sha256 脚本 hash 校验；工具入参 `resume_from`；结果带 `[workflow run: wf-...]`） |
 
 ## Out of Scope
 

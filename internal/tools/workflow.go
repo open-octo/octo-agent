@@ -60,6 +60,13 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 					"type":        "string",
 					"description": "Short human-readable label for this workflow (3-7 words). Shown in progress UI.",
 				},
+				"resume_from": map[string]any{
+					"type": "string",
+					"description": "Run ID of a prior workflow run to resume from " +
+						"(format: wf-YYYYMMDD-HHMMSS-xxxxxxxx, returned as \"[workflow run: ...]\" " +
+						"in a previous result). Completed agent() calls are replayed instantly " +
+						"without re-running. The script must be identical to the original run.",
+				},
 			},
 			"required": []string{"script"},
 		},
@@ -116,6 +123,7 @@ func (WorkflowTool) ExecuteStream(ctx context.Context, _ string, input map[strin
 		},
 		Progress:      progress,
 		MaxConcurrent: defaultWorkflowConcurrency,
+		ResumeFrom:    stringArg(input, "resume_from"),
 	})
 	if err != nil {
 		// Surface logs even on failure — they often explain how far it got.
@@ -128,6 +136,9 @@ func (WorkflowTool) ExecuteStream(ctx context.Context, _ string, input map[strin
 	text := res.Output
 	if len(logs) > 0 {
 		text += "\n\n[workflow log]\n" + strings.Join(logs, "\n")
+	}
+	if res.RunID != "" {
+		text += "\n\n[workflow run: " + res.RunID + "]"
 	}
 	return agent.ToolResult{Text: text}, nil
 }
