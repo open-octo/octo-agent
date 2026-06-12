@@ -36,3 +36,48 @@ jobs:
           args: release --clean -p 1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Build the double-click Windows installer (octo-setup.exe) from the binary
+  # goreleaser just published, and attach it to the same release. Kept separate
+  # from goreleaser because Inno Setup is a Windows-only toolchain. The MVP
+  # installer is unsigned — see dev-docs/windows-onboarding-design.md.
+  windows-installer:
+    name: windows installer
+    needs: goreleaser
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4 # for packaging/windows/octo.iss + LICENSE.txt
+
+      - name: Stage the released binary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          New-Item -ItemType Directory -Force -Path staging | Out-Null
+          gh release download "${{ github.ref_name }}" --pattern "octo_${version}_windows_amd64.zip" --dir dl
+          Expand-Archive -Path "dl\octo_${version}_windows_amd64.zip" -DestinationPath dl\extract -Force
+          $exe = Get-ChildItem -Path dl\extract -Recurse -Filter octo.exe | Select-Object -First 1
+          Copy-Item $exe.FullName staging\octo.exe
+          Copy-Item LICENSE.txt staging\LICENSE.txt
+          "version=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y # not preinstalled on the runner image
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          # Source paths in the .iss resolve relative to the script's own dir,
+          # so SourceDir / OutputDir must be absolute.
+          $staging = Join-Path $PWD 'staging'
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=$env:version" "/DSourceDir=$staging" "/O$staging" `
+            packaging\windows\octo.iss
+
+      - name: Attach installer to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: gh release upload "${{ github.ref_name }}" staging\octo-setup.exe --clobber

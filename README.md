@@ -33,6 +33,14 @@ octo version
 Archives ship for linux / darwin / windows on amd64 + arm64; `checksums.txt`
 in each release verifies the download.
 
+**Windows (double-click installer).** Download `octo-setup.exe` from the
+[latest release](https://github.com/Leihb/octo-agent/releases/latest) and
+double-click it. It installs per-user (no administrator prompt), puts `octo` on
+your `PATH`, and adds a Start-menu entry; open a **new** terminal afterward and
+run `octo`. The installer is not yet code-signed, so Windows SmartScreen shows
+"Windows protected your PC" on first launch — click **More info → Run anyway**.
+Uninstall from "Add or remove programs" like any other app.
+
 **Upgrading:** `octo upgrade` installs the latest release in place (SHA-256
 verified against `checksums.txt`); `octo upgrade --check` only compares
 versions. The web UI's version badge offers the same flow.
