@@ -50,12 +50,26 @@ RG_EMBED_BIN := $(RG_EMBED_DIR)/rg
 
 .PHONY: all build install test cover vet fmt fmt-check tidy clean \
         eval-build eval-list eval \
-        rg-embed rg-embed-clean
+        rg-embed rg-embed-clean \
+        web-build web-dev
 
 all: test
 
+# Build the Vite + Svelte web UI into internal/server/webdist/.
+# Requires Node.js and npm (or pnpm) installed.
+web-build:
+	cd web && npm install && npm run build
+
+# Start the Vite dev server (hot-reload, proxies API to :8080).
+web-dev:
+	cd web && npm install && npm run dev
+
 # Download and embed ripgrep for the current GOOS/GOARCH before building.
 build: rg-embed
+	go build $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' -o octo ./cmd/octo
+
+# Build including the latest web UI.
+build-full: web-build rg-embed
 	go build $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' -o octo ./cmd/octo
 
 install: rg-embed

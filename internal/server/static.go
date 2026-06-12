@@ -11,12 +11,32 @@ import (
 //go:embed all:static
 var staticFS embed.FS
 
+//go:embed all:webdist
+var webdistFS embed.FS
+
 // staticHandler serves the embedded Web UI. It strips the "/" prefix and
 // falls back to index.html for SPA routing.
+// It prefers the Vite-built webdist/ when a real index.html is present
+// there (i.e. after `make web-build`), otherwise falls back to the
+// legacy hand-authored static/ directory.
 func (s *Server) staticHandler() http.Handler {
-	// Try to open the embedded static directory. If it doesn't exist (e.g.
+	// Prefer webdist/ (Vite output) over the legacy static/ directory when
+	// it contains a non-trivially small index.html.
+	chosen := fs.FS(staticFS)
+	chosenDir := "static"
+	if sub, err2 := fs.Sub(webdistFS, "webdist"); err2 == nil {
+		if f, err3 := sub.Open("index.html"); err3 == nil {
+			if st, err4 := f.Stat(); err4 == nil && st.Size() > 2048 {
+				chosen = webdistFS
+				chosenDir = "webdist"
+			}
+			_ = f.Close()
+		}
+	}
+
+	// Try to open the selected directory. If it doesn't exist (e.g.
 	// during development before the UI is built), return a no-op handler.
-	sub, err := fs.Sub(staticFS, "static")
+	sub, err := fs.Sub(chosen, chosenDir)
 	if err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/" {

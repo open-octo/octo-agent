@@ -1,0 +1,277 @@
+<script lang="ts">
+  import { onMount } from 'svelte'
+  import { showToast } from '../lib/stores'
+  import StatusTag from '../components/ui/StatusTag.svelte'
+  import * as api from '../lib/api'
+
+  interface TrashEntry {
+    id: string
+    original: string
+    trash_path: string
+    deleted_at: string
+    project: string
+    size: number
+  }
+
+  let items      = $state<TrashEntry[]>([])
+  let loading    = $state(true)
+  let busyId     = $state<string | null>(null)
+  let totalSize  = $state(0)
+  let totalCount = $state(0)
+
+  onMount(async () => {
+    await reload()
+  })
+
+  async function reload() {
+    loading = true
+    try {
+      const data = await api.listTrash() as any
+      // server returns { files: [...], total_count, total_size }
+      items = data.files ?? data ?? []
+      totalCount = data.total_count ?? items.length
+      totalSize  = data.total_size  ?? items.reduce((s: number, e: TrashEntry) => s + (e.size ?? 0), 0)
+    } catch (e: any) {
+      showToast(`Failed to load trash: ${e.message}`, 'error')
+    } finally {
+      loading = false
+    }
+  }
+
+  async function handleRestore(id: string) {
+    busyId = id
+    try {
+      await api.restoreTrash(id)
+      items = items.filter(i => i.id !== id)
+      totalCount = Math.max(0, totalCount - 1)
+      showToast('File restored', 'success')
+    } catch (e: any) {
+      showToast(`Restore failed: ${e.message}`, 'error')
+    } finally {
+      busyId = null
+    }
+  }
+
+  async function handleDelete(id: string) {
+    busyId = id
+    try {
+      await api.deleteTrashItem(id)
+      const entry = items.find(i => i.id === id)
+      if (entry) totalSize = Math.max(0, totalSize - (entry.size ?? 0))
+      items = items.filter(i => i.id !== id)
+      totalCount = Math.max(0, totalCount - 1)
+      showToast('File permanently deleted', 'success')
+    } catch (e: any) {
+      showToast(`Delete failed: ${e.message}`, 'error')
+    } finally {
+      busyId = null
+    }
+  }
+
+  async function handleEmptyAll() {
+    if (!confirm(`Permanently delete all ${totalCount} files? This cannot be undone.`)) return
+    try {
+      await api.emptyTrash({})
+      items = []
+      totalCount = 0
+      totalSize  = 0
+      showToast('Trash emptied', 'success')
+    } catch (e: any) {
+      showToast(`Empty failed: ${e.message}`, 'error')
+    }
+  }
+
+  async function handleEmptyOld() {
+    try {
+      // Server uses mode "old" to filter >7 days
+      await fetch('/api/trash/empty', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'old' }),
+      })
+      showToast('Old files cleared', 'success')
+      await reload()
+    } catch (e: any) {
+      showToast(`Failed: ${e.message}`, 'error')
+    }
+  }
+
+  function fmtSize(bytes: number): string {
+    if (bytes < 1024)        return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+  }
+
+  function fmtAge(iso: string): string {
+    try {
+      const ms = Date.now() - new Date(iso).getTime()
+      const days = Math.floor(ms / 86400000)
+      if (days === 0) return 'Today'
+      if (days === 1) return 'Yesterday'
+      return `${days} days ago`
+    } catch { return iso }
+  }
+
+  function basename(path: string): string {
+    return path.split('/').pop() ?? path
+  }
+
+  function iconFor(name: string): string {
+    const ext = name.split('.').pop()?.toLowerCase() ?? ''
+    if (['ts', 'tsx', 'js', 'jsx', 'go', 'py', 'rb', 'rs'].includes(ext)) return 'ant-design:code-outlined'
+    if (['md', 'txt', 'log'].includes(ext))  return 'ant-design:file-text-outlined'
+    if (['png', 'jpg', 'gif', 'svg'].includes(ext)) return 'ant-design:file-image-outlined'
+    if (['zip', 'tar', 'gz'].includes(ext))  return 'ant-design:file-zip-outlined'
+    return 'ant-design:file-outlined'
+  }
+
+  function isOld(iso: string): boolean {
+    try {
+      const ms = Date.now() - new Date(iso).getTime()
+      return ms > 7 * 86400000
+    } catch { return false }
+  }
+</script>
+
+<div class="page">
+  <div class="inner">
+    <div class="page-header">
+      <h2>File Recall</h2>
+      <p>Files the agent moved to trash across all projects. Recall them back to where they were, or clear the ones you don't need.</p>
+    </div>
+
+    <!-- Stats + actions -->
+    <div class="stats-bar">
+      <span class="stats-text">
+        {totalCount} {totalCount === 1 ? 'file' : 'files'}, {fmtSize(totalSize)}
+      </span>
+      <div class="bar-actions">
+        <button class="btn-outline" onclick={reload} disabled={loading}>
+          <iconify-icon icon="ant-design:reload-outlined" width="13"></iconify-icon>
+          {loading ? 'Loading…' : 'Refresh'}
+        </button>
+        <button class="btn-outline" onclick={handleEmptyOld}>
+          <iconify-icon icon="ant-design:clock-circle-outlined" width="13"></iconify-icon>
+          Empty &gt;7 days
+        </button>
+        <button class="btn-danger-ghost" onclick={handleEmptyAll} disabled={items.length === 0}>
+          <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
+          Empty all
+        </button>
+      </div>
+    </div>
+
+    {#if loading}
+      <div class="empty-state">Loading…</div>
+    {:else if items.length === 0}
+      <div class="empty-state">
+        <iconify-icon icon="ant-design:delete-outlined" width="32" style="color:rgba(0,0,0,0.2)"></iconify-icon>
+        <span>Trash is empty</span>
+      </div>
+    {:else}
+      <div class="file-list">
+        {#each items as f (f.id)}
+          <div class="file-card">
+            <span class="file-icon">
+              <iconify-icon icon={iconFor(basename(f.original))} width="17"></iconify-icon>
+            </span>
+            <div class="file-info">
+              <div class="file-name-row">
+                <span class="file-name mono">{basename(f.original)}</span>
+                {#if isOld(f.deleted_at)}
+                  <StatusTag status="warning">Old</StatusTag>
+                {/if}
+              </div>
+              <span class="file-path mono">{f.original}</span>
+              <div class="file-meta">
+                <iconify-icon icon="ant-design:folder-outlined" width="12"></iconify-icon>
+                <span>{fmtSize(f.size)}</span>
+                <span class="sep"></span>
+                <span>{fmtAge(f.deleted_at)}</span>
+                {#if f.project}
+                  <span class="sep"></span>
+                  <span>{f.project}</span>
+                {/if}
+              </div>
+            </div>
+            <div class="file-actions">
+              <button
+                class="btn-outline"
+                disabled={busyId === f.id}
+                onclick={() => handleRestore(f.id)}
+              >
+                <iconify-icon icon="ant-design:undo-outlined" width="14"></iconify-icon>
+                {busyId === f.id ? '…' : 'Restore'}
+              </button>
+              <button
+                class="icon-btn del"
+                title="Delete permanently"
+                disabled={busyId === f.id}
+                onclick={() => handleDelete(f.id)}
+              >
+                <iconify-icon icon="ant-design:delete-outlined" width="14"></iconify-icon>
+              </button>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
+</div>
+
+<style>
+.page { flex: 1; overflow-y: auto; min-height: 0; }
+.inner { max-width: 1080px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+.page-header { display: flex; flex-direction: column; gap: 4px; }
+h2 { margin: 0; font-size: 24px; font-weight: 600; color: #1F1F1F; }
+p { margin: 0; font-size: 14px; color: rgba(0,0,0,0.65); }
+.stats-bar {
+  background: #fff; border-radius: 16px; box-shadow: 0 8px 24px rgba(15,23,42,0.03);
+  padding: 14px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.stats-text { font-size: 13px; color: rgba(0,0,0,0.45); flex: 1; min-width: 0; }
+.bar-actions { display: flex; align-items: center; gap: 8px; }
+.btn-outline {
+  height: 30px; padding: 0 12px; border: 1px solid #D9D9D9; background: #fff; border-radius: 6px;
+  display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(0,0,0,0.65);
+  cursor: pointer; font-family: inherit;
+}
+.btn-outline:hover:not(:disabled) { border-color: #4096FF; color: #4096FF; }
+.btn-outline:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-danger-ghost {
+  height: 30px; padding: 0 12px; border: 1px solid #EEEFF1; background: #fff; border-radius: 6px;
+  display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(0,0,0,0.45);
+  cursor: pointer; font-family: inherit;
+}
+.btn-danger-ghost:hover:not(:disabled) { border-color: #FF4D4F; color: #FF4D4F; }
+.btn-danger-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+.empty-state {
+  padding: 60px; display: flex; flex-direction: column; align-items: center; gap: 12px;
+  color: rgba(0,0,0,0.35); font-size: 14px;
+}
+.file-list { display: flex; flex-direction: column; gap: 12px; }
+.file-card {
+  background: #fff; border-radius: 16px; box-shadow: 0 8px 24px rgba(15,23,42,0.03);
+  padding: 16px 24px; display: flex; align-items: center; gap: 16px;
+}
+.file-icon {
+  width: 36px; height: 36px; flex: 0 0 36px; border-radius: 10px;
+  background: #F5F5F5; color: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.file-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.file-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.file-name { font-size: 15px; font-weight: 600; color: #1F1F1F; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-path { font-size: 12px; color: rgba(0,0,0,0.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: rgba(0,0,0,0.45); padding-top: 1px; }
+.sep { width: 3px; height: 3px; border-radius: 9999px; background: rgba(0,0,0,0.25); }
+.file-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.icon-btn {
+  width: 30px; height: 30px; border: 1px solid #EEEFF1; background: #fff; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  color: rgba(0,0,0,0.45);
+}
+.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.icon-btn.del:hover:not(:disabled) { border-color: #FF4D4F; color: #FF4D4F; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
