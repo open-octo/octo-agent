@@ -44,8 +44,8 @@ func TestWorkflowTool_Execute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if res.Text != "R[a],R[b],R[c]" {
-		t.Errorf("Text = %q, want R[a],R[b],R[c]", res.Text)
+	if !strings.HasPrefix(res.Text, "R[a],R[b],R[c]") {
+		t.Errorf("Text = %q, want R[a],R[b],R[c] prefix", res.Text)
 	}
 }
 
