@@ -56,7 +56,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		Stream:          true,
 		StreamOptions:   &apiStreamOptions{IncludeUsage: true},
 		Tools:           toAPITools(req.Tools),
-		PromptCacheKey:  req.CacheKey,
+		PromptCacheKey:  c.promptCacheKey(req.CacheKey),
 		ReasoningEffort: req.ReasoningEffort,
 	}
 	if body.MaxTokens <= 0 {
@@ -241,6 +241,15 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 			_ = json.Unmarshal([]byte(s), &input)
 		}
 		blocks = append(blocks, agent.NewToolUseBlock(st.id, st.name, input))
+	}
+	// Accumulated tool calls make this a tool-use turn — dispatch them
+	// regardless of finish_reason. Some OpenAI-compatible backends (e.g. a
+	// gateway proxying Gemini) stream the calls but report finish_reason "stop"
+	// instead of "tool_calls"; trusting finish_reason alone would silently drop
+	// the call. A genuine truncation ("max_tokens") is left intact, since a
+	// partial tool call is unsafe to dispatch.
+	if len(toolOrder) > 0 && result.StopReason != "max_tokens" {
+		result.StopReason = "tool_use"
 	}
 	attachReasoning(blocks, reasoningB.String())
 	if len(blocks) > 0 {
