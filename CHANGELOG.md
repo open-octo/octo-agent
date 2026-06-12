@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased — 0.21.0-dev]
+## [0.21.0] — 2026-06-12
+
+### Fixed
+- **OpenAI-compatible gateways that proxy non-OpenAI backends now work.** Two issues surfaced against a LiteLLM gateway fronting AWS Bedrock (Anthropic models) and Vertex (Gemini): octo sent the OpenAI-proprietary `prompt_cache_key` on every request, which Bedrock rejects with a 400 (`Extra inputs are not permitted`) — it is now sent only to the official OpenAI endpoint and omitted for any custom base URL; and a tool call reported with `finish_reason: "stop"` instead of `"tool_calls"` (as the gateway does for Gemini) was silently dropped — the adapter now treats any response carrying tool calls as a tool-use turn. (#646)
+- **The Anthropic adapter got the symmetric tool-call hardening**: a response carrying `tool_use` blocks is dispatched regardless of `stop_reason`, so a misbehaving Anthropic-compatible gateway that reports `end_turn` alongside a tool call no longer drops it. `cache_control` is deliberately left intact (it's standard in the Messages API, unlike the OpenAI-proprietary field). (#647)
+- **Mid-stream transport resets are recovered instead of failing the turn.** An HTTP/2 stream reset, a connection drop, or a truncated final chunk while reading a streaming response is now treated as a transient stream error — the agent loop re-issues the round (bounded by the stall cap), the same recovery already used for an idle stall. A genuine cancellation or deadline is never retried. Applies to both the openai and anthropic adapters. (#648)
+
+### Changed
+- **`COMPATIBILITY.md` declares a Platform support tier.** Linux and macOS are first-class; Windows is supported but with two best-effort gaps stated rather than promised — interactive `terminal_input` (POSIX-only, since `pwsh -Command` consumes redirected stdin) and `--sandbox` (unavailable; the permission engine is the safety layer). (#645)
 
 ## [0.20.0] — 2026-06-12
 
