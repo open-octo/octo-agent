@@ -1,0 +1,45 @@
+name: Windows installer check
+
+# Compile the Inno Setup script whenever a PR touches it, so a broken installer
+# surfaces here instead of at release time — release.yml only builds it on a
+# tag push. Path-filtered, so it costs nothing on PRs that don't touch the
+# installer.
+on:
+  pull_request:
+    paths:
+      - 'packaging/windows/**'
+      - '.github/workflows/windows-installer-check.yml'
+  workflow_dispatch:
+
+jobs:
+  compile:
+    name: compile installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+      - name: Build a binary to package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging | Out-Null
+          go build -o staging\octo.exe ./cmd/octo # plain build; embedded rg is irrelevant to packaging
+          Copy-Item LICENSE.txt staging\LICENSE.txt
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            /DAppVersion=0.0.0-ci /DSourceDir=staging /Ostaging `
+            packaging\windows\octo.iss
+          if (-not (Test-Path staging\octo-setup.exe)) { throw "installer was not produced" }
