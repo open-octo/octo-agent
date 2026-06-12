@@ -135,6 +135,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Environment:")
 	fmt.Fprintln(w, "  ANTHROPIC_API_KEY / OPENAI_API_KEY      Required for the chosen provider")
 	fmt.Fprintln(w, "  ANTHROPIC_BASE_URL / OPENAI_BASE_URL    Override the endpoint (proxies, compatible servers)")
+	fmt.Fprintln(w, "  OPENAI_COMPATIBLE_API_KEY  + _BASE_URL  Self-hosted / third-party OpenAI-protocol endpoint")
+	fmt.Fprintln(w, "  ANTHROPIC_COMPATIBLE_API_KEY + _BASE_URL  ... Anthropic-protocol endpoint")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Run `octo help <command>` for examples + env vars (e.g. `octo help mcp`),")
 	fmt.Fprintln(w, "`octo <command> --help` for a command's flags, or `octo -help` for all session flags.")
