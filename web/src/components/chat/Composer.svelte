@@ -1,34 +1,48 @@
 <script lang="ts">
-  import { running, activeSessionId, chatStreaming } from '../../lib/stores'
-  import { ws } from '../../lib/ws'
   import { get } from 'svelte/store'
+  import {
+    running, activeSessionId, chatStreaming, sessions,
+    chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort,
+  } from '../../lib/stores'
+  import { ws } from '../../lib/ws'
+  import { t as tr } from '../../lib/i18n'
   import StatusTag from '../ui/StatusTag.svelte'
 
   let { onSend }: { onSend?: (text: string) => void } = $props()
 
   let text = $state('')
 
-  // Derive streaming state from store
-  let isStreaming = $derived.by(() => {
-    const sid = get(activeSessionId)
-    if (!sid) return false
-    return get(chatStreaming)[sid] ?? false
-  })
+  // $store autosubscription is reactive inside $derived (get() is not).
+  let sid = $derived($activeSessionId ?? '')
+  let isStreaming = $derived($chatStreaming[sid] ?? false)
+  let currentSession = $derived($sessions.find((s: any) => s.id === sid) ?? null)
+
+  // Session meta chips — pull live values from per-session stores, fall back
+  // to the session record, then to sensible defaults.
+  let modelName = $derived(currentSession?.model || currentSession?.model_id || '—')
+  let reasoning = $derived($chatReasoningEffort[sid] || currentSession?.reasoning_effort || 'medium')
+  let workingDir = $derived($chatWorkingDir[sid] || currentSession?.working_dir || '')
+  let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || 'ask')
+  let ctxUsage = $derived(Number($chatContextUsage[sid] ?? currentSession?.context_usage ?? 0))
+
+  function cap(s: string): string {
+    return s ? s[0].toUpperCase() + s.slice(1) : s
+  }
 
   function send() {
     if (!text.trim()) return
-    const t = text.trim()
+    const v = text.trim()
     text = ''
     if (onSend) {
-      onSend(t)
+      onSend(v)
     } else {
       running.set(true)
     }
   }
 
   function stop() {
-    const sid = get(activeSessionId)
-    if (sid) ws.interrupt(sid)
+    const s = get(activeSessionId)
+    if (s) ws.interrupt(s)
     running.set(false)
   }
 
@@ -41,28 +55,34 @@
   <div class="chips">
     <button class="chip">
       <iconify-icon icon="ant-design:robot-outlined" width="12"></iconify-icon>
-      <span>claude-sonnet-4.6</span>
+      <span>{modelName}</span>
       <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
     </button>
     <button class="chip">
-      <span>Reasoning: Medium</span>
+      <span>Reasoning: {cap(reasoning)}</span>
       <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
     </button>
-    <span class="chip static"><span class="mono">~/code/octo-agent</span></span>
+    {#if workingDir}
+      <span class="chip static"><span class="mono">{workingDir}</span></span>
+    {/if}
     <span class="chip static context-chip">
-      <span>Context</span>
-      <span class="ctx-bar"><span class="ctx-fill" style="width:38%"></span></span>
-      <span class="mono">38%</span>
+      <span>{tr('chat.context')}</span>
+      <span class="ctx-bar"><span class="ctx-fill" style="width:{Math.min(ctxUsage, 100)}%"></span></span>
+      <span class="mono">{ctxUsage}%</span>
     </span>
     <span style="margin-left:auto;"></span>
-    <StatusTag status="warning">Ask Mode</StatusTag>
+    {#if permMode === 'auto'}
+      <StatusTag status="success">{tr('chat.auto_mode')}</StatusTag>
+    {:else}
+      <StatusTag status="warning">{tr('chat.ask_mode')}</StatusTag>
+    {/if}
   </div>
 
   <div class="input-wrap">
     <div class="input-card">
       <textarea
         rows={2}
-        placeholder="Message Octo… (Enter to send · Shift+Enter for newline · / for skills)"
+        placeholder={tr('chat.placeholder')}
         bind:value={text}
         onkeydown={onKeydown}
       ></textarea>

@@ -1,6 +1,17 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { view, sidebar, sessions, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast } from '../../lib/stores'
   import * as api from '../../lib/api'
+
+  let versionStr = $state('')
+
+  onMount(async () => {
+    try {
+      const v = await api.getVersion() as any
+      const raw = v.current ?? v.version ?? ''
+      versionStr = raw ? (raw.startsWith('v') ? raw : `v${raw}`) : ''
+    } catch { /* version chip stays hidden */ }
+  })
 
   $effect(() => {
     function onResize() {
@@ -214,7 +225,7 @@
         <iconify-icon icon="ant-design:setting-outlined" width="14"></iconify-icon>
         <span>Settings</span>
       </div>
-      <span class="version">v0.22.0</span>
+      {#if versionStr}<span class="version">{versionStr}</span>{/if}
     </div>
   </div>
   {/if}

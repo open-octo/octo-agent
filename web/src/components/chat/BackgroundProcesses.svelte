@@ -1,8 +1,15 @@
 <script lang="ts">
-  const procs = [
-    { cmd: 'npm run dev', detail: 'VITE ready in 412 ms · http://localhost:5173', time: '4m 12s' },
-    { cmd: 'tail -f logs/app.log', detail: '[ws] client reconnected after 2 retries', time: '1m 03s' },
-  ]
+  // Real background tasks come from the background_task_update WS event.
+  // Each task: { handle_id, command, elapsed } (elapsed in seconds).
+  let { tasks = [] }: { tasks?: any[] } = $props()
+
+  function fmtElapsed(sec: number): string {
+    if (!sec || sec < 0) return '0s'
+    if (sec < 60) return `${Math.floor(sec)}s`
+    const m = Math.floor(sec / 60)
+    const s = Math.floor(sec % 60)
+    return `${m}m ${s.toString().padStart(2, '0')}s`
+  }
 </script>
 
 <div class="bg-tray">
@@ -10,22 +17,18 @@
     <details>
       <summary class="tray-summary">
         <span class="dot"></span>
-        <span class="lbl">2 background processes</span>
+        <span class="lbl">{tasks.length} background {tasks.length === 1 ? 'process' : 'processes'}</span>
         <span style="margin-left:auto"></span>
         <iconify-icon icon="lucide:chevron-up" width="14" style="color:rgba(0,0,0,0.35)"></iconify-icon>
       </summary>
       <div class="proc-list">
-        {#each procs as p}
+        {#each tasks as p (p.handle_id)}
         <div class="proc-row">
           <span class="proc-dot"></span>
           <div class="proc-info">
-            <span class="proc-cmd mono">{p.cmd}</span>
-            <span class="proc-detail mono">{p.detail}</span>
+            <span class="proc-cmd mono">{p.command}</span>
           </div>
-          <span class="proc-time">running · {p.time}</span>
-          <button class="proc-btn" title="View output">
-            <iconify-icon icon="ant-design:eye-outlined" width="14"></iconify-icon>
-          </button>
+          <span class="proc-time">running · {fmtElapsed(p.elapsed)}</span>
           <button class="proc-btn stop" title="Stop">
             <iconify-icon icon="ant-design:stop-outlined" width="14"></iconify-icon>
           </button>
@@ -59,7 +62,6 @@
 }
 .proc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .proc-cmd { font-size: 13px; color: rgba(0,0,0,0.88); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.proc-detail { font-size: 11px; color: rgba(0,0,0,0.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proc-time { font-size: 12px; color: #52C41A; flex: 0 0 auto; }
 .proc-btn {
   width: 28px; height: 28px; flex: 0 0 28px; border: 1px solid #EEEFF1; background: #fff;

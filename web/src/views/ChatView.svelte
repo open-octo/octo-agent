@@ -512,7 +512,7 @@
 
       <!-- Background processes tray -->
       {#if bgTasks && bgTasks.length > 0}
-        <BackgroundProcesses />
+        <BackgroundProcesses tasks={bgTasks} />
       {/if}
 
       <!-- Composer -->
