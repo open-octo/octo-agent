@@ -29,9 +29,6 @@
             <span class="proc-cmd mono">{p.command}</span>
           </div>
           <span class="proc-time">running · {fmtElapsed(p.elapsed)}</span>
-          <button class="proc-btn stop" title="Stop">
-            <iconify-icon icon="ant-design:stop-outlined" width="14"></iconify-icon>
-          </button>
         </div>
         {/each}
       </div>
@@ -63,12 +60,5 @@
 .proc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .proc-cmd { font-size: 13px; color: rgba(0,0,0,0.88); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proc-time { font-size: 12px; color: #52C41A; flex: 0 0 auto; }
-.proc-btn {
-  width: 28px; height: 28px; flex: 0 0 28px; border: 1px solid #EEEFF1; background: #fff;
-  border-radius: 6px; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: rgba(0,0,0,0.45);
-}
-.proc-btn:hover { border-color: #4096FF; color: #4096FF; }
-.proc-btn.stop:hover { border-color: #FF4D4F; color: #FF4D4F; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>

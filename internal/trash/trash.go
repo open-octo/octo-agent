@@ -24,6 +24,9 @@ type Entry struct {
 	DeletedAt string `json:"deleted_at"`
 	Project   string `json:"project"`
 	Size      int64  `json:"size"`
+	// Orphan is true when the original project directory no longer exists
+	// (e.g. a test temp dir) — such entries are safe to permanently delete.
+	Orphan bool `json:"orphan"`
 }
 
 type meta struct {
@@ -174,6 +177,12 @@ func List() ([]Entry, error) {
 					size = info.Size()
 				}
 			}
+			orphan := false
+			if m.Project != "" {
+				if _, err := os.Stat(m.Project); os.IsNotExist(err) {
+					orphan = true
+				}
+			}
 			entries = append(entries, Entry{
 				ID:        filepath.Base(trashPath),
 				Original:  m.Original,
@@ -181,6 +190,7 @@ func List() ([]Entry, error) {
 				DeletedAt: m.DeletedAt,
 				Project:   m.Project,
 				Size:      size,
+				Orphan:    orphan,
 			})
 		}
 	}

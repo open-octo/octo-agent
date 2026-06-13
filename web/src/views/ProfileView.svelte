@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { memTab, memories, showToast, view, sessions, activeSessionId } from '../lib/stores'
+  import { memTab, showToast, view, sessions, activeSessionId } from '../lib/stores'
   import StatusTag from '../components/ui/StatusTag.svelte'
+  import { renderMarkdown } from '../lib/markdown'
   import * as api from '../lib/api'
 
   // --- state ---
@@ -25,6 +26,8 @@
   let loadingUser = $state(false)
   let loadingMem  = $state(false)
   let memLoaded   = $state(false)
+  // Lazily-fetched memory bodies, keyed by file name.
+  let memContent = $state<Record<string, string>>({})
 
   // Load on tab change
   $effect(() => {
@@ -66,6 +69,19 @@
       showToast(`Could not load memories: ${e.message}`, 'error')
     } finally {
       loadingMem = false
+    }
+  }
+
+  async function toggleMemory(e: Event, name: string) {
+    const open = (e.currentTarget as HTMLDetailsElement).open
+    if (open && memContent[name] === undefined) {
+      memContent = { ...memContent, [name]: '' }   // mark in-flight
+      try {
+        const d = await api.getMemory(name)
+        memContent = { ...memContent, [name]: d.content ?? '' }
+      } catch {
+        memContent = { ...memContent, [name]: '_Could not load memory._' }
+      }
     }
   }
 
@@ -143,9 +159,7 @@
         {#if loadingSoul}
           <div class="card-loading">Loading…</div>
         {:else if soulData}
-          <div class="card-body">
-            <pre class="file-content">{soulData.content}</pre>
-          </div>
+          <div class="card-body md-content">{@html renderMarkdown(soulData.content)}</div>
         {:else}
           <div class="card-loading">soul.md not found — ask the assistant to create one.</div>
         {/if}
@@ -173,9 +187,7 @@
         {#if loadingUser}
           <div class="card-loading">Loading…</div>
         {:else if userData}
-          <div class="card-body">
-            <pre class="file-content">{userData.content}</pre>
-          </div>
+          <div class="card-body md-content">{@html renderMarkdown(userData.content)}</div>
         {:else}
           <div class="card-loading">user.md not found — ask the assistant to create one.</div>
         {/if}
@@ -206,20 +218,30 @@
           <div class="card-loading">No memory files yet.</div>
         {:else}
           {#each memFiles as f (f.name)}
-            <div class="mem-row">
-              <span class="mem-icon">
-                <iconify-icon icon={iconForMemory(f)} width="14"></iconify-icon>
-              </span>
-              <div class="mem-content">
-                <span class="mem-text mono">{f.name}</span>
-                <span class="mem-meta">{f.source} · {fmtDate(f.updated_at)}</span>
+            <details class="mem-row" ontoggle={(e) => toggleMemory(e, f.name)}>
+              <summary class="mem-summary">
+                <span class="mem-icon">
+                  <iconify-icon icon={iconForMemory(f)} width="14"></iconify-icon>
+                </span>
+                <div class="mem-content">
+                  <span class="mem-text mono">{f.name}</span>
+                  <span class="mem-meta">{f.source} · {fmtDate(f.updated_at)}</span>
+                </div>
+                <StatusTag status="default">{f.source}</StatusTag>
+                <button class="forget-btn" onclick={(e) => { e.preventDefault(); forgetMemory(f.name) }}>
+                  <iconify-icon icon="ant-design:close-circle-outlined" width="13"></iconify-icon>
+                  Forget
+                </button>
+                <iconify-icon icon="lucide:chevron-right" width="14" class="mem-chevron" style="color:rgba(0,0,0,0.35)"></iconify-icon>
+              </summary>
+              <div class="mem-body">
+                {#if memContent[f.name] === undefined || memContent[f.name] === ''}
+                  <span class="mem-loading">Loading…</span>
+                {:else}
+                  <div class="md-content">{@html renderMarkdown(memContent[f.name])}</div>
+                {/if}
               </div>
-              <StatusTag status="default">{f.source}</StatusTag>
-              <button class="forget-btn" onclick={() => forgetMemory(f.name)}>
-                <iconify-icon icon="ant-design:close-circle-outlined" width="13"></iconify-icon>
-                Forget
-              </button>
-            </div>
+            </details>
           {/each}
         {/if}
         <div class="card-footer">
@@ -256,12 +278,25 @@ p { margin: 0; font-size: 14px; color: rgba(0,0,0,0.65); }
 .card-title { font-size: 16px; font-weight: 600; color: #1F1F1F; }
 .file-path { font-size: 12px; color: rgba(0,0,0,0.45); }
 .card-body { padding: 20px 24px; font-size: 14px; line-height: 1.7; color: rgba(0,0,0,0.88); }
-.file-content {
-  margin: 0; white-space: pre-wrap; word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px; line-height: 1.6; color: rgba(0,0,0,0.80);
-}
 .card-loading { padding: 24px; text-align: center; color: rgba(0,0,0,0.45); font-size: 14px; }
+
+/* Rendered markdown (soul / user / memory bodies) */
+.md-content { font-size: 14px; line-height: 1.7; color: rgba(0,0,0,0.85); }
+:global(.md-content > :first-child) { margin-top: 0; }
+:global(.md-content > :last-child) { margin-bottom: 0; }
+:global(.md-content h1), :global(.md-content h2), :global(.md-content h3) { font-size: 15px; margin: 14px 0 6px; }
+:global(.md-content p) { margin: 8px 0; }
+:global(.md-content ul), :global(.md-content ol) { margin: 8px 0; padding-left: 20px; }
+:global(.md-content li) { margin: 3px 0; }
+:global(.md-content code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  background: #FAFAFA; border: 1px solid #F0F0F0; border-radius: 4px; padding: 1px 5px;
+}
+:global(.md-content pre) {
+  margin: 8px 0; padding: 12px 14px; overflow-x: auto; background: #FBFBFB;
+  border: 1px solid #F0F0F0; border-radius: 8px; font-size: 12.5px; line-height: 1.6;
+}
+:global(.md-content a) { color: #1677FF; }
 .card-footer {
   display: flex; align-items: center; gap: 16px;
   padding: 16px 24px; border-top: 1px dashed #EEEFF1;
@@ -271,11 +306,17 @@ p { margin: 0; font-size: 14px; color: rgba(0,0,0,0.65); }
 .btn-primary:hover { background: #4096FF; }
 .mem-count { font-size: 12px; color: rgba(0,0,0,0.45); }
 .auto-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; color: rgba(0,0,0,0.45); margin-left: auto; }
-.mem-row {
-  display: flex; align-items: flex-start; gap: 12px;
-  padding: 14px 24px; border-bottom: 1px solid #F0F0F0; background: #fff;
+.mem-row { border-bottom: 1px solid #F0F0F0; background: #fff; }
+.mem-summary {
+  list-style: none; display: flex; align-items: center; gap: 12px;
+  padding: 14px 24px; cursor: pointer; user-select: none;
 }
-.mem-row:hover { background: rgba(22,119,255,0.06); }
+.mem-summary::-webkit-details-marker { display: none; }
+.mem-summary:hover { background: rgba(22,119,255,0.06); }
+.mem-row[open] .mem-chevron { transform: rotate(90deg); }
+.mem-chevron { flex: 0 0 auto; transition: transform 0.15s; }
+.mem-body { padding: 4px 24px 16px 52px; border-top: 1px solid #F5F5F5; }
+.mem-loading { font-size: 13px; color: rgba(0,0,0,0.45); }
 .mem-icon {
   width: 28px; height: 28px; flex: 0 0 28px; border-radius: 9999px;
   background: #E6F4FF; color: #1677FF; display: flex; align-items: center; justify-content: center;

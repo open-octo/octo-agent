@@ -11,9 +11,10 @@
   let loading = $state(false)
   let rawTasks = $state<TaskResponse[]>([])
 
-  // Create-task modal
+  // Create/edit-task modal
   let showCreate = $state(false)
   let creating = $state(false)
+  let editingName = $state<string | null>(null)   // non-null ⇒ editing that task
   let newName = $state('')
   let newCron = $state('')
   let newPrompt = $state('')
@@ -87,9 +88,18 @@
   }
 
   function openCreate() {
+    editingName = null
     newName = ''
     newCron = ''
     newPrompt = ''
+    showCreate = true
+  }
+
+  function openEdit(t: TaskResponse) {
+    editingName = t.name
+    newName = t.name
+    newCron = t.cron
+    newPrompt = t.prompt
     showCreate = true
   }
 
@@ -97,12 +107,18 @@
     if (!newName.trim() || !newCron.trim() || !newPrompt.trim()) return
     creating = true
     try {
-      const t = await api.createTask({ name: newName.trim(), cron: newCron.trim(), prompt: newPrompt.trim() })
-      rawTasks = [...rawTasks, t]
-      showToast('Task created')
+      if (editingName) {
+        await api.updateTask(editingName, { cron: newCron.trim(), prompt: newPrompt.trim() })
+        await load()
+        showToast('Task updated')
+      } else {
+        const t = await api.createTask({ name: newName.trim(), cron: newCron.trim(), prompt: newPrompt.trim() })
+        rawTasks = [...rawTasks, t]
+        showToast('Task created')
+      }
       showCreate = false
     } catch (e: any) {
-      showToast(e?.message ?? 'Failed to create task', 'error')
+      showToast(e?.message ?? 'Failed to save task', 'error')
     } finally {
       creating = false
     }
@@ -184,6 +200,9 @@
               <button class="act-btn" title="Run now" onclick={() => handleRun(t)}>
                 <iconify-icon icon="ant-design:caret-right-outlined" width="15"></iconify-icon>
               </button>
+              <button class="act-btn" title="Edit" onclick={() => openEdit(t)}>
+                <iconify-icon icon="ant-design:edit-outlined" width="14"></iconify-icon>
+              </button>
               <button class="act-btn del" title="Delete" onclick={() => handleDelete(t)}>
                 <iconify-icon icon="ant-design:delete-outlined" width="15"></iconify-icon>
               </button>
@@ -203,7 +222,7 @@
   <div class="modal-backdrop" onclick={onBackdropClick}>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-header">
-        <span id="modal-title" class="modal-title">New Scheduled Task</span>
+        <span id="modal-title" class="modal-title">{editingName ? 'Edit Scheduled Task' : 'New Scheduled Task'}</span>
         <button class="modal-close" onclick={() => (showCreate = false)} aria-label="Close">
           <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
         </button>
@@ -217,7 +236,7 @@
             type="text"
             placeholder="e.g. Daily digest"
             bind:value={newName}
-            disabled={creating}
+            disabled={creating || editingName !== null}
           />
         </label>
 
@@ -252,7 +271,7 @@
           onclick={submitCreate}
           disabled={creating || !newName.trim() || !newCron.trim() || !newPrompt.trim()}
         >
-          {creating ? 'Creating…' : 'Create Task'}
+          {creating ? 'Saving…' : editingName ? 'Save' : 'Create Task'}
         </button>
       </div>
     </div>
@@ -296,8 +315,8 @@ p { margin: 0; font-size: 14px; color: rgba(0,0,0,0.65); }
 }
 .table-header, .table-row {
   display: grid;
-  grid-template-columns: minmax(170px,2.4fr) 120px minmax(110px,1.2fr) 96px 88px;
-  column-gap: 12px; align-items: center; padding: 0 24px; min-width: 660px;
+  grid-template-columns: minmax(170px,2.4fr) 120px minmax(110px,1.2fr) 96px 120px;
+  column-gap: 12px; align-items: center; padding: 0 24px; min-width: 690px;
 }
 .table-header {
   height: 44px; background: #FAFAFA;

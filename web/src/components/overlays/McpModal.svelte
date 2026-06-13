@@ -1,27 +1,72 @@
 <script lang="ts">
-  import { mcpModalOpen, mcpServers, showToast } from '../../lib/stores'
+  import { mcpModalOpen, mcpModalState, mcpServers, showToast } from '../../lib/stores'
   import * as api from '../../lib/api'
 
+  let mode = $derived($mcpModalState.mode)
   let name = $state('')
   let command = $state('')
+  let url = $state('')
   let transport = $state('stdio')
+  let jsonText = $state('')
   let submitting = $state(false)
+  let initFor = ''
 
-  async function add() {
-    if (!name.trim() || !command.trim()) return
+  // Re-seed the form whenever the modal opens (add → blank, edit → prefilled).
+  $effect(() => {
+    if (!$mcpModalOpen) { initFor = ''; return }
+    const key = $mcpModalState.mode + ':' + ($mcpModalState.server?.name ?? '')
+    if (initFor === key) return
+    initFor = key
+    const srv = $mcpModalState.server
+    if ($mcpModalState.mode === 'edit' && srv) {
+      name = srv.name ?? ''
+      command = srv.command ?? (Array.isArray(srv.args) ? `${srv.command ?? ''} ${srv.args.join(' ')}`.trim() : '')
+      url = srv.url ?? ''
+      transport = srv.transport || (srv.url ? 'http' : 'stdio')
+    } else {
+      name = ''; command = ''; url = ''; transport = 'stdio'
+    }
+    jsonText = ''
+  })
+
+  const title = $derived(mode === 'edit' ? 'Edit MCP Server' : mode === 'import' ? 'Import MCP Servers' : 'Add MCP Server')
+  const isHttp = $derived(transport === 'http' || transport === 'sse')
+  const canSubmit = $derived(
+    mode === 'import'
+      ? jsonText.trim().length > 0
+      : !!name.trim() && (isHttp ? !!url.trim() : !!command.trim())
+  )
+
+  async function refresh() {
+    const data = await api.listMcpServers()
+    mcpServers.set(data.servers as any)
+  }
+
+  async function submit() {
+    if (!canSubmit) return
     submitting = true
     try {
-      await api.createMcpServer({ name: name.trim(), command: command.trim() })
-      // Reload the server list so McpView reflects the addition.
-      const data = await api.listMcpServers()
-      mcpServers.set(data.servers as any)
+      if (mode === 'import') {
+        let parsed: any
+        try { parsed = JSON.parse(jsonText) } catch { showToast('Invalid JSON', 'error'); submitting = false; return }
+        const servers = parsed.mcpServers ?? parsed
+        await api.importMcpServers(servers)
+        await refresh()
+        showToast('Servers imported')
+      } else if (mode === 'edit') {
+        const server: Record<string, unknown> = isHttp ? { url: url.trim() } : { command: command.trim() }
+        if (transport) server.transport = transport
+        await api.updateMcpServer(name.trim(), { server })
+        await refresh()
+        showToast('Server updated')
+      } else {
+        await api.createMcpServer(isHttp ? { name: name.trim(), url: url.trim(), transport } : { name: name.trim(), command: command.trim(), transport })
+        await refresh()
+        showToast('Server added · connecting…')
+      }
       mcpModalOpen.set(false)
-      name = ''
-      command = ''
-      transport = 'stdio'
-      showToast('Server added · connecting…')
     } catch (e: any) {
-      showToast(e.message ?? 'Failed to add server', 'error')
+      showToast(e.message ?? 'Failed', 'error')
     } finally {
       submitting = false
     }
@@ -36,31 +81,50 @@
 <div class="backdrop" onclick={close}>
   <div class="modal" onclick={(e) => e.stopPropagation()}>
     <div class="modal-header">
-      <span class="modal-title">Add MCP Server</span>
+      <span class="modal-title">{title}</span>
       <button class="close-btn" onclick={close}>
         <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
       </button>
     </div>
     <div class="modal-body">
-      <div class="field">
-        <label>Name</label>
-        <input placeholder="e.g. github" bind:value={name} />
-      </div>
-      <div class="field">
-        <label>Launch command</label>
-        <input placeholder="npx -y @modelcontextprotocol/server-…" bind:value={command} />
-      </div>
-      <div class="field">
-        <label>Transport</label>
-        <select bind:value={transport}>
-          {#each ['stdio', 'http', 'sse'] as opt}<option>{opt}</option>{/each}
-        </select>
-      </div>
+      {#if mode === 'import'}
+        <div class="field">
+          <label>Paste MCP config JSON</label>
+          <textarea
+            rows={9}
+            class="json-area"
+            placeholder={'{\n  "mcpServers": {\n    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }\n  }\n}'}
+            bind:value={jsonText}
+          ></textarea>
+        </div>
+      {:else}
+        <div class="field">
+          <label>Name</label>
+          <input placeholder="e.g. github" bind:value={name} disabled={mode === 'edit'} />
+        </div>
+        <div class="field">
+          <label>Transport</label>
+          <select bind:value={transport}>
+            {#each ['stdio', 'http', 'sse'] as opt}<option>{opt}</option>{/each}
+          </select>
+        </div>
+        {#if isHttp}
+          <div class="field">
+            <label>Server URL</label>
+            <input placeholder="https://example.com/mcp" bind:value={url} />
+          </div>
+        {:else}
+          <div class="field">
+            <label>Launch command</label>
+            <input placeholder="npx -y @modelcontextprotocol/server-…" bind:value={command} />
+          </div>
+        {/if}
+      {/if}
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick={close} disabled={submitting}>Cancel</button>
-      <button class="btn-primary" onclick={add} disabled={submitting || !name.trim() || !command.trim()}>
-        {submitting ? 'Adding…' : 'Add Server'}
+      <button class="btn-primary" onclick={submit} disabled={submitting || !canSubmit}>
+        {submitting ? 'Saving…' : mode === 'edit' ? 'Save' : mode === 'import' ? 'Import' : 'Add Server'}
       </button>
     </div>
   </div>
@@ -99,6 +163,15 @@ input, select {
   box-sizing: border-box;
 }
 input:focus, select:focus { border-color: #1677FF; box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+input:disabled { background: #FAFAFA; color: rgba(0,0,0,0.45); }
+.json-area {
+  width: 100%; padding: 8px 10px; border: 1px solid #D9D9D9; border-radius: 6px;
+  font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(0,0,0,0.88); outline: none; background: #fff; box-sizing: border-box;
+  resize: vertical; line-height: 1.6;
+}
+.json-area:focus { border-color: #1677FF; box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+.modal { max-width: 420px; }
 .modal-footer {
   padding: 12px 18px; border-top: 1px solid #F0F0F0;
   display: flex; justify-content: flex-end; gap: 8px;

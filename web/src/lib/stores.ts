@@ -6,6 +6,8 @@ export const view = writable('chat')
 export const sidebar = writable('full')
 export const cmdkOpen = writable(false)
 export const mcpModalOpen = writable(false)
+// Drives the MCP modal: add a new server, edit an existing one, or paste JSON.
+export const mcpModalState = writable<{ mode: 'add' | 'edit' | 'import'; server?: any }>({ mode: 'add' })
 export const toast = writable<{ msg: string; type: string } | null>(null)
 
 // Runtime / WS state
@@ -40,6 +42,10 @@ export const chatWorkingDir = writable<Record<string, string>>({})
 export const chatPermMode = writable<Record<string, string>>({})
 export const chatReasoningEffort = writable<Record<string, string>>({})
 export const chatSuggestion = writable<Record<string, string>>({})
+// Live thinking buffer (thinking_delta) shown as a Thoughts block while streaming.
+export const chatThinking = writable<Record<string, string>>({})
+// Live sub-agents, keyed by session. Fed by the sub_agent_event WS stream.
+export const chatSubAgents = writable<Record<string, SubAgentState[]>>({})
 
 // Permission/question modals
 export const confirmModal = writable<any | null>(null)
@@ -164,6 +170,68 @@ export function setToolError(sessionId: string, toolId: string | undefined, erro
       msgs[lastGroup] = { ...msgs[lastGroup], tools }
     }
     return { ...m, [sessionId]: msgs }
+  })
+}
+
+// ── Sub-agents ───────────────────────────────────────────────────────────────
+// One live entry per concurrent sub-agent, driven by the sub_agent_event stream
+// (kind: started | tool | tool_error | done). The panel is a live view of the
+// current turn; resetSubAgents() clears it when a new turn starts.
+export interface SubAgentTool {
+  name: string
+  error: boolean
+}
+export interface SubAgentState {
+  id: string
+  description: string
+  status: 'running' | 'done'
+  lastTool: string
+  tools: SubAgentTool[]
+  startedAt: number
+}
+
+export function resetSubAgents(sessionId: string) {
+  chatSubAgents.update(m => ({ ...m, [sessionId]: [] }))
+}
+
+export function applySubAgentEvent(
+  sessionId: string,
+  agentId: string,
+  description: string,
+  kind: string,
+  toolName: string,
+) {
+  chatSubAgents.update(m => {
+    const list = [...(m[sessionId] || [])]
+    let idx = list.findIndex(a => a.id === agentId)
+    if (kind === 'started') {
+      const entry: SubAgentState = {
+        id: agentId,
+        description: description || agentId,
+        status: 'running',
+        lastTool: '',
+        tools: [],
+        startedAt: Date.now(),
+      }
+      if (idx >= 0) list[idx] = entry
+      else list.push(entry)
+      return { ...m, [sessionId]: list }
+    }
+    if (idx < 0) {
+      // Tool/done arrived before a started event (e.g. resumed agent) — seed it.
+      list.push({ id: agentId, description: description || agentId, status: 'running', lastTool: '', tools: [], startedAt: Date.now() })
+      idx = list.length - 1
+    }
+    const a = { ...list[idx], tools: [...list[idx].tools] }
+    if (description && a.description === a.id) a.description = description
+    if (kind === 'tool' || kind === 'tool_error') {
+      a.tools.push({ name: toolName || 'tool', error: kind === 'tool_error' })
+      a.lastTool = toolName || a.lastTool
+    } else if (kind === 'done') {
+      a.status = 'done'
+    }
+    list[idx] = a
+    return { ...m, [sessionId]: list }
   })
 }
 

@@ -1,14 +1,36 @@
 <script lang="ts">
-  import { artifacts, artifactsOpen, artifactSel, artifactView } from '../lib/stores'
-  import type { ArtifactView } from '../lib/types'
-
-  const icons: Record<string, string> = {
-    'ant-design:file-markdown-outlined': 'ant-design:file-markdown-outlined',
-    'ant-design:html5-outlined': 'ant-design:html5-outlined',
-    'ant-design:file-text-outlined': 'ant-design:file-text-outlined',
-  }
+  import { artifacts, artifactsOpen, artifactSel, artifactView, showToast } from '../lib/stores'
 
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
+
+  function isHtml(a: any): boolean {
+    return /html/i.test(a?.type ?? '') || /^\s*<(!doctype|html)/i.test(a?.code ?? '')
+  }
+
+  function copyArtifact() {
+    navigator.clipboard.writeText(cur?.code ?? '').then(() => showToast('Copied to clipboard'))
+  }
+
+  function downloadArtifact() {
+    const blob = new Blob([cur?.code ?? ''], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = cur?.name || 'artifact.txt'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function openArtifact() {
+    const html = isHtml(cur)
+    const blob = new Blob([html ? (cur?.preview || cur?.code || '') : (cur?.code ?? '')], {
+      type: html ? 'text/html' : 'text/plain',
+    })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank', 'noopener')
+    // Revoke after the new tab has had time to load.
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  }
 </script>
 
 <aside class="panel">
@@ -19,9 +41,9 @@
       <span class="file-name">{cur.name}</span>
       <span class="file-meta">{cur.type} · {cur.ver}</span>
     </div>
-    <button class="icon-btn" title="Copy"><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
-    <button class="icon-btn" title="Download"><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
-    <button class="icon-btn" title="Open in new tab"><iconify-icon icon="ant-design:export-outlined" width="14"></iconify-icon></button>
+    <button class="icon-btn" title="Copy" onclick={copyArtifact}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
+    <button class="icon-btn" title="Download" onclick={downloadArtifact}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
+    <button class="icon-btn" title="Open in new tab" onclick={openArtifact}><iconify-icon icon="ant-design:export-outlined" width="14"></iconify-icon></button>
     <button class="icon-btn" title="Close" onclick={() => artifactsOpen.set(false)}>
       <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
     </button>

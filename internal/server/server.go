@@ -553,6 +553,7 @@ func (s *Server) registerRoutes() {
 	s.api("PATCH /api/skills/{name}/toggle", s.handleToggleSkill)
 	s.api("DELETE /api/skills/{name}", s.handleDeleteSkill)
 	s.api("POST /api/skills/import", s.handleImportSkill)
+	s.api("GET /api/skills/{name}/export", s.handleExportSkill)
 
 	// MCP server management
 	s.api("GET /api/mcp/servers", s.handleListMCPServers)

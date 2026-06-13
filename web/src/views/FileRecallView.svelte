@@ -11,13 +11,15 @@
     deleted_at: string
     project: string
     size: number
+    orphan: boolean
   }
 
-  let items      = $state<TrashEntry[]>([])
-  let loading    = $state(true)
-  let busyId     = $state<string | null>(null)
-  let totalSize  = $state(0)
-  let totalCount = $state(0)
+  let items       = $state<TrashEntry[]>([])
+  let loading     = $state(true)
+  let busyId      = $state<string | null>(null)
+  let totalSize   = $state(0)
+  let totalCount  = $state(0)
+  let orphanCount = $state(0)
 
   onMount(async () => {
     await reload()
@@ -31,6 +33,7 @@
       items = data.files ?? data ?? []
       totalCount = data.total_count ?? items.length
       totalSize  = data.total_size  ?? items.reduce((s: number, e: TrashEntry) => s + (e.size ?? 0), 0)
+      orphanCount = data.orphan_count ?? items.filter((e: TrashEntry) => e.orphan).length
     } catch (e: any) {
       showToast(`Failed to load trash: ${e.message}`, 'error')
     } finally {
@@ -71,10 +74,11 @@
   async function handleEmptyAll() {
     if (!confirm(`Permanently delete all ${totalCount} files? This cannot be undone.`)) return
     try {
-      await api.emptyTrash({})
+      await api.emptyTrash({ mode: 'all' })
       items = []
       totalCount = 0
       totalSize  = 0
+      orphanCount = 0
       showToast('Trash emptied', 'success')
     } catch (e: any) {
       showToast(`Empty failed: ${e.message}`, 'error')
@@ -83,13 +87,18 @@
 
   async function handleEmptyOld() {
     try {
-      // Server uses mode "old" to filter >7 days
-      await fetch('/api/trash/empty', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'old' }),
-      })
+      await api.emptyTrash({ mode: 'old' })
       showToast('Old files cleared', 'success')
+      await reload()
+    } catch (e: any) {
+      showToast(`Failed: ${e.message}`, 'error')
+    }
+  }
+
+  async function handleCleanOrphans() {
+    try {
+      await api.emptyTrash({ mode: 'orphans' })
+      showToast('Orphan files cleared', 'success')
       await reload()
     } catch (e: any) {
       showToast(`Failed: ${e.message}`, 'error')
@@ -143,7 +152,7 @@
     <!-- Stats + actions -->
     <div class="stats-bar">
       <span class="stats-text">
-        {totalCount} {totalCount === 1 ? 'file' : 'files'}, {fmtSize(totalSize)}
+        {totalCount} {totalCount === 1 ? 'file' : 'files'}, {fmtSize(totalSize)}{#if orphanCount > 0} · {orphanCount} {orphanCount === 1 ? 'orphan' : 'orphans'}{/if}
       </span>
       <div class="bar-actions">
         <button class="btn-outline" onclick={reload} disabled={loading}>
@@ -153,6 +162,10 @@
         <button class="btn-outline" onclick={handleEmptyOld}>
           <iconify-icon icon="ant-design:clock-circle-outlined" width="13"></iconify-icon>
           Empty &gt;7 days
+        </button>
+        <button class="btn-outline" onclick={handleCleanOrphans} disabled={orphanCount === 0} title="Permanently delete entries whose original project directory no longer exists">
+          <iconify-icon icon="ant-design:disconnect-outlined" width="13"></iconify-icon>
+          Clean orphans
         </button>
         <button class="btn-danger-ghost" onclick={handleEmptyAll} disabled={items.length === 0}>
           <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
@@ -178,7 +191,9 @@
             <div class="file-info">
               <div class="file-name-row">
                 <span class="file-name mono">{basename(f.original)}</span>
-                {#if isOld(f.deleted_at)}
+                {#if f.orphan}
+                  <StatusTag status="error">Orphan</StatusTag>
+                {:else if isOld(f.deleted_at)}
                   <StatusTag status="warning">Old</StatusTag>
                 {/if}
               </div>

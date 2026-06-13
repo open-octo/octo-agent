@@ -93,13 +93,18 @@ func (s *Server) handleGetTrash(w http.ResponseWriter, r *http.Request) {
 		entries = []trash.Entry{}
 	}
 	var totalSize int64
+	orphanCount := 0
 	for _, e := range entries {
 		totalSize += e.Size
+		if e.Orphan {
+			orphanCount++
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"files":       entries,
-		"total_count": len(entries),
-		"total_size":  totalSize,
+		"files":        entries,
+		"total_count":  len(entries),
+		"total_size":   totalSize,
+		"orphan_count": orphanCount,
 	})
 }
 

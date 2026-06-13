@@ -121,6 +121,14 @@ export async function deleteTask(id: string): Promise<void> {
   await request<unknown>(`/api/tasks/${id}`, { method: 'DELETE' })
 }
 
+// Cron tasks are keyed by name on the scheduler side; edits PATCH that route.
+export async function updateTask(name: string, patch: unknown): Promise<void> {
+  await request<unknown>(`/api/cron-tasks/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    ...json(patch),
+  })
+}
+
 export async function runTask(id: string): Promise<void> {
   await request<unknown>(`/api/tasks/${id}/run`, { method: 'POST' })
 }
@@ -161,6 +169,12 @@ export async function createMcpServer(opts: CreateMcpServerOpts): Promise<void> 
   if (command) { server.command = command; if (args) server.args = args }
   if (url) server.url = url
   await request<unknown>('/api/mcp/servers', { method: 'POST', ...json({ name, server }) })
+}
+
+// Bulk-import servers from a pasted JSON config: either a full
+// { mcpServers: { name: {...} } } document or a bare { name: {...} } map.
+export async function importMcpServers(servers: Record<string, unknown>): Promise<void> {
+  await request<unknown>('/api/mcp/servers', { method: 'POST', ...json({ mcpServers: servers }) })
 }
 
 export async function updateMcpServer(name: string, req: unknown): Promise<McpServer> {
@@ -229,6 +243,12 @@ export async function getMemories(): Promise<Memory[]> {
   return d.files ?? []
 }
 
+// Single memory detail — the list endpoint omits content, so the body is
+// fetched on demand when a row is expanded.
+export async function getMemory(name: string): Promise<{ content: string; path: string }> {
+  return request<{ content: string; path: string }>(`/api/memories/${encodeURIComponent(name)}`)
+}
+
 // Trash
 
 export async function listTrash(): Promise<RecallFile[]> {
@@ -244,7 +264,7 @@ export async function deleteTrashItem(id: string): Promise<void> {
 }
 
 export interface EmptyTrashOpts {
-  before?: string
+  mode?: 'all' | 'old' | 'orphans'
 }
 
 export async function emptyTrash(opts?: EmptyTrashOpts): Promise<void> {

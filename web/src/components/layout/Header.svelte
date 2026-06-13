@@ -1,9 +1,30 @@
 <script lang="ts">
-  import { view, cmdkOpen, sidebar } from '../../lib/stores'
-  import { wsState, ws } from '../../lib/ws'
+  import { view, cmdkOpen, sidebar, showToast } from '../../lib/stores'
 
   function cycleSidebar() {
     sidebar.update(s => s === 'full' ? 'rail' : s === 'rail' ? 'hidden' : 'full')
+  }
+
+  // The bell toggles desktop notifications (browser permission) — the backing
+  // for the "Desktop Notifications" setting. There is no notification feed.
+  async function toggleNotifications() {
+    if (!('Notification' in window)) {
+      showToast('Desktop notifications are not supported in this browser', 'error')
+      return
+    }
+    if (Notification.permission === 'granted') {
+      showToast('Desktop notifications are enabled')
+      return
+    }
+    if (Notification.permission === 'denied') {
+      showToast('Notifications are blocked — enable them in your browser settings', 'error')
+      return
+    }
+    const perm = await Notification.requestPermission()
+    showToast(
+      perm === 'granted' ? 'Desktop notifications enabled' : 'Notifications were not enabled',
+      perm === 'granted' ? 'success' : 'error',
+    )
   }
 </script>
 
@@ -26,7 +47,7 @@
       <span>Search sessions…</span>
       <kbd>⌘K</kbd>
     </button>
-    <button class="icon-btn" title="Notifications">
+    <button class="icon-btn" title="Desktop notifications" onclick={toggleNotifications}>
       <iconify-icon icon="ant-design:bell-outlined" width="16"></iconify-icon>
     </button>
     <button class="icon-btn" title="Settings" onclick={() => view.set('settings')}>

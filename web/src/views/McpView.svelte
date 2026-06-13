@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { mcpServers, toolSearchMode, mcpModalOpen, showToast } from '../lib/stores'
+  import { mcpServers, toolSearchMode, mcpModalOpen, mcpModalState, showToast, sessions, activeSessionId, view } from '../lib/stores'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
@@ -77,6 +77,34 @@
 
   onMount(reload)
 
+  // ─── add / edit / import / AI setup ───────────────────────────────────────────
+
+  function openAdd() {
+    mcpModalState.set({ mode: 'add' })
+    mcpModalOpen.set(true)
+  }
+
+  function openEdit(srv: any) {
+    mcpModalState.set({ mode: 'edit', server: srv })
+    mcpModalOpen.set(true)
+  }
+
+  function openImport() {
+    mcpModalState.set({ mode: 'import' })
+    mcpModalOpen.set(true)
+  }
+
+  async function aiSetup() {
+    try {
+      const sess = await api.createSession({ name: 'MCP Setup' })
+      sessions.update(s => [sess, ...s])
+      activeSessionId.set(sess.id)
+      view.set('chat')
+    } catch (e: any) {
+      showToast(e.message ?? 'Could not open session', 'error')
+    }
+  }
+
   // ─── delete server ──────────────────────────────────────────────────────────
 
   async function deleteServer(name: string) {
@@ -149,11 +177,15 @@
           <iconify-icon icon="ant-design:reload-outlined" width="14"></iconify-icon>
           Reload
         </button>
-        <button class="btn-primary" onclick={() => mcpModalOpen.set(true)}>
+        <button class="btn-secondary" onclick={openImport}>
+          <iconify-icon icon="ant-design:code-outlined" width="14"></iconify-icon>
+          Import JSON
+        </button>
+        <button class="btn-primary" onclick={openAdd}>
           <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
           Add Server
         </button>
-        <button class="btn-primary">
+        <button class="btn-primary" onclick={aiSetup}>
           <iconify-icon icon="ant-design:thunderbolt-outlined" width="14"></iconify-icon>
           AI Setup
         </button>
@@ -183,7 +215,7 @@
       <div class="empty-state">
         <iconify-icon icon="ant-design:api-outlined" width="32"></iconify-icon>
         <span>No MCP servers configured yet</span>
-        <button class="btn-primary" onclick={() => mcpModalOpen.set(true)}>Add your first server</button>
+        <button class="btn-primary" onclick={openAdd}>Add your first server</button>
       </div>
     {:else}
       <div class="server-list">
@@ -214,6 +246,14 @@
               {/if}
             </div>
             <div class="server-actions">
+              <button
+                class="srv-btn"
+                title="Edit"
+                disabled={srv.source === 'project'}
+                onclick={() => openEdit(srv)}
+              >
+                <iconify-icon icon="ant-design:edit-outlined" width="14"></iconify-icon>
+              </button>
               <button
                 class="srv-btn"
                 title="Reconnect"

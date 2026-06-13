@@ -8,9 +8,46 @@
   import { t as tr } from '../../lib/i18n'
   import StatusTag from '../ui/StatusTag.svelte'
 
-  let { onSend }: { onSend?: (text: string) => void } = $props()
+  let { onSend }: { onSend?: (text: string, files?: any[]) => void } = $props()
 
   let text = $state('')
+  let textareaEl = $state<HTMLTextAreaElement | null>(null)
+  let fileInputEl = $state<HTMLInputElement | null>(null)
+  let attachments = $state<{ name: string; data_url: string; mime_type: string }[]>([])
+
+  // Called by ChatView when the user clicks "edit" on a prior message — loads
+  // that text back into the composer for resend.
+  export function setText(v: string) {
+    text = v
+    queueMicrotask(() => textareaEl?.focus())
+  }
+
+  function openAttach() {
+    fileInputEl?.click()
+  }
+
+  function onFilesPicked(e: Event) {
+    const input = e.target as HTMLInputElement
+    const files = Array.from(input.files ?? [])
+    for (const f of files) {
+      const reader = new FileReader()
+      reader.onload = () => {
+        attachments = [...attachments, { name: f.name, data_url: String(reader.result), mime_type: f.type }]
+      }
+      reader.readAsDataURL(f)
+    }
+    input.value = ''
+  }
+
+  function removeAttachment(i: number) {
+    attachments = attachments.filter((_, idx) => idx !== i)
+  }
+
+  // The "/" button inserts a slash so the user can type a skill/slash command.
+  function insertSkill() {
+    if (!text.startsWith('/')) text = '/' + text
+    queueMicrotask(() => textareaEl?.focus())
+  }
 
   // $store autosubscription is reactive inside $derived (get() is not).
   let sid = $derived($activeSessionId ?? '')
@@ -38,11 +75,13 @@
   }
 
   function send() {
-    if (!text.trim()) return
+    if (!text.trim() && attachments.length === 0) return
     const v = text.trim()
+    const files = attachments.length ? [...attachments] : undefined
     text = ''
+    attachments = []
     if (onSend) {
-      onSend(v)
+      onSend(v, files)
     } else {
       running.set(true)
     }
@@ -88,17 +127,39 @@
 
   <div class="input-wrap">
     <div class="input-card">
+      {#if attachments.length > 0}
+        <div class="attachments">
+          {#each attachments as a, i}
+            <span class="attach-chip" title={a.name}>
+              <iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>
+              <span class="attach-name">{a.name}</span>
+              <button class="attach-x" title="Remove" onclick={() => removeAttachment(i)}>
+                <iconify-icon icon="ant-design:close-outlined" width="11"></iconify-icon>
+              </button>
+            </span>
+          {/each}
+        </div>
+      {/if}
       <textarea
+        bind:this={textareaEl}
         rows={2}
         placeholder={tr('chat.placeholder')}
         bind:value={text}
         onkeydown={onKeydown}
       ></textarea>
+      <input
+        bind:this={fileInputEl}
+        type="file"
+        accept="image/*"
+        multiple
+        style="display:none"
+        onchange={onFilesPicked}
+      />
       <div class="input-footer">
-        <button class="tool-btn" title="Attach file">
+        <button class="tool-btn" title="Attach image" onclick={openAttach}>
           <iconify-icon icon="ant-design:paper-clip-outlined" width="15"></iconify-icon>
         </button>
-        <button class="tool-btn skill-btn" title="Insert skill">/</button>
+        <button class="tool-btn skill-btn" title="Insert slash command" onclick={insertSkill}>/</button>
         <span style="margin-left:auto;"></span>
         {#if isStreaming || $running}
           <button class="stop-btn" onclick={stop}>
@@ -150,6 +211,18 @@ textarea {
   border: none; outline: none; resize: none; font-size: 14px; line-height: 1.6;
   font-family: inherit; color: rgba(0,0,0,0.88); background: transparent; width: 100%;
 }
+.attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+.attach-chip {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 200px;
+  height: 24px; padding: 0 6px 0 8px; background: #F0F7FF; border: 1px solid #BAE0FF;
+  border-radius: 6px; font-size: 12px; color: rgba(0,0,0,0.65);
+}
+.attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-x {
+  border: none; background: transparent; cursor: pointer; padding: 0;
+  display: flex; align-items: center; color: rgba(0,0,0,0.4);
+}
+.attach-x:hover { color: #FF4D4F; }
 .input-footer { display: flex; align-items: center; gap: 4px; }
 .tool-btn {
   width: 28px; height: 28px; border: none; background: transparent; border-radius: 6px;

@@ -2,6 +2,10 @@ import { writable } from "svelte/store";
 
 export const wsState = writable<"connecting" | "connected" | "disconnected">("disconnected");
 
+// Reconnect telemetry for the disconnect banner: which attempt we're on and the
+// wall-clock time the next attempt fires (so the banner can show a countdown).
+export const wsReconnect = writable<{ attempt: number; nextAt: number } | null>(null);
+
 type Handler = (event: Record<string, unknown>) => void;
 
 const BACKOFF_STEPS = [1000, 2000, 4000, 8000, 16000, 30000];
@@ -27,6 +31,7 @@ export class WsManager {
 
     this.ws.onopen = () => {
       this.backoffIndex = 0;
+      wsReconnect.set(null);
       wsState.set("connected");
       const pending = this.queue.splice(0);
       for (const msg of pending) {
@@ -67,6 +72,7 @@ export class WsManager {
       this.ws.close();
       this.ws = null;
     }
+    wsReconnect.set(null);
     wsState.set("disconnected");
   }
 
@@ -168,6 +174,7 @@ export class WsManager {
     }
     const delay = BACKOFF_STEPS[Math.min(this.backoffIndex, BACKOFF_STEPS.length - 1)];
     this.backoffIndex = Math.min(this.backoffIndex + 1, BACKOFF_STEPS.length - 1);
+    wsReconnect.set({ attempt: this.backoffIndex, nextAt: Date.now() + delay });
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.intentionalClose) {

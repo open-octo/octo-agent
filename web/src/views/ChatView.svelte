@@ -13,6 +13,8 @@
     chatPermMode,
     chatReasoningEffort,
     chatSuggestion,
+    chatThinking,
+    chatSubAgents,
     confirmModal,
     questionModal,
     feedbackModal,
@@ -25,14 +27,18 @@
     updateToolResult,
     setToolError,
     finishAllTools,
+    resetSubAgents,
+    applySubAgentEvent,
+    showToast,
     uid,
   } from '../lib/stores'
-  import { ws, wsState } from '../lib/ws'
+  import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
   import { renderMarkdown, setupCopyButtons } from '../lib/markdown'
   import { t } from '../lib/i18n'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
+  import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
   import BackgroundProcesses from '../components/chat/BackgroundProcesses.svelte'
   import Composer from '../components/chat/Composer.svelte'
   import ArtifactsPanel from '../components/ArtifactsPanel.svelte'
@@ -49,9 +55,21 @@
   let bgTasks     = $derived($chatBgTasks[$activeSessionId ?? ''] ?? [])
   let todos       = $derived($chatTodos[$activeSessionId ?? ''] ?? [])
   let suggestion  = $derived($chatSuggestion[$activeSessionId ?? ''] ?? '')
+  let thinking    = $derived($chatThinking[$activeSessionId ?? ''] ?? '')
+  let subAgents   = $derived($chatSubAgents[$activeSessionId ?? ''] ?? [])
   let currentSession = $derived($sessions.find((s: any) => s.id === $activeSessionId) ?? null)
   let artifactCount  = $derived($artifacts.length)
   let wsDisconnected = $derived($wsState === 'disconnected')
+
+  // Sub-agents card elapsed time + reconnect countdown both tick off `now`.
+  let now = $state(Date.now())
+  $effect(() => {
+    const h = setInterval(() => { now = Date.now() }, 1000)
+    return () => clearInterval(h)
+  })
+  let subAgentsStart = $derived(subAgents.length ? Math.min(...subAgents.map(a => a.startedAt)) : 0)
+  let subAgentsElapsed = $derived(subAgentsStart ? (now - subAgentsStart) / 1000 : 0)
+  let reconnectIn = $derived($wsReconnect ? Math.max(0, Math.ceil(($wsReconnect.nextAt - now) / 1000)) : 0)
 
   // ── history handler ────────────────────────────────────────────────────────
   function handleHistoryEvent(ev: Record<string, any>) {
@@ -76,6 +94,7 @@
         id: uid('a'),
         type: 'assistant',
         content: ev.content ?? '',
+        thinking: ev.thinking ?? '',
         createdAt: Date.now(),
         streaming: false,
         tools: [],
@@ -128,15 +147,34 @@
       appendToLastAssistant(sid, (ev as any).content ?? '')
     }))
 
+    cleanups.push(ws.on('thinking_delta', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      chatThinking.update(tt => ({ ...tt, [sid]: (tt[sid] ?? '') + ((ev as any).text ?? '') }))
+    }))
+
+    cleanups.push(ws.on('sub_agent_event', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      applySubAgentEvent(
+        sid,
+        (ev as any).agent_id ?? '',
+        (ev as any).description ?? '',
+        (ev as any).kind ?? '',
+        (ev as any).tool_name ?? '',
+      )
+    }))
+
     cleanups.push(ws.on('assistant_message', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const think = (ev as any).thinking ?? ''
+      // The live thinking buffer has been consumed into this message; clear it.
+      chatThinking.update(tt => ({ ...tt, [sid]: '' }))
       const curMsgs = get(chatMessages)[sid] ?? []
       if (streaming && curMsgs.length > 0 && curMsgs[curMsgs.length - 1]?.type === 'assistant') {
         // finalize streaming message
         chatMessages.update(m => {
           const arr = [...(m[sid] || [])]
           const last = arr.length - 1
-          if (last >= 0) arr[last] = { ...arr[last], content: (ev as any).content ?? arr[last].content, streaming: false }
+          if (last >= 0) arr[last] = { ...arr[last], content: (ev as any).content ?? arr[last].content, thinking: think || arr[last].thinking, streaming: false }
           return { ...m, [sid]: arr }
         })
       } else {
@@ -144,6 +182,7 @@
           id: uid('a'),
           type: 'assistant',
           content: (ev as any).content ?? '',
+          thinking: think,
           createdAt: Date.now(),
           streaming: false,
           tools: [],
@@ -336,10 +375,43 @@
     setupCopyButtons(el)
   }
 
-  // ── send message ───────────────────────────────────────────────────────────
-  function send(text: string) {
+  // ── edit a prior user message: load it back into the composer for resend ─────
+  let composer = $state<{ setText: (v: string) => void } | null>(null)
+  function editMessage(content: string) {
+    composer?.setText(content)
+  }
+
+  // ── export the visible transcript as a markdown file ─────────────────────────
+  function exportTranscript() {
     const sid = get(activeSessionId)
-    if (!sid || !text.trim()) return
+    if (!sid) return
+    const arr = (get(chatMessages)[sid] ?? []).filter((m: any) => m.type === 'user' || m.type === 'assistant')
+    if (!arr.length) { showToast('Nothing to export yet', 'error'); return }
+    const title = currentSession?.title ?? currentSession?.name ?? 'session'
+    const lines: string[] = [`# ${title}`, '']
+    for (const m of arr) {
+      lines.push(m.type === 'user' ? '## You' : '## Octo')
+      if (m.type === 'assistant' && m.thinking) {
+        lines.push('<details><summary>Thoughts</summary>', '', m.thinking, '', '</details>', '')
+      }
+      lines.push(m.content ?? '', '')
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${title.replace(/[^\w.-]+/g, '_')}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // ── send message ───────────────────────────────────────────────────────────
+  function send(text: string, files?: any[]) {
+    const sid = get(activeSessionId)
+    if (!sid || (!text.trim() && !(files && files.length))) return
+    // A new turn starts: clear the live sub-agents panel and thinking buffer.
+    resetSubAgents(sid)
+    chatThinking.update(tt => ({ ...tt, [sid]: '' }))
     // Optimistically show the user bubble, marked pending. The server echoes
     // it back as a history_user_message — that handler replaces this pending
     // bubble (matching by content) instead of appending a duplicate.
@@ -354,7 +426,7 @@
       todos: [],
     })
     chatStreaming.update(s => ({ ...s, [sid]: true }))
-    ws.sendMessage(sid, text)
+    ws.sendMessage(sid, text, files)
   }
 
   // ── plan progress helpers ──────────────────────────────────────────────────
@@ -388,7 +460,7 @@
           <span class="count-badge">{artifactCount}</span>
         {/if}
       </button>
-      <button class="hdr-btn">
+      <button class="hdr-btn" onclick={exportTranscript}>
         <iconify-icon icon="ant-design:export-outlined" width="13"></iconify-icon>
         {t('chat.export')}
       </button>
@@ -400,6 +472,9 @@
     <div class="ws-banner">
       <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:#FA8C16;animation:octo-spin 0.8s linear infinite"></iconify-icon>
       <span class="ws-msg">Connection lost — reconnecting…</span>
+      {#if $wsReconnect}
+        <span class="ws-meta">attempt {$wsReconnect.attempt} · next in {reconnectIn}s</span>
+      {/if}
       <span style="margin-left:auto"></span>
       <button class="ws-retry" onclick={() => ws.connect()}>Retry now</button>
     </div>
@@ -419,7 +494,10 @@
                 <div class="user-bubble-wrap">
                   <div class="user-bubble">{msg.content}</div>
                   <div class="msg-actions">
-                    <button class="action-btn" title="Copy" onclick={() => navigator.clipboard.writeText(msg.content)}>
+                    <button class="action-btn" title={t('chat.edit')} onclick={() => editMessage(msg.content)}>
+                      <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+                    </button>
+                    <button class="action-btn" title={t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
                       <iconify-icon icon="ant-design:copy-outlined" width="13"></iconify-icon>
                     </button>
                   </div>
@@ -458,6 +536,18 @@
                           </div>
                         {/each}
                       </div>
+                    </details>
+                  {/if}
+
+                  <!-- Thoughts / reasoning block -->
+                  {#if msg.thinking}
+                    <details class="think-block">
+                      <summary class="think-summary">
+                        <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
+                        <span>{t('chat.thoughts')}</span>
+                        <iconify-icon icon="lucide:chevron-right" width="13"></iconify-icon>
+                      </summary>
+                      <div class="think-body">{@html renderMarkdown(msg.thinking)}</div>
                     </details>
                   {/if}
 
@@ -511,6 +601,32 @@
             {/if}
           {/each}
 
+          <!-- Live sub-agents panel (current turn) -->
+          {#if subAgents.length > 0}
+            <div class="msg-agent fadein">
+              <div class="agent-avatar">O</div>
+              <div class="agent-content">
+                <SubAgentsCard agents={subAgents} elapsed={subAgentsElapsed} />
+              </div>
+            </div>
+          {/if}
+
+          <!-- Live thinking block while streaming -->
+          {#if streaming && thinking}
+            <div class="msg-agent fadein">
+              <div class="agent-avatar">O</div>
+              <div class="agent-content">
+                <details class="think-block" open>
+                  <summary class="think-summary">
+                    <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
+                    <span>{t('chat.thinking')}</span>
+                  </summary>
+                  <div class="think-body">{@html renderMarkdown(thinking)}</div>
+                </details>
+              </div>
+            </div>
+          {/if}
+
           <!-- Live thinking indicator while streaming -->
           {#if streaming && progress}
             <div class="msg-agent fadein">
@@ -548,7 +664,7 @@
       {/if}
 
       <!-- Composer -->
-      <Composer onSend={send} />
+      <Composer bind:this={composer} onSend={send} />
     </div>
 
     <!-- Artifacts panel -->
@@ -590,6 +706,7 @@
   padding: 10px 24px; background: #FFF7E6; border-bottom: 1px solid #FFD591;
 }
 .ws-msg { font-size: 13px; color: #874D00; }
+.ws-meta { font-size: 12px; color: rgba(135,77,0,0.6); }
 .ws-retry {
   height: 28px; padding: 0 12px; border: 1px solid #FFD591; background: #fff;
   border-radius: 6px; font-size: 12px; color: #874D00; cursor: pointer; font-family: inherit;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { skills, showToast, view } from '../lib/stores'
+  import { skills, showToast, view, sessions, activeSessionId } from '../lib/stores'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
@@ -40,6 +40,29 @@
 
   function handleCreateSkill() {
     view.set('chat')
+  }
+
+  // Export downloads the skill folder as a .zip from the server.
+  function handleExport(name: string) {
+    const a = document.createElement('a')
+    a.href = `/api/skills/${encodeURIComponent(name)}/export`
+    a.download = `${name}.zip`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+
+  // Editing a skill's files is agent-assisted: open a session pointed at it.
+  // (There is no in-browser file editor; the agent edits the skill on disk.)
+  async function handleEdit(name: string) {
+    try {
+      const sess = await api.createSession({ name: `Edit skill: ${name}` })
+      sessions.update(s => [sess, ...s])
+      activeSessionId.set(sess.id)
+      view.set('chat')
+    } catch (e: any) {
+      showToast(e.message ?? 'Could not open session', 'error')
+    }
   }
 
   function handleImportClick() {
@@ -127,8 +150,8 @@
               />
             </span>
             <div class="row-actions">
-              <button class="act-btn" title="Edit"><iconify-icon icon="ant-design:edit-outlined" width="15"></iconify-icon></button>
-              <button class="act-btn" title="Export"><iconify-icon icon="ant-design:export-outlined" width="15"></iconify-icon></button>
+              <button class="act-btn" title="Edit with agent" onclick={() => handleEdit(sk.name)}><iconify-icon icon="ant-design:edit-outlined" width="15"></iconify-icon></button>
+              <button class="act-btn" title="Export as .zip" onclick={() => handleExport(sk.name)}><iconify-icon icon="ant-design:export-outlined" width="15"></iconify-icon></button>
               <button class="act-btn del" title="Delete" onclick={() => handleDelete(sk.name)}>
                 <iconify-icon icon="ant-design:delete-outlined" width="15"></iconify-icon>
               </button>
