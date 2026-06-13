@@ -53,7 +53,7 @@
     <button class="icon-btn" title="Settings" onclick={() => view.set('settings')}>
       <iconify-icon icon="ant-design:setting-outlined" width="16"></iconify-icon>
     </button>
-    <div class="avatar">R</div>
+    <button class="avatar" title="Assistant memory & profile" onclick={() => view.set('profile')}>R</button>
   </div>
 </header>
 
@@ -100,9 +100,10 @@ kbd {
   padding: 1px 5px; color: rgba(0,0,0,0.45);
 }
 .avatar {
-  width: 28px; height: 28px; border-radius: 9999px;
-  background: #E6F4FF; color: #1677FF;
+  width: 28px; height: 28px; border-radius: 9999px; border: none; padding: 0;
+  background: #E6F4FF; color: #1677FF; font-family: inherit;
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 600; cursor: pointer;
 }
+.avatar:hover { background: #BAE0FF; }
 </style>

@@ -304,7 +304,7 @@
                   <a href={r.url} target="_blank" rel="noopener noreferrer" class="search-title">{r.title}</a>
                   <span class="search-url mono">{r.url}</span>
                 {:else}
-                  <span class="search-title">{r.title}</span>
+                  <span class="search-title-plain">{r.title}</span>
                 {/if}
               </div>
             {/each}
@@ -386,6 +386,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .search-row { display: flex; flex-direction: column; gap: 2px; }
 .search-title { font-size: 13px; color: #1677FF; cursor: pointer; text-decoration: none; }
 .search-title:hover { text-decoration: underline; }
+.search-title-plain { font-size: 13px; color: rgba(0,0,0,0.88); }
 .search-url { font-size: 11px; color: rgba(0,0,0,0.35); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .diff-block { border-top: 1px solid #F0F0F0; font-size: 12px; line-height: 1.7; overflow-x: auto; }
 .diff-hdr { padding: 4px 14px; color: rgba(0,0,0,0.45); border-bottom: 1px solid #F0F0F0; }
