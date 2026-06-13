@@ -132,11 +132,35 @@
     return total > 0 ? `${total.toFixed(1)}s` : ''
   }
 
-  // Read/write-style tools collapse by default — their output is bulky and
-  // rarely the point. Everything else (and any error or in-flight tool) opens.
+  // web_fetch returns the page body as a normal result even when the target
+  // responded with an HTTP error — the tool succeeded, the page didn't. Detect
+  // that "Warning: Target URL returned error NNN" line so the card can show it
+  // as a warning instead of a green check + plain text.
+  function fetchError(tool: any): string | null {
+    if (tool.name !== 'web_fetch' || tool.error) return null
+    const r = typeof tool.result === 'string' ? tool.result : ''
+    const m = r.match(/Target URL returned error\s*([0-9]{3}[^\n]*)/i)
+    return m ? m[1].trim() : null
+  }
+
+  // web_fetch results often wrap an HTML body with a metadata header
+  // ("URL: …\nSize: …\nContent-Type: …\nSaved to: …\n\n<!DOCTYPE…>"), so the
+  // doctype isn't at offset 0. Split off the HTML so it can be rendered in a
+  // sandboxed iframe instead of dumped as source; keep the header as meta.
+  function htmlPart(result: any): { meta: string; html: string } | null {
+    if (typeof result !== 'string') return null
+    const m = result.search(/<!doctype html|<html[\s>]/i)
+    if (m < 0) return null
+    return { meta: result.slice(0, m).trim(), html: result.slice(m) }
+  }
+
+  // Read/write-style tools and fetched pages collapse by default — their
+  // output is bulky and rarely the point. Errors and in-flight tools open.
   const COLLAPSED_BY_DEFAULT = new Set(['read_file', 'write_file', 'glob', 'list_dir', 'ls'])
   function defaultOpen(tool: any): boolean {
     if (tool.error || !tool.done) return true
+    if (fetchError(tool)) return true          // a 4xx/5xx fetch is worth seeing
+    if (tool.name === 'web_fetch') return false // collapse fetched pages
     return !COLLAPSED_BY_DEFAULT.has(tool.name)
   }
 
@@ -189,6 +213,7 @@
     {#each tools as tool (tool.id)}
       {@const meta = toolMeta(tool)}
       {@const todos = todoItems(tool)}
+      {@const fErr = fetchError(tool)}
       <details open={defaultOpen(tool)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:rgba(0,0,0,0.35)"></iconify-icon>
@@ -199,12 +224,17 @@
           {:else if tool.args}
             <span class="tool-arg mono">{argSummary(tool.name, tool.args)}</span>
           {/if}
-          {#if meta}<span class="tool-meta" style="margin-left:auto">{meta}</span>{/if}
-          <span style="{meta ? '' : 'margin-left:auto;'}flex:0 0 auto;display:flex;align-items:center">
+          {#if meta && !fErr}<span class="tool-meta" style="margin-left:auto">{meta}</span>{/if}
+          <span style="{(meta && !fErr) ? '' : 'margin-left:auto;'}flex:0 0 auto;display:flex;align-items:center">
             {#if tool.error}
               <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:#FF4D4F">
                 <iconify-icon icon="ant-design:close-circle-outlined" width="14"></iconify-icon>
                 failed
+              </span>
+            {:else if fErr}
+              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:#FA8C16">
+                <iconify-icon icon="ant-design:warning-outlined" width="14"></iconify-icon>
+                {fErr}
               </span>
             {:else if tool.done}
               <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:#52C41A"></iconify-icon>
@@ -219,6 +249,8 @@
 
         {#if tool.error}
           <div class="error-output mono">{tool.error}</div>
+        {:else if fErr}
+          <pre class="warning-output mono">{tool.result}</pre>
         {:else if todos}
           <div class="todo-list">
             {#each todos as step}
@@ -276,6 +308,14 @@
                 {/if}
               </div>
             {/each}
+          </div>
+        {:else if tool.name === 'web_fetch' && htmlPart(tool.result)}
+          <!-- Render a fetched HTML page in a fully sandboxed iframe (no
+               scripts, no same-origin) instead of dumping the source. -->
+          {@const hp = htmlPart(tool.result)}
+          <div class="html-frame-wrap">
+            {#if hp && hp.meta}<div class="fetch-meta mono">{hp.meta}</div>{/if}
+            <iframe srcdoc={hp?.html} sandbox="" class="html-frame" title="fetched page"></iframe>
           </div>
         {:else if tool.result}
           {@const pretty = prettyResult(tool.result)}
@@ -366,5 +406,23 @@ details[open] > summary .chev { transform: rotate(90deg); }
   border-top: 1px solid #F0F0F0; background: #FFF1F0;
   border-left: 2px solid #FF4D4F; padding: 10px 14px;
   font-size: 12px; line-height: 1.6; color: #CF1322; overflow-x: auto;
+}
+/* web_fetch that hit an HTTP error: the tool ran, the page didn't. */
+.warning-output {
+  margin: 0; border-top: 1px solid #F0F0F0; background: #FFF7E6;
+  border-left: 2px solid #FA8C16; padding: 10px 14px;
+  font-size: 12px; line-height: 1.6; color: #874D00;
+  overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+  max-height: 280px; overflow-y: auto;
+}
+/* Fetched HTML page rendered as a page, not source. */
+.html-frame-wrap { border-top: 1px solid #F0F0F0; background: #fff; }
+.fetch-meta {
+  padding: 8px 14px; border-bottom: 1px solid #F0F0F0; background: #FBFBFB;
+  font-size: 11px; line-height: 1.6; color: rgba(0,0,0,0.45);
+  white-space: pre-wrap; word-break: break-word;
+}
+.html-frame {
+  border: 0; width: 100%; height: 400px; display: block; background: #fff;
 }
 </style>
