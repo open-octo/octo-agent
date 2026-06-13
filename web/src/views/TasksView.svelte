@@ -137,8 +137,8 @@
     <!-- KPI row -->
     <div class="kpi-row">
       <StatCard label="Active Tasks" value={String(activeCount)} />
-      <StatCard label="Runs This Week" value="18" delta="+5 vs last week" deltaDir="up" />
-      <StatCard label="Failures (7d)" value="0" />
+      <StatCard label="Total Tasks" value={String(rawTasks.length)} />
+      <StatCard label="Paused" value={String(rawTasks.length - activeCount)} />
     </div>
 
     <!-- Table -->

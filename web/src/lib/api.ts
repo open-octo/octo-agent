@@ -84,7 +84,8 @@ export async function updateSessionWorkingDir(id: string, dir: string): Promise<
 // Skills
 
 export async function listSkills(): Promise<Skill[]> {
-  return request<Skill[]>('/api/skills')
+  const d = await request<{ skills: Skill[] }>('/api/skills')
+  return d.skills ?? []
 }
 
 export async function toggleSkill(name: string, enabled: boolean): Promise<void> {
@@ -193,7 +194,8 @@ export async function updateToolSearch(mode: 'auto' | 'on' | 'off'): Promise<voi
 // Channels
 
 export async function listChannels(): Promise<Channel[]> {
-  return request<Channel[]>('/api/channels')
+  const d = await request<{ channels: Channel[] }>('/api/channels')
+  return d.channels ?? []
 }
 
 export async function saveChannel(platform: string, cfg: unknown): Promise<void> {
@@ -222,7 +224,9 @@ export async function getProfileUser(): Promise<unknown> {
 }
 
 export async function getMemories(): Promise<Memory[]> {
-  return request<Memory[]>('/api/memories')
+  // The server returns { files: [...] } for the memory listing.
+  const d = await request<{ files: Memory[] }>('/api/memories')
+  return d.files ?? []
 }
 
 // Trash

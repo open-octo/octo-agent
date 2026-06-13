@@ -24,13 +24,14 @@
   let loadingSoul = $state(false)
   let loadingUser = $state(false)
   let loadingMem  = $state(false)
+  let memLoaded   = $state(false)
 
   // Load on tab change
   $effect(() => {
     const tab = $memTab
     if (tab === 'soul'     && !soulData)  loadSoul()
     if (tab === 'user'     && !userData)  loadUser()
-    if (tab === 'memories' && !memFiles.length) loadMems()
+    if (tab === 'memories' && !memLoaded) loadMems()
   })
 
   async function loadSoul() {
@@ -60,6 +61,7 @@
     try {
       const data = await api.getMemories() as any
       memFiles = data.files ?? data ?? []
+      memLoaded = true
     } catch (e: any) {
       showToast(`Could not load memories: ${e.message}`, 'error')
     } finally {
