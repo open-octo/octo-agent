@@ -18,6 +18,18 @@ import (
 // rather than hanging startup.
 const mcpConnectTimeout = 60 * time.Second
 
+// mcpChildStderr is the sink for stdio MCP subprocess stderr (their diagnostic
+// logging). It defaults to nil, which the transport routes to os.Stderr — fine
+// for one-shot CLI use. Long-running hosts (the server) call SetMCPChildStderr
+// to redirect it into structured logging so a child's chatter (e.g. CodeGraph's
+// "[CodeGraph MCP] Auto-synced…") doesn't interleave with the host's own output.
+var mcpChildStderr io.Writer
+
+// SetMCPChildStderr sets the destination for stdio MCP subprocess stderr across
+// every app-level connect path (ConnectMCP, SwapMCP, ConnectMCPServer*). Pass
+// nil to restore the os.Stderr default. Set it before connecting.
+func SetMCPChildStderr(w io.Writer) { mcpChildStderr = w }
+
 // ConnectMCP loads the MCP server config under cwd, connects every server
 // non-interactively, and registers the resulting surface so DefaultToolsFor /
 // the tool executor pick it up. It is the server/IM counterpart to the CLI's
@@ -40,7 +52,7 @@ func ConnectMCP(ctx context.Context, cwd string, warn io.Writer) (func(), error)
 	connectCtx, cancel := context.WithTimeout(ctx, mcpConnectTimeout)
 	defer cancel() // only bounds the connect pass; live connections aren't tied to it
 
-	reg := mcp.ConnectAll(connectCtx, cfg, mcpInfo(), nil /* no interactive OAuth */, warn, nil)
+	reg := mcp.ConnectAll(connectCtx, cfg, mcpInfo(), nil /* no interactive OAuth */, warn, mcpChildStderr)
 	if reg.Len() == 0 {
 		reg.Close()
 		return func() {}, nil
@@ -79,7 +91,7 @@ func SwapMCP(ctx context.Context, cwd string, warn io.Writer) error {
 	if cfg != nil && len(cfg.Servers) > 0 {
 		connectCtx, cancel := context.WithTimeout(ctx, mcpConnectTimeout)
 		defer cancel()
-		reg = mcp.ConnectAll(connectCtx, cfg, mcpInfo(), nil /* no interactive OAuth */, warn, nil)
+		reg = mcp.ConnectAll(connectCtx, cfg, mcpInfo(), nil /* no interactive OAuth */, warn, mcpChildStderr)
 	}
 	tools.SetMCPRegistry(reg)
 	if old != nil {
@@ -118,6 +130,12 @@ func ConnectMCPServerAuth(ctx context.Context, name string, entry mcp.ServerEntr
 	}
 	connectCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// Callers that don't care about a specific sink pass nil; route those to
+	// the app-wide default (the server's slog sink) so a reconnect from the
+	// management UI doesn't leak the child's stderr to the terminal.
+	if childStderr == nil {
+		childStderr = mcpChildStderr
+	}
 	return reg.Connect(connectCtx, name, entry, mcpInfo(), prompt, childStderr)
 }
 

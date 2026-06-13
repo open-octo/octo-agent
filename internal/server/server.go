@@ -385,6 +385,9 @@ func (s *Server) enableMCP() {
 	if cfg, err := config.Load(); err == nil {
 		tools.SetToolSearchConfig(app.ToolSearchConfigFrom(cfg.Tools.ToolSearch))
 	}
+	// Route stdio MCP subprocess stderr into structured logging (debug level)
+	// so a child's chatter doesn't interleave with the server's own output.
+	app.SetMCPChildStderr(newMCPStderrWriter(slog.Default()))
 	s.mcpMu.Lock()
 	defer s.mcpMu.Unlock()
 	if err := app.SwapMCP(context.Background(), s.cwd, os.Stderr); err != nil {
