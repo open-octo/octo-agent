@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { mcpServers, toolSearchMode, mcpModalOpen, mcpModalState, showToast, sessions, activeSessionId, view } from '../lib/stores'
+  import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
@@ -51,11 +52,11 @@
 
   function statusTag(status: string): { tagStatus: TagStatus; tagLabel: string } {
     switch (status) {
-      case 'connected':    return { tagStatus: 'success', tagLabel: 'connected' }
-      case 'error':        return { tagStatus: 'error',   tagLabel: 'error' }
-      case 'invalid':      return { tagStatus: 'error',   tagLabel: 'invalid' }
-      case 'disabled':     return { tagStatus: 'default', tagLabel: 'disabled' }
-      case 'disconnected': return { tagStatus: 'default', tagLabel: 'disconnected' }
+      case 'connected':    return { tagStatus: 'success', tagLabel: tr('status.connected') }
+      case 'error':        return { tagStatus: 'error',   tagLabel: tr('status.error') }
+      case 'invalid':      return { tagStatus: 'error',   tagLabel: tr('mcp.status_invalid') }
+      case 'disabled':     return { tagStatus: 'default', tagLabel: tr('status.disabled') }
+      case 'disconnected': return { tagStatus: 'default', tagLabel: tr('mcp.status_disconnected') }
       default:             return { tagStatus: 'default', tagLabel: status }
     }
   }
@@ -169,25 +170,25 @@
     <!-- Header -->
     <div class="page-header">
       <div class="title-block">
-        <h2>MCP Servers</h2>
-        <p>Connect Model Context Protocol servers to give your assistant extra tools</p>
+        <h2>{$t('mcp.title')}</h2>
+        <p>{$t('mcp.desc')}</p>
       </div>
       <div class="header-actions">
         <button class="btn-secondary" onclick={reload} disabled={loading}>
           <iconify-icon icon="ant-design:reload-outlined" width="14"></iconify-icon>
-          Reload
+          {$t('mcp.reload')}
         </button>
         <button class="btn-secondary" onclick={openImport}>
           <iconify-icon icon="ant-design:code-outlined" width="14"></iconify-icon>
-          Import JSON
+          {$t('mcp.import_json')}
         </button>
         <button class="btn-primary" onclick={openAdd}>
           <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
-          Add Server
+          {$t('mcp.add')}
         </button>
         <button class="btn-primary" onclick={aiSetup}>
           <iconify-icon icon="ant-design:thunderbolt-outlined" width="14"></iconify-icon>
-          AI Setup
+          {$t('mcp.ai_setup')}
         </button>
       </div>
     </div>
@@ -195,11 +196,12 @@
     <!-- Tool Search card -->
     <div class="tool-search-card">
       <div class="ts-info">
-        <span class="ts-title">Tool Search</span>
-        <span class="ts-desc">Defers MCP tool schemas behind a search bridge to save context. Auto activates only when tools would occupy too much of the context window.</span>
+        <span class="ts-title">{$t('mcp.tool_search')}</span>
+        <span class="ts-desc">{$t('mcp.tool_search_desc')}</span>
       </div>
       <Segment
         options={['Auto', 'On', 'Off']}
+        labels={{ Auto: $t('mcp.ts_auto'), On: $t('mcp.ts_on'), Off: $t('mcp.ts_off') }}
         value={capitalize($toolSearchMode ?? 'auto')}
         onchange={onToolSearchChange}
       />
@@ -209,13 +211,13 @@
     {#if loading && ($mcpServers as any[]).length === 0}
       <div class="empty-state">
         <iconify-icon icon="ant-design:loading-outlined" width="24" class="spin"></iconify-icon>
-        <span>Loading servers…</span>
+        <span>{$t('mcp.loading')}</span>
       </div>
     {:else if ($mcpServers as any[]).length === 0}
       <div class="empty-state">
         <iconify-icon icon="ant-design:api-outlined" width="32"></iconify-icon>
-        <span>No MCP servers configured yet</span>
-        <button class="btn-primary" onclick={openAdd}>Add your first server</button>
+        <span>{$t('mcp.empty')}</span>
+        <button class="btn-primary" onclick={openAdd}>{$t('mcp.add_first')}</button>
       </div>
     {:else}
       <div class="server-list">
@@ -248,7 +250,7 @@
             <div class="server-actions">
               <button
                 class="srv-btn"
-                title="Edit"
+                title={$t('common.edit')}
                 disabled={srv.source === 'project'}
                 onclick={() => openEdit(srv)}
               >
@@ -256,7 +258,7 @@
               </button>
               <button
                 class="srv-btn"
-                title="Reconnect"
+                title={$t('status.reconnect')}
                 disabled={srv.status === 'connected'}
                 onclick={() => reconnect(srv.name)}
               >
@@ -264,7 +266,7 @@
               </button>
               <button
                 class="srv-btn del"
-                title="Delete"
+                title={$t('common.delete')}
                 disabled={srv.source === 'project'}
                 onclick={() => deleteServer(srv.name)}
               >

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { view, sidebar, sessions, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast } from '../../lib/stores'
   import * as api from '../../lib/api'
+  import { t } from '../../lib/i18n'
 
   let versionStr = $state('')
 
@@ -25,13 +26,13 @@
   })
 
   const railNav = [
-    { icon: 'ant-design:message-outlined', title: 'Chat', v: 'chat' },
-    { icon: 'ant-design:clock-circle-outlined', title: 'Scheduled Tasks', v: 'tasks' },
-    { icon: 'ant-design:thunderbolt-outlined', title: 'Skills', v: 'skills' },
-    { icon: 'ant-design:api-outlined', title: 'MCP Servers', v: 'mcp' },
-    { icon: 'ant-design:mobile-outlined', title: 'Channels', v: 'channels' },
-    { icon: 'ant-design:user-outlined', title: 'Assistant Memory', v: 'profile' },
-    { icon: 'ant-design:folder-open-outlined', title: 'File Recall', v: 'files' },
+    { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
+    { icon: 'ant-design:clock-circle-outlined', title: 'nav.tasks', v: 'tasks' },
+    { icon: 'ant-design:thunderbolt-outlined', title: 'nav.skills', v: 'skills' },
+    { icon: 'ant-design:api-outlined', title: 'nav.mcp', v: 'mcp' },
+    { icon: 'ant-design:mobile-outlined', title: 'nav.channels', v: 'channels' },
+    { icon: 'ant-design:user-outlined', title: 'nav.memory', v: 'profile' },
+    { icon: 'ant-design:folder-open-outlined', title: 'nav.file_recall', v: 'files' },
   ]
 
   function navActive(v: string) { return $view === v }
@@ -97,7 +98,7 @@
     <div class="new-btn-wrap">
       <button class="new-btn" onclick={newSession}>
         <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
-        <span>New Session</span>
+        <span>{$t('nav.new_session')}</span>
       </button>
     </div>
 
@@ -105,9 +106,9 @@
       <!-- Sessions -->
       <div class="nav-group">
         <div class="group-header">
-          <span class="group-label">SESSIONS</span>
+          <span class="group-label">{$t('nav.sessions')}</span>
           <span class="sel-toggle" onclick={() => { selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null) }}>
-            {$selMode ? 'Done' : 'Select'}
+            {$selMode ? $t('sidebar.done') : $t('sidebar.select')}
           </span>
         </div>
 
@@ -116,7 +117,7 @@
           <span class="batch-count">{Object.keys($sel).length} selected</span>
           <button class="batch-del" onclick={delSelected}>
             <iconify-icon icon="ant-design:delete-outlined" width="12"></iconify-icon>
-            Delete
+            {$t('common.delete')}
           </button>
         </div>
         {/if}
@@ -168,7 +169,7 @@
           <span class="session-title" style="color:{solid ? '#fff' : 'var(--text)'};">{displayName}</span>
           {#if !menuOpen}
             <span class="session-time" style="color:{solid ? 'rgba(255,255,255,0.75)' : 'var(--text-quaternary)'};">
-              {(s as any).source === 'cron' ? 'Cron' : ''}
+              {(s as any).source === 'cron' ? $t('sidebar.cron') : ''}
             </span>
           {/if}
           {#if !menuOpen && !$selMode}
@@ -177,10 +178,10 @@
             </span>
           {/if}
           {#if menuOpen}
-            <span class="row-action" onclick={(e) => { e.stopPropagation(); editId.set(s.id); editDraft.set(displayName); menuFor.set(null) }} title="Rename">
+            <span class="row-action" onclick={(e) => { e.stopPropagation(); editId.set(s.id); editDraft.set(displayName); menuFor.set(null) }} title={$t('sidebar.rename')}>
               <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
             </span>
-            <span class="row-action del" onclick={(e) => { e.stopPropagation(); delSession(s.id) }} title="Delete">
+            <span class="row-action del" onclick={(e) => { e.stopPropagation(); delSession(s.id) }} title={$t('common.delete')}>
               <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
             </span>
           {/if}
@@ -191,16 +192,16 @@
 
       <!-- Config -->
       <div class="nav-group">
-        <div class="group-header"><span class="group-label">CONFIG</span></div>
+        <div class="group-header"><span class="group-label">{$t('nav.config')}</span></div>
         {#each [
-          { icon: 'ant-design:clock-circle-outlined', label: 'Scheduled Tasks', v: 'tasks' },
-          { icon: 'ant-design:thunderbolt-outlined', label: 'Skills', v: 'skills' },
-          { icon: 'ant-design:api-outlined', label: 'MCP Servers', v: 'mcp', meta: '4' },
-          { icon: 'ant-design:mobile-outlined', label: 'Channels', v: 'channels' },
+          { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
+          { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
+          { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp', meta: '4' },
+          { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
           <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? '#fff' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'var(--text-secondary)'};">{item.label}</span>
+          <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'var(--text-secondary)'};">{$t(item.label)}</span>
           {#if item.meta}<span style="margin-left:auto;font-size:11px;color:{navActive(item.v) ? 'rgba(255,255,255,0.75)' : 'var(--text-tertiary)'};">{item.meta}</span>{/if}
         </div>
         {/each}
@@ -208,14 +209,14 @@
 
       <!-- My Data -->
       <div class="nav-group">
-        <div class="group-header"><span class="group-label">MY DATA</span></div>
+        <div class="group-header"><span class="group-label">{$t('nav.my_data')}</span></div>
         {#each [
-          { icon: 'ant-design:user-outlined', label: 'Assistant Memory', v: 'profile' },
-          { icon: 'ant-design:folder-open-outlined', label: 'File Recall', v: 'files' },
+          { icon: 'ant-design:user-outlined', label: 'nav.memory', v: 'profile' },
+          { icon: 'ant-design:folder-open-outlined', label: 'nav.file_recall', v: 'files' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
           <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? '#fff' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'var(--text-secondary)'};">{item.label}</span>
+          <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'var(--text-secondary)'};">{$t(item.label)}</span>
         </div>
         {/each}
       </div>
@@ -224,7 +225,7 @@
     <div class="footer">
       <div class="footer-settings" style="color:{navActive('settings') ? 'var(--blue-6)' : 'var(--text-secondary)'}" onclick={() => view.set('settings')}>
         <iconify-icon icon="ant-design:setting-outlined" width="14"></iconify-icon>
-        <span>Settings</span>
+        <span>{$t('nav.settings')}</span>
       </div>
       {#if versionStr}<span class="version">{versionStr}</span>{/if}
     </div>
@@ -234,7 +235,7 @@
   {#if $sidebar === 'rail'}
   <div class="rail">
     <div style="padding:16px 0 8px 0;">
-      <button class="rail-btn primary" title="New Session" onclick={() => view.set('chat')}>
+      <button class="rail-btn primary" title={$t('nav.new_session')} onclick={() => view.set('chat')}>
         <iconify-icon icon="ant-design:plus-outlined" width="16"></iconify-icon>
       </button>
     </div>
@@ -243,7 +244,7 @@
       <button
         class="rail-btn"
         class:active={navActive(item.v)}
-        title={item.title}
+        title={$t(item.title)}
         onclick={() => view.set(item.v as any)}
       >
         <iconify-icon icon={item.icon} width="16"></iconify-icon>
@@ -251,7 +252,7 @@
       {/each}
     </div>
     <div class="rail-footer">
-      <button class="rail-btn" class:active={navActive('settings')} title="Settings" onclick={() => view.set('settings')}>
+      <button class="rail-btn" class:active={navActive('settings')} title={$t('nav.settings')} onclick={() => view.set('settings')}>
         <iconify-icon icon="ant-design:setting-outlined" width="16"></iconify-icon>
       </button>
     </div>

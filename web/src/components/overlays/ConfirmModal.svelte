@@ -1,6 +1,7 @@
 <script lang="ts">
   import { confirmModal } from '../../lib/stores'
   import { ws } from '../../lib/ws'
+  import { t } from '../../lib/i18n'
   import StatusTag from '../ui/StatusTag.svelte'
 
   function deny() {
@@ -21,9 +22,9 @@
   <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
     <div class="modal-header">
       <iconify-icon icon="ant-design:safety-outlined" width="16" style="color:var(--warning);flex-shrink:0"></iconify-icon>
-      <span class="modal-title">Permission needed</span>
+      <span class="modal-title">{$t('perm.title')}</span>
       <span class="header-tag">
-        <StatusTag status="warning">Awaiting approval</StatusTag>
+        <StatusTag status="warning">{$t('perm.awaiting')}</StatusTag>
       </span>
     </div>
 
@@ -40,17 +41,17 @@
 
     <div class="modal-footer">
       {#if $confirmModal.kind === 'ok'}
-        <button class="btn-primary" onclick={() => answer('ok')}>OK</button>
+        <button class="btn-primary" onclick={() => answer('ok')}>{$t('common.ok')}</button>
       {:else}
         <button class="btn-deny" onclick={deny}>
           <iconify-icon icon="ant-design:close-outlined" width="12"></iconify-icon>
-          Deny
+          {$t('perm.deny')}
         </button>
         <span class="spacer"></span>
-        <button class="btn-secondary" onclick={() => answer('allow_once')}>Allow Once</button>
+        <button class="btn-secondary" onclick={() => answer('allow_once')}>{$t('perm.allow_once')}</button>
         <button class="btn-primary" onclick={() => answer('allow_session')}>
           <iconify-icon icon="ant-design:check-outlined" width="12"></iconify-icon>
-          Allow for Session
+          {$t('perm.allow_session')}
         </button>
       {/if}
     </div>

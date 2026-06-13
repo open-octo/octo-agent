@@ -1,12 +1,13 @@
 <script lang="ts">
   import { skills, showToast, view, sessions, activeSessionId } from '../lib/stores'
+  import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
   import Segment from '../components/ui/Segment.svelte'
 
   let loading = $state(true)
-  let scope = $state('My Skills')
+  let scope = $state(tr('skills.my_skills'))
   let showSystem = $state(false)
   let fileInput: HTMLInputElement
 
@@ -88,8 +89,8 @@
   <div class="inner">
     <div class="page-header">
       <div class="title-block">
-        <h2>Skills</h2>
-        <p>Extend your assistant's capabilities with custom skills</p>
+        <h2>{$t('skills.title')}</h2>
+        <p>{$t('skills.desc')}</p>
       </div>
       <div class="header-actions">
         <input
@@ -99,37 +100,37 @@
           style="display:none"
           onchange={handleFileChange}
         />
-        <button class="btn-secondary" onclick={handleImportClick}>Import</button>
-        <button class="btn-primary" onclick={handleCreateSkill}>Create Skill</button>
+        <button class="btn-secondary" onclick={handleImportClick}>{$t('skills.import')}</button>
+        <button class="btn-primary" onclick={handleCreateSkill}>{$t('skills.create')}</button>
       </div>
     </div>
 
     <div class="toolbar-row">
-      <Segment options={['My Skills', 'System Skills']} bind:value={scope} />
+      <Segment options={[$t('skills.my_skills'), $t('skills.system_skills')]} bind:value={scope} />
       <div class="system-toggle">
         <Switch bind:checked={showSystem} />
-        <span>Show system skills</span>
+        <span>{$t('skills.show_system')}</span>
       </div>
     </div>
 
     <div class="table-card">
       <div class="table-header">
-        <span>Skill</span>
-        <span>Description</span>
-        <span>Version</span>
-        <span>Status</span>
-        <span>Enabled</span>
-        <span style="text-align:right">Actions</span>
+        <span>{$t('skills.col_skill')}</span>
+        <span>{$t('skills.col_description')}</span>
+        <span>{$t('common.version')}</span>
+        <span>{$t('skills.col_status')}</span>
+        <span>{$t('skills.col_enabled')}</span>
+        <span style="text-align:right">{$t('common.actions')}</span>
       </div>
 
       {#if loading}
         <div class="empty-state">
           <div class="spinner"></div>
-          <span>Loading skills…</span>
+          <span>{$t('skills.loading')}</span>
         </div>
       {:else if $skills.length === 0}
         <div class="empty-state">
-          <span>No skills found. Create or import one to get started.</span>
+          <span>{$t('skills.empty')}</span>
         </div>
       {:else}
         {#each $skills as sk (sk.name)}
@@ -150,9 +151,9 @@
               />
             </span>
             <div class="row-actions">
-              <button class="act-btn" title="Edit with agent" onclick={() => handleEdit(sk.name)}><iconify-icon icon="ant-design:edit-outlined" width="15"></iconify-icon></button>
-              <button class="act-btn" title="Export as .zip" onclick={() => handleExport(sk.name)}><iconify-icon icon="ant-design:export-outlined" width="15"></iconify-icon></button>
-              <button class="act-btn del" title="Delete" onclick={() => handleDelete(sk.name)}>
+              <button class="act-btn" title={$t('skills.edit_with_agent')} onclick={() => handleEdit(sk.name)}><iconify-icon icon="ant-design:edit-outlined" width="15"></iconify-icon></button>
+              <button class="act-btn" title={$t('skills.export_zip')} onclick={() => handleExport(sk.name)}><iconify-icon icon="ant-design:export-outlined" width="15"></iconify-icon></button>
+              <button class="act-btn del" title={$t('common.delete')} onclick={() => handleDelete(sk.name)}>
                 <iconify-icon icon="ant-design:delete-outlined" width="15"></iconify-icon>
               </button>
             </div>

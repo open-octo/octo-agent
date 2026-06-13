@@ -4,6 +4,7 @@
   import StatusTag from '../components/ui/StatusTag.svelte'
   import { renderMarkdown } from '../lib/markdown'
   import * as api from '../lib/api'
+  import { t } from '../lib/i18n'
 
   // --- state ---
   interface MemFile {
@@ -133,26 +134,26 @@
 <div class="page">
   <div class="inner">
     <div class="page-header">
-      <h2>Assistant Memory</h2>
-      <p>A window into the assistant's inner life — who it is, who you are, and what it remembers about your work together.</p>
+      <h2>{$t('profile.title')}</h2>
+      <p>{$t('profile.subtitle')}</p>
     </div>
 
     <!-- Tabs -->
     <div class="tabs">
-      <div class="tab" class:active={$memTab === 'soul'}     onclick={() => memTab.set('soul')}>Soul</div>
-      <div class="tab" class:active={$memTab === 'user'}     onclick={() => memTab.set('user')}>User</div>
-      <div class="tab" class:active={$memTab === 'memories'} onclick={() => memTab.set('memories')}>Memories</div>
+      <div class="tab" class:active={$memTab === 'soul'}     onclick={() => memTab.set('soul')}>{$t('profile.soul')}</div>
+      <div class="tab" class:active={$memTab === 'user'}     onclick={() => memTab.set('user')}>{$t('profile.user')}</div>
+      <div class="tab" class:active={$memTab === 'memories'} onclick={() => memTab.set('memories')}>{$t('profile.memories')}</div>
     </div>
 
     {#if $memTab === 'soul'}
       <div class="section-card">
         <div class="card-header">
-          <span class="card-title">Who the assistant is</span>
+          <span class="card-title">{$t('profile.soul_title')}</span>
           <span style="margin-left:auto"></span>
           {#if soulData}
             <span class="file-path mono">{soulData.path}</span>
             <StatusTag status={isCustom(soulData) ? 'success' : 'default'}>
-              {isCustom(soulData) ? 'Custom Override Active' : 'Default'}
+              {isCustom(soulData) ? $t('profile.custom_override') : $t('profile.default')}
             </StatusTag>
           {/if}
         </div>
@@ -161,12 +162,12 @@
         {:else if soulData}
           <div class="card-body md-content">{@html renderMarkdown(soulData.content)}</div>
         {:else}
-          <div class="card-loading">soul.md not found — ask the assistant to create one.</div>
+          <div class="card-loading">{$t('profile.soul_empty')}</div>
         {/if}
         <div class="card-footer">
-          <span class="footer-hint">Want a different working style? Ask the assistant to revise how it shows up.</span>
+          <span class="footer-hint">{$t('profile.soul_hint')}</span>
           <button class="btn-primary" onclick={() => openAssistantChat('Please update my soul.md')}>
-            Have the Assistant Update This
+            {$t('profile.update')}
           </button>
         </div>
       </div>
@@ -175,12 +176,12 @@
     {#if $memTab === 'user'}
       <div class="section-card">
         <div class="card-header">
-          <span class="card-title">Who you are</span>
+          <span class="card-title">{$t('profile.user_title')}</span>
           <span style="margin-left:auto"></span>
           {#if userData}
             <span class="file-path mono">{userData.path}</span>
             <StatusTag status={isCustom(userData) ? 'success' : 'default'}>
-              {isCustom(userData) ? 'Custom Override Active' : 'Default'}
+              {isCustom(userData) ? $t('profile.custom_override') : $t('profile.default')}
             </StatusTag>
           {/if}
         </div>
@@ -189,12 +190,12 @@
         {:else if userData}
           <div class="card-body md-content">{@html renderMarkdown(userData.content)}</div>
         {:else}
-          <div class="card-loading">user.md not found — ask the assistant to create one.</div>
+          <div class="card-loading">{$t('profile.user_empty')}</div>
         {/if}
         <div class="card-footer">
-          <span class="footer-hint">Changed jobs? Picked up new interests? Let the assistant update your profile.</span>
+          <span class="footer-hint">{$t('profile.user_hint')}</span>
           <button class="btn-primary" onclick={() => openAssistantChat('Please update my user.md')}>
-            Have the Assistant Update This
+            {$t('profile.update')}
           </button>
         </div>
       </div>
@@ -204,18 +205,18 @@
       <div class="section-card">
         <div class="card-header">
           <div style="display:flex;align-items:center;gap:8px;">
-            <span class="card-title">What it remembers</span>
+            <span class="card-title">{$t('profile.memories_title')}</span>
             <span class="mem-count">{memFiles.length} entries</span>
           </div>
           <span class="auto-badge">
             <iconify-icon icon="ant-design:thunderbolt-outlined" width="13"></iconify-icon>
-            Captured automatically as you work
+            {$t('profile.captured_auto')}
           </span>
         </div>
         {#if loadingMem}
-          <div class="card-loading">Loading memories…</div>
+          <div class="card-loading">{$t('profile.memories_loading')}</div>
         {:else if memFiles.length === 0}
-          <div class="card-loading">No memory files yet.</div>
+          <div class="card-loading">{$t('profile.memories_empty')}</div>
         {:else}
           {#each memFiles as f (f.name)}
             <details class="mem-row" ontoggle={(e) => toggleMemory(e, f.name)}>
@@ -230,7 +231,7 @@
                 <StatusTag status="default">{f.source}</StatusTag>
                 <button class="forget-btn" onclick={(e) => { e.preventDefault(); forgetMemory(f.name) }}>
                   <iconify-icon icon="ant-design:close-circle-outlined" width="13"></iconify-icon>
-                  Forget
+                  {$t('profile.forget')}
                 </button>
                 <iconify-icon icon="lucide:chevron-right" width="14" class="mem-chevron" style="color:var(--text-tertiary)"></iconify-icon>
               </summary>
@@ -245,9 +246,9 @@
           {/each}
         {/if}
         <div class="card-footer">
-          <span class="footer-hint">Octo writes these as you work together. To add or correct a memory, just tell it in a conversation.</span>
+          <span class="footer-hint">{$t('profile.memories_hint')}</span>
           <button class="btn-primary" onclick={() => openAssistantChat('Please update my memories')}>
-            Have the Assistant Update This
+            {$t('profile.update')}
           </button>
         </div>
       </div>

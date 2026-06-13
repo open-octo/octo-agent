@@ -35,7 +35,7 @@
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
   import { renderMarkdown, setupCopyButtons } from '../lib/markdown'
-  import { t } from '../lib/i18n'
+  import { t, tr } from '../lib/i18n'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
@@ -386,7 +386,7 @@
     const sid = get(activeSessionId)
     if (!sid) return
     const arr = (get(chatMessages)[sid] ?? []).filter((m: any) => m.type === 'user' || m.type === 'assistant')
-    if (!arr.length) { showToast('Nothing to export yet', 'error'); return }
+    if (!arr.length) { showToast(tr('chat.nothing_to_export'), 'error'); return }
     const title = currentSession?.title ?? currentSession?.name ?? 'session'
     const lines: string[] = [`# ${title}`, '']
     for (const m of arr) {
@@ -447,22 +447,22 @@
         {currentSession?.title ?? currentSession?.name ?? 'Chat'}
       </span>
       {#if streaming}
-        <StatusTag status="info">{t('status.running')}</StatusTag>
+        <StatusTag status="info">{$t('status.running')}</StatusTag>
       {:else}
-        <StatusTag status="default">{t('status.idle')}</StatusTag>
+        <StatusTag status="default">{$t('status.idle')}</StatusTag>
       {/if}
     </div>
     <div class="header-actions">
       <button class="hdr-btn" class:active={$artifactsOpen} onclick={() => artifactsOpen.update(v => !v)}>
         <iconify-icon icon="ant-design:file-text-outlined" width="13"></iconify-icon>
-        {t('chat.artifacts')}
+        {$t('chat.artifacts')}
         {#if artifactCount > 0}
           <span class="count-badge">{artifactCount}</span>
         {/if}
       </button>
       <button class="hdr-btn" onclick={exportTranscript}>
         <iconify-icon icon="ant-design:export-outlined" width="13"></iconify-icon>
-        {t('chat.export')}
+        {$t('chat.export')}
       </button>
     </div>
   </div>
@@ -471,12 +471,12 @@
   {#if wsDisconnected}
     <div class="ws-banner">
       <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--warning);animation:octo-spin 0.8s linear infinite"></iconify-icon>
-      <span class="ws-msg">Connection lost — reconnecting…</span>
+      <span class="ws-msg">{$t('chat.connection_lost')}</span>
       {#if $wsReconnect}
         <span class="ws-meta">attempt {$wsReconnect.attempt} · next in {reconnectIn}s</span>
       {/if}
       <span style="margin-left:auto"></span>
-      <button class="ws-retry" onclick={() => ws.connect()}>Retry now</button>
+      <button class="ws-retry" onclick={() => ws.connect()}>{$t('chat.retry_now')}</button>
     </div>
   {/if}
 
@@ -494,10 +494,10 @@
                 <div class="user-bubble-wrap">
                   <div class="user-bubble">{msg.content}</div>
                   <div class="msg-actions">
-                    <button class="action-btn" title={t('chat.edit')} onclick={() => editMessage(msg.content)}>
+                    <button class="action-btn" title={$t('chat.edit')} onclick={() => editMessage(msg.content)}>
                       <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
                     </button>
-                    <button class="action-btn" title={t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
+                    <button class="action-btn" title={$t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
                       <iconify-icon icon="ant-design:copy-outlined" width="13"></iconify-icon>
                     </button>
                   </div>
@@ -514,7 +514,7 @@
                     <details open class="plan-card">
                       <summary class="plan-summary">
                         <iconify-icon icon="ant-design:ordered-list-outlined" width="14" style="color:var(--blue-6)"></iconify-icon>
-                        <span class="plan-title">{t('agent.plan')}</span>
+                        <span class="plan-title">{$t('agent.plan')}</span>
                         <span class="plan-meta">{planDoneCount(msg.todos)} / {msg.todos.length} done</span>
                         <span class="plan-progress"><span class="plan-fill" style="width:{planFill(msg.todos)}"></span></span>
                         <span style="margin-left:auto"></span>
@@ -544,7 +544,7 @@
                     <details class="think-block">
                       <summary class="think-summary">
                         <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
-                        <span>{t('chat.thoughts')}</span>
+                        <span>{$t('chat.thoughts')}</span>
                         <iconify-icon icon="lucide:chevron-right" width="13"></iconify-icon>
                       </summary>
                       <div class="think-body">{@html renderMarkdown(msg.thinking)}</div>
@@ -569,10 +569,10 @@
                   <!-- Message actions -->
                   {#if !msg.streaming}
                     <div class="msg-actions reply-actions">
-                      <button class="action-btn" title={t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
+                      <button class="action-btn" title={$t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
                         <iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon>
                       </button>
-                      <button class="action-btn" title={t('chat.retry')} onclick={() => ws.retry($activeSessionId ?? '')}>
+                      <button class="action-btn" title={$t('chat.retry')} onclick={() => ws.retry($activeSessionId ?? '')}>
                         <iconify-icon icon="ant-design:reload-outlined" width="14"></iconify-icon>
                       </button>
                     </div>
@@ -595,7 +595,7 @@
                 <div class="agent-avatar">O</div>
                 <div class="thinking-indicator">
                   <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
-                  <span>{msg.content || t('chat.thinking')}</span>
+                  <span>{msg.content || $t('chat.thinking')}</span>
                 </div>
               </div>
             {/if}
@@ -619,7 +619,7 @@
                 <details class="think-block" open>
                   <summary class="think-summary">
                     <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
-                    <span>{t('chat.thinking')}</span>
+                    <span>{$t('chat.thinking')}</span>
                   </summary>
                   <div class="think-body">{@html renderMarkdown(thinking)}</div>
                 </details>
@@ -633,7 +633,7 @@
               <div class="agent-avatar">O</div>
               <div class="thinking-indicator">
                 <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
-                <span>{progress.message || t('chat.thinking')}</span>
+                <span>{progress.message || $t('chat.thinking')}</span>
                 <span class="dots">
                   <span></span>
                   <span style="animation-delay:0.2s"></span>

@@ -4,6 +4,7 @@
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
   import * as api from '../lib/api'
+  import { t } from '../lib/i18n'
 
   // platform-to-icon mapping for well-known channels
   const platformIcons: Record<string, string> = {
@@ -133,14 +134,14 @@
   <div class="inner">
     <div class="page-header">
       <div class="title-block">
-        <h2>Channels</h2>
-        <p>Reach your agent from messaging apps — replies and task results are delivered back to the same channel</p>
+        <h2>{$t('channels.title')}</h2>
+        <p>{$t('channels.subtitle')}</p>
       </div>
-      <button class="btn-primary" onclick={openNewSession}>Connect Channel</button>
+      <button class="btn-primary" onclick={openNewSession}>{$t('channels.connect')}</button>
     </div>
 
     {#if loading}
-      <div class="empty-state">Loading channels…</div>
+      <div class="empty-state">{$t('channels.loading')}</div>
     {:else}
       <div class="grid">
         {#each rows as row (row.platform)}
@@ -168,7 +169,7 @@
                 onclick={() => handleTest(row.platform)}
               >
                 <iconify-icon icon="ant-design:check-circle-outlined" width="13"></iconify-icon>
-                {busyPlatform === row.platform ? 'Testing…' : 'Diagnostics'}
+                {busyPlatform === row.platform ? $t('channels.testing') : $t('channels.diagnostics')}
               </button>
               <button
                 class="btn-outline del"
@@ -179,7 +180,7 @@
               </button>
               <button class="btn-primary-sm" onclick={openNewSession}>
                 <iconify-icon icon="ant-design:message-outlined" width="13"></iconify-icon>
-                Set Up with Agent
+                {$t('channels.setup')}
               </button>
             </div>
           </div>
@@ -188,7 +189,7 @@
         <!-- Add tile -->
         <div class="add-tile" onclick={openNewSession} role="button" tabindex="0">
           <iconify-icon icon="ant-design:plus-outlined" width="18"></iconify-icon>
-          <span>Connect a channel — Slack, Discord, Webhook…</span>
+          <span>{$t('channels.add_tile')}</span>
         </div>
       </div>
     {/if}

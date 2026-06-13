@@ -3,7 +3,7 @@
   import Segment from '../components/ui/Segment.svelte'
   import Switch from '../components/ui/Switch.svelte'
   import { showToast, activeSessionId } from '../lib/stores'
-  import { setLocale } from '../lib/i18n'
+  import { setLocale, t, tr } from '../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import * as api from '../lib/api'
 
@@ -27,9 +27,8 @@
   let origWorkdir = ''
 
   const langOptions = [
-    { value: 'en',  label: 'English' },
-    { value: 'zh',  label: '简体中文' },
-    { value: 'zh-TW', label: '繁體中文' },
+    { value: 'en', label: 'English' },
+    { value: 'zh', label: '简体中文' },
   ]
 
   // The whole UI is sized in px, so a :root font-size has no effect. Scale the
@@ -119,7 +118,7 @@
         origModel   = model
         origWorkdir = workdir
       }
-      showToast('Settings saved', 'success')
+      showToast(tr('settings.toast_saved'), 'success')
     } catch (e: any) {
       showToast(`Save failed: ${e.message}`, 'error')
     } finally {
@@ -131,20 +130,20 @@
 <div class="page">
   <div class="inner">
     <div class="page-header">
-      <h2>Settings</h2>
-      <p>Workspace preferences and agent defaults</p>
+      <h2>{$t('settings.title')}</h2>
+      <p>{$t('settings.subtitle')}</p>
     </div>
 
     {#if loading}
-      <div class="loading-state">Loading settings…</div>
+      <div class="loading-state">{$t('settings.loading')}</div>
     {:else}
       <!-- General -->
       <div class="section-card">
-        <div class="section-title">General</div>
+        <div class="section-title">{$t('settings.general')}</div>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Language</span>
-            <span class="setting-desc">Display language for the interface</span>
+            <span class="setting-label">{$t('settings.language')}</span>
+            <span class="setting-desc">{$t('settings.language_desc')}</span>
           </div>
           <select class="sel" bind:value={language}>
             {#each langOptions as o}
@@ -154,27 +153,27 @@
         </div>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Font Size</span>
-            <span class="setting-desc">Base text size across chat and tables</span>
+            <span class="setting-label">{$t('settings.font_size')}</span>
+            <span class="setting-desc">{$t('settings.font_size_desc')}</span>
           </div>
-          <Segment options={['Small', 'Medium', 'Large']} bind:value={fontSize} />
+          <Segment options={['Small', 'Medium', 'Large']} labels={{ Small: $t('settings.fs_small'), Medium: $t('settings.fs_medium'), Large: $t('settings.fs_large') }} bind:value={fontSize} />
         </div>
         <div class="setting-row last">
           <div class="setting-info">
-            <span class="setting-label">Theme</span>
-            <span class="setting-desc">Appearance of the workbench</span>
+            <span class="setting-label">{$t('settings.theme')}</span>
+            <span class="setting-desc">{$t('settings.theme_desc')}</span>
           </div>
-          <Segment options={['Light', 'Dark', 'System']} bind:value={theme} />
+          <Segment options={['Light', 'Dark', 'System']} labels={{ Light: $t('settings.theme_light'), Dark: $t('settings.theme_dark'), System: $t('settings.theme_system') }} bind:value={theme} />
         </div>
       </div>
 
       <!-- Agent defaults -->
       <div class="section-card">
-        <div class="section-title">Agent Defaults</div>
+        <div class="section-title">{$t('settings.agent')}</div>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Default Model</span>
-            <span class="setting-desc">Used for new sessions unless overridden</span>
+            <span class="setting-label">{$t('settings.default_model')}</span>
+            <span class="setting-desc">{$t('settings.default_model_desc')}</span>
           </div>
           {#if modelOptions.length > 0}
             <select class="sel" bind:value={model}>
@@ -186,22 +185,22 @@
         </div>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Reasoning Effort</span>
-            <span class="setting-desc">Higher effort thinks longer before answering</span>
+            <span class="setting-label">{$t('settings.reasoning')}</span>
+            <span class="setting-desc">{$t('settings.reasoning_desc')}</span>
           </div>
-          <Segment options={['Low', 'Medium', 'High']} bind:value={reasoning} />
+          <Segment options={['Low', 'Medium', 'High']} labels={{ Low: $t('settings.re_low'), Medium: $t('settings.re_medium'), High: $t('settings.re_high') }} bind:value={reasoning} />
         </div>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Permission Mode</span>
-            <span class="setting-desc">Ask confirms file changes and shell commands before running</span>
+            <span class="setting-label">{$t('settings.perm_mode')}</span>
+            <span class="setting-desc">{$t('settings.perm_mode_desc')}</span>
           </div>
-          <Segment options={['Ask', 'Auto']} bind:value={permMode} />
+          <Segment options={['Ask', 'Auto']} labels={{ Ask: $t('settings.pm_ask'), Auto: $t('settings.pm_auto') }} bind:value={permMode} />
         </div>
         <div class="setting-row last">
           <div class="setting-info">
-            <span class="setting-label">Working Directory</span>
-            <span class="setting-desc">Default project root for new sessions</span>
+            <span class="setting-label">{$t('settings.workdir')}</span>
+            <span class="setting-desc">{$t('settings.workdir_desc')}</span>
           </div>
           <input class="input" bind:value={workdir} placeholder="~/code/my-project" />
         </div>
@@ -209,18 +208,18 @@
 
       <!-- Notifications -->
       <div class="section-card">
-        <div class="section-title">Notifications</div>
+        <div class="section-title">{$t('settings.notifications')}</div>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Desktop Notifications</span>
-            <span class="setting-desc">Notify when the agent finishes or needs input</span>
+            <span class="setting-label">{$t('settings.desktop_notif')}</span>
+            <span class="setting-desc">{$t('settings.desktop_notif_desc')}</span>
           </div>
           <Switch bind:checked={desktopNotif} />
         </div>
         <div class="setting-row last">
           <div class="setting-info">
-            <span class="setting-label">Notify on Task Failure</span>
-            <span class="setting-desc">Send an alert to your default channel when a scheduled task fails</span>
+            <span class="setting-label">{$t('settings.failure_notif')}</span>
+            <span class="setting-desc">{$t('settings.failure_notif_desc')}</span>
           </div>
           <Switch bind:checked={failureNotif} />
         </div>
@@ -229,10 +228,10 @@
       <!-- Save -->
       <div class="save-row">
         <button class="btn-primary" onclick={handleSave} disabled={saving}>
-          {saving ? 'Saving…' : 'Save Changes'}
+          {saving ? $t('settings.saving') : $t('settings.save_changes')}
         </button>
         {#if versionStr}
-          <span class="version-badge">Version {versionStr}</span>
+          <span class="version-badge">{$t('common.version')} {versionStr}</span>
         {/if}
       </div>
     {/if}

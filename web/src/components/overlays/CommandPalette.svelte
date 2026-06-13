@@ -37,14 +37,14 @@
 
   // Static actions (always available)
   const actions = [
-    { id: 'new', icon: 'ant-design:plus-outlined', label: () => t('nav.new_session'), shortcut: '⌘N', run: () => goTo('chat') },
-    { id: 'skills', icon: 'ant-design:thunderbolt-outlined', label: () => t('nav.skills'), shortcut: '', run: () => goTo('skills') },
-    { id: 'tasks', icon: 'ant-design:clock-circle-outlined', label: () => t('nav.tasks'), shortcut: '', run: () => goTo('tasks') },
-    { id: 'mcp', icon: 'ant-design:api-outlined', label: () => t('nav.mcp'), shortcut: '', run: () => goTo('mcp') },
-    { id: 'channels', icon: 'ant-design:mobile-outlined', label: () => t('nav.channels'), shortcut: '', run: () => goTo('channels') },
-    { id: 'memory', icon: 'ant-design:user-outlined', label: () => t('nav.memory'), shortcut: '', run: () => goTo('profile') },
-    { id: 'files', icon: 'ant-design:folder-open-outlined', label: () => t('nav.file_recall'), shortcut: '', run: () => goTo('files') },
-    { id: 'settings', icon: 'ant-design:setting-outlined', label: () => t('nav.settings'), shortcut: '', run: () => goTo('settings') },
+    { id: 'new', icon: 'ant-design:plus-outlined', label: () => $t('nav.new_session'), shortcut: '⌘N', run: () => goTo('chat') },
+    { id: 'skills', icon: 'ant-design:thunderbolt-outlined', label: () => $t('nav.skills'), shortcut: '', run: () => goTo('skills') },
+    { id: 'tasks', icon: 'ant-design:clock-circle-outlined', label: () => $t('nav.tasks'), shortcut: '', run: () => goTo('tasks') },
+    { id: 'mcp', icon: 'ant-design:api-outlined', label: () => $t('nav.mcp'), shortcut: '', run: () => goTo('mcp') },
+    { id: 'channels', icon: 'ant-design:mobile-outlined', label: () => $t('nav.channels'), shortcut: '', run: () => goTo('channels') },
+    { id: 'memory', icon: 'ant-design:user-outlined', label: () => $t('nav.memory'), shortcut: '', run: () => goTo('profile') },
+    { id: 'files', icon: 'ant-design:folder-open-outlined', label: () => $t('nav.file_recall'), shortcut: '', run: () => goTo('files') },
+    { id: 'settings', icon: 'ant-design:setting-outlined', label: () => $t('nav.settings'), shortcut: '', run: () => goTo('settings') },
   ]
 
   // Reactive filtered results
@@ -110,7 +110,7 @@
         bind:value={query}
         onkeydown={onKeydown}
         class="search-input"
-        placeholder="Search sessions, skills, commands…"
+        placeholder={$t('cmdk.placeholder')}
       />
       <kbd>esc</kbd>
     </div>
@@ -120,7 +120,7 @@
       {/if}
 
       {#if matchedSessions.length > 0}
-        <div class="group-label">{t('nav.sessions')}</div>
+        <div class="group-label">{$t('nav.sessions')}</div>
         {#each matchedSessions as s, i (s.id)}
           <div
             class="result-row"
@@ -138,7 +138,7 @@
       {/if}
 
       {#if matchedSkills.length > 0}
-        <div class="group-label">{t('nav.skills')}</div>
+        <div class="group-label">{$t('nav.skills')}</div>
         {#each matchedSkills as s, i (s.name)}
           {@const gi = skillsOffset + i}
           <div
@@ -154,7 +154,7 @@
       {/if}
 
       {#if matchedActions.length > 0}
-        <div class="group-label">ACTIONS</div>
+        <div class="group-label">{$t('cmdk.actions')}</div>
         {#each matchedActions as a, i (a.id)}
           {@const gi = actionsOffset + i}
           <div

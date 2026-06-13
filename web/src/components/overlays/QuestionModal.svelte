@@ -1,6 +1,7 @@
 <script lang="ts">
   import { questionModal } from '../../lib/stores'
   import { ws } from '../../lib/ws'
+  import { t } from '../../lib/i18n'
 
   let selected = $state<string[]>([])
   let customText = $state('')
@@ -46,7 +47,7 @@
       <span class="modal-title">
         {$questionModal.header || $questionModal.question}
       </span>
-      <button class="close-btn" onclick={close} aria-label="Close">
+      <button class="close-btn" onclick={close} aria-label={$t('common.close')}>
         <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
       </button>
     </div>
@@ -76,7 +77,7 @@
       <div class="custom-input-wrap">
         <input
           class="custom-input"
-          placeholder="Or type a custom answer…"
+          placeholder={$t('question.custom_placeholder')}
           bind:value={customText}
           onkeydown={(e) => { if (e.key === 'Enter') submit() }}
         />
@@ -84,14 +85,14 @@
     </div>
 
     <div class="modal-footer">
-      <button class="btn-cancel" onclick={cancel}>Cancel</button>
+      <button class="btn-cancel" onclick={cancel}>{$t('common.cancel')}</button>
       <span class="spacer"></span>
       <button
         class="btn-primary"
         onclick={submit}
         disabled={selected.length === 0 && !customText.trim()}
       >
-        Submit
+        {$t('common.submit')}
       </button>
     </div>
   </div>

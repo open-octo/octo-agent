@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SubAgentState } from '../../lib/stores'
+  import { t } from '../../lib/i18n'
 
   // Live concurrent sub-agents for the current turn. Fed from chatSubAgents.
   let { agents = [], elapsed = 0 }: { agents?: SubAgentState[]; elapsed?: number } = $props()
@@ -23,7 +24,7 @@
 <div class="subagents">
   <div class="header">
     <iconify-icon icon="ant-design:partition-outlined" width="14" style="color:var(--text-tertiary)"></iconify-icon>
-    <span class="lbl">Sub-agents</span>
+    <span class="lbl">{$t('agent.sub_agents')}</span>
     <span class="count">{agents.length}</span>
     {#if runningCount > 0}
       <span class="running-badge">
@@ -33,7 +34,7 @@
     {:else}
       <span class="running-badge done">
         <iconify-icon icon="ant-design:check-circle-outlined" width="12"></iconify-icon>
-        all done
+        {$t('agent.all_done')}
       </span>
     {/if}
     {#if elapsed > 0}
@@ -55,7 +56,7 @@
         {#if a.status === 'running'}
           <span class="status-running">
             <iconify-icon icon="ant-design:loading-outlined" width="12" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
-            <span class="mono">{a.lastTool || 'working'} · {a.tools.length} tool{a.tools.length === 1 ? '' : 's'}</span>
+            <span class="mono">{a.lastTool || $t('agent.working')} · {a.tools.length} tool{a.tools.length === 1 ? '' : 's'}</span>
           </span>
         {:else}
           <span class="status-done">
@@ -67,7 +68,7 @@
       </summary>
       <div class="agent-body">
         {#if a.tools.length === 0}
-          <span class="step mono" style="color:var(--text-tertiary)">No tool calls yet…</span>
+          <span class="step mono" style="color:var(--text-tertiary)">{$t('agent.no_tools_yet')}</span>
         {:else}
           {#each a.tools as tool, i}
             <div class="step mono" class:err={tool.error}>

@@ -3,6 +3,7 @@
   import { showToast } from '../lib/stores'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import * as api from '../lib/api'
+  import { t, tr } from '../lib/i18n'
 
   interface TrashEntry {
     id: string
@@ -47,7 +48,7 @@
       await api.restoreTrash(id)
       items = items.filter(i => i.id !== id)
       totalCount = Math.max(0, totalCount - 1)
-      showToast('File restored', 'success')
+      showToast(tr('files.toast_restored'), 'success')
     } catch (e: any) {
       showToast(`Restore failed: ${e.message}`, 'error')
     } finally {
@@ -63,7 +64,7 @@
       if (entry) totalSize = Math.max(0, totalSize - (entry.size ?? 0))
       items = items.filter(i => i.id !== id)
       totalCount = Math.max(0, totalCount - 1)
-      showToast('File permanently deleted', 'success')
+      showToast(tr('files.toast_deleted'), 'success')
     } catch (e: any) {
       showToast(`Delete failed: ${e.message}`, 'error')
     } finally {
@@ -79,7 +80,7 @@
       totalCount = 0
       totalSize  = 0
       orphanCount = 0
-      showToast('Trash emptied', 'success')
+      showToast(tr('files.toast_emptied'), 'success')
     } catch (e: any) {
       showToast(`Empty failed: ${e.message}`, 'error')
     }
@@ -88,7 +89,7 @@
   async function handleEmptyOld() {
     try {
       await api.emptyTrash({ mode: 'old' })
-      showToast('Old files cleared', 'success')
+      showToast(tr('files.toast_old_cleared'), 'success')
       await reload()
     } catch (e: any) {
       showToast(`Failed: ${e.message}`, 'error')
@@ -98,7 +99,7 @@
   async function handleCleanOrphans() {
     try {
       await api.emptyTrash({ mode: 'orphans' })
-      showToast('Orphan files cleared', 'success')
+      showToast(tr('files.toast_orphans_cleared'), 'success')
       await reload()
     } catch (e: any) {
       showToast(`Failed: ${e.message}`, 'error')
@@ -145,8 +146,8 @@
 <div class="page">
   <div class="inner">
     <div class="page-header">
-      <h2>File Recall</h2>
-      <p>Files the agent moved to trash across all projects. Recall them back to where they were, or clear the ones you don't need.</p>
+      <h2>{$t('files.title')}</h2>
+      <p>{$t('files.subtitle')}</p>
     </div>
 
     <!-- Stats + actions -->
@@ -157,29 +158,29 @@
       <div class="bar-actions">
         <button class="btn-outline" onclick={reload} disabled={loading}>
           <iconify-icon icon="ant-design:reload-outlined" width="13"></iconify-icon>
-          {loading ? 'Loading…' : 'Refresh'}
+          {loading ? $t('common.loading') : $t('files.refresh')}
         </button>
         <button class="btn-outline" onclick={handleEmptyOld}>
           <iconify-icon icon="ant-design:clock-circle-outlined" width="13"></iconify-icon>
-          Empty &gt;7 days
+          {$t('files.empty_7d')}
         </button>
-        <button class="btn-outline" onclick={handleCleanOrphans} disabled={orphanCount === 0} title="Permanently delete entries whose original project directory no longer exists">
+        <button class="btn-outline" onclick={handleCleanOrphans} disabled={orphanCount === 0} title={$t('files.clean_orphans_tip')}>
           <iconify-icon icon="ant-design:disconnect-outlined" width="13"></iconify-icon>
-          Clean orphans
+          {$t('files.clean_orphans')}
         </button>
         <button class="btn-danger-ghost" onclick={handleEmptyAll} disabled={items.length === 0}>
           <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
-          Empty all
+          {$t('files.empty_all')}
         </button>
       </div>
     </div>
 
     {#if loading}
-      <div class="empty-state">Loading…</div>
+      <div class="empty-state">{$t('common.loading')}</div>
     {:else if items.length === 0}
       <div class="empty-state">
         <iconify-icon icon="ant-design:delete-outlined" width="32" style="color:var(--text-quaternary)"></iconify-icon>
-        <span>Trash is empty</span>
+        <span>{$t('files.empty')}</span>
       </div>
     {:else}
       <div class="file-list">
@@ -192,9 +193,9 @@
               <div class="file-name-row">
                 <span class="file-name mono">{basename(f.original)}</span>
                 {#if f.orphan}
-                  <StatusTag status="error">Orphan</StatusTag>
+                  <StatusTag status="error">{$t('files.orphan')}</StatusTag>
                 {:else if isOld(f.deleted_at)}
-                  <StatusTag status="warning">Old</StatusTag>
+                  <StatusTag status="warning">{$t('files.old')}</StatusTag>
                 {/if}
               </div>
               <span class="file-path mono">{f.original}</span>
@@ -216,11 +217,11 @@
                 onclick={() => handleRestore(f.id)}
               >
                 <iconify-icon icon="ant-design:undo-outlined" width="14"></iconify-icon>
-                {busyId === f.id ? '…' : 'Restore'}
+                {busyId === f.id ? '…' : $t('files.restore')}
               </button>
               <button
                 class="icon-btn del"
-                title="Delete permanently"
+                title={$t('files.delete_perm')}
                 disabled={busyId === f.id}
                 onclick={() => handleDelete(f.id)}
               >

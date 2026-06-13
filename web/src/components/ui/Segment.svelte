@@ -1,8 +1,12 @@
 <script lang="ts">
-  let { options = [], value = $bindable(''), onchange }: {
+  let { options = [], value = $bindable(''), onchange, labels }: {
     options?: string[]
     value?: string
     onchange?: (v: string) => void
+    // Optional display labels keyed by option value. The bound `value` stays
+    // the stable English option (handlers depend on it); only the rendered
+    // text is localized when a label is provided.
+    labels?: Record<string, string>
   } = $props()
 </script>
 
@@ -12,7 +16,7 @@
       class="opt"
       class:active={value === opt}
       onclick={() => { value = opt; onchange?.(opt) }}
-    >{opt}</button>
+    >{labels?.[opt] ?? opt}</button>
   {/each}
 </div>
 

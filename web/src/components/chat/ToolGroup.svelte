@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n'
   // A collapsible group of tool calls for one agent turn.
   // Accepts optional `tools` + `streaming` props for real data;
   // falls back to static prototype content when called without props.
@@ -202,7 +203,7 @@
       {#if groupStreaming}
         <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:12px;color:var(--blue-6)">
           <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
-          running
+          {$t('tools.running')}
         </span>
       {:else}
         {@const elapsed = groupElapsed(tools)}
@@ -229,7 +230,7 @@
             {#if tool.error}
               <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--error)">
                 <iconify-icon icon="ant-design:close-circle-outlined" width="14"></iconify-icon>
-                failed
+                {$t('tools.failed')}
               </span>
             {:else if fErr}
               <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--warning)">
@@ -241,7 +242,7 @@
             {:else}
               <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--blue-6)">
                 <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
-                running
+                {$t('tools.running')}
               </span>
             {/if}
           </span>

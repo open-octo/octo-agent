@@ -1,5 +1,6 @@
 <script lang="ts">
   import { view, cmdkOpen, sidebar, showToast } from '../../lib/stores'
+  import { t, tr } from '../../lib/i18n'
 
   function cycleSidebar() {
     sidebar.update(s => s === 'full' ? 'rail' : s === 'rail' ? 'hidden' : 'full')
@@ -9,20 +10,20 @@
   // for the "Desktop Notifications" setting. There is no notification feed.
   async function toggleNotifications() {
     if (!('Notification' in window)) {
-      showToast('Desktop notifications are not supported in this browser', 'error')
+      showToast(tr('header.notif_unsupported'), 'error')
       return
     }
     if (Notification.permission === 'granted') {
-      showToast('Desktop notifications are enabled')
+      showToast(tr('header.notif_enabled'))
       return
     }
     if (Notification.permission === 'denied') {
-      showToast('Notifications are blocked — enable them in your browser settings', 'error')
+      showToast(tr('header.notif_blocked'), 'error')
       return
     }
     const perm = await Notification.requestPermission()
     showToast(
-      perm === 'granted' ? 'Desktop notifications enabled' : 'Notifications were not enabled',
+      perm === 'granted' ? tr('header.notif_enabled') : tr('header.notif_not_enabled'),
       perm === 'granted' ? 'success' : 'error',
     )
   }
@@ -30,30 +31,30 @@
 
 <header>
   <div class="left">
-    <button class="icon-btn" title="Toggle sidebar" onclick={cycleSidebar}>
+    <button class="icon-btn" title={$t('header.toggle_sidebar')} onclick={cycleSidebar}>
       <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
     </button>
     <div class="brand">
       <div class="logo">O</div>
       <span class="name">Octo</span>
       <span class="divider"></span>
-      <span class="sub">Agent Workbench</span>
+      <span class="sub">{$t('nav.workbench')}</span>
     </div>
   </div>
 
   <div class="right">
     <button class="search-pill" onclick={() => cmdkOpen.set(true)}>
       <iconify-icon icon="ant-design:search-outlined" width="14"></iconify-icon>
-      <span>Search sessions…</span>
+      <span>{$t('header.search_sessions')}</span>
       <kbd>⌘K</kbd>
     </button>
-    <button class="icon-btn" title="Desktop notifications" onclick={toggleNotifications}>
+    <button class="icon-btn" title={$t('header.notifications')} onclick={toggleNotifications}>
       <iconify-icon icon="ant-design:bell-outlined" width="16"></iconify-icon>
     </button>
-    <button class="icon-btn" title="Settings" onclick={() => view.set('settings')}>
+    <button class="icon-btn" title={$t('nav.settings')} onclick={() => view.set('settings')}>
       <iconify-icon icon="ant-design:setting-outlined" width="16"></iconify-icon>
     </button>
-    <button class="avatar" title="Assistant memory & profile" onclick={() => view.set('profile')}>R</button>
+    <button class="avatar" title={$t('header.avatar')} onclick={() => view.set('profile')}>R</button>
   </div>
 </header>
 

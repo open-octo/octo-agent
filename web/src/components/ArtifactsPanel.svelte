@@ -1,5 +1,6 @@
 <script lang="ts">
   import { artifacts, artifactsOpen, artifactSel, artifactView, showToast } from '../lib/stores'
+  import { t } from '../lib/i18n'
 
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
 
@@ -41,10 +42,10 @@
       <span class="file-name">{cur.name}</span>
       <span class="file-meta">{cur.type} · {cur.ver}</span>
     </div>
-    <button class="icon-btn" title="Copy" onclick={copyArtifact}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
-    <button class="icon-btn" title="Download" onclick={downloadArtifact}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
-    <button class="icon-btn" title="Open in new tab" onclick={openArtifact}><iconify-icon icon="ant-design:export-outlined" width="14"></iconify-icon></button>
-    <button class="icon-btn" title="Close" onclick={() => artifactsOpen.set(false)}>
+    <button class="icon-btn" title={$t('artifacts.copy')} onclick={copyArtifact}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
+    <button class="icon-btn" title={$t('artifacts.download')} onclick={downloadArtifact}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
+    <button class="icon-btn" title={$t('artifacts.open_new_tab')} onclick={openArtifact}><iconify-icon icon="ant-design:export-outlined" width="14"></iconify-icon></button>
+    <button class="icon-btn" title={$t('common.close')} onclick={() => artifactsOpen.set(false)}>
       <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
     </button>
   </div>
@@ -52,10 +53,10 @@
   <!-- Preview/Code toggle -->
   <div class="toolbar">
     <div class="seg">
-      <button class="seg-btn" class:active={$artifactView === 'preview'} onclick={() => artifactView.set('preview')}>Preview</button>
-      <button class="seg-btn" class:active={$artifactView === 'code'} onclick={() => artifactView.set('code')}>Code</button>
+      <button class="seg-btn" class:active={$artifactView === 'preview'} onclick={() => artifactView.set('preview')}>{$t('artifacts.preview')}</button>
+      <button class="seg-btn" class:active={$artifactView === 'code'} onclick={() => artifactView.set('code')}>{$t('artifacts.code')}</button>
     </div>
-    <span class="sandboxed-label">Sandboxed preview</span>
+    <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
   </div>
 
   <!-- Body -->
@@ -69,7 +70,7 @@
 
   <!-- Footer chip switcher -->
   <div class="footer">
-    <span class="footer-lbl">Artifacts</span>
+    <span class="footer-lbl">{$t('chat.artifacts')}</span>
     {#each $artifacts as a, i}
     <button
       class="chip"

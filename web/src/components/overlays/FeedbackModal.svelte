@@ -1,6 +1,7 @@
 <script lang="ts">
   import { feedbackModal, activeSessionId } from '../../lib/stores'
   import { ws } from '../../lib/ws'
+  import { t } from '../../lib/i18n'
 
   let selectedOption = $state('')
   let customText = $state('')
@@ -61,7 +62,7 @@
       <div class="custom-input-wrap">
         <textarea
           class="custom-input"
-          placeholder="Or type a custom reply…"
+          placeholder={$t('feedback.custom_placeholder')}
           rows="3"
           bind:value={customText}
         ></textarea>
@@ -69,14 +70,14 @@
     </div>
 
     <div class="modal-footer">
-      <button class="btn-cancel" onclick={dismiss}>Not Now</button>
+      <button class="btn-cancel" onclick={dismiss}>{$t('feedback.not_now')}</button>
       <span class="spacer"></span>
       <button
         class="btn-primary"
         onclick={submit}
         disabled={!selectedOption && !customText.trim()}
       >
-        Submit
+        {$t('common.submit')}
       </button>
     </div>
   </div>

@@ -7,7 +7,7 @@
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
-  import { t as tr } from '../../lib/i18n'
+  import { t } from '../../lib/i18n'
   import StatusTag from '../ui/StatusTag.svelte'
 
   let { onSend }: { onSend?: (text: string, files?: any[]) => void } = $props()
@@ -147,7 +147,7 @@
       {#if modelMenu}
         <div class="menu" onclick={(e) => e.stopPropagation()}>
           {#if models.length === 0}
-            <div class="menu-empty">No models configured</div>
+            <div class="menu-empty">{$t('chat.no_models')}</div>
           {:else}
             {#each models as m (m.id)}
               <button class="menu-item" onclick={() => pickModel(m)}>
@@ -161,7 +161,7 @@
     </div>
     <div class="picker">
       <button class="chip" onclick={(e) => { e.stopPropagation(); modelMenu = false; reasonMenu = !reasonMenu }}>
-        <span>Reasoning: {cap(reasoning)}</span>
+        <span>{$t('chat.reasoning')} {cap(reasoning)}</span>
         <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
       </button>
       {#if reasonMenu}
@@ -178,15 +178,15 @@
       <span class="chip static" title={workingDir}><span class="mono">{shortDir(workingDir)}</span></span>
     {/if}
     <span class="chip static context-chip">
-      <span>{tr('chat.context')}</span>
+      <span>{$t('chat.context')}</span>
       <span class="ctx-bar"><span class="ctx-fill" style="width:{Math.min(ctxUsage, 100)}%"></span></span>
       <span class="mono">{ctxUsage}%</span>
     </span>
     <span style="margin-left:auto;"></span>
     {#if permMode === 'auto'}
-      <StatusTag status="success">{tr('chat.auto_mode')}</StatusTag>
+      <StatusTag status="success">{$t('chat.auto_mode')}</StatusTag>
     {:else}
-      <StatusTag status="warning">{tr('chat.ask_mode')}</StatusTag>
+      <StatusTag status="warning">{$t('chat.ask_mode')}</StatusTag>
     {/if}
   </div>
 
@@ -198,7 +198,7 @@
             <span class="attach-chip" title={a.name}>
               <iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>
               <span class="attach-name">{a.name}</span>
-              <button class="attach-x" title="Remove" onclick={() => removeAttachment(i)}>
+              <button class="attach-x" title={$t('chat.remove')} onclick={() => removeAttachment(i)}>
                 <iconify-icon icon="ant-design:close-outlined" width="11"></iconify-icon>
               </button>
             </span>
@@ -208,7 +208,7 @@
       <textarea
         bind:this={textareaEl}
         rows={2}
-        placeholder={tr('chat.placeholder')}
+        placeholder={$t('chat.placeholder')}
         bind:value={text}
         onkeydown={onKeydown}
       ></textarea>
@@ -221,18 +221,18 @@
         onchange={onFilesPicked}
       />
       <div class="input-footer">
-        <button class="tool-btn" title="Attach image" onclick={openAttach}>
+        <button class="tool-btn" title={$t('chat.attach_image')} onclick={openAttach}>
           <iconify-icon icon="ant-design:paper-clip-outlined" width="15"></iconify-icon>
         </button>
-        <button class="tool-btn skill-btn" title="Insert slash command" onclick={insertSkill}>/</button>
+        <button class="tool-btn skill-btn" title={$t('chat.insert_slash')} onclick={insertSkill}>/</button>
         <span style="margin-left:auto;"></span>
         {#if isStreaming || $running}
           <button class="stop-btn" onclick={stop}>
             <span class="stop-sq"></span>
-            Stop
+            {$t('chat.stop')}
           </button>
         {:else}
-          <button class="send-btn" onclick={send}>Send</button>
+          <button class="send-btn" onclick={send}>{$t('chat.send')}</button>
         {/if}
       </div>
     </div>

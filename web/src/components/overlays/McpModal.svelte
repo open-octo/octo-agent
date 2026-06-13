@@ -1,5 +1,6 @@
 <script lang="ts">
   import { mcpModalOpen, mcpModalState, mcpServers, showToast } from '../../lib/stores'
+  import { t } from '../../lib/i18n'
   import * as api from '../../lib/api'
 
   let mode = $derived($mcpModalState.mode)
@@ -29,7 +30,7 @@
     jsonText = ''
   })
 
-  const title = $derived(mode === 'edit' ? 'Edit MCP Server' : mode === 'import' ? 'Import MCP Servers' : 'Add MCP Server')
+  const title = $derived(mode === 'edit' ? $t('mcp.modal_edit') : mode === 'import' ? $t('mcp.modal_import') : $t('mcp.modal_add'))
   const isHttp = $derived(transport === 'http' || transport === 'sse')
   const canSubmit = $derived(
     mode === 'import'
@@ -89,7 +90,7 @@
     <div class="modal-body">
       {#if mode === 'import'}
         <div class="field">
-          <label>Paste MCP config JSON</label>
+          <label>{$t('mcp.paste_json')}</label>
           <textarea
             rows={9}
             class="json-area"
@@ -99,32 +100,32 @@
         </div>
       {:else}
         <div class="field">
-          <label>Name</label>
-          <input placeholder="e.g. github" bind:value={name} disabled={mode === 'edit'} />
+          <label>{$t('mcp.field_name')}</label>
+          <input placeholder={$t('mcp.field_name_ph')} bind:value={name} disabled={mode === 'edit'} />
         </div>
         <div class="field">
-          <label>Transport</label>
+          <label>{$t('mcp.field_transport')}</label>
           <select bind:value={transport}>
             {#each ['stdio', 'http', 'sse'] as opt}<option>{opt}</option>{/each}
           </select>
         </div>
         {#if isHttp}
           <div class="field">
-            <label>Server URL</label>
+            <label>{$t('mcp.field_url')}</label>
             <input placeholder="https://example.com/mcp" bind:value={url} />
           </div>
         {:else}
           <div class="field">
-            <label>Launch command</label>
+            <label>{$t('mcp.field_command')}</label>
             <input placeholder="npx -y @modelcontextprotocol/server-…" bind:value={command} />
           </div>
         {/if}
       {/if}
     </div>
     <div class="modal-footer">
-      <button class="btn-secondary" onclick={close} disabled={submitting}>Cancel</button>
+      <button class="btn-secondary" onclick={close} disabled={submitting}>{$t('common.cancel')}</button>
       <button class="btn-primary" onclick={submit} disabled={submitting || !canSubmit}>
-        {submitting ? 'Saving…' : mode === 'edit' ? 'Save' : mode === 'import' ? 'Import' : 'Add Server'}
+        {submitting ? $t('common.saving') : mode === 'edit' ? $t('common.save') : mode === 'import' ? $t('mcp.import') : $t('mcp.add')}
       </button>
     </div>
   </div>
