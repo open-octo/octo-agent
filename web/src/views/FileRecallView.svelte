@@ -178,7 +178,7 @@
       <div class="empty-state">Loading…</div>
     {:else if items.length === 0}
       <div class="empty-state">
-        <iconify-icon icon="ant-design:delete-outlined" width="32" style="color:rgba(0,0,0,0.2)"></iconify-icon>
+        <iconify-icon icon="ant-design:delete-outlined" width="32" style="color:var(--text-quaternary)"></iconify-icon>
         <span>Trash is empty</span>
       </div>
     {:else}
@@ -238,55 +238,55 @@
 .page { flex: 1; overflow-y: auto; min-height: 0; }
 .inner { max-width: 1080px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
 .page-header { display: flex; flex-direction: column; gap: 4px; }
-h2 { margin: 0; font-size: 24px; font-weight: 600; color: #1F1F1F; }
-p { margin: 0; font-size: 14px; color: rgba(0,0,0,0.65); }
+h2 { margin: 0; font-size: 24px; font-weight: 600; color: var(--text-heading); }
+p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .stats-bar {
-  background: #fff; border-radius: 16px; box-shadow: 0 8px 24px rgba(15,23,42,0.03);
+  background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow);
   padding: 14px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
 }
-.stats-text { font-size: 13px; color: rgba(0,0,0,0.45); flex: 1; min-width: 0; }
+.stats-text { font-size: 13px; color: var(--text-tertiary); flex: 1; min-width: 0; }
 .bar-actions { display: flex; align-items: center; gap: 8px; }
 .btn-outline {
-  height: 30px; padding: 0 12px; border: 1px solid #D9D9D9; background: #fff; border-radius: 6px;
-  display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(0,0,0,0.65);
+  height: 30px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container); border-radius: 6px;
+  display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary);
   cursor: pointer; font-family: inherit;
 }
-.btn-outline:hover:not(:disabled) { border-color: #4096FF; color: #4096FF; }
+.btn-outline:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
 .btn-outline:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-danger-ghost {
-  height: 30px; padding: 0 12px; border: 1px solid #EEEFF1; background: #fff; border-radius: 6px;
-  display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(0,0,0,0.45);
+  height: 30px; padding: 0 12px; border: 1px solid var(--border-secondary); background: var(--bg-container); border-radius: 6px;
+  display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-tertiary);
   cursor: pointer; font-family: inherit;
 }
-.btn-danger-ghost:hover:not(:disabled) { border-color: #FF4D4F; color: #FF4D4F; }
+.btn-danger-ghost:hover:not(:disabled) { border-color: var(--error); color: var(--error); }
 .btn-danger-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
 .empty-state {
   padding: 60px; display: flex; flex-direction: column; align-items: center; gap: 12px;
-  color: rgba(0,0,0,0.35); font-size: 14px;
+  color: var(--text-tertiary); font-size: 14px;
 }
 .file-list { display: flex; flex-direction: column; gap: 12px; }
 .file-card {
-  background: #fff; border-radius: 16px; box-shadow: 0 8px 24px rgba(15,23,42,0.03);
+  background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow);
   padding: 16px 24px; display: flex; align-items: center; gap: 16px;
 }
 .file-icon {
   width: 36px; height: 36px; flex: 0 0 36px; border-radius: 10px;
-  background: #F5F5F5; color: rgba(0,0,0,0.45);
+  background: var(--bg-layout); color: var(--text-tertiary);
   display: flex; align-items: center; justify-content: center;
 }
 .file-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .file-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.file-name { font-size: 15px; font-weight: 600; color: #1F1F1F; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-path { font-size: 12px; color: rgba(0,0,0,0.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: rgba(0,0,0,0.45); padding-top: 1px; }
-.sep { width: 3px; height: 3px; border-radius: 9999px; background: rgba(0,0,0,0.25); }
+.file-name { font-size: 15px; font-weight: 600; color: var(--text-heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-path { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-tertiary); padding-top: 1px; }
+.sep { width: 3px; height: 3px; border-radius: 9999px; background: var(--text-quaternary); }
 .file-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .icon-btn {
-  width: 30px; height: 30px; border: 1px solid #EEEFF1; background: #fff; border-radius: 6px;
+  width: 30px; height: 30px; border: 1px solid var(--border-secondary); background: var(--bg-container); border-radius: 6px;
   display: flex; align-items: center; justify-content: center; cursor: pointer;
-  color: rgba(0,0,0,0.45);
+  color: var(--text-tertiary);
 }
 .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.icon-btn.del:hover:not(:disabled) { border-color: #FF4D4F; color: #FF4D4F; }
+.icon-btn.del:hover:not(:disabled) { border-color: var(--error); color: var(--error); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>

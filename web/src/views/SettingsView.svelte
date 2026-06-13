@@ -3,7 +3,8 @@
   import Segment from '../components/ui/Segment.svelte'
   import Switch from '../components/ui/Switch.svelte'
   import { showToast, activeSessionId } from '../lib/stores'
-  import { setLocale, locale } from '../lib/i18n'
+  import { setLocale } from '../lib/i18n'
+  import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import * as api from '../lib/api'
 
   // --- local state ---
@@ -36,9 +37,12 @@
   // which is what "base text size" means in practice here.
   const fontZoomMap: Record<string, string> = { Small: '0.9', Medium: '1', Large: '1.1' }
 
+  const modeToThemeLabel: Record<string, string> = { light: 'Light', dark: 'Dark', system: 'System' }
+
   onMount(async () => {
     const savedFont = localStorage.getItem('octo.fontSize')
     if (savedFont) fontSize = savedFont
+    theme = modeToThemeLabel[getMode()] ?? 'Light'
     await Promise.all([loadConfig(), loadVersion()])
   })
 
@@ -86,10 +90,10 @@
     localStorage.setItem('octo.fontSize', fontSize)
   })
 
+  const themeLabelToMode: Record<string, ThemeMode> = { Light: 'light', Dark: 'dark', System: 'system' }
   $effect(() => {
-    // Apply theme
-    const themeMap: Record<string, string> = { Light: 'light', Dark: 'dark', System: 'system' }
-    document.documentElement.setAttribute('data-theme', themeMap[theme] ?? 'light')
+    // Apply + persist the chosen theme mode (light / dark / system).
+    setMode(themeLabelToMode[theme] ?? 'light')
   })
 
   $effect(() => {
@@ -239,34 +243,34 @@
 .page { flex: 1; overflow-y: auto; min-height: 0; }
 .inner { max-width: 800px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
 .page-header { display: flex; flex-direction: column; gap: 4px; }
-h2 { margin: 0; font-size: 24px; font-weight: 600; color: #1F1F1F; }
-p { margin: 0; font-size: 14px; color: rgba(0,0,0,0.65); }
-.loading-state { padding: 40px; text-align: center; color: rgba(0,0,0,0.45); font-size: 14px; }
-.section-card { background: #fff; border-radius: 16px; box-shadow: 0 8px 24px rgba(15,23,42,0.03); overflow: hidden; }
-.section-title { padding: 16px 24px; border-bottom: 1px solid #F0F0F0; font-size: 16px; font-weight: 600; color: #1F1F1F; }
+h2 { margin: 0; font-size: 24px; font-weight: 600; color: var(--text-heading); }
+p { margin: 0; font-size: 14px; color: var(--text-secondary); }
+.loading-state { padding: 40px; text-align: center; color: var(--text-tertiary); font-size: 14px; }
+.section-card { background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow); overflow: hidden; }
+.section-title { padding: 16px 24px; border-bottom: 1px solid var(--border-table); font-size: 16px; font-weight: 600; color: var(--text-heading); }
 .setting-row {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 24px; padding: 14px 24px; border-bottom: 1px solid #F0F0F0;
+  gap: 24px; padding: 14px 24px; border-bottom: 1px solid var(--border-table);
 }
 .setting-row.last { border-bottom: none; }
 .setting-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.setting-label { font-size: 14px; color: rgba(0,0,0,0.88); }
-.setting-desc { font-size: 12px; color: rgba(0,0,0,0.45); }
+.setting-label { font-size: 14px; color: var(--text); }
+.setting-desc { font-size: 12px; color: var(--text-tertiary); }
 .sel {
   width: 220px; flex: 0 0 auto; height: 32px; padding: 0 10px;
-  border: 1px solid #D9D9D9; border-radius: 6px; font-size: 13px;
-  color: rgba(0,0,0,0.88); font-family: inherit; background: #fff; cursor: pointer; outline: none;
+  border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+  color: var(--text); font-family: inherit; background: var(--bg-container); cursor: pointer; outline: none;
 }
-.sel:focus { border-color: #1677FF; box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+.sel:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
 .input {
   width: 220px; flex: 0 0 auto; height: 32px; padding: 0 10px;
-  border: 1px solid #D9D9D9; border-radius: 6px; font-size: 13px;
-  color: rgba(0,0,0,0.88); font-family: inherit; outline: none;
+  border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+  color: var(--text); font-family: inherit; outline: none;
 }
-.input:focus { border-color: #1677FF; box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+.input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
 .save-row { display: flex; align-items: center; gap: 16px; }
-.btn-primary { height: 32px; padding: 0 16px; border: none; background: #1677FF; border-radius: 6px; font-size: 14px; color: #fff; cursor: pointer; font-family: inherit; }
-.btn-primary:hover:not(:disabled) { background: #4096FF; }
+.btn-primary { height: 32px; padding: 0 16px; border: none; background: var(--blue-6); border-radius: 6px; font-size: 14px; color: #fff; cursor: pointer; font-family: inherit; }
+.btn-primary:hover:not(:disabled) { background: var(--blue-5); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.version-badge { font-size: 12px; color: rgba(0,0,0,0.35); }
+.version-badge { font-size: 12px; color: var(--text-tertiary); }
 </style>

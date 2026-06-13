@@ -133,59 +133,59 @@
 
 <style>
 .backdrop {
-  position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.45);
+  position: fixed; inset: 0; z-index: 1000; background: var(--text-tertiary);
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
 .modal {
-  width: 100%; max-width: 380px; background: #fff;
+  width: 100%; max-width: 380px; background: var(--bg-container);
   border-radius: 12px; overflow: hidden;
   box-shadow: 0 16px 48px rgba(0,0,0,0.18);
   animation: octo-fadein 0.16s ease;
 }
 .modal-header {
   display: flex; align-items: center; gap: 8px;
-  padding: 14px 18px; border-bottom: 1px solid #F0F0F0;
+  padding: 14px 18px; border-bottom: 1px solid var(--border-table);
 }
-.modal-title { font-size: 15px; font-weight: 600; color: #1F1F1F; flex: 1; }
+.modal-title { font-size: 15px; font-weight: 600; color: var(--text-heading); flex: 1; }
 .close-btn {
   width: 28px; height: 28px; border: none; background: transparent;
   border-radius: 6px; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: rgba(0,0,0,0.45);
+  cursor: pointer; color: var(--text-tertiary);
 }
-.close-btn:hover { background: rgba(0,0,0,0.04); }
+.close-btn:hover { background: var(--hover-neutral); }
 .modal-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
-label { font-size: 12px; color: rgba(0,0,0,0.65); }
+label { font-size: 12px; color: var(--text-secondary); }
 input, select {
   width: 100%; height: 32px; padding: 0 10px;
-  border: 1px solid #D9D9D9; border-radius: 6px; font-size: 13px;
-  color: rgba(0,0,0,0.88); font-family: inherit; outline: none; background: #fff;
+  border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+  color: var(--text); font-family: inherit; outline: none; background: var(--bg-container);
   box-sizing: border-box;
 }
-input:focus, select:focus { border-color: #1677FF; box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
-input:disabled { background: #FAFAFA; color: rgba(0,0,0,0.45); }
+input:focus, select:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+input:disabled { background: var(--bg-table-header); color: var(--text-tertiary); }
 .json-area {
-  width: 100%; padding: 8px 10px; border: 1px solid #D9D9D9; border-radius: 6px;
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
   font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: rgba(0,0,0,0.88); outline: none; background: #fff; box-sizing: border-box;
+  color: var(--text); outline: none; background: var(--bg-container); box-sizing: border-box;
   resize: vertical; line-height: 1.6;
 }
-.json-area:focus { border-color: #1677FF; box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+.json-area:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
 .modal { max-width: 420px; }
 .modal-footer {
-  padding: 12px 18px; border-top: 1px solid #F0F0F0;
+  padding: 12px 18px; border-top: 1px solid var(--border-table);
   display: flex; justify-content: flex-end; gap: 8px;
 }
 .btn-secondary {
-  height: 32px; padding: 0 14px; border: 1px solid #D9D9D9; background: #fff;
-  border-radius: 6px; font-size: 14px; color: rgba(0,0,0,0.65); cursor: pointer; font-family: inherit;
+  height: 32px; padding: 0 14px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 6px; font-size: 14px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
 }
-.btn-secondary:hover:not(:disabled) { border-color: #4096FF; color: #4096FF; }
+.btn-secondary:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
 .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary {
-  height: 32px; padding: 0 14px; border: none; background: #1677FF;
+  height: 32px; padding: 0 14px; border: none; background: var(--blue-6);
   border-radius: 6px; font-size: 14px; color: #fff; cursor: pointer; font-family: inherit;
 }
-.btn-primary:hover:not(:disabled) { background: #4096FF; }
+.btn-primary:hover:not(:disabled) { background: var(--blue-5); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

@@ -3,11 +3,11 @@
   let { status = 'default', children }: { status?: TagStatus, children?: any } = $props()
 
   const styles: Record<TagStatus, string> = {
-    success: 'background:#F6FFED;border-color:#B7EB8F;color:#52C41A',
-    info:    'background:#E6F4FF;border-color:#91CAFF;color:#1677FF',
-    warning: 'background:#FFFBE6;border-color:#FFE58F;color:#FAAD14',
-    error:   'background:#FFF1F0;border-color:#FFCCC7;color:#FF4D4F',
-    default: 'background:#FAFAFA;border-color:#D9D9D9;color:rgba(0,0,0,0.88)',
+    success: 'background:var(--success-bg);border-color:var(--success-border);color:var(--success)',
+    info:    'background:var(--blue-1);border-color:var(--info-border);color:var(--blue-6)',
+    warning: 'background:var(--warning-bg);border-color:var(--warning-border);color:var(--warning)',
+    error:   'background:var(--error-bg);border-color:var(--error-border);color:var(--error)',
+    default: 'background:var(--bg-table-header);border-color:var(--border);color:var(--text)',
   }
 </script>
 

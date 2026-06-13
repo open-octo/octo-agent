@@ -61,8 +61,8 @@
 header {
   height: 56px;
   flex: 0 0 56px;
-  background: #FFFFFF;
-  border-bottom: 1px solid #EEEFF1;
+  background: var(--bg-container);
+  border-bottom: 1px solid var(--border-secondary);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -73,37 +73,37 @@ header {
 .brand { display: flex; align-items: center; gap: 10px; padding-left: 4px; }
 .logo {
   width: 26px; height: 26px; border-radius: 8px;
-  background: #1677FF; color: #fff;
+  background: var(--blue-6); color: #fff;
   display: flex; align-items: center; justify-content: center;
   font-size: 15px; font-weight: 600;
 }
-.name { font-size: 15px; font-weight: 600; color: #1F1F1F; }
-.divider { width: 1px; height: 16px; background: #EEEFF1; }
-.sub { font-size: 12px; color: rgba(0,0,0,0.45); }
+.name { font-size: 15px; font-weight: 600; color: var(--text-heading); }
+.divider { width: 1px; height: 16px; background: var(--border-secondary); }
+.sub { font-size: 12px; color: var(--text-tertiary); }
 .icon-btn {
   width: 32px; height: 32px; border: none; background: transparent;
   border-radius: 9999px; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: rgba(0,0,0,0.65);
+  cursor: pointer; color: var(--text-secondary);
 }
-.icon-btn:hover { background: rgba(0,0,0,0.04); }
+.icon-btn:hover { background: var(--hover-neutral); }
 .search-pill {
   display: flex; align-items: center; gap: 8px;
   height: 32px; padding: 0 6px 0 12px; width: 240px;
-  background: #E9EEF6; border-radius: 9999px; cursor: pointer;
-  color: rgba(0,0,0,0.45); border: none; font-family: inherit; font-size: 13px;
+  background: var(--search-bg); border-radius: 9999px; cursor: pointer;
+  color: var(--text-tertiary); border: none; font-family: inherit; font-size: 13px;
 }
-.search-pill:hover { background: #DBE2EE; }
+.search-pill:hover { background: var(--search-hover); }
 .search-pill span { flex: 1; text-align: left; }
 kbd {
   font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: #FFFFFF; border: 1px solid #EEEFF1; border-radius: 4px;
-  padding: 1px 5px; color: rgba(0,0,0,0.45);
+  background: var(--bg-container); border: 1px solid var(--border-secondary); border-radius: 4px;
+  padding: 1px 5px; color: var(--text-tertiary);
 }
 .avatar {
   width: 28px; height: 28px; border-radius: 9999px; border: none; padding: 0;
-  background: #E6F4FF; color: #1677FF; font-family: inherit;
+  background: var(--blue-1); color: var(--blue-6); font-family: inherit;
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.avatar:hover { background: #BAE0FF; }
+.avatar:hover { background: var(--blue-2); }
 </style>

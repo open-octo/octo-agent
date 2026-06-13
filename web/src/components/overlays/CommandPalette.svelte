@@ -104,7 +104,7 @@
 <div class="backdrop" onclick={close}>
   <div class="palette" onclick={(e) => e.stopPropagation()}>
     <div class="search-row">
-      <iconify-icon icon="ant-design:search-outlined" width="16" style="color:rgba(0,0,0,0.45)"></iconify-icon>
+      <iconify-icon icon="ant-design:search-outlined" width="16" style="color:var(--text-tertiary)"></iconify-icon>
       <input
         bind:this={inputEl}
         bind:value={query}
@@ -128,10 +128,10 @@
             onclick={() => openSession(s.id)}
             onmouseenter={() => activeIdx = i}
           >
-            <iconify-icon icon={sessionIcon(s)} width="14" style="color:{activeIdx === i ? '#1677FF' : 'rgba(0,0,0,0.45)'}"></iconify-icon>
+            <iconify-icon icon={sessionIcon(s)} width="14" style="color:{activeIdx === i ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
             <span class="result-title" class:dim={activeIdx !== i}>{sessionName(s)}</span>
             {#if activeIdx === i}
-              <iconify-icon icon="lucide:corner-down-left" width="13" style="color:rgba(0,0,0,0.35)"></iconify-icon>
+              <iconify-icon icon="lucide:corner-down-left" width="13" style="color:var(--text-tertiary)"></iconify-icon>
             {/if}
           </div>
         {/each}
@@ -147,7 +147,7 @@
             onclick={() => { view.set('skills'); close() }}
             onmouseenter={() => activeIdx = gi}
           >
-            <iconify-icon icon="ant-design:thunderbolt-outlined" width="14" style="color:{activeIdx === gi ? '#1677FF' : 'rgba(0,0,0,0.45)'}"></iconify-icon>
+            <iconify-icon icon="ant-design:thunderbolt-outlined" width="14" style="color:{activeIdx === gi ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
             <span class="result-title mono" class:dim={activeIdx !== gi}>{s.name}</span>
           </div>
         {/each}
@@ -163,7 +163,7 @@
             onclick={() => a.run()}
             onmouseenter={() => activeIdx = gi}
           >
-            <iconify-icon icon={a.icon} width="14" style="color:{activeIdx === gi ? '#1677FF' : 'rgba(0,0,0,0.45)'}"></iconify-icon>
+            <iconify-icon icon={a.icon} width="14" style="color:{activeIdx === gi ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
             <span class="result-title" class:dim={activeIdx !== gi}>{a.label()}</span>
             {#if a.shortcut}<span class="shortcut mono">{a.shortcut}</span>{/if}
           </div>
@@ -177,39 +177,39 @@
 <style>
 .backdrop {
   position: fixed; inset: 0; z-index: 1000;
-  background: rgba(0,0,0,0.35);
+  background: var(--text-tertiary);
   display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh;
 }
 .palette {
-  width: 92%; max-width: 520px; background: #fff;
+  width: 92%; max-width: 520px; background: var(--bg-container);
   border-radius: 12px; overflow: hidden;
   box-shadow: 0 16px 48px rgba(0,0,0,0.18);
   animation: octo-fadein 0.16s ease;
 }
 .search-row {
   display: flex; align-items: center; gap: 10px;
-  padding: 12px 16px; border-bottom: 1px solid #F0F0F0;
+  padding: 12px 16px; border-bottom: 1px solid var(--border-table);
 }
 .search-input {
   flex: 1; border: none; outline: none; background: transparent;
-  font-size: 14px; color: rgba(0,0,0,0.88); font-family: inherit;
+  font-size: 14px; color: var(--text); font-family: inherit;
 }
-.search-input::placeholder { color: rgba(0,0,0,0.45); }
+.search-input::placeholder { color: var(--text-tertiary); }
 kbd {
   font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: #FAFAFA; border: 1px solid #EEEFF1; border-radius: 4px;
-  padding: 1px 6px; color: rgba(0,0,0,0.45);
+  background: var(--bg-table-header); border: 1px solid var(--border-secondary); border-radius: 4px;
+  padding: 1px 6px; color: var(--text-tertiary);
 }
 .results { padding: 8px; max-height: 360px; overflow-y: auto; }
-.empty { padding: 16px 8px; font-size: 13px; color: rgba(0,0,0,0.45); text-align: center; }
-.group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.4px; color: rgba(0,0,0,0.35); padding: 6px 8px; }
+.empty { padding: 16px 8px; font-size: 13px; color: var(--text-tertiary); text-align: center; }
+.group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.4px; color: var(--text-tertiary); padding: 6px 8px; }
 .result-row {
   display: flex; align-items: center; gap: 10px;
   padding: 8px; border-radius: 6px; cursor: pointer;
 }
-.result-row.active { background: rgba(22,119,255,0.06); }
-.result-title { font-size: 13px; color: rgba(0,0,0,0.88); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.result-title.dim { color: rgba(0,0,0,0.65); }
-.shortcut { font-size: 11px; color: rgba(0,0,0,0.35); }
+.result-row.active { background: var(--active-blue-bg); }
+.result-title { font-size: 13px; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result-title.dim { color: var(--text-secondary); }
+.shortcut { font-size: 11px; color: var(--text-tertiary); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>

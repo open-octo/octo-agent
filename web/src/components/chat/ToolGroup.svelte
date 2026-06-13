@@ -191,7 +191,7 @@
   {@const errorCount = tools.filter((t: any) => t.error).length}
   <div class="tool-group">
     <div class="group-header">
-      <iconify-icon icon="ant-design:tool-outlined" width="14" style="color:rgba(0,0,0,0.45)"></iconify-icon>
+      <iconify-icon icon="ant-design:tool-outlined" width="14" style="color:var(--text-tertiary)"></iconify-icon>
       <span class="hdr-label">{tools.length} {tools.length === 1 ? 'tool' : 'tools'} used</span>
       {#if errorCount > 0}
         <span class="err-badge">
@@ -200,7 +200,7 @@
         </span>
       {/if}
       {#if groupStreaming}
-        <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:12px;color:#1677FF">
+        <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:12px;color:var(--blue-6)">
           <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
           running
         </span>
@@ -216,8 +216,8 @@
       {@const fErr = fetchError(tool)}
       <details open={defaultOpen(tool)} class="tool-item">
         <summary class="tool-summary">
-          <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:rgba(0,0,0,0.35)"></iconify-icon>
-          <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:rgba(0,0,0,0.45);flex:0 0 auto"></iconify-icon>
+          <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
+          <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
           <span class="tool-name mono">{tool.name}</span>
           {#if tool.summary}
             <span class="tool-arg mono">{tool.summary}</span>
@@ -227,19 +227,19 @@
           {#if meta && !fErr}<span class="tool-meta" style="margin-left:auto">{meta}</span>{/if}
           <span style="{(meta && !fErr) ? '' : 'margin-left:auto;'}flex:0 0 auto;display:flex;align-items:center">
             {#if tool.error}
-              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:#FF4D4F">
+              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--error)">
                 <iconify-icon icon="ant-design:close-circle-outlined" width="14"></iconify-icon>
                 failed
               </span>
             {:else if fErr}
-              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:#FA8C16">
+              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--warning)">
                 <iconify-icon icon="ant-design:warning-outlined" width="14"></iconify-icon>
                 {fErr}
               </span>
             {:else if tool.done}
-              <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:#52C41A"></iconify-icon>
+              <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:var(--success)"></iconify-icon>
             {:else}
-              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:#1677FF">
+              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--blue-6)">
                 <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
                 running
               </span>
@@ -256,13 +256,13 @@
             {#each todos as step}
               <div class="todo-step">
                 {#if step.status === 'completed'}
-                  <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:#52C41A"></iconify-icon>
+                  <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:var(--success)"></iconify-icon>
                   <span class="todo-done">{step.content}</span>
                 {:else if step.status === 'in_progress'}
-                  <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:#1677FF;animation:octo-spin 0.8s linear infinite"></iconify-icon>
+                  <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
                   <span>{step.content}</span>
                 {:else}
-                  <iconify-icon icon="lucide:circle" width="14" style="color:rgba(0,0,0,0.25)"></iconify-icon>
+                  <iconify-icon icon="lucide:circle" width="14" style="color:var(--text-quaternary)"></iconify-icon>
                   <span class="todo-pending">{step.content}</span>
                 {/if}
               </div>
@@ -278,7 +278,7 @@
               {:else if line.startsWith('+')}
                 <div class="diff-line add mono">{line}</div>
               {:else}
-                <div class="diff-line mono" style="padding:1px 14px;color:rgba(0,0,0,0.65)">{line}</div>
+                <div class="diff-line mono" style="padding:1px 14px;color:var(--text-secondary)">{line}</div>
               {/if}
             {/each}
           </div>
@@ -336,94 +336,94 @@
 {/if}
 
 <style>
-.tool-group { border: 1px solid #F0F0F0; border-radius: 10px; background: #fff; overflow: hidden; }
+.tool-group { border: 1px solid var(--border-table); border-radius: 10px; background: var(--bg-container); overflow: hidden; }
 .group-header {
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 12px; background: #FAFAFA; border-bottom: 1px solid #F0F0F0;
-  font-size: 13px; color: rgba(0,0,0,0.65);
+  padding: 9px 12px; background: var(--bg-table-header); border-bottom: 1px solid var(--border-table);
+  font-size: 13px; color: var(--text-secondary);
 }
 .hdr-label { flex: 0 0 auto; }
-.err-badge { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 12px; color: #FF4D4F; }
-.hdr-time { font-size: 12px; color: rgba(0,0,0,0.45); margin-left: 10px; }
+.err-badge { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--error); }
+.hdr-time { font-size: 12px; color: var(--text-tertiary); margin-left: 10px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.tool-item { border-bottom: 1px solid #F0F0F0; }
+.tool-item { border-bottom: 1px solid var(--border-table); }
 .tool-item:last-child { border-bottom: none; }
 .tool-summary {
   list-style: none; display: flex; align-items: center; gap: 8px;
   padding: 9px 12px; cursor: pointer; user-select: none;
 }
-.tool-summary:hover { background: rgba(0,0,0,0.02); }
-.tool-name { font-size: 13px; color: rgba(0,0,0,0.88); }
-.tool-arg { font-size: 12px; color: rgba(0,0,0,0.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-meta { font-size: 12px; color: rgba(0,0,0,0.45); }
+.tool-summary:hover { background: var(--hover-neutral); }
+.tool-name { font-size: 13px; color: var(--text); }
+.tool-arg { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-meta { font-size: 12px; color: var(--text-tertiary); }
 .tool-output {
-  margin: 0; padding: 10px 14px; border-top: 1px solid #F0F0F0;
-  background: #FBFBFB; font-size: 12px; line-height: 1.7;
+  margin: 0; padding: 10px 14px; border-top: 1px solid var(--border-table);
+  background: var(--bg-sidebar); font-size: 12px; line-height: 1.7;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: rgba(0,0,0,0.65); overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+  color: var(--text-secondary); overflow-x: auto; white-space: pre-wrap; word-break: break-word;
 }
 /* Chevron rotates from ▸ (collapsed) to ▾ (open). */
 .chev { transition: transform 0.15s ease; flex: 0 0 auto; }
 details[open] > summary .chev { transform: rotate(90deg); }
 /* todo_write checklist */
-.todo-list { border-top: 1px solid #F0F0F0; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
-.todo-step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(0,0,0,0.88); }
-.todo-done { color: rgba(0,0,0,0.35); text-decoration: line-through; }
-.todo-pending { color: rgba(0,0,0,0.45); }
+.todo-list { border-top: 1px solid var(--border-table); padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.todo-step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+.todo-done { color: var(--text-tertiary); text-decoration: line-through; }
+.todo-pending { color: var(--text-tertiary); }
 /* Long-output fold button */
 .term-wrap { display: flex; flex-direction: column; }
 .fold-btn {
-  width: 100%; padding: 8px 12px; border: none; border-top: 1px solid #F0F0F0;
-  background: #FAFAFA; display: flex; align-items: center; justify-content: center;
-  gap: 6px; font-size: 12px; color: #1677FF; cursor: pointer; font-family: inherit;
+  width: 100%; padding: 8px 12px; border: none; border-top: 1px solid var(--border-table);
+  background: var(--bg-table-header); display: flex; align-items: center; justify-content: center;
+  gap: 6px; font-size: 12px; color: var(--blue-6); cursor: pointer; font-family: inherit;
 }
-.fold-btn:hover { background: rgba(22,119,255,0.06); }
-.term-prompt { color: #52C41A; }
+.fold-btn:hover { background: var(--active-blue-bg); }
+.term-prompt { color: var(--success); }
 .search-results {
-  border-top: 1px solid #F0F0F0; padding: 10px 14px;
+  border-top: 1px solid var(--border-table); padding: 10px 14px;
   display: flex; flex-direction: column; gap: 10px;
 }
 .search-row { display: flex; flex-direction: column; gap: 2px; }
-.search-title { font-size: 13px; color: #1677FF; cursor: pointer; text-decoration: none; }
+.search-title { font-size: 13px; color: var(--blue-6); cursor: pointer; text-decoration: none; }
 .search-title:hover { text-decoration: underline; }
-.search-title-plain { font-size: 13px; color: rgba(0,0,0,0.88); }
-.search-url { font-size: 11px; color: rgba(0,0,0,0.35); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.diff-block { border-top: 1px solid #F0F0F0; font-size: 12px; line-height: 1.7; overflow-x: auto; }
-.diff-hdr { padding: 4px 14px; color: rgba(0,0,0,0.45); border-bottom: 1px solid #F0F0F0; }
+.search-title-plain { font-size: 13px; color: var(--text); }
+.search-url { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-block { border-top: 1px solid var(--border-table); font-size: 12px; line-height: 1.7; overflow-x: auto; }
+.diff-hdr { padding: 4px 14px; color: var(--text-tertiary); border-bottom: 1px solid var(--border-table); }
 .diff-line { padding: 1px 14px; }
-.diff-line.rm { background: #FFF1F0; color: #CF1322; border-left: 2px solid #FF4D4F; }
-.diff-line.add { background: #F6FFED; color: #389E0D; border-left: 2px solid #52C41A; }
+.diff-line.rm { background: var(--error-bg); color: var(--error-dark); border-left: 2px solid var(--error); }
+.diff-line.add { background: var(--success-bg); color: var(--success-text); border-left: 2px solid var(--success); }
 .terminal-output {
-  margin: 0; padding: 12px 14px; border-top: 1px solid #F0F0F0;
-  background: #1F1F1F; color: #E6E6E6; font-size: 12px; line-height: 1.6;
+  margin: 0; padding: 12px 14px; border-top: 1px solid var(--border-table);
+  background: var(--terminal-bg); color: var(--terminal-text); font-size: 12px; line-height: 1.6;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto;
 }
 .blink-caret {
   display: inline-block; width: 7px; height: 13px;
-  background: #E6E6E6; vertical-align: -2px;
+  background: var(--terminal-text); vertical-align: -2px;
   animation: octo-blink 1s step-end infinite;
 }
 .error-output {
-  border-top: 1px solid #F0F0F0; background: #FFF1F0;
-  border-left: 2px solid #FF4D4F; padding: 10px 14px;
-  font-size: 12px; line-height: 1.6; color: #CF1322; overflow-x: auto;
+  border-top: 1px solid var(--border-table); background: var(--error-bg);
+  border-left: 2px solid var(--error); padding: 10px 14px;
+  font-size: 12px; line-height: 1.6; color: var(--error-dark); overflow-x: auto;
 }
 /* web_fetch that hit an HTTP error: the tool ran, the page didn't. */
 .warning-output {
-  margin: 0; border-top: 1px solid #F0F0F0; background: #FFF7E6;
-  border-left: 2px solid #FA8C16; padding: 10px 14px;
-  font-size: 12px; line-height: 1.6; color: #874D00;
+  margin: 0; border-top: 1px solid var(--border-table); background: var(--warning-bg);
+  border-left: 2px solid var(--warning); padding: 10px 14px;
+  font-size: 12px; line-height: 1.6; color: var(--warning-text);
   overflow-x: auto; white-space: pre-wrap; word-break: break-word;
   max-height: 280px; overflow-y: auto;
 }
 /* Fetched HTML page rendered as a page, not source. */
-.html-frame-wrap { border-top: 1px solid #F0F0F0; background: #fff; }
+.html-frame-wrap { border-top: 1px solid var(--border-table); background: var(--bg-container); }
 .fetch-meta {
-  padding: 8px 14px; border-bottom: 1px solid #F0F0F0; background: #FBFBFB;
-  font-size: 11px; line-height: 1.6; color: rgba(0,0,0,0.45);
+  padding: 8px 14px; border-bottom: 1px solid var(--border-table); background: var(--bg-sidebar);
+  font-size: 11px; line-height: 1.6; color: var(--text-tertiary);
   white-space: pre-wrap; word-break: break-word;
 }
 .html-frame {
-  border: 0; width: 100%; height: 400px; display: block; background: #fff;
+  border: 0; width: 100%; height: 400px; display: block; background: var(--bg-container);
 }
 </style>

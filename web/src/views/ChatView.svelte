@@ -470,7 +470,7 @@
   <!-- WS disconnect banner -->
   {#if wsDisconnected}
     <div class="ws-banner">
-      <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:#FA8C16;animation:octo-spin 0.8s linear infinite"></iconify-icon>
+      <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--warning);animation:octo-spin 0.8s linear infinite"></iconify-icon>
       <span class="ws-msg">Connection lost — reconnecting…</span>
       {#if $wsReconnect}
         <span class="ws-meta">attempt {$wsReconnect.attempt} · next in {reconnectIn}s</span>
@@ -513,24 +513,24 @@
                   {#if msg.todos && msg.todos.length > 0}
                     <details open class="plan-card">
                       <summary class="plan-summary">
-                        <iconify-icon icon="ant-design:ordered-list-outlined" width="14" style="color:#1677FF"></iconify-icon>
+                        <iconify-icon icon="ant-design:ordered-list-outlined" width="14" style="color:var(--blue-6)"></iconify-icon>
                         <span class="plan-title">{t('agent.plan')}</span>
                         <span class="plan-meta">{planDoneCount(msg.todos)} / {msg.todos.length} done</span>
                         <span class="plan-progress"><span class="plan-fill" style="width:{planFill(msg.todos)}"></span></span>
                         <span style="margin-left:auto"></span>
-                        <iconify-icon icon="lucide:chevron-down" width="14" style="color:rgba(0,0,0,0.35)"></iconify-icon>
+                        <iconify-icon icon="lucide:chevron-down" width="14" style="color:var(--text-tertiary)"></iconify-icon>
                       </summary>
                       <div class="plan-steps">
                         {#each msg.todos as step}
                           <div class="step" class:active={step.status === 'in_progress'}>
                             {#if step.status === 'completed'}
-                              <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:#52C41A"></iconify-icon>
+                              <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:var(--success)"></iconify-icon>
                               <span class="done">{step.content}</span>
                             {:else if step.status === 'in_progress'}
-                              <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:#1677FF;animation:octo-spin 0.8s linear infinite"></iconify-icon>
+                              <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
                               <span>{step.content}</span>
                             {:else}
-                              <iconify-icon icon="lucide:circle" width="14" style="color:rgba(0,0,0,0.25)"></iconify-icon>
+                              <iconify-icon icon="lucide:circle" width="14" style="color:var(--text-quaternary)"></iconify-icon>
                               <span class="pending">{step.content}</span>
                             {/if}
                           </div>
@@ -594,7 +594,7 @@
               <div class="msg-agent fadein">
                 <div class="agent-avatar">O</div>
                 <div class="thinking-indicator">
-                  <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:#1677FF;animation:octo-spin 0.8s linear infinite"></iconify-icon>
+                  <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
                   <span>{msg.content || t('chat.thinking')}</span>
                 </div>
               </div>
@@ -632,7 +632,7 @@
             <div class="msg-agent fadein">
               <div class="agent-avatar">O</div>
               <div class="thinking-indicator">
-                <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:#1677FF;animation:octo-spin 0.8s linear infinite"></iconify-icon>
+                <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
                 <span>{progress.message || t('chat.thinking')}</span>
                 <span class="dots">
                   <span></span>
@@ -680,22 +680,22 @@
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .chat-header {
-  flex: 0 0 auto; background: #fff; border-bottom: 1px solid #EEEFF1;
+  flex: 0 0 auto; background: var(--bg-container); border-bottom: 1px solid var(--border-secondary);
   padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
 }
 .title-row { display: flex; align-items: center; gap: 10px; }
-.session-title { font-size: 16px; font-weight: 600; color: #1F1F1F; }
+.session-title { font-size: 16px; font-weight: 600; color: var(--text-heading); }
 .header-actions { display: flex; align-items: center; gap: 8px; }
 .hdr-btn {
-  height: 28px; padding: 0 12px; border: 1px solid #D9D9D9; background: #fff;
+  height: 28px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
   border-radius: 6px; display: flex; align-items: center; gap: 8px;
-  font-size: 13px; color: rgba(0,0,0,0.65); cursor: pointer; font-family: inherit;
+  font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
 }
-.hdr-btn:hover { border-color: #4096FF; color: #4096FF; }
-.hdr-btn.active { border-color: #1677FF; color: #1677FF; background: rgba(22,119,255,0.06); }
+.hdr-btn:hover { border-color: var(--blue-5); color: var(--blue-5); }
+.hdr-btn.active { border-color: var(--blue-6); color: var(--blue-6); background: var(--active-blue-bg); }
 .count-badge {
   font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: #E6F4FF; color: #1677FF; border-radius: 9999px;
+  background: var(--blue-1); color: var(--blue-6); border-radius: 9999px;
   min-width: 16px; height: 16px; padding: 0 5px;
   display: flex; align-items: center; justify-content: center;
 }
@@ -703,15 +703,15 @@
 /* ── WS banner ───────────────────────────────────────────────────────────── */
 .ws-banner {
   flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
-  padding: 10px 24px; background: #FFF7E6; border-bottom: 1px solid #FFD591;
+  padding: 10px 24px; background: var(--warning-bg); border-bottom: 1px solid var(--warning-border);
 }
-.ws-msg { font-size: 13px; color: #874D00; }
+.ws-msg { font-size: 13px; color: var(--warning-text); }
 .ws-meta { font-size: 12px; color: rgba(135,77,0,0.6); }
 .ws-retry {
-  height: 28px; padding: 0 12px; border: 1px solid #FFD591; background: #fff;
-  border-radius: 6px; font-size: 12px; color: #874D00; cursor: pointer; font-family: inherit;
+  height: 28px; padding: 0 12px; border: 1px solid var(--warning-border); background: var(--bg-container);
+  border-radius: 6px; font-size: 12px; color: var(--warning-text); cursor: pointer; font-family: inherit;
 }
-.ws-retry:hover { border-color: #FA8C16; }
+.ws-retry:hover { border-color: var(--warning); }
 
 /* ── Body row ────────────────────────────────────────────────────────────── */
 .body-row { flex: 1; display: flex; min-height: 0; }
@@ -726,9 +726,9 @@
 .msg-user { display: flex; justify-content: flex-end; }
 .user-bubble-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 80%; }
 .user-bubble {
-  background: #E6F4FF; border: 1px solid #BAE0FF;
+  background: var(--blue-1); border: 1px solid var(--blue-2);
   border-radius: 12px 12px 4px 12px; padding: 10px 14px;
-  font-size: 14px; line-height: 1.6; color: rgba(0,0,0,0.88);
+  font-size: 14px; line-height: 1.6; color: var(--text);
   white-space: pre-wrap; word-break: break-word;
 }
 
@@ -736,71 +736,71 @@
 .msg-agent { display: flex; gap: 12px; }
 .agent-avatar {
   width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px;
-  background: #1677FF; color: #fff;
+  background: var(--blue-6); color: #fff;
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 600;
 }
 .agent-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 
 /* ── Plan card ───────────────────────────────────────────────────────────── */
-.plan-card { border: 1px solid #BAE0FF; border-radius: 10px; background: #F0F7FF; overflow: hidden; }
+.plan-card { border: 1px solid var(--blue-2); border-radius: 10px; background: var(--surface-info); overflow: hidden; }
 .plan-summary {
   list-style: none; display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; cursor: pointer; user-select: none;
 }
-.plan-title { font-size: 13px; font-weight: 600; color: #1F1F1F; }
-.plan-meta { font-size: 12px; color: rgba(0,0,0,0.45); }
+.plan-title { font-size: 13px; font-weight: 600; color: var(--text-heading); }
+.plan-meta { font-size: 12px; color: var(--text-tertiary); }
 .plan-progress {
   flex: 1; min-width: 40px; max-width: 160px; height: 4px;
-  background: #D6E8FF; border-radius: 9999px; overflow: hidden;
+  background: var(--blue-2); border-radius: 9999px; overflow: hidden;
 }
-.plan-fill { display: block; height: 100%; background: #1677FF; }
+.plan-fill { display: block; height: 100%; background: var(--blue-6); }
 .plan-steps {
-  border-top: 1px solid #D6E8FF; background: #fff;
+  border-top: 1px solid var(--blue-2); background: var(--bg-container);
   padding: 10px 14px; display: flex; flex-direction: column; gap: 8px;
 }
 .step { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.step .done { color: rgba(0,0,0,0.35); text-decoration: line-through; }
-.step .pending { color: rgba(0,0,0,0.45); }
-.step.active { margin: 0 -6px; padding: 4px 6px; background: rgba(22,119,255,0.06); border-radius: 6px; }
+.step .done { color: var(--text-tertiary); text-decoration: line-through; }
+.step .pending { color: var(--text-tertiary); }
+.step.active { margin: 0 -6px; padding: 4px 6px; background: var(--active-blue-bg); border-radius: 6px; }
 
 /* ── Rich answer (markdown) ──────────────────────────────────────────────── */
-.rich-answer { font-size: 14px; line-height: 1.6; color: rgba(0,0,0,0.88); display: flex; flex-direction: column; gap: 12px; }
+.rich-answer { font-size: 14px; line-height: 1.6; color: var(--text); display: flex; flex-direction: column; gap: 12px; }
 :global(.rich-answer p) { margin: 0; }
 :global(.rich-answer code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
-  background: #FAFAFA; border: 1px solid #F0F0F0; border-radius: 4px; padding: 1px 5px;
+  background: var(--bg-table-header); border: 1px solid var(--border-table); border-radius: 4px; padding: 1px 5px;
 }
-:global(.rich-answer .code-block) { border: 1px solid #F0F0F0; border-radius: 8px; overflow: hidden; background: #FBFBFB; }
+:global(.rich-answer .code-block) { border: 1px solid var(--border-table); border-radius: 8px; overflow: hidden; background: var(--bg-sidebar); }
 :global(.rich-answer .code-header) {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px;
-  background: #FAFAFA; border-bottom: 1px solid #F0F0F0;
+  background: var(--bg-table-header); border-bottom: 1px solid var(--border-table);
 }
-:global(.rich-answer .code-lang) { font-size: 11px; color: rgba(0,0,0,0.45); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+:global(.rich-answer .code-lang) { font-size: 11px; color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 :global(.rich-answer .copy-btn) {
   margin-left: auto; height: 24px; padding: 0 8px; border: none; background: transparent;
   border-radius: 5px; display: flex; align-items: center; gap: 5px;
-  font-size: 11px; color: rgba(0,0,0,0.45); cursor: pointer;
+  font-size: 11px; color: var(--text-tertiary); cursor: pointer;
 }
-:global(.rich-answer .copy-btn:hover) { background: rgba(0,0,0,0.05); color: #1677FF; }
+:global(.rich-answer .copy-btn:hover) { background: var(--hover-neutral); color: var(--blue-6); }
 :global(.rich-answer pre) {
   margin: 0; padding: 12px 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.75;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: rgba(0,0,0,0.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text);
 }
 :global(.rich-answer .md-bq) {
-  margin: 0; padding: 8px 14px; border-left: 3px solid #BAE0FF;
-  background: #F0F7FF; border-radius: 0 6px 6px 0;
-  font-size: 13px; line-height: 1.6; color: rgba(0,0,0,0.65);
+  margin: 0; padding: 8px 14px; border-left: 3px solid var(--blue-2);
+  background: var(--surface-info); border-radius: 0 6px 6px 0;
+  font-size: 13px; line-height: 1.6; color: var(--text-secondary);
 }
 :global(.rich-answer .think-block) { border-radius: 8px; }
 :global(.rich-answer .think-summary) {
   list-style: none; display: inline-flex; align-items: center; gap: 6px;
-  cursor: pointer; user-select: none; font-size: 13px; color: rgba(0,0,0,0.45);
+  cursor: pointer; user-select: none; font-size: 13px; color: var(--text-tertiary);
 }
-:global(.rich-answer .think-summary:hover) { color: rgba(0,0,0,0.65); }
+:global(.rich-answer .think-summary:hover) { color: var(--text-secondary); }
 :global(.rich-answer .think-body) {
-  margin-top: 8px; padding-left: 12px; border-left: 2px solid #EEEFF1;
-  font-size: 13px; line-height: 1.7; color: rgba(0,0,0,0.45); font-style: italic;
+  margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--border-secondary);
+  font-size: 13px; line-height: 1.7; color: var(--text-tertiary); font-style: italic;
 }
 
 /* ── Message actions ─────────────────────────────────────────────────────── */
@@ -809,41 +809,41 @@
 .action-btn {
   width: 26px; height: 26px; border: none; background: transparent;
   border-radius: 6px; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: rgba(0,0,0,0.4); opacity: 0; transition: opacity 0.12s;
+  cursor: pointer; color: var(--text-tertiary); opacity: 0; transition: opacity 0.12s;
 }
 .user-bubble-wrap:hover .action-btn,
 .agent-content:hover .reply-actions .action-btn { opacity: 1; }
-.action-btn:hover { background: rgba(0,0,0,0.06); color: #1677FF; }
+.action-btn:hover { background: var(--hover-neutral); color: var(--blue-6); }
 
 /* ── Streaming caret ─────────────────────────────────────────────────────── */
 .caret {
   display: inline-block; width: 7px; height: 15px;
-  background: #1677FF; vertical-align: -2px; margin-left: 1px;
+  background: var(--blue-6); vertical-align: -2px; margin-left: 1px;
   animation: octo-blink 1s step-end infinite;
 }
 
 /* ── Thinking indicator ──────────────────────────────────────────────────── */
 .thinking-indicator {
   display: flex; align-items: center; gap: 10px; min-height: 28px;
-  font-size: 14px; color: rgba(0,0,0,0.65);
+  font-size: 14px; color: var(--text-secondary);
 }
 .dots { display: inline-flex; gap: 3px; align-items: center; }
 .dots span {
   width: 4px; height: 4px; border-radius: 9999px;
-  background: rgba(0,0,0,0.4); animation: octo-dot 1.2s infinite;
+  background: var(--text-tertiary); animation: octo-dot 1.2s infinite;
 }
-.think-meta { font-size: 12px; color: rgba(0,0,0,0.35); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.think-meta { font-size: 12px; color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* ── Suggestion ──────────────────────────────────────────────────────────── */
 .suggestion-row { display: flex; justify-content: flex-end; }
 .suggestion-chip {
   max-width: 80%; height: auto; padding: 7px 14px;
-  border: 1px dashed #BAE0FF; background: #F0F7FF;
+  border: 1px dashed var(--blue-2); background: var(--surface-info);
   border-radius: 10px; display: flex; align-items: center; gap: 8px;
-  font-size: 13px; color: rgba(0,0,0,0.65); cursor: pointer; font-family: inherit;
+  font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
   text-align: left; line-height: 1.5;
 }
-.suggestion-chip:hover { border-color: #1677FF; color: #1677FF; }
+.suggestion-chip:hover { border-color: var(--blue-6); color: var(--blue-6); }
 
 /* ── Fade-in ─────────────────────────────────────────────────────────────── */
 .fadein { animation: octo-fadein 0.25s ease; }

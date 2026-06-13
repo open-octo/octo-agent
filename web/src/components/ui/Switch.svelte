@@ -19,23 +19,23 @@
   width: 28px;
   height: 16px;
   border-radius: 999px;
-  background: rgba(0,0,0,0.25);
+  background: var(--text-quaternary);
   border: none;
   cursor: pointer;
   padding: 0;
   transition: background 0.2s;
   position: relative;
 }
-.switch.on { background: #1677FF; }
+.switch.on { background: var(--blue-6); }
 .thumb {
   position: absolute;
   left: 2px;
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--bg-container);
   transition: left 0.2s;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  box-shadow: 0 1px 4px var(--text-quaternary);
 }
 .on .thumb { left: 14px; }
 </style>

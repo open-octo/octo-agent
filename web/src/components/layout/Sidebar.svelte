@@ -90,7 +90,7 @@
   const selCount = $derived(Object.keys($sel).length)
 </script>
 
-<aside style="width:{$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};flex:0 0 {$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};background:#FBFBFB;border-right:1px solid #EEEFF1;overflow:hidden;transition:width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1);">
+<aside style="width:{$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};flex:0 0 {$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};background:var(--bg-sidebar);border-right:1px solid var(--border-secondary);overflow:hidden;transition:width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1);">
 
   {#if $sidebar === 'full'}
   <div class="full">
@@ -138,7 +138,7 @@
           {#if $selMode}
           <span
             class="checkbox"
-            style="border-color:{selected ? '#1677FF' : '#D9D9D9'};background:{selected ? '#1677FF' : '#fff'}"
+            style="border-color:{selected ? 'var(--blue-6)' : 'var(--border)'};background:{selected ? 'var(--blue-6)' : '#fff'}"
             onclick={(e) => { e.stopPropagation(); toggleSel(s.id) }}
           >
             {#if selected}<iconify-icon icon="ant-design:check-outlined" width="11" style="color:#fff"></iconify-icon>{/if}
@@ -146,9 +146,9 @@
           {/if}
 
           {#if (s as any).status === 'working'}
-            <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:{solid ? '#fff' : '#1677FF'};flex:0 0 auto;animation:octo-spin 0.8s linear infinite"></iconify-icon>
+            <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:{solid ? '#fff' : 'var(--blue-6)'};flex:0 0 auto;animation:octo-spin 0.8s linear infinite"></iconify-icon>
           {:else}
-            <iconify-icon icon={icon} width="14" style="color:{solid ? '#fff' : 'rgba(0,0,0,0.45)'};flex:0 0 auto"></iconify-icon>
+            <iconify-icon icon={icon} width="14" style="color:{solid ? '#fff' : 'var(--text-tertiary)'};flex:0 0 auto"></iconify-icon>
           {/if}
 
           {#if editing}
@@ -158,21 +158,21 @@
             oninput={(e) => editDraft.set((e.target as HTMLInputElement).value)}
             onclick={(e) => e.stopPropagation()}
           />
-          <span class="row-action" onclick={(e) => { e.stopPropagation(); commitRename() }} style="color:#52C41A">
+          <span class="row-action" onclick={(e) => { e.stopPropagation(); commitRename() }} style="color:var(--success)">
             <iconify-icon icon="ant-design:check-outlined" width="13"></iconify-icon>
           </span>
-          <span class="row-action" onclick={(e) => { e.stopPropagation(); editId.set(null) }} style="color:rgba(0,0,0,0.45)">
+          <span class="row-action" onclick={(e) => { e.stopPropagation(); editId.set(null) }} style="color:var(--text-tertiary)">
             <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
           </span>
           {:else}
-          <span class="session-title" style="color:{solid ? '#fff' : 'rgba(0,0,0,0.88)'};">{displayName}</span>
+          <span class="session-title" style="color:{solid ? '#fff' : 'var(--text)'};">{displayName}</span>
           {#if !menuOpen}
-            <span class="session-time" style="color:{solid ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.25)'};">
+            <span class="session-time" style="color:{solid ? 'rgba(255,255,255,0.75)' : 'var(--text-quaternary)'};">
               {(s as any).source === 'cron' ? 'Cron' : ''}
             </span>
           {/if}
           {#if !menuOpen && !$selMode}
-            <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id) }} style="color:{solid ? '#fff' : 'rgba(0,0,0,0.45)'}">
+            <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id) }} style="color:{solid ? '#fff' : 'var(--text-tertiary)'}">
               <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
             </span>
           {/if}
@@ -199,9 +199,9 @@
           { icon: 'ant-design:mobile-outlined', label: 'Channels', v: 'channels' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
-          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? '#fff' : 'rgba(0,0,0,0.45)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'rgba(0,0,0,0.65)'};">{item.label}</span>
-          {#if item.meta}<span style="margin-left:auto;font-size:11px;color:{navActive(item.v) ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.45)'};">{item.meta}</span>{/if}
+          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? '#fff' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'var(--text-secondary)'};">{item.label}</span>
+          {#if item.meta}<span style="margin-left:auto;font-size:11px;color:{navActive(item.v) ? 'rgba(255,255,255,0.75)' : 'var(--text-tertiary)'};">{item.meta}</span>{/if}
         </div>
         {/each}
       </div>
@@ -214,15 +214,15 @@
           { icon: 'ant-design:folder-open-outlined', label: 'File Recall', v: 'files' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
-          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? '#fff' : 'rgba(0,0,0,0.45)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'rgba(0,0,0,0.65)'};">{item.label}</span>
+          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? '#fff' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'var(--text-secondary)'};">{item.label}</span>
         </div>
         {/each}
       </div>
     </div>
 
     <div class="footer">
-      <div class="footer-settings" style="color:{navActive('settings') ? '#1677FF' : 'rgba(0,0,0,0.65)'}" onclick={() => view.set('settings')}>
+      <div class="footer-settings" style="color:{navActive('settings') ? 'var(--blue-6)' : 'var(--text-secondary)'}" onclick={() => view.set('settings')}>
         <iconify-icon icon="ant-design:setting-outlined" width="14"></iconify-icon>
         <span>Settings</span>
       </div>
@@ -264,24 +264,24 @@
 .new-btn-wrap { padding: 16px 12px 8px; }
 .new-btn {
   width: 100%; height: 32px; border: none; border-radius: 6px;
-  background: #1677FF; color: #fff; font-size: 14px;
+  background: var(--blue-6); color: #fff; font-size: 14px;
   display: flex; align-items: center; justify-content: center; gap: 8px;
   cursor: pointer; font-family: inherit;
 }
-.new-btn:hover { background: #4096FF; }
+.new-btn:hover { background: var(--blue-5); }
 .scroll { flex: 1; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 20px; }
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
 .group-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 6px; }
-.group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: rgba(0,0,0,0.25); }
-.sel-toggle { font-size: 11px; font-weight: 600; color: #1677FF; cursor: pointer; }
+.group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-quaternary); }
+.sel-toggle { font-size: 11px; font-weight: 600; color: var(--blue-6); cursor: pointer; }
 .batch-bar {
   display: flex; align-items: center; gap: 8px;
   margin: 0 4px 6px; padding: 6px 8px 6px 12px;
-  background: #FFF1F0; border: 1px solid #FFCCC7; border-radius: 8px;
+  background: var(--error-bg); border: 1px solid var(--error-border); border-radius: 8px;
 }
-.batch-count { font-size: 12px; color: #CF1322; flex: 1; }
+.batch-count { font-size: 12px; color: var(--error-dark); flex: 1; }
 .batch-del {
-  height: 26px; padding: 0 10px; border: none; background: #FF4D4F;
+  height: 26px; padding: 0 10px; border: none; background: var(--error);
   border-radius: 6px; display: flex; align-items: center; gap: 6px;
   font-size: 12px; color: #fff; cursor: pointer; font-family: inherit;
 }
@@ -291,11 +291,11 @@
   min-height: 36px; padding: 0 6px 0 10px;
   border-radius: 9999px; cursor: pointer;
 }
-.nav-row.solid { background: #1677FF; }
-.nav-row.selected { background: rgba(22,119,255,0.06); }
+.nav-row.solid { background: var(--blue-6); }
+.nav-row.selected { background: var(--active-blue-bg); }
 /* Hover never overrides the active (solid) row — that washed the blue pill out
    to grey with near-invisible white text. */
-.nav-row:hover:not(.solid) { background: rgba(0,0,0,0.04); }
+.nav-row:hover:not(.solid) { background: var(--hover-neutral); }
 .checkbox {
   width: 16px; height: 16px; flex: 0 0 16px;
   border-radius: 4px; border: 1.5px solid;
@@ -303,8 +303,8 @@
 }
 .rename-input {
   flex: 1; min-width: 0; font-size: 13px; font-family: inherit;
-  border: 1px solid #1677FF; border-radius: 4px;
-  padding: 2px 6px; outline: none; color: rgba(0,0,0,0.88);
+  border: 1px solid var(--blue-6); border-radius: 4px;
+  padding: 2px 6px; outline: none; color: var(--text);
 }
 .session-title {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
@@ -314,27 +314,27 @@
 .row-action {
   width: 22px; height: 22px; flex: 0 0 22px; border-radius: 5px;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: rgba(0,0,0,0.45);
+  cursor: pointer; color: var(--text-tertiary);
   opacity: 0; transition: opacity 0.12s;
 }
 .nav-row:hover .row-action { opacity: 1; }
 .kebab { opacity: 0; }
 .nav-row:hover .kebab { opacity: 1; }
-.row-action:hover { background: rgba(0,0,0,0.06); }
-.del:hover { color: #FF4D4F !important; }
+.row-action:hover { background: var(--hover-neutral); }
+.del:hover { color: var(--error) !important; }
 .footer {
-  flex: 0 0 auto; border-top: 1px solid #EEEFF1;
+  flex: 0 0 auto; border-top: 1px solid var(--border-secondary);
   padding: 10px 12px; display: flex; align-items: center; justify-content: space-between;
 }
 .footer-settings {
   display: flex; align-items: center; gap: 8px;
   cursor: pointer; padding: 4px 8px; border-radius: 9999px;
 }
-.footer-settings:hover { background: rgba(0,0,0,0.04); }
+.footer-settings:hover { background: var(--hover-neutral); }
 .footer-settings span { font-size: 13px; }
 .version {
   font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: rgba(0,0,0,0.45); background: #fff; border: 1px solid #EEEFF1;
+  color: var(--text-tertiary); background: var(--bg-container); border: 1px solid var(--border-secondary);
   border-radius: 9999px; padding: 2px 8px;
 }
 /* Rail */
@@ -343,14 +343,14 @@
   align-items: center; min-height: 0;
 }
 .rail-scroll { flex: 1; overflow-y: auto; padding: 4px 0; display: flex; flex-direction: column; gap: 4px; align-items: center; }
-.rail-footer { flex: 0 0 auto; border-top: 1px solid #EEEFF1; padding: 8px 0; width: 100%; display: flex; justify-content: center; }
+.rail-footer { flex: 0 0 auto; border-top: 1px solid var(--border-secondary); padding: 8px 0; width: 100%; display: flex; justify-content: center; }
 .rail-btn {
   width: 40px; height: 40px; border: none; border-radius: 9999px;
-  background: transparent; color: rgba(0,0,0,0.45);
+  background: transparent; color: var(--text-tertiary);
   display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
-.rail-btn:hover { background: rgba(0,0,0,0.04); }
-.rail-btn.active { background: #1677FF; color: #fff; }
-.rail-btn.primary { background: #1677FF; color: #fff; }
-.rail-btn.primary:hover { background: #4096FF; }
+.rail-btn:hover { background: var(--hover-neutral); }
+.rail-btn.active { background: var(--blue-6); color: #fff; }
+.rail-btn.primary { background: var(--blue-6); color: #fff; }
+.rail-btn.primary:hover { background: var(--blue-5); }
 </style>

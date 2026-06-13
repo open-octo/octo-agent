@@ -42,7 +42,7 @@
 <div class="backdrop" onclick={close} role="presentation">
   <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
     <div class="modal-header">
-      <iconify-icon icon="ant-design:form-outlined" width="16" style="color:#1677FF;flex-shrink:0"></iconify-icon>
+      <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
       <span class="modal-title">
         {$questionModal.header || $questionModal.question}
       </span>
@@ -101,13 +101,13 @@
 <style>
 .backdrop {
   position: fixed; inset: 0; z-index: 1100;
-  background: rgba(0,0,0,0.45);
+  background: var(--text-tertiary);
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
 }
 .modal {
   width: 100%; max-width: 480px;
-  background: #fff;
+  background: var(--bg-container);
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 16px 48px rgba(0,0,0,0.18);
@@ -116,18 +116,18 @@
 .modal-header {
   display: flex; align-items: center; gap: 8px;
   padding: 14px 18px;
-  border-bottom: 1px solid #F0F0F0;
+  border-bottom: 1px solid var(--border-table);
 }
 .modal-title {
-  font-size: 15px; font-weight: 600; color: #1F1F1F; flex: 1;
+  font-size: 15px; font-weight: 600; color: var(--text-heading); flex: 1;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .close-btn {
   width: 28px; height: 28px; border: none; background: transparent;
   border-radius: 6px; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: rgba(0,0,0,0.45); flex-shrink: 0;
+  cursor: pointer; color: var(--text-tertiary); flex-shrink: 0;
 }
-.close-btn:hover { background: rgba(0,0,0,0.04); }
+.close-btn:hover { background: var(--hover-neutral); }
 
 .modal-body {
   padding: 16px 18px;
@@ -135,7 +135,7 @@
 }
 .question-text {
   margin: 0;
-  font-size: 13px; line-height: 1.6; color: rgba(0,0,0,0.65);
+  font-size: 13px; line-height: 1.6; color: var(--text-secondary);
 }
 .options {
   display: flex; flex-wrap: wrap; gap: 8px;
@@ -143,44 +143,44 @@
 .option-pill {
   display: inline-flex; align-items: center; gap: 5px;
   height: 30px; padding: 0 12px;
-  border: 1px solid #D9D9D9; background: #fff;
+  border: 1px solid var(--border); background: var(--bg-container);
   border-radius: 9999px;
-  font-size: 13px; color: rgba(0,0,0,0.65);
+  font-size: 13px; color: var(--text-secondary);
   cursor: pointer; font-family: inherit;
   transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
-.option-pill:hover { border-color: #4096FF; color: #4096FF; }
+.option-pill:hover { border-color: var(--blue-5); color: var(--blue-5); }
 .option-pill.selected {
-  border-color: #1677FF; background: #E6F4FF; color: #1677FF;
+  border-color: var(--blue-6); background: var(--blue-1); color: var(--blue-6);
 }
 .custom-input-wrap { display: flex; }
 .custom-input {
   flex: 1; height: 34px; padding: 0 10px;
-  border: 1px solid #D9D9D9; border-radius: 6px;
-  font-size: 13px; color: rgba(0,0,0,0.88);
-  font-family: inherit; outline: none; background: #fff;
+  border: 1px solid var(--border); border-radius: 6px;
+  font-size: 13px; color: var(--text);
+  font-family: inherit; outline: none; background: var(--bg-container);
 }
-.custom-input:focus { border-color: #1677FF; box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+.custom-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
 
 .modal-footer {
   padding: 12px 18px;
-  border-top: 1px solid #F0F0F0;
+  border-top: 1px solid var(--border-table);
   display: flex; align-items: center; gap: 8px;
 }
 .spacer { flex: 1; }
 .btn-cancel {
   height: 32px; padding: 0 14px;
-  border: 1px solid #D9D9D9; background: #fff;
-  border-radius: 6px; font-size: 14px; color: rgba(0,0,0,0.65);
+  border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 6px; font-size: 14px; color: var(--text-secondary);
   cursor: pointer; font-family: inherit;
 }
-.btn-cancel:hover { border-color: #4096FF; color: #4096FF; }
+.btn-cancel:hover { border-color: var(--blue-5); color: var(--blue-5); }
 .btn-primary {
   height: 32px; padding: 0 14px;
-  border: none; background: #1677FF;
+  border: none; background: var(--blue-6);
   border-radius: 6px; font-size: 14px; color: #fff;
   cursor: pointer; font-family: inherit;
 }
-.btn-primary:hover:not(:disabled) { background: #4096FF; }
-.btn-primary:disabled { background: #D9D9D9; cursor: not-allowed; }
+.btn-primary:hover:not(:disabled) { background: var(--blue-5); }
+.btn-primary:disabled { background: var(--border); cursor: not-allowed; }
 </style>
