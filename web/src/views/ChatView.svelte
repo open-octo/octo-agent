@@ -37,61 +37,22 @@
   // ── reactive state ─────────────────────────────────────────────────────────
   let messagesEl = $state<HTMLElement | null>(null)
 
-  // Derive current session id from store
-  let id = $derived(get(activeSessionId) as string | null)
-
-  // Derive per-session slices reactively
-  let msgs = $derived.by(() => {
-    const sid = get(activeSessionId)
-    if (!sid) return []
-    return (get(chatMessages)[sid] ?? [])
-  })
-
-  let streaming = $derived.by(() => {
-    const sid = get(activeSessionId)
-    if (!sid) return false
-    return (get(chatStreaming)[sid] ?? false)
-  })
-
-  let progress = $derived.by(() => {
-    const sid = get(activeSessionId)
-    if (!sid) return null
-    return (get(chatProgress)[sid] ?? null)
-  })
-
-  let bgTasks = $derived.by(() => {
-    const sid = get(activeSessionId)
-    if (!sid) return []
-    return (get(chatBgTasks)[sid] ?? [])
-  })
-
-  let todos = $derived.by(() => {
-    const sid = get(activeSessionId)
-    if (!sid) return []
-    return (get(chatTodos)[sid] ?? [])
-  })
-
-  let suggestion = $derived.by(() => {
-    const sid = get(activeSessionId)
-    if (!sid) return ''
-    return (get(chatSuggestion)[sid] ?? '')
-  })
-
-  let currentSession = $derived.by(() => {
-    const sid = get(activeSessionId)
-    if (!sid) return null
-    return get(sessions).find((s: any) => s.id === sid) ?? null
-  })
-
-  // Artifact count from stored artifacts
-  let artifactCount = $derived(get(artifacts).length)
-
-  // WS disconnected banner
-  let wsDisconnected = $derived(get(wsState) === 'disconnected')
+  // In Svelte 5 runes mode, $store is reactive inside $derived / $effect.
+  // get(store) is a one-time read — do NOT use inside $derived/$effect.
+  let id          = $derived($activeSessionId)
+  let msgs        = $derived($chatMessages[$activeSessionId ?? ''] ?? [])
+  let streaming   = $derived($chatStreaming[$activeSessionId ?? ''] ?? false)
+  let progress    = $derived($chatProgress[$activeSessionId ?? ''] ?? null)
+  let bgTasks     = $derived($chatBgTasks[$activeSessionId ?? ''] ?? [])
+  let todos       = $derived($chatTodos[$activeSessionId ?? ''] ?? [])
+  let suggestion  = $derived($chatSuggestion[$activeSessionId ?? ''] ?? '')
+  let currentSession = $derived($sessions.find((s: any) => s.id === $activeSessionId) ?? null)
+  let artifactCount  = $derived($artifacts.length)
+  let wsDisconnected = $derived($wsState === 'disconnected')
 
   // ── history handler ────────────────────────────────────────────────────────
   function handleHistoryEvent(ev: Record<string, any>) {
-    const sid = get(activeSessionId)
+    const sid = get(activeSessionId)   // get() is fine in imperative functions
     if (!sid) return
     if (ev.type === 'history_user_message') {
       addChatMsg(sid, {
@@ -131,8 +92,9 @@
   }
 
   // ── main lifecycle effect ──────────────────────────────────────────────────
+  // $activeSessionId makes this effect re-run whenever the session changes.
   $effect(() => {
-    const sid = get(activeSessionId)
+    const sid = $activeSessionId
     if (!sid) return
 
     clearMsgs(sid)
@@ -387,7 +349,7 @@
       {/if}
     </div>
     <div class="header-actions">
-      <button class="hdr-btn" class:active={get(artifactsOpen)} onclick={() => artifactsOpen.update(v => !v)}>
+      <button class="hdr-btn" class:active={$artifactsOpen} onclick={() => artifactsOpen.update(v => !v)}>
         <iconify-icon icon="ant-design:file-text-outlined" width="13"></iconify-icon>
         {t('chat.artifacts')}
         {#if artifactCount > 0}
@@ -488,7 +450,7 @@
                       <button class="action-btn" title={t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
                         <iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon>
                       </button>
-                      <button class="action-btn" title={t('chat.retry')} onclick={() => ws.retry(get(activeSessionId) ?? '')}>
+                      <button class="action-btn" title={t('chat.retry')} onclick={() => ws.retry($activeSessionId ?? '')}>
                         <iconify-icon icon="ant-design:reload-outlined" width="14"></iconify-icon>
                       </button>
                     </div>
@@ -558,7 +520,7 @@
     </div>
 
     <!-- Artifacts panel -->
-    {#if get(artifactsOpen)}
+    {#if $artifactsOpen}
       <ArtifactsPanel />
     {/if}
   </div>
