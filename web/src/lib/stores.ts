@@ -1,5 +1,6 @@
 import { writable, derived, get } from 'svelte/store'
 import type { Session, Skill, ScheduledTask, McpServer, Channel, Memory, Artifact, ArtifactView } from './types'
+import * as api from './api'
 
 // Navigation
 export const view = writable('chat')
@@ -47,6 +48,14 @@ export const chatThinking = writable<Record<string, string>>({})
 // Live sub-agents, keyed by session. Fed by the sub_agent_event WS stream.
 export const chatSubAgents = writable<Record<string, SubAgentState[]>>({})
 
+// A slash-command / prompt queued to auto-send once its session's WS
+// subscription is confirmed. Set by panel "create / setup" actions that open an
+// agent session; consumed by ChatView on the `subscribed` ack. This mirrors the
+// old hand-written UI's Sessions.setPendingMessage → ws "subscribed" flush, so
+// the agentic-first panels invoke a skill in a fresh chat instead of opening a
+// blank session or popping a form.
+export const pendingPrompt = writable<{ sessionId: string; content: string } | null>(null)
+
 // Permission/question modals
 export const confirmModal = writable<any | null>(null)
 export const questionModal = writable<any | null>(null)
@@ -83,6 +92,18 @@ export function showToast(msg: string, type = 'success') {
 export function setActiveSession(id: string) {
   activeSessionId.set(id)
   chatMessages.update(m => ({ ...m, [id]: m[id] || [] }))
+}
+
+// Agentic-first entry point shared by the Skills / Tasks / MCP / Channels /
+// Profile panels: open a fresh chat session and queue a slash-command to
+// auto-send once the WS subscription is confirmed (see pendingPrompt). The
+// relevant skill drives the rest of the flow in conversation — no forms.
+export async function openAgentSession(content: string, name?: string): Promise<void> {
+  const sess = await api.createSession({ source: 'manual', ...(name ? { name } : {}) })
+  sessions.update(s => [sess, ...s])
+  pendingPrompt.set({ sessionId: sess.id, content })
+  activeSessionId.set(sess.id)
+  view.set('chat')
 }
 
 export function addChatMsg(sessionId: string, msg: any) {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { skills, showToast, view, sessions, activeSessionId } from '../lib/stores'
+  import { skills, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
@@ -39,8 +39,10 @@
     }
   }
 
+  // Agentic-first: creating a skill opens a fresh chat that invokes the
+  // skill-creator skill, which guides the user through it in conversation.
   function handleCreateSkill() {
-    view.set('chat')
+    openAgentSession('/skill-creator', 'New skill')
   }
 
   // Export downloads the skill folder as a .zip from the server.
@@ -53,17 +55,11 @@
     a.remove()
   }
 
-  // Editing a skill's files is agent-assisted: open a session pointed at it.
-  // (There is no in-browser file editor; the agent edits the skill on disk.)
-  async function handleEdit(name: string) {
-    try {
-      const sess = await api.createSession({ name: `Edit skill: ${name}` })
-      sessions.update(s => [sess, ...s])
-      activeSessionId.set(sess.id)
-      view.set('chat')
-    } catch (e: any) {
-      showToast(e.message ?? 'Could not open session', 'error')
-    }
+  // Editing a skill's files is agent-assisted: open a session that drives the
+  // skill-creator skill at this skill. (There is no in-browser file editor; the
+  // agent edits the skill on disk.)
+  function handleEdit(name: string) {
+    openAgentSession(`/skill-creator Edit the existing "${name}" skill.`, `Edit skill: ${name}`)
   }
 
   function handleImportClick() {

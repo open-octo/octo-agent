@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { mcpServers, toolSearchMode, mcpModalOpen, mcpModalState, showToast, sessions, activeSessionId, view } from '../lib/stores'
+  import { mcpServers, toolSearchMode, mcpModalOpen, mcpModalState, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
@@ -95,15 +95,10 @@
     mcpModalOpen.set(true)
   }
 
-  async function aiSetup() {
-    try {
-      const sess = await api.createSession({ name: 'MCP Setup' })
-      sessions.update(s => [sess, ...s])
-      activeSessionId.set(sess.id)
-      view.set('chat')
-    } catch (e: any) {
-      showToast(e.message ?? 'Could not open session', 'error')
-    }
+  // Agentic-first: open a fresh chat that invokes the mcp-creator skill, which
+  // walks the user through picking + configuring a server in conversation.
+  function aiSetup() {
+    openAgentSession('/mcp-creator', 'MCP Setup')
   }
 
   // ─── delete server ──────────────────────────────────────────────────────────

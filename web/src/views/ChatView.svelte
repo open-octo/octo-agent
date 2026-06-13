@@ -18,6 +18,7 @@
     confirmModal,
     questionModal,
     feedbackModal,
+    pendingPrompt,
     artifactsOpen,
     artifacts,
     addChatMsg,
@@ -141,6 +142,19 @@
 
     // ── WS event handlers ───────────────────────────────────────────────────
     const cleanups: Array<() => void> = []
+
+    // A panel ("create skill", "new task", "MCP setup", …) opened this session
+    // with a slash-command queued in pendingPrompt. The server must register
+    // the subscription before the agent broadcasts, so we wait for its
+    // `subscribed` ack, then auto-send — mirroring the old UI's flush-on-subscribe.
+    cleanups.push(ws.on('subscribed', (ev) => {
+      if ((ev as any).session_id !== sid) return
+      const pend = get(pendingPrompt)
+      if (pend && pend.sessionId === sid) {
+        pendingPrompt.set(null)
+        send(pend.content)
+      }
+    }))
 
     cleanups.push(ws.on('output', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return

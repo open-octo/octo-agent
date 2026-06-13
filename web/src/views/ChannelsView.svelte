@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { channels, showToast, view, sessions, activeSessionId } from '../lib/stores'
+  import { channels, showToast, openAgentSession } from '../lib/stores'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
   import * as api from '../lib/api'
@@ -97,15 +97,15 @@
     }
   }
 
-  async function openNewSession() {
-    try {
-      const sess = await api.createSession({ name: 'Channel Setup' })
-      sessions.update(s => [sess, ...s])
-      activeSessionId.set(sess.id)
-      view.set('chat')
-    } catch (e: any) {
-      showToast(`Could not open session: ${e.message}`, 'error')
-    }
+  // Agentic-first: open a fresh chat that invokes the channel-manager skill,
+  // which guides the user through the platform console + credentials. With a
+  // platform it jumps straight to that platform's setup.
+  function openNewSession() {
+    openAgentSession('/channel-manager setup', 'Channel Setup')
+  }
+
+  function openSetup(platform: string) {
+    openAgentSession(`/channel-manager setup ${platform}`, `Channel Setup — ${labelFor(platform)}`)
   }
 
   function iconFor(platform: string) {
@@ -195,7 +195,7 @@
               >
                 <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
               </button>
-              <button class="btn-primary-sm" onclick={openNewSession}>
+              <button class="btn-primary-sm" onclick={() => openSetup(row.platform)}>
                 <iconify-icon icon="ant-design:message-outlined" width="13"></iconify-icon>
                 {$t('channels.setup')}
               </button>
