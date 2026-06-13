@@ -35,9 +35,22 @@
   async function reload() {
     loading = true
     try {
-      const data = await api.listChannels() as any
-      // server returns { channels: [...] } or ChannelRow[]
-      rows = Array.isArray(data) ? data : (data.channels ?? [])
+      // /api/channels returns only CONFIGURED channels; show every supported
+      // platform as a card by merging the available-platform list with config.
+      const [avail, data] = await Promise.all([
+        api.listAvailableChannels().catch(() => []),
+        api.listChannels() as any,
+      ])
+      const configured: ChannelRow[] = Array.isArray(data) ? data : (data.channels ?? [])
+      const byPlatform: Record<string, ChannelRow> = {}
+      for (const c of configured) byPlatform[c.platform] = c
+      if (avail.length > 0) {
+        rows = avail.map((a: any) =>
+          byPlatform[a.platform] ?? { platform: a.platform, enabled: false, running: false, has_config: false, fields: {} }
+        )
+      } else {
+        rows = configured
+      }
     } catch (e: any) {
       showToast(`Failed to load channels: ${e.message}`, 'error')
     } finally {
@@ -125,8 +138,12 @@
   }
 
   function handleFor(row: ChannelRow): string {
-    const f = row.fields
-    return f.bot_id ?? f.app_id ?? f.bot_token?.slice(0, 8) + '…' ?? platform
+    const f = row.fields ?? {}
+    if (f.bot_id) return f.bot_id
+    if (f.app_id) return f.app_id
+    if (f.client_id) return f.client_id
+    if (f.bot_token) return f.bot_token.slice(0, 8) + '…'
+    return ''  // unconfigured — no handle to show
   }
 </script>
 

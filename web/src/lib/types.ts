@@ -19,6 +19,7 @@ export interface Skill {
   tagStatus: TagStatus
   tagLabel: string
   enabled: boolean
+  source: string
 }
 
 export interface ScheduledTask {

@@ -142,7 +142,7 @@
               <span class="mono name">{sk.name}</span>
             </div>
             <span class="desc">{sk.desc}</span>
-            <span class="mono ver">{sk.version}</span>
+            <span class="mono ver">{sk.version || '—'}</span>
             <span><StatusTag status={sk.tagStatus}>{sk.tagLabel}</StatusTag></span>
             <span>
               <Switch

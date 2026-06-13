@@ -91,9 +91,30 @@ export async function updateSessionWorkingDir(id: string, dir: string): Promise<
 
 // Skills
 
+// The server returns { skills: [{name, description, source, enabled}] }. Map it
+// to the display shape the table expects (desc/icon/tag), since the server has
+// no icon/version/status of its own.
+interface SkillInfoRaw {
+  name: string
+  description?: string
+  source?: string
+  enabled?: boolean
+}
 export async function listSkills(): Promise<Skill[]> {
-  const d = await request<{ skills: Skill[] }>('/api/skills')
-  return d.skills ?? []
+  const d = await request<{ skills: SkillInfoRaw[] }>('/api/skills')
+  return (d.skills ?? []).map((s): Skill => {
+    const project = s.source === 'project'
+    return {
+      name: s.name,
+      desc: s.description ?? '',
+      version: '',
+      icon: 'ant-design:thunderbolt-outlined',
+      tagStatus: project ? 'info' : 'default',
+      tagLabel: project ? 'Project' : 'User',
+      enabled: s.enabled ?? false,
+      source: s.source ?? 'user',
+    }
+  })
 }
 
 export async function toggleSkill(name: string, enabled: boolean): Promise<void> {
@@ -217,6 +238,19 @@ export async function updateToolSearch(mode: 'auto' | 'on' | 'off'): Promise<voi
 
 export async function listChannels(): Promise<Channel[]> {
   const d = await request<{ channels: Channel[] }>('/api/channels')
+  return d.channels ?? []
+}
+
+export interface AvailableChannel {
+  platform: string
+  label: string
+  fields: string[]
+}
+
+// The supported platforms (telegram/discord/feishu/dingtalk/wecom/weixin),
+// shown as cards even before they're configured.
+export async function listAvailableChannels(): Promise<AvailableChannel[]> {
+  const d = await request<{ channels: AvailableChannel[] }>('/api/channels/available')
   return d.channels ?? []
 }
 
