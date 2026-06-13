@@ -91,6 +91,99 @@
       url: r.url ?? r.link ?? '',
     })).filter((r: any) => r.title || r.url)
   }
+
+  // Per-tool right-aligned meta count ("12 matches" / "64 lines" / …), derived
+  // from the result/payload since the server sends no explicit counter.
+  function nonEmptyLines(s: string): number {
+    return s ? s.split('\n').filter(l => l.trim() !== '').length : 0
+  }
+  function toolMeta(tool: any): string {
+    if (!tool.done || tool.error) return ''
+    const res = typeof tool.result === 'string' ? tool.result : ''
+    switch (tool.name) {
+      case 'web_search': {
+        const r = searchResults(tool)
+        return r ? `${r.length} results` : ''
+      }
+      case 'grep':       return res ? `${nonEmptyLines(res)} matches` : ''
+      case 'read_file':  return res ? `${nonEmptyLines(res)} lines` : ''
+      case 'bash': case 'terminal': {
+        const out = (tool.stdout && tool.stdout.length) ? tool.stdout.join('\n') : res
+        return out ? `${nonEmptyLines(out)} lines` : ''
+      }
+      case 'edit_file': {
+        if (!tool.diff) return ''
+        const changes = tool.diff.split('\n').filter((l: string) => l.startsWith('+') || l.startsWith('-')).length
+        return changes ? `${changes} changes` : ''
+      }
+      case 'write_file': {
+        const bytes = res ? new Blob([res]).size : 0
+        if (!bytes) return ''
+        return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
+      }
+      default: return ''
+    }
+  }
+
+  // Group elapsed = sum of per-tool durations (only known for live calls; a
+  // replayed history transcript has no timing so this stays empty there).
+  function groupElapsed(ts: any[]): string {
+    const total = ts.reduce((s, t) => s + (typeof t.elapsed === 'number' ? t.elapsed : 0), 0)
+    return total > 0 ? `${total.toFixed(1)}s` : ''
+  }
+
+  // web_fetch returns the page body as a normal result even when the target
+  // responded with an HTTP error — the tool succeeded, the page didn't. Detect
+  // that "Warning: Target URL returned error NNN" line so the card can show it
+  // as a warning instead of a green check + plain text.
+  function fetchError(tool: any): string | null {
+    if (tool.name !== 'web_fetch' || tool.error) return null
+    const r = typeof tool.result === 'string' ? tool.result : ''
+    const m = r.match(/Target URL returned error\s*([0-9]{3}[^\n]*)/i)
+    return m ? m[1].trim() : null
+  }
+
+  // web_fetch results often wrap an HTML body with a metadata header
+  // ("URL: …\nSize: …\nContent-Type: …\nSaved to: …\n\n<!DOCTYPE…>"), so the
+  // doctype isn't at offset 0. Split off the HTML so it can be rendered in a
+  // sandboxed iframe instead of dumped as source; keep the header as meta.
+  function htmlPart(result: any): { meta: string; html: string } | null {
+    if (typeof result !== 'string') return null
+    const m = result.search(/<!doctype html|<html[\s>]/i)
+    if (m < 0) return null
+    return { meta: result.slice(0, m).trim(), html: result.slice(m) }
+  }
+
+  // Read/write-style tools and fetched pages collapse by default — their
+  // output is bulky and rarely the point. Errors and in-flight tools open.
+  const COLLAPSED_BY_DEFAULT = new Set(['read_file', 'write_file', 'glob', 'list_dir', 'ls'])
+  function defaultOpen(tool: any): boolean {
+    if (tool.error || !tool.done) return true
+    if (fetchError(tool)) return true          // a 4xx/5xx fetch is worth seeing
+    if (tool.name === 'web_fetch') return false // collapse fetched pages
+    return !COLLAPSED_BY_DEFAULT.has(tool.name)
+  }
+
+  // todo_write renders its checklist from the tool args.
+  function todoItems(tool: any): Array<{ status: string; content: string }> | null {
+    if (tool.name !== 'todo_write' && tool.name !== 'todowrite') return null
+    let a = tool.args
+    if (typeof a === 'string') { try { a = JSON.parse(a) } catch { return null } }
+    const list = a?.todos ?? a?.items ?? (Array.isArray(a) ? a : null)
+    if (!Array.isArray(list)) return null
+    return list.map((t: any) => ({ status: t.status ?? 'pending', content: t.content ?? t.text ?? String(t) }))
+  }
+
+  // Long output folding: show the first FOLD_LINES, reveal the rest on click.
+  const FOLD_LINES = 14
+  let expanded = $state<Record<string, boolean>>({})
+  function foldInfo(id: string, text: string) {
+    const lines = text.split('\n')
+    if (lines.length <= FOLD_LINES || expanded[id]) {
+      return { shown: text, hidden: 0 }
+    }
+    return { shown: lines.slice(0, FOLD_LINES).join('\n'), hidden: lines.length - FOLD_LINES }
+  }
 </script>
 
 {#if tools !== null && tools.length > 0}
@@ -111,25 +204,37 @@
           <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
           running
         </span>
+      {:else}
+        {@const elapsed = groupElapsed(tools)}
+        {#if elapsed}<span class="hdr-time mono" style="margin-left:auto">{elapsed}</span>{/if}
       {/if}
     </div>
 
     {#each tools as tool (tool.id)}
-      <details open class="tool-item">
+      {@const meta = toolMeta(tool)}
+      {@const todos = todoItems(tool)}
+      {@const fErr = fetchError(tool)}
+      <details open={defaultOpen(tool)} class="tool-item">
         <summary class="tool-summary">
-          <iconify-icon icon="lucide:chevron-down" width="13" style="color:rgba(0,0,0,0.35)"></iconify-icon>
-          <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:rgba(0,0,0,0.45)"></iconify-icon>
+          <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:rgba(0,0,0,0.35)"></iconify-icon>
+          <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:rgba(0,0,0,0.45);flex:0 0 auto"></iconify-icon>
           <span class="tool-name mono">{tool.name}</span>
           {#if tool.summary}
             <span class="tool-arg mono">{tool.summary}</span>
           {:else if tool.args}
             <span class="tool-arg mono">{argSummary(tool.name, tool.args)}</span>
           {/if}
-          <span style="margin-left:auto;flex:0 0 auto">
+          {#if meta && !fErr}<span class="tool-meta" style="margin-left:auto">{meta}</span>{/if}
+          <span style="{(meta && !fErr) ? '' : 'margin-left:auto;'}flex:0 0 auto;display:flex;align-items:center">
             {#if tool.error}
               <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:#FF4D4F">
                 <iconify-icon icon="ant-design:close-circle-outlined" width="14"></iconify-icon>
                 failed
+              </span>
+            {:else if fErr}
+              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:#FA8C16">
+                <iconify-icon icon="ant-design:warning-outlined" width="14"></iconify-icon>
+                {fErr}
               </span>
             {:else if tool.done}
               <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:#52C41A"></iconify-icon>
@@ -144,6 +249,25 @@
 
         {#if tool.error}
           <div class="error-output mono">{tool.error}</div>
+        {:else if fErr}
+          <pre class="warning-output mono">{tool.result}</pre>
+        {:else if todos}
+          <div class="todo-list">
+            {#each todos as step}
+              <div class="todo-step">
+                {#if step.status === 'completed'}
+                  <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:#52C41A"></iconify-icon>
+                  <span class="todo-done">{step.content}</span>
+                {:else if step.status === 'in_progress'}
+                  <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:#1677FF;animation:octo-spin 0.8s linear infinite"></iconify-icon>
+                  <span>{step.content}</span>
+                {:else}
+                  <iconify-icon icon="lucide:circle" width="14" style="color:rgba(0,0,0,0.25)"></iconify-icon>
+                  <span class="todo-pending">{step.content}</span>
+                {/if}
+              </div>
+            {/each}
+          </div>
         {:else if tool.diff}
           <div class="diff-block">
             {#each tool.diff.split('\n') as line}
@@ -159,7 +283,18 @@
             {/each}
           </div>
         {:else if tool.stdout && tool.stdout.length > 0}
-          <pre class="terminal-output">{tool.stdout.join('\n')}{#if !tool.done}<span class="blink-caret"></span>{/if}</pre>
+          {@const full = tool.stdout.join('\n')}
+          {@const fold = foldInfo(tool.id, full)}
+          <div class="term-wrap">
+            <pre class="terminal-output">{#each fold.shown.split('\n') as line}{#if line.startsWith('$ ') || line === '$'}<span class="term-prompt">$</span>{line.slice(1)}{:else}{line}{/if}
+{/each}{#if !tool.done}<span class="blink-caret"></span>{/if}</pre>
+            {#if fold.hidden > 0}
+              <button class="fold-btn" onclick={() => expanded[tool.id] = true}>
+                <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
+                Show {fold.hidden} more lines
+              </button>
+            {/if}
+          </div>
         {:else if tool.name === 'web_search' && searchResults(tool)}
           {@const results = searchResults(tool)}
           <div class="search-results">
@@ -174,8 +309,26 @@
               </div>
             {/each}
           </div>
+        {:else if tool.name === 'web_fetch' && htmlPart(tool.result)}
+          <!-- Render a fetched HTML page in a fully sandboxed iframe (no
+               scripts, no same-origin) instead of dumping the source. -->
+          {@const hp = htmlPart(tool.result)}
+          <div class="html-frame-wrap">
+            {#if hp && hp.meta}<div class="fetch-meta mono">{hp.meta}</div>{/if}
+            <iframe srcdoc={hp?.html} sandbox="" class="html-frame" title="fetched page"></iframe>
+          </div>
         {:else if tool.result}
-          <pre class="tool-output">{prettyResult(tool.result)}</pre>
+          {@const pretty = prettyResult(tool.result)}
+          {@const fold = foldInfo(tool.id, pretty)}
+          <div>
+            <pre class="tool-output">{fold.shown}</pre>
+            {#if fold.hidden > 0}
+              <button class="fold-btn light" onclick={() => expanded[tool.id] = true}>
+                <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
+                Show {fold.hidden} more lines
+              </button>
+            {/if}
+          </div>
         {/if}
       </details>
     {/each}
@@ -207,8 +360,25 @@
   margin: 0; padding: 10px 14px; border-top: 1px solid #F0F0F0;
   background: #FBFBFB; font-size: 12px; line-height: 1.7;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: rgba(0,0,0,0.65); overflow: auto; max-height: 320px;
+  color: rgba(0,0,0,0.65); overflow-x: auto; white-space: pre-wrap; word-break: break-word;
 }
+/* Chevron rotates from ▸ (collapsed) to ▾ (open). */
+.chev { transition: transform 0.15s ease; flex: 0 0 auto; }
+details[open] > summary .chev { transform: rotate(90deg); }
+/* todo_write checklist */
+.todo-list { border-top: 1px solid #F0F0F0; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.todo-step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(0,0,0,0.88); }
+.todo-done { color: rgba(0,0,0,0.35); text-decoration: line-through; }
+.todo-pending { color: rgba(0,0,0,0.45); }
+/* Long-output fold button */
+.term-wrap { display: flex; flex-direction: column; }
+.fold-btn {
+  width: 100%; padding: 8px 12px; border: none; border-top: 1px solid #F0F0F0;
+  background: #FAFAFA; display: flex; align-items: center; justify-content: center;
+  gap: 6px; font-size: 12px; color: #1677FF; cursor: pointer; font-family: inherit;
+}
+.fold-btn:hover { background: rgba(22,119,255,0.06); }
+.term-prompt { color: #52C41A; }
 .search-results {
   border-top: 1px solid #F0F0F0; padding: 10px 14px;
   display: flex; flex-direction: column; gap: 10px;
@@ -236,5 +406,23 @@
   border-top: 1px solid #F0F0F0; background: #FFF1F0;
   border-left: 2px solid #FF4D4F; padding: 10px 14px;
   font-size: 12px; line-height: 1.6; color: #CF1322; overflow-x: auto;
+}
+/* web_fetch that hit an HTTP error: the tool ran, the page didn't. */
+.warning-output {
+  margin: 0; border-top: 1px solid #F0F0F0; background: #FFF7E6;
+  border-left: 2px solid #FA8C16; padding: 10px 14px;
+  font-size: 12px; line-height: 1.6; color: #874D00;
+  overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+  max-height: 280px; overflow-y: auto;
+}
+/* Fetched HTML page rendered as a page, not source. */
+.html-frame-wrap { border-top: 1px solid #F0F0F0; background: #fff; }
+.fetch-meta {
+  padding: 8px 14px; border-bottom: 1px solid #F0F0F0; background: #FBFBFB;
+  font-size: 11px; line-height: 1.6; color: rgba(0,0,0,0.45);
+  white-space: pre-wrap; word-break: break-word;
+}
+.html-frame {
+  border: 0; width: 100%; height: 400px; display: block; background: #fff;
 }
 </style>
