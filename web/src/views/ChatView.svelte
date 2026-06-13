@@ -142,14 +142,19 @@
 
     cleanups.push(ws.on('history_user_message', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      addChatMsg(sid, {
-        id: String((ev as any).created_at ?? Date.now()),
-        type: 'user',
-        content: (ev as any).content ?? '',
-        createdAt: (ev as any).created_at ?? Date.now(),
-        streaming: false,
-        tools: [],
-        todos: [],
+      const content = (ev as any).content ?? ''
+      const createdAt = (ev as any).created_at ?? Date.now()
+      chatMessages.update(m => {
+        const msgs = [...(m[sid] || [])]
+        // If the last user bubble is a pending optimistic echo of the same
+        // text, replace it in place (de-dup). Otherwise append a fresh one.
+        const lastPending = msgs.findLastIndex((x: any) => x.type === 'user' && x.pending)
+        if (lastPending >= 0 && msgs[lastPending].content === content) {
+          msgs[lastPending] = { ...msgs[lastPending], id: String(createdAt), createdAt, pending: false }
+        } else {
+          msgs.push({ id: String(createdAt), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [] })
+        }
+        return { ...m, [sid]: msgs }
       })
     }))
 
@@ -312,12 +317,16 @@
   function send(text: string) {
     const sid = get(activeSessionId)
     if (!sid || !text.trim()) return
+    // Optimistically show the user bubble, marked pending. The server echoes
+    // it back as a history_user_message — that handler replaces this pending
+    // bubble (matching by content) instead of appending a duplicate.
     addChatMsg(sid, {
-      id: String(Date.now()),
+      id: 'pending-' + Date.now(),
       type: 'user',
       content: text,
       createdAt: Date.now(),
       streaming: false,
+      pending: true,
       tools: [],
       todos: [],
     })
