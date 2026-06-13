@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { tasks, showToast } from '../lib/stores'
+  import { tasks, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
   import type { TaskResponse } from '../lib/types'
@@ -11,14 +11,6 @@
 
   let loading = $state(false)
   let rawTasks = $state<TaskResponse[]>([])
-
-  // Create/edit-task modal
-  let showCreate = $state(false)
-  let creating = $state(false)
-  let editingName = $state<string | null>(null)   // non-null ⇒ editing that task
-  let newName = $state('')
-  let newCron = $state('')
-  let newPrompt = $state('')
 
   // ── derived KPIs ─────────────────────────────────────────────────────────────
 
@@ -88,53 +80,17 @@
     }
   }
 
+  // Agentic-first: creating/editing a task opens a fresh chat that invokes the
+  // cron-task-creator skill, which collects the schedule + prompt in conversation
+  // (no form).
   function openCreate() {
-    editingName = null
-    newName = ''
-    newCron = ''
-    newPrompt = ''
-    showCreate = true
+    openAgentSession('/cron-task-creator', 'New task')
   }
 
   function openEdit(t: TaskResponse) {
-    editingName = t.name
-    newName = t.name
-    newCron = t.cron
-    newPrompt = t.prompt
-    showCreate = true
-  }
-
-  async function submitCreate() {
-    if (!newName.trim() || !newCron.trim() || !newPrompt.trim()) return
-    creating = true
-    try {
-      if (editingName) {
-        await api.updateTask(editingName, { cron: newCron.trim(), prompt: newPrompt.trim() })
-        await load()
-        showToast('Task updated')
-      } else {
-        const t = await api.createTask({ name: newName.trim(), cron: newCron.trim(), prompt: newPrompt.trim() })
-        rawTasks = [...rawTasks, t]
-        showToast('Task created')
-      }
-      showCreate = false
-    } catch (e: any) {
-      showToast(e?.message ?? 'Failed to save task', 'error')
-    } finally {
-      creating = false
-    }
-  }
-
-  function onBackdropClick(e: MouseEvent) {
-    if ((e.target as HTMLElement).classList.contains('modal-backdrop')) showCreate = false
-  }
-
-  function onKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') showCreate = false
+    openAgentSession(`/cron-task-creator edit ${t.id} "${t.name}"`, `Edit task: ${t.name}`)
   }
 </script>
-
-<svelte:window onkeydown={onKeydown} />
 
 <div class="page">
   <div class="inner">
@@ -216,69 +172,6 @@
   </div>
 </div>
 
-<!-- Create Task Modal -->
-{#if showCreate}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={onBackdropClick}>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div class="modal-header">
-        <span id="modal-title" class="modal-title">{editingName ? $t('tasks.modal_edit') : $t('tasks.modal_new')}</span>
-        <button class="modal-close" onclick={() => (showCreate = false)} aria-label={$t('common.close')}>
-          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
-        </button>
-      </div>
-
-      <div class="modal-body">
-        <label class="field">
-          <span class="field-label">{$t('tasks.field_name')} <span class="req">*</span></span>
-          <input
-            class="field-input"
-            type="text"
-            placeholder={$t('tasks.field_name_ph')}
-            bind:value={newName}
-            disabled={creating || editingName !== null}
-          />
-        </label>
-
-        <label class="field">
-          <span class="field-label">{$t('tasks.field_cron')} <span class="req">*</span></span>
-          <input
-            class="field-input mono"
-            type="text"
-            placeholder="0 9 * * *"
-            bind:value={newCron}
-            disabled={creating}
-          />
-          <span class="field-hint">{$t('tasks.field_cron_hint')}</span>
-        </label>
-
-        <label class="field">
-          <span class="field-label">{$t('tasks.field_prompt')} <span class="req">*</span></span>
-          <textarea
-            class="field-textarea"
-            rows="4"
-            placeholder={$t('tasks.field_prompt_ph')}
-            bind:value={newPrompt}
-            disabled={creating}
-          ></textarea>
-        </label>
-      </div>
-
-      <div class="modal-footer">
-        <button class="btn-secondary" onclick={() => (showCreate = false)} disabled={creating}>{$t('common.cancel')}</button>
-        <button
-          class="btn-primary"
-          onclick={submitCreate}
-          disabled={creating || !newName.trim() || !newCron.trim() || !newPrompt.trim()}
-        >
-          {creating ? $t('common.saving') : editingName ? $t('common.save') : $t('tasks.create')}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
 <style>
 /* ── layout ─────────────────────────────────────────────────────────────────── */
 .page { flex: 1; overflow-y: auto; min-height: 0; }
@@ -298,13 +191,6 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 }
 .btn-primary:hover:not(:disabled) { background: var(--blue-5); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-secondary {
-  height: 32px; padding: 0 14px; border: 1px solid var(--border); background: var(--bg-container);
-  border-radius: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer;
-  font-family: inherit;
-}
-.btn-secondary:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
-.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── KPI row ─────────────────────────────────────────────────────────────────── */
 .kpi-row { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
@@ -347,49 +233,4 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 }
 .act-btn:hover { background: var(--hover-neutral); color: var(--blue-6); }
 .act-btn.del:hover { color: var(--error); }
-
-/* ── modal ───────────────────────────────────────────────────────────────────── */
-.modal-backdrop {
-  position: fixed; inset: 0; background: var(--text-tertiary);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 200;
-}
-.modal {
-  width: 480px; max-width: calc(100vw - 32px);
-  background: var(--bg-container); border-radius: 16px;
-  box-shadow: 0 24px 48px rgba(15,23,42,0.18);
-  display: flex; flex-direction: column; overflow: hidden;
-}
-.modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 18px 24px 16px; border-bottom: 1px solid var(--border-table);
-}
-.modal-title { font-size: 16px; font-weight: 600; color: var(--text-heading); }
-.modal-close {
-  width: 28px; height: 28px; border: none; background: transparent;
-  border-radius: 6px; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: var(--text-tertiary);
-}
-.modal-close:hover { background: var(--hover-neutral); color: var(--text); }
-.modal-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
-.modal-footer {
-  padding: 16px 24px 20px;
-  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
-  border-top: 1px solid var(--border-table);
-}
-
-/* ── form fields ─────────────────────────────────────────────────────────────── */
-.field { display: flex; flex-direction: column; gap: 6px; }
-.field-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
-.req { color: var(--error); }
-.field-input, .field-textarea {
-  font-family: inherit; font-size: 14px; color: var(--text);
-  border: 1px solid var(--border); border-radius: 8px;
-  padding: 7px 11px; outline: none; background: var(--bg-container);
-  transition: border-color 0.15s;
-}
-.field-input:focus, .field-textarea:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(22,119,255,0.1); }
-.field-input:disabled, .field-textarea:disabled { background: var(--bg-table-header); cursor: not-allowed; }
-.field-textarea { resize: vertical; }
-.field-hint { font-size: 12px; color: var(--text-tertiary); }
 </style>

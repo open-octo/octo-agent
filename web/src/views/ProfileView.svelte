@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { memTab, showToast, view, sessions, activeSessionId } from '../lib/stores'
+  import { memTab, showToast, openAgentSession } from '../lib/stores'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import { renderMarkdown } from '../lib/markdown'
   import * as api from '../lib/api'
@@ -96,17 +96,10 @@
     }
   }
 
-  async function openAssistantChat(prompt: string) {
-    try {
-      const sess = await api.createSession({ name: 'Memory update' })
-      sessions.update(s => [sess, ...s])
-      activeSessionId.set(sess.id)
-      view.set('chat')
-      // The draft is set on the input by the ChatView reading a store —
-      // for now we just open the session; the user will type.
-    } catch (e: any) {
-      showToast(`Could not open session: ${e.message}`, 'error')
-    }
+  // Agentic-first: open a fresh chat and auto-send the curate command. soul/user
+  // run the onboard skill scoped to that one file; memories opens a freeform turn.
+  function openAssistantChat(prompt: string, name = 'Profile update') {
+    openAgentSession(prompt, name)
   }
 
   function fmtDate(iso: string): string {
@@ -166,7 +159,7 @@
         {/if}
         <div class="card-footer">
           <span class="footer-hint">{$t('profile.soul_hint')}</span>
-          <button class="btn-primary" onclick={() => openAssistantChat('Please update my soul.md')}>
+          <button class="btn-primary" onclick={() => openAssistantChat('/onboard scope:soul', 'Update soul.md')}>
             {$t('profile.update')}
           </button>
         </div>
@@ -194,7 +187,7 @@
         {/if}
         <div class="card-footer">
           <span class="footer-hint">{$t('profile.user_hint')}</span>
-          <button class="btn-primary" onclick={() => openAssistantChat('Please update my user.md')}>
+          <button class="btn-primary" onclick={() => openAssistantChat('/onboard scope:user', 'Update user.md')}>
             {$t('profile.update')}
           </button>
         </div>
@@ -247,7 +240,7 @@
         {/if}
         <div class="card-footer">
           <span class="footer-hint">{$t('profile.memories_hint')}</span>
-          <button class="btn-primary" onclick={() => openAssistantChat('Please update my memories')}>
+          <button class="btn-primary" onclick={() => openAssistantChat('Review my saved memories and help me update or remove any that are stale.', 'Update memories')}>
             {$t('profile.update')}
           </button>
         </div>
