@@ -25,6 +25,24 @@
 
   let booted = false
 
+  // ── URL routing ─────────────────────────────────────────────────────────────
+  // Reflect the current view (and active chat session) in the hash so a refresh
+  // lands back where the user was instead of the default chat view.
+  let routeReady = false
+  const VALID_VIEWS = ['chat', 'skills', 'tasks', 'mcp', 'channels', 'settings', 'profile', 'files']
+
+  function applyHash() {
+    const h = location.hash.replace(/^#\/?/, '')
+    if (!h) return
+    const [v, ...rest] = h.split('/')
+    if (!VALID_VIEWS.includes(v)) return
+    if (get(view) !== v) view.set(v)
+    if (v === 'chat' && rest[0]) {
+      const sid = decodeURIComponent(rest[0])
+      if (get(activeSessionId) !== sid) activeSessionId.set(sid)
+    }
+  }
+
   onMount(async () => {
     // First-run gate: decide the onboard phase BEFORE booting the main UI so it
     // never flashes behind the setup panel. Default to '' on error so a status
@@ -46,6 +64,15 @@
     booted = true
     bootMain()
     if (phase === 'soul_setup') maybeLaunchOnboard()
+  })
+
+  // Write the current view/session to the hash on navigation (once the initial
+  // hash has been restored, and only while the main UI is showing).
+  $effect(() => {
+    const v = $view, sid = $activeSessionId, phase = $onboardPhase
+    if (!routeReady || phase === 'unknown' || phase === 'key_setup') return
+    const hash = v === 'chat' ? (sid ? `#/chat/${encodeURIComponent(sid)}` : '#/chat') : `#/${v}`
+    if (location.hash !== hash) location.hash = hash
   })
 
   function bootMain() {
@@ -81,6 +108,13 @@
         if (!get(activeSessionId)) activeSessionId.set(data.sessions[0].id)
       }
     }).catch(() => { /* non-critical: WS session_list will arrive shortly */ })
+
+    // Restore the view/session from the URL now — synchronously, before the
+    // WS/REST auto-select above resolves (both guard on activeSessionId being
+    // unset, so this wins). Then start tracking forward/back + manual edits.
+    applyHash()
+    routeReady = true
+    window.addEventListener('hashchange', applyHash)
   }
 
   // soul_setup: key present, soul.md missing → auto-launch one /onboard chat.
