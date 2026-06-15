@@ -69,6 +69,7 @@
       <ModelConfigForm
         {providers}
         requireKey={true}
+        showPrefs={false}
         submitLabel={$t('models.btn.test_save')}
         {onSubmit}
       />

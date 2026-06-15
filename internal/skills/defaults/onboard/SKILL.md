@@ -113,7 +113,10 @@ Parse freely. Store the user's name as `user.name` (default `"老大"` for zh, `
 ### A.6. Collect behaviour preferences
 
 These three settings are saved to `~/.octo/config.yaml` and affect every session.
-All have sensible defaults — the user can hit Enter to skip any prompt.
+All have sensible defaults. Tell the user they can reply `default` (中文：`默认`) to
+accept the default for any prompt — do NOT tell them to "press Enter", because an
+empty message can't be sent (both the terminal UI and the web composer ignore a
+blank Enter). Treat a reply of `default` / `默认` / `skip` / `跳过` as "use the default".
 
 **Permission mode** — how the assistant handles sensitive tool calls (file writes, shell commands, etc.).
 
