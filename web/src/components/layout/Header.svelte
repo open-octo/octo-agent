@@ -54,7 +54,6 @@
     <button class="icon-btn" title={$t('nav.settings')} onclick={() => view.set('settings')}>
       <iconify-icon icon="ant-design:setting-outlined" width="16"></iconify-icon>
     </button>
-    <button class="avatar" title={$t('header.avatar')} onclick={() => view.set('profile')}>R</button>
   </div>
 </header>
 
@@ -100,11 +99,4 @@ kbd {
   background: var(--bg-container); border: 1px solid var(--border-secondary); border-radius: 4px;
   padding: 1px 5px; color: var(--text-tertiary);
 }
-.avatar {
-  width: 28px; height: 28px; border-radius: 9999px; border: none; padding: 0;
-  background: var(--blue-1); color: var(--blue-6); font-family: inherit;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 600; cursor: pointer;
-}
-.avatar:hover { background: var(--blue-2); }
 </style>

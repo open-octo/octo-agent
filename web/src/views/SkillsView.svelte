@@ -11,6 +11,16 @@
   let showSystem = $state(false)
   let fileInput: HTMLInputElement
 
+  // System skills are the built-in defaults (source "default"); My Skills are
+  // user- or project-installed. The "System Skills" tab shows only system; the
+  // "My Skills" tab shows user/project, plus system when the toggle is on.
+  let filtered = $derived(
+    $skills.filter((sk) => {
+      const sys = sk.source === 'default'
+      return scope === $t('skills.system_skills') ? sys : (!sys || showSystem)
+    })
+  )
+
   $effect(() => {
     api.listSkills()
       .then(list => skills.set(list))
@@ -62,7 +72,21 @@
     openAgentSession(`/skill-creator Edit the existing "${name}" skill.`, `Edit skill: ${name}`)
   }
 
+  // ── Import (GitHub URL / owner-repo / local path / browsed upload) ───────────
+  // The server import endpoint is JSON-only ({source, force}); a local file is
+  // uploaded first via /api/upload, then its /api/uploads/<name> URL is used as
+  // the source. Mirrors the old hand-written import bar + `octo skills add`.
+  let importOpen = $state(false)
+  let importSource = $state('')
+  let importing = $state(false)
+  let uploading = $state(false)
+
   function handleImportClick() {
+    importSource = ''
+    importOpen = true
+  }
+
+  function browseFile() {
     fileInput.value = ''
     fileInput.click()
   }
@@ -70,13 +94,40 @@
   async function handleFileChange(e: Event) {
     const file = (e.target as HTMLInputElement).files?.[0]
     if (!file) return
+    uploading = true
     try {
-      await api.importSkill(file)
-      const list = await api.listSkills()
-      skills.set(list)
-      showToast(`Skill imported from "${file.name}"`)
+      importSource = await api.uploadFile(file)
     } catch (err: any) {
       showToast(err.message, 'error')
+    } finally {
+      uploading = false
+    }
+  }
+
+  async function doImport(force = false) {
+    const source = importSource.trim()
+    if (!source) return
+    importing = true
+    try {
+      const r = await api.importSkill(source, force)
+      if (r.conflict && !force) {
+        if (confirm(tr('skills.import_confirm_replace'))) {
+          importing = false
+          return doImport(true)
+        }
+        return
+      }
+      if (!r.ok) {
+        showToast(tr('skills.import_error') + (r.error ?? 'unknown'), 'error')
+        return
+      }
+      skills.set(await api.listSkills())
+      showToast(`Skill "${r.name}" imported`)
+      importOpen = false
+    } catch (err: any) {
+      showToast(tr('skills.import_error') + err.message, 'error')
+    } finally {
+      importing = false
     }
   }
 </script>
@@ -124,12 +175,12 @@
           <div class="spinner"></div>
           <span>{$t('skills.loading')}</span>
         </div>
-      {:else if $skills.length === 0}
+      {:else if filtered.length === 0}
         <div class="empty-state">
           <span>{$t('skills.empty')}</span>
         </div>
       {:else}
-        {#each $skills as sk (sk.name)}
+        {#each filtered as sk (sk.name)}
           <div class="table-row">
             <div class="skill-name-cell">
               <span class="skill-icon">
@@ -160,9 +211,81 @@
   </div>
 </div>
 
+<!-- Import modal: GitHub URL / owner-repo / local path, or browse to upload -->
+{#if importOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('modal-backdrop')) importOpen = false }}>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <span class="modal-title">{$t('skills.import_title')}</span>
+        <button class="modal-close" onclick={() => (importOpen = false)} aria-label={$t('common.close')}>
+          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="import-row">
+          <input
+            class="field-input mono"
+            type="text"
+            placeholder={$t('skills.import_placeholder')}
+            bind:value={importSource}
+            disabled={importing}
+            onkeydown={(e) => { if (e.key === 'Enter') doImport() }}
+          />
+          <button class="btn-secondary" onclick={browseFile} disabled={importing || uploading}>
+            {uploading ? $t('skills.import_uploading') : $t('skills.import_browse')}
+          </button>
+        </div>
+        <span class="field-hint">{$t('skills.import_hint')}</span>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick={() => (importOpen = false)} disabled={importing}>{$t('common.cancel')}</button>
+        <button class="btn-primary" onclick={() => doImport()} disabled={importing || uploading || !importSource.trim()}>
+          {importing ? $t('skills.import_installing') : $t('skills.import_install')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
 .page { flex: 1; overflow-y: auto; min-height: 0; }
 .inner { max-width: 1080px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+
+/* ── import modal ─────────────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0; background: var(--text-tertiary);
+  display: flex; align-items: flex-start; justify-content: center; z-index: 200;
+  padding: 56px 16px;
+}
+.modal {
+  width: 520px; max-width: 100%;
+  background: var(--bg-container); border-radius: 16px; box-shadow: 0 24px 48px rgba(15,23,42,0.18);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 24px 16px; border-bottom: 1px solid var(--border-table);
+}
+.modal-title { font-size: 16px; font-weight: 600; color: var(--text-heading); }
+.modal-close {
+  width: 28px; height: 28px; border: none; background: transparent; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-tertiary);
+}
+.modal-close:hover { background: var(--hover-neutral); color: var(--text); }
+.modal-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 8px; }
+.modal-footer {
+  padding: 16px 24px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  border-top: 1px solid var(--border-table);
+}
+.import-row { display: flex; gap: 8px; }
+.field-input {
+  flex: 1; min-width: 0; font-family: inherit; font-size: 14px; color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; outline: none; background: var(--bg-container);
+}
+.field-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(22,119,255,0.1); }
+.field-hint { font-size: 12px; color: var(--text-tertiary); }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .title-block { display: flex; flex-direction: column; gap: 4px; }
 h2 { margin: 0; font-size: 24px; font-weight: 600; color: var(--text-heading); }

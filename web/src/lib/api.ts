@@ -103,16 +103,22 @@ interface SkillInfoRaw {
 export async function listSkills(): Promise<Skill[]> {
   const d = await request<{ skills: SkillInfoRaw[] }>('/api/skills')
   return (d.skills ?? []).map((s): Skill => {
-    const project = s.source === 'project'
+    // Server source is "default" (built-in/system) | "project" | "user".
+    const src = s.source ?? 'user'
+    const tag = src === 'project'
+      ? { tagStatus: 'info', tagLabel: 'Project' }
+      : src === 'default'
+        ? { tagStatus: 'default', tagLabel: 'System' }
+        : { tagStatus: 'success', tagLabel: 'User' }
     return {
       name: s.name,
       desc: s.description ?? '',
       version: '',
       icon: 'ant-design:thunderbolt-outlined',
-      tagStatus: project ? 'info' : 'default',
-      tagLabel: project ? 'Project' : 'User',
+      tagStatus: tag.tagStatus,
+      tagLabel: tag.tagLabel,
       enabled: s.enabled ?? false,
-      source: s.source ?? 'user',
+      source: src,
     }
   })
 }
@@ -128,12 +134,35 @@ export async function deleteSkill(name: string): Promise<void> {
   await request<unknown>(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
 
-export async function importSkill(file: File): Promise<Skill> {
+export interface ImportSkillResult {
+  ok: boolean
+  conflict?: boolean   // 409: a same-named skill exists — retry with force
+  name?: string
+  error?: string
+}
+
+// Install a skill from a GitHub URL, owner/repo[/sub/path] shorthand, a local
+// path, or an /api/uploads/<name> URL (from uploadFile). The server endpoint is
+// JSON-only — it does NOT accept a multipart file directly; uploads go through
+// /api/upload first. Mirrors the old web import + `octo skills add`.
+export async function importSkill(source: string, force = false): Promise<ImportSkillResult> {
+  const res = await fetch('/api/skills/import', { method: 'POST', ...json({ source, force }) })
+  if (res.status === 409) return { ok: false, conflict: true }
+  const d = await res.json().catch(() => ({} as any))
+  if (!res.ok) return { ok: false, error: d.error ?? `${res.status} ${res.statusText}` }
+  return { ok: true, name: d.name }
+}
+
+// Upload a local file, returning the /api/uploads/<name> URL to feed importSkill.
+export async function uploadFile(file: File): Promise<string> {
   const form = new FormData()
-  form.append('file', file)
-  const res = await fetch('/api/skills/import', { method: 'POST', body: form })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json() as Promise<Skill>
+  form.append('files', file)
+  const res = await fetch('/api/upload', { method: 'POST', body: form })
+  const d = await res.json().catch(() => ({} as any))
+  if (!res.ok) throw new Error(d.error ?? `${res.status} ${res.statusText}`)
+  const url = d.files?.[0]?.url
+  if (!url) throw new Error(d.files?.[0]?.error ?? 'upload failed')
+  return url
 }
 
 // Tasks
