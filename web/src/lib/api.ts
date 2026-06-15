@@ -287,8 +287,11 @@ export async function getMemories(): Promise<Memory[]> {
 
 // Single memory detail — the list endpoint omits content, so the body is
 // fetched on demand when a row is expanded.
-export async function getMemory(name: string): Promise<{ content: string; path: string }> {
-  return request<{ content: string; path: string }>(`/api/memories/${encodeURIComponent(name)}`)
+export async function getMemory(name: string, source?: string): Promise<{ content: string; path: string }> {
+  // source disambiguates a filename that exists in both the project and the
+  // inherited (home) memory dirs.
+  const qs = source ? `?source=${encodeURIComponent(source)}` : ''
+  return request<{ content: string; path: string }>(`/api/memories/${encodeURIComponent(name)}${qs}`)
 }
 
 // Trash
