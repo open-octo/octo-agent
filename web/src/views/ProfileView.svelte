@@ -73,23 +73,25 @@
     }
   }
 
-  async function toggleMemory(e: Event, name: string) {
+  // Keyed by the file's full path, not its name: the same filename can exist in
+  // both the project and inherited memory dirs, so name alone collides.
+  async function toggleMemory(e: Event, f: MemFile) {
     const open = (e.currentTarget as HTMLDetailsElement).open
-    if (open && memContent[name] === undefined) {
-      memContent = { ...memContent, [name]: '' }   // mark in-flight
+    if (open && memContent[f.path] === undefined) {
+      memContent = { ...memContent, [f.path]: '' }   // mark in-flight
       try {
-        const d = await api.getMemory(name)
-        memContent = { ...memContent, [name]: d.content ?? '' }
+        const d = await api.getMemory(f.name, f.source)
+        memContent = { ...memContent, [f.path]: d.content ?? '' }
       } catch {
-        memContent = { ...memContent, [name]: '_Could not load memory._' }
+        memContent = { ...memContent, [f.path]: '_Could not load memory._' }
       }
     }
   }
 
-  async function forgetMemory(name: string) {
+  async function forgetMemory(f: MemFile) {
     try {
-      await fetch(`/api/memories/${encodeURIComponent(name)}`, { method: 'DELETE' })
-      memFiles = memFiles.filter(f => f.name !== name)
+      await fetch(`/api/memories/${encodeURIComponent(f.name)}?source=${encodeURIComponent(f.source)}`, { method: 'DELETE' })
+      memFiles = memFiles.filter(m => m.path !== f.path)
       showToast('Memory removed', 'success')
     } catch (e: any) {
       showToast(`Failed to remove memory: ${e.message}`, 'error')
@@ -211,8 +213,8 @@
         {:else if memFiles.length === 0}
           <div class="card-loading">{$t('profile.memories_empty')}</div>
         {:else}
-          {#each memFiles as f (f.name)}
-            <details class="mem-row" ontoggle={(e) => toggleMemory(e, f.name)}>
+          {#each memFiles as f (f.path)}
+            <details class="mem-row" ontoggle={(e) => toggleMemory(e, f)}>
               <summary class="mem-summary">
                 <span class="mem-icon">
                   <iconify-icon icon={iconForMemory(f)} width="14"></iconify-icon>
@@ -222,17 +224,17 @@
                   <span class="mem-meta">{f.source} · {fmtDate(f.updated_at)}</span>
                 </div>
                 <StatusTag status="default">{f.source}</StatusTag>
-                <button class="forget-btn" onclick={(e) => { e.preventDefault(); forgetMemory(f.name) }}>
+                <button class="forget-btn" onclick={(e) => { e.preventDefault(); forgetMemory(f) }}>
                   <iconify-icon icon="ant-design:close-circle-outlined" width="13"></iconify-icon>
                   {$t('profile.forget')}
                 </button>
                 <iconify-icon icon="lucide:chevron-right" width="14" class="mem-chevron" style="color:var(--text-tertiary)"></iconify-icon>
               </summary>
               <div class="mem-body">
-                {#if memContent[f.name] === undefined || memContent[f.name] === ''}
+                {#if memContent[f.path] === undefined || memContent[f.path] === ''}
                   <span class="mem-loading">Loading…</span>
                 {:else}
-                  <div class="md-content">{@html renderMarkdown(memContent[f.name])}</div>
+                  <div class="md-content">{@html renderMarkdown(memContent[f.path])}</div>
                 {/if}
               </div>
             </details>

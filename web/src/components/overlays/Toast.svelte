@@ -1,11 +1,23 @@
 <script lang="ts">
   import { toast } from '../../lib/stores'
+
+  // The store holds { msg, type }; render msg, and pick the icon from type.
+  const ICON: Record<string, string> = {
+    success: 'ant-design:check-circle-filled',
+    error:   'ant-design:close-circle-filled',
+    info:    'ant-design:info-circle-filled',
+  }
+  const COLOR: Record<string, string> = {
+    success: 'var(--success)',
+    error:   'var(--error)',
+    info:    'var(--blue-6)',
+  }
 </script>
 
 {#if $toast}
 <div class="toast">
-  <iconify-icon icon="ant-design:check-circle-filled" width="16" style="color:var(--success)"></iconify-icon>
-  <span>{$toast}</span>
+  <iconify-icon icon={ICON[$toast.type] ?? ICON.success} width="16" style="color:{COLOR[$toast.type] ?? COLOR.success}"></iconify-icon>
+  <span>{$toast.msg}</span>
 </div>
 {/if}
 
