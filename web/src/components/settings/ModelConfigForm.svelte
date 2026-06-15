@@ -12,12 +12,17 @@
     providers = [],
     initial = null,
     requireKey = true,
+    showPrefs = true,
     submitLabel,
     onSubmit,
   }: {
     providers?: ProviderPreset[]
     initial?: Partial<ModelEntry> | null
     requireKey?: boolean
+    // First-run onboard hides these: the /onboard ceremony collects permission
+    // mode / reasoning effort / show-reasoning itself, so the bootstrap form
+    // would only ask the same questions twice.
+    showPrefs?: boolean
     submitLabel: string
     onSubmit: (req: ModelConfigInput) => Promise<void>
   } = $props()
@@ -76,17 +81,21 @@
   function buildReq(): ModelConfigInput {
     const providerID = preset ? preset.id : 'openai_compatible'
     const anthropic = !!(preset && preset.api === 'anthropic-messages')
-    return {
+    const req: ModelConfigInput = {
       type: 'default',
       model: model.trim(),
       base_url: baseUrl.trim(),
       api_key: apiKey.trim(),
       provider: providerID,
       anthropic_format: anthropic,
-      permission_mode: permMode,
-      reasoning_effort: reasoning,
-      show_reasoning: showReason,
     }
+    // Onboard hides prefs; leave them to server defaults + the /onboard ceremony.
+    if (showPrefs) {
+      req.permission_mode = permMode
+      req.reasoning_effort = reasoning
+      req.show_reasoning = showReason
+    }
+    return req
   }
 
   function valid(): boolean {
@@ -198,30 +207,32 @@
     </div>
   </label>
 
-  <!-- Preferences -->
-  <div class="prefs">
-    <label class="field half">
-      <span class="field-label">{$t('models.permission_mode')}</span>
-      <select class="field-input" bind:value={permMode} disabled={saving}>
-        <option value="interactive">{$t('models.permission_mode.interactive')}</option>
-        <option value="auto">{$t('models.permission_mode.auto')}</option>
-      </select>
-    </label>
-    <label class="field half">
-      <span class="field-label">{$t('models.reasoning_effort')}</span>
-      <select class="field-input" bind:value={reasoning} disabled={saving}>
-        <option value="off">{$t('models.reasoning.off')}</option>
-        <option value="low">{$t('models.reasoning.low')}</option>
-        <option value="medium">{$t('models.reasoning.medium')}</option>
-        <option value="high">{$t('models.reasoning.high')}</option>
-      </select>
-    </label>
-  </div>
+  <!-- Preferences (hidden during onboard — the /onboard ceremony collects them) -->
+  {#if showPrefs}
+    <div class="prefs">
+      <label class="field half">
+        <span class="field-label">{$t('models.permission_mode')}</span>
+        <select class="field-input" bind:value={permMode} disabled={saving}>
+          <option value="interactive">{$t('models.permission_mode.interactive')}</option>
+          <option value="auto">{$t('models.permission_mode.auto')}</option>
+        </select>
+      </label>
+      <label class="field half">
+        <span class="field-label">{$t('models.reasoning_effort')}</span>
+        <select class="field-input" bind:value={reasoning} disabled={saving}>
+          <option value="off">{$t('models.reasoning.off')}</option>
+          <option value="low">{$t('models.reasoning.low')}</option>
+          <option value="medium">{$t('models.reasoning.medium')}</option>
+          <option value="high">{$t('models.reasoning.high')}</option>
+        </select>
+      </label>
+    </div>
 
-  <div class="reason-toggle">
-    <Switch bind:checked={showReason} />
-    <span>{$t('models.show_reasoning')}</span>
-  </div>
+    <div class="reason-toggle">
+      <Switch bind:checked={showReason} />
+      <span>{$t('models.show_reasoning')}</span>
+    </div>
+  {/if}
 
   <!-- Result -->
   {#if result}

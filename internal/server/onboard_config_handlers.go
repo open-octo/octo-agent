@@ -339,8 +339,10 @@ func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
 	applyModelRequestToEntry(req, &entry)
 	entry.Name = cfg.UniqueName(req.Model)
 	cfg.Models = append(cfg.Models, entry)
+	becameDefault := false
 	if cfg.DefaultModel == "" || len(cfg.Models) == 1 {
 		cfg.DefaultModel = entry.Name
+		becameDefault = true
 	}
 	if req.PermissionMode != "" {
 		cfg.PermissionMode = req.PermissionMode
@@ -349,6 +351,12 @@ func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
 	if err := cfg.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
+	}
+	// When this entry becomes the default (e.g. the first model saved during
+	// first-run onboard), point new sessions at it — otherwise handleCreateSession
+	// keeps using the stale startup s.model. Mirrors handleSetDefaultModelConfig.
+	if becameDefault {
+		s.model = entry.Model
 	}
 	s.invalidateSenderCache()
 

@@ -31,6 +31,17 @@ Parse the invocation message **first**, before greeting:
 
 Look for `lang:zh` / `lang:en` anywhere in the same line and use it to set the language.
 
+## Presenting choices
+
+Whenever you offer the user a **fixed set of options** (personality, permission
+mode, reasoning effort, the curate-action menu, soul/user/memory keep-or-rewrite,
+etc.), present them with the **`ask_user_question` tool** — never as a plain
+markdown list. The tool renders as clickable cards in the web UI and an arrow-key
+picker in the terminal; a markdown bullet list is just text the user cannot click.
+Put each option's label + a short description in the tool's options, and rely on
+its built-in "Other" choice for free-text answers. Genuinely open prompts (the
+user's name, occupation, links) stay plain prose — those have no fixed options.
+
 ---
 
 ## A. First-run mode (no arguments)
@@ -74,7 +85,8 @@ Store the result as `ai.name` (default `"Octo"` if blank).
 
 ### A.4. Collect AI personality
 
-Address the AI by `ai.name` in the question.
+Address the AI by `ai.name` in the question. Present the four styles as an
+`ask_user_question` (clickable cards), not a markdown list.
 
 zh:
 > 好的！[ai.name] 应该是什么风格呢？
@@ -113,7 +125,11 @@ Parse freely. Store the user's name as `user.name` (default `"老大"` for zh, `
 ### A.6. Collect behaviour preferences
 
 These three settings are saved to `~/.octo/config.yaml` and affect every session.
-All have sensible defaults — the user can hit Enter to skip any prompt.
+All have fixed choices with a sensible default, so present each as an
+`ask_user_question` (clickable cards) — make the default option's label say
+"(default)". Do NOT print a markdown list and tell the user to "press Enter" to
+skip: an empty message can't be sent (both the terminal UI and the web composer
+ignore a blank Enter), so an un-clickable list would strand them.
 
 **Permission mode** — how the assistant handles sensitive tool calls (file writes, shell commands, etc.).
 
@@ -319,6 +335,10 @@ Examples:
 - **USER en**: "Your profile says: Yafei, software engineer, mostly using AI to ship side projects."
 
 ### B.4. Ask what to change (one question)
+
+Present this as an `ask_user_question` (clickable cards), not a markdown list —
+each bullet below becomes one option. The tool's built-in "Other" covers the
+"just tell me directly" path.
 
 **scope:soul**, zh:
 > 想怎么调整我的性格？可以选，也可以直接告诉我。
