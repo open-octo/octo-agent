@@ -2,6 +2,11 @@ import { writable, derived, get } from 'svelte/store'
 import type { Session, Skill, ScheduledTask, McpServer, Channel, Memory, Artifact, ArtifactView } from './types'
 import * as api from './api'
 
+// First-run gate. 'unknown' until /api/onboard/status resolves (render a splash,
+// never flash the main UI); 'key_setup' blocks on the setup panel; 'soul_setup'
+// boots normally then auto-launches an /onboard chat; '' means fully configured.
+export const onboardPhase = writable<'unknown' | 'key_setup' | 'soul_setup' | ''>('unknown')
+
 // Navigation
 export const view = writable('chat')
 export const sidebar = writable('full')

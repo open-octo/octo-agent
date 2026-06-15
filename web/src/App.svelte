@@ -1,8 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, activeSessionId, showToast } from './lib/stores'
+  import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession } from './lib/stores'
   import { ws, wsState } from './lib/ws'
+  import { locale } from './lib/i18n'
+  import { get } from 'svelte/store'
   import * as api from './lib/api'
+  import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
   import Header from './components/layout/Header.svelte'
   import Sidebar from './components/layout/Sidebar.svelte'
   import ChatView from './views/ChatView.svelte'
@@ -20,20 +23,41 @@
   import FeedbackModal from './components/overlays/FeedbackModal.svelte'
   import Toast from './components/overlays/Toast.svelte'
 
+  let booted = false
+
   onMount(async () => {
-    // Connect WebSocket
+    // First-run gate: decide the onboard phase BEFORE booting the main UI so it
+    // never flashes behind the setup panel. Default to '' on error so a status
+    // hiccup doesn't trap a configured user behind a blank splash.
+    try {
+      const status = await api.getOnboardStatus()
+      onboardPhase.set(status.phase ?? '')
+    } catch {
+      onboardPhase.set('')
+    }
+    return () => ws.disconnect()
+  })
+
+  // Boot the normal UI once onboarding doesn't block it. 'key_setup' holds here
+  // until FirstRunSetup completes and flips the phase to ''.
+  $effect(() => {
+    const phase = $onboardPhase
+    if (booted || phase === 'unknown' || phase === 'key_setup') return
+    booted = true
+    bootMain()
+    if (phase === 'soul_setup') maybeLaunchOnboard()
+  })
+
+  function bootMain() {
     ws.connect()
 
-    // session_list event populates the sidebar
     ws.on('session_list', (ev: any) => {
       sessions.set(ev.sessions ?? [])
-      // Auto-select first session
-      if (!$activeSessionId && ev.sessions?.length > 0) {
+      if (!get(activeSessionId) && ev.sessions?.length > 0) {
         activeSessionId.set(ev.sessions[0].id)
       }
     })
 
-    // session_update: patch the session in the list
     ws.on('session_update', (ev: any) => {
       sessions.update(list =>
         list.map(s => s.id === ev.session_id
@@ -43,31 +67,37 @@
       )
     })
 
-    // session_deleted: remove from list
     ws.on('session_deleted', (ev: any) => {
       sessions.update(list => list.filter(s => s.id !== ev.session_id))
-      if ($activeSessionId === ev.session_id) {
+      if (get(activeSessionId) === ev.session_id) {
         activeSessionId.set(null)
       }
     })
 
-    // Also load sessions from REST as immediate fallback (WS session_list may be delayed)
-    try {
-      const data = await api.listSessions() as any
+    // REST fallback (WS session_list may be delayed)
+    api.listSessions().then((data: any) => {
       if (data.sessions?.length > 0) {
         sessions.set(data.sessions)
-        if (!$activeSessionId) {
-          activeSessionId.set(data.sessions[0].id)
-        }
+        if (!get(activeSessionId)) activeSessionId.set(data.sessions[0].id)
       }
-    } catch (e) {
-      // non-critical: WS session_list will arrive shortly
-    }
+    }).catch(() => { /* non-critical: WS session_list will arrive shortly */ })
+  }
 
-    return () => ws.disconnect()
-  })
+  // soul_setup: key present, soul.md missing → auto-launch one /onboard chat.
+  // Guarded by sessionStorage so a refresh doesn't spawn a second session.
+  function maybeLaunchOnboard() {
+    if (sessionStorage.getItem('octo-onboard-launched')) return
+    sessionStorage.setItem('octo-onboard-launched', '1')
+    const lang = get(locale).startsWith('zh') ? 'zh' : 'en'
+    openAgentSession(`/onboard lang:${lang}`, '✨ Onboard').catch(() => {})
+  }
 </script>
 
+{#if $onboardPhase === 'unknown'}
+  <div class="splash"><div class="spinner"></div></div>
+{:else if $onboardPhase === 'key_setup'}
+  <FirstRunSetup />
+{:else}
 <div class="app">
   <Header />
   <div class="content">
@@ -93,6 +123,7 @@
     </main>
   </div>
 </div>
+{/if}
 
 <CommandPalette />
 <McpModal />
@@ -123,4 +154,14 @@
   flex-direction: column;
   min-height: 0;
 }
+.splash {
+  height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: var(--bg-layout);
+}
+.splash .spinner {
+  width: 28px; height: 28px; border: 3px solid rgba(22,119,255,0.2);
+  border-top-color: var(--blue-6); border-radius: 50%;
+  animation: octo-spin 0.7s linear infinite;
+}
+@keyframes octo-spin { to { transform: rotate(360deg); } }
 </style>
