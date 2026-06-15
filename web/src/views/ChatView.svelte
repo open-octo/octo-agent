@@ -35,6 +35,7 @@
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
+  import { observeArtifact, resetArtifacts } from '../lib/artifacts'
   import { renderMarkdown, setupCopyButtons } from '../lib/markdown'
   import { t, tr } from '../lib/i18n'
   import StatusTag from '../components/ui/StatusTag.svelte'
@@ -116,6 +117,7 @@
       })
     } else if (ev.type === 'tool_result') {
       updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload)
+      observeArtifact(sid, ev.ui_payload, false)   // history replay — silent
     }
   }
 
@@ -126,6 +128,7 @@
     if (!sid) return
 
     clearMsgs(sid)
+    resetArtifacts(sid)
     ws.subscribe(sid)
 
     // Load history
@@ -243,6 +246,7 @@
     cleanups.push(ws.on('tool_result', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       updateToolResult(sid, (ev as any).tool_id, (ev as any).result, (ev as any).ui_payload)
+      observeArtifact(sid, (ev as any).ui_payload, true)   // live turn — may auto-open
     }))
 
     cleanups.push(ws.on('tool_error', (ev) => {

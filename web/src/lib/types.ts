@@ -77,6 +77,7 @@ export interface Artifact {
   icon: string
   code: string
   preview: string
+  path: string
 }
 
 // SessionItem matches the Go server session struct
