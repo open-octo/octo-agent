@@ -242,8 +242,7 @@
 <style>
 .composer {
   flex: 0 0 auto;
-  background: rgba(255,255,255,0.96);
-  backdrop-filter: blur(8px);
+  background: var(--bg-container);
   border-top: 1px solid var(--border-secondary);
 }
 .chips {

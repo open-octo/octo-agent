@@ -1,10 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sidebar, sessions, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast } from '../../lib/stores'
+  import { view, sidebar, sessions, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t } from '../../lib/i18n'
 
   let versionStr = $state('')
+
+  // Real count of configured MCP servers for the nav badge. Seeded here so the
+  // badge is correct before the user ever opens the MCP panel; McpView keeps the
+  // shared store in sync afterward.
+  let mcpCount = $derived(($mcpServers as any[]).length)
 
   onMount(async () => {
     try {
@@ -12,6 +17,10 @@
       const raw = v.current ?? v.version ?? ''
       versionStr = raw ? (raw.startsWith('v') ? raw : `v${raw}`) : ''
     } catch { /* version chip stays hidden */ }
+    try {
+      const d = await api.listMcpServers()
+      mcpServers.set(d.servers as any)
+    } catch { /* badge falls back to hidden */ }
   })
 
   $effect(() => {
@@ -196,7 +205,7 @@
         {#each [
           { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
           { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
-          { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp', meta: '4' },
+          { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp', meta: mcpCount || '' },
           { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>

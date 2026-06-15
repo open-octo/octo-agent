@@ -35,12 +35,26 @@
 </script>
 
 <aside class="panel">
+  {#if !cur}
+    <!-- Open with nothing collected yet: explain instead of crashing on cur.* -->
+    <div class="topbar">
+      <span class="file-name">{$t('chat.artifacts')}</span>
+      <span style="flex:1"></span>
+      <button class="icon-btn" title={$t('common.close')} onclick={() => artifactsOpen.set(false)}>
+        <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+      </button>
+    </div>
+    <div class="empty">
+      <iconify-icon icon="ant-design:file-text-outlined" width="28"></iconify-icon>
+      <span>{$t('artifacts.empty')}</span>
+    </div>
+  {:else}
   <!-- Topbar -->
   <div class="topbar">
     <iconify-icon icon={cur.icon} width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
     <div class="file-info">
       <span class="file-name">{cur.name}</span>
-      <span class="file-meta">{cur.type} · {cur.ver}</span>
+      <span class="file-meta">{cur.type}</span>
     </div>
     <button class="icon-btn" title={$t('artifacts.copy')} onclick={copyArtifact}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
     <button class="icon-btn" title={$t('artifacts.download')} onclick={downloadArtifact}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
@@ -82,6 +96,7 @@
     </button>
     {/each}
   </div>
+  {/if}
 </aside>
 
 <style>
@@ -114,6 +129,10 @@
 .seg-btn.active { background: var(--bg-container); color: var(--blue-6); }
 .sandboxed-label { margin-left: auto; font-size: 11px; color: var(--text-tertiary); }
 .body { flex: 1; min-height: 0; background: var(--bg-container); }
+.empty {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 32px; text-align: center; color: var(--text-tertiary); font-size: 13px;
+}
 iframe { border: 0; width: 100%; height: 100%; display: block; }
 .code-view {
   margin: 0; height: 100%; box-sizing: border-box; overflow: auto;

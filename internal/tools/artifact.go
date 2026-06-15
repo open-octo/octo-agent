@@ -56,10 +56,13 @@ func (ShowArtifactTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "show_artifact",
 		Description: "Present a previewable file (HTML page, Markdown document, or image) to the " +
-			"user as an artifact. Use after a file was produced by a script or build step — " +
-			"files you create with write_file are surfaced automatically and don't need this. " +
-			"In the web UI the file appears in the Artifacts panel; in other clients the path " +
-			"is simply reported. The file must already exist.",
+			"user as an artifact. ALWAYS call this right after you produce a previewable file the " +
+			"user would want to look at — a generated HTML page or slide deck, a Markdown report, a " +
+			"chart or image — whenever it was created by some means other than write_file (a terminal " +
+			"heredoc/redirect like `cat > x.html`, a script, a build step, or a download). Files you " +
+			"create with write_file/edit_file are surfaced automatically and do NOT need this. In the " +
+			"web UI the file opens in the Artifacts panel (HTML renders in a sandboxed preview); in " +
+			"other clients the path is simply reported. The file must already exist.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
