@@ -315,15 +315,25 @@ export async function emptyTrash(opts?: EmptyTrashOpts): Promise<void> {
 
 // Config & Version
 
+// Mirrors server modelConfig (onboard_config_handlers.go). api_key is returned
+// masked; type is "default" | "lite" | "" .
 export interface ModelEntry {
   id: string
   model: string
   type?: string
+  base_url?: string
+  api_key_masked?: string
   provider?: string
+  anthropic_format?: boolean
+  permission_mode?: string
+  reasoning_effort?: string
+  show_reasoning?: boolean
 }
 export interface ConfigResponse {
   models?: ModelEntry[]
   default_model_idx?: number
+  font_size?: string
+  language?: string
 }
 
 export async function getConfig(): Promise<ConfigResponse> {
@@ -332,4 +342,87 @@ export async function getConfig(): Promise<ConfigResponse> {
 
 export async function getVersion(): Promise<unknown> {
   return request<unknown>('/api/version')
+}
+
+// Onboard / first-run
+
+export interface OnboardStatus {
+  needs_onboard: boolean
+  phase: '' | 'key_setup' | 'soul_setup'
+}
+
+export async function getOnboardStatus(): Promise<OnboardStatus> {
+  return request<OnboardStatus>('/api/onboard/status')
+}
+
+export async function completeOnboard(): Promise<void> {
+  await request<unknown>('/api/onboard/complete', { method: 'POST' })
+}
+
+// Provider presets (GET /api/providers) — mirrors server providerPreset.
+export interface EndpointVariant {
+  label: string
+  label_key?: string
+  base_url: string
+  region?: string
+}
+export interface ProviderPreset {
+  id: string
+  name: string
+  base_url: string
+  api: string                // "anthropic-messages" ⇒ anthropic protocol
+  default_model: string
+  models?: string[]
+  lite_model?: string
+  endpoint_variants?: EndpointVariant[]
+  website_url?: string
+  custom_endpoint?: boolean
+}
+
+export async function listProviders(): Promise<ProviderPreset[]> {
+  const d = await request<{ providers: ProviderPreset[] }>('/api/providers')
+  return d.providers ?? []
+}
+
+// Model config mutations. The request shape mirrors server saveModelRequest;
+// an empty/masked api_key keeps the stored key on the server side.
+export interface ModelConfigInput {
+  type?: string
+  model: string
+  base_url: string
+  api_key?: string
+  provider?: string
+  anthropic_format?: boolean
+  permission_mode?: string
+  reasoning_effort?: string
+  show_reasoning?: boolean
+}
+
+export interface TestConfigResult {
+  ok: boolean
+  message?: string
+}
+
+export async function testConfig(req: ModelConfigInput & { index?: number }): Promise<TestConfigResult> {
+  return request<TestConfigResult>('/api/config/test', { method: 'POST', ...json(req) })
+}
+
+export async function saveModel(req: ModelConfigInput): Promise<{ ok: boolean; id?: string }> {
+  return request<{ ok: boolean; id?: string }>('/api/config/models', { method: 'POST', ...json(req) })
+}
+
+export async function updateModel(id: string, req: ModelConfigInput): Promise<void> {
+  await request<unknown>(`/api/config/models/${encodeURIComponent(id)}`, { method: 'PATCH', ...json(req) })
+}
+
+export async function deleteModel(id: string): Promise<void> {
+  await request<unknown>(`/api/config/models/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export async function setDefaultModel(id: string): Promise<void> {
+  await request<unknown>(`/api/config/models/${encodeURIComponent(id)}/default`, { method: 'POST' })
+}
+
+export async function setLiteModel(id: string): Promise<{ ok: boolean; lite_model: string }> {
+  return request<{ ok: boolean; lite_model: string }>(`/api/config/models/${encodeURIComponent(id)}/lite`, { method: 'POST' })
 }

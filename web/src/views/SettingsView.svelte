@@ -2,10 +2,13 @@
   import { onMount } from 'svelte'
   import Segment from '../components/ui/Segment.svelte'
   import Switch from '../components/ui/Switch.svelte'
+  import StatusTag from '../components/ui/StatusTag.svelte'
+  import ModelConfigForm from '../components/settings/ModelConfigForm.svelte'
   import { showToast, activeSessionId } from '../lib/stores'
   import { setLocale, t, tr } from '../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import * as api from '../lib/api'
+  import type { ModelEntry, ProviderPreset, ModelConfigInput } from '../lib/api'
 
   // --- local state ---
   let language      = $state('en')
@@ -26,6 +29,13 @@
   let origModel   = ''
   let origWorkdir = ''
 
+  // ── Models section (config-level entries: add/edit/delete/default/lite) ──────
+  let models       = $state<ModelEntry[]>([])
+  let providers    = $state<ProviderPreset[]>([])
+  let modelModalOpen = $state(false)
+  let editingModel = $state<ModelEntry | null>(null)
+  let busyModelId  = $state<string | null>(null)
+
   const langOptions = [
     { value: 'en', label: 'English' },
     { value: 'zh', label: '简体中文' },
@@ -42,8 +52,66 @@
     const savedFont = localStorage.getItem('octo.fontSize')
     if (savedFont) fontSize = savedFont
     theme = modeToThemeLabel[getMode()] ?? 'Light'
+    api.listProviders().then(p => (providers = p)).catch(() => {})
     await Promise.all([loadConfig(), loadVersion()])
   })
+
+  // ── model actions ───────────────────────────────────────────────────────────
+  function openAddModel() {
+    editingModel = null
+    modelModalOpen = true
+  }
+  function openEditModel(m: ModelEntry) {
+    editingModel = m
+    modelModalOpen = true
+  }
+  async function submitModel(req: ModelConfigInput) {
+    if (editingModel) {
+      await api.updateModel(editingModel.id, req)
+    } else {
+      await api.saveModel(req)
+    }
+    modelModalOpen = false
+    await loadConfig()
+    showToast(tr('settings.toast_saved'), 'success')
+  }
+  async function deleteModelRow(m: ModelEntry) {
+    if (!confirm(tr('settings.models.confirm_remove'))) return
+    busyModelId = m.id
+    try {
+      await api.deleteModel(m.id)
+      await loadConfig()
+    } catch (e: any) {
+      showToast(e?.message ?? 'Delete failed', 'error')
+    } finally {
+      busyModelId = null
+    }
+  }
+  async function setDefaultModel(m: ModelEntry) {
+    busyModelId = m.id
+    try {
+      await api.setDefaultModel(m.id)
+      await loadConfig()
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed', 'error')
+    } finally {
+      busyModelId = null
+    }
+  }
+  async function toggleLite(m: ModelEntry) {
+    busyModelId = m.id
+    try {
+      await api.setLiteModel(m.id)
+      await loadConfig()
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed', 'error')
+    } finally {
+      busyModelId = null
+    }
+  }
+  function maskedFor(m: ModelEntry): string {
+    return m.api_key_masked || ''
+  }
 
   async function loadConfig() {
     loading = true
@@ -51,6 +119,7 @@
       const cfg = await api.getConfig() as any
       // models list
       const ms: any[] = cfg.models ?? []
+      models = ms as ModelEntry[]
       modelOptions = ms.map((m: any) => m.model ?? m.id)
       const defaultIdx = cfg.default_model_idx ?? 0
       const def = ms[defaultIdx]
@@ -137,6 +206,47 @@
     {#if loading}
       <div class="loading-state">{$t('settings.loading')}</div>
     {:else}
+      <!-- AI Models (config-level entries) -->
+      <div class="section-card">
+        <div class="section-head">
+          <span class="section-title-inline">{$t('settings.models.title')}</span>
+          <button class="btn-add" onclick={openAddModel}>
+            <iconify-icon icon="ant-design:plus-outlined" width="13"></iconify-icon>
+            {$t('settings.models.add')}
+          </button>
+        </div>
+        {#if models.length === 0}
+          <div class="models-empty">{$t('settings.models.empty')}</div>
+        {:else}
+          {#each models as m (m.id)}
+            <div class="model-row">
+              <div class="model-info">
+                <div class="model-name-line">
+                  <span class="model-name mono">{m.model}</span>
+                  {#if m.type === 'default'}<StatusTag status="success">{$t('settings.models.badge.default')}</StatusTag>{/if}
+                  {#if m.type === 'lite'}<StatusTag status="info">{$t('settings.models.badge.lite')}</StatusTag>{/if}
+                </div>
+                <span class="model-meta mono">{m.base_url}{maskedFor(m) ? ` · ${maskedFor(m)}` : ''}</span>
+              </div>
+              <div class="model-actions">
+                {#if m.type !== 'default'}
+                  <button class="act-text" disabled={busyModelId === m.id} onclick={() => setDefaultModel(m)}>{$t('settings.models.set_default')}</button>
+                {/if}
+                <button class="act-text" disabled={busyModelId === m.id} title={$t('settings.models.lite_hint')} onclick={() => toggleLite(m)}>
+                  {m.type === 'lite' ? $t('settings.models.unset_lite') : $t('settings.models.set_lite')}
+                </button>
+                <button class="act-btn" title={$t('common.edit')} onclick={() => openEditModel(m)}>
+                  <iconify-icon icon="ant-design:edit-outlined" width="14"></iconify-icon>
+                </button>
+                <button class="act-btn del" title={$t('common.delete')} disabled={busyModelId === m.id} onclick={() => deleteModelRow(m)}>
+                  <iconify-icon icon="ant-design:delete-outlined" width="14"></iconify-icon>
+                </button>
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+
       <!-- General -->
       <div class="section-card">
         <div class="section-title">{$t('settings.general')}</div>
@@ -238,6 +348,31 @@
   </div>
 </div>
 
+<!-- Add / edit model modal -->
+{#if modelModalOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('modal-backdrop')) modelModalOpen = false }}>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <span class="modal-title">{editingModel ? $t('settings.models.modal_edit') : $t('settings.models.modal_add')}</span>
+        <button class="modal-close" onclick={() => (modelModalOpen = false)} aria-label={$t('common.close')}>
+          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+        </button>
+      </div>
+      <div class="modal-body">
+        <ModelConfigForm
+          {providers}
+          initial={editingModel}
+          requireKey={!editingModel}
+          submitLabel={$t('models.btn.save')}
+          onSubmit={submitModel}
+        />
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
 .page { flex: 1; overflow-y: auto; min-height: 0; }
 .inner { max-width: 800px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
@@ -272,4 +407,65 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .btn-primary:hover:not(:disabled) { background: var(--blue-5); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .version-badge { font-size: 12px; color: var(--text-tertiary); }
+
+/* ── Models section ─────────────────────────────────────────────────────────── */
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 24px; border-bottom: 1px solid var(--border-table);
+}
+.section-title-inline { font-size: 16px; font-weight: 600; color: var(--text-heading); }
+.btn-add {
+  height: 30px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 6px; display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+}
+.btn-add:hover { border-color: var(--blue-5); color: var(--blue-5); }
+.models-empty { padding: 28px 24px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
+.model-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 24px; border-bottom: 1px solid var(--border-table);
+}
+.model-row:last-child { border-bottom: none; }
+.model-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.model-name-line { display: flex; align-items: center; gap: 8px; }
+.model-name { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-meta { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.act-text {
+  height: 28px; padding: 0 10px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+}
+.act-text:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
+.act-text:disabled { opacity: 0.5; cursor: not-allowed; }
+.act-btn {
+  width: 28px; height: 28px; border: none; background: transparent; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-tertiary);
+}
+.act-btn:hover { background: var(--hover-neutral); color: var(--blue-6); }
+.act-btn.del:hover { color: var(--error); }
+.act-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* ── modal ──────────────────────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0; background: var(--text-tertiary);
+  display: flex; align-items: flex-start; justify-content: center; z-index: 200;
+  padding: 48px 16px; overflow-y: auto;
+}
+.modal {
+  width: 520px; max-width: 100%;
+  background: var(--bg-container); border-radius: 16px; box-shadow: 0 24px 48px rgba(15,23,42,0.18);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 24px 16px; border-bottom: 1px solid var(--border-table);
+}
+.modal-title { font-size: 16px; font-weight: 600; color: var(--text-heading); }
+.modal-close {
+  width: 28px; height: 28px; border: none; background: transparent; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-tertiary);
+}
+.modal-close:hover { background: var(--hover-neutral); color: var(--text); }
+.modal-body { padding: 20px 24px; }
 </style>

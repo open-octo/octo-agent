@@ -1,0 +1,292 @@
+<script lang="ts">
+  import { untrack } from 'svelte'
+  import { t } from '../../lib/i18n'
+  import * as api from '../../lib/api'
+  import type { ProviderPreset, ModelEntry, ModelConfigInput } from '../../lib/api'
+  import Switch from '../ui/Switch.svelte'
+
+  // Shared provider/key form used by both the first-run setup panel and the
+  // Settings → Models section. It owns the Test-connection button internally;
+  // persistence differs per caller, so Save is delegated via onSubmit.
+  let {
+    providers = [],
+    initial = null,
+    requireKey = true,
+    submitLabel,
+    onSubmit,
+  }: {
+    providers?: ProviderPreset[]
+    initial?: Partial<ModelEntry> | null
+    requireKey?: boolean
+    submitLabel: string
+    onSubmit: (req: ModelConfigInput) => Promise<void>
+  } = $props()
+
+  // ── form state ──────────────────────────────────────────────────────────────
+  // Snapshot the prop once: this form is mounted fresh each time a modal opens,
+  // so seeding editable state from the initial value (not tracking it) is what
+  // we want — and the snapshot avoids the state_referenced_locally warning.
+  const seed = untrack(() => initial) ?? {}
+
+  // Preselect the stored provider id (a real vendor, always present in the
+  // presets list); an unknown id just falls back to the placeholder option.
+  let providerId   = $state(seed.provider ?? '')
+  let model        = $state(seed.model ?? '')
+  let baseUrl      = $state(seed.base_url ?? '')
+  let apiKey       = $state('')            // never prefilled; placeholder shows the masked key
+  let permMode     = $state(seed.permission_mode ?? 'interactive')
+  let reasoning    = $state(seed.reasoning_effort ?? 'off')
+  let showReason   = $state(seed.show_reasoning ?? false)
+  let showKey      = $state(false)
+
+  let testing      = $state(false)
+  let saving       = $state(false)
+  let result       = $state<{ ok: boolean; msg: string } | null>(null)
+
+  let preset    = $derived(providers.find(p => p.id === providerId) ?? null)
+  let variants  = $derived(preset?.endpoint_variants ?? [])
+  // Catalogue vendors are pinned to their endpoint; only custom_endpoint
+  // providers (and Custom) take a typed Base URL.
+  let baseUrlLocked = $derived(!!preset && !preset.custom_endpoint)
+  let keyPlaceholder = $derived(initial?.api_key_masked || $t('models.apikey.placeholder'))
+
+  function variantLabel(v: api.EndpointVariant): string {
+    if (v.label_key) {
+      const tr = $t(v.label_key)
+      if (tr && tr !== v.label_key) return tr
+    }
+    return v.label || v.base_url
+  }
+
+  // Selecting a preset fills model + base_url; Custom clears them for free entry.
+  function onProviderChange() {
+    result = null
+    if (providerId === '__custom__' || providerId === '') {
+      if (providerId === '__custom__') { model = ''; baseUrl = '' }
+      return
+    }
+    if (preset) {
+      model = preset.default_model || ''
+      baseUrl = preset.base_url || ''
+    }
+  }
+
+  // anthropic vs openai protocol is decided by the chosen preset; a hand-typed
+  // endpoint with no preset is the openai-compatible catch-all.
+  function buildReq(): ModelConfigInput {
+    const providerID = preset ? preset.id : 'openai_compatible'
+    const anthropic = !!(preset && preset.api === 'anthropic-messages')
+    return {
+      type: 'default',
+      model: model.trim(),
+      base_url: baseUrl.trim(),
+      api_key: apiKey.trim(),
+      provider: providerID,
+      anthropic_format: anthropic,
+      permission_mode: permMode,
+      reasoning_effort: reasoning,
+      show_reasoning: showReason,
+    }
+  }
+
+  function valid(): boolean {
+    return !!model.trim() && !!baseUrl.trim() && (!requireKey || !!apiKey.trim())
+  }
+
+  async function handleTest() {
+    if (!valid()) { result = { ok: false, msg: $t('models.error.required') }; return }
+    testing = true
+    result = null
+    try {
+      const r = await api.testConfig(buildReq())
+      result = { ok: r.ok, msg: r.ok ? $t('models.test.ok') : (r.message || $t('models.test.fail')) }
+    } catch (e: any) {
+      result = { ok: false, msg: e?.message ?? $t('models.test.fail') }
+    } finally {
+      testing = false
+    }
+  }
+
+  async function handleSubmit() {
+    if (!valid()) { result = { ok: false, msg: $t('models.error.required') }; return }
+    saving = true
+    try {
+      await onSubmit(buildReq())
+    } catch (e: any) {
+      result = { ok: false, msg: e?.message ?? $t('models.save.fail') }
+      saving = false
+    }
+    // On success the parent typically unmounts this form (closes modal / advances
+    // onboard), so we leave `saving` true to keep the button disabled until then.
+  }
+</script>
+
+<div class="form">
+  <!-- Provider -->
+  <label class="field">
+    <span class="field-label">{$t('models.provider')}</span>
+    <select class="field-input" bind:value={providerId} onchange={onProviderChange} disabled={saving}>
+      <option value="">{$t('models.provider.placeholder')}</option>
+      {#each providers as p (p.id)}
+        <option value={p.id}>{p.name}</option>
+      {/each}
+      <option value="__custom__">{$t('models.provider.custom')}</option>
+    </select>
+    {#if preset?.website_url}
+      <a class="field-link" href={preset.website_url} target="_blank" rel="noreferrer">{$t('models.get_apikey')}</a>
+    {/if}
+  </label>
+
+  <!-- Model -->
+  <label class="field">
+    <span class="field-label">{$t('models.model')}</span>
+    <input
+      class="field-input mono"
+      type="text"
+      list="mcf-models"
+      placeholder={$t('models.model.placeholder')}
+      bind:value={model}
+      disabled={saving}
+    />
+    {#if preset?.models?.length}
+      <datalist id="mcf-models">
+        {#each preset.models as m}<option value={m}></option>{/each}
+      </datalist>
+    {/if}
+  </label>
+
+  <!-- Base URL -->
+  <label class="field">
+    <span class="field-label">{$t('models.baseurl')}</span>
+    <input
+      class="field-input mono"
+      type="text"
+      placeholder={$t('models.baseurl.placeholder')}
+      bind:value={baseUrl}
+      readonly={baseUrlLocked}
+      disabled={saving}
+    />
+    {#if variants.length > 0}
+      <div class="variants">
+        {#each variants as v (v.base_url)}
+          <button
+            type="button"
+            class="variant-chip"
+            class:active={baseUrl === v.base_url}
+            onclick={() => (baseUrl = v.base_url)}
+            disabled={saving}
+          >{variantLabel(v)}</button>
+        {/each}
+      </div>
+    {/if}
+  </label>
+
+  <!-- API Key -->
+  <label class="field">
+    <span class="field-label">{$t('models.apikey')}</span>
+    <div class="key-row">
+      <input
+        class="field-input mono"
+        type={showKey ? 'text' : 'password'}
+        placeholder={keyPlaceholder}
+        bind:value={apiKey}
+        disabled={saving}
+      />
+      <button type="button" class="key-toggle" onclick={() => (showKey = !showKey)} title={showKey ? 'Hide' : 'Show'}>
+        <iconify-icon icon={showKey ? 'ant-design:eye-invisible-outlined' : 'ant-design:eye-outlined'} width="15"></iconify-icon>
+      </button>
+    </div>
+  </label>
+
+  <!-- Preferences -->
+  <div class="prefs">
+    <label class="field half">
+      <span class="field-label">{$t('models.permission_mode')}</span>
+      <select class="field-input" bind:value={permMode} disabled={saving}>
+        <option value="interactive">{$t('models.permission_mode.interactive')}</option>
+        <option value="auto">{$t('models.permission_mode.auto')}</option>
+      </select>
+    </label>
+    <label class="field half">
+      <span class="field-label">{$t('models.reasoning_effort')}</span>
+      <select class="field-input" bind:value={reasoning} disabled={saving}>
+        <option value="off">{$t('models.reasoning.off')}</option>
+        <option value="low">{$t('models.reasoning.low')}</option>
+        <option value="medium">{$t('models.reasoning.medium')}</option>
+        <option value="high">{$t('models.reasoning.high')}</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="reason-toggle">
+    <Switch bind:checked={showReason} />
+    <span>{$t('models.show_reasoning')}</span>
+  </div>
+
+  <!-- Result -->
+  {#if result}
+    <div class="result" class:ok={result.ok} class:fail={!result.ok}>
+      {result.ok ? '✓' : '✗'} {result.msg}
+    </div>
+  {/if}
+
+  <!-- Actions -->
+  <div class="actions">
+    <button class="btn-secondary" onclick={handleTest} disabled={testing || saving}>
+      {testing ? $t('models.btn.testing') : $t('models.btn.test')}
+    </button>
+    <button class="btn-primary" onclick={handleSubmit} disabled={saving || testing}>
+      {saving ? $t('models.btn.saving') : submitLabel}
+    </button>
+  </div>
+</div>
+
+<style>
+.form { display: flex; flex-direction: column; gap: 16px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
+.field-input {
+  font-family: inherit; font-size: 14px; color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 11px; outline: none; background: var(--bg-container);
+  transition: border-color 0.15s;
+}
+.field-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(22,119,255,0.1); }
+.field-input[readonly], .field-input:disabled { background: var(--bg-table-header); cursor: not-allowed; }
+.field-link { font-size: 12px; color: var(--blue-6); text-decoration: none; align-self: flex-start; }
+.field-link:hover { text-decoration: underline; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.variants { display: flex; flex-wrap: wrap; gap: 6px; }
+.variant-chip {
+  height: 24px; padding: 0 10px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 999px; font-size: 12px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+}
+.variant-chip:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
+.variant-chip.active { border-color: var(--blue-6); color: var(--blue-6); background: var(--active-blue-bg); }
+.key-row { display: flex; align-items: center; gap: 8px; }
+.key-row .field-input { flex: 1; min-width: 0; }
+.key-toggle {
+  width: 34px; height: 36px; flex: 0 0 34px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-tertiary);
+}
+.key-toggle:hover { border-color: var(--blue-5); color: var(--blue-5); }
+.prefs { display: flex; gap: 12px; }
+.field.half { flex: 1; min-width: 0; }
+.reason-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+.result { font-size: 13px; padding: 8px 12px; border-radius: 8px; }
+.result.ok { background: var(--surface-info); color: var(--success); }
+.result.fail { background: var(--warning-bg); color: var(--error); }
+.actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.btn-primary {
+  height: 34px; padding: 0 16px; border: none; background: var(--blue-6); border-radius: 6px;
+  font-size: 14px; color: #fff; cursor: pointer; font-family: inherit;
+}
+.btn-primary:hover:not(:disabled) { background: var(--blue-5); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-secondary {
+  height: 34px; padding: 0 16px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+}
+.btn-secondary:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
+.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
