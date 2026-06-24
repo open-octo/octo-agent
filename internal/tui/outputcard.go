@@ -29,7 +29,15 @@ func RenderOutputCard(verb, target, output string, maxLines int, isErr bool, lan
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("%s %s", bullet, headerVerb.Render(fmt.Sprintf("%s(%s)", verb, target))))
 
-	lines := splitLinesNoTrail(output)
+	all := splitLinesNoTrail(output)
+	// Blank lines waste preview slots without adding information; filter them
+	// out so the cap applies to meaningful content only.
+	lines := all[:0]
+	for _, l := range all {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
 	if len(lines) == 0 {
 		b.WriteString("\n  " + outGutter.String() + " " + outMore.Render("(no output)"))
 		return b.String()
