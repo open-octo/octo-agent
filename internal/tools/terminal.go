@@ -18,16 +18,14 @@ import (
 var TerminalTimeout = 120 * time.Second
 
 // BgPollNotice is the model-facing instruction appended to a background-launch
-// tool result. It steers the model away from polling terminal_output and
-// carries no information for the human, so the TUI strips it from result cards
-// (see renderToolCard) rather than printing it to the scrollback.
-const BgPollNotice = "DO NOT poll terminal_output. The system will automatically notify you when this process finishes, carrying its final output. While it runs, you may continue with other independent tasks. If you have no other task to do, report the launch to the user and stop — do not spin in a polling loop."
+// tool result. Wrapped in <system-reminder> so StripRemindersForDisplay strips
+// it from UI cards (TUI and web) — it's noise for humans.
+const BgPollNotice = "<system-reminder>DO NOT poll terminal_output. The system will automatically notify you when this process finishes, carrying its final output. While it runs, you may continue with other independent tasks. If you have no other task to do, report the launch to the user and stop — do not spin in a polling loop.</system-reminder>"
 
 // ServiceModeNotice is the model-facing instruction appended to a background
-// launch of a long-running service (servers, watchers, etc.). It tells the
-// model to verify the service externally (curl, pgrep) rather than polling
-// terminal_output.
-const ServiceModeNotice = "After launching a long-running service, verify it with an external check (e.g., `curl http://localhost:PORT` or `pgrep`) rather than polling terminal_output. terminal_output is for inspecting startup logs or diagnosing issues — do not call it in a tight loop."
+// launch of a long-running service (servers, watchers, etc.). Wrapped in
+// <system-reminder> so UI card renderers strip it automatically.
+const ServiceModeNotice = "<system-reminder>After launching a long-running service, verify it with an external check (e.g., `curl http://localhost:PORT` or `pgrep`) rather than polling terminal_output. terminal_output is for inspecting startup logs or diagnosing issues — do not call it in a tight loop.</system-reminder>"
 
 // TerminalTool is an agent.ToolExecutor that runs shell commands through the
 // system shell (`sh -c` on macOS/Linux, PowerShell on Windows; see

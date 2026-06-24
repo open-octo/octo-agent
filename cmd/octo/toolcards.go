@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/Leihb/octo-agent/internal/tools"
 	"github.com/Leihb/octo-agent/internal/tui"
@@ -96,12 +95,6 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 		if p, _ := input["path"].(string); p != "" {
 			lang = tui.GuessLanguage(p)
 		}
-	}
-	if toolName == "terminal" {
-		// The background-launch result carries a model-only "don't poll"
-		// instruction appended after a blank line. It's noise for the human, so
-		// drop it from the card — the "Started background process N" line stays.
-		output = strings.TrimRight(strings.TrimSuffix(output, tools.BgPollNotice), "\n")
 	}
 	if toolName == "write_file" {
 		// write_file's own output is already a human-readable summary
