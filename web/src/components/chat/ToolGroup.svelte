@@ -344,6 +344,13 @@
               </div>
             {/if}
           </div>
+        {:else if (tool.name === 'terminal' || tool.name === 'bash') && tool.ui_payload?.output_preview}
+          <!-- Use ui_payload.output_preview for terminal results with no stdout —
+               the raw tool.result contains model-facing instructions (BgPollNotice)
+               that should never be shown to the user. -->
+          <div class="term-wrap">
+            <pre class="terminal-output">{tool.ui_payload.output_preview}</pre>
+          </div>
         {:else if tool.result}
           {@const pretty = prettyResult(tool.result)}
           {@const fold = foldInfo(tool.id, pretty)}

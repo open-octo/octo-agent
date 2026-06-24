@@ -157,7 +157,7 @@ func (t TerminalTool) ExecuteStream(
 		}
 		return agent.ToolResult{
 			Text: fmt.Sprintf("Started background process %s.%s\n\n%s", id, stdinWarn, BgPollNotice),
-			UI:   terminalUI(command, "running", fmt.Sprintf("background process %s", id)),
+			UI:   terminalUI(command, "running", fmt.Sprintf("Started background process %s.", id)),
 		}, nil
 	}
 
