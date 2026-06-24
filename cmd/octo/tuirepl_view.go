@@ -36,7 +36,8 @@ var (
 	modalStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
 	hintStyle         = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
 	activityStyle     = lipgloss.NewStyle().Foreground(tui.ColBrand)
-	userEchoStyle     = lipgloss.NewStyle().Foreground(tui.ColUserMsg).Bold(true)
+	userEchoStyle        = lipgloss.NewStyle().Foreground(tui.ColUserMsg).Bold(true)
+	assistantPrefixStyle = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
 	pendingSteerStyle = lipgloss.NewStyle().Foreground(tui.ColMuted)
 	complSelStyle     = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
 	complNameStyle    = lipgloss.NewStyle().Foreground(tui.ColAccent)
@@ -968,7 +969,11 @@ func (m *tuiModel) View() string {
 
 	// Live partial assistant text
 	if p := m.partial.String(); p != "" {
-		b.WriteString(m.md.render(p, m.width))
+		rendered := m.md.render(p, m.width)
+		if m.assistantFirstBlock {
+			rendered = injectAssistantPrefix(rendered, assistantPrefixStyle.Render("◆ "))
+		}
+		b.WriteString(rendered)
 		b.WriteByte('\n')
 	}
 
@@ -1319,4 +1324,24 @@ func (m *tuiModel) thinkingLine() string {
 		hintStyle.Render(string(frame)),
 		activityStyle.Render(phrase+"…"),
 		hintStyle.Render("("+meta+")"))
+}
+
+// injectAssistantPrefix inserts prefix just before the first non-space content
+// character in rendered, skipping any leading newlines glamour may prepend.
+// This aligns ◆ at the left edge, mirroring how "> " anchors user messages.
+func injectAssistantPrefix(rendered, prefix string) string {
+	// Skip leading newlines (glamour block margin), then leading spaces
+	// (glamour paragraph indent) on the first content line.
+	i := 0
+	for i < len(rendered) && rendered[i] == '\n' {
+		i++
+	}
+	j := i
+	for j < len(rendered) && rendered[j] == ' ' {
+		j++
+	}
+	if j >= len(rendered) {
+		return rendered // blank output — don't inject
+	}
+	return rendered[:i] + prefix + rendered[j:]
 }
