@@ -126,11 +126,7 @@ func (WorkflowTool) ExecuteStream(ctx context.Context, _ string, input map[strin
 		ResumeFrom:    stringArg(input, "resume_from"),
 	})
 	if err != nil {
-		// Surface logs even on failure — they often explain how far it got.
-		if len(logs) > 0 {
-			return agent.ToolResult{}, fmt.Errorf("workflow: %w\n[log]\n%s", err, strings.Join(logs, "\n"))
-		}
-		return agent.ToolResult{}, fmt.Errorf("workflow: %w", err)
+		return agent.ToolResult{}, workflowError(err, res, logs)
 	}
 
 	text := res.Output
@@ -141,4 +137,36 @@ func (WorkflowTool) ExecuteStream(ctx context.Context, _ string, input map[strin
 		text += "\n\n[workflow run: " + res.RunID + "]"
 	}
 	return agent.ToolResult{Text: text}, nil
+}
+
+// workflowError turns a failed run into an actionable tool error. A script
+// error is the model's own Ruby — it must learn to fix the script and re-call
+// workflow rather than treat the failure as terminal — so the message says so
+// explicitly. When agents completed before the failure, their results are
+// journaled under res.RunID; surfacing it lets the retry pass resume_from to
+// skip the work already done. Logs are appended last since they often show how
+// far the run got.
+func workflowError(err error, res workflow.Result, logs []string) error {
+	var b strings.Builder
+	if strings.Contains(err.Error(), "script error") {
+		b.WriteString("workflow: the Ruby script you wrote failed to run. ")
+		b.WriteString("Fix the script and call workflow again.\n\n")
+		b.WriteString(err.Error())
+		// Resume hint only when at least one agent actually ran (tokens spent);
+		// a compile/syntax error journals nothing, so resume would be a no-op.
+		if res.RunID != "" && (res.OutputTokens > 0 || res.InputTokens > 0) {
+			b.WriteString(fmt.Sprintf(
+				"\n\nSome agents completed before the failure. To skip re-running them, "+
+					"pass resume_from: %q in the retry (only the agent() calls that didn't "+
+					"finish will run again).", res.RunID))
+		}
+	} else {
+		b.WriteString("workflow: ")
+		b.WriteString(err.Error())
+	}
+	if len(logs) > 0 {
+		b.WriteString("\n\n[workflow log]\n")
+		b.WriteString(strings.Join(logs, "\n"))
+	}
+	return fmt.Errorf("%s", b.String())
 }

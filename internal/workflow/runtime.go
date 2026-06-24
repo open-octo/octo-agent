@@ -18,6 +18,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -177,7 +178,7 @@ func Run(ctx context.Context, script string, opt Options) (Result, error) {
 			if res.Canceled {
 				return res, context.Canceled
 			}
-			return res, fmt.Errorf("workflow: script error: %s", strings.TrimSpace(stderr.String()))
+			return res, fmt.Errorf("workflow: script error: %s", cleanScriptError(stderr.String()))
 		}
 		if res.Canceled || ctx.Err() != nil {
 			return res, context.Canceled
@@ -186,6 +187,43 @@ func Run(ctx context.Context, script string, opt Options) (Result, error) {
 	}
 	res.Output = strings.TrimRight(stdout.String(), "\n")
 	return res, nil
+}
+
+// mruby backtrace noise. The interpreter prepends a position prefix to every
+// error line, but the position is meaningless to the script author: the
+// filename is always "(unknown)", runtime errors report line/column "0", and
+// syntax-error line numbers count from the top of the Go-prepended prelude
+// (~86 lines) rather than the user's script — so surfacing them just misleads
+// the model into editing a line that doesn't exist. We strip the prefixes and
+// keep the human-readable message + error class.
+var (
+	mrubyPosPrefix = regexp.MustCompile(`(?m)^\s*(?:\(unknown\)|line \d+):\d+:(?:in [^:]*:)?\s*`)
+	mrubyTraceLine = regexp.MustCompile(`(?m)^\s*(?:trace \(most recent call last\):|\[\d+\] .*)\s*$`)
+)
+
+// cleanScriptError turns a raw mruby backtrace into a concise, author-facing
+// message by stripping the misleading position prefixes (see mrubyPosPrefix)
+// and the bare trace scaffolding, then collapsing blank/duplicate lines. The
+// error class (NoMethodError, SyntaxError, …) and message survive intact.
+func cleanScriptError(stderr string) string {
+	s := mrubyTraceLine.ReplaceAllString(stderr, "")
+	s = mrubyPosPrefix.ReplaceAllString(s, "")
+	// Collapse to non-empty, de-duplicated lines (mruby often repeats the
+	// SyntaxError summary on a second line).
+	seen := make(map[string]bool)
+	var out []string
+	for _, ln := range strings.Split(s, "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || seen[ln] {
+			continue
+		}
+		seen[ln] = true
+		out = append(out, ln)
+	}
+	if len(out) == 0 {
+		return strings.TrimSpace(stderr) // never return empty — fall back to raw
+	}
+	return strings.Join(out, "; ")
 }
 
 // backend holds the host-side scheduler state for one Run.

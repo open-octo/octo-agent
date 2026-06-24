@@ -212,6 +212,45 @@ func TestRun_ScriptError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "script error") {
 		t.Errorf("err = %v, want script error", err)
 	}
+	// The misleading mruby position prefix ("(unknown):0:") must be stripped,
+	// while the method name and error class survive so the model can self-fix.
+	if strings.Contains(err.Error(), "(unknown)") {
+		t.Errorf("err leaks mruby position noise: %v", err)
+	}
+	for _, want := range []string{"this_method_does_not_exist", "NoMethodError"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+}
+
+func TestCleanScriptError(t *testing.T) {
+	cases := []struct {
+		name, in string
+		want     string // substring that must be present
+		absent   string // substring that must be gone
+	}{
+		{"nomethod", "(unknown):0: undefined method 'nope' for Object (NoMethodError)",
+			"undefined method 'nope'", "(unknown)"},
+		{"syntax", "line 90:0: syntax error, unexpected end of file\n(unknown):0: syntax error (SyntaxError)",
+			"unexpected end of file", "line 90"},
+		{"trace", "trace (most recent call last):\n(unknown):0:in +: String cannot be converted to Float (TypeError)",
+			"cannot be converted to Float", "trace (most recent"},
+	}
+	for _, c := range cases {
+		got := cleanScriptError(c.in)
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%s: cleanScriptError(%q) = %q, want substring %q", c.name, c.in, got, c.want)
+		}
+		if c.absent != "" && strings.Contains(got, c.absent) {
+			t.Errorf("%s: cleanScriptError(%q) = %q, must not contain %q", c.name, c.in, got, c.absent)
+		}
+	}
+	// A non-blank input that is entirely position-noise must not vanish — it
+	// falls back to the raw stderr so the failure is never silently hidden.
+	if got := cleanScriptError("(unknown):0:"); got == "" {
+		t.Error("cleanScriptError of noise-only input returned empty string")
+	}
 }
 
 func TestRun_RequiresAgent(t *testing.T) {

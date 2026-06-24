@@ -93,3 +93,44 @@ func TestWorkflowTool_RequiresScript(t *testing.T) {
 		t.Errorf("err = %v, want script-required", err)
 	}
 }
+
+// TestWorkflowTool_ScriptErrorIsActionable verifies a bad Ruby script comes
+// back as a fix-and-retry instruction (not an opaque failure) with the mruby
+// position noise stripped, so the model self-corrects instead of giving up.
+func TestWorkflowTool_ScriptErrorIsActionable(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+
+	_, err := WorkflowTool{}.Execute(context.Background(), "c",
+		map[string]any{"script": `this_is_not_defined(1)`})
+	if err == nil {
+		t.Fatal("expected an error from a bad script")
+	}
+	msg := err.Error()
+	for _, want := range []string{"Fix the script and call workflow again", "this_is_not_defined"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error = %q, want substring %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "(unknown)") {
+		t.Errorf("error leaks mruby position noise: %q", msg)
+	}
+}
+
+// TestWorkflowTool_PartialFailureSuggestsResume verifies that when agents run
+// before the script errors, the failure surfaces the run id with a resume_from
+// hint so the retry skips the completed work.
+func TestWorkflowTool_PartialFailureSuggestsResume(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+
+	// First agent() succeeds (spending tokens + journaling), then a bad call.
+	_, err := WorkflowTool{}.Execute(context.Background(), "c",
+		map[string]any{"script": `agent("ok"); this_is_not_defined(1)`})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "resume_from") {
+		t.Errorf("error should suggest resume_from after a partial run; got: %q", err.Error())
+	}
+}
