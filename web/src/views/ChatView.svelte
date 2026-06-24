@@ -173,6 +173,9 @@
 
     cleanups.push(ws.on('thinking_delta', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      // Respect show_reasoning: undefined/true → show; false → discard.
+      const sess = get(sessions).find((s: any) => s.id === sid) as any
+      if (sess?.show_reasoning === false) return
       chatThinking.update(tt => ({ ...tt, [sid]: (tt[sid] ?? '') + ((ev as any).text ?? '') }))
     }))
 
@@ -235,6 +238,9 @@
 
     cleanups.push(ws.on('tool_call', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      // Step boundary: clear the live thinking buffer so the next step's
+      // reasoning starts fresh (mirrors the TUI's EventToolStarted reset).
+      chatThinking.update(tt => ({ ...tt, [sid]: '' }))
       addToolCallToGroup(sid, {
         id: uid('t'),
         toolId: (ev as any).tool_id ?? '',

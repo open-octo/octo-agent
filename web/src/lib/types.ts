@@ -161,6 +161,7 @@ export interface WsSessionInfo {
   working_dir: string
   permission_mode: 'ask' | 'auto'
   reasoning_effort: 'low' | 'medium' | 'high'
+  show_reasoning?: boolean
   context_usage: number
 }
 
