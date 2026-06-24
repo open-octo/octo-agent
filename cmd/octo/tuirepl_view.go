@@ -917,8 +917,8 @@ func (m *tuiModel) liveHeight() int {
 	if m.partial.String() != "" {
 		h++
 	}
-	if m.thinkingPartial.String() != "" {
-		h++
+	if t := m.thinkingPartial.String(); t != "" {
+		h += strings.Count(t, "\n") + 1
 	}
 	if m.running != nil || (m.turnRunning && m.partial.Len() == 0 && m.thinkingPartial.Len() == 0) {
 		h++

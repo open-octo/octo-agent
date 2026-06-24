@@ -948,12 +948,14 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 
 	case agent.EventTextDelta:
 		m.turnOutChars += len(ev.Text)
+		m.thinkingPartial.Reset() // thinking phase ended; text is now streaming
 		m.appendText(ev.Text)
 		return
 
 	case agent.EventToolStarted:
 		// Args finished streaming; the tool now executes. Clear the stream
 		// readout so the running-card spinner (or one-line status) takes over.
+		m.thinkingPartial.Reset() // thinking phase ended; tool call is next
 		m.toolStreamName, m.toolStreamID, m.toolStreamBytes = "", "", 0
 		if m.toolInput == nil {
 			m.toolInput = map[string]map[string]any{}
