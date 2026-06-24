@@ -318,6 +318,14 @@ type tuiModel struct {
 	// fully-completed list (normally hidden once nothing is outstanding).
 	showTasks bool
 
+	// showReasoning controls whether the reasoning/thinking trace is displayed
+	// in the live area (when true) or suppressed (when false). When false,
+	// thinking deltas still feed the live activity line's token count.
+	showReasoning bool
+	// thinkingPartial accumulates the reasoning trace when showReasoning is
+	// true, rendered dimmed in the live area above the normal partial text.
+	thinkingPartial strings.Builder
+
 	width int
 	quit  bool
 
@@ -457,7 +465,7 @@ func newTUIModel(cfg replConfig) *tuiModel {
 	if !tui.IsDark() {
 		style = "light"
 	}
-	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1}
+	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, showReasoning: cfg.showReasoning}
 	_ = m.updateTextAreaHeight()
 	return m
 }
@@ -916,9 +924,13 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 	m.commitEcho()
 	switch ev.Kind {
 	case agent.EventThinkingDelta:
-		// The reasoning trace stays out of the scrollback; only its size feeds
-		// the live activity line's token readout.
+		// When showReasoning is true, the thinking trace is streamed to the
+		// live area (dimmed, like the plain REPL). When false, it stays out
+		// of the live area and only feeds the activity line's token readout.
 		m.turnOutChars += len(ev.Text)
+		if m.showReasoning {
+			m.thinkingPartial.WriteString(ev.Text)
+		}
 		return
 
 	case agent.EventToolInputDelta:
@@ -1286,6 +1298,7 @@ func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
 	m.turnRunning = false
 	m.cancelTurn = nil
 	m.running = nil // clear any live tool indicator (e.g. on interrupt)
+	m.thinkingPartial.Reset()
 
 	// Any steer messages that weren't drained via EventSteerInjected during
 	// the turn (e.g. typed after the last loop iteration) are printed now so

@@ -904,11 +904,16 @@ func senderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("no API key for entry %q (provider %q)", entry.Name, entry.Provider)
 	}
+	showReasoning := true
+	if entry.ShowReasoning != nil {
+		showReasoning = *entry.ShowReasoning
+	}
 	return app.NewSender(app.SenderOptions{
 		Provider:        entry.Provider,
 		APIKey:          apiKey,
 		BaseURL:         entry.BaseURL,
 		ReasoningEffort: entry.ReasoningEffort,
+		ShowReasoning:   showReasoning,
 	})
 }
 

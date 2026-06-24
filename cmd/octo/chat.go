@@ -770,6 +770,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			reasoningEffort: resolvedEffort,
 			providerName:    provName,
 			configEntry:     entry,
+			showReasoning:   resolvedShowReasoning,
 		}
 		if toolsOn {
 			// Built-ins only at first paint — the MCP registry is still nil
