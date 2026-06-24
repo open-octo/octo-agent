@@ -318,6 +318,14 @@ type tuiModel struct {
 	// fully-completed list (normally hidden once nothing is outstanding).
 	showTasks bool
 
+	// showReasoning controls whether the reasoning/thinking trace is displayed
+	// in the live area (when true) or suppressed (when false). When false,
+	// thinking deltas still feed the live activity line's token count.
+	showReasoning bool
+	// thinkingPartial accumulates the reasoning trace when showReasoning is
+	// true, rendered dimmed in the live area above the normal partial text.
+	thinkingPartial strings.Builder
+
 	width int
 	quit  bool
 
@@ -363,6 +371,12 @@ type tuiModel struct {
 	// so printlnBlock can separate block-level items with exactly one blank
 	// line instead of stacking them edge-to-edge.
 	lastPrintBlank bool
+
+	// assistantFirstBlock is true from the start of a turn until the first
+	// assistant text block is committed to the scrollback. Used to prepend
+	// the ◆ indicator so the assistant's prose is visually anchored like the
+	// "> " prefix is for user messages.
+	assistantFirstBlock bool
 
 	// historyReplayed guards the one-time replay of a resumed session's prior
 	// turns into the scrollback. Done on the first WindowSizeMsg so markdown
@@ -451,7 +465,7 @@ func newTUIModel(cfg replConfig) *tuiModel {
 	if !tui.IsDark() {
 		style = "light"
 	}
-	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1}
+	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, showReasoning: cfg.showReasoning}
 	_ = m.updateTextAreaHeight()
 	return m
 }
@@ -599,6 +613,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case turnStartedMsg:
+		m.assistantFirstBlock = true
 		return m, m.flushPrints()
 
 	case tickMsg:
@@ -909,9 +924,13 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 	m.commitEcho()
 	switch ev.Kind {
 	case agent.EventThinkingDelta:
-		// The reasoning trace stays out of the scrollback; only its size feeds
-		// the live activity line's token readout.
+		// When showReasoning is true, the thinking trace is streamed to the
+		// live area (dimmed, like the plain REPL). When false, it stays out
+		// of the live area and only feeds the activity line's token readout.
 		m.turnOutChars += len(ev.Text)
+		if m.showReasoning {
+			m.thinkingPartial.WriteString(ev.Text)
+		}
 		return
 
 	case agent.EventToolInputDelta:
@@ -1172,6 +1191,10 @@ func (m *tuiModel) appendText(text string) {
 		complete := buf[:idx]
 		m.partial.Reset()
 		m.partial.WriteString(buf[idx+1:])
+		if m.assistantFirstBlock {
+			complete = assistantPrefixStyle.Render("◆ ") + complete
+			m.assistantFirstBlock = false
+		}
 		m.println(complete)
 		return
 	}
@@ -1182,7 +1205,12 @@ func (m *tuiModel) appendText(text string) {
 	}
 	m.partial.Reset()
 	m.partial.WriteString(rest)
-	m.printlnBlock(m.md.render(commit, m.width))
+	rendered := m.md.render(commit, m.width)
+	if m.assistantFirstBlock {
+		rendered = injectAssistantPrefix(rendered, assistantPrefixStyle.Render("◆ "))
+		m.assistantFirstBlock = false
+	}
+	m.printlnBlock(rendered)
 }
 
 // flushText commits whatever assistant text is still buffered (the final or
@@ -1207,9 +1235,18 @@ func (m *tuiModel) flushTextString() (string, bool) {
 	}
 	m.partial.Reset()
 	if m.cfg.plain {
+		if m.assistantFirstBlock {
+			p = assistantPrefixStyle.Render("◆ ") + p
+			m.assistantFirstBlock = false
+		}
 		return p, true
 	}
-	return m.md.render(p, m.width), true
+	rendered := m.md.render(p, m.width)
+	if m.assistantFirstBlock {
+		rendered = injectAssistantPrefix(rendered, assistantPrefixStyle.Render("◆ "))
+		m.assistantFirstBlock = false
+	}
+	return rendered, true
 }
 
 // commitToolLine flushes any in-progress text to the scrollback, then appends
@@ -1261,6 +1298,7 @@ func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
 	m.turnRunning = false
 	m.cancelTurn = nil
 	m.running = nil // clear any live tool indicator (e.g. on interrupt)
+	m.thinkingPartial.Reset()
 
 	// Any steer messages that weren't drained via EventSteerInjected during
 	// the turn (e.g. typed after the last loop iteration) are printed now so

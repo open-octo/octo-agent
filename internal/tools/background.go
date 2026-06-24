@@ -255,6 +255,18 @@ func (m *BackgroundManager) SetOnExit(fn func(BgExit)) {
 	m.mu.Unlock()
 }
 
+// FireExitHook calls the onExit hook directly with e, as if a tracked process
+// had just exited. No-op when no hook is registered. Used in tests to trigger
+// the notification path without starting a real shell process.
+func (m *BackgroundManager) FireExitHook(e BgExit) {
+	m.mu.Lock()
+	hook := m.onExit
+	m.mu.Unlock()
+	if hook != nil {
+		hook(e)
+	}
+}
+
 // StartOption is a functional option for BackgroundManager.Start.
 type StartOption func(*bgProcess)
 

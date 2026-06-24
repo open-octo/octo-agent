@@ -904,11 +904,16 @@ func senderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("no API key for entry %q (provider %q)", entry.Name, entry.Provider)
 	}
+	showReasoning := true
+	if entry.ShowReasoning != nil {
+		showReasoning = *entry.ShowReasoning
+	}
 	return app.NewSender(app.SenderOptions{
 		Provider:        entry.Provider,
 		APIKey:          apiKey,
 		BaseURL:         entry.BaseURL,
 		ReasoningEffort: entry.ReasoningEffort,
+		ShowReasoning:   showReasoning,
 	})
 }
 
@@ -1029,6 +1034,14 @@ func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse
 	a.s.pendingQuestions[sessionID] = ev
 	a.s.pendingPromptMu.Unlock()
 
+	dismiss := func() {
+		a.s.wsHub.broadcast(sessionID, wsEventDismissUserQuestion{
+			Type:       "dismiss_user_question",
+			SessionID:  sessionID,
+			QuestionID: qid,
+		})
+	}
+
 	cleanup := func() {
 		a.s.questionMu.Lock()
 		delete(a.s.questionChans, qid)
@@ -1046,9 +1059,11 @@ func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse
 		return res, nil
 	case <-ctx.Done():
 		cleanup()
+		dismiss()
 		return tools.AskResponse{Cancelled: true}, nil
 	case <-time.After(5 * time.Minute):
 		cleanup()
+		dismiss()
 		return tools.AskResponse{}, fmt.Errorf("ask_user_question: timed out waiting for user answer")
 	}
 }

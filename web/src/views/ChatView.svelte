@@ -336,6 +336,11 @@
       })
     }))
 
+    cleanups.push(ws.on('dismiss_user_question', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      questionModal.set(null)
+    }))
+
     cleanups.push(ws.on('request_feedback', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       feedbackModal.set({

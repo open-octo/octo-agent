@@ -70,7 +70,24 @@ func (WriteFileTool) Execute(_ context.Context, _ string, input map[string]any) 
 	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
 		lineCount++
 	}
-	ui := map[string]any{"type": "write", "path": abs, "size_bytes": len(content)}
+
+	const previewLines = 30
+	lines := strings.Split(content, "\n")
+	preview := content
+	previewTruncated := false
+	if len(lines) > previewLines {
+		preview = strings.Join(lines[:previewLines], "\n")
+		previewTruncated = true
+	}
+
+	ui := map[string]any{
+		"type":              "write",
+		"path":              abs,
+		"size_bytes":        len(content),
+		"line_count":        lineCount,
+		"preview":           preview,
+		"preview_truncated": previewTruncated,
+	}
 	if memory.IsMemoryPath(abs) {
 		memCount := memory.CountMemories(content)
 		return agent.ToolResult{Text: fmt.Sprintf("Saved %d %s to %s", memCount, pluralize(memCount, "memory", "memories"), filepath.Base(abs)), UI: ui}, nil

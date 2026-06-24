@@ -87,12 +87,17 @@ func TestWireBackgroundTaskNotices_BroadcastsExit(t *testing.T) {
 
 	srv.wireBackgroundTaskNotices(sid)
 
-	if _, err := tools.SessionBackgroundManager(sid).Start("echo done"); err != nil {
-		t.Fatalf("start: %v", err)
-	}
+	// Trigger the exit hook directly rather than starting a real shell process.
+	// A real process requires PowerShell on Windows (slow startup, flaky on CI).
+	// wireBackgroundTaskNotices is what we're testing here — not the shell.
+	tools.SessionBackgroundManager(sid).FireExitHook(tools.BgExit{
+		ID:      "bg_1",
+		Command: "echo done",
+		Status:  "exited: 0",
+	})
 
 	var gotNotice, gotUpdate bool
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(3 * time.Second)
 	for !(gotNotice && gotUpdate) {
 		select {
 		case b := <-conn.send:

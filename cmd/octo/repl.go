@@ -66,6 +66,10 @@ type replConfig struct {
 	// configEntry is the config entry the session resolved at startup; sender
 	// rebuilds (e.g. /thinking) anchor base URL and stored key on it.
 	configEntry config.ModelEntry
+	// showReasoning controls whether the reasoning/thinking trace is displayed
+	// in the TUI (when true) or suppressed (when false). Mirrors the --show-reasoning
+	// flag and config file setting.
+	showReasoning bool
 }
 
 // mcpBootstrap carries the inputs runTUI needs to connect MCP servers from a
