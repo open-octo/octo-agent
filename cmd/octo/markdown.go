@@ -44,7 +44,7 @@ func (m *markdownRenderer) render(src string, width int) string {
 	if err != nil {
 		return strings.TrimRight(src, "\n")
 	}
-	return strings.TrimRight(out, "\n")
+	return strings.Trim(out, "\n")
 }
 
 // splitCommittableMarkdown splits a streamed assistant buffer into the prefix
