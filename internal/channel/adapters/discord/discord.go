@@ -13,13 +13,17 @@ package discord
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math/rand"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -27,6 +31,7 @@ import (
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/channel"
+	"github.com/Leihb/octo-agent/internal/version"
 	"github.com/gorilla/websocket"
 )
 
@@ -151,6 +156,10 @@ func (a *Adapter) Start(ctx context.Context, onMessage func(channel.InboundEvent
 			if errors.As(err, &fatal) {
 				return fmt.Errorf("discord: %w", err)
 			}
+			if errors.Is(err, errReconnectNow) {
+				// Server-requested immediate reconnect; skip the delay.
+				continue
+			}
 			log.Printf("[discord-gateway] connection lost: %v (reconnecting in %s)", err, reconnectDelay)
 		}
 		select {
@@ -184,10 +193,86 @@ func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 	return channel.SendResult{OK: true, MessageID: msg.ID}
 }
 
-// SendFile is not yet implemented for Discord (matches the Feishu and
-// DingTalk adapters, which are text-only today).
+// SendFile uploads a file to a Discord channel using multipart form data.
 func (a *Adapter) SendFile(chatID, path, name, replyTo string) channel.SendResult {
-	return channel.SendResult{OK: false, Error: "SendFile not yet implemented"}
+	f, err := os.Open(path)
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	defer f.Close()
+
+	fileBytes, err := io.ReadAll(f)
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+
+	filename := name
+	if filename == "" {
+		filename = path[strings.LastIndexByte(path, '/')+1:]
+	}
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	// Part 1: JSON payload describing the attachment.
+	payloadJSON, _ := json.Marshal(map[string]any{
+		"attachments": []map[string]any{{"id": "0", "filename": filename}},
+	})
+	jsonPart, err := mw.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": []string{`form-data; name="payload_json"`},
+		"Content-Type":        []string{"application/json"},
+	})
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	if _, err := jsonPart.Write(payloadJSON); err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+
+	// Part 2: the file bytes.
+	filePart, err := mw.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": []string{fmt.Sprintf(`form-data; name="files[0]"; filename="%s"`, filename)},
+		"Content-Type":        []string{"application/octet-stream"},
+	})
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	if _, err := filePart.Write(fileBytes); err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	mw.Close()
+
+	req, err := http.NewRequest(http.MethodPost,
+		a.apiBase+fmt.Sprintf("/channels/%s/messages", chatID), &buf)
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	req.Header.Set("Authorization", "Bot "+a.token)
+	req.Header.Set("User-Agent", userAgent())
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var e struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(data, &e)
+		if e.Message == "" {
+			e.Message = strings.TrimSpace(string(data))
+		}
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("discord API %d: %s", resp.StatusCode, e.Message)}
+	}
+	var msg struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(data, &msg)
+	return channel.SendResult{OK: true, MessageID: msg.ID}
 }
 
 // UpdateMessage edits an existing message.
@@ -227,7 +312,7 @@ func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 // ─── REST ───────────────────────────────────────────────────────────────────
 
 func userAgent() string {
-	return "DiscordBot (https://github.com/Leihb/octo-agent, 1.0)"
+	return "DiscordBot (https://github.com/Leihb/octo-agent, " + version.String() + ")"
 }
 
 func (a *Adapter) rest(method, path string, payload, out any) error {
@@ -290,6 +375,11 @@ func (a *Adapter) usersMe() (*dcUser, error) {
 }
 
 // ─── Gateway ────────────────────────────────────────────────────────────────
+
+// errReconnectNow is returned by connectAndListen when the server explicitly
+// requests an immediate reconnect (op=7). The Start loop skips the
+// reconnectDelay sleep for this sentinel.
+var errReconnectNow = errors.New("reconnect requested")
 
 // fatalGatewayError marks close codes where reconnecting cannot help.
 type fatalGatewayError struct {
@@ -448,7 +538,7 @@ func (a *Adapter) connectAndListen(ctx context.Context, onMessage func(channel.I
 
 		case 7: // Reconnect
 			log.Printf("[discord-gateway] server requested reconnect")
-			return fmt.Errorf("server requested reconnect")
+			return errReconnectNow
 
 		case 9: // Invalid session
 			var resumable bool
@@ -471,6 +561,13 @@ func (a *Adapter) connectAndListen(ctx context.Context, onMessage func(channel.I
 
 // ─── Dispatch ───────────────────────────────────────────────────────────────
 
+type dcAttachment struct {
+	URL         string `json:"url"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int    `json:"size"`
+}
+
 type dcMessage struct {
 	ID        string `json:"id"`
 	ChannelID string `json:"channel_id"`
@@ -480,6 +577,7 @@ type dcMessage struct {
 	Mentions  []struct {
 		ID string `json:"id"`
 	} `json:"mentions"`
+	Attachments []dcAttachment `json:"attachments"`
 }
 
 func (a *Adapter) handleDispatch(typ string, data json.RawMessage, onMessage func(channel.InboundEvent)) {
@@ -506,7 +604,75 @@ func (a *Adapter) handleDispatch(typ string, data json.RawMessage, onMessage fun
 	}
 }
 
+// processAttachments downloads Discord CDN attachments and returns them as
+// channel.FileAttachment values. Images are base64-encoded into a data URL;
+// other files are saved to a temp file.
+func (a *Adapter) processAttachments(atts []dcAttachment) []channel.FileAttachment {
+	var files []channel.FileAttachment
+	for _, att := range atts {
+		if att.URL == "" {
+			continue
+		}
+		resp, err := http.Get(att.URL) //nolint:noctx // Discord CDN is public; no auth needed
+		if err != nil {
+			log.Printf("[discord] attachment download failed (%s): %v", att.Filename, err)
+			continue
+		}
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			log.Printf("[discord] attachment read failed (%s): %v", att.Filename, err)
+			continue
+		}
+
+		mime := att.ContentType
+		if mime == "" {
+			mime = resp.Header.Get("Content-Type")
+		}
+		// Strip charset or other parameters.
+		if idx := strings.Index(mime, ";"); idx >= 0 {
+			mime = strings.TrimSpace(mime[:idx])
+		}
+
+		if strings.HasPrefix(mime, "image/") {
+			dataURL := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+			files = append(files, channel.FileAttachment{
+				Type:     "image",
+				Name:     att.Filename,
+				MimeType: mime,
+				DataURL:  dataURL,
+			})
+		} else {
+			tmp, err := os.CreateTemp("", "discord-att-*-"+att.Filename)
+			if err != nil {
+				log.Printf("[discord] temp file creation failed (%s): %v", att.Filename, err)
+				continue
+			}
+			if _, err := tmp.Write(data); err != nil {
+				tmp.Close()
+				log.Printf("[discord] temp file write failed (%s): %v", att.Filename, err)
+				continue
+			}
+			tmp.Close()
+			files = append(files, channel.FileAttachment{
+				Type:     "file",
+				Name:     att.Filename,
+				MimeType: mime,
+				Path:     tmp.Name(),
+			})
+		}
+	}
+	return files
+}
+
 func (a *Adapter) handleMessage(msg *dcMessage, onMessage func(channel.InboundEvent)) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[discord] panic in handleMessage: %v", r)
+			a.SendText(msg.ChannelID, fmt.Sprintf("Error: %v", r), "")
+		}
+	}()
+
 	if msg.Author.Bot || msg.Author.ID == a.botUserID || msg.ChannelID == "" {
 		return
 	}
@@ -535,7 +701,10 @@ func (a *Adapter) handleMessage(msg *dcMessage, onMessage func(channel.InboundEv
 		text = a.mentionRe.ReplaceAllString(text, "")
 	}
 	text = strings.TrimSpace(text)
-	if text == "" {
+
+	files := a.processAttachments(msg.Attachments)
+
+	if text == "" && len(files) == 0 {
 		return
 	}
 
@@ -546,6 +715,7 @@ func (a *Adapter) handleMessage(msg *dcMessage, onMessage func(channel.InboundEv
 		ChatID:    msg.ChannelID,
 		UserID:    msg.Author.ID,
 		Text:      text,
+		Files:     files,
 		MessageID: msg.ID,
 		ChatType:  chatType,
 		Raw:       msg,

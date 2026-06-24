@@ -13,11 +13,17 @@ package telegram
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -96,6 +102,12 @@ func New(cfg channel.PlatformConfig) (channel.Adapter, error) {
 				allowed[u] = true
 			}
 		}
+	} else if list, ok2 := cfg[cfgAllowedUsers].([]interface{}); ok2 {
+		for _, v := range list {
+			if s := strings.TrimSpace(fmt.Sprint(v)); s != "" {
+				allowed[s] = true
+			}
+		}
 	}
 
 	return &Adapter{
@@ -117,12 +129,13 @@ func (a *Adapter) Start(ctx context.Context, onMessage func(channel.InboundEvent
 	ctx, a.cancel = context.WithCancel(ctx)
 	defer func() { a.running = false }()
 
-	// Bot identity is required to gate group mentions; without it group
-	// messages are dropped (fail closed) rather than answered indiscriminately.
+	// Bot identity is used to gate group mentions; failure is non-fatal —
+	// the poll loop will retry fetchBotIdentity each cycle until it succeeds.
 	if err := a.fetchBotIdentity(ctx); err != nil {
-		return fmt.Errorf("telegram: getMe: %w", err)
+		log.Printf("[telegram] getMe failed (will retry): %v", err)
+	} else {
+		log.Printf("[telegram] bot identity: @%s (id=%d)", a.botUsername, a.botID)
 	}
-	log.Printf("[telegram] bot identity: @%s (id=%d)", a.botUsername, a.botID)
 	log.Printf("[telegram] starting long-poll (base_url=%s)", a.baseURL)
 
 	var offset int64
@@ -134,10 +147,21 @@ func (a *Adapter) Start(ctx context.Context, onMessage func(channel.InboundEvent
 		default:
 		}
 
+		// If bot identity is still unknown, retry getMe before each poll cycle.
+		if a.botID == 0 {
+			if err := a.fetchBotIdentity(ctx); err == nil {
+				log.Printf("[telegram] bot identity: @%s (id=%d)", a.botUsername, a.botID)
+			}
+		}
+
 		updates, err := a.getUpdates(ctx, offset)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
+			}
+			// Long-poll timeouts are normal (no updates during the window) — not errors.
+			if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "timeout") {
+				continue
 			}
 			consecutiveErrors++
 			delay := 5 * time.Second
@@ -209,10 +233,122 @@ func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 	return channel.SendResult{OK: true, MessageID: lastID}
 }
 
-// SendFile is not yet implemented for Telegram (matches the Feishu and
-// DingTalk adapters, which are text-only today).
+// SendFile sends a local file to the chat. Images (png/jpg/jpeg/gif/webp) are
+// sent via sendPhoto; all other files are sent via sendDocument.
 func (a *Adapter) SendFile(chatID, path, name, replyTo string) channel.SendResult {
-	return channel.SendResult{OK: false, Error: "SendFile not yet implemented"}
+	if _, err := os.Stat(path); err != nil {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("file not found: %s", path)}
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	isImage := ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".webp"
+
+	var msg *tgMessage
+	var err error
+	if isImage {
+		msg, err = a.sendMultipart("sendPhoto", chatID, "photo", path, "", replyTo)
+	} else {
+		msg, err = a.sendMultipart("sendDocument", chatID, "document", path, name, replyTo)
+	}
+	if err != nil {
+		log.Printf("[telegram] send_file failed for %s: %v", path, err)
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	return channel.SendResult{OK: true, MessageID: fmt.Sprintf("%d", msg.MessageID)}
+}
+
+// sendMultipart builds and sends a multipart/form-data request for file upload.
+func (a *Adapter) sendMultipart(method, chatID, fileField, filePath, fileName, replyTo string) (*tgMessage, error) {
+	fileBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+
+	// Write chat_id field.
+	if fw, err := w.CreateFormField("chat_id"); err == nil {
+		fw.Write([]byte(chatID))
+	}
+
+	// Write reply_to_message_id if provided.
+	if replyTo != "" {
+		if fw, err := w.CreateFormField("reply_to_message_id"); err == nil {
+			fw.Write([]byte(replyTo))
+		}
+	}
+
+	// Write the file field.
+	if fileName == "" {
+		fileName = filepath.Base(filePath)
+	}
+	mime := mimeForExt(filepath.Ext(filePath))
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, fileField, fileName))
+	h.Set("Content-Type", mime)
+	if fw, err := w.CreatePart(h); err == nil {
+		fw.Write(fileBytes)
+	}
+
+	w.Close()
+
+	url := fmt.Sprintf("%s/bot%s/%s", a.baseURL, a.token, method)
+	req, err := http.NewRequest(http.MethodPost, url, &body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var r struct {
+		OK          bool            `json:"ok"`
+		Result      json.RawMessage `json:"result"`
+		ErrorCode   int             `json:"error_code"`
+		Description string          `json:"description"`
+	}
+	if err := json.Unmarshal(rawBody, &r); err != nil {
+		return nil, fmt.Errorf("invalid JSON response: %w", err)
+	}
+	if !r.OK {
+		return nil, &apiError{Code: r.ErrorCode, Description: r.Description}
+	}
+
+	var msg tgMessage
+	if err := json.Unmarshal(r.Result, &msg); err != nil {
+		return nil, fmt.Errorf("invalid message in response: %w", err)
+	}
+	return &msg, nil
+}
+
+// mimeForExt returns a MIME type for common file extensions.
+func mimeForExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".pdf":
+		return "application/pdf"
+	case ".txt", ".md":
+		return "text/plain"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 // UpdateMessage edits a previously sent message in place.
@@ -322,6 +458,23 @@ func (a *Adapter) call(ctx context.Context, method string, params map[string]any
 	return r.Result, nil
 }
 
+type tgPhotoSize struct {
+	FileID   string `json:"file_id"`
+	FileSize int    `json:"file_size"`
+}
+
+type tgDocument struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	MimeType string `json:"mime_type"`
+}
+
+type tgEntity struct {
+	Type   string `json:"type"`
+	Offset int    `json:"offset"`
+	Length int    `json:"length"`
+}
+
 type tgMessage struct {
 	MessageID int64 `json:"message_id"`
 	Date      int64 `json:"date"`
@@ -333,8 +486,11 @@ type tgMessage struct {
 		ID    int64 `json:"id"`
 		IsBot bool  `json:"is_bot"`
 	} `json:"from"`
-	Text           string `json:"text"`
-	Caption        string `json:"caption"`
+	Text           string        `json:"text"`
+	Caption        string        `json:"caption"`
+	Photo          []tgPhotoSize `json:"photo"`
+	Document       *tgDocument   `json:"document"`
+	Entities       []tgEntity    `json:"entities"`
 	ReplyToMessage *struct {
 		From struct {
 			ID int64 `json:"id"`
@@ -425,7 +581,55 @@ func (a *Adapter) processUpdate(upd tgUpdate, onMessage func(channel.InboundEven
 		text = msg.Caption
 	}
 	text = strings.TrimSpace(text)
-	if text == "" {
+
+	// Collect file attachments.
+	var files []channel.FileAttachment
+
+	if len(msg.Photo) > 0 {
+		// Pick the largest (last) photo size variant.
+		largest := msg.Photo[len(msg.Photo)-1]
+		rawBytes, filePath, err := a.downloadTGFile(largest.FileID)
+		if err != nil {
+			log.Printf("[telegram] image download failed: %v", err)
+		} else {
+			mime := detectImageMIME(rawBytes)
+			dataURL := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(rawBytes)
+			name := filepath.Base(filePath)
+			if name == "" || name == "." {
+				name = "image.jpg"
+			}
+			files = append(files, channel.FileAttachment{
+				Type:     "image",
+				Name:     name,
+				MimeType: mime,
+				DataURL:  dataURL,
+			})
+		}
+	}
+
+	if msg.Document != nil {
+		rawBytes, _, err := a.downloadTGFile(msg.Document.FileID)
+		if err != nil {
+			log.Printf("[telegram] document download failed: %v", err)
+		} else {
+			name := msg.Document.FileName
+			if name == "" {
+				name = "attachment"
+			}
+			f, err := os.CreateTemp("", "tg-doc-*-"+name)
+			if err == nil {
+				f.Write(rawBytes)
+				f.Close()
+				files = append(files, channel.FileAttachment{
+					Type: "file",
+					Name: name,
+					Path: f.Name(),
+				})
+			}
+		}
+	}
+
+	if text == "" && len(files) == 0 {
 		return
 	}
 
@@ -441,15 +645,70 @@ func (a *Adapter) processUpdate(upd tgUpdate, onMessage func(channel.InboundEven
 		ChatID:    fmt.Sprintf("%d", msg.Chat.ID),
 		UserID:    userID,
 		Text:      text,
+		Files:     files,
 		MessageID: fmt.Sprintf("%d", msg.MessageID),
 		ChatType:  chatType,
 		Raw:       msg,
 	})
 }
 
+// downloadTGFile resolves file_id to a file_path via getFile, then downloads
+// the raw bytes. Returns (bytes, filePath, error).
+func (a *Adapter) downloadTGFile(fileID string) ([]byte, string, error) {
+	raw, err := a.call(nil, "getFile", map[string]any{"file_id": fileID}, a.http)
+	if err != nil {
+		return nil, "", fmt.Errorf("getFile: %w", err)
+	}
+	var result struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, "", fmt.Errorf("parse getFile response: %w", err)
+	}
+	if result.FilePath == "" {
+		return nil, "", fmt.Errorf("getFile returned no file_path")
+	}
+	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", a.baseURL, a.token, result.FilePath)
+	req, err := http.NewRequest(http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("file download HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, result.FilePath, nil
+}
+
+// detectImageMIME sniffs the first bytes to identify common image types.
+func detectImageMIME(b []byte) string {
+	if len(b) < 4 {
+		return "image/jpeg"
+	}
+	if b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47 {
+		return "image/png"
+	}
+	if b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46 {
+		return "image/gif"
+	}
+	if len(b) >= 8 && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46 {
+		return "image/webp"
+	}
+	return "image/jpeg"
+}
+
 // groupMention reports whether the bot should react to a group message:
-// either the text @-mentions the bot's username, or the message replies to
-// one of the bot's own messages. Fails closed when bot identity is unknown.
+// either the text @-mentions the bot's username via a mention entity, or the
+// message replies to one of the bot's own messages. Falls back to regex when
+// no entities are present. Fails closed when bot identity is unknown.
 func (a *Adapter) groupMention(msg *tgMessage, text string) bool {
 	if a.botID == 0 {
 		return false
@@ -457,6 +716,21 @@ func (a *Adapter) groupMention(msg *tgMessage, text string) bool {
 	if msg.ReplyToMessage != nil && msg.ReplyToMessage.From.ID == a.botID {
 		return true
 	}
+	// Use entity offsets when available for precise mention matching.
+	runes := []rune(text)
+	for _, e := range msg.Entities {
+		if e.Type != "mention" {
+			continue
+		}
+		if e.Offset < 0 || e.Offset+e.Length > len(runes) {
+			continue
+		}
+		mention := string(runes[e.Offset : e.Offset+e.Length])
+		if strings.EqualFold(mention, "@"+a.botUsername) {
+			return true
+		}
+	}
+	// Fallback to regex for clients that omit entity metadata.
 	return a.mentionRe != nil && a.mentionRe.MatchString(text)
 }
 

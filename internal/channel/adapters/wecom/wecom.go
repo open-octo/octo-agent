@@ -19,12 +19,19 @@ package wecom
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/md5"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -226,10 +233,132 @@ func (a *Adapter) sendWebhook(text string) channel.SendResult {
 	return channel.SendResult{OK: true}
 }
 
-// SendFile is not yet implemented for WeCom (matches the Feishu and DingTalk
-// adapters, which are text-only today).
+const (
+	uploadChunkSize = 512 * 1024 // 512 KB per chunk
+	uploadMaxChunks = 100
+)
+
+// SendFile uploads a local file via the WeCom three-step chunked-upload
+// protocol and sends it as an attachment.
+//
+// Protocol:
+//  1. aibot_upload_media_init  — announce filename/size/chunks/md5 → upload_id
+//  2. aibot_upload_media_chunk × N — send base64-encoded 512 KB chunks
+//  3. aibot_upload_media_finish     — commit → media_id
+//  4. aibot_send_msg with the resulting media_id
 func (a *Adapter) SendFile(chatID, path, name, replyTo string) channel.SendResult {
-	return channel.SendResult{OK: false, Error: "SendFile not yet implemented"}
+	a.connMu.Lock()
+	connected := a.conn != nil
+	a.connMu.Unlock()
+	if !connected {
+		return channel.SendResult{OK: false, Error: "wecom: SendFile requires an active WebSocket connection"}
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("wecom: read file: %v", err)}
+	}
+	filename := name
+	if filename == "" {
+		filename = filepath.Base(path)
+	}
+
+	mediaType := detectMediaType(path)
+	totalSize := len(data)
+	totalChunks := (totalSize + uploadChunkSize - 1) / uploadChunkSize
+	if totalChunks == 0 {
+		totalChunks = 1
+	}
+	if totalChunks > uploadMaxChunks {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("wecom: file too large (%d chunks, max %d)", totalChunks, uploadMaxChunks)}
+	}
+
+	sum := md5.Sum(data)
+	md5hex := hex.EncodeToString(sum[:])
+
+	log.Printf("[wecom] SendFile chat=%s filename=%s size=%d chunks=%d md5=%s", chatID, filename, totalSize, totalChunks, md5hex)
+
+	// Step 1: init
+	initFrame, err := a.sendFrameAndWait("aibot_upload_media_init", map[string]any{
+		"type":         mediaType,
+		"filename":     filename,
+		"total_size":   totalSize,
+		"total_chunks": totalChunks,
+		"md5":          md5hex,
+	})
+	if err != nil {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("wecom: upload_media_init: %v", err)}
+	}
+	var initBody struct {
+		UploadID string `json:"upload_id"`
+	}
+	if err := json.Unmarshal(initFrame.Body, &initBody); err != nil || initBody.UploadID == "" {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("wecom: upload_media_init: missing upload_id in %s", initFrame.Body)}
+	}
+	uploadID := initBody.UploadID
+	log.Printf("[wecom] upload_id=%s", uploadID)
+
+	// Step 2: chunks
+	for i := 0; i < totalChunks; i++ {
+		start := i * uploadChunkSize
+		end := start + uploadChunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		chunk := data[start:end]
+		b64 := base64.StdEncoding.EncodeToString(chunk)
+		log.Printf("[wecom] uploading chunk %d/%d", i+1, totalChunks)
+		_, err := a.sendFrameAndWait("aibot_upload_media_chunk", map[string]any{
+			"upload_id":   uploadID,
+			"chunk_index": i,
+			"base64_data": b64,
+		})
+		if err != nil {
+			return channel.SendResult{OK: false, Error: fmt.Sprintf("wecom: upload_media_chunk %d: %v", i, err)}
+		}
+	}
+
+	// Step 3: finish
+	log.Printf("[wecom] upload_media_finish upload_id=%s", uploadID)
+	finishFrame, err := a.sendFrameAndWait("aibot_upload_media_finish", map[string]any{
+		"upload_id": uploadID,
+	})
+	if err != nil {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("wecom: upload_media_finish: %v", err)}
+	}
+	var finishBody struct {
+		MediaID string `json:"media_id"`
+	}
+	if err := json.Unmarshal(finishFrame.Body, &finishBody); err != nil || finishBody.MediaID == "" {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("wecom: upload_media_finish: missing media_id in %s", finishFrame.Body)}
+	}
+	mediaID := finishBody.MediaID
+	log.Printf("[wecom] SendFile media_id=%s", mediaID)
+
+	// Step 4: send message with media_id
+	_, err = a.sendFrameAndWait("aibot_send_msg", map[string]any{
+		"chatid":  chatID,
+		"msgtype": mediaType,
+		mediaType: map[string]string{"media_id": mediaID},
+	})
+	if err != nil {
+		return channel.SendResult{OK: false, Error: fmt.Sprintf("wecom: send_msg (file): %v", err)}
+	}
+	return channel.SendResult{OK: true}
+}
+
+// detectMediaType returns the WeCom media type string from a file extension.
+func detectMediaType(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
+		return "image"
+	case ".mp4", ".avi", ".mov", ".mkv":
+		return "video"
+	case ".mp3", ".wav", ".amr", ".m4a":
+		return "voice"
+	default:
+		return "file"
+	}
 }
 
 // UpdateMessage — WeCom does not support editing sent messages.
@@ -373,7 +502,7 @@ func (a *Adapter) connectAndListen(ctx context.Context, onMessage func(channel.I
 
 		switch frame.Cmd {
 		case "aibot_msg_callback":
-			a.handleInbound(frame.Body, onMessage)
+			go a.handleInbound(frame.Body, onMessage)
 		case "aibot_event_callback":
 			// Ignored.
 		case "":
@@ -469,6 +598,17 @@ func reqID(prefix string) string {
 
 // ─── Inbound ────────────────────────────────────────────────────────────────
 
+type wcMedia struct {
+	URL    string `json:"url"`
+	AESKey string `json:"aeskey"`
+}
+
+type wcFile struct {
+	URL    string `json:"url"`
+	AESKey string `json:"aeskey"`
+	Name   string `json:"name"`
+}
+
 type wcMessage struct {
 	MsgType  string `json:"msgtype"`
 	ChatID   string `json:"chatid"`
@@ -480,6 +620,82 @@ type wcMessage struct {
 	Text struct {
 		Content string `json:"content"`
 	} `json:"text"`
+	Image *wcMedia `json:"image,omitempty"`
+	File  *wcFile  `json:"file,omitempty"`
+}
+
+// decryptWCMedia decrypts AES-256-CBC data with the per-resource aeskey.
+// Key = base64_decode(aeskey), IV = first 16 bytes of key, PKCS7 unpad.
+// On any error, returns the original data (matching Ruby fallback behavior).
+func decryptWCMedia(data []byte, aeskeyB64 string) ([]byte, error) {
+	// Pad to multiple of 4
+	if rem := len(aeskeyB64) % 4; rem != 0 {
+		aeskeyB64 += strings.Repeat("=", 4-rem)
+	}
+	key, err := base64.StdEncoding.DecodeString(aeskeyB64)
+	if err != nil {
+		return data, nil
+	}
+	if len(key) < 16 {
+		return data, nil
+	}
+	iv := key[:16]
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return data, nil
+	}
+	if len(data) == 0 || len(data)%aes.BlockSize != 0 {
+		return data, nil
+	}
+	out := make([]byte, len(data))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(out, data)
+	// PKCS7 unpad
+	if len(out) == 0 {
+		return data, nil
+	}
+	padLen := int(out[len(out)-1])
+	if padLen == 0 || padLen > aes.BlockSize || padLen > len(out) {
+		return data, nil
+	}
+	return out[:len(out)-padLen], nil
+}
+
+// downloadWCMedia fetches a WeCom media URL and optionally decrypts it.
+func downloadWCMedia(url, aeskey string) ([]byte, error) {
+	resp, err := http.Get(url) //nolint:gosec
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if aeskey != "" {
+		body, _ = decryptWCMedia(body, aeskey)
+	}
+	return body, nil
+}
+
+// detectMIME returns a MIME type from the first bytes of data.
+func detectMIME(data []byte) string {
+	if len(data) < 4 {
+		return "application/octet-stream"
+	}
+	switch {
+	case bytes.HasPrefix(data, []byte("\xFF\xD8\xFF")):
+		return "image/jpeg"
+	case bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")):
+		return "image/png"
+	case bytes.HasPrefix(data, []byte("GIF8")):
+		return "image/gif"
+	case bytes.HasPrefix(data, []byte("RIFF")) && len(data) >= 12 && string(data[8:12]) == "WEBP":
+		return "image/webp"
+	case bytes.HasPrefix(data, []byte("BM")):
+		return "image/bmp"
+	default:
+		return "image/jpeg"
+	}
 }
 
 func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.InboundEvent)) {
@@ -488,7 +704,11 @@ func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.Inb
 		log.Printf("[wecom] unmarshal callback: %v", err)
 		return
 	}
-	if msg.MsgType != "text" {
+
+	switch msg.MsgType {
+	case "text", "image", "file":
+		// handled below
+	default:
 		return
 	}
 
@@ -504,8 +724,68 @@ func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.Inb
 		return
 	}
 
-	text := strings.TrimSpace(msg.Text.Content)
-	if text == "" {
+	var text string
+	var files []channel.FileAttachment
+
+	switch msg.MsgType {
+	case "text":
+		text = strings.TrimSpace(msg.Text.Content)
+
+	case "image":
+		if msg.Image == nil || msg.Image.URL == "" {
+			return
+		}
+		data, err := downloadWCMedia(msg.Image.URL, msg.Image.AESKey)
+		if err != nil {
+			log.Printf("[wecom] download image failed: %v", err)
+			return
+		}
+		mime := detectMIME(data)
+		dataURL := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+		files = append(files, channel.FileAttachment{
+			Type:     "image",
+			Name:     "image.jpg",
+			MimeType: mime,
+			DataURL:  dataURL,
+		})
+
+	case "file":
+		if msg.File == nil || msg.File.URL == "" {
+			return
+		}
+		data, err := downloadWCMedia(msg.File.URL, msg.File.AESKey)
+		if err != nil {
+			log.Printf("[wecom] download file failed: %v", err)
+			return
+		}
+		filename := msg.File.Name
+		if filename == "" {
+			filename = "attachment"
+		}
+		dir := filepath.Join(os.TempDir(), "octo-wecom")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			log.Printf("[wecom] mkdir temp dir: %v", err)
+			return
+		}
+		tmp, err := os.CreateTemp(dir, "wecom-*-"+filepath.Base(filename))
+		if err != nil {
+			log.Printf("[wecom] create temp file: %v", err)
+			return
+		}
+		if _, err := tmp.Write(data); err != nil {
+			tmp.Close()
+			log.Printf("[wecom] write temp file: %v", err)
+			return
+		}
+		tmp.Close()
+		files = append(files, channel.FileAttachment{
+			Type: "file",
+			Name: filename,
+			Path: tmp.Name(),
+		})
+	}
+
+	if text == "" && len(files) == 0 {
 		return
 	}
 
@@ -514,13 +794,14 @@ func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.Inb
 		chatType = "group"
 	}
 
-	log.Printf("[wecom] msg from %s in %s (%s): %.80s", msg.From.UserID, chatID, chatType, text)
+	log.Printf("[wecom] msg from %s in %s (%s) type=%s", msg.From.UserID, chatID, chatType, msg.MsgType)
 	onMessage(channel.InboundEvent{
 		Type:      "message",
 		Platform:  platformName,
 		ChatID:    chatID,
 		UserID:    msg.From.UserID,
 		Text:      text,
+		Files:     files,
 		MessageID: msg.MsgID,
 		ChatType:  chatType,
 		Raw:       msg,

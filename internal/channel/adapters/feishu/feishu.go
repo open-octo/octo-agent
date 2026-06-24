@@ -13,11 +13,14 @@ package feishu
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -27,8 +30,11 @@ import (
 )
 
 const (
-	platformName  = "feishu"
-	defaultDomain = "https://open.feishu.cn"
+	platformName   = "feishu"
+	defaultDomain  = "https://open.feishu.cn"
+	reconnectDelay = 5 * time.Second
+	readDeadline   = 120 * time.Second
+	pingInterval   = 90 * time.Second
 )
 
 func init() {
@@ -96,31 +102,76 @@ func New(cfg channel.PlatformConfig) (channel.Adapter, error) {
 func (a *Adapter) Platform() string { return platformName }
 
 // Start connects to Feishu WebSocket and listens for messages.
+// It reconnects on transient errors; only ctx.Done() stops it.
 func (a *Adapter) Start(ctx context.Context, onMessage func(channel.InboundEvent)) error {
 	a.running = true
 	ctx, a.cancel = context.WithCancel(ctx)
 	defer func() { a.running = false }()
 
+	// Fetch bot identity once upfront; if it fails we will retry lazily in handleEvent.
+	a.botOpenID = a.getBotOpenID()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		if err := a.connectOnce(ctx, onMessage); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			log.Printf("[feishu] connection lost: %v (reconnecting in %s)", err, reconnectDelay)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(reconnectDelay):
+		}
+	}
+}
+
+// connectOnce fetches a WS endpoint, dials, and reads until error or ctx done.
+func (a *Adapter) connectOnce(ctx context.Context, onMessage func(channel.InboundEvent)) error {
 	if err := a.refreshToken(); err != nil {
-		return fmt.Errorf("feishu: token: %w", err)
+		return fmt.Errorf("token: %w", err)
 	}
 
 	wsURL, err := a.getWSEndpoint()
 	if err != nil {
-		return fmt.Errorf("feishu: ws endpoint: %w", err)
+		return fmt.Errorf("ws endpoint: %w", err)
 	}
 
 	dialer := websocket.DefaultDialer
 	conn, _, err := dialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
-		return fmt.Errorf("feishu: connect: %w", err)
+		return fmt.Errorf("connect: %w", err)
 	}
 	defer conn.Close()
 
 	log.Printf("[feishu] connected to WebSocket")
 
-	// Get bot's open_id once.
-	a.botOpenID = a.getBotOpenID()
+	// FEISHU-005: proactive ping goroutine.
+	pingCtx, cancelPing := context.WithCancel(ctx)
+	defer cancelPing()
+	go func() {
+		ticker := time.NewTicker(pingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pingCtx.Done():
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					log.Printf("[feishu] ping error: %v", err)
+					conn.Close()
+					return
+				}
+			}
+		}
+	}()
 
 	return a.readEvents(ctx, conn, onMessage)
 }
@@ -135,7 +186,7 @@ func (a *Adapter) Stop() error {
 
 // SendText sends a text message.
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
-	msgID, err := a.sendMessage(chatID, text)
+	msgID, err := a.sendMessage(chatID, text, replyTo)
 	if err != nil {
 		return channel.SendResult{OK: false, Error: err.Error()}
 	}
@@ -214,24 +265,19 @@ func (a *Adapter) refreshToken() error {
 	return nil
 }
 
+// getToken returns a valid access token, refreshing synchronously if expired.
+// FEISHU-012: refresh is synchronous under the lock, no background goroutine.
 func (a *Adapter) getToken() string {
 	a.tokenMu.Lock()
 	tok := a.accessToken
 	expired := time.Now().After(a.tokenExpiry)
 	a.tokenMu.Unlock()
 
-	// No token yet: this adapter is being used for an outbound send without
-	// Start() (e.g. channel.SendOnce). Fetch synchronously or the first send
-	// goes out with an empty Authorization header.
-	if tok == "" {
+	if tok == "" || expired {
 		_ = a.refreshToken()
 		a.tokenMu.Lock()
 		tok = a.accessToken
 		a.tokenMu.Unlock()
-		return tok
-	}
-	if expired {
-		go a.refreshToken()
 	}
 	return tok
 }
@@ -266,9 +312,12 @@ func (a *Adapter) readEvents(ctx context.Context, conn *websocket.Conn, onMessag
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		default:
 		}
+
+		// FEISHU-004: set read deadline before every ReadMessage call.
+		conn.SetReadDeadline(time.Now().Add(readDeadline))
 
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
@@ -277,6 +326,9 @@ func (a *Adapter) readEvents(ctx context.Context, conn *websocket.Conn, onMessag
 			}
 			return err
 		}
+
+		// Reset deadline after a successful read.
+		conn.SetReadDeadline(time.Time{})
 
 		var envelope struct {
 			Type string          `json:"type"`
@@ -335,6 +387,12 @@ type fsEvent struct {
 			ChatType    string `json:"chat_type"`
 			MessageType string `json:"message_type"`
 			Content     string `json:"content"`
+			// FEISHU-007: mentions list from the message object.
+			Mentions []struct {
+				ID struct {
+					OpenID string `json:"open_id"`
+				} `json:"id"`
+			} `json:"mentions"`
 		} `json:"message"`
 		Sender struct {
 			SenderID struct {
@@ -344,9 +402,16 @@ type fsEvent struct {
 	} `json:"event"`
 }
 
+// FEISHU-006: extended content structs for image and file messages.
 type msgContent struct {
-	Text string `json:"text"`
+	Text     string `json:"text"`
+	ImageKey string `json:"image_key"`
+	FileKey  string `json:"file_key"`
+	FileName string `json:"file_name"`
 }
+
+// feishuDocURLRe matches Feishu document URLs (docx, docs, wiki).
+var feishuDocURLRe = regexp.MustCompile(`https://[^/]+\.feishu\.cn/(docx|docs|wiki)/([A-Za-z0-9]+)`)
 
 func (a *Adapter) handleEvent(raw json.RawMessage, onMessage func(channel.InboundEvent)) {
 	var ev fsEvent
@@ -371,8 +436,25 @@ func (a *Adapter) handleEvent(raw json.RawMessage, onMessage func(channel.Inboun
 	}
 
 	// Group chat: @-mention check.
+	// FEISHU-013: lazy botOpenID fetch on first message if it was unavailable at Start.
 	if chatType == "group" {
-		if a.botOpenID == "" || !strings.Contains(msg.Content, a.botOpenID) {
+		if a.botOpenID == "" {
+			a.botOpenID = a.getBotOpenID()
+		}
+		if a.botOpenID == "" {
+			// Still unavailable — fail closed to avoid spamming the group.
+			log.Printf("[feishu] bot_open_id unavailable; dropping group message to avoid spam")
+			return
+		}
+		// FEISHU-007: check mentions slice instead of raw JSON string search.
+		mentioned := false
+		for _, m := range ev.Event.Message.Mentions {
+			if m.ID.OpenID == a.botOpenID {
+				mentioned = true
+				break
+			}
+		}
+		if !mentioned {
 			return
 		}
 	}
@@ -384,13 +466,42 @@ func (a *Adapter) handleEvent(raw json.RawMessage, onMessage func(channel.Inboun
 	var content msgContent
 	json.Unmarshal([]byte(msg.Content), &content)
 
-	text := strings.TrimSpace(content.Text)
-	if text == "" {
+	var text string
+	var files []channel.FileAttachment
+
+	switch msg.MessageType {
+	case "text":
+		text = strings.TrimSpace(content.Text)
+		text = stripAtMentions(text)
+	case "image":
+		// FEISHU-006: download image and attach.
+		if content.ImageKey != "" {
+			if fa, err := a.downloadResource(msg.MessageID, content.ImageKey, "image", ""); err != nil {
+				log.Printf("[feishu] image download failed: %v", err)
+			} else {
+				files = append(files, fa)
+			}
+		}
+	case "file":
+		// FEISHU-006: download file and attach.
+		if content.FileKey != "" {
+			if fa, err := a.downloadResource(msg.MessageID, content.FileKey, "file", content.FileName); err != nil {
+				log.Printf("[feishu] file download failed: %v", err)
+			} else {
+				files = append(files, fa)
+			}
+		}
+	}
+
+	// FEISHU-006: drop only if both text and files are empty.
+	if text == "" && len(files) == 0 {
 		return
 	}
 
-	// Strip @-mentions.
-	text = stripAtMentions(text)
+	// FEISHU-011: enrich with Feishu doc content.
+	if text != "" {
+		text = a.enrichDocContent(text)
+	}
 
 	onMessage(channel.InboundEvent{
 		Type:      "message",
@@ -398,10 +509,133 @@ func (a *Adapter) handleEvent(raw json.RawMessage, onMessage func(channel.Inboun
 		ChatID:    msg.ChatID,
 		UserID:    senderID,
 		Text:      text,
+		Files:     files,
 		MessageID: msg.MessageID,
 		ChatType:  chatType,
 		Raw:       ev,
 	})
+}
+
+// downloadResource fetches a message attachment from Feishu.
+// For images it returns a DataURL; for files it saves to a temp file.
+func (a *Adapter) downloadResource(messageID, key, resourceType, fileName string) (channel.FileAttachment, error) {
+	url := fmt.Sprintf("%s/open-apis/im/v1/messages/%s/resources/%s?type=%s",
+		a.domain, messageID, key, resourceType)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", "Bearer "+a.getToken())
+
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return channel.FileAttachment{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return channel.FileAttachment{}, fmt.Errorf("download %s: HTTP %d", resourceType, resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return channel.FileAttachment{}, err
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	// Trim parameters like "; charset=…".
+	if idx := strings.Index(ct, ";"); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+
+	if resourceType == "image" {
+		mime := ct
+		if !strings.HasPrefix(mime, "image/") {
+			mime = "image/jpeg"
+		}
+		dataURL := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+		return channel.FileAttachment{
+			Type:     "image",
+			MimeType: mime,
+			DataURL:  dataURL,
+		}, nil
+	}
+
+	// File: save to temp.
+	tmpFile, err := os.CreateTemp("", "feishu-file-*")
+	if err != nil {
+		return channel.FileAttachment{}, err
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		return channel.FileAttachment{}, err
+	}
+	tmpFile.Close()
+
+	name := fileName
+	if name == "" {
+		name = key
+	}
+	return channel.FileAttachment{
+		Type:     "file",
+		Name:     name,
+		Path:     tmpFile.Name(),
+		MimeType: ct,
+	}, nil
+}
+
+// enrichDocContent fetches inline Feishu doc content and appends it to the text.
+// FEISHU-011: silently skips on error.
+func (a *Adapter) enrichDocContent(text string) string {
+	matches := feishuDocURLRe.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return text
+	}
+
+	var sections []string
+	for _, m := range matches {
+		docToken := m[2]
+		content, err := a.fetchDocRawContent(docToken)
+		if err != nil {
+			log.Printf("[feishu] doc fetch failed for %s: %v", docToken, err)
+			continue
+		}
+		if content != "" {
+			sections = append(sections, fmt.Sprintf("[Doc content from %s]\n%s", m[0], content))
+		}
+	}
+
+	if len(sections) == 0 {
+		return text
+	}
+	return text + "\n\n" + strings.Join(sections, "\n\n")
+}
+
+// fetchDocRawContent calls the Feishu docx raw_content API.
+func (a *Adapter) fetchDocRawContent(docToken string) (string, error) {
+	url := fmt.Sprintf("%s/open-apis/docx/v1/documents/%s/raw_content", a.domain, docToken)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", "Bearer "+a.getToken())
+
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var r struct {
+		Code int `json:"code"`
+		Data struct {
+			Content string `json:"content"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return "", err
+	}
+	if r.Code != 0 {
+		return "", fmt.Errorf("doc api code %d", r.Code)
+	}
+	return strings.TrimSpace(r.Data.Content), nil
 }
 
 func stripAtMentions(text string) string {
@@ -431,11 +665,54 @@ func stripAtMentions(text string) string {
 
 // ─── Send ──────────────────────────────────────────────────────────────────
 
-func (a *Adapter) sendMessage(chatID, text string) (string, error) {
+// buildMsgPayload selects msg_type and content based on text content.
+// FEISHU-010: uses "post" (md) for plain text, "interactive" (card) for code/tables.
+func buildMsgPayload(text string) (msgType, content string) {
+	// Strip image markdown before rendering.
+	cleaned := regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`).ReplaceAllString(text, "")
+
+	hasCodeOrTable := strings.Contains(cleaned, "```") ||
+		regexp.MustCompile(`\|.+\|`).MatchString(cleaned)
+
+	if hasCodeOrTable {
+		// Use interactive card (schema 2.0) with markdown element.
+		card := map[string]any{
+			"schema": "2.0",
+			"config": map[string]any{"wide_screen_mode": true},
+			"body": map[string]any{
+				"elements": []any{
+					map[string]any{"tag": "markdown", "content": cleaned},
+				},
+			},
+		}
+		b, _ := json.Marshal(card)
+		return "interactive", string(b)
+	}
+
+	// Plain post with md tag.
+	post := map[string]any{
+		"zh_cn": map[string]any{
+			"content": []any{
+				[]any{map[string]any{"tag": "md", "text": cleaned}},
+			},
+		},
+	}
+	b, _ := json.Marshal(post)
+	return "post", string(b)
+}
+
+// sendMessage posts a message to a chat.
+// FEISHU-008: replyTo is passed through as reply_to_message_id when non-empty.
+func (a *Adapter) sendMessage(chatID, text, replyTo string) (string, error) {
+	msgType, content := buildMsgPayload(text)
+
 	body := map[string]any{
 		"receive_id": chatID,
-		"msg_type":   "text",
-		"content":    map[string]string{"text": text},
+		"msg_type":   msgType,
+		"content":    content,
+	}
+	if replyTo != "" {
+		body["reply_to_message_id"] = replyTo
 	}
 	b, _ := json.Marshal(body)
 
@@ -467,9 +744,14 @@ func (a *Adapter) sendMessage(chatID, text string) (string, error) {
 	return r.Data.MessageID, nil
 }
 
+// updateMessage patches an existing message.
+// FEISHU-009: includes msg_type in the PATCH body.
 func (a *Adapter) updateMessage(messageID, text string) bool {
+	msgType, content := buildMsgPayload(text)
+
 	body := map[string]any{
-		"content": map[string]string{"text": text},
+		"msg_type": msgType,
+		"content":  content,
 	}
 	b, _ := json.Marshal(body)
 
