@@ -119,6 +119,10 @@ export class WsManager {
     });
   }
 
+  promoteSyncTerminal(sessionId: string): void {
+    this.send({ type: "promote_sync_terminal", session_id: sessionId });
+  }
+
   retry(sessionId: string): void {
     this.send({ type: "retry", session_id: sessionId });
   }

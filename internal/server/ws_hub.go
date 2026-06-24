@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Leihb/octo-agent/internal/tools"
 	"github.com/gorilla/websocket"
 )
 
@@ -333,6 +334,13 @@ func (c *wsConn) dispatch(msgType string, raw []byte) {
 			return
 		}
 		c.hub.s.handleWSUserQuestionAnswer(msg.QuestionID, msg.Choices, msg.Custom, msg.Cancelled)
+
+	case "promote_sync_terminal":
+		var msg wsInPromoteSyncTerminal
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			return
+		}
+		tools.SessionBackgroundManager(msg.SessionID).PromoteSync()
 
 	default:
 		log.Printf("[ws] unknown message type: %q", msgType)

@@ -189,16 +189,22 @@ func (t TerminalTool) ExecuteStream(
 		}
 	}
 
-	id, err := t.managerFor(ctx).Start(command, WithOnLine(onLine), WithVisible(false))
+	mgr := t.managerFor(ctx)
+	id, err := mgr.Start(command, WithOnLine(onLine), WithVisible(false))
 	if err != nil {
 		return agent.ToolResult{Text: ""}, err
 	}
 	var stdinWarn string
 	if stdinText != "" {
-		if werr := t.managerFor(ctx).WriteStdinAndClose(id, stdinText); werr != nil {
+		if werr := mgr.WriteStdinAndClose(id, stdinText); werr != nil {
 			stdinWarn = stdinWriteWarning(werr)
 		}
 	}
+
+	// Register a SyncSession so TUI (Ctrl+B) and Web ("Background" button)
+	// can promote this process before the timer fires.
+	sess := mgr.BeginSync()
+	defer mgr.EndSync()
 
 	// snapshot returns the collected output so far, tab-expanded and with the
 	// truncation marker prepended when the cap dropped earlier bytes. The
@@ -215,18 +221,25 @@ func (t TerminalTool) ExecuteStream(
 		return body + stdinWarn
 	}
 
-	// Poll until the process exits or the timeout fires.
+	// Poll until the process exits, the user promotes it, or the timeout fires.
 	timer := time.NewTimer(TerminalTimeout)
 	defer timer.Stop()
 
 	for {
 		select {
+		case <-sess.C():
+			// User promoted (Ctrl+B in TUI / button in Web): make the process
+			// visible in the background panel and return. NOT reaped.
+			mgr.Promote(id)
+			body := MaybeSpillOutput(id, snapshot())
+			return agent.ToolResult{
+				Text: fmt.Sprintf("%s\n\n[promoted to background process %s]\n\n%s", body, id, BgPollNotice),
+				UI:   terminalUI(command, "running", body),
+			}, nil
 		case <-timer.C:
-			// Timeout: promote the hidden process to visible so it shows up
-			// in the TUI "background (N running)" panel, then return. NOT
-			// reaped — it's now a real background task and its output must stay
-			// readable via terminal_output.
-			t.managerFor(ctx).Promote(id)
+			// Timer backstop: covers IM channels and forgotten browser tabs.
+			// Identical outcome to the manual promote path.
+			mgr.Promote(id)
 			body := MaybeSpillOutput(id, snapshot())
 			return agent.ToolResult{
 				Text: fmt.Sprintf("%s\n\n[timeout: command exceeded %s and continues as background process %s]\n\n%s", body, TerminalTimeout, id, BgPollNotice),
@@ -235,9 +248,9 @@ func (t TerminalTool) ExecuteStream(
 		case <-ctx.Done():
 			// User cancelled (Esc / Ctrl-C): kill the hidden process and reap
 			// it — the output is returned here and now, nothing will poll it.
-			t.managerFor(ctx).Kill(id)
+			mgr.Kill(id)
 			body := snapshot()
-			t.managerFor(ctx).Remove(id)
+			mgr.Remove(id)
 			return agent.ToolResult{
 				Text: body + "\n[exit: signal: killed]",
 				UI:   terminalUI(command, "failed", body+"\n[exit: signal: killed]"),
@@ -245,12 +258,12 @@ func (t TerminalTool) ExecuteStream(
 		default:
 		}
 
-		_, status, _, _ := t.managerFor(ctx).Read(id)
+		_, status, _, _ := mgr.Read(id)
 		if strings.HasPrefix(status, "exited") {
 			body := MaybeSpillOutput(id, snapshot())
 			// Reap the hidden process: its output has been captured and
 			// returned, so the bgProcess (and its retained buffer) can go.
-			t.managerFor(ctx).Remove(id)
+			mgr.Remove(id)
 			if status != "exited: 0" {
 				text := body + "\n[exit: " + strings.TrimPrefix(status, "exited: ") + "]"
 				return agent.ToolResult{Text: text, UI: terminalUI(command, "failed", text)}, nil

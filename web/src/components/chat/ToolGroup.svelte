@@ -1,5 +1,7 @@
 <script lang="ts">
   import { t } from '../../lib/i18n'
+  import { activeSessionId } from '../../lib/stores'
+  import { ws } from '../../lib/ws'
   // A collapsible group of tool calls for one agent turn.
   // Accepts optional `tools` + `streaming` props for real data;
   // falls back to static prototype content when called without props.
@@ -8,6 +10,11 @@
     tools?: any[] | null,
     streaming?: boolean,
   } = $props()
+
+  function promoteTerminal() {
+    const sid = $activeSessionId
+    if (sid) ws.promoteSyncTerminal(sid)
+  }
 
   const TOOL_ICONS: Record<string, string> = {
     grep: 'ant-design:search-outlined',
@@ -240,9 +247,14 @@
             {:else if tool.done}
               <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:var(--success)"></iconify-icon>
             {:else}
-              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--blue-6)">
+              <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--blue-6)">
                 <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
                 {$t('tools.running')}
+                {#if tool.name === 'terminal' || tool.name === 'bash'}
+                  <button class="promote-btn" onclick={(e) => { e.preventDefault(); e.stopPropagation(); promoteTerminal() }}>
+                    Background
+                  </button>
+                {/if}
               </span>
             {/if}
           </span>
@@ -427,4 +439,11 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .html-frame {
   border: 0; width: 100%; height: 400px; display: block; background: var(--bg-container);
 }
+.promote-btn {
+  height: 20px; padding: 0 8px;
+  border: 1px solid var(--blue-6); background: transparent;
+  border-radius: 3px; font-size: 11px; color: var(--blue-6);
+  cursor: pointer; font-family: inherit; line-height: 1;
+}
+.promote-btn:hover { background: var(--blue-1); }
 </style>

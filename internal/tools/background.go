@@ -165,6 +165,22 @@ type BgExit struct {
 	NewOutput string
 }
 
+// SyncSession is the promote handle for one in-flight synchronous terminal
+// command. Closing the channel (via Signal) unblocks the polling loop so the
+// process is promoted to a visible background task before the timer fires.
+// safe for concurrent calls (sync.Once).
+type SyncSession struct {
+	ch   chan struct{}
+	once sync.Once
+}
+
+// Signal closes the channel, unblocking any select waiting on C(). Safe to
+// call multiple times — only the first call takes effect.
+func (s *SyncSession) Signal() { s.once.Do(func() { close(s.ch) }) }
+
+// C returns the receive-only channel the terminal polling loop selects on.
+func (s *SyncSession) C() <-chan struct{} { return s.ch }
+
 // BackgroundManager owns the set of detached background processes for a
 // session. Methods are safe for concurrent use.
 type BackgroundManager struct {
@@ -172,12 +188,60 @@ type BackgroundManager struct {
 	procs  map[string]*bgProcess
 	seq    int
 	onExit func(BgExit) // optional; fired from the waiter goroutine on completion
+
+	syncMu   sync.Mutex
+	syncSess *SyncSession // non-nil while a sync terminal is polling
 }
 
 // NewBackgroundManager returns an empty manager.
 func NewBackgroundManager() *BackgroundManager {
 	return &BackgroundManager{procs: map[string]*bgProcess{}}
 }
+
+// BeginSync registers a new SyncSession for the current synchronous terminal
+// command. Call EndSync (via defer) when the command finishes or is promoted.
+// At most one sync terminal runs per manager at a time — the agent loop is
+// serial — so there is only one slot.
+func (m *BackgroundManager) BeginSync() *SyncSession {
+	s := &SyncSession{ch: make(chan struct{})}
+	m.syncMu.Lock()
+	m.syncSess = s
+	m.syncMu.Unlock()
+	return s
+}
+
+// EndSync clears the current SyncSession.
+func (m *BackgroundManager) EndSync() {
+	m.syncMu.Lock()
+	m.syncSess = nil
+	m.syncMu.Unlock()
+}
+
+// HasSync reports whether a sync terminal is currently polling.
+func (m *BackgroundManager) HasSync() bool {
+	m.syncMu.Lock()
+	defer m.syncMu.Unlock()
+	return m.syncSess != nil
+}
+
+// PromoteSync signals the current sync terminal to promote itself to a visible
+// background process. No-op if no sync terminal is running.
+func (m *BackgroundManager) PromoteSync() {
+	m.syncMu.Lock()
+	s := m.syncSess
+	m.syncMu.Unlock()
+	if s != nil {
+		s.Signal()
+	}
+}
+
+// HasActiveSync reports whether the default manager has a sync terminal polling.
+// Used by the TUI to conditionally show the Ctrl+B hint.
+func HasActiveSync() bool { return defaultBg.HasSync() }
+
+// PromoteCurrentSync signals the default manager's sync terminal to promote.
+// Called by the TUI Ctrl+B handler.
+func PromoteCurrentSync() { defaultBg.PromoteSync() }
 
 // SetOnExit registers a completion hook fired once per process when it exits,
 // carrying its final status and any output not yet read. Pass nil to clear.

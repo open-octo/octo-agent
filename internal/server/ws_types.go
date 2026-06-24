@@ -264,3 +264,9 @@ type wsEventShellPreview struct {
 	Type    string `json:"type"`
 	Command string `json:"command"`
 }
+
+// wsInPromoteSyncTerminal is sent by the browser when the user clicks the
+// "Background" button on a running terminal tool card.
+type wsInPromoteSyncTerminal struct {
+	SessionID string `json:"session_id"`
+}

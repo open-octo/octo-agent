@@ -95,6 +95,14 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quit = true
 		return m, tea.Quit
 
+	case tea.KeyCtrlB:
+		// Background the current sync terminal, if one is running.
+		// No-op when no sync terminal is polling.
+		if m.turnRunning && tools.HasActiveSync() {
+			tools.PromoteCurrentSync()
+		}
+		return m, nil
+
 	case tea.KeyCtrlC:
 		if m.turnRunning {
 			m.interrupt()
@@ -910,6 +918,9 @@ func (m *tuiModel) liveHeight() int {
 	if m.running != nil || (m.turnRunning && m.partial.Len() == 0) {
 		h++
 	}
+	if m.running != nil && tools.HasActiveSync() {
+		h++ // Ctrl+B hint line
+	}
 	if n := len(m.pendingSteer); n > 0 {
 		h += n // one line per pending steer message
 	}
@@ -980,6 +991,10 @@ func (m *tuiModel) View() string {
 	} else if m.running != nil {
 		b.WriteString(m.spinnerLine(m.running.verb+"("+m.running.target+")", m.running.start))
 		b.WriteByte('\n')
+		if tools.HasActiveSync() {
+			b.WriteString(hintStyle.Render("  [Ctrl+B] background  [Esc] kill"))
+			b.WriteByte('\n')
+		}
 	} else if m.turnRunning && m.toolStreamName != "" {
 		// The model is streaming a tool call's arguments (e.g. a large
 		// write_file body). Show a live byte counter so a multi-second argument
