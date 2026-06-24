@@ -655,7 +655,7 @@ func (a *Adapter) processUpdate(upd tgUpdate, onMessage func(channel.InboundEven
 // downloadTGFile resolves file_id to a file_path via getFile, then downloads
 // the raw bytes. Returns (bytes, filePath, error).
 func (a *Adapter) downloadTGFile(fileID string) ([]byte, string, error) {
-	raw, err := a.call(nil, "getFile", map[string]any{"file_id": fileID}, a.http)
+	raw, err := a.call(context.Background(), "getFile", map[string]any{"file_id": fileID}, a.http)
 	if err != nil {
 		return nil, "", fmt.Errorf("getFile: %w", err)
 	}
@@ -681,7 +681,7 @@ func (a *Adapter) downloadTGFile(fileID string) ([]byte, string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("file download HTTP %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20)) // 50 MB cap
 	if err != nil {
 		return nil, "", err
 	}
