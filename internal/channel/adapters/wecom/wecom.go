@@ -667,7 +667,7 @@ func downloadWCMedia(url, aeskey string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20)) // 50 MB cap
 	if err != nil {
 		return nil, err
 	}
@@ -694,7 +694,7 @@ func detectMIME(data []byte) string {
 	case bytes.HasPrefix(data, []byte("BM")):
 		return "image/bmp"
 	default:
-		return "image/jpeg"
+		return "application/octet-stream"
 	}
 }
 

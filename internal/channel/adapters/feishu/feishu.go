@@ -49,6 +49,12 @@ const (
 	cfgAllowedUsers = "allowed_users"
 )
 
+// Package-level compiled regexps (avoids recompiling on every message send).
+var (
+	feishuStripImgRe = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+	feishuTableRe    = regexp.MustCompile(`\|.+\|`)
+)
+
 // Adapter implements channel.Adapter for Feishu.
 type Adapter struct {
 	appID        string
@@ -118,17 +124,17 @@ func (a *Adapter) Start(ctx context.Context, onMessage func(channel.InboundEvent
 		default:
 		}
 
-		if err := a.connectOnce(ctx, onMessage); err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			log.Printf("[feishu] connection lost: %v (reconnecting in %s)", err, reconnectDelay)
-		}
-
-		select {
-		case <-ctx.Done():
+		err := a.connectOnce(ctx, onMessage)
+		if ctx.Err() != nil {
 			return nil
-		case <-time.After(reconnectDelay):
+		}
+		if err != nil {
+			log.Printf("[feishu] connection lost: %v (reconnecting in %s)", err, reconnectDelay)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(reconnectDelay):
+			}
 		}
 	}
 }
@@ -534,7 +540,7 @@ func (a *Adapter) downloadResource(messageID, key, resourceType, fileName string
 		return channel.FileAttachment{}, fmt.Errorf("download %s: HTTP %d", resourceType, resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20)) // 50 MB cap
 	if err != nil {
 		return channel.FileAttachment{}, err
 	}
@@ -568,6 +574,7 @@ func (a *Adapter) downloadResource(messageID, key, resourceType, fileName string
 	}
 	if _, err := tmpFile.Write(data); err != nil {
 		tmpFile.Close()
+		os.Remove(tmpFile.Name())
 		return channel.FileAttachment{}, err
 	}
 	tmpFile.Close()
@@ -669,10 +676,10 @@ func stripAtMentions(text string) string {
 // FEISHU-010: uses "post" (md) for plain text, "interactive" (card) for code/tables.
 func buildMsgPayload(text string) (msgType, content string) {
 	// Strip image markdown before rendering.
-	cleaned := regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`).ReplaceAllString(text, "")
+	cleaned := feishuStripImgRe.ReplaceAllString(text, "")
 
 	hasCodeOrTable := strings.Contains(cleaned, "```") ||
-		regexp.MustCompile(`\|.+\|`).MatchString(cleaned)
+		feishuTableRe.MatchString(cleaned)
 
 	if hasCodeOrTable {
 		// Use interactive card (schema 2.0) with markdown element.
