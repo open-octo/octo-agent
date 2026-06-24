@@ -8,11 +8,21 @@
 # pipeline, but run synchronously when called at top level (no fiber to yield).
 $__wf_sched = false
 
-# agent(prompt) runs one sub-agent to completion and returns its reply string.
-# Inside parallel/pipeline it starts the work then yields its fiber, so siblings
-# run concurrently. At top level it starts then blocks for its own result.
-def agent(prompt)
-  token = __agent_start(prompt.to_s)
+# agent(prompt, opts = {}) runs one sub-agent to completion and returns its
+# reply string. Inside parallel/pipeline it starts the work then yields its
+# fiber, so siblings run concurrently. At top level it starts then blocks for
+# its own result.
+#
+# opts (all optional):
+#   model:      String  — override the model for this one sub-agent
+#   tools:      Array   — restrict the child to this subset of tool names
+#   read_only:  true    — strip the mutating tools (write_file/edit_file)
+def agent(prompt, opts = {})
+  model = (opts[:model] || opts["model"]).to_s
+  tools = opts[:tools] || opts["tools"] || []
+  tools = tools.join(",") if tools.is_a?(Array)
+  read_only = (opts[:read_only] || opts["read_only"]) ? 1 : 0
+  token = __agent_start(prompt.to_s, model, tools.to_s, read_only)
   raise "workflow: token budget exhausted" if token < 0
   if $__wf_sched
     Fiber.yield(token)

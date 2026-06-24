@@ -18,7 +18,10 @@
 /* ── Host imports (Go, module "env"). Strings cross as (ptr,len) in linear
    memory; results are written back into a guest-allocated buffer. ───────── */
 __attribute__((import_module("env"), import_name("agent_start")))
-extern int host_agent_start(const char *p, int plen);          /* -> token, non-blocking */
+extern int host_agent_start(const char *p, int plen,
+                            const char *model, int mlen,
+                            const char *tools, int tlen,
+                            int read_only);                    /* -> token, non-blocking */
 __attribute__((import_module("env"), import_name("agent_wait_any")))
 extern int host_agent_wait_any(void);                          /* blocks; -> token (0 = cancelled) */
 __attribute__((import_module("env"), import_name("agent_take")))
@@ -29,9 +32,15 @@ __attribute__((import_module("env"), import_name("budget_remaining")))
 extern long long host_budget_remaining(void);                  /* -> remaining output-token budget */
 
 static mrb_value m_agent_start(mrb_state *mrb, mrb_value self) {
-  const char *p; mrb_int len;
-  mrb_get_args(mrb, "s", &p, &len);
-  return mrb_fixnum_value(host_agent_start(p, (int)len));
+  const char *p; mrb_int plen;
+  const char *model; mrb_int mlen;
+  const char *tools; mrb_int tlen;
+  mrb_int read_only;
+  /* prompt, model, tools (comma-joined names), read_only(0/1) — the prelude
+     always passes all four (empty strings / 0 when unset). */
+  mrb_get_args(mrb, "sssi", &p, &plen, &model, &mlen, &tools, &tlen, &read_only);
+  return mrb_fixnum_value(host_agent_start(p, (int)plen, model, (int)mlen,
+                                           tools, (int)tlen, (int)read_only));
 }
 static mrb_value m_agent_wait_any(mrb_state *mrb, mrb_value self) {
   (void)self;
@@ -40,7 +49,7 @@ static mrb_value m_agent_wait_any(mrb_state *mrb, mrb_value self) {
 static mrb_value m_agent_take(mrb_state *mrb, mrb_value self) {
   mrb_int token;
   mrb_get_args(mrb, "i", &token);
-  int cap = 1 << 20; /* 1 MiB result cap */
+  int cap = 16 << 20; /* 16 MiB result cap (a sub-agent reply rarely nears this) */
   char *buf = (char *)malloc(cap);
   if (!buf) return mrb_str_new(mrb, "", 0);
   int n = host_agent_take((int)token, buf, cap);
@@ -83,7 +92,7 @@ int main(void) {
   mrb_state *mrb = mrb_open();
   if (!mrb) { fprintf(stderr, "mrb_open failed\n"); return 1; }
   struct RClass *k = mrb->kernel_module;
-  mrb_define_method(mrb, k, "__agent_start",      m_agent_start,      MRB_ARGS_REQ(1));
+  mrb_define_method(mrb, k, "__agent_start",      m_agent_start,      MRB_ARGS_REQ(4));
   mrb_define_method(mrb, k, "__agent_wait_any",   m_agent_wait_any,   MRB_ARGS_NONE());
   mrb_define_method(mrb, k, "__agent_take",       m_agent_take,       MRB_ARGS_REQ(1));
   mrb_define_method(mrb, k, "__log",              m_log,              MRB_ARGS_REQ(1));

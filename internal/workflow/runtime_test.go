@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
 // echoAgent replies "reply<prompt>" with a fixed token cost.
-func echoAgent(_ context.Context, prompt string) AgentResult {
+func echoAgent(_ context.Context, prompt string, _ AgentOptions) AgentResult {
 	return AgentResult{Reply: "reply<" + prompt + ">", InputTokens: 5, OutputTokens: 7}
 }
 
@@ -36,7 +37,7 @@ func TestRun_AgentRoundTrip(t *testing.T) {
 func TestRun_ParallelConcurrent(t *testing.T) {
 	const n = 5
 	var inFlight, peak int64
-	track := func(_ context.Context, p string) AgentResult {
+	track := func(_ context.Context, p string, _ AgentOptions) AgentResult {
 		cur := atomic.AddInt64(&inFlight, 1)
 		for {
 			old := atomic.LoadInt64(&peak)
@@ -64,7 +65,7 @@ func TestRun_ParallelConcurrent(t *testing.T) {
 
 func TestRun_MaxConcurrent(t *testing.T) {
 	var inFlight, peak int64
-	track := func(_ context.Context, p string) AgentResult {
+	track := func(_ context.Context, p string, _ AgentOptions) AgentResult {
 		cur := atomic.AddInt64(&inFlight, 1)
 		for {
 			old := atomic.LoadInt64(&peak)
@@ -89,7 +90,7 @@ func TestRun_MaxConcurrent(t *testing.T) {
 
 func TestRun_Pipeline(t *testing.T) {
 	// stage1 echoes; stage2 appends the stage1 result length.
-	agent := func(_ context.Context, p string) AgentResult {
+	agent := func(_ context.Context, p string, _ AgentOptions) AgentResult {
 		return AgentResult{Reply: p + "!"}
 	}
 	script := `
@@ -110,7 +111,7 @@ func TestRun_Pipeline(t *testing.T) {
 
 func TestRun_Cancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	blocked := func(c context.Context, _ string) AgentResult {
+	blocked := func(c context.Context, _ string, _ AgentOptions) AgentResult {
 		<-c.Done() // never returns until canceled
 		return AgentResult{Err: c.Err()}
 	}
@@ -129,7 +130,7 @@ func TestRun_Cancellation(t *testing.T) {
 func TestRun_BudgetExhausted(t *testing.T) {
 	// First agent spends 100 output tokens; Budget is 50, so the budget is
 	// already over after one call and the next agent() raises.
-	costly := func(_ context.Context, _ string) AgentResult {
+	costly := func(_ context.Context, _ string, _ AgentOptions) AgentResult {
 		return AgentResult{Reply: "ok", OutputTokens: 100}
 	}
 	script := `
@@ -189,6 +190,44 @@ func TestRun_Log(t *testing.T) {
 	}
 	if len(lines) != 2 || lines[0] != "starting" || lines[1] != "done" {
 		t.Errorf("log lines = %v", lines)
+	}
+}
+
+// TestRun_AgentOptions verifies agent(prompt, opts) forwards model / tools /
+// read_only to the AgentFunc, and that a bare agent(prompt) yields zero opts.
+func TestRun_AgentOptions(t *testing.T) {
+	var got []AgentOptions
+	var mu sync.Mutex
+	rec := func(_ context.Context, _ string, o AgentOptions) AgentResult {
+		mu.Lock()
+		got = append(got, o)
+		mu.Unlock()
+		return AgentResult{Reply: "ok"}
+	}
+	script := `
+		agent("a", model: "haiku", tools: ["read_file", "grep"], read_only: true)
+		agent("b")
+		"done"
+	`
+	if _, err := Run(context.Background(), script, Options{Agent: rec}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d calls, want 2", len(got))
+	}
+	// Ordering across two sequential top-level agent() calls is deterministic.
+	first, second := got[0], got[1]
+	if first.Model != "haiku" {
+		t.Errorf("opts.Model = %q, want haiku", first.Model)
+	}
+	if len(first.Tools) != 2 || first.Tools[0] != "read_file" || first.Tools[1] != "grep" {
+		t.Errorf("opts.Tools = %v, want [read_file grep]", first.Tools)
+	}
+	if !first.ReadOnly {
+		t.Error("opts.ReadOnly = false, want true")
+	}
+	if second.Model != "" || len(second.Tools) != 0 || second.ReadOnly {
+		t.Errorf("bare agent() should yield zero opts, got %+v", second)
 	}
 }
 

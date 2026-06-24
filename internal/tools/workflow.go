@@ -36,8 +36,11 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"than improvised across turns.\n\n" +
 			"The script runs in a sandboxed mruby interpreter (no file/network access — all " +
 			"effects go through the primitives). Primitives:\n" +
-			"- `agent(prompt) -> String`: run one sub-agent to completion, return its reply. " +
-			"Inside parallel/pipeline it runs concurrently with siblings.\n" +
+			"- `agent(prompt, opts = {}) -> String`: run one sub-agent to completion, return " +
+			"its reply. Inside parallel/pipeline it runs concurrently with siblings. " +
+			"Optional opts: `model:` (override the model for this call, e.g. a cheaper model " +
+			"for mechanical stages), `tools:` (Array restricting the child's tools), " +
+			"`read_only: true` (strip write_file/edit_file).\n" +
 			"- `parallel(items) { |it| ... } -> Array`: run the block for every item " +
 			"concurrently; returns results in input order.\n" +
 			"- `pipeline(items, stage1, stage2, ...) -> Array`: run each item through all " +
@@ -97,10 +100,13 @@ func (WorkflowTool) ExecuteStream(ctx context.Context, _ string, input map[strin
 
 	// agent() delegates to the same Spawner that backs sub_agent. The Spawner
 	// marks children as sub-agents, so a workflow agent can't recurse.
-	af := func(c context.Context, prompt string) workflow.AgentResult {
+	af := func(c context.Context, prompt string, opts workflow.AgentOptions) workflow.AgentResult {
 		res, err := spawner.Spawn(c, SpawnRequest{
 			Description: firstLine(prompt),
 			Prompt:      prompt,
+			Model:       opts.Model,
+			Tools:       opts.Tools,
+			ReadOnly:    opts.ReadOnly,
 		})
 		if err != nil {
 			return workflow.AgentResult{Err: err}

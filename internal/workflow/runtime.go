@@ -37,7 +37,19 @@ var preludeRB string
 // AgentFunc runs one sub-agent task to completion. It backs the DSL's agent()
 // primitive. Implementations must be safe for concurrent calls on distinct
 // prompts (parallel() invokes it from multiple goroutines at once).
-type AgentFunc func(ctx context.Context, prompt string) AgentResult
+type AgentFunc func(ctx context.Context, prompt string, opts AgentOptions) AgentResult
+
+// AgentOptions carries the optional per-call settings from agent(prompt, …).
+// All fields are zero-valued ("inherit the parent's default") when the script
+// passes no options.
+type AgentOptions struct {
+	// Model overrides the model for this one sub-agent (empty = inherit).
+	Model string
+	// Tools restricts the child to this subset of tools (empty = inherit all).
+	Tools []string
+	// ReadOnly strips the mutating tools (write_file, edit_file) from the child.
+	ReadOnly bool
+}
 
 // AgentResult is one agent() call's outcome.
 type AgentResult struct {
@@ -253,9 +265,29 @@ func (b *backend) register(ctx context.Context, r wazero.Runtime) (api.Module, e
 // (non-blocking). When the call maps to a cached journal entry it delivers the
 // stored result on a goroutine without invoking Agent. Returns -1 (cast) when
 // the budget is exhausted.
-func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length uint32) uint32 {
+func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mptr, mlen, tptr, tlen, readOnly uint32) uint32 {
 	promptBytes, _ := mod.Memory().Read(ptr, length)
 	prompt := string(promptBytes)
+
+	// Per-call options (model / tools / read_only). The prelude always passes
+	// all three slots, empty when unset. Read synchronously — the wasm linear
+	// memory may be reused once we return the token.
+	var opts AgentOptions
+	if mlen > 0 {
+		if mb, ok := mod.Memory().Read(mptr, mlen); ok {
+			opts.Model = string(mb)
+		}
+	}
+	if tlen > 0 {
+		if tb, ok := mod.Memory().Read(tptr, tlen); ok {
+			for _, t := range strings.Split(string(tb), ",") {
+				if t = strings.TrimSpace(t); t != "" {
+					opts.Tools = append(opts.Tools, t)
+				}
+			}
+		}
+	}
+	opts.ReadOnly = readOnly != 0
 
 	b.mu.Lock()
 	if b.opt.Budget > 0 && int64(b.outTok) >= b.opt.Budget {
@@ -299,7 +331,7 @@ func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length uint
 				return
 			}
 		}
-		res := b.opt.Agent(b.ctx, prompt)
+		res := b.opt.Agent(b.ctx, prompt, opts)
 		b.deliver(tok, res)
 	}()
 	return tok

@@ -113,7 +113,7 @@ func TestRun_ResumeSkipsCachedCall(t *testing.T) {
 
 	var callCount int
 	res, err := Run(newTestCtx(t), script, Options{
-		Agent: func(_ context.Context, _ string) AgentResult {
+		Agent: func(_ context.Context, _ string, _ AgentOptions) AgentResult {
 			callCount++
 			return AgentResult{Reply: "fresh-reply"}
 		},
@@ -148,7 +148,7 @@ func TestRun_ResumeContinuesFromCrashPoint(t *testing.T) {
 	var mu sync.Mutex
 	var called []string
 	res, err := Run(newTestCtx(t), script, Options{
-		Agent: func(_ context.Context, prompt string) AgentResult {
+		Agent: func(_ context.Context, prompt string, _ AgentOptions) AgentResult {
 			mu.Lock()
 			called = append(called, prompt)
 			mu.Unlock()
