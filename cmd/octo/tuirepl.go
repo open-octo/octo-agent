@@ -948,7 +948,6 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 
 	case agent.EventTextDelta:
 		m.turnOutChars += len(ev.Text)
-		m.thinkingPartial.Reset() // thinking phase ended; text is now streaming
 		m.appendText(ev.Text)
 		return
 
