@@ -214,6 +214,15 @@ type wsEventRequestUserQuestion struct {
 	Header      string   `json:"header,omitempty"`
 }
 
+// wsEventDismissUserQuestion tells the browser to close the question modal
+// that was opened by request_user_question. Sent when the question times out
+// or the agent context is cancelled before the user answers.
+type wsEventDismissUserQuestion struct {
+	Type       string `json:"type"`
+	SessionID  string `json:"session_id"`
+	QuestionID string `json:"question_id"`
+}
+
 type wsEventBackgroundTaskUpdate struct {
 	Type      string             `json:"type"`
 	SessionID string             `json:"session_id"`
