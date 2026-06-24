@@ -122,6 +122,7 @@ WS.onEvent(ev => {
         if (ev.working_dir !== undefined) patch.working_dir = ev.working_dir;
         if (ev.permission_mode !== undefined) patch.permission_mode = ev.permission_mode;
         if (ev.reasoning_effort !== undefined) patch.reasoning_effort = ev.reasoning_effort;
+        if (ev.show_reasoning !== undefined) patch.show_reasoning = ev.show_reasoning;
       }
       if (!sid) break;
       Sessions.patch(sid, patch);

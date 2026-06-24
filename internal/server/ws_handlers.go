@@ -89,7 +89,7 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 	if err != nil {
 		return nil
 	}
-	wd, pm, re, ctxUsage := s.sessionStatusFields()
+	wd, pm, re, sr, ctxUsage := s.sessionStatusFields()
 	out := make([]wsSessionInfo, 0, len(sessions))
 	for _, sess := range sessions {
 		source := sess.Source
@@ -107,6 +107,7 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 			WorkingDir:      wd,
 			PermissionMode:  pm,
 			ReasoningEffort: re,
+			ShowReasoning:   sr,
 			ContextUsage:    ctxUsage,
 		})
 	}
@@ -146,7 +147,7 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 	if pct > 100 {
 		pct = 100
 	}
-	wd, pm, re, _ := s.sessionStatusFields()
+	wd, pm, re, _, _ := s.sessionStatusFields()
 	b, err := json.Marshal(map[string]any{
 		"type":             "session_update",
 		"session_id":       sessionID,
@@ -876,7 +877,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// so turn_done + assistant_message were broadcast by the handler.
 			// Nothing more for the reply itself.
 		} else {
-			wd, pm, re, _ := s.sessionStatusFields()
+			wd, pm, re, _, _ := s.sessionStatusFields()
 			sw.error(err.Error())
 			s.wsHub.broadcast(sess.ID, map[string]any{
 				"type":             "session_update",
@@ -915,7 +916,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			ctxPct = 100
 		}
 	}
-	wd, pm, re, _ := s.sessionStatusFields()
+	wd, pm, re, _, _ := s.sessionStatusFields()
 	s.wsHub.broadcast(sess.ID, map[string]any{
 		"type":             "session_update",
 		"session_id":       sess.ID,
