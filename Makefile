@@ -51,7 +51,7 @@ RG_EMBED_BIN := $(RG_EMBED_DIR)/rg
 .PHONY: all build install test cover vet fmt fmt-check tidy clean \
         eval-build eval-list eval \
         rg-embed rg-embed-clean \
-        web-build web-dev dev
+        web-build web-dev dev build-full
 
 all: test
 
@@ -74,14 +74,12 @@ web-dev:
 	cd web && npm run dev
 
 # Download and embed ripgrep for the current GOOS/GOARCH before building.
-build: rg-embed
+build: web-build rg-embed
 	go build $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' -o octo ./cmd/octo
 
-# Build including the latest web UI.
-build-full: web-build rg-embed
-	go build $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' -o octo ./cmd/octo
+build-full: build
 
-install: rg-embed
+install: web-build rg-embed
 	go install $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' ./cmd/octo
 
 test:
