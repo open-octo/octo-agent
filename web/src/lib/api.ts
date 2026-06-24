@@ -1,4 +1,4 @@
-import type { Session, Skill, ScheduledTask, McpServer, Channel, Memory, RecallFile } from './types'
+import type { Session, Skill, ScheduledTask, McpServer, Channel, Memory, RecallFile, TagStatus } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init)
@@ -105,7 +105,7 @@ export async function listSkills(): Promise<Skill[]> {
   return (d.skills ?? []).map((s): Skill => {
     // Server source is "default" (built-in/system) | "project" | "user".
     const src = s.source ?? 'user'
-    const tag = src === 'project'
+    const tag: { tagStatus: TagStatus; tagLabel: string } = src === 'project'
       ? { tagStatus: 'info', tagLabel: 'Project' }
       : src === 'default'
         ? { tagStatus: 'default', tagLabel: 'System' }

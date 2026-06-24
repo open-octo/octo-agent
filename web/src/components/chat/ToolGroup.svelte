@@ -120,14 +120,18 @@
         return out ? `${nonEmptyLines(out)} lines` : ''
       }
       case 'edit_file': {
-        if (!tool.diff) return ''
-        const changes = tool.diff.split('\n').filter((l: string) => l.startsWith('+') || l.startsWith('-')).length
+        const diff = tool.ui_payload?.diff
+        if (!diff) return ''
+        const changes = diff.split('\n').filter((l: string) => l.startsWith('+') || l.startsWith('-')).length
         return changes ? `${changes} changes` : ''
       }
       case 'write_file': {
-        const bytes = res ? new Blob([res]).size : 0
-        if (!bytes) return ''
-        return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
+        const p = tool.ui_payload
+        if (!p) return ''
+        const lines = p.line_count ? `${p.line_count} lines` : ''
+        const b = p.size_bytes ?? 0
+        const bytes = b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`
+        return [lines, bytes].filter(Boolean).join(' · ')
       }
       default: return ''
     }
@@ -281,9 +285,9 @@
               </div>
             {/each}
           </div>
-        {:else if tool.diff}
+        {:else if tool.ui_payload?.diff}
           <div class="diff-block">
-            {#each tool.diff.split('\n') as line}
+            {#each tool.ui_payload.diff.split('\n') as line}
               {#if line.startsWith('@@')}
                 <div class="diff-hdr mono">{line}</div>
               {:else if line.startsWith('-')}
@@ -329,6 +333,16 @@
           <div class="html-frame-wrap">
             {#if hp && hp.meta}<div class="fetch-meta mono">{hp.meta}</div>{/if}
             <iframe srcdoc={hp?.html} sandbox="" class="html-frame" title="fetched page"></iframe>
+          </div>
+        {:else if tool.name === 'write_file' && tool.ui_payload?.preview != null}
+          <div class="term-wrap">
+            <pre class="tool-output">{tool.ui_payload.preview}</pre>
+            {#if tool.ui_payload.preview_truncated}
+              <div class="fold-info">
+                <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
+                {tool.ui_payload.line_count - 30} more lines
+              </div>
+            {/if}
           </div>
         {:else if tool.result}
           {@const pretty = prettyResult(tool.result)}
@@ -391,6 +405,11 @@ details[open] > summary .chev { transform: rotate(90deg); }
   gap: 6px; font-size: 12px; color: var(--blue-6); cursor: pointer; font-family: inherit;
 }
 .fold-btn:hover { background: var(--active-blue-bg); }
+.fold-info {
+  width: 100%; padding: 8px 12px; border-top: 1px solid var(--border-table);
+  background: var(--bg-table-header); display: flex; align-items: center; justify-content: center;
+  gap: 6px; font-size: 12px; color: var(--text-tertiary); font-family: inherit;
+}
 .term-prompt { color: var(--success); }
 .search-results {
   border-top: 1px solid var(--border-table); padding: 10px 14px;
