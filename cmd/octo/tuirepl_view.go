@@ -1336,22 +1336,13 @@ func (m *tuiModel) thinkingLine() string {
 		hintStyle.Render("("+meta+")"))
 }
 
-// injectAssistantPrefix inserts prefix just before the first non-space content
-// character in rendered, skipping any leading newlines glamour may prepend.
-// This aligns ◆ at the left edge, mirroring how "> " anchors user messages.
+// injectAssistantPrefix strips glamour's 2-space paragraph indent from the
+// first line and prepends prefix so ◆ aligns at column 0, mirroring "> ".
+// Leading newlines are already trimmed by markdownRenderer.render.
 func injectAssistantPrefix(rendered, prefix string) string {
-	// Skip leading newlines (glamour block margin), then leading spaces
-	// (glamour paragraph indent) on the first content line.
-	i := 0
-	for i < len(rendered) && rendered[i] == '\n' {
-		i++
+	trimmed := strings.TrimLeft(rendered, " ")
+	if trimmed == "" {
+		return rendered
 	}
-	j := i
-	for j < len(rendered) && rendered[j] == ' ' {
-		j++
-	}
-	if j >= len(rendered) {
-		return rendered // blank output — don't inject
-	}
-	return rendered[:i] + prefix + rendered[j:]
+	return prefix + trimmed
 }

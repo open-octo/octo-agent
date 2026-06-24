@@ -57,6 +57,7 @@ type sessionItem struct {
 	WorkingDir      string    `json:"working_dir,omitempty"`
 	PermissionMode  string    `json:"permission_mode,omitempty"`
 	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
+	ShowReasoning   *bool     `json:"show_reasoning,omitempty"`
 	ContextUsage    int       `json:"context_usage,omitempty"`
 }
 
@@ -94,7 +95,7 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 	if name == "" {
 		name = s.DisplayTitle()
 	}
-	wd, pm, re, ctxUsage := srv.sessionStatusFields()
+	wd, pm, re, sr, ctxUsage := srv.sessionStatusFields()
 	return sessionItem{
 		ID:              s.ID,
 		Name:            name,
@@ -111,21 +112,24 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 		WorkingDir:      wd,
 		PermissionMode:  pm,
 		ReasoningEffort: re,
+		ShowReasoning:   sr,
 		ContextUsage:    ctxUsage,
 	}
 }
 
 // sessionStatusFields returns the server-level session metadata that is shared
-// across all sessions (cwd, permission mode, reasoning effort, current context
-// usage). The Web UI mirrors the CLI bottom status bar, so these values are
-// surfaced on every session descriptor.
-func (srv *Server) sessionStatusFields() (workingDir, permissionMode, reasoningEffort string, contextUsage int) {
+// across all sessions (cwd, permission mode, reasoning effort, show reasoning,
+// current context usage). The Web UI mirrors the CLI bottom status bar, so
+// these values are surfaced on every session descriptor.
+func (srv *Server) sessionStatusFields() (workingDir, permissionMode, reasoningEffort string, showReasoning *bool, contextUsage int) {
 	workingDir = srv.cwd
 	permissionMode = string(resolvePermissionMode())
 	if cfg, err := config.Load(); err == nil {
-		reasoningEffort = cfg.DefaultEntry().ReasoningEffort
+		entry := cfg.DefaultEntry()
+		reasoningEffort = entry.ReasoningEffort
+		showReasoning = entry.ShowReasoning
 	}
-	return workingDir, permissionMode, reasoningEffort, 0
+	return workingDir, permissionMode, reasoningEffort, showReasoning, 0
 }
 
 type toolInfo struct {

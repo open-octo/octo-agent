@@ -95,6 +95,7 @@ type wsSessionInfo struct {
 	WorkingDir      string `json:"working_dir,omitempty"`
 	PermissionMode  string `json:"permission_mode,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
 	ContextUsage    int    `json:"context_usage,omitempty"`
 }
 

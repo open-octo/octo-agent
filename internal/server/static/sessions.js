@@ -3611,9 +3611,14 @@ const Sessions = (() => {
     // Append a thinking/reasoning trace delta.
     // Shown dimmed and italic, matching the TUI's thinkingStyle.
     // Thinking blocks are collected above the main answer.
+    // Guarded by show_reasoning: if the config is off, the server shouldn't
+    // send these, but we drop them defensively in case it does.
     appendThinkingDelta(text) {
       const sid = _activeId;
       if (!sid) return;
+
+      const session = Sessions.find(sid);
+      if (session && session.show_reasoning === false) return;
 
       const state = Sessions._getLiveAssistant(sid);
       const messages = $("messages");
@@ -3656,7 +3661,9 @@ const Sessions = (() => {
         state.thinkingEl.remove();
       }
 
-      const thinkingHtml = thinking ? _buildThinkingBlock(_markedParse(thinking)) : "";
+      const session = Sessions.find(sid);
+      const showThinking = !session || session.show_reasoning !== false;
+      const thinkingHtml = (showThinking && thinking) ? _buildThinkingBlock(_markedParse(thinking)) : "";
       const contentHtml = _renderMarkdown(content || "");
       const finalHtml = thinkingHtml + contentHtml;
 
@@ -3674,7 +3681,7 @@ const Sessions = (() => {
 
       // No live bubble (non-streaming path or late subscribe) — create fresh
       Sessions._clearLiveAssistant(sid);
-      if (thinking) {
+      if (showThinking && thinking) {
         const messages = $("messages");
         const el = document.createElement("div");
         el.className = "msg msg-assistant";
