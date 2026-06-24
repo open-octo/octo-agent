@@ -22,6 +22,11 @@ const EXT_KIND: Record<string, Kind> = {
   html: 'html', htm: 'html',
   md: 'markdown', markdown: 'markdown',
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', svg: 'image', webp: 'image',
+  js: 'code', ts: 'code', jsx: 'code', tsx: 'code', mjs: 'code', cjs: 'code',
+  css: 'code', scss: 'code', less: 'code',
+  json: 'code', yaml: 'code', yml: 'code', toml: 'code',
+  py: 'code', go: 'code', rs: 'code', sh: 'code', bash: 'code', zsh: 'code',
+  txt: 'code', xml: 'code', csv: 'code',
 }
 
 // Once-per-session guard so a live write auto-opens the panel only the first time.
@@ -43,17 +48,29 @@ function iconFor(kind: Kind): string {
     case 'html':     return 'ant-design:html5-outlined'
     case 'markdown': return 'ant-design:file-markdown-outlined'
     case 'image':    return 'ant-design:file-image-outlined'
+    case 'code':     return 'ant-design:file-text-outlined'
     default:         return 'ant-design:file-text-outlined'
   }
 }
 
-function typeLabel(kind: Kind): string {
+function typeLabel(kind: Kind, path: string): string {
+  if (kind === 'code') {
+    const dot = path.lastIndexOf('.')
+    return dot >= 0 ? path.slice(dot + 1).toUpperCase() : 'Code'
+  }
   switch (kind) {
     case 'html':     return 'HTML'
     case 'markdown': return 'Markdown'
     case 'image':    return 'Image'
     default:         return 'File'
   }
+}
+
+// Detects HTML that references external scripts or stylesheets — these fail to
+// load inside a sandboxed srcdoc iframe that has no same-origin access.
+const EXTERNAL_REF_RE = /<(script[^>]+src|link[^>]+href)=["'](?!data:|blob:|#)[^"']/i
+function hasExternalRefs(html: string): boolean {
+  return EXTERNAL_REF_RE.test(html)
 }
 
 // Clear artifacts on session switch; history replay then repopulates. The
@@ -96,9 +113,27 @@ export async function observeArtifact(
       const res = await fetch(url)
       if (!res.ok) return
       code = await res.text()
-      preview = kind === 'html'
-        ? code
-        : `<body style="margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:#1f1f1f">${renderMarkdown(code)}</body>`
+      if (kind === 'html') {
+        if (hasExternalRefs(code)) {
+          // External scripts/stylesheets can't load inside a sandboxed srcdoc
+          // iframe without same-origin access. Show a warning + the raw source.
+          const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          preview = `<body style="margin:0;padding:16px;font:13px/1.5 system-ui,sans-serif;color:#555;background:#fafafa">
+<div style="padding:10px 14px;background:#fff8e1;border:1px solid #f0c040;border-radius:6px;margin-bottom:14px;font-size:13px;color:#7a5c00">
+⚠️ This file references external resources and cannot be previewed here. Use <b>Open in new tab</b> or switch to <b>Code</b> view.
+</div>
+<pre style="margin:0;padding:12px;background:#f5f5f5;border-radius:6px;overflow:auto;font:12px/1.6 'SFMono-Regular',Menlo,monospace;color:#333;white-space:pre-wrap">${escaped}</pre>
+</body>`
+        } else {
+          preview = code
+        }
+      } else if (kind === 'markdown') {
+        preview = `<body style="margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:#1f1f1f">${renderMarkdown(code)}</body>`
+      } else {
+        // code kind: show with a dark monospace style
+        const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        preview = `<body style="margin:0;background:#1e1e1e"><pre style="margin:0;padding:16px;color:#d4d4d4;font:13px/1.6 'SFMono-Regular',Menlo,monospace;white-space:pre-wrap;word-break:break-all">${escaped}</pre></body>`
+      }
     }
   } catch {
     return
@@ -110,7 +145,7 @@ export async function observeArtifact(
   const name = basename(path)
   const entry: Artifact = {
     name,
-    type: typeLabel(kind),
+    type: typeLabel(kind, path),
     ver: '',
     short: name.length > 22 ? name.slice(0, 21) + '…' : name,
     icon: iconFor(kind),
