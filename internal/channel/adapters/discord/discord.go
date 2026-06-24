@@ -23,6 +23,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -604,6 +605,24 @@ func (a *Adapter) handleDispatch(typ string, data json.RawMessage, onMessage fun
 	}
 }
 
+// discordCDNHosts are the only hosts Discord serves attachment content from.
+// The attachment URL arrives in the (user-originated) gateway message, so it
+// is validated against this allowlist before any fetch to prevent the bot from
+// being coerced into requesting arbitrary internal URLs (SSRF).
+var discordCDNHosts = map[string]bool{
+	"cdn.discordapp.com":   true,
+	"media.discordapp.net": true,
+}
+
+// allowedAttachmentURL reports whether u is an https URL on a Discord CDN host.
+func allowedAttachmentURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "https" && discordCDNHosts[u.Hostname()]
+}
+
 // processAttachments downloads Discord CDN attachments and returns them as
 // channel.FileAttachment values. Images are base64-encoded into a data URL;
 // other files are saved to a temp file.
@@ -611,6 +630,10 @@ func (a *Adapter) processAttachments(atts []dcAttachment) []channel.FileAttachme
 	var files []channel.FileAttachment
 	for _, att := range atts {
 		if att.URL == "" {
+			continue
+		}
+		if !allowedAttachmentURL(att.URL) {
+			log.Printf("[discord] skipping attachment with non-CDN URL (%s)", att.Filename)
 			continue
 		}
 		resp, err := a.http.Get(att.URL)
