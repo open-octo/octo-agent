@@ -113,7 +113,6 @@ export async function listSkills(): Promise<Skill[]> {
     return {
       name: s.name,
       desc: s.description ?? '',
-      version: '',
       icon: 'ant-design:thunderbolt-outlined',
       tagStatus: tag.tagStatus,
       tagLabel: tag.tagLabel,

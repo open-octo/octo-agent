@@ -4,21 +4,13 @@
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
-  import Segment from '../components/ui/Segment.svelte'
 
   let loading = $state(true)
-  let scope = $state(tr('skills.my_skills'))
   let showSystem = $state(false)
   let fileInput: HTMLInputElement
 
-  // System skills are the built-in defaults (source "default"); My Skills are
-  // user- or project-installed. The "System Skills" tab shows only system; the
-  // "My Skills" tab shows user/project, plus system when the toggle is on.
   let filtered = $derived(
-    $skills.filter((sk) => {
-      const sys = sk.source === 'default'
-      return scope === $t('skills.system_skills') ? sys : (!sys || showSystem)
-    })
+    $skills.filter((sk) => showSystem || sk.source !== 'default')
   )
 
   $effect(() => {
@@ -153,7 +145,7 @@
     </div>
 
     <div class="toolbar-row">
-      <Segment options={[$t('skills.my_skills'), $t('skills.system_skills')]} bind:value={scope} />
+      <div></div>
       <div class="system-toggle">
         <Switch bind:checked={showSystem} />
         <span>{$t('skills.show_system')}</span>
@@ -164,7 +156,6 @@
       <div class="table-header">
         <span>{$t('skills.col_skill')}</span>
         <span>{$t('skills.col_description')}</span>
-        <span>{$t('common.version')}</span>
         <span>{$t('skills.col_status')}</span>
         <span>{$t('skills.col_enabled')}</span>
         <span style="text-align:right">{$t('common.actions')}</span>
@@ -189,7 +180,6 @@
               <span class="mono name">{sk.name}</span>
             </div>
             <span class="desc">{sk.desc}</span>
-            <span class="mono ver">{sk.version || '—'}</span>
             <span><StatusTag status={sk.tagStatus}>{sk.tagLabel}</StatusTag></span>
             <span>
               <Switch
@@ -300,7 +290,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .table-card { background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow); overflow: hidden; }
 .table-header, .table-row {
   display: grid;
-  grid-template-columns: minmax(150px,2.2fr) minmax(120px,3fr) 76px 96px 72px 100px;
+  grid-template-columns: minmax(150px,2.2fr) minmax(120px,3fr) 96px 72px 100px;
   column-gap: 12px; align-items: center; padding: 0 24px;
 }
 .table-header { height: 44px; background: var(--bg-table-header); font-size: 12px; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-table); }
@@ -315,7 +305,6 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .name { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desc { font-size: 13px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 16px; }
-.ver { font-size: 13px; color: var(--text-tertiary); }
 .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .act-btn {
   width: 28px; height: 28px; border: none; background: transparent; border-radius: 6px;

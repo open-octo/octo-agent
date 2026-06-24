@@ -14,7 +14,6 @@ export interface Session {
 export interface Skill {
   name: string
   desc: string
-  version: string
   icon: string
   tagStatus: TagStatus
   tagLabel: string
