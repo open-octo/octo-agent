@@ -28,20 +28,20 @@ func min(a, b int) int {
 }
 
 var (
-	promptStyle       = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
-	noticeStyle       = lipgloss.NewStyle().Foreground(tui.ColMuted)
-	errorStyle        = lipgloss.NewStyle().Foreground(tui.ColDanger)
-	toolErrStyle      = lipgloss.NewStyle().Foreground(tui.ColDanger)
-	queueStyle        = lipgloss.NewStyle().Foreground(tui.ColAccent)
-	modalStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
-	hintStyle         = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
-	activityStyle     = lipgloss.NewStyle().Foreground(tui.ColBrand)
+	promptStyle          = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
+	noticeStyle          = lipgloss.NewStyle().Foreground(tui.ColMuted)
+	errorStyle           = lipgloss.NewStyle().Foreground(tui.ColDanger)
+	toolErrStyle         = lipgloss.NewStyle().Foreground(tui.ColDanger)
+	queueStyle           = lipgloss.NewStyle().Foreground(tui.ColAccent)
+	modalStyle           = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
+	hintStyle            = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
+	activityStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand)
 	userEchoStyle        = lipgloss.NewStyle().Foreground(tui.ColUserMsg).Bold(true)
 	assistantPrefixStyle = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
-	pendingSteerStyle = lipgloss.NewStyle().Foreground(tui.ColMuted)
-	complSelStyle     = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
-	complNameStyle    = lipgloss.NewStyle().Foreground(tui.ColAccent)
-	bgDoneStyle       = lipgloss.NewStyle().Foreground(tui.ColAccent)
+	pendingSteerStyle    = lipgloss.NewStyle().Foreground(tui.ColMuted)
+	complSelStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
+	complNameStyle       = lipgloss.NewStyle().Foreground(tui.ColAccent)
+	bgDoneStyle          = lipgloss.NewStyle().Foreground(tui.ColAccent)
 )
 
 func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
