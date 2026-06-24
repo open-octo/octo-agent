@@ -4,6 +4,8 @@
 
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
 
+  let maximized = $state(false)
+
   function isHtml(a: any): boolean {
     return /html/i.test(a?.type ?? '') || /^\s*<(!doctype|html)/i.test(a?.code ?? '')
   }
@@ -34,7 +36,7 @@
   }
 </script>
 
-<aside class="panel">
+<aside class="panel" class:maximized>
   {#if !cur}
     <!-- Open with nothing collected yet: explain instead of crashing on cur.* -->
     <div class="topbar">
@@ -58,6 +60,9 @@
     </div>
     <button class="icon-btn" title={$t('artifacts.copy')} onclick={copyArtifact}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
     <button class="icon-btn" title={$t('artifacts.download')} onclick={downloadArtifact}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
+    <button class="icon-btn" title={maximized ? $t('artifacts.restore') : $t('artifacts.maximize')} onclick={() => maximized = !maximized}>
+      <iconify-icon icon={maximized ? 'ant-design:compress-outlined' : 'ant-design:expand-outlined'} width="14"></iconify-icon>
+    </button>
     <button class="icon-btn" title={$t('artifacts.open_new_tab')} onclick={openArtifact}><iconify-icon icon="ant-design:export-outlined" width="14"></iconify-icon></button>
     <button class="icon-btn" title={$t('common.close')} onclick={() => artifactsOpen.set(false)}>
       <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
@@ -89,6 +94,7 @@
     <button
       class="chip"
       class:active={i === $artifactSel}
+      title={a.path}
       onclick={() => artifactSel.set(i)}
     >
       <iconify-icon icon={a.icon} width="13"></iconify-icon>
@@ -103,6 +109,12 @@
 .panel {
   width: 420px; flex: 0 0 420px; background: var(--bg-container);
   border-left: 1px solid var(--border-secondary); display: flex; flex-direction: column; min-height: 0;
+}
+.panel.maximized {
+  position: fixed; right: 0; top: 0; bottom: 0;
+  width: min(900px, 75vw); flex: none;
+  z-index: 200;
+  box-shadow: -4px 0 32px rgba(0,0,0,0.25);
 }
 .topbar {
   flex: 0 0 auto; padding: 8px 8px 8px 16px;
