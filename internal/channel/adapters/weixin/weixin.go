@@ -182,7 +182,7 @@ func (q *sendQueue) throttle() {
 	q.lastMu.Lock()
 	wait := minSendInterval - time.Since(q.lastAt)
 	if wait > 0 {
-		q.lastMu.Unlock()  // release while sleeping so enqueue is never blocked
+		q.lastMu.Unlock() // release while sleeping so enqueue is never blocked
 		time.Sleep(wait)
 		q.lastMu.Lock()
 	}
