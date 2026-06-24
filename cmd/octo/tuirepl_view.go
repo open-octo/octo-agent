@@ -28,19 +28,21 @@ func min(a, b int) int {
 }
 
 var (
-	promptStyle       = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
-	noticeStyle       = lipgloss.NewStyle().Foreground(tui.ColMuted)
-	errorStyle        = lipgloss.NewStyle().Foreground(tui.ColDanger)
-	toolErrStyle      = lipgloss.NewStyle().Foreground(tui.ColDanger)
-	queueStyle        = lipgloss.NewStyle().Foreground(tui.ColAccent)
-	modalStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
-	hintStyle         = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
-	activityStyle     = lipgloss.NewStyle().Foreground(tui.ColBrand)
-	userEchoStyle     = lipgloss.NewStyle().Foreground(tui.ColUserMsg).Bold(true)
-	pendingSteerStyle = lipgloss.NewStyle().Foreground(tui.ColMuted)
-	complSelStyle     = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
-	complNameStyle    = lipgloss.NewStyle().Foreground(tui.ColAccent)
-	bgDoneStyle       = lipgloss.NewStyle().Foreground(tui.ColAccent)
+	promptStyle          = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
+	noticeStyle          = lipgloss.NewStyle().Foreground(tui.ColMuted)
+	errorStyle           = lipgloss.NewStyle().Foreground(tui.ColDanger)
+	toolErrStyle         = lipgloss.NewStyle().Foreground(tui.ColDanger)
+	queueStyle           = lipgloss.NewStyle().Foreground(tui.ColAccent)
+	modalStyle           = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
+	hintStyle            = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
+	activityStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand)
+	userEchoStyle        = lipgloss.NewStyle().Foreground(tui.ColUserMsg).Bold(true)
+	assistantPrefixStyle = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
+	pendingSteerStyle    = lipgloss.NewStyle().Foreground(tui.ColMuted)
+	complSelStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
+	complNameStyle       = lipgloss.NewStyle().Foreground(tui.ColAccent)
+	bgDoneStyle          = lipgloss.NewStyle().Foreground(tui.ColAccent)
+	thinkingStyle        = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
 )
 
 func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -733,7 +735,7 @@ func (m *tuiModel) dispatchThinking(level string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	tuning := senderTuning{}
+	tuning := senderTuning{showReasoning: m.cfg.showReasoning}
 	if level != "off" {
 		tuning.reasoningEffort = level
 		tuning.thinkingBudget = anthropicThinkingBudget(level)
@@ -915,7 +917,10 @@ func (m *tuiModel) liveHeight() int {
 	if m.partial.String() != "" {
 		h++
 	}
-	if m.running != nil || (m.turnRunning && m.partial.Len() == 0) {
+	if m.thinkingPartial.String() != "" {
+		h++
+	}
+	if m.running != nil || (m.turnRunning && m.partial.Len() == 0 && m.thinkingPartial.Len() == 0) {
 		h++
 	}
 	if m.running != nil && tools.HasActiveSync() {
@@ -966,9 +971,19 @@ func (m *tuiModel) View() string {
 		b.WriteByte('\n')
 	}
 
+	// Live thinking trace (shown when showReasoning is true).
+	if t := m.thinkingPartial.String(); t != "" {
+		b.WriteString(thinkingStyle.Render("💭 " + t))
+		b.WriteByte('\n')
+	}
+
 	// Live partial assistant text
 	if p := m.partial.String(); p != "" {
-		b.WriteString(m.md.render(p, m.width))
+		rendered := m.md.render(p, m.width)
+		if m.assistantFirstBlock {
+			rendered = injectAssistantPrefix(rendered, assistantPrefixStyle.Render("◆ "))
+		}
+		b.WriteString(rendered)
 		b.WriteByte('\n')
 	}
 
@@ -1003,7 +1018,7 @@ func (m *tuiModel) View() string {
 		label := fmt.Sprintf("%s… %s", streamVerbFor(m.toolStreamName), humanByteSize(m.toolStreamBytes))
 		b.WriteString(m.spinnerLine(label, m.turnStart))
 		b.WriteByte('\n')
-	} else if m.turnRunning && m.partial.Len() == 0 {
+	} else if m.turnRunning && m.partial.Len() == 0 && m.thinkingPartial.Len() == 0 {
 		// Turn is running but nothing is on the activity line right now — no
 		// live tool and no streaming text. That's the wait on the model
 		// (initial prompt, or between steps after a tool result). Show the
@@ -1319,4 +1334,24 @@ func (m *tuiModel) thinkingLine() string {
 		hintStyle.Render(string(frame)),
 		activityStyle.Render(phrase+"…"),
 		hintStyle.Render("("+meta+")"))
+}
+
+// injectAssistantPrefix inserts prefix just before the first non-space content
+// character in rendered, skipping any leading newlines glamour may prepend.
+// This aligns ◆ at the left edge, mirroring how "> " anchors user messages.
+func injectAssistantPrefix(rendered, prefix string) string {
+	// Skip leading newlines (glamour block margin), then leading spaces
+	// (glamour paragraph indent) on the first content line.
+	i := 0
+	for i < len(rendered) && rendered[i] == '\n' {
+		i++
+	}
+	j := i
+	for j < len(rendered) && rendered[j] == ' ' {
+		j++
+	}
+	if j >= len(rendered) {
+		return rendered // blank output — don't inject
+	}
+	return rendered[:i] + prefix + rendered[j:]
 }
