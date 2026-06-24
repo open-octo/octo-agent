@@ -209,6 +209,12 @@ func (a *Adapter) SendTyping(chatID, contextToken string) error {
 	return a.rest(http.MethodPost, fmt.Sprintf("/channels/%s/typing", chatID), nil, nil)
 }
 
+// StopTyping — Discord's typing indicator expires automatically; nothing to cancel.
+func (a *Adapter) StopTyping(chatID, contextToken string) error { return nil }
+
+// Flush — Discord has no outgoing buffer.
+func (a *Adapter) Flush(chatID string) {}
+
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 	var errs []string

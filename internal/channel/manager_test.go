@@ -71,6 +71,8 @@ func (m *mockAdapter) UpdateMessage(chatID, messageID, text string) bool {
 }
 func (m *mockAdapter) SupportsMessageUpdates() bool                 { return true }
 func (m *mockAdapter) SendTyping(chatID, contextToken string) error { return nil }
+func (m *mockAdapter) StopTyping(chatID, contextToken string) error { return nil }
+func (m *mockAdapter) Flush(chatID string)                          {}
 func (m *mockAdapter) ValidateConfig(cfg PlatformConfig) []string   { return m.validateErrs }
 
 func (m *mockAdapter) sentTextCount() int {

@@ -130,14 +130,16 @@ func (u *UIController) onToolError(toolName, errMsg, output string) {
 }
 
 // onTurnDone finalizes the turn: flushes remaining text, sends file previews,
-// and resets state for the next turn.
+// resets state, then force-drains any adapter send queue so the final message
+// is delivered immediately instead of waiting for the background flush timer.
 func (u *UIController) onTurnDone(reply *agent.Reply) {
 	u.mu.Lock()
-	defer u.mu.Unlock()
-
 	u.flushTextLocked()
 	u.flushFilesLocked()
 	u.resetLocked()
+	u.mu.Unlock() // explicit unlock before Flush — Flush may block during send
+
+	u.adapter.Flush(u.chatID)
 }
 
 // flushTextLocked sends the accumulated text buffer to the adapter.

@@ -173,6 +173,12 @@ func (a *Adapter) SupportsMessageUpdates() bool { return false }
 // SendTyping sends a typing indicator. DingTalk Stream Mode does not support this.
 func (a *Adapter) SendTyping(chatID, contextToken string) error { return nil }
 
+// StopTyping — no-op for DingTalk.
+func (a *Adapter) StopTyping(chatID, contextToken string) error { return nil }
+
+// Flush — DingTalk has no outgoing buffer.
+func (a *Adapter) Flush(chatID string) {}
+
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 	var errs []string

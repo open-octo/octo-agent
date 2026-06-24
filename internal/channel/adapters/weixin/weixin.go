@@ -64,10 +64,12 @@ type sendQueue struct {
 	baseURL string
 	token   string
 
-	mu      sync.Mutex
+	mu      sync.Mutex // guards buffers only
 	buffers map[string][]sendEntry
-	lastAt  time.Time
 	stopCh  chan struct{}
+
+	lastMu sync.Mutex // guards lastAt only — separate from buffers so throttle
+	lastAt time.Time  // sleep never blocks enqueue callers (BUG-1 fix)
 }
 
 type sendEntry struct {
@@ -177,13 +179,15 @@ func (q *sendQueue) sendBatch(chatID string, entries []sendEntry) {
 }
 
 func (q *sendQueue) throttle() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	q.lastMu.Lock()
 	wait := minSendInterval - time.Since(q.lastAt)
 	if wait > 0 {
+		q.lastMu.Unlock()  // release while sleeping so enqueue is never blocked
 		time.Sleep(wait)
+		q.lastMu.Lock()
 	}
 	q.lastAt = time.Now()
+	q.lastMu.Unlock()
 }
 
 func (q *sendQueue) sendWithRetry(chatID, text, contextToken string) {
@@ -599,6 +603,20 @@ func (a *Adapter) UpdateMessage(chatID, messageID, text string) bool { return fa
 
 // SupportsMessageUpdates returns false.
 func (a *Adapter) SupportsMessageUpdates() bool { return false }
+
+// StopTyping cancels the keepalive goroutine and sends sendtyping(status=2)
+// to clear the typing indicator in the WeChat client.
+func (a *Adapter) StopTyping(chatID, contextToken string) error {
+	a.stopTypingKeepalive(chatID)
+	return nil
+}
+
+// Flush immediately drains any buffered outgoing messages for the chat.
+func (a *Adapter) Flush(chatID string) {
+	if a.sendQ != nil {
+		a.sendQ.flush(chatID)
+	}
+}
 
 // SendTyping triggers a typing indicator and starts keepalive.
 func (a *Adapter) SendTyping(chatID, contextToken string) error {
