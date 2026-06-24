@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"fmt"
+	"sort"
 )
 
 // InboundEvent is the standardized event yielded by every adapter when a
@@ -129,11 +130,12 @@ func Find(name string) (func(PlatformConfig) (Adapter, error), error) {
 	return ctor, nil
 }
 
-// RegisteredPlatforms returns all platform names in the registry.
+// RegisteredPlatforms returns all platform names in the registry, sorted alphabetically.
 func RegisteredPlatforms() []string {
 	out := make([]string, 0, len(registry))
 	for k := range registry {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }
