@@ -737,7 +737,7 @@ func (a *Adapter) downloadDTFile(downloadCode, robotCode string) ([]byte, string
 	}
 	defer fileResp.Body.Close()
 
-	data, err := io.ReadAll(fileResp.Body)
+	data, err := io.ReadAll(io.LimitReader(fileResp.Body, 50<<20)) // 50 MB cap
 	if err != nil {
 		return nil, "", err
 	}

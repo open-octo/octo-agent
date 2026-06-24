@@ -613,12 +613,12 @@ func (a *Adapter) processAttachments(atts []dcAttachment) []channel.FileAttachme
 		if att.URL == "" {
 			continue
 		}
-		resp, err := http.Get(att.URL) //nolint:noctx // Discord CDN is public; no auth needed
+		resp, err := a.http.Get(att.URL)
 		if err != nil {
 			log.Printf("[discord] attachment download failed (%s): %v", att.Filename, err)
 			continue
 		}
-		data, err := io.ReadAll(resp.Body)
+		data, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20)) // 50 MB cap
 		resp.Body.Close()
 		if err != nil {
 			log.Printf("[discord] attachment read failed (%s): %v", att.Filename, err)
@@ -669,7 +669,7 @@ func (a *Adapter) handleMessage(msg *dcMessage, onMessage func(channel.InboundEv
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[discord] panic in handleMessage: %v", r)
-			a.SendText(msg.ChannelID, fmt.Sprintf("Error: %v", r), "")
+			a.SendText(msg.ChannelID, "An internal error occurred.", "")
 		}
 	}()
 
