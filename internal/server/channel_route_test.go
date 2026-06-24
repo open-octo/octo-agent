@@ -38,6 +38,8 @@ func (a *fullFakeAdapter) SendFile(chatID, path, name, replyTo string) channel.S
 func (a *fullFakeAdapter) UpdateMessage(chatID, messageID, text string) bool { return true }
 func (a *fullFakeAdapter) SupportsMessageUpdates() bool                      { return false }
 func (a *fullFakeAdapter) SendTyping(chatID, contextToken string) error      { return nil }
+func (a *fullFakeAdapter) StopTyping(chatID, contextToken string) error      { return nil }
+func (a *fullFakeAdapter) Flush(chatID string)                               {}
 func (a *fullFakeAdapter) ValidateConfig(channel.PlatformConfig) []string    { return nil }
 
 func (a *fullFakeAdapter) texts() []string {

@@ -1315,6 +1315,24 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	ctx, done := sess.BeginRun(ctx)
 	defer done()
 
+	// Start typing keepalive BEFORE sending any text. The WeChat iLink protocol
+	// cancels the typing indicator on sendmessage, so the keepalive must already
+	// be running when the acknowledgment message is sent so it can immediately
+	// re-assert the typing state. Other platforms treat this as a no-op or a
+	// self-expiring hint (Telegram, Discord) — safe to call universally.
+	if err := ad.SendTyping(ev.ChatID, ev.ContextToken); err != nil {
+		slog.Debug("channel sendTyping", "platform", ev.Platform, "err", err)
+	}
+	defer func() {
+		if err := ad.StopTyping(ev.ChatID, ev.ContextToken); err != nil {
+			slog.Debug("channel stopTyping", "platform", ev.Platform, "err", err)
+		}
+	}()
+
+	// Acknowledge receipt immediately so the user knows the message landed
+	// while the agent is working. Mirrors Ruby channel_manager behaviour.
+	ad.SendText(ev.ChatID, "Thinking…", ev.MessageID)
+
 	// Recompose the system prompt every turn so memory written and skills
 	// imported/toggled since server start are visible — web turns get this
 	// for free from buildAgent; the IM factory's compose-once snapshot went

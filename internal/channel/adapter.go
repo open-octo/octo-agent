@@ -95,9 +95,18 @@ type Adapter interface {
 	// SupportsMessageUpdates reports whether the platform can edit sent messages.
 	SupportsMessageUpdates() bool
 
-	// SendTyping sends a typing indicator to the chat.
+	// SendTyping sends a typing indicator to the chat and, for platforms that
+	// require a keepalive (e.g. Weixin iLink), starts the background keepalive.
 	// The contextToken is the platform-specific reply context from the inbound event.
 	SendTyping(chatID, contextToken string) error
+
+	// StopTyping cancels the typing indicator and any keepalive goroutine for
+	// the chat. Must be called after the agent turn completes.
+	StopTyping(chatID, contextToken string) error
+
+	// Flush forces any buffered outgoing messages for a chat to be delivered
+	// immediately. Adapters without an outgoing buffer implement this as a no-op.
+	Flush(chatID string)
 
 	// ValidateConfig returns a list of human-readable errors; empty means valid.
 	ValidateConfig(cfg PlatformConfig) []string

@@ -158,6 +158,12 @@ func (a *Adapter) SupportsMessageUpdates() bool { return true }
 // SendTyping — Feishu does not have a typing indicator API.
 func (a *Adapter) SendTyping(chatID, contextToken string) error { return nil }
 
+// StopTyping — no-op for Feishu.
+func (a *Adapter) StopTyping(chatID, contextToken string) error { return nil }
+
+// Flush — Feishu has no outgoing buffer.
+func (a *Adapter) Flush(chatID string) {}
+
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 	var errs []string

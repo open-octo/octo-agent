@@ -247,6 +247,12 @@ func (a *Adapter) SendTyping(chatID, contextToken string) error {
 	return err
 }
 
+// StopTyping — Telegram's typing action expires automatically; nothing to cancel.
+func (a *Adapter) StopTyping(chatID, contextToken string) error { return nil }
+
+// Flush — Telegram has no outgoing buffer.
+func (a *Adapter) Flush(chatID string) {}
+
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 	var errs []string

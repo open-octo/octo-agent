@@ -23,8 +23,8 @@ import (
 const (
 	// DefaultBaseURL is the iLink API host.
 	DefaultBaseURL = "https://ilinkai.weixin.qq.com"
-	// ChannelVersion is the protocol version.
-	ChannelVersion = "0.1.0"
+	// ChannelVersion is the protocol version (matches @tencent-weixin/openclaw-weixin).
+	ChannelVersion = "1.0.2"
 	// iLinkAppID is the iLink-App-Id header value.
 	iLinkAppID = "bot"
 	// iLinkClientVer is the iLink-App-ClientVersion header value (0x00MMNNPP for 0.1.0 = 256).

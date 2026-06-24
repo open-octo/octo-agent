@@ -241,6 +241,12 @@ func (a *Adapter) SupportsMessageUpdates() bool { return false }
 // SendTyping — the aibot protocol has no typing indicator.
 func (a *Adapter) SendTyping(chatID, contextToken string) error { return nil }
 
+// StopTyping — no-op for WeCom.
+func (a *Adapter) StopTyping(chatID, contextToken string) error { return nil }
+
+// Flush — WeCom has no outgoing buffer.
+func (a *Adapter) Flush(chatID string) {}
+
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 	botID, _ := cfg[cfgBotID].(string)
