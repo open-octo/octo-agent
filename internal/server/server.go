@@ -775,9 +775,11 @@ func resolveProviderAndModel(flagProvider, flagModel string) (agent.Sender, stri
 		return nil, model, provName, nil
 	}
 	sender, err := app.NewSender(app.SenderOptions{
-		Provider: provName,
-		APIKey:   apiKey,
-		BaseURL:  resolveBaseURL(provName, cfg),
+		Provider:        provName,
+		APIKey:          apiKey,
+		BaseURL:         resolveBaseURL(provName, cfg),
+		ReasoningEffort: entry.ReasoningEffort,
+		ShowReasoning:   entry.ShowReasoning == nil || *entry.ShowReasoning,
 	})
 	if err != nil {
 		return nil, "", "", err
