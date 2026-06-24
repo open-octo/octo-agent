@@ -231,6 +231,28 @@ func TestRun_AgentOptions(t *testing.T) {
 	}
 }
 
+func TestRun_Phase(t *testing.T) {
+	var lines []string
+	got, err := Run(context.Background(),
+		`phase("Review"); log("x"); phase("Verify"); "ok"`,
+		Options{Agent: echoAgent, Log: func(s string) { lines = append(lines, s) }})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Output != "ok" {
+		t.Errorf("Output = %q", got.Output)
+	}
+	want := []string{"== phase: Review", "x", "== phase: Verify"}
+	if len(lines) != len(want) {
+		t.Fatalf("log lines = %v, want %v", lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Errorf("line %d = %q, want %q", i, lines[i], want[i])
+		}
+	}
+}
+
 func TestRun_ExceptionHandling(t *testing.T) {
 	// Exercises mruby begin/rescue (setjmp/longjmp via the wasm EH proposal).
 	got, err := Run(context.Background(),

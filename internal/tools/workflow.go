@@ -46,6 +46,8 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"- `pipeline(items, stage1, stage2, ...) -> Array`: run each item through all " +
 			"stages; items flow independently (no barrier between stages). Stages are lambdas.\n" +
 			"- `log(msg)`: surface a progress line.\n" +
+			"- `phase(title)`: mark the start of a named stage; groups the progress " +
+			"stream into steps (cosmetic, does not affect scheduling).\n" +
 			"- `budget_remaining -> Integer`: remaining output-token budget.\n\n" +
 			"The script's final expression is returned as the result. Example:\n" +
 			"```ruby\n" +
