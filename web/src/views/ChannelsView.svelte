@@ -10,9 +10,9 @@
   const platformIcons: Record<string, string> = {
     telegram: 'logos:telegram',
     discord:  'logos:discord-icon',
-    feishu:   'simple-icons:lark',
-    dingtalk: 'simple-icons:dingtalk',
-    wecom:    'simple-icons:wechat',
+    feishu:   'mdi:feather',
+    dingtalk: 'ant-design:dingtalk-outlined',
+    wecom:    'mdi:briefcase-outline',
     weixin:   'simple-icons:wechat',
   }
 
