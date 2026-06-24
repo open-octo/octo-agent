@@ -166,14 +166,13 @@
     return { meta: result.slice(0, m).trim(), html: result.slice(m) }
   }
 
-  // Read/write-style tools and fetched pages collapse by default — their
-  // output is bulky and rarely the point. Errors and in-flight tools open.
-  const COLLAPSED_BY_DEFAULT = new Set(['read_file', 'write_file', 'glob', 'list_dir', 'ls'])
-  function defaultOpen(tool: any): boolean {
-    if (tool.error || !tool.done) return true
-    if (fetchError(tool)) return true          // a 4xx/5xx fetch is worth seeing
-    if (tool.name === 'web_fetch') return false // collapse fetched pages
-    return !COLLAPSED_BY_DEFAULT.has(tool.name)
+  // All completed tools collapse by default. Only the latest in-flight tool
+  // stays open so the user sees live output without noise from finished calls.
+  // Errors always open — they need attention.
+  function defaultOpen(tool: any, lastUndoneId: string | undefined): boolean {
+    if (tool.error) return true
+    if (!tool.done) return tool.id === lastUndoneId
+    return false
   }
 
   // todo_write renders its checklist from the tool args.
@@ -222,11 +221,12 @@
       {/if}
     </div>
 
+    {@const lastUndoneId = tools.findLast((t: any) => !t.done)?.id}
     {#each tools as tool (tool.id)}
       {@const meta = toolMeta(tool)}
       {@const todos = todoItems(tool)}
       {@const fErr = fetchError(tool)}
-      <details open={defaultOpen(tool)} class="tool-item">
+      <details open={defaultOpen(tool, lastUndoneId)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
           <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
