@@ -28,6 +28,7 @@
     updateToolResult,
     setToolError,
     finishAllTools,
+    finishToolsById,
     resetSubAgents,
     applySubAgentEvent,
     showToast,
@@ -134,13 +135,19 @@
     // Load history
     api.getSessionMessages(sid, { limit: 30 }).then((resp: any) => {
       const events: any[] = resp?.events ?? []
+      // Collect the tool_ids that came from history so we only close those,
+      // leaving any concurrently-replayed live-turn tools untouched.
+      const historyToolIds = new Set<string>()
       for (const ev of events) {
+        if (ev.type === 'tool_call' && ev.tool_id) historyToolIds.add(ev.tool_id)
         handleHistoryEvent(ev)
       }
-      // History is a completed transcript — mark all tools done so nothing
-      // shows a perpetual "running" spinner (there's no complete event in the
-      // replayed history to close them).
-      finishAllTools(sid)
+      // Finish only the history tools (not live-turn tools from WS replay).
+      finishToolsById(sid, historyToolIds)
+      // Pin to bottom after the DOM update so the user lands at the latest message.
+      queueMicrotask(() => {
+        if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
+      })
     }).catch(() => {/* silently ignore history load errors */})
 
     // ── WS event handlers ───────────────────────────────────────────────────

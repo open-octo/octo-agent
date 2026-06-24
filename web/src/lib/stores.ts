@@ -261,6 +261,24 @@ export function applySubAgentEvent(
   })
 }
 
+// Mark only the tools whose IDs are in the provided set as done. Used after
+// loading history so we don't accidentally close tools from a concurrently
+// replaying live turn (those tools have different IDs and are not in the set).
+export function finishToolsById(sessionId: string, toolIds: Set<string>) {
+  if (toolIds.size === 0) return
+  chatMessages.update(m => {
+    const msgs = (m[sessionId] || []).map((msg: any) => {
+      if (msg.type !== 'tool_group') return msg
+      const tools = msg.tools.map((t: any) =>
+        toolIds.has(t.toolId) && !t.done && !t.error ? { ...t, done: true } : t
+      )
+      const allDone = tools.every((t: any) => t.done || t.error)
+      return { ...msg, streaming: allDone ? false : msg.streaming, tools }
+    })
+    return { ...m, [sessionId]: msgs }
+  })
+}
+
 // Mark every still-running tool in the session as done — called on `complete`
 // so a finished turn never leaves tools spinning (parallel results that never
 // matched, or a tool whose result event was dropped).
