@@ -65,15 +65,13 @@ func TestHandleGetArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Use relative paths under a session cwd; the server resolves them under
-	// its own working directory.
+	// UI payloads carry absolute paths, so the transcript stores absolute paths.
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	srv.cwd = artDir
-	id := newArtifactSession(t, "bundle.html", "main.go")
+	id := newArtifactSession(t, htmlPath, goPath)
 	otherID := newArtifactSession(t /* wrote nothing */)
 
 	// Whitelisted write → 200 with explicit headers.
-	w := getArtifact(t, srv, id, "bundle.html")
+	w := getArtifact(t, srv, id, htmlPath)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
@@ -91,20 +89,25 @@ func TestHandleGetArtifact(t *testing.T) {
 	}
 
 	// On-disk but unwritten by the session → 404.
-	if w := getArtifact(t, srv, id, "secret.html"); w.Code != http.StatusNotFound {
+	if w := getArtifact(t, srv, id, secretPath); w.Code != http.StatusNotFound {
 		t.Errorf("unwritten path: status = %d, want 404", w.Code)
 	}
 	// Written by a different session → 404.
-	if w := getArtifact(t, srv, otherID, "bundle.html"); w.Code != http.StatusNotFound {
+	if w := getArtifact(t, srv, otherID, htmlPath); w.Code != http.StatusNotFound {
 		t.Errorf("other session: status = %d, want 404", w.Code)
 	}
 	// Written but not a previewable extension → 404.
-	if w := getArtifact(t, srv, id, "main.go"); w.Code != http.StatusNotFound {
+	if w := getArtifact(t, srv, id, goPath); w.Code != http.StatusNotFound {
 		t.Errorf("non-previewable ext: status = %d, want 404", w.Code)
 	}
 	// Unknown session → 404.
 	if w := getArtifact(t, srv, "nope", htmlPath); w.Code != http.StatusNotFound {
 		t.Errorf("unknown session: status = %d, want 404", w.Code)
+	}
+	// Relative paths are rejected outright to avoid resolving against the
+	// server's process CWD.
+	if w := getArtifact(t, srv, id, "bundle.html"); w.Code != http.StatusBadRequest {
+		t.Errorf("relative path: status = %d, want 400", w.Code)
 	}
 	// Missing path param → 400.
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+id+"/artifacts", nil)
@@ -125,11 +128,10 @@ func TestHandleGetArtifact_SizeCap(t *testing.T) {
 	if err := os.WriteFile(big, bytes.Repeat([]byte("a"), artifactMaxBytes+1), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	id := newArtifactSession(t, "big.html")
+	id := newArtifactSession(t, big)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	srv.cwd = artDir
 
-	if w := getArtifact(t, srv, id, "big.html"); w.Code != http.StatusRequestEntityTooLarge {
+	if w := getArtifact(t, srv, id, big); w.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("status = %d, want 413", w.Code)
 	}
 }
@@ -151,15 +153,14 @@ func TestHandleGetArtifact_ShowArtifactCountsAsWrite(t *testing.T) {
 		Role: agent.RoleAssistant,
 		Blocks: []agent.ContentBlock{{
 			Type: "tool_use", ID: "t1", Name: "show_artifact",
-			Input: map[string]any{"path": "bundle.html"},
+			Input: map[string]any{"path": p},
 		}}})
 	if err := sess.Save(); err != nil {
 		t.Fatal(err)
 	}
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	srv.cwd = artDir
 
-	w := getArtifact(t, srv, sess.ID, "bundle.html")
+	w := getArtifact(t, srv, sess.ID, p)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
@@ -183,20 +184,45 @@ func TestHandleGetArtifact_EditCountsAsWrite(t *testing.T) {
 		Role: agent.RoleAssistant,
 		Blocks: []agent.ContentBlock{{
 			Type: "tool_use", ID: "t1", Name: "edit_file",
-			Input: map[string]any{"path": "doc.md", "old_string": "a", "new_string": "b"},
+			Input: map[string]any{"path": p, "old_string": "a", "new_string": "b"},
 		}},
 	})
 	if err := sess.Save(); err != nil {
 		t.Fatal(err)
 	}
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	srv.cwd = artDir
 
-	w := getArtifact(t, srv, sess.ID, "doc.md")
+	w := getArtifact(t, srv, sess.ID, p)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/markdown") {
 		t.Errorf("Content-Type = %q", ct)
+	}
+}
+
+func TestHandleGetArtifact_WorktreeOutsideServerCWD(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	// Simulate a session that ran in a worktree outside the server's cwd.
+	serverCWD := t.TempDir()
+	worktree := t.TempDir()
+	p := filepath.Join(worktree, "report.html")
+	if err := os.WriteFile(p, []byte("<p>worktree</p>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	id := newArtifactSession(t, p)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.cwd = serverCWD
+
+	w := getArtifact(t, srv, id, p)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "<p>worktree</p>" {
+		t.Errorf("body = %q", w.Body.String())
 	}
 }
