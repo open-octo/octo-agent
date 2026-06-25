@@ -139,17 +139,20 @@ Files: `internal/agent/overflow.go`, `internal/agent/agent.go` (hook field),
   tool_result content).
 - Part 2 reclamation and Part 3 archival are independently revertible.
 
-## Open decisions (need your call)
+## Settled parameters
 
-1. **keepBudget fraction** — 0.30 of window (recommended). Lower = rarer
-   compaction, less recent verbatim. Tie it to the trigger (e.g. always
-   `trigger − 0.4×window`) or keep independent?
-2. **Reclamation aggressiveness** — hot tail = 6 results, stale threshold = 4KB.
-   More aggressive (smaller threshold / shorter hot tail) reclaims more but elides
-   more recent tool output.
-3. **Part 2 data loss without archival** — ship Part 2 before Part 3b (eliding is
-   lossy until archival lands), or land 3b first so reclamation is always
-   recoverable? Recommended: land 3b before enabling lossy reclamation, or gate
-   reclamation on the hook being set.
-4. **Chunk format** — reuse Ruby's per-session chunk-MD layout, or a simpler
-   single append-only `.jsonl` per session?
+1. **keepBudget** = `CompactKeepFraction` × window, default **0.30**, independent
+   of the trigger but capped at half the trigger so a fold reliably clears it.
+2. **Reclamation** keeps the most recent **6** tool results inline; elides older
+   ones over **4KB**.
+3. **Reclamation recoverability** — reclamation elides in place with a "re-run to
+   view" placeholder, the same lossy-but-regenerable contract the write-time
+   `microCompact` backstop already ships, so it doesn't depend on archival.
+   Archival (3b) covers the genuinely-lost content: the turns the summarize path
+   folds away (their lossy summary is otherwise the only trace). The overflow
+   fallback path and reclamation placeholders are not archived.
+4. **Chunk format** — per-session `<id>.chunks/chunk-NNN.md`, a readable
+   Markdown transcript (so the recalled text is plain, not wire JSON). Archival
+   is best-effort: a write failure never breaks a compaction. CLI (persisted TUI
+   sessions) and the web server (`buildAgent`) set `Agent.ArchiveDir` via
+   `Session.ChunkDir`; one-shot/headless and the IM factory leave it unset.

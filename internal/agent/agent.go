@@ -167,6 +167,14 @@ type Agent struct {
 	// compactKeepBudget and dev-docs/compaction-redesign.md.
 	CompactKeepFraction float64
 
+	// ArchiveDir, when non-empty, is the directory into which compaction writes
+	// the verbatim originals of folded turns (chunk-NNN.md) before replacing
+	// them with the summary, so the model can recall details with the read
+	// tool. Set by the session-owning layer (CLI/server) via Session.ChunkDir;
+	// empty disables archival. Archival is best-effort — a write failure never
+	// breaks a compaction. See dev-docs/compaction-redesign.md.
+	ArchiveDir string
+
 	// CompactBatchThreshold controls compaction after a tool batch, before the
 	// next LLM call. Semantics mirror CompactThreshold:
 	//   < 0  → disabled (never compact between batches)

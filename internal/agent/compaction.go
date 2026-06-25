@@ -309,9 +309,16 @@ func (a *Agent) maybeCompact(ctx context.Context, handler EventHandler) error {
 		return nil                                      // leave history alone
 	}
 
+	// Archive the verbatim originals before discarding them, so the model can
+	// recall details the lossy summary dropped (best-effort; "" when disabled).
+	body := "[Earlier conversation summary]\n\n" + summary
+	if ref := a.archiveChunk(msgs[:split]); ref != "" {
+		body += fmt.Sprintf("\n\n[Full originals of the summarized turns archived at %s — use the read tool to recall details.]", ref)
+	}
+
 	// Rebuild: one summary user-message, then the kept recent turns verbatim.
 	a.History.Reset()
-	a.History.Append(NewUserMessage("[Earlier conversation summary]\n\n" + summary))
+	a.History.Append(NewUserMessage(body))
 	for _, m := range msgs[split:] {
 		a.History.Append(m)
 	}
