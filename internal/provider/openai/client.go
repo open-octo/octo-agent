@@ -28,10 +28,10 @@ const DefaultBaseURL = "https://api.openai.com"
 const ChatCompletionsPath = "/v1/chat/completions"
 
 // DefaultMaxTokens caps response length when a caller doesn't specify one.
-// 4096 mirrors the Anthropic provider's default so behaviour stays consistent
+// 16384 mirrors the Anthropic provider's default so behaviour stays consistent
 // across backends. OpenAI itself treats max_tokens as optional (model
-// maximum if omitted); we send 4096 anyway for predictability.
-const DefaultMaxTokens = 4096
+// maximum if omitted); we send 16384 anyway for predictability.
+const DefaultMaxTokens = 16384
 
 // DialectDeepSeek selects DeepSeek's reasoning quirks (the thinking on/off
 // toggle) on a Client. Assign it to Client.Dialect for the "deepseek" vendor;
