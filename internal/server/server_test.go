@@ -252,6 +252,25 @@ func TestCORS_DisallowedOrigin(t *testing.T) {
 	}
 }
 
+func TestCORS_WildcardDoesNotReflectOrigin(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, CORSOrigins: []string{"*"}})
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/health", nil)
+	req.Header.Set("Origin", "http://evil.com")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.http.Handler, w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("CORS origin = %q, want *", got)
+	}
+	if got := w.Header().Get("Vary"); got != "Origin" {
+		t.Fatalf("Vary = %q, want Origin", got)
+	}
+}
+
 // mustAccessKey resolves the test server's key without ever persisting —
 // generation is in-memory only here; only server.New writes config.yml.
 func mustAccessKey(cfg Config) string {

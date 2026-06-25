@@ -598,16 +598,30 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		allowed := false
+		wildcard := false
 		for _, o := range s.cfg.CORSOrigins {
-			if o == "*" || o == origin {
+			if o == "*" {
+				wildcard = true
 				allowed = true
+			} else if o == origin {
+				allowed = true
+			}
+			if allowed {
 				break
 			}
 		}
 		if allowed {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
+			// Wildcard '*' must never be reflected as the concrete Origin when
+			// credentials-related headers (Authorization, X-Access-Key) are
+			// allowed; that would let any origin make authenticated requests.
+			if wildcard {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			} else {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Access-Key")
+			w.Header().Set("Vary", "Origin")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

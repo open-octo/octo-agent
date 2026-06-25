@@ -1,4 +1,5 @@
 import { marked, Renderer } from "marked"
+import DOMPurify from "dompurify"
 import hljs from "highlight.js/lib/core"
 import javascript from "highlight.js/lib/languages/javascript"
 import typescript from "highlight.js/lib/languages/typescript"
@@ -60,8 +61,16 @@ export function renderMarkdown(text: string): string {
   }
 
   renderer.link = function ({ href, title, text }: { href: string; title?: string | null; text: string }) {
+    // Only allow safe URL schemes; strip everything else.
+    const safe = isSafeHref(href)
     const titleAttr = title ? ` title="${escapeHtml(title)}"` : ""
-    return `<a href="${href}"${titleAttr} target="_blank" rel="noopener">${text}</a>`
+    return `<a href="${safe ? escapeHtml(href) : ""}"${titleAttr} target="_blank" rel="noopener">${escapeHtml(text)}</a>`
+  }
+
+  function isSafeHref(href: string): boolean {
+    if (!href) return false
+    const lower = href.trim().toLowerCase()
+    return lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("mailto:") || lower.startsWith("tel:")
   }
 
   renderer.blockquote = function ({ text: bqText }: { text: string }) {
@@ -75,20 +84,22 @@ export function renderMarkdown(text: string): string {
 
   // 2. Build think block HTML for each segment
   const thinkBlocks = thinkSegments.map((segment) => {
-    const renderedSegment = marked.parse(segment) as string
+    const renderedSegment = DOMPurify.sanitize(marked.parse(segment) as string)
     return `<details class="think-block"><summary class="think-summary"><iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>Thoughts</summary><div class="think-body">${renderedSegment}</div></details>`
   })
 
-  // 4. Replace placeholders with think block HTML
-  const result = renderedMain.replace(
+  // 4. Replace placeholders with think block HTML, then sanitize the combined
+  //    output. DOMPurify removes dangerous markup (script, event handlers,
+  //    javascript: URLs) while preserving the allowed structure.
+  const combined = renderedMain.replace(
     new RegExp(`${PLACEHOLDER.replace(/\x00/g, "\\x00")}(\\d+)\\x00`, "g"),
     (_match, indexStr: string) => {
       return thinkBlocks[parseInt(indexStr, 10)] ?? ""
     }
   )
 
-  // 5. Return combined HTML
-  return result
+  // 5. Return combined sanitized HTML
+  return DOMPurify.sanitize(combined, { ADD_ATTR: ["target"] })
 }
 
 export function setupCopyButtons(el: HTMLElement): void {

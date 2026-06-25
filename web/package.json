@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "marked": "^15.0.0",
-    "highlight.js": "^11.10.0"
+    "highlight.js": "^11.10.0",
+    "dompurify": "^3.2.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
