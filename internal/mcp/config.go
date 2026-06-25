@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Config is the parsed view of one mcp.json file. The wire format mirrors
@@ -97,7 +98,17 @@ func (e ServerEntry) Validate(name string) error {
 	if e.Auth != "" && e.Command != "" {
 		return fmt.Errorf("mcp server %q: auth applies to http servers only", name)
 	}
+	if e.URL != "" && !isAllowedURLScheme(e.URL) {
+		return fmt.Errorf("mcp server %q: url must use http:// or https:// scheme", name)
+	}
 	return nil
+}
+
+// isAllowedURLScheme reports whether rawURL starts with an acceptable scheme.
+// MCP HTTP transports require a network endpoint; file:// and javascript: would
+// not make sense and could be used to bypass intended reachability controls.
+func isAllowedURLScheme(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://")
 }
 
 // LoadConfig reads + merges the user-global config and the project-local

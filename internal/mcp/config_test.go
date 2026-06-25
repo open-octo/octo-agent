@@ -133,6 +133,20 @@ func TestLoadConfig_ValidationRejectsNeither(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_RejectsBadURLScheme(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	writeFile(t, filepath.Join(tmp, ".octo", "mcp.json"), `{
+        "mcpServers": {
+          "bad": {"url": "file:///etc/passwd"}
+        }
+    }`)
+	if _, err := LoadConfig(""); err == nil {
+		t.Fatal("expected validation error for non-http url")
+	}
+}
+
 func TestConfig_ServerNames_Sorted(t *testing.T) {
 	c := &Config{Servers: map[string]ServerEntry{
 		"z": {Command: "a"},
