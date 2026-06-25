@@ -494,9 +494,17 @@
   function send(text: string, files?: any[]) {
     const sid = get(activeSessionId)
     if (!sid || (!text.trim() && !(files && files.length))) return
-    // A new turn starts: clear the live sub-agents panel and thinking buffer.
-    resetSubAgents(sid)
-    chatThinking.update(tt => ({ ...tt, [sid]: '' }))
+    // Steering: a message sent while a turn is already running rides the
+    // running turn's Inbox on the server. It must NOT reset the live UI —
+    // the sub-agents panel and thinking buffer belong to the turn in flight.
+    const steering = get(chatStreaming)[sid] ?? false
+    if (!steering) {
+      // A fresh turn starts: clear the previous turn's sub-agents panel and
+      // thinking buffer, and flip the session into streaming.
+      resetSubAgents(sid)
+      chatThinking.update(tt => ({ ...tt, [sid]: '' }))
+      chatStreaming.update(s => ({ ...s, [sid]: true }))
+    }
     // Optimistically show the user bubble, marked pending. The server echoes
     // it back as a history_user_message — that handler replaces this pending
     // bubble (matching by content) instead of appending a duplicate.
@@ -510,7 +518,6 @@
       tools: [],
       todos: [],
     })
-    chatStreaming.update(s => ({ ...s, [sid]: true }))
     ws.sendMessage(sid, text, files)
   }
 
@@ -609,7 +616,10 @@
               <!-- Right-aligned user bubble -->
               <div class="msg-user fadein">
                 <div class="user-bubble-wrap">
-                  <div class="user-bubble">{msg.content}</div>
+                  <div class="user-bubble" class:pending={msg.pending}>
+                    {msg.content}
+                    {#if msg.pending}<span class="pending-spinner" title={$t('status.running')}></span>{/if}
+                  </div>
                   <div class="msg-actions">
                     <button class="action-btn" title={$t('chat.edit')} onclick={() => editMessage(msg.content)}>
                       <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
@@ -883,6 +893,16 @@
   border-radius: 12px 12px 4px 12px; padding: 10px 14px;
   font-size: 14px; line-height: 1.6; color: var(--text);
   white-space: pre-wrap; word-break: break-word;
+}
+/* Pending (queued) bubble — an optimistic echo, or a steer message waiting to
+   be drained into the running turn. Dimmed with a small spinner until the
+   server confirms it via history_user_message. */
+.user-bubble.pending { opacity: 0.65; }
+.pending-spinner {
+  display: inline-block; width: 10px; height: 10px; margin-left: 6px;
+  vertical-align: -1px; border-radius: 50%;
+  border: 1.5px solid var(--blue-2); border-top-color: var(--blue-6);
+  animation: octo-spin 0.8s linear infinite;
 }
 
 /* ── Agent message ───────────────────────────────────────────────────────── */

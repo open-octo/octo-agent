@@ -362,13 +362,15 @@
         <button class="tool-btn skill-btn" title={$t('chat.insert_slash')} onclick={insertSkill}>/</button>
         <span style="margin-left:auto;"></span>
         {#if isStreaming || $running}
+          <!-- Mid-turn: Stop interrupts the running turn; Send stays available
+               so a follow-up message steers the turn in flight (rides the
+               running Agent's Inbox server-side). -->
           <button class="stop-btn" onclick={stop}>
             <span class="stop-sq"></span>
             {$t('chat.stop')}
           </button>
-        {:else}
-          <button class="send-btn" onclick={send}>{$t('chat.send')}</button>
         {/if}
+        <button class="send-btn" onclick={send}>{$t('chat.send')}</button>
       </div>
     </div>
   </div>
