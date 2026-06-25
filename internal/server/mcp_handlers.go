@@ -2,13 +2,47 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/mcp"
 	"github.com/Leihb/octo-agent/internal/tools"
 )
+
+// allowedMCPCommands lists stdio executables that are commonly used to launch
+// MCP servers and are considered safe without an explicit user opt-in. Any
+// other command requires allow_arbitrary_command=true.
+var allowedMCPCommands = map[string]bool{
+	"npx": true, "npm": true, "node": true,
+	"uvx": true, "uv": true,
+	"python": true, "python3": true,
+	"cargo": true, "go": true, "ruby": true,
+}
+
+// parseStdioCommand splits a command line into executable and arguments,
+// validates that the executable is a simple basename (no path separators,
+// absolute paths, or shell metacharacters), and returns the parsed parts.
+// If allowArbitrary is false and the basename is not in allowedMCPCommands,
+// it returns an error telling the caller to opt in.
+func parseStdioCommand(name, line string, allowArbitrary bool) (string, []string, error) {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return "", nil, fmt.Errorf("mcp server %q: empty command", name)
+	}
+	base := fields[0]
+	if filepath.IsAbs(base) || strings.ContainsAny(base, `/\;|&$<>`) || strings.Contains(base, "..") {
+		return "", nil, fmt.Errorf("mcp server %q: command must be a simple basename", name)
+	}
+	base = filepath.Base(base)
+	if !allowArbitrary && !allowedMCPCommands[base] {
+		return "", nil, fmt.Errorf("mcp server %q: command %q is not in the allowlist; enable allow arbitrary command", name, base)
+	}
+	return base, fields[1:], nil
+}
 
 // MCP server management API. Reads merge the user-global and project-local
 // configs (internal/mcp.LoadManaged); writes go to ~/.octo/mcp.json only —
@@ -124,9 +158,10 @@ func (s *Server) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
 // bulk import upserts.
 func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name    string                     `json:"name"`
-		Server  *mcp.ServerEntry           `json:"server"`
-		Servers map[string]mcp.ServerEntry `json:"mcpServers"`
+		Name                  string                     `json:"name"`
+		Server                *mcp.ServerEntry           `json:"server"`
+		AllowArbitraryCommand bool                       `json:"allow_arbitrary_command"`
+		Servers               map[string]mcp.ServerEntry `json:"mcpServers"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -139,11 +174,22 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case len(req.Servers) > 0:
 		// Bulk import: validate everything first so a half-bad paste doesn't
-		// land half the servers.
+		// land half the servers. For bulk import we do not require per-server
+		// opt-in; instead we parse and normalize stdio commands and reject any
+		// command that is not a simple allowlisted basename.
 		for name, e := range req.Servers {
 			if err := mcp.ValidateServerName(name); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
+			}
+			if e.Command != "" {
+				cmd, args, err := parseStdioCommand(name, e.Command, false)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				e.Command = cmd
+				e.Args = append(args, e.Args...)
 			}
 			if err := e.Validate(name); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
@@ -168,6 +214,15 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusConflict, "an MCP server with this name already exists")
 				return
 			}
+		}
+		if req.Server.Command != "" {
+			cmd, args, err := parseStdioCommand(req.Name, req.Server.Command, req.AllowArbitraryCommand)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			req.Server.Command = cmd
+			req.Server.Args = append(args, req.Server.Args...)
 		}
 		if err := mcp.UpsertUserServer(req.Name, *req.Server); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -210,7 +265,8 @@ func (s *Server) userManagedServer(w http.ResponseWriter, name string) (mcp.Mana
 func (s *Server) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	var req struct {
-		Server *mcp.ServerEntry `json:"server"`
+		Server                *mcp.ServerEntry `json:"server"`
+		AllowArbitraryCommand bool             `json:"allow_arbitrary_command"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Server == nil {
 		writeError(w, http.StatusBadRequest, "expected {server: {...}}")
@@ -222,6 +278,15 @@ func (s *Server) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 
 	if _, ok := s.userManagedServer(w, name); !ok {
 		return
+	}
+	if req.Server.Command != "" {
+		cmd, args, err := parseStdioCommand(name, req.Server.Command, req.AllowArbitraryCommand)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		req.Server.Command = cmd
+		req.Server.Args = append(args, req.Server.Args...)
 	}
 	if err := mcp.UpsertUserServer(name, *req.Server); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

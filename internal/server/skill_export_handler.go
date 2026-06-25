@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // handleExportSkill streams a skill directory as a .zip download. Skills are
@@ -42,16 +43,22 @@ func (s *Server) handleExportSkill(w http.ResponseWriter, r *http.Request) {
 	defer zw.Close()
 
 	// Walk the skill dir, writing each file under a top-level <name>/ prefix so
-	// the archive unpacks into a self-contained skill folder.
+	// the archive unpacks into a self-contained skill folder. Symlinks are
+	// resolved and rejected if they point outside the skill directory to prevent
+	// arbitrary file inclusion.
 	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		rel, err := filepath.Rel(dir, path)
+		real, err := filepath.EvalSymlinks(path)
 		if err != nil {
 			return nil
 		}
-		f, err := os.Open(path)
+		rel, err := filepath.Rel(dir, real)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return nil
+		}
+		f, err := os.Open(real)
 		if err != nil {
 			return nil
 		}

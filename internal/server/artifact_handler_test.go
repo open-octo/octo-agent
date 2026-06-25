@@ -65,12 +65,15 @@ func TestHandleGetArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	id := newArtifactSession(t, htmlPath, goPath)
-	otherID := newArtifactSession(t /* wrote nothing */)
+	// Use relative paths under a session cwd; the server resolves them under
+	// its own working directory.
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.cwd = artDir
+	id := newArtifactSession(t, "bundle.html", "main.go")
+	otherID := newArtifactSession(t /* wrote nothing */)
 
 	// Whitelisted write → 200 with explicit headers.
-	w := getArtifact(t, srv, id, htmlPath)
+	w := getArtifact(t, srv, id, "bundle.html")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
@@ -88,15 +91,15 @@ func TestHandleGetArtifact(t *testing.T) {
 	}
 
 	// On-disk but unwritten by the session → 404.
-	if w := getArtifact(t, srv, id, secretPath); w.Code != http.StatusNotFound {
+	if w := getArtifact(t, srv, id, "secret.html"); w.Code != http.StatusNotFound {
 		t.Errorf("unwritten path: status = %d, want 404", w.Code)
 	}
 	// Written by a different session → 404.
-	if w := getArtifact(t, srv, otherID, htmlPath); w.Code != http.StatusNotFound {
+	if w := getArtifact(t, srv, otherID, "bundle.html"); w.Code != http.StatusNotFound {
 		t.Errorf("other session: status = %d, want 404", w.Code)
 	}
 	// Written but not a previewable extension → 404.
-	if w := getArtifact(t, srv, id, goPath); w.Code != http.StatusNotFound {
+	if w := getArtifact(t, srv, id, "main.go"); w.Code != http.StatusNotFound {
 		t.Errorf("non-previewable ext: status = %d, want 404", w.Code)
 	}
 	// Unknown session → 404.
@@ -117,14 +120,16 @@ func TestHandleGetArtifact_SizeCap(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
-	big := filepath.Join(t.TempDir(), "big.html")
+	artDir := t.TempDir()
+	big := filepath.Join(artDir, "big.html")
 	if err := os.WriteFile(big, bytes.Repeat([]byte("a"), artifactMaxBytes+1), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	id := newArtifactSession(t, big)
+	id := newArtifactSession(t, "big.html")
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.cwd = artDir
 
-	if w := getArtifact(t, srv, id, big); w.Code != http.StatusRequestEntityTooLarge {
+	if w := getArtifact(t, srv, id, "big.html"); w.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("status = %d, want 413", w.Code)
 	}
 }
@@ -136,7 +141,8 @@ func TestHandleGetArtifact_ShowArtifactCountsAsWrite(t *testing.T) {
 
 	// Simulates a script-built file surfaced via the show_artifact tool: no
 	// write_file in the transcript, only the show_artifact tool_use.
-	p := filepath.Join(t.TempDir(), "bundle.html")
+	artDir := t.TempDir()
+	p := filepath.Join(artDir, "bundle.html")
 	if err := os.WriteFile(p, []byte("<h1>built</h1>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -145,14 +151,15 @@ func TestHandleGetArtifact_ShowArtifactCountsAsWrite(t *testing.T) {
 		Role: agent.RoleAssistant,
 		Blocks: []agent.ContentBlock{{
 			Type: "tool_use", ID: "t1", Name: "show_artifact",
-			Input: map[string]any{"path": p},
+			Input: map[string]any{"path": "bundle.html"},
 		}}})
 	if err := sess.Save(); err != nil {
 		t.Fatal(err)
 	}
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.cwd = artDir
 
-	w := getArtifact(t, srv, sess.ID, p)
+	w := getArtifact(t, srv, sess.ID, "bundle.html")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
@@ -166,7 +173,8 @@ func TestHandleGetArtifact_EditCountsAsWrite(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
-	p := filepath.Join(t.TempDir(), "doc.md")
+	artDir := t.TempDir()
+	p := filepath.Join(artDir, "doc.md")
 	if err := os.WriteFile(p, []byte("# doc"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -175,15 +183,16 @@ func TestHandleGetArtifact_EditCountsAsWrite(t *testing.T) {
 		Role: agent.RoleAssistant,
 		Blocks: []agent.ContentBlock{{
 			Type: "tool_use", ID: "t1", Name: "edit_file",
-			Input: map[string]any{"path": p, "old_string": "a", "new_string": "b"},
+			Input: map[string]any{"path": "doc.md", "old_string": "a", "new_string": "b"},
 		}},
 	})
 	if err := sess.Save(); err != nil {
 		t.Fatal(err)
 	}
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.cwd = artDir
 
-	w := getArtifact(t, srv, sess.ID, p)
+	w := getArtifact(t, srv, sess.ID, "doc.md")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}

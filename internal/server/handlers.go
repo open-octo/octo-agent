@@ -790,6 +790,8 @@ type fileActionRequest struct {
 // When action is "open" and the server is running on localhost,
 // it attempts to open the file with the OS default handler.
 // When action is "download", it streams the file contents back.
+// The path is always resolved under the server's working directory (s.cwd);
+// absolute paths or paths that escape cwd are rejected.
 func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 	var req fileActionRequest
 	if err := readBodyJSON(r, &req); err != nil {
@@ -798,6 +800,12 @@ func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Path == "" {
 		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	abs, ok := resolveUnderCWD(s.cwd, req.Path)
+	if !ok {
+		writeError(w, http.StatusForbidden, "path is outside the working directory")
 		return
 	}
 
@@ -821,14 +829,14 @@ func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 		default:
 			cmd = "xdg-open"
 		}
-		if err := exec.Command(cmd, req.Path).Start(); err != nil {
+		if err := exec.Command(cmd, abs).Start(); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "opened"})
 
 	case "download":
-		f, err := os.Open(req.Path)
+		f, err := os.Open(abs)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
@@ -839,10 +847,14 @@ func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if info.IsDir() {
+			writeError(w, http.StatusBadRequest, "cannot download a directory")
+			return
+		}
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(req.Path)+"\"")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(abs)+"\"")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
-		http.ServeContent(w, r, filepath.Base(req.Path), info.ModTime(), f)
+		http.ServeContent(w, r, filepath.Base(abs), info.ModTime(), f)
 
 	default:
 		writeError(w, http.StatusBadRequest, "unknown action")

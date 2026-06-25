@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -661,6 +662,37 @@ func (s *Server) forgetTurnLock(id string) {
 	s.rememberedMu.Lock()
 	delete(s.rememberedStores, id)
 	s.rememberedMu.Unlock()
+}
+
+// resolveUnderCWD joins path with cwd and checks that the resulting absolute
+// path is inside cwd. It rejects absolute paths outside cwd, paths containing
+// ".." that escape, and empty inputs. Returns (absPath, true) on success.
+func resolveUnderCWD(cwd, path string) (string, bool) {
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	if cwd == "" || path == "" {
+		return "", false
+	}
+	// Reject absolute paths outright; only relative paths under cwd are allowed.
+	// The explicit slash/tilde/drive checks catch Unix-style paths on Windows
+	// (where filepath.IsAbs("/etc/passwd") is false).
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") || strings.HasPrefix(path, "~") || (len(path) >= 2 && path[1] == ':') {
+		return "", false
+	}
+	abs, err := filepath.Abs(filepath.Join(cwd, path))
+	if err != nil {
+		return "", false
+	}
+	root, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", false
+	}
+	// Ensure abs has the same volume/prefix as root and is not outside it.
+	if !strings.HasPrefix(abs, root) || (len(abs) > len(root) && abs[len(root)] != filepath.Separator) {
+		return "", false
+	}
+	return abs, true
 }
 
 // buildAgent creates a fresh agent for a turn. The caller must have locked

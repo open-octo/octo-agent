@@ -50,8 +50,15 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clean := filepath.Clean(reqPath)
-	fi, err := os.Stat(clean)
+	// Defense in depth: even though sessionWrotePath validates the path against
+	// the transcript, the transcript could contain an absolute path outside the
+	// working directory. Only serve files that resolve under s.cwd.
+	abs, ok := resolveUnderCWD(s.cwd, reqPath)
+	if !ok {
+		writeError(w, http.StatusForbidden, "path is outside the working directory")
+		return
+	}
+	fi, err := os.Stat(abs)
 	if err != nil || fi.IsDir() {
 		writeError(w, http.StatusNotFound, "file not found")
 		return
@@ -61,7 +68,7 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(clean)
+	f, err := os.Open(abs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -72,7 +79,7 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// Defense in depth for a URL opened directly in a tab; the panel's primary
 	// isolation is the sandboxed iframe (no allow-same-origin).
-	w.Header().Set("Content-Security-Policy", "sandbox allow-scripts")
+	w.Header().Set("Content-Security-Policy", "sandbox")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, f)
 }

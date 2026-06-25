@@ -164,7 +164,7 @@ func TestHandleCreateMCPServer_BulkImport(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"mcpServers": {"a": {"command": "echo"}, "b": {"url": "https://b.example"}}}`)
+		`{"mcpServers": {"a": {"command": "npx", "args": ["-y", "server-a"]}, "b": {"url": "https://b.example"}}}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("bulk: status = %d: %s", w.Code, w.Body.String())
 	}
@@ -174,7 +174,7 @@ func TestHandleCreateMCPServer_BulkImport(t *testing.T) {
 
 	// A half-bad paste lands nothing.
 	w = doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"mcpServers": {"c": {"command": "echo"}, "bad name": {"command": "x"}}}`)
+		`{"mcpServers": {"c": {"command": "npx"}, "bad name": {"command": "x"}}}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("half-bad bulk: status = %d, want 400", w.Code)
 	}
@@ -182,6 +182,34 @@ func TestHandleCreateMCPServer_BulkImport(t *testing.T) {
 	for _, s := range decodeServers(t, w) {
 		if s.Name == "c" {
 			t.Error("validation must reject the whole paste, not half of it")
+		}
+	}
+}
+
+func TestHandleCreateMCPServer_ArbitraryCommandRequiresConsent(t *testing.T) {
+	mcpTestHome(t, "")
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// Non-allowlisted command without consent → 400.
+	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
+		`{"name": "custom", "server": {"command": "echo"}}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// With explicit consent → 200.
+	w = doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
+		`{"name": "custom", "server": {"command": "echo"}, "allow_arbitrary_command": true}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Dangerous paths are always rejected, even with consent.
+	for _, cmd := range []string{"/bin/echo", "../../bin/echo", "echo; rm -rf /"} {
+		w = doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
+			`{"name": "bad", "server": {"command": "`+cmd+`"}, "allow_arbitrary_command": true}`)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("command %q: expected 400, got %d", cmd, w.Code)
 		}
 	}
 }
