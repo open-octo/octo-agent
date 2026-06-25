@@ -109,6 +109,80 @@ func TestRun_Pipeline(t *testing.T) {
 	}
 }
 
+// TestRun_NestedParallelDeadlock is the regression guard for the re-entrant
+// scheduler. One outer branch keeps a top-level agent in flight (fast) while a
+// sibling branch sits inside a nested parallel (slow). The nested level's
+// wait_any therefore receives the OUTER branch's token first. Before the
+// $__wf_ready buffer, the nested loop mis-routed that foreign token —
+// __agent_take'ing the outer result and resuming a nil fiber — which crashed
+// the script and deadlocked the outer loop (its token never came back). The
+// slow/fast skew makes the cross-level arrival deterministic; the watchdog
+// turns a regression into a fast failure instead of a hung test.
+func TestRun_NestedParallelDeadlock(t *testing.T) {
+	agent := func(_ context.Context, p string, _ AgentOptions) AgentResult {
+		if strings.Contains(p, "outer") {
+			time.Sleep(10 * time.Millisecond) // completes first → lands in the nested level's wait
+		} else {
+			time.Sleep(80 * time.Millisecond)
+		}
+		return AgentResult{Reply: "r<" + p + ">"}
+	}
+	script := `
+		parallel([1, 2]) do |i|
+			if i == 1
+				agent("outer")
+			else
+				parallel([1, 2]) { |j| agent("inner#{j}") }.join("+")
+			end
+		end.join(",")
+	`
+	type out struct {
+		res Result
+		err error
+	}
+	ch := make(chan out, 1)
+	go func() {
+		r, e := Run(context.Background(), script, Options{Agent: agent})
+		ch <- out{r, e}
+	}()
+	select {
+	case got := <-ch:
+		if got.err != nil {
+			t.Fatalf("Run: %v", got.err)
+		}
+		want := "r<outer>,r<inner1>+r<inner2>"
+		if got.res.Output != want {
+			t.Errorf("Output = %q, want %q", got.res.Output, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("workflow deadlocked on nested parallel (re-entrant scheduler regression)")
+	}
+}
+
+// TestRun_NestedPipelineInParallel exercises a pipeline nested inside parallel
+// — the "judge panel" shape from the docs — and checks every result threads
+// through correctly across the two scheduler levels.
+func TestRun_NestedPipelineInParallel(t *testing.T) {
+	agent := func(_ context.Context, p string, _ AgentOptions) AgentResult {
+		return AgentResult{Reply: p}
+	}
+	script := `
+		parallel([1, 2]) do |i|
+			s1 = ->(x) { agent("p#{x}") }
+			s2 = ->(prev) { prev + "!" }
+			pipeline([i, i + 10], s1, s2).join(",")
+		end.join(" | ")
+	`
+	got, err := Run(context.Background(), script, Options{Agent: agent})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := "p1!,p11! | p2!,p12!"
+	if got.Output != want {
+		t.Errorf("Output = %q, want %q", got.Output, want)
+	}
+}
+
 func TestRun_Cancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	blocked := func(c context.Context, _ string, _ AgentOptions) AgentResult {
