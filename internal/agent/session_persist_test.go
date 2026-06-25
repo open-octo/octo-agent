@@ -162,6 +162,30 @@ func TestLoadSession_DropsPartialTail(t *testing.T) {
 	}
 }
 
+// TestSessionBoundRoundTrip checks that BoundEntry and BoundAt survive a save/load cycle.
+func TestSessionBoundRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := NewSession("m", "")
+	sess.Bind(EntryTUI, false)
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	loaded, err := LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !loaded.BoundTo(EntryTUI) {
+		t.Fatalf("bound entry = %q, want %q", loaded.BoundEntry, EntryTUI)
+	}
+	if loaded.BoundAt.IsZero() {
+		t.Fatal("BoundAt not persisted")
+	}
+}
+
 // TestSetTitle_RewritesAfterPartialTail: SetTitle appends a raw title record;
 // after a crash left a partial tail it must rewrite instead, or the title
 // record fuses with the dangling bytes into one corrupt line.

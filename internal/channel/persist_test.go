@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 )
@@ -145,12 +146,64 @@ func TestCmdBind_AttachesToExistingSession(t *testing.T) {
 	if bound.Store.ID != targetID {
 		t.Errorf("bound session store = %q, want %q", bound.Store.ID, targetID)
 	}
+	if !bound.Store.BoundTo(agent.EntryChannel) {
+		t.Errorf("bound session entry = %q, want %q", bound.Store.BoundEntry, agent.EntryChannel)
+	}
 
 	// The binding survives a rebuild (persisted): a fresh manager re-attaches.
 	m2 := testManager()
 	again := m2.GetOrCreateSession(evB)
 	if again.Store.ID != targetID {
 		t.Errorf("binding did not persist: store = %q, want %q", again.Store.ID, targetID)
+	}
+}
+
+// TestCmdBind_RejectedWhenBoundToOtherEntry: /bind must not silently take over
+// a session owned by web/tui/cli.
+func TestCmdBind_RejectedWhenBoundToOtherEntry(t *testing.T) {
+	tempHome(t)
+	m := testManager()
+
+	// A session owned by the web entry.
+	webSess := agent.NewSession("stub-model", "")
+	webSess.BoundEntry = agent.EntryWeb
+	webSess.BoundAt = time.Now()
+	webSess.Messages = []agent.Message{{Role: agent.RoleUser, Content: "web context"}}
+	if err := webSess.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	evB := InboundEvent{Platform: "feishu", ChatID: "cB", UserID: "uB"}
+	reply := m.cmdBind(evB, []string{webSess.ID})
+	if !strings.Contains(strings.ToLower(reply), "cannot bind") {
+		t.Fatalf("expected rejection, got %q", reply)
+	}
+	if m.GetSession(evB) != nil {
+		t.Fatal("expected no session after rejected /bind")
+	}
+}
+
+// TestCmdUnbind_ReleasesBoundEntry: /unbind clears the IM entry binding so
+// other entries can use the session.
+func TestCmdUnbind_ReleasesBoundEntry(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	m := testManager()
+	sess := m.GetOrCreateSession(ev)
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "secret"})
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+
+	m.cmdUnbind(ev)
+
+	reloaded, err := agent.LoadSession(sess.Store.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.BoundEntry != "" {
+		t.Errorf("BoundEntry = %q after unbind, want empty", reloaded.BoundEntry)
 	}
 }
 

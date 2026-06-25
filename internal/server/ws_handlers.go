@@ -332,24 +332,33 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 		return
 	}
 
-	mu := s.sessionTurnLock(sess.ID)
+	if ok, _, berr := s.acquireSessionBinding(sid, agent.EntryWeb, false); !ok {
+		s.wsHub.broadcast(sid, map[string]string{
+			"type":    "error",
+			"message": berr.Error(),
+		})
+		return
+	}
+
+	mu := s.sessionTurnLock(sid)
 	mu.Lock()
 
-	if s.turnRunning[sess.ID] {
+	if s.turnRunning[sid] {
 		mu.Unlock()
-		// A mid-turn message has exactly one home: the running Agent's Inbox
-		// when it is registered (the runLoop drains it between iterations —
-		// attachment blocks and all), the steer queue otherwise (consumed by
-		// runAgentTurnLoop as the next chained turn). Enqueueing into both,
-		// as this branch once did, processed the same message twice.
+		// The current Web entry already owns the binding; a mid-turn message
+		// has exactly one home: the running Agent's Inbox when it is registered
+		// (the runLoop drains it between iterations — attachment blocks and
+		// all), the steer queue otherwise (consumed by runAgentTurnLoop as the
+		// next chained turn). Enqueueing into both, as this branch once did,
+		// processed the same message twice.
 		s.sessionAgentsMu.Lock()
-		a := s.sessionAgents[sess.ID]
+		a := s.sessionAgents[sid]
 		if a != nil {
 			a.Inbox.EnqueueWithBlocks(content, att.blocks)
 		}
 		s.sessionAgentsMu.Unlock()
 		if a == nil {
-			s.enqueueSteer(sess.ID, agent.InboxItem{Text: content, Blocks: att.blocks})
+			s.enqueueSteer(sid, agent.InboxItem{Text: content, Blocks: att.blocks})
 		}
 		// The frontend already rendered a ghost bubble in _sendMessage;
 		// history_user_message (broadcast when the turn drains steer) will
@@ -357,14 +366,30 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 		return
 	}
 
-	s.turnRunning[sess.ID] = true
+	// Reload the authoritative session after acquiring the binding so the turn
+	// works on the latest persisted state (another process may have saved).
+	sess, err = agent.LoadSession(sid)
+	if err != nil {
+		mu.Unlock()
+		s.releaseSessionBinding(sid, agent.EntryWeb)
+		s.wsHub.broadcast(sid, map[string]string{
+			"type":    "error",
+			"message": fmt.Sprintf("session not found: %s", sid),
+		})
+		return
+	}
+
+	sess.IncFlight()
+	s.turnRunning[sid] = true
 	mu.Unlock()
 
 	go func() {
 		defer func() {
 			mu.Lock()
-			s.turnRunning[sess.ID] = false
+			s.turnRunning[sid] = false
 			mu.Unlock()
+			sess.DecFlight()
+			s.releaseSessionBinding(sid, agent.EntryWeb)
 		}()
 		s.runAgentTurnLoop(sess, content, att.blocks, att.images)
 	}()

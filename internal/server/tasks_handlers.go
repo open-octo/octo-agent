@@ -96,9 +96,22 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 		}
 	}
 
+	if ok, _, berr := s.acquireSessionBinding(sess.ID, agent.EntryCron, false); !ok {
+		return sess.ID, fmt.Errorf("acquire binding: %w", berr)
+	}
+
 	mu := s.sessionTurnLock(sess.ID)
 	mu.Lock()
-	defer mu.Unlock()
+	defer func() {
+		mu.Unlock()
+		s.releaseSessionBinding(sess.ID, agent.EntryCron)
+	}()
+
+	// Reload the authoritative session after acquiring the binding.
+	sess, err = agent.LoadSession(sess.ID)
+	if err != nil {
+		return sess.ID, fmt.Errorf("reload session: %w", err)
+	}
 
 	a := s.buildAgent(sess)
 

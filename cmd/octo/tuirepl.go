@@ -120,13 +120,17 @@ func runTUI(cfg replConfig) int {
 		return 1
 	}
 
-	// Final save on exit (mirrors runREPL's exit save).
+	// Final save on exit (mirrors runREPL's exit save). Unbind before saving so
+	// other entries see the session as released once the TUI process exits.
 	if !cfg.noSave {
 		cfg.session.SyncFrom(cfg.a.History)
+		cfg.session.Unbind(agent.EntryTUI)
 		if err := cfg.session.Save(); err != nil {
 			fmt.Fprintf(cfg.stderr, "session save: %v\n", err)
 			return 1
 		}
+	} else {
+		cfg.session.Unbind(agent.EntryTUI)
 	}
 	if !cfg.verbosity.quiet() {
 		fmt.Fprintf(cfg.stdout, "\nResume: octo -c %s\n", cfg.session.ShortID())

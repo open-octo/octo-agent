@@ -321,6 +321,8 @@ func (m *Manager) cmdClear(ev InboundEvent) string {
 // by its list number or (short/full) ID. The redirection is recorded in the
 // persistent binding table so it survives a restart, and no history is
 // deleted — /bind switches conversations rather than starting a fresh one.
+// If the target session is bound to another entry, the bind is rejected so
+// IM cannot silently take over a session owned by CLI/TUI/Web.
 func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
 	if len(args) == 0 {
 		return "Usage: /bind <number|id> — run /list to see sessions, then attach this chat to one. History is preserved."
@@ -330,8 +332,18 @@ func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
 		return fmt.Sprintf("No session matches %q. Run /list to see available sessions.", args[0])
 	}
 
+	if res, _, err := target.Bind(agent.EntryChannel, false); res == agent.Rejected {
+		return fmt.Sprintf("Cannot bind: %v", err)
+	}
+	if err := target.Save(); err != nil {
+		return fmt.Sprintf("Could not persist entry binding: %v", err)
+	}
+
 	key := sessionKeyFor(m.mode, ev)
 	if err := m.bindings.set(key, target.ID); err != nil {
+		// Roll back the entry binding so we don't leave the session claimed.
+		target.Unbind(agent.EntryChannel)
+		_ = target.Save()
 		return fmt.Sprintf("Could not save the binding: %v", err)
 	}
 	// Drop any live session for this key, then rebuild it against the newly
@@ -379,11 +391,21 @@ func (m *Manager) cmdStop(ev InboundEvent) string {
 	return "No task is running."
 }
 
-// cmdUnbind detaches the chat from a session it was bound to via /bind,
-// reverting it to its own default session. No history is deleted — the bound
-// session's transcript is left intact so it can be re-attached later.
+// cmdUnbind detaches the chat from its current session. If the chat was
+// explicitly /bind-ed to another session, that override is dropped; if the
+// chat owned its automatically-created session's entry binding, that binding
+// is released so other entries can use it. No history is deleted.
 func (m *Manager) cmdUnbind(ev InboundEvent) string {
 	key := sessionKeyFor(m.mode, ev)
+
+	released := false
+	if val, ok := m.sessions.Load(key); ok {
+		if ch := val.(*Session); ch.Store != nil {
+			released = ch.Store.Unbind(agent.EntryChannel)
+			_ = ch.Store.Save()
+		}
+	}
+
 	hadOverride, err := m.bindings.remove(key)
 	if err != nil {
 		return fmt.Sprintf("Could not clear the binding: %v", err)
@@ -391,7 +413,7 @@ func (m *Manager) cmdUnbind(ev InboundEvent) string {
 	// Detach the live session without touching any store; the next message
 	// re-attaches this chat to its own default session.
 	m.sessions.LoadAndDelete(key)
-	if hadOverride {
+	if hadOverride || released {
 		return "Unbound. This chat reverted to its own session; the bound session's history was kept."
 	}
 	return "This chat wasn't bound to another session. Reset to its default session; no history was deleted."

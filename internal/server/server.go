@@ -123,6 +123,20 @@ type Server struct {
 	// Guarded by the session's turnLocks mutex.
 	turnRunning map[string]bool
 
+	// entryBindings is a short-lease cache of the authoritative binding state
+	// stored in each session file. It is only an optimisation within this
+	// process: the session file's BoundEntry field is the single source of
+	// truth, so a server restart or a concurrent CLI/TUI process always sees
+	// the persisted value.
+	entryBindings   map[string]*cachedEntryBinding
+	entryBindingsMu sync.Mutex
+
+	// sessionBindingLocks serialises the load→bind→save sequence for each
+	// session inside this process, so two goroutines cannot both read an
+	// unbound file and write conflicting bindings.
+	sessionBindingLocks   map[string]*sync.Mutex
+	sessionBindingLocksMu sync.Mutex
+
 	// steerQueues holds mid-turn user messages (steer) that arrive while a
 	// turn is in flight.  Consumed by the turn loop after each iteration.
 	steerQueues map[string][]agent.InboxItem
@@ -290,28 +304,30 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:              cfg,
-		mux:              http.NewServeMux(),
-		sender:           sender,
-		model:            model,
-		provider:         provName,
-		system:           cfg.System,
-		skillReg:         skillReg,
-		skillsManifest:   skillsManifest,
-		cwd:              cwd,
-		envCtx:           envCtx,
-		memDir:           memDir,
-		homeMemDir:       homeMemDir,
-		turnLocks:        map[string]*sync.Mutex{},
-		turnRunning:      make(map[string]bool),
-		steerQueues:      make(map[string][]agent.InboxItem),
-		sessionAgents:    make(map[string]*agent.Agent),
-		accessKey:        accessKey,
-		confirmations:    make(map[string]chan string),
-		questionChans:    make(map[string]chan tools.AskResponse),
-		pendingQuestions: make(map[string]wsEventRequestUserQuestion),
-		pendingConfirms:  make(map[string]wsEventRequestConfirmation),
-		sessionInjectors: make(map[string]*memory.Injector),
+		cfg:                 cfg,
+		mux:                 http.NewServeMux(),
+		sender:              sender,
+		model:               model,
+		provider:            provName,
+		system:              cfg.System,
+		skillReg:            skillReg,
+		skillsManifest:      skillsManifest,
+		cwd:                 cwd,
+		envCtx:              envCtx,
+		memDir:              memDir,
+		homeMemDir:          homeMemDir,
+		turnLocks:           map[string]*sync.Mutex{},
+		turnRunning:         make(map[string]bool),
+		entryBindings:       make(map[string]*cachedEntryBinding),
+		sessionBindingLocks: map[string]*sync.Mutex{},
+		steerQueues:         make(map[string][]agent.InboxItem),
+		sessionAgents:       make(map[string]*agent.Agent),
+		accessKey:           accessKey,
+		confirmations:       make(map[string]chan string),
+		questionChans:       make(map[string]chan tools.AskResponse),
+		pendingQuestions:    make(map[string]wsEventRequestUserQuestion),
+		pendingConfirms:     make(map[string]wsEventRequestConfirmation),
+		sessionInjectors:    make(map[string]*memory.Injector),
 	}
 
 	// Register the WebSocket-backed asker so ask_user_question appears in the
@@ -663,6 +679,144 @@ func (s *Server) forgetTurnLock(id string) {
 	s.rememberedMu.Lock()
 	delete(s.rememberedStores, id)
 	s.rememberedMu.Unlock()
+
+	s.entryBindingsMu.Lock()
+	delete(s.entryBindings, id)
+	s.entryBindingsMu.Unlock()
+}
+
+// cachedEntryBinding is a short-lease, in-process cache of a session's binding.
+// The session file is the single source of truth; this cache only avoids
+// reloading the file on every turn within one server process.
+type cachedEntryBinding struct {
+	entry   string
+	expires time.Time
+}
+
+// entryBindingCacheLease is how long the in-process cache remains valid without
+// being renewed. The on-disk lease is written for entryBindingLease (longer) so
+// a cached owner can keep working without touching the file on every request.
+const entryBindingCacheLease = 30 * time.Second
+
+// entryBindingLease is how long a turn lease written to the session file
+// remains authoritative. It must be long enough to cover most turns, short
+// enough that a crashed process releases the binding quickly.
+const entryBindingLease = 2 * time.Minute
+
+// loadBoundSession reloads the session from disk and returns its authoritative
+// BoundEntry. The returned session is always a fresh object.
+func (s *Server) loadBoundSession(id string) (*agent.Session, error) {
+	return agent.LoadSession(id)
+}
+
+// sessionBindingLock returns the mutex that serialises load→bind→save for id.
+func (s *Server) sessionBindingLock(id string) *sync.Mutex {
+	s.sessionBindingLocksMu.Lock()
+	defer s.sessionBindingLocksMu.Unlock()
+	if mu, ok := s.sessionBindingLocks[id]; ok {
+		return mu
+	}
+	mu := &sync.Mutex{}
+	s.sessionBindingLocks[id] = mu
+	return mu
+}
+
+// acquireSessionBinding claims the session for entry. It always reloads the
+// session from disk first so the session file is the single source of truth.
+// A local cache with a short lease avoids repeated disk reads for the same
+// owner within this process. On success the binding and a turn lease are
+// persisted, and the cache is refreshed. The load→bind→save sequence is
+// serialised per session id.
+func (s *Server) acquireSessionBinding(id, entry string, steal bool) (bool, string, error) {
+	mu := s.sessionBindingLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+
+	s.entryBindingsMu.Lock()
+	cache := s.entryBindings[id]
+	s.entryBindingsMu.Unlock()
+
+	now := time.Now()
+	if cache != nil && cache.entry == entry && cache.expires.After(now) {
+		// This process already owns an unexpired cache entry; just renew it.
+		s.entryBindingsMu.Lock()
+		s.entryBindings[id] = &cachedEntryBinding{entry: entry, expires: now.Add(entryBindingCacheLease)}
+		s.entryBindingsMu.Unlock()
+		return true, "", nil
+	}
+
+	// Authoritative check: reload from disk.
+	sess, err := s.loadBoundSession(id)
+	if err != nil {
+		return false, "", err
+	}
+
+	bound := sess.BoundEntry
+	if bound == "" || bound == entry {
+		// Own it. Write back immediately so other processes see it.
+		sess.Bind(entry, false)
+		if err := sess.Save(); err != nil {
+			return false, "", fmt.Errorf("persist binding: %w", err)
+		}
+		if err := sess.WriteLease(entry, now.Add(entryBindingLease)); err != nil {
+			return false, "", fmt.Errorf("write lease: %w", err)
+		}
+		s.entryBindingsMu.Lock()
+		s.entryBindings[id] = &cachedEntryBinding{entry: entry, expires: now.Add(entryBindingCacheLease)}
+		s.entryBindingsMu.Unlock()
+		return true, "", nil
+	}
+
+	if !steal {
+		return false, "", fmt.Errorf("session is bound to %s since %s; close the other entry first", bound, sess.BoundAt.Format(time.RFC3339))
+	}
+
+	// Respect the in-memory cache when we have seen this binding recently; the
+	// authoritative owner in another process may still be alive.
+	if cache != nil && cache.entry == bound && cache.expires.After(now) {
+		return false, "", fmt.Errorf("session is bound to %s and the local lease has not expired; cannot take over yet", bound)
+	}
+	// Respect the persisted turn lease: if another entry holds an unexpired
+	// lease, refuse to steal even if our cache has expired.
+	if holder, active := sess.LeaseActive(); active && holder != entry {
+		return false, "", fmt.Errorf("session is bound to %s and a turn lease is active until %s; cannot take over while busy", bound, sess.LeaseExpires.Format(time.RFC3339))
+	}
+
+	sess.Bind(entry, true)
+	if err := sess.Save(); err != nil {
+		return false, "", fmt.Errorf("persist stolen binding: %w", err)
+	}
+	if err := sess.WriteLease(entry, now.Add(entryBindingLease)); err != nil {
+		return false, "", fmt.Errorf("write stolen lease: %w", err)
+	}
+	s.entryBindingsMu.Lock()
+	s.entryBindings[id] = &cachedEntryBinding{entry: entry, expires: now.Add(entryBindingCacheLease)}
+	s.entryBindingsMu.Unlock()
+	return true, fmt.Sprintf("session taken over from %s", bound), nil
+}
+
+// releaseSessionBinding clears the binding when this process owns it. It
+// reloads the session from disk first to avoid clobbering a binding set by
+// another process after the turn started. The turn lease is also cleared.
+func (s *Server) releaseSessionBinding(id, entry string) {
+	mu := s.sessionBindingLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+
+	sess, err := s.loadBoundSession(id)
+	if err != nil {
+		return
+	}
+	if sess.BoundEntry != entry {
+		return
+	}
+	_ = sess.ClearLease()
+	sess.Unbind(entry)
+	_ = sess.Save()
+
+	s.entryBindingsMu.Lock()
+	delete(s.entryBindings, id)
+	s.entryBindingsMu.Unlock()
 }
 
 // resolveUnderCWD joins path with cwd and checks that the resulting absolute
@@ -1368,7 +1522,19 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 		ad.SendText(ev.ChatID, "A task is running — try /compact again once it finishes.", ev.MessageID)
 		return
 	}
+
+	storeID := sess.Store.ID
+	if ok, _, berr := s.acquireSessionBinding(storeID, agent.EntryChannel, false); !ok {
+		ad.SendText(ev.ChatID, "⚠️ "+berr.Error(), ev.MessageID)
+		return
+	}
+
+	if fresh, err := agent.LoadSession(storeID); err == nil {
+		sess.Store = fresh
+	}
+
 	go func() {
+		defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 		ctx, done := sess.BeginRun(context.Background())
 		defer done()
 		stats, err := sess.Agent.ForceCompact(ctx, nil)
@@ -1401,6 +1567,23 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	sess := s.channelMgr.GetOrCreateSession(ev)
 	if sess == nil {
 		return
+	}
+
+	// Enforce entry binding: the session file is the single source of truth.
+	// If another entry (web/tui/cli) owns this session, refuse to run the turn
+	// rather than interleaving with it across processes.
+	storeID := sess.Store.ID
+	if ok, _, berr := s.acquireSessionBinding(storeID, agent.EntryChannel, false); !ok {
+		ad.SendText(ev.ChatID, "⚠️ "+berr.Error(), ev.MessageID)
+		return
+	}
+	defer s.releaseSessionBinding(storeID, agent.EntryChannel)
+
+	// Reload the authoritative session after acquiring the binding. Another
+	// process may have saved since the manager restored it, and we must not
+	// persist through a stale Store pointer.
+	if fresh, err := agent.LoadSession(storeID); err == nil {
+		sess.Store = fresh
 	}
 
 	// Waits for any in-flight turn in this session, then makes this turn

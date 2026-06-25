@@ -732,6 +732,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "octo: %v\n", err)
 				return 1
 			}
+			if ok, msg, berr := sess.Bind(agent.EntryTUI, false); ok == agent.Rejected {
+				fmt.Fprintf(stderr, "octo: %v\n", berr)
+				return 1
+			} else if msg != "" && !*quietFlag {
+				fmt.Fprintln(stderr, "octo:", msg)
+			}
 			// Restore history and override model/system from saved session.
 			a.History = sess.ToHistory()
 			if sess.Model != "" {
@@ -742,6 +748,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			a.System = prompt.Compose(sess.System, cwd, env, skillsManifest, memInjection, coauthor)
 		} else {
 			sess = agent.NewSession(resolvedModel, *system)
+			sess.Bind(agent.EntryTUI, false)
 		}
 		// Persisted (non-ephemeral) sessions archive folded turns so the model
 		// can recall them with the read tool after a compaction.

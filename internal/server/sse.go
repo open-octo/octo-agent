@@ -37,20 +37,31 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if ok, msg, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {
+		writeError(w, http.StatusConflict, berr.Error())
+		return
+	} else if msg != "" {
+		_ = msg
+	}
+
+	if err := s.ensureSender(); err != nil {
+		s.releaseSessionBinding(id, agent.EntryWeb)
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+
+	mu := s.sessionTurnLock(id)
+	mu.Lock()
+	defer func() {
+		mu.Unlock()
+		s.releaseSessionBinding(id, agent.EntryWeb)
+	}()
+
 	sess, err := agent.LoadSession(id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-
-	if err := s.ensureSender(); err != nil {
-		writeError(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-
-	mu := s.sessionTurnLock(sess.ID)
-	mu.Lock()
-	defer mu.Unlock()
 
 	// Refuse new turns during a restart drain — after the turn lock (so a
 	// queued SSE turn admitted before the drain doesn't slip through) but

@@ -168,13 +168,17 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		model = req.Model
 	}
 	sess := agent.NewSession(model, s.system)
+	sess.Bind(agent.EntryWeb, false)
 	if req.Name != "" {
 		_ = sess.SetTitle(req.Name)
 	}
 
 	mu := s.sessionTurnLock(sess.ID)
 	mu.Lock()
-	defer mu.Unlock()
+	defer func() {
+		mu.Unlock()
+		s.releaseSessionBinding(sess.ID, agent.EntryWeb)
+	}()
 
 	reply, err := s.runTurn(r.Context(), sess, req.Message)
 	if errors.Is(err, errDraining) {
@@ -236,9 +240,26 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mu := s.sessionTurnLock(sess.ID)
+	if ok, msg, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {
+		writeError(w, http.StatusConflict, berr.Error())
+		return
+	} else if msg != "" {
+		// TODO: surface takeover notice to the client via an event.
+		_ = msg
+	}
+
+	mu := s.sessionTurnLock(id)
 	mu.Lock()
-	defer mu.Unlock()
+	defer func() {
+		mu.Unlock()
+		s.releaseSessionBinding(id, agent.EntryWeb)
+	}()
+
+	sess, err = agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
 
 	reply, err := s.runTurn(r.Context(), sess, req.Message)
 	if errors.Is(err, errDraining) {
@@ -338,6 +359,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	sess := agent.NewSession(model, "")
 	sess.Source = source
 	sess.ModelConfig = modelConfig
+	sess.Bind(agent.EntryWeb, false)
 	if req.Name != "" {
 		sess.Title = req.Name
 	}
@@ -958,6 +980,19 @@ func (s *Server) handleUpdateSessionModel(w http.ResponseWriter, r *http.Request
 	}
 
 	sess, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	if ok, _, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {
+		writeError(w, http.StatusConflict, berr.Error())
+		return
+	}
+	defer s.releaseSessionBinding(id, agent.EntryWeb)
+
+	// Reload after acquiring the binding in case another process saved.
+	sess, err = agent.LoadSession(id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
