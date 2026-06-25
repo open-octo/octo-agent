@@ -9,7 +9,7 @@ Flags:
 - `--provider` — Override the default provider (`anthropic` or `openai`)
 - `--model` — Override the default model
 - `--system` — Path to a custom system-prompt file
-- `--reasoning-effort low|medium|high|max` — Enable extended reasoning
+- `--reasoning-effort low|medium|high|xhigh|max` — Enable extended reasoning
 - `--no-reasoning` — Disable reasoning trace display
 
 ### `octo config [subcommand]`

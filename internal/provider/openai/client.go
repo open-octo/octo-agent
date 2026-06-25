@@ -38,6 +38,11 @@ const DefaultMaxTokens = 16384
 // any other value leaves the request shaped as generic OpenAI.
 const DialectDeepSeek = "deepseek"
 
+// DialectOpenAI selects OpenAI's effort value set ("max" → "xhigh", since
+// gpt-5.x reasoning_effort tops out at "xhigh", not "max"). Assign it to
+// Client.Dialect for the "openai" vendor.
+const DialectOpenAI = "openai"
+
 // DefaultStreamIdleTimeout bounds how long a streaming response may go silent
 // (no bytes received) before SendStream aborts it as a stall. Chat Completions
 // backends stream chunks continuously while generating, so a healthy stream
@@ -72,21 +77,30 @@ type Client struct {
 }
 
 // applyReasoning populates the reasoning fields of body for the given effort
-// ("" | "low" | "medium" | "high" | "max").
+// ("" | "low" | "medium" | "high" | "xhigh" | "max"). The accepted value set
+// differs by backend, so each dialect normalises before sending:
 //
-// For the DeepSeek dialect it forwards the effort verbatim — DeepSeek natively
-// accepts "high"/"max" and maps "low"/"medium" up to "high" — and additionally
-// sets the thinking on/off toggle: DeepSeek treats enabling thinking and tuning
-// its effort as separate switches and keeps thinking on by default, so we
-// enable it explicitly when an effort is requested and disable it explicitly
-// when none is — otherwise "off" would still think.
-//
-// Generic OpenAI-compatible backends top out at "high" and reject an unknown
-// "max" enum, so "max" is clamped down to "high" for them; "thinking" (a
-// DeepSeek extension) is never sent.
+//   - DeepSeek: forwards verbatim — DeepSeek accepts "high"/"max", maps
+//     "low"/"medium" up to "high" and "xhigh" up to "max" — and additionally
+//     sets the thinking on/off toggle (enabling thinking and tuning effort are
+//     separate switches, and thinking stays on by default, so "off" must be
+//     sent explicitly or it would still think).
+//   - OpenAI: gpt-5.x reasoning_effort accepts "low".."high" and "xhigh" but
+//     not "max", so "max" maps to "xhigh" (the real top tier).
+//   - Generic OpenAI-compatible: top out at "high" and reject unknown enums, so
+//     both "xhigh" and "max" clamp to "high"; "thinking" is never sent.
 func (c *Client) applyReasoning(body *apiRequest, effort string) {
-	if c.Dialect != DialectDeepSeek {
+	switch c.Dialect {
+	case DialectDeepSeek:
+		// fall through to the toggle logic below.
+	case DialectOpenAI:
 		if effort == "max" {
+			effort = "xhigh"
+		}
+		body.ReasoningEffort = effort
+		return
+	default:
+		if effort == "xhigh" || effort == "max" {
 			effort = "high"
 		}
 		body.ReasoningEffort = effort

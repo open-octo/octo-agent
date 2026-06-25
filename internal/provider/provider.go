@@ -37,16 +37,18 @@ type Request struct {
 	// breakpoints) ignore it. Empty means "no hint".
 	CacheKey string
 
-	// ThinkingBudget, when > 0, enables extended thinking and sets the token
-	// budget for the reasoning trace. Only the Anthropic provider honors it
-	// (Claude / Kimi k2.6 via the thinking request field); others ignore it.
+	// ThinkingBudget, when > 0, is the reasoning token budget. Only the
+	// Anthropic provider honors it: as thinking.budget_tokens on older Claude /
+	// Kimi-for-coding, and as a max_tokens floor on modern Claude (which use
+	// adaptive thinking + ReasoningEffort instead). Other providers ignore it.
 	ThinkingBudget int
 
-	// ReasoningEffort, when non-empty ("low" | "medium" | "high" | "max"), is
-	// forwarded as the OpenAI-protocol reasoning_effort request field. Only the
-	// OpenAI provider honors it; the Anthropic provider expresses reasoning
-	// intensity through ThinkingBudget instead and ignores this field. "max" is
-	// honored by DeepSeek and clamped to "high" for other OpenAI backends.
+	// ReasoningEffort, when non-empty ("low" | "medium" | "high" | "xhigh" |
+	// "max"), is the unified reasoning-intensity level. The OpenAI provider
+	// sends it as reasoning_effort (normalising per dialect — see
+	// openai.Client.applyReasoning). The Anthropic provider uses it for
+	// output_config.effort on modern Claude models (adaptive thinking) and
+	// falls back to ThinkingBudget on older Claude / Kimi-for-coding.
 	ReasoningEffort string
 }
 

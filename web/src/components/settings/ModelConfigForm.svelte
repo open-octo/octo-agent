@@ -224,6 +224,7 @@
           <option value="low">{$t('models.reasoning.low')}</option>
           <option value="medium">{$t('models.reasoning.medium')}</option>
           <option value="high">{$t('models.reasoning.high')}</option>
+          <option value="xhigh">{$t('models.reasoning.xhigh')}</option>
           <option value="max">{$t('models.reasoning.max')}</option>
         </select>
       </label>

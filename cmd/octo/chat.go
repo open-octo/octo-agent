@@ -182,16 +182,18 @@ func resolveReasoningEffort(flagVal string, entry config.ModelEntry) string {
 // validReasoningEffort reports whether e is an accepted reasoning intensity.
 func validReasoningEffort(e string) bool {
 	switch e {
-	case "", "low", "medium", "high", "max":
+	case "", "low", "medium", "high", "xhigh", "max":
 		return true
 	}
 	return false
 }
 
 // anthropicThinkingBudget maps a unified reasoning-effort level to an Anthropic
-// extended-thinking token budget. "" (off) yields 0, which disables thinking.
-// The provider bumps max_tokens to fit a budget larger than it, so "max" can
-// outrun the default cap safely.
+// thinking-token figure. "" (off) yields 0, which disables thinking. On modern
+// Claude models (adaptive thinking + output_config.effort) the provider uses
+// this only as a max_tokens floor; on older Claude / Kimi-for-coding it is the
+// literal thinking.budget_tokens. The provider bumps max_tokens to fit a value
+// larger than it, so the higher levels can outrun the default cap safely.
 func anthropicThinkingBudget(effort string) int {
 	switch effort {
 	case "low":
@@ -200,6 +202,8 @@ func anthropicThinkingBudget(effort string) int {
 		return 16384
 	case "high":
 		return 32768
+	case "xhigh":
+		return 48000
 	case "max":
 		return 64000
 	}
@@ -252,7 +256,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	compactThreshold := fs.Int("compact-threshold", 0, "Compact older history once a turn's input crosses this many tokens; 0 = auto (percentage of the model's context window, settable via --compact-auto-pct or config), <0 = disabled")
 	compactAutoPct := fs.Int("compact-auto-pct", 0, "Auto-compaction threshold as a percentage of the model's context window (0 = use `octo config` or built-in default 75). Only used when --compact-threshold=0.")
 	compactBatchThreshold := fs.Int("compact-batch-threshold", 0, "Batch-level compaction: compact after a tool batch when context exceeds this many tokens; 0 = auto (~85% of the model's context window), <0 = disabled between batches")
-	reasoningEffort := fs.String("reasoning-effort", "", "Reasoning intensity: low | medium | high | max (empty = off). OpenAI → reasoning_effort; Anthropic → mapped thinking budget. Also from `octo config`.")
+	reasoningEffort := fs.String("reasoning-effort", "", "Reasoning intensity: low | medium | high | xhigh | max (empty = off). OpenAI → reasoning_effort; Anthropic → adaptive thinking + effort. Also from `octo config`.")
 	showReasoning := fs.Bool("show-reasoning", true, "Stream the reasoning/thinking trace to the terminal (dimmed). Use --show-reasoning=false to hide it. Also from `octo config`.")
 	useSandbox := fs.Bool("sandbox", false, "Confine terminal commands to the project dir + tmp with no network (OS-enforced; macOS/Linux). Fails closed if unavailable.")
 	sandboxAllowNet := fs.Bool("sandbox-allow-net", false, "Under --sandbox, permit network access (default: denied)")
@@ -334,7 +338,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// config entry.
 	resolvedEffort := resolveReasoningEffort(*reasoningEffort, entry)
 	if !validReasoningEffort(resolvedEffort) {
-		fmt.Fprintf(stderr, "octo: invalid --reasoning-effort %q (want 'low', 'medium', 'high', or 'max')\n", resolvedEffort)
+		fmt.Fprintf(stderr, "octo: invalid --reasoning-effort %q (want 'low', 'medium', 'high', 'xhigh', or 'max')\n", resolvedEffort)
 		return 2
 	}
 	showReasoningFlagSet := false

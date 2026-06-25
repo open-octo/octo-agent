@@ -24,7 +24,7 @@ type Vendor struct {
 	ID               string            // canonical identifier, e.g. "kimi"
 	DisplayName      string            // human label, e.g. "Kimi (Moonshot)"
 	Protocol         string            // "anthropic" or "openai"
-	API              string            // "anthropic-messages" or "openai-completions" or "openai-responses"
+	API              string            // "anthropic-messages" or "openai-completions"
 	DefaultBaseURL   string            // vendor's official endpoint (host only; the client appends the protocol path)
 	DefaultModel     string            // cheapest/reasoning-capable default
 	Models           []string          // available models (for UI dropdown)
@@ -45,7 +45,7 @@ var Registry = []Vendor{
 		ID:             "openrouter",
 		DisplayName:    "OpenRouter",
 		Protocol:       "openai",
-		API:            "openai-responses",
+		API:            "openai-completions",
 		DefaultBaseURL: "https://openrouter.ai/api",
 		DefaultModel:   "anthropic/claude-sonnet-4-6",
 		Models: []string{
@@ -133,7 +133,7 @@ var Registry = []Vendor{
 		ID:             "openai",
 		DisplayName:    "OpenAI",
 		Protocol:       "openai",
-		API:            "openai-responses",
+		API:            "openai-completions",
 		DefaultBaseURL: "https://api.openai.com",
 		DefaultModel:   "gpt-5.4",
 		Models:         []string{"gpt-5.5", "gpt-5.4", "gpt-5.4-mini"},
@@ -148,7 +148,7 @@ var Registry = []Vendor{
 		API:            "anthropic-messages",
 		DefaultBaseURL: "https://api.anthropic.com",
 		DefaultModel:   "claude-sonnet-4-6",
-		Models:         []string{"claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"},
+		Models:         []string{"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"},
 		LiteModel:      "claude-haiku-4-5",
 		APIKeyEnvVar:   "ANTHROPIC_API_KEY",
 		WebsiteURL:     "https://console.anthropic.com/settings/keys",

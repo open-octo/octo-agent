@@ -65,7 +65,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = DefaultMaxTokens
 	}
-	applyThinking(&body, req.ThinkingBudget)
+	applyReasoning(&body, req.Model, req.ReasoningEffort, req.ThinkingBudget)
 
 	payload, err := json.Marshal(body)
 	if err != nil {

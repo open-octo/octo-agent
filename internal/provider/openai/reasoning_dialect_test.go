@@ -90,10 +90,24 @@ func TestDeepSeekDialect_MaxPassesThrough(t *testing.T) {
 	}
 }
 
-// A non-DeepSeek backend must never see the thinking toggle — it's a DeepSeek
-// extension and an unknown field elsewhere — while reasoning_effort still flows.
-// "max" is clamped to "high" since generic backends reject the unknown enum.
-func TestGenericDialect_OmitsThinkingAndClampsMax(t *testing.T) {
+// The OpenAI dialect maps "max" → "xhigh" (gpt-5.x's real top tier; it has no
+// "max"), passes "xhigh" and lower through, and never sends the thinking toggle.
+func TestOpenAIDialect_MaxMapsToXHigh(t *testing.T) {
+	cases := map[string]string{"low": "low", "high": "high", "xhigh": "xhigh", "max": "xhigh"}
+	for in, want := range cases {
+		got := captureRequest(t, DialectOpenAI, in, false)
+		if got.ReasoningEffort != want {
+			t.Errorf("OpenAI effort %q → %q, want %q", in, got.ReasoningEffort, want)
+		}
+		if got.Thinking != nil {
+			t.Errorf("OpenAI effort %q: thinking = %+v, want omitted", in, got.Thinking)
+		}
+	}
+}
+
+// A generic (unknown) backend must never see the thinking toggle, and tops out
+// at "high" — both "xhigh" and "max" clamp down since it rejects unknown enums.
+func TestGenericDialect_OmitsThinkingAndClampsHigh(t *testing.T) {
 	got := captureRequest(t, "", "high", false)
 	if got.Thinking != nil {
 		t.Errorf("thinking = %+v, want omitted for generic OpenAI", got.Thinking)
@@ -102,13 +116,15 @@ func TestGenericDialect_OmitsThinkingAndClampsMax(t *testing.T) {
 		t.Errorf("reasoning_effort = %q, want high", got.ReasoningEffort)
 	}
 
-	// "max" clamps down to "high" for generic backends.
-	clamped := captureRequest(t, "", "max", false)
-	if clamped.ReasoningEffort != "high" {
-		t.Errorf("max reasoning_effort = %q, want clamped to high", clamped.ReasoningEffort)
-	}
-	if clamped.Thinking != nil {
-		t.Errorf("max thinking = %+v, want omitted", clamped.Thinking)
+	// Both "xhigh" and "max" clamp down to "high" for generic backends.
+	for _, in := range []string{"xhigh", "max"} {
+		clamped := captureRequest(t, "", in, false)
+		if clamped.ReasoningEffort != "high" {
+			t.Errorf("%q reasoning_effort = %q, want clamped to high", in, clamped.ReasoningEffort)
+		}
+		if clamped.Thinking != nil {
+			t.Errorf("%q thinking = %+v, want omitted", in, clamped.Thinking)
+		}
 	}
 
 	// Empty effort on a generic backend omits both fields entirely.

@@ -131,7 +131,7 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = DefaultMaxTokens
 	}
-	applyThinking(&body, req.ThinkingBudget)
+	applyReasoning(&body, req.Model, req.ReasoningEffort, req.ThinkingBudget)
 
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -306,10 +306,31 @@ func markMessageCacheable(m apiMessage) apiMessage {
 	return m
 }
 
-// applyThinking enables extended thinking on the request when budget > 0.
-// Anthropic requires max_tokens to exceed budget_tokens, so it bumps
-// max_tokens to leave room for the answer on top of the reasoning budget.
-func applyThinking(body *apiRequest, budget int) {
+// applyReasoning enables thinking on the request for the requested effort.
+//
+// Modern Claude models (Opus 4.6/4.7/4.8, Sonnet 4.6, Fable 5, …) removed the
+// budget_tokens extended-thinking API — sending it 400s on Opus 4.7+. They use
+// adaptive thinking plus the GA output_config.effort control instead. Older
+// Claude models (Haiku 4.5, Sonnet 4.5) and Anthropic-protocol-compatible
+// backends (Kimi for coding) don't speak adaptive/effort, so they keep the
+// budget_tokens path. The model name selects which.
+//
+// On either path max_tokens is bumped to leave room above the reasoning budget
+// (the budget value doubles as a max_tokens floor on the adaptive path).
+func applyReasoning(body *apiRequest, model, effort string, budget int) {
+	if usesAdaptiveEffort(model) {
+		if effort == "" {
+			return
+		}
+		body.Thinking = &apiThinking{Type: "adaptive"}
+		body.OutputConfig = &apiOutputConfig{Effort: clampEffort(model, effort)}
+		if budget > 0 && body.MaxTokens <= budget {
+			body.MaxTokens = budget + DefaultMaxTokens
+		}
+		return
+	}
+	// Legacy budget_tokens path (older Claude, Kimi-for-coding): triggered by a
+	// positive budget, independent of the effort string.
 	if budget <= 0 {
 		return
 	}
@@ -317,6 +338,43 @@ func applyThinking(body *apiRequest, budget int) {
 	if body.MaxTokens <= budget {
 		body.MaxTokens = budget + DefaultMaxTokens
 	}
+}
+
+// usesAdaptiveEffort reports whether a model takes adaptive thinking +
+// output_config.effort (true) rather than the legacy thinking.budget_tokens
+// (false). True for the Claude models that removed or deprecated budget_tokens
+// in favour of adaptive thinking; false for older Claude (Haiku 4.5, Sonnet
+// 4.5) and non-Claude Anthropic-protocol backends (e.g. kimi-for-coding).
+func usesAdaptiveEffort(model string) bool {
+	m := strings.ToLower(model)
+	for _, s := range []string{"opus-4-6", "opus-4-7", "opus-4-8", "sonnet-4-6", "fable-5", "mythos-5"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// clampEffort lowers "xhigh" to "high" for models that don't support it — Opus
+// 4.7 introduced "xhigh", so Opus 4.6 and Sonnet 4.6 would reject it. Every
+// adaptive model accepts "max".
+func clampEffort(model, effort string) string {
+	if effort != "xhigh" || supportsXHigh(model) {
+		return effort
+	}
+	return "high"
+}
+
+// supportsXHigh reports whether a model accepts the "xhigh" effort level
+// (introduced with Opus 4.7).
+func supportsXHigh(model string) bool {
+	m := strings.ToLower(model)
+	for _, s := range []string{"opus-4-7", "opus-4-8", "fable-5", "mythos-5"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // toAPITools converts []agent.ToolDefinition to []apiTool.
