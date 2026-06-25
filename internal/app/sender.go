@@ -40,7 +40,7 @@ type SenderOptions struct {
 	// ThinkingBudget > 0 enables Anthropic extended thinking with this trace
 	// budget; ignored by OpenAI-protocol vendors.
 	ThinkingBudget int
-	// ReasoningEffort ("low"|"medium"|"high"|"max") is forwarded to OpenAI-protocol
+	// ReasoningEffort ("low"|"medium"|"high"|"xhigh"|"max") is forwarded to OpenAI-protocol
 	// vendors as reasoning_effort; ignored by Anthropic-protocol vendors
 	// (which use ThinkingBudget).
 	ReasoningEffort string

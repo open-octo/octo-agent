@@ -717,7 +717,7 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// dispatchThinking handles "/thinking <off|low|medium|high|max>" — change the
+// dispatchThinking handles "/thinking <off|low|medium|high|xhigh|max>" — change the
 // reasoning effort level. This rebuilds the sender because thinkingBudget and
 // reasoningEffort are set at construction time.
 func (m *tuiModel) dispatchThinking(level string) (tea.Model, tea.Cmd) {
@@ -726,7 +726,7 @@ func (m *tuiModel) dispatchThinking(level string) (tea.Model, tea.Cmd) {
 		level = "off"
 	}
 	if level != "off" && !validReasoningEffort(level) {
-		m.println(errorStyle.Render("Usage: /thinking off | low | medium | high | max"))
+		m.println(errorStyle.Render("Usage: /thinking off | low | medium | high | xhigh | max"))
 		return m, nil
 	}
 

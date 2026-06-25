@@ -57,7 +57,7 @@ type replConfig struct {
 	mcpBoot *mcpBootstrap
 	// modelName is the resolved model displayed in the TUI status bar.
 	modelName string
-	// reasoningEffort is the resolved reasoning level ("low" | "medium" | "high" | "max" | "")
+	// reasoningEffort is the resolved reasoning level ("low" | "medium" | "high" | "xhigh" | "max" | "")
 	// displayed in the TUI status bar; empty means off.
 	reasoningEffort string
 	// providerName is the resolved provider (e.g. "anthropic", "openai") used

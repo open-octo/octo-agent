@@ -940,7 +940,7 @@ type updateSessionReasoningEffortRequest struct {
 }
 
 // handleUpdateSessionReasoningEffort updates the global reasoning-effort tuning.
-// Valid levels: "off", "low", "medium", "high", "max". Empty is normalised to "off".
+// Valid levels: "off", "low", "medium", "high", "xhigh", "max". Empty is normalised to "off".
 func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -958,8 +958,8 @@ func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *ht
 	if level == "" {
 		level = "off"
 	}
-	if level != "off" && level != "low" && level != "medium" && level != "high" && level != "max" {
-		writeError(w, http.StatusBadRequest, "reasoning_effort must be off, low, medium, high, or max")
+	if level != "off" && level != "low" && level != "medium" && level != "high" && level != "xhigh" && level != "max" {
+		writeError(w, http.StatusBadRequest, "reasoning_effort must be off, low, medium, high, xhigh, or max")
 		return
 	}
 

@@ -47,13 +47,25 @@ type apiRequest struct {
 	Stream    bool         `json:"stream,omitempty"`
 	Tools     []apiTool    `json:"tools,omitempty"`
 	Thinking  *apiThinking `json:"thinking,omitempty"`
+	// OutputConfig carries the GA effort control for modern Claude models
+	// (output_config.effort). Set only on the adaptive path; nil otherwise.
+	OutputConfig *apiOutputConfig `json:"output_config,omitempty"`
 }
 
-// apiThinking enables extended thinking. Type is "enabled"; BudgetTokens caps
-// the reasoning trace and must be less than the request's max_tokens.
+// apiThinking enables thinking. Type is "adaptive" for modern Claude models
+// (Opus 4.6+/Sonnet 4.6/Fable 5, where budget_tokens is removed and 400s), or
+// "enabled" with a BudgetTokens cap for older Claude models and Anthropic-
+// protocol-compatible backends (e.g. Kimi for coding). BudgetTokens is omitted
+// on the adaptive path.
 type apiThinking struct {
-	Type         string `json:"type"` // "enabled"
-	BudgetTokens int    `json:"budget_tokens"`
+	Type         string `json:"type"` // "adaptive" | "enabled"
+	BudgetTokens int    `json:"budget_tokens,omitempty"`
+}
+
+// apiOutputConfig carries output_config.effort ("low"|"medium"|"high"|"xhigh"|
+// "max"), the GA reasoning-depth control for Claude 4.6+ models.
+type apiOutputConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 // apiMessage is one element of apiRequest.Messages.

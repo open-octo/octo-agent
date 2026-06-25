@@ -148,7 +148,7 @@ var Registry = []Vendor{
 		API:            "anthropic-messages",
 		DefaultBaseURL: "https://api.anthropic.com",
 		DefaultModel:   "claude-sonnet-4-6",
-		Models:         []string{"claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"},
+		Models:         []string{"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"},
 		LiteModel:      "claude-haiku-4-5",
 		APIKeyEnvVar:   "ANTHROPIC_API_KEY",
 		WebsiteURL:     "https://console.anthropic.com/settings/keys",
