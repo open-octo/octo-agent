@@ -201,18 +201,11 @@
 
 {#if tools !== null && tools.length > 0}
   <!-- Real data rendering -->
-  {@const errorCount = tools.filter((t: any) => t.error).length}
   {@const lastId = tools[tools.length - 1]?.id}
   <div class="tool-group">
     <div class="group-header">
       <iconify-icon icon="ant-design:tool-outlined" width="14" style="color:var(--text-tertiary)"></iconify-icon>
       <span class="hdr-label">{tools.length} {tools.length === 1 ? 'tool' : 'tools'} used</span>
-      {#if errorCount > 0}
-        <span class="err-badge">
-          <iconify-icon icon="ant-design:close-circle-outlined" width="12"></iconify-icon>
-          {errorCount} failed
-        </span>
-      {/if}
       {#if groupStreaming}
         <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:12px;color:var(--blue-6)">
           <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
@@ -372,7 +365,6 @@
   font-size: 13px; color: var(--text-secondary);
 }
 .hdr-label { flex: 0 0 auto; }
-.err-badge { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--error); }
 .hdr-time { font-size: 12px; color: var(--text-tertiary); margin-left: 10px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .tool-item { border-bottom: 1px solid var(--border-table); }
