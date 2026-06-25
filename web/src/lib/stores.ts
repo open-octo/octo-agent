@@ -52,6 +52,10 @@ export const chatSuggestion = writable<Record<string, string>>({})
 export const chatThinking = writable<Record<string, string>>({})
 // Live sub-agents, keyed by session. Fed by the sub_agent_event WS stream.
 export const chatSubAgents = writable<Record<string, SubAgentState[]>>({})
+// Background workflows, keyed by session. Fed by the workflow_event WS stream.
+// Unlike sub-agents these persist across turns (a workflow runs detached), so
+// the panel is NOT reset on send.
+export const chatWorkflows = writable<Record<string, WorkflowRunState[]>>({})
 
 // A slash-command / prompt queued to auto-send once its session's WS
 // subscription is confirmed. Set by panel "create / setup" actions that open an
@@ -257,6 +261,53 @@ export function applySubAgentEvent(
       a.status = 'done'
     }
     list[idx] = a
+    return { ...m, [sessionId]: list }
+  })
+}
+
+// ── Background workflows ─────────────────────────────────────────────────────
+// One entry per background workflow run, driven by the workflow_event stream
+// (kind: started | progress | done). Runs persist across turns, so this is
+// never auto-reset — entries accumulate for the session's lifetime.
+const maxWorkflowProgressLines = 200
+
+export interface WorkflowRunState {
+  id: string
+  description: string
+  status: 'running' | 'done' | 'error'
+  progress: string[]
+  startedAt: number
+}
+
+export function applyWorkflowEvent(
+  sessionId: string,
+  runId: string,
+  description: string,
+  kind: string,
+  line: string,
+  status: string,
+) {
+  if (!runId) return
+  chatWorkflows.update(m => {
+    const list = [...(m[sessionId] || [])]
+    let idx = list.findIndex(r => r.id === runId)
+    if (idx < 0) {
+      list.push({ id: runId, description: description || runId, status: 'running', progress: [], startedAt: Date.now() })
+      idx = list.length - 1
+    }
+    const r = { ...list[idx], progress: [...list[idx].progress] }
+    if (description && (r.description === r.id || !r.description)) r.description = description
+    if (kind === 'progress') {
+      if (line) {
+        r.progress.push(line)
+        if (r.progress.length > maxWorkflowProgressLines) {
+          r.progress = r.progress.slice(r.progress.length - maxWorkflowProgressLines)
+        }
+      }
+    } else if (kind === 'done') {
+      r.status = status === 'error' ? 'error' : 'done'
+    }
+    list[idx] = r
     return { ...m, [sessionId]: list }
   })
 }

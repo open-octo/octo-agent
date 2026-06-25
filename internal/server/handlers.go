@@ -683,7 +683,27 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.C
 		ctx = tools.WithBackgroundManager(ctx, tools.SessionBackgroundManager(sid))
 		// Per-session workflow manager so background workflows are isolated per
 		// session (own wf_N namespace + concurrency budget) and reaped on delete.
-		ctx = tools.WithWorkflowManager(ctx, tools.SessionWorkflowManager(sid))
+		// Re-wiring the hooks every turn is idempotent and they outlive the turn,
+		// so a run that finishes between turns still reaches the panel + model.
+		wfMgr := tools.SessionWorkflowManager(sid)
+		wfMgr.SetOnEvent(func(ev tools.WorkflowEvent) {
+			if s.wsHub == nil {
+				return
+			}
+			s.wsHub.broadcast(sid, map[string]any{
+				"type":        "workflow_event",
+				"session_id":  sid,
+				"run_id":      ev.RunID,
+				"description": ev.Description,
+				"kind":        ev.Kind,
+				"line":        ev.Line,
+				"status":      ev.Status,
+			})
+		})
+		wfMgr.SetOnDone(func(ev tools.WorkflowNotification) {
+			s.deliverModelNote(sid, tools.FormatWorkflowNote(ev))
+		})
+		ctx = tools.WithWorkflowManager(ctx, wfMgr)
 		// "Always allow" decisions live per session, not per engine — the
 		// engine is rebuilt every turn.
 		engine.AttachRemembered(s.rememberedFor(sid))
