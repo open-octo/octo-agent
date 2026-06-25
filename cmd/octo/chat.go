@@ -191,25 +191,10 @@ func validReasoningEffort(e string) bool {
 }
 
 // anthropicThinkingBudget maps a unified reasoning-effort level to an Anthropic
-// thinking-token figure. "" (off) yields 0, which disables thinking. On modern
-// Claude models (adaptive thinking + output_config.effort) the provider uses
-// this only as a max_tokens floor; on older Claude / Kimi-for-coding it is the
-// literal thinking.budget_tokens. The provider bumps max_tokens to fit a value
-// larger than it, so the higher levels can outrun the default cap safely.
+// thinking-token figure. Delegates to app.AnthropicThinkingBudget so the CLI
+// and the server share one source of truth for the effort→budget mapping.
 func anthropicThinkingBudget(effort string) int {
-	switch effort {
-	case "low":
-		return 4096
-	case "medium":
-		return 16384
-	case "high":
-		return 32768
-	case "xhigh":
-		return 48000
-	case "max":
-		return 64000
-	}
-	return 0
+	return app.AnthropicThinkingBudget(effort)
 }
 
 // defaultModels maps each provider to the model used when `--model` isn't

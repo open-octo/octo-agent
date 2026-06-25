@@ -49,6 +49,28 @@ type SenderOptions struct {
 	ShowReasoning bool
 }
 
+// AnthropicThinkingBudget maps a unified reasoning-effort level to an Anthropic
+// thinking-token figure. "" (off) yields 0, which disables thinking. On modern
+// Claude models (adaptive thinking + output_config.effort) the provider uses
+// this only as a max_tokens floor; on older Claude / Kimi-for-coding it is the
+// literal thinking.budget_tokens. The provider bumps max_tokens to fit a value
+// larger than it, so the higher levels can outrun the default cap safely.
+func AnthropicThinkingBudget(effort string) int {
+	switch effort {
+	case "low":
+		return 4096
+	case "medium":
+		return 16384
+	case "high":
+		return 32768
+	case "xhigh":
+		return 48000
+	case "max":
+		return 64000
+	}
+	return 0
+}
+
 // NewSender builds the provider client for opts and wraps it as an agent.Sender.
 // It is the single entry point through which every transport obtains a sender.
 func NewSender(opts SenderOptions) (agent.Sender, error) {
@@ -56,10 +78,21 @@ func NewSender(opts SenderOptions) (agent.Sender, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Anthropic-protocol models on the legacy budget path (older Claude,
+	// Kimi-for-coding) enable thinking only from a positive ThinkingBudget and
+	// ignore the effort string entirely. Callers that set only ReasoningEffort
+	// (e.g. the server, which carries the persisted reasoning_effort) would
+	// otherwise never enable thinking — derive the budget from the effort here
+	// so every transport behaves like the CLI. An explicit budget wins; the
+	// figure is harmless to OpenAI-protocol vendors, which ignore it.
+	thinkingBudget := opts.ThinkingBudget
+	if thinkingBudget == 0 {
+		thinkingBudget = AnthropicThinkingBudget(opts.ReasoningEffort)
+	}
 	return sender{
 		p:               p,
 		cacheKey:        opts.CacheKey,
-		thinkingBudget:  opts.ThinkingBudget,
+		thinkingBudget:  thinkingBudget,
 		reasoningEffort: opts.ReasoningEffort,
 		showReasoning:   opts.ShowReasoning,
 	}, nil

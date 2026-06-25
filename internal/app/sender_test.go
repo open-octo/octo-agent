@@ -35,6 +35,41 @@ func TestSender_PassesRequestThrough(t *testing.T) {
 	}
 }
 
+// NewSender must derive a thinking budget from ReasoningEffort when no explicit
+// ThinkingBudget is given (the server path), so Anthropic-protocol legacy models
+// (Kimi-for-coding, older Claude) actually enable thinking. An explicit budget
+// wins.
+func TestNewSender_DerivesThinkingBudgetFromEffort(t *testing.T) {
+	cases := []struct {
+		name          string
+		effort        string
+		explicitBudg  int
+		wantThinkBudg int
+	}{
+		{"effort max, no explicit budget", "max", 0, 64000},
+		{"effort high, no explicit budget", "high", 0, 32768},
+		{"effort off → no thinking", "", 0, 0},
+		{"explicit budget wins over effort", "low", 50000, 50000},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, err := NewSender(SenderOptions{
+				Provider:        "anthropic",
+				APIKey:          "test-key",
+				ReasoningEffort: c.effort,
+				ThinkingBudget:  c.explicitBudg,
+			})
+			if err != nil {
+				t.Fatalf("NewSender: %v", err)
+			}
+			got := s.(sender).thinkingBudget
+			if got != c.wantThinkBudg {
+				t.Errorf("thinkingBudget = %d, want %d", got, c.wantThinkBudg)
+			}
+		})
+	}
+}
+
 func TestSender_NilProvider(t *testing.T) {
 	s := sender{p: nil}
 	if _, err := s.SendMessages(context.Background(), "m", "", nil, 0); err == nil {
