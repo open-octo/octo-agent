@@ -224,10 +224,44 @@
       loadHistory(sid)
     }))
 
+    // The transcript tail was stripped server-side (retry / rollback): re-render
+    // from the persisted history before any new events stream in. Same effect as
+    // history_reload — different trigger.
+    cleanups.push(ws.on('history_rollback', (ev) => {
+      if ((ev as any).session_id !== sid) return
+      clearMsgs(sid)
+      resetArtifacts(sid)
+      loadHistory(sid)
+    }))
+
     // Transient server-side notice (command result, error).
     cleanups.push(ws.on('toast', (ev) => {
       if ((ev as any).session_id !== sid) return
       showToast((ev as any).message ?? '', (ev as any).level ?? 'info')
+    }))
+
+    // Operation errors surfaced over WS (e.g. "can't retry while a turn is
+    // running", session-not-found). The payload carries no session_id — delivery
+    // is already scoped to this session — so only filter when one is present.
+    cleanups.push(ws.on('error', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      showToast((ev as any).message ?? 'Error', 'error')
+    }))
+
+    // The turn was interrupted. `complete` still fires and handles cleanup, so
+    // this is purely a heads-up.
+    cleanups.push(ws.on('interrupted', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      showToast(tr('chat.interrupted'), 'info')
+    }))
+
+    // A background process finished (the badge updates via
+    // background_tasks_update); surface the outcome as a toast.
+    cleanups.push(ws.on('background_task_notice', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const status = (ev as any).status ?? ''
+      const level = status === 'success' ? 'success' : status === 'cancelled' ? 'info' : 'error'
+      showToast(`${tr('bgtask.notice')}: ${(ev as any).command ?? ''}`, level)
     }))
 
     cleanups.push(ws.on('text_delta', (ev) => {
