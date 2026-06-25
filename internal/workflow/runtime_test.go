@@ -231,6 +231,36 @@ func TestRun_AgentOptions(t *testing.T) {
 	}
 }
 
+// TestRun_AgentSchema verifies agent(prompt, schema: "...") forwards the schema
+// string to the AgentFunc, and a bare call yields an empty schema.
+func TestRun_AgentSchema(t *testing.T) {
+	var got []AgentOptions
+	var mu sync.Mutex
+	rec := func(_ context.Context, _ string, o AgentOptions) AgentResult {
+		mu.Lock()
+		got = append(got, o)
+		mu.Unlock()
+		return AgentResult{Reply: `{"ok":true}`}
+	}
+	script := `
+		agent("a", schema: '{"type":"object"}')
+		agent("b")
+		"done"
+	`
+	if _, err := Run(context.Background(), script, Options{Agent: rec}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d calls, want 2", len(got))
+	}
+	if got[0].Schema != `{"type":"object"}` {
+		t.Errorf("opts.Schema = %q, want the JSON schema string", got[0].Schema)
+	}
+	if got[1].Schema != "" {
+		t.Errorf("bare agent() should yield empty schema, got %q", got[1].Schema)
+	}
+}
+
 func TestRun_Phase(t *testing.T) {
 	var lines []string
 	got, err := Run(context.Background(),
