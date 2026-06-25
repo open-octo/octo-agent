@@ -590,7 +590,8 @@ func humanByteSize(n int) string {
 	}
 }
 
-// submit acts on Enter. Idle → start a turn. Running → steer. Empty input
+// submit acts on Enter. Idle → start a turn or dispatch a slash command.
+// Running → steer, queue a slash command, or queue plain text. Empty input
 // with no attachments is ignored.
 func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	text := strings.TrimSpace(m.ta.Value())
@@ -606,12 +607,19 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	}
 
 	// Slash commands are the TUI's alone — the plain REPL is a pure conversation
-	// loop. Only dispatched when idle; mid-turn input still steers / queues.
-	// A leading "/" with attachments is treated as ordinary text, not a command.
-	if !m.turnRunning {
-		if strings.HasPrefix(text, "/") && len(m.pendingAttachments) == 0 {
+	// loop. A leading "/" with attachments is treated as ordinary text, not a command.
+	if strings.HasPrefix(text, "/") && len(m.pendingAttachments) == 0 {
+		if !m.turnRunning {
 			return m.dispatchSlash(text)
 		}
+		// Mid-turn slash commands are queued so they run after the current turn
+		// finishes, instead of being misinterpreted as steer text.
+		m.queue = append(m.queue, pendingItem{text: text})
+		m.println(queueStyle.Render("＋ queued: " + text))
+		return m, nil
+	}
+
+	if !m.turnRunning {
 		// Fold any pending image attachments into this turn's user message.
 		echo := text
 		if len(m.pendingAttachments) > 0 {

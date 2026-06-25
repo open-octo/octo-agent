@@ -47,11 +47,12 @@ func (m *tuiModel) slashCandidates() []complItem {
 
 // updateCompletion (re)computes the menu from the current input. It opens the
 // menu when the input is a bare "/command" token (a leading slash, no
-// whitespace yet) and the session is idle; otherwise it closes the menu.
+// whitespace yet); otherwise it closes the menu. The menu is available while a
+// turn runs so slash commands can be queued and executed once it finishes.
 // complIdx is clamped but not reset here — callers reset it on a fresh edit.
 func (m *tuiModel) updateCompletion() {
 	v := m.ta.Value()
-	if m.turnRunning || !strings.HasPrefix(v, "/") || strings.ContainsAny(v, " \t\n") {
+	if !strings.HasPrefix(v, "/") || strings.ContainsAny(v, " \t\n") {
 		m.complItems = nil
 		return
 	}

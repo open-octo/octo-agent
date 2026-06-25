@@ -116,6 +116,21 @@ func TestTUI_RunningCtrlQQueues(t *testing.T) {
 	}
 }
 
+// A slash command submitted while a turn runs is queued, not dispatched or sent
+// as steer text. It runs once the current turn finishes.
+func TestTUI_RunningSlashQueues(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	setInput(m, "/clear")
+	_, _ = m.submit()
+	if len(m.queue) != 1 || m.queue[0].text != "/clear" {
+		t.Fatalf("slash command should queue, got %+v", m.queue)
+	}
+	if m.a.Inbox.HasPending() {
+		t.Error("slash command must not enqueue to inbox as steer text")
+	}
+}
+
 func TestTUI_EscInterruptsRunningTurn(t *testing.T) {
 	m := newTestModel()
 	m.turnRunning = true
@@ -496,6 +511,24 @@ func TestTUI_TurnFinishedDequeuesNext(t *testing.T) {
 	// Dequeued and a new turn started.
 	if !m.turnRunning {
 		t.Fatal("a queued item should start the next turn")
+	}
+	if len(m.queue) != 0 {
+		t.Errorf("queue should be drained, got %+v", m.queue)
+	}
+}
+
+// A slash command queued mid-turn is dispatched once the turn finishes, not run
+// as a plain user message.
+func TestTUI_TurnFinishedDispatchesQueuedSlash(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.queue = []pendingItem{{text: "/clear"}}
+
+	_, _ = m.handleTurnFinished()
+
+	// /clear clears history and leaves the queue empty.
+	if m.a.History.Len() != 0 {
+		t.Errorf("queued /clear should have cleared history; len=%d", m.a.History.Len())
 	}
 	if len(m.queue) != 0 {
 		t.Errorf("queue should be drained, got %+v", m.queue)
