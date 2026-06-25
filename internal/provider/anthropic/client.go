@@ -49,6 +49,11 @@ const DefaultMaxTokens = 16384
 // the agent loop (see isTransientStreamErr), not surfaced as a turn error.
 const DefaultStreamIdleTimeout = 5 * time.Minute
 
+// maxErrorBodyBytes caps how much of a non-2xx response body we read for an
+// error message. Provider error bodies are usually small JSON objects; this
+// avoids memory pressure if a misbehaving endpoint streams a huge HTML page.
+const maxErrorBodyBytes = 4096
+
 // Client talks to an Anthropic-compatible Messages API. Construct via New();
 // zero values are not valid because APIKey is required.
 //
@@ -165,7 +170,7 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		}
 		defer resp.Body.Close()
 
-		respBody, err := io.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		if err != nil {
 			return provider.Response{}, retry.Decision{Retry: retry.RetryableErr(ctx, err)}, fmt.Errorf("anthropic: read response: %w", err)
 		}

@@ -53,6 +53,11 @@ const DialectOpenAI = "openai"
 // turn error.
 const DefaultStreamIdleTimeout = 5 * time.Minute
 
+// maxErrorBodyBytes caps how much of a non-2xx response body we read for an
+// error message. Provider error bodies are usually small JSON objects; this
+// avoids memory pressure if a misbehaving endpoint streams a huge HTML page.
+const maxErrorBodyBytes = 4096
+
 // Client talks to an OpenAI-compatible Chat Completions API. Construct via
 // New(); zero values are not valid because APIKey is required.
 //
@@ -206,7 +211,7 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		}
 		defer resp.Body.Close()
 
-		respBody, err := io.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		if err != nil {
 			return nil, retry.Decision{Retry: retry.RetryableErr(ctx, err)}, fmt.Errorf("openai: read response: %w", err)
 		}
