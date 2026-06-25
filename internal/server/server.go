@@ -793,7 +793,7 @@ func resolveProviderAndModel(flagProvider, flagModel string) (agent.Sender, stri
 		APIKey:          apiKey,
 		BaseURL:         resolveBaseURL(provName, cfg),
 		ReasoningEffort: entry.ReasoningEffort,
-		ShowReasoning:   entry.ShowReasoning == nil || *entry.ShowReasoning,
+		ShowReasoning:   entry.ShowReasoning != nil && *entry.ShowReasoning,
 	})
 	if err != nil {
 		return nil, "", "", err
@@ -920,7 +920,7 @@ func senderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("no API key for entry %q (provider %q)", entry.Name, entry.Provider)
 	}
-	showReasoning := true
+	showReasoning := false
 	if entry.ShowReasoning != nil {
 		showReasoning = *entry.ShowReasoning
 	}

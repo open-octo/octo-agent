@@ -177,9 +177,10 @@
 
     cleanups.push(ws.on('thinking_delta', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      // Respect show_reasoning: undefined/true → show; false → discard.
+      // Respect show_reasoning: only an explicit true shows the trace
+      // (default off). The terminal never displays it — this is web-only.
       const sess = get(sessions).find((s: any) => s.id === sid) as any
-      if (sess?.show_reasoning === false) return
+      if (sess?.show_reasoning !== true) return
       chatThinking.update(tt => ({ ...tt, [sid]: (tt[sid] ?? '') + ((ev as any).text ?? '') }))
     }))
 

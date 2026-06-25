@@ -179,7 +179,7 @@ func runConfigShow(stdout, stderr io.Writer) int {
 		effortStatus = entry.ReasoningEffort + " (config)"
 	}
 	fmt.Fprintf(stdout, "  reasoning: %s\n", effortStatus)
-	showStatus := "on (default)"
+	showStatus := "off (default)"
 	if entry.ShowReasoning != nil {
 		if *entry.ShowReasoning {
 			showStatus = "on (config)"
@@ -187,7 +187,7 @@ func runConfigShow(stdout, stderr io.Writer) int {
 			showStatus = "off (config)"
 		}
 	}
-	fmt.Fprintf(stdout, "  show trace: %s\n", showStatus)
+	fmt.Fprintf(stdout, "  show trace (web): %s\n", showStatus)
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "CLI flags (--provider, --model, --system) and env vars override this file per run.")
 	return 0
@@ -416,10 +416,11 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer) int {
 		outEntry.ReasoningEffort = effortAns
 	}
 
-	// Show the reasoning/thinking trace: default on.
-	showDefault := existing.ShowReasoning == nil || *existing.ShowReasoning
+	// Surface the reasoning/thinking trace for the Web UI to display (the
+	// terminal never renders it): default off.
+	showDefault := existing.ShowReasoning != nil && *existing.ShowReasoning
 	showVal, ok := pickYesNo(tty, reader, stdin, stdout,
-		"Show the reasoning/thinking trace while streaming?", showDefault)
+		"Show the reasoning/thinking trace on the Web UI?", showDefault)
 	if !ok {
 		return cancelWizard(stderr)
 	}
