@@ -791,7 +791,7 @@
                   <summary class="think-summary">
                     <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
                     <span>{$t('chat.thinking')}</span>
-                    <span class="think-meta mono">{fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↑ ~{fmtTokens(thinkTokens)} tokens{/if}</span>
+                    <span class="think-meta mono">{fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↓ ~{fmtTokens(thinkTokens)} tokens{:else} · ↑{/if}</span>
                   </summary>
                   <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(thinking)}</div>
                 </details>
@@ -812,7 +812,7 @@
                   <span style="animation-delay:0.4s"></span>
                 </span>
                 <span class="think-meta mono">
-                  {fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↑ ~{fmtTokens(thinkTokens)} tokens{/if}
+                  {fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↓ ~{fmtTokens(thinkTokens)} tokens{:else} · ↑{/if}
                 </span>
               </div>
             </div>
