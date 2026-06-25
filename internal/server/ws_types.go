@@ -170,8 +170,9 @@ type wsEventSessionUpdate struct {
 }
 
 type wsEventTodoUpdate struct {
-	Type  string `json:"type"`
-	Todos any    `json:"todos"`
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+	Todos     any    `json:"todos"`
 }
 
 type wsEventSessionDeleted struct {

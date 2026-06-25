@@ -223,7 +223,7 @@ func TestTasks_UIPayload(t *testing.T) {
 		t.Errorf("payload = %+v", ui)
 	}
 	todos, _ := ui["todos"].([]map[string]any)
-	if len(todos) != 1 || todos[0]["task"] != "Do the thing" || todos[0]["status"] != "pending" {
+	if len(todos) != 1 || todos[0]["content"] != "Do the thing" || todos[0]["status"] != "pending" {
 		t.Errorf("todos = %+v", todos)
 	}
 }

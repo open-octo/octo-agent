@@ -539,6 +539,38 @@
     </div>
   {/if}
 
+  <!-- Session-level task progress (driven by task_create / task_update / task_list) -->
+  {#if todos && todos.length > 0}
+    <div class="session-tasks">
+      <details open class="plan-card">
+        <summary class="plan-summary">
+          <iconify-icon icon="ant-design:ordered-list-outlined" width="14" style="color:var(--blue-6)"></iconify-icon>
+          <span class="plan-title">{$t('agent.plan')}</span>
+          <span class="plan-meta">{planDoneCount(todos)} / {todos.length} done</span>
+          <span class="plan-progress"><span class="plan-fill" style="width:{planFill(todos)}"></span></span>
+          <span style="margin-left:auto"></span>
+          <iconify-icon icon="lucide:chevron-down" width="14" style="color:var(--text-tertiary)"></iconify-icon>
+        </summary>
+        <div class="plan-steps">
+          {#each todos as step}
+            <div class="step" class:active={step.status === 'in_progress'}>
+              {#if step.status === 'completed'}
+                <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:var(--success)"></iconify-icon>
+                <span class="done">{step.content}</span>
+              {:else if step.status === 'in_progress'}
+                <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
+                <span>{step.content}</span>
+              {:else}
+                <iconify-icon icon="lucide:circle" width="14" style="color:var(--text-quaternary)"></iconify-icon>
+                <span class="pending">{step.content}</span>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      </details>
+    </div>
+  {/if}
+
   <!-- Body row: messages + artifacts -->
   <div class="body-row">
     <div class="conversation">
@@ -797,6 +829,15 @@
   border-radius: 6px; font-size: 12px; color: var(--warning-text); cursor: pointer; font-family: inherit;
 }
 .ws-retry:hover { border-color: var(--warning); }
+
+/* ── Session task progress ───────────────────────────────────────────────── */
+.session-tasks {
+  flex: 0 0 auto;
+  padding: 12px 24px 0;
+  background: var(--bg-container);
+  border-bottom: 1px solid var(--border);
+}
+.session-tasks .plan-card { margin: 0; }
 
 /* ── Body row ────────────────────────────────────────────────────────────── */
 .body-row { flex: 1; display: flex; min-height: 0; }

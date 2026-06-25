@@ -1139,6 +1139,16 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 		}
 		if ev.UI != nil {
 			toolResult["ui_payload"] = ev.UI
+			// Task tools surface their checklist as a "todo" UI payload. Also
+			// broadcast a dedicated todo_update so the web task panel stays in
+			// sync without having to mine tool_result events.
+			if m, ok := ev.UI.(map[string]any); ok && m["type"] == "todo" {
+				w.hub.broadcast(w.sessionID, wsEventTodoUpdate{
+					Type:      "todo_update",
+					SessionID: w.sessionID,
+					Todos:     m["todos"],
+				})
+			}
 		}
 		w.hub.broadcast(w.sessionID, toolResult)
 		w.bufferTurnEvent(toolResult)

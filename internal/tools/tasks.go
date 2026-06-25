@@ -276,8 +276,8 @@ func taskUI(action string, store TaskStore) map[string]any {
 		}
 		if len(todos) < 20 {
 			todos = append(todos, map[string]any{
-				"task":   t.Subject,
-				"status": string(t.Status),
+				"content": t.Subject,
+				"status":  string(t.Status),
 			})
 		}
 	}
