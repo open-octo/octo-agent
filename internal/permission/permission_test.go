@@ -85,6 +85,46 @@ func TestDefaultRules_TerminalCredentialPathsBeatSafeVerb(t *testing.T) {
 	}
 }
 
+func TestDefaultRules_TerminalAllowCannotChain(t *testing.T) {
+	// Allow-list entries like "ls" must not auto-approve a command that
+	// chains into something else. The safe command can have arguments but no
+	// shell control characters.
+	e := newDefaultEngine(t)
+	cases := map[string]Decision{
+		"ls -la":               Allow,
+		"  ls -la":             Allow, // leading whitespace is fine
+		"ls && ./untrusted":    Ask,   // chain bypass attempt
+		"go test ./...; ./pwn": Ask,   // chain bypass attempt
+		"cat file | grep x":    Ask,   // pipe is chaining
+		"echo $(id)":           Ask,   // command substitution
+		"echo `id`":            Ask,   // backtick substitution
+		"git status\ngit push": Ask,   // newline separates commands
+		"catapult README.md":   Ask,   // prefix of "cat" must not match
+		"echo ls":              Allow, // starts with "echo" allow pattern
+	}
+	for cmd, want := range cases {
+		if got := e.Check("terminal", map[string]any{"command": cmd}); got != want {
+			t.Errorf("terminal %q: got %s, want %s", cmd, got, want)
+		}
+	}
+}
+
+func TestDefaultRules_WebFetchIPv6LoopbackDenied(t *testing.T) {
+	e := newDefaultEngine(t)
+	cases := map[string]Decision{
+		"http://[::1]/":              Deny,
+		"http://[::ffff:127.0.0.1]/": Deny,
+		"http://[::ffff:7f00:1]/":    Deny,
+		"http://[fe80::1]/":          Deny,
+		"https://github.com/":        Allow,
+	}
+	for u, want := range cases {
+		if got := e.Check("web_fetch", map[string]any{"url": u}); got != want {
+			t.Errorf("web_fetch %q: got %s, want %s", u, got, want)
+		}
+	}
+}
+
 func TestDefaultRules_WebFetchPrivateRangeDenied(t *testing.T) {
 	e := newDefaultEngine(t)
 	cases := map[string]Decision{

@@ -88,8 +88,10 @@ type RuleSet map[string][]Rule
 // decisions for "always allow this" style answers.
 type Engine struct {
 	rules RuleSet
-	mode  Mode
 	cwd   string
+
+	modeMu sync.RWMutex
+	mode   Mode
 
 	mu       sync.Mutex
 	remember *Remembered // session decisions; swappable via AttachRemembered
@@ -161,6 +163,21 @@ func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*
 	}, nil
 }
 
+// Mode returns the engine's current mode (for callers that need to branch
+// on it, e.g. to decide whether to prompt the user).
+func (e *Engine) GetMode() Mode {
+	e.modeMu.RLock()
+	defer e.modeMu.RUnlock()
+	return e.mode
+}
+
+// SetMode changes the engine's mode at runtime (e.g. TUI shortcut).
+func (e *Engine) SetMode(mode Mode) {
+	e.modeMu.Lock()
+	defer e.modeMu.Unlock()
+	e.mode = mode
+}
+
 // Check evaluates the rules for one tool invocation. Returns Allow,
 // Deny, or Ask.
 //
@@ -207,13 +224,6 @@ func (e *Engine) Remember(toolName string, input map[string]any, decision Decisi
 	store.set(signature(toolName, input), decision)
 }
 
-// Mode returns the engine's current mode (for callers that need to branch
-// on it, e.g. to decide whether to prompt the user).
-func (e *Engine) GetMode() Mode { return e.mode }
-
-// SetMode changes the engine's mode at runtime (e.g. TUI shortcut).
-func (e *Engine) SetMode(mode Mode) { e.mode = mode }
-
 // DenialReason returns a human-readable explanation for why a tool call
 // was denied. Useful for surfacing to the LLM so it knows the failure
 // was a policy denial, not a tool malfunction.
@@ -237,6 +247,8 @@ func (e *Engine) applyMode(d Decision) Decision {
 	if d != Ask {
 		return d
 	}
+	e.modeMu.RLock()
+	defer e.modeMu.RUnlock()
 	switch e.mode {
 	case ModeAutoApprove:
 		return Allow
@@ -295,6 +307,11 @@ func (e *Engine) matches(toolName string, r Rule, input map[string]any) bool {
 			// that exposes the file via input["file"] still works.
 			cmd = stringifyInput(input)
 		}
+		// Allow rules on terminal must only match simple commands. A
+		// substring match on "ls" would otherwise allow "ls && ./pwn".
+		if r.Decision == Allow {
+			return allowPatternMatches(cmd, r.Pattern)
+		}
 		return patternMatches(cmd, r.Pattern)
 	}
 }
@@ -337,7 +354,52 @@ func patternMatches(cmd, pattern string) bool {
 // isArgBoundary reports whether c ends a shell argument for the purposes of
 // patternMatches' root/home anchoring.
 func isArgBoundary(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '*'
+	return c == ' ' || c == '\t' || c == '\n' || c == '*' ||
+		c == ';' || c == '&' || c == '|' || c == '(' || c == ')'
+}
+
+// shellControlChars lists characters that start a new command or shell
+// construct. Allow rules must never match a command containing any of them,
+// otherwise "ls && ./untrusted" would be auto-approved by the "ls" rule.
+var shellControlChars = []byte(";|&$()<>" + "`" + "\n")
+
+// containsShellControl reports whether cmd contains a shell metacharacter
+// that would let one command chain into another.
+func containsShellControl(cmd string) bool {
+	for i := 0; i < len(cmd); i++ {
+		for _, c := range shellControlChars {
+			if cmd[i] == c {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// allowPatternMatches is the stricter matcher used for terminal allow rules.
+// It requires the command to start with the pattern (after optional leading
+// whitespace), the pattern to end at a command boundary, and the whole
+// command to contain no shell chaining metacharacters.
+func allowPatternMatches(cmd, pattern string) bool {
+	cmd = strings.TrimLeft(cmd, " \t\n")
+	if pattern == "" {
+		return true
+	}
+	// Trailing whitespace in the pattern is a stylistic way to avoid prefix
+	// matches (e.g. "cat " vs "catapult"). For boundary checking we ignore it.
+	pattern = strings.TrimRight(pattern, " \t\n")
+	if !strings.HasPrefix(cmd, pattern) {
+		return false
+	}
+	if containsShellControl(cmd) {
+		return false
+	}
+	// The character after the pattern must be a boundary (end of command or
+	// start of arguments), not a continuation of the command word.
+	if end := len(pattern); end < len(cmd) && !isArgBoundary(cmd[end]) {
+		return false
+	}
+	return true
 }
 
 // signature returns a stable hash of (tool, input) for the remember
