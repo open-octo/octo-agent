@@ -21,6 +21,8 @@ var builtinSlashCommands = []complItem{
 	{"/help", "List commands and tools"},
 	{"/model", "Switch to another model"},
 	{"/thinking", "Set reasoning effort (off/low/medium/high/xhigh/max)"},
+	{"/compact", "Summarize older history to free up context"},
+	{"/clear", "Wipe the conversation and start fresh"},
 	{"/skills", "List discovered skills"},
 	{"/mcp", "List connected MCP servers"},
 	{"/memory", "Show cross-session memory"},

@@ -166,17 +166,10 @@
     }
   }
 
-  // ── main lifecycle effect ──────────────────────────────────────────────────
-  // $activeSessionId makes this effect re-run whenever the session changes.
-  $effect(() => {
-    const sid = $activeSessionId
-    if (!sid) return
-
-    clearMsgs(sid)
-    resetArtifacts(sid)
-    ws.subscribe(sid)
-
-    // Load history
+  // loadHistory fetches and renders a session's persisted transcript. Used on
+  // session switch and on a server `history_reload` (after /clear or /compact
+  // rewrote history out of band).
+  function loadHistory(sid: string) {
     api.getSessionMessages(sid, { limit: 30 }).then((resp: any) => {
       const events: any[] = resp?.events ?? []
       // Collect the tool_ids that came from history so we only close those,
@@ -193,6 +186,18 @@
         if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
       })
     }).catch(() => {/* silently ignore history load errors */})
+  }
+
+  // ── main lifecycle effect ──────────────────────────────────────────────────
+  // $activeSessionId makes this effect re-run whenever the session changes.
+  $effect(() => {
+    const sid = $activeSessionId
+    if (!sid) return
+
+    clearMsgs(sid)
+    resetArtifacts(sid)
+    ws.subscribe(sid)
+    loadHistory(sid)
 
     // ── WS event handlers ───────────────────────────────────────────────────
     const cleanups: Array<() => void> = []
@@ -208,6 +213,21 @@
         pendingPrompt.set(null)
         send(pend.content)
       }
+    }))
+
+    // History rewritten out of band (/clear, /compact): drop the rendered
+    // transcript and re-fetch the persisted one.
+    cleanups.push(ws.on('history_reload', (ev) => {
+      if ((ev as any).session_id !== sid) return
+      clearMsgs(sid)
+      resetArtifacts(sid)
+      loadHistory(sid)
+    }))
+
+    // Transient server-side notice (command result, error).
+    cleanups.push(ws.on('toast', (ev) => {
+      if ((ev as any).session_id !== sid) return
+      showToast((ev as any).message ?? '', (ev as any).level ?? 'info')
     }))
 
     cleanups.push(ws.on('text_delta', (ev) => {
