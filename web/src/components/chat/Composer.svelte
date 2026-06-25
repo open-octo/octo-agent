@@ -41,6 +41,23 @@
     input.value = ''
   }
 
+  // Paste images from clipboard into the composer.
+  function onPaste(e: ClipboardEvent) {
+    const items = Array.from(e.clipboardData?.items ?? [])
+    const imageItems = items.filter(it => it.kind === 'file' && it.type.startsWith('image/'))
+    if (imageItems.length === 0) return
+    e.preventDefault()
+    for (const it of imageItems) {
+      const f = it.getAsFile()
+      if (!f) continue
+      const reader = new FileReader()
+      reader.onload = () => {
+        attachments = [...attachments, { name: f.name || 'pasted-image', data_url: String(reader.result), mime_type: f.type || it.type }]
+      }
+      reader.readAsDataURL(f)
+    }
+  }
+
   function removeAttachment(i: number) {
     attachments = attachments.filter((_, idx) => idx !== i)
   }
@@ -211,6 +228,7 @@
         placeholder={$t('chat.placeholder')}
         bind:value={text}
         onkeydown={onKeydown}
+        onpaste={onPaste}
       ></textarea>
       <input
         bind:this={fileInputEl}

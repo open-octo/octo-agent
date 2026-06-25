@@ -908,7 +908,10 @@ const Sessions = (() => {
         if (ACCEPTED_IMAGE_TYPES.includes(it.type)) return true;
         if (ACCEPTED_DOC_TYPES.includes(it.type))   return true;
         const f = it.getAsFile && it.getAsFile();
-        return f ? _hasAcceptedDocExt(f.name) : false;
+        if (!f) return false;
+        // Fallback: some browsers report empty type for clipboard images;
+        // check both image and document extensions via the file object.
+        return _isAcceptedImage(f) || _isAcceptedDoc(f);
       });
       if (attachItems.length === 0) return;
       e.preventDefault();
