@@ -1658,3 +1658,58 @@ func TestToolResultUIPayload_DroppedOnError(t *testing.T) {
 		t.Fatalf("error block UI = %#v, want nil", blocks[0].UI)
 	}
 }
+
+// A first-iteration send failure must roll the history back to the pre-turn
+// state, not just pop the last message. When a steer is drained at i==0 before
+// the failing send, both the steer and the user input were appended, so popping
+// only the last one would leave the user turn behind and duplicate it on retry.
+func TestAgent_RunLoop_FirstIterationErrorRollsBackFully(t *testing.T) {
+	send := &fakeToolSender{errs: []error{errors.New("boom")}}
+	a := New(send, "m")
+	a.Inbox.Enqueue("steer arriving as the turn starts")
+
+	_, err := a.Run(context.Background(), "hello", []ToolDefinition{{Name: "bash"}}, &fakeExecutor{})
+	if err == nil {
+		t.Fatal("expected error from failing send")
+	}
+	if n := a.History.Len(); n != 0 {
+		t.Fatalf("history length = %d after first-iteration failure, want 0 (full rollback)", n)
+	}
+}
+
+// A reply truncated mid tool_use carries leading text in Content alongside a
+// partial tool_use block. The layer-2 prose-resume must NOT fire — appending
+// only Content would silently drop the half-written tool call. The turn should
+// end with a graceful max_tokens budget stop instead.
+func TestAgent_RunLoop_TruncatedToolUseSkipsResume(t *testing.T) {
+	truncated := Reply{
+		Content:    "let me look that up",
+		StopReason: StopReasonMaxTokens,
+		Blocks: []ContentBlock{
+			NewTextBlock("let me look that up"),
+			NewToolUseBlock("c1", "bash", map[string]any{"command": "ls"}),
+		},
+	}
+	// Two identical truncated replies: the initial round and the escalation
+	// retry. A buggy resume path would loop and demand a third reply.
+	send := &fakeToolSender{replies: []Reply{truncated, truncated}}
+	a := New(send, "m")
+	a.MaxTokens = 100
+	a.MaxTokensEscalate = 200
+
+	reply, err := a.Run(context.Background(), "hello", []ToolDefinition{{Name: "bash"}}, &fakeExecutor{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reply.StopReason != StopReasonMaxTokens {
+		t.Fatalf("StopReason = %q, want %q (graceful budget stop)", reply.StopReason, StopReasonMaxTokens)
+	}
+	if send.calls != 2 {
+		t.Fatalf("sender calls = %d, want 2 (initial + escalation, no resume loop)", send.calls)
+	}
+	for _, m := range a.History.Snapshot() {
+		if hasToolUse(m) {
+			t.Errorf("history leaked a tool_use block from the truncated reply: %+v", m)
+		}
+	}
+}

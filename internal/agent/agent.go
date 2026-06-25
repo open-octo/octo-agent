@@ -541,6 +541,11 @@ func (a *Agent) runLoop(
 	// non-fatal — we log nothing and proceed with the full history.
 	_ = a.maybeCompact(ctx, handler)
 
+	// History length before this turn appended anything. Used to roll back
+	// cleanly on a first-iteration failure: the turn may append more than the
+	// user input (drained inbox messages), so truncating to this baseline is
+	// what restores the pre-turn state — popLast would only remove one message.
+	baseHistoryLen := a.History.Len()
 	a.appendUserInput(userInput)
 
 	limit := a.turnLimit()
@@ -617,7 +622,7 @@ func (a *Agent) runLoop(
 			}
 
 			if i == 0 {
-				a.History.popLast()
+				a.History.TruncateTo(baseHistoryLen)
 			}
 			return Reply{}, fmt.Errorf("agent: loop[%d]: %w", i, err)
 		}
@@ -651,7 +656,7 @@ func (a *Agent) runLoop(
 				// through to the graceful stop below.
 			default:
 				if i == 0 {
-					a.History.popLast()
+					a.History.TruncateTo(baseHistoryLen)
 				}
 				return Reply{}, fmt.Errorf("agent: loop[%d] escalate: %w", i, eerr)
 			}
@@ -664,7 +669,20 @@ func (a *Agent) runLoop(
 		// cap. Limited to maxTruncationResumes to prevent infinite loops. Skipped
 		// for truncated tool_use blocks (partial tool calls are unsafe in
 		// OpenAI-protocol history) and when escalation is disabled.
-		if isTruncated(reply.StopReason) && a.MaxTokensEscalate > a.MaxTokens && reply.Content != "" && truncationResumes < maxTruncationResumes {
+		// A truncated reply can carry both leading text and a half-written
+		// tool_use block (providers keep StopReason "max_tokens" rather than
+		// normalising to "tool_use"). reply.Content holds only the text, so the
+		// prose-resume below would append the text and silently drop the partial
+		// tool call. Detect any tool_use block and fall through to the graceful
+		// stop instead — partial tool calls are unsafe to resume.
+		replyHasToolUse := false
+		for _, b := range reply.Blocks {
+			if b.Type == "tool_use" {
+				replyHasToolUse = true
+				break
+			}
+		}
+		if isTruncated(reply.StopReason) && a.MaxTokensEscalate > a.MaxTokens && !replyHasToolUse && reply.Content != "" && truncationResumes < maxTruncationResumes {
 			a.History.Append(NewAssistantMessage(reply.Content))
 			a.History.Append(NewUserMessage(truncationResumePrompt))
 			truncationResumes++

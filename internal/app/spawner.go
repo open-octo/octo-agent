@@ -45,9 +45,9 @@ func NewSpawner(parent *agent.Agent, executor agent.ToolExecutor, toolsFn func()
 	}
 }
 
-// childMaxTurns caps the sub-agent's tool loop.
-// Set to the same default as the parent (100) so sub-agents have enough
-// budget for complex sub-tasks. Each Continue re-arms
+// childMaxTurns caps the sub-agent's tool loop per round. Deliberately lower
+// than the parent's defaultMaxTurns (100): a sub-task should make focused
+// progress and check back rather than run unbounded. Each Continue re-arms
 // this budget for the next round.
 const childMaxTurns = 30
 
@@ -76,11 +76,19 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	child.LiteSender = s.parent.LiteSender
 	child.LiteModel = s.parent.LiteModel
 
+	// Create the session dir before registering the child: a permissions
+	// failure here must abort the spawn, not leave a dead entry in the registry
+	// whose later Save() would silently fail.
+	if req.SessionDir != "" {
+		if err := os.MkdirAll(req.SessionDir, 0o755); err != nil {
+			return tools.SpawnResult{}, fmt.Errorf("spawner: create session dir: %w", err)
+		}
+	}
+
 	lc := &liveChild{agent: child, tools: childTools, executor: s.executor, sessionDir: req.SessionDir}
 	id := s.reg.put(lc)
 
 	if req.SessionDir != "" {
-		_ = os.MkdirAll(req.SessionDir, 0o755)
 		sess := agent.NewSession(child.Model, child.System)
 		sess.ID = id
 		sess.Dir = req.SessionDir
@@ -330,7 +338,11 @@ func (r *childRegistry) evictLocked() {
 func (r *childRegistry) freshIDLocked() string {
 	for {
 		var b [4]byte
-		_, _ = rand.Read(b[:]) // crypto/rand.Read effectively never fails
+		if _, err := rand.Read(b[:]); err != nil {
+			// crypto/rand.Read is documented never to fail; a failure means the
+			// OS entropy source is broken, so refuse to mint a predictable id.
+			panic(fmt.Sprintf("spawner: crypto/rand unavailable: %v", err))
+		}
 		id := hex.EncodeToString(b[:])
 		if _, taken := r.m[id]; !taken {
 			return id
