@@ -40,6 +40,11 @@ export const editDraft = writable('')
 // Per-session chat state (keyed by sessionId)
 export const chatMessages = writable<Record<string, any[]>>({})
 export const chatStreaming = writable<Record<string, boolean>>({})
+// Wall-clock start (ms) of the active streaming turn, per session, so the live
+// "Thinking" elapsed readout survives view remounts (page switches) instead of
+// resetting — a component-local start would restart from ~0 (and briefly read
+// negative) every time ChatView is re-created.
+export const chatTurnStart = writable<Record<string, number>>({})
 export const chatProgress = writable<Record<string, any>>({})
 export const chatBgTasks = writable<Record<string, any[]>>({})
 export const chatTodos = writable<Record<string, any[]>>({})
