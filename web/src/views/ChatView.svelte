@@ -79,6 +79,28 @@
   let subAgentsElapsed = $derived(subAgentsStart ? (now - subAgentsStart) / 1000 : 0)
   let reconnectIn = $derived($wsReconnect ? Math.max(0, Math.ceil(($wsReconnect.nextAt - now) / 1000)) : 0)
 
+  // Live "Thinking" readout — mirrors the TUI thinkingLine: elapsed since the
+  // turn began plus a rough output-token estimate (streamed chars / 4) so a
+  // long silent wait reads as the model working, not a freeze.
+  let turnStartAt = $state(0)
+  let turnOutChars = $state(0)
+  $effect(() => {
+    if (streaming) {
+      if (!turnStartAt) turnStartAt = Date.now()
+    } else {
+      turnStartAt = 0
+      turnOutChars = 0
+    }
+  })
+  let thinkElapsed = $derived(turnStartAt ? Math.floor((now - turnStartAt) / 1000) : 0)
+  let thinkTokens = $derived(Math.floor(turnOutChars / 4))
+  function fmtDur(s: number): string {
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`
+  }
+  function fmtTokens(n: number): string {
+    return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
+  }
+
   // ── history handler ────────────────────────────────────────────────────────
   function handleHistoryEvent(ev: Record<string, any>) {
     const sid = get(activeSessionId)   // get() is fine in imperative functions
@@ -177,7 +199,9 @@
 
     cleanups.push(ws.on('output', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      appendToLastAssistant(sid, (ev as any).content ?? '')
+      const txt = (ev as any).content ?? ''
+      turnOutChars += txt.length
+      appendToLastAssistant(sid, txt)
     }))
 
     cleanups.push(ws.on('thinking_delta', (ev) => {
@@ -185,7 +209,9 @@
       // The server only emits thinking_delta when show_reasoning is on for the
       // session's sender (it's off by default and never surfaced to the
       // terminal), so any delta that reaches the Web UI is meant to be shown.
-      chatThinking.update(tt => ({ ...tt, [sid]: (tt[sid] ?? '') + ((ev as any).text ?? '') }))
+      const txt = (ev as any).text ?? ''
+      turnOutChars += txt.length
+      chatThinking.update(tt => ({ ...tt, [sid]: (tt[sid] ?? '') + txt }))
     }))
 
     cleanups.push(ws.on('sub_agent_event', (ev) => {
@@ -737,6 +763,7 @@
                   <summary class="think-summary">
                     <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
                     <span>{$t('chat.thinking')}</span>
+                    <span class="think-meta mono">{fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↑ ~{fmtTokens(thinkTokens)} tokens{/if}</span>
                   </summary>
                   <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(thinking)}</div>
                 </details>
@@ -756,9 +783,9 @@
                   <span style="animation-delay:0.2s"></span>
                   <span style="animation-delay:0.4s"></span>
                 </span>
-                {#if progress.phase}
-                  <span class="think-meta mono">{progress.phase}</span>
-                {/if}
+                <span class="think-meta mono">
+                  {fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↑ ~{fmtTokens(thinkTokens)} tokens{/if}
+                </span>
               </div>
             </div>
           {/if}
