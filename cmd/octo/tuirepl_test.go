@@ -683,23 +683,20 @@ func TestTUI_SubmitSavesToHistory(t *testing.T) {
 	}
 }
 
-// When showReasoning is true, thinking deltas are rendered in the live area
-// (dimmed) instead of being suppressed.
-func TestTUI_ThinkingShownWhenEnabled(t *testing.T) {
+// The terminal never renders the reasoning trace — that display is web-only.
+// A thinking delta must not appear in the live View (nor the scrollback); it
+// only feeds the activity line's output-token readout.
+func TestTUI_ThinkingNeverShownInTerminal(t *testing.T) {
 	m := newTestModel()
-	m.showReasoning = true
 	m.turnRunning = true
 
 	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: "let me think"})
 
-	// Thinking should not reach scrollback (printlnBuf) — it's live-only.
 	if joined := strings.Join(m.printlnBuf, "\n"); joined != "" {
 		t.Fatalf("thinking must not reach the scrollback; got %q", joined)
 	}
-	// But it should appear in the live View.
-	out := m.View()
-	if !strings.Contains(out, "let me think") {
-		t.Errorf("view should contain thinking text when showReasoning=true; got:\n%s", out)
+	if out := m.View(); strings.Contains(out, "let me think") {
+		t.Errorf("view must NOT contain thinking text; got:\n%s", out)
 	}
 	if m.turnOutChars != 12 {
 		t.Errorf("turnOutChars = %d, want 12", m.turnOutChars)

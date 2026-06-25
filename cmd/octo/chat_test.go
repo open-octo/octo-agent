@@ -212,7 +212,7 @@ func TestResolveShowReasoning(t *testing.T) {
 		entry   config.ModelEntry
 		want    bool
 	}{
-		{"default on", false, true, config.ModelEntry{}, true},
+		{"default off", false, true, config.ModelEntry{}, false},
 		{"config off", false, true, config.ModelEntry{ShowReasoning: &fls}, false},
 		{"config on", false, true, config.ModelEntry{ShowReasoning: &tru}, true},
 		{"flag off beats config on", true, false, config.ModelEntry{ShowReasoning: &tru}, false},

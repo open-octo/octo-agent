@@ -42,7 +42,6 @@ var (
 	complSelStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
 	complNameStyle       = lipgloss.NewStyle().Foreground(tui.ColAccent)
 	bgDoneStyle          = lipgloss.NewStyle().Foreground(tui.ColAccent)
-	thinkingStyle        = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
 )
 
 func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -917,10 +916,7 @@ func (m *tuiModel) liveHeight() int {
 	if m.partial.String() != "" {
 		h++
 	}
-	if t := m.thinkingPartial.String(); t != "" {
-		h += strings.Count(t, "\n") + 1
-	}
-	if m.running != nil || (m.turnRunning && m.partial.Len() == 0 && m.thinkingPartial.Len() == 0) {
+	if m.running != nil || (m.turnRunning && m.partial.Len() == 0) {
 		h++
 	}
 	if m.running != nil && tools.HasActiveSync() {
@@ -971,12 +967,6 @@ func (m *tuiModel) View() string {
 		b.WriteByte('\n')
 	}
 
-	// Live thinking trace (shown when showReasoning is true).
-	if t := m.thinkingPartial.String(); t != "" {
-		b.WriteString(thinkingStyle.Render("💭 " + t))
-		b.WriteByte('\n')
-	}
-
 	// Live partial assistant text
 	if p := m.partial.String(); p != "" {
 		rendered := m.md.render(p, m.width)
@@ -1018,7 +1008,7 @@ func (m *tuiModel) View() string {
 		label := fmt.Sprintf("%s… %s", streamVerbFor(m.toolStreamName), humanByteSize(m.toolStreamBytes))
 		b.WriteString(m.spinnerLine(label, m.turnStart))
 		b.WriteByte('\n')
-	} else if m.turnRunning && m.partial.Len() == 0 && m.thinkingPartial.Len() == 0 {
+	} else if m.turnRunning && m.partial.Len() == 0 {
 		// Turn is running but nothing is on the activity line right now — no
 		// live tool and no streaming text. That's the wait on the model
 		// (initial prompt, or between steps after a tool result). Show the

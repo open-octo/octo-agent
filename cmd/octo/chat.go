@@ -151,8 +151,10 @@ func resolveCoauthor(noCoauthorFlag bool, cfg config.Config) bool {
 }
 
 // resolveShowReasoning determines whether the reasoning/thinking trace is
-// streamed to the terminal. Precedence: an explicit --show-reasoning flag >
-// config file > default (true).
+// surfaced (i.e. requested from the provider). The terminal never renders it —
+// this only governs whether the trace is fetched at all, which the Web UI then
+// displays. Precedence: an explicit --show-reasoning flag > config file >
+// default (false).
 func resolveShowReasoning(flagSet, flagVal bool, entry config.ModelEntry) bool {
 	if flagSet {
 		return flagVal
@@ -160,7 +162,7 @@ func resolveShowReasoning(flagSet, flagVal bool, entry config.ModelEntry) bool {
 	if entry.ShowReasoning != nil {
 		return *entry.ShowReasoning
 	}
-	return true
+	return false
 }
 
 // toolSearchConfigFrom maps the persisted tools.tool_search block onto the
@@ -257,7 +259,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	compactAutoPct := fs.Int("compact-auto-pct", 0, "Auto-compaction threshold as a percentage of the model's context window (0 = use `octo config` or built-in default 75). Only used when --compact-threshold=0.")
 	compactBatchThreshold := fs.Int("compact-batch-threshold", 0, "Batch-level compaction: compact after a tool batch when context exceeds this many tokens; 0 = auto (~85% of the model's context window), <0 = disabled between batches")
 	reasoningEffort := fs.String("reasoning-effort", "", "Reasoning intensity: low | medium | high | xhigh | max (empty = off). OpenAI → reasoning_effort; Anthropic → adaptive thinking + effort. Also from `octo config`.")
-	showReasoning := fs.Bool("show-reasoning", true, "Stream the reasoning/thinking trace to the terminal (dimmed). Use --show-reasoning=false to hide it. Also from `octo config`.")
+	showReasoning := fs.Bool("show-reasoning", false, "Surface the reasoning/thinking trace for the Web UI (octo serve) to display. The terminal never renders it. Default off; also from `octo config`.")
 	useSandbox := fs.Bool("sandbox", false, "Confine terminal commands to the project dir + tmp with no network (OS-enforced; macOS/Linux). Fails closed if unavailable.")
 	sandboxAllowNet := fs.Bool("sandbox-allow-net", false, "Under --sandbox, permit network access (default: denied)")
 	var sandboxWrite, sandboxRead stringList
