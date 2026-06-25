@@ -520,14 +520,16 @@ func TestAgent_Run_CustomMaxTurns(t *testing.T) {
 }
 
 func TestAgent_Run_DuplicateToolCalls_StopsGracefully(t *testing.T) {
-	// The model keeps issuing the exact same tool_use batch. After 3 identical
-	// consecutive batches the stuck detector should fire (window=2 means 2
-	// repeats on top of the original = 3 total).
+	// The model keeps issuing the exact same tool_use batch. After 5 identical
+	// consecutive batches the stuck detector should fire (window=4 means 4
+	// repeats on top of the original = 5 total).
 	repeats := []Reply{
 		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c1", "bash", map[string]any{"command": "ls"})}},
 		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c2", "bash", map[string]any{"command": "ls"})}},
 		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c3", "bash", map[string]any{"command": "ls"})}},
-		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c4", "bash", map[string]any{"command": "ls"})}}, // should never reach
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c4", "bash", map[string]any{"command": "ls"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c5", "bash", map[string]any{"command": "ls"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c6", "bash", map[string]any{"command": "ls"})}}, // should never reach
 	}
 	send := &fakeToolSender{replies: repeats}
 	exec := &fakeExecutor{}
@@ -544,13 +546,13 @@ func TestAgent_Run_DuplicateToolCalls_StopsGracefully(t *testing.T) {
 	if !strings.Contains(reply.Content, "stuck") {
 		t.Errorf("reply should mention being stuck, got %q", reply.Content)
 	}
-	// The stuck detector fires on the 3rd identical batch, so only 3 provider
-	// calls and 3 tool executions should have happened.
-	if send.calls != 3 {
-		t.Errorf("provider calls = %d, want 3 (stuck detector should stop early)", send.calls)
+	// The stuck detector fires on the 5th identical batch, so only 5 provider
+	// calls and 4 tool executions should have happened.
+	if send.calls != 5 {
+		t.Errorf("provider calls = %d, want 5 (stuck detector should stop early)", send.calls)
 	}
-	if len(exec.called) != 2 {
-		t.Errorf("executor calls = %d, want 2", len(exec.called))
+	if len(exec.called) != 4 {
+		t.Errorf("executor calls = %d, want 4", len(exec.called))
 	}
 }
 

@@ -803,7 +803,7 @@ func (a *Agent) runLoop(
 			// stuck in a loop with no progress. Detect this early and stop
 			// gracefully so the caller can intervene instead of burning the
 			// full turn budget.
-			const stuckWindow = 2 // require 2 consecutive repeats (3 identical batches total)
+			const stuckWindow = 4 // require 4 consecutive repeats (5 identical batches total)
 			fp := fingerprintToolUseBatch(reply.Blocks)
 			if hasConsecutiveDuplicates(a.recentToolCalls, fp, stuckWindow) {
 				return a.budgetStop(handler, StopReasonStuck,
