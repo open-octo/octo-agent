@@ -33,6 +33,11 @@ const ChatCompletionsPath = "/v1/chat/completions"
 // maximum if omitted); we send 4096 anyway for predictability.
 const DefaultMaxTokens = 4096
 
+// DialectDeepSeek selects DeepSeek's reasoning quirks (the thinking on/off
+// toggle) on a Client. Assign it to Client.Dialect for the "deepseek" vendor;
+// any other value leaves the request shaped as generic OpenAI.
+const DialectDeepSeek = "deepseek"
+
 // DefaultStreamIdleTimeout bounds how long a streaming response may go silent
 // (no bytes received) before SendStream aborts it as a stall. Chat Completions
 // backends stream chunks continuously while generating, so a healthy stream
@@ -59,6 +64,31 @@ type Client struct {
 	// StreamIdleTimeout overrides DefaultStreamIdleTimeout for SendStream. Zero
 	// uses the default; a negative value disables the idle guard entirely.
 	StreamIdleTimeout time.Duration
+
+	// Dialect selects vendor-specific request quirks within the OpenAI protocol.
+	// Empty (the default) is generic OpenAI-compatible; DialectDeepSeek enables
+	// DeepSeek's thinking-mode toggle. Set at construction (see internal/app).
+	Dialect string
+}
+
+// applyReasoning populates the reasoning fields of body for the given effort.
+// reasoning_effort is forwarded for every backend (omitted when empty). For the
+// DeepSeek dialect it additionally sets the thinking on/off toggle: DeepSeek
+// treats enabling thinking and tuning its effort as separate switches and keeps
+// thinking on by default, so we enable it explicitly when an effort is
+// requested and disable it explicitly when none is — otherwise "off" would
+// still think. Effort values octo emits ("low"|"medium"|"high") are accepted by
+// DeepSeek, which maps "low"/"medium" up to "high".
+func (c *Client) applyReasoning(body *apiRequest, effort string) {
+	body.ReasoningEffort = effort
+	if c.Dialect != DialectDeepSeek {
+		return
+	}
+	if effort == "" {
+		body.Thinking = &apiThinking{Type: "disabled"}
+	} else {
+		body.Thinking = &apiThinking{Type: "enabled"}
+	}
 }
 
 // policy returns the configured retry policy, or the package default when the
@@ -115,13 +145,13 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 	}
 
 	body := apiRequest{
-		Model:           req.Model,
-		MaxTokens:       req.MaxTokens,
-		Messages:        msgs,
-		Tools:           toAPITools(req.Tools),
-		PromptCacheKey:  c.promptCacheKey(req.CacheKey),
-		ReasoningEffort: req.ReasoningEffort,
+		Model:          req.Model,
+		MaxTokens:      req.MaxTokens,
+		Messages:       msgs,
+		Tools:          toAPITools(req.Tools),
+		PromptCacheKey: c.promptCacheKey(req.CacheKey),
 	}
+	c.applyReasoning(&body, req.ReasoningEffort)
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = DefaultMaxTokens
 	}

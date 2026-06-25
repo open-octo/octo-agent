@@ -111,6 +111,10 @@ func buildClient(name, apiKey, baseURL string) (provider.Provider, error) {
 		if baseURL != "" {
 			client.BaseURL = baseURL
 		}
+		// Pass the vendor id as the dialect so the client can apply
+		// vendor-specific quirks (DeepSeek's thinking-mode toggle); names the
+		// client doesn't recognise leave the request in its generic shape.
+		client.Dialect = name
 		return client, nil
 	default:
 		return nil, fmt.Errorf("unknown protocol %q for provider %q", v.Protocol, name)

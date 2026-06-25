@@ -50,15 +50,15 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 	}
 
 	body := apiRequest{
-		Model:           req.Model,
-		MaxTokens:       req.MaxTokens,
-		Messages:        msgs,
-		Stream:          true,
-		StreamOptions:   &apiStreamOptions{IncludeUsage: true},
-		Tools:           toAPITools(req.Tools),
-		PromptCacheKey:  c.promptCacheKey(req.CacheKey),
-		ReasoningEffort: req.ReasoningEffort,
+		Model:          req.Model,
+		MaxTokens:      req.MaxTokens,
+		Messages:       msgs,
+		Stream:         true,
+		StreamOptions:  &apiStreamOptions{IncludeUsage: true},
+		Tools:          toAPITools(req.Tools),
+		PromptCacheKey: c.promptCacheKey(req.CacheKey),
 	}
+	c.applyReasoning(&body, req.ReasoningEffort)
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = DefaultMaxTokens
 	}

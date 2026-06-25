@@ -44,6 +44,18 @@ type apiRequest struct {
 	// answering ("low" | "medium" | "high"). Omitted when empty so non-reasoning
 	// models and backends that don't support the field are unaffected.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Thinking is DeepSeek's on/off toggle for thinking mode, set only for the
+	// DeepSeek dialect (see Client.applyReasoning). DeepSeek separates enabling
+	// thinking from tuning its effort, and leaves thinking on by default — so
+	// reasoning_effort alone may not engage it, and "off" must be sent
+	// explicitly. nil (omitted) for every other OpenAI-compatible backend.
+	Thinking *apiThinking `json:"thinking,omitempty"`
+}
+
+// apiThinking is DeepSeek's thinking-mode toggle. Type is "enabled" or
+// "disabled".
+type apiThinking struct {
+	Type string `json:"type"`
 }
 
 // apiStreamOptions is the stream_options object on a streaming request.
