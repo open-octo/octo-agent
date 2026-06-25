@@ -630,6 +630,10 @@ func (a *Agent) runLoop(
 	// non-fatal — we log nothing and proceed with the full history.
 	_ = a.maybeCompact(ctx, handler)
 
+	// Reset per-turn overflow state so a previous turn's failed recovery does
+	// not permanently disable overflow recovery for this agent.
+	a.overflow.reset()
+
 	// History length before this turn appended anything. Used to roll back
 	// cleanly on a first-iteration failure: the turn may append more than the
 	// user input (drained inbox messages), so truncating to this baseline is
