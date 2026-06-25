@@ -127,6 +127,16 @@ func runOnce(cfg replConfig, prompt string, stream bool) int {
 	tools.SetBackgroundOnExit(func(e tools.BgExit) { a.Inbox.Enqueue(tools.FormatBgNote(e)) })
 	defer tools.SetBackgroundOnExit(nil)
 
+	// Background workflows ride the same inbox path, so a finished detached run
+	// is drained on a later iteration (or by idleInboxWait while idle).
+	tools.SetDefaultWorkflowOnDone(func(ev tools.WorkflowNotification) {
+		a.Inbox.Enqueue(tools.FormatWorkflowNote(ev))
+	})
+	defer func() {
+		tools.SetDefaultWorkflowOnDone(nil)
+		tools.KillDefaultWorkflows()
+	}()
+
 	// The view sink renders the turn (spinner, streamed text, tool-event lines,
 	// cache/error) and raises Ask prompts. With a TTY reader (a positional
 	// message typed at a terminal) permission prompts are interactive; over a

@@ -132,6 +132,15 @@ func KillAllSessionSubAgents() {
 // the CLI/TUI, which never stamp a ctx-scoped manager.
 var defaultWorkflowMgr = NewWorkflowManager()
 
+// SetDefaultWorkflowOnDone wires the completion hook on the process-global
+// workflow manager so a finished background run reaches the CLI/TUI agent
+// (parity with SetBackgroundOnExit / SubAgentManager.SetOnExit). Pass nil to clear.
+func SetDefaultWorkflowOnDone(fn func(WorkflowNotification)) { defaultWorkflowMgr.SetOnDone(fn) }
+
+// KillDefaultWorkflows cancels every background workflow on the process-global
+// manager — called on CLI/TUI exit so a detached run doesn't linger.
+func KillDefaultWorkflows() { defaultWorkflowMgr.KillAll() }
+
 type workflowManagerCtxKey struct{}
 
 // WithWorkflowManager stamps ctx with the per-session workflow manager the

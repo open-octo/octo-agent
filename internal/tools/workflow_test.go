@@ -178,6 +178,39 @@ func TestWorkflowKill_UnknownRun(t *testing.T) {
 	}
 }
 
+// TestDefaultWorkflowOnDone_FiresOnCompletion guards the CLI/TUI notification
+// path: a workflow started through the tool (which resolves to the default
+// manager) must fire the OnDone hook on completion. This is the wiring that was
+// missing — without it the agent never learns a background run finished.
+func TestDefaultWorkflowOnDone_FiresOnCompletion(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+
+	done := make(chan WorkflowNotification, 1)
+	SetDefaultWorkflowOnDone(func(ev WorkflowNotification) { done <- ev })
+	t.Cleanup(func() { SetDefaultWorkflowOnDone(nil) })
+
+	_, err := WorkflowTool{}.Execute(context.Background(), "c",
+		map[string]any{"script": `agent("x")`, "description": "notify-me"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	select {
+	case ev := <-done:
+		if ev.Status != "done" || ev.Description != "notify-me" {
+			t.Errorf("notification = %+v, want status=done description=notify-me", ev)
+		}
+		note := FormatWorkflowNote(ev)
+		for _, want := range []string{"<system-reminder>", "notify-me", "workflow_status"} {
+			if !strings.Contains(note, want) {
+				t.Errorf("FormatWorkflowNote missing %q; got:\n%s", want, note)
+			}
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("OnDone hook did not fire within the window")
+	}
+}
+
 func TestWorkflowTool_RefusesInSubAgent(t *testing.T) {
 	SetSpawner(replySpawner{})
 	t.Cleanup(func() { SetSpawner(nil) })

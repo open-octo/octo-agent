@@ -103,6 +103,17 @@ func runTUI(cfg replConfig) int {
 	})
 	defer tools.SetBackgroundOnExit(nil)
 
+	// Background-workflow completion notifications. A workflow runs detached, so
+	// without this its result is invisible until the model polls workflow_status.
+	tools.SetDefaultWorkflowOnDone(func(ev tools.WorkflowNotification) {
+		cfg.a.Inbox.Enqueue(tools.FormatWorkflowNote(ev))
+		p.Send(workflowNoteMsg{ev})
+	})
+	defer func() {
+		tools.SetDefaultWorkflowOnDone(nil)
+		tools.KillDefaultWorkflows()
+	}()
+
 	_, err := p.Run()
 	if err != nil {
 		fmt.Fprintf(cfg.stderr, "octo: tui: %v\n", err)
@@ -139,6 +150,7 @@ type turnFinishedMsg struct{ err error } // the turn goroutine returned
 type noticeMsg struct{ text string }
 type bgExitMsg struct{ e tools.BgExit }                      // a background process finished (async)
 type subAgentNoteMsg struct{ ev tools.SubAgentNotification } // a sub-agent completed (async)
+type workflowNoteMsg struct{ ev tools.WorkflowNotification } // a background workflow finished (async)
 type mcpReadyMsg struct{ reg *mcp.Registry }                 // background MCP connect finished (async)
 type subAgentEventMsg struct{ ev tools.SubAgentEvent }       // a sub-agent's runtime activity (async)
 type suggestionMsg struct{ text string }                     // an after-turn follow-up suggestion (async)
@@ -660,6 +672,23 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// inbox (which holds the full <system-reminder> notice) and start a
 		// turn so the model sees the completion immediately — matching the plain
 		// REPL's idleInboxWait behaviour.
+		if !m.turnRunning && len(m.queue) == 0 {
+			if items := m.a.Inbox.Drain(); len(items) > 0 {
+				s := strings.Join(agent.Texts(items), "\n\n")
+				return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(s, ""))
+			}
+		}
+		return m, m.flushPrints()
+
+	case workflowNoteMsg:
+		// Scrollback notice for the user; the full <system-reminder> rode the
+		// inbox for the model. Idle auto-turn mirrors bgExitMsg so the model
+		// reacts to a finished background workflow immediately.
+		status := msg.ev.Status
+		if status == "" {
+			status = "done"
+		}
+		m.printlnBlock(bgDoneStyle.Render(fmt.Sprintf("● Workflow %s (%s) %s", msg.ev.RunID, msg.ev.Description, status)))
 		if !m.turnRunning && len(m.queue) == 0 {
 			if items := m.a.Inbox.Drain(); len(items) > 0 {
 				s := strings.Join(agent.Texts(items), "\n\n")
