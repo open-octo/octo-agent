@@ -137,7 +137,16 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// After output has streamed the echo is committed; Esc interrupts
 			// and recalls the last submitted message into the input box so the
 			// user can edit and resubmit without pressing ↑ manually.
+			//
+			// Pending steers are exempt: they stay in the inbox and run as the
+			// next turn on their own (handleTurnFinished drains it), so recalling
+			// them here would both run the steer AND strand its text in the box.
+			// Note interrupt() clears pendingSteer, so capture it first.
+			hadSteer := len(m.pendingSteer) > 0
 			m.interrupt()
+			if hadSteer {
+				return m, nil
+			}
 			if n := len(m.inputHistory); n > 0 && m.ta.Value() == "" {
 				m.ta.SetValue(m.inputHistory[n-1])
 				m.ta.CursorEnd()

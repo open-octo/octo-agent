@@ -69,6 +69,29 @@ func TestSteerRecall_AlreadyDrainedFallsThroughToHistory(t *testing.T) {
 	}
 }
 
+// With a pending steer, Esc interrupts the running turn and leaves the input
+// box empty: the steer stays in the inbox and runs as the next turn on its own
+// (handleTurnFinished drains it). Recalling it here would both run the steer AND
+// strand its text in the box.
+func TestSteerRecall_EscDoesNotRecallPendingSteer(t *testing.T) {
+	m := steerModel(t, "my steer")
+	cancelled := false
+	m.cancelTurn = func() { cancelled = true }
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if !cancelled {
+		t.Error("Esc should interrupt the running turn")
+	}
+	if m.ta.Value() != "" {
+		t.Errorf("input box should stay empty, got %q", m.ta.Value())
+	}
+	// The steer remains in the inbox so the next turn picks it up.
+	if !m.a.Inbox.HasPending() {
+		t.Error("steer should remain in the inbox to run as the next turn")
+	}
+}
+
 func TestSteerRecall_NoPendingUsesHistory(t *testing.T) {
 	m := newTestModel()
 	// An ordinary idle submit populates history but no pending steer.
