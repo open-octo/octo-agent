@@ -197,9 +197,9 @@
       }
     }))
 
-    cleanups.push(ws.on('output', (ev) => {
+    cleanups.push(ws.on('text_delta', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      const txt = (ev as any).content ?? ''
+      const txt = (ev as any).text ?? ''
       turnOutChars += txt.length
       appendToLastAssistant(sid, txt)
     }))
@@ -345,6 +345,13 @@
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       chatStreaming.update(s => ({ ...s, [sid]: false }))
       chatProgress.update(p => ({ ...p, [sid]: null }))
+      // A turn that ends without an assistant_message (interrupt / error) would
+      // otherwise leave the live bubble's streaming caret blinking forever, so
+      // clear any lingering per-message streaming flags here.
+      chatMessages.update(m => {
+        const msgs = (m[sid] || []).map((x: any) => (x.streaming ? { ...x, streaming: false } : x))
+        return { ...m, [sid]: msgs }
+      })
       // Close open tool groups AND mark any still-spinning tools done — a
       // finished turn must never leave a tool on "running" (e.g. parallel
       // results that never matched a tool, or a dropped result event).
