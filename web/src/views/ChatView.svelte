@@ -15,6 +15,8 @@
     chatSuggestion,
     chatThinking,
     chatSubAgents,
+    chatWorkflows,
+    applyWorkflowEvent,
     confirmModal,
     questionModal,
     feedbackModal,
@@ -42,6 +44,7 @@
   import StatusTag from '../components/ui/StatusTag.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
+  import WorkflowsCard from '../components/chat/WorkflowsCard.svelte'
   import BackgroundProcesses from '../components/chat/BackgroundProcesses.svelte'
   import Composer from '../components/chat/Composer.svelte'
   import ArtifactsPanel from '../components/ArtifactsPanel.svelte'
@@ -60,6 +63,7 @@
   let suggestion  = $derived($chatSuggestion[$activeSessionId ?? ''] ?? '')
   let thinking    = $derived($chatThinking[$activeSessionId ?? ''] ?? '')
   let subAgents   = $derived($chatSubAgents[$activeSessionId ?? ''] ?? [])
+  let workflows   = $derived($chatWorkflows[$activeSessionId ?? ''] ?? [])
   let currentSession = $derived($sessions.find((s: any) => s.id === $activeSessionId) ?? null)
   let artifactCount  = $derived($artifacts.length)
   let wsDisconnected = $derived($wsState === 'disconnected')
@@ -187,6 +191,18 @@
         (ev as any).description ?? '',
         (ev as any).kind ?? '',
         (ev as any).tool_name ?? '',
+      )
+    }))
+
+    cleanups.push(ws.on('workflow_event', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      applyWorkflowEvent(
+        sid,
+        (ev as any).run_id ?? '',
+        (ev as any).description ?? '',
+        (ev as any).kind ?? '',
+        (ev as any).line ?? '',
+        (ev as any).status ?? '',
       )
     }))
 
@@ -636,6 +652,16 @@
               </div>
             {/if}
           {/each}
+
+          <!-- Background workflows panel (persists across turns) -->
+          {#if workflows.length > 0}
+            <div class="msg-agent fadein">
+              <div class="agent-avatar">O</div>
+              <div class="agent-content">
+                <WorkflowsCard runs={workflows} {now} />
+              </div>
+            </div>
+          {/if}
 
           <!-- Live sub-agents panel (current turn) -->
           {#if subAgents.length > 0}
