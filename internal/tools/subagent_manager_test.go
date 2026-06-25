@@ -75,3 +75,83 @@ func TestStart_EmitsDoneOnCompletion(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// cancelRecordingSpawner captures the contexts passed to Spawn/Continue so tests
+// can assert they are cancelled at the right boundaries.
+type cancelRecordingSpawner struct {
+	spawnCtxCh       chan context.Context
+	spawnReturnCh    chan SpawnResult
+	continueCtxCh    chan context.Context
+	continueReturnCh chan SpawnResult
+}
+
+func (s *cancelRecordingSpawner) Spawn(ctx context.Context, _ SpawnRequest) (SpawnResult, error) {
+	s.spawnCtxCh <- ctx
+	return <-s.spawnReturnCh, nil
+}
+
+func (s *cancelRecordingSpawner) Continue(ctx context.Context, _, _ string) (SpawnResult, error) {
+	s.continueCtxCh <- ctx
+	return <-s.continueReturnCh, nil
+}
+
+func waitForStatus(t *testing.T, m *SubAgentManager, id, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, status, found := m.Read(id)
+		if !found {
+			t.Fatalf("agent %q not found", id)
+		}
+		if status == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("agent %q status = %q, want %q", id, status, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestSend_CancelsSpawnContext verifies that runContinue cancels the previous
+// round's context (from Spawn) before starting the Continue round, and cancels
+// the Continue context when the round ends. Without this, CancelFuncs pile up
+// and the initial Spawn context leaks until garbage collection.
+func TestSend_CancelsSpawnContext(t *testing.T) {
+	sp := &cancelRecordingSpawner{
+		spawnCtxCh:       make(chan context.Context, 1),
+		spawnReturnCh:    make(chan SpawnResult, 1),
+		continueCtxCh:    make(chan context.Context, 1),
+		continueReturnCh: make(chan SpawnResult, 1),
+	}
+	m := NewSubAgentManager(sp)
+
+	id, err := m.Start(SpawnRequest{Description: "d"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	ctx1 := <-sp.spawnCtxCh
+	sp.spawnReturnCh <- SpawnResult{Reply: "spawned", AgentID: "child-1"}
+	waitForStatus(t, m, id, "idle")
+
+	go m.Send(id, "continue")
+
+	var ctx2 context.Context
+	select {
+	case ctx2 = <-sp.continueCtxCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Continue")
+	}
+
+	if ctx1.Err() == nil {
+		t.Error("Spawn context was not cancelled before Continue started")
+	}
+
+	sp.continueReturnCh <- SpawnResult{Reply: "continued"}
+	waitForStatus(t, m, id, "idle")
+
+	if ctx2.Err() == nil {
+		t.Error("Continue context was not cancelled after the round ended")
+	}
+}

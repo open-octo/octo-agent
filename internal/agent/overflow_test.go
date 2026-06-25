@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -37,5 +38,58 @@ func TestParseOverflowTokens(t *testing.T) {
 					c.msg, have, max, ok, c.have, c.max, c.ok)
 			}
 		})
+	}
+}
+
+// dummyOverflowTools gives Run/RunStream enough reason to enter runLoop rather
+// than falling back to the plain Turn path.
+var dummyOverflowTools = []ToolDefinition{{Name: "bash", Description: "shell"}}
+
+// TestOverflow_ResetAtStartOfRun verifies that runLoop resets the per-turn
+// overflow recovery state before starting a new turn. Without this reset, a
+// previous run that set attempted=true (e.g. because recovery itself failed or
+// the run errored out after recovery started) would permanently disable
+// overflow recovery for the agent.
+func TestOverflow_ResetAtStartOfRun(t *testing.T) {
+	send := &fakeToolSender{
+		replies: []Reply{{Content: "ok", StopReason: "end_turn"}},
+	}
+	a := New(send, "m")
+	a.overflow.attempted = true
+
+	if _, err := a.Run(context.Background(), "hello", dummyOverflowTools, &fakeExecutor{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if a.overflow.attempted {
+		t.Error("overflow.attempted was not reset at the start of the run")
+	}
+}
+
+// TestOverflow_RetriesAfterFailedRun verifies that a run which fails with a
+// context-too-long error leaves attempted=true, and that the *next* run resets
+// it so recovery can be attempted again if needed.
+func TestOverflow_RetriesAfterFailedRun(t *testing.T) {
+	send := &fakeToolSender{
+		errs: []error{errors.New("prompt is too long: 99999 tokens > 200000 maximum")},
+	}
+	a := New(send, "m")
+
+	if _, err := a.Run(context.Background(), "hello", dummyOverflowTools, &fakeExecutor{}); err == nil {
+		t.Fatal("expected error from context-too-long")
+	}
+	if !a.overflow.attempted {
+		t.Error("overflow.attempted should be true after a recovery attempt")
+	}
+
+	// A subsequent run must be able to attempt recovery again.
+	send.errs = nil
+	send.replies = []Reply{{Content: "ok", StopReason: "end_turn"}}
+	send.calls = 0
+	if _, err := a.Run(context.Background(), "hello again", dummyOverflowTools, &fakeExecutor{}); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if a.overflow.attempted {
+		t.Error("overflow.attempted was not reset on the subsequent run")
 	}
 }

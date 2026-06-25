@@ -410,12 +410,23 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	// Replace the agent's cancel so Kill targets the current operation.
+
+	// Replace the agent's cancel so Kill targets the current operation. Call the
+	// previous cancel to release the context resources from the Spawn (or an
+	// earlier Continue round); each round owns exactly one live context at a time.
 	agent.mu.Lock()
+	oldCancel := agent.cancel
 	agent.cancel = cancel
 	backingID := agent.backingID
 	desc := agent.description
 	agent.mu.Unlock()
+	if oldCancel != nil {
+		oldCancel()
+	}
+
+	// Ensure this round's context is cancelled when the round ends, even if no
+	// Kill arrives. CancelFunc is idempotent, so a concurrent Kill is harmless.
+	defer cancel()
 
 	// Stream runtime events for this round too, so the live panel re-shows the
 	// sub-agent as running while it handles the message. "done" is emitted
