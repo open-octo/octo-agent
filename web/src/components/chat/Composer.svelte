@@ -62,10 +62,78 @@
     attachments = attachments.filter((_, idx) => idx !== i)
   }
 
-  // The "/" button inserts a slash so the user can type a skill/slash command.
-  function insertSkill() {
-    if (!text.startsWith('/')) text = '/' + text
+  // ── Skill autocomplete ───────────────────────────────────────────────────
+  let skills = $state<api.Skill[]>([])
+  let skillMenu = $state(false)
+  let skillQuery = $state('')
+  let skillActiveIndex = $state(-1)
+
+  function getSlashQuery(value: string): string | null {
+    const trimmed = value.replace(/^[\uff0f\u3001]/, '/')
+    if (!trimmed.startsWith('/')) return null
+    if (/^\/\S*$/.test(trimmed)) return trimmed.slice(1).toLowerCase()
+    return null
+  }
+
+  function scoreMatch(skill: api.Skill, query: string): number {
+    if (!query) return 50
+    const q = query.toLowerCase()
+    const name = skill.name.toLowerCase()
+    if (name === q) return 100
+    if (name.startsWith(q)) return 80
+    if (name.includes(q)) return 60
+    return 0
+  }
+
+  function filteredSkills(): api.Skill[] {
+    const query = skillQuery
+    let scored = skills
+      .map(s => ({ skill: s, score: scoreMatch(s, query) }))
+      .filter(({ score }) => score > 0)
+    scored.sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
+    return scored.map(({ skill }) => skill)
+  }
+
+  function showSkillMenu(query: string) {
+    skillQuery = query
+    skillActiveIndex = -1
+    skillMenu = true
+  }
+
+  function hideSkillMenu() {
+    skillMenu = false
+    skillActiveIndex = -1
+  }
+
+  function selectSkill(skill: api.Skill) {
+    text = '/' + skill.name + ' '
+    hideSkillMenu()
     queueMicrotask(() => textareaEl?.focus())
+  }
+
+  function moveSkillActive(delta: number) {
+    const items = filteredSkills()
+    if (!skillMenu || items.length === 0) return
+    skillActiveIndex = (skillActiveIndex + delta + items.length) % items.length
+  }
+
+  // The "/" button opens skill autocomplete with "/" prefilled.
+  function insertSkill() {
+    text = '/'
+    showSkillMenu('')
+    queueMicrotask(() => textareaEl?.focus())
+  }
+
+  // Full-width slash replacement + autocomplete trigger on input.
+  function onInput() {
+    const normalized = text.replace(/^[\uff0f\u3001]/, '/')
+    if (normalized !== text) text = normalized
+    const query = getSlashQuery(text)
+    if (query !== null) {
+      showSkillMenu(query)
+    } else {
+      hideSkillMenu()
+    }
   }
 
   // $store autosubscription is reactive inside $derived (get() is not).
@@ -93,6 +161,7 @@
 
   onMount(async () => {
     try { models = (await api.getConfig()).models ?? [] } catch { /* leave empty */ }
+    try { skills = await api.listSkills() } catch { /* leave empty */ }
   })
 
   async function pickModel(m: api.ModelEntry) {
@@ -147,11 +216,40 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+    // Skill menu navigation
+    if (skillMenu) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveSkillActive(1); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); moveSkillActive(-1); return }
+      if (e.key === 'Escape') { e.preventDefault(); hideSkillMenu(); return }
+      if ((e.key === 'Tab' || e.key === 'Enter') && skillActiveIndex >= 0) {
+        const items = filteredSkills()
+        if (items[skillActiveIndex]) {
+          e.preventDefault()
+          selectSkill(items[skillActiveIndex])
+          return
+        }
+      }
+    }
+
+    // Enter to send (unless shift is held)
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      send()
+      return
+    }
+  }
+
+  // Click outside to close skill menu.
+  function onWindowClick(e: MouseEvent) {
+    const target = e.target as HTMLElement
+    if (skillMenu && !target.closest('.skill-menu') && !target.closest('.skill-btn')) {
+      hideSkillMenu()
+    }
+    closeMenus()
   }
 </script>
 
-<svelte:window onclick={closeMenus} />
+<svelte:window onclick={onWindowClick} />
 
 <div class="composer">
   <div class="chips">
@@ -228,8 +326,27 @@
         placeholder={$t('chat.placeholder')}
         bind:value={text}
         onkeydown={onKeydown}
+        oninput={onInput}
         onpaste={onPaste}
       ></textarea>
+      {#if skillMenu}
+        <div class="skill-menu">
+          {#each filteredSkills() as skill, i (skill.name)}
+            <button
+              class="skill-menu-item"
+              class:active={i === skillActiveIndex}
+              onclick={() => selectSkill(skill)}
+            >
+              <span class="skill-name">/{skill.name}</span>
+              {#if skill.desc}
+                <span class="skill-desc">{skill.desc}</span>
+              {/if}
+            </button>
+          {:else}
+            <div class="skill-menu-empty">No matching skills</div>
+          {/each}
+        </div>
+      {/if}
       <input
         bind:this={fileInputEl}
         type="file"
@@ -301,6 +418,7 @@
 .input-card {
   background: var(--bg-container); border: 1px solid var(--border); border-radius: 12px;
   padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  position: relative;
 }
 .input-card:focus-within {
   border-color: var(--blue-6);
@@ -342,4 +460,56 @@ textarea {
 }
 .stop-btn:hover { border-color: var(--error); }
 .stop-sq { width: 9px; height: 9px; border-radius: 2px; background: var(--error); }
+
+/* Skill autocomplete dropdown */
+.skill-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--bg-container);
+  border: 1px solid var(--border-secondary);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.14);
+  padding: 4px;
+}
+.skill-menu-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.skill-menu-item:hover,
+.skill-menu-item.active {
+  background: rgba(22,119,255,0.08);
+}
+.skill-name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+.skill-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.skill-menu-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
 </style>
