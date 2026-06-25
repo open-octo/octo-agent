@@ -57,10 +57,13 @@
   }
 
   async function handleDelete(id: string) {
+    const entry = items.find(i => i.id === id)
+    // Permanent delete — confirm first (the bulk actions already do), and name
+    // the file so the user knows exactly what they're discarding.
+    if (!confirm(`${tr('files.confirm_delete_one')}${entry ? `\n\n${basename(entry.original)}` : ''}`)) return
     busyId = id
     try {
       await api.deleteTrashItem(id)
-      const entry = items.find(i => i.id === id)
       if (entry) totalSize = Math.max(0, totalSize - (entry.size ?? 0))
       items = items.filter(i => i.id !== id)
       totalCount = Math.max(0, totalCount - 1)

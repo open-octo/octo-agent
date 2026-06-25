@@ -47,6 +47,12 @@
     openAgentSession('/skill-creator', 'New skill')
   }
 
+  // Use: open a fresh chat that invokes the skill (matches the old UI's per-card
+  // "Use" — the slash command runs the skill in conversation).
+  function handleUse(name: string) {
+    openAgentSession(`/${name}`, name)
+  }
+
   // Export downloads the skill folder as a .zip from the server.
   function handleExport(name: string) {
     const a = document.createElement('a')
@@ -188,6 +194,7 @@
               />
             </span>
             <div class="row-actions">
+              <button class="act-btn" title={$t('skills.use')} disabled={!sk.enabled} onclick={() => handleUse(sk.name)}><iconify-icon icon="ant-design:play-circle-outlined" width="15"></iconify-icon></button>
               <button class="act-btn" title={$t('skills.edit_with_agent')} onclick={() => handleEdit(sk.name)}><iconify-icon icon="ant-design:edit-outlined" width="15"></iconify-icon></button>
               <button class="act-btn" title={$t('skills.export_zip')} onclick={() => handleExport(sk.name)}><iconify-icon icon="ant-design:export-outlined" width="15"></iconify-icon></button>
               <button class="act-btn del" title={$t('common.delete')} onclick={() => handleDelete(sk.name)}>
