@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { mcpServers, toolSearchMode, mcpModalOpen, mcpModalState, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
@@ -129,6 +129,64 @@
     }
   }
 
+  // ─── OAuth device flow ────────────────────────────────────────────────────
+  // The serve process can't block on a device flow, so authorizing is split:
+  // start kicks it off, then we poll status until it settles. See
+  // internal/server/mcp_oauth_handlers.go.
+
+  let oauth = $state<{ name: string; state: string; userCode: string; link: string; error: string } | null>(null)
+  let oauthTimer: ReturnType<typeof setInterval> | null = null
+
+  function oauthSettled(state: string): boolean {
+    return state === 'connected' || state === 'failed'
+  }
+
+  function applyOAuth(name: string, d: api.McpOAuthState) {
+    oauth = {
+      name,
+      state: d.state,
+      userCode: d.user_code ?? '',
+      link: d.verification_uri_complete || d.verification_uri || '',
+      error: d.error ?? '',
+    }
+  }
+
+  function stopPolling() {
+    if (oauthTimer) { clearInterval(oauthTimer); oauthTimer = null }
+  }
+
+  async function authorize(name: string) {
+    try {
+      const d = await api.startMcpOAuth(name)
+      applyOAuth(name, d)
+      if (oauthSettled(d.state)) { onOAuthSettled(d.state); return }
+      stopPolling()
+      oauthTimer = setInterval(async () => {
+        try {
+          const s = await api.mcpOAuthStatus(name)
+          applyOAuth(name, s)
+          if (oauthSettled(s.state)) { stopPolling(); onOAuthSettled(s.state) }
+        } catch { /* transient — keep polling until the modal closes */ }
+      }, 1500)
+    } catch (e: any) {
+      showToast(e.message ?? 'Authorization failed', 'error')
+    }
+  }
+
+  function onOAuthSettled(state: string) {
+    reload() // refresh statuses (connected / error)
+    if (state === 'connected') setTimeout(() => { oauth = null }, 1200)
+  }
+
+  // Closing just stops watching — the device flow continues server-side and the
+  // token caches on success regardless.
+  function closeOAuth() {
+    stopPolling()
+    oauth = null
+  }
+
+  onDestroy(stopPolling)
+
   // ─── reconnect ──────────────────────────────────────────────────────────────
 
   async function reconnect(name: string) {
@@ -243,6 +301,15 @@
               {/if}
             </div>
             <div class="server-actions">
+              {#if srv.auth === 'oauth' && !srv.disabled && !srv.invalid && srv.status !== 'connected'}
+                <button
+                  class="srv-btn"
+                  title={$t('mcp.btn.authorize')}
+                  onclick={() => authorize(srv.name)}
+                >
+                  <iconify-icon icon="ant-design:key-outlined" width="14"></iconify-icon>
+                </button>
+              {/if}
               <button
                 class="srv-btn"
                 title={$t('common.edit')}
@@ -280,6 +347,38 @@
 
   </div>
 </div>
+
+{#if oauth}
+<div class="oauth-backdrop" role="presentation" onclick={closeOAuth}>
+  <div class="oauth-modal" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+    <div class="oauth-header">
+      <iconify-icon icon="ant-design:key-outlined" width="16" style="color:var(--blue-6)"></iconify-icon>
+      <span class="oauth-title">{$t('mcp.oauth.title')}</span>
+      <span class="oauth-name mono">{oauth.name}</span>
+      <button class="oauth-close" onclick={closeOAuth} aria-label="close">
+        <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+      </button>
+    </div>
+    <div class="oauth-body">
+      {#if oauth.state === 'starting'}
+        <div class="oauth-wait"><div class="oauth-spinner"></div><span>{$t('mcp.oauth.starting')}</span></div>
+      {:else if oauth.state === 'authorizing'}
+        <p class="oauth-instruction">{$t('mcp.oauth.instruction')}</p>
+        <div class="oauth-code">{oauth.userCode}</div>
+        {#if oauth.link}
+          <a class="oauth-link" href={oauth.link} target="_blank" rel="noopener noreferrer">{$t('mcp.oauth.openLink')}</a>
+        {/if}
+        <div class="oauth-wait"><div class="oauth-spinner"></div><span>{$t('mcp.oauth.waiting')}</span></div>
+      {:else if oauth.state === 'connected'}
+        <p class="oauth-success"><span class="oauth-ok">✓</span> {$t('mcp.oauth.success')}</p>
+      {:else}
+        <p class="oauth-failed">{$t('mcp.oauth.failed')}</p>
+        {#if oauth.error}<p class="server-error">{oauth.error}</p>{/if}
+      {/if}
+    </div>
+  </div>
+</div>
+{/if}
 
 <style>
 /* ── layout ──────────────────────────────────────────────────────────────── */
@@ -378,4 +477,45 @@ p  { margin: 0; font-size: 14px; color: var(--text-secondary); }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 1s linear infinite; display: inline-block; }
+
+/* ── OAuth modal ─────────────────────────────────────────────────────────── */
+.oauth-backdrop {
+  position: fixed; inset: 0; z-index: 1100; background: var(--text-tertiary);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.oauth-modal {
+  width: 100%; max-width: 440px; background: var(--bg-container);
+  border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.18); animation: octo-fadein 0.16s ease;
+}
+.oauth-header {
+  display: flex; align-items: center; gap: 8px; padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.oauth-title { font-size: 14px; font-weight: 600; color: var(--text-heading); }
+.oauth-name { font-size: 13px; color: var(--text-secondary); flex: 1; }
+.oauth-close {
+  border: none; background: none; cursor: pointer; color: var(--text-tertiary);
+  display: flex; align-items: center; padding: 2px;
+}
+.oauth-close:hover { color: var(--text-secondary); }
+.oauth-body {
+  padding: 20px 18px; display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.oauth-instruction { margin: 0; font-size: 13px; color: var(--text-secondary); text-align: center; }
+.oauth-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 22px; font-weight: 600; letter-spacing: 3px; color: var(--text-heading);
+  padding: 8px 16px; background: var(--hover-neutral); border-radius: 8px;
+}
+.oauth-link { font-size: 13px; color: var(--blue-6); text-decoration: none; }
+.oauth-link:hover { text-decoration: underline; }
+.oauth-wait { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-tertiary); }
+.oauth-spinner {
+  width: 16px; height: 16px; border: 2px solid var(--border);
+  border-top-color: var(--blue-6); border-radius: 50%; animation: octo-spin 0.7s linear infinite;
+}
+.oauth-success { margin: 0; font-size: 14px; color: var(--text-heading); }
+.oauth-ok { color: var(--success); }
+.oauth-failed { margin: 0; font-size: 14px; color: var(--error); }
 </style>
