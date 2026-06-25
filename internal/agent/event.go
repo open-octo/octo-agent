@@ -155,6 +155,11 @@ type CompactStats struct {
 	// SummaryTokens is the running estimate of the summary generated so far
 	// (progress only).
 	SummaryTokens int `json:"summary_tokens,omitempty"`
+	// ReclaimedTokens is how many tokens the no-LLM stale-tool-result
+	// reclamation pass freed (done only). When set with FoldedMsgs == 0 the
+	// compaction was handled entirely by the cheap reclamation tier — no
+	// summarize call was made.
+	ReclaimedTokens int `json:"reclaimed_tokens,omitempty"`
 	// MaxTokens is the summary's output-token cap, for a "N / max" readout.
 	MaxTokens int `json:"max_tokens,omitempty"`
 }

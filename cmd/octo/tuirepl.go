@@ -1058,9 +1058,16 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		// Only announce a real reduction; a no-op (summary failed / unchanged)
 		// clears the indicator silently rather than implying work was done.
 		if c := ev.Compact; c != nil && c.AfterTokens > 0 && c.AfterTokens < c.BeforeTokens {
-			m.printlnBlock(noticeStyle.Render(fmt.Sprintf(
-				"✦ compacted context · folded %d message(s) · ~%s → ~%s tokens",
-				c.FoldedMsgs, humanTokens(c.BeforeTokens), humanTokens(c.AfterTokens))))
+			if c.FoldedMsgs == 0 && c.ReclaimedTokens > 0 {
+				// Cheap tier: stale tool output reclaimed without a summarize.
+				m.printlnBlock(noticeStyle.Render(fmt.Sprintf(
+					"✦ reclaimed stale tool output · ~%s → ~%s tokens",
+					humanTokens(c.BeforeTokens), humanTokens(c.AfterTokens))))
+			} else {
+				m.printlnBlock(noticeStyle.Render(fmt.Sprintf(
+					"✦ compacted context · folded %d message(s) · ~%s → ~%s tokens",
+					c.FoldedMsgs, humanTokens(c.BeforeTokens), humanTokens(c.AfterTokens))))
+			}
 		}
 		return
 

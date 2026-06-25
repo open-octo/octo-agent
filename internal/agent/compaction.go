@@ -258,6 +258,23 @@ func (a *Agent) maybeCompact(ctx context.Context, handler EventHandler) error {
 		return nil
 	}
 
+	// Cheap tier first: reclaim stale tool-result bulk with no LLM call. Often
+	// this alone drops the context under the trigger (especially the single
+	// huge agentic turn the summarize path can't fold), saving a summarize.
+	if reclaimed := a.reclaimStaleToolResults(); reclaimed > 0 {
+		a.resetContextTrigger() // the real lastInputTokens count is now stale
+		msgs = a.History.Snapshot()
+		if afterReclaim := estimateMessages(msgs); afterReclaim < trigger {
+			if handler != nil {
+				handler(AgentEvent{Kind: EventCompactDone, Compact: &CompactStats{
+					BeforeTokens: before, AfterTokens: afterReclaim, ReclaimedTokens: reclaimed,
+				}})
+			}
+			return nil
+		}
+		before = estimateMessages(msgs)
+	}
+
 	split := safeSplitIndexByBudget(msgs, a.compactKeepBudget())
 	if split <= 0 {
 		return nil // not enough complete turns to safely compact yet
