@@ -8,34 +8,24 @@ import (
 	"strings"
 )
 
-//go:embed all:static
-var staticFS embed.FS
-
 //go:embed all:webdist
 var webdistFS embed.FS
 
-// staticHandler serves the embedded Web UI. It strips the "/" prefix and
-// falls back to index.html for SPA routing.
-// It prefers the Vite-built webdist/ when a real index.html is present
-// there (i.e. after `make web-build`), otherwise falls back to the
-// legacy hand-authored static/ directory.
+// staticHandler serves the embedded Vite-built Web UI from webdist/. It strips
+// the "/" prefix and falls back to index.html for SPA routing. Before a real
+// `make web-build` run, webdist/ holds only a placeholder index.html with no
+// assets/ sibling — in that case we serve a minimal built-in placeholder.
 func (s *Server) staticHandler() http.Handler {
-	// Prefer webdist/ (Vite output) when the assets/ directory exists inside
-	// it, which is only true after a real `make web-build` run. The placeholder
-	// index.html has no assets/ sibling, so this reliably distinguishes the two.
-	chosen := fs.FS(staticFS)
-	chosenDir := "static"
-	if sub, err2 := fs.Sub(webdistFS, "webdist"); err2 == nil {
-		if _, err3 := sub.Open("assets"); err3 == nil {
-			chosen = webdistFS
-			chosenDir = "webdist"
+	sub, err := fs.Sub(webdistFS, "webdist")
+	built := false
+	if err == nil {
+		if _, aerr := sub.Open("assets"); aerr == nil {
+			built = true
 		}
 	}
 
-	// Try to open the selected directory. If it doesn't exist (e.g.
-	// during development before the UI is built), return a no-op handler.
-	sub, err := fs.Sub(chosen, chosenDir)
-	if err != nil {
+	// UI not built yet (dev before `make web-build`): serve a placeholder.
+	if !built {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/" {
 				w.Header().Set("Content-Type", "text/html")
