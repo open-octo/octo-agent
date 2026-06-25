@@ -320,7 +320,7 @@ func (t TerminalOutputTool) managerFor(ctx context.Context) *BackgroundManager {
 func (TerminalOutputTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal_output",
-		Description: "Peek at the recent output of a background process (the id from terminal run_in_background:true): a snapshot of the last N lines plus its status (running / exited). Read-only; to stop the process use kill_shell.\n\nUse this to CHECK PROGRESS of a still-running process on demand — e.g. inspect a server's startup logs. You do NOT need it to learn that a process finished or to get its result: completion is pushed to you automatically, carrying the final output. This is a snapshot, not a feed — repeated calls return the current tail, there is no 'new since last call', so do not call it in a loop. To find an id you've lost track of, use terminal_list.",
+		Description: "Peek at the recent output of a background process (the id from terminal run_in_background:true): a snapshot of the last N lines plus its status (running / exited). Read-only; to stop the process use kill_shell.\n\nUse this to CHECK PROGRESS of a still-running process on demand — e.g. inspect a server's startup logs. You do NOT need it to learn that a process finished or to get its result: completion is pushed to you automatically, carrying the final output. This is a snapshot, not a feed — repeated calls return the current tail, there is no 'new since last call', so do not call it in a loop. Repeated empty snapshots of a running process are detected as polling and will trigger a hard STOP reminder. To find an id you've lost track of, use terminal_list.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -355,7 +355,7 @@ func (t TerminalOutputTool) Execute(ctx context.Context, _ string, input map[str
 	if v, ok := input["lines"].(float64); ok { // JSON numbers decode as float64
 		lines = int(v)
 	}
-	out, status, found := t.managerFor(ctx).Tail(id, lines)
+	out, status, found, blocked := t.managerFor(ctx).Tail(id, lines)
 	if !found {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: no background process %q (it may have been reaped — use terminal_list to see live processes)", id)
 	}
@@ -369,6 +369,15 @@ func (t TerminalOutputTool) Execute(ctx context.Context, _ string, input map[str
 			msg += "\n(if this persists for a process that should be logging, its stdio is likely " +
 				"block-buffered because it's piped — on macOS/Linux relaunch it as `stdbuf -oL <cmd>` " +
 				"to force line buffering)"
+		}
+		// Hard stop for models that keep polling despite the "do not poll"
+		// instructions. The agent loop's duplicate-tool-call detector would
+		// eventually kill the turn; this surfaces the problem directly in the
+		// tool result so the model sees why it must stop.
+		if blocked {
+			msg += "\n\n[STOP: repeated empty terminal_output calls detected. " +
+				"Do not poll this process again. The system will push a [BACKGROUND COMPLETED] " +
+				"notification when it finishes.]"
 		}
 		return agent.ToolResult{Text: msg}, nil
 	}

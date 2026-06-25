@@ -164,11 +164,6 @@ func TestTerminalOutputTool(t *testing.T) {
 	waitFor(t, "terminal_output to show exit", func() bool {
 		rTool, err := outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
 		if err != nil {
-			// Anti-polling block is temporary while the process is still running
-			// with no new output; retry until it exits.
-			if strings.Contains(err.Error(), "polling blocked") {
-				return false
-			}
 			t.Fatalf("terminal_output: %v", err)
 		}
 		res += rTool.Text
@@ -273,9 +268,9 @@ func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
 
 // TestTerminalOutputTool_SnapshotIdempotent verifies the snapshot semantics:
 // terminal_output is a non-advancing peek, so repeated calls on a running
-// process never error or "block" — they just return the current tail and
-// status. (Replaces the old delta + anti-polling behavior, which the snapshot
-// model removes by design.)
+// process return the current tail and status without error. Empty snapshots are
+// still counted for anti-polling, but that is surfaced as extra text in the
+// result, not as an error.
 func TestTerminalOutputTool_SnapshotIdempotent(t *testing.T) {
 	m := NewBackgroundManager()
 	term := TerminalTool{mgr: m}
@@ -288,8 +283,7 @@ func TestTerminalOutputTool_SnapshotIdempotent(t *testing.T) {
 		t.Fatalf("launch: %v", err)
 	}
 
-	// Many empty polls in a row: all succeed, none block, all report running.
-	for i := 1; i <= 5; i++ {
+	for i := 1; i <= 2; i++ {
 		res, err := outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
 		if err != nil {
 			t.Fatalf("poll %d should never error in the snapshot model: %v", i, err)
@@ -297,6 +291,40 @@ func TestTerminalOutputTool_SnapshotIdempotent(t *testing.T) {
 		if !strings.Contains(res.Text, "[status: running]") {
 			t.Errorf("poll %d should report running, got %q", i, res.Text)
 		}
+		if strings.Contains(res.Text, "[STOP:") {
+			t.Errorf("poll %d should not be blocked yet, got %q", i, res.Text)
+		}
+	}
+}
+
+// TestTerminalOutputTool_AntiPollBlocksEmptySnapshots verifies that repeated
+// empty terminal_output calls on a running process eventually trigger a hard
+// "STOP" hint, teaching the model to wait for the automatic completion
+// notification instead of polling.
+func TestTerminalOutputTool_AntiPollBlocksEmptySnapshots(t *testing.T) {
+	m := NewBackgroundManager()
+	term := TerminalTool{mgr: m}
+	outTool := TerminalOutputTool{mgr: m}
+
+	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
+		"command":           "sleep 30",
+		"run_in_background": true,
+	}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	var blocked bool
+	for i := 1; i <= 3; i++ {
+		res, err := outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
+		if err != nil {
+			t.Fatalf("poll %d should not error: %v", i, err)
+		}
+		if strings.Contains(res.Text, "[STOP:") {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Errorf("expected anti-polling STOP after %d empty snapshots", 3)
 	}
 }
 

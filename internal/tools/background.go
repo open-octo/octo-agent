@@ -17,6 +17,12 @@ import (
 // is what matters); Read reports when earlier output was dropped.
 const maxBgOutputBytes = 1 << 20 // 1 MiB
 
+// Anti-polling window shared by Read and Tail. Within a 30-second window, 3 or
+// more empty reads on a running process trigger a block, giving the LLM a hard
+// hint to stop polling and wait for the automatic completion notification.
+const pollWindow = 30 * time.Second
+const maxEmptyPolls = 3
+
 // bgProcess tracks one detached command launched via BackgroundManager.
 type bgProcess struct {
 	id      string
@@ -37,6 +43,12 @@ type bgProcess struct {
 	// status checks on long-running services without penalising the model.
 	firstEmptyPoll time.Time
 	emptyPollCount int
+
+	// Anti-polling for Tail (terminal_output). Same window/count threshold as
+	// Read, but tracked independently because Tail snapshots the buffer without
+	// advancing the read cursor.
+	firstEmptyTailPoll time.Time
+	emptyTailPollCount int
 
 	onLine func(string) // optional real-time callback for sync-mode streaming
 
@@ -89,7 +101,12 @@ func (p *bgProcess) statusLocked() string {
 // non-destructive snapshot, so repeated calls return the same view and there is
 // no incentive to poll. A truncation marker is prefixed when output was dropped
 // (buffer cap or the n-line clamp).
-func (p *bgProcess) tail(n int) (output, status string) {
+//
+// To stop models that ignore the "do not poll" instructions, tail tracks empty
+// snapshot calls on a running process within the same anti-polling window used
+// by readNew. Once the threshold is exceeded, blocked is true and callers
+// should tell the model to stop polling and wait for the completion push.
+func (p *bgProcess) tail(n int) (output, status string, blocked bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -107,7 +124,27 @@ func (p *bgProcess) tail(n int) (output, status string) {
 	if truncated && out != "" {
 		out = "[... earlier output truncated ...]\n" + out
 	}
-	return out, p.statusLocked()
+	status = p.statusLocked()
+
+	// Anti-polling for terminal_output: repeated empty snapshots of a running
+	// process are almost always a polling loop. Count them in the same window as
+	// Read so the model gets a consistent hard stop.
+	if !p.done && out == "" {
+		now := time.Now()
+		if p.emptyTailPollCount == 0 || now.Sub(p.firstEmptyTailPoll) > pollWindow {
+			p.firstEmptyTailPoll = now
+			p.emptyTailPollCount = 1
+		} else {
+			p.emptyTailPollCount++
+			if p.emptyTailPollCount >= maxEmptyPolls {
+				blocked = true
+			}
+		}
+	} else {
+		p.emptyTailPollCount = 0
+		p.firstEmptyTailPoll = time.Time{}
+	}
+	return out, status, blocked
 }
 
 // readNew returns output produced since the last Read and the current status,
@@ -132,8 +169,6 @@ func (p *bgProcess) readNew() (string, string, bool) {
 	// empty reads on a running process trigger a block. This is lenient enough
 	// for occasional status checks on long-running services while still stopping
 	// tight polling loops on one-shot tasks.
-	const pollWindow = 30 * time.Second
-	const maxEmptyPolls = 3
 	blocked := false
 	if !p.done && len(out) == 0 {
 		now := time.Now()
@@ -401,17 +436,18 @@ func (m *BackgroundManager) Read(id string) (output, status string, found bool, 
 // Tail returns a non-destructive snapshot of the last `lines` lines of a
 // process's output (lines <= 0 = all retained), plus its status. found is false
 // when id is unknown. Unlike Read it does not advance the cursor — it's for
-// on-demand progress peeks (the terminal_output tool), so it never blocks and
-// repeated calls are idempotent.
-func (m *BackgroundManager) Tail(id string, lines int) (output, status string, found bool) {
+// on-demand progress peeks (the terminal_output tool). repeated calls return
+// the same bytes, but repeated empty snapshots of a running process are counted
+// as polling; once blocked is true, callers should tell the model to stop.
+func (m *BackgroundManager) Tail(id string, lines int) (output, status string, found bool, blocked bool) {
 	m.mu.Lock()
 	p := m.procs[id]
 	m.mu.Unlock()
 	if p == nil {
-		return "", "", false
+		return "", "", false, false
 	}
-	out, st := p.tail(lines)
-	return out, st, true
+	out, st, blk := p.tail(lines)
+	return out, st, true, blk
 }
 
 // BgInfo is a snapshot of a tracked background process — used both by the TUI's
