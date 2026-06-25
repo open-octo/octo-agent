@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/trash"
@@ -50,6 +51,208 @@ type Session struct {
 	// longer match Messages, so the next Save must rewrite the whole file.
 	// Cleared by a successful rewriteAll. Not serialized.
 	forceRewrite bool
+
+	// mu guards runtime binding state (BoundEntry, InFlight) and is not
+	// serialized. Session methods that mutate bound state are goroutine-safe;
+	// Messages remain the caller's responsibility to serialise per-turn.
+	mu sync.Mutex
+
+	// BoundEntry is the entry (cli | tui | web | api | channel | cron | setup)
+	// that currently owns the session. Empty means unbound. Persisted so a
+	// resumed session remembers where it was created / last used.
+	BoundEntry string `json:"bound_entry,omitempty"`
+
+	// BoundAt records when BoundEntry was last set, used for diagnostics when
+	// another entry tries to take over.
+	BoundAt time.Time `json:"bound_at,omitempty"`
+
+	// LeaseEntry/LeaseExpires implement a cross-process "in-flight" lock. A
+	// turn writes a short-lived lease before starting and clears it on finish;
+	// another process loading the session can see the lease and refuse to steal
+	// the binding while it is still valid. The lease is stored as an append-only
+	// "lease" record so it can be updated without rewriting the whole file.
+	LeaseEntry   string    `json:"-"`
+	LeaseExpires time.Time `json:"-"`
+
+	// InFlight counts active turns on this session within the current process.
+	// It is not persisted; use LeaseEntry/LeaseExpires for cross-process checks.
+	InFlight int `json:"-"`
+}
+
+// Common entry names. Use these constants at call sites so typos are caught.
+const (
+	EntryCLI     = "cli"
+	EntryTUI     = "tui"
+	EntryWeb     = "web"
+	EntryAPI     = "api"
+	EntryChannel = "channel"
+	EntryCron    = "cron"
+	EntrySetup   = "setup"
+)
+
+// IsBound reports whether the session is bound to any entry.
+func (s *Session) IsBound() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.BoundEntry != ""
+}
+
+// BoundTo reports whether the session is currently bound to entry.
+func (s *Session) BoundTo(entry string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.BoundEntry == entry
+}
+
+// ErrSessionBoundToOther is returned when an entry tries to use a session
+// owned by another entry without permission to steal.
+var ErrSessionBoundToOther = fmt.Errorf("session is bound to another entry")
+
+// BindResult reports what happened in a Bind call.
+type BindResult int
+
+const (
+	// Bound indicates the session is now bound to the caller.
+	Bound BindResult = iota
+	// AlreadyBound indicates the caller already owns the binding.
+	AlreadyBound
+	// Stolen indicates the binding was taken from another entry.
+	Stolen
+	// Rejected indicates another entry owns the session and steal was false.
+	Rejected
+)
+
+// Bind binds the session to entry in memory. It does NOT persist the change;
+// callers must Save() before another process can see it. This makes the session
+// file the single source of truth for cross-process binding.
+func (s *Session) Bind(entry string, steal bool) (BindResult, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.BoundEntry == "" {
+		s.BoundEntry = entry
+		s.BoundAt = time.Now()
+		s.forceRewrite = true
+		return Bound, fmt.Sprintf("session bound to %s", entry), nil
+	}
+	if s.BoundEntry == entry {
+		s.BoundAt = time.Now()
+		s.forceRewrite = true
+		return AlreadyBound, fmt.Sprintf("session already bound to %s", entry), nil
+	}
+	if !steal {
+		return Rejected, "", fmt.Errorf("%w: bound to %s since %s; close it or request takeover", ErrSessionBoundToOther, s.BoundEntry, s.BoundAt.Format(time.RFC3339))
+	}
+	if holder, active := s.leaseActiveLocked(); active && holder != entry {
+		return Rejected, "", fmt.Errorf("%w: bound to %s and a turn lease is active until %s; cannot take over while busy", ErrSessionBoundToOther, s.BoundEntry, s.LeaseExpires.Format(time.RFC3339))
+	}
+	prev := s.BoundEntry
+	s.BoundEntry = entry
+	s.BoundAt = time.Now()
+	s.forceRewrite = true
+	return Stolen, fmt.Sprintf("session taken over from %s by %s", prev, entry), nil
+}
+
+// Unbind releases the session from entry in memory. No-op if not bound to entry.
+// Callers must Save() to publish the change.
+func (s *Session) Unbind(entry string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.BoundEntry != entry {
+		return false
+	}
+	s.BoundEntry = ""
+	s.BoundAt = time.Time{}
+	s.forceRewrite = true
+	return true
+}
+
+// IncFlight increments the in-flight turn count. Caller must already hold the
+// binding; the increment is a no-op if the session is unbound.
+func (s *Session) IncFlight() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.InFlight++
+}
+
+// DecFlight decrements the in-flight turn count, guarding against underflow.
+func (s *Session) DecFlight() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.InFlight > 0 {
+		s.InFlight--
+	}
+}
+
+// SetBoundEntry writes the binding fields directly. Used by persistent stores
+// after reloading the authoritative record from disk.
+func (s *Session) SetBoundEntry(entry string, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.BoundEntry = entry
+	s.BoundAt = at
+}
+
+// leaseActiveLocked reports whether an unexpired lease is held by someone else
+// (or the caller). Caller must hold s.mu.
+func (s *Session) leaseActiveLocked() (string, bool) {
+	if s.LeaseEntry == "" || s.LeaseExpires.IsZero() {
+		return "", false
+	}
+	if time.Now().After(s.LeaseExpires) {
+		return "", false
+	}
+	return s.LeaseEntry, true
+}
+
+// LeaseActive reports whether the session has an unexpired turn lease and who
+// holds it.
+func (s *Session) LeaseActive() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.leaseActiveLocked()
+}
+
+// WriteLease appends a lease record claiming this session for entry until
+// expires. It does not change the in-memory BoundEntry. The lease is visible
+// to other processes on the next LoadSession.
+func (s *Session) WriteLease(entry string, expires time.Time) error {
+	if entry == "" {
+		return fmt.Errorf("lease entry cannot be empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appendLeaseRecordLocked(entry, expires)
+}
+
+// ClearLease appends an empty lease record, clearing the cross-process
+// in-flight marker.
+func (s *Session) ClearLease() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appendLeaseRecordLocked("", time.Time{})
+}
+
+// appendLeaseRecordLocked writes a lease record to the transcript. Caller must
+// hold s.mu.
+func (s *Session) appendLeaseRecordLocked(entry string, expires time.Time) error {
+	path, err := s.SavePath()
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	rec := sessionRecord{Type: "lease", LeaseEntry: entry, LeaseExpires: expires}
+	enc := json.NewEncoder(f)
+	if err := enc.Encode(rec); err != nil {
+		return err
+	}
+	s.LeaseEntry = entry
+	s.LeaseExpires = expires
+	return nil
 }
 
 // NewSession creates a Session with an ID derived from the current time plus
@@ -167,25 +370,29 @@ func (s *Session) ChunkDir() (string, error) {
 }
 
 // sessionRecord is one JSONL line. Type discriminates the meta header, a
-// message record, and a title record. The title is appended on its own line
-// (rather than rewriting the meta header) so the append-only path is preserved:
-// it's generated after the first turn, by which point the meta line is already
-// on disk. LoadSession takes the last title record as authoritative; rewriteAll
-// also folds the title back into the meta header so a compacted file keeps it.
+// message record, a title record, and a lease record. The title/lease are
+// appended on their own lines (rather than rewriting the meta header) so the
+// append-only path is preserved. LoadSession takes the last record of each
+// type as authoritative; rewriteAll folds them back into the meta header when
+// compacting.
 type sessionRecord struct {
-	Type        string    `json:"type"` // "meta" | "message" | "title" | "model_config"
-	ID          string    `json:"id,omitempty"`
-	CreatedAt   time.Time `json:"created_at,omitempty"`
-	Model       string    `json:"model,omitempty"`
-	System      string    `json:"system,omitempty"`
-	Title       string    `json:"title,omitempty"`
-	Source      string    `json:"source,omitempty"`
-	ModelConfig string    `json:"model_config,omitempty"`
-	Message     *Message  `json:"message,omitempty"`
+	Type         string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "lease"
+	ID           string    `json:"id,omitempty"`
+	CreatedAt    time.Time `json:"created_at,omitempty"`
+	Model        string    `json:"model,omitempty"`
+	System       string    `json:"system,omitempty"`
+	Title        string    `json:"title,omitempty"`
+	Source       string    `json:"source,omitempty"`
+	ModelConfig  string    `json:"model_config,omitempty"`
+	BoundEntry   string    `json:"bound_entry,omitempty"`
+	BoundAt      time.Time `json:"bound_at,omitempty"`
+	LeaseEntry   string    `json:"lease_entry,omitempty"`
+	LeaseExpires time.Time `json:"lease_expires,omitempty"`
+	Message      *Message  `json:"message,omitempty"`
 }
 
 func (s *Session) metaRecord() sessionRecord {
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt}
 }
 
 func messageRecord(m Message) sessionRecord {
@@ -496,6 +703,9 @@ func LoadSession(id string) (*Session, error) {
 			s.Title = rec.Title // a compacted file carries the title in its meta header
 			s.Source = rec.Source
 			s.ModelConfig = rec.ModelConfig
+			s.BoundEntry = rec.BoundEntry
+			s.BoundAt = rec.BoundAt
+			s.InFlight = 0
 		case "title":
 			s.Title = rec.Title // last one wins
 		case "model_config":
@@ -507,6 +717,10 @@ func LoadSession(id string) (*Session, error) {
 			if rec.Message != nil {
 				s.Messages = append(s.Messages, *rec.Message)
 			}
+		case "lease":
+			// Last lease record wins. An empty lease_entry clears the marker.
+			s.LeaseEntry = rec.LeaseEntry
+			s.LeaseExpires = rec.LeaseExpires
 		}
 	}
 	if err := sc.Err(); err != nil {

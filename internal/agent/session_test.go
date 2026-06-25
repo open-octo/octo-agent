@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -571,6 +572,52 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestSessionBind(t *testing.T) {
+	s := NewSession("m", "")
+
+	res, msg, err := s.Bind(EntryTUI, false)
+	if res != Bound || err != nil {
+		t.Fatalf("bind new: %v %v %v", res, msg, err)
+	}
+
+	res, msg, err = s.Bind(EntryTUI, false)
+	if res != AlreadyBound || err != nil {
+		t.Fatalf("bind same: %v %v %v", res, msg, err)
+	}
+
+	res, _, err = s.Bind(EntryWeb, false)
+	if res != Rejected || !errors.Is(err, ErrSessionBoundToOther) {
+		t.Fatalf("bind other without steal: %v %v", res, err)
+	}
+
+	res, msg, err = s.Bind(EntryWeb, true)
+	if res != Stolen || err != nil {
+		t.Fatalf("steal idle: %v %v %v", res, msg, err)
+	}
+	if !s.BoundTo(EntryWeb) {
+		t.Fatal("expected web binding after steal")
+	}
+
+	// Simulate an active turn lease from the current owner; stealing must fail.
+	s.LeaseEntry = EntryWeb
+	s.LeaseExpires = time.Now().Add(time.Minute)
+	res, _, err = s.Bind(EntryTUI, true)
+	if res != Rejected || err == nil {
+		t.Fatalf("steal with active lease should fail: %v %v", res, err)
+	}
+	s.LeaseExpires = time.Time{}
+
+	if !s.Unbind(EntryWeb) {
+		t.Fatal("Unbind should succeed for current entry")
+	}
+	if s.IsBound() {
+		t.Fatal("expected unbound after Unbind")
+	}
+	if s.Unbind(EntryTUI) {
+		t.Fatal("Unbind should fail for non-current entry")
+	}
 }
 
 func TestSession_UsedTools_PlainMessagesIsFalse(t *testing.T) {

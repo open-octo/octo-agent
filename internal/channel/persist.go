@@ -45,6 +45,10 @@ func sessionStoreID(key SessionKey) string {
 // override or the deterministic default) and passed in. Best-effort — a
 // corrupt or unreadable file degrades to a fresh conversation rather than
 // blocking the chat.
+//
+// For a restored session the existing BoundEntry is preserved; the caller
+// (Manager) must explicitly Bind(EntryChannel) before using it, so entry
+// ownership is enforced consistently across CLI/TUI/Web/IM.
 func (s *Session) restoreOrInitStore(id string) {
 	if loaded, err := agent.LoadSession(id); err == nil {
 		s.Store = loaded
@@ -53,13 +57,16 @@ func (s *Session) restoreOrInitStore(id string) {
 		}
 		return
 	}
-	st := &agent.Session{
-		ID:        id,
-		CreatedAt: time.Now(),
-		Model:     s.Agent.Model,
-		Source:    "channel",
-		Title:     string(s.Key),
-	}
+	st := agent.NewSession(s.Agent.Model, "")
+	st.ID = id
+	st.CreatedAt = time.Now()
+	st.Source = "channel"
+	st.BoundEntry = agent.EntryChannel
+	st.BoundAt = time.Now()
+	st.Title = string(s.Key)
+	// Persist immediately so the entry binding is visible to other processes
+	// (and to the server's authoritative LoadSession in handleChannelMessage).
+	_ = st.Save()
 	s.Store = st
 }
 

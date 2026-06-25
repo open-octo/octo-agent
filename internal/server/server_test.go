@@ -285,19 +285,21 @@ func mustServer(t *testing.T, cfg Config) *Server {
 
 	// Create a minimal server with stubbed provider.
 	srv := &Server{
-		cfg:            cfg,
-		mux:            http.NewServeMux(),
-		model:          "stub-model",
-		system:         "",
-		skillReg:       skills.Discover(""),
-		skillsManifest: "",
-		cwd:            "",
-		envCtx:         "",
-		turnLocks:      map[string]*sync.Mutex{},
-		sender:         &stubSender{},
-		accessKey:      mustAccessKey(cfg),
-		sessionAgents:  make(map[string]*agent.Agent),
-		steerQueues:    make(map[string][]agent.InboxItem),
+		cfg:                 cfg,
+		mux:                 http.NewServeMux(),
+		model:               "stub-model",
+		system:              "",
+		skillReg:            skills.Discover(""),
+		skillsManifest:      "",
+		cwd:                 "",
+		envCtx:              "",
+		turnLocks:           map[string]*sync.Mutex{},
+		sender:              &stubSender{},
+		accessKey:           mustAccessKey(cfg),
+		entryBindings:       make(map[string]*cachedEntryBinding),
+		sessionBindingLocks: map[string]*sync.Mutex{},
+		sessionAgents:       make(map[string]*agent.Agent),
+		steerQueues:         make(map[string][]agent.InboxItem),
 	}
 	srv.registerRoutes()
 	// Wrap with CORS middleware so tests that exercise CORS hit the right layer.
