@@ -96,7 +96,7 @@
     } else if (ev.type === 'assistant_message') {
       // Skip empty assistant turns (thinking-only / tool-only rounds) so they
       // don't render as blank bubbles.
-      if (!(ev.content ?? '').trim()) return
+      if (!(ev.content ?? '').trim() && !(ev.thinking ?? '').trim()) return
       addChatMsg(sid, {
         id: uid('a'),
         type: 'assistant',

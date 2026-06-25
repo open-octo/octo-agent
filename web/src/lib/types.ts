@@ -186,6 +186,7 @@ export interface WsEventAssistantMessage {
   type: 'assistant_message'
   content: string
   files: string[]
+  thinking: string
 }
 
 export interface WsEventToolCall {
