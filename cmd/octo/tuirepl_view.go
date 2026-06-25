@@ -1057,7 +1057,7 @@ func (m *tuiModel) View() string {
 	// exit notice will land there too, so a per-command panel just repeats
 	// what's known.
 	if bg := tools.RunningBackground(); len(bg) > 0 && !m.turnRunning {
-		frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+		frame := m.spinnerGlyph()
 		b.WriteString(hintStyle.Render(fmt.Sprintf("%c %s · %s",
 			frame, time.Since(bg[0].Start).Round(time.Second), shellCountLabel(len(bg)))))
 		b.WriteByte('\n')
@@ -1066,7 +1066,7 @@ func (m *tuiModel) View() string {
 	// Sub-agents panel — live tool-call chain of each running sub-agent
 	// (Claude-Code style), mirroring the background-processes panel.
 	if len(m.subAgentOrder) > 0 {
-		frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+		frame := m.spinnerGlyph()
 		var lines strings.Builder
 		for i, id := range m.subAgentOrder {
 			sa := m.subAgents[id]
@@ -1306,33 +1306,74 @@ func (m *tuiModel) thinkingPhrase() string {
 	return thinkingPhrases[(m.spinnerFrame/16)%len(thinkingPhrases)]
 }
 
-// spinnerLine renders one animated activity line: a braille frame, a label,
+// tuiSpinnerFrames is the in-app activity spinner: a center-out "breathing"
+// star that grows then shrinks (Claude Code style) instead of a scattered
+// braille wheel. Adjacent glyphs differ only by one size step, so the motion
+// reads as a calm pulse rather than a flicker. (The headless one-shot spinner
+// keeps its own braille frames — see spinner.go.)
+var tuiSpinnerFrames = []rune{'·', '✢', '✳', '∗', '✻', '✽', '✻', '∗', '✳', '✢'}
+
+// spinnerGlyph returns the current activity-spinner frame. The visible frame
+// advances at half the tick rate (~240ms/frame) so the pulse stays unhurried
+// while the elapsed clock above it still updates every second.
+func (m *tuiModel) spinnerGlyph() rune {
+	return tuiSpinnerFrames[(m.spinnerFrame/2)%len(tuiSpinnerFrames)]
+}
+
+// spinnerLine renders one animated activity line: a spinner frame, a label,
 // and elapsed seconds since the given start.
 func (m *tuiModel) spinnerLine(label string, since time.Time) string {
-	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+	frame := m.spinnerGlyph()
 	return hintStyle.Render(fmt.Sprintf("%c %s (%s)", frame, label, time.Since(since).Round(time.Second)))
 }
 
 // thinkingLine is the wait-on-the-model activity line. Since the reasoning
 // trace itself is not shown, the line carries the turn's elapsed time and a
-// rough output-token count ("↑ ~N tokens", chars/4) so a long silent stretch
+// rough output-token count ("↓ ~N tokens", chars/4) so a long silent stretch
 // still reads as the model working, Claude Code style. When a task is in
 // progress its present-continuous form replaces the generic thinking verb
 // ("Migrating config readers…" instead of "Thinking…").
 func (m *tuiModel) thinkingLine() string {
-	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+	frame := m.spinnerGlyph()
 	phrase := m.activeTaskPhrase()
 	if phrase == "" {
 		phrase = m.thinkingPhrase()
 	}
 	meta := time.Since(m.turnStart).Round(time.Second).String()
-	if m.turnOutChars > 0 {
-		meta += fmt.Sprintf(" · ↑ ~%s tokens", humanTokens(m.turnOutChars/4))
+	if m.turnOutChars == 0 {
+		// Uplink: the request/context is still going up and nothing has
+		// streamed back yet — an up arrow, no count to show.
+		meta += " · ↑"
+	} else {
+		// Downlink: tokens are streaming back. At the hand-off to the answer
+		// the counter sprints (see answerSprint) as an accelerating flourish
+		// just before the prose appears.
+		meta += fmt.Sprintf(" · ↓ ~%s tokens", humanTokens(m.sprintTokens()))
 	}
 	return fmt.Sprintf("%s %s %s",
 		hintStyle.Render(string(frame)),
 		activityStyle.Render(phrase+"…"),
 		hintStyle.Render("("+meta+")"))
+}
+
+// sprintTokens is the token estimate shown on the downlink line. Normally it's
+// the live estimate (chars/4); during the answer hand-off sprint it eases from
+// the pre-sprint value up to the live estimate on an accelerating (ease-in)
+// curve, so the counter visibly races just before the answer drops in.
+func (m *tuiModel) sprintTokens() int {
+	live := m.turnOutChars / 4
+	if !m.answerSprint {
+		return live
+	}
+	frac := float64(time.Since(m.sprintStart)) / float64(answerSprintDur)
+	if frac < 0 {
+		frac = 0
+	}
+	if frac > 1 {
+		frac = 1
+	}
+	eased := frac * frac // ease-in: slow start, accelerating finish
+	return m.sprintStartTok + int(float64(live-m.sprintStartTok)*eased)
 }
 
 // injectAssistantPrefix strips glamour's 2-space paragraph indent from the
