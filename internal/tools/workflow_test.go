@@ -2,23 +2,25 @@ package tools
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
-// TestDefaultTools_WorkflowGatedOnSpawner verifies the workflow tool is only
-// advertised when a Spawner is registered (it has nothing to delegate to
+// TestDefaultTools_WorkflowGatedOnSpawner verifies the workflow + workflow_status
+// tools are only advertised when a Spawner is registered (nothing to delegate to
 // otherwise).
 func TestDefaultTools_WorkflowGatedOnSpawner(t *testing.T) {
 	SetSpawner(nil)
 	t.Cleanup(func() { SetSpawner(nil) })
 
-	if advertisedNames()["workflow"] {
-		t.Error("workflow should be absent when no Spawner is configured")
+	if advertisedNames()["workflow"] || advertisedNames()["workflow_status"] {
+		t.Error("workflow tools should be absent when no Spawner is configured")
 	}
 	SetSpawner(&fakeSpawner{})
-	if !advertisedNames()["workflow"] {
-		t.Error("workflow should appear once a Spawner is registered")
+	if !advertisedNames()["workflow"] || !advertisedNames()["workflow_status"] {
+		t.Error("workflow + workflow_status should appear once a Spawner is registered")
 	}
 }
 
@@ -32,44 +34,81 @@ func (replySpawner) Continue(_ context.Context, _, _ string) (SpawnResult, error
 	return SpawnResult{}, nil
 }
 
-// TestWorkflowTool_Execute drives a parallel() script through the tool and
-// confirms each agent() call reaches the Spawner and results come back in order.
-func TestWorkflowTool_Execute(t *testing.T) {
+var wfRunIDRe = regexp.MustCompile(`wf_\d+`)
+
+// startWorkflowAndWait starts a background workflow via the tool, then polls
+// workflow_status by run id until it is no longer running, returning the final
+// status text. Fails the test on timeout.
+func startWorkflowAndWait(t *testing.T, input map[string]any) string {
+	t.Helper()
+	res, err := WorkflowTool{}.Execute(context.Background(), "c", input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	id := wfRunIDRe.FindString(res.Text)
+	if id == "" {
+		t.Fatalf("no run id in start result: %q", res.Text)
+	}
+	for i := 0; i < 500; i++ {
+		out, err := WorkflowStatusTool{}.Execute(context.Background(), "c", map[string]any{"run_id": id})
+		if err != nil {
+			t.Fatalf("workflow_status: %v", err)
+		}
+		if !strings.Contains(out.Text, "[running]") {
+			return out.Text
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("workflow did not finish within the polling window")
+	return ""
+}
+
+// TestWorkflowTool_StartsInBackground verifies the tool returns a run handle
+// immediately rather than blocking on the result.
+func TestWorkflowTool_StartsInBackground(t *testing.T) {
 	SetSpawner(replySpawner{})
 	t.Cleanup(func() { SetSpawner(nil) })
 
-	res, err := WorkflowTool{}.Execute(context.Background(), "call-1", map[string]any{
+	res, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{
 		"script": `parallel(%w[a b c]) { |x| agent(x) }.join(",")`,
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.HasPrefix(res.Text, "R[a],R[b],R[c]") {
-		t.Errorf("Text = %q, want R[a],R[b],R[c] prefix", res.Text)
+	if !strings.Contains(res.Text, "background") || wfRunIDRe.FindString(res.Text) == "" {
+		t.Errorf("start result should name a background run id; got %q", res.Text)
 	}
 }
 
-// TestWorkflowTool_ExecuteStream verifies live progress chunks flow through the
-// streaming callback: log() output plus each agent's start/finish.
-func TestWorkflowTool_ExecuteStream(t *testing.T) {
+// TestWorkflowTool_StatusCollectsResult drives the full async path: start, then
+// collect the completed result via workflow_status.
+func TestWorkflowTool_StatusCollectsResult(t *testing.T) {
 	SetSpawner(replySpawner{})
 	t.Cleanup(func() { SetSpawner(nil) })
 
-	var chunks []string
-	res, err := WorkflowTool{}.ExecuteStream(context.Background(), "c",
-		map[string]any{"script": `log("begin"); parallel(%w[a b]) { |x| agent(x) }.join(",")`},
-		func(chunk string) { chunks = append(chunks, chunk) })
+	got := startWorkflowAndWait(t, map[string]any{
+		"script": `parallel(%w[a b c]) { |x| agent(x) }.join(",")`,
+	})
+	if !strings.Contains(got, "[done]") || !strings.Contains(got, "R[a],R[b],R[c]") {
+		t.Errorf("status = %q, want a done run with R[a],R[b],R[c]", got)
+	}
+}
+
+// TestWorkflowTool_StatusListsRuns verifies the no-argument listing form.
+func TestWorkflowTool_StatusListsRuns(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+
+	_ = startWorkflowAndWait(t, map[string]any{
+		"script":      `agent("x")`,
+		"description": "list me",
+	})
+	out, err := WorkflowStatusTool{}.Execute(context.Background(), "c", map[string]any{})
 	if err != nil {
-		t.Fatalf("ExecuteStream: %v", err)
+		t.Fatalf("workflow_status list: %v", err)
 	}
-	if !strings.Contains(res.Text, "R[a],R[b]") {
-		t.Errorf("Text = %q", res.Text)
-	}
-	joined := strings.Join(chunks, "\n")
-	for _, want := range []string{"begin", "→ a", "→ b", "✓ a", "✓ b"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("progress chunks missing %q; got:\n%s", want, joined)
-		}
+	if !strings.Contains(out.Text, "list me") {
+		t.Errorf("listing should include the run description; got %q", out.Text)
 	}
 }
 
@@ -94,43 +133,23 @@ func TestWorkflowTool_RequiresScript(t *testing.T) {
 	}
 }
 
-// TestWorkflowTool_ScriptErrorIsActionable verifies a bad Ruby script comes
-// back as a fix-and-retry instruction (not an opaque failure) with the mruby
+// TestWorkflowTool_ScriptErrorIsActionable verifies a bad Ruby script surfaces
+// through workflow_status as a fix-and-retry instruction with the mruby
 // position noise stripped, so the model self-corrects instead of giving up.
 func TestWorkflowTool_ScriptErrorIsActionable(t *testing.T) {
 	SetSpawner(replySpawner{})
 	t.Cleanup(func() { SetSpawner(nil) })
 
-	_, err := WorkflowTool{}.Execute(context.Background(), "c",
-		map[string]any{"script": `this_is_not_defined(1)`})
-	if err == nil {
-		t.Fatal("expected an error from a bad script")
+	got := startWorkflowAndWait(t, map[string]any{"script": `this_is_not_defined(1)`})
+	if !strings.Contains(got, "[error]") {
+		t.Fatalf("status should report an error run; got %q", got)
 	}
-	msg := err.Error()
 	for _, want := range []string{"Fix the script and call workflow again", "this_is_not_defined"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("error = %q, want substring %q", msg, want)
+		if !strings.Contains(got, want) {
+			t.Errorf("error status = %q, want substring %q", got, want)
 		}
 	}
-	if strings.Contains(msg, "(unknown)") {
-		t.Errorf("error leaks mruby position noise: %q", msg)
-	}
-}
-
-// TestWorkflowTool_PartialFailureSuggestsResume verifies that when agents run
-// before the script errors, the failure surfaces the run id with a resume_from
-// hint so the retry skips the completed work.
-func TestWorkflowTool_PartialFailureSuggestsResume(t *testing.T) {
-	SetSpawner(replySpawner{})
-	t.Cleanup(func() { SetSpawner(nil) })
-
-	// First agent() succeeds (spending tokens + journaling), then a bad call.
-	_, err := WorkflowTool{}.Execute(context.Background(), "c",
-		map[string]any{"script": `agent("ok"); this_is_not_defined(1)`})
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	if !strings.Contains(err.Error(), "resume_from") {
-		t.Errorf("error should suggest resume_from after a partial run; got: %q", err.Error())
+	if strings.Contains(got, "(unknown)") {
+		t.Errorf("error status leaks mruby position noise: %q", got)
 	}
 }

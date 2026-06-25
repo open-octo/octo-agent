@@ -24,16 +24,16 @@ const defaultWorkflowConcurrency = 8
 // workflow.
 type WorkflowTool struct{}
 
-// WorkflowTool streams live progress (log() output + agent lifecycle).
-var _ agent.StreamingToolExecutor = WorkflowTool{}
-
 func (WorkflowTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "workflow",
-		Description: "Run a Ruby orchestration script for deterministic multi-agent work. " +
+		Description: "Start a Ruby orchestration script for deterministic multi-agent work. " +
 			"Use when a task decomposes into many sub-agent calls with explicit control flow " +
 			"(fan-out, pipelines, loops, conditionals) that you want executed reliably rather " +
 			"than improvised across turns.\n\n" +
+			"Runs in the BACKGROUND: this call returns a run id immediately; collect the result " +
+			"later with the workflow_status tool. (A long multi-agent run won't block you or the " +
+			"user while it executes.)\n\n" +
 			"The script runs in a sandboxed mruby interpreter (no file/network access — all " +
 			"effects go through the primitives). Primitives:\n" +
 			"- `agent(prompt, opts = {}) -> String`: run one sub-agent to completion, return " +
@@ -49,7 +49,7 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"- `phase(title)`: mark the start of a named stage; groups the progress " +
 			"stream into steps (cosmetic, does not affect scheduling).\n" +
 			"- `budget_remaining -> Integer`: remaining output-token budget.\n\n" +
-			"The script's final expression is returned as the result. Example:\n" +
+			"The script's final expression is the run's result. Example:\n" +
 			"```ruby\n" +
 			"findings = parallel(%w[auth db cache]) { |area| agent(\"Audit the #{area} module for bugs\") }\n" +
 			"\"Reviewed #{findings.size} modules:\\n\" + findings.join(\"\\n---\\n\")\n" +
@@ -59,16 +59,16 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"properties": map[string]any{
 				"script": map[string]any{
 					"type":        "string",
-					"description": "The Ruby workflow script. Its last expression is the returned result. Use agent()/parallel()/pipeline()/log() to orchestrate sub-agents.",
+					"description": "The Ruby workflow script. Its last expression is the run's result. Use agent()/parallel()/pipeline()/log() to orchestrate sub-agents.",
 				},
 				"description": map[string]any{
 					"type":        "string",
-					"description": "Short human-readable label for this workflow (3-7 words). Shown in progress UI.",
+					"description": "Short human-readable label for this workflow (3-7 words). Shown in the status list and progress UI.",
 				},
 				"resume_from": map[string]any{
 					"type": "string",
-					"description": "Run ID of a prior workflow run to resume from " +
-						"(format: wf-YYYYMMDD-HHMMSS-xxxxxxxx, returned as \"[workflow run: ...]\" " +
+					"description": "Run id of a prior workflow run to resume from " +
+						"(format: wf-YYYYMMDD-HHMMSS-xxxxxxxx, shown as \"[workflow run: ...]\" " +
 						"in a previous result). Completed agent() calls are replayed instantly " +
 						"without re-running. The script must be identical to the original run.",
 				},
@@ -78,14 +78,8 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 	}
 }
 
-func (t WorkflowTool) Execute(ctx context.Context, name string, input map[string]any) (agent.ToolResult, error) {
-	return t.ExecuteStream(ctx, name, input, func(string) {})
-}
-
-// ExecuteStream runs the workflow and streams live progress — the script's
-// log() output plus each agent's start/finish — as tool-progress chunks, so the
-// UI shows what a long multi-agent run is doing instead of an opaque spinner.
-func (WorkflowTool) ExecuteStream(ctx context.Context, _ string, input map[string]any, progress func(chunk string)) (agent.ToolResult, error) {
+// Execute starts the workflow in the background and returns its run handle.
+func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	if IsSubAgent(ctx) {
 		return agent.ToolResult{}, fmt.Errorf("workflow: a sub-agent cannot run a workflow")
 	}
@@ -120,61 +114,62 @@ func (WorkflowTool) ExecuteStream(ctx context.Context, _ string, input map[strin
 		}
 	}
 
-	// Collect log() lines for the final result, and also stream them — plus
-	// agent lifecycle — live via the progress callback.
-	var logs []string
-	res, err := workflow.Run(ctx, script, workflow.Options{
-		Agent: af,
-		Log: func(s string) {
-			logs = append(logs, s)
-			progress(s)
-		},
-		Progress:      progress,
+	mgr := resolveWorkflowManager(ctx)
+	runID, err := mgr.Start(WorkflowRunRequest{
+		Description:   strings.TrimSpace(stringArg(input, "description")),
+		Script:        script,
+		Agent:         af,
 		MaxConcurrent: defaultWorkflowConcurrency,
 		ResumeFrom:    stringArg(input, "resume_from"),
 	})
 	if err != nil {
-		return agent.ToolResult{}, workflowError(err, res, logs)
+		return agent.ToolResult{}, fmt.Errorf("workflow: %w", err)
 	}
-
-	text := res.Output
-	if len(logs) > 0 {
-		text += "\n\n[workflow log]\n" + strings.Join(logs, "\n")
-	}
-	if res.RunID != "" {
-		text += "\n\n[workflow run: " + res.RunID + "]"
-	}
-	return agent.ToolResult{Text: text}, nil
+	return agent.ToolResult{Text: fmt.Sprintf(
+		"Workflow started in the background as %s. It runs while you continue; "+
+			"call workflow_status(%q) to check progress and collect the result "+
+			"(or workflow_status with no argument to list all runs).", runID, runID)}, nil
 }
 
-// workflowError turns a failed run into an actionable tool error. A script
-// error is the model's own Ruby — it must learn to fix the script and re-call
-// workflow rather than treat the failure as terminal — so the message says so
-// explicitly. When agents completed before the failure, their results are
-// journaled under res.RunID; surfacing it lets the retry pass resume_from to
-// skip the work already done. Logs are appended last since they often show how
-// far the run got.
-func workflowError(err error, res workflow.Result, logs []string) error {
-	var b strings.Builder
-	if strings.Contains(err.Error(), "script error") {
-		b.WriteString("workflow: the Ruby script you wrote failed to run. ")
-		b.WriteString("Fix the script and call workflow again.\n\n")
-		b.WriteString(err.Error())
-		// Resume hint only when at least one agent actually ran (tokens spent);
-		// a compile/syntax error journals nothing, so resume would be a no-op.
-		if res.RunID != "" && (res.OutputTokens > 0 || res.InputTokens > 0) {
-			b.WriteString(fmt.Sprintf(
-				"\n\nSome agents completed before the failure. To skip re-running them, "+
-					"pass resume_from: %q in the retry (only the agent() calls that didn't "+
-					"finish will run again).", res.RunID))
+// WorkflowStatusTool reports on background workflow runs: a list with no
+// argument, or one run's full status + result when given a run id.
+type WorkflowStatusTool struct{}
+
+func (WorkflowStatusTool) Definition() agent.ToolDefinition {
+	return agent.ToolDefinition{
+		Name: "workflow_status",
+		Description: "Check background workflow runs started with the workflow tool. " +
+			"With no run_id: list this session's runs and their status (running/done/error). " +
+			"With a run_id: the full result (or error + how to fix/resume) plus the captured log.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"run_id": map[string]any{
+					"type":        "string",
+					"description": "A run id from the workflow tool (e.g. \"wf_1\"). Omit to list all runs.",
+				},
+			},
+		},
+	}
+}
+
+func (WorkflowStatusTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
+	mgr := resolveWorkflowManager(ctx)
+	runID := strings.TrimSpace(stringArg(input, "run_id"))
+	if runID == "" {
+		runs := mgr.List()
+		if len(runs) == 0 {
+			return agent.ToolResult{Text: "No background workflows have been started in this session."}, nil
 		}
-	} else {
-		b.WriteString("workflow: ")
-		b.WriteString(err.Error())
+		lines := make([]string, 0, len(runs))
+		for _, r := range runs {
+			lines = append(lines, statusLine(r))
+		}
+		return agent.ToolResult{Text: strings.Join(lines, "\n")}, nil
 	}
-	if len(logs) > 0 {
-		b.WriteString("\n\n[workflow log]\n")
-		b.WriteString(strings.Join(logs, "\n"))
+	snap, ok := mgr.Read(runID)
+	if !ok {
+		return agent.ToolResult{}, fmt.Errorf("workflow_status: no run named %q in this session", runID)
 	}
-	return fmt.Errorf("%s", b.String())
+	return agent.ToolResult{Text: formatRunDetail(snap)}, nil
 }

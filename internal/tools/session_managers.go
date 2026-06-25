@@ -126,6 +126,66 @@ func KillAllSessionSubAgents() {
 	}
 }
 
+// ─── Workflow managers ──────────────────────────────────────────────────────
+
+// defaultWorkflowMgr is the process-global background-workflow manager used by
+// the CLI/TUI, which never stamp a ctx-scoped manager.
+var defaultWorkflowMgr = NewWorkflowManager()
+
+type workflowManagerCtxKey struct{}
+
+// WithWorkflowManager stamps ctx with the per-session workflow manager the
+// workflow tools dispatch to (web/IM). CLI/TUI leave it unset and fall back to
+// defaultWorkflowMgr.
+func WithWorkflowManager(ctx context.Context, mgr *WorkflowManager) context.Context {
+	return context.WithValue(ctx, workflowManagerCtxKey{}, mgr)
+}
+
+func workflowManagerFromContext(ctx context.Context) *WorkflowManager {
+	m, _ := ctx.Value(workflowManagerCtxKey{}).(*WorkflowManager)
+	return m
+}
+
+// resolveWorkflowManager picks the ctx-scoped per-session manager (web/IM)
+// first, else the process-global default (CLI/TUI).
+func resolveWorkflowManager(ctx context.Context) *WorkflowManager {
+	if m := workflowManagerFromContext(ctx); m != nil {
+		return m
+	}
+	return defaultWorkflowMgr
+}
+
+// Per-session workflow managers, keyed like the background/sub-agent managers.
+var (
+	sessionWorkflowMgrsMu sync.Mutex
+	sessionWorkflowMgrs   = map[string]*WorkflowManager{}
+)
+
+// SessionWorkflowManager returns the per-session workflow manager for id,
+// creating it on first use.
+func SessionWorkflowManager(id string) *WorkflowManager {
+	sessionWorkflowMgrsMu.Lock()
+	defer sessionWorkflowMgrsMu.Unlock()
+	m := sessionWorkflowMgrs[id]
+	if m == nil {
+		m = NewWorkflowManager()
+		sessionWorkflowMgrs[id] = m
+	}
+	return m
+}
+
+// CloseSessionWorkflowManager cancels every workflow tracked for a session and
+// drops its manager. No-op for an unknown id.
+func CloseSessionWorkflowManager(id string) {
+	sessionWorkflowMgrsMu.Lock()
+	m := sessionWorkflowMgrs[id]
+	delete(sessionWorkflowMgrs, id)
+	sessionWorkflowMgrsMu.Unlock()
+	if m != nil {
+		m.KillAll()
+	}
+}
+
 // allBackgroundManagers returns defaultBg plus every live per-session manager,
 // so process-wide operations (shutdown reap) cover every tracked process.
 func allBackgroundManagers() []*BackgroundManager {

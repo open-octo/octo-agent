@@ -1397,6 +1397,9 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 			sess.Agent.Inbox.Enqueue(tools.FormatBgNote(e))
 		})
 		ctx = tools.WithBackgroundManager(ctx, bgMgr)
+		// Per-chat workflow manager so background workflows are isolated per
+		// conversation (their own wf_N namespace and concurrency budget).
+		ctx = tools.WithWorkflowManager(ctx, tools.SessionWorkflowManager("im:"+string(sess.Key)))
 		// Turn-scoped asker: ask_user_question prompts in this chat instead
 		// of falling back to the process-global wsAsker, which broadcasts to
 		// browser tabs an IM session doesn't have (the question would hang

@@ -535,6 +535,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	s.forgetTurnLock(id)
 	tools.CloseSessionBackgroundManager(id) // reap the session's background daemons
 	tools.CloseSessionSubAgentManager(id)   // and its sub-agents
+	tools.CloseSessionWorkflowManager(id)   // and its background workflows
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": []string{id}})
 }
 
@@ -565,6 +566,7 @@ func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
 		s.forgetTurnLock(id)
 		tools.CloseSessionBackgroundManager(id) // reap the session's background daemons
 		tools.CloseSessionSubAgentManager(id)   // and its sub-agents
+		tools.CloseSessionWorkflowManager(id)   // and its background workflows
 		deleted = append(deleted, id)
 	}
 
@@ -679,6 +681,9 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.C
 	if sid, ok := ctx.Value(ctxKeySessionID{}).(string); ok && sid != "" {
 		ask = s.permissionAskFrom(sid)
 		ctx = tools.WithBackgroundManager(ctx, tools.SessionBackgroundManager(sid))
+		// Per-session workflow manager so background workflows are isolated per
+		// session (own wf_N namespace + concurrency budget) and reaped on delete.
+		ctx = tools.WithWorkflowManager(ctx, tools.SessionWorkflowManager(sid))
 		// "Always allow" decisions live per session, not per engine — the
 		// engine is rebuilt every turn.
 		engine.AttachRemembered(s.rememberedFor(sid))
