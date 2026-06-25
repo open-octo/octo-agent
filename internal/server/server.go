@@ -1123,14 +1123,18 @@ func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse
 // pending wsAsker.Ask call.
 func (s *Server) handleWSUserQuestionAnswer(qid string, choices []string, custom string, cancelled bool) {
 	s.questionMu.Lock()
-	if ch, ok := s.questionChans[qid]; ok {
-		ch <- tools.AskResponse{
-			Choices:   choices,
-			Custom:    custom,
-			Cancelled: cancelled,
-		}
+	defer s.questionMu.Unlock()
+	ch, ok := s.questionChans[qid]
+	if !ok {
+		slog.Warn("user_question_answer: no pending question channel", "qid", qid)
+		return
 	}
-	s.questionMu.Unlock()
+	ch <- tools.AskResponse{
+		Choices:   choices,
+		Custom:    custom,
+		Cancelled: cancelled,
+	}
+	slog.Info("user_question_answer: delivered", "qid", qid, "choices", choices, "custom", custom, "cancelled", cancelled)
 }
 
 // permissionAskFrom adapts the server's requestConfirmation into an

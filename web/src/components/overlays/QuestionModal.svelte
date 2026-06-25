@@ -15,7 +15,8 @@
   })
 
   function toggleOption(opt: string) {
-    if ($questionModal?.multi_select) {
+    // ChatView stores the server field `multi_select` as `multiSelect`.
+    if ($questionModal?.multiSelect) {
       selected = selected.includes(opt)
         ? selected.filter(o => o !== opt)
         : [...selected, opt]
@@ -26,13 +27,22 @@
 
   function submit() {
     if (!$questionModal) return
-    ws.answerQuestion($questionModal.question_id, selected, customText)
+    const q = $questionModal
+    const payload = {
+      question_id: q.question_id,
+      choices: [...selected],
+      custom: customText,
+    }
+    console.log('[question] submit', payload)
+    ws.answerQuestion(payload.question_id, payload.choices, payload.custom)
     questionModal.set(null)
   }
 
   function cancel() {
     if (!$questionModal) return
-    ws.answerQuestion($questionModal.question_id, [], '', true)
+    const q = $questionModal
+    console.log('[question] cancel', { question_id: q.question_id })
+    ws.answerQuestion(q.question_id, [], '', true)
     questionModal.set(null)
   }
 
