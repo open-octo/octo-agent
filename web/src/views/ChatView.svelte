@@ -27,6 +27,7 @@
     clearMsgs,
     appendToLastAssistant,
     addToolCallToGroup,
+    commitThinking,
     updateToolResult,
     setToolError,
     finishAllTools,
@@ -107,6 +108,10 @@
         tools: [],
         todos: [],
       })
+    } else if (ev.type === 'thinking') {
+      // Standalone reasoning segment from an intermediate (tool) round — render
+      // it before the tools it preceded.
+      commitThinking(sid, ev.text ?? '')
     } else if (ev.type === 'tool_call') {
       addToolCallToGroup(sid, {
         id: uid('t'),
@@ -254,8 +259,10 @@
 
     cleanups.push(ws.on('tool_call', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      // Step boundary: clear the live thinking buffer so the next step's
-      // reasoning starts fresh (mirrors the TUI's EventToolStarted reset).
+      // Step boundary: commit the reasoning that preceded this tool call as a
+      // standalone Thoughts segment so it renders before the tool (think → act)
+      // and breaks the tool group, then reset the live buffer for the next step.
+      commitThinking(sid, get(chatThinking)[sid] ?? '')
       chatThinking.update(tt => ({ ...tt, [sid]: '' }))
       addToolCallToGroup(sid, {
         id: uid('t'),
@@ -629,6 +636,22 @@
                       </button>
                     </div>
                   {/if}
+                </div>
+              </div>
+
+            {:else if msg.type === 'thinking'}
+              <!-- Standalone Thoughts segment (reasoning before a tool round) -->
+              <div class="msg-agent fadein">
+                <div class="agent-avatar">O</div>
+                <div class="agent-content">
+                  <details class="think-block">
+                    <summary class="think-summary">
+                      <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
+                      <span>{$t('chat.thoughts')}</span>
+                      <iconify-icon icon="lucide:chevron-right" width="13"></iconify-icon>
+                    </summary>
+                    <div class="think-body">{@html renderMarkdown(msg.thinking)}</div>
+                  </details>
                 </div>
               </div>
 

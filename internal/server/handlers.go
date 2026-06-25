@@ -459,35 +459,64 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 				events = append(events, ev)
 			}
 		case agent.RoleAssistant:
-			// Emit tool_call events for any tool_use blocks.
+			// Reasoning trace: Anthropic returns a standalone "thinking" block;
+			// OpenAI-protocol models stash it on the first tool_use block.
+			thinking := ""
+			hasToolUse := false
 			for _, b := range m.Blocks {
 				if b.Type == "tool_use" {
+					hasToolUse = true
+				}
+				if thinking == "" {
+					if b.Type == "thinking" && b.Thinking != "" {
+						thinking = b.Thinking
+					} else if b.Type == "tool_use" && b.Reasoning != "" {
+						thinking = b.Reasoning
+					}
+				}
+			}
+			if hasToolUse {
+				// Intermediate (tool) round — replay in block order so it mirrors
+				// the live stream's think → act sequence: the reasoning (and any
+				// answer text) come BEFORE the tool calls. Each non-tool segment
+				// is a group boundary, so tools separated by thinking/text don't
+				// collapse into one card. Emitted as a standalone "thinking"
+				// segment rather than inline, since this round has no answer bubble.
+				if thinking != "" {
+					events = append(events, map[string]any{"type": "thinking", "text": thinking})
+				}
+				var txt strings.Builder
+				for _, b := range m.Blocks {
+					if b.Type == "text" {
+						txt.WriteString(b.Text)
+					}
+				}
+				if txt.Len() > 0 {
 					events = append(events, map[string]any{
-						"type":    "tool_call",
-						"name":    b.Name,
-						"args":    b.Input,
-						"tool_id": b.ID,
+						"type":     "assistant_message",
+						"content":  txt.String(),
+						"thinking": "",
 					})
 				}
-			}
-			// Pull reasoning/thinking trace from blocks ( Anthropic "thinking"
-			// or OpenAI reasoning stashed on "tool_use").
-			thinking := ""
-			for _, b := range m.Blocks {
-				if b.Type == "thinking" && b.Thinking != "" {
-					thinking = b.Thinking
-					break
+				for _, b := range m.Blocks {
+					if b.Type == "tool_use" {
+						events = append(events, map[string]any{
+							"type":    "tool_call",
+							"name":    b.Name,
+							"args":    b.Input,
+							"tool_id": b.ID,
+						})
+					}
 				}
-				if b.Type == "tool_use" && b.Reasoning != "" {
-					thinking = b.Reasoning
-					break
-				}
+			} else {
+				// Final answer turn: keep the reasoning inline on the answer
+				// bubble, mirroring the live assistant_message.
+				events = append(events, map[string]any{
+					"type":     "assistant_message",
+					"content":  m.Content,
+					"thinking": thinking,
+				})
 			}
-			events = append(events, map[string]any{
-				"type":     "assistant_message",
-				"content":  m.Content,
-				"thinking": thinking,
-			})
 		}
 	}
 

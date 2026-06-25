@@ -140,12 +140,33 @@ export function clearMsgs(sessionId: string) {
   chatMessages.update(m => ({ ...m, [sessionId]: [] }))
 }
 
+// Commit a finished reasoning segment as a standalone Thoughts message. Used
+// both on history replay (a `thinking` event) and live (when a tool call ends
+// the current thinking step). Placing it in the message list — rather than the
+// transient live buffer — preserves think → act order and makes the segment a
+// tool-group boundary. Whitespace-only thinking is dropped.
+export function commitThinking(sessionId: string, text: string) {
+  const t = (text ?? '').trim()
+  if (!t) return
+  chatMessages.update(m => ({
+    ...m,
+    [sessionId]: [...(m[sessionId] || []), {
+      id: uid('th'), type: 'thinking', thinking: t,
+      createdAt: Date.now(), streaming: false, tools: [], todos: [],
+    }],
+  }))
+}
+
 export function addToolCallToGroup(sessionId: string, toolCall: any) {
   chatMessages.update(m => {
     const msgs = [...(m[sessionId] || [])]
-    const lastGroup = msgs.findLastIndex((x: any) => x.type === 'tool_group')
-    if (lastGroup >= 0 && msgs[lastGroup].streaming) {
-      msgs[lastGroup] = { ...msgs[lastGroup], tools: [...msgs[lastGroup].tools, toolCall] }
+    // Group consecutive tools only — append to the running group when it is the
+    // LAST message. Any thinking/assistant message pushed since (a reasoning
+    // step or LLM text between rounds) ends the group, so separated tools render
+    // as their own cards while back-to-back tool calls stay in one.
+    const last = msgs[msgs.length - 1]
+    if (last && last.type === 'tool_group' && last.streaming) {
+      msgs[msgs.length - 1] = { ...last, tools: [...last.tools, toolCall] }
     } else {
       msgs.push({ id: uid('grp'), type: 'tool_group', content: '', streaming: true, tools: [toolCall], todos: [], createdAt: Date.now() })
     }

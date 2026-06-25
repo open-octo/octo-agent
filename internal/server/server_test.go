@@ -1055,7 +1055,6 @@ func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {
 		"history_user_message",
 		"tool_call",
 		"tool_call",
-		"assistant_message",
 		"tool_result",
 		"tool_result",
 		"assistant_message",
@@ -1069,17 +1068,95 @@ func TestHandleGetSessionMessages_MultiToolUse(t *testing.T) {
 		}
 	}
 
-	// events[4] / events[5] are the two tool_results: only the first has UI.
-	ui, ok := body.Events[4]["ui_payload"].(map[string]any)
+	// A tool-use round with no reasoning/text emits no intermediate
+	// assistant_message — only its tool_calls — so the two tool_results land at
+	// events[3] / events[4]; only the first carries UI.
+	ui, ok := body.Events[3]["ui_payload"].(map[string]any)
 	if !ok || ui["type"] != "file_list" {
-		t.Errorf("events[4].ui_payload = %#v, want file_list payload", body.Events[4]["ui_payload"])
+		t.Errorf("events[3].ui_payload = %#v, want file_list payload", body.Events[3]["ui_payload"])
 	}
-	if _, present := body.Events[5]["ui_payload"]; present {
-		t.Errorf("events[5].ui_payload present, want absent: %#v", body.Events[5]["ui_payload"])
+	if _, present := body.Events[4]["ui_payload"]; present {
+		t.Errorf("events[4].ui_payload present, want absent: %#v", body.Events[4]["ui_payload"])
 	}
 	// The save-nudge reminder on res2 is model-facing — replay must strip it.
-	if got, _ := body.Events[5]["result"].(string); got != "file.txt:1:foo" {
-		t.Errorf("events[5].result = %q, want reminder stripped", got)
+	if got, _ := body.Events[4]["result"].(string); got != "file.txt:1:foo" {
+		t.Errorf("events[4].result = %q, want reminder stripped", got)
+	}
+}
+
+// TestHandleGetSessionMessages_ThinkingBeforeTools verifies an intermediate
+// (tool) round replays its reasoning as a standalone `thinking` event BEFORE the
+// tool_call (think → act), while the final answer keeps its reasoning inline on
+// the assistant_message. This is what lets the web UI place Thoughts ahead of
+// the tool card after a refresh instead of stranding it behind one.
+func TestHandleGetSessionMessages_ThinkingBeforeTools(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: "weather?"},
+		agent.NewToolUseMessage([]agent.ContentBlock{
+			agent.NewThinkingBlock("let me search", "SIG1"),
+			agent.NewToolUseBlock("call_1", "web_search", map[string]any{"q": "weather"}),
+		}),
+		agent.NewToolResultMessage([]agent.ContentBlock{
+			agent.NewToolResultBlock("call_1", "5 results", false),
+		}),
+		// Final answer turn carries its own reasoning inline (the fix that
+		// persists final-turn thinking).
+		{Role: agent.RoleAssistant, Content: "It's sunny.", Blocks: []agent.ContentBlock{
+			agent.NewThinkingBlock("synthesize the answer", "SIG2"),
+			agent.NewTextBlock("It's sunny."),
+		}},
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotTypes []string
+	for _, ev := range body.Events {
+		gotTypes = append(gotTypes, ev["type"].(string))
+	}
+	wantTypes := []string{
+		"history_user_message",
+		"thinking",  // intermediate reasoning, BEFORE the tool
+		"tool_call", // web_search
+		"tool_result",
+		"assistant_message", // final answer, reasoning inline
+	}
+	if len(gotTypes) != len(wantTypes) {
+		t.Fatalf("event types = %v, want %v", gotTypes, wantTypes)
+	}
+	for i, want := range wantTypes {
+		if gotTypes[i] != want {
+			t.Fatalf("event[%d].type = %q, want %q; full=%v", i, gotTypes[i], want, gotTypes)
+		}
+	}
+	if got, _ := body.Events[1]["text"].(string); got != "let me search" {
+		t.Errorf("events[1].text = %q, want intermediate thinking", got)
+	}
+	if got, _ := body.Events[4]["thinking"].(string); got != "synthesize the answer" {
+		t.Errorf("events[4].thinking = %q, want final reasoning inline", got)
+	}
+	if got, _ := body.Events[4]["content"].(string); got != "It's sunny." {
+		t.Errorf("events[4].content = %q, want answer text", got)
 	}
 }
 
