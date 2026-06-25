@@ -2,9 +2,11 @@
   import { onMount } from 'svelte'
   import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession } from './lib/stores'
   import { ws, wsState } from './lib/ws'
-  import { locale } from './lib/i18n'
+  import { locale, t } from './lib/i18n'
+  import { checkAuth } from './lib/auth'
   import { get } from 'svelte/store'
   import * as api from './lib/api'
+  import AuthGate from './components/overlays/AuthGate.svelte'
   import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
   import Header from './components/layout/Header.svelte'
   import Sidebar from './components/layout/Sidebar.svelte'
@@ -24,6 +26,9 @@
   import Toast from './components/overlays/Toast.svelte'
 
   let booted = false
+  // Set when the server requires an access key the user couldn't provide; the
+  // app shows a denied splash instead of booting.
+  let authDenied = $state(false)
 
   // ── URL routing ─────────────────────────────────────────────────────────────
   // Reflect the current view (and active chat session) in the hash so a refresh
@@ -44,6 +49,13 @@
   }
 
   onMount(async () => {
+    // Access-key gate, BEFORE any gated call. Loopback visits pass instantly
+    // (the server exempts them); a networked server without a valid key prompts
+    // via the AuthGate overlay. A denied result blocks boot with a message.
+    if (!(await checkAuth())) {
+      authDenied = true
+      return () => ws.disconnect()
+    }
     // First-run gate: decide the onboard phase BEFORE booting the main UI so it
     // never flashes behind the setup panel. Default to '' on error so a status
     // hiccup doesn't trap a configured user behind a blank splash.
@@ -127,7 +139,9 @@
   }
 </script>
 
-{#if $onboardPhase === 'unknown'}
+{#if authDenied}
+  <div class="splash splash-msg">{$t('auth.denied')}</div>
+{:else if $onboardPhase === 'unknown'}
   <div class="splash"><div class="spinner"></div></div>
 {:else if $onboardPhase === 'key_setup'}
   <FirstRunSetup />
@@ -159,6 +173,7 @@
 </div>
 {/if}
 
+<AuthGate />
 <CommandPalette />
 <McpModal />
 <ConfirmModal />
@@ -191,6 +206,11 @@
 .splash {
   height: 100vh; display: flex; align-items: center; justify-content: center;
   background: var(--bg-layout);
+}
+.splash-msg {
+  padding: 24px; text-align: center;
+  font-size: 14px; line-height: 1.6; color: var(--text-secondary);
+  max-width: 420px; margin: 0 auto;
 }
 .splash .spinner {
   width: 28px; height: 28px; border: 3px solid rgba(22,119,255,0.2);

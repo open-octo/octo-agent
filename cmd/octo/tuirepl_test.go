@@ -249,7 +249,7 @@ func TestTUI_ToolInputStreamProgress(t *testing.T) {
 }
 
 // The reasoning trace stays out of the scrollback — only its size feeds the
-// live activity line's "↑ ~N tokens" readout, so a long agentic turn doesn't
+// live activity line's "↓ ~N tokens" readout, so a long agentic turn doesn't
 // fill the transcript with thinking text.
 func TestTUI_ThinkingStaysOutOfScrollback(t *testing.T) {
 	m := newTestModel()
@@ -266,8 +266,92 @@ func TestTUI_ThinkingStaysOutOfScrollback(t *testing.T) {
 	}
 	// The wait-on-model activity line shows the running token estimate (chars/4).
 	out := m.View()
-	if !strings.Contains(out, "↑ ~1.0k tokens") {
+	if !strings.Contains(out, "↓ ~1.0k tokens") {
 		t.Errorf("view should show the output-token readout; got:\n%s", out)
+	}
+}
+
+// Before any token streams back the wait line shows the uplink ↑ (request still
+// going up); once tokens arrive it flips to the downlink ↓ with a count.
+func TestTUI_ThinkingArrowUplinkThenDownlink(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+
+	// Uplink: nothing received yet — up arrow, no count, no downlink arrow.
+	out := m.View()
+	if !strings.Contains(out, "· ↑") {
+		t.Errorf("uplink wait line should show ↑; got:\n%s", out)
+	}
+	if strings.Contains(out, "↓") {
+		t.Errorf("no downlink ↓ before any token; got:\n%s", out)
+	}
+
+	// Downlink: a reasoning delta arrives — flip to ↓ with the token readout.
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: strings.Repeat("x", 400)})
+	out = m.View()
+	if !strings.Contains(out, "↓ ~") {
+		t.Errorf("downlink wait line should show ↓ with a count; got:\n%s", out)
+	}
+}
+
+// After a real reasoning phase the first answer delta is held briefly (the
+// hand-off sprint) instead of streaming immediately; flushSprint releases it.
+func TestTUI_AnswerSprintHoldsThenReleases(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.assistantFirstBlock = true
+
+	// A reasoning phase ≥ the sprint threshold precedes the answer.
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: strings.Repeat("x", answerSprintMinChars)})
+
+	// First answer delta: held, not appended to the live partial.
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Here is the answer."})
+	if !m.answerSprint {
+		t.Fatal("first answer delta after a reasoning phase should start the sprint")
+	}
+	if m.partial.Len() != 0 {
+		t.Errorf("answer text must be held during the sprint, not streamed; partial=%q", m.partial.String())
+	}
+
+	// Release: the sprint ends and the held text reaches the live partial.
+	m.flushSprint()
+	if m.answerSprint {
+		t.Error("flushSprint should end the sprint")
+	}
+	if m.partial.Len() == 0 && len(m.printlnBuf) == 0 {
+		t.Error("released answer text should reach the partial or scrollback")
+	}
+}
+
+// A direct reply with no meaningful reasoning phase must not be held back — the
+// sprint only kicks in after a real uplink/reasoning wait, so quick answers add
+// no latency.
+func TestTUI_QuickReplySkipsSprint(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.assistantFirstBlock = true
+
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "hi"})
+	if m.answerSprint {
+		t.Error("a direct reply with no reasoning phase must not sprint")
+	}
+}
+
+// A non-text event arriving mid-sprint (e.g. a tool call) releases the held
+// answer text first, so output commits in the right order.
+func TestTUI_SprintFlushedByNonTextEvent(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.assistantFirstBlock = true
+
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: strings.Repeat("x", answerSprintMinChars)})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "partial answer"})
+	if !m.answerSprint {
+		t.Fatal("sprint should be active")
+	}
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "mcp_thing", Input: map[string]any{"q": "x"}})
+	if m.answerSprint {
+		t.Error("a non-text event should flush and end the sprint")
 	}
 }
 

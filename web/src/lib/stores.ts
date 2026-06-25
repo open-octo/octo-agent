@@ -128,10 +128,29 @@ export function updateLastMsg(sessionId: string, updater: (msg: any) => any) {
 }
 
 export function appendToLastAssistant(sessionId: string, content: string) {
+  if (!content) return
   chatMessages.update(m => {
     const msgs = [...(m[sessionId] || [])]
-    const last = msgs.findLastIndex((x: any) => x.type === 'assistant')
-    if (last >= 0) msgs[last] = { ...msgs[last], content: msgs[last].content + content, streaming: true }
+    const last = msgs.length - 1
+    // Continue the in-flight bubble only if it is the trailing message AND still
+    // streaming. Otherwise this delta opens a new segment (turn start, or text
+    // following a tool call / thinking block), so finalize any prior streaming
+    // bubble and push a fresh one. Without the freshness check a delta would
+    // either be dropped (no assistant bubble yet) or merged into a finalized
+    // reply from an earlier segment/turn.
+    if (last >= 0 && msgs[last].type === 'assistant' && msgs[last].streaming) {
+      msgs[last] = { ...msgs[last], content: msgs[last].content + content }
+      return { ...m, [sessionId]: msgs }
+    }
+    for (let i = 0; i < msgs.length; i++) {
+      if (msgs[i].type === 'assistant' && msgs[i].streaming) {
+        msgs[i] = { ...msgs[i], streaming: false }
+      }
+    }
+    msgs.push({
+      id: uid('a'), type: 'assistant', content,
+      thinking: '', createdAt: Date.now(), streaming: true, tools: [], todos: [],
+    })
     return { ...m, [sessionId]: msgs }
   })
 }
