@@ -198,14 +198,18 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// maskKey masks most of an API key, keeping the first and last four runes
+// visible. It measures by runes so it never splits a multi-byte UTF-8 character.
 func maskKey(k string) string {
 	if k == "" {
 		return ""
 	}
-	if len(k) <= 8 {
-		return strings.Repeat("*", len(k))
+	r := []rune(k)
+	n := len(r)
+	if n <= 8 {
+		return strings.Repeat("*", n)
 	}
-	return k[:4] + strings.Repeat("*", len(k)-8) + k[len(k)-4:]
+	return string(r[:4]) + strings.Repeat("*", n-8) + string(r[n-4:])
 }
 
 // ─── POST /api/config/test ──────────────────────────────────────────────────

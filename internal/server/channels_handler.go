@@ -258,9 +258,14 @@ func (s *Server) isAdapterRunning(platform string) bool {
 	return ok
 }
 
+// maskSecret masks most of a secret string, keeping the first and last four
+// runes visible. It measures by runes so it never splits a multi-byte UTF-8
+// character (even though real secrets are usually ASCII).
 func maskSecret(s string) string {
-	if len(s) <= 8 {
-		return strings.Repeat("*", len(s))
+	r := []rune(s)
+	n := len(r)
+	if n <= 8 {
+		return strings.Repeat("*", n)
 	}
-	return s[:4] + strings.Repeat("*", len(s)-8) + s[len(s)-4:]
+	return string(r[:4]) + strings.Repeat("*", n-8) + string(r[n-4:])
 }

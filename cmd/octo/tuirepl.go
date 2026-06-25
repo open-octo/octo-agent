@@ -1451,6 +1451,14 @@ func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
 	if len(m.queue) > 0 {
 		next := m.queue[0]
 		m.queue = m.queue[1:]
+		// A slash command queued mid-turn is dispatched now that we're idle.
+		if strings.HasPrefix(next.text, "/") && len(next.blocks) == 0 {
+			model, cmd := m.dispatchSlash(next.text)
+			if cmd == nil {
+				return model, m.flushPrints()
+			}
+			return model, tea.Sequence(m.flushPrints(), cmd)
+		}
 		return m, m.startQueued(next)
 	}
 	return m, nil

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Leihb/octo-agent/internal/eval"
 )
@@ -158,10 +159,21 @@ func firstLine(s string) string {
 		s = s[:i]
 	}
 	s = strings.TrimSpace(s)
-	if len(s) > 72 {
-		return s[:69] + "..."
+	if utf8.RuneCountInString(s) > 72 {
+		return truncateRunes(s, 69) + "..."
 	}
 	return s
+}
+
+func truncateRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 func lastLines(s string, n int) string {

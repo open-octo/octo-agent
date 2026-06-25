@@ -65,8 +65,8 @@ func TestCompletion_ClosedConditions(t *testing.T) {
 	}
 	m.turnRunning = true
 	setInputAndComplete(m, "/")
-	if m.complItems != nil {
-		t.Errorf("menu should stay closed while a turn runs; got %v", complNames(m))
+	if len(m.complItems) != len(builtinSlashCommands) {
+		t.Errorf("menu should stay open while a turn runs; got %v", complNames(m))
 	}
 }
 

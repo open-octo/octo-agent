@@ -1,6 +1,10 @@
 package memory
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
 
 func TestParseRules_Sections(t *testing.T) {
 	raw := `# Memory index
@@ -89,6 +93,17 @@ func TestParseRules_TriggeredBulletWithoutClause(t *testing.T) {
 	}
 	if r.Triggered[0].Text != "a rule with no trigger clause" || len(r.Triggered[0].Triggers) != 0 {
 		t.Errorf("got %+v", r.Triggered[0])
+	}
+}
+
+func TestOneLine_TruncatesOnRunes(t *testing.T) {
+	longCJK := strings.Repeat("中", 70)
+	got := oneLine(longCJK)
+	if strings.ContainsRune(got, '\uFFFD') {
+		t.Errorf("got replacement character in %q", got)
+	}
+	if utf8.RuneCountInString(got) > 60 {
+		t.Errorf("rune count too large: %d, %q", utf8.RuneCountInString(got), got)
 	}
 }
 

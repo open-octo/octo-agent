@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // Lint inspects a memory dir's MEMORY.md for problems that silently degrade
@@ -46,10 +47,23 @@ func Lint(dir string) []string {
 // oneLine collapses a rule to a short single-line form for warning output.
 func oneLine(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > 60 {
-		s = s[:57] + "…"
+	if utf8.RuneCountInString(s) > 60 {
+		s = truncateRunes(s, 57) + "…"
 	}
 	return s
+}
+
+// truncateRunes returns s truncated to at most n runes without splitting a
+// multi-byte UTF-8 character (byte slicing CJK runes produces "�").
+func truncateRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 // Rule is one actionable memory item parsed from MEMORY.md's structured
