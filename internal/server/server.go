@@ -523,6 +523,7 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/tasks", s.handleCreateTask)
 	s.api("DELETE /api/tasks/{id}", s.handleDeleteTask)
 	s.api("POST /api/tasks/{id}/run", s.handleRunTask)
+	s.api("PATCH /api/tasks/{id}/toggle", s.handleToggleTask)
 	s.api("GET /api/profile/soul", s.handleGetProfileSoul)
 	s.api("GET /api/profile/user", s.handleGetProfileUser)
 	s.api("GET /api/memories", s.handleGetMemories)

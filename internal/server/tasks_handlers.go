@@ -238,6 +238,39 @@ func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "id": id})
 }
 
+// handleToggleTask pauses or resumes a scheduled task. Update reschedules or
+// unschedules the live cron entry and persists, so the change survives restart.
+func (s *Server) handleToggleTask(w http.ResponseWriter, r *http.Request) {
+	s.initScheduler()
+	if s.scheduler == nil {
+		writeError(w, http.StatusInternalServerError, "scheduler not available")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing task id")
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	task, err := s.scheduler.Get(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	task.Enabled = req.Enabled
+	if err := s.scheduler.Update(*task); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, taskToResponse(*task))
+}
+
 func taskToResponse(t scheduler.Task) taskResponse {
 	r := taskResponse{
 		ID:      t.ID,

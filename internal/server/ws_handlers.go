@@ -1011,17 +1011,11 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// so turn_done + assistant_message were broadcast by the handler.
 			// Nothing more for the reply itself.
 		} else {
-			wd, pm, re, _, _ := s.sessionStatusFields()
+			// Surface the error, then fall through to the common complete +
+			// session_update tail. Returning here would skip `complete`, leaving
+			// the web UI's streaming flag (and its caret) stuck on forever; the
+			// tail's session_update is a superset of what we'd emit here.
 			sw.error(err.Error())
-			s.wsHub.broadcast(sess.ID, map[string]any{
-				"type":             "session_update",
-				"session_id":       sess.ID,
-				"status":           "idle",
-				"working_dir":      wd,
-				"permission_mode":  pm,
-				"reasoning_effort": re,
-			})
-			return
 		}
 	} else {
 		// Normal completion: emit the final turn_done explicitly so the
