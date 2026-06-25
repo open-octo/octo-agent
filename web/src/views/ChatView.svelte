@@ -638,7 +638,7 @@
                         <span>{$t('chat.thoughts')}</span>
                         <iconify-icon icon="lucide:chevron-right" width="13"></iconify-icon>
                       </summary>
-                      <div class="think-body">{@html renderMarkdown(msg.thinking)}</div>
+                      <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(msg.thinking)}</div>
                     </details>
                   {/if}
 
@@ -682,7 +682,7 @@
                       <span>{$t('chat.thoughts')}</span>
                       <iconify-icon icon="lucide:chevron-right" width="13"></iconify-icon>
                     </summary>
-                    <div class="think-body">{@html renderMarkdown(msg.thinking)}</div>
+                    <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(msg.thinking)}</div>
                   </details>
                 </div>
               </div>
@@ -738,7 +738,7 @@
                     <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
                     <span>{$t('chat.thinking')}</span>
                   </summary>
-                  <div class="think-body">{@html renderMarkdown(thinking)}</div>
+                  <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(thinking)}</div>
                 </details>
               </div>
             </div>
@@ -893,40 +893,45 @@
 /* ── Rich answer (markdown) ──────────────────────────────────────────────── */
 .rich-answer { font-size: 14px; line-height: 1.6; color: var(--text); display: flex; flex-direction: column; gap: 12px; }
 :global(.rich-answer p) { margin: 0; }
-:global(.rich-answer code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+:global(.rich-answer code), :global(.think-body code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-style: normal;
   background: var(--bg-table-header); border: 1px solid var(--border-table); border-radius: 4px; padding: 1px 5px;
 }
-:global(.rich-answer .code-block) { border: 1px solid var(--border-table); border-radius: 8px; overflow: hidden; background: var(--bg-sidebar); }
-:global(.rich-answer .code-header) {
+:global(.rich-answer .code-block), :global(.think-body .code-block) {
+  border: 1px solid var(--border-table); border-radius: 8px; overflow: hidden;
+  background: var(--bg-sidebar); font-style: normal;
+}
+:global(.rich-answer .code-header), :global(.think-body .code-header) {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px;
   background: var(--bg-table-header); border-bottom: 1px solid var(--border-table);
 }
-:global(.rich-answer .code-lang) { font-size: 11px; color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-:global(.rich-answer .copy-btn) {
+:global(.rich-answer .code-lang), :global(.think-body .code-lang) { font-size: 11px; color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+:global(.rich-answer .copy-btn), :global(.think-body .copy-btn) {
   margin-left: auto; height: 24px; padding: 0 8px; border: none; background: transparent;
   border-radius: 5px; display: flex; align-items: center; gap: 5px;
   font-size: 11px; color: var(--text-tertiary); cursor: pointer;
 }
-:global(.rich-answer .copy-btn:hover) { background: var(--hover-neutral); color: var(--blue-6); }
-:global(.rich-answer pre) {
+:global(.rich-answer .copy-btn:hover), :global(.think-body .copy-btn:hover) { background: var(--hover-neutral); color: var(--blue-6); }
+:global(.rich-answer pre), :global(.think-body pre) {
   margin: 0; padding: 12px 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.75;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); font-style: normal;
 }
-:global(.rich-answer .md-bq) {
+:global(.rich-answer .md-bq), :global(.think-body .md-bq) {
   margin: 0; padding: 8px 14px; border-left: 3px solid var(--blue-2);
   background: var(--surface-info); border-radius: 0 6px 6px 0;
   font-size: 13px; line-height: 1.6; color: var(--text-secondary);
 }
-:global(.rich-answer .think-block) { border-radius: 8px; }
-:global(.rich-answer .think-summary) {
+:global(.think-block) { border-radius: 8px; }
+:global(.think-summary) {
   list-style: none; display: inline-flex; align-items: center; gap: 6px;
   cursor: pointer; user-select: none; font-size: 13px; color: var(--text-tertiary);
 }
-:global(.rich-answer .think-summary:hover) { color: var(--text-secondary); }
-:global(.rich-answer .think-body) {
+:global(.think-summary::-webkit-details-marker) { display: none; }
+:global(.think-summary:hover) { color: var(--text-secondary); }
+:global(.think-body) {
   margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--border-secondary);
   font-size: 13px; line-height: 1.7; color: var(--text-tertiary); font-style: italic;
+  display: flex; flex-direction: column; gap: 10px;
 }
 
 /* ── Message actions ─────────────────────────────────────────────────────── */
