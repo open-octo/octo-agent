@@ -15,12 +15,14 @@ func TestDefaultTools_WorkflowGatedOnSpawner(t *testing.T) {
 	SetSpawner(nil)
 	t.Cleanup(func() { SetSpawner(nil) })
 
-	if advertisedNames()["workflow"] || advertisedNames()["workflow_status"] {
+	if advertisedNames()["workflow"] || advertisedNames()["workflow_status"] || advertisedNames()["workflow_kill"] {
 		t.Error("workflow tools should be absent when no Spawner is configured")
 	}
 	SetSpawner(&fakeSpawner{})
-	if !advertisedNames()["workflow"] || !advertisedNames()["workflow_status"] {
-		t.Error("workflow + workflow_status should appear once a Spawner is registered")
+	for _, name := range []string{"workflow", "workflow_status", "workflow_kill"} {
+		if !advertisedNames()[name] {
+			t.Errorf("%s should appear once a Spawner is registered", name)
+		}
 	}
 }
 
@@ -112,6 +114,67 @@ func TestWorkflowTool_StatusListsRuns(t *testing.T) {
 	}
 	if !strings.Contains(out.Text, "list me") {
 		t.Errorf("listing should include the run description; got %q", out.Text)
+	}
+}
+
+// ctxBlockingSpawner blocks each Spawn until the context is cancelled, so a
+// workflow built on it stays running until killed (and unwinds cleanly on kill).
+type ctxBlockingSpawner struct{}
+
+func (ctxBlockingSpawner) Spawn(ctx context.Context, _ SpawnRequest) (SpawnResult, error) {
+	<-ctx.Done()
+	return SpawnResult{}, ctx.Err()
+}
+func (ctxBlockingSpawner) Continue(_ context.Context, _, _ string) (SpawnResult, error) {
+	return SpawnResult{}, nil
+}
+
+// TestWorkflowTool_Kill drives the full kill path through the tools: start a
+// workflow whose agent blocks, cancel it with workflow_kill, and confirm
+// workflow_status reports it killed.
+func TestWorkflowTool_Kill(t *testing.T) {
+	SetSpawner(ctxBlockingSpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+
+	res, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"script": `agent("x")`})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	id := wfRunIDRe.FindString(res.Text)
+	if id == "" {
+		t.Fatalf("no run id in %q", res.Text)
+	}
+
+	kr, err := WorkflowKillTool{}.Execute(context.Background(), "c", map[string]any{"run_id": id})
+	if err != nil {
+		t.Fatalf("workflow_kill: %v", err)
+	}
+	if !strings.Contains(kr.Text, "Cancelled") {
+		t.Errorf("kill result = %q, want a cancellation confirmation", kr.Text)
+	}
+
+	// Poll until it leaves running, then confirm it reads as killed.
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		out, _ := WorkflowStatusTool{}.Execute(context.Background(), "c", map[string]any{"run_id": id})
+		if !strings.Contains(out.Text, "[running]") {
+			if !strings.Contains(out.Text, "killed") {
+				t.Errorf("final status = %q, want it to mention 'killed'", out.Text)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("killed workflow never left running")
+}
+
+// TestWorkflowKill_UnknownRun verifies the tool errors on an unknown id.
+func TestWorkflowKill_UnknownRun(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	_, err := WorkflowKillTool{}.Execute(context.Background(), "c", map[string]any{"run_id": "wf_nope_999"})
+	if err == nil || !strings.Contains(err.Error(), "no run named") {
+		t.Errorf("err = %v, want unknown-run error", err)
 	}
 }
 

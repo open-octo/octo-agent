@@ -42,6 +42,7 @@ var allTools = []tool{
 	AgentKillTool{},
 	WorkflowTool{},
 	WorkflowStatusTool{},
+	WorkflowKillTool{},
 	AskUserQuestionTool{},
 	TaskCreateTool{},
 	TaskUpdateTool{},
@@ -257,6 +258,9 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 			continue
 		}
 		if _, isWfStatus := t.(WorkflowStatusTool); isWfStatus && !spawnerOn {
+			continue
+		}
+		if _, isWfKill := t.(WorkflowKillTool); isWfKill && !spawnerOn {
 			continue
 		}
 		if _, isAsk := t.(AskUserQuestionTool); isAsk && !askerOn {

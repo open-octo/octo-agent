@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -113,4 +114,60 @@ func TestWorkflowManager_ConcurrencyCap(t *testing.T) {
 	}
 	close(block) // unblock so the goroutines exit
 	_ = started
+}
+
+// ctxBlockingAgent blocks until the context is cancelled, then returns the
+// cancellation error — so a Kill of the workflow actually unwinds it.
+func ctxBlockingAgent(ctx context.Context, _ string, _ workflow.AgentOptions) workflow.AgentResult {
+	<-ctx.Done()
+	return workflow.AgentResult{Err: ctx.Err()}
+}
+
+// TestWorkflowManager_Kill verifies a running workflow can be cancelled by id
+// and reports as killed.
+func TestWorkflowManager_Kill(t *testing.T) {
+	m := NewWorkflowManager()
+	id, err := m.Start(WorkflowRunRequest{Script: `agent("x")`, Agent: ctxBlockingAgent})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	found, wasRunning := m.Kill(id)
+	if !found || !wasRunning {
+		t.Fatalf("Kill = (found=%v, wasRunning=%v), want (true, true)", found, wasRunning)
+	}
+	snap := waitForDone(t, m, id)
+	if snap.Status != "error" || !strings.Contains(snap.ErrMsg, "killed") {
+		t.Errorf("after kill: status=%q errMsg=%q, want error + 'killed'", snap.Status, snap.ErrMsg)
+	}
+}
+
+// TestWorkflowManager_KillUnknownAndFinished covers the non-running cases.
+func TestWorkflowManager_KillUnknownAndFinished(t *testing.T) {
+	m := NewWorkflowManager()
+	if found, _ := m.Kill("wf_999"); found {
+		t.Error("Kill of unknown id should report found=false")
+	}
+	id, err := m.Start(WorkflowRunRequest{Script: `agent("x")`, Agent: echoAgentOpts})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitForDone(t, m, id)
+	found, wasRunning := m.Kill(id)
+	if !found || wasRunning {
+		t.Errorf("Kill of finished run = (found=%v, wasRunning=%v), want (true, false)", found, wasRunning)
+	}
+}
+
+// TestWorkflowManager_LastActivity verifies progress advances the liveness
+// timestamp (so a stalled run is distinguishable from a busy one).
+func TestWorkflowManager_LastActivity(t *testing.T) {
+	m := NewWorkflowManager()
+	id, err := m.Start(WorkflowRunRequest{Script: `log("step"); agent("x")`, Agent: echoAgentOpts})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	snap := waitForDone(t, m, id)
+	if snap.LastActivity.IsZero() || snap.LastActivity.Before(snap.Start) {
+		t.Errorf("LastActivity = %v, want a time at/after start %v", snap.LastActivity, snap.Start)
+	}
 }
