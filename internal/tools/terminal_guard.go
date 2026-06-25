@@ -3,6 +3,7 @@ package tools
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // sedInPlace matches an invocation of `sed` with an in-place edit flag
@@ -23,10 +24,47 @@ var sedInPlace = regexp.MustCompile(`\bsed\b[^|;&\n]*\s-(?:-in-place\b|[a-z]*i\b
 // into an IsError tool_result, so the model reads the hint and retries with
 // edit_file.
 func guardCommand(command string) error {
-	if sedInPlace.MatchString(command) {
+	if sedInPlace.MatchString(maskQuoted(command)) {
 		return fmt.Errorf("refusing in-place `sed` edit: use the edit_file tool instead, " +
 			"so the change is permission-checked, shown as a diff, and tracked for " +
 			"read-before-write")
 	}
 	return nil
+}
+
+// maskQuoted replaces single- and double-quoted substrings with spaces so
+// regex-based guards don't false-positive on literal text inside quotes
+// (e.g. `echo "sed -i"`). It does not attempt full shell parsing; nested
+// quotes and backslash escapes are ignored, which is sufficient for guarding
+// against accidental sed flags in quoted arguments.
+func maskQuoted(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inSingle, inDouble := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case 0x27:
+			if !inDouble {
+				inSingle = !inSingle
+				b.WriteByte(c)
+			} else {
+				b.WriteByte(' ')
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+				b.WriteByte(c)
+			} else {
+				b.WriteByte(' ')
+			}
+		default:
+			if inSingle || inDouble {
+				b.WriteByte(' ')
+			} else {
+				b.WriteByte(c)
+			}
+		}
+	}
+	return b.String()
 }

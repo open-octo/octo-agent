@@ -220,7 +220,17 @@ func (t TerminalTool) ExecuteStream(
 	}
 
 	// Poll until the process exits, the user promotes it, or the timeout fires.
-	timer := time.NewTimer(TerminalTimeout)
+	// Honour the caller's context deadline if it is sooner than TerminalTimeout.
+	timeout := TerminalTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < timeout {
+			timeout = remaining
+			if timeout <= 0 {
+				timeout = 1 * time.Millisecond
+			}
+		}
+	}
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	for {

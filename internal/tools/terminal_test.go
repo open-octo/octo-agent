@@ -230,6 +230,29 @@ var _ agent.StreamingToolExecutor = TerminalTool{}
 
 // ─── TerminalInputTool tests ────────────────────────────────────────────────
 
+// TestTerminalTool_RespectsContextDeadline verifies that the synchronous terminal
+// path shortens its timeout to the caller's context deadline, so a turn-level
+// timeout is honoured even when TerminalTimeout is longer.
+func TestTerminalTool_RespectsContextDeadline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell only")
+	}
+	tool := TerminalTool{}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := tool.ExecuteStream(ctx, "terminal", map[string]any{"command": "sleep 30"}, nil)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("ExecuteStream: %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("elapsed %s — context deadline was not respected", elapsed)
+	}
+}
+
 func TestTerminalInputTool_Definition(t *testing.T) {
 	def := TerminalInputTool{}.Definition()
 	if def.Name != "terminal_input" {
