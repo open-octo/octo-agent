@@ -743,6 +743,13 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		} else {
 			sess = agent.NewSession(resolvedModel, *system)
 		}
+		// Persisted (non-ephemeral) sessions archive folded turns so the model
+		// can recall them with the read tool after a compaction.
+		if !*noSave {
+			if dir, err := sess.ChunkDir(); err == nil {
+				a.ArchiveDir = dir
+			}
+		}
 
 		cfg := replConfig{
 			a:               a,

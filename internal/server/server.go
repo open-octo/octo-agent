@@ -702,6 +702,9 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	a := agent.New(sender, model)
 	a.CWD = s.cwd
 	a.MaxTokens = s.cfg.MaxTokens
+	if dir, err := sess.ChunkDir(); err == nil {
+		a.ArchiveDir = dir // recall folded turns via the read tool
+	}
 	if cfg, err := config.Load(); err == nil {
 		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 		if a.LiteSender == nil {

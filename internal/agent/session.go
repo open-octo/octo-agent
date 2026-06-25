@@ -151,6 +151,21 @@ func (s *Session) SavePath() (string, error) {
 	return filepath.Join(dir, s.ID+".jsonl"), nil
 }
 
+// ChunkDir returns the per-session directory where compaction archives the
+// verbatim originals of folded turns (chunk-NNN.md), so the model can recall
+// them with the read tool. Honors the Dir override like SavePath.
+func (s *Session) ChunkDir() (string, error) {
+	dir := s.Dir
+	if dir == "" {
+		var err error
+		dir, err = sessionsDir()
+		if err != nil {
+			return "", err
+		}
+	}
+	return filepath.Join(dir, s.ID+".chunks"), nil
+}
+
 // sessionRecord is one JSONL line. Type discriminates the meta header, a
 // message record, and a title record. The title is appended on its own line
 // (rather than rewriting the meta header) so the append-only path is preserved:
