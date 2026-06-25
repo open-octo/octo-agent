@@ -166,13 +166,15 @@
     return { meta: result.slice(0, m).trim(), html: result.slice(m) }
   }
 
-  // All completed tools collapse by default. Only the latest in-flight tool
-  // stays open so the user sees live output without noise from finished calls.
+  // While a turn is still running, keep the LATEST tool open (whether or not it
+  // has finished) so its output stays readable until the next step replaces it
+  // — a finished tool only collapses once the next tool appears, and the whole
+  // group collapses once the turn completes (the assistant reply takes over).
   // Errors always open — they need attention.
-  function defaultOpen(tool: any, lastUndoneId: string | undefined): boolean {
+  function defaultOpen(tool: any, lastId: string | undefined, streaming: boolean): boolean {
     if (tool.error) return true
-    if (!tool.done) return tool.id === lastUndoneId
-    return false
+    if (!streaming) return false
+    return tool.id === lastId
   }
 
   // todo_write renders its checklist from the tool args.
@@ -200,7 +202,7 @@
 {#if tools !== null && tools.length > 0}
   <!-- Real data rendering -->
   {@const errorCount = tools.filter((t: any) => t.error).length}
-  {@const lastUndoneId = tools.findLast((t: any) => !t.done)?.id}
+  {@const lastId = tools[tools.length - 1]?.id}
   <div class="tool-group">
     <div class="group-header">
       <iconify-icon icon="ant-design:tool-outlined" width="14" style="color:var(--text-tertiary)"></iconify-icon>
@@ -226,7 +228,7 @@
       {@const meta = toolMeta(tool)}
       {@const todos = todoItems(tool)}
       {@const fErr = fetchError(tool)}
-      <details open={defaultOpen(tool, lastUndoneId)} class="tool-item">
+      <details open={defaultOpen(tool, lastId, groupStreaming)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
           <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
