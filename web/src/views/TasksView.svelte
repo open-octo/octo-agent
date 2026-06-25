@@ -70,6 +70,17 @@
     }
   }
 
+  async function handleToggle(t: TaskResponse) {
+    const next = !t.enabled
+    try {
+      await api.toggleTask(t.id, next)
+      rawTasks = rawTasks.map(r => r.id === t.id ? { ...r, enabled: next } : r)
+      showToast(next ? tr('tasks.resumed') : tr('tasks.paused_toast'))
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed to update task', 'error')
+    }
+  }
+
   async function handleDelete(t: TaskResponse) {
     try {
       await api.deleteTask(t.id)
@@ -156,6 +167,13 @@
             <div class="row-actions">
               <button class="act-btn" title={$t('tasks.run_now')} onclick={() => handleRun(task)}>
                 <iconify-icon icon="ant-design:caret-right-outlined" width="15"></iconify-icon>
+              </button>
+              <button
+                class="act-btn"
+                title={task.enabled ? $t('tasks.pause') : $t('tasks.resume')}
+                onclick={() => handleToggle(task)}
+              >
+                <iconify-icon icon={task.enabled ? 'ant-design:pause-outlined' : 'ant-design:caret-right-outlined'} width="15"></iconify-icon>
               </button>
               <button class="act-btn" title={$t('common.edit')} onclick={() => openEdit(task)}>
                 <iconify-icon icon="ant-design:edit-outlined" width="14"></iconify-icon>

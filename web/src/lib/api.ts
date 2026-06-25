@@ -190,6 +190,14 @@ export async function runTask(id: string): Promise<void> {
   await request<unknown>(`/api/tasks/${id}/run`, { method: 'POST' })
 }
 
+// Pause (enabled:false) or resume (enabled:true) a scheduled task.
+export async function toggleTask(id: string, enabled: boolean): Promise<void> {
+  await request<unknown>(`/api/tasks/${encodeURIComponent(id)}/toggle`, {
+    method: 'PATCH',
+    ...json({ enabled }),
+  })
+}
+
 // MCP Servers
 
 export interface ToolSearchInfo {
