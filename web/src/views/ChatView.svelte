@@ -338,15 +338,16 @@
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       const content = (ev as any).content ?? ''
       const createdAt = (ev as any).created_at ?? Date.now()
+      const images = (ev as any).images ?? []
       chatMessages.update(m => {
         const msgs = [...(m[sid] || [])]
         // If the last user bubble is a pending optimistic echo of the same
         // text, replace it in place (de-dup). Otherwise append a fresh one.
         const lastPending = msgs.findLastIndex((x: any) => x.type === 'user' && x.pending)
         if (lastPending >= 0 && msgs[lastPending].content === content) {
-          msgs[lastPending] = { ...msgs[lastPending], id: uid('u'), createdAt, pending: false }
+          msgs[lastPending] = { ...msgs[lastPending], id: uid('u'), createdAt, pending: false, images }
         } else {
-          msgs.push({ id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [] })
+          msgs.push({ id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images })
         }
         return { ...m, [sid]: msgs }
       })
@@ -588,6 +589,7 @@
       id: 'pending-' + Date.now(),
       type: 'user',
       content: text,
+      files: files && files.length ? files : undefined,
       createdAt: Date.now(),
       streaming: false,
       pending: true,
@@ -695,7 +697,18 @@
               <div class="msg-user fadein">
                 <div class="user-bubble-wrap">
                   <div class="user-bubble" class:pending={msg.pending}>
-                    {msg.content}
+                    {#if msg.files && msg.files.length > 0}
+                      <div class="msg-attachments">
+                        {#each msg.files as f}
+                          {#if f.mime_type?.startsWith('image/')}
+                            <img src={f.data_url} alt={f.name} class="msg-image" />
+                          {:else}
+                            <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{f.name}</span>
+                          {/if}
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if msg.content}{msg.content}{/if}
                     {#if msg.pending}<span class="pending-spinner" title={$t('status.running')}></span>{/if}
                   </div>
                   <div class="msg-actions">
@@ -991,6 +1004,7 @@
   border-radius: 12px 12px 4px 12px; padding: 10px 14px;
   font-size: 14px; line-height: 1.6; color: var(--text);
   white-space: pre-wrap; word-break: break-word;
+  display: flex; flex-direction: column; gap: 8px;
 }
 /* Pending (queued) bubble — an optimistic echo, or a steer message waiting to
    be drained into the running turn. Dimmed with a small spinner until the
@@ -1002,6 +1016,10 @@
   border: 1.5px solid var(--blue-2); border-top-color: var(--blue-6);
   animation: octo-spin 0.8s linear infinite;
 }
+
+/* ── Inline attachments inside user bubbles ──────────────────────────────── */
+.msg-attachments { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.msg-image { max-width: 100%; max-height: 320px; border-radius: 8px; border: 1px solid var(--blue-2); }
 
 /* ── Agent message ───────────────────────────────────────────────────────── */
 .msg-agent { display: flex; gap: 12px; }
