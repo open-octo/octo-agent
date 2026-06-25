@@ -370,7 +370,7 @@ func (a *Agent) TurnStream(
 // defaultMaxTurns is the fallback per-Run loop cap when Agent.MaxTurns is
 // unset (0). A "turn" here is one provider round-trip inside the agentic
 // loop; the cap stops a misbehaving model from looping on tools forever.
-const defaultMaxTurns = 100
+const defaultMaxTurns = 200
 
 // unlimitedTurns signals no cap (used for unattended runs).
 const unlimitedTurns = -1
