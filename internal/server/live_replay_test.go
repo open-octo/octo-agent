@@ -164,6 +164,76 @@ func TestReplayLiveState_NothingAfterTurnPersists(t *testing.T) {
 	}
 }
 
+// TestReplayLiveState_IdleSessionSendsIdleUpdate checks that a subscribing tab
+// receives an explicit idle snapshot when the session has no live turn. Without
+// this, a tab that switched away while the turn ran and missed the completion
+// broadcast would keep showing a stale thinking indicator after switching back.
+func TestReplayLiveState_IdleSessionSendsIdleUpdate(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "replay-idle-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+
+	// No live state means the session is idle.
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	var idleSeen bool
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] == "session_update" && ev["status"] == "idle" && ev["session_id"] == sid {
+			idleSeen = true
+		}
+		if ev["type"] == "progress" || ev["type"] == "text_delta" || ev["type"] == "thinking_delta" {
+			t.Errorf("idle session replayed a live-turn event: %v", ev["type"])
+		}
+	}
+	if !idleSeen {
+		t.Error("idle session replay did not include a session_update{status:idle} snapshot")
+	}
+}
+
+// TestReplayLiveState_IdleWithPendingPrompt sends both the idle snapshot and
+// any outstanding interactive prompt when there is no live turn. The two must
+// not be mutually exclusive — a tab refreshing at the exact moment a question
+// is waiting should still see the idle reset and the question modal.
+func TestReplayLiveState_IdleWithPendingPrompt(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "replay-idle-prompt-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+
+	srv.pendingQuestions[sid] = wsEventRequestUserQuestion{
+		Type: "request_user_question", SessionID: sid, QuestionID: "q_1", Question: "pick one", Options: []string{"a", "b"},
+	}
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	var idleSeen, questionSeen bool
+	for _, ev := range drainConn(t, conn) {
+		switch ev["type"] {
+		case "session_update":
+			if ev["status"] == "idle" && ev["session_id"] == sid {
+				idleSeen = true
+			}
+		case "request_user_question":
+			questionSeen = true
+		}
+	}
+	if !idleSeen {
+		t.Error("idle session with pending prompt did not replay idle snapshot")
+	}
+	if !questionSeen {
+		t.Error("idle session with pending prompt did not replay the question")
+	}
+}
+
 // TestSessionLiveState_EventBufferCap checks the replay buffer drops its
 // oldest entries instead of growing without bound on very long turns.
 func TestSessionLiveState_EventBufferCap(t *testing.T) {

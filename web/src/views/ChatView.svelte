@@ -192,6 +192,17 @@
     }).catch(() => {/* silently ignore history load errors */})
   }
 
+  // Clear transient runtime state for a session so switching back from another
+  // conversation never shows a stale thinking indicator or spinning sub-agent.
+  function resetSessionRuntimeState(sid: string) {
+    chatStreaming.update(s => ({ ...s, [sid]: false }))
+    chatProgress.update(p => ({ ...p, [sid]: null }))
+    chatThinking.update(t => ({ ...t, [sid]: '' }))
+    chatTurnStart.update(m => { const n = { ...m }; delete n[sid]; return n })
+    resetSubAgents(sid)
+    finishAllTools(sid)
+  }
+
   // ── main lifecycle effect ──────────────────────────────────────────────────
   // $activeSessionId makes this effect re-run whenever the session changes.
   $effect(() => {
@@ -200,6 +211,7 @@
 
     clearMsgs(sid)
     resetArtifacts(sid)
+    resetSessionRuntimeState(sid)
     ws.subscribe(sid)
     loadHistory(sid)
 
@@ -434,6 +446,10 @@
       chatPermMode.update(mm => ({ ...mm, [sid]: (ev as any).permission_mode }))
       chatReasoningEffort.update(r => ({ ...r, [sid]: (ev as any).reasoning_effort }))
       chatWorkingDir.update(w => ({ ...w, [sid]: (ev as any).working_dir }))
+      // An idle snapshot from the server clears a stale thinking indicator.
+      if ((ev as any).status === 'idle') {
+        resetSessionRuntimeState(sid)
+      }
     }))
 
     cleanups.push(ws.on('todo_update', (ev) => {

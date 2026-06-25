@@ -269,6 +269,36 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 		}
 	}
 
+	// If the session has no live turn, the subscribing tab may still hold a
+	// stale streaming/progress state (e.g. the user switched away while the
+	// turn ran and missed its completion broadcast). Emit an explicit idle
+	// update so the frontend resets its indicator.
+	if len(replay) == 0 {
+		// Re-check under the lock: another goroutine may have just started a
+		// turn between the RUnlock above and this point. If it did, the replay
+		// buffer would be non-empty and we would not reach here; guard anyway.
+		s.liveStateMu.RLock()
+		_, stillLive := s.liveStates[sessionID]
+		s.liveStateMu.RUnlock()
+		if !stillLive {
+			wd, pm, re, sr, _ := s.sessionStatusFields()
+			if b, err := json.Marshal(map[string]any{
+				"type":             "session_update",
+				"session_id":       sessionID,
+				"status":           "idle",
+				"working_dir":      wd,
+				"permission_mode":  pm,
+				"reasoning_effort": re,
+				"show_reasoning":   sr,
+			}); err == nil {
+				select {
+				case conn.send <- b:
+				default:
+				}
+			}
+		}
+	}
+
 	// Replay an outstanding interactive prompt. Its original broadcast only
 	// reached the tabs connected at the time; without this, a page refresh
 	// during ask_user_question / a permission confirmation leaves the new tab
