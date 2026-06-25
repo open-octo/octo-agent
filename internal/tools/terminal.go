@@ -116,7 +116,11 @@ func (t TerminalTool) ExecuteStream(
 ) (agent.ToolResult, error) {
 	command, _ := input["command"].(string)
 	if command == "" {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal: command is required")
+		return agent.ToolResult{Text: ""}, fmt.Errorf(
+			"terminal: the required \"command\" argument was empty or missing. " +
+				"Put the shell command in the tool's JSON arguments as the \"command\" field, " +
+				`e.g. {"command": "go test ./..."}. Do not call this tool with empty arguments — ` +
+				"if you have nothing to run, respond with text instead.")
 	}
 	stdinText, _ := input["stdin"].(string)
 	if err := guardCommand(command); err != nil {

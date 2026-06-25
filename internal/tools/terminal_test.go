@@ -90,7 +90,12 @@ func TestTerminalTool_Execute_EmptyCommand(t *testing.T) {
 		"command": "",
 	})
 	if err == nil {
-		t.Error("empty command should return error")
+		t.Fatal("empty command should return error")
+	}
+	// The error is fed back to the model verbatim, so it must explain how to
+	// retry — naming the "command" argument — rather than just stating a fact.
+	if !strings.Contains(err.Error(), `"command"`) {
+		t.Errorf("error should name the \"command\" argument to guide retry, got %q", err.Error())
 	}
 }
 
