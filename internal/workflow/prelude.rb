@@ -8,6 +8,33 @@
 # pipeline, but run synchronously when called at top level (no fiber to yield).
 $__wf_sched = false
 
+# $__wf_ready buffers completions that arrived for a scheduler level other than
+# the one currently waiting. The host's __agent_wait_any returns *any* finished
+# agent from a single shared queue, but each parallel/pipeline level only knows
+# its own tokens. Without this buffer a nested parallel would consume (and then
+# mis-route) a token belonging to an outer level — corrupting the outer loop and
+# deadlocking it. With it, a level that pulls a foreign token stashes the result
+# here and keeps waiting; the level that actually owns the token finds it here
+# before blocking. This makes parallel/pipeline safely re-entrant (nestable).
+$__wf_ready = {}
+
+# __take_for drains agent completions until one whose token is in `pending`
+# arrives, returning [token, result]. Completions for other levels are stashed
+# in $__wf_ready (and consumed from the host immediately, so host state is freed
+# in finish order regardless of which level owns the token). Raises on cancel.
+def __take_for(pending)
+  pending.each_key do |t|
+    return [t, $__wf_ready.delete(t)] if $__wf_ready.key?(t)
+  end
+  loop do
+    token = __agent_wait_any
+    raise "workflow: canceled" if token == 0    # cancellation sentinel
+    result = __agent_take(token)
+    return [token, result] if pending.key?(token)
+    $__wf_ready[token] = result                 # belongs to an outer level
+  end
+end
+
 # agent(prompt, opts = {}) runs one sub-agent to completion and returns its
 # reply string. Inside parallel/pipeline it starts the work then yields its
 # fiber, so siblings run concurrently. At top level it starts then blocks for
@@ -34,9 +61,11 @@ def agent(prompt, opts = {})
   if $__wf_sched
     Fiber.yield(token)
   else
-    tok = __agent_wait_any
-    raise "workflow: canceled" if tok == 0
-    __agent_take(tok)
+    # Top level: no fiber to yield, so block for this one token. Route through
+    # __take_for so a stray completion from an unwound parallel (rescued mid-run)
+    # can't be mistaken for our result — we wait specifically for `token`.
+    _, result = __take_for({ token => true })
+    result
   end
 end
 
@@ -78,12 +107,10 @@ def __run_fibers(items)
       f.alive? ? (pending[r] = i) : (results[i] = r)
     end
     until pending.empty?
-      token = __agent_wait_any                   # blocks until some agent finishes
-      raise "workflow: canceled" if token == 0   # cancellation sentinel
+      token, result = __take_for(pending)         # next completion this level owns
       i      = pending.delete(token)
-      result = __agent_take(token)
       f      = fibers[i]
-      r      = f.resume(result)                   # agent() returns; fiber continues
+      r      = f.resume(result)                    # agent() returns; fiber continues
       f.alive? ? (pending[r] = i) : (results[i] = r)
     end
     results
