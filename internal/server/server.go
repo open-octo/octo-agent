@@ -1134,7 +1134,6 @@ func (s *Server) handleWSUserQuestionAnswer(qid string, choices []string, custom
 		Custom:    custom,
 		Cancelled: cancelled,
 	}
-	slog.Info("user_question_answer: delivered", "qid", qid, "choices", choices, "custom", custom, "cancelled", cancelled)
 }
 
 // permissionAskFrom adapts the server's requestConfirmation into an

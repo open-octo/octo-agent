@@ -28,21 +28,15 @@
   function submit() {
     if (!$questionModal) return
     const q = $questionModal
-    const payload = {
-      question_id: q.question_id,
-      choices: [...selected],
-      custom: customText,
-    }
-    console.log('[question] submit', payload)
-    ws.answerQuestion(payload.question_id, payload.choices, payload.custom)
+    // ChatView stores the server field `question_id` as `questionId`.
+    ws.answerQuestion(q.questionId, [...selected], customText)
     questionModal.set(null)
   }
 
   function cancel() {
     if (!$questionModal) return
     const q = $questionModal
-    console.log('[question] cancel', { question_id: q.question_id })
-    ws.answerQuestion(q.question_id, [], '', true)
+    ws.answerQuestion(q.questionId, [], '', true)
     questionModal.set(null)
   }
 

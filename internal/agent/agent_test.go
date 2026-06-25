@@ -556,6 +556,51 @@ func TestAgent_Run_DuplicateToolCalls_StopsGracefully(t *testing.T) {
 	}
 }
 
+func TestAgent_Run_StuckDetector_ResetsPerUserTurn(t *testing.T) {
+	// A new user turn ("continue") must give the model a fresh stuck-detector
+	// window. Without the per-turn reset the prior turn's fingerprints linger,
+	// so a single repeated call on the second turn would trip the stuck-stop
+	// immediately — leaving the user unable to break out by sending another
+	// message.
+	mk := func(id string) Reply {
+		return Reply{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock(id, "bash", map[string]any{"command": "ls"})}}
+	}
+	// 5 identical batches per turn → stuck stop on the 5th. Two turns' worth.
+	replies := []Reply{
+		mk("a1"), mk("a2"), mk("a3"), mk("a4"), mk("a5"),
+		mk("b1"), mk("b2"), mk("b3"), mk("b4"), mk("b5"),
+		mk("c1"), // should never be reached
+	}
+	send := &fakeToolSender{replies: replies}
+	exec := &fakeExecutor{}
+	a := New(send, "m")
+	defs := []ToolDefinition{{Name: "bash"}}
+
+	r1, err := a.Run(context.Background(), "go", defs, exec)
+	if err != nil {
+		t.Fatalf("turn 1: %v", err)
+	}
+	if r1.StopReason != StopReasonStuck {
+		t.Fatalf("turn 1 StopReason = %q, want %q", r1.StopReason, StopReasonStuck)
+	}
+	if send.calls != 5 {
+		t.Fatalf("turn 1 provider calls = %d, want 5", send.calls)
+	}
+
+	// Second user turn: detector must start fresh, so it again takes 5 identical
+	// batches (calls 6..10) to stop — not a single call.
+	r2, err := a.Run(context.Background(), "继续", defs, exec)
+	if err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	if r2.StopReason != StopReasonStuck {
+		t.Fatalf("turn 2 StopReason = %q, want %q", r2.StopReason, StopReasonStuck)
+	}
+	if send.calls != 10 {
+		t.Errorf("provider calls after 2 turns = %d, want 10 (detector reset → 5 per turn)", send.calls)
+	}
+}
+
 func TestAgent_Run_DifferentToolCalls_DoesNotStop(t *testing.T) {
 	// The model issues different tool calls each round — no stuck detector.
 	replies := []Reply{

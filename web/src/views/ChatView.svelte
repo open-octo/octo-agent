@@ -5,6 +5,7 @@
     sessions,
     chatMessages,
     chatStreaming,
+    chatTurnStart,
     chatProgress,
     chatBgTasks,
     chatTodos,
@@ -82,17 +83,29 @@
   // Live "Thinking" readout — mirrors the TUI thinkingLine: elapsed since the
   // turn began plus a rough output-token estimate (streamed chars / 4) so a
   // long silent wait reads as the model working, not a freeze.
-  let turnStartAt = $state(0)
-  let turnOutChars = $state(0)
+  // Persist the turn's start across view remounts. A page switch unmounts
+  // ChatView; a component-local start would restart from ~0 on return — and
+  // since `now` is captured at mount, a start stamped a few ms later renders as
+  // -1s until the next tick. Keying the start by session in a module store keeps
+  // elapsed correct and monotonic across switches. (get() for the guard so the
+  // effect doesn't re-trigger on its own store write.)
   $effect(() => {
+    const sid = $activeSessionId ?? ''
+    if (!sid) return
     if (streaming) {
-      if (!turnStartAt) turnStartAt = Date.now()
-    } else {
-      turnStartAt = 0
-      turnOutChars = 0
+      if (!get(chatTurnStart)[sid]) chatTurnStart.update(m => ({ ...m, [sid]: Date.now() }))
+    } else if (get(chatTurnStart)[sid]) {
+      chatTurnStart.update(m => { const n = { ...m }; delete n[sid]; return n })
     }
   })
-  let thinkElapsed = $derived(turnStartAt ? Math.floor((now - turnStartAt) / 1000) : 0)
+  let turnStartAt = $derived($chatTurnStart[$activeSessionId ?? ''] ?? 0)
+  let thinkElapsed = $derived(turnStartAt ? Math.max(0, Math.floor((now - turnStartAt) / 1000)) : 0)
+  // Output-token estimate (~chars/4), derived from persisted stores — the live
+  // assistant text plus the reasoning buffer — so it survives view remounts
+  // alongside the elapsed clock instead of resetting to 0.
+  let turnOutChars = $derived(
+    ((msgs.find((m: any) => m.streaming && m.type === 'assistant')?.content?.length) ?? 0) + thinking.length
+  )
   let thinkTokens = $derived(Math.floor(turnOutChars / 4))
   function fmtDur(s: number): string {
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`
@@ -220,7 +233,6 @@
     cleanups.push(ws.on('text_delta', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       const txt = (ev as any).text ?? ''
-      turnOutChars += txt.length
       appendToLastAssistant(sid, txt)
     }))
 
@@ -230,7 +242,6 @@
       // session's sender (it's off by default and never surfaced to the
       // terminal), so any delta that reaches the Web UI is meant to be shown.
       const txt = (ev as any).text ?? ''
-      turnOutChars += txt.length
       chatThinking.update(tt => ({ ...tt, [sid]: (tt[sid] ?? '') + txt }))
     }))
 
@@ -800,7 +811,7 @@
                   <summary class="think-summary">
                     <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
                     <span>{$t('chat.thinking')}</span>
-                    <span class="think-meta mono">{fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↑ ~{fmtTokens(thinkTokens)} tokens{/if}</span>
+                    <span class="think-meta mono">{fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↓ ~{fmtTokens(thinkTokens)} tokens{:else} · ↑{/if}</span>
                   </summary>
                   <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(thinking)}</div>
                 </details>
@@ -821,7 +832,7 @@
                   <span style="animation-delay:0.4s"></span>
                 </span>
                 <span class="think-meta mono">
-                  {fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↑ ~{fmtTokens(thinkTokens)} tokens{/if}
+                  {fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↓ ~{fmtTokens(thinkTokens)} tokens{:else} · ↑{/if}
                 </span>
               </div>
             </div>
