@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least-privilege default: jobs only check out and build, no write access.
+permissions:
+  contents: read
+
 # Run a fresh job per push to the same branch and cancel any in-flight one,
 # saves CI minutes during rapid iteration.
 concurrency:
