@@ -110,15 +110,13 @@ export class WsManager {
     custom?: string,
     cancelled?: boolean
   ): void {
-    const payload = {
+    this.send({
       type: "user_question_answer",
       question_id: questionId,
       choices,
       custom,
       cancelled,
-    };
-    console.log("[ws] answerQuestion", payload);
-    this.send(payload);
+    });
   }
 
   promoteSyncTerminal(sessionId: string): void {

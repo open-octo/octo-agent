@@ -634,6 +634,15 @@ func (a *Agent) runLoop(
 	// not permanently disable overflow recovery for this agent.
 	a.overflow.reset()
 
+	// Reset the duplicate-tool-call detector at the start of each user turn.
+	// The detector is meant to catch a model looping *within* one turn; letting
+	// its fingerprint history bleed across turns means a fresh user message
+	// (often "continue") that produces even a single repeat of the prior call
+	// trips the stuck-stop immediately, so the user can never break out. A new
+	// user turn is a fresh intent — give the model the full within-turn window
+	// again.
+	a.recentToolCalls = nil
+
 	// History length before this turn appended anything. Used to roll back
 	// cleanly on a first-iteration failure: the turn may append more than the
 	// user input (drained inbox messages), so truncating to this baseline is
