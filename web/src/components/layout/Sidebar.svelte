@@ -3,8 +3,7 @@
   import { view, sidebar, sessions, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t } from '../../lib/i18n'
-
-  let versionStr = $state('')
+  import VersionBadge from './VersionBadge.svelte'
 
   // Real count of configured MCP servers for the nav badge. Seeded here so the
   // badge is correct before the user ever opens the MCP panel; McpView keeps the
@@ -12,11 +11,6 @@
   let mcpCount = $derived(($mcpServers as any[]).length)
 
   onMount(async () => {
-    try {
-      const v = await api.getVersion() as any
-      const raw = v.current ?? v.version ?? ''
-      versionStr = raw ? (raw.startsWith('v') ? raw : `v${raw}`) : ''
-    } catch { /* version chip stays hidden */ }
     try {
       const d = await api.listMcpServers()
       mcpServers.set(d.servers as any)
@@ -236,7 +230,7 @@
         <iconify-icon icon="ant-design:setting-outlined" width="14"></iconify-icon>
         <span>{$t('nav.settings')}</span>
       </div>
-      {#if versionStr}<span class="version">{versionStr}</span>{/if}
+      <VersionBadge />
     </div>
   </div>
   {/if}
@@ -342,11 +336,6 @@
 }
 .footer-settings:hover { background: var(--hover-neutral); }
 .footer-settings span { font-size: 13px; }
-.version {
-  font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text-tertiary); background: var(--bg-container); border: 1px solid var(--border-secondary);
-  border-radius: 9999px; padding: 2px 8px;
-}
 /* Rail */
 .rail {
   width: 64px; height: 100%; display: flex; flex-direction: column;
