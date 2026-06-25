@@ -113,6 +113,19 @@
       }
     })
 
+    // Auto-title: a global broadcast carrying the freshly generated name, so
+    // the sidebar reflects the rename live instead of showing the stale title
+    // until a reload.
+    ws.on('session_renamed', (ev: any) => {
+      if (!ev.name) return
+      sessions.update(list =>
+        list.map(s => s.id === ev.session_id
+          ? { ...s, title: ev.name, name: ev.name }
+          : s
+        )
+      )
+    })
+
     // REST fallback (WS session_list may be delayed)
     api.listSessions().then((data: any) => {
       if (data.sessions?.length > 0) {
