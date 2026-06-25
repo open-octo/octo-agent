@@ -177,10 +177,9 @@
 
     cleanups.push(ws.on('thinking_delta', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      // Respect show_reasoning: only an explicit true shows the trace
-      // (default off). The terminal never displays it — this is web-only.
-      const sess = get(sessions).find((s: any) => s.id === sid) as any
-      if (sess?.show_reasoning !== true) return
+      // The server only emits thinking_delta when show_reasoning is on for the
+      // session's sender (it's off by default and never surfaced to the
+      // terminal), so any delta that reaches the Web UI is meant to be shown.
       chatThinking.update(tt => ({ ...tt, [sid]: (tt[sid] ?? '') + ((ev as any).text ?? '') }))
     }))
 
