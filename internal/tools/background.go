@@ -305,6 +305,7 @@ func (m *BackgroundManager) Start(command string, opts ...StartOption) (string, 
 	if err != nil {
 		cancel()
 		_ = pw.Close()
+		_ = pr.Close()
 		return "", fmt.Errorf("terminal: create stdin pipe: %w", err)
 	}
 	cmd.Stdin = stdinR
@@ -312,7 +313,9 @@ func (m *BackgroundManager) Start(command string, opts ...StartOption) (string, 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = pw.Close()
+		_ = pr.Close()
 		_ = stdinW.Close()
+		_ = stdinR.Close()
 		return "", fmt.Errorf("terminal: start background: %w", err)
 	}
 
@@ -342,6 +345,11 @@ func (m *BackgroundManager) Start(command string, opts ...StartOption) (string, 
 			// Tabs break the TUI's cursor-position math; replace with spaces.
 			line = bytes.ReplaceAll(line, []byte{'\t'}, []byte("    "))
 			p.append(append(line, '\n')) // append copies
+		}
+		// A line exceeding the 1 MiB token cap (or any read error) stops the
+		// scan; without this, all remaining output would vanish silently.
+		if err := scanner.Err(); err != nil {
+			p.append([]byte("\n[... output truncated: " + err.Error() + " ...]\n"))
 		}
 	}()
 	// Waiter: wait for the process, close pipe so the reader sees EOF,
