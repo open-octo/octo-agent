@@ -179,6 +179,44 @@ func TestRunChat_PromptFile_SingleTurn(t *testing.T) {
 	}
 }
 
+// TestRunChat_TakeOverFlagUsage checks --take-over is rejected without -c
+// and accepted when paired with it. The actual TUI resume path requires a tty,
+// so the second case fails earlier at session resolution, not at flag parsing.
+func TestRunChat_TakeOverFlagUsage(t *testing.T) {
+	t.Run("without continue", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runChat([]string{"--take-over"}, strings.NewReader(""), &stdout, &stderr)
+		if code != 2 {
+			t.Errorf("exit code = %d, want 2", code)
+		}
+		if !strings.Contains(stderr.String(), "--take-over requires -c") {
+			t.Errorf("stderr should reject --take-over without -c, got: %q", stderr.String())
+		}
+	})
+
+	t.Run("with continue accepted", func(t *testing.T) {
+		// Isolate HOME so a local ~/.octo/sessions cannot accidentally match
+		// the nonexistent ID and change the exit path.
+		tmp := t.TempDir()
+		t.Setenv("HOME", tmp)
+		t.Setenv("USERPROFILE", tmp)
+
+		var stdout, stderr bytes.Buffer
+		code := runChat([]string{"--take-over", "-c", "nonexistent-id"}, strings.NewReader(""), &stdout, &stderr)
+		// --take-over is accepted with -c; resolve runs before the TUI gate, so
+		// we expect a "no session matches" error rather than flag validation.
+		if code != 2 {
+			t.Errorf("exit code = %d, want 2 (session resolve failure)", code)
+		}
+		if strings.Contains(stderr.String(), "--take-over requires -c") {
+			t.Errorf("flag should be accepted with -c, got: %q", stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "no session matches") {
+			t.Errorf("expected session resolve error, got: %q", stderr.String())
+		}
+	})
+}
+
 func TestResolveMaxTurns(t *testing.T) {
 	cases := []struct {
 		name        string

@@ -227,6 +227,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	stream := fs.Bool("stream", true, "Stream the reply (chunks printed as they arrive); --stream=false buffers")
 	continueID := fs.String("c", "", "Resume a session — accepts 'last', a short ID, or a substring of an ID; omit the value to pick from a list")
 	continueIDLong := fs.String("continue", "", "Resume a session — accepts 'last', a short ID, or a substring of an ID; omit the value to pick from a list")
+	takeOver := fs.Bool("take-over", false, "When resuming (-c), take over a session currently bound to another entry")
 	noSave := fs.Bool("no-save", false, "Disable session auto-save in the interactive TUI (headless one-shots never persist)")
 	enableTools := fs.Bool("tools", true, "Built-in tools (terminal, edit_file, …) for the agentic loop. On by default; use --no-tools to disable.")
 	noTools := fs.Bool("no-tools", false, "Disable the built-in tools (and MCP/skill execution) — plain chat only")
@@ -339,6 +340,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Single-turn mode requires a message.
 	if !isREPL && resumeID != "" {
 		fmt.Fprintln(stderr, "octo: -c/--continue requires interactive mode (omit the message argument)")
+		return 2
+	}
+
+	// --take-over only makes sense when resuming an existing session.
+	if *takeOver && resumeID == "" {
+		fmt.Fprintln(stderr, "octo: --take-over requires -c/--continue")
 		return 2
 	}
 
@@ -732,7 +739,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "octo: %v\n", err)
 				return 1
 			}
-			if ok, msg, berr := sess.Bind(agent.EntryTUI, false); ok == agent.Rejected {
+			if ok, msg, berr := sess.Bind(agent.EntryTUI, *takeOver); ok == agent.Rejected {
 				fmt.Fprintf(stderr, "octo: %v\n", berr)
 				return 1
 			} else if msg != "" && !*quietFlag {

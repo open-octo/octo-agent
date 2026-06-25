@@ -111,6 +111,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Common flags:")
 	fmt.Fprintln(w, "  -c, --continue [id]      Resume a session — 'last', short ID, or substring; no ID = pick from a list")
+	fmt.Fprintln(w, "  --take-over              When resuming, take over a session bound to another entry")
 	fmt.Fprintln(w, "  --no-tools               Disable built-in tools (terminal, edit_file, …) + MCP/skills")
 	fmt.Fprintln(w, "  --provider <name>        anthropic (default) | openai")
 	fmt.Fprintln(w, "  --model <name>           Override the default model for the provider")
