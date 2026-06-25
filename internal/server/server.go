@@ -1327,12 +1327,14 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 	if !strings.HasPrefix(text, "/") {
 		return false
 	}
-	// /unbind promises "history cleared" and /bind "start fresh" — the
-	// session's remembered permission allows and its memory-injector latch
-	// are part of that history. The manager doesn't know about the
-	// server-side stores, so drop them here.
-	switch strings.ToLower(strings.Fields(text)[0]) {
-	case "/unbind", "/bind":
+	// /bind switches the chat to a different session, /unbind reverts it to its
+	// default, and /clear wipes the conversation — all start a fresh context.
+	// The session's remembered permission allows and its memory-injector latch
+	// are scoped to the previous conversation, so drop them here: the manager
+	// owns session stores but not these server-side per-key latches.
+	cmd := strings.ToLower(strings.Fields(text)[0])
+	switch cmd {
+	case "/unbind", "/bind", "/clear":
 		imKey := "im:" + string(s.channelMgr.KeyFor(ev))
 		s.rememberedMu.Lock()
 		delete(s.rememberedStores, imKey)
@@ -1341,10 +1343,48 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		delete(s.sessionInjectors, imKey)
 		s.injectorMu.Unlock()
 	}
+	// /compact runs an LLM summarize, so it's handled out of the (synchronous,
+	// reply-string) CommandRouter: run it in a goroutine and report the result.
+	if cmd == "/compact" {
+		s.handleChannelCompact(ad, ev)
+		return true
+	}
 	if reply := s.channelMgr.CommandRouter(ev); reply != "" {
 		ad.SendText(ev.ChatID, reply, ev.MessageID)
 	}
 	return true
+}
+
+// handleChannelCompact force-compacts an IM session's history and reports the
+// outcome. The summarize is an LLM call, so it runs in a goroutine; BeginRun
+// serialises it against any agent turn in the same session.
+func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEvent) {
+	sess := s.channelMgr.GetSession(ev)
+	if sess == nil {
+		ad.SendText(ev.ChatID, "No active session to compact.", ev.MessageID)
+		return
+	}
+	if sess.IsRunning() {
+		ad.SendText(ev.ChatID, "A task is running — try /compact again once it finishes.", ev.MessageID)
+		return
+	}
+	go func() {
+		ctx, done := sess.BeginRun(context.Background())
+		defer done()
+		stats, err := sess.Agent.ForceCompact(ctx, nil)
+		switch {
+		case err != nil:
+			ad.SendText(ev.ChatID, "Compact failed: "+err.Error(), ev.MessageID)
+		case stats.FoldedMsgs == 0 && stats.ReclaimedTokens == 0:
+			ad.SendText(ev.ChatID, "Nothing to compact yet.", ev.MessageID)
+		default:
+			if perr := sess.Persist(); perr != nil {
+				ad.SendText(ev.ChatID, "Compacted, but saving failed: "+perr.Error(), ev.MessageID)
+				return
+			}
+			ad.SendText(ev.ChatID, fmt.Sprintf("Compacted — folded %d message(s).", stats.FoldedMsgs), ev.MessageID)
+		}
+	}()
 }
 
 // handleChannelMessage runs an agent turn for a channel inbound event.

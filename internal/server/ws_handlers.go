@@ -303,6 +303,20 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	if content == "" && len(att.blocks) == 0 && len(att.notes) == 0 {
 		return
 	}
+
+	// Session-management slash commands handled inline (no model turn). Other
+	// "/..." text falls through to the model, matching the TUI where unknown
+	// slashes are ordinary input.
+	if len(att.blocks) == 0 && len(att.notes) == 0 {
+		switch strings.ToLower(strings.TrimSpace(content)) {
+		case "/clear":
+			s.wsClearSession(sid)
+			return
+		case "/compact":
+			s.wsCompactSession(sid)
+			return
+		}
+	}
 	// Document attachments ride as path notes in the text so the model can
 	// read_file them and the transcript keeps a visible record.
 	if len(att.notes) > 0 {
@@ -354,6 +368,126 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 		}()
 		s.runAgentTurnLoop(sess, content, att.blocks, att.images)
 	}()
+}
+
+// wsClearSession wipes a session's persisted history (keeping its meta header)
+// and tells subscribed browsers to reload the now-empty transcript. Backs the
+// /clear command. Refused while a turn is running so it can't race the turn's
+// own post-turn persist.
+func (s *Server) wsClearSession(sid string) {
+	mu := s.sessionTurnLock(sid)
+	mu.Lock()
+	running := s.turnRunning[sid]
+	mu.Unlock()
+	if running {
+		s.wsToast(sid, "Can't clear while a turn is running — interrupt it first.", "error")
+		return
+	}
+
+	sess, err := agent.LoadSession(sid)
+	if err != nil {
+		s.wsToast(sid, "Session not found.", "error")
+		return
+	}
+	sess.Messages = nil
+	if err := sess.Save(); err != nil {
+		s.wsToast(sid, "Clear failed: "+err.Error(), "error")
+		return
+	}
+
+	// Drop the cached agent and the memory-recall latch so the next turn starts
+	// from a genuinely fresh context (delete on a nil map is a no-op).
+	s.sessionAgentsMu.Lock()
+	delete(s.sessionAgents, sid)
+	s.sessionAgentsMu.Unlock()
+	s.injectorMu.Lock()
+	delete(s.sessionInjectors, sid)
+	s.injectorMu.Unlock()
+
+	s.wsHub.broadcast(sid, map[string]any{"type": "session_update", "session_id": sid, "context_usage": 0})
+	s.broadcastHistoryReload(sid)
+	s.wsToast(sid, "Conversation cleared.", "success")
+}
+
+// wsCompactSession force-compacts a session's history now and reloads the
+// transcript. Backs the /compact command. The summarize is an LLM call, so it
+// runs in a goroutine (the WS read loop must not block) guarded by turnRunning
+// so a model turn can't race it; it registers an interrupt so /stop works.
+func (s *Server) wsCompactSession(sid string) {
+	mu := s.sessionTurnLock(sid)
+	mu.Lock()
+	if s.turnRunning[sid] {
+		mu.Unlock()
+		s.wsToast(sid, "Can't compact while a turn is running — interrupt it first.", "error")
+		return
+	}
+	s.turnRunning[sid] = true
+	mu.Unlock()
+
+	go func() {
+		defer func() {
+			mu.Lock()
+			s.turnRunning[sid] = false
+			mu.Unlock()
+		}()
+
+		sess, err := agent.LoadSession(sid)
+		if err != nil {
+			s.wsToast(sid, "Session not found.", "error")
+			return
+		}
+		if err := s.ensureSender(); err != nil {
+			s.wsToast(sid, err.Error(), "error")
+			return
+		}
+		a := s.buildAgent(sess)
+
+		ctx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKeySessionID{}, sid))
+		s.registerInterrupt(sid, cancel)
+		defer func() {
+			cancel()
+			s.interruptMu.Lock()
+			delete(s.interrupts, sid)
+			s.interruptMu.Unlock()
+		}()
+
+		s.wsHub.broadcast(sid, map[string]any{"type": "session_update", "session_id": sid, "status": "running"})
+		defer s.wsHub.broadcast(sid, map[string]any{"type": "session_update", "session_id": sid, "status": "idle"})
+
+		stats, err := a.ForceCompact(ctx, nil)
+		if err != nil {
+			s.wsToast(sid, "Compact failed: "+err.Error(), "error")
+			return
+		}
+		if stats.FoldedMsgs == 0 && stats.ReclaimedTokens == 0 {
+			s.wsToast(sid, "Nothing to compact yet.", "info")
+			return
+		}
+		sess.SyncFrom(a.History)
+		if err := sess.Save(); err != nil {
+			s.wsToast(sid, "Compact failed to save: "+err.Error(), "error")
+			return
+		}
+		s.broadcastHistoryReload(sid)
+		s.wsToast(sid, fmt.Sprintf("Compacted — folded %d message(s).", stats.FoldedMsgs), "success")
+	}()
+}
+
+// broadcastHistoryReload asks subscribed browsers to re-fetch the transcript,
+// used after an out-of-band history rewrite (/clear, /compact).
+func (s *Server) broadcastHistoryReload(sid string) {
+	s.wsHub.broadcast(sid, map[string]string{"type": "history_reload", "session_id": sid})
+}
+
+// wsToast surfaces a transient message in the browser (level: success | info |
+// error).
+func (s *Server) wsToast(sid, message, level string) {
+	s.wsHub.broadcast(sid, map[string]string{
+		"type":       "toast",
+		"session_id": sid,
+		"message":    message,
+		"level":      level,
+	})
 }
 
 // handleWSInterrupt sends an interrupt signal for a session and broadcasts

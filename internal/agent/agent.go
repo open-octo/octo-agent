@@ -1477,6 +1477,15 @@ func (a *Agent) addUsage(inputTokens, outputTokens int) {
 	a.sessionOutputTokens += outputTokens
 }
 
+// ClearHistory drops the entire conversation history, returning the agent to a
+// fresh state while keeping its system prompt, model, and tool wiring intact.
+// The context-usage gauge is reset; cumulative session token totals (cost
+// accounting) are deliberately left alone. Backs the /clear command.
+func (a *Agent) ClearHistory() {
+	a.History.Reset()
+	a.resetContextTrigger()
+}
+
 // resetContextTrigger zeroes the compaction-trigger context size under the
 // usage lock (it's read from the TUI goroutine via ContextUsage).
 func (a *Agent) resetContextTrigger() {

@@ -329,6 +329,84 @@ func (a *Agent) maybeCompact(ctx context.Context, handler EventHandler) error {
 	return nil
 }
 
+// ForceCompact compacts the conversation now, regardless of the auto-trigger
+// threshold — it backs the explicit /compact command. Like maybeCompact it
+// reclaims stale tool results first (cheap, no LLM call) and then summarizes
+// the oldest complete turns, but it does not gate on the context being "full"
+// nor skip a small fold (anti-thrash): the user asked for it. It still no-ops
+// when there aren't enough complete turns to fold safely. The returned stats
+// report what changed (BeforeTokens == AfterTokens and FoldedMsgs == 0 means
+// nothing was compacted).
+func (a *Agent) ForceCompact(ctx context.Context, handler EventHandler) (CompactStats, error) {
+	msgs := a.History.Snapshot()
+	origBefore := a.historyTokens(msgs)
+	before := origBefore
+	stats := CompactStats{BeforeTokens: origBefore, AfterTokens: origBefore}
+
+	// Cheap tier first: reclaim stale tool-result bulk with no LLM call.
+	if reclaimed := a.reclaimStaleToolResults(); reclaimed > 0 {
+		a.resetContextTrigger()
+		msgs = a.History.Snapshot()
+		stats.ReclaimedTokens = reclaimed
+		before = estimateMessages(msgs)
+		stats.AfterTokens = before
+	}
+
+	split := safeSplitIndexByBudget(msgs, a.compactKeepBudget())
+	if split <= 0 {
+		// Not enough complete turns to fold. If reclamation shrank things,
+		// surface that as a done event so the UI can announce it.
+		if stats.ReclaimedTokens > 0 && handler != nil {
+			handler(AgentEvent{Kind: EventCompactDone, Compact: &CompactStats{
+				BeforeTokens:    origBefore,
+				AfterTokens:     stats.AfterTokens,
+				ReclaimedTokens: stats.ReclaimedTokens,
+			}})
+		}
+		return stats, nil
+	}
+
+	if handler != nil {
+		handler(AgentEvent{Kind: EventCompactStarted, Compact: &CompactStats{
+			BeforeTokens: before,
+			FoldedMsgs:   split,
+			KeptTurns:    countKeptUserTurns(msgs, split),
+			MaxTokens:    summarizeMaxTokens,
+		}})
+	}
+
+	summary, err := a.summarize(ctx, msgs[:split], handler)
+	if err != nil {
+		emitCompactDone(handler, before, before, split) // no-op: clear the indicator
+		return stats, fmt.Errorf("agent: compact: %w", err)
+	}
+	if summary == "" {
+		emitCompactDone(handler, before, before, split) // nothing usable came back
+		return stats, nil
+	}
+
+	// Archive the verbatim originals before discarding them, so the model can
+	// recall details the lossy summary dropped (best-effort; "" when disabled).
+	body := "[Earlier conversation summary]\n\n" + summary
+	if ref := a.archiveChunk(msgs[:split]); ref != "" {
+		body += fmt.Sprintf("\n\n[Full originals of the summarized turns archived at %s — use the read tool to recall details.]", ref)
+	}
+
+	// Rebuild: one summary user-message, then the kept recent turns verbatim.
+	a.History.Reset()
+	a.History.Append(NewUserMessage(body))
+	for _, m := range msgs[split:] {
+		a.History.Append(m)
+	}
+	a.resetContextTrigger()
+
+	after := estimateMessages(a.History.Snapshot())
+	stats.AfterTokens = after
+	stats.FoldedMsgs = split
+	emitCompactDone(handler, before, after, split)
+	return stats, nil
+}
+
 // emitCompactDone fires EventCompactDone if a handler is attached. before ==
 // after signals a no-op compaction (the full history was kept).
 func emitCompactDone(handler EventHandler, before, after, folded int) {

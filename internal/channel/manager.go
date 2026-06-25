@@ -3,7 +3,7 @@ package channel
 import (
 	"context"
 	"fmt"
-	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -139,7 +139,7 @@ func (m *Manager) newSession(key SessionKey, ev InboundEvent) *Session {
 		UserID:  ev.UserID,
 		BoundAt: time.Now(),
 	}
-	s.restoreOrInitStore()
+	s.restoreOrInitStore(m.resolveStoreID(key))
 	return s
 }
 
@@ -155,6 +155,11 @@ type Manager struct {
 	// sessions holds active sessions keyed by SessionKey.
 	sessions sync.Map // SessionKey -> *Session
 
+	// bindings is the persistent chat→session redirection set by /bind. When a
+	// key is present, the chat routes to the recorded store instead of its
+	// deterministic default (see resolveStoreID).
+	bindings *bindingStore
+
 	// mu guards the running flag.
 	mu      sync.RWMutex
 	running bool
@@ -167,10 +172,20 @@ func NewManager(cfg *Config, factory AgentFactory, mode BindingMode) *Manager {
 		mode = BindByChatUser
 	}
 	return &Manager{
-		cfg:     cfg,
-		factory: factory,
-		mode:    mode,
+		cfg:      cfg,
+		factory:  factory,
+		mode:     mode,
+		bindings: newBindingStore(),
 	}
+}
+
+// resolveStoreID returns the on-disk session store ID a chat should use: the
+// session it was explicitly bound to via /bind, or its deterministic default.
+func (m *Manager) resolveStoreID(key SessionKey) string {
+	if id, ok := m.bindings.get(key); ok {
+		return id
+	}
+	return sessionStoreID(key)
 }
 
 // Start launches all enabled adapters and begins listening for messages.
@@ -278,36 +293,75 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 		return m.cmdStatus(ev)
 	case "/list":
 		return m.cmdList()
+	case "/clear":
+		return m.cmdClear(ev)
 	default:
-		return fmt.Sprintf("Unknown command: %s. Available: /bind, /stop, /unbind, /status, /list", cmd)
+		return fmt.Sprintf("Unknown command: %s. Available: /bind <number|id>, /unbind, /list, /clear, /compact, /stop, /status", cmd)
 	}
 }
 
-// cmdBind explicitly binds the current chat/user to a new session. The
-// persisted store is deleted first — /bind means "start fresh", and without
-// the delete the new session would just rehydrate the old history.
-func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
+// cmdClear wipes the current session's conversation history while keeping its
+// binding and persisted store — the chat starts fresh without re-binding. The
+// emptied history is persisted so a restart doesn't bring it back.
+func (m *Manager) cmdClear(ev InboundEvent) string {
 	key := sessionKeyFor(m.mode, ev)
-	var delErr error
-	if val, loaded := m.sessions.LoadAndDelete(key); loaded {
-		delErr = val.(*Session).deleteStore()
-	} else {
-		// No live session, but a persisted store from a previous process
-		// may still exist; /bind must clear that too.
-		if err := agent.DeleteSession(sessionStoreID(key)); err != nil && !os.IsNotExist(err) {
-			delErr = err
+	val, loaded := m.sessions.Load(key)
+	if !loaded {
+		return "No active session to clear."
+	}
+	sess := val.(*Session)
+	sess.Agent.ClearHistory()
+	if err := sess.Persist(); err != nil {
+		return fmt.Sprintf("Cleared, but saving the empty history failed: %v", err)
+	}
+	return "Conversation cleared. Starting fresh."
+}
+
+// cmdBind attaches the current chat to an existing session chosen from /list,
+// by its list number or (short/full) ID. The redirection is recorded in the
+// persistent binding table so it survives a restart, and no history is
+// deleted — /bind switches conversations rather than starting a fresh one.
+func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
+	if len(args) == 0 {
+		return "Usage: /bind <number|id> — run /list to see sessions, then attach this chat to one. History is preserved."
+	}
+	target := m.resolveBindTarget(args[0])
+	if target == nil {
+		return fmt.Sprintf("No session matches %q. Run /list to see available sessions.", args[0])
+	}
+
+	key := sessionKeyFor(m.mode, ev)
+	if err := m.bindings.set(key, target.ID); err != nil {
+		return fmt.Sprintf("Could not save the binding: %v", err)
+	}
+	// Drop any live session for this key, then rebuild it against the newly
+	// bound store so the chat is ready immediately. A turn still in flight on
+	// the old session keeps persisting to its own store — nothing is deleted.
+	m.sessions.LoadAndDelete(key)
+	m.sessions.Store(key, m.newSession(key, ev))
+	return fmt.Sprintf("Bound to session %q [%s]. History preserved.", target.DisplayTitle(), target.ShortID())
+}
+
+// resolveBindTarget maps a /bind argument to a persisted session: a 1-based
+// index into the /list ordering (newest first), or a full / short ID match.
+// Returns nil when nothing matches.
+func (m *Manager) resolveBindTarget(arg string) *agent.Session {
+	sessions, err := agent.ListSessions(0)
+	if err != nil || len(sessions) == 0 {
+		return nil
+	}
+	if n, err := strconv.Atoi(arg); err == nil {
+		if n >= 1 && n <= len(sessions) {
+			return sessions[n-1]
+		}
+		return nil
+	}
+	for _, s := range sessions {
+		if s.ID == arg || s.ShortID() == arg {
+			return s
 		}
 	}
-	if delErr != nil {
-		return fmt.Sprintf("Cannot start fresh: clearing the previous history failed: %v", delErr)
-	}
-	sess := m.newSession(key, ev)
-	m.sessions.Store(key, sess)
-	modeStr := string(m.mode)
-	if modeStr == "" {
-		modeStr = string(BindByChatUser)
-	}
-	return fmt.Sprintf("Session bound (%s). Key: %s", modeStr, key)
+	return nil
 }
 
 // cmdStop interrupts the session's in-flight agent turn (mirrors the Ctrl-C /
@@ -325,18 +379,22 @@ func (m *Manager) cmdStop(ev InboundEvent) string {
 	return "No task is running."
 }
 
-// cmdUnbind deletes the current session and its history, including the
-// persisted store — "history cleared" must survive a restart too.
+// cmdUnbind detaches the chat from a session it was bound to via /bind,
+// reverting it to its own default session. No history is deleted — the bound
+// session's transcript is left intact so it can be re-attached later.
 func (m *Manager) cmdUnbind(ev InboundEvent) string {
 	key := sessionKeyFor(m.mode, ev)
-	val, loaded := m.sessions.LoadAndDelete(key)
-	if !loaded {
-		return "No active session for this context."
+	hadOverride, err := m.bindings.remove(key)
+	if err != nil {
+		return fmt.Sprintf("Could not clear the binding: %v", err)
 	}
-	if err := val.(*Session).deleteStore(); err != nil {
-		return fmt.Sprintf("Session unbound, but clearing the persisted history failed: %v", err)
+	// Detach the live session without touching any store; the next message
+	// re-attaches this chat to its own default session.
+	m.sessions.LoadAndDelete(key)
+	if hadOverride {
+		return "Unbound. This chat reverted to its own session; the bound session's history was kept."
 	}
-	return "Session unbound and history cleared."
+	return "This chat wasn't bound to another session. Reset to its default session; no history was deleted."
 }
 
 // cmdStatus reports the current session state.
@@ -344,7 +402,7 @@ func (m *Manager) cmdStatus(ev InboundEvent) string {
 	key := sessionKeyFor(m.mode, ev)
 	val, ok := m.sessions.Load(key)
 	if !ok {
-		return "No active session. Send a message or use /bind to start one."
+		return "No active session. Send a message to start one, or /bind to attach to a saved session."
 	}
 	sess := val.(*Session)
 	inTok, outTok := sess.Agent.SessionTokens()
@@ -352,17 +410,22 @@ func (m *Manager) cmdStatus(ev InboundEvent) string {
 		sess.BoundAt.Format("15:04:05"), inTok, outTok)
 }
 
-// cmdList returns all active sessions.
+// cmdList shows the persisted sessions a chat can attach to with /bind,
+// newest first. The number printed here is the index /bind accepts.
 func (m *Manager) cmdList() string {
-	var count int
-	m.sessions.Range(func(_, _ any) bool {
-		count++
-		return true
-	})
-	if count == 0 {
-		return "No active sessions."
+	sessions, err := agent.ListSessions(20)
+	if err != nil {
+		return fmt.Sprintf("Could not list sessions: %v", err)
 	}
-	return fmt.Sprintf("Active sessions: %d", count)
+	if len(sessions) == 0 {
+		return "No saved sessions yet."
+	}
+	var b strings.Builder
+	b.WriteString("Sessions (newest first) — /bind <number> to attach:\n")
+	for i, s := range sessions {
+		fmt.Fprintf(&b, "%d. %s  [%s]\n", i+1, s.DisplayTitle(), s.ShortID())
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // handleSessionMessage routes a non-command message to the appropriate session,

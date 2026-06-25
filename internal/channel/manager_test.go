@@ -161,47 +161,48 @@ func TestManager_CommandRouter(t *testing.T) {
 			"mock": {"enabled": true},
 		},
 	}
+	tempHome(t)
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
-	// /bind
-	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1", Text: "/bind"}
-	reply := mgr.CommandRouter(ev)
-	if reply == "" {
-		t.Fatal("expected non-empty reply for /bind")
-	}
+	// A session exists once the chat has spoken.
+	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
+	mgr.GetOrCreateSession(ev)
 	if mgr.SessionCount() != 1 {
 		t.Fatalf("expected 1 session, got %d", mgr.SessionCount())
 	}
 
+	// /bind with no target explains usage and creates nothing.
+	ev.Text = "/bind"
+	if reply := mgr.CommandRouter(ev); !strings.Contains(strings.ToLower(reply), "usage") {
+		t.Fatalf("expected usage hint for bare /bind, got %q", reply)
+	}
+
 	// /status
 	ev.Text = "/status"
-	reply = mgr.CommandRouter(ev)
-	if reply == "" {
+	if reply := mgr.CommandRouter(ev); reply == "" {
 		t.Fatal("expected non-empty reply for /status")
 	}
 
 	// /list
 	ev.Text = "/list"
-	reply = mgr.CommandRouter(ev)
-	if reply == "" {
+	if reply := mgr.CommandRouter(ev); reply == "" {
 		t.Fatal("expected non-empty reply for /list")
 	}
 
 	// /stop with no turn in flight (does not delete the session)
 	ev.Text = "/stop"
-	reply = mgr.CommandRouter(ev)
-	if !strings.Contains(reply, "No task is running") {
+	if reply := mgr.CommandRouter(ev); !strings.Contains(reply, "No task is running") {
 		t.Fatalf("expected idle /stop reply, got %q", reply)
 	}
 	if mgr.SessionCount() != 1 {
 		t.Fatalf("expected session to survive /stop, got %d", mgr.SessionCount())
 	}
 
-	// /unbind (deletes)
+	// /unbind detaches the live session (history is kept on disk).
 	ev.Text = "/unbind"
-	reply = mgr.CommandRouter(ev)
+	mgr.CommandRouter(ev)
 	if mgr.SessionCount() != 0 {
-		t.Fatalf("expected 0 sessions after /unbind, got %d", mgr.SessionCount())
+		t.Fatalf("expected 0 live sessions after /unbind, got %d", mgr.SessionCount())
 	}
 }
 
