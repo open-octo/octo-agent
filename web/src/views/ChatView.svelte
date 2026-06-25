@@ -70,6 +70,10 @@
   let artifactCount  = $derived($artifacts.length)
   let wsDisconnected = $derived($wsState === 'disconnected')
 
+  // Session-level plan panel: collapsed by default so it never occludes the
+  // message stream; the user can expand it into a floating dropdown.
+  let planExpanded = $state(false)
+
   // Sub-agents card elapsed time + reconnect countdown both tick off `now`.
   let now = $state(Date.now())
   $effect(() => {
@@ -644,17 +648,19 @@
     </div>
   {/if}
 
-  <!-- Session-level task progress (driven by task_create / task_update / task_list) -->
+  <!-- Session-level task progress (driven by task_create / task_update / task_list).
+       Kept collapsed by default and rendered as a floating dropdown when open so
+       the message list underneath is never pushed out of view. -->
   {#if todos && todos.length > 0}
     <div class="session-tasks">
-      <details open class="plan-card">
+      <details bind:open={planExpanded} class="plan-card plan-float">
         <summary class="plan-summary">
           <iconify-icon icon="ant-design:ordered-list-outlined" width="14" style="color:var(--blue-6)"></iconify-icon>
           <span class="plan-title">{$t('agent.plan')}</span>
           <span class="plan-meta">{planDoneCount(todos)} / {todos.length} done</span>
           <span class="plan-progress"><span class="plan-fill" style="width:{planFill(todos)}"></span></span>
           <span style="margin-left:auto"></span>
-          <iconify-icon icon="lucide:chevron-down" width="14" style="color:var(--text-tertiary)"></iconify-icon>
+          <iconify-icon icon={planExpanded ? 'lucide:chevron-up' : 'lucide:chevron-down'} width="14" style="color:var(--text-tertiary)"></iconify-icon>
         </summary>
         <div class="plan-steps">
           {#each todos as step}
@@ -710,7 +716,7 @@
                 <div class="agent-content">
                   <!-- Plan card (todos attached to this message) -->
                   {#if msg.todos && msg.todos.length > 0}
-                    <details open class="plan-card">
+                    <details class="plan-card">
                       <summary class="plan-summary">
                         <iconify-icon icon="ant-design:ordered-list-outlined" width="14" style="color:var(--blue-6)"></iconify-icon>
                         <span class="plan-title">{$t('agent.plan')}</span>
@@ -942,11 +948,31 @@
 /* ── Session task progress ───────────────────────────────────────────────── */
 .session-tasks {
   flex: 0 0 auto;
-  padding: 12px 24px 0;
+  padding: 8px 24px;
   background: var(--bg-container);
   border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 10;
 }
 .session-tasks .plan-card { margin: 0; }
+/* Floating plan dropdown: the step list overlays the message area instead of
+   pushing it down, so expanding the panel never hides the conversation. */
+.plan-float {
+  position: relative;
+}
+.plan-float > .plan-steps {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
+  border: 1px solid var(--blue-2);
+  border-radius: 10px;
+  background: var(--bg-container);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  z-index: 20;
+}
 
 /* ── Body row ────────────────────────────────────────────────────────────── */
 .body-row { flex: 1; display: flex; min-height: 0; }
