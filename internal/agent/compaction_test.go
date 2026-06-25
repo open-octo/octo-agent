@@ -258,6 +258,96 @@ func TestMaybeCompact_RewritesHistory(t *testing.T) {
 	}
 }
 
+// TestForceCompact_FoldsBelowAutoThreshold proves /compact folds even when the
+// context sits below the auto-compaction trigger (where maybeCompact no-ops).
+func TestForceCompact_FoldsBelowAutoThreshold(t *testing.T) {
+	f := &summarizeFake{summary: "GOAL: build X."}
+	a := New(f, "m") // unknown model → 128k window; keepBudget caps at trigger/2
+	a.CompactThreshold = 4000
+
+	longMsg := strings.Repeat("x ", 500) // ~250 tokens each → ~3000 total
+	for i := 0; i < 6; i++ {
+		a.History.Append(NewUserMessage(longMsg))
+		a.History.Append(NewAssistantMessage(longMsg))
+	}
+	before := len(a.History.Snapshot())
+
+	// Below the 4000 trigger: the auto path must leave history untouched.
+	if err := a.maybeCompact(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(a.History.Snapshot()); got != before {
+		t.Fatalf("maybeCompact should no-op below the trigger; len %d → %d", before, got)
+	}
+
+	// The explicit /compact must fold anyway.
+	stats, err := a.ForceCompact(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.FoldedMsgs == 0 {
+		t.Fatal("ForceCompact should have folded the older turns")
+	}
+	snap := a.History.Snapshot()
+	if len(snap) >= before {
+		t.Errorf("history not reduced: %d → %d", before, len(snap))
+	}
+	if snap[0].Role != RoleUser || !strings.Contains(snap[0].Content, "GOAL: build X") {
+		t.Errorf("first message should carry the summary, got %+v", snap[0])
+	}
+	if f.calls != 1 {
+		t.Errorf("summarize calls = %d, want 1", f.calls)
+	}
+	if a.lastInputTokens != 0 {
+		t.Errorf("trigger should reset to 0 after compaction, got %d", a.lastInputTokens)
+	}
+}
+
+// TestForceCompact_NoOpOnTinyHistory: nothing foldable (one turn) yields a
+// no-op stats result with history untouched.
+func TestForceCompact_NoOpOnTinyHistory(t *testing.T) {
+	f := &summarizeFake{summary: "unused"}
+	a := New(f, "m")
+	a.History.Append(NewUserMessage("hello"))
+	a.History.Append(NewAssistantMessage("hi"))
+
+	stats, err := a.ForceCompact(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.FoldedMsgs != 0 || stats.ReclaimedTokens != 0 {
+		t.Errorf("expected a no-op, got %+v", stats)
+	}
+	if f.calls != 0 {
+		t.Errorf("summarize should not be called on a no-op, got %d", f.calls)
+	}
+	if len(a.History.Snapshot()) != 2 {
+		t.Errorf("history must be untouched, got %d messages", len(a.History.Snapshot()))
+	}
+}
+
+// TestClearHistory wipes the conversation and resets the context gauge while
+// keeping the system prompt.
+func TestClearHistory(t *testing.T) {
+	a := New(&summarizeFake{}, "m")
+	a.System = "you are a test"
+	a.History.Append(NewUserMessage("hello"))
+	a.History.Append(NewAssistantMessage("hi"))
+	a.lastInputTokens = 1234
+
+	a.ClearHistory()
+
+	if got := len(a.History.Snapshot()); got != 0 {
+		t.Errorf("history len = %d, want 0", got)
+	}
+	if a.lastInputTokens != 0 {
+		t.Errorf("context gauge not reset: %d", a.lastInputTokens)
+	}
+	if a.System != "you are a test" {
+		t.Errorf("system prompt must survive /clear, got %q", a.System)
+	}
+}
+
 // streamingSummarizeFake implements StreamingSender, emitting the canned
 // summary in chunks so the compaction-progress events can be observed.
 type streamingSummarizeFake struct {

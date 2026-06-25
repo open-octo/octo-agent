@@ -86,7 +86,9 @@ func TestSession_PersistAcrossTurnsAppends(t *testing.T) {
 	}
 }
 
-func TestCmdUnbind_DeletesStore(t *testing.T) {
+// TestCmdUnbind_KeepsStore: /unbind detaches the chat but must not delete the
+// session's persisted history — it can be re-attached later with /bind.
+func TestCmdUnbind_KeepsStore(t *testing.T) {
 	tempHome(t)
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
@@ -104,39 +106,93 @@ func TestCmdUnbind_DeletesStore(t *testing.T) {
 		t.Fatalf("store file missing before unbind: %v", err)
 	}
 
-	if reply := m.cmdUnbind(ev); !strings.Contains(reply, "unbound") {
+	if reply := m.cmdUnbind(ev); !strings.Contains(strings.ToLower(reply), "unbound") &&
+		!strings.Contains(strings.ToLower(reply), "wasn't bound") {
 		t.Fatalf("unexpected unbind reply %q", reply)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Error("/unbind must delete the persisted history")
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("/unbind must keep the persisted history, but the file is gone: %v", err)
 	}
 }
 
-// TestCmdBind_StartsFresh: /bind explicitly resets the conversation; the new
-// session must not rehydrate the previous history from disk.
-func TestCmdBind_StartsFresh(t *testing.T) {
+// TestCmdBind_AttachesToExistingSession: /bind <id> redirects a chat to an
+// existing session and rehydrates its history (it does not start fresh).
+func TestCmdBind_AttachesToExistingSession(t *testing.T) {
+	tempHome(t)
+	m := testManager()
+
+	// Chat A builds up a session and persists it.
+	evA := InboundEvent{Platform: "feishu", ChatID: "cA", UserID: "uA"}
+	sessA := m.GetOrCreateSession(evA)
+	sessA.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "shared context"})
+	if err := sessA.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	targetID := sessA.Store.ID
+
+	// Chat B binds to A's session by ID and should see A's history.
+	evB := InboundEvent{Platform: "feishu", ChatID: "cB", UserID: "uB"}
+	if reply := m.cmdBind(evB, []string{targetID}); !strings.Contains(strings.ToLower(reply), "bound") {
+		t.Fatalf("unexpected bind reply %q", reply)
+	}
+	bound := m.GetSession(evB)
+	if bound == nil {
+		t.Fatal("expected a session after /bind")
+	}
+	if got := len(bound.Agent.History.Snapshot()); got != 1 {
+		t.Errorf("history after /bind = %d messages, want 1 (rehydrated from target)", got)
+	}
+	if bound.Store.ID != targetID {
+		t.Errorf("bound session store = %q, want %q", bound.Store.ID, targetID)
+	}
+
+	// The binding survives a rebuild (persisted): a fresh manager re-attaches.
+	m2 := testManager()
+	again := m2.GetOrCreateSession(evB)
+	if again.Store.ID != targetID {
+		t.Errorf("binding did not persist: store = %q, want %q", again.Store.ID, targetID)
+	}
+}
+
+// TestCmdClear_WipesHistoryKeepsStore: /clear empties the conversation but
+// keeps the session and its (now-empty) store file.
+func TestCmdClear_WipesHistoryKeepsStore(t *testing.T) {
 	tempHome(t)
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	m := testManager()
 	sess := m.GetOrCreateSession(ev)
-	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "old context"})
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "remember me"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
 	}
-
-	if reply := m.cmdBind(ev, nil); !strings.Contains(reply, "bound") {
-		t.Fatalf("unexpected bind reply %q", reply)
+	path, err := sess.Store.SavePath()
+	if err != nil {
+		t.Fatal(err)
 	}
-	fresh := m.GetSession(ev)
-	if got := len(fresh.Agent.History.Snapshot()); got != 0 {
-		t.Errorf("history after /bind = %d messages, want 0 (fresh session)", got)
+	storeID := sess.Store.ID
+
+	if reply := m.cmdClear(ev); !strings.Contains(strings.ToLower(reply), "cleared") {
+		t.Fatalf("unexpected clear reply %q", reply)
+	}
+	if got := len(sess.Agent.History.Snapshot()); got != 0 {
+		t.Errorf("in-memory history after /clear = %d, want 0", got)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("/clear must keep the store file: %v", err)
+	}
+	reloaded, err := agent.LoadSession(storeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Messages) != 0 {
+		t.Errorf("persisted history after /clear = %d, want 0", len(reloaded.Messages))
 	}
 }
 
-// TestDeleteStore_TombstonesAgainstZombiePersist pins the /unbind-during-turn
-// contract: a turn that finishes after the user cleared the history must not
-// recreate the file via its post-turn Persist.
+// TestDeleteStore_TombstonesAgainstZombiePersist pins the clear-during-turn
+// contract: after deleteStore tombstones the store, a turn that finishes later
+// must not recreate the file via its post-turn Persist.
 func TestDeleteStore_TombstonesAgainstZombiePersist(t *testing.T) {
 	tempHome(t)
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
@@ -152,8 +208,8 @@ func TestDeleteStore_TombstonesAgainstZombiePersist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if reply := m.cmdUnbind(ev); !strings.Contains(reply, "cleared") {
-		t.Fatalf("unexpected unbind reply %q", reply)
+	if err := sess.deleteStore(); err != nil {
+		t.Fatalf("deleteStore: %v", err)
 	}
 
 	// The zombie turn finishes now and persists — the tombstone must hold.

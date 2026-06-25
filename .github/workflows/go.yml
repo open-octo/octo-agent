@@ -49,5 +49,10 @@ jobs:
       - name: go build
         run: go build ./...
 
+      # Data races are OS-independent, so the detector only runs on ubuntu (where
+      # it's cheapest). Windows/macOS run a plain `go test` — fast, and still
+      # catches platform-specific failures (path handling, process spawning, the
+      # GOOS-guarded cases). The race pass on Windows was the CI bottleneck
+      # (~150s of a ~220s job) thanks to instrumentation + costly process spawns.
       - name: go test
-        run: go test -race ./...
+        run: go test ${{ matrix.os == 'ubuntu-latest' && '-race' || '' }} ./...

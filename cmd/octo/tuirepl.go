@@ -605,6 +605,36 @@ func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
 	return tickCmd()
 }
 
+// startCompact launches an explicit /compact in a background goroutine. It
+// reuses the turn machinery: the sink streams EventCompact* events so the live
+// "Compacting…" spinner and the success/reclaim notice render exactly as
+// auto-compaction does, and turnFinishedMsg saves the folded history. A no-op
+// (nothing foldable) or error gets its own scrollback notice, since those
+// don't ride the compaction events.
+func (m *tuiModel) startCompact() tea.Cmd {
+	m.turnRunning = true
+	m.turnStart = time.Now()
+	m.spinnerFrame = 0
+	m.running = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelTurn = cancel
+	a := m.a
+	sink := m.sink
+	prog := m.sink.prog
+	go func() {
+		stats, err := a.ForceCompact(ctx, sink.Emit)
+		cancel()
+		switch {
+		case err != nil:
+			prog.Send(noticeMsg{text: "compact failed: " + err.Error()})
+		case stats.FoldedMsgs == 0 && stats.ReclaimedTokens == 0:
+			prog.Send(noticeMsg{text: "✦ nothing to compact yet"})
+		}
+		prog.Send(turnFinishedMsg{err: err})
+	}()
+	return tickCmd()
+}
+
 // commitEcho promotes the deferred user-message echo from the live View() area
 // to the scrollback, so it lands just above the turn's first output. Idempotent
 // — a no-op once the echo has been committed or dropped.

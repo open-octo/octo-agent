@@ -41,10 +41,11 @@ func sessionStoreID(key SessionKey) string {
 
 // restoreOrInitStore attaches the persistent store to a freshly built
 // session: an existing file rehydrates the agent's history, otherwise a new
-// store is initialised. Best-effort — a corrupt or unreadable file degrades
-// to a fresh conversation rather than blocking the chat.
-func (s *Session) restoreOrInitStore() {
-	id := sessionStoreID(s.Key)
+// store is initialised. The store ID is resolved by the manager (a /bind
+// override or the deterministic default) and passed in. Best-effort — a
+// corrupt or unreadable file degrades to a fresh conversation rather than
+// blocking the chat.
+func (s *Session) restoreOrInitStore(id string) {
 	if loaded, err := agent.LoadSession(id); err == nil {
 		s.Store = loaded
 		if len(loaded.Messages) > 0 {

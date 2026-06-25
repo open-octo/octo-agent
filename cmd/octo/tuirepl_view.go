@@ -678,6 +678,14 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		return m.dispatchModel(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/thinking":
 		return m.dispatchThinking(strings.TrimSpace(strings.TrimPrefix(text, first)))
+	case "/clear":
+		return m.dispatchClear()
+	case "/compact":
+		if m.turnRunning {
+			m.println(noticeStyle.Render("/compact: wait for the current turn to finish"))
+			return m, nil
+		}
+		return m, m.startCompact()
 	case "/help", "/save", "/sessions", "/skills", "/memory", "/mcp":
 		var b bytes.Buffer
 		switch cmd {
@@ -705,6 +713,26 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		// paths, regexes, and other /-prefixed messages reach the model.
 		return m, m.startTurn(text)
 	}
+}
+
+// dispatchClear handles "/clear" — wipe the conversation history for a fresh
+// start, keeping the system prompt, model, and tools. The cleared history is
+// persisted immediately so a resume doesn't bring it back. Already-printed
+// scrollback stays on screen (the terminal owns it); only the model's context
+// is reset.
+func (m *tuiModel) dispatchClear() (tea.Model, tea.Cmd) {
+	if m.turnRunning {
+		m.println(noticeStyle.Render("/clear: wait for the current turn to finish"))
+		return m, nil
+	}
+	m.a.ClearHistory()
+	if !m.cfg.noSave {
+		m.cfg.session.SyncFrom(m.a.History)
+		_ = m.cfg.session.Save()
+	}
+	m.assistantFirstBlock = true
+	m.println(noticeStyle.Render("✦ context cleared — starting fresh"))
+	return m, nil
 }
 
 // dispatchModel handles "/model <name>" — switch the active model for the
