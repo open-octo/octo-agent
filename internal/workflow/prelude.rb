@@ -45,6 +45,15 @@ def budget_remaining
   __budget_remaining
 end
 
+# phase(title) marks the start of a named stage so a multi-stage run reads as
+# grouped steps in the progress stream instead of a flat log. It is purely
+# cosmetic — scheduling is unaffected; agent/parallel/pipeline behave the same
+# whether or not phases are declared. Returns nil.
+def phase(title)
+  __log("== phase: #{title}")
+  nil
+end
+
 # __run_fibers is the cooperative event loop: every item runs in its own fiber;
 # all branches are advanced to their first agent() call (so every job is in
 # flight) before any result is awaited; then completions are drained in finish
