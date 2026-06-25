@@ -61,6 +61,10 @@ type WorkflowRunSnapshot struct {
 	JournalRunID string
 	Start        time.Time
 	End          time.Time
+	// LastActivity is when the run last emitted progress (a log line or an
+	// agent start/finish). A running run whose LastActivity is far in the past
+	// is likely stuck — the gap, not the total elapsed, is the liveness signal.
+	LastActivity time.Time
 }
 
 // workflowRun tracks one detached workflow.Run invocation.
@@ -77,15 +81,28 @@ type workflowRun struct {
 	logs         []string
 	journalRunID string
 	end          time.Time
+	lastActivity time.Time
+	killed       bool
 }
 
-func (r *workflowRun) appendLog(line string) {
+// appendLog records a progress line and marks the run live (updates
+// lastActivity). now is passed in so the caller controls the clock.
+func (r *workflowRun) appendLog(line string, now time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.logs = append(r.logs, line)
 	if n := len(r.logs) - maxWorkflowLogLines; n > 0 {
 		r.logs = r.logs[n:]
 	}
+	r.lastActivity = now
+}
+
+// markKilled flags the run as deliberately killed, so finish reports it as a
+// kill rather than a raw "context canceled" error.
+func (r *workflowRun) markKilled() {
+	r.mu.Lock()
+	r.killed = true
+	r.mu.Unlock()
 }
 
 func (r *workflowRun) finish(output, journalRunID, errMsg string, end time.Time) {
@@ -94,6 +111,11 @@ func (r *workflowRun) finish(output, journalRunID, errMsg string, end time.Time)
 	r.done = true
 	r.output = output
 	r.journalRunID = journalRunID
+	// A killed run comes back as "context canceled"; report it as a kill so the
+	// model doesn't read it as a spurious failure.
+	if r.killed {
+		errMsg = "workflow was killed (workflow_kill)"
+	}
 	r.errMsg = errMsg
 	r.end = end
 }
@@ -120,6 +142,7 @@ func (r *workflowRun) snapshot() WorkflowRunSnapshot {
 		JournalRunID: r.journalRunID,
 		Start:        r.start,
 		End:          r.end,
+		LastActivity: r.lastActivity,
 	}
 }
 
@@ -182,7 +205,8 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 	m.active++
 	m.seq++
 	id := fmt.Sprintf("wf_%d", m.seq)
-	run := &workflowRun{id: id, description: req.Description, cancel: cancel, start: time.Now()}
+	now := time.Now()
+	run := &workflowRun{id: id, description: req.Description, cancel: cancel, start: now, lastActivity: now}
 	m.runs[id] = run
 	m.mu.Unlock()
 
@@ -197,10 +221,13 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 		res, err := workflow.Run(ctx, req.Script, workflow.Options{
 			Agent: req.Agent,
 			Log: func(s string) {
-				run.appendLog(s)
+				run.appendLog(s, time.Now())
 				m.emit(WorkflowEvent{RunID: id, Kind: "progress", Line: s})
 			},
+			// Agent lifecycle ("→ start" / "✓ done") is also captured + counts as
+			// activity, so a workflow with no log() calls still shows it's alive.
 			Progress: func(s string) {
+				run.appendLog(s, time.Now())
 				m.emit(WorkflowEvent{RunID: id, Kind: "progress", Line: s})
 			},
 			MaxConcurrent: req.MaxConcurrent,
@@ -268,6 +295,28 @@ func (m *WorkflowManager) List() []WorkflowRunSnapshot {
 	return out
 }
 
+// Kill cancels one running workflow by id. Returns (found, wasRunning): found
+// is false for an unknown id; wasRunning is false when the run had already
+// finished (a no-op cancel). The run's detached context is cancelled, which
+// propagates to its in-flight sub-agents and unwinds the script.
+func (m *WorkflowManager) Kill(id string) (found, wasRunning bool) {
+	m.mu.Lock()
+	run := m.runs[id]
+	m.mu.Unlock()
+	if run == nil {
+		return false, false
+	}
+	run.mu.Lock()
+	done := run.done
+	run.mu.Unlock()
+	if done {
+		return true, false
+	}
+	run.markKilled()
+	run.cancel()
+	return true, true
+}
+
 // KillAll cancels every running workflow this manager owns. Called on session
 // close so a detached run doesn't outlive its conversation.
 func (m *WorkflowManager) KillAll() {
@@ -282,7 +331,9 @@ func (m *WorkflowManager) KillAll() {
 	}
 }
 
-// statusLine renders a one-line summary of a run for listings.
+// statusLine renders a one-line summary of a run for listings. For a running
+// run it appends how long since the last activity, so a stalled run (large
+// idle gap) is distinguishable from one making steady progress.
 func statusLine(s WorkflowRunSnapshot) string {
 	elapsed := time.Since(s.Start)
 	if s.Status != "running" {
@@ -292,7 +343,11 @@ func statusLine(s WorkflowRunSnapshot) string {
 	if desc == "" {
 		desc = "(workflow)"
 	}
-	return fmt.Sprintf("%s  [%s]  %s  (%s)", s.ID, s.Status, desc, elapsed.Round(time.Second))
+	line := fmt.Sprintf("%s  [%s]  %s  (%s)", s.ID, s.Status, desc, elapsed.Round(time.Second))
+	if s.Status == "running" && !s.LastActivity.IsZero() {
+		line += fmt.Sprintf("  · last activity %s ago", time.Since(s.LastActivity).Round(time.Second))
+	}
+	return line
 }
 
 // formatRunDetail renders a single run's full status for workflow_status.
@@ -301,7 +356,16 @@ func formatRunDetail(s WorkflowRunSnapshot) string {
 	fmt.Fprintf(&b, "%s\n", statusLine(s))
 	switch s.Status {
 	case "running":
-		b.WriteString("Still running. Poll again later.")
+		idle := time.Since(s.LastActivity)
+		if s.LastActivity.IsZero() {
+			idle = 0
+		}
+		fmt.Fprintf(&b, "Still running — last activity %s ago, %d progress line(s) so far.",
+			idle.Round(time.Second), len(s.Logs))
+		if idle > 2*time.Minute {
+			b.WriteString(" If the idle gap keeps growing it may be stuck — workflow_kill(run_id) cancels it.")
+		}
+		b.WriteString(" Poll again later to collect the result.")
 		if n := len(s.Logs); n > 0 {
 			fmt.Fprintf(&b, "\n\n[progress]\n%s", strings.Join(s.Logs, "\n"))
 		}

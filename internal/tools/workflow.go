@@ -175,3 +175,46 @@ func (WorkflowStatusTool) Execute(ctx context.Context, _ string, input map[strin
 	}
 	return agent.ToolResult{Text: formatRunDetail(snap)}, nil
 }
+
+// WorkflowKillTool cancels a running background workflow by id — for a run that
+// has stalled (workflow_status shows a large, growing "last activity" gap) or
+// is no longer wanted.
+type WorkflowKillTool struct{}
+
+func (WorkflowKillTool) Definition() agent.ToolDefinition {
+	return agent.ToolDefinition{
+		Name: "workflow_kill",
+		Description: "Cancel a running background workflow by run id (e.g. \"wf_1\"). Use when " +
+			"workflow_status shows a run is stuck (a large, growing 'last activity' gap) or you " +
+			"no longer want its result. Cancellation propagates to the workflow's in-flight " +
+			"sub-agents. A run that already finished is left as-is.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"run_id": map[string]any{
+					"type":        "string",
+					"description": "The run id to cancel (from the workflow tool / workflow_status).",
+				},
+			},
+			"required": []string{"run_id"},
+		},
+	}
+}
+
+func (WorkflowKillTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
+	runID := strings.TrimSpace(stringArg(input, "run_id"))
+	if runID == "" {
+		return agent.ToolResult{}, fmt.Errorf("workflow_kill: run_id is required")
+	}
+	mgr := resolveWorkflowManager(ctx)
+	found, wasRunning := mgr.Kill(runID)
+	switch {
+	case !found:
+		return agent.ToolResult{}, fmt.Errorf("workflow_kill: no run named %q in this session", runID)
+	case !wasRunning:
+		return agent.ToolResult{Text: fmt.Sprintf("Workflow %s had already finished — nothing to cancel.", runID)}, nil
+	default:
+		return agent.ToolResult{Text: fmt.Sprintf("Cancelled workflow %s. It will report as killed shortly; "+
+			"workflow_status(%q) confirms.", runID, runID)}, nil
+	}
+}
