@@ -364,7 +364,7 @@
       chatTodos.update(t => ({ ...t, [sid]: (ev as any).todos ?? [] }))
     }))
 
-    cleanups.push(ws.on('background_task_update', (ev) => {
+    cleanups.push(ws.on('background_tasks_update', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       chatBgTasks.update(b => ({ ...b, [sid]: (ev as any).tasks ?? [] }))
     }))
