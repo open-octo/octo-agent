@@ -40,22 +40,23 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Tool UI payloads carry absolute paths (write_file/edit_file/show_artifact
+	// all resolve inputs before emitting them). Reject relative inputs before
+	// touching the transcript so we never resolve them against the server's
+	// arbitrary process CWD.
+	abs, ok := resolveArtifactPath(reqPath)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid artifact path")
+		return
+	}
+
 	sess, err := agent.LoadSession(id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	if !sessionWrotePath(sess, reqPath) {
+	if !sessionWrotePath(sess, abs) {
 		writeError(w, http.StatusNotFound, "path was not written by this session")
-		return
-	}
-
-	// Defense in depth: even though sessionWrotePath validates the path against
-	// the transcript, the transcript could contain an absolute path outside the
-	// working directory. Only serve files that resolve under s.cwd.
-	abs, ok := resolveUnderCWD(s.cwd, reqPath)
-	if !ok {
-		writeError(w, http.StatusForbidden, "path is outside the working directory")
 		return
 	}
 	fi, err := os.Stat(abs)
@@ -103,4 +104,22 @@ func sessionWrotePath(sess *agent.Session, reqPath string) bool {
 		}
 	}
 	return false
+}
+
+// resolveArtifactPath validates a path from a tool UI payload. UI payloads carry
+// absolute paths, so relative inputs are rejected outright; this avoids resolving
+// them against the server's arbitrary process CWD and prevents path-traversal
+// payloads that would otherwise be cleaned into sensitive locations.
+func resolveArtifactPath(path string) (string, bool) {
+	if path == "" {
+		return "", false
+	}
+	if !filepath.IsAbs(path) {
+		return "", false
+	}
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		return "", false
+	}
+	return clean, true
 }
