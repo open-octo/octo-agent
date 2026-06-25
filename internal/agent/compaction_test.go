@@ -22,43 +22,60 @@ func (f *summarizeFake) SendMessages(_ context.Context, _, _ string, msgs []Mess
 	return Reply{Content: f.summary, InputTokens: 5, OutputTokens: 3}, nil
 }
 
-func TestSafeSplitIndex(t *testing.T) {
+func TestSafeSplitIndexByBudget(t *testing.T) {
 	u := NewUserMessage
 	a := NewAssistantMessage
-	toolResult := Message{Role: RoleUser, Blocks: []ContentBlock{NewToolResultBlock("c1", "out", false)}}
+	// big is ~100 tokens (400 ASCII chars / 4); a u()+a() turn is ~200 tokens.
+	big := strings.Repeat("x ", 200)
+	bigU := func() Message { return u(big) }
+	bigA := func() Message { return a(big) }
 
-	t.Run("not enough turns", func(t *testing.T) {
-		msgs := []Message{u("1"), a("r1"), u("2"), a("r2")}
-		if got := safeSplitIndex(msgs, 4); got != 0 {
-			t.Errorf("split = %d, want 0 (only 2 user turns, keep 4)", got)
+	t.Run("fewer than two user turns folds nothing", func(t *testing.T) {
+		msgs := []Message{bigU(), bigA()}
+		if got := safeSplitIndexByBudget(msgs, 10); got != 0 {
+			t.Errorf("split = %d, want 0 (only one user turn)", got)
 		}
 	})
 
-	t.Run("splits keeping last N user turns", func(t *testing.T) {
-		// 6 user turns at indices 0,2,4,6,8,10. Keep last 4 → split at index 4.
+	t.Run("budget keeps the last N turns that fit", func(t *testing.T) {
+		// 6 turns of ~200 tokens each at user indices 0,2,4,6,8,10.
 		var msgs []Message
 		for i := 0; i < 6; i++ {
-			msgs = append(msgs, u(fmt.Sprintf("u%d", i)), a(fmt.Sprintf("a%d", i)))
+			msgs = append(msgs, bigU(), bigA())
 		}
-		if got := safeSplitIndex(msgs, 4); got != 4 {
-			t.Errorf("split = %d, want 4", got)
+		// Budget ~450 tokens fits the last 2 turns (~400) but not 3 (~600),
+		// so the split keeps turns from user index 8.
+		if got := safeSplitIndexByBudget(msgs, 450); got != 8 {
+			t.Errorf("split = %d, want 8 (keep last 2 turns)", got)
 		}
 	})
 
-	t.Run("tool_result messages are not counted as user turns", func(t *testing.T) {
-		// Real user turns at 0 and 4; the tool_result at index 2 must NOT
-		// count, so with keep=1 the split lands on the second real turn (4),
-		// never on the tool_result.
-		msgs := []Message{
-			u("real-1"),       // 0  user turn
-			a("asst tooluse"), // 1
-			toolResult,        // 2  NOT a user turn
-			a("asst final"),   // 3
-			u("real-2"),       // 4  user turn
-			a("asst done"),    // 5
+	t.Run("a single oversized recent turn is still kept whole", func(t *testing.T) {
+		// Last turn alone (~200 tokens) exceeds a tiny budget; we never split
+		// inside a turn, so we keep just it (split at its user index).
+		var msgs []Message
+		for i := 0; i < 3; i++ {
+			msgs = append(msgs, bigU(), bigA())
 		}
-		if got := safeSplitIndex(msgs, 1); got != 4 {
-			t.Errorf("split = %d, want 4 (the second real user turn)", got)
+		if got := safeSplitIndexByBudget(msgs, 10); got != 4 {
+			t.Errorf("split = %d, want 4 (keep only the last turn)", got)
+		}
+	})
+
+	t.Run("tool_result messages are not split points", func(t *testing.T) {
+		toolResult := Message{Role: RoleUser, Blocks: []ContentBlock{NewToolResultBlock("c1", big, false)}}
+		msgs := []Message{
+			bigU(),     // 0  user turn
+			bigA(),     // 1  asst tool_use
+			toolResult, // 2  NOT a user turn
+			bigA(),     // 3  asst final
+			bigU(),     // 4  user turn
+			bigA(),     // 5
+		}
+		// Tiny budget keeps only the last turn; the split lands on the real
+		// user turn at 4, never on the tool_result at 2.
+		if got := safeSplitIndexByBudget(msgs, 10); got != 4 {
+			t.Errorf("split = %d, want 4 (second real user turn, not the tool_result)", got)
 		}
 	})
 }
@@ -170,6 +187,32 @@ func TestMaybeCompact_DisabledOrBelowThreshold(t *testing.T) {
 	}
 }
 
+// When the token bulk is wedged inside the most recent turn (a single huge
+// agentic turn), folding the older sliver wouldn't help, so maybeCompact must
+// skip the summarize call rather than thrash — reclamation handles that case.
+func TestMaybeCompact_AntiThrashSkipsSliverFold(t *testing.T) {
+	f := &summarizeFake{summary: "S"}
+	a := New(f, "m")
+	a.CompactThreshold = 100
+
+	// Turn 0 is tiny; turn 1 carries all the bulk. The split keeps the huge
+	// recent turn (can't fold inside it) and would fold only the tiny prefix.
+	a.History.Append(NewUserMessage("hi"))
+	a.History.Append(NewAssistantMessage("ok"))
+	a.History.Append(NewUserMessage("go"))
+	a.History.Append(NewAssistantMessage(strings.Repeat("x ", 5000))) // ~2500 tokens
+
+	if err := a.maybeCompact(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if f.calls != 0 {
+		t.Errorf("anti-thrash should skip the summarize; calls=%d", f.calls)
+	}
+	if a.History.Len() != 4 {
+		t.Errorf("history must be untouched; len=%d, want 4", a.History.Len())
+	}
+}
+
 func TestMaybeCompact_RewritesHistory(t *testing.T) {
 	f := &summarizeFake{summary: "GOAL: build X. Touched main.go."}
 	a := New(f, "m")
@@ -191,17 +234,19 @@ func TestMaybeCompact_RewritesHistory(t *testing.T) {
 	if snap[0].Role != RoleUser || !strings.Contains(snap[0].Content, "GOAL: build X") {
 		t.Errorf("first message should carry the summary, got %+v", snap[0])
 	}
-	// 6 user turns, keep last 4 → split at index 4; kept = msgs[4:] = 8
-	// messages, + 1 summary = 9.
-	if len(snap) != 9 {
-		t.Errorf("history len = %d, want 9", len(snap))
+	// With an explicit trigger of 100, keepBudget is capped at trigger/2 = 50
+	// tokens — smaller than one ~500-token turn — so only the most recent user
+	// turn (2 messages) is kept. Split at index 10; kept = msgs[10:] = 2
+	// messages, + 1 summary = 3.
+	if len(snap) != 3 {
+		t.Errorf("history len = %d, want 3", len(snap))
 	}
-	// The summarized side-call saw the dropped prefix (4 msgs) + 1 instruction.
+	// The summarized side-call saw the dropped prefix (10 msgs) + 1 instruction.
 	if f.calls != 1 {
 		t.Fatalf("summarize calls = %d, want 1", f.calls)
 	}
-	if len(f.gotMsgs) != 5 {
-		t.Errorf("summarize saw %d messages, want 5 (4 dropped + instruction)", len(f.gotMsgs))
+	if len(f.gotMsgs) != 11 {
+		t.Errorf("summarize saw %d messages, want 11 (10 dropped + instruction)", len(f.gotMsgs))
 	}
 	// The most-recent turn survived verbatim.
 	if snap[len(snap)-1].Content != longMsg {
@@ -266,8 +311,8 @@ func TestMaybeCompact_EmitsProgressEvents(t *testing.T) {
 	if first.Compact == nil || first.Compact.BeforeTokens <= 0 {
 		t.Errorf("started event missing BeforeTokens: %+v", first.Compact)
 	}
-	if first.Compact.KeptTurns != compactKeepTurns {
-		t.Errorf("started KeptTurns = %d, want %d", first.Compact.KeptTurns, compactKeepTurns)
+	if first.Compact.KeptTurns != 1 {
+		t.Errorf("started KeptTurns = %d, want 1 (tiny budget keeps one turn)", first.Compact.KeptTurns)
 	}
 	if first.Compact.MaxTokens != summarizeMaxTokens {
 		t.Errorf("started MaxTokens = %d, want %d", first.Compact.MaxTokens, summarizeMaxTokens)

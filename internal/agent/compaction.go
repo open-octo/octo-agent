@@ -7,9 +7,19 @@ import (
 	"unicode/utf8"
 )
 
-// compactKeepTurns is how many of the most recent user turns runLoop keeps
-// verbatim when it compacts; everything older is folded into one summary.
-const compactKeepTurns = 4
+// defaultCompactKeepFraction is the share of the model's context window that
+// compaction keeps verbatim as the recent tail (everything older is folded into
+// the summary) when Agent.CompactKeepFraction is unset. Chosen so a compaction
+// from the 75% trigger lands well below it, leaving wide headroom before the
+// next one.
+const defaultCompactKeepFraction = 0.30
+
+// minFoldPercent is the anti-thrash floor: maybeCompact skips the summarize call
+// unless the fold would reclaim at least this share of the current context. It
+// stops the "fold a sliver, re-trigger next turn" loop when the bulk is wedged
+// inside the kept tail (a single huge agentic turn) — reclamation, not a
+// summarize, is what shrinks that case.
+const minFoldPercent = 15
 
 // compactThresholdFraction is the share of the model's context window at which
 // auto-compaction (CompactThreshold == 0) triggers, leaving headroom for the
@@ -248,16 +258,26 @@ func (a *Agent) maybeCompact(ctx context.Context, handler EventHandler) error {
 		return nil
 	}
 
-	split := safeSplitIndex(msgs, compactKeepTurns)
+	split := safeSplitIndexByBudget(msgs, a.compactKeepBudget())
 	if split <= 0 {
 		return nil // not enough complete turns to safely compact yet
+	}
+
+	// Anti-thrash: skip the summarize when the fold would reclaim only a sliver
+	// (the bulk is wedged inside the kept tail — a single huge agentic turn).
+	// Reclamation, not a summarize, shrinks that case; burning an LLM call here
+	// would just re-trigger next turn. Measured in the estimate space so both
+	// sides of the ratio use the same units.
+	estBefore := estimateMessages(msgs)
+	if estFolded := estimateMessages(msgs[:split]); estBefore > 0 && estFolded*100 < estBefore*minFoldPercent {
+		return nil
 	}
 
 	if handler != nil {
 		handler(AgentEvent{Kind: EventCompactStarted, Compact: &CompactStats{
 			BeforeTokens: before,
 			FoldedMsgs:   split,
-			KeptTurns:    compactKeepTurns,
+			KeptTurns:    countKeptUserTurns(msgs, split),
 			MaxTokens:    summarizeMaxTokens,
 		}})
 	}
@@ -386,23 +406,69 @@ func (a *Agent) summarizeOn(ctx context.Context, sender Sender, model string, ms
 	return reply.Content, nil
 }
 
-// safeSplitIndex returns the history index at which compaction can split:
-// messages before it are summarized, messages from it onward are kept. The
-// split always lands on a plain user turn (RoleUser with no tool_result
-// blocks), so a tool_use and its tool_result are never separated. It keeps
-// the last keepTurns user turns; if there aren't more than that, it returns 0
-// (nothing safe to compact).
-func safeSplitIndex(msgs []Message, keepTurns int) int {
+// compactKeepBudget is the token budget for the verbatim recent tail that
+// compaction keeps. It is CompactKeepFraction of the model's window (default
+// 0.30), but never more than half the trigger — so a fold reliably brings the
+// context under the trigger with headroom, even when an explicit (small)
+// CompactThreshold is set.
+func (a *Agent) compactKeepBudget() int {
+	frac := a.CompactKeepFraction
+	if frac <= 0 {
+		frac = defaultCompactKeepFraction
+	}
+	if frac > 1 {
+		frac = 1
+	}
+	budget := int(float64(contextWindow(a.Model)) * frac)
+	if trig := a.compactTriggerTokens(); trig > 0 && budget > trig/2 {
+		budget = trig / 2
+	}
+	return budget
+}
+
+// safeSplitIndexByBudget returns the history index at which compaction splits:
+// messages before it are summarized, messages from it onward are kept verbatim.
+// The split always lands on a plain user turn (RoleUser with no tool_result
+// blocks), so a tool_use and its tool_result are never separated and the kept
+// tail always begins on a real user message.
+//
+// It keeps the largest suffix of user turns whose estimated token count stays
+// within keepBudget, and always keeps at least the most recent user turn (even
+// when that single turn alone exceeds the budget — we never split inside a
+// turn). Returns 0 when there aren't at least two user turns, or when nothing
+// older than the kept tail exists to fold.
+func safeSplitIndexByBudget(msgs []Message, keepBudget int) int {
 	var userTurns []int
 	for i, m := range msgs {
 		if m.Role == RoleUser && !hasToolResult(m) {
 			userTurns = append(userTurns, i)
 		}
 	}
-	if len(userTurns) <= keepTurns {
-		return 0
+	if len(userTurns) <= 1 {
+		return 0 // need ≥2 user turns: one (or more) to fold, one to keep
 	}
-	return userTurns[len(userTurns)-keepTurns]
+	// At minimum keep the most recent user turn; then walk older boundaries
+	// while the kept tail still fits the budget.
+	keptFrom := userTurns[len(userTurns)-1]
+	for k := len(userTurns) - 2; k >= 0; k-- {
+		if estimateMessages(msgs[userTurns[k]:]) > keepBudget {
+			break
+		}
+		keptFrom = userTurns[k]
+	}
+	return keptFrom
+}
+
+// countKeptUserTurns returns how many plain user turns sit at or after split —
+// i.e. how many recent turns compaction kept verbatim. For event stats only.
+func countKeptUserTurns(msgs []Message, split int) int {
+	n := 0
+	for i := split; i < len(msgs); i++ {
+		if msgs[i].Role == RoleUser && !hasToolResult(msgs[i]) {
+			n++
+		}
+	}
+	return n
 }
 
 // hasToolResult reports whether m carries any tool_result block (i.e. it's a

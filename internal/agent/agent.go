@@ -159,6 +159,14 @@ type Agent struct {
 	// the built-in default (0.75). Values outside 0–1 are clamped.
 	CompactAutoFraction float64
 
+	// CompactKeepFraction is the share (0.0–1.0) of the model's context window
+	// that compaction keeps verbatim as the recent tail; everything older is
+	// folded into the summary. Zero uses the built-in default (0.30). It is
+	// always capped below the trigger (at half the trigger) so a compaction can
+	// reliably bring the context under the trigger with headroom to spare. See
+	// compactKeepBudget and dev-docs/compaction-redesign.md.
+	CompactKeepFraction float64
+
 	// CompactBatchThreshold controls compaction after a tool batch, before the
 	// next LLM call. Semantics mirror CompactThreshold:
 	//   < 0  → disabled (never compact between batches)

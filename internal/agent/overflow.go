@@ -138,7 +138,8 @@ func (a *Agent) tryOverflowCompact(ctx context.Context, pullBackMode int, handle
 	}
 
 	// Find safe split point
-	split := safeSplitIndex(truncated.Snapshot(), compactKeepTurns)
+	tsnap := truncated.Snapshot()
+	split := safeSplitIndexByBudget(tsnap, a.compactKeepBudget())
 	if split <= 0 {
 		return false
 	}
@@ -148,20 +149,20 @@ func (a *Agent) tryOverflowCompact(ctx context.Context, pullBackMode int, handle
 		handler(AgentEvent{Kind: EventCompactStarted, Compact: &CompactStats{
 			BeforeTokens: before,
 			FoldedMsgs:   split,
-			KeptTurns:    compactKeepTurns,
+			KeptTurns:    countKeptUserTurns(tsnap, split),
 			MaxTokens:    summarizeMaxTokens,
 		}})
 	}
 
 	// Run compression side-call on truncated history
-	summary, err := a.summarize(ctx, truncated.Snapshot()[:split], handler)
+	summary, err := a.summarize(ctx, tsnap[:split], handler)
 	if err != nil || summary == "" {
 		emitCompactDone(handler, before, before, split) // no-op: clear the indicator
 		return false
 	}
 
 	// Rebuild: summary + kept recent + pulled_back
-	recent := truncated.Snapshot()[split:]
+	recent := tsnap[split:]
 
 	a.History.Reset()
 	a.History.Append(NewUserMessage("[Earlier conversation summary]\n\n" + summary))
