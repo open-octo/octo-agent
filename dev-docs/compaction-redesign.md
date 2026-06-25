@@ -105,6 +105,12 @@ Files: new `internal/agent/reclaim.go`, wired in `compaction.go`.
 Files: `internal/agent/overflow.go`, `internal/agent/agent.go` (hook field),
 `internal/app` + `internal/server` + `cmd/octo` (set the hook; chunk file I/O).
 
+## Status
+
+Part 1 (token-budget retention + anti-thrash) and Part 3a (deficit parsing) are
+implemented. `safeSplitIndex` was replaced by `safeSplitIndexByBudget` in
+`internal/agent/compaction.go` and `internal/agent/overflow.go`.
+
 ## Acceptance criteria
 
 - A session that today logs `folded 1 message · 170k → 132k` repeatedly folds to

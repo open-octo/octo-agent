@@ -165,6 +165,14 @@ type askMsg struct {
 // without being wasteful; it only runs while a turn is in flight.
 const tickInterval = 120 * time.Millisecond
 
+// answerSprintDur is how long the wait-on-model line holds the first answer
+// deltas while the ↓ token counter sprints, before releasing the prose.
+const answerSprintDur = 280 * time.Millisecond
+
+// answerSprintMinChars gates the sprint: only turns with a real reasoning /
+// uplink phase get the flourish, so a quick direct reply isn't delayed.
+const answerSprintMinChars = 240
+
 // shiftEnterFilter intercepts Kitty-keyboard-protocol CSI sequences that
 // bubbletea v1 does not natively understand (e.g. Shift+Enter = \x1b[13;2u)
 // and converts them into plain KeyMsg events the rest of the app already
@@ -299,9 +307,20 @@ type tuiModel struct {
 	// turnOutChars counts this turn's streamed output characters (reasoning +
 	// answer text + tool arguments). The reasoning trace itself never lands in
 	// the scrollback — over a long agentic turn it would dominate the transcript
-	// — the count just feeds the activity line's "↑ ~N tokens" readout so the
+	// — the count just feeds the activity line's "↓ ~N tokens" readout so the
 	// wait still reads as progress (Claude Code style).
 	turnOutChars int
+
+	// answerSprint plays a brief accelerating token-counter flourish at the
+	// hand-off from the model's reasoning/uplink phase to its answer: the first
+	// answer deltas are held in sprintBuf for answerSprintDur while the ↓
+	// counter races up, then released so the prose streams. sprintStartTok is
+	// the token estimate when the sprint began; the displayed value eases from
+	// it up to the live estimate (which keeps climbing as held deltas arrive).
+	answerSprint   bool
+	sprintStart    time.Time
+	sprintStartTok int
+	sprintBuf      strings.Builder
 
 	// toolInput caches each tool call's input from EventToolStarted so the
 	// matching EventToolDone can render a card (tool_result events don't carry
@@ -556,6 +575,8 @@ func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
 	m.running = nil
 	m.partial.Reset()
 	m.turnOutChars = 0
+	m.answerSprint = false
+	m.sprintBuf.Reset()
 	m.toolStreamName, m.toolStreamID, m.toolStreamBytes = "", "", 0
 	m.clearSuggestion() // a new turn supersedes any pending follow-up
 	ctx, cancel := context.WithCancel(context.Background())
@@ -628,6 +649,12 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.flushPrints()
 		}
 		m.spinnerFrame++
+		// End the answer hand-off sprint once its window elapses: release the
+		// held prose so streaming resumes.
+		if m.answerSprint && time.Since(m.sprintStart) >= answerSprintDur {
+			m.flushSprint()
+			return m, tea.Batch(m.flushPrints(), tickCmd())
+		}
 		return m, tickCmd()
 
 	case agentEventMsg:
@@ -731,6 +758,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.flushPrints()
 
 	case turnEndedMsg:
+		// Release any answer text still held by an in-flight hand-off sprint so
+		// the trailing-block flush below sees it.
+		m.flushSprint()
 		// Commit a still-pending echo (a turn that produced no events — error,
 		// or Ctrl+C). The Esc take-back path clears it before cancelling, so this
 		// is a no-op there.
@@ -943,6 +973,12 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 	// Promote the deferred user echo above this turn's first output so the
 	// transcript order (your message → reply) is preserved.
 	m.commitEcho()
+	// Any event other than a continued answer delta ends a hand-off sprint and
+	// releases the held text first, so a following tool call / turn-end commits
+	// in the right order.
+	if ev.Kind != agent.EventTextDelta {
+		m.flushSprint()
+	}
 	switch ev.Kind {
 	case agent.EventThinkingDelta:
 		// The terminal never renders the reasoning trace — that display lives
@@ -967,6 +1003,25 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 
 	case agent.EventTextDelta:
 		m.turnOutChars += len(ev.Text)
+		if m.answerSprint {
+			// Mid-sprint: keep the prose held; the live count climbs as these
+			// held deltas land, which is what makes the ↓ counter race.
+			m.sprintBuf.WriteString(ev.Text)
+			return
+		}
+		// First answer text after a real reasoning/uplink phase: hold it for a
+		// brief window and let the ↓ counter sprint as a hand-off flourish. A
+		// quick direct reply (little prior output) skips the hold and streams
+		// immediately.
+		if m.assistantFirstBlock && m.partial.Len() == 0 &&
+			m.turnOutChars-len(ev.Text) >= answerSprintMinChars {
+			m.answerSprint = true
+			m.sprintStart = time.Now()
+			m.sprintStartTok = (m.turnOutChars - len(ev.Text)) / 4
+			m.sprintBuf.Reset()
+			m.sprintBuf.WriteString(ev.Text)
+			return
+		}
 		m.appendText(ev.Text)
 		return
 
@@ -1195,6 +1250,21 @@ func userMessageText(msg agent.Message) string {
 	return b.String()
 }
 
+// flushSprint ends the answer hand-off sprint, if one is active, and releases
+// the buffered answer text into the live partial so the prose resumes
+// streaming. Idempotent — safe to call on any event or turn boundary.
+func (m *tuiModel) flushSprint() {
+	if !m.answerSprint {
+		return
+	}
+	m.answerSprint = false
+	buf := m.sprintBuf.String()
+	m.sprintBuf.Reset()
+	if buf != "" {
+		m.appendText(buf)
+	}
+}
+
 // appendText buffers a streamed text delta into m.partial. The partial is
 // rendered live in View() so the user sees tokens arrive in real time. When a
 // complete block boundary is found (blank line outside a code fence), that
@@ -1316,6 +1386,7 @@ func (m *tuiModel) flushPrints() tea.Cmd {
 }
 
 func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
+	m.flushSprint() // safety net: never strand held answer text on interrupt
 	m.turnRunning = false
 	m.cancelTurn = nil
 	m.running = nil // clear any live tool indicator (e.g. on interrupt)

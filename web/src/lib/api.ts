@@ -268,6 +268,26 @@ export async function reconnectMcpServer(name: string): Promise<void> {
   })
 }
 
+// MCP OAuth device flow. start launches it in the background and returns the
+// initial snapshot; poll status until the state settles (connected | failed).
+export interface McpOAuthState {
+  state: 'starting' | 'authorizing' | 'connected' | 'failed'
+  user_code?: string
+  verification_uri?: string
+  verification_uri_complete?: string
+  error?: string
+}
+
+export async function startMcpOAuth(name: string): Promise<McpOAuthState> {
+  return request<McpOAuthState>(`/api/mcp/servers/${encodeURIComponent(name)}/oauth/start`, {
+    method: 'POST',
+  })
+}
+
+export async function mcpOAuthStatus(name: string): Promise<McpOAuthState> {
+  return request<McpOAuthState>(`/api/mcp/servers/${encodeURIComponent(name)}/oauth/status`)
+}
+
 export async function updateToolSearch(mode: 'auto' | 'on' | 'off'): Promise<void> {
   await request<unknown>('/api/config/toolsearch', { method: 'PUT', ...json({ enabled: mode }) })
 }

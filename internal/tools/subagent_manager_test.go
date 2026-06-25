@@ -113,6 +113,20 @@ func waitForStatus(t *testing.T, m *SubAgentManager, id, want string) {
 	}
 }
 
+// waitForCancel waits until ctx is cancelled. runContinue cancels the round's
+// context via a deferred call that fires when the round goroutine returns —
+// which happens slightly after the status flips to "idle" (setDone runs first,
+// then the exit hook/sink, then the defer). So a bare ctx.Err() read right
+// after waitForStatus races that defer; poll instead.
+func waitForCancel(t *testing.T, ctx context.Context, what string) {
+	t.Helper()
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Errorf("%s context was not cancelled", what)
+	}
+}
+
 // TestSend_CancelsSpawnContext verifies that runContinue cancels the previous
 // round's context (from Spawn) before starting the Continue round, and cancels
 // the Continue context when the round ends. Without this, CancelFuncs pile up
@@ -151,7 +165,5 @@ func TestSend_CancelsSpawnContext(t *testing.T) {
 	sp.continueReturnCh <- SpawnResult{Reply: "continued"}
 	waitForStatus(t, m, id, "idle")
 
-	if ctx2.Err() == nil {
-		t.Error("Continue context was not cancelled after the round ended")
-	}
+	waitForCancel(t, ctx2, "Continue")
 }
