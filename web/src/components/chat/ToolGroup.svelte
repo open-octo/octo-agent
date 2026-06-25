@@ -200,6 +200,7 @@
 {#if tools !== null && tools.length > 0}
   <!-- Real data rendering -->
   {@const errorCount = tools.filter((t: any) => t.error).length}
+  {@const lastUndoneId = tools.findLast((t: any) => !t.done)?.id}
   <div class="tool-group">
     <div class="group-header">
       <iconify-icon icon="ant-design:tool-outlined" width="14" style="color:var(--text-tertiary)"></iconify-icon>
@@ -221,7 +222,6 @@
       {/if}
     </div>
 
-    {@const lastUndoneId = tools.findLast((t: any) => !t.done)?.id}
     {#each tools as tool (tool.id)}
       {@const meta = toolMeta(tool)}
       {@const todos = todoItems(tool)}
