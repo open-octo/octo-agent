@@ -184,6 +184,69 @@ func TestAgent_TurnStream_HappyPath(t *testing.T) {
 	}
 }
 
+func TestAgent_TurnStream_PersistsThinkingBlock(t *testing.T) {
+	// An Anthropic-protocol final turn returns [thinking, text]. The persisted
+	// assistant message must keep the thinking block (with its signature) so a
+	// web client replaying history after a refresh still sees the reasoning —
+	// not just the live stream.
+	send := &fakeStreamSender{
+		emittedReply: Reply{
+			Content:    "the answer",
+			Model:      "m",
+			StopReason: "end_turn",
+			Blocks: []ContentBlock{
+				NewThinkingBlock("let me reason", "SIG123"),
+				NewTextBlock("the answer"),
+			},
+		},
+	}
+	a := New(send, "m")
+
+	if _, err := a.TurnStream(context.Background(), "hello", nil, nil); err != nil {
+		t.Fatalf("TurnStream: %v", err)
+	}
+
+	snap := a.History.Snapshot()
+	if len(snap) != 2 {
+		t.Fatalf("History len = %d, want 2", len(snap))
+	}
+	asst := snap[1]
+	if asst.Role != RoleAssistant {
+		t.Fatalf("last message role = %q, want assistant", asst.Role)
+	}
+	// Content stays populated for backward-compatible display/replay.
+	if asst.Content != "the answer" {
+		t.Errorf("Content = %q, want %q", asst.Content, "the answer")
+	}
+	// Blocks must carry the thinking trace + its signature.
+	if len(asst.Blocks) != 2 || asst.Blocks[0].Type != "thinking" {
+		t.Fatalf("Blocks = %+v, want [thinking, text]", asst.Blocks)
+	}
+	if asst.Blocks[0].Thinking != "let me reason" || asst.Blocks[0].Signature != "SIG123" {
+		t.Errorf("thinking block = %+v, want thinking text + signature preserved", asst.Blocks[0])
+	}
+}
+
+func TestAgent_TurnStream_NoThinkingStaysTextOnly(t *testing.T) {
+	// A plain reply with no thinking block keeps the lightweight Content-only
+	// form (no Blocks), so we don't bloat history for non-reasoning turns.
+	send := &fakeStreamSender{
+		emittedReply: Reply{Content: "plain", Model: "m", StopReason: "end_turn"},
+	}
+	a := New(send, "m")
+
+	if _, err := a.TurnStream(context.Background(), "hi", nil, nil); err != nil {
+		t.Fatalf("TurnStream: %v", err)
+	}
+	asst := a.History.Snapshot()[1]
+	if len(asst.Blocks) != 0 {
+		t.Errorf("Blocks = %+v, want none for a no-thinking reply", asst.Blocks)
+	}
+	if asst.Content != "plain" {
+		t.Errorf("Content = %q, want %q", asst.Content, "plain")
+	}
+}
+
 func TestAgent_TurnStream_NilCallback(t *testing.T) {
 	send := &fakeStreamSender{
 		chunks:       []string{"a", "b"},

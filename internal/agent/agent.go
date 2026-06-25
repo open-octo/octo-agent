@@ -381,7 +381,7 @@ func (a *Agent) Turn(ctx context.Context, userInput string) (Reply, error) {
 		return Reply{}, fmt.Errorf("agent: send: %w", err)
 	}
 
-	a.History.Append(NewAssistantMessage(reply.Content))
+	a.History.Append(assistantReplyMessage(reply))
 	a.accrueUsage(reply)
 	return reply, nil
 }
@@ -435,7 +435,7 @@ func (a *Agent) TurnStream(
 		return Reply{}, fmt.Errorf("agent: stream: %w", err)
 	}
 
-	a.History.Append(NewAssistantMessage(reply.Content))
+	a.History.Append(assistantReplyMessage(reply))
 	a.accrueUsage(reply)
 	return reply, nil
 }
@@ -835,7 +835,7 @@ func (a *Agent) runLoop(
 		if content == "" {
 			content = textFromBlocks(reply.Blocks)
 		}
-		a.History.Append(NewAssistantMessage(content))
+		a.History.Append(assistantReplyMessage(reply))
 		reply.Content = content
 
 		// A mid-turn steer (text and/or pasted images) arrived while the model
@@ -1366,6 +1366,37 @@ func flattenResults(slices [][]ContentBlock) []ContentBlock {
 		out = append(out, s...)
 	}
 	return out
+}
+
+// assistantReplyMessage builds the assistant history message for a completed
+// turn, preserving any reasoning trace (a "thinking" block with its signature)
+// so a web client that replays history after a refresh still shows the thinking
+// — the live stream surfaces it from reply.Blocks, but a text-only message drops
+// it. Anthropic-protocol models return the final turn as [thinking, text];
+// round-tripping those blocks is the same contract already honored for tool-use
+// turns, and the OpenAI adapter ignores the thinking block and falls back to
+// Content. Plain replies with no thinking keep the lightweight Content form.
+func assistantReplyMessage(reply Reply) Message {
+	content := reply.Content
+	if content == "" {
+		content = textFromBlocks(reply.Blocks)
+	}
+	msg := NewAssistantMessage(content)
+	if hasThinkingBlock(reply.Blocks) {
+		msg.Blocks = reply.Blocks
+	}
+	return msg
+}
+
+// hasThinkingBlock reports whether blocks carries a reasoning trace worth
+// persisting (a non-empty Anthropic-protocol "thinking" block).
+func hasThinkingBlock(blocks []ContentBlock) bool {
+	for _, b := range blocks {
+		if b.Type == "thinking" && b.Thinking != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // textFromBlocks joins text from all "text" content blocks.
