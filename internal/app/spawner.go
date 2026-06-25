@@ -51,7 +51,7 @@ func NewSpawner(parent *agent.Agent, executor agent.ToolExecutor, toolsFn func()
 // than the parent's defaultMaxTurns (200): a sub-task should make focused
 // progress and check back rather than run unbounded. Each Continue re-arms
 // this budget for the next round.
-const childMaxTurns = 30
+const childMaxTurns = 100
 
 // Spawn implements tools.Spawner. It builds an isolated child, registers it so
 // a later Continue can resume it, runs the first prompt, and returns the
