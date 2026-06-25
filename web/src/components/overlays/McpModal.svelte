@@ -3,12 +3,15 @@
   import { t } from '../../lib/i18n'
   import * as api from '../../lib/api'
 
+  const ALLOWED_MCP_COMMANDS = new Set(['npx', 'npm', 'node', 'uvx', 'uv', 'python', 'python3', 'cargo', 'go', 'ruby'])
+
   let mode = $derived($mcpModalState.mode)
   let name = $state('')
   let command = $state('')
   let url = $state('')
   let transport = $state('stdio')
   let jsonText = $state('')
+  let allowArbitrary = $state(false)
   let submitting = $state(false)
   let initFor = ''
 
@@ -28,14 +31,17 @@
       name = ''; command = ''; url = ''; transport = 'stdio'
     }
     jsonText = ''
+    allowArbitrary = false
   })
 
   const title = $derived(mode === 'edit' ? $t('mcp.modal_edit') : mode === 'import' ? $t('mcp.modal_import') : $t('mcp.modal_add'))
   const isHttp = $derived(transport === 'http' || transport === 'sse')
+  const commandBase = $derived((!isHttp ? command.trim().split(/\s+/)[0].toLowerCase() : ''))
+  const needsArbitraryConsent = $derived(!isHttp && commandBase !== '' && !ALLOWED_MCP_COMMANDS.has(commandBase))
   const canSubmit = $derived(
     mode === 'import'
       ? jsonText.trim().length > 0
-      : !!name.trim() && (isHttp ? !!url.trim() : !!command.trim())
+      : !!name.trim() && (isHttp ? !!url.trim() : !!command.trim()) && (!needsArbitraryConsent || allowArbitrary)
   )
 
   async function refresh() {
@@ -57,11 +63,11 @@
       } else if (mode === 'edit') {
         const server: Record<string, unknown> = isHttp ? { url: url.trim() } : { command: command.trim() }
         if (transport) server.transport = transport
-        await api.updateMcpServer(name.trim(), { server })
+        await api.updateMcpServer(name.trim(), { server, allowArbitraryCommand: allowArbitrary })
         await refresh()
         showToast('Server updated')
       } else {
-        await api.createMcpServer(isHttp ? { name: name.trim(), url: url.trim(), transport } : { name: name.trim(), command: command.trim(), transport })
+        await api.createMcpServer(isHttp ? { name: name.trim(), url: url.trim(), transport } : { name: name.trim(), command: command.trim(), transport, allowArbitraryCommand: allowArbitrary })
         await refresh()
         showToast('Server added · connecting…')
       }
@@ -119,6 +125,12 @@
             <label>{$t('mcp.field_command')}</label>
             <input placeholder="npx -y @modelcontextprotocol/server-…" bind:value={command} />
           </div>
+          {#if needsArbitraryConsent}
+            <label class="consent-row">
+              <input type="checkbox" bind:checked={allowArbitrary} />
+              <span>This command is not in the default allowlist. Allow it to run.</span>
+            </label>
+          {/if}
         {/if}
       {/if}
     </div>
@@ -173,6 +185,11 @@ input:disabled { background: var(--bg-table-header); color: var(--text-tertiary)
 }
 .json-area:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
 .modal { max-width: 420px; }
+.consent-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 12px; color: var(--text-secondary); line-height: 1.5;
+}
+.consent-row input { width: auto; height: auto; margin-top: 2px; }
 .modal-footer {
   padding: 12px 18px; border-top: 1px solid var(--border-table);
   display: flex; justify-content: flex-end; gap: 8px;
