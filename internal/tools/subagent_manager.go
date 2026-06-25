@@ -424,10 +424,6 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 		oldCancel()
 	}
 
-	// Ensure this round's context is cancelled when the round ends, even if no
-	// Kill arrives. CancelFunc is idempotent, so a concurrent Kill is harmless.
-	defer cancel()
-
 	// Stream runtime events for this round too, so the live panel re-shows the
 	// sub-agent as running while it handles the message. "done" is emitted
 	// explicitly before any pending-message handoff (not deferred) so it can't
@@ -441,6 +437,12 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 	// Continue addresses the child by its Spawner-side id, not the manager's
 	// agent_N handle — the two id spaces are distinct.
 	res, err := m.spawner.Continue(ctx, backingID, message)
+
+	// Cancel this round's context as soon as Continue returns. This must happen
+	// before setDone marks the agent idle, otherwise a concurrent Read() can see
+	// idle before the context is cancelled (observed on Windows).
+	cancel()
+
 	stopReason := ""
 	if err == nil {
 		agent.setResult(res.Reply, res.InputTokens, res.OutputTokens)

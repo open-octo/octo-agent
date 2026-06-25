@@ -16,7 +16,8 @@ is truncated mid-JSON. Two things then conspire:
 - The provider reports truncation, not a tool call — `finish_reason="length"`
   (OpenAI) / `stop_reason="max_tokens"` (Anthropic), never `tool_use`.
 - The truncated argument JSON is unparseable, so the assembled tool-use block
-  carries empty input (`openai/stream.go` ignores the unmarshal error).
+  carries empty input (`internal/provider/openai/stream.go` ignores the
+  unmarshal error).
 
 The loop only continues on `tool_use`, so a truncated turn fell through to the
 "final reply" branch and ended — the half-written file never dispatched, nothing
@@ -86,7 +87,7 @@ closure. Its signature carries the per-call cap so the loop can re-issue at a
 different value:
 
 ```
-send func(ctx, msgs []Message, maxTokens int) (Reply, error)
+send func(ctx context.Context, msgs []Message, maxTokens int) (Reply, error)
 ```
 
 `Run` and `RunStream` build the closure over the active `ToolSender` /
