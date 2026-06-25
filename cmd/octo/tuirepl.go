@@ -1270,18 +1270,22 @@ func (m *tuiModel) renderReplayText(s string) string {
 }
 
 // userMessageText returns a user message's human-typed text, ignoring
-// tool_result carriers and non-text (e.g. image) blocks.
+// tool_result carriers, non-text (e.g. image) blocks, and any
+// model-facing <system-reminder> spans the harness injected into the turn.
 func userMessageText(msg agent.Message) string {
+	var s string
 	if len(msg.Blocks) == 0 {
-		return msg.Content
-	}
-	var b strings.Builder
-	for _, blk := range msg.Blocks {
-		if blk.Type == "text" {
-			b.WriteString(blk.Text)
+		s = msg.Content
+	} else {
+		var b strings.Builder
+		for _, blk := range msg.Blocks {
+			if blk.Type == "text" {
+				b.WriteString(blk.Text)
+			}
 		}
+		s = b.String()
 	}
-	return b.String()
+	return strings.TrimSpace(agent.StripSystemReminders(s))
 }
 
 // flushSprint ends the answer hand-off sprint, if one is active, and releases
