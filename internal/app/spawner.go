@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,10 +66,15 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 
 	child := agent.New(s.parent.Sender, model)
 	child.System = s.parent.System // share harness identity (base + soul + env + skills + memory + …)
-	if req.SystemSuffix != "" {
-		// Preset agents append a persona after the shared identity, so the
-		// child keeps the harness context but takes on its specialized role.
-		child.System = s.parent.System + "\n\n" + req.SystemSuffix
+	// Preset agents append a persona after the shared identity, so the child
+	// keeps the harness context but takes on its specialized role. A schema
+	// request appends a strict JSON-only instruction on top of that.
+	suffix := req.SystemSuffix
+	if req.Schema != "" {
+		suffix = appendSuffix(suffix, schemaInstruction(req.Schema))
+	}
+	if suffix != "" {
+		child.System = s.parent.System + "\n\n" + suffix
 	}
 	child.MaxTokens = s.parent.MaxTokens
 	child.Gate = s.parent.Gate
@@ -99,6 +106,30 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	if err != nil {
 		return tools.SpawnResult{}, err
 	}
+
+	// Schema requested: clean the reply down to its JSON. If the model wrapped
+	// it in prose / markdown fences and it doesn't parse, re-prompt the same
+	// child once (in-context) with a corrective nudge, then take the best of
+	// the two. We don't fail the spawn on still-invalid JSON — the caller gets
+	// the cleaned text and can decide — but a single retry catches the common
+	// "```json …```" wrapping that fence-stripping alone misses mid-string.
+	if req.Schema != "" {
+		cleaned := extractJSON(reply)
+		if !json.Valid([]byte(cleaned)) {
+			r2, in2, out2, stop2, turns2, err2 := s.runChild(ctx, lc, schemaRetryPrompt)
+			if err2 != nil {
+				return tools.SpawnResult{}, err2
+			}
+			in, out, turns, stop = in+in2, out+out2, turns+turns2, stop2
+			if c2 := extractJSON(r2); json.Valid([]byte(c2)) {
+				cleaned = c2
+			} else if c2 != "" {
+				cleaned = c2 // still invalid, but the retry is the model's latest attempt
+			}
+		}
+		reply = cleaned
+	}
+
 	return tools.SpawnResult{
 		AgentID:      id,
 		Reply:        reply,
@@ -107,6 +138,54 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 		Turns:        turns,
 		StopReason:   stop,
 	}, nil
+}
+
+// schemaRetryPrompt re-prompts a child whose first reply wasn't valid JSON.
+const schemaRetryPrompt = "Your previous reply was not valid JSON. Respond with ONLY the raw JSON " +
+	"value matching the schema — no prose, no explanation, no markdown code fences."
+
+// schemaInstruction is appended to a schema-constrained child's system prompt.
+func schemaInstruction(schema string) string {
+	return "You must respond with ONLY a single valid JSON value that conforms to this JSON " +
+		"Schema. Output the raw JSON and nothing else — no prose, no explanation, no markdown " +
+		"code fences.\n\nJSON Schema:\n" + schema
+}
+
+// appendSuffix joins two system-prompt fragments, skipping empties.
+func appendSuffix(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + "\n\n" + b
+	}
+}
+
+// extractJSON pulls the JSON payload out of a model reply: it strips a leading
+// ```json / ``` fence and trailing ```, then trims to the outermost { } or [ ]
+// span so surrounding prose doesn't defeat json.Valid. Returns the trimmed
+// text (unchanged when no JSON-looking span is found).
+func extractJSON(s string) string {
+	t := strings.TrimSpace(s)
+	if strings.HasPrefix(t, "```") {
+		// Drop the opening fence line (``` or ```json) and the closing fence.
+		if nl := strings.IndexByte(t, '\n'); nl >= 0 {
+			t = t[nl+1:]
+		}
+		if i := strings.LastIndex(t, "```"); i >= 0 {
+			t = t[:i]
+		}
+		t = strings.TrimSpace(t)
+	}
+	// Trim to the outermost object/array span.
+	start := strings.IndexAny(t, "{[")
+	end := strings.LastIndexAny(t, "}]")
+	if start >= 0 && end > start {
+		return t[start : end+1]
+	}
+	return t
 }
 
 // Continue implements tools.Spawner. It re-runs a still-alive child with a new

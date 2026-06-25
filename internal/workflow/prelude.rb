@@ -17,12 +17,15 @@ $__wf_sched = false
 #   model:      String  — override the model for this one sub-agent
 #   tools:      Array   — restrict the child to this subset of tool names
 #   read_only:  true    — strip the mutating tools (write_file/edit_file)
+#   schema:     String  — a JSON Schema (as a JSON string) the reply must match;
+#                         agent() then returns the sub-agent's JSON as a string
 def agent(prompt, opts = {})
   model = (opts[:model] || opts["model"]).to_s
   tools = opts[:tools] || opts["tools"] || []
   tools = tools.join(",") if tools.is_a?(Array)
   read_only = (opts[:read_only] || opts["read_only"]) ? 1 : 0
-  token = __agent_start(prompt.to_s, model, tools.to_s, read_only)
+  schema = (opts[:schema] || opts["schema"]).to_s
+  token = __agent_start(prompt.to_s, model, tools.to_s, read_only, schema)
   raise "workflow: token budget exhausted" if token < 0
   if $__wf_sched
     Fiber.yield(token)

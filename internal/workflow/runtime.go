@@ -50,6 +50,9 @@ type AgentOptions struct {
 	Tools []string
 	// ReadOnly strips the mutating tools (write_file, edit_file) from the child.
 	ReadOnly bool
+	// Schema is a JSON Schema (as a JSON string) the sub-agent's reply must
+	// satisfy; empty means free-form text.
+	Schema string
 }
 
 // AgentResult is one agent() call's outcome.
@@ -303,12 +306,12 @@ func (b *backend) register(ctx context.Context, r wazero.Runtime) (api.Module, e
 // (non-blocking). When the call maps to a cached journal entry it delivers the
 // stored result on a goroutine without invoking Agent. Returns -1 (cast) when
 // the budget is exhausted.
-func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mptr, mlen, tptr, tlen, readOnly uint32) uint32 {
+func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mptr, mlen, tptr, tlen, readOnly, sptr, slen uint32) uint32 {
 	promptBytes, _ := mod.Memory().Read(ptr, length)
 	prompt := string(promptBytes)
 
-	// Per-call options (model / tools / read_only). The prelude always passes
-	// all three slots, empty when unset. Read synchronously — the wasm linear
+	// Per-call options (model / tools / read_only / schema). The prelude always
+	// passes every slot, empty when unset. Read synchronously — the wasm linear
 	// memory may be reused once we return the token.
 	var opts AgentOptions
 	if mlen > 0 {
@@ -326,6 +329,11 @@ func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mpt
 		}
 	}
 	opts.ReadOnly = readOnly != 0
+	if slen > 0 {
+		if sb, ok := mod.Memory().Read(sptr, slen); ok {
+			opts.Schema = string(sb)
+		}
+	}
 
 	b.mu.Lock()
 	if b.opt.Budget > 0 && int64(b.outTok) >= b.opt.Budget {

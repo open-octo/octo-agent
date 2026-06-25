@@ -47,6 +47,12 @@ type SpawnRequest struct {
 	// from the child's toolbelt on top of the always-dropped Agent tool.
 	ReadOnly bool
 
+	// Schema, when non-empty, is a JSON Schema (as a JSON string) the child's
+	// reply must satisfy. The spawner instructs the child to emit only matching
+	// JSON, strips any markdown fences, and re-prompts once if the reply isn't
+	// valid JSON. The returned Reply is the cleaned JSON text.
+	Schema string
+
 	// SessionDir, when non-empty, tells the spawner to persist the sub-agent's
 	// full conversation transcript to <SessionDir>/<agent-id>.jsonl so it can
 	// be inspected after a failure.

@@ -40,7 +40,8 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"its reply. Inside parallel/pipeline it runs concurrently with siblings. " +
 			"Optional opts: `model:` (override the model for this call, e.g. a cheaper model " +
 			"for mechanical stages), `tools:` (Array restricting the child's tools), " +
-			"`read_only: true` (strip write_file/edit_file).\n" +
+			"`read_only: true` (strip write_file/edit_file), `schema:` (a JSON Schema as a " +
+			"JSON **string** — the call then returns the sub-agent's reply as JSON text matching it).\n" +
 			"- `parallel(items) { |it| ... } -> Array`: run the block for every item " +
 			"concurrently; returns results in input order.\n" +
 			"- `pipeline(items, stage1, stage2, ...) -> Array`: run each item through all " +
@@ -103,6 +104,7 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 			Model:       opts.Model,
 			Tools:       opts.Tools,
 			ReadOnly:    opts.ReadOnly,
+			Schema:      opts.Schema,
 		})
 		if err != nil {
 			return workflow.AgentResult{Err: err}
