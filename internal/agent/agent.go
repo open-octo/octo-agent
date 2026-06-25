@@ -2,6 +2,9 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -215,6 +218,71 @@ type Agent struct {
 	// executed during the most recent Run/RunStream call. It is set when the
 	// runLoop returns so callers can surface it in UI (e.g. "3 iterations").
 	turnIterations int
+
+	// recentToolCalls tracks the fingerprints of the last few tool-use batches
+	// so runLoop can detect when the model is stuck repeating the same call(s).
+	// Guarded by the implicit serialisation of runLoop (single goroutine).
+	recentToolCalls [][]toolCallFingerprint
+}
+
+// toolCallFingerprint is a lightweight hash of a single tool-use block.
+type toolCallFingerprint struct {
+	name     string
+	argsHash string // hex-encoded SHA-256 of the JSON-serialised Input map
+}
+
+// fingerprintToolUseBlock hashes a tool_use ContentBlock into a comparable
+// fingerprint. Empty string on blocks that aren't tool_use.
+func fingerprintToolUseBlock(b ContentBlock) toolCallFingerprint {
+	if b.Type != "tool_use" {
+		return toolCallFingerprint{}
+	}
+	// Input is a map[string]any; deterministically marshal to JSON for hashing.
+	// We don't need crypto strength, just collision resistance for debugging.
+	data, _ := json.Marshal(b.Input)
+	h := sha256.Sum256(data)
+	return toolCallFingerprint{
+		name:     b.Name,
+		argsHash: hex.EncodeToString(h[:]),
+	}
+}
+
+// fingerprintToolUseBatch hashes an ordered slice of tool_use blocks.
+func fingerprintToolUseBatch(blocks []ContentBlock) []toolCallFingerprint {
+	out := make([]toolCallFingerprint, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Type == "tool_use" {
+			out = append(out, fingerprintToolUseBlock(b))
+		}
+	}
+	return out
+}
+
+// hasConsecutiveDuplicates reports whether the last `window` entries in
+// recentToolCalls are all identical to the current batch. The window size
+// determines how many consecutive repeats trigger the stuck detector.
+func hasConsecutiveDuplicates(recent [][]toolCallFingerprint, current []toolCallFingerprint, window int) bool {
+	if len(recent) < window || len(current) == 0 {
+		return false
+	}
+	for i := len(recent) - window; i < len(recent); i++ {
+		if !slicesEqual(recent[i], current) {
+			return false
+		}
+	}
+	return true
+}
+
+func slicesEqual(a, b []toolCallFingerprint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // AttachUserBlocks queues content blocks — typically image blocks — to be
@@ -264,6 +332,11 @@ const (
 	// synthetic StopReason when a turn is ended because the response stayed
 	// truncated even after escalation. See dev-docs/truncation-recovery.md.
 	StopReasonMaxTokens = "max_tokens"
+	// StopReasonStuck is set when the agentic loop detects consecutive duplicate
+	// tool calls — a sign the model is stuck in a loop with no progress. The run
+	// ends gracefully so the caller can intervene (e.g. prompt the user or retry
+	// with a different strategy) rather than burning the full turn budget.
+	StopReasonStuck = "stuck"
 )
 
 // interruptNote caps an interrupted turn as an assistant message so history
@@ -704,6 +777,24 @@ func (a *Agent) runLoop(
 
 		if reply.StopReason == "tool_use" {
 			a.History.Append(NewToolUseMessage(reply.Blocks))
+
+			// ── Duplicate-tool-call loop detection ──
+			// If the model keeps issuing the exact same tool_use batch, it is
+			// stuck in a loop with no progress. Detect this early and stop
+			// gracefully so the caller can intervene instead of burning the
+			// full turn budget.
+			const stuckWindow = 2 // require 2 consecutive repeats (3 identical batches total)
+			fp := fingerprintToolUseBatch(reply.Blocks)
+			if hasConsecutiveDuplicates(a.recentToolCalls, fp, stuckWindow) {
+				return a.budgetStop(handler, StopReasonStuck,
+					"[octo] Stopped: detected repeated tool calls without progress. "+
+						"The model appears to be stuck in a loop. "+
+						"Send another message to continue with a different approach.")
+			}
+			a.recentToolCalls = append(a.recentToolCalls, fp)
+			if len(a.recentToolCalls) > stuckWindow+1 {
+				a.recentToolCalls = a.recentToolCalls[len(a.recentToolCalls)-stuckWindow-1:]
+			}
 
 			// Emit EventToolStarted before dispatch so observers see the
 			// "thinking → tool call" boundary even if the tool blocks.

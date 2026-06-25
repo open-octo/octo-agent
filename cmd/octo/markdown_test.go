@@ -35,6 +35,59 @@ func TestSplitCommittableMarkdown(t *testing.T) {
 	}
 }
 
+func TestInjectAssistantPrefix(t *testing.T) {
+	const prefix = "◆ "
+	cases := []struct {
+		name, in, want string
+	}{
+		{"plain leading spaces", "  hello", "◆ hello"},
+		{"no indent", "hello", "◆ hello"},
+		// glamour shape: margin spaces sit behind zero-width SGR escapes; the
+		// colour escape that styles the text must survive.
+		{
+			"glamour margin behind escapes",
+			"\x1b[0m\x1b[0m  \x1b[38;5;252mhello\x1b[0m",
+			"◆ \x1b[0m\x1b[0m\x1b[38;5;252mhello\x1b[0m",
+		},
+		{"escape then space then text", "\x1b[1m  hi", "◆ \x1b[1mhi"},
+		{"empty", "", ""},
+		{"only spaces", "   ", "   "},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := injectAssistantPrefix(c.in, prefix); got != c.want {
+				t.Errorf("injectAssistantPrefix(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestInjectAssistantPrefix_RealGlamour guards the original bug: glamour's
+// margin must not leave visible leading spaces between the ◆ prefix and the
+// text. We assert no space immediately follows the prefix once escapes are
+// stripped from the visible run.
+func TestInjectAssistantPrefix_RealGlamour(t *testing.T) {
+	var md markdownRenderer
+	rendered := md.render("hello world", 80)
+	out := injectAssistantPrefix(rendered, "◆ ")
+	if !strings.HasPrefix(out, "◆ ") {
+		t.Fatalf("output should start with prefix; got %q", out)
+	}
+	// Strip the prefix and all leading escapes; the next byte must be the
+	// glyph 'h', never a leftover margin space.
+	rest := strings.TrimPrefix(out, "◆ ")
+	for {
+		if n := ansiPrefixLen(rest); n > 0 {
+			rest = rest[n:]
+			continue
+		}
+		break
+	}
+	if strings.HasPrefix(rest, " ") {
+		t.Errorf("margin space survived after prefix+escapes; full output: %q", out)
+	}
+}
+
 func TestMarkdownRenderer_RendersAndIsBestEffort(t *testing.T) {
 	var md markdownRenderer
 

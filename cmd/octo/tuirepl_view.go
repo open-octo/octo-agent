@@ -1339,10 +1339,45 @@ func (m *tuiModel) thinkingLine() string {
 // injectAssistantPrefix strips glamour's 2-space paragraph indent from the
 // first line and prepends prefix so ◆ aligns at column 0, mirroring "> ".
 // Leading newlines are already trimmed by markdownRenderer.render.
+//
+// glamour emits the document margin as literal spaces sitting *behind*
+// zero-width SGR escapes (e.g. "\x1b[…m\x1b[0m  \x1b[…m我先…"), so the string
+// rarely begins with a space — a plain TrimLeft(rendered, " ") would be a
+// no-op and the indent would survive. We instead walk the leading run,
+// dropping margin spaces while keeping the escapes (the colour escape that
+// styles the text included), and stop at the first visible glyph.
 func injectAssistantPrefix(rendered, prefix string) string {
-	trimmed := strings.TrimLeft(rendered, " ")
-	if trimmed == "" {
-		return rendered
+	var kept strings.Builder
+	i := 0
+	for i < len(rendered) {
+		if rendered[i] == ' ' {
+			i++ // drop glamour's margin spaces
+			continue
+		}
+		if n := ansiPrefixLen(rendered[i:]); n > 0 {
+			kept.WriteString(rendered[i : i+n]) // keep zero-width escapes
+			i += n
+			continue
+		}
+		break // first visible glyph
 	}
-	return prefix + trimmed
+	if i >= len(rendered) {
+		return rendered // nothing but whitespace/escapes
+	}
+	return prefix + kept.String() + rendered[i:]
+}
+
+// ansiPrefixLen returns the byte length of the ANSI CSI escape sequence at the
+// start of s (ESC '[' … final-byte in 0x40–0x7E, which covers the SGR colour
+// codes glamour emits), or 0 if s does not begin with a complete one.
+func ansiPrefixLen(s string) int {
+	if len(s) < 2 || s[0] != 0x1b || s[1] != '[' {
+		return 0
+	}
+	for i := 2; i < len(s); i++ {
+		if s[i] >= 0x40 && s[i] <= 0x7e {
+			return i + 1
+		}
+	}
+	return 0 // unterminated; treat as not a complete escape
 }

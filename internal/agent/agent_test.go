@@ -405,13 +405,14 @@ func TestAgent_Run_MultipleToolCalls(t *testing.T) {
 }
 
 func TestAgent_Run_ExceedsMaxTurns_FriendlyStop(t *testing.T) {
-	// Every reply is tool_use — loop hits the cap. Hitting it must NOT error;
-	// it returns a friendly reply with StopReason "max_turns".
+	// Every reply is tool_use with DIFFERENT args — loop hits the cap without
+	// triggering the stuck detector. Hitting it must NOT error; it returns a
+	// friendly reply with StopReason "max_turns".
 	replies := make([]Reply, defaultMaxTurns+5)
 	for i := range replies {
 		replies[i] = Reply{
 			StopReason: "tool_use",
-			Blocks:     []ContentBlock{NewToolUseBlock("c", "bash", nil)},
+			Blocks:     []ContentBlock{NewToolUseBlock(fmt.Sprintf("c%d", i), "bash", map[string]any{"command": fmt.Sprintf("cmd%d", i)})},
 		}
 	}
 	send := &fakeToolSender{replies: replies}
@@ -452,6 +453,66 @@ func TestAgent_Run_CustomMaxTurns(t *testing.T) {
 	}
 	if send.calls != 2 {
 		t.Errorf("provider calls = %d, want 2 (MaxTurns)", send.calls)
+	}
+}
+
+func TestAgent_Run_DuplicateToolCalls_StopsGracefully(t *testing.T) {
+	// The model keeps issuing the exact same tool_use batch. After 3 identical
+	// consecutive batches the stuck detector should fire (window=2 means 2
+	// repeats on top of the original = 3 total).
+	repeats := []Reply{
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c1", "bash", map[string]any{"command": "ls"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c2", "bash", map[string]any{"command": "ls"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c3", "bash", map[string]any{"command": "ls"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c4", "bash", map[string]any{"command": "ls"})}}, // should never reach
+	}
+	send := &fakeToolSender{replies: repeats}
+	exec := &fakeExecutor{}
+	a := New(send, "m")
+	defs := []ToolDefinition{{Name: "bash"}}
+
+	reply, err := a.Run(context.Background(), "go", defs, exec)
+	if err != nil {
+		t.Fatalf("stuck detector should stop gracefully, not error: %v", err)
+	}
+	if reply.StopReason != StopReasonStuck {
+		t.Errorf("StopReason = %q, want %q", reply.StopReason, StopReasonStuck)
+	}
+	if !strings.Contains(reply.Content, "stuck") {
+		t.Errorf("reply should mention being stuck, got %q", reply.Content)
+	}
+	// The stuck detector fires on the 3rd identical batch, so only 3 provider
+	// calls and 3 tool executions should have happened.
+	if send.calls != 3 {
+		t.Errorf("provider calls = %d, want 3 (stuck detector should stop early)", send.calls)
+	}
+	if len(exec.called) != 2 {
+		t.Errorf("executor calls = %d, want 2", len(exec.called))
+	}
+}
+
+func TestAgent_Run_DifferentToolCalls_DoesNotStop(t *testing.T) {
+	// The model issues different tool calls each round — no stuck detector.
+	replies := []Reply{
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c1", "bash", map[string]any{"command": "ls"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c2", "bash", map[string]any{"command": "pwd"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c3", "bash", map[string]any{"command": "cat"})}},
+		{Content: "done", StopReason: "end_turn"},
+	}
+	send := &fakeToolSender{replies: replies}
+	exec := &fakeExecutor{}
+	a := New(send, "m")
+	defs := []ToolDefinition{{Name: "bash"}}
+
+	reply, err := a.Run(context.Background(), "go", defs, exec)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reply.StopReason != "end_turn" {
+		t.Errorf("StopReason = %q, want end_turn", reply.StopReason)
+	}
+	if send.calls != 4 {
+		t.Errorf("provider calls = %d, want 4", send.calls)
 	}
 }
 
