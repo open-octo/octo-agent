@@ -49,7 +49,10 @@ func startWorkflowAndWait(t *testing.T, input map[string]any) string {
 	if id == "" {
 		t.Fatalf("no run id in start result: %q", res.Text)
 	}
-	for i := 0; i < 500; i++ {
+	// Generous wall-clock deadline: under `go test -race` the wasm interpreter
+	// runs several times slower, so a tight iteration count flakes in CI.
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
 		out, err := WorkflowStatusTool{}.Execute(context.Background(), "c", map[string]any{"run_id": id})
 		if err != nil {
 			t.Fatalf("workflow_status: %v", err)
@@ -57,7 +60,7 @@ func startWorkflowAndWait(t *testing.T, input map[string]any) string {
 		if !strings.Contains(out.Text, "[running]") {
 			return out.Text
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("workflow did not finish within the polling window")
 	return ""

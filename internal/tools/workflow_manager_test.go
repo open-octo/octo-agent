@@ -16,7 +16,10 @@ func echoAgentOpts(_ context.Context, prompt string, _ workflow.AgentOptions) wo
 // waitForDone polls a manager run until it leaves "running", or fails on timeout.
 func waitForDone(t *testing.T, m *WorkflowManager, id string) WorkflowRunSnapshot {
 	t.Helper()
-	for i := 0; i < 500; i++ {
+	// Generous wall-clock deadline: under `go test -race` the wasm interpreter
+	// runs several times slower, so a tight iteration count flakes in CI.
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
 		snap, ok := m.Read(id)
 		if !ok {
 			t.Fatalf("run %q vanished", id)
@@ -24,7 +27,7 @@ func waitForDone(t *testing.T, m *WorkflowManager, id string) WorkflowRunSnapsho
 		if snap.Status != "running" {
 			return snap
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("run did not finish within the polling window")
 	return WorkflowRunSnapshot{}
