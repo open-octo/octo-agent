@@ -72,7 +72,9 @@ terminal:
 
 web_fetch:
   # Block private / link-local / loopback ranges — SSRF protection.
-  - deny:  { hostname: ["10.*", "192.168.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*.*", "172.30.*", "172.31.*", "127.*", "169.254.*", "localhost", "*.local"] }
+  # IPv4 private + loopback, IPv6 loopback / link-local / IPv4-mapped loopback,
+  # and localhost names are all denied.
+  - deny:  { hostname: ["10.*", "192.168.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*.*", "172.30.*", "172.31.*", "127.*", "169.254.*", "localhost", "*.local", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.*", "::ffff:7f00:*", "fe80:*", "fc*:*", "fd*:*"] }
   # Pre-approved hosts known to be safe.
   - allow: { hostname: ["github.com", "*.github.com", "stackoverflow.com", "*.stackoverflow.com", "go.dev", "*.go.dev", "pkg.go.dev"] }
   # Other hosts fall through to ask.
