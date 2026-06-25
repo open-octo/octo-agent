@@ -2,8 +2,50 @@ package agent
 
 import (
 	"context"
+	"regexp"
+	"strconv"
 	"strings"
 )
+
+// overflowReclaimMargin is the extra headroom (tokens) the cheap reclamation
+// tier must free beyond the parsed deficit before we retry the send without a
+// summarize — the deficit is approximate, so leave slack.
+const overflowReclaimMargin = 4_000
+
+var (
+	// Anthropic: "prompt is too long: 218849 tokens > 200000 maximum".
+	reTokensOverMax = regexp.MustCompile(`(\d+)\s+tokens\s*>\s*(\d+)`)
+	// OpenAI: "maximum context length is 128000 tokens ... you requested 130000".
+	reMaxContextLen = regexp.MustCompile(`maximum context length is (\d+)`)
+	reRequested     = regexp.MustCompile(`requested (?:about |~)?(\d+)`)
+)
+
+// parseOverflowTokens extracts (have, max) token counts from a context-overflow
+// error when the provider reports them, so recovery can free at least the
+// deficit. Best-effort: returns ok=false when the numbers aren't present.
+func parseOverflowTokens(err error) (have, max int, ok bool) {
+	if err == nil {
+		return 0, 0, false
+	}
+	msg := strings.ToLower(err.Error())
+	if m := reTokensOverMax.FindStringSubmatch(msg); m != nil {
+		h, _ := strconv.Atoi(m[1])
+		mx, _ := strconv.Atoi(m[2])
+		if h > mx && mx > 0 {
+			return h, mx, true
+		}
+	}
+	if mm := reMaxContextLen.FindStringSubmatch(msg); mm != nil {
+		mx, _ := strconv.Atoi(mm[1])
+		if rm := reRequested.FindStringSubmatch(msg); rm != nil {
+			h, _ := strconv.Atoi(rm[1])
+			if h > mx && mx > 0 {
+				return h, mx, true
+			}
+		}
+	}
+	return 0, 0, false
+}
 
 // overflowRecovery handles "context too long" errors by compressing history
 // and retrying. Aligned with Ruby's perform_context_overflow_compression.
@@ -83,6 +125,18 @@ func (r *overflowRecovery) tryRecover(ctx context.Context, a *Agent, sendErr err
 	r.attempted = true
 	r.inProgress = true
 	defer func() { r.inProgress = false }()
+
+	// Layer 0: cheap reclamation of stale tool results (no LLM call). When the
+	// provider reported the deficit and reclamation freed at least that much
+	// (plus margin), retry the send directly — no summarize needed.
+	if reclaimed := a.reclaimStaleToolResults(); reclaimed > 0 {
+		a.resetContextTrigger()
+		if have, max, ok := parseOverflowTokens(sendErr); ok && reclaimed >= have-max+overflowReclaimMargin {
+			return true
+		}
+		// Not provably enough — fall through to summarize, now over the
+		// already-reduced history.
+	}
 
 	// Layer 1: standard cache-preserving compression
 	if a.tryOverflowCompact(ctx, pullBackStandard, handler) {
