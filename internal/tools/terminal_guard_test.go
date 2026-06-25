@@ -47,3 +47,18 @@ func TestTerminalTool_RefusesSedInPlace(t *testing.T) {
 		t.Errorf("terminal should refuse sed -i with an edit_file hint, got %v", err)
 	}
 }
+
+// guardCommand is regex-based, so it must not be tripped by literal "sed -i"
+// inside a quoted argument (e.g. an echo example).
+func TestGuardCommand_DoesNotCrossQuotes(t *testing.T) {
+	ok := []string{
+		`echo "sed -i 's/a/b/' file.txt"`,
+		`echo 'sed -i file'`,
+		`python -c "print('sed -i')"`,
+	}
+	for _, cmd := range ok {
+		if err := guardCommand(cmd); err != nil {
+			t.Errorf("expected %q to be allowed, got %v", cmd, err)
+		}
+	}
+}

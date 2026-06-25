@@ -29,11 +29,27 @@ func TestScanForSecrets_AllowsOrdinaryContent(t *testing.T) {
 		"# README\n\nThis project does things.\n",
 		"AKIAIOSFODNN7EXAMPLE",                                       // AWS docs example access-key ID — not secret, must not trip
 		"the aws_secret_access_key is configured in the environment", // prose, no value
-		"ghp_short", // too short to be a real token
+		"ghp_short",           // too short to be a real token
+		"API_KEY=placeholder", // generic key label with too-short value
 	}
 	for _, content := range ok {
 		if got := scanForSecrets(content); got != "" {
 			t.Errorf("ordinary content flagged as %q: %q", got, content)
+		}
+	}
+}
+
+func TestScanForSecrets_DetectsAdditionalKeys(t *testing.T) {
+	cases := map[string]string{
+		"openai":    "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+		"anthropic": "ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789AB",
+		"google":    "GOOGLE_API_KEY=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abc",
+		"jwt":       "token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+		"generic":   "api_key=abcdefghijklmnopqrstuvwxyz0123456789",
+	}
+	for label, content := range cases {
+		if got := scanForSecrets(content); got == "" {
+			t.Errorf("%s: expected a secret to be detected", label)
 		}
 	}
 }

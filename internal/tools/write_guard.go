@@ -18,6 +18,13 @@ var secretPatterns = []struct {
 	{"GitHub token", regexp.MustCompile(`\b(?:ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{36}\b`)},
 	{"GitHub fine-grained token", regexp.MustCompile(`\bgithub_pat_[0-9A-Za-z_]{60,}\b`)},
 	{"Slack token", regexp.MustCompile(`\bxox[baprs]-[0-9A-Za-z-]{10,}`)},
+	{"OpenAI API key", regexp.MustCompile(`\bsk-[a-zA-Z0-9]{20,}\b`)},
+	{"Anthropic API key", regexp.MustCompile(`\bsk-ant-[a-zA-Z0-9_-]{20,}\b`)},
+	{"Google API key", regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{30,}\b`)},
+	{"JWT", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\b`)},
+	{"generic API key", regexp.MustCompile(`(?i)\b(?:api[_-]?key|apikey|secret[_-]?key)\s*[=:]\s*['"]?[a-zA-Z0-9_\-]{16,}\b`)},
+	{"JWT", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\b`)},
+	{"generic API key", regexp.MustCompile(`(?i)\b(?:api[_-]?key|apikey|secret[_-]?key)\s*[=:]\s*['"]?[a-zA-Z0-9_\-]{16,}\b`)},
 }
 
 // scanForSecrets returns the name of the first secret shape detected in
