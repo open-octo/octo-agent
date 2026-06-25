@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 )
@@ -191,9 +192,21 @@ func TestSummariseInput_TruncatesLongValues(t *testing.T) {
 	if !strings.Contains(got, "...") {
 		t.Errorf("expected truncation marker, got %q", got)
 	}
-	// Output line itself capped at 120 chars.
-	if len(got) > 120 {
-		t.Errorf("line not capped: len=%d, got %q", len(got), got)
+	// Output line itself capped at 60 runes (byte length may be larger for CJK).
+	if utf8.RuneCountInString(got) > 60 {
+		t.Errorf("line not capped: runes=%d, got %q", utf8.RuneCountInString(got), got)
+	}
+}
+
+func TestSummariseInput_NoMojibakeOnCJK(t *testing.T) {
+	// Regression: byte-slicing a UTF-8 CJK string produced the replacement
+	// character "�". Truncation must happen on rune boundaries.
+	got := summariseInput(map[string]any{
+		"active_form": "修复 TUI agent 运行时 slash 命令补全",
+		"description": "agent 执行过程中输入 / 应弹出 slash 命令补全菜单",
+	})
+	if strings.ContainsRune(got, '\uFFFD') {
+		t.Errorf("got replacement character in %q", got)
 	}
 }
 
@@ -201,6 +214,40 @@ func TestTruncate1Line_CollapsesMultiline(t *testing.T) {
 	got := truncate1Line("\n\nfirst real line\nsecond line that gets dropped")
 	if got != "first real line" {
 		t.Errorf("truncate1Line = %q", got)
+	}
+}
+
+func TestTruncate1Line_NoMojibakeOnCJK(t *testing.T) {
+	got := truncate1Line("第一行\n第二行")
+	if strings.ContainsRune(got, '\uFFFD') {
+		t.Errorf("got replacement character in %q", got)
+	}
+}
+
+func TestTruncateRunes(t *testing.T) {
+	cases := []struct {
+		in   string
+		max  int
+		want string
+	}{
+		{"hello", 10, "hello"},
+		{"hello world", 8, "hello..."},
+		{"你好世界", 3, "你好世"},
+		{"你好世界", 4, "你好世界"},
+		{"你好世界", 5, "你好世界"},
+		{"你好世界这是一段很长的中文", 10, "你好世界这是一..."},
+		{"", 5, ""},
+		{"abc", 0, ""},
+		{"ab", 2, "ab"},
+		{"abc", 3, "abc"},
+		{"abcd", 3, "abc"},
+		{"abcde", 4, "a..."},
+	}
+	for _, c := range cases {
+		got := truncateRunes(c.in, c.max)
+		if got != c.want {
+			t.Errorf("truncateRunes(%q, %d) = %q, want %q", c.in, c.max, got, c.want)
+		}
 	}
 }
 

@@ -519,16 +519,11 @@ func summariseInput(input map[string]any) string {
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		v := fmt.Sprintf("%v", input[k])
-		if len(v) > 60 {
-			v = v[:57] + "..."
-		}
+		v = truncateRunes(v, 30)
 		parts = append(parts, fmt.Sprintf("%s=%s", k, v))
 	}
 	joined := strings.Join(parts, " ")
-	if len(joined) > 120 {
-		joined = joined[:117] + "..."
-	}
-	return joined
+	return truncateRunes(joined, 60)
 }
 
 // truncate1Line collapses a multi-line error to its first non-empty line and
@@ -539,10 +534,25 @@ func truncate1Line(s string) string {
 		if line == "" {
 			continue
 		}
-		if len(line) > 200 {
-			line = line[:197] + "..."
-		}
-		return line
+		return truncateRunes(line, 100)
 	}
 	return "(empty error)"
+}
+
+// truncateRunes returns s truncated to at most max runes. If truncation is
+// needed, the result ends with "..." and never splits a multi-byte UTF-8
+// character (byte slicing a CJK string in the middle of a rune produces the
+// replacement-character garbage users see as "�").
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(r[:max])
+	}
+	return string(r[:max-3]) + "..."
 }
