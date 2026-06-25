@@ -1008,30 +1008,14 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		input := m.toolInput[ev.ToolID]
 		delete(m.toolInput, ev.ToolID)
 		m.running = nil // the finished card replaces the live indicator
-		if m.rendersCard(ev.ToolName) {
-			m.commitToolLine(renderToolCard(ev.ToolName, input, ev.Output, false))
-			return
-		}
-		if m.cfg.plain {
-			m.commitToolLine(fmt.Sprintf("↳ %s ✓", ev.ToolName))
-			return
-		}
-		m.commitToolLine(tui.RenderToolStatus(ev.ToolName, summariseInput(input), false, ""))
+		m.commitToolLine(m.renderToolOutcome(ev.ToolName, input, ev.Output, false))
 		return
 
 	case agent.EventToolError:
 		input := m.toolInput[ev.ToolID]
 		delete(m.toolInput, ev.ToolID)
 		m.running = nil
-		if m.rendersCard(ev.ToolName) {
-			m.commitToolLine(renderToolCard(ev.ToolName, input, firstNonEmpty(ev.Output, ev.Err), true))
-			return
-		}
-		if m.cfg.plain {
-			m.commitToolLine(toolErrStyle.Render(fmt.Sprintf("↳ %s ✗ — %s", ev.ToolName, truncate1Line(ev.Err))))
-			return
-		}
-		m.commitToolLine(tui.RenderToolStatus(ev.ToolName, summariseInput(input), true, truncate1Line(ev.Err)))
+		m.commitToolLine(m.renderToolOutcome(ev.ToolName, input, firstNonEmpty(ev.Output, ev.Err), true))
 		return
 
 	case agent.EventCompactStarted:
@@ -1107,10 +1091,34 @@ func (m *tuiModel) rendersCard(toolName string) bool {
 	return !m.cfg.plain && cardVerbFor(toolName) != ""
 }
 
+// renderToolOutcome produces the scrollback item for a finished tool call: a
+// rich card for card tools, a styled status line otherwise, or the dense
+// one-liner under --plain. resultText is the tool's output (or its error
+// message on failure). This is the single rendering path shared by the live
+// done/error events and resumed-history replay, so a resumed transcript looks
+// byte-for-byte like it did live.
+func (m *tuiModel) renderToolOutcome(toolName string, input map[string]any, resultText string, isErr bool) string {
+	if m.rendersCard(toolName) {
+		return renderToolCard(toolName, input, resultText, isErr)
+	}
+	if m.cfg.plain {
+		if isErr {
+			return toolErrStyle.Render(fmt.Sprintf("↳ %s ✗ — %s", toolName, truncate1Line(resultText)))
+		}
+		return fmt.Sprintf("↳ %s ✓", toolName)
+	}
+	errText := ""
+	if isErr {
+		errText = truncate1Line(resultText)
+	}
+	return tui.RenderToolStatus(toolName, summariseInput(input), isErr, errText)
+}
+
 // replayHistoryLines renders a resumed session's prior turns into scrollback
-// lines: user prompts and assistant replies verbatim (markdown unless --plain),
-// each tool call collapsed to a one-line ✓/✗ summary, closed by a dim "resumed"
-// marker. Returns nil for a fresh session (empty history).
+// lines exactly as they appeared live: user prompts and assistant replies
+// verbatim (markdown unless --plain), tool calls through the same
+// renderToolOutcome path as the live done/error events (rich cards, status
+// lines, full error text). Returns nil for a fresh session (empty history).
 func (m *tuiModel) replayHistoryLines() []string {
 	msgs := m.a.History.Snapshot()
 	if len(msgs) == 0 {
@@ -1149,15 +1157,15 @@ func (m *tuiModel) replayHistoryLines() []string {
 						out = append(out, s)
 					}
 				case "tool_use":
-					out = append(out, replayToolLine(b, results[b.ID]))
+					res := results[b.ID]
+					out = append(out, m.renderToolOutcome(
+						b.Name, b.Input,
+						agent.StripRemindersForDisplay(res.Result), res.IsError))
 				}
 			}
 		}
 	}
-	if len(out) == 0 {
-		return nil
-	}
-	return append(out, hintStyle.Render(fmt.Sprintf("── resumed · %d messages ──", len(msgs))))
+	return out
 }
 
 // renderReplayText styles one block of restored assistant/user prose: markdown
@@ -1185,19 +1193,6 @@ func userMessageText(msg agent.Message) string {
 		}
 	}
 	return b.String()
-}
-
-// replayToolLine collapses a tool_use (and its paired result) into a single
-// ↳ verb(target) ✓/✗ line — the resumed-history counterpart of the live card.
-func replayToolLine(use, result agent.ContentBlock) string {
-	label := "↳ " + use.Name
-	if target := cardTargetFor(use.Name, use.Input); target != "" {
-		label += "(" + target + ")"
-	}
-	if result.Type == "tool_result" && result.IsError {
-		return toolErrStyle.Render(label + " ✗")
-	}
-	return label + " ✓"
 }
 
 // appendText buffers a streamed text delta into m.partial. The partial is

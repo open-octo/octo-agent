@@ -326,9 +326,10 @@ func TestTUI_PrintlnBlockSeparation(t *testing.T) {
 	}
 }
 
-// Resuming a session replays prior turns into the scrollback: prompts and
-// replies verbatim, tool calls collapsed to a one-line ✓/✗ (no raw output),
-// closed by a dim "resumed" marker.
+// Resuming a session replays prior turns into the scrollback exactly as they
+// appeared live: prompts and replies verbatim, and tool calls rendered through
+// the same renderToolOutcome path — so a card tool (terminal) shows its rich
+// card with the real output, not a collapsed one-liner.
 func TestTUI_ReplayHistoryLines(t *testing.T) {
 	m := newTestModel()
 	m.width = 80
@@ -345,14 +346,18 @@ func TestTUI_ReplayHistoryLines(t *testing.T) {
 
 	joined := stripANSI(strings.Join(m.replayHistoryLines(), "\n"))
 
-	for _, want := range []string{"hello there", "let me check", "here are the files", "terminal", "✓", "resumed"} {
+	for _, want := range []string{"hello there", "let me check", "here are the files", "Run(ls)"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("replay missing %q; got:\n%s", want, joined)
 		}
 	}
-	// The collapsed tool line must NOT include the raw tool output.
-	if strings.Contains(joined, "file1") {
-		t.Errorf("raw tool output should be collapsed away; got:\n%s", joined)
+	// The replayed card carries the real tool output, same as the live card.
+	if !strings.Contains(joined, "file1") {
+		t.Errorf("replay should render the live card with raw output; got:\n%s", joined)
+	}
+	// No special-cased "resumed" marker — replay is indistinguishable from live.
+	if strings.Contains(joined, "resumed") {
+		t.Errorf("replay should not append a special marker; got:\n%s", joined)
 	}
 }
 
@@ -369,7 +374,8 @@ func TestTUI_ReplayHistoryLines_FreshSessionEmpty(t *testing.T) {
 	}
 }
 
-// A failed tool call collapses to a ✗ line.
+// A failed tool call replays as its live error card, carrying the real error
+// message (the regression: the old collapsed line dropped it).
 func TestTUI_ReplayHistoryLines_ToolError(t *testing.T) {
 	m := newTestModel()
 	m.width = 80
@@ -382,9 +388,9 @@ func TestTUI_ReplayHistoryLines_ToolError(t *testing.T) {
 		agent.NewToolResultBlock("c1", "exit 1", true),
 	}))
 
-	joined := strings.Join(m.replayHistoryLines(), "\n")
-	if !strings.Contains(joined, "✗") {
-		t.Errorf("failed tool should collapse to a ✗ line; got:\n%s", joined)
+	joined := stripANSI(strings.Join(m.replayHistoryLines(), "\n"))
+	if !strings.Contains(joined, "exit 1") {
+		t.Errorf("failed tool should replay its error message; got:\n%s", joined)
 	}
 }
 
