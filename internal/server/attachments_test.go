@@ -144,6 +144,50 @@ func TestHandleGetUpload(t *testing.T) {
 	}
 }
 
+func TestHandleGetUpload_HTMLAttachmentForcesDownload(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	dir, err := ensureUploadsDir()
+	if err != nil {
+		t.Fatalf("uploads dir: %v", err)
+	}
+	for _, name := range []string{"1_xss.html", "2_xss.htm", "3_xss.js", "4_xss.mjs"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("<script>alert(1)</script>"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	// Non-executable file should not get Content-Disposition.
+	if err := os.WriteFile(filepath.Join(dir, "5_note.txt"), []byte("hi"), 0o600); err != nil {
+		t.Fatalf("write txt: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(srv.http.Handler)
+	defer ts.Close()
+
+	for _, name := range []string{"1_xss.html", "2_xss.htm", "3_xss.js", "4_xss.mjs"} {
+		resp, err := http.Get(ts.URL + "/api/uploads/" + name)
+		if err != nil {
+			t.Fatalf("get %s: %v", name, err)
+		}
+		resp.Body.Close()
+		if got := resp.Header.Get("Content-Disposition"); got != "attachment" {
+			t.Errorf("%s Content-Disposition = %q, want attachment", name, got)
+		}
+	}
+
+	resp, err := http.Get(ts.URL + "/api/uploads/5_note.txt")
+	if err != nil {
+		t.Fatalf("get txt: %v", err)
+	}
+	resp.Body.Close()
+	if resp.Header.Get("Content-Disposition") != "" {
+		t.Errorf("txt Content-Disposition = %q, want empty", resp.Header.Get("Content-Disposition"))
+	}
+}
+
 // TestHandleWSUserMessage_ImageOnly is the regression guard for the web-UI
 // "sent an image, nothing happened" bug: handleWSUserMessage ignored
 // msg.Files entirely and returned early on empty text, silently dropping

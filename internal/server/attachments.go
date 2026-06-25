@@ -182,5 +182,12 @@ func (s *Server) handleGetUpload(w http.ResponseWriter, r *http.Request) {
 	// Uploads are user-supplied bytes served from our origin; without nosniff
 	// a no-Origin <script src> include could read one as JS (XSSI).
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Force download for HTML/JS content so it cannot execute in the Octo UI
+	// origin (stored XSS). Browsers still render images/pdf normally.
+	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, ".html") || strings.HasSuffix(lower, ".htm") ||
+		strings.HasSuffix(lower, ".js") || strings.HasSuffix(lower, ".mjs") {
+		w.Header().Set("Content-Disposition", "attachment")
+	}
 	http.ServeFile(w, r, filepath.Join(dir, name))
 }

@@ -77,6 +77,7 @@ export interface Artifact {
   code: string
   preview: string
   path: string
+  allowScripts?: boolean
 }
 
 // SessionItem matches the Go server session struct
