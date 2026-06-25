@@ -46,15 +46,15 @@ func InstallZip(zipPath, destRoot string, force bool) (name, desc string, err er
 		if rel == "" {
 			continue
 		}
-		clean := path.Clean(rel)
-		if clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) {
+		clean := filepath.FromSlash(path.Clean(rel))
+		if !filepath.IsLocal(clean) {
 			return "", "", fmt.Errorf("zip entry %q escapes the skill directory", f.Name)
 		}
 		total += int64(f.UncompressedSize64)
 		if total > installMaxBytes {
 			return "", "", fmt.Errorf("archive exceeds %d MB extraction cap", installMaxBytes>>20)
 		}
-		if err := writeZipEntry(f, filepath.Join(tmp, filepath.FromSlash(clean))); err != nil {
+		if err := writeZipEntry(f, filepath.Join(tmp, clean)); err != nil {
 			return "", "", err
 		}
 	}

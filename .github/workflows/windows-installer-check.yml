@@ -11,6 +11,10 @@ on:
       - '.github/workflows/windows-installer-check.yml'
   workflow_dispatch:
 
+# Least-privilege default: this job only checks out and compiles.
+permissions:
+  contents: read
+
 jobs:
   compile:
     name: compile installer

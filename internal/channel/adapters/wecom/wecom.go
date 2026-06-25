@@ -30,6 +30,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -660,9 +661,38 @@ func decryptWCMedia(data []byte, aeskeyB64 string) ([]byte, error) {
 	return out[:len(out)-padLen], nil
 }
 
+// wcMediaHostSuffixes are the Tencent/WeCom CDN host suffixes that serve
+// media for inbound messages. The media URL arrives in the (user-originated)
+// callback frame, so it is validated against this allowlist before any fetch
+// to prevent the bot from being coerced into requesting arbitrary internal
+// URLs (SSRF).
+var wcMediaHostSuffixes = []string{
+	".qq.com",
+	".qpic.cn",
+	".weixinbridge.com",
+}
+
+// allowedWCMediaURL reports whether raw is an https URL on a WeCom media host.
+func allowedWCMediaURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	for _, suf := range wcMediaHostSuffixes {
+		if host == suf[1:] || strings.HasSuffix(host, suf) {
+			return true
+		}
+	}
+	return false
+}
+
 // downloadWCMedia fetches a WeCom media URL and optionally decrypts it.
-func downloadWCMedia(url, aeskey string) ([]byte, error) {
-	resp, err := http.Get(url) //nolint:gosec
+func downloadWCMedia(mediaURL, aeskey string) ([]byte, error) {
+	if !allowedWCMediaURL(mediaURL) {
+		return nil, fmt.Errorf("wecom: refusing to fetch non-allowlisted media URL")
+	}
+	resp, err := http.Get(mediaURL)
 	if err != nil {
 		return nil, err
 	}

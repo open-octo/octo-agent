@@ -229,17 +229,18 @@ func extractSubdir(r io.Reader, subpath, dest string) error {
 			}
 			rel = strings.TrimPrefix(rel, subpath+"/")
 		}
-		// Reject entries that would land outside dest. path.Clean plus the
-		// separator check covers ".." chains and absolute names.
-		clean := path.Clean(rel)
-		if clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) {
+		// Reject entries that would land outside dest. filepath.IsLocal
+		// rejects absolute paths, ".." chains, and (on Windows) reserved
+		// names — anything that would escape the destination directory.
+		clean := filepath.FromSlash(path.Clean(rel))
+		if !filepath.IsLocal(clean) {
 			return fmt.Errorf("tar entry %q escapes the skill directory", hdr.Name)
 		}
 		total += hdr.Size
 		if total > installMaxBytes {
 			return fmt.Errorf("tarball exceeds %d MB extraction cap", installMaxBytes>>20)
 		}
-		target := filepath.Join(dest, filepath.FromSlash(clean))
+		target := filepath.Join(dest, clean)
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
