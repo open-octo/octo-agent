@@ -41,8 +41,10 @@ type apiRequest struct {
 	// across a conversation's turns → higher cache hit-rate. Omitted when empty.
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 	// ReasoningEffort tunes how much a reasoning model deliberates before
-	// answering ("low" | "medium" | "high"). Omitted when empty so non-reasoning
-	// models and backends that don't support the field are unaffected.
+	// answering ("low" | "medium" | "high" | "max"). Omitted when empty so
+	// non-reasoning models and backends that don't support the field are
+	// unaffected. Set via Client.applyReasoning, which clamps "max" to "high"
+	// for non-DeepSeek backends.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// Thinking is DeepSeek's on/off toggle for thinking mode, set only for the
 	// DeepSeek dialect (see Client.applyReasoning). DeepSeek separates enabling

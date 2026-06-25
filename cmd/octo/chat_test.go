@@ -240,12 +240,12 @@ func TestResolveReasoningEffort(t *testing.T) {
 }
 
 func TestValidReasoningEffort(t *testing.T) {
-	for _, ok := range []string{"", "low", "medium", "high"} {
+	for _, ok := range []string{"", "low", "medium", "high", "max"} {
 		if !validReasoningEffort(ok) {
 			t.Errorf("validReasoningEffort(%q) = false, want true", ok)
 		}
 	}
-	for _, bad := range []string{"none", "max", "LOW", "1"} {
+	for _, bad := range []string{"none", "xhigh", "LOW", "1"} {
 		if validReasoningEffort(bad) {
 			t.Errorf("validReasoningEffort(%q) = true, want false", bad)
 		}
@@ -253,7 +253,7 @@ func TestValidReasoningEffort(t *testing.T) {
 }
 
 func TestAnthropicThinkingBudget(t *testing.T) {
-	cases := map[string]int{"": 0, "low": 4096, "medium": 16384, "high": 32768}
+	cases := map[string]int{"": 0, "low": 4096, "medium": 16384, "high": 32768, "max": 64000}
 	for effort, want := range cases {
 		if got := anthropicThinkingBudget(effort); got != want {
 			t.Errorf("anthropicThinkingBudget(%q) = %d, want %d", effort, got, want)

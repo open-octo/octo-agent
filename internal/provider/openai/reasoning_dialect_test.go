@@ -78,15 +78,37 @@ func TestDeepSeekDialect_ThinkingToggle(t *testing.T) {
 	}
 }
 
+// DeepSeek accepts "max" natively, so it must pass through verbatim with
+// thinking enabled.
+func TestDeepSeekDialect_MaxPassesThrough(t *testing.T) {
+	got := captureRequest(t, DialectDeepSeek, "max", false)
+	if got.ReasoningEffort != "max" {
+		t.Errorf("reasoning_effort = %q, want max", got.ReasoningEffort)
+	}
+	if got.Thinking == nil || got.Thinking.Type != "enabled" {
+		t.Errorf("thinking = %+v, want type=enabled", got.Thinking)
+	}
+}
+
 // A non-DeepSeek backend must never see the thinking toggle — it's a DeepSeek
 // extension and an unknown field elsewhere — while reasoning_effort still flows.
-func TestGenericDialect_OmitsThinking(t *testing.T) {
+// "max" is clamped to "high" since generic backends reject the unknown enum.
+func TestGenericDialect_OmitsThinkingAndClampsMax(t *testing.T) {
 	got := captureRequest(t, "", "high", false)
 	if got.Thinking != nil {
 		t.Errorf("thinking = %+v, want omitted for generic OpenAI", got.Thinking)
 	}
 	if got.ReasoningEffort != "high" {
 		t.Errorf("reasoning_effort = %q, want high", got.ReasoningEffort)
+	}
+
+	// "max" clamps down to "high" for generic backends.
+	clamped := captureRequest(t, "", "max", false)
+	if clamped.ReasoningEffort != "high" {
+		t.Errorf("max reasoning_effort = %q, want clamped to high", clamped.ReasoningEffort)
+	}
+	if clamped.Thinking != nil {
+		t.Errorf("max thinking = %+v, want omitted", clamped.Thinking)
 	}
 
 	// Empty effort on a generic backend omits both fields entirely.

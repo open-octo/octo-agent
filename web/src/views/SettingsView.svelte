@@ -181,7 +181,7 @@
         if (workdir !== origWorkdir) {
           promises.push(api.updateSessionWorkingDir(sid, workdir))
         }
-        const effortMap: Record<string, string> = { Low: 'low', Medium: 'medium', High: 'high' }
+        const effortMap: Record<string, string> = { Low: 'low', Medium: 'medium', High: 'high', Max: 'max' }
         promises.push(api.updateSessionReasoningEffort(sid, effortMap[reasoning] ?? 'medium'))
         await Promise.all(promises)
         origModel   = model
@@ -298,7 +298,7 @@
             <span class="setting-label">{$t('settings.reasoning')}</span>
             <span class="setting-desc">{$t('settings.reasoning_desc')}</span>
           </div>
-          <Segment options={['Low', 'Medium', 'High']} labels={{ Low: $t('settings.re_low'), Medium: $t('settings.re_medium'), High: $t('settings.re_high') }} bind:value={reasoning} />
+          <Segment options={['Low', 'Medium', 'High', 'Max']} labels={{ Low: $t('settings.re_low'), Medium: $t('settings.re_medium'), High: $t('settings.re_high'), Max: $t('settings.re_max') }} bind:value={reasoning} />
         </div>
         <div class="setting-row">
           <div class="setting-info">

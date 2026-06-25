@@ -42,10 +42,11 @@ type Request struct {
 	// (Claude / Kimi k2.6 via the thinking request field); others ignore it.
 	ThinkingBudget int
 
-	// ReasoningEffort, when non-empty ("low" | "medium" | "high"), is forwarded
-	// as the OpenAI-protocol reasoning_effort request field. Only the OpenAI
-	// provider honors it; the Anthropic provider expresses reasoning intensity
-	// through ThinkingBudget instead and ignores this field.
+	// ReasoningEffort, when non-empty ("low" | "medium" | "high" | "max"), is
+	// forwarded as the OpenAI-protocol reasoning_effort request field. Only the
+	// OpenAI provider honors it; the Anthropic provider expresses reasoning
+	// intensity through ThinkingBudget instead and ignores this field. "max" is
+	// honored by DeepSeek and clamped to "high" for other OpenAI backends.
 	ReasoningEffort string
 }
 

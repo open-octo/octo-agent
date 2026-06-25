@@ -71,19 +71,28 @@ type Client struct {
 	Dialect string
 }
 
-// applyReasoning populates the reasoning fields of body for the given effort.
-// reasoning_effort is forwarded for every backend (omitted when empty). For the
-// DeepSeek dialect it additionally sets the thinking on/off toggle: DeepSeek
-// treats enabling thinking and tuning its effort as separate switches and keeps
-// thinking on by default, so we enable it explicitly when an effort is
-// requested and disable it explicitly when none is — otherwise "off" would
-// still think. Effort values octo emits ("low"|"medium"|"high") are accepted by
-// DeepSeek, which maps "low"/"medium" up to "high".
+// applyReasoning populates the reasoning fields of body for the given effort
+// ("" | "low" | "medium" | "high" | "max").
+//
+// For the DeepSeek dialect it forwards the effort verbatim — DeepSeek natively
+// accepts "high"/"max" and maps "low"/"medium" up to "high" — and additionally
+// sets the thinking on/off toggle: DeepSeek treats enabling thinking and tuning
+// its effort as separate switches and keeps thinking on by default, so we
+// enable it explicitly when an effort is requested and disable it explicitly
+// when none is — otherwise "off" would still think.
+//
+// Generic OpenAI-compatible backends top out at "high" and reject an unknown
+// "max" enum, so "max" is clamped down to "high" for them; "thinking" (a
+// DeepSeek extension) is never sent.
 func (c *Client) applyReasoning(body *apiRequest, effort string) {
-	body.ReasoningEffort = effort
 	if c.Dialect != DialectDeepSeek {
+		if effort == "max" {
+			effort = "high"
+		}
+		body.ReasoningEffort = effort
 		return
 	}
+	body.ReasoningEffort = effort
 	if effort == "" {
 		body.Thinking = &apiThinking{Type: "disabled"}
 	} else {

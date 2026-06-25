@@ -399,6 +399,7 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer) int {
 			{label: "Low", value: "low"},
 			{label: "Medium", value: "medium"},
 			{label: "High", value: "high"},
+			{label: "Max", value: "max"},
 		}, existing.ReasoningEffort)
 		if !ok {
 			return cancelWizard(stderr)
@@ -406,9 +407,9 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer) int {
 		outEntry.ReasoningEffort = choice.value
 	} else {
 		effortAns := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
-			"Reasoning effort (low | medium | high, empty = off)", existing.ReasoningEffort)))
+			"Reasoning effort (low | medium | high | max, empty = off)", existing.ReasoningEffort)))
 		if !validReasoningEffort(effortAns) {
-			fmt.Fprintf(stderr, "octo config: invalid reasoning effort %q (use 'low', 'medium', 'high', or empty)\n", effortAns)
+			fmt.Fprintf(stderr, "octo config: invalid reasoning effort %q (use 'low', 'medium', 'high', 'max', or empty)\n", effortAns)
 			return 2
 		}
 		outEntry.ReasoningEffort = effortAns

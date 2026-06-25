@@ -16,7 +16,7 @@ Created interactively via `octo config` or edited directly.
 | `permission_mode` | string | `"strict"`, `"confirm"`, or `"auto"` |
 | `coauthor` | bool | Append `Co-authored-by` to git commits |
 | `show_reasoning` | bool | Stream reasoning/thinking traces to terminal |
-| `reasoning_effort` | string | `"low"`, `"medium"`, `"high"`, or `""` (off) |
+| `reasoning_effort` | string | `"low"`, `"medium"`, `"high"`, `"max"`, or `""` (off) |
 | `api_key` | string | Plaintext fallback (discouraged — use env var instead) |
 
 ## Precedence

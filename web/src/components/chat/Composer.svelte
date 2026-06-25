@@ -72,7 +72,7 @@
   let models = $state<api.ModelEntry[]>([])
   let modelMenu = $state(false)
   let reasonMenu = $state(false)
-  const reasoningLevels = ['low', 'medium', 'high']
+  const reasoningLevels = ['low', 'medium', 'high', 'max']
 
   onMount(async () => {
     try { models = (await api.getConfig()).models ?? [] } catch { /* leave empty */ }
