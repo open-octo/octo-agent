@@ -33,6 +33,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -672,13 +673,14 @@ var wcMediaHostSuffixes = []string{
 	".weixinbridge.com",
 }
 
-// allowedWCMediaURL reports whether raw is an https URL on a WeCom media host.
-func allowedWCMediaURL(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" {
-		return false
-	}
-	host := u.Hostname()
+// wcMediaURLRe is a strict allowlist pattern for inbound WeCom media URLs.
+// It anchors the host to a Tencent/WeCom CDN domain and only permits https.
+// The regexp check doubles as a CodeQL request-forgery sanitizer (regexp
+// matches are recognised as barrier guards by the go/request-forgery query).
+var wcMediaURLRe = regexp.MustCompile(`^https://(?:[a-zA-Z0-9.-]+\.)?(?:qq\.com|qpic\.cn|weixinbridge\.com)(?:[/?#].*)?$`)
+
+// wcMediaHostAllowed reports whether host is a WeCom media host suffix.
+func wcMediaHostAllowed(host string) bool {
 	for _, suf := range wcMediaHostSuffixes {
 		if host == suf[1:] || strings.HasSuffix(host, suf) {
 			return true
@@ -687,12 +689,64 @@ func allowedWCMediaURL(raw string) bool {
 	return false
 }
 
+// allowedWCMediaURL reports whether raw is an https URL on a WeCom media host.
+func allowedWCMediaURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	return wcMediaHostAllowed(u.Hostname())
+}
+
+// sanitizeWCMediaURL validates a WeCom media URL and returns a reconstructed
+// URL whose scheme and host are tightly controlled. The regexp acts as the
+// primary barrier guard recognised by CodeQL; the allowlist and url.Parse
+// checks provide defence in depth.
+func sanitizeWCMediaURL(raw string) (string, error) {
+	if !wcMediaURLRe.MatchString(raw) {
+		return "", fmt.Errorf("wecom: media URL does not match allowlisted pattern")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("wecom: invalid media URL: %w", err)
+	}
+	if u.Scheme != "https" || u.User != nil {
+		return "", fmt.Errorf("wecom: media URL must be https without credentials")
+	}
+	host := u.Hostname()
+	if !wcMediaHostAllowed(host) {
+		return "", fmt.Errorf("wecom: media URL host %q is not allowlisted", host)
+	}
+	safe := &url.URL{
+		Scheme:   "https",
+		Host:     host,
+		Path:     u.Path,
+		RawQuery: u.RawQuery,
+	}
+	return safe.String(), nil
+}
+
 // downloadWCMedia fetches a WeCom media URL and optionally decrypts it.
 func downloadWCMedia(mediaURL, aeskey string) ([]byte, error) {
-	if !allowedWCMediaURL(mediaURL) {
-		return nil, fmt.Errorf("wecom: refusing to fetch non-allowlisted media URL")
+	safeURL, err := sanitizeWCMediaURL(mediaURL)
+	if err != nil {
+		return nil, fmt.Errorf("wecom: refusing to fetch media: %w", err)
 	}
-	resp, err := http.Get(mediaURL)
+
+	// Block open redirects: any 302 target must also pass the host allowlist.
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("wecom: too many redirects")
+			}
+			if !allowedWCMediaURL(req.URL.String()) {
+				return fmt.Errorf("wecom: redirect to non-allowlisted URL %q", req.URL.String())
+			}
+			return nil
+		},
+	}
+	resp, err := client.Get(safeURL)
 	if err != nil {
 		return nil, err
 	}

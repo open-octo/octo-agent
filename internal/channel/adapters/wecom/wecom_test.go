@@ -318,3 +318,45 @@ func TestSendText_NoConnectionNoWebhook(t *testing.T) {
 		t.Fatal("want failure when not connected and no webhook configured")
 	}
 }
+
+func TestSanitizeWCMediaURL(t *testing.T) {
+	cases := []struct {
+		url string
+		ok  bool
+	}{
+		{"https://wework.qpic.cn/wwpic/123", true},
+		{"https://qyapi.weixin.qq.com/cgi-bin/media/get?media_id=abc", true},
+		{"https://qq.com", true},
+		{"https://foo.qq.com/", true},
+		{"https://foo.weixinbridge.com/bar#frag", true},
+		{"http://wework.qpic.cn/xx", false},
+		{"https://attacker.com/?qpic.cn", false},
+		{"https://qpic.cn.attacker.com/xx", false},
+		{"https://foo@wework.qpic.cn/xx", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.url, func(t *testing.T) {
+			got, err := sanitizeWCMediaURL(tc.url)
+			if tc.ok {
+				if err != nil {
+					t.Fatalf("want allow, got error: %v", err)
+				}
+				if got == "" {
+					t.Fatal("want non-empty sanitized URL")
+				}
+			} else {
+				if err == nil {
+					t.Fatalf("want reject, got %q", got)
+				}
+			}
+		})
+	}
+}
+
+func TestDownloadWCMedia_RejectNonAllowlisted(t *testing.T) {
+	_, err := downloadWCMedia("https://attacker.com/internal", "")
+	if err == nil {
+		t.Fatal("expected rejection of non-allowlisted URL")
+	}
+}
