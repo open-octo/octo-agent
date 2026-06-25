@@ -78,7 +78,7 @@ func (ReadFileTool) Definition() agent.ToolDefinition {
 	}
 }
 
-func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
+func (ReadFileTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	path, _ := input["path"].(string)
 	if strings.TrimSpace(path) == "" {
 		return agent.ToolResult{}, fmt.Errorf("read_file: path is required")
@@ -90,7 +90,7 @@ func (ReadFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 	if isUNCPath(path) {
 		return agent.ToolResult{}, fmt.Errorf("read_file: refusing network/UNC path %q — it could leak credentials to a remote host", path)
 	}
-	abs, err := resolvePath(path)
+	abs, err := resolvePathIn(WorkingDir(ctx), path)
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
@@ -266,8 +266,18 @@ func isUNCPath(path string) bool {
 	return strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//")
 }
 
-// resolvePath normalises path → absolute, expanding "~" and cleaning.
+// resolvePath normalises path → absolute against the process CWD, expanding
+// "~" and cleaning. Used where there's no tool context (permission path
+// extraction). Tool executors should prefer resolvePathIn(WorkingDir(ctx), …).
 func resolvePath(path string) (string, error) {
+	return resolvePathIn("", path)
+}
+
+// resolvePathIn is resolvePath rooted at base: a relative path is joined to
+// base (empty base falls back to the process CWD). base is normally
+// WorkingDir(ctx), so a worktree-isolated sub-agent's file operations land in
+// its worktree — the same directory its terminal commands run in.
+func resolvePathIn(base, path string) (string, error) {
 	if strings.HasPrefix(path, "~/") || path == "~" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -276,11 +286,14 @@ func resolvePath(path string) (string, error) {
 		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
 	}
 	if !filepath.IsAbs(path) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("resolve cwd: %w", err)
+		if base == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return "", fmt.Errorf("resolve cwd: %w", err)
+			}
+			base = cwd
 		}
-		path = filepath.Join(cwd, path)
+		path = filepath.Join(base, path)
 	}
 	return filepath.Clean(path), nil
 }

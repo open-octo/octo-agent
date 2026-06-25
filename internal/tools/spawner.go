@@ -53,6 +53,12 @@ type SpawnRequest struct {
 	// valid JSON. The returned Reply is the cleaned JSON text.
 	Schema string
 
+	// Isolation, when "worktree", runs the child in a fresh git worktree so its
+	// file/terminal changes don't touch the main checkout. Changes are left on a
+	// dedicated branch for the caller to review; an unchanged run is cleaned up.
+	// Requires a git repository.
+	Isolation string
+
 	// SessionDir, when non-empty, tells the spawner to persist the sub-agent's
 	// full conversation transcript to <SessionDir>/<agent-id>.jsonl so it can
 	// be inspected after a failure.

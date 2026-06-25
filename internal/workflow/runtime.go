@@ -53,6 +53,9 @@ type AgentOptions struct {
 	// Schema is a JSON Schema (as a JSON string) the sub-agent's reply must
 	// satisfy; empty means free-form text.
 	Schema string
+	// Isolation, when "worktree", runs the sub-agent in a fresh git worktree so
+	// its file/terminal changes are isolated from the main checkout.
+	Isolation string
 }
 
 // AgentResult is one agent() call's outcome.
@@ -306,13 +309,13 @@ func (b *backend) register(ctx context.Context, r wazero.Runtime) (api.Module, e
 // (non-blocking). When the call maps to a cached journal entry it delivers the
 // stored result on a goroutine without invoking Agent. Returns -1 (cast) when
 // the budget is exhausted.
-func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mptr, mlen, tptr, tlen, readOnly, sptr, slen uint32) uint32 {
+func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mptr, mlen, tptr, tlen, readOnly, sptr, slen, iptr, ilen uint32) uint32 {
 	promptBytes, _ := mod.Memory().Read(ptr, length)
 	prompt := string(promptBytes)
 
-	// Per-call options (model / tools / read_only / schema). The prelude always
-	// passes every slot, empty when unset. Read synchronously — the wasm linear
-	// memory may be reused once we return the token.
+	// Per-call options (model / tools / read_only / schema / isolation). The
+	// prelude always passes every slot, empty when unset. Read synchronously —
+	// the wasm linear memory may be reused once we return the token.
 	var opts AgentOptions
 	if mlen > 0 {
 		if mb, ok := mod.Memory().Read(mptr, mlen); ok {
@@ -332,6 +335,11 @@ func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mpt
 	if slen > 0 {
 		if sb, ok := mod.Memory().Read(sptr, slen); ok {
 			opts.Schema = string(sb)
+		}
+	}
+	if ilen > 0 {
+		if ib, ok := mod.Memory().Read(iptr, ilen); ok {
+			opts.Isolation = string(ib)
 		}
 	}
 

@@ -41,7 +41,10 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"Optional opts: `model:` (override the model for this call, e.g. a cheaper model " +
 			"for mechanical stages), `tools:` (Array restricting the child's tools), " +
 			"`read_only: true` (strip write_file/edit_file), `schema:` (a JSON Schema as a " +
-			"JSON **string** — the call then returns the sub-agent's reply as JSON text matching it).\n" +
+			"JSON **string** — the call then returns the sub-agent's reply as JSON text matching it), " +
+			"`isolation: \"worktree\"` (run the sub-agent in a fresh git worktree so its file changes " +
+			"don't touch the main checkout — useful for parallel agents that write files; changes are " +
+			"left on a branch named in the reply).\n" +
 			"- `parallel(items) { |it| ... } -> Array`: run the block for every item " +
 			"concurrently; returns results in input order.\n" +
 			"- `pipeline(items, stage1, stage2, ...) -> Array`: run each item through all " +
@@ -105,6 +108,7 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 			Tools:       opts.Tools,
 			ReadOnly:    opts.ReadOnly,
 			Schema:      opts.Schema,
+			Isolation:   opts.Isolation,
 		})
 		if err != nil {
 			return workflow.AgentResult{Err: err}

@@ -270,7 +270,7 @@ func findWithIndentNorm(fileContent, searchString string, width int) string {
 	return actual
 }
 
-func (EditFileTool) Execute(_ context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
+func (EditFileTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	path, _ := input["path"].(string)
 	if strings.TrimSpace(path) == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("edit_file: path is required")
@@ -291,7 +291,7 @@ func (EditFileTool) Execute(_ context.Context, _ string, input map[string]any) (
 	}
 	replaceAll, _ := input["replace_all"].(bool)
 
-	abs, err := resolvePath(path)
+	abs, err := resolvePathIn(WorkingDir(ctx), path)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, err
 	}

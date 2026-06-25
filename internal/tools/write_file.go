@@ -39,7 +39,7 @@ func (WriteFileTool) Definition() agent.ToolDefinition {
 	}
 }
 
-func (WriteFileTool) Execute(_ context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
+func (WriteFileTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	path, _ := input["path"].(string)
 	if strings.TrimSpace(path) == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("write_file: path is required")
@@ -54,7 +54,7 @@ func (WriteFileTool) Execute(_ context.Context, _ string, input map[string]any) 
 			"If this is genuinely intended (e.g. a test fixture), remove the live-credential "+
 			"shape or create the file outside the agent.", secret)
 	}
-	abs, err := resolvePath(path)
+	abs, err := resolvePathIn(WorkingDir(ctx), path)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, err
 	}

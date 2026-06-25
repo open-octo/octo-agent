@@ -19,13 +19,17 @@ $__wf_sched = false
 #   read_only:  true    — strip the mutating tools (write_file/edit_file)
 #   schema:     String  — a JSON Schema (as a JSON string) the reply must match;
 #                         agent() then returns the sub-agent's JSON as a string
+#   isolation:  "worktree" — run the sub-agent in a fresh git worktree so its
+#                         file/terminal changes don't touch the main checkout;
+#                         changes are left on a branch (named in the reply)
 def agent(prompt, opts = {})
   model = (opts[:model] || opts["model"]).to_s
   tools = opts[:tools] || opts["tools"] || []
   tools = tools.join(",") if tools.is_a?(Array)
   read_only = (opts[:read_only] || opts["read_only"]) ? 1 : 0
   schema = (opts[:schema] || opts["schema"]).to_s
-  token = __agent_start(prompt.to_s, model, tools.to_s, read_only, schema)
+  isolation = (opts[:isolation] || opts["isolation"]).to_s
+  token = __agent_start(prompt.to_s, model, tools.to_s, read_only, schema, isolation)
   raise "workflow: token budget exhausted" if token < 0
   if $__wf_sched
     Fiber.yield(token)

@@ -261,6 +261,36 @@ func TestRun_AgentSchema(t *testing.T) {
 	}
 }
 
+// TestRun_AgentIsolation verifies agent(prompt, isolation: "...") forwards the
+// isolation mode to the AgentFunc.
+func TestRun_AgentIsolation(t *testing.T) {
+	var got []AgentOptions
+	var mu sync.Mutex
+	rec := func(_ context.Context, _ string, o AgentOptions) AgentResult {
+		mu.Lock()
+		got = append(got, o)
+		mu.Unlock()
+		return AgentResult{Reply: "ok"}
+	}
+	script := `
+		agent("a", isolation: "worktree")
+		agent("b")
+		"done"
+	`
+	if _, err := Run(context.Background(), script, Options{Agent: rec}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d calls, want 2", len(got))
+	}
+	if got[0].Isolation != "worktree" {
+		t.Errorf("opts.Isolation = %q, want worktree", got[0].Isolation)
+	}
+	if got[1].Isolation != "" {
+		t.Errorf("bare agent() should yield empty isolation, got %q", got[1].Isolation)
+	}
+}
+
 func TestRun_Phase(t *testing.T) {
 	var lines []string
 	got, err := Run(context.Background(),

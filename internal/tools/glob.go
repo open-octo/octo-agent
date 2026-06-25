@@ -79,7 +79,7 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 	if p, ok := input["path"].(string); ok && p != "" {
 		root = p
 	}
-	absRoot, err := resolvePath(root)
+	absRoot, err := resolvePathIn(WorkingDir(ctx), root)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, err
 	}

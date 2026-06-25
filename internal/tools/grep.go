@@ -143,7 +143,7 @@ func (GrepTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 
 	args = append(args, "--", pattern)
 	if p, _ := input["path"].(string); p != "" {
-		abs, err := resolvePath(p)
+		abs, err := resolvePathIn(WorkingDir(ctx), p)
 		if err != nil {
 			return agent.ToolResult{Text: ""}, err
 		}

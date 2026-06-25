@@ -102,8 +102,25 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 		lc.session = sess
 	}
 
+	// Worktree isolation: create a fresh worktree and root the child's tools in
+	// it (terminal + file ops both honor WorkingDir(ctx)), so its changes don't
+	// touch the main checkout. Set up before runChild so both the first prompt
+	// and any schema-retry run inside the worktree.
+	var wt *worktree
+	if req.Isolation == "worktree" {
+		var werr error
+		wt, werr = newWorktree(id)
+		if werr != nil {
+			return tools.SpawnResult{}, fmt.Errorf("spawner: %w", werr)
+		}
+		ctx = tools.WithWorkingDir(ctx, wt.dir)
+	}
+
 	reply, in, out, stop, turns, err := s.runChild(ctx, lc, req.Prompt)
 	if err != nil {
+		if wt != nil {
+			wt.finish() // reconcile/clean even on error so we don't leak the worktree
+		}
 		return tools.SpawnResult{}, err
 	}
 
@@ -128,6 +145,18 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 			}
 		}
 		reply = cleaned
+	}
+
+	// Reconcile the worktree: clean up an unchanged run, or commit changes onto
+	// its branch and tell the caller where to find them.
+	if wt != nil {
+		if note := wt.finish(); note != "" {
+			if reply != "" {
+				reply += "\n\n" + note
+			} else {
+				reply = note
+			}
+		}
 	}
 
 	return tools.SpawnResult{
