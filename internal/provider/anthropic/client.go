@@ -170,12 +170,12 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		}
 		defer resp.Body.Close()
 
-		respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		if err != nil {
-			return provider.Response{}, retry.Decision{Retry: retry.RetryableErr(ctx, err)}, fmt.Errorf("anthropic: read response: %w", err)
-		}
-
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+			if err != nil {
+				return provider.Response{}, retry.Decision{Retry: retry.RetryableErr(ctx, err)}, fmt.Errorf("anthropic: read error response: %w", err)
+			}
+
 			dec := retry.Decision{Retry: retry.RetryableStatus(resp.StatusCode), RetryAfter: retry.RetryAfterHeader(resp.Header)}
 			var apiErr apiError
 			if jerr := json.Unmarshal(respBody, &apiErr); jerr == nil && apiErr.Error.Message != "" {
@@ -185,6 +185,11 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 				)
 			}
 			return provider.Response{}, dec, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return provider.Response{}, retry.Decision{Retry: retry.RetryableErr(ctx, err)}, fmt.Errorf("anthropic: read response: %w", err)
 		}
 
 		var apiResp apiResponse

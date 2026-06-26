@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -111,6 +112,43 @@ func TestSend_Success(t *testing.T) {
 	}
 	if resp.InputTokens != 12 || resp.OutputTokens != 7 {
 		t.Errorf("Usage = (%d, %d), want (12, 7)", resp.InputTokens, resp.OutputTokens)
+	}
+}
+
+// TestSend_LargeResponseBody verifies that successful responses larger than the
+// error-body cap are read in full, not truncated mid-JSON.
+func TestSend_LargeResponseBody(t *testing.T) {
+	longText := strings.Repeat("x", 5000)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := fmt.Sprintf(`{
+			"id": "msg_large",
+			"type": "message",
+			"role": "assistant",
+			"model": "claude-haiku-4-5-20251001",
+			"content": [{"type": "text", "text": %q}],
+			"stop_reason": "end_turn",
+			"usage": {"input_tokens": 10, "output_tokens": 100}
+		}`, longText)
+		_, _ = w.Write([]byte(resp))
+	}))
+	defer srv.Close()
+
+	c, err := New("test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+
+	resp, err := c.Send(context.Background(), provider.Request{
+		Model:    "claude-haiku-4-5-20251001",
+		Messages: []agent.Message{agent.NewUserMessage("generate a long response")},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if resp.Content != longText {
+		t.Errorf("Content length = %d, want %d", len(resp.Content), len(longText))
 	}
 }
 
