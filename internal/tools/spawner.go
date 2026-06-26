@@ -35,6 +35,13 @@ type SpawnRequest struct {
 	// Prompt is the sub-agent's user message. It carries the task.
 	Prompt string
 
+	// ForkConversation, when true, seeds the child's history with the parent's
+	// conversation so far (a true fork), rather than starting fresh. The
+	// spawner trims the in-flight tool_use turn that spawned the child so the
+	// copied history ends cleanly. Set by the sub_agent tool when no
+	// subagent_type is given; workflow agents leave it false.
+	ForkConversation bool
+
 	// Tools, when non-empty, restricts the child to this subset of the
 	// parent's tool list. nil/empty means "inherit all of parent's tools
 	// except Agent itself" — the spawn implementation handles the

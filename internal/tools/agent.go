@@ -33,11 +33,12 @@ func (AgentTool) Definition() agent.ToolDefinition {
 			"Use when you need parallel investigation, a fresh context for an isolated " +
 			"sub-problem, or when the task is well-defined enough to delegate.\n\n" +
 			"Two modes:\n" +
-			"- **Fork** (omit subagent_type): the child inherits your system prompt — the " +
-			"shared harness identity (base rules, env, skills, memory) — and shares its " +
-			"prompt cache, so it's cheap. It does NOT see this conversation's messages, so " +
-			"still put everything the task needs in `prompt`. Use when the intermediate " +
-			"tool output isn't worth keeping in your context.\n" +
+			"- **Fork** (omit subagent_type): the child inherits your full conversation — your " +
+			"system prompt AND this conversation's messages so far — so it already has your " +
+			"context. Its own tool calls and output stay in its branch and never enter your " +
+			"context; only its final reply comes back. Use to offload a chunk of your own work " +
+			"(deep investigation, a focused edit) and get just the conclusion. `prompt` is the " +
+			"specific task to do now.\n" +
 			"- **Fresh agent** (set subagent_type): the child starts with zero context and a " +
 			"specialized persona. Provide a complete task description. Use when you want an " +
 			"independent read (e.g. code review).\n\n" +
@@ -59,7 +60,7 @@ func (AgentTool) Definition() agent.ToolDefinition {
 				},
 				"subagent_type": map[string]any{
 					"type":        "string",
-					"description": "Optional agent type. 'explore' (read-only research), 'plan' (read-only planning), 'general' (full toolbelt), 'code-review' (read-only review). Omit to fork yourself — the child inherits your system prompt (not this conversation's messages).",
+					"description": "Optional agent type. 'explore' (read-only research), 'plan' (read-only planning), 'general' (full toolbelt), 'code-review' (read-only review). Omit to fork yourself — the child inherits your full conversation (system prompt + messages so far).",
 				},
 				"run_in_background": map[string]any{
 					"type":        "boolean",
@@ -120,6 +121,8 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		Prompt:      prompt,
 		Tools:       callTools,
 		Model:       callModel,
+		// No subagent_type → fork: seed the child with this conversation so far.
+		ForkConversation: subagentType == "",
 	}
 	if preset != nil {
 		req.SystemSuffix = preset.persona

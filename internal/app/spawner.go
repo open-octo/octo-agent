@@ -83,6 +83,15 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	child.LiteSender = s.parent.LiteSender
 	child.LiteModel = s.parent.LiteModel
 
+	// True fork: seed the child with the parent's conversation so far so it
+	// continues with full context. runChild then appends req.Prompt as the next
+	// user turn. The in-flight assistant turn that called sub_agent is trimmed
+	// (see forkHistorySnapshot) so the copied history doesn't end on a dangling
+	// tool_use the provider would reject.
+	if req.ForkConversation {
+		child.History.ReplaceAll(forkHistorySnapshot(s.parent.History.Snapshot()))
+	}
+
 	// Create the session dir before registering the child: a permissions
 	// failure here must abort the spawn, not leave a dead entry in the registry
 	// whose later Save() would silently fail.
@@ -309,6 +318,34 @@ func (lc *liveChild) syncSession() {
 // edit_file) are dropped too — used by read-only presets so the child keeps
 // terminal/MCP/codegraph but can't change files. The two filters compose: a
 // readOnly preset still honours allowed.
+// forkHistorySnapshot trims a parent-history snapshot for seeding a fork. The
+// parent is mid-turn: the assistant message that called sub_agent is already in
+// history, but its tool_result hasn't been produced. Copying it verbatim would
+// leave a trailing tool_use with no matching tool_result, which the provider
+// rejects. Drop trailing assistant turns carrying a tool_use so the seeded
+// history ends on a complete exchange; runChild then appends the fork prompt.
+func forkHistorySnapshot(msgs []agent.Message) []agent.Message {
+	for len(msgs) > 0 {
+		last := msgs[len(msgs)-1]
+		if last.Role == agent.RoleAssistant && messageHasToolUse(last) {
+			msgs = msgs[:len(msgs)-1]
+			continue
+		}
+		break
+	}
+	return msgs
+}
+
+// messageHasToolUse reports whether m carries any tool_use content block.
+func messageHasToolUse(m agent.Message) bool {
+	for _, b := range m.Blocks {
+		if b.Type == "tool_use" {
+			return true
+		}
+	}
+	return false
+}
+
 func filterChildTools(parent []agent.ToolDefinition, allowed, disallowed []string, readOnly bool) []agent.ToolDefinition {
 	var allowSet map[string]bool
 	if len(allowed) > 0 {

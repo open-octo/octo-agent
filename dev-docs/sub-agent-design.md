@@ -90,7 +90,7 @@ child.Gate = parent.Gate                    // 续用同一权限门控
 child.MaxTurns = childMaxTurns              // child 专属 loop 预算
 ```
 
-- **隔离点**:fresh History(子 agent 看不到父对话)、自己的 loop 预算。
+- **隔离点**:自己的 loop 预算。History 视模式而定:**fork(省略 subagent_type)复制父此刻的对话**作为 child 起点(`req.ForkConversation`,`forkHistorySnapshot` 裁掉触发本次 spawn 的悬空 tool_use 回合);**带 subagent_type 的 fresh agent / workflow agent 仍是 fresh History**,看不到父对话。
 - **共享点**:Sender(一条连接)、System(同一身份,fork 时连 cache 一起共享)、Gate(同一权限——
   子 agent 不绕过权限)、计费(子 agent token 累加进父 session 总数,`/cost` 报合并数字)。
 - `req.Tools` 非空时与父 toolbelt 取交集;`req.DisallowedTools` 从继承集里减;`req.Model` 非空时覆盖父模型。调用层传的 tools/model 优先于 preset frontmatter,preset 只补调用没指定的部分。
