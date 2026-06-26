@@ -465,6 +465,67 @@ func TestAgentSpawner_ForkSeedsConversation(t *testing.T) {
 	}
 }
 
+func TestAgentSpawner_LeanUsesLiteModelAndSystem(t *testing.T) {
+	main := &subAgentSender{reply: "main"}
+	lite := &subAgentSender{reply: "lite"}
+	parent := agent.New(main, "main-model")
+	parent.System = "FULL BASE"
+	parent.LeanSystem = "LEAN BASE"
+	parent.LiteSender = lite
+	parent.LiteModel = "lite-model"
+
+	sp := NewSpawner(parent, nilExecutor{}, func() []agent.ToolDefinition { return nil })
+	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{
+		Prompt: "go", LeanContext: true, SystemSuffix: "PERSONA",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lc := sp.reg.m[onlyChildID(t, sp)]
+	if lc.agent.Model != "lite-model" {
+		t.Errorf("lean child model = %q, want lite-model", lc.agent.Model)
+	}
+	if lc.agent.Sender != lite {
+		t.Error("lean child should run on the lite sender, not the main one")
+	}
+	if lc.agent.System != "LEAN BASE\n\nPERSONA" {
+		t.Errorf("lean child System = %q, want lean base + persona", lc.agent.System)
+	}
+}
+
+func TestAgentSpawner_LeanFallsBackWithoutLiteModel(t *testing.T) {
+	main := &subAgentSender{reply: "main"}
+	parent := agent.New(main, "main-model")
+	parent.System = "FULL BASE" // no LeanSystem, no LiteSender/LiteModel
+
+	sp := NewSpawner(parent, nilExecutor{}, func() []agent.ToolDefinition { return nil })
+	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "go", LeanContext: true}); err != nil {
+		t.Fatal(err)
+	}
+	lc := sp.reg.m[onlyChildID(t, sp)]
+	if lc.agent.Model != "main-model" || lc.agent.Sender != main {
+		t.Errorf("lean with no lite model should fall back to main sender/model; got model=%q", lc.agent.Model)
+	}
+	if lc.agent.System != "FULL BASE" {
+		t.Errorf("System = %q, want full-base fallback when no lean system", lc.agent.System)
+	}
+}
+
+func TestAgentSpawner_ExplicitModelWinsOverLean(t *testing.T) {
+	main := &subAgentSender{reply: "main"}
+	lite := &subAgentSender{reply: "lite"}
+	parent := agent.New(main, "main-model")
+	parent.LiteSender, parent.LiteModel = lite, "lite-model"
+
+	sp := NewSpawner(parent, nilExecutor{}, func() []agent.ToolDefinition { return nil })
+	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "go", LeanContext: true, Model: "explicit"}); err != nil {
+		t.Fatal(err)
+	}
+	lc := sp.reg.m[onlyChildID(t, sp)]
+	if lc.agent.Model != "explicit" || lc.agent.Sender != main {
+		t.Errorf("explicit model should win and use main sender; got model=%q", lc.agent.Model)
+	}
+}
+
 func TestAgentSpawner_NoForkStartsFresh(t *testing.T) {
 	send := &subAgentSender{reply: "ok"}
 	parent := agent.New(send, "parent-model")

@@ -17,6 +17,26 @@ func TestCompose_BaseAlwaysPresent(t *testing.T) {
 	}
 }
 
+func TestComposePair_LeanDropsSkillsAndMemory(t *testing.T) {
+	dir := t.TempDir()
+	full, lean := ComposePair("USER_RULE", dir, "ENV_BLOCK", "SKILLS_MANIFEST", "MEMORY_BLOCK", true)
+
+	// Full keeps everything; lean drops skills + memory but keeps env + user.
+	for _, want := range []string{"SKILLS_MANIFEST", "MEMORY_BLOCK", "ENV_BLOCK", "USER_RULE"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("full system missing %q", want)
+		}
+	}
+	if strings.Contains(lean, "SKILLS_MANIFEST") || strings.Contains(lean, "MEMORY_BLOCK") {
+		t.Errorf("lean system should drop skills + memory:\n%s", lean)
+	}
+	for _, want := range []string{"ENV_BLOCK", "USER_RULE"} {
+		if !strings.Contains(lean, want) {
+			t.Errorf("lean system should keep %q", want)
+		}
+	}
+}
+
 func TestCompose_LayersInOrder(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ProjectContextFile), []byte("PROJECT_RULE_X"), 0o644); err != nil {

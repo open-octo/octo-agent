@@ -119,6 +119,11 @@ type Agent struct {
 	History   *History
 	Sender    Sender
 
+	// LeanSystem, when set, is a lighter variant of System (skills manifest and
+	// memory dropped) used to seed cheap read-only sub-agents. Empty falls back
+	// to System.
+	LeanSystem string
+
 	// LiteSender/LiteModel, when both set, run history summarisation
 	// (compaction) on a cheaper model. Unset falls back to Sender/Model.
 	// On a lite-call error summarize retries once on the primary sender, so

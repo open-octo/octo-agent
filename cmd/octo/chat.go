@@ -698,7 +698,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if memDir != "" {
 		memInjection = memory.RenderInjection(memDir, homeMemDir)
 	}
-	a.System = prompt.Compose(*system, cwd, env, skillsManifest, memInjection, coauthor)
+	a.System, a.LeanSystem = prompt.ComposePair(*system, cwd, env, skillsManifest, memInjection, coauthor)
 
 	// Attention layer: re-surface MEMORY.md's structured rules (## 必须遵守 /
 	// ## 触发提醒) on the message stream at the point of action. This rides each
@@ -752,7 +752,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			}
 			// Recompose from the session's raw user layer so base/project/env
 			// pick up any changes since the session was created.
-			a.System = prompt.Compose(sess.System, cwd, env, skillsManifest, memInjection, coauthor)
+			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, memInjection, coauthor)
 		} else {
 			sess = agent.NewSession(resolvedModel, *system)
 			sess.Bind(agent.EntryTUI, false)
