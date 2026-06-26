@@ -66,13 +66,26 @@ func (WebFetchTool) Definition() agent.ToolDefinition {
 			"Use read_file or grep on that path to inspect the full content. " +
 			"Returns text only — for a binary/image URL it returns a short notice (download " +
 			"it with the terminal tool, then read_file an image for multimodal viewing). " +
-			"Public web only — no authentication.",
+			"Public web only — no authentication.\n\n" +
+			"If a URL returns 403/404 even though it works in a browser (hotlink/anti-bot " +
+			"checks), set `referer` — e.g. the page's own origin (https://example.com) or the " +
+			"search engine you found it from. Setting `referer` or `user_agent` forces a direct " +
+			"fetch with those headers (the Jina proxy is skipped, since its outbound headers " +
+			"aren't controllable).",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"url": map[string]any{
 					"type":        "string",
 					"description": "Full URL to fetch (http or https).",
+				},
+				"referer": map[string]any{
+					"type":        "string",
+					"description": "Optional Referer header. Use when a page 403/404s without one (hotlink protection, anti-bot). Often the page's own origin or the search-result source. Forces a direct fetch (skips the Jina proxy).",
+				},
+				"user_agent": map[string]any{
+					"type":        "string",
+					"description": "Optional User-Agent override. Rarely needed (a realistic browser UA is sent by default). Forces a direct fetch (skips the Jina proxy).",
 				},
 			},
 			"required": []string{"url"},
@@ -106,6 +119,24 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: only http/https URLs are allowed (got %q)", u.Scheme)
 	}
 
+	referer := strings.TrimSpace(stringArg(input, "referer"))
+	userAgent := strings.TrimSpace(stringArg(input, "user_agent"))
+
+	// Custom headers requested: the model wants this page fetched with a
+	// specific Referer/User-Agent (typically to clear a hotlink/anti-bot 403/404).
+	// Go straight to the direct fetch — the Jina proxy's outbound headers aren't
+	// controllable, so it can't honour the override.
+	if referer != "" || userAgent != "" {
+		directCtx, directCancel := context.WithTimeout(ctx, 30*time.Second)
+		out, err := fetchDirect(directCtx, raw, referer, userAgent)
+		directCancel()
+		if err != nil {
+			return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: %w", err)
+		}
+		out.UI = webFetchUI(raw, out.Text)
+		return out, nil
+	}
+
 	// Strategy: try Jina Reader proxy first (better quality), then fall back
 	// to a direct fetch on network-level or 5xx/429 proxy failures.
 	// Jina gets a short 5s timeout so a slow proxy doesn't block the fallback.
@@ -121,9 +152,11 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 	// errors, or 429 rate-limit. 4xx client errors (e.g. 404) from the proxy
 	// are NOT retried — the proxy correctly reflected an upstream 404.
 	if shouldFallback(jinaErr) {
-		// Give the direct fetch the remaining time up to 30s total.
+		// Give the direct fetch the remaining time up to 30s total. No explicit
+		// referer/UA here — fetchDirect supplies a same-origin Referer and a
+		// browser UA by default.
 		directCtx, directCancel := context.WithTimeout(ctx, 30*time.Second)
-		out, directErr := fetchDirect(directCtx, raw)
+		out, directErr := fetchDirect(directCtx, raw, "", "")
 		directCancel()
 		if directErr == nil {
 			out.UI = webFetchUI(raw, out.Text)
@@ -206,16 +239,34 @@ func fetchViaJina(ctx context.Context, rawURL string) (agent.ToolResult, error) 
 	return readBody(resp.Body, rawURL, resp.Header.Get("Content-Type"))
 }
 
+// defaultDirectUserAgent is the browser-like UA sent on direct fetches when the
+// caller doesn't override it, so simple anti-bot checks don't reject us.
+const defaultDirectUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
 // fetchDirect performs a direct HTTP GET against the original URL. It uses
 // a browser-like header set so simple anti-bot checks don't immediately
 // reject us, but it does NOT run JavaScript — dynamic pages will return
-// their static HTML skeleton.
-func fetchDirect(ctx context.Context, rawURL string) (agent.ToolResult, error) {
+// their static HTML skeleton. referer and userAgent override the defaults;
+// when referer is empty a same-origin Referer (scheme://host/) is sent, which
+// a browser would send navigating within a site and which clears many
+// hotlink/anti-bot 403/404s.
+func fetchDirect(ctx context.Context, rawURL, referer, userAgent string) (agent.ToolResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+	if userAgent == "" {
+		userAgent = defaultDirectUserAgent
+	}
+	if referer == "" {
+		if u, perr := url.Parse(rawURL); perr == nil && u.Scheme != "" && u.Host != "" {
+			referer = u.Scheme + "://" + u.Host + "/"
+		}
+	}
+	req.Header.Set("User-Agent", userAgent)
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
