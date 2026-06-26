@@ -197,6 +197,10 @@
     }
     return { shown: lines.slice(0, FOLD_LINES).join('\n'), hidden: lines.length - FOLD_LINES }
   }
+
+  // web_fetch HTML preview: collapsed by default because sandboxed iframes
+  // often render as blank space when scripts/external resources are blocked.
+  let htmlPreviewOpen = $state<Record<string, boolean>>({})
 </script>
 
 {#if tools !== null && tools.length > 0}
@@ -322,12 +326,21 @@
             {/each}
           </div>
         {:else if tool.name === 'web_fetch' && htmlPart(tool.result)}
-          <!-- Render a fetched HTML page in a fully sandboxed iframe (no
-               scripts, no same-origin) instead of dumping the source. -->
+          <!-- HTML pages are rendered in a sandboxed iframe, but sandboxed
+               frames often fail to render (blocked scripts/resources). Show
+               metadata by default and let the user opt into the preview so
+               blank iframe space doesn't dominate the card. -->
           {@const hp = htmlPart(tool.result)}
+          {@const previewOpen = htmlPreviewOpen[tool.id] ?? false}
           <div class="html-frame-wrap">
             {#if hp && hp.meta}<div class="fetch-meta mono">{hp.meta}</div>{/if}
-            <iframe srcdoc={hp?.html} sandbox="" class="html-frame" title="fetched page"></iframe>
+            <button class="fold-btn light preview-toggle" onclick={() => htmlPreviewOpen[tool.id] = !previewOpen}>
+              <iconify-icon icon={previewOpen ? 'lucide:chevron-up' : 'lucide:chevron-down'} width="13"></iconify-icon>
+              {previewOpen ? 'Hide page preview' : 'Show page preview'}
+            </button>
+            {#if previewOpen}
+              <iframe srcdoc={hp?.html} sandbox="" class="html-frame" title="fetched page"></iframe>
+            {/if}
           </div>
         {:else if tool.name === 'write_file' && tool.ui_payload?.preview != null}
           <div class="term-wrap">
@@ -449,6 +462,10 @@ details[open] > summary .chev { transform: rotate(90deg); }
   padding: 8px 14px; border-bottom: 1px solid var(--border-table); background: var(--bg-sidebar);
   font-size: 11px; line-height: 1.6; color: var(--text-tertiary);
   white-space: pre-wrap; word-break: break-word;
+}
+.preview-toggle {
+  border-top: none;
+  border-bottom: 1px solid var(--border-table);
 }
 .html-frame {
   border: 0; width: 100%; height: 400px; display: block; background: var(--bg-container);
