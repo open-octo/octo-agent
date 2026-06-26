@@ -101,10 +101,34 @@ begin
   RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvKey, 'Path', Path);
 end;
 
+// LaunchAndOpenDashboard starts the background server and opens the onboarding
+// page. `octo serve -d` blocks until the server is accepting connections (or it
+// times out), so the browser opens against a live port rather than racing the
+// bind. The dashboard binds 127.0.0.1, which is exempt from access-key auth, so
+// the page loads without a key and goes straight into first-run onboarding.
+procedure LaunchAndOpenDashboard;
+var
+  ResultCode: Integer;
+begin
+  // Start the daemon and wait for it to return (ready or timed out). Hidden so
+  // no console window flashes; the daemon itself is detached and outlives this.
+  if not Exec(ExpandConstant('{app}\octo.exe'), 'serve -d', '',
+              SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    exit;
+  // Open the onboarding page regardless of the exact exit code — if the server
+  // is up, this lands on onboarding; if it never bound, the browser shows a
+  // connection error the user can retry, which is no worse than not opening.
+  ShellExec('open', 'http://127.0.0.1:8080', '', '', SW_SHOWNORMAL,
+            ewNoWait, ResultCode);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
     AddToPath;
+    LaunchAndOpenDashboard;
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

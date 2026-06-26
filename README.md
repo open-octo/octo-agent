@@ -36,9 +36,13 @@ in each release verifies the download.
 **Windows (double-click installer).** Download `octo-setup.exe` from the
 [latest release](https://github.com/Leihb/octo-agent/releases/latest) and
 double-click it. It installs per-user (no administrator prompt), puts `octo` on
-your `PATH`, and adds a Start-menu entry; open a **new** terminal afterward and
-run `octo`. The installer is not yet code-signed, so Windows SmartScreen shows
-"Windows protected your PC" on first launch — click **More info → Run anyway**.
+your `PATH`, and adds a Start-menu entry. When it finishes it starts the local
+server in the background (`octo serve -d`) and opens
+<http://127.0.0.1:8080> — a loopback address, so no access key is needed — to
+walk you through first-run onboarding (pick a provider, paste a key). For a
+terminal session afterward, open a **new** terminal and run `octo`. The
+installer is not yet code-signed, so Windows SmartScreen shows "Windows
+protected your PC" on first launch — click **More info → Run anyway**.
 Uninstall from "Add or remove programs" like any other app.
 
 **Upgrading:** `octo upgrade` installs the latest release in place (SHA-256
