@@ -3,14 +3,13 @@
   import { tasks, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
-  import type { TaskResponse } from '../lib/types'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import StatCard from '../components/ui/StatCard.svelte'
 
   // ── local state ──────────────────────────────────────────────────────────────
 
   let loading = $state(false)
-  let rawTasks = $state<TaskResponse[]>([])
+  let rawTasks = $state<api.TaskResponse[]>([])
 
   // ── derived KPIs ─────────────────────────────────────────────────────────────
 
@@ -30,7 +29,7 @@
     }
   }
 
-  function nextRunLabel(t: TaskResponse): string {
+  function nextRunLabel(t: api.TaskResponse): string {
     // Server doesn't expose next_run yet; fall back to last_run
     return fmtDate(t.last_run)
   }
@@ -61,7 +60,7 @@
 
   // ── actions ──────────────────────────────────────────────────────────────────
 
-  async function handleRun(t: TaskResponse) {
+  async function handleRun(t: api.TaskResponse) {
     try {
       await api.runTask(t.id)
       showToast('Task started')
@@ -70,7 +69,7 @@
     }
   }
 
-  async function handleToggle(t: TaskResponse) {
+  async function handleToggle(t: api.TaskResponse) {
     const next = !t.enabled
     try {
       await api.toggleTask(t.id, next)
@@ -81,7 +80,7 @@
     }
   }
 
-  async function handleDelete(t: TaskResponse) {
+  async function handleDelete(t: api.TaskResponse) {
     try {
       await api.deleteTask(t.id)
       rawTasks = rawTasks.filter(r => r.id !== t.id)
@@ -98,7 +97,7 @@
     openAgentSession('/cron-task-creator', 'New task')
   }
 
-  function openEdit(t: TaskResponse) {
+  function openEdit(t: api.TaskResponse) {
     openAgentSession(`/cron-task-creator edit ${t.id} "${t.name}"`, `Edit task: ${t.name}`)
   }
 </script>

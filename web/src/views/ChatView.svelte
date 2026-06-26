@@ -66,7 +66,7 @@
   let thinking    = $derived($chatThinking[$activeSessionId ?? ''] ?? '')
   let subAgents   = $derived($chatSubAgents[$activeSessionId ?? ''] ?? [])
   let workflows   = $derived($chatWorkflows[$activeSessionId ?? ''] ?? [])
-  let currentSession = $derived($sessions.find((s: any) => s.id === $activeSessionId) ?? null)
+  let currentSession = $derived($sessions.find(s => s.id === $activeSessionId) ?? null)
   let artifactCount  = $derived($artifacts.length)
   let wsDisconnected = $derived($wsState === 'disconnected')
 

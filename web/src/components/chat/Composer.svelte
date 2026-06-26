@@ -63,7 +63,9 @@
   }
 
   // ── Skill autocomplete ───────────────────────────────────────────────────
-  let skills = $state<api.Skill[]>([])
+  import type { Skill } from '../../lib/types'
+
+  let skills = $state<Skill[]>([])
   let skillMenu = $state(false)
   let skillQuery = $state('')
   let skillActiveIndex = $state(-1)
@@ -75,7 +77,7 @@
     return null
   }
 
-  function scoreMatch(skill: api.Skill, query: string): number {
+  function scoreMatch(skill: Skill, query: string): number {
     if (!query) return 50
     const q = query.toLowerCase()
     const name = skill.name.toLowerCase()
@@ -85,7 +87,7 @@
     return 0
   }
 
-  function filteredSkills(): api.Skill[] {
+  function filteredSkills(): Skill[] {
     const query = skillQuery
     let scored = skills
       .map(s => ({ skill: s, score: scoreMatch(s, query) }))
@@ -105,7 +107,7 @@
     skillActiveIndex = -1
   }
 
-  function selectSkill(skill: api.Skill) {
+  function selectSkill(skill: Skill) {
     text = '/' + skill.name + ' '
     hideSkillMenu()
     queueMicrotask(() => textareaEl?.focus())
@@ -139,7 +141,7 @@
   // $store autosubscription is reactive inside $derived (get() is not).
   let sid = $derived($activeSessionId ?? '')
   let isStreaming = $derived($chatStreaming[sid] ?? false)
-  let currentSession = $derived($sessions.find((s: any) => s.id === sid) ?? null)
+  let currentSession = $derived($sessions.find(s => s.id === sid) ?? null)
 
   // Session meta chips — pull live values from per-session stores, fall back
   // to the session record, then to sensible defaults.

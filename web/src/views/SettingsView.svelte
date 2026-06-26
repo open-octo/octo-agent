@@ -174,7 +174,7 @@
     const sid = $activeSessionId
     try {
       if (sid) {
-        const promises: Promise<void>[] = []
+        const promises: Promise<unknown>[] = []
         if (model !== origModel) {
           promises.push(api.updateSessionModel(sid, model))
         }

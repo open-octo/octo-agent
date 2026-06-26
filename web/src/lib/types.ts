@@ -4,11 +4,30 @@ export type MemTab = 'soul' | 'user' | 'memories'
 export type ArtifactView = 'preview' | 'code'
 export type TagStatus = 'success' | 'info' | 'warning' | 'error' | 'default'
 
+// Session matches the server-side session item returned by the REST API and
+// broadcast over the WebSocket. The UI stores it as-is; title/name may differ
+// depending on which endpoint produced the record.
 export interface Session {
   id: string
+  name: string
   title: string
-  time: string
-  icon: string
+  created_at: string
+  updated_at: string
+  model: string
+  model_id: string
+  status: 'idle' | 'working' | string
+  source: string
+  agent_profile: string
+  pinned: boolean
+  total_tasks: number
+  turn_count: number
+  working_dir: string
+  permission_mode: 'ask' | 'auto' | string
+  reasoning_effort: 'low' | 'medium' | 'high' | string
+  context_usage: number
+  // Optional UI-only fields carried by some broadcasts.
+  time?: string
+  icon?: string
 }
 
 export interface Skill {
@@ -80,48 +99,12 @@ export interface Artifact {
   allowScripts?: boolean
 }
 
-// SessionItem matches the Go server session struct
-export interface SessionItem {
-  id: string
-  name: string
-  title: string
-  created_at: string
-  updated_at: string
-  model: string
-  model_id: string
-  status: 'idle' | 'working'
-  source: string
-  agent_profile: string
-  pinned: boolean
-  total_tasks: number
-  turn_count: number
-  working_dir: string
-  permission_mode: 'ask' | 'auto'
-  reasoning_effort: 'low' | 'medium' | 'high'
-  context_usage: number
-}
-
 // SkillInfo matches the Go server skill struct
 export interface SkillInfo {
   name: string
   description: string
   source: string
   enabled: boolean
-}
-
-// TaskResponse matches the Go server task struct
-export interface TaskResponse {
-  id: string
-  name: string
-  cron: string
-  prompt: string
-  model: string
-  agent: string
-  notify: string
-  enabled: boolean
-  created_at: string
-  last_run: string
-  session_id: string
 }
 
 // McpServerInfo matches the Go server MCP server struct
