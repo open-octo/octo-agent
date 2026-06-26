@@ -5,7 +5,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased — 0.22.0-dev]
+## [Unreleased — 1.1.0-dev]
+
+## [1.0.0] — 2026-06-26
+
+First stable release. The compatibility tiers in
+[`COMPATIBILITY.md`](COMPATIBILITY.md) are now a hard commitment: breaking a
+Stable surface — the config/permissions/MCP/channels formats, the
+Claude-Code-compatible `SKILL.md` format, identity & memory files, the session
+and task read guarantees, and the documented CLI commands/flags/exit codes —
+requires a major version, always with a **Breaking** callout here.
+
+### Added
+- **A new Web UI — the Octo Workbench, rebuilt in Vite + Svelte.** The
+  hand-authored static UI is gone (the legacy `static/` tree was removed); the
+  replacement is a single-page workbench with a first-run onboarding gate and
+  model/key management, MCP OAuth authorization, an access-key gate for
+  non-loopback clients, a version badge wired to the self-upgrade flow, an
+  artifacts panel (sandboxed HTML/MD/image preview), sub-agents/tasks/memories
+  panels, a skill-autocomplete composer with clipboard image paste, theming
+  with dark mode, EN/ZH i18n, and pause/resume for scheduled tasks.
+- **Background workflows.** Workflows can run detached: a liveness signal and a
+  `workflow_kill` control, completion notifications delivered across every
+  transport (CLI/TUI/Web/IM), a web panel for live progress, optional git
+  **worktree isolation** per `agent()` so parallel agents don't clobber each
+  other, a `schema` option for reliable structured (JSON) agent output, a
+  `phase()` primitive for grouped progress, and resume-from-journal. A dynamic
+  Ruby DSL (embedded mruby on a pure-Go wazero runtime) backs the `workflow`
+  tool alongside the JS scripts.
+- **Manual terminal promotion.** A long-running foreground command can be
+  promoted to a background task mid-run — Ctrl+B in the TUI, a button in the Web
+  UI — instead of blocking the turn.
+- **serve operations surface.** Structured logging to stderr (`OCTO_LOG_LEVEL`)
+  plus systemd and launchd service templates, daemon-management subcommands, and
+  stdio-MCP subprocess stderr routed into the structured log.
+- **Single-entry session ownership.** A session is owned by one live entry point
+  (CLI/TUI/Web/IM) at a time; a new `--take-over` flag resumes a session already
+  bound elsewhere.
+
+### Changed
+- **Compaction redesign.** Retention is now a **token budget** (a fraction of
+  the context window) rather than a fixed number of user turns. Stale tool
+  results are reclaimed without an LLM call before any summarization, overflow
+  recovery is deficit-aware (it reclaims first, summarizes only as needed), and
+  folded turns are archived so a read tool can recall them on demand.
+- **Reasoning effort, unified across providers.** A single `""|low|med|high|xhigh|max`
+  scale, normalized per provider — corrected wiring for official Anthropic and
+  OpenAI models, a DeepSeek thinking-mode toggle, and an Anthropic thinking
+  budget derived from the effort level. The reasoning trace is Web-only and off
+  by default; it is never rendered in the terminal.
+- **Higher defaults for real work.** Per-response `max_tokens` 4096 → 16384
+  (a single large artifact no longer truncates mid-write), per-message turn cap
+  100 → 200, and the sub-agent per-round cap 30 → 100.
+- **The agent stops gracefully on loops.** Duplicate tool-call detection and a
+  retuned stuck-detector end a spinning turn with an actionable message instead
+  of burning the cap; `terminal_output` has an anti-polling hard stop.
+- **OpenAI-compatible string handling is rune-aware** — tool-input summaries and
+  truncation no longer split multi-byte characters.
+
+### Fixed
+- **Channels.** Dozens of defects fixed across Feishu, DingTalk, Discord,
+  Telegram, WeCom, and WeChat — throttling, typing lifecycle, icons, stable sort
+  order, and the Thinking acknowledgement.
+- **Web.** Live token streaming, the Thinking indicator (monotonic elapsed
+  across remounts), tool-card grouping and state on session switch, the
+  `ask_user_question` modal, `session_renamed` live titles, and the full set of
+  server WS events.
+
+### Security
+- **SSRF hardening** on every URL the agent or channels fetch: WeCom and Discord
+  media hosts validated, MCP URL scheme checked, IPv6/IPv4-mapped addresses
+  added to the deny rules, and error-body reads capped.
+- **Path and sandbox hardening.** File-action and artifact paths are restricted,
+  MCP stdio commands validated, skill-export symlinks rejected, HTML artifacts
+  sandboxed, Markdown sanitized, CORS tightened, and a permission
+  command-chain bypass closed. CodeQL code-scanning alerts resolved.
 
 ## [0.21.0] — 2026-06-12
 
