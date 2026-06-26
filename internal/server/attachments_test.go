@@ -256,6 +256,20 @@ drain:
 		t.Error("history_user_message carried no /api/uploads/ image ref")
 	}
 
+	// The "complete" event is broadcast from inside runAgentTurnLoop, but the
+	// turn runs in a goroutine (handleWSUserMessage) whose deferred teardown —
+	// and any trailing session persist — finishes slightly later. Wait for the
+	// turn flag to clear so the session file is fully written and its handle
+	// closed before t.TempDir() cleanup runs; otherwise Windows refuses to
+	// RemoveAll a sessions dir whose file is still open ("directory is not
+	// empty").
+	waitFor(t, func() bool {
+		mu := srv.sessionTurnLock(sess.ID)
+		mu.Lock()
+		defer mu.Unlock()
+		return !srv.turnRunning[sess.ID]
+	})
+
 	// The persisted session must carry the image block with its file path.
 	loaded, err := agent.LoadSession(sess.ID)
 	if err != nil {
