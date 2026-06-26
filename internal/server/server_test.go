@@ -304,6 +304,32 @@ func mustServer(t *testing.T, cfg Config) *Server {
 	srv.registerRoutes()
 	// Wrap with CORS middleware so tests that exercise CORS hit the right layer.
 	srv.http = &http.Server{Handler: srv.corsMiddleware(srv.mux)}
+
+	// Drain in-flight turn goroutines before the test's t.TempDir()/t.Setenv()
+	// cleanups run. A WS turn (runAgentTurnLoop) persists the session and its
+	// fire-and-forget title goroutine writes the session file again — both can
+	// outlive the "complete" event a test waits on. If one is still writing
+	// when t.TempDir() runs RemoveAll, POSIX unlinks the open file fine but
+	// Windows refuses ("the directory is not empty"); a goroutine leaked past
+	// one test also corrupts the next test's session state. The turn loop is
+	// tracked by the drain gate (begin/end in runAgentTurnLoop); the title
+	// goroutine by titlePending. Restart tests that call drain.begin() to
+	// simulate a stuck turn already call end()/Restart() before returning, so
+	// this never blocks. With stub senders every goroutine finishes in
+	// milliseconds; the timeouts are just a backstop.
+	t.Cleanup(func() {
+		srv.drain.drain(10 * time.Second)
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			srv.titleMu.Lock()
+			pending := len(srv.titlePending)
+			srv.titleMu.Unlock()
+			if pending == 0 {
+				return
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+	})
 	return srv
 }
 
