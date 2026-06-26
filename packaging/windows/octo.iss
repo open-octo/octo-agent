@@ -52,6 +52,16 @@ Name: "{userprograms}\octo"; Filename: "{cmd}"; \
   Parameters: "/k ""{app}\octo.exe"" chat"; WorkingDir: "{userdocs}"; \
   Comment: "Start an octo session"
 
+[Registry]
+; Start the background server on each login. Per-user (HKCU — no admin, no
+; UAC), matching the per-user install. The value runs a hidden .vbs launcher
+; (written in [Code]) so `octo serve -d` starts with no console window on the
+; desktop. uninsdeletevalue removes the entry on uninstall.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
+  ValueType: string; ValueName: "octo"; \
+  ValueData: "wscript.exe //B //Nologo ""{app}\octo-autostart.vbs"""; \
+  Flags: uninsdeletevalue
+
 [Code]
 const
   EnvKey = 'Environment';
@@ -122,17 +132,59 @@ begin
             ewNoWait, ResultCode);
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
+// WriteAutostartScript drops a tiny VBScript beside octo.exe that launches
+// `octo serve -d` with a hidden window (WScript.Shell.Run window style 0). The
+// HKCU Run entry invokes it on each login, so the daemon returns after a reboot
+// with no console window flashing on the desktop. `octo serve -d` refuses to
+// start a second daemon, so a login while one is already running is a no-op.
+// The exe path is baked in (quoted) to survive a username with spaces.
+procedure WriteAutostartScript;
+var
+  Vbs: string;
 begin
+  Vbs :=
+    'Set sh = CreateObject("WScript.Shell")' + #13#10 +
+    'exe = "' + ExpandConstant('{app}\octo.exe') + '"' + #13#10 +
+    'sh.Run """" & exe & """ serve -d", 0, False' + #13#10;
+  SaveStringToFile(ExpandConstant('{app}\octo-autostart.vbs'), Vbs, False);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  // Before overwriting files on an in-place upgrade, stop a running daemon —
+  // install-time launch and the login Run entry mean octo.exe is very likely
+  // running, and Windows can't replace an in-use image. Harmless no-op on a
+  // first install (no octo.exe yet). ssPostInstall then starts the new build.
+  if CurStep = ssInstall then
+  begin
+    if FileExists(ExpandConstant('{app}\octo.exe')) then
+      Exec(ExpandConstant('{app}\octo.exe'), 'serve --stop', '',
+           SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
   if CurStep = ssPostInstall then
   begin
     AddToPath;
+    WriteAutostartScript;
     LaunchAndOpenDashboard;
   end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
 begin
   if CurUninstallStep = usUninstall then
+  begin
+    // Stop the running daemon first so its octo.exe isn't locked when the
+    // uninstaller removes it (Windows can't delete an in-use image).
+    Exec(ExpandConstant('{app}\octo.exe'), 'serve --stop', '',
+         SW_HIDE, ewWaitUntilTerminated, ResultCode);
     RemoveFromPath;
+    // Remove the launcher we wrote at install time; it isn't in the [Files]
+    // log, so the uninstaller won't clean it up on its own.
+    DeleteFile(ExpandConstant('{app}\octo-autostart.vbs'));
+  end;
 end;
