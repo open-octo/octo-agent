@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 	"unsafe"
 
 	"github.com/Leihb/octo-agent/internal/agent"
@@ -17,6 +18,8 @@ import (
 	"github.com/Leihb/octo-agent/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	rw "github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 )
 
 // min returns the smaller of a and b.
@@ -1176,7 +1179,7 @@ func (m *tuiModel) View() string {
 // When the height grows we also reset the viewport YOffset to 0 via reflection
 // so that earlier lines remain visible instead of being scrolled out of view.
 func (m *tuiModel) updateTextAreaHeight() tea.Cmd {
-	lines := strings.Count(m.ta.Value(), "\n") + 1
+	lines := m.softWrappedRows()
 	maxH := min(6, m.height/4)
 	if maxH < 1 {
 		maxH = 1
@@ -1196,6 +1199,26 @@ func (m *tuiModel) updateTextAreaHeight() tea.Cmd {
 		yOffset.SetInt(0)
 	}
 	return nil
+}
+
+// softWrappedRows returns the number of display rows the textarea value
+// occupies after soft-wrapping at the current width. This matches bubbles'
+// internal wrap logic so the input box grows with the actual rendered text
+// instead of just counting hard newlines.
+func (m *tuiModel) softWrappedRows() int {
+	// Read bubbles' internal wrap width so our row count matches what the
+	// textarea will actually render. Fall back to newline counting if the
+	// internals ever change shape.
+	v := reflect.ValueOf(&m.ta).Elem()
+	width := int(v.FieldByName("width").Int())
+	if width <= 0 {
+		return strings.Count(m.ta.Value(), "\n") + 1
+	}
+	total := 0
+	for _, line := range strings.Split(m.ta.Value(), "\n") {
+		total += len(wrapRunes([]rune(line), width))
+	}
+	return total
 }
 
 func (m *tuiModel) renderInputBox() string {
@@ -1456,4 +1479,77 @@ func ansiPrefixLen(s string) int {
 		}
 	}
 	return 0 // unterminated; treat as not a complete escape
+}
+
+// wrapRunes is a local copy of bubbles/textarea.wrap. It soft-wraps a single
+// line of runes to the given width, matching the textarea's rendering so the
+// input box height grows with the actual displayed text. The implementation is
+// reproduced here because bubbles does not export the function.
+func wrapRunes(runes []rune, width int) [][]rune {
+	var (
+		lines  = [][]rune{{}}
+		word   = []rune{}
+		row    int
+		spaces int
+	)
+
+	// Word wrap the runes
+	for _, r := range runes {
+		if unicode.IsSpace(r) {
+			spaces++
+		} else {
+			word = append(word, r)
+		}
+
+		if spaces > 0 {
+			if uniseg.StringWidth(string(lines[row]))+uniseg.StringWidth(string(word))+spaces > width {
+				row++
+				lines = append(lines, []rune{})
+				lines[row] = append(lines[row], word...)
+				lines[row] = append(lines[row], repeatSpacesRune(spaces)...)
+				spaces = 0
+				word = nil
+			} else {
+				lines[row] = append(lines[row], word...)
+				lines[row] = append(lines[row], repeatSpacesRune(spaces)...)
+				spaces = 0
+				word = nil
+			}
+		} else {
+			// If the last character is a double-width rune, then we may not be able to add it to this line
+			// as it might cause us to go past the width.
+			lastCharLen := rw.RuneWidth(word[len(word)-1])
+			if uniseg.StringWidth(string(word))+lastCharLen > width {
+				// If the current line has any content, let's move to the next
+				// line because the current word fills up the entire line.
+				if len(lines[row]) > 0 {
+					row++
+					lines = append(lines, []rune{})
+				}
+				lines[row] = append(lines[row], word...)
+				word = nil
+			}
+		}
+	}
+
+	if uniseg.StringWidth(string(lines[row]))+uniseg.StringWidth(string(word))+spaces >= width {
+		lines = append(lines, []rune{})
+		lines[row+1] = append(lines[row+1], word...)
+		// We add an extra space at the end of the line to account for the
+		// trailing space at the end of the previous soft-wrapped lines so that
+		// behaviour when navigating is consistent and so that we don't need to
+		// continually add edges to handle the last line of the wrapped input.
+		spaces++
+		lines[row+1] = append(lines[row+1], repeatSpacesRune(spaces)...)
+	} else {
+		lines[row] = append(lines[row], word...)
+		spaces++
+		lines[row] = append(lines[row], repeatSpacesRune(spaces)...)
+	}
+
+	return lines
+}
+
+func repeatSpacesRune(n int) []rune {
+	return []rune(strings.Repeat(string(' '), n))
 }
