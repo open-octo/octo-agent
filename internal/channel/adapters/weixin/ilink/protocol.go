@@ -281,17 +281,37 @@ func newUUID() string {
 		buf[0:4], buf[4:6], buf[6:8], buf[8:10], buf[10:16])
 }
 
-// DownloadMedia downloads a file from the WeChat CDN using the given CDNMedia reference.
-// If FullURL is set, it uses that directly. Otherwise constructs the URL from EncryptQueryParam.
+// DownloadMedia downloads and decrypts a file from the WeChat CDN using the
+// given CDNMedia reference. iLink media is always AES-128-ECB encrypted on
+// the CDN; the plaintext bytes are returned.
 func (c *Client) DownloadMedia(ctx context.Context, media *CDNMedia) ([]byte, error) {
 	if media == nil {
 		return nil, fmt.Errorf("nil CDN media")
 	}
-	if media.FullURL != "" {
-		return c.downloadRaw(ctx, media.FullURL)
+	if media.AESKey == "" {
+		return nil, fmt.Errorf("CDN media missing aes_key")
 	}
-	url := fmt.Sprintf("%s/downloadfile?%s", CDNBaseURL, media.EncryptQueryParam)
-	return c.downloadRaw(ctx, url)
+	key, err := DecodeAESKey(media.AESKey)
+	if err != nil {
+		return nil, fmt.Errorf("decode aes_key: %w", err)
+	}
+
+	var url string
+	if media.FullURL != "" {
+		url = media.FullURL
+	} else {
+		url = fmt.Sprintf("%s/downloadfile?%s", CDNBaseURL, media.EncryptQueryParam)
+	}
+	ciphertext, err := c.downloadRaw(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+
+	plaintext, err := DecryptAESECB(ciphertext, key)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt media: %w", err)
+	}
+	return plaintext, nil
 }
 
 func (c *Client) downloadRaw(ctx context.Context, url string) ([]byte, error) {
