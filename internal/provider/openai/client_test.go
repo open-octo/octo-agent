@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -104,6 +105,45 @@ func TestSend_Success(t *testing.T) {
 	}
 	if resp.InputTokens != 12 || resp.OutputTokens != 7 {
 		t.Errorf("Usage = (%d, %d), want (12, 7)", resp.InputTokens, resp.OutputTokens)
+	}
+}
+
+// TestSend_LargeResponseBody verifies that successful responses larger than the
+// error-body cap are read in full, not truncated mid-JSON.
+func TestSend_LargeResponseBody(t *testing.T) {
+	longText := strings.Repeat("x", 5000)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := fmt.Sprintf(`{
+			"id":"chatcmpl-large",
+			"object":"chat.completion",
+			"model":"gpt-4o-mini",
+			"choices":[{
+				"index":0,
+				"message":{"role":"assistant","content":%q},
+				"finish_reason":"stop"
+			}],
+			"usage":{"prompt_tokens":10,"completion_tokens":100,"total_tokens":110}
+		}`, longText)
+		_, _ = w.Write([]byte(resp))
+	}))
+	defer srv.Close()
+
+	c, err := New("test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+
+	resp, err := c.Send(context.Background(), provider.Request{
+		Model:    "gpt-4o-mini",
+		Messages: []agent.Message{agent.NewUserMessage("generate a long response")},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if resp.Content != longText {
+		t.Errorf("Content length = %d, want %d", len(resp.Content), len(longText))
 	}
 }
 
