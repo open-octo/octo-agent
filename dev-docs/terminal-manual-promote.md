@@ -1,6 +1,6 @@
 # Terminal Manual Promotion
 
-**Status:** Implemented — #674  
+**Status:** Implemented  
 **Scope:** `internal/tools` · `cmd/octo` · `internal/server` · `web/src`
 
 ## Problem

@@ -402,8 +402,8 @@
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🤖</span>
-          <h3>Autonomous orchestration</h3>
-          <p><code>octo conduct</code> plans a goal into a subtask DAG, delegates to parallel sub-agents, and resumes after crashes. Long-horizon tasks without babysitting.</p>
+          <h3>Background workflows &amp; sub-agents</h3>
+          <p>The <code>workflow</code> tool orchestrates parallel sub-agents (fan-out, pipelines) with git worktree isolation, runs detached in the background, and reports back across every interface. Long-horizon tasks without babysitting.</p>
         </div>
       </div>
     </div>
@@ -430,7 +430,7 @@
         <div class="iface reveal">
           <div class="iface-icon">💬</div>
           <h3>IM Bridge</h3>
-          <p>WeChat iLink today. Scan a QR code, add Octo to your group chat, and delegate tasks from your phone without opening a terminal.</p>
+          <p>WeChat iLink, Feishu, DingTalk, WeCom, Discord, and Telegram. Add Octo to a chat and delegate tasks from your phone without opening a terminal.</p>
         </div>
       </div>
     </div>
@@ -464,11 +464,14 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
 <span class="cmd">octo</span> --reasoning-effort high --sandbox</pre>
         </div>
         <div class="demo-block reveal">
-          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Autonomous execution</div>
-          <pre class="demo-code"><span class="comment"># Plan, delegate, and run without babysitting</span>
-<span class="cmd">octo conduct</span> <span class="arg">"Refactor error handling in internal/agent"</span>
-<span class="cmd">octo conduct</span> status &lt;id&gt;
-<span class="cmd">octo conduct</span> resume &lt;id&gt;</pre>
+          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Web, IM, and MCP</div>
+          <pre class="demo-code"><span class="comment"># Local web dashboard + IM bridges (one process)</span>
+<span class="cmd">octo serve</span>
+<span class="cmd">octo serve</span> --addr :8080  <span class="comment"># expose on the LAN</span>
+
+<span class="comment"># Connect MCP servers; manage skills</span>
+<span class="cmd">octo mcp</span>
+<span class="cmd">octo skills</span> list</pre>
         </div>
         <div class="demo-block reveal">
           <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Configuration layers</div>
