@@ -230,6 +230,19 @@ func TestDiscoverAgents_ProjectOverridesUser(t *testing.T) {
 	}
 }
 
+func TestBuiltInPresets_LeanFlag(t *testing.T) {
+	lean := map[string]bool{"explore": true, "plan": true, "general": false, "code-review": false}
+	for name, want := range lean {
+		p, ok := lookupAgentPreset(name)
+		if !ok {
+			t.Fatalf("built-in %q not found", name)
+		}
+		if p.lean != want {
+			t.Errorf("%q lean = %v, want %v", name, p.lean, want)
+		}
+	}
+}
+
 func TestParseAgentFile_Invalid(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.md")
 	if err := os.WriteFile(path, []byte("no frontmatter here"), 0o644); err != nil {

@@ -127,6 +127,7 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	if preset != nil {
 		req.SystemSuffix = preset.persona
 		req.ReadOnly = preset.readOnly
+		req.LeanContext = preset.lean
 		req.DisallowedTools = preset.disallowedTools
 		if len(callTools) == 0 {
 			req.Tools = preset.tools

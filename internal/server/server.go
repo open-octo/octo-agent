@@ -377,7 +377,7 @@ func (s *Server) enableSubAgentTools() {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	template.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
+	template.System, template.LeanSystem = prompt.ComposePair(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
 	executor := tools.NewDefaultRegistry()
 	spawner := app.NewSpawner(template, executor, func() []agent.ToolDefinition {
 		return tools.DefaultToolsFor(s.model)
@@ -882,7 +882,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	a.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
+	a.System, a.LeanSystem = prompt.ComposePair(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
 
 	// L2: attention-layer rules injected per user turn (triggered keywords),
 	// plus the save-nudge appended to milestone tool results.
@@ -1375,7 +1375,7 @@ func (s *Server) initChannels() {
 		a := agent.New(s.sender, s.model)
 		a.CWD = s.cwd
 		a.MaxTokens = s.cfg.MaxTokens
-		a.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
+		a.System, a.LeanSystem = prompt.ComposePair(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
 		if cfg, err := config.Load(); err == nil {
 			a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 			if a.LiteSender == nil {
@@ -1618,7 +1618,7 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	sess.Agent.System = prompt.Compose(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
+	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
 
 	// L2 memory hooks, same pair buildAgent gives web turns: keyword
 	// reminders on user input, save-nudge on milestone tool results. The

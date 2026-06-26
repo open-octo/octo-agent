@@ -121,6 +121,17 @@ func Compose(userSystem, cwd, env, skills, memory string, coauthor bool) string 
 	return strings.Join(layers, "\n\n---\n\n")
 }
 
+// ComposePair returns both the full system prompt and a "lean" variant that
+// drops the skills manifest and memory injection (the two heaviest, most
+// optional layers). The lean variant seeds cheap read-only sub-agents
+// (explore/plan) that don't need the full harness context. Other layers —
+// soul, env, user/project conventions — are kept in both.
+func ComposePair(userSystem, cwd, env, skills, memory string, coauthor bool) (full, lean string) {
+	full = Compose(userSystem, cwd, env, skills, memory, coauthor)
+	lean = Compose(userSystem, cwd, env, "", "", coauthor)
+	return full, lean
+}
+
 // IdentityPath resolves an identity file under dir, preferring the
 // canonical lowercase name and falling back to the legacy uppercase
 // spelling — pre-0.19 onboarding wrote SOUL.md/USER.md while composition

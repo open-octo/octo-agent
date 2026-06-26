@@ -59,13 +59,28 @@ const childMaxTurns = 100
 func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.SpawnResult, error) {
 	childTools := filterChildTools(s.toolsFn(), req.Tools, req.DisallowedTools, req.ReadOnly)
 
-	model := req.Model
+	// Pick the child's sender + model. A lean preset (explore/plan) runs on the
+	// parent's lite model when one is configured — its own cheaper sender, not
+	// the main one, since a named lite model may live on a different provider.
+	// An explicit req.Model always wins; otherwise lean → lite, else parent's.
+	sender, model := s.parent.Sender, req.Model
 	if model == "" {
-		model = s.parent.Model
+		if req.LeanContext && s.parent.LiteModel != "" && s.parent.LiteSender != nil {
+			sender, model = s.parent.LiteSender, s.parent.LiteModel
+		} else {
+			model = s.parent.Model
+		}
 	}
 
-	child := agent.New(s.parent.Sender, model)
-	child.System = s.parent.System // share harness identity (base + soul + env + skills + memory + …)
+	// Lean presets are seeded with the lean system prompt (skills + memory
+	// dropped) when the parent has one; everyone else shares the full identity.
+	baseSystem := s.parent.System // base + soul + env + skills + memory + …
+	if req.LeanContext && s.parent.LeanSystem != "" {
+		baseSystem = s.parent.LeanSystem
+	}
+
+	child := agent.New(sender, model)
+	child.System = baseSystem
 	// Preset agents append a persona after the shared identity, so the child
 	// keeps the harness context but takes on its specialized role. A schema
 	// request appends a strict JSON-only instruction on top of that.
@@ -74,7 +89,7 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 		suffix = appendSuffix(suffix, schemaInstruction(req.Schema))
 	}
 	if suffix != "" {
-		child.System = s.parent.System + "\n\n" + suffix
+		child.System = baseSystem + "\n\n" + suffix
 	}
 	child.MaxTokens = s.parent.MaxTokens
 	child.Gate = s.parent.Gate

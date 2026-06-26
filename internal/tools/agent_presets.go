@@ -16,6 +16,10 @@ type agentPreset struct {
 	tools           []string
 	disallowedTools []string
 	model           string
+	// lean marks a cheap read-only agent (explore/plan): it runs on the
+	// parent's lite model and is seeded with the lean system prompt (skills
+	// manifest + memory dropped) to keep its context small.
+	lean bool
 }
 
 // builtInPresets is the canonical set of built-in agent types. These are
@@ -25,6 +29,7 @@ var builtInPresets = []agentPreset{
 		name:        "explore",
 		description: "Read-only exploration agent",
 		readOnly:    true,
+		lean:        true,
 		persona: "You are a read-only exploration sub-agent. Your job is to locate and understand " +
 			"code, then report findings — not to modify anything. Use read_file, grep, glob, " +
 			"read-only terminal commands (git, find, ls), and any code-intelligence tools available. " +
@@ -36,6 +41,7 @@ var builtInPresets = []agentPreset{
 		name:        "plan",
 		description: "Read-only planning agent",
 		readOnly:    true,
+		lean:        true,
 		persona: "You are a planning sub-agent. Investigate the codebase read-only, then produce a " +
 			"concrete, step-by-step implementation plan. Do NOT modify files. Deliverable: an ordered " +
 			"plan — the files to change and what changes in each, in dependency order; the key design " +
