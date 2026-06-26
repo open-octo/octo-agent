@@ -6,15 +6,19 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Leihb/octo-agent/internal/memory"
 	"gopkg.in/yaml.v3"
 )
 
 // agentFrontmatter is the subset of an agent definition file's YAML frontmatter
 // that we consume. Unmapped keys are ignored.
 type agentFrontmatter struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	ReadOnly    bool   `yaml:"read_only"`
+	Name            string   `yaml:"name"`
+	Description     string   `yaml:"description"`
+	ReadOnly        bool     `yaml:"read_only"`
+	Tools           []string `yaml:"tools"`
+	DisallowedTools []string `yaml:"disallowed_tools"`
+	Model           string   `yaml:"model"`
 }
 
 // userAgentsRoot returns ~/.octo/agents, or "" when the home dir can't be
@@ -27,6 +31,22 @@ var userAgentsRoot = func() string {
 	return filepath.Join(home, ".octo", "agents")
 }
 
+// projectAgentsRoot returns <project-root>/.octo/agents for the current working
+// directory's repository, or "" when it can't be resolved. Project-level agents
+// override user-level ones of the same name (matching .claude/agents semantics).
+// A var so tests can point it at a temp directory.
+var projectAgentsRoot = func() string {
+	cwd, err := os.Getwd()
+	if err != nil || cwd == "" {
+		return ""
+	}
+	root := memory.ProjectRoot(cwd)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, ".octo", "agents")
+}
+
 // discoveredAgents holds the last scanned user-defined agents.
 var (
 	discoveredAgentsMu sync.RWMutex
@@ -37,7 +57,20 @@ var (
 // discoveredAgents cache. It is safe to call concurrently; callers that need
 // the freshest set call it before lookupAgentPreset.
 func discoverAgents() {
-	root := userAgentsRoot()
+	fresh := make(map[string]agentPreset)
+	// User-level first, then project-level — project entries override
+	// user-level ones of the same name.
+	for _, root := range []string{userAgentsRoot(), projectAgentsRoot()} {
+		scanAgentsRoot(root, fresh)
+	}
+	discoveredAgentsMu.Lock()
+	discoveredAgents = fresh
+	discoveredAgentsMu.Unlock()
+}
+
+// scanAgentsRoot reads *.md agent definitions from root into dst (existing keys
+// are overwritten). A missing or unreadable root is a no-op.
+func scanAgentsRoot(root string, dst map[string]agentPreset) {
 	if root == "" {
 		return
 	}
@@ -45,7 +78,6 @@ func discoverAgents() {
 	if err != nil {
 		return // missing/unreadable root: nothing to add
 	}
-	fresh := make(map[string]agentPreset, len(entries))
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -60,11 +92,8 @@ func discoverAgents() {
 		}
 		// The file name (without .md) is the authoritative trigger name.
 		p.name = strings.TrimSuffix(name, ".md")
-		fresh[p.name] = p
+		dst[p.name] = p
 	}
-	discoveredAgentsMu.Lock()
-	discoveredAgents = fresh
-	discoveredAgentsMu.Unlock()
 }
 
 // parseAgentFile reads a single agent definition markdown file. It expects YAML
@@ -87,11 +116,19 @@ func parseAgentFile(path string) (agentPreset, bool) {
 	if fm.Description == "" {
 		return agentPreset{}, false
 	}
+	// "inherit" (CC's default) means no override — treat it as empty.
+	model := strings.TrimSpace(fm.Model)
+	if strings.EqualFold(model, "inherit") {
+		model = ""
+	}
 	return agentPreset{
-		name:        "", // filled by caller from file name
-		description: fm.Description,
-		persona:     strings.TrimSpace(body),
-		readOnly:    fm.ReadOnly,
+		name:            "", // filled by caller from file name
+		description:     fm.Description,
+		persona:         strings.TrimSpace(body),
+		readOnly:        fm.ReadOnly,
+		tools:           fm.Tools,
+		disallowedTools: fm.DisallowedTools,
+		model:           model,
 	}, true
 }
 

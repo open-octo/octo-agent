@@ -72,8 +72,11 @@ spawn 入口(`internal/tools/agent.go`),经 spawner 注册门控——未配置 
 | `general` | 否 | 全工具,端到端处理委派任务 |
 | `code-review` | 是 | 用 `git diff` 等审查改动 |
 
-用户可在 `~/.octo/agents/*.md` 用 frontmatter(name / description / tools / read_only / model + persona
-正文)自定义 preset,`discoverAgents` 在查找前刷新,覆盖/补充内置集。
+用户可用 `*.md` 文件自定义 preset:frontmatter 支持 `description`(必填)、`tools`(白名单)、
+`disallowed_tools`(从继承集里减)、`read_only`、`model`(默认 `inherit` = 空),markdown 正文是
+persona。文件名(去掉 `.md`)是权威触发名,frontmatter 的 `name` 被忽略。发现路径有两级:用户级
+`~/.octo/agents/` 和项目级 `<repo>/.octo/agents/`,同名时**项目级覆盖用户级**。`discoverAgents` 在
+查找前刷新,覆盖/补充内置集。
 
 ## 子 agent 的隔离与构造
 
@@ -90,7 +93,7 @@ child.MaxTurns = childMaxTurns              // child 专属 loop 预算
 - **隔离点**:fresh History(子 agent 看不到父对话)、自己的 loop 预算。
 - **共享点**:Sender(一条连接)、System(同一身份,fork 时连 cache 一起共享)、Gate(同一权限——
   子 agent 不绕过权限)、计费(子 agent token 累加进父 session 总数,`/cost` 报合并数字)。
-- `req.Tools` 非空时与父 toolbelt 取交集;`req.Model` 非空时覆盖父模型。
+- `req.Tools` 非空时与父 toolbelt 取交集;`req.DisallowedTools` 从继承集里减;`req.Model` 非空时覆盖父模型。调用层传的 tools/model 优先于 preset frontmatter,preset 只补调用没指定的部分。
 - **max-turns 不是失败**:child 跑到 `childMaxTurns` 上限时,`runChild` 返回**部分 reply** +
   `StopReason="max_turns"`(而非报错)。`sub_agent` 的同步结果和异步完成通知都会把它标成
   `[INCOMPLETE]`,这样父 agent 不会把半成品当完整答案——而不是静默丢掉这个信号。
