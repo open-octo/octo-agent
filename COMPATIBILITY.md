@@ -5,10 +5,9 @@ declares which surfaces that promise covers: what you can build on, what is
 documented but may move, and what is internal. If a surface isn't listed
 here, assume Internal.
 
-**Status:** this policy is in force now (0.19). Until v1.0.0, a minor
-release may still break a Stable surface — always with a **Breaking** callout
-in the [CHANGELOG](CHANGELOG.md). From v1.0.0 the tiers below are a hard
-commitment: breaking a Stable surface requires a major version.
+**Status:** as of v1.0.0 the tiers below are a hard commitment: breaking a
+Stable surface requires a major version, always with a **Breaking** callout
+in the [CHANGELOG](CHANGELOG.md).
 
 ## What the versions mean
 
@@ -158,6 +157,6 @@ not a supported surface: octo is distributed as a binary, and
 
 ## Reporting
 
-A Stable surface that broke without a major version (post-1.0) or without a
-CHANGELOG **Breaking** callout (pre-1.0) is a bug — please
+A Stable surface that broke without a major version, or without a CHANGELOG
+**Breaking** callout, is a bug — please
 [open an issue](https://github.com/Leihb/octo-agent/issues).
