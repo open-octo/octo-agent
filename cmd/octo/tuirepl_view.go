@@ -1409,9 +1409,14 @@ func (m *tuiModel) thinkingLine() string {
 	}
 	meta := time.Since(m.turnStart).Round(time.Second).String()
 	if m.turnOutChars == 0 {
-		// Uplink: the request/context is still going up and nothing has
-		// streamed back yet — an up arrow, no count to show.
-		meta += " · ↑"
+		// Uplink: the request/context is going up and nothing has streamed
+		// back yet. Show how much context is being sent (last known
+		// occupancy); 0 on the very first turn falls back to a bare arrow.
+		if used, _ := m.a.ContextUsage(); used > 0 {
+			meta += fmt.Sprintf(" · ↑ ~%s tokens", humanTokens(used))
+		} else {
+			meta += " · ↑"
+		}
 	} else {
 		// Downlink: tokens are streaming back. At the hand-off to the answer
 		// the counter sprints (see answerSprint) as an accelerating flourish

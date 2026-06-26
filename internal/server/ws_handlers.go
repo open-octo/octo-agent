@@ -128,17 +128,21 @@ func (s *Server) SetSubscribed(conn *wsConn, sessionID string) {}
 // transcript — approximate, but far better than a misleading 0%.
 func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 	pct := 0
+	usedTokens := 0
 	s.sessionAgentsMu.Lock()
 	a := s.sessionAgents[sessionID]
 	s.sessionAgentsMu.Unlock()
 	if a != nil {
 		if used, window := a.ContextUsage(); window > 0 && used > 0 {
 			pct = used * 100 / window
+			usedTokens = used
 		}
 	}
 	if pct == 0 {
 		if sess, err := agent.LoadSession(sessionID); err == nil {
 			pct = estimateContextPct(sess)
+			// Cold/resumed session: only a % estimate is available, no exact
+			// token count — leave usedTokens 0 so the UI shows a bare arrow.
 		}
 	}
 	if pct <= 0 {
@@ -152,6 +156,7 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 		"type":             "session_update",
 		"session_id":       sessionID,
 		"context_usage":    pct,
+		"context_tokens":   usedTokens,
 		"working_dir":      wd,
 		"permission_mode":  pm,
 		"reasoning_effort": re,
@@ -461,7 +466,7 @@ func (s *Server) wsClearSession(sid string) {
 	delete(s.sessionInjectors, sid)
 	s.injectorMu.Unlock()
 
-	s.wsHub.broadcast(sid, map[string]any{"type": "session_update", "session_id": sid, "context_usage": 0})
+	s.wsHub.broadcast(sid, map[string]any{"type": "session_update", "session_id": sid, "context_usage": 0, "context_tokens": 0})
 	s.broadcastHistoryReload(sid)
 	s.wsToast(sid, "Conversation cleared.", "success")
 }
@@ -1107,6 +1112,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		"session_id":       sess.ID,
 		"status":           "idle",
 		"context_usage":    ctxPct,
+		"context_tokens":   used,
 		"working_dir":      wd,
 		"permission_mode":  pm,
 		"reasoning_effort": re,
