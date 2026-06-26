@@ -92,7 +92,11 @@ const (
 // tool result going back into the conversation — this cap only applies to
 // what's surfaced to event observers (Web UI cards, IM previews), where a
 // 100KB shell dump would be useless noise.
-const EventToolOutputCap = 512
+//
+// 8KB is enough for web_fetch/read_file/grep previews (first ~40 lines) to
+// remain useful while keeping event payloads small; the frontend folds long
+// outputs anyway.
+const EventToolOutputCap = 8 * 1024
 
 // AgentEvent is the union shape carried over the EventHandler callback.
 //
