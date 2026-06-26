@@ -582,6 +582,14 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/skills/import", s.handleImportSkill)
 	s.api("GET /api/skills/{name}/export", s.handleExportSkill)
 
+	// Protean skill bridge
+	s.api("GET /api/protean/info", s.handleProteanInfo)
+	s.api("GET /api/protean/skills", s.handleProteanListSkills)
+	s.api("POST /api/protean/record/start", s.handleProteanRecordStart)
+	s.api("POST /api/protean/record/stop", s.handleProteanRecordStop)
+	s.api("POST /api/protean/generate", s.handleProteanGenerate)
+	s.api("POST /api/protean/run", s.handleProteanRun)
+
 	// MCP server management
 	s.api("GET /api/mcp/servers", s.handleListMCPServers)
 	s.api("GET /api/mcp/servers/{name}", s.handleGetMCPServer)

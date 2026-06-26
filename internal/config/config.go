@@ -87,6 +87,8 @@ type Config struct {
 	// thinking trace is surfaced. Individual model entries can override this.
 	// nil means the built-in default (enabled).
 	ShowReasoning *bool `yaml:"show_reasoning,omitempty"`
+	// Protean configures the Protean skill recorder/executor bridge.
+	Protean ProteanConfig `yaml:"protean,omitempty"`
 }
 
 // EffectiveShowReasoning resolves the effective show-reasoning flag for a
@@ -124,6 +126,18 @@ type ToolSearchConfig struct {
 	SearchDefaultLimit int `yaml:"search_default_limit,omitempty"`
 	// MaxSearchLimit caps the caller-supplied limit.
 	MaxSearchLimit int `yaml:"max_search_limit,omitempty"`
+}
+
+// ProteanConfig configures the Protean skill recorder/executor bridge.
+type ProteanConfig struct {
+	// VenvPath is the path to the Protean Python virtual environment. When
+	// empty, octo looks for PROTEAN_VENV env var, then falls back to
+	// ~/.octo/protean/.venv.
+	VenvPath string `yaml:"venv_path,omitempty"`
+	// SkillsDir is where Protean skills are stored. When empty, octo stores
+	// them under ~/.octo/protean-skills/ so they don't collide with octo
+	// skills. The tool uses this as PROTEAN_SKILLS_DIR when running skills.
+	SkillsDir string `yaml:"skills_dir,omitempty"`
 }
 
 // DefaultEntry returns the entry named by DefaultModel, falling back to the

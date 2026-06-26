@@ -535,3 +535,69 @@ export async function setDefaultModel(id: string): Promise<void> {
 export async function setLiteModel(id: string): Promise<{ ok: boolean; lite_model: string }> {
   return request<{ ok: boolean; lite_model: string }>(`/api/config/models/${encodeURIComponent(id)}/lite`, { method: 'POST' })
 }
+
+// ─── Protean skill bridge API ─────────────────────────────────────────────────
+
+export interface ProteanInfo {
+  available: boolean
+  venv: string
+  skills_dir: string
+}
+
+export interface ProteanSkill {
+  name: string
+  description?: string
+}
+
+export interface ProteanRecordStart {
+  recording_id: string
+  out_dir: string
+}
+
+export interface ProteanRecordStop {
+  out_dir: string
+  duration: number
+}
+
+export interface ProteanGenerateResult {
+  name: string
+  description: string
+  skill_dir: string
+}
+
+export interface ProteanRunResult {
+  success: boolean
+  output: string
+  error?: string
+}
+
+export async function getProteanInfo(): Promise<ProteanInfo> {
+  return request<ProteanInfo>('/api/protean/info')
+}
+
+export async function listProteanSkills(): Promise<ProteanSkill[]> {
+  const d = await request<{ skills: ProteanSkill[] }>('/api/protean/skills')
+  return d.skills ?? []
+}
+
+export async function startProteanRecording(): Promise<ProteanRecordStart> {
+  return request<ProteanRecordStart>('/api/protean/record/start', { method: 'POST' })
+}
+
+export async function stopProteanRecording(): Promise<ProteanRecordStop> {
+  return request<ProteanRecordStop>('/api/protean/record/stop', { method: 'POST' })
+}
+
+export async function generateProteanSkill(recordingDir: string, taskDesc: string): Promise<ProteanGenerateResult> {
+  return request<ProteanGenerateResult>('/api/protean/generate', {
+    method: 'POST',
+    ...json({ recording_dir: recordingDir, task_desc: taskDesc }),
+  })
+}
+
+export async function runProteanSkill(name: string): Promise<ProteanRunResult> {
+  return request<ProteanRunResult>('/api/protean/run', {
+    method: 'POST',
+    ...json({ name }),
+  })
+}

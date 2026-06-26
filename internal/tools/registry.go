@@ -49,6 +49,8 @@ var allTools = []tool{
 	TaskUpdateTool{},
 	TaskListTool{},
 	RestartServerTool{},
+	RunProteanSkillTool{},
+	ProteanRecordTool{},
 }
 
 // DefaultRegistry is the agent.ToolExecutor used when `octo --tools` is
@@ -277,6 +279,12 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 			continue
 		}
 		if _, isRestart := t.(RestartServerTool); isRestart && !restarterOn {
+			continue
+		}
+		if _, isRunProtean := t.(RunProteanSkillTool); isRunProtean && !proteanSkillEnabled() {
+			continue
+		}
+		if _, isProteanRecord := t.(ProteanRecordTool); isProteanRecord && !proteanSkillEnabled() {
 			continue
 		}
 		if _, isTaskCreate := t.(TaskCreateTool); isTaskCreate && !tasksOn {

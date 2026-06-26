@@ -20,6 +20,85 @@
       .finally(() => { loading = false })
   })
 
+  // ── Protean record / generate / run ─────────────────────────────────────────
+  let proteanAvailable = $state(false)
+  let proteanSkills = $state<api.ProteanSkill[]>([])
+  let recordingOutDir = $state('')
+  let taskDesc = $state('')
+  let generating = $state(false)
+  let runningSkill = $state('')
+
+  $effect(() => {
+    api.getProteanInfo()
+      .then(info => {
+        proteanAvailable = info.available
+        if (info.available) loadProteanSkills()
+      })
+      .catch(() => { proteanAvailable = false })
+  })
+
+  async function loadProteanSkills() {
+    try {
+      proteanSkills = await api.listProteanSkills()
+    } catch (err: any) {
+      showToast(err.message, 'error')
+    }
+  }
+
+  async function handleRecordStart() {
+    try {
+      const res = await api.startProteanRecording()
+      recordingOutDir = res.out_dir
+      showToast('Recording started — perform the workflow, then stop')
+    } catch (err: any) {
+      showToast(err.message, 'error')
+    }
+  }
+
+  async function handleRecordStop() {
+    try {
+      await api.stopProteanRecording()
+      showToast('Recording stopped')
+    } catch (err: any) {
+      showToast(err.message, 'error')
+    }
+  }
+
+  async function handleGenerateSkill() {
+    if (!recordingOutDir) {
+      showToast('Start a recording first', 'error')
+      return
+    }
+    if (!taskDesc.trim()) {
+      showToast('Describe what the skill does', 'error')
+      return
+    }
+    generating = true
+    try {
+      const res = await api.generateProteanSkill(recordingOutDir, taskDesc)
+      await loadProteanSkills()
+      showToast(`Generated skill "${res.name}"`)
+      taskDesc = ''
+      recordingOutDir = ''
+    } catch (err: any) {
+      showToast(err.message, 'error')
+    } finally {
+      generating = false
+    }
+  }
+
+  async function handleRunProtean(name: string) {
+    runningSkill = name
+    try {
+      const res = await api.runProteanSkill(name)
+      showToast(`Ran "${name}": ${res.success ? 'success' : 'failed'}`)
+    } catch (err: any) {
+      showToast(err.message, 'error')
+    } finally {
+      runningSkill = ''
+    }
+  }
+
   async function handleToggle(name: string, currentEnabled: boolean) {
     const next = !currentEnabled
     try {
@@ -47,10 +126,18 @@
     openAgentSession('/skill-creator', 'New skill')
   }
 
+  let recordOpen = $state(false)
+
   // Use: open a fresh chat that invokes the skill (matches the old UI's per-card
   // "Use" — the slash command runs the skill in conversation).
   function handleUse(name: string) {
     openAgentSession(`/${name}`, name)
+  }
+
+  function openRecordModal() {
+    recordOpen = true
+    taskDesc = ''
+    recordingOutDir = ''
   }
 
   // Export downloads the skill folder as a .zip from the server.
@@ -146,6 +233,11 @@
           onchange={handleFileChange}
         />
         <button class="btn-secondary" onclick={handleImportClick}>{$t('skills.import')}</button>
+        {#if proteanAvailable}
+          <button class="btn-secondary" onclick={openRecordModal} disabled={!!recordingOutDir}>
+            {recordingOutDir ? 'Recording…' : $t('skills.record')}
+          </button>
+        {/if}
         <button class="btn-primary" onclick={handleCreateSkill}>{$t('skills.create')}</button>
       </div>
     </div>
@@ -246,6 +338,57 @@
   </div>
 {/if}
 
+<!-- Protean record/generate/run modal -->
+{#if recordOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('modal-backdrop')) recordOpen = false }}>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <span class="modal-title">{$t('skills.record_title')}</span>
+        <button class="modal-close" onclick={() => (recordOpen = false)} aria-label={$t('common.close')}>
+          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="record-row">
+          {#if !recordingOutDir}
+            <button class="btn-primary" onclick={handleRecordStart}>{$t('skills.record_start')}</button>
+          {:else}
+            <button class="btn-secondary" onclick={handleRecordStop}>{$t('skills.record_stop')}</button>
+          {/if}
+        </div>
+        <textarea
+          class="field-textarea"
+          placeholder={$t('skills.record_task_placeholder')}
+          bind:value={taskDesc}
+          disabled={generating}
+          rows={3}
+        ></textarea>
+        {#if proteanSkills.length > 0}
+          <div class="protean-list">
+            <span class="field-hint">{$t('skills.protean_list_hint')}</span>
+            {#each proteanSkills as sk}
+              <div class="protean-row">
+                <span class="mono">{sk.name}</span>
+                <button class="btn-secondary btn-sm" onclick={() => handleRunProtean(sk.name)} disabled={runningSkill === sk.name}>
+                  {runningSkill === sk.name ? $t('common.loading') : $t('skills.run')}
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick={() => (recordOpen = false)} disabled={generating}>{$t('common.cancel')}</button>
+        <button class="btn-primary" onclick={handleGenerateSkill} disabled={generating || !recordingOutDir || !taskDesc.trim()}>
+          {generating ? $t('common.saving') : $t('skills.record_generate')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
 .page { flex: 1; overflow-y: auto; min-height: 0; }
 .inner { max-width: 1080px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
@@ -277,6 +420,24 @@
   border-top: 1px solid var(--border-table);
 }
 .import-row { display: flex; gap: 8px; }
+.record-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.field-textarea {
+  width: 100%;
+  min-height: 80px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  outline: none;
+  background: var(--bg-container);
+  resize: vertical;
+}
+.field-textarea:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(22,119,255,0.1); }
+.protean-list { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+.protean-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
+.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
 .field-input {
   flex: 1; min-width: 0; font-family: inherit; font-size: 14px; color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; outline: none; background: var(--bg-container);
