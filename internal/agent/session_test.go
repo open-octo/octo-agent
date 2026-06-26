@@ -372,6 +372,25 @@ func TestLoadSession_NotFound(t *testing.T) {
 	}
 }
 
+func TestLoadSession_RejectsTraversal(t *testing.T) {
+	setTempHome(t)
+
+	// Session ids reach LoadSession straight from HTTP/WS requests, so a
+	// traversal payload must be refused before it can resolve outside
+	// ~/.octo/sessions (go/path-injection).
+	for _, id := range []string{
+		"../../../etc/passwd",
+		"..",
+		"foo/bar",
+		"/etc/passwd",
+		"",
+	} {
+		if _, err := LoadSession(id); err == nil {
+			t.Errorf("LoadSession(%q): expected rejection, got nil error", id)
+		}
+	}
+}
+
 func TestLoadSession_StripDotJSON(t *testing.T) {
 	setTempHome(t)
 

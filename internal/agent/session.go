@@ -782,19 +782,24 @@ func imageMIMEFromPath(path string) string {
 	}
 }
 
-// resolveSessionPath maps an id (bare, suffixed, or absolute path) to the
-// transcript file path.
+// resolveSessionPath maps an id (bare or with a .jsonl/.json suffix) to the
+// transcript file path under ~/.octo/sessions. The id reaches here straight
+// from HTTP/WS requests, so it must be a plain filename stem: absolute paths,
+// path separators, and "." / ".." components are all rejected so a
+// caller-supplied id can never escape the sessions directory.
 func resolveSessionPath(id string) (string, error) {
-	if filepath.IsAbs(id) {
-		return id, nil
+	stem := strings.TrimSuffix(strings.TrimSuffix(id, ".jsonl"), ".json")
+	if stem == "" {
+		return "", fmt.Errorf("session id is empty")
 	}
-	id = strings.TrimSuffix(id, ".jsonl")
-	id = strings.TrimSuffix(id, ".json")
+	if filepath.IsAbs(id) || stem != filepath.Base(stem) || strings.Contains(stem, "..") {
+		return "", fmt.Errorf("invalid session id %q", id)
+	}
 	dir, err := sessionsDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, id+".jsonl"), nil
+	return filepath.Join(dir, stem+".jsonl"), nil
 }
 
 // SessionMTime returns the file mtime of the session whose id is given.
@@ -835,7 +840,7 @@ func ListSessions(n int) ([]*Session, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
 		}
-		s, err := LoadSession(filepath.Join(dir, e.Name()))
+		s, err := LoadSession(strings.TrimSuffix(e.Name(), ".jsonl"))
 		if err != nil {
 			continue // skip corrupt files
 		}
