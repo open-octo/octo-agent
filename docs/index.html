@@ -90,7 +90,7 @@
       line-height: 1.1;
       margin-bottom: 1rem;
     }
-    .hero h1 span { color: var(--accent); }
+    .hero h1 .accent { color: var(--accent); }
     .hero-tagline {
       font-size: clamp(1.05rem, 2.5vw, 1.25rem);
       color: var(--fg-secondary);
@@ -333,6 +333,36 @@
       flex-wrap: wrap;
     }
 
+    /* Language toggle */
+    .lang-toggle {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      z-index: 50;
+      display: inline-flex;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.2rem;
+      box-shadow: var(--shadow);
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .lang-toggle button {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0.3rem 0.8rem;
+      border-radius: 999px;
+      font: inherit;
+      transition: all 0.15s ease;
+    }
+    .lang-toggle button.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
     /* Scroll reveal */
     .reveal {
       opacity: 0;
@@ -347,19 +377,23 @@
 </head>
 <body>
 
+  <!-- Language toggle -->
+  <div class="lang-toggle" role="group" aria-label="Language">
+    <button type="button" data-lang="en">EN</button>
+    <button type="button" data-lang="zh">中文</button>
+  </div>
+
   <!-- Hero -->
   <header class="hero">
     <div class="hero-inner">
       <div class="hero-logo">🐙</div>
-      <h1>Meet <span>Octo</span></h1>
-      <p class="hero-tagline">
-        A functionality-first AI agent in a single Go binary.
-        Bring it to your terminal, browser, or chat app — it speaks
-        Anthropic and OpenAI natively, and actually gets things done.
-      </p>
+      <h1><span data-en="Meet " data-zh="认识 "></span><span class="accent">Octo</span></h1>
+      <p class="hero-tagline"
+         data-en="A functionality-first AI agent in a single Go binary. Bring it to your terminal, browser, or chat app — it speaks Anthropic and OpenAI natively, and actually gets things done."
+         data-zh="以功能为先的 AI Agent，单一 Go 二进制。带它进终端、浏览器或聊天工具 —— 原生支持 Anthropic 与 OpenAI，真正把事情干完。"></p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="https://github.com/Leihb/octo-agent">⭐ Star on GitHub</a>
-        <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent/blob/main/README.md">📖 Read the Docs</a>
+        <a class="btn btn-primary" href="https://github.com/Leihb/octo-agent" data-en="⭐ Star on GitHub" data-zh="⭐ 在 GitHub 上 Star"></a>
+        <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent/blob/main/README.md" data-href-en="https://github.com/Leihb/octo-agent/blob/main/README.md" data-href-zh="https://github.com/Leihb/octo-agent/blob/main/README_CN.md" data-en="📖 Read the Docs" data-zh="📖 阅读文档"></a>
       </div>
       <div class="install-hint">
         <code>go install github.com/Leihb/octo-agent/cmd/octo@latest</code>
@@ -371,39 +405,46 @@
   <section>
     <div class="container">
       <div class="section-header reveal">
-        <h2>Built for people who ship</h2>
-        <p>Octo is not a thin wrapper around an API. It is a full agent loop with tools, memory, sandboxing, and autonomy — packaged as one file you can drop anywhere.</p>
+        <h2 data-en="Built for people who ship" data-zh="为真正交付的人打造"></h2>
+        <p data-en="Octo is not a thin wrapper around an API. It is a full agent loop with tools, memory, sandboxing, and autonomy — packaged as one file you can drop anywhere."
+           data-zh="Octo 不是 API 的薄封装，而是带工具、记忆、沙箱与自主能力的完整 agent 循环 —— 打包成一个可随处放置的文件。"></p>
       </div>
       <div class="features">
         <div class="feature reveal">
           <span class="feature-icon">📦</span>
-          <h3>Single binary, zero deps</h3>
-          <p>One Go executable. No Python, no Node, no Docker. Download a prebuilt for macOS, Linux, or Windows and run it immediately.</p>
+          <h3 data-en="Single binary, zero deps" data-zh="单一二进制，零依赖"></h3>
+          <p data-en="One Go executable. No Python, no Node, no Docker. Download a prebuilt for macOS, Linux, or Windows and run it immediately."
+             data-zh="一个 Go 可执行文件。无需 Python、Node、Docker。下载 macOS / Linux / Windows 预编译版即刻运行。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🔌</span>
-          <h3>Two protocols, every provider</h3>
-          <p>Speaks Anthropic Messages and OpenAI Chat Completions natively. DeepSeek, Kimi, Bailian, OpenRouter, vLLM — if it exposes either shape, it just works.</p>
+          <h3 data-en="Two protocols, every provider" data-zh="两种协议，对接一切"></h3>
+          <p data-en="Speaks Anthropic Messages and OpenAI Chat Completions natively. DeepSeek, Kimi, Bailian, OpenRouter, vLLM — if it exposes either shape, it just works."
+             data-zh="原生支持 Anthropic Messages 与 OpenAI Chat Completions。DeepSeek、Kimi、百炼、OpenRouter、vLLM —— 只要兼容其中一种，开箱即用。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🛠️</span>
-          <h3>Real tools, not toy examples</h3>
-          <p>File read/write/edit, terminal (with background jobs), glob, grep, web fetch/search. Plus MCP servers and reusable Skills in Claude Code format.</p>
+          <h3 data-en="Real tools, not toy examples" data-zh="真工具，不是玩具示例"></h3>
+          <p data-en="File read/write/edit, terminal (with background jobs), glob, grep, web fetch/search. Plus MCP servers and reusable Skills in Claude Code format."
+             data-zh="文件读/写/改、终端（含后台任务）、glob、grep、网页抓取/搜索。外加 MCP 服务与 Claude Code 格式的可复用 Skills。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🧠</span>
-          <h3>Persistent memory</h3>
-          <p>Octo remembers your preferences, project conventions, and past corrections across sessions — stored locally in <code>~/.octo/memories/</code>, not in the cloud.</p>
+          <h3 data-en="Persistent memory" data-zh="持久化记忆"></h3>
+          <p data-en="Octo remembers your preferences, project conventions, and past corrections across sessions — stored locally in ~/.octo/memories/, not in the cloud."
+             data-zh="Octo 跨会话记住你的偏好、项目约定与过往纠正 —— 本地存于 ~/.octo/memories/，不上云。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🔒</span>
-          <h3>OS-level sandboxing</h3>
-          <p>Enable <code>--sandbox</code> to confine terminal commands to the project directory with no network access. macOS Seatbelt and Linux Landlock + seccomp.</p>
+          <h3 data-en="OS-level sandboxing" data-zh="操作系统级沙箱"></h3>
+          <p data-en="Enable --sandbox to confine terminal commands to the project directory with no network access. macOS Seatbelt and Linux Landlock + seccomp."
+             data-zh="开启 --sandbox 把终端命令限制在项目目录、禁网络。由 macOS Seatbelt、Linux Landlock + seccomp 强制执行。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🤖</span>
-          <h3>Background workflows &amp; sub-agents</h3>
-          <p>The <code>workflow</code> tool orchestrates parallel sub-agents (fan-out, pipelines) with git worktree isolation, runs detached in the background, and reports back across every interface. Long-horizon tasks without babysitting.</p>
+          <h3 data-en="Background workflows &amp; sub-agents" data-zh="后台工作流 & 子代理"></h3>
+          <p data-en="The workflow tool orchestrates parallel sub-agents (fan-out, pipelines) with git worktree isolation, runs detached in the background, and reports back across every interface. Long-horizon tasks without babysitting."
+             data-zh="workflow 工具编排并行子代理（扇出、流水线），带 git worktree 隔离，可后台分离运行，并在每个界面回报进度。长周期任务无需盯着。"></p>
         </div>
       </div>
     </div>
@@ -413,24 +454,28 @@
   <section>
     <div class="container">
       <div class="section-header reveal">
-        <h2>Three faces, one agent</h2>
-        <p>Each interface is a first-class citizen. Use the one that fits your workflow — the agent underneath is identical.</p>
+        <h2 data-en="Three faces, one agent" data-zh="三种界面，同一个 agent"></h2>
+        <p data-en="Each interface is a first-class citizen. Use the one that fits your workflow — the agent underneath is identical."
+           data-zh="每个界面都是一等公民。挑最适合你工作流的那个 —— 底层的 agent 完全一致。"></p>
       </div>
       <div class="interfaces">
         <div class="iface reveal">
           <div class="iface-icon">💻</div>
-          <h3>Terminal</h3>
-          <p>Rich interactive TUI with streaming, tool-call cards, session history, and readline editing. Or run headless one-shots in scripts and CI.</p>
+          <h3 data-en="Terminal" data-zh="终端"></h3>
+          <p data-en="Rich interactive TUI with streaming, tool-call cards, session history, and readline editing. Or run headless one-shots in scripts and CI."
+             data-zh="富交互 TUI：流式输出、工具卡片、会话历史、readline 编辑。也可在脚本与 CI 里跑 headless 单发。"></p>
         </div>
         <div class="iface reveal">
           <div class="iface-icon">🌐</div>
-          <h3>Web UI</h3>
-          <p>Local dashboard at <code>:8080</code>. Browse sessions, inspect tool output, manage skills — same agent, richer visuals.</p>
+          <h3 data-en="Web UI" data-zh="Web 界面"></h3>
+          <p data-en="Local dashboard at :8080. Browse sessions, inspect tool output, manage skills — same agent, richer visuals."
+             data-zh="本地仪表盘（:8080）。浏览会话、查看工具输出、管理 skills —— 同一个 agent，更丰富的可视化。"></p>
         </div>
         <div class="iface reveal">
           <div class="iface-icon">💬</div>
-          <h3>IM Bridge</h3>
-          <p>WeChat iLink, Feishu, DingTalk, WeCom, Discord, and Telegram. Add Octo to a chat and delegate tasks from your phone without opening a terminal.</p>
+          <h3 data-en="IM Bridge" data-zh="IM 桥接"></h3>
+          <p data-en="WeChat iLink, Feishu, DingTalk, WeCom, Discord, and Telegram. Add Octo to a chat and delegate tasks from your phone without opening a terminal."
+             data-zh="微信 iLink、飞书、钉钉、企微、Discord、Telegram。把 Octo 加进聊天，从手机派活，无需打开终端。"></p>
         </div>
       </div>
     </div>
@@ -440,46 +485,46 @@
   <section>
     <div class="container">
       <div class="section-header reveal">
-        <h2>See it in action</h2>
-        <p>A few commands to get a feel for what Octo can do.</p>
+        <h2 data-en="See it in action" data-zh="看它怎么干活"></h2>
+        <p data-en="A few commands to get a feel for what Octo can do." data-zh="几条命令，感受一下 Octo 能做什么。"></p>
       </div>
       <div class="demo-grid">
         <div class="demo-block reveal">
-          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>One-shot agentic task</div>
-          <pre class="demo-code"><span class="comment"># Headless: one prompt → full tool loop → exit</span>
+          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span data-en="One-shot agentic task" data-zh="单发 agentic 任务"></span></div>
+          <pre class="demo-code"><span class="comment" data-en="# Headless: one prompt → full tool loop → exit" data-zh="# Headless：一个 prompt → 完整工具循环 → 退出"></span>
 <span class="cmd">octo</span> <span class="arg">"Add a --json flag to octo config show"</span>
 
-<span class="comment"># Pipe-friendly for scripts</span>
+<span class="comment" data-en="# Pipe-friendly for scripts" data-zh="# 对脚本友好，支持管道"></span>
 echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">octo</span></pre>
         </div>
         <div class="demo-block reveal">
-          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Interactive session</div>
-          <pre class="demo-code"><span class="comment"># TUI with history, tool cards, and /commands</span>
+          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span data-en="Interactive session" data-zh="交互式会话"></span></div>
+          <pre class="demo-code"><span class="comment" data-en="# TUI with history, tool cards, and /commands" data-zh="# TUI：历史、工具卡片、/ 命令"></span>
 <span class="cmd">octo</span>
 <span class="cmd">octo sessions</span>
-<span class="cmd">octo</span> -c  <span class="comment"># pick a session from a list</span>
+<span class="cmd">octo</span> -c  <span class="comment" data-en="# pick a session from a list" data-zh="# 从列表里选一个会话"></span>
 <span class="cmd">octo</span> -c &lt;session-id&gt;
 
-<span class="comment"># With reasoning and sandbox</span>
+<span class="comment" data-en="# With reasoning and sandbox" data-zh="# 带推理与沙箱"></span>
 <span class="cmd">octo</span> --reasoning-effort high --sandbox</pre>
         </div>
         <div class="demo-block reveal">
-          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Web, IM, and MCP</div>
-          <pre class="demo-code"><span class="comment"># Local web dashboard + IM bridges (one process)</span>
+          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span data-en="Web, IM, and MCP" data-zh="Web、IM 与 MCP"></span></div>
+          <pre class="demo-code"><span class="comment" data-en="# Local web dashboard + IM bridges (one process)" data-zh="# 本地 Web 仪表盘 + IM 桥接（同一进程）"></span>
 <span class="cmd">octo serve</span>
-<span class="cmd">octo serve</span> --addr :8080  <span class="comment"># expose on the LAN</span>
+<span class="cmd">octo serve</span> --addr :8080  <span class="comment" data-en="# expose on the LAN" data-zh="# 暴露到局域网"></span>
 
-<span class="comment"># Connect MCP servers; manage skills</span>
+<span class="comment" data-en="# Connect MCP servers; manage skills" data-zh="# 连接 MCP 服务；管理 skills"></span>
 <span class="cmd">octo mcp</span>
 <span class="cmd">octo skills</span> list</pre>
         </div>
         <div class="demo-block reveal">
-          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Configuration layers</div>
-          <pre class="demo-code"><span class="comment"># Octo learns who you are and how you work</span>
-~/.octo/soul.md      <span class="comment"># agent persona</span>
-~/.octo/user.md      <span class="comment"># your profile</span>
-~/.octo/octorules.md <span class="comment"># global rules</span>
-.octorules           <span class="comment"># project conventions</span></pre>
+          <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span data-en="Configuration layers" data-zh="配置分层"></span></div>
+          <pre class="demo-code"><span class="comment" data-en="# Octo learns who you are and how you work" data-zh="# Octo 学习你是谁、你怎么工作"></span>
+~/.octo/soul.md      <span class="comment" data-en="# agent persona" data-zh="# agent 人格"></span>
+~/.octo/user.md      <span class="comment" data-en="# your profile" data-zh="# 你的个人画像"></span>
+~/.octo/octorules.md <span class="comment" data-en="# global rules" data-zh="# 全局规则"></span>
+.octorules           <span class="comment" data-en="# project conventions" data-zh="# 项目约定"></span></pre>
         </div>
       </div>
     </div>
@@ -490,23 +535,23 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
     <div class="container">
       <div class="philosophy">
         <div class="philosophy-block positive reveal">
-          <h3>What Octo is</h3>
+          <h3 data-en="What Octo is" data-zh="Octo 是什么"></h3>
           <ul>
-            <li>A tool that gets out of the way and lets you work</li>
-            <li>Functionality over token-counting minimalism</li>
-            <li>Open, inspectable, and hackable — MIT licensed</li>
-            <li>Local-first: your data stays on your machine</li>
-            <li>Composable: MCP, skills, hooks, sub-agents</li>
+            <li data-en="A tool that gets out of the way and lets you work" data-zh="一个不挡路、让你专心干活的工具"></li>
+            <li data-en="Functionality over token-counting minimalism" data-zh="功能优先，而非抠 token 的极简主义"></li>
+            <li data-en="Open, inspectable, and hackable — MIT licensed" data-zh="开放、可检视、可魔改 —— MIT 许可"></li>
+            <li data-en="Local-first: your data stays on your machine" data-zh="本地优先：你的数据留在你机器上"></li>
+            <li data-en="Composable: MCP, skills, hooks, sub-agents" data-zh="可组合：MCP、skills、hooks、子代理"></li>
           </ul>
         </div>
         <div class="philosophy-block reveal">
-          <h3>What Octo is not</h3>
+          <h3 data-en="What Octo is not" data-zh="Octo 不是什么"></h3>
           <ul>
-            <li>Not a web-only SaaS with a tacked-on CLI</li>
-            <li>Not a closed marketplace for encrypted skills</li>
-            <li>Not obsessed with shaving tokens at the cost of capability</li>
-            <li>Not a black box — every tool call is visible and gated</li>
-            <li>Not trying to replace your IDE (it pairs beautifully with one)</li>
+            <li data-en="Not a web-only SaaS with a tacked-on CLI" data-zh="不是只有网页、CLI 是后贴的 SaaS"></li>
+            <li data-en="Not a closed marketplace for encrypted skills" data-zh="不是卖加密 skills 的封闭市场"></li>
+            <li data-en="Not obsessed with shaving tokens at the cost of capability" data-zh="不为省 token 而牺牲能力"></li>
+            <li data-en="Not a black box — every tool call is visible and gated" data-zh="不是黑盒 —— 每次工具调用都可见、可门控"></li>
+            <li data-en="Not trying to replace your IDE (it pairs beautifully with one)" data-zh="不打算取代你的 IDE（它和 IDE 配合得很好）"></li>
           </ul>
         </div>
       </div>
@@ -517,12 +562,12 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
   <section style="text-align: center;">
     <div class="container">
       <div class="reveal">
-        <h2 style="font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem;">Ready to try it?</h2>
-        <p style="color: var(--muted); margin-bottom: 1.5rem;">Install in seconds, configure in a minute, ship in an hour.</p>
+        <h2 style="font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem;" data-en="Ready to try it?" data-zh="想试试吗？"></h2>
+        <p style="color: var(--muted); margin-bottom: 1.5rem;" data-en="Install in seconds, configure in a minute, ship in an hour." data-zh="几秒安装，一分钟配置，一小时交付。"></p>
         <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
-          <a class="btn btn-primary" href="https://github.com/Leihb/octo-agent/releases/latest">⬇️ Download</a>
-          <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent">🐙 GitHub</a>
-          <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent/blob/main/CHANGELOG.md">📋 Changelog</a>
+          <a class="btn btn-primary" href="https://github.com/Leihb/octo-agent/releases/latest" data-en="⬇️ Download" data-zh="⬇️ 下载"></a>
+          <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent" data-en="🐙 GitHub" data-zh="🐙 GitHub"></a>
+          <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent/blob/main/CHANGELOG.md" data-en="📋 Changelog" data-zh="📋 更新日志"></a>
         </div>
       </div>
     </div>
@@ -531,14 +576,42 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
   <footer>
     <div class="footer-links">
       <a href="https://github.com/Leihb/octo-agent">GitHub</a>
-      <a href="https://github.com/Leihb/octo-agent/blob/main/README.md">README</a>
-      <a href="https://github.com/Leihb/octo-agent/blob/main/CHANGELOG.md">Changelog</a>
-      <a href="https://github.com/Leihb/octo-agent/blob/main/LICENSE.txt">License</a>
+      <a href="https://github.com/Leihb/octo-agent/blob/main/README.md" data-href-en="https://github.com/Leihb/octo-agent/blob/main/README.md" data-href-zh="https://github.com/Leihb/octo-agent/blob/main/README_CN.md">README</a>
+      <a href="https://github.com/Leihb/octo-agent/blob/main/CHANGELOG.md" data-en="Changelog" data-zh="更新日志"></a>
+      <a href="https://github.com/Leihb/octo-agent/blob/main/LICENSE.txt" data-en="License" data-zh="许可"></a>
     </div>
-    <p>MIT licensed · Built with curiosity and a lot of ☕</p>
+    <p data-en="MIT licensed · Built with curiosity and a lot of ☕" data-zh="MIT 许可 · 用好奇心和大量 ☕ 打造"></p>
   </footer>
 
   <script>
+    // Bilingual content: swap data-en/data-zh text and data-href-* targets.
+    function applyLang(lang) {
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-en]').forEach(el => {
+        const v = el.dataset[lang];
+        if (v != null) el.textContent = v;
+      });
+      document.querySelectorAll('[data-href-en]').forEach(el => {
+        const href = el.dataset['href' + (lang === 'zh' ? 'Zh' : 'En')];
+        if (href) el.setAttribute('href', href);
+      });
+      document.querySelectorAll('.lang-toggle button').forEach(b => {
+        b.classList.toggle('active', b.dataset.lang === lang);
+      });
+      try { localStorage.setItem('octo-lang', lang); } catch (e) {}
+    }
+
+    let initial;
+    try { initial = localStorage.getItem('octo-lang'); } catch (e) {}
+    if (initial !== 'en' && initial !== 'zh') {
+      initial = (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+    }
+    applyLang(initial);
+
+    document.querySelectorAll('.lang-toggle button').forEach(b => {
+      b.addEventListener('click', () => applyLang(b.dataset.lang));
+    });
+
     // Simple scroll-reveal
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
