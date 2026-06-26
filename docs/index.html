@@ -123,6 +123,9 @@
       border: 1.5px solid var(--accent);
     }
     .btn-secondary:hover { background: var(--accent-soft); }
+    .all-builds { margin-top: 0.85rem; font-size: 0.85rem; }
+    .all-builds a { color: var(--muted); text-decoration: none; }
+    .all-builds a:hover { color: var(--accent); text-decoration: underline; }
     .install-hint {
       margin-top: 2rem;
       display: inline-block;
@@ -392,9 +395,13 @@
          data-en="A functionality-first AI agent in a single Go binary. Bring it to your terminal, browser, or chat app — it speaks Anthropic and OpenAI natively, and actually gets things done."
          data-zh="以功能为先的 AI Agent，单一 Go 二进制。带它进终端、浏览器或聊天工具 —— 原生支持 Anthropic 与 OpenAI，真正把事情干完。"></p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="https://github.com/Leihb/octo-agent" data-en="⭐ Star on GitHub" data-zh="⭐ 在 GitHub 上 Star"></a>
+        <a class="btn btn-primary js-download" href="https://github.com/Leihb/octo-agent/releases/latest" data-en="⬇️ Download" data-zh="⬇️ 下载"></a>
+        <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent" data-en="⭐ Star on GitHub" data-zh="⭐ 在 GitHub 上 Star"></a>
         <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent/blob/main/README.md" data-href-en="https://github.com/Leihb/octo-agent/blob/main/README.md" data-href-zh="https://github.com/Leihb/octo-agent/blob/main/README_CN.md" data-en="📖 Read the Docs" data-zh="📖 阅读文档"></a>
       </div>
+      <p class="all-builds">
+        <a href="https://github.com/Leihb/octo-agent/releases/latest" data-en="Other platforms &amp; checksums →" data-zh="其他平台与校验和 →"></a>
+      </p>
       <div class="install-hint">
         <code>go install github.com/Leihb/octo-agent/cmd/octo@latest</code>
       </div>
@@ -565,7 +572,7 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
         <h2 style="font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem;" data-en="Ready to try it?" data-zh="想试试吗？"></h2>
         <p style="color: var(--muted); margin-bottom: 1.5rem;" data-en="Install in seconds, configure in a minute, ship in an hour." data-zh="几秒安装，一分钟配置，一小时交付。"></p>
         <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
-          <a class="btn btn-primary" href="https://github.com/Leihb/octo-agent/releases/latest" data-en="⬇️ Download" data-zh="⬇️ 下载"></a>
+          <a class="btn btn-primary js-download" href="https://github.com/Leihb/octo-agent/releases/latest" data-en="⬇️ Download" data-zh="⬇️ 下载"></a>
           <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent" data-en="🐙 GitHub" data-zh="🐙 GitHub"></a>
           <a class="btn btn-secondary" href="https://github.com/Leihb/octo-agent/blob/main/CHANGELOG.md" data-en="📋 Changelog" data-zh="📋 更新日志"></a>
         </div>
@@ -601,16 +608,65 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
       try { localStorage.setItem('octo-lang', lang); } catch (e) {}
     }
 
+    let currentLang = 'en';
+    function setLang(lang) { currentLang = lang; applyLang(lang); }
+
     let initial;
     try { initial = localStorage.getItem('octo-lang'); } catch (e) {}
     if (initial !== 'en' && initial !== 'zh') {
       initial = (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
     }
-    applyLang(initial);
+    setLang(initial);
 
     document.querySelectorAll('.lang-toggle button').forEach(b => {
-      b.addEventListener('click', () => applyLang(b.dataset.lang));
+      b.addEventListener('click', () => setLang(b.dataset.lang));
     });
+
+    // Direct download: detect the visitor's OS and point the Download buttons
+    // straight at the matching release asset, so they skip the GitHub releases
+    // page. The version-stable installer aside, archive names carry the version,
+    // so the exact URL comes from the GitHub API (CORS-enabled, no auth). Any
+    // failure (offline, rate-limited, unknown OS) leaves the buttons on their
+    // fallback href — the releases page — so they always work.
+    (function initDownload() {
+      var btns = document.querySelectorAll('.js-download');
+      if (!btns.length) return;
+
+      var ua = navigator.userAgent || '';
+      var plat = (navigator.platform || '') + ' ' + ua;
+      var arch = /arm64|aarch64/i.test(ua) ? 'arm64' : 'amd64';
+      var target = null;
+      if (/Win/i.test(plat)) target = { os: 'windows' };
+      else if (/Mac/i.test(plat)) target = { os: 'darwin', arch: 'arm64' }; // modern Macs; Intel users use "Other platforms"
+      else if (/Linux|X11/i.test(plat) && !/Android/i.test(ua)) target = { os: 'linux', arch: arch };
+      if (!target) return;
+
+      var labels = {
+        windows: { en: '⬇️ Download for Windows', zh: '⬇️ 下载 Windows 安装器' },
+        darwin:  { en: '⬇️ Download for macOS',   zh: '⬇️ 下载 macOS 版' },
+        linux:   { en: '⬇️ Download for Linux',   zh: '⬇️ 下载 Linux 版' }
+      };
+      var matches = target.os === 'windows'
+        ? function (n) { return n === 'octo-setup.exe'; }
+        : function (n) { return n.indexOf('_' + target.os + '_' + target.arch) !== -1 && /\.(tar\.gz|zip)$/i.test(n); };
+
+      fetch('https://api.github.com/repos/Leihb/octo-agent/releases/latest', {
+        headers: { 'Accept': 'application/vnd.github+json' }
+      }).then(function (r) {
+        if (!r.ok) throw new Error('release lookup failed');
+        return r.json();
+      }).then(function (data) {
+        var asset = (data.assets || []).filter(function (a) { return matches(a.name); })[0];
+        if (!asset) return;
+        var lbl = labels[target.os];
+        btns.forEach(function (b) {
+          b.setAttribute('href', asset.browser_download_url);
+          b.setAttribute('data-en', lbl.en);
+          b.setAttribute('data-zh', lbl.zh);
+        });
+        applyLang(currentLang);
+      }).catch(function () { /* keep the releases-page fallback */ });
+    })();
 
     // Simple scroll-reveal
     const observer = new IntersectionObserver((entries) => {
