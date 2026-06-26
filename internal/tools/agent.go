@@ -110,17 +110,27 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		preset = &p
 	}
 
-	// Build the spawn request
+	// Build the spawn request. Call-level tools/model win over the preset's
+	// frontmatter defaults; the preset fills in what the call left unset.
+	callTools := stringSliceArg(input, "tools")
+	callModel := strings.TrimSpace(stringArg(input, "model"))
 	req := SpawnRequest{
 		Description: desc,
 		AgentType:   subagentType,
 		Prompt:      prompt,
-		Tools:       stringSliceArg(input, "tools"),
-		Model:       strings.TrimSpace(stringArg(input, "model")),
+		Tools:       callTools,
+		Model:       callModel,
 	}
 	if preset != nil {
 		req.SystemSuffix = preset.persona
 		req.ReadOnly = preset.readOnly
+		req.DisallowedTools = preset.disallowedTools
+		if len(callTools) == 0 {
+			req.Tools = preset.tools
+		}
+		if callModel == "" {
+			req.Model = preset.model
+		}
 	}
 
 	// Determine sync vs async

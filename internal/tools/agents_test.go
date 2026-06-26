@@ -15,6 +15,14 @@ func useAgentsRoot(t *testing.T, dir string) {
 	t.Cleanup(func() { userAgentsRoot = orig })
 }
 
+// useProjectAgentsRoot points projectAgentsRoot at dir for the test's duration.
+func useProjectAgentsRoot(t *testing.T, dir string) {
+	t.Helper()
+	orig := projectAgentsRoot
+	projectAgentsRoot = func() string { return dir }
+	t.Cleanup(func() { projectAgentsRoot = orig })
+}
+
 func writeAgentFile(t *testing.T, root, name, content string) {
 	t.Helper()
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -159,6 +167,66 @@ func TestParseAgentFile_Valid(t *testing.T) {
 	}
 	if !strings.Contains(p.persona, "Be helpful.") {
 		t.Errorf("persona = %q", p.persona)
+	}
+}
+
+func TestParseAgentFile_ToolsModelDisallowed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scoped.md")
+	content := "---\ndescription: scoped agent\ntools: [read_file, grep]\ndisallowed_tools: [terminal]\nmodel: haiku\n---\nbody"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, ok := parseAgentFile(path)
+	if !ok {
+		t.Fatal("parseAgentFile returned false")
+	}
+	if len(p.tools) != 2 || p.tools[0] != "read_file" || p.tools[1] != "grep" {
+		t.Errorf("tools = %v", p.tools)
+	}
+	if len(p.disallowedTools) != 1 || p.disallowedTools[0] != "terminal" {
+		t.Errorf("disallowedTools = %v", p.disallowedTools)
+	}
+	if p.model != "haiku" {
+		t.Errorf("model = %q, want haiku", p.model)
+	}
+}
+
+func TestParseAgentFile_ModelInheritIsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inh.md")
+	if err := os.WriteFile(path, []byte("---\ndescription: d\nmodel: inherit\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, ok := parseAgentFile(path)
+	if !ok {
+		t.Fatal("parseAgentFile returned false")
+	}
+	if p.model != "" {
+		t.Errorf("model = %q, want empty (inherit)", p.model)
+	}
+}
+
+func TestDiscoverAgents_ProjectOverridesUser(t *testing.T) {
+	userRoot := t.TempDir()
+	projRoot := t.TempDir()
+	useAgentsRoot(t, userRoot)
+	useProjectAgentsRoot(t, projRoot)
+
+	writeAgentFile(t, userRoot, "helper.md", "---\ndescription: user helper\n---\nuser body")
+	writeAgentFile(t, userRoot, "useronly.md", "---\ndescription: user only\n---\nbody")
+	writeAgentFile(t, projRoot, "helper.md", "---\ndescription: project helper\n---\nproject body")
+
+	discoverAgents()
+
+	p, ok := lookupAgentPreset("helper")
+	if !ok {
+		t.Fatal("helper not discovered")
+	}
+	if p.description != "project helper" {
+		t.Errorf("description = %q, want project-level override", p.description)
+	}
+	// User-only agents are still visible.
+	if _, ok := lookupAgentPreset("useronly"); !ok {
+		t.Error("user-only agent should remain discoverable")
 	}
 }
 

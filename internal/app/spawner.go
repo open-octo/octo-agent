@@ -57,7 +57,7 @@ const childMaxTurns = 100
 // a later Continue can resume it, runs the first prompt, and returns the
 // child's id alongside its reply.
 func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.SpawnResult, error) {
-	childTools := filterChildTools(s.toolsFn(), req.Tools, req.ReadOnly)
+	childTools := filterChildTools(s.toolsFn(), req.Tools, req.DisallowedTools, req.ReadOnly)
 
 	model := req.Model
 	if model == "" {
@@ -309,12 +309,19 @@ func (lc *liveChild) syncSession() {
 // edit_file) are dropped too — used by read-only presets so the child keeps
 // terminal/MCP/codegraph but can't change files. The two filters compose: a
 // readOnly preset still honours allowed.
-func filterChildTools(parent []agent.ToolDefinition, allowed []string, readOnly bool) []agent.ToolDefinition {
+func filterChildTools(parent []agent.ToolDefinition, allowed, disallowed []string, readOnly bool) []agent.ToolDefinition {
 	var allowSet map[string]bool
 	if len(allowed) > 0 {
 		allowSet = make(map[string]bool, len(allowed))
 		for _, a := range allowed {
 			allowSet[a] = true
+		}
+	}
+	var denySet map[string]bool
+	if len(disallowed) > 0 {
+		denySet = make(map[string]bool, len(disallowed))
+		for _, d := range disallowed {
+			denySet[d] = true
 		}
 	}
 	out := make([]agent.ToolDefinition, 0, len(parent))
@@ -326,6 +333,9 @@ func filterChildTools(parent []agent.ToolDefinition, allowed []string, readOnly 
 			continue
 		}
 		if allowSet != nil && !allowSet[td.Name] {
+			continue
+		}
+		if denySet[td.Name] {
 			continue
 		}
 		out = append(out, td)

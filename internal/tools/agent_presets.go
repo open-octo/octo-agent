@@ -9,6 +9,13 @@ type agentPreset struct {
 	description string
 	persona     string
 	readOnly    bool
+	// tools, when non-empty, is the agent's tool allowlist (frontmatter
+	// `tools`). disallowedTools (frontmatter `disallowed_tools`) is subtracted
+	// from the inherited set. model (frontmatter `model`, default "inherit")
+	// pins the child's model; empty means inherit the parent's.
+	tools           []string
+	disallowedTools []string
+	model           string
 }
 
 // builtInPresets is the canonical set of built-in agent types. These are

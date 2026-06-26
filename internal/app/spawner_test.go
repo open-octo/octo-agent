@@ -101,7 +101,7 @@ func TestAgentSpawner_AppliesToolAllowlist(t *testing.T) {
 	sp := NewSpawner(parent, nilExecutor{}, func() []agent.ToolDefinition { return parentTools })
 
 	// Allowlist restricts to read_file + grep. sub_agent always excluded.
-	got := filterChildTools(parentTools, []string{"read_file", "grep"}, false)
+	got := filterChildTools(parentTools, []string{"read_file", "grep"}, nil, false)
 	if len(got) != 2 {
 		t.Fatalf("filtered tools len = %d, want 2: %+v", len(got), got)
 	}
@@ -111,7 +111,7 @@ func TestAgentSpawner_AppliesToolAllowlist(t *testing.T) {
 	}
 
 	// No allowlist → all parent tools minus sub_agent.
-	got = filterChildTools(parentTools, nil, false)
+	got = filterChildTools(parentTools, nil, nil, false)
 	if len(got) != 3 {
 		t.Errorf("nil allowlist should keep all non-sub_agent tools: %+v", got)
 	}
@@ -314,7 +314,7 @@ func TestFilterChildTools_DropsSendMessage(t *testing.T) {
 		{Name: "read_file"},
 		{Name: "sub_agent"},
 	}
-	got := filterChildTools(parentTools, nil, false)
+	got := filterChildTools(parentTools, nil, nil, false)
 	for _, td := range got {
 		if td.Name == "sub_agent" {
 			t.Errorf("child toolbelt must not contain %q", td.Name)
@@ -333,7 +333,7 @@ func TestFilterChildTools_ReadOnlyDropsMutators(t *testing.T) {
 		{Name: "write_file"},
 		{Name: "edit_file"},
 	}
-	got := filterChildTools(parentTools, nil, true)
+	got := filterChildTools(parentTools, nil, nil, true)
 	for _, td := range got {
 		if td.Name == "write_file" || td.Name == "edit_file" {
 			t.Errorf("read-only child must not contain %q", td.Name)
@@ -348,6 +348,36 @@ func TestFilterChildTools_ReadOnlyDropsMutators(t *testing.T) {
 		if !names[want] {
 			t.Errorf("read-only child should keep %q, got %+v", want, got)
 		}
+	}
+}
+
+func TestFilterChildTools_DisallowedSubtracted(t *testing.T) {
+	parentTools := []agent.ToolDefinition{
+		{Name: "read_file"},
+		{Name: "grep"},
+		{Name: "terminal"},
+		{Name: "write_file"},
+	}
+	// Denylist removes terminal even though it isn't a mutator and no allowlist
+	// is set; the rest survive.
+	got := filterChildTools(parentTools, nil, []string{"terminal"}, false)
+	names := map[string]bool{}
+	for _, td := range got {
+		names[td.Name] = true
+	}
+	if names["terminal"] {
+		t.Errorf("disallowed terminal must be removed: %+v", got)
+	}
+	for _, want := range []string{"read_file", "grep", "write_file"} {
+		if !names[want] {
+			t.Errorf("expected %q to survive denylist, got %+v", want, got)
+		}
+	}
+
+	// Denylist composes with an allowlist: allow read_file+grep, then deny grep.
+	got = filterChildTools(parentTools, []string{"read_file", "grep"}, []string{"grep"}, false)
+	if len(got) != 1 || got[0].Name != "read_file" {
+		t.Errorf("allow{read_file,grep} minus deny{grep} should leave read_file, got %+v", got)
 	}
 }
 

@@ -41,6 +41,10 @@ type SpawnRequest struct {
 	// recursion filter, not the tool.
 	Tools []string
 
+	// DisallowedTools is subtracted from the child's inherited tool set
+	// (frontmatter `disallowed_tools`). Applied on top of Tools/ReadOnly.
+	DisallowedTools []string
+
 	// Model, when non-empty, overrides the parent's model for this child.
 	Model string
 
