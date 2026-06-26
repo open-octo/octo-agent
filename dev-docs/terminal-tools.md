@@ -139,6 +139,14 @@ non-advancing snapshot.
 The model's concurrency is **process-parallel, turn-serial**: many background
 processes run at once, but the agent loop still takes one turn at a time.
 
+### Loop detection exemption
+
+`terminal_output` and `terminal_list` are exempt from the agent loop's
+duplicate-tool-call "stuck" detector. Repeatedly checking on the same background
+process is normal wait behaviour, and the loop should not stop the turn just
+because the model asked for another progress snapshot. The tools themselves still
+enforce their own anti-polling limits (see `background.go`).
+
 - `BackgroundManager` is a `map[id]*bgProcess` with two goroutines per process
   (reader + waiter), so N `run_in_background` launches run concurrently. The
   agent fires several off, continues other work, and reacts to each completion

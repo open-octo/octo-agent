@@ -556,6 +556,36 @@ func TestAgent_Run_DuplicateToolCalls_StopsGracefully(t *testing.T) {
 	}
 }
 
+func TestAgent_Run_RepeatedTerminalOutput_DoesNotStop(t *testing.T) {
+	// Repeatedly checking the same background process with terminal_output is
+	// normal wait behaviour, not a stuck loop. The stuck detector must not fire
+	// just because the model polls for progress.
+	replies := []Reply{
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c1", "terminal_output", map[string]any{"id": "bg_1"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c2", "terminal_output", map[string]any{"id": "bg_1"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c3", "terminal_output", map[string]any{"id": "bg_1"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c4", "terminal_output", map[string]any{"id": "bg_1"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c5", "terminal_output", map[string]any{"id": "bg_1"})}},
+		{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock("c6", "terminal_output", map[string]any{"id": "bg_1"})}},
+		{Content: "done", StopReason: "end_turn"},
+	}
+	send := &fakeToolSender{replies: replies}
+	exec := &fakeExecutor{}
+	a := New(send, "m")
+	defs := []ToolDefinition{{Name: "terminal_output"}}
+
+	reply, err := a.Run(context.Background(), "go", defs, exec)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reply.StopReason != "end_turn" {
+		t.Errorf("StopReason = %q, want end_turn", reply.StopReason)
+	}
+	if send.calls != 7 {
+		t.Errorf("provider calls = %d, want 7 (stuck detector should not stop early)", send.calls)
+	}
+}
+
 func TestAgent_Run_StuckDetector_ResetsPerUserTurn(t *testing.T) {
 	// A new user turn ("continue") must give the model a fresh stuck-detector
 	// window. Without the per-turn reset the prior turn's fingerprints linger,

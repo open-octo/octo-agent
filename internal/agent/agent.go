@@ -263,11 +263,24 @@ func fingerprintToolUseBlock(b ContentBlock) toolCallFingerprint {
 	}
 }
 
+// observationToolNames are tools whose only purpose is to inspect state
+// started by earlier work (background process output, running process list).
+// Repeating them while waiting for a long-running process is normal behaviour,
+// not a stuck loop, so the stuck detector ignores them when fingerprinting a
+// batch. The tools themselves still have their own anti-polling guards.
+var observationToolNames = map[string]bool{
+	"terminal_output": true,
+	"terminal_list":   true,
+}
+
 // fingerprintToolUseBatch hashes an ordered slice of tool_use blocks.
+// Observation-only tools are omitted from the fingerprint so that repeatedly
+// checking on a background process (e.g. terminal_output on the same id)
+// does not trip the duplicate-tool-call loop detector.
 func fingerprintToolUseBatch(blocks []ContentBlock) []toolCallFingerprint {
 	out := make([]toolCallFingerprint, 0, len(blocks))
 	for _, b := range blocks {
-		if b.Type == "tool_use" {
+		if b.Type == "tool_use" && !observationToolNames[b.Name] {
 			out = append(out, fingerprintToolUseBlock(b))
 		}
 	}
@@ -812,17 +825,23 @@ func (a *Agent) runLoop(
 			// stuck in a loop with no progress. Detect this early and stop
 			// gracefully so the caller can intervene instead of burning the
 			// full turn budget.
+			//
+			// Observation-only tools such as terminal_output are exempt: repeatedly
+			// checking on a long-running background process is expected behaviour,
+			// not a loop. Those tools still enforce their own anti-polling limits.
 			const stuckWindow = 4 // require 4 consecutive repeats (5 identical batches total)
 			fp := fingerprintToolUseBatch(reply.Blocks)
-			if hasConsecutiveDuplicates(a.recentToolCalls, fp, stuckWindow) {
+			if len(fp) > 0 && hasConsecutiveDuplicates(a.recentToolCalls, fp, stuckWindow) {
 				return a.budgetStop(handler, StopReasonStuck,
 					"[octo] Stopped: detected repeated tool calls without progress. "+
 						"The model appears to be stuck in a loop. "+
 						"Send another message to continue with a different approach.")
 			}
-			a.recentToolCalls = append(a.recentToolCalls, fp)
-			if len(a.recentToolCalls) > stuckWindow+1 {
-				a.recentToolCalls = a.recentToolCalls[len(a.recentToolCalls)-stuckWindow-1:]
+			if len(fp) > 0 {
+				a.recentToolCalls = append(a.recentToolCalls, fp)
+				if len(a.recentToolCalls) > stuckWindow+1 {
+					a.recentToolCalls = a.recentToolCalls[len(a.recentToolCalls)-stuckWindow-1:]
+				}
 			}
 
 			// Emit EventToolStarted before dispatch so observers see the
