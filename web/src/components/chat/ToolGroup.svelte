@@ -382,6 +382,7 @@
   background: var(--bg-sidebar); font-size: 12px; line-height: 1.7;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--text-secondary); overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+  max-height: 420px; overflow-y: auto;
 }
 /* Chevron rotates from ▸ (collapsed) to ▾ (open). */
 .chev { transition: transform 0.15s ease; flex: 0 0 auto; }
