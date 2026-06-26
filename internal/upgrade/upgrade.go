@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,6 +31,19 @@ import (
 
 // BaseURL is the release origin. A var so tests point it at httptest.
 var BaseURL = "https://github.com/Leihb/octo-agent"
+
+// MirrorBaseURLs are tried in order when a release asset or checksums.txt
+// fails to download from BaseURL. They must expose the same path layout as
+// GitHub releases: /releases/download/v<ver>/<asset>.
+//
+// Public, no-cost mirrors come and go; the list is conservative and can be
+// extended. Checksum verification still anchors trust to the original
+// checksums.txt content, so a mirror cannot silently install a modified binary.
+var MirrorBaseURLs = []string{
+	"https://ghproxy.net/https://github.com/Leihb/octo-agent",
+	"https://gh-proxy.com/https://github.com/Leihb/octo-agent",
+	"https://gh.ddlc.top/https://github.com/Leihb/octo-agent",
+}
 
 // maxArchiveSize caps the download; a release archive is ~15 MB, so this is
 // generous headroom, not a real limit.
@@ -63,16 +77,18 @@ func (o Options) log(format string, args ...any) {
 // Check resolves the latest released version (no leading "v") by following
 // none of the releases/latest redirect: the target tag is in the Location
 // header. No GitHub API, so no rate-limit coupling.
+//
+// It honors the standard proxy environment variables (HTTP_PROXY,
+// HTTPS_PROXY, NO_PROXY) via http.ProxyFromEnvironment.
 func Check(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, BaseURL+"/releases/latest", nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", version.UserAgent())
-	client := &http.Client{
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+	client := proxiedClient()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -213,12 +229,12 @@ func Prepare(ctx context.Context, opts Options) (*Prepared, error) {
 	asset := AssetName(latest)
 	opts.log("downloading %s", asset)
 	archivePath := filepath.Join(tmpDir, asset)
-	if err := download(ctx, releaseURL(latest, asset), archivePath); err != nil {
+	if err := downloadWithMirrors(ctx, releaseURLs(latest, asset), archivePath, opts); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("download %s: %w", asset, err)
 	}
 	sumsPath := filepath.Join(tmpDir, "checksums.txt")
-	if err := download(ctx, releaseURL(latest, "checksums.txt"), sumsPath); err != nil {
+	if err := downloadWithMirrors(ctx, releaseURLs(latest, "checksums.txt"), sumsPath, opts); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("download checksums.txt: %w", err)
 	}
@@ -271,8 +287,49 @@ func Run(ctx context.Context, opts Options) error {
 	return p.Install()
 }
 
-func releaseURL(ver, asset string) string {
-	return BaseURL + "/releases/download/v" + ver + "/" + asset
+// releaseURLs returns candidate URLs for a release asset: the canonical
+// GitHub URL first, followed by each configured mirror.
+func releaseURLs(ver, asset string) []string {
+	paths := []string{BaseURL}
+	paths = append(paths, MirrorBaseURLs...)
+	urls := make([]string, 0, len(paths))
+	for _, base := range paths {
+		urls = append(urls, base+"/releases/download/v"+ver+"/"+asset)
+	}
+	return urls
+}
+
+// proxiedClient returns an *http.Client that honors HTTP_PROXY,
+// HTTPS_PROXY, and NO_PROXY via http.ProxyFromEnvironment.
+func proxiedClient() *http.Client {
+	return &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment}}
+}
+
+// downloadWithMirrors tries each URL in turn until one succeeds, respecting
+// proxy environment variables for every attempt.
+func downloadWithMirrors(ctx context.Context, urls []string, path string, opts Options) error {
+	var lastErr error
+	for i, u := range urls {
+		if i > 0 {
+			opts.log("retry mirror: %s", maskedURL(u))
+		}
+		if err := download(ctx, u, path); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	return lastErr
+}
+
+// maskedURL strips query parameters from a URL for logging.
+func maskedURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.RawQuery = ""
+	return u.String()
 }
 
 // download fetches url into path. The size cap guards against a hostile
@@ -283,7 +340,7 @@ func download(ctx context.Context, url, path string) error {
 		return err
 	}
 	req.Header.Set("User-Agent", version.UserAgent())
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := proxiedClient().Do(req)
 	if err != nil {
 		return err
 	}
