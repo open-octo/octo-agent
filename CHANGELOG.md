@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased — 1.1.0-dev]
+## [Unreleased — 1.2.0-dev]
+
+## [1.1.0] — 2026-06-26
+
+### Added
+- **Sub-agent parity with Claude Code.** Friendly names for background tasks and
+  sub-agents (#802); richer agent-definition frontmatter (`tools`,
+  `disallowed_tools`, `model`) plus project-level `.octo/agents/` (#803); `fork`
+  now inherits the parent conversation (#804); explore/plan sub-agents run lean
+  on a lite model with a leaner system prompt (#805).
+- **Windows onboarding.** The installer starts the server and opens onboarding
+  (#798), starts the server on login, and makes installer-driven upgrades safe
+  (#799). A macOS/Linux install script with clear serve/onboard steps (#801).
+- **`web_fetch`** accepts optional `referer` / `user_agent` to clear hotlink
+  403/404 responses (#808).
+- The Thinking indicator's ↑ now shows the uplink token count (#807).
+- The system prompt requires intent narration before multi-step tool sequences
+  (#791).
 
 ### Changed
 - **`sed -i` is no longer hard-blocked.** The default `deny` rules for in-place
@@ -15,6 +32,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under strict/unattended mode — like any other unrecognised command, matching
   the interactive-first posture. The system prompt still steers toward
   `edit_file` for partial changes.
+- The terminal tool now guards against backtick command-substitution: its
+  description warns against backticks in quoted shell strings (POSIX runs them,
+  PowerShell escapes them), and a reactive hint fires when a command with
+  backticks produces "command not found" output (#814).
+
+### Fixed
+- **Server:** a scheduled task's `Directory` now actually takes effect (#806).
+- **Web:** the session Plan dropdown is no longer clipped (#813); the tool event
+  output cap was raised and tool-output height capped (#812); the streaming
+  caret stops blinking when tool calls start (#793); optimistic send state rolls
+  back when a session bind is rejected (#790); pre-existing TypeScript type
+  errors resolved (#792).
+- **TUI:** the input box auto-grows by soft-wrapped rows (#796).
+- **Agent:** observation tools are exempt from the duplicate-tool-call stuck
+  detector (#795).
+- **WeChat (weixin):** downloaded media files are now decrypted (#788).
 
 ## [1.0.0] — 2026-06-26
 
