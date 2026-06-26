@@ -3,11 +3,17 @@ package main
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+// daemonReadyTimeout bounds how long startDaemon waits for the spawned server
+// to begin accepting connections before it returns anyway.
+const daemonReadyTimeout = 15 * time.Second
 
 // daemonPidFile returns the path of the daemon PID file, creating ~/.octo if needed.
 func daemonPidFile() (string, error) {
@@ -54,7 +60,10 @@ func writePidFile(path string, pid int) error {
 }
 
 // startDaemon re-execs the current binary as a detached background process,
-// writes its PID, and returns immediately. serveArgs must not contain -d/--daemon.
+// writes its PID, and waits (up to daemonReadyTimeout) for it to start
+// accepting connections so callers — the Windows installer's post-install
+// launch, a shell one-liner — can open the dashboard the moment this returns.
+// serveArgs must not contain -d/--daemon.
 func startDaemon(serveArgs []string, stdout, stderr io.Writer) int {
 	pidFile, err := daemonPidFile()
 	if err != nil {
@@ -110,9 +119,68 @@ func startDaemon(serveArgs []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "octo serve daemon started (pid %d)\n", pid)
+	// Wait for the server to bind so a caller that opens the dashboard right
+	// after this returns doesn't hit a not-yet-listening port. A bind failure
+	// (e.g. port in use) shows up as the child exiting during the wait.
+	addr := daemonDialAddr(serveArgs)
+	if waitDaemonReady(addr, pid, daemonReadyTimeout) {
+		fmt.Fprintf(stdout, "octo serve daemon started (pid %d), ready at http://%s\n", pid, addr)
+	} else if !isProcessAlive(pid) {
+		fmt.Fprintf(stderr, "octo serve: daemon exited during startup; see %s\n", logPath)
+		_ = os.Remove(pidFile)
+		return 1
+	} else {
+		fmt.Fprintf(stdout, "octo serve daemon started (pid %d); not yet accepting connections — check %s\n", pid, logPath)
+	}
 	fmt.Fprintf(stdout, "logs: %s\n", logPath)
 	return 0
+}
+
+// daemonDialAddr derives a loopback-dialable host:port from the serve --addr
+// flag (default 127.0.0.1:8080). A wildcard or empty host is dialed on
+// 127.0.0.1 — the server always listens there too.
+func daemonDialAddr(serveArgs []string) string {
+	addr := "127.0.0.1:8080"
+	for i, a := range serveArgs {
+		switch {
+		case a == "-addr" || a == "--addr":
+			if i+1 < len(serveArgs) {
+				addr = serveArgs[i+1]
+			}
+		case strings.HasPrefix(a, "-addr="):
+			addr = strings.TrimPrefix(a, "-addr=")
+		case strings.HasPrefix(a, "--addr="):
+			addr = strings.TrimPrefix(a, "--addr=")
+		}
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// waitDaemonReady blocks until the daemon accepts a TCP connection on addr, the
+// child process dies, or timeout elapses. Returns true once a connection
+// succeeds.
+func waitDaemonReady(addr string, pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+		if !isProcessAlive(pid) {
+			return false
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return false
 }
 
 // stopDaemon reads the PID file and terminates the daemon process.

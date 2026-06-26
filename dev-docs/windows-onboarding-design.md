@@ -23,8 +23,11 @@ A Windows user with no dev toolchain:
 3. The installer copies `octo.exe` to `%LOCALAPPDATA%\Programs\octo`, adds that
    directory to the user `PATH`, creates a Start-menu shortcut, and registers an
    entry in "Add or remove programs". No UAC prompt.
-4. Opens a **new** terminal, types `octo`, and it runs. First run launches the
-   existing config wizard.
+4. On finish, the installer starts the server in the background
+   (`octo serve -d`, which blocks until the port is listening) and opens
+   <http://127.0.0.1:8080> — loopback, so no access key — landing the user in
+   the web UI's first-run onboarding. For a terminal session, opening a **new**
+   terminal and typing `octo` launches the existing config wizard on first run.
 5. When a task needs a tool that isn't installed, the agent already knows it's
    missing (from part A) and uses the existing `ShellEnvNote()` guidance to walk
    the user through a `winget` install — instead of discovering the gap by
