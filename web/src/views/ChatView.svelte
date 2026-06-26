@@ -707,11 +707,10 @@
   {/if}
 
   <!-- Session-level task progress (driven by task_create / task_update / task_list).
-       Kept collapsed by default and rendered as a floating dropdown when open so
-       the message list underneath is never pushed out of view. -->
+       Collapsed by default; expands its step list in-flow below the summary. -->
   {#if todos && todos.length > 0}
     <div class="session-tasks">
-      <details bind:open={planExpanded} class="plan-card plan-float">
+      <details bind:open={planExpanded} class="plan-card">
         <summary class="plan-summary">
           <iconify-icon icon="ant-design:ordered-list-outlined" width="14" style="color:var(--blue-6)"></iconify-icon>
           <span class="plan-title">{$t('agent.plan')}</span>
@@ -1024,27 +1023,16 @@
   z-index: 10;
 }
 .session-tasks .plan-card { margin: 0; }
-/* Floating plan dropdown: the step list overlays the message area instead of
-   pushing it down, so expanding the panel never hides the conversation. */
-.plan-float {
-  position: relative;
-  /* The expanded step list is an absolutely-positioned dropdown that sits
-     outside this card's box; the inherited overflow:hidden would clip it
-     away, so let it spill. */
-  overflow: visible;
-}
-.plan-float > .plan-steps {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  max-height: min(320px, 50vh);
+/* The step list expands in-flow below the summary. It used to render as an
+   absolute-positioned floating overlay, but .plan-card's overflow:hidden (same
+   element, equal specificity, declared later) overrode the overlay's
+   overflow:visible and clipped it away — the panel looked stuck closed. In flow
+   there is nothing to clip: the bar is flex:0 0 auto, so growing it shrinks the
+   scrollable conversation underneath rather than hiding it. Cap the height so a
+   long plan scrolls inside the bar instead of swallowing the message area. */
+.session-tasks .plan-steps {
+  max-height: min(320px, 40vh);
   overflow-y: auto;
-  border: 1px solid var(--blue-2);
-  border-radius: 10px;
-  background: var(--bg-container);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-  z-index: 20;
 }
 
 /* ── Body row ────────────────────────────────────────────────────────────── */
