@@ -16,6 +16,7 @@
   let textareaEl = $state<HTMLTextAreaElement | null>(null)
   let fileInputEl = $state<HTMLInputElement | null>(null)
   let attachments = $state<{ name: string; data_url: string; mime_type: string }[]>([])
+  let dragOver = $state(false)
 
   // Called by ChatView when the user clicks "edit" on a prior message — loads
   // that text back into the composer for resend.
@@ -28,16 +29,18 @@
     fileInputEl?.click()
   }
 
+  function addAttachment(file: File, fallbackName?: string) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      attachments = [...attachments, { name: file.name || fallbackName || 'attachment', data_url: String(reader.result), mime_type: file.type }]
+    }
+    reader.readAsDataURL(file)
+  }
+
   function onFilesPicked(e: Event) {
     const input = e.target as HTMLInputElement
     const files = Array.from(input.files ?? [])
-    for (const f of files) {
-      const reader = new FileReader()
-      reader.onload = () => {
-        attachments = [...attachments, { name: f.name, data_url: String(reader.result), mime_type: f.type }]
-      }
-      reader.readAsDataURL(f)
-    }
+    for (const f of files) addAttachment(f)
     input.value = ''
   }
 
@@ -50,11 +53,27 @@
     for (const it of imageItems) {
       const f = it.getAsFile()
       if (!f) continue
-      const reader = new FileReader()
-      reader.onload = () => {
-        attachments = [...attachments, { name: f.name || 'pasted-image', data_url: String(reader.result), mime_type: f.type || it.type }]
-      }
-      reader.readAsDataURL(f)
+      addAttachment(f, 'pasted-image')
+    }
+  }
+
+  // Drop files onto the composer input card.
+  function onDragOver(e: DragEvent) {
+    e.preventDefault()
+    dragOver = true
+  }
+
+  function onDragLeave(e: DragEvent) {
+    const card = e.currentTarget as HTMLElement
+    if (!card.contains(e.relatedTarget as Node)) dragOver = false
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault()
+    dragOver = false
+    const files = Array.from(e.dataTransfer?.files ?? [])
+    for (const f of files) {
+      if (f.type.startsWith('image/')) addAttachment(f)
     }
   }
 
@@ -308,7 +327,13 @@
   </div>
 
   <div class="input-wrap">
-    <div class="input-card">
+    <div
+      class="input-card"
+      class:drag-over={dragOver}
+      ondragover={onDragOver}
+      ondragleave={onDragLeave}
+      ondrop={onDrop}
+    >
       {#if attachments.length > 0}
         <div class="attachments">
           {#each attachments as a, i}
@@ -427,6 +452,11 @@
 .input-card:focus-within {
   border-color: var(--blue-6);
   box-shadow: 0 0 0 2px rgba(5,145,255,0.1);
+}
+.input-card.drag-over {
+  border-color: var(--blue-6);
+  background: rgba(5,145,255,0.06);
+  box-shadow: 0 0 0 2px rgba(5,145,255,0.15);
 }
 textarea {
   border: none; outline: none; resize: none; font-size: 14px; line-height: 1.6;
