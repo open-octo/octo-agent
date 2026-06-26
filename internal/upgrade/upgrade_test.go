@@ -104,9 +104,14 @@ func asRelease(t *testing.T, ver, commit string) {
 
 func pointAt(t *testing.T, srv *httptest.Server) {
 	t.Helper()
-	orig := BaseURL
+	origBase := BaseURL
+	origMirrors := MirrorBaseURLs
 	BaseURL = srv.URL
-	t.Cleanup(func() { BaseURL = orig })
+	MirrorBaseURLs = nil
+	t.Cleanup(func() {
+		BaseURL = origBase
+		MirrorBaseURLs = origMirrors
+	})
 }
 
 func writeTarget(t *testing.T, content string) string {
@@ -140,6 +145,60 @@ func TestCheck_NoRedirect(t *testing.T) {
 
 	if _, err := Check(context.Background()); err == nil {
 		t.Fatal("expected error on non-redirect response")
+	}
+}
+
+func TestRun_FallsBackToMirror(t *testing.T) {
+	asRelease(t, "0.18.0", "abc1234")
+	ver := "0.19.0"
+	asset := AssetName(ver)
+	archive := buildArchive(t, asset, binaryName(), "MIRRORED")
+	sum := sha256.Sum256(archive)
+	sums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset)
+
+	// Primary server: /releases/latest works, download endpoint 404s.
+	primaryMux := http.NewServeMux()
+	var primary *httptest.Server
+	primaryMux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, primary.URL+"/releases/tag/v"+ver, http.StatusFound)
+	})
+	primaryMux.HandleFunc("/releases/download/v"+ver+"/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "primary down", http.StatusNotFound)
+	})
+	primary = httptest.NewServer(primaryMux)
+	t.Cleanup(primary.Close)
+
+	// Mirror server: serves the real asset and checksums.
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/releases/download/v" + ver + "/" + asset:
+			_, _ = w.Write(archive)
+		case "/releases/download/v" + ver + "/checksums.txt":
+			_, _ = w.Write([]byte(sums))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(mirror.Close)
+
+	origBase := BaseURL
+	BaseURL = primary.URL
+	origMirrors := MirrorBaseURLs
+	MirrorBaseURLs = []string{mirror.URL}
+	t.Cleanup(func() {
+		BaseURL = origBase
+		MirrorBaseURLs = origMirrors
+	})
+
+	target := writeTarget(t, "OLD")
+	var lines []string
+	err := Run(context.Background(), Options{TargetPath: target, Log: func(s string) { lines = append(lines, s) }})
+	if err != nil {
+		t.Fatalf("Run: %v (log: %v)", err, lines)
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != "MIRRORED" {
+		t.Errorf("target content = %q, want MIRRORED", got)
 	}
 }
 
