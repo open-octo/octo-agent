@@ -11,6 +11,71 @@ import (
 	"time"
 )
 
+// TestWebFetch_CustomHeadersGoDirect verifies that supplying referer/user_agent
+// forces a direct fetch carrying those headers and skips the Jina proxy.
+func TestWebFetch_CustomHeadersGoDirect(t *testing.T) {
+	var gotReferer, gotUA string
+	hits := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		gotReferer = r.Header.Get("Referer")
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><body>ok</body></html>"))
+	}))
+	defer target.Close()
+
+	// Jina must NOT be called when custom headers are set.
+	jina := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("Jina proxy was called despite custom headers")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer jina.Close()
+	old := jinaReaderHostForTest
+	jinaReaderHostForTest = jina.URL + "/"
+	defer func() { jinaReaderHostForTest = old }()
+
+	if _, err := (WebFetchTool{}).Execute(context.Background(), "web_fetch", map[string]any{
+		"url":        target.URL,
+		"referer":    "https://ref.example/",
+		"user_agent": "MyUA/1.0",
+	}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if hits != 1 {
+		t.Fatalf("target hit %d times, want 1", hits)
+	}
+	if gotReferer != "https://ref.example/" {
+		t.Errorf("Referer = %q, want https://ref.example/", gotReferer)
+	}
+	if gotUA != "MyUA/1.0" {
+		t.Errorf("User-Agent = %q, want MyUA/1.0", gotUA)
+	}
+}
+
+// TestFetchDirect_DefaultSameOriginReferer pins the default direct-fetch
+// headers: a same-origin Referer and the browser UA when the caller passes none.
+func TestFetchDirect_DefaultSameOriginReferer(t *testing.T) {
+	var gotReferer, gotUA string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotReferer = r.Header.Get("Referer")
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>x</html>"))
+	}))
+	defer target.Close()
+
+	if _, err := fetchDirect(context.Background(), target.URL, "", ""); err != nil {
+		t.Fatalf("fetchDirect: %v", err)
+	}
+	if want := target.URL + "/"; gotReferer != want {
+		t.Errorf("default Referer = %q, want same-origin %q", gotReferer, want)
+	}
+	if gotUA != defaultDirectUserAgent {
+		t.Errorf("default User-Agent = %q, want the browser default", gotUA)
+	}
+}
+
 // blockedFetchIP must reject the cloud metadata / link-local range (the
 // high-value SSRF target) while still allowing loopback and private-LAN
 // addresses, since fetching a local dev server is a legitimate use.
