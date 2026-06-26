@@ -19,19 +19,27 @@ A functionality-first AI agent, distributed as a single Go binary. Speaks two na
 
 ## Install
 
-**Prebuilt binary (no Go toolchain needed).** Grab the archive for your OS/arch
-from the [latest release](https://github.com/Leihb/octo-agent/releases/latest),
-unpack it, and put `octo` on your `PATH`:
+**macOS / Linux (install script).** Detects your OS/arch, downloads the matching
+release, verifies its SHA-256, and installs `octo` to your `PATH`:
 
 ```bash
-# macOS (Apple Silicon) example — swap the asset name for your platform
-curl -sSL https://github.com/Leihb/octo-agent/releases/latest/download/octo_<version>_darwin_arm64.tar.gz | tar xz
-sudo mv octo /usr/local/bin/
-octo version
+curl -fsSL https://octo-agent.dev/install.sh | sh
 ```
 
-Archives ship for linux / darwin / windows on amd64 + arm64; `checksums.txt`
-in each release verifies the download.
+Then start the local server and onboard in your browser:
+
+```bash
+octo serve -d                  # run the local server in the background
+open http://127.0.0.1:8080     # Linux: xdg-open — opens the dashboard
+```
+
+`127.0.0.1` is loopback, so no access key is needed; the page goes straight
+into first-run onboarding (pick a provider, paste a key). Stop the server later
+with `octo serve --stop`. Prefer the terminal? Just run `octo`.
+
+Prebuilt archives (linux / darwin / windows × amd64 + arm64) and `checksums.txt`
+are on the [latest release](https://github.com/Leihb/octo-agent/releases/latest)
+if you'd rather grab one by hand.
 
 **Windows (double-click installer).** Download `octo-setup.exe` from the
 [latest release](https://github.com/Leihb/octo-agent/releases/latest) and
