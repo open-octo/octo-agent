@@ -1028,6 +1028,10 @@
    pushing it down, so expanding the panel never hides the conversation. */
 .plan-float {
   position: relative;
+  /* The expanded step list is an absolutely-positioned dropdown that sits
+     outside this card's box; the inherited overflow:hidden would clip it
+     away, so let it spill. */
+  overflow: visible;
 }
 .plan-float > .plan-steps {
   position: absolute;
