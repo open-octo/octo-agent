@@ -21,9 +21,9 @@ jobs:
     name: Svelte Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -48,15 +48,15 @@ jobs:
         go: ['1.25']
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
           cache: true
         env:
           # Opt into Node 24 early to silence deprecation warnings.
-          # Both actions/checkout@v4 and actions/setup-go@v5 support it.
+          # Both actions/checkout@v5 and actions/setup-go@v6 support it.
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       - name: go vet

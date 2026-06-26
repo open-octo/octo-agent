@@ -16,11 +16,11 @@ jobs:
     name: goreleaser
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # full history + tags so goreleaser can build the changelog
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
           cache: true
@@ -28,7 +28,7 @@ jobs:
           # Opt into Node 24 early to silence deprecation warnings.
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
           # -p 1 serializes builds: the per-target rg-embed hook writes a single
@@ -46,7 +46,7 @@ jobs:
     needs: goreleaser
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4 # for packaging/windows/octo.iss + LICENSE.txt
+      - uses: actions/checkout@v5 # for packaging/windows/octo.iss + LICENSE.txt
 
       - name: Stage the released binary
         env:
@@ -85,7 +85,7 @@ jobs:
       - name: Upload unsigned installer (for SignPath)
         if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
         id: unsigned-installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: octo-setup-unsigned
           path: staging\octo-setup.exe
