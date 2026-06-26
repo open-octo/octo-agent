@@ -28,11 +28,6 @@ terminal:
   - ask:   { pattern: "wget " }
   - ask:   { pattern: "ssh " }
   - ask:   { pattern: "scp " }
-  # In-place stream edits bypass the file tools' permission + read-before-write
-  # checks. Deny outright; the terminal tool also guards this with a message
-  # steering the model to edit_file (defence in depth for permissive configs).
-  - deny:  { pattern: "sed -i" }
-  - deny:  { pattern: "sed --in-place" }
   # Windows / PowerShell dangers. Matching is case-sensitive substring and
   # PowerShell is case-insensitive with aliases, so these catch the canonical
   # forms an LLM typically emits — anything missed still falls through to the

@@ -123,13 +123,10 @@ func (t TerminalTool) ExecuteStream(
 				"if you have nothing to run, respond with text instead.")
 	}
 	stdinText, _ := input["stdin"].(string)
-	if err := guardCommand(command); err != nil {
-		return agent.ToolResult{Text: ""}, err
-	}
 
 	// Detached launch: a daemon that deliberately outlives octo. Not tracked, not
-	// killed on exit — fire-and-forget. The guard above still applies. Checked
-	// before run_in_background so detached wins if both are set.
+	// killed on exit — fire-and-forget. Checked before run_in_background so
+	// detached wins if both are set.
 	if det, _ := input["detached"].(bool); det {
 		logFile, _ := input["log_file"].(string)
 		pid, logPath, err := startDetached(ctx, command, logFile)

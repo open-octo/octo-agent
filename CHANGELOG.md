@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased — 1.1.0-dev]
 
+### Changed
+- **`sed -i` is no longer hard-blocked.** The default `deny` rules for in-place
+  stream edits (`sed -i`, `sed --in-place`) and the terminal tool's
+  `guardCommand` interceptor have both been removed. In-place edits now fall
+  through to the normal permission gate — prompting in interactive mode, denied
+  under strict/unattended mode — like any other unrecognised command, matching
+  the interactive-first posture. The system prompt still steers toward
+  `edit_file` for partial changes.
+
 ## [1.0.0] — 2026-06-26
 
 First stable release. The compatibility tiers in

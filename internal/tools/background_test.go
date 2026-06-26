@@ -114,13 +114,6 @@ func TestTerminalTool_BackgroundLaunch(t *testing.T) {
 	if !strings.Contains(resTool.Text, "bg_1") {
 		t.Errorf("result = %q, want it to mention the bg id", resTool.Text)
 	}
-	// The terminal guard (e.g. in-place sed) still applies to background launches.
-	if _, err := tool.Execute(context.Background(), "terminal", map[string]any{
-		"command":           "sed -i 's/a/b/' file.txt",
-		"run_in_background": true,
-	}); err == nil {
-		t.Error("guarded command should be refused even in background mode")
-	}
 }
 
 func TestTerminalTool_SyncCommandIsReaped(t *testing.T) {

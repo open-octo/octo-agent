@@ -75,8 +75,8 @@ func TestDefaultRules_TerminalCredentialPathsBeatSafeVerb(t *testing.T) {
 		"cat ~/.aws/credentials":          Ask,
 		"grep secret ~/.ssh/id_ed25519":   Ask,
 		"cat README.md":                   Allow, // ordinary safe read still allows
-		"sed -i 's/a/b/' main.go":         Deny,  // in-place edit denied
-		"sed --in-place 's/a/b/' main.go": Deny,
+		"sed -i 's/a/b/' main.go":         Ask,   // not allow-listed → falls through to ask
+		"sed --in-place 's/a/b/' main.go": Ask,
 	}
 	for cmd, want := range cases {
 		if got := e.Check("terminal", map[string]any{"command": cmd}); got != want {

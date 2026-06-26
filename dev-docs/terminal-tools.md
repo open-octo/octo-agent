@@ -43,8 +43,6 @@ process by the `bg_N` id `terminal` returns.
    *promoted* to a visible background task (no kill, no restart) and its id
    returned. On normal completion it is reaped (`Remove`).
 
-`guardCommand` blocks dangerous commands before any of these branches.
-
 ## BackgroundManager and the process lifecycle
 
 `BackgroundManager` owns the tracked processes (`map[id]*bgProcess`). Each
