@@ -305,6 +305,7 @@ func TestManager_AutoSessionCreation(t *testing.T) {
 }
 
 func TestManager_SendReply(t *testing.T) {
+	tempHome(t)
 	mock := &mockAdapter{platform: "mock3"}
 	Register("mock3", func(pc PlatformConfig) (Adapter, error) {
 		return mock, nil
@@ -333,6 +334,7 @@ func TestManager_SendReply(t *testing.T) {
 }
 
 func TestManager_UnknownCommand(t *testing.T) {
+	tempHome(t)
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
 	ev := InboundEvent{Text: "/foobar"}
 	reply := mgr.CommandRouter(ev)
