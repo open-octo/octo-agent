@@ -55,11 +55,15 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	if !sessionWrotePath(sess, abs) {
+	// served is the path as recorded in the transcript, not the request-derived
+	// value: it only matches when the agent itself wrote it, and using the
+	// transcript's copy keeps the file ops off the raw user-supplied path.
+	served, ok := sessionWrotePath(sess, abs)
+	if !ok {
 		writeError(w, http.StatusNotFound, "path was not written by this session")
 		return
 	}
-	fi, err := os.Stat(abs)
+	fi, err := os.Stat(served)
 	if err != nil || fi.IsDir() {
 		writeError(w, http.StatusNotFound, "file not found")
 		return
@@ -69,7 +73,7 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(abs)
+	f, err := os.Open(served)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -85,12 +89,14 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 
-// sessionWrotePath reports whether the transcript contains a write_file,
-// edit_file, or show_artifact tool_use whose path input matches reqPath
-// (after Clean on both sides — the payloads carry absolute paths, so no
-// base-dir join is needed). show_artifact is how script-produced files
-// (built rather than written through the file tools) enter the whitelist.
-func sessionWrotePath(sess *agent.Session, reqPath string) bool {
+// sessionWrotePath looks for a write_file, edit_file, or show_artifact tool_use
+// in the transcript whose path input matches reqPath (after Clean on both
+// sides — the payloads carry absolute paths, so no base-dir join is needed).
+// show_artifact is how script-produced files (built rather than written through
+// the file tools) enter the whitelist. On a match it returns the transcript's
+// own copy of the path so callers serve a value sourced from what the agent
+// recorded rather than from the raw request.
+func sessionWrotePath(sess *agent.Session, reqPath string) (string, bool) {
 	want := filepath.Clean(reqPath)
 	for _, m := range sess.Messages {
 		for _, b := range m.Blocks {
@@ -98,12 +104,14 @@ func sessionWrotePath(sess *agent.Session, reqPath string) bool {
 				continue
 			}
 			p, ok := b.Input["path"].(string)
-			if ok && filepath.Clean(p) == want {
-				return true
+			if ok {
+				if clean := filepath.Clean(p); clean == want {
+					return clean, true
+				}
 			}
 		}
 	}
-	return false
+	return "", false
 }
 
 // resolveArtifactPath validates a path from a tool UI payload. UI payloads carry
