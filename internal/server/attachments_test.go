@@ -256,21 +256,29 @@ drain:
 		t.Error("history_user_message carried no /api/uploads/ image ref")
 	}
 
-	// The persisted session must carry the image block with its file path.
-	// doAgentTurn persists the turn before broadcasting "complete", so the
-	// session is on disk by the time the drain above returns. (mustServer's
-	// cleanup drains the turn goroutine before TempDir teardown.)
-	loaded, err := agent.LoadSession(sess.ID)
-	if err != nil {
-		t.Fatalf("reload: %v", err)
-	}
-	var foundBlock bool
-	for _, m := range loaded.Messages {
-		for _, blk := range m.Blocks {
-			if blk.Type == "image" && blk.ImagePath != "" && blk.Image != nil {
-				foundBlock = true
+	// The persisted session must carry the image block with its file path,
+	// rehydrated from disk. doAgentTurn persists before broadcasting "complete",
+	// but the turn runs on a background goroutine and the assert reads a file
+	// that goroutine just wrote; poll briefly so a loaded CI runner's scheduling
+	// jitter can't flake the read (it succeeds on the first iteration normally).
+	hasRehydratableImage := func() bool {
+		loaded, err := agent.LoadSession(sess.ID)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		for _, m := range loaded.Messages {
+			for _, blk := range m.Blocks {
+				if blk.Type == "image" && blk.ImagePath != "" && blk.Image != nil {
+					return true
+				}
 			}
 		}
+		return false
+	}
+	foundBlock := hasRehydratableImage()
+	for deadline := time.Now().Add(2 * time.Second); !foundBlock && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+		foundBlock = hasRehydratableImage()
 	}
 	if !foundBlock {
 		t.Error("no rehydratable image block persisted in session")
