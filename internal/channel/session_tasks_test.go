@@ -6,6 +6,7 @@ import "testing"
 // survives across messages in the same chat — so the IM bridge's task list
 // doesn't reset every turn. (A fresh per-message store would lose it.)
 func TestSessionTaskStorePersists(t *testing.T) {
+	tempHome(t)
 	cfg := &Config{Channels: map[string]PlatformConfig{"mock": {"enabled": true}}}
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 

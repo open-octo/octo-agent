@@ -100,6 +100,7 @@ func (f fakeSender) SendMessages(ctx context.Context, model, system string, mess
 }
 
 func TestManager_StartStop(t *testing.T) {
+	tempHome(t)
 	Register("mock", func(pc PlatformConfig) (Adapter, error) {
 		return &mockAdapter{platform: "mock"}, nil
 	})
@@ -207,6 +208,7 @@ func TestManager_CommandRouter(t *testing.T) {
 }
 
 func TestManager_StopInterruptsRunningTurn(t *testing.T) {
+	tempHome(t)
 	cfg := &Config{Channels: map[string]PlatformConfig{}}
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
@@ -274,6 +276,7 @@ func TestSession_InterruptIdleIsNoop(t *testing.T) {
 }
 
 func TestManager_AutoSessionCreation(t *testing.T) {
+	tempHome(t)
 	Register("mock2", func(pc PlatformConfig) (Adapter, error) {
 		return &mockAdapter{platform: "mock2"}, nil
 	})
