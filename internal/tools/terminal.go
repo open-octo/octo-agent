@@ -53,7 +53,7 @@ func (t TerminalTool) managerFor(ctx context.Context) *BackgroundManager {
 func (TerminalTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal",
-		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, write_file, edit_file, glob, grep) over raw shell commands when they exist.\n\nChoosing sync vs background:\n- Default (no run_in_background): runs synchronously with a 120s timeout. Use for fast commands whose output you need immediately (e.g. `ls`, `git status`, `grep`, short scripts).\n- run_in_background:true — ONE-SHOT tasks (compiling, testing, installing, building, linting, CI checks): detaches immediately, returns a process id. The system automatically notifies you on completion. DO NOT poll terminal_output.\n- run_in_background:true — LONG-RUNNING services (servers, watchers, docker compose up): detaches immediately, returns a process id. After launch, verify the service with an external check (e.g., `curl http://localhost:PORT`, `pgrep`) rather than polling terminal_output. Use terminal_output only to inspect startup logs or diagnose issues — do not call it in a tight loop.\n\nBuffering: the process is connected via pipes, not a terminal, so stdio block-buffers its output — a chatty program's logs can sit unflushed and invisible to terminal_output for a long time. On macOS/Linux, when you will want live logs, prefix the command with `stdbuf -oL` (e.g. `stdbuf -oL npm run dev`) to force line buffering.\n\nTo feed text to a command's stdin, pass it via the stdin parameter instead of embedding it in the command string — embedded text gets interpreted by the shell (backticks, quotes, $), stdin is delivered verbatim.",
+		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, write_file, edit_file, glob, grep) over raw shell commands when they exist.\n\nChoosing sync vs background:\n- Default (no run_in_background): runs synchronously with a 120s timeout. Use for fast commands whose output you need immediately (e.g. `ls`, `git status`, `grep`, short scripts).\n- run_in_background:true — ONE-SHOT tasks (compiling, testing, installing, building, linting, CI checks): detaches immediately, returns a process id. The system automatically notifies you on completion. DO NOT poll terminal_output.\n- run_in_background:true — LONG-RUNNING services (servers, watchers, docker compose up): detaches immediately, returns a process id. After launch, verify the service with an external check (e.g., `curl http://localhost:PORT`, `pgrep`) rather than polling terminal_output. Use terminal_output only to inspect startup logs or diagnose issues — do not call it in a tight loop.\n\nBuffering: the process is connected via pipes, not a terminal, so stdio block-buffers its output — a chatty program's logs can sit unflushed and invisible to terminal_output for a long time. On macOS/Linux, when you will want live logs, prefix the command with `stdbuf -oL` (e.g. `stdbuf -oL npm run dev`) to force line buffering.\n\nTo feed text to a command's stdin, pass it via the stdin parameter instead of embedding it in the command string — embedded text gets interpreted by the shell (backticks, quotes, $), stdin is delivered verbatim.\n\nNEVER put backticks (`) inside a double-quoted shell string: the shell runs whatever is between them as command substitution. For PR/issue/commit bodies (or any text) that contain markdown code spans, ALWAYS pass the text through the stdin parameter with `--body-file -` / `-F -` rather than `--body \"...`...\"`.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -273,14 +273,31 @@ func (t TerminalTool) ExecuteStream(
 			// Reap the hidden process: its output has been captured and
 			// returned, so the bgProcess (and its retained buffer) can go.
 			mgr.Remove(id)
+			hint := backtickSubstitutionHint(command, body)
 			if status != "exited: 0" {
-				text := body + "\n[exit: " + strings.TrimPrefix(status, "exited: ") + "]"
+				text := hint + body + "\n[exit: " + strings.TrimPrefix(status, "exited: ") + "]"
 				return agent.ToolResult{Text: text, UI: terminalUI(command, "failed", text)}, nil
 			}
-			return agent.ToolResult{Text: body, UI: terminalUI(command, "success", body)}, nil
+			return agent.ToolResult{Text: hint + body, UI: terminalUI(command, "success", body)}, nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// backtickSubstitutionHint detects the classic failure where the model embeds
+// markdown code spans (backticks) inside a double-quoted shell string — e.g.
+// `gh pr create --body "use the `web_fetch` tool"`. The shell treats the
+// backtick text as command substitution and tries to run it, producing
+// "command not found" noise that the model misreads as a real failure (and
+// silently drops the backticked text from the body). When both signals are
+// present we prepend a corrective reminder so the model fixes it mid-session
+// rather than self-rationalizing the errors. Wrapped in <system-reminder> so
+// StripRemindersForDisplay keeps it out of the UI card.
+func backtickSubstitutionHint(command, output string) string {
+	if !strings.Contains(command, "`") || !strings.Contains(output, "command not found") {
+		return ""
+	}
+	return "<system-reminder>The backticks (`) in your double-quoted shell string were executed by the shell as command substitution — that is what produced the \"command not found\" lines above; the command itself likely did NOT fail. If those backticks were meant as literal markdown code spans (e.g. in a PR/issue/commit body), re-run using the stdin parameter with `--body-file -` / `-F -` instead of embedding the text in --body.</system-reminder>\n\n"
 }
 
 // stdinWriteWarning formats a WriteStdinAndClose failure for the tool result.

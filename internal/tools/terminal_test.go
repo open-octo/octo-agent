@@ -432,6 +432,41 @@ func TestTerminalInputTool_MissingID(t *testing.T) {
 	}
 }
 
+func TestBacktickSubstitutionHint(t *testing.T) {
+	// Fires only when BOTH signals are present: a backtick in the command and
+	// "command not found" in the output.
+	if got := backtickSubstitutionHint("gh pr create --body \"use `web_fetch`\"", "sh: web_fetch: command not found"); got == "" {
+		t.Error("hint should fire when command has a backtick and output has 'command not found'")
+	}
+	if got := backtickSubstitutionHint("ls -la", "sh: foo: command not found"); got != "" {
+		t.Errorf("hint must not fire without a backtick in the command, got %q", got)
+	}
+	if got := backtickSubstitutionHint("echo `date`", "Mon Jan 1 2026"); got != "" {
+		t.Errorf("hint must not fire when there is no 'command not found' in output, got %q", got)
+	}
+}
+
+func TestTerminalTool_Execute_BacktickSubstitutionHint(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX sh backtick command substitution semantics; PowerShell differs")
+	}
+	// A double-quoted body with a backticked markdown span: the shell runs the
+	// backtick content as a command, producing 'command not found'. The result
+	// must carry the corrective reminder so the model uses stdin next time.
+	result, err := TerminalTool{}.Execute(context.Background(), "terminal", map[string]any{
+		"command": "echo \"use the `definitely_not_a_real_cmd_xyz` tool\"",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(result.Text, "command not found") {
+		t.Fatalf("precondition: expected shell to report command not found, got %q", result.Text)
+	}
+	if !strings.Contains(result.Text, "--body-file -") {
+		t.Errorf("result should carry the backtick-substitution reminder, got %q", result.Text)
+	}
+}
+
 func TestTerminalTool_Stdin_PipedVerbatim(t *testing.T) {
 	// PowerShell's Get-Content (aliased as cat) requires -Path when no
 	// pipeline input. stdin delivery through the pwsh -Command wrapper
