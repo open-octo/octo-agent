@@ -84,10 +84,9 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 		sess.Source = "cron"
 		sess.Title = task.Name
 		task.SessionID = sess.ID
-		// If the task specifies a directory, note it in system prompt.
-		if task.Directory != "" {
-			sess.System = fmt.Sprintf("Working directory: %s\n%s", task.Directory, sess.System)
-		}
+		// task.Directory is applied at run time (see below): buildAgent recomposes
+		// the system prompt from s.system every turn, so stashing it on
+		// sess.System here would be silently dropped.
 		// Persist immediately: a task run can take many minutes, and until the
 		// session file exists the run is invisible in the web session list —
 		// clicking Run looked like it did nothing.
@@ -115,6 +114,14 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 
 	a := s.buildAgent(sess)
 
+	// Apply the task's working directory so the run actually happens there.
+	if task.Directory != "" {
+		var derr error
+		if ctx, derr = applyTaskDirectory(ctx, a, task.Directory); derr != nil {
+			return sess.ID, derr
+		}
+	}
+
 	var toolDefs []agent.ToolDefinition
 	var executor agent.ToolExecutor
 	if s.cfg.Tools {
@@ -141,6 +148,29 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 	}
 
 	return sess.ID, nil
+}
+
+// applyTaskDirectory roots a task run at dir: tools (terminal + file ops)
+// resolve relative paths against it via WorkingDir(ctx), the planner uses it
+// (a.CWD), and the model is told its cwd in both system-prompt variants (so a
+// lean explore sub-agent sees it too) — buildAgent composed System/LeanSystem
+// from the server cwd, so this note corrects it. Errors if dir isn't a usable
+// directory rather than running the whole turn against a broken root.
+func applyTaskDirectory(ctx context.Context, a *agent.Agent, dir string) (context.Context, error) {
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return ctx, fmt.Errorf("task directory %q: %w", dir, err)
+	}
+	if !fi.IsDir() {
+		return ctx, fmt.Errorf("task directory %q is not a directory", dir)
+	}
+	a.CWD = dir
+	note := "Working directory: " + dir
+	a.System = note + "\n\n" + a.System
+	if a.LeanSystem != "" {
+		a.LeanSystem = note + "\n\n" + a.LeanSystem
+	}
+	return tools.WithWorkingDir(ctx, dir), nil
 }
 
 // notifyTaskResult pushes a task run's outcome to every configured IM notify
