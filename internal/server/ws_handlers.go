@@ -355,17 +355,19 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 
 	sess, err := agent.LoadSession(sid)
 	if err != nil {
-		s.wsHub.broadcast(sid, map[string]string{
-			"type":    "error",
-			"message": fmt.Sprintf("session not found: %s", sid),
+		s.wsHub.broadcast(sid, map[string]any{
+			"type":       "send_rejected",
+			"session_id": sid,
+			"message":    fmt.Sprintf("session not found: %s", sid),
 		})
 		return
 	}
 
 	if ok, _, berr := s.acquireSessionBinding(sid, agent.EntryWeb, false); !ok {
-		s.wsHub.broadcast(sid, map[string]string{
-			"type":    "error",
-			"message": berr.Error(),
+		s.wsHub.broadcast(sid, map[string]any{
+			"type":       "send_rejected",
+			"session_id": sid,
+			"message":    berr.Error(),
 		})
 		return
 	}

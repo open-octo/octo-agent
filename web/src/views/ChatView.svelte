@@ -74,6 +74,11 @@
   // message stream; the user can expand it into a floating dropdown.
   let planExpanded = $state(false)
 
+  // Tracks optimistic UI state for in-flight sends. If the server rejects the
+  // message (e.g. the session is bound to another entry), we roll back the
+  // pending bubble and restore the streaming flag to its pre-send value.
+  const pendingSends = new Map<string, { pendingId: string; wasStreaming: boolean }>()
+
   // Sub-agents card elapsed time + reconnect countdown both tick off `now`.
   let now = $state(Date.now())
   $effect(() => {
@@ -264,6 +269,24 @@
       showToast((ev as any).message ?? 'Error', 'error')
     }))
 
+    // The server rejected a user_message (session bound to another entry,
+    // session not found, etc.). Roll back the optimistic pending bubble and
+    // restore the streaming flag so the composer doesn't get stuck showing
+    // Stop / a phantom steer message.
+    cleanups.push(ws.on('send_rejected', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const meta = pendingSends.get(sid)
+      if (meta) {
+        chatMessages.update(m => ({
+          ...m,
+          [sid]: (m[sid] || []).filter((msg: any) => msg.id !== meta.pendingId),
+        }))
+        chatStreaming.update(s => ({ ...s, [sid]: meta.wasStreaming }))
+        pendingSends.delete(sid)
+      }
+      showToast((ev as any).message ?? 'Error', 'error')
+    }))
+
     // The turn was interrupted. `complete` still fires and handles cleanup, so
     // this is purely a heads-up.
     cleanups.push(ws.on('interrupted', (ev) => {
@@ -351,18 +374,25 @@
       const content = (ev as any).content ?? ''
       const createdAt = (ev as any).created_at ?? Date.now()
       const images = (ev as any).images ?? []
+      let confirmedPendingId: string | null = null
       chatMessages.update(m => {
         const msgs = [...(m[sid] || [])]
         // If the last user bubble is a pending optimistic echo of the same
         // text, replace it in place (de-dup). Otherwise append a fresh one.
         const lastPending = msgs.findLastIndex((x: any) => x.type === 'user' && x.pending)
         if (lastPending >= 0 && msgs[lastPending].content === content) {
+          confirmedPendingId = msgs[lastPending].id
           msgs[lastPending] = { ...msgs[lastPending], id: uid('u'), createdAt, pending: false, images }
         } else {
           msgs.push({ id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images })
         }
         return { ...m, [sid]: msgs }
       })
+      // The server confirmed this optimistic send; stop tracking it for rollback.
+      const meta = pendingSends.get(sid)
+      if (meta && meta.pendingId === confirmedPendingId) {
+        pendingSends.delete(sid)
+      }
     }))
 
     cleanups.push(ws.on('tool_call', (ev) => {
@@ -590,7 +620,8 @@
     // Steering: a message sent while a turn is already running rides the
     // running turn's Inbox on the server. It must NOT reset the live UI —
     // the sub-agents panel and thinking buffer belong to the turn in flight.
-    const steering = get(chatStreaming)[sid] ?? false
+    const wasStreaming = get(chatStreaming)[sid] ?? false
+    const steering = wasStreaming
     if (!steering) {
       // A fresh turn starts: clear the previous turn's sub-agents panel and
       // thinking buffer, and flip the session into streaming.
@@ -601,8 +632,10 @@
     // Optimistically show the user bubble, marked pending. The server echoes
     // it back as a history_user_message — that handler replaces this pending
     // bubble (matching by content) instead of appending a duplicate.
+    const pendingId = 'pending-' + Date.now()
+    pendingSends.set(sid, { pendingId, wasStreaming })
     addChatMsg(sid, {
-      id: 'pending-' + Date.now(),
+      id: pendingId,
       type: 'user',
       content: text,
       files: files && files.length ? files : undefined,
