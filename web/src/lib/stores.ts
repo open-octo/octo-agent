@@ -49,6 +49,9 @@ export const chatProgress = writable<Record<string, any>>({})
 export const chatBgTasks = writable<Record<string, any[]>>({})
 export const chatTodos = writable<Record<string, any[]>>({})
 export const chatContextUsage = writable<Record<string, any>>({})
+// Absolute context-window occupancy in tokens (the uplink size), per session.
+// Distinct from chatContextUsage, which is the 0–100% fill.
+export const chatContextTokens = writable<Record<string, number>>({})
 export const chatWorkingDir = writable<Record<string, string>>({})
 export const chatPermMode = writable<Record<string, string>>({})
 export const chatReasoningEffort = writable<Record<string, string>>({})

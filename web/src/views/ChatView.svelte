@@ -10,6 +10,7 @@
     chatBgTasks,
     chatTodos,
     chatContextUsage,
+    chatContextTokens,
     chatWorkingDir,
     chatPermMode,
     chatReasoningEffort,
@@ -116,6 +117,8 @@
     ((msgs.find((m: any) => m.streaming && m.type === 'assistant')?.content?.length) ?? 0) + thinking.length
   )
   let thinkTokens = $derived(Math.floor(turnOutChars / 4))
+  // Uplink size: the context being sent up (last known occupancy in tokens).
+  let ctxTokens = $derived(Number($chatContextTokens[$activeSessionId ?? ''] ?? 0))
   function fmtDur(s: number): string {
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`
   }
@@ -474,6 +477,9 @@
     cleanups.push(ws.on('session_update', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       chatContextUsage.update(u => ({ ...u, [sid]: (ev as any).context_usage }))
+      if (typeof (ev as any).context_tokens === 'number') {
+        chatContextTokens.update(u => ({ ...u, [sid]: (ev as any).context_tokens }))
+      }
       chatPermMode.update(mm => ({ ...mm, [sid]: (ev as any).permission_mode }))
       chatReasoningEffort.update(r => ({ ...r, [sid]: (ev as any).reasoning_effort }))
       chatWorkingDir.update(w => ({ ...w, [sid]: (ev as any).working_dir }))
@@ -914,7 +920,7 @@
                   <summary class="think-summary">
                     <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
                     <span>{$t('chat.thinking')}</span>
-                    <span class="think-meta mono">{fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↓ ~{fmtTokens(thinkTokens)} tokens{:else} · ↑{/if}</span>
+                    <span class="think-meta mono">{fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↓ ~{fmtTokens(thinkTokens)} tokens{:else if ctxTokens > 0} · ↑ ~{fmtTokens(ctxTokens)} tokens{:else} · ↑{/if}</span>
                   </summary>
                   <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(thinking)}</div>
                 </details>
@@ -935,7 +941,7 @@
                   <span style="animation-delay:0.4s"></span>
                 </span>
                 <span class="think-meta mono">
-                  {fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↓ ~{fmtTokens(thinkTokens)} tokens{:else} · ↑{/if}
+                  {fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↓ ~{fmtTokens(thinkTokens)} tokens{:else if ctxTokens > 0} · ↑ ~{fmtTokens(ctxTokens)} tokens{:else} · ↑{/if}
                 </span>
               </div>
             </div>
