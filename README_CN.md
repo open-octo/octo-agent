@@ -19,18 +19,25 @@
 
 ## 安装
 
-**预编译二进制（无需 Go 工具链）。** 从 [最新 release](https://github.com/Leihb/octo-agent/releases/latest)
-下载对应 OS/架构的压缩包，解压后把 `octo` 放进 `PATH`：
+**macOS / Linux（安装脚本）。** 自动识别 OS/架构，下载对应 release，校验
+SHA-256，并把 `octo` 装进 `PATH`：
 
 ```bash
-# macOS (Apple Silicon) 示例 —— 按你的平台替换文件名
-curl -sSL https://github.com/Leihb/octo-agent/releases/latest/download/octo_<version>_darwin_arm64.tar.gz | tar xz
-sudo mv octo /usr/local/bin/
-octo version
+curl -fsSL https://octo-agent.dev/install.sh | sh
 ```
 
-提供 linux / darwin / windows × amd64 + arm64 的压缩包；每个 release 附带的
-`checksums.txt` 可校验下载完整性。
+然后启动本地服务、在浏览器里 onboard：
+
+```bash
+octo serve -d                  # 后台运行本地服务
+open http://127.0.0.1:8080     # Linux 用 xdg-open —— 打开仪表盘
+```
+
+`127.0.0.1` 是 loopback，无需 access key；页面直接进入首屏 onboarding（选
+provider、贴 key）。之后用 `octo serve --stop` 停服务。想用终端?直接跑 `octo`。
+
+想手动取包的话，linux / darwin / windows × amd64 + arm64 的压缩包和
+`checksums.txt` 都在 [最新 release](https://github.com/Leihb/octo-agent/releases/latest)。
 
 **升级：**`octo upgrade` 原地安装最新 release（SHA-256 对照 `checksums.txt`
 校验）；`octo upgrade --check` 仅比较版本。Web UI 的版本徽标提供同样的流程。

@@ -130,7 +130,7 @@
       margin-top: 2rem;
       display: inline-block;
     }
-    .install-hint code {
+    .install-hint code, .install-cmd {
       font-family: "SF Mono", Menlo, Consolas, monospace;
       font-size: 0.85rem;
       background: var(--code-bg);
@@ -138,6 +138,15 @@
       padding: 0.5rem 1rem;
       border-radius: var(--radius-sm);
       border: 1px solid var(--border);
+    }
+    .install-cmd {
+      margin: 0;
+      padding: 0.75rem 1.1rem;
+      text-align: left;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.7;
+      max-width: 100%;
     }
 
     /* Layout */
@@ -402,8 +411,8 @@
       <p class="all-builds">
         <a href="https://github.com/Leihb/octo-agent/releases/latest" data-en="Other platforms &amp; checksums →" data-zh="其他平台与校验和 →"></a>
       </p>
-      <div class="install-hint">
-        <code>go install github.com/Leihb/octo-agent/cmd/octo@latest</code>
+      <div class="install-hint" id="install-block">
+        <pre class="install-cmd" id="install-cmd">curl -fsSL https://octo-agent.dev/install.sh | sh</pre>
       </div>
     </div>
   </header>
@@ -630,39 +639,53 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
     // fallback href — the releases page — so they always work.
     (function initDownload() {
       var btns = document.querySelectorAll('.js-download');
-      if (!btns.length) return;
+      var block = document.getElementById('install-block');
+      var cmd = document.getElementById('install-cmd');
 
       var ua = navigator.userAgent || '';
       var plat = (navigator.platform || '') + ' ' + ua;
       var arch = /arm64|aarch64/i.test(ua) ? 'arm64' : 'amd64';
       var target = null;
       if (/Win/i.test(plat)) target = { os: 'windows' };
-      else if (/Mac/i.test(plat)) target = { os: 'darwin', arch: 'arm64' }; // modern Macs; Intel users use "Other platforms"
+      else if (/Mac/i.test(plat)) target = { os: 'darwin' };
       else if (/Linux|X11/i.test(plat) && !/Android/i.test(ua)) target = { os: 'linux', arch: arch };
-      if (!target) return;
 
-      var labels = {
-        windows: { en: '⬇️ Download for Windows', zh: '⬇️ 下载 Windows 安装器' },
-        darwin:  { en: '⬇️ Download for macOS',   zh: '⬇️ 下载 macOS 版' },
-        linux:   { en: '⬇️ Download for Linux',   zh: '⬇️ 下载 Linux 版' }
-      };
-      var matches = target.os === 'windows'
-        ? function (n) { return n === 'octo-setup.exe'; }
-        : function (n) { return n.indexOf('_' + target.os + '_' + target.arch) !== -1 && /\.(tar\.gz|zip)$/i.test(n); };
+      // macOS / Linux: lead with the install script and the steps to start the
+      // server — these platforms have no auto-starting installer, so the user
+      // runs `octo serve -d` and opens the dashboard themselves.
+      if (target && (target.os === 'darwin' || target.os === 'linux')) {
+        var opener = target.os === 'darwin' ? 'open    ' : 'xdg-open';
+        if (cmd) {
+          cmd.textContent =
+            'curl -fsSL https://octo-agent.dev/install.sh | sh\n' +
+            'octo serve -d                       # start the local server\n' +
+            opener + ' http://127.0.0.1:8080      # open the dashboard, then onboard';
+        }
+        btns.forEach(function (b) { b.style.display = 'none'; });
+        return;
+      }
 
+      // Windows: the Download button is the installer, which starts the server
+      // and opens the dashboard itself — so hide the command box.
+      if (target && target.os === 'windows' && block) block.style.display = 'none';
+
+      // Unknown OS: leave the releases-page button and the curl one-liner both
+      // visible so every visitor has a working path.
+      if (!btns.length || !target) return;
+
+      // Windows: point the Download buttons straight at the installer asset.
       fetch('https://api.github.com/repos/Leihb/octo-agent/releases/latest', {
         headers: { 'Accept': 'application/vnd.github+json' }
       }).then(function (r) {
         if (!r.ok) throw new Error('release lookup failed');
         return r.json();
       }).then(function (data) {
-        var asset = (data.assets || []).filter(function (a) { return matches(a.name); })[0];
+        var asset = (data.assets || []).filter(function (a) { return a.name === 'octo-setup.exe'; })[0];
         if (!asset) return;
-        var lbl = labels[target.os];
         btns.forEach(function (b) {
           b.setAttribute('href', asset.browser_download_url);
-          b.setAttribute('data-en', lbl.en);
-          b.setAttribute('data-zh', lbl.zh);
+          b.setAttribute('data-en', '⬇️ Download for Windows');
+          b.setAttribute('data-zh', '⬇️ 下载 Windows 安装器');
         });
         applyLang(currentLang);
       }).catch(function () { /* keep the releases-page fallback */ });
