@@ -294,7 +294,10 @@ func (t TerminalTool) ExecuteStream(
 // rather than self-rationalizing the errors. Wrapped in <system-reminder> so
 // StripRemindersForDisplay keeps it out of the UI card.
 func backtickSubstitutionHint(command, output string) string {
-	if !strings.Contains(command, "`") || !strings.Contains(output, "command not found") {
+	// Shells word differently: bash/zsh say "command not found", dash (the
+	// usual /bin/sh on Linux) says "<name>: not found". Match both.
+	if !strings.Contains(command, "`") ||
+		(!strings.Contains(output, "command not found") && !strings.Contains(output, ": not found")) {
 		return ""
 	}
 	return "<system-reminder>The backticks (`) in your double-quoted shell string were executed by the shell as command substitution — that is what produced the \"command not found\" lines above; the command itself likely did NOT fail. If those backticks were meant as literal markdown code spans (e.g. in a PR/issue/commit body), re-run using the stdin parameter with `--body-file -` / `-F -` instead of embedding the text in --body.</system-reminder>\n\n"

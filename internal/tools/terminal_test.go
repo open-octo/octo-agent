@@ -436,7 +436,10 @@ func TestBacktickSubstitutionHint(t *testing.T) {
 	// Fires only when BOTH signals are present: a backtick in the command and
 	// "command not found" in the output.
 	if got := backtickSubstitutionHint("gh pr create --body \"use `web_fetch`\"", "sh: web_fetch: command not found"); got == "" {
-		t.Error("hint should fire when command has a backtick and output has 'command not found'")
+		t.Error("hint should fire on bash/zsh 'command not found'")
+	}
+	if got := backtickSubstitutionHint("gh pr create --body \"use `web_fetch`\"", "sh: 1: web_fetch: not found"); got == "" {
+		t.Error("hint should fire on dash 'not found'")
 	}
 	if got := backtickSubstitutionHint("ls -la", "sh: foo: command not found"); got != "" {
 		t.Errorf("hint must not fire without a backtick in the command, got %q", got)
@@ -459,8 +462,9 @@ func TestTerminalTool_Execute_BacktickSubstitutionHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(result.Text, "command not found") {
-		t.Fatalf("precondition: expected shell to report command not found, got %q", result.Text)
+	// bash/zsh say "command not found"; dash (Linux /bin/sh) says "not found".
+	if !strings.Contains(result.Text, "not found") {
+		t.Fatalf("precondition: expected shell to report the command was not found, got %q", result.Text)
 	}
 	if !strings.Contains(result.Text, "--body-file -") {
 		t.Errorf("result should carry the backtick-substitution reminder, got %q", result.Text)
