@@ -17,6 +17,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  svelte-check:
+    name: Svelte Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Run svelte-check
+        working-directory: web
+        run: npx svelte-check --tsconfig ./tsconfig.json
+
   test:
     name: Go ${{ matrix.go }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
