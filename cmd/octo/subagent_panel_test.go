@@ -34,6 +34,20 @@ func TestSubAgentPanel_StartedThenTools(t *testing.T) {
 	}
 }
 
+func TestSubAgentPanel_CapturesAgentType(t *testing.T) {
+	m := newPanelModel()
+	m.handleSubAgentEvent(tools.SubAgentEvent{AgentID: "agent_1", Description: "Find code", AgentType: "explore", Kind: "started"})
+	sa := m.subAgents["agent_1"]
+	if sa.agentType != "explore" {
+		t.Errorf("agentType = %q, want %q", sa.agentType, "explore")
+	}
+	// A later round with the type omitted keeps the captured type.
+	m.handleSubAgentEvent(tools.SubAgentEvent{AgentID: "agent_1", Kind: "started"})
+	if sa.agentType != "explore" {
+		t.Errorf("agentType reset on re-start = %q, want %q", sa.agentType, "explore")
+	}
+}
+
 func TestSubAgentPanel_RecentCapped(t *testing.T) {
 	m := newPanelModel()
 	m.handleSubAgentEvent(tools.SubAgentEvent{AgentID: "agent_1", Kind: "started"})

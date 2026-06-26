@@ -324,6 +324,7 @@
         sid,
         (ev as any).agent_id ?? '',
         (ev as any).description ?? '',
+        (ev as any).agent_type ?? '',
         (ev as any).kind ?? '',
         (ev as any).tool_name ?? '',
       )

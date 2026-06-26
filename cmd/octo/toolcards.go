@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/Leihb/octo-agent/internal/tools"
 	"github.com/Leihb/octo-agent/internal/tui"
 )
@@ -53,8 +51,10 @@ func cardTargetFor(toolName string, input map[string]any) string {
 		key = "command"
 	case "terminal_output", "kill_shell", "terminal_input":
 		if id, ok := input["id"].(string); ok && id != "" {
+			// Show the command as the name; fall back to the internal id only
+			// when the process is already gone and its command can't be resolved.
 			if cmd, found := tools.BgCommand(id); found && cmd != "" {
-				return fmt.Sprintf("%s (%s)", id, truncate1Line(cmd))
+				return truncate1Line(cmd)
 			}
 			return id
 		}

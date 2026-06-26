@@ -114,6 +114,7 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 				"session_id":  sess.ID,
 				"agent_id":    ev.AgentID,
 				"description": ev.Description,
+				"agent_type":  ev.AgentType,
 				"kind":        ev.Kind,
 				"tool_name":   ev.ToolName,
 			})

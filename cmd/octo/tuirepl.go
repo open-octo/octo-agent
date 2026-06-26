@@ -439,6 +439,7 @@ type tuiModel struct {
 // subAgentUI is the live panel state for one running sub-agent.
 type subAgentUI struct {
 	description string
+	agentType   string // subagent_type, e.g. "explore" (empty for an untyped fork)
 	start       time.Time
 	toolCount   int
 	recent      []string // last few tool names, for the live chain (collapsed view)
@@ -720,7 +721,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Print a concise, Claude-Code-style scrollback notice so the user
 		// sees the completion even when the model-facing <system-reminder>
 		// is folded into a later turn.
-		m.printlnBlock(bgDoneStyle.Render(fmt.Sprintf("● Background process %s (`%s`) %s", msg.e.ID, msg.e.Command, msg.e.Status)))
+		m.printlnBlock(bgDoneStyle.Render(fmt.Sprintf("● Background `%s` %s", msg.e.Command, msg.e.Status)))
 		// Idle auto-turn: if no turn is running and nothing is queued, drain the
 		// inbox (which holds the full <system-reminder> notice) and start a
 		// turn so the model sees the completion immediately — matching the plain
@@ -870,7 +871,7 @@ func (m *tuiModel) handleSubAgentEvent(ev tools.SubAgentEvent) {
 	}
 	sa := m.subAgents[ev.AgentID]
 	if sa == nil {
-		sa = &subAgentUI{description: ev.Description, start: time.Now()}
+		sa = &subAgentUI{description: ev.Description, agentType: ev.AgentType, start: time.Now()}
 		m.subAgents[ev.AgentID] = sa
 		m.subAgentOrder = append(m.subAgentOrder, ev.AgentID)
 	}
@@ -883,6 +884,9 @@ func (m *tuiModel) handleSubAgentEvent(ev tools.SubAgentEvent) {
 		sa.errored = false
 		if ev.Description != "" {
 			sa.description = ev.Description
+		}
+		if ev.AgentType != "" {
+			sa.agentType = ev.AgentType
 		}
 	case "tool", "tool_error":
 		sa.toolCount++

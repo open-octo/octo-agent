@@ -37,6 +37,7 @@ type SubAgentInfo struct {
 type asyncSubAgent struct {
 	id          string
 	description string
+	agentType   string
 	cancel      context.CancelFunc
 	start       time.Time
 
@@ -200,7 +201,7 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 	id := fmt.Sprintf("sync_%d", m.seq)
 	m.mu.Unlock()
 
-	if sink := m.eventSink(id, req.Description); sink != nil {
+	if sink := m.eventSink(id, req.Description, req.AgentType); sink != nil {
 		ctx = WithSubAgentEventSink(ctx, sink)
 		sink(SubAgentEvent{Kind: "started"})
 		defer sink(SubAgentEvent{Kind: "done"})
@@ -270,7 +271,7 @@ func (m *SubAgentManager) SetOnEvent(fn func(SubAgentEvent)) {
 
 // eventSink builds the per-agent sink stamped into the spawn context. Returns
 // nil when no onEvent hook is set, so the spawner skips streaming entirely.
-func (m *SubAgentManager) eventSink(id, description string) func(SubAgentEvent) {
+func (m *SubAgentManager) eventSink(id, description, agentType string) func(SubAgentEvent) {
 	m.mu.Lock()
 	onEvent := m.onEvent
 	m.mu.Unlock()
@@ -281,6 +282,9 @@ func (m *SubAgentManager) eventSink(id, description string) func(SubAgentEvent) 
 		ev.AgentID = id
 		if ev.Description == "" {
 			ev.Description = description
+		}
+		if ev.AgentType == "" {
+			ev.AgentType = agentType
 		}
 		onEvent(ev)
 	}
@@ -308,6 +312,7 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 	agent := &asyncSubAgent{
 		id:          id,
 		description: req.Description,
+		agentType:   req.AgentType,
 		cancel:      cancel,
 		start:       time.Now(),
 		busy:        true,
@@ -317,7 +322,7 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 
 	// Stream runtime events (started + per-tool) for live display. nil sink =>
 	// no onEvent hook => the spawner runs without streaming.
-	sink := m.eventSink(id, req.Description)
+	sink := m.eventSink(id, req.Description, req.AgentType)
 	if sink != nil {
 		ctx = WithSubAgentEventSink(ctx, sink)
 		sink(SubAgentEvent{Kind: "started"})
@@ -419,6 +424,7 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 	agent.cancel = cancel
 	backingID := agent.backingID
 	desc := agent.description
+	agentType := agent.agentType
 	agent.mu.Unlock()
 	if oldCancel != nil {
 		oldCancel()
@@ -428,7 +434,7 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 	// sub-agent as running while it handles the message. "done" is emitted
 	// explicitly before any pending-message handoff (not deferred) so it can't
 	// race the next round's "started".
-	sink := m.eventSink(agentID, desc)
+	sink := m.eventSink(agentID, desc, agentType)
 	if sink != nil {
 		ctx = WithSubAgentEventSink(ctx, sink)
 		sink(SubAgentEvent{Kind: "started"})

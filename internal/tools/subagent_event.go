@@ -13,6 +13,7 @@ import "context"
 type SubAgentEvent struct {
 	AgentID     string // manager handle, e.g. "agent_1"
 	Description string // human-readable label from sub_agent
+	AgentType   string // subagent_type, e.g. "explore" (empty for an untyped fork)
 	// Kind is one of:
 	//   "started"    — the sub-agent began a task (or a Continue round)
 	//   "tool"       — it dispatched a tool (ToolName set)

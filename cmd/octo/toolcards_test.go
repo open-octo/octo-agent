@@ -39,6 +39,9 @@ func TestCardTargetFor(t *testing.T) {
 		{"web_search", map[string]any{"query": "golang generics"}, "golang generics"},
 		{"read_file", map[string]any{"path": "main.go"}, "main.go"},
 		{"web_fetch", map[string]any{"url": "https://x.example"}, "https://x.example"},
+		// terminal_output names the process by its command; with no live process
+		// to resolve it falls back to the bare internal id (never "id (cmd)").
+		{"terminal_output", map[string]any{"id": "bg_404"}, "bg_404"},
 	}
 	for _, c := range cases {
 		if got := cardTargetFor(c.tool, c.input); got != c.want {

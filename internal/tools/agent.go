@@ -113,6 +113,7 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	// Build the spawn request
 	req := SpawnRequest{
 		Description: desc,
+		AgentType:   subagentType,
 		Prompt:      prompt,
 		Tools:       stringSliceArg(input, "tools"),
 		Model:       strings.TrimSpace(stringArg(input, "model")),

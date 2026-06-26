@@ -50,8 +50,8 @@
           <span class="dot green" class:pulse={a.status === 'running'}></span>
         </span>
         <div class="agent-info">
-          <span class="agent-name">{a.description}</span>
-          <span class="agent-task mono">{a.id}</span>
+          <!-- An untyped child is a fork of the parent — label it "fork". -->
+          <span class="agent-name"><span class="agent-type">{a.agentType || 'fork'}</span> {a.description}</span>
         </div>
         {#if a.status === 'running'}
           <span class="status-running">
@@ -128,7 +128,7 @@
 .dot.pulse { animation: octo-dot 1.4s infinite; }
 .agent-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .agent-name { font-size: 13px; font-weight: 600; color: var(--text-heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-task { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-type { font-weight: 600; color: var(--blue-6); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .status-running { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--blue-6); flex: 0 0 auto; }
 .status-done { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--success); flex: 0 0 auto; }
 .agent-body {

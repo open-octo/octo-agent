@@ -27,6 +27,11 @@ type SpawnRequest struct {
 	// Description is a short human-readable label for logging / progress UI.
 	Description string
 
+	// AgentType is the subagent_type the caller selected (e.g. "explore",
+	// "general"), shown alongside Description in the live panels. Empty for an
+	// untyped fork.
+	AgentType string
+
 	// Prompt is the sub-agent's user message. It carries the task.
 	Prompt string
 

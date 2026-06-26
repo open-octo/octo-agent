@@ -786,6 +786,7 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.C
 				"session_id":  sid,
 				"agent_id":    ev.AgentID,
 				"description": ev.Description,
+				"agent_type":  ev.AgentType,
 				"kind":        ev.Kind,
 				"tool_name":   ev.ToolName,
 			})

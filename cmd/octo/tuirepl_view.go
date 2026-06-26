@@ -1115,10 +1115,19 @@ func (m *tuiModel) View() string {
 			if i > 0 {
 				lines.WriteByte('\n')
 			}
+			// Show the task description as the name, prefixed with the
+			// subagent_type (e.g. "explore (Find code)"). An untyped child is a
+			// fork of the parent, labelled "fork" — the tool's own vocabulary.
+			// The agent_N id is the internal addressing handle, not user-facing.
 			label := id
 			if sa.description != "" {
-				label = fmt.Sprintf("%s (%s)", id, truncate1Line(sa.description))
+				label = truncate1Line(sa.description)
 			}
+			typ := sa.agentType
+			if typ == "" {
+				typ = "fork"
+			}
+			label = fmt.Sprintf("%s (%s)", typ, label)
 			focus := "  "
 			if m.subAgentFocus == i {
 				focus = "▸ "

@@ -274,6 +274,7 @@ export interface SubAgentTool {
 export interface SubAgentState {
   id: string
   description: string
+  agentType: string // subagent_type, e.g. "explore" (empty for an untyped fork)
   status: 'running' | 'done'
   lastTool: string
   tools: SubAgentTool[]
@@ -288,6 +289,7 @@ export function applySubAgentEvent(
   sessionId: string,
   agentId: string,
   description: string,
+  agentType: string,
   kind: string,
   toolName: string,
 ) {
@@ -298,6 +300,7 @@ export function applySubAgentEvent(
       const entry: SubAgentState = {
         id: agentId,
         description: description || agentId,
+        agentType,
         status: 'running',
         lastTool: '',
         tools: [],
@@ -309,11 +312,12 @@ export function applySubAgentEvent(
     }
     if (idx < 0) {
       // Tool/done arrived before a started event (e.g. resumed agent) — seed it.
-      list.push({ id: agentId, description: description || agentId, status: 'running', lastTool: '', tools: [], startedAt: Date.now() })
+      list.push({ id: agentId, description: description || agentId, agentType, status: 'running', lastTool: '', tools: [], startedAt: Date.now() })
       idx = list.length - 1
     }
     const a = { ...list[idx], tools: [...list[idx].tools] }
     if (description && a.description === a.id) a.description = description
+    if (agentType && !a.agentType) a.agentType = agentType
     if (kind === 'tool' || kind === 'tool_error') {
       a.tools.push({ name: toolName || 'tool', error: kind === 'tool_error' })
       a.lastTool = toolName || a.lastTool
