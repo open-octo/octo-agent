@@ -1,5 +1,20 @@
 import type { Session, Skill, ScheduledTask, McpServer, Channel, Memory, RecallFile, TagStatus } from './types'
 
+// TaskResponse matches the Go server task struct.
+export interface TaskResponse {
+  id: string
+  name: string
+  cron: string
+  prompt: string
+  model: string
+  agent: string
+  notify: string
+  enabled: boolean
+  created_at: string
+  last_run: string
+  session_id: string
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init)
   if (!res.ok) {
@@ -166,8 +181,8 @@ export async function uploadFile(file: File): Promise<string> {
 
 // Tasks
 
-export async function listTasks(): Promise<ScheduledTask[]> {
-  return request<ScheduledTask[]>('/api/tasks')
+export async function listTasks(): Promise<TaskResponse[]> {
+  return request<TaskResponse[]>('/api/tasks')
 }
 
 export async function createTask(req: unknown): Promise<ScheduledTask> {

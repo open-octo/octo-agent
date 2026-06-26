@@ -48,24 +48,29 @@
     }
   }
 
-  onMount(async () => {
+  onMount(() => {
     // Access-key gate, BEFORE any gated call. Loopback visits pass instantly
     // (the server exempts them); a networked server without a valid key prompts
     // via the AuthGate overlay. A denied result blocks boot with a message.
-    if (!(await checkAuth())) {
-      authDenied = true
-      return () => ws.disconnect()
-    }
-    // First-run gate: decide the onboard phase BEFORE booting the main UI so it
-    // never flashes behind the setup panel. Default to '' on error so a status
-    // hiccup doesn't trap a configured user behind a blank splash.
-    try {
-      const status = await api.getOnboardStatus()
-      onboardPhase.set(status.phase ?? '')
-    } catch {
-      onboardPhase.set('')
-    }
-    return () => ws.disconnect()
+    let cancelled = false
+    const cleanup = () => { cancelled = true; ws.disconnect() }
+    checkAuth().then(async ok => {
+      if (cancelled) return
+      if (!ok) {
+        authDenied = true
+        return
+      }
+      // First-run gate: decide the onboard phase BEFORE booting the main UI so it
+      // never flashes behind the setup panel. Default to '' on error so a status
+      // hiccup doesn't trap a configured user behind a blank splash.
+      try {
+        const status = await api.getOnboardStatus()
+        onboardPhase.set(status.phase ?? '')
+      } catch {
+        onboardPhase.set('')
+      }
+    })
+    return cleanup
   })
 
   // Boot the normal UI once onboarding doesn't block it. 'key_setup' holds here
