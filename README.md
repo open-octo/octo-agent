@@ -2,7 +2,7 @@
 
 [![Go CI](https://img.shields.io/github/actions/workflow/status/Leihb/octo-agent/go.yml?label=ci&style=flat-square)](https://github.com/Leihb/octo-agent/actions)
 [![Website](https://img.shields.io/badge/website-octo--agent.dev-4f46e5?style=flat-square)](https://octo-agent.dev)
-[![Go](https://img.shields.io/badge/go-%3E%3D%201.22-00ADD8?style=flat-square)](https://go.dev)
+[![Go](https://img.shields.io/badge/go-%3E%3D%201.25-00ADD8?style=flat-square)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE.txt)
 
 <p align="center">
@@ -13,7 +13,7 @@ A functionality-first AI agent, distributed as a single Go binary. Speaks two na
 
 ## Status
 
-> **Pre-1.0.** All three interfaces are live: the CLI (an interactive TUI in a terminal, a headless agentic one-shot everywhere else), a local web server (`octo serve`), and an IM bridge (running inside `octo serve`; WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram). On top of the agent loop there are skills, MCP clients, OS-level sandboxing, persistent memory, sub-agents, and a task graph for autonomous multi-step goals.
+> **Stable (1.0).** All three interfaces are live: the CLI (an interactive TUI in a terminal, a headless agentic one-shot everywhere else), a local web server (`octo serve`), and an IM bridge (running inside `octo serve`; WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram). On top of the agent loop there are skills, MCP clients, OS-level sandboxing, persistent memory, sub-agents, background workflows, and a task graph for autonomous multi-step goals.
 >
 > What you can build on is declared in [COMPATIBILITY.md](COMPATIBILITY.md) (stable config formats, CLI, exit codes — and what isn't covered); the security boundary in [SECURITY.md](SECURITY.md).
 
@@ -230,8 +230,9 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 | Sandbox | done | OS-enforced `--sandbox` (macOS / Linux) |
 | MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, device-flow OAuth |
 | Memory | done | Persistent cross-session memory under `~/.octo/memories/`, auto extract/consolidate |
-| Sub-agents | done | `launch_agent` fan-out, async + resumable (`send_message`, `agent_status`, `kill_agent`) |
-| Web server | done | `octo serve` — REST + SSE, embedded dashboard UI with session browse/delete (loopback bind by default; access-key auth for exposed binds, see SECURITY.md) |
+| Sub-agents | done | `sub_agent` fan-out, async + resumable (`sub_agent_send`, `sub_agent_status`, `sub_agent_kill`) |
+| Workflows | done | `workflow` tool — deterministic multi-agent orchestration (parallel/pipeline), background runs with liveness + `workflow_kill`, git worktree isolation, structured-output schema; JS or an embedded-Ruby DSL |
+| Web server | done | `octo serve` — REST + SSE, the embedded Octo Workbench UI (sessions, tool output, artifacts, sub-agents, tasks, memories, MCP, skills; loopback bind by default; access-key auth for exposed binds, see SECURITY.md) |
 | IM bridge | done | runs inside `octo serve` — WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram adapters (web QR login, per-user sessions, slash commands) |
 
 ## Architecture
@@ -239,7 +240,7 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 Layered, one-directional dependency graph:
 
 ```
-cmd/octo/          CLI entry (chat one-shot + TUI, serve, channel, mcp, slash commands)
+cmd/octo/          CLI entry (chat one-shot + TUI, serve, mcp, slash commands)
    ↓
 internal/agent/    History, sessions, content blocks, Sender interface,
                    Agent.Turn / TurnStream / Run (tool-calling loop)
@@ -254,7 +255,8 @@ internal/skills/   SKILL.md discovery + system-prompt manifest
 internal/permission/  allow/deny/ask rule engine gating every tool call
 internal/mcp/      MCP client (stdio + HTTP, OAuth)
 internal/server/   octo serve — HTTP REST + SSE + embedded dashboard
-internal/channel/  IM bridge — adapter interface + WeChat iLink adapter
+internal/channel/  IM bridge — adapter interface + WeChat iLink / Feishu /
+                   DingTalk / WeCom / Discord / Telegram adapters
 ```
 
 Each provider implements both **buffered** (`Send`) and **streaming** (`SendStream`) variants. The agent layer mirrors with `Sender` / `StreamingSender` / `ToolSender` / `ToolStreamingSender` — interfaces are added incrementally so non-streaming providers still work.

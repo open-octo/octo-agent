@@ -2,7 +2,7 @@
 
 [![Go CI](https://img.shields.io/github/actions/workflow/status/Leihb/octo-agent/go.yml?label=ci&style=flat-square)](https://github.com/Leihb/octo-agent/actions)
 [![Website](https://img.shields.io/badge/website-octo--agent.dev-4f46e5?style=flat-square)](https://octo-agent.dev)
-[![Go](https://img.shields.io/badge/go-%3E%3D%201.22-00ADD8?style=flat-square)](https://go.dev)
+[![Go](https://img.shields.io/badge/go-%3E%3D%201.25-00ADD8?style=flat-square)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE.txt)
 
 <p align="center">
@@ -13,7 +13,7 @@
 
 ## 状态
 
-> **Pre-1.0。** 三种界面均已上线：CLI（终端里是交互式 TUI，其余场景是 headless 的 agentic 单发）、本地 Web 服务（`octo serve`）、IM 桥接（随 `octo serve` 运行；微信 iLink、飞书、钉钉、企微、Discord、Telegram）。在 agent 循环之上还有 skills、MCP 客户端、操作系统级沙箱、持久化记忆、子代理，以及用于自主多步目标的任务图。
+> **稳定版（1.0）。** 三种界面均已上线：CLI（终端里是交互式 TUI，其余场景是 headless 的 agentic 单发）、本地 Web 服务（`octo serve`）、IM 桥接（随 `octo serve` 运行；微信 iLink、飞书、钉钉、企微、Discord、Telegram）。在 agent 循环之上还有 skills、MCP 客户端、操作系统级沙箱、持久化记忆、子代理、后台工作流，以及用于自主多步目标的任务图。
 >
 > 哪些接口可以放心依赖，见 [COMPATIBILITY.md](COMPATIBILITY.md)（稳定的配置格式、CLI、退出码，以及不在承诺范围内的部分）；安全边界见 [SECURITY.md](SECURITY.md)。
 
@@ -70,7 +70,7 @@ octo --prompt-file ./task.md
 # session）。用 -c 恢复历史 session。
 octo
 octo sessions
-octo -c                  # pick a recent session from a list
+octo -c                  # 从列表里选一个最近的 session
 octo -c <session-id>
 
 # 默认流式输出；--stream=false 改为缓冲、只打印最终回复文本（便于重定向到文件捕获）。
@@ -105,7 +105,7 @@ octo skills list
 octo serve --addr 127.0.0.1:8080
 
 # IM 桥接（微信 iLink）：扫码登录；渠道随 `octo serve` 一起运行
-octo serve   # WeChat login: Channels panel in the web UI (scan QR)
+octo serve   # 微信登录：在 Web UI 的 Channels 面板扫码
 ```
 
 ## 配置
@@ -185,8 +185,9 @@ octo --sandbox --sandbox-read /opt/data     # 额外可读目录（可重复）
 | 沙箱 | 完成 | 操作系统强制的 `--sandbox`（macOS / Linux） |
 | MCP 客户端 | 完成 | `mcp.json` 的 stdio + Streamable HTTP 服务，tools/resources/prompts，device-flow OAuth |
 | 记忆 | 完成 | `~/.octo/memories/` 下的跨会话持久化记忆，自动抽取/整合 |
-| 子代理 | 完成 | `launch_agent` 并行扇出，异步 + 可恢复（`send_message`、`agent_status`、`kill_agent`） |
-| Web 服务 | 完成 | `octo serve` —— REST + SSE，内嵌仪表盘 UI（绑定 localhost） |
+| 子代理 | 完成 | `sub_agent` 并行扇出，异步 + 可恢复（`sub_agent_send`、`sub_agent_status`、`sub_agent_kill`） |
+| 工作流 | 完成 | `workflow` 工具 —— 确定性多代理编排（parallel/pipeline）、后台运行带 liveness + `workflow_kill`、git worktree 隔离、结构化输出 schema；支持 JS 或内嵌 Ruby DSL |
+| Web 服务 | 完成 | `octo serve` —— REST + SSE，内嵌 Octo Workbench UI（session、工具输出、artifacts、子代理、任务、记忆、MCP、skills；默认绑定 localhost） |
 | IM 桥接 | 完成 | 随 `octo serve` 运行 —— 微信 iLink/飞书/钉钉/企微/Discord/Telegram 适配器（web 扫码登录、按用户隔离 session、斜杠命令） |
 
 ## 架构
@@ -194,7 +195,7 @@ octo --sandbox --sandbox-read /opt/data     # 额外可读目录（可重复）
 分层、单向依赖：
 
 ```
-cmd/octo/          CLI 入口（chat 单发 + TUI / serve / channel / mcp / 斜杠命令）
+cmd/octo/          CLI 入口（chat 单发 + TUI / serve / mcp / 斜杠命令）
    ↓
 internal/agent/    历史、Session、ContentBlock、Sender 接口、
                    Agent.Turn / TurnStream / Run（工具调用循环）
@@ -209,7 +210,8 @@ internal/skills/   SKILL.md 发现 + 系统提示清单
 internal/permission/  门控每次工具调用的 allow/deny/ask 规则引擎
 internal/mcp/      MCP 客户端（stdio + HTTP，OAuth）
 internal/server/   octo serve —— HTTP REST + SSE + 内嵌仪表盘
-internal/channel/  IM 桥接 —— 适配器接口 + 微信 iLink 适配器
+internal/channel/  IM 桥接 —— 适配器接口 + 微信 iLink / 飞书 /
+                   钉钉 / 企微 / Discord / Telegram 适配器
 ```
 
 每个 Provider 同时实现**缓冲式** (`Send`) 和**流式** (`SendStream`) 变体。Agent 层对应有 `Sender` / `StreamingSender` / `ToolSender` / `ToolStreamingSender` —— 接口分层添加，不支持流式的 Provider 也能跑。
