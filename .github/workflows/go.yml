@@ -28,8 +28,6 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       - name: Install web dependencies
         working-directory: web
@@ -54,10 +52,6 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
-        env:
-          # Opt into Node 24 early to silence deprecation warnings.
-          # Both actions/checkout@v5 and actions/setup-go@v6 support it.
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       - name: go vet
         run: go vet ./...
