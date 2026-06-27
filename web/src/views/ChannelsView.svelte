@@ -12,7 +12,7 @@
     discord:  'logos:discord-icon',
     feishu:   'mdi:feather',
     dingtalk: 'ant-design:dingtalk-outlined',
-    wecom:    'mdi:briefcase-outline',
+    wecom:    'simple-icons:wecom',
     weixin:   'simple-icons:wechat',
   }
 
