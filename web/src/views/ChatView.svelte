@@ -506,6 +506,12 @@
         ...p,
         [sid]: { message: (ev as any).message || 'Thinking', phase: (ev as any).phase },
       }))
+      // A fresh or replayed progress event means a turn is in flight. When the
+      // user switches back to a running session the indicator was reset, so
+      // restore the streaming flag so the thinking block/spinner renders.
+      if ((ev as any).phase === 'active') {
+        chatStreaming.update(s => ({ ...s, [sid]: true }))
+      }
     }))
 
     cleanups.push(ws.on('complete', (ev) => {
