@@ -57,6 +57,10 @@
     try {
       await api.deleteSessions(ids)
       sessions.update(ss => ss.filter(s => !$sel[s.id]))
+      if (ids.includes($activeSessionId ?? '')) {
+        activeSessionId.set(null)
+        view.set('chat')
+      }
     } catch (e: any) { showToast(e.message, 'error') }
     sel.set({}); selMode.set(false)
   }
@@ -65,7 +69,14 @@
     try {
       await api.deleteSession(id)
       sessions.update(ss => ss.filter(s => s.id !== id))
-      if ($activeSessionId === id) activeSessionId.set(null)
+      if ($activeSessionId === id) {
+        activeSessionId.set(null)
+        // Clearing the active session while still on the chat view would leave
+        // ChatView rendering a phantom "bound to another entry" banner. Fall
+        // back to the session list landing so the deleted session is gone and
+        // the user can pick or create a new one.
+        view.set('chat')
+      }
     } catch (e: any) { showToast(e.message, 'error') }
     menuFor.set(null)
   }

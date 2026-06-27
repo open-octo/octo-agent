@@ -225,7 +225,12 @@
   // $activeSessionId makes this effect re-run whenever the session changes.
   $effect(() => {
     const sid = $activeSessionId
-    if (!sid) return
+    if (!sid) {
+      // No active session: drop any stale force-bind banner so a deleted session
+      // does not leave the chat view showing "Session is bound to another entry."
+      bindRequiredFor = null
+      return
+    }
 
     clearMsgs(sid)
     resetArtifacts(sid)
