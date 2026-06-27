@@ -298,12 +298,23 @@
     }))
 
     // A background process finished (the badge updates via
-    // background_tasks_update); surface the outcome as a toast.
+    // background_tasks_update); render the outcome as an inline scrollback
+    // notice in the message stream, mirroring the TUI's bgDoneStyle line.
     cleanups.push(ws.on('background_task_notice', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       const status = (ev as any).status ?? ''
       const level = status === 'success' ? 'success' : status === 'cancelled' ? 'info' : 'error'
-      showToast(`${tr('bgtask.notice')}: ${(ev as any).command ?? ''}`, level)
+      const command = (ev as any).command ?? ''
+      addChatMsg(sid, {
+        id: uid('note'),
+        type: 'notice',
+        content: `Background \`${command}\` ${status}`,
+        level,
+        createdAt: Date.now(),
+        streaming: false,
+        tools: [],
+        todos: [],
+      })
     }))
 
     cleanups.push(ws.on('text_delta', (ev) => {
@@ -887,6 +898,17 @@
                   <span>{msg.content || $t('chat.thinking')}</span>
                 </div>
               </div>
+
+            {:else if msg.type === 'notice'}
+              <!-- Inline scrollback notice (background process completion, etc.) -->
+              <div class="msg-agent fadein">
+                <div class="agent-avatar notice-avatar" data-level={msg.level}>
+                  <iconify-icon icon="lucide:info" width="14"></iconify-icon>
+                </div>
+                <div class="agent-content">
+                  <div class="notice-line" data-level={msg.level}>{@html renderMarkdown(msg.content)}</div>
+                </div>
+              </div>
             {/if}
           {/each}
 
@@ -1186,6 +1208,28 @@
   text-align: left; line-height: 1.5;
 }
 .suggestion-chip:hover { border-color: var(--blue-6); color: var(--blue-6); }
+
+/* ── Inline scrollback notice ─────────────────────────────────────────────── */
+.notice-avatar {
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.notice-avatar[data-level="success"] { color: var(--success); }
+.notice-avatar[data-level="error"] { color: var(--error); }
+.notice-avatar[data-level="info"] { color: var(--text-secondary); }
+.notice-line {
+  display: flex; align-items: center; gap: 8px; min-height: 28px;
+  font-size: 13px; color: var(--text-secondary);
+}
+.notice-line[data-level="success"] { color: var(--success); }
+.notice-line[data-level="error"] { color: var(--error); }
+.notice-line[data-level="info"] { color: var(--text-secondary); }
+.notice-line :global(p) { margin: 0; }
+.notice-line :global(code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; background: var(--bg-table-header); border: 1px solid var(--border-table);
+  border-radius: 4px; padding: 1px 4px;
+}
 
 /* ── Fade-in ─────────────────────────────────────────────────────────────── */
 .fadein { animation: octo-fadein 0.25s ease; }
