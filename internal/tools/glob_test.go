@@ -153,3 +153,72 @@ func TestGlob_RequiresPattern(t *testing.T) {
 		t.Fatal("missing pattern should error")
 	}
 }
+
+func TestGlob_NonExistentRoot(t *testing.T) {
+	requireRg(t)
+	_, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "*.go",
+		"path":    filepath.Join(t.TempDir(), "does-not-exist"),
+	})
+	if err == nil {
+		t.Fatal("expected error for non-existent root")
+	}
+	if !strings.Contains(err.Error(), "stat root") {
+		t.Errorf("error should mention stat root, got: %v", err)
+	}
+}
+
+func TestGlob_FileRoot(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	single := filepath.Join(dir, "single.go")
+	writeTestFile(t, single, "")
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "*.go",
+		"path":    single,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "single.go") {
+		t.Errorf("expected single.go in output:\n%s", out.Text)
+	}
+}
+
+func TestGlob_UnreadableSubdirReturnsPartialResults(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "readable", "ok.go"), "")
+	writeTestFile(t, filepath.Join(dir, "unreadable", "secret.go"), "")
+
+	unreadable := filepath.Join(dir, "unreadable")
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatalf("chmod unreadable: %v", err)
+	}
+	defer os.Chmod(unreadable, 0o755) // ensure cleanup can remove the tree
+
+	// Permission restrictions may not be enforced (e.g. root on Unix, some Windows
+	// configurations). If we can still list the directory, the test premise fails.
+	if f, err := os.Open(unreadable); err == nil {
+		f.Close()
+		t.Skip("chmod 000 did not prevent directory listing; skipping permission test")
+	}
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "**/*.go",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "ok.go") {
+		t.Errorf("expected ok.go from readable subdir:\n%s", out.Text)
+	}
+	if strings.Contains(out.Text, "secret.go") {
+		t.Errorf("secret.go should not be readable:\n%s", out.Text)
+	}
+	if !strings.Contains(out.Text, "[warning:") {
+		t.Errorf("expected a warning about the unreadable subdir:\n%s", out.Text)
+	}
+}

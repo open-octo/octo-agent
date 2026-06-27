@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -150,13 +151,19 @@ func (GrepTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 		args = append(args, abs)
 	}
 
-	out, err := exec.CommandContext(ctx, rgPath, args...).Output()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, rgPath, args...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
 		// ripgrep exits 1 when nothing matched. That's not an error from
 		// the LLM's perspective — surface it as a normal result.
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return agent.ToolResult{Text: "(no matches)", UI: grepUIEmpty(pattern)}, nil
+		}
+		if stderr.Len() > 0 {
+			return agent.ToolResult{Text: ""}, fmt.Errorf("grep: rg failed: %s", strings.TrimSpace(stderr.String()))
 		}
 		return agent.ToolResult{Text: ""}, fmt.Errorf("grep: rg failed: %w", err)
 	}

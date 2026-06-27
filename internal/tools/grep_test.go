@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -215,5 +216,36 @@ func TestGrep_TruncatesLongMatchingLines(t *testing.T) {
 	// The old unhelpful marker should no longer appear.
 	if strings.Contains(out.Text, "Omitted long matching line") {
 		t.Errorf("old full-omission marker should not appear; output:\n%s", out.Text)
+	}
+}
+
+func TestGrep_IncludesStderrOnError(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "readable", "ok.go"), "needle\n")
+	writeTestFile(t, filepath.Join(dir, "unreadable", "secret.go"), "needle\n")
+
+	unreadable := filepath.Join(dir, "unreadable")
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatalf("chmod unreadable: %v", err)
+	}
+	defer os.Chmod(unreadable, 0o755) // ensure cleanup can remove the tree
+
+	// Permission restrictions may not be enforced (e.g. root on Unix, some Windows
+	// configurations). If we can still list the directory, the test premise fails.
+	if f, err := os.Open(unreadable); err == nil {
+		f.Close()
+		t.Skip("chmod 000 did not prevent directory listing; skipping permission test")
+	}
+
+	_, err := GrepTool{}.Execute(context.Background(), "grep", map[string]any{
+		"pattern": "needle",
+		"path":    dir,
+	})
+	if err == nil {
+		t.Fatal("expected error when rg cannot scan an unreadable directory")
+	}
+	if !strings.Contains(err.Error(), "Permission denied") && !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error should include rg's stderr message, got: %v", err)
 	}
 }

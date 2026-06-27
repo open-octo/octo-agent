@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -84,7 +85,7 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 		return agent.ToolResult{Text: ""}, err
 	}
 
-	files, err := listProjectFiles(ctx, absRoot)
+	files, warning, err := listProjectFiles(ctx, absRoot)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("glob: %w", err)
 	}
@@ -150,10 +151,17 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 	}
 
 	if out.Len() == 0 {
-		return agent.ToolResult{Text: fmt.Sprintf("(no matches for %q under %s)", pattern, absRoot), UI: ui}, nil
+		text := fmt.Sprintf("(no matches for %q under %s)", pattern, absRoot)
+		if warning != "" {
+			text += fmt.Sprintf("\n[warning: %s]", warning)
+		}
+		return agent.ToolResult{Text: text, UI: ui}, nil
 	}
 	if truncated {
 		fmt.Fprintf(&out, "\n[truncated to first %d of %d matches]\n", GlobMaxResults, totalMatches)
+	}
+	if warning != "" {
+		fmt.Fprintf(&out, "\n[warning: %s]\n", warning)
 	}
 	return agent.ToolResult{Text: out.String(), UI: ui}, nil
 }
@@ -164,20 +172,60 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 // can still find e.g. `.octorules`; `--null` separates paths with NUL so a
 // newline inside a filename can't split one path into two. A clean "no files"
 // (ripgrep exit code 1) returns an empty slice, not an error.
-func listProjectFiles(ctx context.Context, root string) ([]string, error) {
+//
+// The returned warning is non-empty when ripgrep exited with an error but still
+// produced a partial file list; callers should surface it alongside the results
+// rather than treating the call as a failure.
+func listProjectFiles(ctx context.Context, root string) ([]string, string, error) {
 	rgPath, err := rgembed.Path()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	out, err := exec.CommandContext(ctx, rgPath, "--files", "--hidden", "--null", root).Output()
+
+	info, err := os.Stat(root)
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			return nil, nil // no files under root
-		}
-		return nil, fmt.Errorf("rg --files: %w", err)
+		return nil, "", fmt.Errorf("stat root %q: %w", root, err)
 	}
-	trimmed := strings.Trim(string(out), "\x00")
+	if !info.IsDir() {
+		// rg --files on a regular file emits that file and exits 0; mirror that
+		// without shelling out so non-directory roots don't produce a cryptic
+		// "not a directory" error from ripgrep.
+		return []string{root}, "", nil
+	}
+
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, rgPath, "--files", "--hidden", "--null", root)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+
+	if err == nil {
+		files, parseErr := parseNullSeparatedPaths(out)
+		return files, "", parseErr
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return nil, "", nil // no files under root
+	}
+
+	// ripgrep exit code 2 means an error occurred while scanning. If it still
+	// managed to list some files, return those and let the caller surface the
+	// warning; failing entirely for a single unreadable directory is worse than
+	// returning partial results.
+	files, _ := parseNullSeparatedPaths(out)
+	if len(files) > 0 {
+		return files, strings.TrimSpace(stderr.String()), nil
+	}
+
+	if stderr.Len() > 0 {
+		return nil, "", fmt.Errorf("rg --files: %s", strings.TrimSpace(stderr.String()))
+	}
+	return nil, "", fmt.Errorf("rg --files: %w", err)
+}
+
+// parseNullSeparatedPaths splits rg --null output into individual paths.
+func parseNullSeparatedPaths(data []byte) ([]string, error) {
+	trimmed := strings.Trim(string(data), "\x00")
 	if trimmed == "" {
 		return nil, nil
 	}
