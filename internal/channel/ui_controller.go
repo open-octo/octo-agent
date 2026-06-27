@@ -9,8 +9,8 @@ import (
 )
 
 // UIController bridges agent.AgentEvent stream to IM platform messages.
-// It suppresses noisy tool-call events, buffers file previews, and forwards
-// meaningful events (text deltas, tool results, completion) to the adapter.
+// It suppresses noisy tool-call events and forwards only the model's text
+// reply to the adapter.
 type UIController struct {
 	adapter Adapter
 	chatID  string
@@ -26,9 +26,6 @@ type UIController struct {
 	// pendingTextMsgID is the message ID of the last text message we sent,
 	// used for in-place updates on platforms that support it.
 	pendingTextMsgID string
-
-	// fileBuf accumulates file paths mentioned in tool results for batch preview.
-	fileBuf []string
 
 	// toolCount tracks how many tools have started (for suppression heuristics).
 	toolCount int
@@ -66,7 +63,7 @@ func (u *UIController) handleEvent(ev agent.AgentEvent) {
 	case agent.EventToolProgress:
 		// Suppress progress noise in IM — too chatty.
 	case agent.EventToolDone:
-		u.onToolDone(ev.ToolName, ev.Output)
+		u.onToolDone(ev.ToolName)
 	case agent.EventToolError:
 		// Suppress tool errors in IM — the model sees the error result in
 		// context and can explain it in its own reply; a separate ❌ message
@@ -106,16 +103,12 @@ func (u *UIController) onToolStarted(toolName string) {
 	u.inTool = true
 }
 
-// onToolDone handles successful tool completion. We extract file references from
-// the output and buffer them for a batched preview at turn end.
-func (u *UIController) onToolDone(toolName, output string) {
+// onToolDone notes that a tool completed successfully. Tool output is not
+// surfaced as a separate chat message; only the model's text reply is shown.
+func (u *UIController) onToolDone(toolName string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.inTool = false
-
-	// Extract file paths from tool output for potential preview.
-	files := extractFilePaths(output)
-	u.fileBuf = append(u.fileBuf, files...)
 }
 
 // onToolError notes that a tool failed. The error is not surfaced as a chat
@@ -127,13 +120,12 @@ func (u *UIController) onToolError(toolName string) {
 	u.inTool = false
 }
 
-// onTurnDone finalizes the turn: flushes remaining text, sends file previews,
-// resets state, then force-drains any adapter send queue so the final message
-// is delivered immediately instead of waiting for the background flush timer.
+// onTurnDone finalizes the turn: flushes remaining text, resets state, then
+// force-drains any adapter send queue so the final message is delivered
+// immediately instead of waiting for the background flush timer.
 func (u *UIController) onTurnDone(reply *agent.Reply) {
 	u.mu.Lock()
 	u.flushTextLocked()
-	u.flushFilesLocked()
 	u.resetLocked()
 	u.mu.Unlock() // explicit unlock before Flush — Flush may block during send
 
@@ -164,47 +156,9 @@ func (u *UIController) flushTextLocked() {
 	}
 }
 
-// flushFilesLocked sends batched file previews. Must be called with mu held.
-func (u *UIController) flushFilesLocked() {
-	if len(u.fileBuf) == 0 {
-		return
-	}
-	// Deduplicate.
-	seen := make(map[string]bool, len(u.fileBuf))
-	unique := make([]string, 0, len(u.fileBuf))
-	for _, f := range u.fileBuf {
-		if !seen[f] {
-			seen[f] = true
-			unique = append(unique, f)
-		}
-	}
-	u.fileBuf = u.fileBuf[:0]
-
-	// Send a summary message with file references.
-	if len(unique) > 0 {
-		var sb strings.Builder
-		sb.WriteString("📎 Files:\n")
-		for _, f := range unique {
-			sb.WriteString("• ")
-			sb.WriteString(f)
-			sb.WriteByte('\n')
-		}
-		u.sendText(strings.TrimSpace(sb.String()))
-	}
-}
-
-// sendText sends a text message through the adapter (unlocked helper).
-func (u *UIController) sendText(text string) {
-	if text == "" {
-		return
-	}
-	u.adapter.SendText(u.chatID, text, u.replyTo)
-}
-
 // resetLocked clears per-turn state. Must be called with mu held.
 func (u *UIController) resetLocked() {
 	u.textBuf.Reset()
-	u.fileBuf = u.fileBuf[:0]
 	u.pendingTextMsgID = ""
 	u.toolCount = 0
 	u.inTool = false
@@ -230,27 +184,6 @@ func shouldFlush(buf string) bool {
 		}
 	}
 	return false
-}
-
-// extractFilePaths scans tool output for likely file path references.
-// This is a heuristic — it looks for lines that look like file operations.
-func extractFilePaths(output string) []string {
-	var paths []string
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		// Simple heuristic: lines containing "/" that don't look like URLs.
-		if strings.Contains(line, "/") && !strings.HasPrefix(line, "http") {
-			// Take the last word as the path candidate.
-			fields := strings.Fields(line)
-			if len(fields) > 0 {
-				candidate := fields[len(fields)-1]
-				if strings.Contains(candidate, "/") && !strings.Contains(candidate, "://") {
-					paths = append(paths, candidate)
-				}
-			}
-		}
-	}
-	return paths
 }
 
 // truncate limits a string to maxLen, adding an ellipsis if truncated.

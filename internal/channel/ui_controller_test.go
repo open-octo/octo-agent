@@ -62,7 +62,7 @@ func TestUIController_ToolEventsSuppressed(t *testing.T) {
 
 }
 
-func TestUIController_ToolDoneBuffersFiles(t *testing.T) {
+func TestUIController_ToolDoneSuppressed(t *testing.T) {
 	mock := &mockAdapter{platform: "mock"}
 	ctrl := NewUIController(mock, "chat1", "")
 	handler := ctrl.Handler()
@@ -71,29 +71,19 @@ func TestUIController_ToolDoneBuffersFiles(t *testing.T) {
 	handler(agent.AgentEvent{Kind: agent.EventToolStarted, ToolName: "read_file"})
 	handler(agent.AgentEvent{Kind: agent.EventToolDone, ToolName: "read_file", Output: output})
 
-	// Files should be buffered, not sent yet.
 	if mock.sentTextCount() != 0 {
-		t.Fatalf("expected no message yet, got %d", mock.sentTextCount())
+		t.Fatalf("expected no message for tool done, got %d", mock.sentTextCount())
 	}
 
-	// End turn flushes files.
+	// End turn should only flush the model's reply text, not a file summary.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Done"})
 	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{Content: "Done"}})
 
-	// Should have sent the reply text and a file summary.
-	if mock.sentTextCount() < 1 {
-		t.Fatalf("expected at least 1 sent text, got %d", mock.sentTextCount())
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("expected 1 reply text, got %d", mock.sentTextCount())
 	}
-
-	// Check that file summary was sent.
-	found := false
-	for _, st := range mock.sentTexts {
-		if strings.Contains(st.text, "file.go") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected file summary in sent messages, got: %+v", mock.sentTexts)
+	if strings.Contains(mock.lastSentText().text, "file.go") {
+		t.Fatalf("expected no file summary, got: %q", mock.lastSentText().text)
 	}
 }
 
@@ -127,20 +117,6 @@ func TestUIController_ShouldFlush(t *testing.T) {
 	// Short incomplete sentence does not flush.
 	if shouldFlush("Hel") {
 		t.Error("expected no flush on short text")
-	}
-}
-
-func TestUIController_ExtractFilePaths(t *testing.T) {
-	output := "Read file: /path/to/file.go\nWrote /another/file.txt\nURL: http://example.com"
-	paths := extractFilePaths(output)
-	if len(paths) != 2 {
-		t.Fatalf("expected 2 paths, got %d: %v", len(paths), paths)
-	}
-	if paths[0] != "/path/to/file.go" {
-		t.Errorf("unexpected path[0]: %q", paths[0])
-	}
-	if paths[1] != "/another/file.txt" {
-		t.Errorf("unexpected path[1]: %q", paths[1])
 	}
 }
 
