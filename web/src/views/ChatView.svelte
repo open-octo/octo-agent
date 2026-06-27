@@ -53,6 +53,7 @@
   import BackgroundProcesses from '../components/chat/BackgroundProcesses.svelte'
   import Composer from '../components/chat/Composer.svelte'
   import ArtifactsPanel from '../components/ArtifactsPanel.svelte'
+  import OctoLogo from '../components/layout/OctoLogo.svelte'
 
   // ── reactive state ─────────────────────────────────────────────────────────
   let messagesEl = $state<HTMLElement | null>(null)
@@ -872,6 +873,9 @@
             {#if msg.type === 'user'}
               <!-- Right-aligned user bubble -->
               <div class="msg-user fadein">
+                <div class="user-avatar" aria-hidden="true">
+                  <iconify-icon icon="ant-design:user-outlined" width="16"></iconify-icon>
+                </div>
                 <div class="user-bubble-wrap">
                   <div class="user-bubble" class:pending={msg.pending}>
                     {#if msg.files && msg.files.length > 0}
@@ -902,7 +906,7 @@
             {:else if msg.type === 'assistant'}
               <!-- Assistant message with avatar -->
               <div class="msg-agent fadein">
-                <div class="agent-avatar">O</div>
+                <div class="agent-avatar"><OctoLogo size={18} /></div>
                 <div class="agent-content">
                   <!-- Plan card (todos attached to this message) -->
                   {#if msg.todos && msg.todos.length > 0}
@@ -978,7 +982,7 @@
             {:else if msg.type === 'thinking'}
               <!-- Standalone Thoughts segment (reasoning before a tool round) -->
               <div class="msg-agent fadein">
-                <div class="agent-avatar">O</div>
+                <div class="agent-avatar"><OctoLogo size={18} /></div>
                 <div class="agent-content">
                   <details class="think-block">
                     <summary class="think-summary">
@@ -994,7 +998,7 @@
             {:else if msg.type === 'tool_group'}
               <!-- Tool group card -->
               <div class="msg-agent fadein">
-                <div class="agent-avatar">O</div>
+                <div class="agent-avatar"><OctoLogo size={18} /></div>
                 <div class="agent-content">
                   <ToolGroup tools={msg.tools} streaming={msg.streaming} />
                 </div>
@@ -1003,7 +1007,7 @@
             {:else if msg.type === 'progress'}
               <!-- Inline progress message -->
               <div class="msg-agent fadein">
-                <div class="agent-avatar">O</div>
+                <div class="agent-avatar"><OctoLogo size={18} /></div>
                 <div class="thinking-indicator">
                   <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
                   <span>{msg.content || $t('chat.thinking')}</span>
@@ -1026,7 +1030,7 @@
           <!-- Background workflows panel (persists across turns) -->
           {#if workflows.length > 0}
             <div class="msg-agent fadein">
-              <div class="agent-avatar">O</div>
+              <div class="agent-avatar"><OctoLogo size={18} /></div>
               <div class="agent-content">
                 <WorkflowsCard runs={workflows} {now} />
               </div>
@@ -1036,7 +1040,7 @@
           <!-- Live sub-agents panel (current turn) -->
           {#if subAgents.length > 0}
             <div class="msg-agent fadein">
-              <div class="agent-avatar">O</div>
+              <div class="agent-avatar"><OctoLogo size={18} /></div>
               <div class="agent-content">
                 <SubAgentsCard agents={subAgents} elapsed={subAgentsElapsed} />
               </div>
@@ -1046,7 +1050,7 @@
           <!-- Live thinking block while streaming -->
           {#if streaming && thinking}
             <div class="msg-agent fadein">
-              <div class="agent-avatar">O</div>
+              <div class="agent-avatar"><OctoLogo size={18} /></div>
               <div class="agent-content">
                 <details class="think-block" open>
                   <summary class="think-summary">
@@ -1063,7 +1067,7 @@
           <!-- Live thinking indicator while streaming -->
           {#if streaming && progress}
             <div class="msg-agent fadein">
-              <div class="agent-avatar">O</div>
+              <div class="agent-avatar"><OctoLogo size={18} /></div>
               <div class="thinking-indicator">
                 <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
                 <span>{progress.message || $t('chat.thinking')}</span>
@@ -1184,8 +1188,14 @@
 }
 
 /* ── User message ────────────────────────────────────────────────────────── */
-.msg-user { display: flex; justify-content: flex-end; }
+.msg-user { display: flex; justify-content: flex-end; gap: 12px; }
 .user-bubble-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 80%; }
+.user-avatar {
+  width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px;
+  background: var(--bg-tertiary); color: var(--text-secondary);
+  display: flex; align-items: center; justify-content: center;
+  order: 1;
+}
 .user-bubble {
   background: var(--blue-1); border: 1px solid var(--blue-2);
   border-radius: 12px 12px 4px 12px; padding: 10px 14px;
@@ -1215,7 +1225,9 @@
   background: var(--blue-6); color: #fff;
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 600;
+  overflow: hidden;
 }
+.agent-avatar :global(svg) { width: 100%; height: 100%; }
 .agent-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 
 /* ── Plan card ───────────────────────────────────────────────────────────── */
