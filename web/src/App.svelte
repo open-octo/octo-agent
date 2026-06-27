@@ -131,6 +131,10 @@
       sessions.update(list => list.filter(s => s.id !== ev.session_id))
       if (get(activeSessionId) === ev.session_id) {
         activeSessionId.set(null)
+        // A session deleted by another entry (e.g. another tab or the CLI)
+        // should not leave the chat view stuck on a bound-to-another-entry
+        // banner. Reset to the default chat landing.
+        view.set('chat')
       }
     })
 
