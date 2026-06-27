@@ -93,6 +93,66 @@ func TestAdapter_SendText_Success(t *testing.T) {
 	}
 }
 
+func TestAdapter_SendText_BufferedMerge(t *testing.T) {
+	var mu sync.Mutex
+	var received []map[string]any
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ilink/bot/sendmessage" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		body := make([]byte, r.ContentLength)
+		r.Body.Read(body)
+		var payload map[string]any
+		_ = json.Unmarshal(body, &payload)
+		received = append(received, payload)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ret": 0})
+	}))
+	defer ts.Close()
+
+	a := &Adapter{
+		baseURL: ts.URL,
+		client:  ilink.NewClient(),
+		bot: &ilinkBot{
+			client: ilink.NewClient(),
+			creds:  &ilink.Credentials{Token: "tok", BaseURL: ts.URL},
+		},
+	}
+	a.bot.contextTokens.Store("user1", "ctx123")
+	a.sendQ = newSendQueue(a.client, ts.URL, "tok")
+	defer a.sendQ.stop()
+
+	for _, text := range []string{"hello", "world", "from weixin"} {
+		res := a.SendText("user1", text, "")
+		if !res.OK {
+			t.Fatalf("expected send OK for %q, got error: %s", text, res.Error)
+		}
+	}
+
+	// Wait for the flush interval plus two ticker ticks to avoid flakes.
+	time.Sleep(flushInterval + 500*time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 1 {
+		t.Fatalf("expected 1 batched request, got %d", len(received))
+	}
+	msg := received[0]["msg"].(map[string]any)
+	items := msg["item_list"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 text item, got %d", len(items))
+	}
+	textItem := items[0].(map[string]any)["text_item"].(map[string]any)
+	sent := textItem["text"].(string)
+	want := "hello\nworld\nfrom weixin"
+	if sent != want {
+		t.Errorf("unexpected batched text: got %q, want %q", sent, want)
+	}
+}
+
 func TestAdapter_SendFile(t *testing.T) {
 	// Create a real temp file to upload.
 	tmpFile, err := os.CreateTemp(t.TempDir(), "test*.txt")
