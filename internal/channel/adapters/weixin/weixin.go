@@ -41,7 +41,7 @@ const (
 
 	// Send queue tuning.
 	flushCharThreshold = 400
-	flushInterval      = 800 * time.Millisecond
+	flushInterval      = 2 * time.Second
 	minSendInterval    = time.Second
 
 	// Typing keepalive (matches @tencent-weixin/openclaw-weixin npm package).
