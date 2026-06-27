@@ -88,11 +88,14 @@ var (
 // SessionSubAgentManager returns the per-session sub-agent manager for id,
 // creating it via mkSpawner on first use. Subsequent calls reuse the existing
 // manager (and its spawner), so mkSpawner is only invoked once per session.
+// If mkSpawner is nil and no manager exists for id, nil is returned — callers
+// that only need to signal an already-running sync sub-agent (e.g. a WebSocket
+// promote message) can use this safely without constructing a manager.
 func SessionSubAgentManager(id string, mkSpawner func() Spawner) *SubAgentManager {
 	sessionSubMgrsMu.Lock()
 	defer sessionSubMgrsMu.Unlock()
 	m := sessionSubMgrs[id]
-	if m == nil {
+	if m == nil && mkSpawner != nil {
 		m = NewSubAgentManager(mkSpawner())
 		sessionSubMgrs[id] = m
 	}

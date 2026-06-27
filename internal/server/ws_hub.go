@@ -348,8 +348,11 @@ func (c *wsConn) dispatch(msgType string, raw []byte) {
 			return
 		}
 		// The session's sub-agent manager is created on the first tool turn;
-		// by the time a sync sub-agent is running it must exist.
-		tools.SessionSubAgentManager(msg.SessionID, nil).PromoteSync()
+		// by the time a sync sub-agent is running it must exist. If the session
+		// has never started a sub-agent, the message is a no-op.
+		if mgr := tools.SessionSubAgentManager(msg.SessionID, nil); mgr != nil {
+			mgr.PromoteSync()
+		}
 
 	default:
 		log.Printf("[ws] unknown message type: %q", msgType)
