@@ -183,6 +183,72 @@ func TestCmdBind_RejectedWhenBoundToOtherEntry(t *testing.T) {
 	}
 }
 
+// TestCmdBind_ForceTakesOverOtherEntry: /bind --force may take over a session
+// owned by another entry, as long as no turn lease is active.
+func TestCmdBind_ForceTakesOverOtherEntry(t *testing.T) {
+	tempHome(t)
+	m := testManager()
+
+	// A session owned by the web entry, with no active lease.
+	webSess := agent.NewSession("stub-model", "")
+	webSess.BoundEntry = agent.EntryWeb
+	webSess.BoundAt = time.Now()
+	webSess.Messages = []agent.Message{{Role: agent.RoleUser, Content: "web context"}}
+	if err := webSess.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	evB := InboundEvent{Platform: "feishu", ChatID: "cB", UserID: "uB"}
+	reply := m.cmdBind(evB, []string{"--force", webSess.ID})
+	if !strings.Contains(strings.ToLower(reply), "taken over") {
+		t.Fatalf("expected takeover success, got %q", reply)
+	}
+	if !strings.Contains(reply, agent.EntryWeb) {
+		t.Fatalf("expected reply to name previous owner %q, got %q", agent.EntryWeb, reply)
+	}
+
+	bound := m.GetSession(evB)
+	if bound == nil {
+		t.Fatal("expected a session after /bind --force")
+	}
+	if !bound.Store.BoundTo(agent.EntryChannel) {
+		t.Errorf("bound session entry = %q, want %q", bound.Store.BoundEntry, agent.EntryChannel)
+	}
+
+	// The binding is persisted: a fresh manager sees channel ownership.
+	m2 := testManager()
+	again := m2.GetOrCreateSession(evB)
+	if !again.Store.BoundTo(agent.EntryChannel) {
+		t.Errorf("persisted entry after takeover = %q, want %q", again.Store.BoundEntry, agent.EntryChannel)
+	}
+}
+
+// TestCmdBind_ForceRejectedWhenLeaseActive: /bind --force cannot steal a
+// session while another entry holds an active turn lease.
+func TestCmdBind_ForceRejectedWhenLeaseActive(t *testing.T) {
+	tempHome(t)
+	m := testManager()
+
+	webSess := agent.NewSession("stub-model", "")
+	webSess.BoundEntry = agent.EntryWeb
+	webSess.BoundAt = time.Now()
+	if err := webSess.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := webSess.WriteLease(agent.EntryWeb, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	evB := InboundEvent{Platform: "feishu", ChatID: "cB", UserID: "uB"}
+	reply := m.cmdBind(evB, []string{webSess.ID, "--force"})
+	if !strings.Contains(strings.ToLower(reply), "cannot bind") {
+		t.Fatalf("expected rejection due to active lease, got %q", reply)
+	}
+	if m.GetSession(evB) != nil {
+		t.Fatal("expected no session after rejected forced /bind")
+	}
+}
+
 // TestCmdUnbind_ReleasesBoundEntry: /unbind clears the IM entry binding so
 // other entries can use the session.
 func TestCmdUnbind_ReleasesBoundEntry(t *testing.T) {
@@ -240,6 +306,31 @@ func TestCmdClear_WipesHistoryKeepsStore(t *testing.T) {
 	}
 	if len(reloaded.Messages) != 0 {
 		t.Errorf("persisted history after /clear = %d, want 0", len(reloaded.Messages))
+	}
+}
+
+func TestParseBindArgs(t *testing.T) {
+	cases := []struct {
+		args       []string
+		wantSteal  bool
+		wantTarget string
+		wantOK     bool
+	}{
+		{args: []string{"abc"}, wantSteal: false, wantTarget: "abc", wantOK: true},
+		{args: []string{"--force", "abc"}, wantSteal: true, wantTarget: "abc", wantOK: true},
+		{args: []string{"abc", "--force"}, wantSteal: true, wantTarget: "abc", wantOK: true},
+		{args: []string{"--Force", "abc"}, wantSteal: true, wantTarget: "abc", wantOK: true},
+		{args: []string{}, wantOK: false},
+		{args: []string{"--force"}, wantOK: false},
+		{args: []string{"abc", "def"}, wantOK: false},
+		{args: []string{"abc", "--force", "def"}, wantOK: false},
+	}
+	for _, c := range cases {
+		steal, target, ok := parseBindArgs(c.args)
+		if steal != c.wantSteal || target != c.wantTarget || ok != c.wantOK {
+			t.Errorf("parseBindArgs(%v) = (%v, %q, %v), want (%v, %q, %v)",
+				c.args, steal, target, ok, c.wantSteal, c.wantTarget, c.wantOK)
+		}
 	}
 }
 

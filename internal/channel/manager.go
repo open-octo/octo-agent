@@ -296,7 +296,7 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 	case "/clear":
 		return m.cmdClear(ev)
 	default:
-		return fmt.Sprintf("Unknown command: %s. Available: /bind <number|id>, /unbind, /list, /clear, /compact, /stop, /status", cmd)
+		return fmt.Sprintf("Unknown command: %s. Available: /bind [--force] <number|id>, /unbind, /list, /clear, /compact, /stop, /status", cmd)
 	}
 }
 
@@ -321,18 +321,22 @@ func (m *Manager) cmdClear(ev InboundEvent) string {
 // by its list number or (short/full) ID. The redirection is recorded in the
 // persistent binding table so it survives a restart, and no history is
 // deleted — /bind switches conversations rather than starting a fresh one.
-// If the target session is bound to another entry, the bind is rejected so
-// IM cannot silently take over a session owned by CLI/TUI/Web.
+// By default, if the target session is bound to another entry, the bind is
+// rejected so IM cannot silently take over a session owned by CLI/TUI/Web.
+// Pass --force to take over a session whose turn lease has expired.
 func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
-	if len(args) == 0 {
-		return "Usage: /bind <number|id> — run /list to see sessions, then attach this chat to one. History is preserved."
+	steal, targetArg, ok := parseBindArgs(args)
+	if !ok {
+		return "Usage: /bind [--force] <number|id> — run /list to see sessions, then attach this chat to one. History is preserved."
 	}
-	target := m.resolveBindTarget(args[0])
+	target := m.resolveBindTarget(targetArg)
 	if target == nil {
-		return fmt.Sprintf("No session matches %q. Run /list to see available sessions.", args[0])
+		return fmt.Sprintf("No session matches %q. Run /list to see available sessions.", targetArg)
 	}
 
-	if res, _, err := target.Bind(agent.EntryChannel, false); res == agent.Rejected {
+	previousEntry := target.BoundEntry
+	res, _, err := target.Bind(agent.EntryChannel, steal)
+	if res == agent.Rejected {
 		return fmt.Sprintf("Cannot bind: %v", err)
 	}
 	if err := target.Save(); err != nil {
@@ -351,7 +355,31 @@ func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
 	// the old session keeps persisting to its own store — nothing is deleted.
 	m.sessions.LoadAndDelete(key)
 	m.sessions.Store(key, m.newSession(key, ev))
+	if res == agent.Stolen {
+		return fmt.Sprintf("Taken over %q [%s] from %s. History preserved.", target.DisplayTitle(), target.ShortID(), previousEntry)
+	}
 	return fmt.Sprintf("Bound to session %q [%s]. History preserved.", target.DisplayTitle(), target.ShortID())
+}
+
+// parseBindArgs extracts the optional --force flag and the target identifier
+// from /bind arguments. It accepts both "/bind --force <id>" and
+// "/bind <id> --force". The second return value is the target argument; the
+// third reports whether the args are well-formed.
+func parseBindArgs(args []string) (steal bool, target string, ok bool) {
+	for _, a := range args {
+		if strings.EqualFold(a, "--force") {
+			steal = true
+			continue
+		}
+		if target != "" {
+			return false, "", false
+		}
+		target = a
+	}
+	if target == "" {
+		return false, "", false
+	}
+	return steal, target, true
 }
 
 // resolveBindTarget maps a /bind argument to a persisted session: a 1-based
