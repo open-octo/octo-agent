@@ -732,12 +732,18 @@ func (s *Server) handleWSRunTask(conn *wsConn, sessionID string) {
 		})
 		return
 	}
-	if err := s.scheduler.RunNow(sessionID); err != nil {
+	newSessionID, err := s.scheduler.RunNow(sessionID)
+	if err != nil {
 		s.wsHub.broadcast(sessionID, map[string]string{
 			"type":    "error",
 			"message": err.Error(),
 		})
+		return
 	}
+	s.wsHub.broadcast(sessionID, map[string]string{
+		"type":       "task_started",
+		"session_id": newSessionID,
+	})
 }
 
 // handleWSConfirmation delivers a confirmation answer from the browser.

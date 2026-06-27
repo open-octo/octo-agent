@@ -15,6 +15,10 @@ type recordRunner struct {
 	tasks []Task
 }
 
+func (r *recordRunner) CreateSession(t Task) (string, error) {
+	return "sess_" + t.ID, nil
+}
+
 func (r *recordRunner) RunTask(_ context.Context, t Task) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -201,7 +205,7 @@ func TestFireUsesCurrentTaskState(t *testing.T) {
 
 func TestRunNowUnknownTask(t *testing.T) {
 	s, r := newTestScheduler(t)
-	if err := s.RunNow("nope"); err == nil {
+	if _, err := s.RunNow("nope"); err == nil {
 		t.Fatal("RunNow on unknown id: want error, got nil")
 	}
 	if got := len(r.calls()); got != 0 {
@@ -234,8 +238,12 @@ func TestRunNowFiresDisabledTaskAndPersistsBookkeeping(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	if err := s.RunNow("t1"); err != nil {
+	sessionID, err := s.RunNow("t1")
+	if err != nil {
 		t.Fatalf("RunNow: %v", err)
+	}
+	if sessionID != "sess_t1" {
+		t.Fatalf("RunNow sessionID = %q, want sess_t1", sessionID)
 	}
 
 	waitFor(t, "runner call", func() bool { return len(r.calls()) == 1 })

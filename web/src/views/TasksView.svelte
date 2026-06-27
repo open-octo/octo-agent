@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { tasks, showToast, openAgentSession } from '../lib/stores'
+  import { tasks, showToast, sessions, activeSessionId, view, setActiveSession, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
@@ -62,8 +62,17 @@
 
   async function handleRun(t: api.TaskResponse) {
     try {
-      await api.runTask(t.id)
+      const res = await api.runTask(t.id)
       showToast('Task started')
+      if (res.session_id) {
+        // Refresh the session list so the new session shows in the sidebar,
+        // then activate it and switch to chat. The streamed turn events will
+        // appear automatically once the WebSocket subscribes.
+        const data = await api.listSessions()
+        sessions.set(data.sessions ?? [])
+        setActiveSession(res.session_id)
+        view.set('chat')
+      }
     } catch (e: any) {
       showToast(e?.message ?? 'Failed to run task', 'error')
     }
