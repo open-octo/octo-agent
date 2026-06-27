@@ -23,10 +23,26 @@ const maxBgOutputBytes = 1 << 20 // 1 MiB
 const pollWindow = 30 * time.Second
 const maxEmptyPolls = 3
 
+// BackgroundMode distinguishes the two kinds of tracked background processes
+// the terminal tool can launch. Async processes run a one-shot task and notify
+// the model on completion; interactive processes are long-running services or
+// REPLs that the model may observe or feed via terminal_output / terminal_input.
+type BackgroundMode string
+
+const (
+	// BgModeAsync is for one-shot tasks (tests, builds, installs). The model
+	// must not poll them; completion is pushed automatically.
+	BgModeAsync BackgroundMode = "async"
+	// BgModeInteractive is for long-running services and REPLs (rails c,
+	// octo serve). The model may use terminal_output and terminal_input.
+	BgModeInteractive BackgroundMode = "interactive"
+)
+
 // bgProcess tracks one detached command launched via BackgroundManager.
 type bgProcess struct {
 	id      string
 	command string
+	mode    BackgroundMode
 	cancel  context.CancelFunc
 	proc    *os.Process // set after Start; used for hard-kill
 	start   time.Time
@@ -321,8 +337,13 @@ func WithVisible(v bool) StartOption {
 
 // Start launches command detached (via `sh -c`), with no timeout, and returns
 // its background id. Output streams into a capped buffer; the process is killed
-// if its context is cancelled (Kill / KillAll).
-func (m *BackgroundManager) Start(command string, opts ...StartOption) (string, error) {
+// if its context is cancelled (Kill / KillAll). The mode argument determines
+// whether the process is an async one-shot task or an interactive service/REPL.
+func (m *BackgroundManager) Start(command string, mode BackgroundMode, opts ...StartOption) (string, error) {
+	if mode != BgModeAsync && mode != BgModeInteractive {
+		return "", fmt.Errorf("background: invalid mode %q (want %q or %q)", mode, BgModeAsync, BgModeInteractive)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd, err := shellCommand(ctx, command)
 	if err != nil {
@@ -357,7 +378,7 @@ func (m *BackgroundManager) Start(command string, opts ...StartOption) (string, 
 	m.mu.Lock()
 	m.seq++
 	id := fmt.Sprintf("bg_%d", m.seq)
-	p := &bgProcess{id: id, command: command, cancel: cancel, proc: cmd.Process, start: time.Now(), visible: true, stdin: stdinW}
+	p := &bgProcess{id: id, command: command, mode: mode, cancel: cancel, proc: cmd.Process, start: time.Now(), visible: true, stdin: stdinW}
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -421,16 +442,17 @@ func (m *BackgroundManager) Start(command string, opts ...StartOption) (string, 
 // Read returns output produced since the last call for id, plus a status
 // string. found is false when id is unknown. blocked is true when the caller
 // has polled too many times without new output while the process is still
-// running — this forces the LLM to stop polling.
-func (m *BackgroundManager) Read(id string) (output, status string, found bool, blocked bool) {
+// running — this forces the LLM to stop polling. mode reports the process's
+// background mode (empty when not found).
+func (m *BackgroundManager) Read(id string) (output, status string, found bool, blocked bool, mode BackgroundMode) {
 	m.mu.Lock()
 	p := m.procs[id]
 	m.mu.Unlock()
 	if p == nil {
-		return "", "", false, false
+		return "", "", false, false, ""
 	}
 	out, st, blk := p.readNew()
-	return out, st, true, blk
+	return out, st, true, blk, p.mode
 }
 
 // Tail returns a non-destructive snapshot of the last `lines` lines of a
@@ -439,15 +461,27 @@ func (m *BackgroundManager) Read(id string) (output, status string, found bool, 
 // on-demand progress peeks (the terminal_output tool). repeated calls return
 // the same bytes, but repeated empty snapshots of a running process are counted
 // as polling; once blocked is true, callers should tell the model to stop.
-func (m *BackgroundManager) Tail(id string, lines int) (output, status string, found bool, blocked bool) {
+// mode reports the process's background mode (empty when not found).
+func (m *BackgroundManager) Tail(id string, lines int) (output, status string, found bool, blocked bool, mode BackgroundMode) {
 	m.mu.Lock()
 	p := m.procs[id]
 	m.mu.Unlock()
 	if p == nil {
-		return "", "", false, false
+		return "", "", false, false, ""
 	}
 	out, st, blk := p.tail(lines)
-	return out, st, true, blk
+	return out, st, true, blk, p.mode
+}
+
+// Mode returns the background mode for id, or ("", false) if unknown.
+func (m *BackgroundManager) Mode(id string) (BackgroundMode, bool) {
+	m.mu.Lock()
+	p := m.procs[id]
+	m.mu.Unlock()
+	if p == nil {
+		return "", false
+	}
+	return p.mode, true
 }
 
 // BgInfo is a snapshot of a tracked background process — used both by the TUI's
@@ -455,6 +489,7 @@ func (m *BackgroundManager) Tail(id string, lines int) (output, status string, f
 type BgInfo struct {
 	ID      string
 	Command string
+	Mode    BackgroundMode
 	Start   time.Time
 	Status  string // "running" / "exited: …"
 }
@@ -485,7 +520,7 @@ func (m *BackgroundManager) list(includeExited bool) []BgInfo {
 		p.mu.Lock()
 		done := p.done
 		visible := p.visible
-		info := BgInfo{ID: p.id, Command: p.command, Start: p.start, Status: p.statusLocked()}
+		info := BgInfo{ID: p.id, Command: p.command, Mode: p.mode, Start: p.start, Status: p.statusLocked()}
 		p.mu.Unlock()
 		if visible && (includeExited || !done) {
 			out = append(out, info)

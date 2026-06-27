@@ -22,7 +22,7 @@ func TestBackgroundManager_OnExitHookFires(t *testing.T) {
 		}
 	})
 
-	id, err := m.Start("echo hi-from-bg")
+	id, err := m.Start("echo hi-from-bg", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestBackgroundManager_OnExitHookFires(t *testing.T) {
 
 	// Dedup: the hook already consumed the output via readNew, so a subsequent
 	// terminal_output-style poll must not re-report the same bytes.
-	o, _, found, _ := m.Read(id)
+	o, _, found, _, _ := m.Read(id)
 	if !found {
 		t.Fatal("process should still be known after exit")
 	}
@@ -62,13 +62,13 @@ func TestBackgroundManager_OnExitHookFires(t *testing.T) {
 // leaves the original poll-only behaviour intact — Start/Read still work.
 func TestBackgroundManager_NoHookByDefault(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("echo plain")
+	id, err := m.Start("echo plain", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	var out string
 	waitFor(t, "process to exit", func() bool {
-		o, s, f, _ := m.Read(id)
+		o, s, f, _, _ := m.Read(id)
 		out += o
 		return f && strings.HasPrefix(s, "exited")
 	})
@@ -94,14 +94,14 @@ func TestBackgroundManager_OnExitNotFiredForInvisibleProcess(t *testing.T) {
 	})
 
 	// Start invisible (visible=false), exactly like the sync path does.
-	id, err := m.Start("echo sync-done", WithVisible(false))
+	id, err := m.Start("echo sync-done", BgModeAsync, WithVisible(false))
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
 	// Wait for the process to finish.
 	waitFor(t, "process to exit", func() bool {
-		_, s, f, _ := m.Read(id)
+		_, s, f, _, _ := m.Read(id)
 		return f && strings.HasPrefix(s, "exited")
 	})
 
@@ -129,7 +129,7 @@ func TestBackgroundManager_OnExitFiresAfterPromote(t *testing.T) {
 	})
 
 	// Start invisible, then promote before it finishes.
-	id, err := m.Start("sleep 0.1", WithVisible(false))
+	id, err := m.Start("sleep 0.1", BgModeAsync, WithVisible(false))
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

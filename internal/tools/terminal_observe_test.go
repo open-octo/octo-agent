@@ -21,7 +21,7 @@ func TestTerminalListTool(t *testing.T) {
 
 	if _, err := term.Execute(ctx, "terminal", map[string]any{
 		"command":           "sleep 30",
-		"run_in_background": true,
+		"run_in_background": "async",
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -36,6 +36,9 @@ func TestTerminalListTool(t *testing.T) {
 	if !strings.Contains(res.Text, "sleep 30") {
 		t.Errorf("list should include the command, got %q", res.Text)
 	}
+	if !strings.Contains(res.Text, "[async]") {
+		t.Errorf("list should include the mode, got %q", res.Text)
+	}
 }
 
 // TestTerminalOutputTool_LinesSnapshot verifies the lines param trims to the
@@ -49,12 +52,12 @@ func TestTerminalOutputTool_LinesSnapshot(t *testing.T) {
 	// Print 5 lines then exit; wait for completion.
 	if _, err := (TerminalTool{mgr: m}).Execute(ctx, "terminal", map[string]any{
 		"command":           "printf 'l1\\nl2\\nl3\\nl4\\nl5\\n'",
-		"run_in_background": true,
+		"run_in_background": "interactive",
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
 	waitFor(t, "exit", func() bool {
-		_, s, _, _ := m.Read("bg_1")
+		_, s, _, _, _ := m.Read("bg_1")
 		return strings.HasPrefix(s, "exited")
 	})
 

@@ -21,7 +21,7 @@ func TestShutdown_KillsBackgroundProcesses(t *testing.T) {
 	term := tools.TerminalTool{}
 	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
 		"command":           "sleep 60",
-		"run_in_background": true,
+		"run_in_background": "async",
 	}); err != nil {
 		t.Fatalf("start background: %v", err)
 	}

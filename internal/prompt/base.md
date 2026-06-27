@@ -74,22 +74,23 @@ Memories are snapshots and can be stale. If one names a file path, function, fla
 
 ## Background processes
 
-- **Never use `nohup` or shell `&` in a synchronous `terminal` call.** In sync mode the tool creates stdout/stderr pipes that are inherited by the forked child; `cmd.Wait()` does not return until all pipe write-ends are closed, so the command appears to hang until the background process exits. Always use `run_in_background:true` for anything that outlives the immediate turn.
-- **`run_in_background` vs `detached` — pick by lifecycle.** `run_in_background:true` is the default for work tied to this session (servers, watchers, one-shot builds): octo tracks it, you can read its output and kill it, and it is **stopped when the session ends**. Use `detached:true` ONLY when the user explicitly wants a process to **outlive octo** — e.g. exposing a port with `ngrok`, starting a standalone daemon. A detached process runs in its own session, is untracked (no `terminal_output` / `kill_shell`), is not killed on exit, and returns only its OS pid. Don't reach for `detached` to dodge the session timeout — that's what `run_in_background` is for. Never hand-roll `nohup`/`setsid`/`&`; set `detached:true` and the tool handles it.
+- **Never use `nohup` or shell `&` in a synchronous `terminal` call.** In sync mode the tool creates stdout/stderr pipes that are inherited by the forked child; `cmd.Wait()` does not return until all pipe write-ends are closed, so the command appears to hang until the background process exits. Always use `run_in_background` for anything that outlives the immediate turn.
+- **`run_in_background` vs `detached` — pick by lifecycle.** `run_in_background:"async"` / `"interactive"` is for work tied to this session: octo tracks it and kills it when the session ends. Use `run_in_background:"async"` for one-shot tasks (tests, builds, installs) — you may NOT use `terminal_output` or `terminal_input`; wait for the completion notification. Use `run_in_background:"interactive"` for long-running services and REPLs (servers, watchers, `rails c`, `octo serve`) — `terminal_output` and `terminal_input` are allowed. Use `detached:true` ONLY when the user explicitly wants a process to **outlive octo** — e.g. exposing a port with `ngrok`, starting a standalone daemon. A detached process runs in its own session, is untracked (no `terminal_output` / `kill_shell`), is not killed on exit, and returns only its OS pid. Don't reach for `detached` to dodge the session timeout — that's what `run_in_background` is for. Never hand-roll `nohup`/`setsid`/`&`; set `detached:true` and the tool handles it.
 
 ### One-shot tasks (compiles, tests, installs, builds, linting, CI checks)
 
-- Use `terminal` with `run_in_background:true`. Do not let a long command block the session.
-- After launching, **do not poll `terminal_output`**. The system will automatically notify you when the process finishes.
+- Use `terminal` with `run_in_background:"async"`. Do not let a long command block the session.
+- After launching, **do not call `terminal_output` or `terminal_input`**. The system will automatically notify you when the process finishes.
 - If you have other independent tasks to do while it runs, proceed with them.
 - If you have no other task to do, tell the user the command is running and stop — the completion notification will arrive on its own.
 - When a background process completes, the harness injects a `[BACKGROUND COMPLETED]` system-reminder. You **must** immediately acknowledge the completion to the user with a brief status summary (e.g. "CI passed, merging now" or "Build failed — see logs above"). Do not wait for the user to ask.
 
-### Long-running services (servers, watchers, docker compose up)
+### Long-running services and REPLs (servers, watchers, docker compose up, rails c, octo serve)
 
-- Use `terminal` with `run_in_background:true`.
+- Use `terminal` with `run_in_background:"interactive"`.
 - After launch, **verify the service with an external check** (e.g., `curl http://localhost:PORT`, `pgrep`, or reading a PID file) rather than polling `terminal_output`.
 - `terminal_output` is a **snapshot** of a process's last N lines, not a feed — call it on demand to inspect startup logs or check progress; repeated calls return the current tail, so there's nothing to gain from looping. Lost a process id? Use `terminal_list` to see what's running.
+- Send interactive commands via `terminal_input` when appropriate (REPLs, servers that read stdin).
 - Stop with `kill_shell`. For servers and other services, prefer `signal: "SIGTERM"` for graceful shutdown. Use `signal: "SIGKILL"` (default) for forceful termination or when SIGTERM fails.
 
 ## Tool-use timing

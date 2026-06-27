@@ -76,10 +76,11 @@ func main() {
 		t.Fatalf("server build failed: %s", resBuild.Text)
 	}
 
-	// Launch the server in the background.
+	// Launch the server in the background as an interactive process so we can
+	// inspect its startup logs via terminal_output.
 	resLaunch, err := term.Execute(ctx, "terminal", map[string]any{
 		"command":           fmt.Sprintf("%s %s", bin, port),
-		"run_in_background": true,
+		"run_in_background": "interactive",
 	})
 	if err != nil {
 		t.Fatalf("launch server: %v", err)

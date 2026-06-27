@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased — 1.2.0-dev]
 
+### Breaking
+- **Terminal `run_in_background` is now an enum (`"async"` / `"interactive"`).**
+  The boolean `true` value is no longer accepted. `"async"` is for one-shot tasks
+  (tests, builds, installs) and rejects `terminal_output` / `terminal_input` —
+  completion is pushed automatically. `"interactive"` is for long-running services
+  and REPLs (servers, watchers, `rails c`, `octo serve`) and allows observation
+  and stdin input. Synchronous commands that time out are promoted to `async`.
+
 ## [1.1.0] — 2026-06-26
 
 ### Added

@@ -51,7 +51,7 @@ func PromoteCurrentSync()
 
 ```go
 mgr := t.managerFor(ctx)
-id, _ := mgr.Start(command, WithOnLine(onLine), WithVisible(false))
+id, _ := mgr.Start(command, BgModeAsync, WithOnLine(onLine), WithVisible(false))
 
 sess := mgr.BeginSync()
 defer mgr.EndSync()
@@ -60,12 +60,12 @@ select {
 case <-sess.C():
     // User promoted — identical outcome to timer, different result text.
     mgr.Promote(id)
-    return ToolResult{Text: fmt.Sprintf("… [promoted to background process %s]\n\n%s", id, BgPollNotice)}
+    return ToolResult{Text: fmt.Sprintf("… [promoted to async background process %s]\n\n%s", id, AsyncModeNotice)}
 
 case <-timer.C:
     // Timer backstop — covers IM and forgotten browser tabs.
     mgr.Promote(id)
-    return ToolResult{Text: fmt.Sprintf("… [timeout: command exceeded %s …]\n\n%s", TerminalTimeout, BgPollNotice)}
+    return ToolResult{Text: fmt.Sprintf("… [timeout: command exceeded %s …]\n\n%s", TerminalTimeout, AsyncModeNotice)}
 
 case <-ctx.Done():
     // Kill on interrupt — unchanged.
@@ -138,4 +138,4 @@ No code changes. The `sess.C()` case is wired but nobody fires it; the 2-minute 
 - Partial output is returned on both promote paths.
 - `TerminalTimeout` (120 s) is unchanged.
 - `ctx.Done()` (kill) is unchanged.
-- `run_in_background:true` commands bypass `BeginSync` entirely — they're already async.
+- `run_in_background:"async"` / `"interactive"` commands bypass `BeginSync` entirely — they're already background tasks.

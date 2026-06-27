@@ -7,7 +7,7 @@ import (
 
 func TestBackgroundManager_ListRunning(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("sleep 2")
+	id, err := m.Start("sleep 2", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -18,6 +18,9 @@ func TestBackgroundManager_ListRunning(t *testing.T) {
 	}
 	if run[0].ID != id || run[0].Command != "sleep 2" {
 		t.Errorf("running entry = %+v, want id=%s command='sleep 2'", run[0], id)
+	}
+	if run[0].Mode != BgModeAsync {
+		t.Errorf("running entry mode = %q, want %q", run[0].Mode, BgModeAsync)
 	}
 	if run[0].Start.IsZero() {
 		t.Error("running entry has no Start time")
@@ -32,13 +35,13 @@ func TestBackgroundManager_ListRunning(t *testing.T) {
 
 func TestBackgroundManager_ListRunning_ExcludesExited(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("echo done")
+	id, err := m.Start("echo done", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	// Wait for it to finish (Read reports exited), then it must not be listed.
 	waitFor(t, "process to exit", func() bool {
-		_, status, _, _ := m.Read(id)
+		_, status, _, _, _ := m.Read(id)
 		return strings.HasPrefix(status, "exited")
 	})
 	if run := m.ListRunning(); len(run) != 0 {
@@ -55,7 +58,7 @@ func TestRunningBackground_DefaultManagerDelegates(t *testing.T) {
 // started with visible=false do not appear in ListRunning until Promoted.
 func TestBackgroundManager_ListRunning_ExcludesInvisible(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("sleep 2", WithVisible(false))
+	id, err := m.Start("sleep 2", BgModeAsync, WithVisible(false))
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
