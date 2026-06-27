@@ -14,6 +14,7 @@
     chatWorkingDir,
     chatPermMode,
     chatReasoningEffort,
+    chatShowReasoning,
     chatSuggestion,
     chatThinking,
     chatSubAgents,
@@ -346,14 +347,30 @@
 
     cleanups.push(ws.on('workflow_event', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      applyWorkflowEvent(
-        sid,
-        (ev as any).run_id ?? '',
-        (ev as any).description ?? '',
-        (ev as any).kind ?? '',
-        (ev as any).line ?? '',
-        (ev as any).status ?? '',
-      )
+      const kind = (ev as any).kind ?? ''
+      const runId = (ev as any).run_id ?? ''
+      const description = (ev as any).description ?? ''
+      const status = (ev as any).status ?? ''
+      applyWorkflowEvent(sid, runId, description, kind, (ev as any).line ?? '', status)
+      // When a background workflow finishes, mirror the TUI scrollback notice
+      // so the completion is visible in the message stream.
+      if (kind === 'done') {
+        const level = status === 'error' ? 'error' : 'success'
+        const label = description || runId || 'workflow'
+        const text = status === 'error'
+          ? `Workflow \`${label}\` failed`
+          : `Workflow \`${label}\` completed`
+        addChatMsg(sid, {
+          id: uid('note'),
+          type: 'notice',
+          content: text,
+          level,
+          createdAt: Date.now(),
+          streaming: false,
+          tools: [],
+          todos: [],
+        })
+      }
     }))
 
     cleanups.push(ws.on('assistant_message', (ev) => {
@@ -493,6 +510,9 @@
       }
       chatPermMode.update(mm => ({ ...mm, [sid]: (ev as any).permission_mode }))
       chatReasoningEffort.update(r => ({ ...r, [sid]: (ev as any).reasoning_effort }))
+      if (typeof (ev as any).show_reasoning === 'boolean') {
+        chatShowReasoning.update(r => ({ ...r, [sid]: (ev as any).show_reasoning }))
+      }
       chatWorkingDir.update(w => ({ ...w, [sid]: (ev as any).working_dir }))
       // An idle snapshot from the server clears a stale thinking indicator.
       if ((ev as any).status === 'idle') {
