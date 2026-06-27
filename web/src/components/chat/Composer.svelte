@@ -532,7 +532,7 @@
   border-top: 1px solid var(--border-secondary);
 }
 .chips {
-  max-width: 1080px; margin: 0 auto;
+  max-width: var(--chat-content-max-width, 1080px); margin: 0 auto;
   padding: 12px 24px 0;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
@@ -581,7 +581,7 @@
 .context-chip { gap: 8px; }
 .ctx-bar { width: 56px; height: 4px; background: var(--border-table); border-radius: 9999px; overflow: hidden; display: inline-block; }
 .ctx-fill { display: block; height: 100%; background: var(--blue-6); border-radius: 9999px; }
-.input-wrap { max-width: 1080px; margin: 10px auto 0; padding: 0 24px 16px; }
+.input-wrap { max-width: var(--chat-content-max-width, 1080px); margin: 10px auto 0; padding: 0 24px 16px; }
 .input-card {
   background: var(--bg-container); border: 1px solid var(--border); border-radius: 12px;
   padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
