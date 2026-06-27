@@ -16,6 +16,11 @@
     if (sid) ws.promoteSyncTerminal(sid)
   }
 
+  function promoteSubAgent() {
+    const sid = $activeSessionId
+    if (sid) ws.promoteSyncSubAgent(sid)
+  }
+
   const TOOL_ICONS: Record<string, string> = {
     grep: 'ant-design:search-outlined',
     glob: 'ant-design:search-outlined',
@@ -255,6 +260,10 @@
                 {$t('tools.running')}
                 {#if tool.name === 'terminal' || tool.name === 'bash'}
                   <button class="promote-btn" onclick={(e) => { e.preventDefault(); e.stopPropagation(); promoteTerminal() }}>
+                    Background
+                  </button>
+                {:else if tool.name === 'sub_agent'}
+                  <button class="promote-btn" onclick={(e) => { e.preventDefault(); e.stopPropagation(); promoteSubAgent() }}>
                     Background
                   </button>
                 {/if}

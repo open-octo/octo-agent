@@ -123,6 +123,10 @@ export class WsManager {
     this.send({ type: "promote_sync_terminal", session_id: sessionId });
   }
 
+  promoteSyncSubAgent(sessionId: string): void {
+    this.send({ type: "promote_sync_sub_agent", session_id: sessionId });
+  }
+
   retry(sessionId: string): void {
     this.send({ type: "retry", session_id: sessionId });
   }
