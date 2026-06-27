@@ -48,13 +48,24 @@ func (s *Server) handleGetMemories(w http.ResponseWriter, r *http.Request) {
 	}
 	files := make([]memFile, 0)
 
+	// If the project memory directory coincides with the inherited (home)
+	// directory — e.g. the server was started from a non-repo path — listing
+	// both would emit duplicate paths. The front-end keys rows by path, so
+	// duplicates freeze the UI on "Loading memories…". Skip the inherited
+	// directory when it is the same as the project one, matching the dedupe
+	// already done in memory.RenderInjection.
+	homeMemDir := s.homeMemDir
+	if homeMemDir == s.memDir {
+		homeMemDir = ""
+	}
+
 	for _, src := range []struct {
 		dir   string
 		label string
 	}{{
 		s.memDir, "project",
 	}, {
-		s.homeMemDir, "inherited",
+		homeMemDir, "inherited",
 	}} {
 		if src.dir == "" {
 			continue

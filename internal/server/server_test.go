@@ -656,6 +656,44 @@ func TestHandleGetMemory_NotFound(t *testing.T) {
 	}
 }
 
+func TestHandleGetMemories_DedupesProjectAndHomeDir(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// Simulate a setup where the project memory directory is the same as the
+	// inherited home memory directory. Without deduplication the endpoint
+	// returns the same file twice, which causes the front-end {#each} keyed by
+	// path to throw a duplicate-key error and freeze on "Loading memories…".
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte("# test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv.memDir = dir
+	srv.homeMemDir = dir
+
+	req := httptest.NewRequest(http.MethodGet, "/api/memories", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body struct {
+		Files []struct {
+			Name   string `json:"name"`
+			Path   string `json:"path"`
+			Source string `json:"source"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Files) != 1 {
+		t.Fatalf("got %d files, want 1: %+v", len(body.Files), body.Files)
+	}
+	if body.Files[0].Source != "project" {
+		t.Fatalf("source = %q, want project", body.Files[0].Source)
+	}
+}
+
 func TestHandleVersionUpgrade_AcceptedAndConflict(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 

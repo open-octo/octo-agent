@@ -4,17 +4,10 @@
   import StatusTag from '../components/ui/StatusTag.svelte'
   import { renderMarkdown } from '../lib/markdown'
   import * as api from '../lib/api'
+  import type { Memory } from '../lib/types'
   import { t } from '../lib/i18n'
 
   // --- state ---
-  interface MemFile {
-    name: string
-    path: string
-    size: number
-    updated_at: string
-    source: string
-  }
-
   interface SoulData {
     content: string
     path: string
@@ -22,7 +15,7 @@
 
   let soulData    = $state<SoulData | null>(null)
   let userData    = $state<SoulData | null>(null)
-  let memFiles    = $state<MemFile[]>([])
+  let memFiles    = $state<Memory[]>([])
   let loadingSoul = $state(false)
   let loadingUser = $state(false)
   let loadingMem  = $state(false)
@@ -63,8 +56,7 @@
   async function loadMems() {
     loadingMem = true
     try {
-      const data = await api.getMemories() as any
-      memFiles = data.files ?? data ?? []
+      memFiles = await api.getMemories()
       memLoaded = true
     } catch (e: any) {
       showToast(`Could not load memories: ${e.message}`, 'error')
@@ -75,7 +67,7 @@
 
   // Keyed by the file's full path, not its name: the same filename can exist in
   // both the project and inherited memory dirs, so name alone collides.
-  async function toggleMemory(e: Event, f: MemFile) {
+  async function toggleMemory(e: Event, f: Memory) {
     const open = (e.currentTarget as HTMLDetailsElement).open
     if (open && memContent[f.path] === undefined) {
       memContent = { ...memContent, [f.path]: '' }   // mark in-flight
@@ -88,7 +80,7 @@
     }
   }
 
-  async function forgetMemory(f: MemFile) {
+  async function forgetMemory(f: Memory) {
     try {
       await fetch(`/api/memories/${encodeURIComponent(f.name)}?source=${encodeURIComponent(f.source)}`, { method: 'DELETE' })
       memFiles = memFiles.filter(m => m.path !== f.path)
@@ -110,7 +102,7 @@
     } catch { return iso }
   }
 
-  function iconForMemory(f: MemFile): string {
+  function iconForMemory(f: Memory): string {
     if (f.source === 'inherited') return 'ant-design:global-outlined'
     return 'ant-design:file-text-outlined'
   }
