@@ -394,6 +394,57 @@ func TestHandleChannelMessage_BackgroundCompletionTriggersIdleTurn(t *testing.T)
 	}
 }
 
+// TestRunChannelIdleTurn_SkipsWhenBoundToOtherEntry: if another entry has
+// taken over the session while the IM chat was idle, the idle follow-up turn
+// must not run.
+func TestRunChannelIdleTurn_SkipsWhenBoundToOtherEntry(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+		return agent.New(&stubSender{}, "stub-model")
+	}, channel.BindByChat)
+	ad := &fullFakeAdapter{}
+	ev := evFor("hello")
+
+	// Pre-create the store file bound to web so the idle turn sees the
+	// authoritative binding and refuses to run.
+	// First create the channel session to learn its deterministic store ID,
+	// then overwrite the file with a web-bound meta record.
+	sess := srv.channelMgr.GetOrCreateSession(ev)
+	storeID := sess.Store.ID
+	path, err := sess.Store.SavePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	webBound := agent.NewSession("stub-model", "")
+	webBound.ID = storeID
+	webBound.Source = "channel"
+	webBound.BoundEntry = agent.EntryWeb
+	webBound.BoundAt = time.Now()
+	if err := webBound.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reload so the in-memory store reflects the web-bound file.
+	loaded, err := agent.LoadSession(storeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.Store = loaded
+
+	sess.Agent.Inbox.Enqueue("<system-reminder>[BACKGROUND COMPLETED] bg done.</system-reminder>")
+	srv.runChannelIdleTurn(context.Background(), sess, ad, ev)
+
+	// The adapter must not have sent a reply from the idle turn.
+	for _, txt := range ad.texts() {
+		if strings.Contains(txt, "stub reply") {
+			t.Fatal("idle turn ran while session was bound to another entry")
+		}
+	}
+}
+
 // TestInjectorFor_SessionStickyAndDroppedOnUnbind: the injector's
 // once-per-session recall latch must survive turns but reset with /unbind.
 func TestInjectorFor_SessionStickyAndDroppedOnUnbind(t *testing.T) {

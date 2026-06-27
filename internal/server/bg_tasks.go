@@ -96,10 +96,19 @@ func (s *Server) deliverModelNote(sessionID, note string) {
 // a turn is running (its chained loop drains the queue at turn end) or the
 // queue is already empty by the time the lock is held.
 func (s *Server) kickIdleSteerTurn(sessionID string) {
+	// Acquire the persistent binding before locking the turn: this keeps the
+	// same lock order as the user-initiated web path and prevents idle
+	// follow-up turns from interleaving with another entry (cli/tui/im) that
+	// has taken over the session while we were idle.
+	if ok, _, _ := s.acquireSessionBinding(sessionID, agent.EntryWeb, false); !ok {
+		return
+	}
+
 	mu := s.sessionTurnLock(sessionID)
 	mu.Lock()
 	if s.turnRunning[sessionID] {
 		mu.Unlock()
+		s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		return
 	}
 	sess, err := agent.LoadSession(sessionID)
@@ -107,11 +116,13 @@ func (s *Server) kickIdleSteerTurn(sessionID string) {
 		// Session not loadable (deleted, or a transient read error) — leave
 		// the queue untouched; the next turn will pick the note up.
 		mu.Unlock()
+		s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		return
 	}
 	items := s.drainSteer(sessionID)
 	if len(items) == 0 {
 		mu.Unlock()
+		s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		return
 	}
 	s.turnRunning[sessionID] = true
@@ -130,6 +141,7 @@ func (s *Server) kickIdleSteerTurn(sessionID string) {
 			mu.Lock()
 			s.turnRunning[sessionID] = false
 			mu.Unlock()
+			s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		}()
 		s.runAgentTurnLoop(sess, strings.Join(texts, "\n\n"), blocks, imageRefsFromBlocks(blocks))
 	}()
