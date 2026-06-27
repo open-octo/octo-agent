@@ -145,6 +145,11 @@ type SubAgentManager struct {
 	onEvent     func(SubAgentEvent)
 	synchronous bool
 	activeAsync int // running async spawns, for the concurrency cap
+
+	// syncMu guards the sync session slot used to promote a synchronous
+	// sub-agent to background while it is running.
+	syncMu   sync.Mutex
+	syncSess *SyncSession
 }
 
 // NewSubAgentManager returns an empty manager.
@@ -184,29 +189,194 @@ func subAgentsSynchronous() bool {
 	return defaultSubAgentMgr != nil && defaultSubAgentMgr.Synchronous()
 }
 
+// BeginSync registers a new SyncSession for the current synchronous sub-agent
+// run. Call EndSync (via defer) when the run finishes or is promoted. At most
+// one synchronous sub-agent runs per manager at a time — the agent loop is
+// serial — so there is only one slot.
+func (m *SubAgentManager) BeginSync() *SyncSession {
+	s := &SyncSession{ch: make(chan struct{})}
+	m.syncMu.Lock()
+	m.syncSess = s
+	m.syncMu.Unlock()
+	return s
+}
+
+// EndSync clears the current SyncSession.
+func (m *SubAgentManager) EndSync() {
+	m.syncMu.Lock()
+	m.syncSess = nil
+	m.syncMu.Unlock()
+}
+
+// HasSync reports whether a synchronous sub-agent is currently running.
+func (m *SubAgentManager) HasSync() bool {
+	m.syncMu.Lock()
+	defer m.syncMu.Unlock()
+	return m.syncSess != nil
+}
+
+// PromoteSync signals the current synchronous sub-agent to promote itself to
+// a background agent. No-op if no synchronous sub-agent is running.
+func (m *SubAgentManager) PromoteSync() {
+	m.syncMu.Lock()
+	s := m.syncSess
+	m.syncMu.Unlock()
+	if s != nil {
+		s.Signal()
+	}
+}
+
+// HasActiveSubAgentSync reports whether the default manager has a synchronous
+// sub-agent running. Used by the TUI to conditionally show the Ctrl+B hint.
+func HasActiveSubAgentSync() bool {
+	return defaultSubAgentMgr != nil && defaultSubAgentMgr.HasSync()
+}
+
+// PromoteCurrentSubAgentSync signals the default manager's synchronous
+// sub-agent to promote. Called by the TUI Ctrl+B handler.
+func PromoteCurrentSubAgentSync() {
+	if defaultSubAgentMgr != nil {
+		defaultSubAgentMgr.PromoteSync()
+	}
+}
+
 // RunSync spawns a sub-agent and blocks until it completes, returning its
 // reply. Used by the synchronous sub_agent path; the spawner stamps the
 // sub-agent marker and keeps the child resumable for a later ContinueSync.
 // When an onEvent hook is registered the child's tool-level activity is
 // streamed the same way async sub-agents are, so live panels work for both
 // sync and async modes.
+//
+// A synchronous run can be manually promoted to a background agent while it is
+// running (TUI Ctrl+B, Web "Background" button). The same agent_N id is kept,
+// the goroutine continues, and the result arrives via the onExit hook.
 func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnResult, error) {
 	if m.spawner == nil {
 		return SpawnResult{}, fmt.Errorf("subagent: no spawner configured")
 	}
-	// Give this sync sub-agent a temporary ID so the event stream can track
-	// it the same way async agents are tracked.
+
+	// Allocate a real agent_N id up front. If the user promotes this sync run,
+	// the same id becomes the background handle; if it completes inline, the
+	// temporary entry is reaped.
 	m.mu.Lock()
 	m.seq++
-	id := fmt.Sprintf("sync_%d", m.seq)
+	id := fmt.Sprintf("agent_%d", m.seq)
+	a := &asyncSubAgent{
+		id:          id,
+		description: req.Description,
+		agentType:   req.AgentType,
+		start:       time.Now(),
+		busy:        true,
+	}
+	m.agents[id] = a
 	m.mu.Unlock()
 
-	if sink := m.eventSink(id, req.Description, req.AgentType); sink != nil {
-		ctx = WithSubAgentEventSink(ctx, sink)
+	// Run the spawn on a background context so a user promotion can detach it
+	// from the turn context and let it keep running.
+	spawnCtx, cancel := context.WithCancel(context.Background())
+	a.mu.Lock()
+	a.cancel = cancel
+	a.mu.Unlock()
+
+	sink := m.eventSink(id, req.Description, req.AgentType)
+	if sink != nil {
+		spawnCtx = WithSubAgentEventSink(spawnCtx, sink)
 		sink(SubAgentEvent{Kind: "started"})
-		defer sink(SubAgentEvent{Kind: "done"})
 	}
-	return m.spawner.Spawn(ctx, req)
+
+	sess := m.BeginSync()
+	defer m.EndSync()
+
+	type outcome struct {
+		res SpawnResult
+		err error
+	}
+	done := make(chan outcome, 1)
+
+	go func() {
+		res, err := m.spawner.Spawn(spawnCtx, req)
+		if err == nil {
+			a.mu.Lock()
+			a.backingID = res.AgentID
+			a.mu.Unlock()
+			a.setResult(res.Reply, res.InputTokens, res.OutputTokens)
+		}
+		stopReason := ""
+		if err == nil {
+			stopReason = res.StopReason
+		}
+		a.setDone(err, stopReason)
+		done <- outcome{res: res, err: err}
+	}()
+
+	select {
+	case o := <-done:
+		// Normal synchronous completion (or spawner error). Reap the temporary
+		// entry: the result has been returned inline.
+		if sink != nil {
+			sink(SubAgentEvent{Kind: "done"})
+		}
+		m.mu.Lock()
+		delete(m.agents, id)
+		m.mu.Unlock()
+		return o.res, o.err
+
+	case <-sess.C():
+		// Promoted to background: keep the agent entry alive, count it against
+		// the async concurrency cap, and let the goroutine finish on its own.
+		m.mu.Lock()
+		m.activeAsync++
+		m.mu.Unlock()
+
+		go func() {
+			o := <-done
+			a.mu.Lock()
+			a.cancel()
+			a.mu.Unlock()
+
+			m.mu.Lock()
+			m.activeAsync--
+			hook := m.onExit
+			m.mu.Unlock()
+
+			if hook != nil {
+				result, _, _, _, sr := a.readState()
+				if o.err != nil {
+					result = o.err.Error()
+				}
+				a.mu.Lock()
+				inTok := a.inputTokens
+				outTok := a.outputTokens
+				a.mu.Unlock()
+				hook(SubAgentNotification{
+					AgentID:      id,
+					Description:  req.Description,
+					Kind:         "spawn_done",
+					Result:       result,
+					InputTokens:  inTok,
+					OutputTokens: outTok,
+					StopReason:   sr,
+				})
+			}
+			if sink != nil {
+				sink(SubAgentEvent{Kind: "done"})
+			}
+		}()
+
+		return SpawnResult{AgentID: id, StopReason: "promoted"}, nil
+
+	case <-ctx.Done():
+		// Turn cancelled: stop the spawn and clean up.
+		cancel()
+		<-done
+		if sink != nil {
+			sink(SubAgentEvent{Kind: "done"})
+		}
+		m.mu.Lock()
+		delete(m.agents, id)
+		m.mu.Unlock()
+		return SpawnResult{}, ctx.Err()
+	}
 }
 
 // ContinueSync re-runs a still-alive sub-agent (addressed by its spawner-side

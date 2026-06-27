@@ -100,10 +100,14 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case tea.KeyCtrlB:
-		// Background the current sync terminal, if one is running.
-		// No-op when no sync terminal is polling.
-		if m.turnRunning && tools.HasActiveSync() {
-			tools.PromoteCurrentSync()
+		// Background the current sync terminal or sub-agent, if one is running.
+		// No-op when no sync task is polling.
+		if m.turnRunning {
+			if tools.HasActiveSync() {
+				tools.PromoteCurrentSync()
+			} else if tools.HasActiveSubAgentSync() {
+				tools.PromoteCurrentSubAgentSync()
+			}
 		}
 		return m, nil
 
@@ -967,7 +971,7 @@ func (m *tuiModel) liveHeight() int {
 	if m.running != nil || (m.turnRunning && m.partial.Len() == 0) {
 		h++
 	}
-	if m.running != nil && tools.HasActiveSync() {
+	if m.running != nil && (tools.HasActiveSync() || tools.HasActiveSubAgentSync()) {
 		h++ // Ctrl+B hint line
 	}
 	if n := len(m.pendingSteer); n > 0 {
@@ -1044,7 +1048,7 @@ func (m *tuiModel) View() string {
 	} else if m.running != nil {
 		b.WriteString(m.spinnerLine(m.running.verb+"("+m.running.target+")", m.running.start))
 		b.WriteByte('\n')
-		if tools.HasActiveSync() {
+		if tools.HasActiveSync() || tools.HasActiveSubAgentSync() {
 			b.WriteString(hintStyle.Render("  [Ctrl+B] background  [Esc] kill"))
 			b.WriteByte('\n')
 		}
