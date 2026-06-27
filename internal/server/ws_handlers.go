@@ -478,7 +478,7 @@ func (s *Server) wsClearSession(sid string) {
 	delete(s.sessionInjectors, sid)
 	s.injectorMu.Unlock()
 
-	s.wsHub.broadcast(sid, map[string]any{"type": "session_update", "session_id": sid, "context_usage": 0, "context_tokens": 0})
+	s.wsHub.broadcast(sid, map[string]any{"type": "session_update", "session_id": sid, "status": "idle", "context_usage": 0, "context_tokens": 0})
 	s.broadcastHistoryReload(sid)
 	s.wsToast(sid, "Conversation cleared.", "success")
 }
@@ -531,15 +531,18 @@ func (s *Server) wsCompactSession(sid string) {
 		stats, err := a.ForceCompact(ctx, nil)
 		if err != nil {
 			s.wsToast(sid, "Compact failed: "+err.Error(), "error")
+			s.broadcastHistoryReload(sid)
 			return
 		}
 		if stats.FoldedMsgs == 0 && stats.ReclaimedTokens == 0 {
 			s.wsToast(sid, "Nothing to compact yet.", "info")
+			s.broadcastHistoryReload(sid)
 			return
 		}
 		sess.SyncFrom(a.History)
 		if err := sess.Save(); err != nil {
 			s.wsToast(sid, "Compact failed to save: "+err.Error(), "error")
+			s.broadcastHistoryReload(sid)
 			return
 		}
 		s.broadcastHistoryReload(sid)

@@ -315,6 +315,11 @@ func (m *Manager) cmdClear(ev InboundEvent) string {
 	if sess.IsRunning() {
 		return "Can't clear while a turn is running — /stop it first or wait for it to finish."
 	}
+	// Serialize with agent turns so the clear cannot race a turn that starts
+	// immediately after the IsRunning check.
+	_, done := sess.BeginRun(context.Background())
+	defer done()
+
 	sess.Agent.ClearHistory()
 	if err := sess.Persist(); err != nil {
 		return fmt.Sprintf("Cleared, but saving the empty history failed: %v", err)
@@ -335,7 +340,12 @@ func (m *Manager) cmdCompact(ev InboundEvent) string {
 	if sess.IsRunning() {
 		return "Can't compact while a turn is running — /stop it first or wait for it to finish."
 	}
-	stats, err := sess.Agent.ForceCompact(context.Background(), nil)
+	// Serialize with agent turns so the compaction cannot race a turn that
+	// starts immediately after the IsRunning check.
+	ctx, done := sess.BeginRun(context.Background())
+	defer done()
+
+	stats, err := sess.Agent.ForceCompact(ctx, nil)
 	if err != nil {
 		return fmt.Sprintf("Compact failed: %v", err)
 	}
