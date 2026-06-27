@@ -97,6 +97,13 @@ export async function updateSessionReasoningEffort(id: string, effort: string): 
   })
 }
 
+export async function updateSessionShowReasoning(id: string, show: boolean): Promise<void> {
+  await request<unknown>(`/api/sessions/${id}/show_reasoning`, {
+    method: 'PATCH',
+    ...json({ show_reasoning: show }),
+  })
+}
+
 export async function updateSessionWorkingDir(id: string, dir: string): Promise<void> {
   await request<unknown>(`/api/sessions/${id}/working_dir`, {
     method: 'PATCH',

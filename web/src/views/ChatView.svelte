@@ -1114,7 +1114,7 @@
 .conversation { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .messages { flex: 1; overflow-y: auto; min-height: 0; }
 .messages-inner {
-  max-width: 800px; margin: 0 auto;
+  max-width: 1080px; margin: 0 auto;
   padding: 24px 24px 16px; display: flex; flex-direction: column; gap: 20px;
 }
 

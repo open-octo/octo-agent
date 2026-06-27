@@ -264,6 +264,7 @@
   let modelMenu = $state(false)
   let reasonMenu = $state(false)
   const reasoningLevels = ['low', 'medium', 'high', 'xhigh', 'max']
+  const showReasoningIcon = $derived(showReasoning ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined')
 
   onMount(async () => {
     try { models = (await api.getConfig()).models ?? [] } catch { /* leave empty */ }
@@ -288,13 +289,23 @@
   }
 
   async function pickReasoning(level: string) {
-    reasonMenu = false
     if (!sid) return
     try {
       await api.updateSessionReasoningEffort(sid, level)
       chatReasoningEffort.update(r => ({ ...r, [sid]: level }))
     } catch (e: any) {
       showToast(e.message ?? 'Failed to set reasoning', 'error')
+    }
+  }
+
+  async function toggleShowReasoning() {
+    if (!sid) return
+    const next = !showReasoning
+    try {
+      await api.updateSessionShowReasoning(sid, next)
+      chatShowReasoning.update(r => ({ ...r, [sid]: next }))
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to toggle reasoning visibility', 'error')
     }
   }
 
@@ -387,8 +398,9 @@
       {/if}
     </div>
     <div class="picker">
-      <button class="chip" onclick={(e) => { e.stopPropagation(); modelMenu = false; reasonMenu = !reasonMenu }}>
+      <button class="chip reasoning-chip" onclick={(e) => { e.stopPropagation(); modelMenu = false; reasonMenu = !reasonMenu }}>
         <span>{$t('chat.reasoning')} {cap(reasoning)}</span>
+        <iconify-icon icon={showReasoningIcon} width="12" class="reasoning-eye"></iconify-icon>
         <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
       </button>
       {#if reasonMenu}
@@ -398,6 +410,13 @@
               <span class="mi-name">{cap(lvl)}</span>
             </button>
           {/each}
+          <div class="menu-divider"></div>
+          <button class="menu-item toggle-item" onclick={() => toggleShowReasoning()}>
+            <span class="mi-name">{$t('chat.show_reasoning')}</span>
+            <span class="toggle" class:on={showReasoning}>
+              <span class="toggle-knob"></span>
+            </span>
+          </button>
         </div>
       {/if}
     </div>
@@ -410,11 +429,6 @@
       <span class="mono">{ctxUsage}%</span>
     </span>
     <span style="margin-left:auto;"></span>
-    {#if showReasoning}
-      <StatusTag status="success">{$t('chat.reasoning_on')}</StatusTag>
-    {:else}
-      <StatusTag status="default">{$t('chat.reasoning_off')}</StatusTag>
-    {/if}
     {#if permMode === 'auto'}
       <StatusTag status="success">{$t('chat.auto_mode')}</StatusTag>
     {:else}
@@ -445,7 +459,7 @@
       {/if}
       <textarea
         bind:this={textareaEl}
-        rows={2}
+        rows={1}
         placeholder={$t('chat.placeholder')}
         bind:value={text}
         onkeydown={onKeydown}
@@ -518,7 +532,7 @@
   border-top: 1px solid var(--border-secondary);
 }
 .chips {
-  max-width: 800px; margin: 0 auto;
+  max-width: 1080px; margin: 0 auto;
   padding: 12px 24px 0;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
@@ -544,14 +558,30 @@
 }
 .menu-item:hover { background: rgba(22,119,255,0.08); }
 .menu-item.active { background: var(--active-blue-bg); }
+.menu-divider { height: 1px; background: var(--border-secondary); margin: 4px 0; }
+.menu-item.toggle-item { flex-direction: row; justify-content: space-between; align-items: center; }
+.toggle {
+  width: 30px; height: 16px; border-radius: 9999px; background: var(--border);
+  position: relative; cursor: pointer; transition: background 0.15s ease;
+}
+.toggle.on { background: var(--green-6); }
+.toggle-knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 12px; height: 12px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  transition: transform 0.15s ease;
+}
+.toggle.on .toggle-knob { transform: translateX(14px); }
 .mi-name { font-size: 13px; color: var(--text); }
 .mi-model { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
 .menu-empty { padding: 8px 10px; font-size: 12px; color: var(--text-tertiary); }
+.reasoning-chip { padding-right: 8px; }
+.reasoning-eye { color: var(--green-6); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .context-chip { gap: 8px; }
 .ctx-bar { width: 56px; height: 4px; background: var(--border-table); border-radius: 9999px; overflow: hidden; display: inline-block; }
 .ctx-fill { display: block; height: 100%; background: var(--blue-6); border-radius: 9999px; }
-.input-wrap { max-width: 800px; margin: 10px auto 0; padding: 0 24px 16px; }
+.input-wrap { max-width: 1080px; margin: 10px auto 0; padding: 0 24px 16px; }
 .input-card {
   background: var(--bg-container); border: 1px solid var(--border); border-radius: 12px;
   padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;

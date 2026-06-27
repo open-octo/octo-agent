@@ -522,6 +522,7 @@ func (s *Server) registerRoutes() {
 	s.api("PATCH /api/sessions/{id}", s.handleUpdateSession)
 	s.api("PATCH /api/sessions/{id}/model", s.handleUpdateSessionModel)
 	s.api("PATCH /api/sessions/{id}/reasoning_effort", s.handleUpdateSessionReasoningEffort)
+	s.api("PATCH /api/sessions/{id}/show_reasoning", s.handleUpdateSessionShowReasoning)
 	s.api("PATCH /api/sessions/{id}/working_dir", s.handleUpdateSessionWorkingDir)
 	s.api("GET /api/tools", s.handleListTools)
 	s.api("GET /api/skills", s.handleListSkills)
