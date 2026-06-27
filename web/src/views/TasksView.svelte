@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { tasks, showToast, openAgentSession, sessions, activeSessionId, view } from '../lib/stores'
+  import { tasks, showToast, sessions, activeSessionId, view, setActiveSession, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
@@ -65,10 +65,12 @@
       const res = await api.runTask(t.id)
       showToast('Task started')
       if (res.session_id) {
-        // Ensure the session appears in the sidebar, then open it.
+        // Refresh the session list so the new session shows in the sidebar,
+        // then activate it and switch to chat. The streamed turn events will
+        // appear automatically once the WebSocket subscribes.
         const data = await api.listSessions()
         sessions.set(data.sessions ?? [])
-        activeSessionId.set(res.session_id)
+        setActiveSession(res.session_id)
         view.set('chat')
       }
     } catch (e: any) {
