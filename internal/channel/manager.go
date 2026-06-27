@@ -295,6 +295,8 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 		return m.cmdList()
 	case "/clear":
 		return m.cmdClear(ev)
+	case "/compact":
+		return m.cmdCompact(ev)
 	default:
 		return fmt.Sprintf("Unknown command: %s. Available: /bind [--force] <number|id>, /unbind, /list, /clear, /compact, /stop, /status", cmd)
 	}
@@ -310,11 +312,43 @@ func (m *Manager) cmdClear(ev InboundEvent) string {
 		return "No active session to clear."
 	}
 	sess := val.(*Session)
+	if sess.IsRunning() {
+		return "Can't clear while a turn is running — /stop it first or wait for it to finish."
+	}
 	sess.Agent.ClearHistory()
 	if err := sess.Persist(); err != nil {
 		return fmt.Sprintf("Cleared, but saving the empty history failed: %v", err)
 	}
 	return "Conversation cleared. Starting fresh."
+}
+
+// cmdCompact force-compacts the current session's conversation history now,
+// summarizing older turns to free up context. It refuses to run while an agent
+// turn is in flight so it can't race the turn's own history mutations.
+func (m *Manager) cmdCompact(ev InboundEvent) string {
+	key := sessionKeyFor(m.mode, ev)
+	val, loaded := m.sessions.Load(key)
+	if !loaded {
+		return "No active session to compact."
+	}
+	sess := val.(*Session)
+	if sess.IsRunning() {
+		return "Can't compact while a turn is running — /stop it first or wait for it to finish."
+	}
+	stats, err := sess.Agent.ForceCompact(context.Background(), nil)
+	if err != nil {
+		return fmt.Sprintf("Compact failed: %v", err)
+	}
+	if err := sess.Persist(); err != nil {
+		return fmt.Sprintf("Compacted, but saving failed: %v", err)
+	}
+	if stats.FoldedMsgs == 0 && stats.ReclaimedTokens == 0 {
+		return "Nothing to compact yet."
+	}
+	if stats.FoldedMsgs == 0 {
+		return fmt.Sprintf("Reclaimed stale tool output · ~%d → ~%d tokens", stats.BeforeTokens, stats.AfterTokens)
+	}
+	return fmt.Sprintf("Compacted context · folded %d message(s) · ~%d → ~%d tokens", stats.FoldedMsgs, stats.BeforeTokens, stats.AfterTokens)
 }
 
 // cmdBind attaches the current chat to an existing session chosen from /list,

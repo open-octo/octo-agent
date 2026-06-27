@@ -346,6 +346,100 @@ func TestManager_UnknownCommand(t *testing.T) {
 	}
 }
 
+// TestCmdClear_RefusesWhileRunning: /clear must not race an in-flight turn.
+func TestCmdClear_RefusesWhileRunning(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	sess := mgr.GetOrCreateSession(ev)
+	runCtx, done := sess.BeginRun(context.Background())
+	defer done()
+
+	reply := mgr.cmdClear(ev)
+	if !strings.Contains(strings.ToLower(reply), "can't clear") {
+		t.Fatalf("expected refusal while running, got %q", reply)
+	}
+	if runCtx.Err() != nil {
+		t.Fatal("/clear should not cancel the running turn")
+	}
+}
+
+// TestCmdCompact_FoldsHistory: /compact summarizes older turns and persists the
+// shorter history.
+func TestCmdCompact_FoldsHistory(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	sess := mgr.GetOrCreateSession(ev)
+	// Shrink the keep budget so the small test history still has something to fold.
+	sess.Agent.CompactKeepFraction = 0.001
+
+	for i := 0; i < 4; i++ {
+		sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: strings.Repeat("a ", 500)})
+		sess.Agent.History.Append(agent.Message{Role: agent.RoleAssistant, Content: strings.Repeat("b ", 500)})
+	}
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	before := len(sess.Agent.History.Snapshot())
+
+	reply := mgr.cmdCompact(ev)
+	if !strings.Contains(strings.ToLower(reply), "compact") &&
+		!strings.Contains(strings.ToLower(reply), "folded") &&
+		!strings.Contains(strings.ToLower(reply), "reclaimed") {
+		t.Fatalf("unexpected compact reply %q", reply)
+	}
+
+	after := len(sess.Agent.History.Snapshot())
+	if after >= before {
+		t.Errorf("history not reduced: %d -> %d messages", before, after)
+	}
+
+	reloaded, err := agent.LoadSession(sess.Store.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Messages) != after {
+		t.Errorf("persisted messages %d != in-memory %d", len(reloaded.Messages), after)
+	}
+}
+
+// TestCmdCompact_NoOpOnTinyHistory: /compact gracefully no-ops when there isn't
+// enough history to fold safely.
+func TestCmdCompact_NoOpOnTinyHistory(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	mgr.GetOrCreateSession(ev)
+
+	reply := mgr.cmdCompact(ev)
+	if !strings.Contains(strings.ToLower(reply), "nothing to compact") {
+		t.Fatalf("expected no-op reply, got %q", reply)
+	}
+}
+
+// TestCmdCompact_RefusesWhileRunning: /compact must not race an in-flight turn.
+func TestCmdCompact_RefusesWhileRunning(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	sess := mgr.GetOrCreateSession(ev)
+	runCtx, done := sess.BeginRun(context.Background())
+	defer done()
+
+	reply := mgr.cmdCompact(ev)
+	if !strings.Contains(strings.ToLower(reply), "can't compact") {
+		t.Fatalf("expected refusal while running, got %q", reply)
+	}
+	if runCtx.Err() != nil {
+		t.Fatal("/compact should not cancel the running turn")
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }
