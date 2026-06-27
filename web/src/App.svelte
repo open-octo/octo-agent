@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession } from './lib/stores'
+  import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning } from './lib/stores'
   import { ws, wsState } from './lib/ws'
   import { locale, t } from './lib/i18n'
   import { checkAuth } from './lib/auth'
@@ -96,19 +96,35 @@
     ws.connect()
 
     ws.on('session_list', (ev: any) => {
-      sessions.set(ev.sessions ?? [])
-      if (!get(activeSessionId) && ev.sessions?.length > 0) {
-        activeSessionId.set(ev.sessions[0].id)
+      const list = ev.sessions ?? []
+      sessions.set(list)
+      chatShowReasoning.update(m => {
+        const next = { ...m }
+        for (const s of list) {
+          if (typeof s.show_reasoning === 'boolean') next[s.id] = s.show_reasoning
+        }
+        return next
+      })
+      if (!get(activeSessionId) && list.length > 0) {
+        activeSessionId.set(list[0].id)
       }
     })
 
     ws.on('session_update', (ev: any) => {
       sessions.update(list =>
         list.map(s => s.id === ev.session_id
-          ? { ...s, status: ev.status ?? s.status, context_usage: ev.context_usage ?? s.context_usage }
+          ? {
+              ...s,
+              status: ev.status ?? s.status,
+              context_usage: ev.context_usage ?? s.context_usage,
+              show_reasoning: typeof ev.show_reasoning === 'boolean' ? ev.show_reasoning : s.show_reasoning,
+            }
           : s
         )
       )
+      if (typeof ev.show_reasoning === 'boolean') {
+        chatShowReasoning.update(m => ({ ...m, [ev.session_id]: ev.show_reasoning }))
+      }
     })
 
     ws.on('session_deleted', (ev: any) => {
@@ -133,9 +149,17 @@
 
     // REST fallback (WS session_list may be delayed)
     api.listSessions().then((data: any) => {
-      if (data.sessions?.length > 0) {
-        sessions.set(data.sessions)
-        if (!get(activeSessionId)) activeSessionId.set(data.sessions[0].id)
+      const list = data.sessions ?? []
+      if (list.length > 0) {
+        sessions.set(list)
+        chatShowReasoning.update(m => {
+          const next = { ...m }
+          for (const s of list) {
+            if (typeof s.show_reasoning === 'boolean') next[s.id] = s.show_reasoning
+          }
+          return next
+        })
+        if (!get(activeSessionId)) activeSessionId.set(list[0].id)
       }
     }).catch(() => { /* non-critical: WS session_list will arrive shortly */ })
 

@@ -418,10 +418,18 @@ export interface ConfigResponse {
   default_model_idx?: number
   font_size?: string
   language?: string
+  show_reasoning?: boolean
 }
 
 export async function getConfig(): Promise<ConfigResponse> {
   return request<ConfigResponse>('/api/config')
+}
+
+export async function updateShowReasoning(showReasoning: boolean): Promise<{ ok: boolean; show_reasoning?: boolean }> {
+  return request<{ ok: boolean; show_reasoning?: boolean }>('/api/config/show_reasoning', {
+    method: 'PUT',
+    ...json({ show_reasoning: showReasoning }),
+  })
 }
 
 export async function getVersion(): Promise<unknown> {

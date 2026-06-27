@@ -24,6 +24,7 @@ export interface Session {
   working_dir: string
   permission_mode: 'ask' | 'auto' | string
   reasoning_effort: 'low' | 'medium' | 'high' | string
+  show_reasoning?: boolean
   context_usage: number
   // Optional UI-only fields carried by some broadcasts.
   time?: string
@@ -222,6 +223,7 @@ export interface WsEventSessionUpdate {
   working_dir: string
   permission_mode: 'ask' | 'auto'
   reasoning_effort: 'low' | 'medium' | 'high'
+  show_reasoning: boolean
 }
 
 export interface WsEventTodoUpdate {

@@ -345,6 +345,28 @@
       )
     }))
 
+    cleanups.push(ws.on('sub_agent_notice', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const status = (ev as any).status ?? ''
+      const level = status === 'success' ? 'success' : 'error'
+      const description = (ev as any).description ?? ''
+      const agentId = (ev as any).agent_id ?? ''
+      const label = description || agentId || 'sub-agent'
+      const text = status === 'success'
+        ? `Sub-agent \`${label}\` completed`
+        : `Sub-agent \`${label}\` failed`
+      addChatMsg(sid, {
+        id: uid('note'),
+        type: 'notice',
+        content: text,
+        level,
+        createdAt: Date.now(),
+        streaming: false,
+        tools: [],
+        todos: [],
+      })
+    }))
+
     cleanups.push(ws.on('workflow_event', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       const kind = (ev as any).kind ?? ''

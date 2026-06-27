@@ -74,6 +74,44 @@ func TestConfigModels_GetListsAllEntries(t *testing.T) {
 	}
 }
 
+func TestConfig_ShowReasoningGlobalDefault(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6"},
+		},
+		DefaultModel: "main",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	resp := getConfigResponse(t, srv)
+	if resp.ShowReasoning != nil {
+		t.Fatalf("initial global show_reasoning = %+v, want nil", resp.ShowReasoning)
+	}
+
+	// Set global default to false.
+	if w := doJSON(t, srv, http.MethodPut, "/api/config/show_reasoning", `{"show_reasoning":false}`); w.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.ShowReasoning == nil || *cfg.ShowReasoning {
+		t.Fatalf("stored global = %+v, want false", cfg.ShowReasoning)
+	}
+	resp = getConfigResponse(t, srv)
+	if resp.ShowReasoning == nil || *resp.ShowReasoning {
+		t.Fatalf("response global = %+v, want false", resp.ShowReasoning)
+	}
+
+	// Toggle back to true.
+	if w := doJSON(t, srv, http.MethodPut, "/api/config/show_reasoning", `{"show_reasoning":true}`); w.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ = config.Load()
+	if cfg.ShowReasoning == nil || !*cfg.ShowReasoning {
+		t.Fatalf("stored global = %+v, want true", cfg.ShowReasoning)
+	}
+}
+
 func TestConfigModels_PostAppendsEntry(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{

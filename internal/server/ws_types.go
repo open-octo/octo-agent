@@ -246,6 +246,15 @@ type wsEventBackgroundTaskNotice struct {
 	Status    string `json:"status"`
 }
 
+type wsEventSubAgentNotice struct {
+	Type        string `json:"type"`
+	SessionID   string `json:"session_id"`
+	AgentID     string `json:"agent_id"`
+	Description string `json:"description"`
+	Kind        string `json:"kind"`
+	Status      string `json:"status"`
+}
+
 type wsEventUserMessageQueueStatus struct {
 	Type    string `json:"type"`
 	Pending int    `json:"pending"`

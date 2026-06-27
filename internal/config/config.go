@@ -83,6 +83,23 @@ type Config struct {
 	// Tools holds opt-in tooling behaviour (Tool Search for MCP, etc.). A
 	// missing block leaves the built-in defaults.
 	Tools ToolsConfig `yaml:"tools,omitempty"`
+	// ShowReasoning is the global default for whether a reasoning model's
+	// thinking trace is surfaced. Individual model entries can override this.
+	// nil means the built-in default (enabled).
+	ShowReasoning *bool `yaml:"show_reasoning,omitempty"`
+}
+
+// EffectiveShowReasoning resolves the effective show-reasoning flag for a
+// model entry. The entry-level value overrides the global default; when both
+// are unset the built-in default is enabled (true).
+func (c Config) EffectiveShowReasoning(entry *bool) bool {
+	if entry != nil {
+		return *entry
+	}
+	if c.ShowReasoning != nil {
+		return *c.ShowReasoning
+	}
+	return true
 }
 
 // ToolsConfig groups per-tool behaviour knobs under the `tools:` block.
@@ -207,7 +224,10 @@ type fileConfig struct {
 	LegacyBaseURL         string `yaml:"base_url,omitempty"`
 	LegacyAPIKey          string `yaml:"api_key,omitempty"`
 	LegacyReasoningEffort string `yaml:"reasoning_effort,omitempty"`
-	LegacyShowReasoning   *bool  `yaml:"show_reasoning,omitempty"`
+	// LegacyShowReasoning is intentionally absent: the top-level show_reasoning
+	// key is now read into Config.ShowReasoning (the global default). During
+	// normalization it is also copied onto the single legacy model entry so
+	// behaviour is preserved.
 }
 
 // normalize folds legacy top-level model fields into a one-entry Models list.
@@ -228,7 +248,7 @@ func (f fileConfig) normalize() Config {
 		BaseURL:         f.LegacyBaseURL,
 		APIKey:          f.LegacyAPIKey,
 		ReasoningEffort: f.LegacyReasoningEffort,
-		ShowReasoning:   f.LegacyShowReasoning,
+		ShowReasoning:   c.ShowReasoning,
 	}}
 	c.DefaultModel = "default"
 	return c

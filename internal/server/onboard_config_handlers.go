@@ -137,6 +137,7 @@ type configResponse struct {
 	DefaultModelIdx int           `json:"default_model_idx,omitempty"`
 	FontSize        string        `json:"font_size,omitempty"`
 	Language        string        `json:"language,omitempty"`
+	ShowReasoning   *bool         `json:"show_reasoning,omitempty"`
 }
 
 type modelConfig struct {
@@ -195,7 +196,38 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		DefaultModelIdx: defaultIdx,
 		FontSize:        "medium",
 		Language:        "en",
+		ShowReasoning:   cfg.ShowReasoning,
 	})
+}
+
+// ─── PUT /api/config/show_reasoning ─────────────────────────────────────────
+
+type putShowReasoningRequest struct {
+	ShowReasoning bool `json:"show_reasoning"`
+}
+
+func (s *Server) handlePutShowReasoning(w http.ResponseWriter, r *http.Request) {
+	var req putShowReasoningRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+		return
+	}
+
+	cfg.ShowReasoning = &req.ShowReasoning
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+	// Cached senders may have been built with the old global default.
+	s.invalidateSenderCache()
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "show_reasoning": req.ShowReasoning})
 }
 
 // maskKey masks most of an API key, keeping the first and last four runes

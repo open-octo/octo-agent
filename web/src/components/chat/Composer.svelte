@@ -3,7 +3,7 @@
   import { onMount } from 'svelte'
   import {
     running, activeSessionId, chatStreaming, sessions,
-    chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, showToast,
+    chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -168,6 +168,8 @@
   let reasoning = $derived($chatReasoningEffort[sid] || currentSession?.reasoning_effort || 'medium')
   let workingDir = $derived($chatWorkingDir[sid] || currentSession?.working_dir || '')
   let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || 'ask')
+  // Effective show-reasoning for this session: live store > session record > default true.
+  let showReasoning = $derived($chatShowReasoning[sid] ?? currentSession?.show_reasoning ?? true)
   let ctxUsage = $derived(Number($chatContextUsage[sid] ?? currentSession?.context_usage ?? 0))
 
   function cap(s: string): string {
@@ -319,6 +321,11 @@
       <span class="mono">{ctxUsage}%</span>
     </span>
     <span style="margin-left:auto;"></span>
+    {#if showReasoning}
+      <StatusTag status="success">{$t('chat.reasoning_on')}</StatusTag>
+    {:else}
+      <StatusTag status="default">{$t('chat.reasoning_off')}</StatusTag>
+    {/if}
     {#if permMode === 'auto'}
       <StatusTag status="success">{$t('chat.auto_mode')}</StatusTag>
     {:else}

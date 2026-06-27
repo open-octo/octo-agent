@@ -55,6 +55,8 @@ export const chatContextTokens = writable<Record<string, number>>({})
 export const chatWorkingDir = writable<Record<string, string>>({})
 export const chatPermMode = writable<Record<string, string>>({})
 export const chatReasoningEffort = writable<Record<string, string>>({})
+// Effective show-reasoning flag for the current session (global default + per-model override).
+export const chatShowReasoning = writable<Record<string, boolean>>({})
 export const chatSuggestion = writable<Record<string, string>>({})
 // Live thinking buffer (thinking_delta) shown as a Thoughts block while streaming.
 export const chatThinking = writable<Record<string, string>>({})

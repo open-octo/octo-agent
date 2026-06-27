@@ -127,7 +127,8 @@ func (srv *Server) sessionStatusFields() (workingDir, permissionMode, reasoningE
 	if cfg, err := config.Load(); err == nil {
 		entry := cfg.DefaultEntry()
 		reasoningEffort = entry.ReasoningEffort
-		showReasoning = entry.ShowReasoning
+		eff := cfg.EffectiveShowReasoning(entry.ShowReasoning)
+		showReasoning = &eff
 	}
 	return workingDir, permissionMode, reasoningEffort, showReasoning, 0
 }
@@ -792,6 +793,14 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.C
 			})
 		})
 		mgr.SetOnExit(func(ev tools.SubAgentNotification) {
+			s.wsHub.broadcast(sid, wsEventSubAgentNotice{
+				Type:        "sub_agent_notice",
+				SessionID:   sid,
+				AgentID:     ev.AgentID,
+				Description: ev.Description,
+				Kind:        ev.Kind,
+				Status:      subAgentNoticeStatus(ev),
+			})
 			s.notifySubAgentExit(sid, ev)
 		})
 	} else {

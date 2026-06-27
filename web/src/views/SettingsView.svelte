@@ -19,6 +19,7 @@
   let reasoning     = $state('Medium')
   let permMode      = $state('Ask')
   let workdir       = $state('')
+  let showReasoning = $state(true)
   let desktopNotif  = $state(true)
   let failureNotif  = $state(true)
   let versionStr    = $state('')
@@ -26,8 +27,9 @@
   let loading       = $state(true)
 
   // Original values for dirty-checking
-  let origModel   = ''
-  let origWorkdir = ''
+  let origModel        = ''
+  let origWorkdir      = ''
+  let origShowReasoning = true
 
   // ── Models section (config-level entries: add/edit/delete/default/lite) ──────
   let models       = $state<ModelEntry[]>([])
@@ -128,7 +130,9 @@
         reasoning = capitalize(def.reasoning_effort ?? 'medium')
         permMode  = capitalize(def.permission_mode ?? 'ask')
       }
+      showReasoning = cfg.show_reasoning ?? true
       origModel = model
+      origShowReasoning = showReasoning
       // Font size is a client-only preference (persisted in localStorage); the
       // server only hardcodes a placeholder, so don't let it clobber the saved
       // choice. Language still seeds from config when present.
@@ -186,6 +190,10 @@
         await Promise.all(promises)
         origModel   = model
         origWorkdir = workdir
+      }
+      if (showReasoning !== origShowReasoning) {
+        await api.updateShowReasoning(showReasoning)
+        origShowReasoning = showReasoning
       }
       showToast(tr('settings.toast_saved'), 'success')
     } catch (e: any) {
@@ -306,6 +314,13 @@
             <span class="setting-desc">{$t('settings.perm_mode_desc')}</span>
           </div>
           <Segment options={['Ask', 'Auto']} labels={{ Ask: $t('settings.pm_ask'), Auto: $t('settings.pm_auto') }} bind:value={permMode} />
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{$t('settings.show_reasoning')}</span>
+            <span class="setting-desc">{$t('settings.show_reasoning_desc')}</span>
+          </div>
+          <Switch bind:checked={showReasoning} />
         </div>
         <div class="setting-row last">
           <div class="setting-info">

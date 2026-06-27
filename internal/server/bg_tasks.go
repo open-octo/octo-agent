@@ -148,3 +148,13 @@ func bgNoticeStatus(status string) string {
 		return "failed"
 	}
 }
+
+// subAgentNoticeStatus maps a SubAgentNotification onto the frontend notice
+// levels (success / failed). A sub-agent whose exit was triggered by an error
+// or the max-turns budget is treated as failed for UI purposes.
+func subAgentNoticeStatus(ev tools.SubAgentNotification) string {
+	if ev.StopReason != "" {
+		return "failed"
+	}
+	return "success"
+}
