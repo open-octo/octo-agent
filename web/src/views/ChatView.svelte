@@ -781,6 +781,16 @@
       {/if}
     </div>
     <div class="header-actions">
+      <button class="hdr-btn" title={$t('chat.compact_tooltip')} disabled={!id || streaming} onclick={() => send('/compact')}>
+        <iconify-icon icon="ant-design:compress-outlined" width="13"></iconify-icon>
+        {$t('chat.compact')}
+      </button>
+      <button class="hdr-btn" title={$t('chat.clear_tooltip')} disabled={!id || streaming} onclick={() => {
+        if (confirm($t('chat.clear_confirm'))) send('/clear')
+      }}>
+        <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
+        {$t('chat.clear')}
+      </button>
       <button class="hdr-btn" class:active={$artifactsOpen} onclick={() => artifactsOpen.update(v => !v)}>
         <iconify-icon icon="ant-design:file-text-outlined" width="13"></iconify-icon>
         {$t('chat.artifacts')}
@@ -1116,6 +1126,7 @@
 }
 .hdr-btn:hover { border-color: var(--blue-5); color: var(--blue-5); }
 .hdr-btn.active { border-color: var(--blue-6); color: var(--blue-6); background: var(--active-blue-bg); }
+.hdr-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: var(--border); color: var(--text-quaternary); }
 .count-badge {
   font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   background: var(--blue-1); color: var(--blue-6); border-radius: 9999px;
