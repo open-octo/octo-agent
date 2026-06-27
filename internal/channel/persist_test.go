@@ -334,6 +334,76 @@ func TestParseBindArgs(t *testing.T) {
 	}
 }
 
+// TestCmdNew_CreatesFreshSessionAndBindsChat: /new creates a brand-new session,
+// overrides the chat's binding, and evicts the live session so the next message
+// starts from the new store.
+func TestCmdNew_CreatesFreshSessionAndBindsChat(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	m := testManager()
+	old := m.GetOrCreateSession(ev)
+	old.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "old context"})
+	if err := old.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	oldID := old.Store.ID
+
+	reply := m.cmdNew(ev)
+	if !strings.Contains(strings.ToLower(reply), "started a new session") {
+		t.Fatalf("unexpected /new reply %q", reply)
+	}
+
+	// A fresh manager must resolve to the new session, not the old one.
+	m2 := testManager()
+	fresh := m2.GetOrCreateSession(ev)
+	if fresh.Store.ID == oldID {
+		t.Errorf("chat still resolves to old session %q after /new", oldID)
+	}
+	if !fresh.Store.BoundTo(agent.EntryChannel) {
+		t.Errorf("new session bound to %q, want %q", fresh.Store.BoundEntry, agent.EntryChannel)
+	}
+	if len(fresh.Agent.History.Snapshot()) != 0 {
+		t.Errorf("new session history = %d messages, want 0", len(fresh.Agent.History.Snapshot()))
+	}
+
+	// The old session file must still exist (history preserved, just detached).
+	path, err := agent.LoadSession(oldID)
+	if err != nil {
+		t.Errorf("old session file missing after /new: %v", err)
+	}
+	_ = path
+}
+
+// TestCmdNew_DetachesEvenWhenBoundToOtherEntry: /new is local to the chat and
+// does not need to steal the chat's usual session from another entry.
+func TestCmdNew_DetachesEvenWhenBoundToOtherEntry(t *testing.T) {
+	tempHome(t)
+
+	// Chat A owns a session that is now bound to web.
+	evA := InboundEvent{Platform: "feishu", ChatID: "cA", UserID: "uA"}
+	m := testManager()
+	sessA := m.GetOrCreateSession(evA)
+	sessA.Store.Bind(agent.EntryWeb, true)
+	if err := sessA.Store.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	reply := m.cmdNew(evA)
+	if !strings.Contains(strings.ToLower(reply), "started a new session") {
+		t.Fatalf("unexpected /new reply %q", reply)
+	}
+
+	m2 := testManager()
+	fresh := m2.GetOrCreateSession(evA)
+	if fresh.Store.ID == sessA.Store.ID {
+		t.Error("chat still resolves to the web-bound session after /new")
+	}
+	if !fresh.Store.BoundTo(agent.EntryChannel) {
+		t.Errorf("new session bound to %q, want %q", fresh.Store.BoundEntry, agent.EntryChannel)
+	}
+}
+
 // TestDeleteStore_TombstonesAgainstZombiePersist pins the clear-during-turn
 // contract: after deleteStore tombstones the store, a turn that finishes later
 // must not recreate the file via its post-turn Persist.

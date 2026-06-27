@@ -342,6 +342,63 @@ func TestHandleChannelMessage_WiresMemoryHooks(t *testing.T) {
 	}
 }
 
+// TestHandleChannelMessage_RejectsTurnWhenBoundToOtherEntry: when the session
+// is owned by another entry, the channel turn is rejected and the reply hints
+// at /new and /bind --force.
+func TestHandleChannelMessage_RejectsTurnWhenBoundToOtherEntry(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	// Pre-create the chat's deterministic store and mark it web-bound.
+	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"))
+	storeID := sess.Store.ID
+	path, err := sess.Store.SavePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	webBound := agent.NewSession("stub-model", "")
+	webBound.ID = storeID
+	webBound.Source = "channel"
+	webBound.BoundEntry = agent.EntryWeb
+	webBound.BoundAt = time.Now()
+	if err := webBound.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := agent.LoadSession(storeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.Store = loaded
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello again"))
+
+	waitFor(t, func() bool {
+		for _, txt := range ad.texts() {
+			if strings.Contains(txt, "bound to web") {
+				return true
+			}
+		}
+		return false
+	})
+
+	for _, txt := range ad.texts() {
+		if strings.Contains(txt, "bound to web") {
+			if !strings.Contains(txt, "/new") || !strings.Contains(txt, "/bind --force") {
+				t.Errorf("rejection message missing hints: %q", txt)
+			}
+			return
+		}
+	}
+	t.Fatal("expected rejection text from adapter")
+}
+
 // TestHandleChannelMessage_BackgroundCompletionTriggersIdleTurn: when an
 // async background process finishes after the synchronous turn chain has
 // ended, the completion note is drained into a follow-up idle turn so the
@@ -465,5 +522,25 @@ func TestInjectorFor_SessionStickyAndDroppedOnUnbind(t *testing.T) {
 	srv.handleChannelCommand(ad, ev)
 	if srv.injectorFor(key) == first {
 		t.Error("/unbind must drop the session injector (fresh recall latch)")
+	}
+}
+
+// TestInjectorFor_DroppedOnNew: the injector's once-per-session recall latch
+// must reset with /new, which creates a brand-new session.
+func TestInjectorFor_DroppedOnNew(t *testing.T) {
+	srv := chanServer(t)
+	srv.memDir = t.TempDir()
+	ad := &fullFakeAdapter{}
+	ev := evFor("/new")
+
+	key := "im:" + string(srv.channelMgr.KeyFor(ev))
+	first := srv.injectorFor(key)
+	if first == nil {
+		t.Fatal("injectorFor returned nil")
+	}
+
+	srv.handleChannelCommand(ad, ev)
+	if srv.injectorFor(key) == first {
+		t.Error("/new must drop the session injector (fresh recall latch)")
 	}
 }

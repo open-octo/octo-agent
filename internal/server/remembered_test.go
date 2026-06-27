@@ -128,3 +128,21 @@ func TestChannelCommand_UnbindDropsRemembered(t *testing.T) {
 		t.Error("/unbind must drop the session's remembered permission store")
 	}
 }
+
+// TestChannelCommand_NewDropsRemembered: /new starts a brand-new session, so
+// the previous session's always-allows must not leak into it.
+func TestChannelCommand_NewDropsRemembered(t *testing.T) {
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+	ev := evFor("/new")
+
+	key := "im:" + string(srv.channelMgr.KeyFor(ev))
+	before := srv.rememberedFor(key)
+
+	if !srv.handleChannelCommand(ad, ev) {
+		t.Fatal("/new not handled as a command")
+	}
+	if srv.rememberedFor(key) == before {
+		t.Error("/new must drop the session's remembered permission store")
+	}
+}

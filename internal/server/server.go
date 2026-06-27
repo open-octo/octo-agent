@@ -1548,13 +1548,14 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		return false
 	}
 	// /bind switches the chat to a different session, /unbind reverts it to its
-	// default, and /clear wipes the conversation — all start a fresh context.
-	// The session's remembered permission allows and its memory-injector latch
-	// are scoped to the previous conversation, so drop them here: the manager
-	// owns session stores but not these server-side per-key latches.
+	// default, /clear wipes the conversation, and /new starts a brand-new one —
+	// all start a fresh context. The session's remembered permission allows and
+	// its memory-injector latch are scoped to the previous conversation, so drop
+	// them here: the manager owns session stores but not these server-side
+	// per-key latches.
 	cmd := strings.ToLower(strings.Fields(text)[0])
 	switch cmd {
-	case "/unbind", "/bind", "/clear":
+	case "/unbind", "/bind", "/clear", "/new":
 		imKey := "im:" + string(s.channelMgr.KeyFor(ev))
 		s.rememberedMu.Lock()
 		delete(s.rememberedStores, imKey)
@@ -1642,7 +1643,7 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	// rather than interleaving with it across processes.
 	storeID := sess.Store.ID
 	if ok, _, berr := s.acquireSessionBinding(storeID, agent.EntryChannel, false); !ok {
-		ad.SendText(ev.ChatID, "⚠️ "+berr.Error(), ev.MessageID)
+		ad.SendText(ev.ChatID, "⚠️ "+berr.Error()+"\nReply /new to start a fresh session, or /bind --force to take over.", ev.MessageID)
 		return
 	}
 	defer s.releaseSessionBinding(storeID, agent.EntryChannel)

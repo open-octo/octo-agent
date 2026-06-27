@@ -295,10 +295,12 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 		return m.cmdList()
 	case "/clear":
 		return m.cmdClear(ev)
+	case "/new":
+		return m.cmdNew(ev)
 	case "/compact":
 		return m.cmdCompact(ev)
 	default:
-		return fmt.Sprintf("Unknown command: %s. Available: /bind [--force] <number|id>, /unbind, /list, /clear, /compact, /stop, /status", cmd)
+		return fmt.Sprintf("Unknown command: %s. Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /stop, /status", cmd)
 	}
 }
 
@@ -359,6 +361,43 @@ func (m *Manager) cmdCompact(ev InboundEvent) string {
 		return fmt.Sprintf("Reclaimed stale tool output · ~%d → ~%d tokens", stats.BeforeTokens, stats.AfterTokens)
 	}
 	return fmt.Sprintf("Compacted context · folded %d message(s) · ~%d → ~%d tokens", stats.FoldedMsgs, stats.BeforeTokens, stats.AfterTokens)
+}
+
+// cmdNew creates a brand-new session and binds the current chat to it. The old
+// store (if any) is left on disk but detached from this chat, so /new is safe
+// to use even when another entry owns the chat's usual session.
+func (m *Manager) cmdNew(ev InboundEvent) string {
+	key := sessionKeyFor(m.mode, ev)
+
+	// Create a fresh session owned by channel.
+	st := agent.NewSession(m.agentModel(), "")
+	st.Source = "channel"
+	st.Bind(agent.EntryChannel, false)
+	if err := st.Save(); err != nil {
+		return fmt.Sprintf("Could not create new session: %v", err)
+	}
+
+	// Drop any existing override and point this chat at the new session.
+	if _, err := m.bindings.remove(key); err != nil {
+		return fmt.Sprintf("Could not clear old binding: %v", err)
+	}
+	if err := m.bindings.set(key, st.ID); err != nil {
+		return fmt.Sprintf("Could not attach chat to new session: %v", err)
+	}
+
+	// Evict the live session so the next message builds against the new store.
+	m.sessions.LoadAndDelete(key)
+
+	return fmt.Sprintf("Started a new session [%s]. Send a message to begin.", st.ShortID())
+}
+
+// agentModel returns the model name the factory uses, so /new can create a
+// session that matches the agent configuration without running a turn.
+func (m *Manager) agentModel() string {
+	if m.factory == nil {
+		return ""
+	}
+	return m.factory().Model
 }
 
 // cmdBind attaches the current chat to an existing session chosen from /list,
