@@ -1110,6 +1110,67 @@ func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *ht
 	})
 }
 
+// ─── PATCH /api/sessions/{id}/show_reasoning ────────────────────────────────
+
+type updateSessionShowReasoningRequest struct {
+	ShowReasoning bool `json:"show_reasoning"`
+}
+
+// handleUpdateSessionShowReasoning updates whether reasoning traces are shown.
+// Like reasoning_effort, this is stored on the default model entry and
+// broadcast to all sessions so the composer status bar updates immediately.
+func (s *Server) handleUpdateSessionShowReasoning(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+
+	var req updateSessionShowReasoningRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	cfg, _ := config.Load()
+	entry := cfg.DefaultEntry()
+	entry.ShowReasoning = &req.ShowReasoning
+	cfg.SetDefaultEntry(entry)
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	// The default sender embeds show_reasoning; rebuild it so existing
+	// unbound sessions pick up the new value on their next turn.
+	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		slog.Error("reload default sender after show_reasoning change", "err", err)
+	}
+
+	// Push the new effective show_reasoning to every known session so the
+	// composer status bar refreshes immediately.
+	if s.wsHub != nil {
+		wd, pm, re, sr, _ := s.sessionStatusFields()
+		sessions, _ := agent.ListSessions(50)
+		for _, sess := range sessions {
+			s.wsHub.broadcast(sess.ID, map[string]any{
+				"type":             "session_update",
+				"session_id":       sess.ID,
+				"working_dir":      wd,
+				"permission_mode":  pm,
+				"reasoning_effort": re,
+				"show_reasoning":   sr,
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             true,
+		"show_reasoning": req.ShowReasoning,
+	})
+}
+
 // ─── PATCH /api/sessions/{id}/working_dir ───────────────────────────────────
 
 type updateSessionWorkingDirRequest struct {
