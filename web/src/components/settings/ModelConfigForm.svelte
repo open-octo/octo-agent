@@ -36,7 +36,10 @@
   // Preselect the stored provider id (a real vendor, always present in the
   // presets list); an unknown id just falls back to the placeholder option.
   let providerId   = $state(seed.provider ?? '')
-  let model        = $state(seed.model ?? '')
+  // Some legacy/shortened entries have an empty model field while the entry id
+  // carries the intended model name. Use id as a fallback so the edit form is
+  // pre-filled and saveable without re-typing.
+  let model        = $state(seed.model || (seed as Partial<ModelEntry>).id || '')
   let baseUrl      = $state(seed.base_url ?? '')
   let apiKey       = $state('')            // never prefilled; placeholder shows the masked key
   let permMode     = $state(seed.permission_mode ?? 'interactive')
