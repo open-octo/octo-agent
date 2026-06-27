@@ -1185,10 +1185,24 @@
 
 /* ── Body row ────────────────────────────────────────────────────────────── */
 .body-row { flex: 1; display: flex; min-height: 0; }
-.conversation { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.messages { flex: 1; overflow-y: auto; min-height: 0; }
+.conversation {
+  flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  /* Keep the chat column narrower than full-width settings pages for
+     readability; Composer picks this up via CSS var inheritance. */
+  --chat-content-max-width: 800px;
+}
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  /* Keep the conversation's overscroll (rubber-band) from chaining to the
+     body. On WebKit this prevents the page from juddering when the user is
+     at the bottom and swipes up a small amount. */
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
 .messages-inner {
-  max-width: 1080px; margin: 0 auto;
+  max-width: var(--chat-content-max-width); margin: 0 auto;
   padding: 24px 24px 16px; display: flex; flex-direction: column; gap: 20px;
 }
 

@@ -532,7 +532,7 @@
   border-top: 1px solid var(--border-secondary);
 }
 .chips {
-  max-width: 1080px; margin: 0 auto;
+  max-width: var(--chat-content-max-width, 1080px); margin: 0 auto;
   padding: 12px 24px 0;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
@@ -564,7 +564,7 @@
   width: 30px; height: 16px; border-radius: 9999px; background: var(--border);
   position: relative; cursor: pointer; transition: background 0.15s ease;
 }
-.toggle.on { background: var(--green-6); }
+.toggle.on { background: var(--success); }
 .toggle-knob {
   position: absolute; top: 2px; left: 2px;
   width: 12px; height: 12px; border-radius: 50%; background: #fff;
@@ -576,12 +576,12 @@
 .mi-model { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
 .menu-empty { padding: 8px 10px; font-size: 12px; color: var(--text-tertiary); }
 .reasoning-chip { padding-right: 8px; }
-.reasoning-eye { color: var(--green-6); }
+.reasoning-eye { color: var(--success); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .context-chip { gap: 8px; }
 .ctx-bar { width: 56px; height: 4px; background: var(--border-table); border-radius: 9999px; overflow: hidden; display: inline-block; }
 .ctx-fill { display: block; height: 100%; background: var(--blue-6); border-radius: 9999px; }
-.input-wrap { max-width: 1080px; margin: 10px auto 0; padding: 0 24px 16px; }
+.input-wrap { max-width: var(--chat-content-max-width, 1080px); margin: 10px auto 0; padding: 0 24px 16px; }
 .input-card {
   background: var(--bg-container); border: 1px solid var(--border); border-radius: 12px;
   padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
