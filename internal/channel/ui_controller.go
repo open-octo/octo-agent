@@ -2,7 +2,6 @@ package channel
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -69,7 +68,10 @@ func (u *UIController) handleEvent(ev agent.AgentEvent) {
 	case agent.EventToolDone:
 		u.onToolDone(ev.ToolName, ev.Output)
 	case agent.EventToolError:
-		u.onToolError(ev.ToolName, ev.Err, ev.Output)
+		// Suppress tool errors in IM — the model sees the error result in
+		// context and can explain it in its own reply; a separate ❌ message
+		// is noisy and can leak implementation details into group chats.
+		u.onToolError(ev.ToolName)
 	case agent.EventTurnDone:
 		u.onTurnDone(ev.Reply)
 	case agent.EventToolInputDelta:
@@ -116,17 +118,13 @@ func (u *UIController) onToolDone(toolName, output string) {
 	u.fileBuf = append(u.fileBuf, files...)
 }
 
-// onToolError handles failed tool execution. We flush any pending text, then
-// send a concise error summary.
-func (u *UIController) onToolError(toolName, errMsg, output string) {
+// onToolError notes that a tool failed. The error is not surfaced as a chat
+// message; the model receives the error in the tool result and can address it
+// in its reply.
+func (u *UIController) onToolError(toolName string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.inTool = false
-
-	u.flushTextLocked()
-
-	msg := fmt.Sprintf("❌ Tool %q failed: %s", toolName, truncate(errMsg, 200))
-	u.sendText(msg)
 }
 
 // onTurnDone finalizes the turn: flushes remaining text, sends file previews,

@@ -97,7 +97,7 @@ func TestUIController_ToolDoneBuffersFiles(t *testing.T) {
 	}
 }
 
-func TestUIController_ToolErrorSendsError(t *testing.T) {
+func TestUIController_ToolErrorSuppressed(t *testing.T) {
 	mock := &mockAdapter{platform: "mock"}
 	ctrl := NewUIController(mock, "chat1", "")
 	handler := ctrl.Handler()
@@ -105,12 +105,8 @@ func TestUIController_ToolErrorSendsError(t *testing.T) {
 	handler(agent.AgentEvent{Kind: agent.EventToolStarted, ToolName: "read_file"})
 	handler(agent.AgentEvent{Kind: agent.EventToolError, ToolName: "read_file", Err: "permission denied", Output: ""})
 
-	if mock.sentTextCount() != 1 {
-		t.Fatalf("expected 1 error message, got %d", mock.sentTextCount())
-	}
-	last := mock.lastSentText()
-	if !strings.Contains(last.text, "failed") {
-		t.Fatalf("expected error message to contain 'failed', got: %q", last.text)
+	if mock.sentTextCount() != 0 {
+		t.Fatalf("expected no chat message for tool error, got %d", mock.sentTextCount())
 	}
 }
 
