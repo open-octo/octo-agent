@@ -2,8 +2,11 @@ package tools
 
 import (
 	"context"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestTerminalListTool lists running background processes so the model can
@@ -39,6 +42,79 @@ func TestTerminalListTool(t *testing.T) {
 	if !strings.Contains(res.Text, "[async]") {
 		t.Errorf("list should include the mode, got %q", res.Text)
 	}
+}
+
+// TestTerminalListTool_ExitedElapsedFrozen verifies that once a background
+// process exits, terminal_list reports its actual lifetime rather than the time
+// elapsed since the process started.
+func TestTerminalListTool_ExitedElapsedFrozen(t *testing.T) {
+	m := NewBackgroundManager()
+	term := TerminalTool{mgr: m}
+	listTool := TerminalListTool{mgr: m}
+	ctx := context.Background()
+
+	if _, err := term.Execute(ctx, "terminal", map[string]any{
+		"command":           "sleep 0.1",
+		"run_in_background": "async",
+	}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	waitFor(t, "exit", func() bool {
+		_, s, _, _, _ := m.Read("bg_1")
+		return strings.HasPrefix(s, "exited")
+	})
+
+	first := listAndParseElapsed(t, listTool, ctx, "bg_1")
+
+	// Wait and list again: the elapsed time for an exited process should not
+	// grow, because it is computed from the recorded end time.
+	time.Sleep(200 * time.Millisecond)
+	second := listAndParseElapsed(t, listTool, ctx, "bg_1")
+
+	if second != first {
+		t.Errorf("exited process elapsed should be frozen, got %v then %v", first, second)
+	}
+
+	res, err := listTool.Execute(ctx, "terminal_list", nil)
+	if err != nil {
+		t.Fatalf("terminal_list: %v", err)
+	}
+	if !strings.Contains(res.Text, "exited:") {
+		t.Errorf("list should show exited status, got %q", res.Text)
+	}
+}
+
+// listAndParseElapsed runs terminal_list and extracts the elapsed duration for
+// the given process id. It expects lines of the form:
+//
+//	bg_1  [async]  [exited: 0]  100ms  sleep 0.1
+var elapsedRE = regexp.MustCompile(`^(\S+)\s+\[[^\]]+\]\s+\[[^\]]+\]\s+(\S+)\s+`)
+
+func listAndParseElapsed(t *testing.T, listTool TerminalListTool, ctx context.Context, id string) time.Duration {
+	t.Helper()
+	res, err := listTool.Execute(ctx, "terminal_list", nil)
+	if err != nil {
+		t.Fatalf("terminal_list: %v", err)
+	}
+	for _, line := range strings.Split(res.Text, "\n") {
+		m := elapsedRE.FindStringSubmatch(line)
+		if m == nil || m[1] != id {
+			continue
+		}
+		d, err := time.ParseDuration(m[2])
+		if err == nil {
+			return d
+		}
+		// go's time.Duration String() may return values like "0s"; try strconv
+		// for seconds in case the format ever changes.
+		if s, convErr := strconv.ParseFloat(m[2], 64); convErr == nil {
+			return time.Duration(s * float64(time.Second))
+		}
+		t.Fatalf("could not parse elapsed %q: %v", m[2], err)
+	}
+	t.Fatalf("process %q not found in list output: %q", id, res.Text)
+	return 0
 }
 
 // TestTerminalOutputTool_LinesSnapshot verifies the lines param trims to the

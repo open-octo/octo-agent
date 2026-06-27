@@ -52,6 +52,7 @@ type bgProcess struct {
 	produced int64  // total bytes ever written to the logical stream
 	readOff  int64  // absolute offset already returned by Read
 	done     bool
+	end      time.Time // set when the process exits; used for accurate elapsed time in listings
 	exitErr  error
 
 	// Anti-polling: time-window based. Within a 30-second window, 3 or more
@@ -96,6 +97,7 @@ func (p *bgProcess) append(b []byte) {
 func (p *bgProcess) finish(err error) {
 	p.mu.Lock()
 	p.done = true
+	p.end = time.Now()
 	p.exitErr = err
 	p.mu.Unlock()
 }
@@ -491,7 +493,8 @@ type BgInfo struct {
 	Command string
 	Mode    BackgroundMode
 	Start   time.Time
-	Status  string // "running" / "exited: …"
+	End     time.Time // zero value while running; set when the process exits
+	Status  string    // "running" / "exited: …"
 }
 
 // ListRunning returns the visible processes that haven't exited yet, oldest first.
@@ -521,12 +524,20 @@ func (m *BackgroundManager) list(includeExited bool) []BgInfo {
 		done := p.done
 		visible := p.visible
 		info := BgInfo{ID: p.id, Command: p.command, Mode: p.mode, Start: p.start, Status: p.statusLocked()}
+		if done {
+			info.End = p.end
+		}
 		p.mu.Unlock()
 		if visible && (includeExited || !done) {
 			out = append(out, info)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Start.Before(out[j].Start) })
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].Start.Equal(out[j].Start) {
+			return out[i].Start.Before(out[j].Start)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 

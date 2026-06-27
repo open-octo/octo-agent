@@ -598,9 +598,17 @@ func (t TerminalListTool) Execute(ctx context.Context, _ string, _ map[string]an
 		return agent.ToolResult{Text: "No background processes."}, nil
 	}
 	var b strings.Builder
+	now := time.Now()
 	for _, in := range infos {
-		elapsed := time.Since(in.Start).Round(time.Second)
-		fmt.Fprintf(&b, "%s  [%s]  [%s]  %s  %s\n", in.ID, in.Mode, in.Status, elapsed, in.Command)
+		var elapsed time.Duration
+		if in.Status == "running" {
+			elapsed = now.Sub(in.Start)
+		} else {
+			// Use the recorded end time so exited processes don't appear to keep
+			// running every time terminal_list is called.
+			elapsed = in.End.Sub(in.Start)
+		}
+		fmt.Fprintf(&b, "%s  [%s]  [%s]  %s  %s\n", in.ID, in.Mode, in.Status, elapsed.Round(time.Second), in.Command)
 	}
 	return agent.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
 }
