@@ -163,6 +163,12 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: %w", err)
 	}
+	// User promoted the running synchronous sub-agent to background.
+	if res.StopReason == "promoted" {
+		return agent.ToolResult{
+			Text: fmt.Sprintf("Sub-agent %s was promoted to background. You will be notified when it completes.", res.AgentID),
+		}, nil
+	}
 	text := withAgentTag(res.AgentID, res.Reply)
 	// Surface a truncated result rather than passing a partial reply off as
 	// complete: a sub-agent that hit its turn limit returns partial work.

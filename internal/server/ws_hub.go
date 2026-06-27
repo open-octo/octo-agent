@@ -342,6 +342,15 @@ func (c *wsConn) dispatch(msgType string, raw []byte) {
 		}
 		tools.SessionBackgroundManager(msg.SessionID).PromoteSync()
 
+	case "promote_sync_sub_agent":
+		var msg wsInPromoteSyncSubAgent
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			return
+		}
+		// The session's sub-agent manager is created on the first tool turn;
+		// by the time a sync sub-agent is running it must exist.
+		tools.SessionSubAgentManager(msg.SessionID, nil).PromoteSync()
+
 	default:
 		log.Printf("[ws] unknown message type: %q", msgType)
 	}

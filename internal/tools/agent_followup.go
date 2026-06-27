@@ -99,7 +99,7 @@ func (AgentStatusTool) Definition() agent.ToolDefinition {
 		Description: "Check on async sub-agents: with agent_id, report that sub-agent's state " +
 			"(running/done/exited) and its latest result; without agent_id, list all currently " +
 			"running sub-agents. Synchronous sub-agents return their result inline at spawn " +
-			"and are not tracked here.",
+			"and are not tracked here unless the user promotes them to background while running.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
