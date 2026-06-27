@@ -4,6 +4,7 @@
   import * as api from '../../lib/api'
   import { t } from '../../lib/i18n'
   import VersionBadge from './VersionBadge.svelte'
+  import OctoLogo from './OctoLogo.svelte'
 
   // Real count of configured MCP servers for the nav badge. Seeded here so the
   // badge is correct before the user ever opens the MCP panel; McpView keeps the
@@ -98,6 +99,10 @@
 
   {#if $sidebar === 'full'}
   <div class="full">
+    <div class="brand">
+      <OctoLogo size={26} />
+      <span class="brand-name">Octo</span>
+    </div>
     <div class="new-btn-wrap">
       <button class="new-btn" onclick={newSession}>
         <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
@@ -265,7 +270,13 @@
 
 <style>
 .full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
-.new-btn-wrap { padding: 16px 12px 8px; }
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px 12px 8px;
+}
+.brand :global(svg) { color: var(--blue-6); flex: 0 0 auto; }
+.brand-name { font-size: 15px; font-weight: 600; color: var(--text-heading); }
+.new-btn-wrap { padding: 0 12px 8px; }
 .new-btn {
   width: 100%; height: 32px; border: none; border-radius: 6px;
   background: var(--blue-6); color: #fff; font-size: 14px;

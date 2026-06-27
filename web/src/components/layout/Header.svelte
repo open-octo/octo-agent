@@ -1,6 +1,7 @@
 <script lang="ts">
   import { view, cmdkOpen, sidebar, showToast } from '../../lib/stores'
   import { t, tr } from '../../lib/i18n'
+  import OctoLogo from './OctoLogo.svelte'
 
   function cycleSidebar() {
     sidebar.update(s => s === 'full' ? 'rail' : s === 'rail' ? 'hidden' : 'full')
@@ -35,7 +36,7 @@
       <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
     </button>
     <div class="brand">
-      <div class="logo">O</div>
+      <OctoLogo class="logo" size={26} />
       <span class="name">Octo</span>
       <span class="divider"></span>
       <span class="sub">{$t('nav.workbench')}</span>
@@ -71,11 +72,9 @@ header {
 }
 .left, .right { display: flex; align-items: center; gap: 8px; }
 .brand { display: flex; align-items: center; gap: 10px; padding-left: 4px; }
-.logo {
-  width: 26px; height: 26px; border-radius: 8px;
-  background: var(--blue-6); color: #fff;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 15px; font-weight: 600;
+.brand :global(.logo) {
+  color: var(--blue-6);
+  flex: 0 0 auto;
 }
 .name { font-size: 15px; font-weight: 600; color: var(--text-heading); }
 .divider { width: 1px; height: 16px; background: var(--border-secondary); }
