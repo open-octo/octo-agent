@@ -1701,6 +1701,23 @@ func (s *Server) wireChannelCompletionHooks(sess *channel.Session, ad channel.Ad
 // arrived while the session was idle. It competes with the synchronous turn
 // path for the session's runMu; BeginRun serialises them, so only one wins.
 func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent) {
+	// Acquire the persistent binding before locking the turn: this matches the
+	// user-initiated IM path and prevents idle follow-up turns from
+	// interleaving with another entry (web/cli/tui) that has taken over the
+	// session while we were idle.
+	storeID := sess.Store.ID
+	if ok, _, _ := s.acquireSessionBinding(storeID, agent.EntryChannel, false); !ok {
+		return
+	}
+	defer s.releaseSessionBinding(storeID, agent.EntryChannel)
+
+	// Enroll in the drain gate so graceful shutdown waits for idle follow-up
+	// turns just like user-initiated channel turns and web turns.
+	if err := s.drain.begin(); err != nil {
+		return
+	}
+	defer s.drain.end()
+
 	ctx, done := sess.BeginRun(ctx)
 	defer done()
 
@@ -1708,10 +1725,6 @@ func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, 
 	if len(items) == 0 {
 		return
 	}
-
-	// Re-wire hooks in case this is the first idle turn after a process
-	// restart or the session was recreated while we were waiting.
-	s.wireChannelCompletionHooks(sess, ad, ev)
 
 	s.runChannelTurns(ctx, sess, ad, ev, strings.Join(agent.Texts(items), "\n\n"))
 }

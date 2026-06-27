@@ -211,6 +211,45 @@ func TestDeliverModelNote_IdleKicksTurn(t *testing.T) {
 	}
 }
 
+// TestKickIdleSteerTurn_SkipsWhenBoundToOtherEntry: if another entry has
+// taken over the session while we were idle, the idle follow-up turn must not
+// run; the note stays in the steer queue for the owning entry to drain.
+func TestKickIdleSteerTurn_SkipsWhenBoundToOtherEntry(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.wsHub = newWSHub()
+	srv.turnRunning = map[string]bool{}
+	srv.liveStates = map[string]*sessionLiveState{}
+	srv.interrupts = map[string]context.CancelFunc{}
+
+	sess := agent.NewSession("stub-model", "")
+	sess.BoundEntry = agent.EntryCLI
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	note := "<system-reminder>\n[BACKGROUND COMPLETED]\nBackground process bg_1 (`make build`) exited: 0.\n</system-reminder>"
+	srv.enqueueSteer(sess.ID, agent.InboxItem{Text: note})
+	srv.kickIdleSteerTurn(sess.ID)
+
+	// Give any goroutine time to start.
+	time.Sleep(100 * time.Millisecond)
+
+	mu := srv.sessionTurnLock(sess.ID)
+	mu.Lock()
+	running := srv.turnRunning[sess.ID]
+	mu.Unlock()
+	if running {
+		t.Fatal("idle turn should not start when session is bound to another entry")
+	}
+	if leftover := srv.drainSteer(sess.ID); len(leftover) != 1 {
+		t.Errorf("steer queue = %d items, want 1 (preserved for the owning entry)", len(leftover))
+	}
+}
+
 // prepareToolTurn must hand back the SAME session-scoped manager on every
 // turn of a session (async mode), so spawns survive turn boundaries — and a
 // sid-less context still gets the old per-turn synchronous manager.
