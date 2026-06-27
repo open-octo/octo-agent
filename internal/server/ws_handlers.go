@@ -368,13 +368,25 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 		return
 	}
 
-	if ok, _, berr := s.acquireSessionBinding(sid, agent.EntryWeb, false); !ok {
+	if ok, bindMsg, berr := s.acquireSessionBinding(sid, agent.EntryWeb, msg.Force); !ok {
+		// A binding held by another entry without an active lease is recoverable:
+		// ask the user to confirm a takeover instead of silently dropping the message.
+		if s.canForceBind(sid, berr) {
+			s.wsHub.broadcast(sid, map[string]any{
+				"type":       "bind_required",
+				"session_id": sid,
+				"message":    berr.Error(),
+			})
+			return
+		}
 		s.wsHub.broadcast(sid, map[string]any{
 			"type":       "send_rejected",
 			"session_id": sid,
 			"message":    berr.Error(),
 		})
 		return
+	} else if bindMsg != "" {
+		s.wsToast(sid, bindMsg, "info")
 	}
 
 	mu := s.sessionTurnLock(sid)

@@ -799,6 +799,24 @@ func (s *Server) acquireSessionBinding(id, entry string, steal bool) (bool, stri
 	return true, fmt.Sprintf("session taken over from %s", bound), nil
 }
 
+// canForceBind reports whether a failed binding acquisition is recoverable
+// by a force takeover. It is true when another entry owns the session but no
+// turn lease is active, matching the /bind --force semantics for IM.
+func (s *Server) canForceBind(id string, berr error) bool {
+	if berr == nil {
+		return false
+	}
+	sess, err := agent.LoadSession(id)
+	if err != nil {
+		return false
+	}
+	if sess.BoundEntry == "" || sess.BoundEntry == agent.EntryWeb {
+		return false
+	}
+	_, active := sess.LeaseActive()
+	return !active
+}
+
 // releaseSessionBinding clears the binding when this process owns it. It
 // reloads the session from disk first to avoid clobbering a binding set by
 // another process after the turn started. The turn lease is also cleared.

@@ -23,6 +23,9 @@ type wsMsgUserMessage struct {
 	SessionID string          `json:"session_id"`
 	Content   json.RawMessage `json:"content"` // string or array (multipart)
 	Files     []wsUserFile    `json:"files,omitempty"`
+	// Force allows the web UI to take over a session bound to another entry.
+	// The server still refuses if the other entry holds an active turn lease.
+	Force bool `json:"force,omitempty"`
 }
 
 type wsUserFile struct {
