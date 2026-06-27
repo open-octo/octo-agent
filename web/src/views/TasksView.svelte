@@ -181,7 +181,7 @@
                 title={task.enabled ? $t('tasks.pause') : $t('tasks.resume')}
                 onclick={() => handleToggle(task)}
               >
-                <iconify-icon icon={task.enabled ? 'ant-design:pause-outlined' : 'ant-design:caret-right-outlined'} width="15"></iconify-icon>
+                <iconify-icon icon={task.enabled ? 'ant-design:pause-outlined' : 'ant-design:play-circle-outlined'} width="15"></iconify-icon>
               </button>
               <button class="act-btn" title={$t('common.edit')} onclick={() => openEdit(task)}>
                 <iconify-icon icon="ant-design:edit-outlined" width="14"></iconify-icon>
