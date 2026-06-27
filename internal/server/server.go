@@ -1601,7 +1601,9 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 	}()
 }
 
-// handleChannelMessage runs an agent turn for a channel inbound event.
+// handleChannelMessage runs an agent turn for a channel inbound event and
+// wires completion hooks so background processes / workflows can trigger
+// follow-up turns when the session goes idle (web kickIdleSteerTurn parity).
 func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, ev channel.InboundEvent) {
 	if err := s.drain.begin(); err != nil {
 		// Restart drain in progress. The adapter is still up (it stops only
@@ -1657,6 +1659,67 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	// while the agent is working. Mirrors Ruby channel_manager behaviour.
 	ad.SendText(ev.ChatID, "Thinking…", ev.MessageID)
 
+	// Wire completion hooks before the turn starts so any process launched
+	// during this turn can notify the model, and any completion that lands
+	// after the synchronous turn chain has finished can kick an idle turn.
+	s.wireChannelCompletionHooks(sess, ad, ev)
+
+	s.runChannelTurns(ctx, sess, ad, ev, ev.Text)
+
+	// A steer that arrived during a restart drain would die with the
+	// process (the Inbox is memory-only) — give it the same retry notice a
+	// non-steered message gets. Leftovers outside a drain stay queued for
+	// the chat's next turn: delayed, not lost.
+	if s.drain.isDraining() && sess.Agent.Inbox.HasPending() {
+		sess.Agent.Inbox.Drain()
+		ad.SendText(ev.ChatID, "The server is restarting — please send that again in a moment.", ev.MessageID)
+	}
+}
+
+// wireChannelCompletionHooks registers per-session hooks for background
+// processes and workflows. The hook enqueues a <system-reminder> note for the
+// model and tries to start an idle follow-up turn so IM sessions react to
+// async completions without waiting for the user's next message.
+func (s *Server) wireChannelCompletionHooks(sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent) {
+	if !s.cfg.Tools {
+		return
+	}
+	key := "im:" + string(sess.Key)
+	bgMgr := tools.SessionBackgroundManager(key)
+	bgMgr.SetOnExit(func(e tools.BgExit) {
+		sess.Agent.Inbox.Enqueue(tools.FormatBgNote(e))
+		go s.runChannelIdleTurn(context.Background(), sess, ad, ev)
+	})
+	wfMgr := tools.SessionWorkflowManager(key)
+	wfMgr.SetOnDone(func(n tools.WorkflowNotification) {
+		sess.Agent.Inbox.Enqueue(tools.FormatWorkflowNote(n))
+		go s.runChannelIdleTurn(context.Background(), sess, ad, ev)
+	})
+}
+
+// runChannelIdleTurn tries to run a follow-up turn for async completions that
+// arrived while the session was idle. It competes with the synchronous turn
+// path for the session's runMu; BeginRun serialises them, so only one wins.
+func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent) {
+	ctx, done := sess.BeginRun(ctx)
+	defer done()
+
+	items := sess.Agent.Inbox.Drain()
+	if len(items) == 0 {
+		return
+	}
+
+	// Re-wire hooks in case this is the first idle turn after a process
+	// restart or the session was recreated while we were waiting.
+	s.wireChannelCompletionHooks(sess, ad, ev)
+
+	s.runChannelTurns(ctx, sess, ad, ev, strings.Join(agent.Texts(items), "\n\n"))
+}
+
+// runChannelTurns executes one content-bearing turn plus any chained turns
+// drained from the agent's Inbox. It is shared between user-initiated and
+// idle-triggered channel turns.
+func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent, content string) {
 	// Recompose the system prompt every turn so memory written and skills
 	// imported/toggled since server start are visible — web turns get this
 	// for free from buildAgent; the IM factory's compose-once snapshot went
@@ -1713,22 +1776,13 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 		// The task store lives on the session, so the task list persists
 		// across messages in this chat.
 		ctx = tools.WithTaskStore(ctx, sess.Tasks)
-		// Per-chat background manager; completions are surfaced to the model
-		// via the Inbox so an idle-time exit is drained at the start of the
-		// next message's turn.
-		bgMgr := tools.SessionBackgroundManager("im:" + string(sess.Key))
-		bgMgr.SetOnExit(func(e tools.BgExit) {
-			sess.Agent.Inbox.Enqueue(tools.FormatBgNote(e))
-		})
-		ctx = tools.WithBackgroundManager(ctx, bgMgr)
+		// Per-chat background manager: completions are surfaced to the model
+		// via the Inbox and also trigger idle follow-up turns above.
+		ctx = tools.WithBackgroundManager(ctx, tools.SessionBackgroundManager("im:"+string(sess.Key)))
 		// Per-chat workflow manager so background workflows are isolated per
 		// conversation (their own wf_N namespace and concurrency budget). Its
 		// completion hook nudges the model via the same Inbox path as bg/sub-agent.
-		wfMgr := tools.SessionWorkflowManager("im:" + string(sess.Key))
-		wfMgr.SetOnDone(func(ev tools.WorkflowNotification) {
-			sess.Agent.Inbox.Enqueue(tools.FormatWorkflowNote(ev))
-		})
-		ctx = tools.WithWorkflowManager(ctx, wfMgr)
+		ctx = tools.WithWorkflowManager(ctx, tools.SessionWorkflowManager("im:"+string(sess.Key)))
 		// Turn-scoped asker: ask_user_question prompts in this chat instead
 		// of falling back to the process-global wsAsker, which broadcasts to
 		// browser tabs an IM session doesn't have (the question would hang
@@ -1744,7 +1798,7 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 		}
 	}
 
-	_, runErr := channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, ev.Text)
+	_, runErr := channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, content)
 	persist()
 
 	// Steer messages that arrived after the turn's final inbox drain chain
@@ -1760,15 +1814,6 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 		}
 		_, runErr = channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, strings.Join(agent.Texts(items), "\n\n"))
 		persist()
-	}
-
-	// A steer that arrived during a restart drain would die with the
-	// process (the Inbox is memory-only) — give it the same retry notice a
-	// non-steered message gets. Leftovers outside a drain stay queued for
-	// the chat's next turn: delayed, not lost.
-	if s.drain.isDraining() && sess.Agent.Inbox.HasPending() {
-		sess.Agent.Inbox.Drain()
-		ad.SendText(ev.ChatID, "The server is restarting — please send that again in a moment.", ev.MessageID)
 	}
 }
 

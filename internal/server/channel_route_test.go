@@ -10,6 +10,7 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/channel"
+	"github.com/Leihb/octo-agent/internal/tools"
 )
 
 // fullFakeAdapter implements the whole channel.Adapter surface with no-ops,
@@ -338,6 +339,58 @@ func TestHandleChannelMessage_WiresMemoryHooks(t *testing.T) {
 	}
 	if sess.Agent.ToolResultHook == nil {
 		t.Error("IM agent missing ToolResultHook (save-nudge)")
+	}
+}
+
+// TestHandleChannelMessage_BackgroundCompletionTriggersIdleTurn: when an
+// async background process finishes after the synchronous turn chain has
+// ended, the completion note is drained into a follow-up idle turn so the
+// model can react without waiting for the user's next message.
+func TestHandleChannelMessage_BackgroundCompletionTriggersIdleTurn(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+		return agent.New(&stubSender{}, "stub-model")
+	}, channel.BindByChat)
+	ad := &fullFakeAdapter{}
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+
+	// Wait for the user-initiated turn to finish.
+	waitFor(t, func() bool {
+		for _, txt := range ad.texts() {
+			if strings.Contains(txt, "stub reply") {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Simulate an async background process exiting after the turn went idle.
+	sess := srv.channelMgr.GetSession(evFor("x"))
+	bgMgr := tools.SessionBackgroundManager("im:" + string(sess.Key))
+	bgMgr.FireExitHook(tools.BgExit{ID: "bg_1", Command: "make build", Status: "exited: 0", NewOutput: "done"})
+
+	// The idle turn should react to the completion note.
+	waitFor(t, func() bool {
+		count := 0
+		for _, txt := range ad.texts() {
+			if strings.Contains(txt, "stub reply") {
+				count++
+			}
+		}
+		return count >= 2
+	})
+
+	// The completion note must have reached the model via history.
+	found := false
+	for _, m := range sess.Agent.History.Snapshot() {
+		if strings.Contains(m.Content, "[BACKGROUND COMPLETED]") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("background completion note never reached the agent's history")
 	}
 }
 
