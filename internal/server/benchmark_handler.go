@@ -43,7 +43,8 @@ func (s *Server) handleBenchmark(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve the model to benchmark: the session's current model if we can
 	// load it, otherwise the server's default.
-	model := s.model
+	defaultSender, defaultModel := s.defaultSenderAndModel()
+	model := defaultModel
 	if sess, err := agent.LoadSession(sessionID); err == nil && sess.Model != "" {
 		model = sess.Model
 	}
@@ -53,11 +54,11 @@ func (s *Server) handleBenchmark(w http.ResponseWriter, r *http.Request) {
 	msgs := []agent.Message{{Role: agent.RoleUser, Content: "hi"}}
 
 	// Try the streaming path so we can measure true TTFT.
-	streamingSender, ok := s.sender.(agent.StreamingSender)
+	streamingSender, ok := defaultSender.(agent.StreamingSender)
 	if !ok {
 		// Non-streaming fallback: measure total round-trip.
 		t0 := time.Now()
-		_, err := s.sender.SendMessages(ctx, model, s.system, msgs, 10)
+		_, err := defaultSender.SendMessages(ctx, model, s.system, msgs, 10)
 		elapsed := int(time.Since(t0).Milliseconds())
 		res := benchmarkResult{
 			ModelID: model,

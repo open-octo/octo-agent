@@ -112,6 +112,52 @@ func TestConfig_ShowReasoningGlobalDefault(t *testing.T) {
 	}
 }
 
+func TestConfig_ShowReasoningReloadsDefaultSender(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-test"},
+		},
+		DefaultModel: "main",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	before := srv.getSender()
+	if before == nil {
+		t.Fatal("server should have a default sender after startup")
+	}
+
+	// Toggle global show_reasoning off.
+	if w := doJSON(t, srv, http.MethodPut, "/api/config/show_reasoning", `{"show_reasoning":false}`); w.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+
+	// The default sender should have been rebuilt (new pointer).
+	after := srv.getSender()
+	if after == nil {
+		t.Fatal("server default sender missing after reload")
+	}
+	if after == before {
+		t.Error("default sender pointer did not change after show_reasoning toggle")
+	}
+
+	// An unbound session should resolve to the newly-reloaded default sender.
+	sess := agent.NewSession("claude-sonnet-4-6", "")
+	sender, model := srv.senderForSession(sess)
+	if sender != after {
+		t.Error("unbound session should use the reloaded default sender")
+	}
+	if model != "claude-sonnet-4-6" {
+		t.Errorf("model = %q, want claude-sonnet-4-6", model)
+	}
+
+	// The effective show_reasoning broadcast value should reflect the new default.
+	_, _, _, sr, _ := srv.sessionStatusFields()
+	if sr == nil || *sr {
+		t.Fatalf("effective show_reasoning = %+v, want false", sr)
+	}
+}
+
 func TestConfigModels_PostAppendsEntry(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{

@@ -372,7 +372,8 @@ func (s *Server) enableSubAgentTools() {
 	if !s.cfg.Tools {
 		return
 	}
-	template := agent.New(s.sender, s.model)
+	defaultSender, model := s.defaultSenderAndModel()
+	template := agent.New(defaultSender, model)
 	var memInjection string
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
@@ -867,7 +868,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			// No explicit lite entry — fall back to the vendor's registry
 			// lite model on the session's OWN sender, keeping compaction on
 			// the endpoint, key, and prompt cache the conversation uses.
-			prov, baseURL := s.provider, resolveBaseURL(s.provider, cfg)
+			prov, baseURL := s.getProvider(), resolveBaseURL(s.getProvider(), cfg)
 			if entry, ok := cfg.EntryByName(sess.ModelConfig); ok {
 				prov, baseURL = entry.Provider, entry.BaseURL
 			}
@@ -1033,6 +1034,15 @@ func resolveBaseURL(provider string, cfg config.Config) string {
 	return ""
 }
 
+// defaultSenderAndModel returns the server's current default sender and its
+// model under senderMu. Callers that need both should use this to avoid
+// observing a torn snapshot while the sender is being reloaded.
+func (s *Server) defaultSenderAndModel() (agent.Sender, string) {
+	s.senderMu.Lock()
+	defer s.senderMu.Unlock()
+	return s.sender, s.model
+}
+
 // senderForSession resolves the (sender, model) a turn should run on. A
 // session bound to a config entry (ModelConfig) gets that entry's sender from
 // the cache, built on first use; everything else — unbound sessions, a
@@ -1040,21 +1050,21 @@ func resolveBaseURL(provider string, cfg config.Config) string {
 // the server's default sender so a stale binding degrades instead of
 // breaking the turn.
 func (s *Server) senderForSession(sess *agent.Session) (agent.Sender, string) {
-	model := s.model
+	defaultSender, model := s.defaultSenderAndModel()
 	if sess.Model != "" {
 		model = sess.Model
 	}
 	if sess.ModelConfig == "" {
-		return s.sender, model
+		return defaultSender, model
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		return s.sender, model
+		return defaultSender, model
 	}
 	entry, ok := cfg.EntryByName(sess.ModelConfig)
 	if !ok {
-		return s.sender, model
+		return defaultSender, model
 	}
 	if entry.Model != "" {
 		model = entry.Model
@@ -1062,7 +1072,7 @@ func (s *Server) senderForSession(sess *agent.Session) (agent.Sender, string) {
 
 	sender, err := s.cachedSenderForEntry(entry)
 	if err != nil {
-		return s.sender, model
+		return defaultSender, model
 	}
 	return sender, model
 }
@@ -1167,7 +1177,7 @@ func buildEnvContext(cwd string) string {
 // once the user completes onboard and saves the API key, the next chat
 // request picks it up without a server restart. Thread-safe via senderMu.
 func (s *Server) ensureSender() error {
-	if s.sender != nil {
+	if s.getSender() != nil {
 		return nil
 	}
 	s.senderMu.Lock()
@@ -1188,6 +1198,43 @@ func (s *Server) ensureSender() error {
 	if s.cfg.Tools {
 		s.enableSubAgentTools()
 	}
+	return nil
+}
+
+// getSender returns the current default sender under senderMu.
+func (s *Server) getSender() agent.Sender {
+	s.senderMu.Lock()
+	defer s.senderMu.Unlock()
+	return s.sender
+}
+
+// getProvider returns the current default provider id under senderMu.
+func (s *Server) getProvider() string {
+	s.senderMu.Lock()
+	defer s.senderMu.Unlock()
+	return s.provider
+}
+
+// reloadDefaultSender rebuilds the server's default sender from current config.
+// It is used when global settings (e.g. show_reasoning) change so existing
+// sessions pick up the new defaults on their next turn. If the server is still
+// in onboarding mode (nil sender) the call is a no-op.
+func (s *Server) reloadDefaultSender() error {
+	s.senderMu.Lock()
+	defer s.senderMu.Unlock()
+	if s.sender == nil {
+		return nil
+	}
+	sender, model, provName, err := resolveProviderAndModel(s.cfg.Provider, s.cfg.Model)
+	if err != nil {
+		return err
+	}
+	if sender == nil {
+		return nil
+	}
+	s.sender = sender
+	s.model = model
+	s.provider = provName
 	return nil
 }
 
@@ -1343,7 +1390,7 @@ func (s *Server) initChannels() {
 	if s.cfg.NoChannel {
 		return
 	}
-	if s.sender == nil {
+	if s.getSender() == nil {
 		// Skip channel init when the server is in onboarding mode (no API key
 		// yet). Channels will be started on the next server restart after the
 		// user completes setup.
@@ -1370,15 +1417,16 @@ func (s *Server) initChannels() {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
 	factory := func() *agent.Agent {
-		a := agent.New(s.sender, s.model)
+		defaultSender, model := s.defaultSenderAndModel()
+		a := agent.New(defaultSender, model)
 		a.CWD = s.cwd
 		a.MaxTokens = s.cfg.MaxTokens
 		a.System, a.LeanSystem = prompt.ComposePair(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
 		if cfg, err := config.Load(); err == nil {
 			a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 			if a.LiteSender == nil {
-				if lm := app.ImplicitLiteModel(s.provider, s.model, resolveBaseURL(s.provider, cfg)); lm != "" {
-					a.LiteSender = s.sender
+				if lm := app.ImplicitLiteModel(s.getProvider(), model, resolveBaseURL(s.getProvider(), cfg)); lm != "" {
+					a.LiteSender = defaultSender
 					a.LiteModel = lm
 				}
 			}
