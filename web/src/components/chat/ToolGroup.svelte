@@ -160,17 +160,6 @@
     return m ? m[1].trim() : null
   }
 
-  // web_fetch results often wrap an HTML body with a metadata header
-  // ("URL: …\nSize: …\nContent-Type: …\nSaved to: …\n\n<!DOCTYPE…>"), so the
-  // doctype isn't at offset 0. Split off the HTML so it can be rendered in a
-  // sandboxed iframe instead of dumped as source; keep the header as meta.
-  function htmlPart(result: any): { meta: string; html: string } | null {
-    if (typeof result !== 'string') return null
-    const m = result.search(/<!doctype html|<html[\s>]/i)
-    if (m < 0) return null
-    return { meta: result.slice(0, m).trim(), html: result.slice(m) }
-  }
-
   // While a turn is still running, keep the LATEST tool open (whether or not it
   // has finished) so its output stays readable until the next step replaces it
   // — a finished tool only collapses once the next tool appears, and the whole
@@ -203,9 +192,7 @@
     return { shown: lines.slice(0, FOLD_LINES).join('\n'), hidden: lines.length - FOLD_LINES }
   }
 
-  // web_fetch HTML preview: collapsed by default because sandboxed iframes
-  // often render as blank space when scripts/external resources are blocked.
-  let htmlPreviewOpen = $state<Record<string, boolean>>({})
+
 </script>
 
 {#if tools !== null && tools.length > 0}
@@ -334,23 +321,6 @@
               </div>
             {/each}
           </div>
-        {:else if tool.name === 'web_fetch' && htmlPart(tool.result)}
-          <!-- HTML pages are rendered in a sandboxed iframe, but sandboxed
-               frames often fail to render (blocked scripts/resources). Show
-               metadata by default and let the user opt into the preview so
-               blank iframe space doesn't dominate the card. -->
-          {@const hp = htmlPart(tool.result)}
-          {@const previewOpen = htmlPreviewOpen[tool.id] ?? false}
-          <div class="html-frame-wrap">
-            {#if hp && hp.meta}<div class="fetch-meta mono">{hp.meta}</div>{/if}
-            <button class="fold-btn light preview-toggle" onclick={() => htmlPreviewOpen[tool.id] = !previewOpen}>
-              <iconify-icon icon={previewOpen ? 'lucide:chevron-up' : 'lucide:chevron-down'} width="13"></iconify-icon>
-              {previewOpen ? 'Hide page preview' : 'Show page preview'}
-            </button>
-            {#if previewOpen}
-              <iframe srcdoc={hp?.html} sandbox="" class="html-frame" title="fetched page"></iframe>
-            {/if}
-          </div>
         {:else if tool.name === 'write_file' && tool.ui_payload?.preview != null}
           <div class="term-wrap">
             <pre class="tool-output">{tool.ui_payload.preview}</pre>
@@ -464,20 +434,6 @@ details[open] > summary .chev { transform: rotate(90deg); }
   font-size: 12px; line-height: 1.6; color: var(--warning-text);
   overflow-x: auto; white-space: pre-wrap; word-break: break-word;
   max-height: 280px; overflow-y: auto;
-}
-/* Fetched HTML page rendered as a page, not source. */
-.html-frame-wrap { border-top: 1px solid var(--border-table); background: var(--bg-container); }
-.fetch-meta {
-  padding: 8px 14px; border-bottom: 1px solid var(--border-table); background: var(--bg-sidebar);
-  font-size: 11px; line-height: 1.6; color: var(--text-tertiary);
-  white-space: pre-wrap; word-break: break-word;
-}
-.preview-toggle {
-  border-top: none;
-  border-bottom: 1px solid var(--border-table);
-}
-.html-frame {
-  border: 0; width: 100%; height: 400px; display: block; background: var(--bg-container);
 }
 .promote-btn {
   height: 20px; padding: 0 8px;
