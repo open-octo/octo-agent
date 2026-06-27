@@ -69,6 +69,19 @@ type mcpServerInfo struct {
 	Tools     int               `json:"tools"`
 }
 
+// mcpToolInfo is the detail view of a single advertised tool.
+type mcpToolInfo struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
+}
+
+// mcpServerDetail extends mcpServerInfo with the live tool surface list.
+type mcpServerDetail struct {
+	mcpServerInfo
+	ToolList []mcpToolInfo `json:"tool_list,omitempty"`
+}
+
 // mcpServerList builds the management view: configured entries joined with
 // live-registry state.
 func (s *Server) mcpServerList() ([]mcpServerInfo, error) {
@@ -142,6 +155,85 @@ func (s *Server) connectIfLive(r *http.Request, name string, entry mcp.ServerEnt
 func (s *Server) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
 	_ = r
 	s.writeMCPServerList(w)
+}
+
+// ─── GET /api/mcp/servers/{name} ────────────────────────────────────────────
+
+func (s *Server) handleGetMCPServer(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	managed, err := mcp.LoadManaged(s.cwd)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var entry *mcp.ManagedServer
+	for i := range managed {
+		if managed[i].Name == name {
+			entry = &managed[i]
+			break
+		}
+	}
+	if entry == nil {
+		writeError(w, http.StatusNotFound, "mcp server not found")
+		return
+	}
+
+	info := mcpServerInfo{
+		Name:      entry.Name,
+		Transport: entry.Entry.Kind(),
+		Source:    entry.Source,
+		Disabled:  entry.Entry.Disabled,
+		Invalid:   entry.Invalid,
+		Command:   entry.Entry.Command,
+		Args:      entry.Entry.Args,
+		Env:       entry.Entry.Env,
+		URL:       entry.Entry.URL,
+		Headers:   entry.Entry.Headers,
+		Auth:      entry.Entry.Auth,
+	}
+	switch {
+	case entry.Invalid != "":
+		info.Status = "invalid"
+	case entry.Entry.Disabled:
+		info.Status = "disabled"
+	default:
+		reg := tools.ActiveMCPRegistry()
+		if reg != nil && reg.Get(name) != nil {
+			info.Status = "connected"
+			conn := reg.Get(name)
+			info.Tools = len(conn.Tools)
+		} else {
+			info.Status = "disconnected"
+			if reg != nil {
+				if msg, ok := reg.ConnectError(name); ok {
+					info.Status = "error"
+					info.Error = msg
+				}
+			}
+		}
+	}
+
+	detail := mcpServerDetail{mcpServerInfo: info}
+	if info.Status == "connected" {
+		reg := tools.ActiveMCPRegistry()
+		if reg != nil {
+			conn := reg.Get(name)
+			if conn != nil {
+				detail.ToolList = make([]mcpToolInfo, 0, len(conn.Tools))
+				for _, t := range conn.Tools {
+					detail.ToolList = append(detail.ToolList, mcpToolInfo{
+						Name:        t.Name,
+						Description: t.Description,
+						InputSchema: t.InputSchema,
+					})
+				}
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, detail)
 }
 
 // ─── POST /api/mcp/servers ──────────────────────────────────────────────────

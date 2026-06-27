@@ -9,6 +9,8 @@
   import * as api from '../../lib/api'
   import { t } from '../../lib/i18n'
   import StatusTag from '../ui/StatusTag.svelte'
+  import type { McpServerDetail, McpTool } from '../../lib/types'
+  import { getMcpServer } from '../../lib/api'
 
   let { onSend }: { onSend?: (text: string, files?: any[]) => void } = $props()
 
@@ -81,22 +83,50 @@
     attachments = attachments.filter((_, idx) => idx !== i)
   }
 
-  // ── Skill autocomplete ───────────────────────────────────────────────────
+  // ── Slash autocomplete (skills + MCP servers/tools) ──────────────────────
   import type { Skill } from '../../lib/types'
 
   let skills = $state<Skill[]>([])
-  let skillMenu = $state(false)
-  let skillQuery = $state('')
-  let skillActiveIndex = $state(-1)
+  let mcpServerNames = $state<string[]>([])
+  let mcpToolCache = $state<Record<string, McpTool[]>>({})
+  let slashMenu = $state(false)
+  let slashMode = $state<'skills' | 'mcp-servers' | 'mcp-tools'>('skills')
+  let slashQuery = $state('')
+  let slashActiveIndex = $state(-1)
+  let slashMcpServer = $state('')
 
-  function getSlashQuery(value: string): string | null {
-    const trimmed = value.replace(/^[\uff0f\u3001]/, '/')
-    if (!trimmed.startsWith('/')) return null
-    if (/^\/\S*$/.test(trimmed)) return trimmed.slice(1).toLowerCase()
-    return null
+  type SlashItem =
+    | { kind: 'skill'; skill: Skill }
+    | { kind: 'mcp-server'; name: string }
+    | { kind: 'mcp-tool'; server: string; tool: McpTool }
+
+  function normalizeSlash(value: string): string {
+    return value.replace(/^[\uff0f\u3001]/, '/')
   }
 
-  function scoreMatch(skill: Skill, query: string): number {
+  function parseSlashInput(value: string): { mode: SlashItem['kind'] | null; query: string; serverName?: string } {
+    const trimmed = normalizeSlash(value)
+    if (!trimmed.startsWith('/')) return { mode: null, query: '' }
+    const rest = trimmed.slice(1)
+    const lowerRest = rest.toLowerCase()
+    if (lowerRest === 'mcp' || lowerRest.startsWith('mcp/') || lowerRest.startsWith('mcp ')) {
+      const after = rest.slice(3).trimStart() // after "mcp"
+      if (after === '' || after === '/') {
+        return { mode: 'mcp-server', query: '' }
+      }
+      const withoutLeadingSlash = after.startsWith('/') ? after.slice(1) : after
+      const spaceIdx = withoutLeadingSlash.search(/\s/)
+      const serverName = spaceIdx >= 0 ? withoutLeadingSlash.slice(0, spaceIdx) : withoutLeadingSlash
+      const query = spaceIdx >= 0 ? withoutLeadingSlash.slice(spaceIdx + 1).trimStart().toLowerCase() : ''
+      return { mode: 'mcp-tool', query, serverName }
+    }
+    if (/^\/\S*$/.test(trimmed)) {
+      return { mode: 'skill', query: rest.toLowerCase() }
+    }
+    return { mode: null, query: '' }
+  }
+
+  function scoreSkillMatch(skill: Skill, query: string): number {
     if (!query) return 50
     const q = query.toLowerCase()
     const name = skill.name.toLowerCase()
@@ -106,55 +136,108 @@
     return 0
   }
 
-  function filteredSkills(): Skill[] {
-    const query = skillQuery
-    let scored = skills
-      .map(s => ({ skill: s, score: scoreMatch(s, query) }))
-      .filter(({ score }) => score > 0)
-    scored.sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
-    return scored.map(({ skill }) => skill)
+  function filteredItems(): SlashItem[] {
+    if (slashMode === 'skills') {
+      const q = slashQuery
+      let scored = skills
+        .map(s => ({ skill: s, score: scoreSkillMatch(s, q) }))
+        .filter(({ score }) => score > 0)
+      scored.sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
+      return scored.map(({ skill }) => ({ kind: 'skill', skill }))
+    }
+    if (slashMode === 'mcp-servers') {
+      const q = slashQuery
+      return mcpServerNames
+        .filter(n => !q || n.toLowerCase().includes(q))
+        .sort((a, b) => a.localeCompare(b))
+        .map(name => ({ kind: 'mcp-server', name }))
+    }
+    if (slashMode === 'mcp-tools') {
+      const tools = mcpToolCache[slashMcpServer] ?? []
+      const q = slashQuery
+      return tools
+        .filter(t => !q || t.name.toLowerCase().includes(q))
+        .map(tool => ({ kind: 'mcp-tool', server: slashMcpServer, tool }))
+    }
+    return []
   }
 
-  function showSkillMenu(query: string) {
-    skillQuery = query
-    skillActiveIndex = -1
-    skillMenu = true
+  function showSlashMenu(mode: 'skills' | 'mcp-servers' | 'mcp-tools', query: string, serverName = '') {
+    slashMode = mode
+    slashQuery = query
+    slashMcpServer = serverName
+    slashActiveIndex = -1
+    slashMenu = true
   }
 
-  function hideSkillMenu() {
-    skillMenu = false
-    skillActiveIndex = -1
+  function hideSlashMenu() {
+    slashMenu = false
+    slashActiveIndex = -1
+    slashMcpServer = ''
   }
 
-  function selectSkill(skill: Skill) {
-    text = '/' + skill.name + ' '
-    hideSkillMenu()
+  async function maybeLoadMcpTools(serverName: string) {
+    if (mcpToolCache[serverName]) return
+    try {
+      const detail = await getMcpServer(serverName)
+      mcpToolCache[serverName] = detail.tool_list ?? []
+    } catch {
+      mcpToolCache[serverName] = []
+    }
+  }
+
+  async function handleSlashInput() {
+    const normalized = normalizeSlash(text)
+    if (normalized !== text) text = normalized
+    const parsed = parseSlashInput(text)
+    if (parsed.mode === null) {
+      hideSlashMenu()
+      return
+    }
+    if (parsed.mode === 'skill') {
+      showSlashMenu('skills', parsed.query)
+      return
+    }
+    if (parsed.mode === 'mcp-server') {
+      showSlashMenu('mcp-servers', parsed.query)
+      return
+    }
+    if (parsed.mode === 'mcp-tool' && parsed.serverName) {
+      await maybeLoadMcpTools(parsed.serverName)
+      showSlashMenu('mcp-tools', parsed.query, parsed.serverName)
+      return
+    }
+    hideSlashMenu()
+  }
+
+  function selectItem(item: SlashItem) {
+    if (item.kind === 'skill') {
+      text = '/' + item.skill.name + ' '
+    } else if (item.kind === 'mcp-server') {
+      text = '/mcp/' + item.name + ' '
+    } else if (item.kind === 'mcp-tool') {
+      text = `请帮我调用 mcp__${item.server}__${item.tool.name}，并说明需要什么参数`
+    }
+    hideSlashMenu()
     queueMicrotask(() => textareaEl?.focus())
   }
 
-  function moveSkillActive(delta: number) {
-    const items = filteredSkills()
-    if (!skillMenu || items.length === 0) return
-    skillActiveIndex = (skillActiveIndex + delta + items.length) % items.length
+  function moveSlashActive(delta: number) {
+    const items = filteredItems()
+    if (!slashMenu || items.length === 0) return
+    slashActiveIndex = (slashActiveIndex + delta + items.length) % items.length
   }
 
   // The "/" button opens skill autocomplete with "/" prefilled.
   function insertSkill() {
     text = '/'
-    showSkillMenu('')
+    showSlashMenu('skills', '')
     queueMicrotask(() => textareaEl?.focus())
   }
 
   // Full-width slash replacement + autocomplete trigger on input.
   function onInput() {
-    const normalized = text.replace(/^[\uff0f\u3001]/, '/')
-    if (normalized !== text) text = normalized
-    const query = getSlashQuery(text)
-    if (query !== null) {
-      showSkillMenu(query)
-    } else {
-      hideSkillMenu()
-    }
+    handleSlashInput()
   }
 
   // $store autosubscription is reactive inside $derived (get() is not).
@@ -185,6 +268,12 @@
   onMount(async () => {
     try { models = (await api.getConfig()).models ?? [] } catch { /* leave empty */ }
     try { skills = await api.listSkills() } catch { /* leave empty */ }
+    try {
+      const data = await api.listMcpServers()
+      mcpServerNames = (data.servers ?? [])
+        .filter((s: any) => s.status === 'connected')
+        .map((s: any) => s.name)
+    } catch { /* leave empty */ }
   })
 
   async function pickModel(m: api.ModelEntry) {
@@ -239,16 +328,16 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    // Skill menu navigation
-    if (skillMenu) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); moveSkillActive(1); return }
-      if (e.key === 'ArrowUp') { e.preventDefault(); moveSkillActive(-1); return }
-      if (e.key === 'Escape') { e.preventDefault(); hideSkillMenu(); return }
-      if ((e.key === 'Tab' || e.key === 'Enter') && skillActiveIndex >= 0) {
-        const items = filteredSkills()
-        if (items[skillActiveIndex]) {
+    // Slash menu navigation
+    if (slashMenu) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveSlashActive(1); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); moveSlashActive(-1); return }
+      if (e.key === 'Escape') { e.preventDefault(); hideSlashMenu(); return }
+      if ((e.key === 'Tab' || e.key === 'Enter') && slashActiveIndex >= 0) {
+        const items = filteredItems()
+        if (items[slashActiveIndex]) {
           e.preventDefault()
-          selectSkill(items[skillActiveIndex])
+          selectItem(items[slashActiveIndex])
           return
         }
       }
@@ -262,11 +351,11 @@
     }
   }
 
-  // Click outside to close skill menu.
+  // Click outside to close slash menu.
   function onWindowClick(e: MouseEvent) {
     const target = e.target as HTMLElement
-    if (skillMenu && !target.closest('.skill-menu') && !target.closest('.skill-btn')) {
-      hideSkillMenu()
+    if (slashMenu && !target.closest('.skill-menu') && !target.closest('.skill-btn')) {
+      hideSlashMenu()
     }
     closeMenus()
   }
@@ -363,21 +452,33 @@
         oninput={onInput}
         onpaste={onPaste}
       ></textarea>
-      {#if skillMenu}
+      {#if slashMenu}
         <div class="skill-menu">
-          {#each filteredSkills() as skill, i (skill.name)}
+          {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'skill' ? item.skill.name : item.kind === 'mcp-server' ? item.name : item.server + '/' + item.tool.name))}
             <button
               class="skill-menu-item"
-              class:active={i === skillActiveIndex}
-              onclick={() => selectSkill(skill)}
+              class:active={i === slashActiveIndex}
+              onclick={() => selectItem(item)}
             >
-              <span class="skill-name">/{skill.name}</span>
-              {#if skill.desc}
-                <span class="skill-desc">{skill.desc}</span>
+              {#if item.kind === 'skill'}
+                <span class="skill-name">/{item.skill.name}</span>
+                {#if item.skill.desc}
+                  <span class="skill-desc">{item.skill.desc}</span>
+                {/if}
+              {:else if item.kind === 'mcp-server'}
+                <span class="skill-name">/mcp/{item.name}</span>
+                <span class="skill-desc">MCP server</span>
+              {:else}
+                <span class="skill-name">mcp__{item.server}__{item.tool.name}</span>
+                {#if item.tool.description}
+                  <span class="skill-desc">{item.tool.description}</span>
+                {/if}
               {/if}
             </button>
           {:else}
-            <div class="skill-menu-empty">No matching skills</div>
+            <div class="skill-menu-empty">
+              {slashMode === 'skills' ? 'No matching skills' : slashMode === 'mcp-servers' ? 'No matching MCP servers' : 'No tools found'}
+            </div>
           {/each}
         </div>
       {/if}

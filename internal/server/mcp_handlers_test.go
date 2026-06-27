@@ -377,6 +377,34 @@ func TestMCPLiveConnect_FailureSurfacesAsStatus(t *testing.T) {
 	}
 }
 
+func TestHandleGetMCPServer(t *testing.T) {
+	mcpTestHome(t, `{"mcpServers": {
+		"alpha": {"command": "echo"},
+		"off":   {"url": "https://x.example", "disabled": true}
+	}}`)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := doJSON(t, srv, http.MethodGet, "/api/mcp/servers/alpha", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var detail mcpServerDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v (body: %s)", err, w.Body.String())
+	}
+	if detail.Name != "alpha" || detail.Status != "disconnected" || detail.Tools != 0 {
+		t.Errorf("alpha detail = %+v", detail)
+	}
+	if len(detail.ToolList) != 0 {
+		t.Errorf("disconnected server should have no tool list, got %d", len(detail.ToolList))
+	}
+
+	w = doJSON(t, srv, http.MethodGet, "/api/mcp/servers/missing", "")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("missing: status = %d, want 404", w.Code)
+	}
+}
+
 func TestToolSearchSettings(t *testing.T) {
 	home := mcpTestHome(t, "")
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})

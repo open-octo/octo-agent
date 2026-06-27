@@ -577,6 +577,7 @@ func (s *Server) registerRoutes() {
 
 	// MCP server management
 	s.api("GET /api/mcp/servers", s.handleListMCPServers)
+	s.api("GET /api/mcp/servers/{name}", s.handleGetMCPServer)
 	s.api("POST /api/mcp/servers", s.handleCreateMCPServer)
 	s.api("PATCH /api/mcp/servers/{name}", s.handleUpdateMCPServer)
 	s.api("DELETE /api/mcp/servers/{name}", s.handleDeleteMCPServer)

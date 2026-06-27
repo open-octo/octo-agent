@@ -1,4 +1,4 @@
-import type { Session, Skill, ScheduledTask, McpServer, Channel, Memory, RecallFile, TagStatus } from './types'
+import type { Session, Skill, ScheduledTask, McpServer, McpServerDetail, Channel, Memory, RecallFile, TagStatus } from './types'
 
 // TaskResponse matches the Go server task struct.
 export interface TaskResponse {
@@ -233,6 +233,10 @@ export async function listMcpServers(): Promise<McpServersResponse> {
     request<ToolSearchInfo>('/api/config/toolsearch'),
   ])
   return { servers: serversData.servers, tool_search: tsData }
+}
+
+export async function getMcpServer(name: string): Promise<McpServerDetail> {
+  return request<McpServerDetail>(`/api/mcp/servers/${encodeURIComponent(name)}`)
 }
 
 export interface CreateMcpServerOpts {

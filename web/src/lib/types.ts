@@ -126,6 +126,32 @@ export interface McpServerInfo {
   tools: string[]
 }
 
+// McpTool matches a single advertised tool from a connected MCP server.
+export interface McpTool {
+  name: string
+  description?: string
+  inputSchema?: Record<string, any>
+}
+
+// McpServerDetail matches the Go server mcpServerDetail struct.
+export interface McpServerDetail {
+  name: string
+  transport: string
+  source: string
+  disabled: boolean
+  invalid?: string
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  url?: string
+  headers?: Record<string, string>
+  auth?: string
+  status: 'connected' | 'error' | 'disabled' | 'invalid' | 'disconnected'
+  error?: string
+  tools: number
+  tool_list?: McpTool[]
+}
+
 // ToolSearchSettings matches the Go server tool search settings struct
 export interface ToolSearchSettings {
   enabled: 'auto' | 'on' | 'off'
