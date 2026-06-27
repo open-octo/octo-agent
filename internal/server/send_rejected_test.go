@@ -175,6 +175,16 @@ func TestHandleWSUserMessage_ForceTakesOverStaleBinding(t *testing.T) {
 		Force:     true,
 	})
 
+	// The binding is acquired synchronously before the turn goroutine starts;
+	// verify it persisted to disk before the turn completes and releases it.
+	fresh, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if !fresh.BoundTo(agent.EntryWeb) {
+		t.Fatalf("expected session to be bound to web after force takeover, got %q", fresh.BoundEntry)
+	}
+
 	var sawComplete bool
 	deadline := time.After(3 * time.Second)
 drain:
@@ -202,14 +212,6 @@ drain:
 	}
 	if !sawComplete {
 		t.Fatal("expected turn to complete after force takeover")
-	}
-
-	fresh, err := agent.LoadSession(sess.ID)
-	if err != nil {
-		t.Fatalf("reload session: %v", err)
-	}
-	if !fresh.BoundTo(agent.EntryWeb) {
-		t.Fatalf("expected session to be bound to web after force takeover, got %q", fresh.BoundEntry)
 	}
 }
 
