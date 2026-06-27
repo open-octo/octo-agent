@@ -36,6 +36,7 @@
     finishAllTools,
     finishToolsById,
     resetSubAgents,
+    clearDoneSubAgents,
     applySubAgentEvent,
     showToast,
     uid,
@@ -522,6 +523,9 @@
       // finished turn must never leave a tool on "running" (e.g. parallel
       // results that never matched a tool, or a dropped result event).
       finishAllTools(sid)
+      // Dismiss finished sub-agents from the live panel. Agents still running
+      // (e.g. a sync sub-agent promoted to background) remain visible.
+      clearDoneSubAgents(sid)
     }))
 
     cleanups.push(ws.on('session_update', (ev) => {

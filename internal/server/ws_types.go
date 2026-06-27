@@ -290,3 +290,9 @@ type wsEventShellPreview struct {
 type wsInPromoteSyncTerminal struct {
 	SessionID string `json:"session_id"`
 }
+
+// wsInPromoteSyncSubAgent is sent by the browser when the user clicks the
+// "Background" button on a running synchronous sub_agent tool card.
+type wsInPromoteSyncSubAgent struct {
+	SessionID string `json:"session_id"`
+}

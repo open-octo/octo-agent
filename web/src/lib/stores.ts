@@ -290,6 +290,16 @@ export function resetSubAgents(sessionId: string) {
   chatSubAgents.update(m => ({ ...m, [sessionId]: [] }))
 }
 
+// Remove finished sub-agents from the live panel while keeping any that are
+// still running (e.g. a sync sub-agent promoted to background). Called on
+// `complete` so a done panel doesn't linger until the next page refresh.
+export function clearDoneSubAgents(sessionId: string) {
+  chatSubAgents.update(m => {
+    const remaining = (m[sessionId] || []).filter(a => a.status !== 'done')
+    return { ...m, [sessionId]: remaining }
+  })
+}
+
 export function applySubAgentEvent(
   sessionId: string,
   agentId: string,
