@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/prompt"
@@ -226,6 +228,31 @@ func (s *Server) handlePutShowReasoning(w http.ResponseWriter, r *http.Request) 
 	}
 	// Cached senders may have been built with the old global default.
 	s.invalidateSenderCache()
+	// Also rebuild the server's default sender so unbound existing sessions
+	// pick up the new show_reasoning value on their next turn.
+	if err := s.reloadDefaultSender(); err != nil {
+		// Log but don't fail the request: config is already saved and the next
+		// chat request will retry via ensureSender anyway.
+		log.Printf("[server] reload default sender after show_reasoning change: %v", err)
+	}
+
+	// Push the new effective default to every open session so the composer
+	// status bar refreshes immediately.
+	wd, pm, re, sr, ctxUsage := s.sessionStatusFields()
+	if sr != nil {
+		sessions, _ := agent.ListSessions(50)
+		for _, sess := range sessions {
+			s.wsHub.broadcast(sess.ID, map[string]any{
+				"type":             "session_update",
+				"session_id":       sess.ID,
+				"working_dir":      wd,
+				"permission_mode":  pm,
+				"reasoning_effort": re,
+				"show_reasoning":   *sr,
+				"context_usage":    ctxUsage,
+			})
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "show_reasoning": req.ShowReasoning})
 }
