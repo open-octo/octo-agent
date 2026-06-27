@@ -71,11 +71,11 @@ export interface Channel {
 }
 
 export interface Memory {
-  text: string
+  name: string
+  path: string
+  size: number
+  updated_at: string
   source: string
-  date: string
-  category: string
-  icon: string
 }
 
 export interface RecallFile {
