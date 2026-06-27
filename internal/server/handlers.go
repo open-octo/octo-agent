@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -1076,6 +1077,31 @@ func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *ht
 	if err := cfg.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
+	}
+
+	// The default sender embeds reasoning_effort; rebuild it so existing
+	// unbound sessions pick up the new effort on their next turn. Per-entry
+	// senders are rebuilt lazily via invalidateSenderCache.
+	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		slog.Error("reload default sender after reasoning_effort change", "err", err)
+	}
+
+	// Push the new effective reasoning_effort to every known session so the
+	// composer status bar refreshes immediately.
+	if s.wsHub != nil {
+		wd, pm, re, sr, _ := s.sessionStatusFields()
+		sessions, _ := agent.ListSessions(50)
+		for _, sess := range sessions {
+			s.wsHub.broadcast(sess.ID, map[string]any{
+				"type":             "session_update",
+				"session_id":       sess.ID,
+				"working_dir":      wd,
+				"permission_mode":  pm,
+				"reasoning_effort": re,
+				"show_reasoning":   sr,
+			})
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
