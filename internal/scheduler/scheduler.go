@@ -71,6 +71,10 @@ type Task struct {
 
 // Runner is the interface the scheduler calls to execute a task.
 type Runner interface {
+	// CreateSession prepares (or reuses) the session for a task and persists it
+	// so the UI can open it before the turn begins. It must be safe to call
+	// synchronously from an HTTP handler.
+	CreateSession(task Task) (sessionID string, err error)
 	RunTask(ctx context.Context, task Task) (sessionID string, err error)
 }
 
@@ -229,17 +233,41 @@ func (s *Scheduler) Get(id string) (*Task, error) {
 // RunNow starts an immediate background run of the task, mirroring a cron
 // firing (own 30-minute context, LastRun/SessionID bookkeeping) — except that
 // a manual run also fires when the task is disabled, since the user asked for
-// it explicitly. It returns once the run is accepted, not when it finishes,
-// so an HTTP handler calling it never blocks for the whole agent turn.
-func (s *Scheduler) RunNow(id string) error {
+// it explicitly.
+//
+// To give callers (e.g. the web UI) a session they can open immediately, the
+// session is created synchronously before the turn runs asynchronously. The
+// returned sessionID is valid as soon as RunNow returns; the turn itself may
+// take minutes.
+func (s *Scheduler) RunNow(id string) (string, error) {
 	s.mu.Lock()
-	_, ok := s.tasks[id]
+	task, ok := s.tasks[id]
 	s.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("task %q not found", id)
+		return "", fmt.Errorf("task %q not found", id)
 	}
+
+	sessionID, err := s.runner.CreateSession(*task)
+	if err != nil {
+		return "", fmt.Errorf("create session: %w", err)
+	}
+
+	// Persist the new session_id on the task so subsequent runs reuse it and
+	// the task list reports it immediately.
+	s.mu.Lock()
+	if t, ok := s.tasks[id]; ok {
+		t.SessionID = sessionID
+		cp := *t
+		s.mu.Unlock()
+		if err := s.save(cp); err != nil {
+			log.Printf("[scheduler] save task %q: %v", cp.Name, err)
+		}
+	} else {
+		s.mu.Unlock()
+	}
+
 	go s.fire(id, true)
-	return nil
+	return sessionID, nil
 }
 
 // ─── Private methods ─────────────────────────────────────────────────────

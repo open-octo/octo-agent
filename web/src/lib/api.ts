@@ -201,8 +201,14 @@ export async function updateTask(name: string, patch: unknown): Promise<void> {
   })
 }
 
-export async function runTask(id: string): Promise<void> {
-  await request<unknown>(`/api/tasks/${id}/run`, { method: 'POST' })
+export interface RunTaskResult {
+  status: string
+  id: string
+  session_id: string
+}
+
+export async function runTask(id: string): Promise<RunTaskResult> {
+  return request<RunTaskResult>(`/api/tasks/${id}/run`, { method: 'POST' })
 }
 
 // Pause (enabled:false) or resume (enabled:true) a scheduled task.

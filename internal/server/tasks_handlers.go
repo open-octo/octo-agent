@@ -64,14 +64,10 @@ func (s *Server) initScheduler() {
 	s.scheduler = sch
 }
 
-// RunTask implements scheduler.Runner. It executes a scheduled task by
-// creating (or reusing) a session and running a single turn.
-func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, error) {
-	if err := s.drain.begin(); err != nil {
-		return "", err
-	}
-	defer s.drain.end()
-
+// CreateSession implements scheduler.Runner. It creates or reuses the session
+// for a task and persists it immediately so the web UI can open the session
+// before the (potentially long) agent turn starts.
+func (s *Server) CreateSession(task scheduler.Task) (string, error) {
 	// Try to load an existing session for this task.
 	sess, err := agent.LoadSession(task.SessionID)
 	if err != nil {
@@ -83,33 +79,45 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 		sess = agent.NewSession(model, s.system)
 		sess.Source = "cron"
 		sess.Title = task.Name
-		task.SessionID = sess.ID
-		// task.Directory is applied at run time (see below): buildAgent recomposes
-		// the system prompt from s.system every turn, so stashing it on
-		// sess.System here would be silently dropped.
-		// Persist immediately: a task run can take many minutes, and until the
-		// session file exists the run is invisible in the web session list —
-		// clicking Run looked like it did nothing.
+		// task.Directory is applied at run time: buildAgent recomposes the
+		// system prompt from s.system every turn, so stashing it on sess.System
+		// here would be silently dropped.
 		if err := sess.Save(); err != nil {
 			return sess.ID, fmt.Errorf("save session: %w", err)
 		}
 	}
+	return sess.ID, nil
+}
 
-	if ok, _, berr := s.acquireSessionBinding(sess.ID, agent.EntryCron, false); !ok {
-		return sess.ID, fmt.Errorf("acquire binding: %w", berr)
+// RunTask implements scheduler.Runner. It executes a scheduled task by
+// creating (or reusing) a session and running a single turn.
+func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, error) {
+	if err := s.drain.begin(); err != nil {
+		return "", err
+	}
+	defer s.drain.end()
+
+	sessionID, err := s.CreateSession(task)
+	if err != nil {
+		return sessionID, err
+	}
+	task.SessionID = sessionID
+
+	if ok, _, berr := s.acquireSessionBinding(sessionID, agent.EntryCron, false); !ok {
+		return sessionID, fmt.Errorf("acquire binding: %w", berr)
 	}
 
-	mu := s.sessionTurnLock(sess.ID)
+	mu := s.sessionTurnLock(sessionID)
 	mu.Lock()
 	defer func() {
 		mu.Unlock()
-		s.releaseSessionBinding(sess.ID, agent.EntryCron)
+		s.releaseSessionBinding(sessionID, agent.EntryCron)
 	}()
 
 	// Reload the authoritative session after acquiring the binding.
-	sess, err = agent.LoadSession(sess.ID)
+	sess, err := agent.LoadSession(sessionID)
 	if err != nil {
-		return sess.ID, fmt.Errorf("reload session: %w", err)
+		return sessionID, fmt.Errorf("reload session: %w", err)
 	}
 
 	a := s.buildAgent(sess)
@@ -118,7 +126,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 	if task.Directory != "" {
 		var derr error
 		if ctx, derr = applyTaskDirectory(ctx, a, task.Directory); derr != nil {
-			return sess.ID, derr
+			return sessionID, derr
 		}
 	}
 
@@ -128,7 +136,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 		var perr error
 		ctx, executor, _, perr = s.prepareToolTurn(ctx, a)
 		if perr != nil {
-			return sess.ID, fmt.Errorf("prepare tools: %w", perr)
+			return sessionID, fmt.Errorf("prepare tools: %w", perr)
 		}
 		toolDefs = tools.DefaultToolsFor(a.Model)
 	}
@@ -138,16 +146,16 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 		sess.SyncFrom(a.History)
 		_ = sess.Save()
 		s.notifyTaskResult(task, fmt.Sprintf("⏰ %s failed: %v", task.Name, err))
-		return sess.ID, fmt.Errorf("run task: %w", err)
+		return sessionID, fmt.Errorf("run task: %w", err)
 	}
 	s.notifyTaskResult(task, fmt.Sprintf("⏰ %s\n\n%s", task.Name, reply.Content))
 
 	sess.SyncFrom(a.History)
 	if err := sess.Save(); err != nil {
-		return sess.ID, fmt.Errorf("save session: %w", err)
+		return sessionID, fmt.Errorf("save session: %w", err)
 	}
 
-	return sess.ID, nil
+	return sessionID, nil
 }
 
 // applyTaskDirectory roots a task run at dir: tools (terminal + file ops)
@@ -274,11 +282,12 @@ func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing task id")
 		return
 	}
-	if err := s.scheduler.RunNow(id); err != nil {
+	sessionID, err := s.scheduler.RunNow(id)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "id": id})
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "id": id, "session_id": sessionID})
 }
 
 // handleToggleTask pauses or resumes a scheduled task. Update reschedules or

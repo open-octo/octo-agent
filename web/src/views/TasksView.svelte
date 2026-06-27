@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { tasks, showToast, openAgentSession } from '../lib/stores'
+  import { tasks, showToast, openAgentSession, sessions, activeSessionId, view } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
@@ -62,8 +62,15 @@
 
   async function handleRun(t: api.TaskResponse) {
     try {
-      await api.runTask(t.id)
+      const res = await api.runTask(t.id)
       showToast('Task started')
+      if (res.session_id) {
+        // Ensure the session appears in the sidebar, then open it.
+        const data = await api.listSessions()
+        sessions.set(data.sessions ?? [])
+        activeSessionId.set(res.session_id)
+        view.set('chat')
+      }
     } catch (e: any) {
       showToast(e?.message ?? 'Failed to run task', 'error')
     }
