@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -375,5 +376,12 @@ func (s *Scheduler) save(task Task) error {
 		return err
 	}
 	p := filepath.Join(s.dir, task.ID+".json")
-	return os.WriteFile(p, data, 0600)
+	// Write to a unique temporary file and rename into place. A unique tmp name
+	// prevents two concurrent saves of the same task from corrupting each
+	// other's temp file before the rename.
+	tmp := p + "." + strconv.FormatInt(time.Now().UnixNano(), 10) + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
 }
