@@ -84,7 +84,7 @@ export class WsManager {
     this.send({ type: "unsubscribe", session_id: sessionId });
   }
 
-  sendMessage(sessionId: string, content: string, files?: unknown[]): void {
+  sendMessage(sessionId: string, content: string, files?: unknown[], force?: boolean): void {
     const payload: Record<string, unknown> = {
       type: "user_message",
       session_id: sessionId,
@@ -92,6 +92,9 @@ export class WsManager {
     };
     if (files !== undefined) {
       payload.files = files;
+    }
+    if (force) {
+      payload.force = true;
     }
     this.send(payload);
   }

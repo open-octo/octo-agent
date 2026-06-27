@@ -80,7 +80,14 @@
   // Tracks optimistic UI state for in-flight sends. If the server rejects the
   // message (e.g. the session is bound to another entry), we roll back the
   // pending bubble and restore the streaming flag to its pre-send value.
-  const pendingSends = new Map<string, { pendingId: string; wasStreaming: boolean }>()
+  // Content and files are kept so a force takeover can retry the same message.
+  const pendingSends = new Map<string, { pendingId: string; wasStreaming: boolean; text: string; files?: any[] }>()
+
+  // Set when the server reports a recoverable binding conflict. The UI shows a
+  // banner with a "Force bind" button; clicking it retries the pending send
+  // with force=true, matching the IM /bind --force semantics.
+  let bindRequiredFor = $state<string | null>(null)
+  let bindRequiredMessage = $state('')
 
   // Sub-agents card elapsed time + reconnect countdown both tick off `now`.
   let now = $state(Date.now())
@@ -289,7 +296,19 @@
         chatStreaming.update(s => ({ ...s, [sid]: meta.wasStreaming }))
         pendingSends.delete(sid)
       }
+      bindRequiredFor = null
       showToast((ev as any).message ?? 'Error', 'error')
+    }))
+
+    // The session is bound to another entry but no turn lease is active. Offer
+    // a force takeover instead of dropping the message.
+    cleanups.push(ws.on('bind_required', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const meta = pendingSends.get(sid)
+      if (!meta) return
+      // Keep the pending bubble and streaming state; the user can confirm.
+      bindRequiredFor = sid
+      bindRequiredMessage = (ev as any).message ?? 'Session is bound to another entry.'
     }))
 
     // The turn was interrupted. `complete` still fires and handles cleanup, so
@@ -703,7 +722,7 @@
     // it back as a history_user_message — that handler replaces this pending
     // bubble (matching by content) instead of appending a duplicate.
     const pendingId = 'pending-' + Date.now()
-    pendingSends.set(sid, { pendingId, wasStreaming })
+    pendingSends.set(sid, { pendingId, wasStreaming, text, files })
     addChatMsg(sid, {
       id: pendingId,
       type: 'user',
@@ -718,6 +737,21 @@
     ws.sendMessage(sid, text, files)
   }
 
+  // ── force bind ─────────────────────────────────────────────────────────────
+  // Retry the pending send with force=true, taking over a session bound to
+  // another entry as long as no turn lease is active.
+  function forceBindAndSend() {
+    const sid = bindRequiredFor
+    if (!sid) return
+    const meta = pendingSends.get(sid)
+    if (!meta) {
+      bindRequiredFor = null
+      return
+    }
+    bindRequiredFor = null
+    ws.sendMessage(sid, meta.text, meta.files, true)
+  }
+
   // ── plan progress helpers ──────────────────────────────────────────────────
   function planDoneCount(todos: any[]): number {
     return todos.filter((t: any) => t.status === 'completed').length
@@ -725,6 +759,11 @@
   function planFill(todos: any[]): string {
     if (!todos.length) return '0%'
     return `${Math.round((planDoneCount(todos) / todos.length) * 100)}%`
+  }
+
+  function formatBindMessage(msg: string): string {
+    // Keep the message concise for the inline banner.
+    return msg.replace(/since [^;]+;?/i, '').trim() || 'Session is bound to another entry.'
   }
 </script>
 
@@ -755,6 +794,16 @@
       </button>
     </div>
   </div>
+
+  <!-- Force-bind banner: session is owned by another entry but can be taken over. -->
+  {#if bindRequiredFor === id}
+    <div class="ws-banner bind-banner">
+      <iconify-icon icon="ant-design:warning-outlined" width="15" style="color:var(--warning)"></iconify-icon>
+      <span class="ws-msg">{formatBindMessage(bindRequiredMessage)}</span>
+      <span style="margin-left:auto"></span>
+      <button class="ws-retry" onclick={forceBindAndSend}>{$t('chat.force_bind')}</button>
+    </div>
+  {/if}
 
   <!-- WS disconnect banner -->
   {#if wsDisconnected}
@@ -1086,6 +1135,11 @@
   border-radius: 6px; font-size: 12px; color: var(--warning-text); cursor: pointer; font-family: inherit;
 }
 .ws-retry:hover { border-color: var(--warning); }
+
+.bind-banner {
+  background: var(--surface-info);
+  border-bottom-color: var(--blue-2);
+}
 
 /* ── Session task progress ───────────────────────────────────────────────── */
 .session-tasks {
