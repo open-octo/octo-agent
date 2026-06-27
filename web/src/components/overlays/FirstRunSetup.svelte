@@ -5,6 +5,7 @@
   import * as api from '../../lib/api'
   import type { ProviderPreset, ModelConfigInput } from '../../lib/api'
   import ModelConfigForm from '../settings/ModelConfigForm.svelte'
+  import OctoLogo from '../layout/OctoLogo.svelte'
 
   // Blocking first-run panel shown when no API key is configured (the agent
   // can't run without a key, so the key must be collected natively — not via a
@@ -42,7 +43,7 @@
 <div class="setup">
   <div class="card">
     <div class="brand">
-      <div class="logo">O</div>
+      <div class="logo"><OctoLogo size={28} /></div>
       <div class="brand-text">
         <h1>{$t('onboard.title')}</h1>
         <p>{$t('onboard.subtitle')}</p>
@@ -95,7 +96,7 @@
 .logo {
   width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px;
   background: var(--blue-6); color: #fff; display: flex; align-items: center; justify-content: center;
-  font-size: 22px; font-weight: 700;
+  overflow: hidden;
 }
 .brand-text h1 { margin: 0; font-size: 20px; font-weight: 600; color: var(--text-heading); }
 .brand-text p { margin: 2px 0 0; font-size: 13px; color: var(--text-secondary); }
