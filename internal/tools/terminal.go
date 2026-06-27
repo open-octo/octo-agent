@@ -582,8 +582,9 @@ func (t TerminalListTool) managerFor(ctx context.Context) *BackgroundManager {
 // Definition takes no parameters.
 func (TerminalListTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
-		Name:        "terminal_list",
-		Description: "List this session's background processes — those started with terminal run_in_background:\"async\" or \"interactive\" — with their id, mode, status (running / exited), elapsed time, and command. Use to recover a process id you've lost track of, or to see what is still running before checking its output (terminal_output) or stopping it (kill_shell). Detached processes (terminal detached:true) are NOT listed — they're untracked by design.",
+		Name: "terminal_list",
+		Description: "List this session's background processes — those started with terminal run_in_background:\"async\" or \"interactive\" — with their id, mode, status (running / exited), elapsed time, and command. Use to recover a process id you've lost track of, or to see what is still running before checking its output (terminal_output) or stopping it (kill_shell).\n\n" +
+			"Do NOT call terminal_list in a loop to wait for async background processes to finish. Their completion is pushed automatically via a [BACKGROUND COMPLETED] system notification; polling terminal_list will not make them finish faster and wastes turns.",
 		Parameters: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -599,16 +600,23 @@ func (t TerminalListTool) Execute(ctx context.Context, _ string, _ map[string]an
 	}
 	var b strings.Builder
 	now := time.Now()
+	runningAsync := 0
 	for _, in := range infos {
 		var elapsed time.Duration
 		if in.Status == "running" {
 			elapsed = now.Sub(in.Start)
+			if in.Mode == BgModeAsync {
+				runningAsync++
+			}
 		} else {
 			// Use the recorded end time so exited processes don't appear to keep
 			// running every time terminal_list is called.
 			elapsed = in.End.Sub(in.Start)
 		}
 		fmt.Fprintf(&b, "%s  [%s]  [%s]  %s  %s\n", in.ID, in.Mode, in.Status, elapsed.Round(time.Second), in.Command)
+	}
+	if runningAsync > 0 {
+		fmt.Fprintf(&b, "\n<system-reminder>%d async background task(s) are still running. Do not poll terminal_list; the system will push a [BACKGROUND COMPLETED] notification when each finishes.</system-reminder>", runningAsync)
 	}
 	return agent.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
 }

@@ -44,6 +44,46 @@ func TestTerminalListTool(t *testing.T) {
 	}
 }
 
+// TestTerminalListTool_RunningAsyncReminder verifies that terminal_list adds
+// a system-reminder telling the model not to poll when async tasks are still
+// running. Interactive-only lists do not trigger the reminder.
+func TestTerminalListTool_RunningAsyncReminder(t *testing.T) {
+	m := NewBackgroundManager()
+	term := TerminalTool{mgr: m}
+	listTool := TerminalListTool{mgr: m}
+	ctx := context.Background()
+
+	// Interactive-only list: no reminder.
+	if _, err := term.Execute(ctx, "terminal", map[string]any{
+		"command":           "sleep 30",
+		"run_in_background": "interactive",
+	}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	res, err := listTool.Execute(ctx, "terminal_list", nil)
+	if err != nil {
+		t.Fatalf("terminal_list: %v", err)
+	}
+	if strings.Contains(res.Text, "[BACKGROUND COMPLETED]") {
+		t.Errorf("interactive-only list should not include the async reminder, got %q", res.Text)
+	}
+
+	// Adding a running async task triggers the reminder.
+	if _, err := term.Execute(ctx, "terminal", map[string]any{
+		"command":           "sleep 30",
+		"run_in_background": "async",
+	}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	res2, err := listTool.Execute(ctx, "terminal_list", nil)
+	if err != nil {
+		t.Fatalf("terminal_list: %v", err)
+	}
+	if !strings.Contains(res2.Text, "[BACKGROUND COMPLETED]") {
+		t.Errorf("running async process should trigger a reminder not to poll, got %q", res2.Text)
+	}
+}
+
 // TestTerminalListTool_ExitedElapsedFrozen verifies that once a background
 // process exits, terminal_list reports its actual lifetime rather than the time
 // elapsed since the process started.
