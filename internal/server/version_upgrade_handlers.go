@@ -11,12 +11,12 @@ import (
 	"github.com/Leihb/octo-agent/internal/version"
 )
 
-// Latest-version cache TTLs: successes are fresh for an hour, failures
+// Latest-version cache TTLs: successes are fresh for 15 minutes, failures
 // back off for ten minutes. The /api/version endpoint is unauthenticated,
 // so the cache is also what keeps a request flood from becoming an
 // outbound-request flood.
 const (
-	versionCheckTTL     = time.Hour
+	versionCheckTTL     = 15 * time.Minute
 	versionCheckBackoff = 10 * time.Minute
 	versionCheckTimeout = 3 * time.Second
 )
@@ -31,6 +31,12 @@ const (
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	current := strings.TrimPrefix(version.Version, "v")
 	latest, needs := s.latestVersion()
+	// The response includes the running binary version, which changes after an
+	// upgrade/restart. Tell browsers and intermediaries not to cache it so the
+	// badge reflects the currently running server immediately.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":      version.Version,
 		"current":      current,

@@ -437,7 +437,7 @@ export async function updateShowReasoning(showReasoning: boolean): Promise<{ ok:
 }
 
 export async function getVersion(): Promise<unknown> {
-  return request<unknown>('/api/version')
+  return request<unknown>('/api/version', { cache: 'no-store' })
 }
 
 // Onboard / first-run

@@ -765,6 +765,23 @@ func TestHandleVersion_NoUpdateCheck(t *testing.T) {
 	}
 }
 
+func TestHandleVersion_CacheHeaders(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	cc := w.Header().Get("Cache-Control")
+	if !strings.Contains(cc, "no-store") || !strings.Contains(cc, "no-cache") {
+		t.Errorf("Cache-Control = %q, want no-store and no-cache", cc)
+	}
+	if got, want := w.Header().Get("Pragma"), "no-cache"; got != want {
+		t.Errorf("Pragma = %q, want %q", got, want)
+	}
+}
+
 func TestHandleUpdateSessionReasoningEffort(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

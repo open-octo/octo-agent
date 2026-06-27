@@ -124,10 +124,12 @@ date"), 1 failure, 2 flag errors.
   web badge reads, `cli_command` is the constant `"octo"` (the endpoint is
   unauthenticated; the executable's filesystem path must not leak there).
   `latest` comes from `upgrade.Check` through a cache: results cached
-  1 hour, failures 10 minutes, lookups single-flight with a short timeout.
+  15 minutes, failures 10 minutes, lookups single-flight with a short timeout.
   The cache is also the guard against a request flood becoming an
   outbound-request flood; on any check failure the response degrades to
-  `latest == current, needs_update == false`.
+  `latest == current, needs_update == false`. The endpoint also emits
+  `Cache-Control: no-store` so browsers and intermediaries do not cache the
+  running version.
 
   The update check is **opt-in via `server.Config.UpdateCheck`**, set only
   by `octo serve`. Everything else that constructs a `Server` — the whole
