@@ -190,9 +190,9 @@ func subAgentsSynchronous() bool {
 }
 
 // BeginSync registers a new SyncSession for the current synchronous sub-agent
-// run. Call EndSync (via defer) when the run finishes or is promoted. At most
-// one synchronous sub-agent runs per manager at a time — the agent loop is
-// serial — so there is only one slot.
+// run. Call EndSync with the returned session (via defer) when the run finishes
+// or is promoted. At most one synchronous sub-agent runs per manager at a time —
+// the agent loop is serial — so there is only one slot.
 func (m *SubAgentManager) BeginSync() *SyncSession {
 	s := &SyncSession{ch: make(chan struct{})}
 	m.syncMu.Lock()
@@ -201,10 +201,14 @@ func (m *SubAgentManager) BeginSync() *SyncSession {
 	return s
 }
 
-// EndSync clears the current SyncSession.
-func (m *SubAgentManager) EndSync() {
+// EndSync clears the current SyncSession only if it is still the one returned
+// by BeginSync. This protects against a deferred EndSync racing with a later
+// synchronous run in tests or if the manager is ever used concurrently.
+func (m *SubAgentManager) EndSync(s *SyncSession) {
 	m.syncMu.Lock()
-	m.syncSess = nil
+	if m.syncSess == s {
+		m.syncSess = nil
+	}
 	m.syncMu.Unlock()
 }
 
@@ -255,6 +259,11 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 		return SpawnResult{}, fmt.Errorf("subagent: no spawner configured")
 	}
 
+	// Run the spawn on a background context so a user promotion can detach it
+	// from the turn context and let it keep running. Create the context first
+	// so the agent entry is never observed with a nil cancel func.
+	spawnCtx, cancel := context.WithCancel(context.Background())
+
 	// Allocate a real agent_N id up front. If the user promotes this sync run,
 	// the same id becomes the background handle; if it completes inline, the
 	// temporary entry is reaped.
@@ -265,18 +274,12 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 		id:          id,
 		description: req.Description,
 		agentType:   req.AgentType,
+		cancel:      cancel,
 		start:       time.Now(),
 		busy:        true,
 	}
 	m.agents[id] = a
 	m.mu.Unlock()
-
-	// Run the spawn on a background context so a user promotion can detach it
-	// from the turn context and let it keep running.
-	spawnCtx, cancel := context.WithCancel(context.Background())
-	a.mu.Lock()
-	a.cancel = cancel
-	a.mu.Unlock()
 
 	sink := m.eventSink(id, req.Description, req.AgentType)
 	if sink != nil {
@@ -285,7 +288,7 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 	}
 
 	sess := m.BeginSync()
-	defer m.EndSync()
+	defer m.EndSync(sess)
 
 	type outcome struct {
 		res SpawnResult
@@ -329,13 +332,18 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 		m.mu.Unlock()
 
 		go func() {
+			defer func() {
+				m.mu.Lock()
+				m.activeAsync--
+				m.mu.Unlock()
+			}()
 			o := <-done
+			// Spawn has finished; cancel its context to release resources.
 			a.mu.Lock()
 			a.cancel()
 			a.mu.Unlock()
 
 			m.mu.Lock()
-			m.activeAsync--
 			hook := m.onExit
 			m.mu.Unlock()
 
