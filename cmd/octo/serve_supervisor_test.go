@@ -145,6 +145,40 @@ func TestSuperviseLoop_SpawnErrorReturns1(t *testing.T) {
 	}
 }
 
+// TestSpawnServeWorker_ReResolvesExecutablePath verifies that each worker spawn
+// calls the resolver again, so a binary replaced on disk (e.g. by the web
+// upgrade flow) is picked up on the next restart on platforms where
+// os.Executable() resolves by path.
+func TestSpawnServeWorker_ReResolvesExecutablePath(t *testing.T) {
+	paths := []string{"/first/octo", "/second/octo", "/third/octo"}
+	calls := 0
+	resolver := func() (string, error) {
+		if calls >= len(paths) {
+			t.Fatalf("resolver called more than %d times", len(paths))
+		}
+		p := paths[calls]
+		calls++
+		return p, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	spawn := spawnServeWorkerWithResolver(nil, &stdout, &stderr, resolver)
+
+	// Three spawns; each should see the next resolved path. We do not actually
+	// start processes (the paths are fake) — we only verify that the resolver is
+	// consulted each time.
+	for i := 0; i < len(paths); i++ {
+		_, _, err := spawn()
+		if err == nil {
+			t.Fatalf("spawn %d: expected error from fake path, got nil", i)
+		}
+	}
+
+	if calls != len(paths) {
+		t.Errorf("resolver calls = %d, want %d", calls, len(paths))
+	}
+}
+
 func TestShouldSupervise(t *testing.T) {
 	cases := []struct {
 		noSupervisor bool
