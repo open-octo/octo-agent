@@ -17,15 +17,15 @@ import (
 // synchronously before it is automatically promoted to a background process.
 var TerminalTimeout = 120 * time.Second
 
-// BgPollNotice is the model-facing instruction appended to a background-launch
-// tool result. Wrapped in <system-reminder> so StripRemindersForDisplay strips
-// it from UI cards (TUI and web) — it's noise for humans.
-const BgPollNotice = "<system-reminder>DO NOT poll terminal_output. The system will automatically notify you when this process finishes, carrying its final output. While it runs, you may continue with other independent tasks. If you have no other task to do, report the launch to the user and stop — do not spin in a polling loop.</system-reminder>"
+// AsyncModeNotice is the model-facing instruction appended to an async
+// background-launch tool result. Wrapped in <system-reminder> so
+// StripRemindersForDisplay strips it from UI cards (TUI and web).
+const AsyncModeNotice = "<system-reminder>This is an ASYNC background process (a one-shot task). DO NOT use terminal_output or terminal_input on it. The system will automatically notify you when it finishes, carrying its final output. While it runs, you may continue with other independent tasks. If you have no other task to do, report the launch to the user and stop — do not spin in a polling loop.</system-reminder>"
 
-// ServiceModeNotice is the model-facing instruction appended to a background
-// launch of a long-running service (servers, watchers, etc.). Wrapped in
-// <system-reminder> so UI card renderers strip it automatically.
-const ServiceModeNotice = "<system-reminder>After launching a long-running service, verify it with an external check (e.g., `curl http://localhost:PORT` or `pgrep`) rather than polling terminal_output. terminal_output is for inspecting startup logs or diagnosing issues — do not call it in a tight loop.</system-reminder>"
+// InteractiveModeNotice is the model-facing instruction appended to an
+// interactive background-launch tool result. Wrapped in <system-reminder> so UI
+// card renderers strip it automatically.
+const InteractiveModeNotice = "<system-reminder>This is an INTERACTIVE background process (a long-running service or REPL). You may use terminal_output to inspect its logs and terminal_input to send it commands. After launching a service, verify it with an external check (e.g., `curl http://localhost:PORT` or `pgrep`) rather than polling terminal_output in a tight loop.</system-reminder>"
 
 // TerminalTool is an agent.ToolExecutor that runs shell commands through the
 // system shell (`sh -c` on macOS/Linux, PowerShell on Windows; see
@@ -43,17 +43,48 @@ const ServiceModeNotice = "<system-reminder>After launching a long-running servi
 // exists so tests can inject an isolated manager.
 type TerminalTool struct{ mgr *BackgroundManager }
 
+// parseBackgroundMode interprets the run_in_background parameter, which is now
+// an enum string ("async" / "interactive") rather than a boolean. A missing
+// key or empty string means synchronous. Any other value (including the legacy
+// boolean true) surfaces as a tool error so the model gets immediate feedback.
+func parseBackgroundMode(input map[string]any) (mode BackgroundMode, useBg bool, err error) {
+	raw, ok := input["run_in_background"]
+	if !ok {
+		return "", false, nil
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "", false, fmt.Errorf(
+			"terminal: run_in_background must be a string (\"async\" or \"interactive\"), got %T. "+
+				"Boolean values are no longer accepted.", raw)
+	}
+	if s == "" {
+		return "", false, nil
+	}
+	switch s {
+	case "async":
+		return BgModeAsync, true, nil
+	case "interactive":
+		return BgModeInteractive, true, nil
+	default:
+		return "", false, fmt.Errorf(
+			"terminal: run_in_background must be either \"async\" or \"interactive\" (got %q). "+
+				"Use \"async\" for one-shot tasks like tests/builds/installs, \"interactive\" for "+
+				"long-running services or REPLs. Omit it to run synchronously.", s)
+	}
+}
+
 func (t TerminalTool) managerFor(ctx context.Context) *BackgroundManager {
 	return resolveBackgroundManager(ctx, t.mgr)
 }
 
 // Definition returns the agent.ToolDefinition the LLM receives in the tools
 // list. The JSON Schema describes a required "command" string and an optional
-// "run_in_background" flag.
+// "run_in_background" enum.
 func (TerminalTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal",
-		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, write_file, edit_file, glob, grep) over raw shell commands when they exist.\n\nChoosing sync vs background:\n- Default (no run_in_background): runs synchronously with a 120s timeout. Use for fast commands whose output you need immediately (e.g. `ls`, `git status`, `grep`, short scripts).\n- run_in_background:true — ONE-SHOT tasks (compiling, testing, installing, building, linting, CI checks): detaches immediately, returns a process id. The system automatically notifies you on completion. DO NOT poll terminal_output.\n- run_in_background:true — LONG-RUNNING services (servers, watchers, docker compose up): detaches immediately, returns a process id. After launch, verify the service with an external check (e.g., `curl http://localhost:PORT`, `pgrep`) rather than polling terminal_output. Use terminal_output only to inspect startup logs or diagnose issues — do not call it in a tight loop.\n\nBuffering: the process is connected via pipes, not a terminal, so stdio block-buffers its output — a chatty program's logs can sit unflushed and invisible to terminal_output for a long time. On macOS/Linux, when you will want live logs, prefix the command with `stdbuf -oL` (e.g. `stdbuf -oL npm run dev`) to force line buffering.\n\nTo feed text to a command's stdin, pass it via the stdin parameter instead of embedding it in the command string — embedded text gets interpreted by the shell (backticks, quotes, $), stdin is delivered verbatim.\n\nNEVER put backticks (`) inside a quoted shell string: every shell mangles them — POSIX sh/bash run the backticked text as command substitution (you'll see 'command not found' / 'not found' noise), and PowerShell treats the backtick as an escape character and silently drops it or turns `n/`t into control chars (corrupting the text with no error). For PR/issue/commit bodies (or any text) that contain markdown code spans, ALWAYS pass the text through the stdin parameter with `--body-file -` / `-F -` rather than `--body \"...`...\"`.",
+		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, write_file, edit_file, glob, grep) over raw shell commands when they exist.\n\nChoosing sync vs background:\n- Default (no run_in_background): runs synchronously with a 120s timeout. Use for fast commands whose output you need immediately (e.g. `ls`, `git status`, `grep`, short scripts).\n- run_in_background:\"async\" — ONE-SHOT tasks (compiling, testing, installing, building, linting, CI checks): detaches immediately, returns a process id. The system automatically notifies you on completion. DO NOT use terminal_output or terminal_input; wait for the completion notification.\n- run_in_background:\"interactive\" — LONG-RUNNING services, REPLs, watchers, servers (e.g. `rails c`, `octo serve`, `docker compose up`): detaches immediately, returns a process id. You may use terminal_output to inspect logs and terminal_input to feed commands. Verify the service with an external check (e.g., `curl http://localhost:PORT`, `pgrep`) rather than polling terminal_output in a tight loop.\n\nBuffering: the process is connected via pipes, not a terminal, so stdio block-buffers its output — a chatty program's logs can sit unflushed and invisible to terminal_output for a long time. On macOS/Linux, when you will want live logs, prefix the command with `stdbuf -oL` (e.g. `stdbuf -oL npm run dev`) to force line buffering.\n\nTo feed text to a command's stdin, pass it via the stdin parameter instead of embedding it in the command string — embedded text gets interpreted by the shell (backticks, quotes, $), stdin is delivered verbatim.\n\nNEVER put backticks (`) inside a quoted shell string: every shell mangles them — POSIX sh/bash run the backticked text as command substitution (you'll see 'command not found' / 'not found' noise), and PowerShell treats the backtick as an escape character and silently drops it or turns `n/`t into control chars (corrupting the text with no error). For PR/issue/commit bodies (or any text) that contain markdown code spans, ALWAYS pass the text through the stdin parameter with `--body-file -` / `-F -` rather than `--body \"...`...\"`.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -66,8 +97,9 @@ func (TerminalTool) Definition() agent.ToolDefinition {
 					"description": "Text piped verbatim to the command's stdin, which is then closed (EOF). Use this — not interpolation into the command string — to pass long or special-character text (quotes, backticks, $) to commands that read stdin, e.g. `gh pr create --body-file -`, `git apply -`, `python script.py`.",
 				},
 				"run_in_background": map[string]any{
-					"type":        "boolean",
-					"description": "Run detached in the background (no 120s timeout, non-blocking). Returns a process id. Use for one-shot tasks that take more than a few seconds (compiling, testing, installing, building, CI checks) or for long-running services (servers, watchers). For one-shot tasks the system auto-notifies on completion. For long-running services, verify with an external check (e.g., curl, pgrep) rather than polling terminal_output. The process is tracked by octo and KILLED when the session ends — for a daemon meant to outlive octo, use detached:true instead.",
+					"type":        "string",
+					"enum":        []string{"async", "interactive"},
+					"description": "Run detached in the background (no 120s timeout, non-blocking). \"async\" for one-shot tasks like tests/builds/installs — the system auto-notifies on completion and terminal_output is not allowed. \"interactive\" for long-running services or REPLs — terminal_output and terminal_input are allowed. The process is tracked by octo and KILLED when the session ends — for a daemon meant to outlive octo, use detached:true instead.",
 				},
 				"detached": map[string]any{
 					"type":        "boolean",
@@ -141,10 +173,15 @@ func (t TerminalTool) ExecuteStream(
 		}, nil
 	}
 
+	bgMode, useBg, err := parseBackgroundMode(input)
+	if err != nil {
+		return agent.ToolResult{Text: ""}, err
+	}
+
 	// Background launch: detach, no timeout, return the id immediately. The
 	// guard above still applies, so dangerous commands are blocked either way.
-	if bg, _ := input["run_in_background"].(bool); bg {
-		id, err := t.managerFor(ctx).Start(command)
+	if useBg {
+		id, err := t.managerFor(ctx).Start(command, bgMode)
 		if err != nil {
 			return agent.ToolResult{Text: ""}, err
 		}
@@ -154,9 +191,13 @@ func (t TerminalTool) ExecuteStream(
 				stdinWarn = stdinWriteWarning(werr)
 			}
 		}
+		notice := AsyncModeNotice
+		if bgMode == BgModeInteractive {
+			notice = InteractiveModeNotice
+		}
 		return agent.ToolResult{
-			Text: fmt.Sprintf("Started background process %s.%s\n\n%s", id, stdinWarn, BgPollNotice),
-			UI:   terminalUI(command, "running", fmt.Sprintf("background process %s", id)),
+			Text: fmt.Sprintf("Started %s background process %s.%s\n\n%s", bgMode, id, stdinWarn, notice),
+			UI:   terminalUI(command, "running", fmt.Sprintf("%s background process %s", bgMode, id)),
 		}, nil
 	}
 
@@ -189,7 +230,7 @@ func (t TerminalTool) ExecuteStream(
 	}
 
 	mgr := t.managerFor(ctx)
-	id, err := mgr.Start(command, WithOnLine(onLine), WithVisible(false))
+	id, err := mgr.Start(command, BgModeAsync, WithOnLine(onLine), WithVisible(false))
 	if err != nil {
 		return agent.ToolResult{Text: ""}, err
 	}
@@ -242,7 +283,7 @@ func (t TerminalTool) ExecuteStream(
 			mgr.Promote(id)
 			body := MaybeSpillOutput(id, snapshot())
 			return agent.ToolResult{
-				Text: fmt.Sprintf("%s\n\n[promoted to background process %s]\n\n%s", body, id, BgPollNotice),
+				Text: fmt.Sprintf("%s\n\n[promoted to async background process %s]\n\n%s", body, id, AsyncModeNotice),
 				UI:   terminalUI(command, "running", body),
 			}, nil
 		case <-timer.C:
@@ -251,7 +292,7 @@ func (t TerminalTool) ExecuteStream(
 			mgr.Promote(id)
 			body := MaybeSpillOutput(id, snapshot())
 			return agent.ToolResult{
-				Text: fmt.Sprintf("%s\n\n[timeout: command exceeded %s and continues as background process %s]\n\n%s", body, TerminalTimeout, id, BgPollNotice),
+				Text: fmt.Sprintf("%s\n\n[timeout: command exceeded %s and continues as async background process %s]\n\n%s", body, TerminalTimeout, id, AsyncModeNotice),
 				UI:   terminalUI(command, "running", body),
 			}, nil
 		case <-ctx.Done():
@@ -267,7 +308,7 @@ func (t TerminalTool) ExecuteStream(
 		default:
 		}
 
-		_, status, _, _ := mgr.Read(id)
+		_, status, _, _, _ := mgr.Read(id)
 		if strings.HasPrefix(status, "exited") {
 			body := MaybeSpillOutput(id, snapshot())
 			// Reap the hidden process: its output has been captured and
@@ -323,9 +364,8 @@ func terminalUI(command, status, output string) map[string]any {
 	}
 }
 
-// TerminalOutputTool reads new output (and status) from a background process
-// started by TerminalTool with run_in_background:true — the counterpart that makes
-// detached commands useful. It can also kill the process.
+// TerminalOutputTool reads new output (and status) from an INTERACTIVE
+// background process launched with terminal run_in_background:"interactive".
 type TerminalOutputTool struct{ mgr *BackgroundManager }
 
 func (t TerminalOutputTool) managerFor(ctx context.Context) *BackgroundManager {
@@ -337,7 +377,7 @@ func (t TerminalOutputTool) managerFor(ctx context.Context) *BackgroundManager {
 func (TerminalOutputTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal_output",
-		Description: "Peek at the recent output of a background process (the id from terminal run_in_background:true): a snapshot of the last N lines plus its status (running / exited). Read-only; to stop the process use kill_shell.\n\nUse this to CHECK PROGRESS of a still-running process on demand — e.g. inspect a server's startup logs. You do NOT need it to learn that a process finished or to get its result: completion is pushed to you automatically, carrying the final output. This is a snapshot, not a feed — repeated calls return the current tail, there is no 'new since last call', so do not call it in a loop. Repeated empty snapshots of a running process are detected as polling and will trigger a hard STOP reminder. To find an id you've lost track of, use terminal_list.",
+		Description: "Peek at the recent output of an INTERACTIVE background process launched with terminal run_in_background:\"interactive\". Snapshots the last N lines plus its status (running / exited). Read-only; to stop the process use kill_shell.\n\nUse this to CHECK PROGRESS of a still-running interactive process on demand — e.g. inspect a server's startup logs. You may NOT use terminal_output on async processes; async tasks must not be polled, so wait for the [BACKGROUND COMPLETED] notification instead. This is a snapshot, not a feed — repeated calls return the current tail, so do not call it in a loop. Repeated empty snapshots of a running process are detected as polling and will trigger a hard STOP reminder. To find an id you've lost track of, use terminal_list.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -372,7 +412,15 @@ func (t TerminalOutputTool) Execute(ctx context.Context, _ string, input map[str
 	if v, ok := input["lines"].(float64); ok { // JSON numbers decode as float64
 		lines = int(v)
 	}
-	out, status, found, blocked := t.managerFor(ctx).Tail(id, lines)
+	mgr := t.managerFor(ctx)
+	mode, ok := mgr.Mode(id)
+	if !ok {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: no background process %q (it may have been reaped — use terminal_list to see live processes)", id)
+	}
+	if mode != BgModeInteractive {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: process %q is an async task; do not poll it. Wait for the [BACKGROUND COMPLETED] notification instead", id)
+	}
+	out, status, found, blocked, _ := mgr.Tail(id, lines)
 	if !found {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: no background process %q (it may have been reaped — use terminal_list to see live processes)", id)
 	}
@@ -401,10 +449,10 @@ func (t TerminalOutputTool) Execute(ctx context.Context, _ string, input map[str
 	return agent.ToolResult{Text: header + "\n" + MaybeSpillOutput(id, out)}, nil
 }
 
-// TerminalInputTool sends text to the stdin of a running background process
-// started by TerminalTool with run_in_background:true. Use to interact with
-// long-running interactive applications (REPLs, configuration wizards, servers
-// that accept commands via stdin).
+// TerminalInputTool sends text to the stdin of a running INTERACTIVE background
+// process launched with terminal run_in_background:"interactive". Use to
+// interact with long-running interactive applications (REPLs, configuration
+// wizards, servers that accept commands via stdin).
 type TerminalInputTool struct{ mgr *BackgroundManager }
 
 func (t TerminalInputTool) managerFor(ctx context.Context) *BackgroundManager {
@@ -415,7 +463,7 @@ func (t TerminalInputTool) managerFor(ctx context.Context) *BackgroundManager {
 func (TerminalInputTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal_input",
-		Description: "Send text input to the stdin of a running background process started by terminal with run_in_background:true. Use to interact with long-running interactive applications (e.g., REPLs, configuration wizards, servers that accept commands via stdin). The input is written verbatim — include a trailing newline (\\n) if the process expects line-based input.",
+		Description: "Send text input to the stdin of a running INTERACTIVE background process launched with terminal run_in_background:\"interactive\". Use to interact with long-running interactive applications (e.g., REPLs, configuration wizards, servers that accept commands via stdin). You may NOT use terminal_input on async processes. The input is written verbatim — include a trailing newline (\\n) if the process expects line-based input.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -434,6 +482,8 @@ func (TerminalInputTool) Definition() agent.ToolDefinition {
 }
 
 // Execute writes input to the process's stdin. Unknown or exited id is an error.
+// Reject async processes: terminal_input is only meaningful for interactive
+// background tasks.
 func (t TerminalInputTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	id, _ := input["id"].(string)
 	if id == "" {
@@ -443,16 +493,25 @@ func (t TerminalInputTool) Execute(ctx context.Context, _ string, input map[stri
 	if text == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_input: input is required")
 	}
-	if err := t.managerFor(ctx).WriteStdin(id, text); err != nil {
+	mgr := t.managerFor(ctx)
+	mode, ok := mgr.Mode(id)
+	if !ok {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_input: no background process %q", id)
+	}
+	if mode != BgModeInteractive {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_input: process %q is an async task; do not send input to it", id)
+	}
+	if err := mgr.WriteStdin(id, text); err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_input: %w", err)
 	}
 	return agent.ToolResult{Text: fmt.Sprintf("Sent to %s.", id)}, nil
 }
 
 // KillShellTool terminates a background process started by TerminalTool with
-// run_in_background:true and returns its final output — the counterpart to
-// terminal_output, which only reads. Split out from terminal_output's old
-// kill:true flag so "stop this process" is a first-class, obvious action.
+// run_in_background:"async" or "interactive" and returns its final output —
+// the counterpart to terminal_output, which only reads. Split out from
+// terminal_output's old kill:true flag so "stop this process" is a first-class,
+// obvious action.
 type KillShellTool struct{ mgr *BackgroundManager }
 
 func (t KillShellTool) managerFor(ctx context.Context) *BackgroundManager {
@@ -463,7 +522,7 @@ func (t KillShellTool) managerFor(ctx context.Context) *BackgroundManager {
 func (KillShellTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "kill_shell",
-		Description: "Terminate a background process started by terminal with run_in_background:true (the id it returned), and return its final output. Use to stop a server, watcher, or other long-running command you no longer need. To read output without stopping it, use terminal_output.\n\nFor long-running services (servers, watchers), prefer signal 'SIGTERM' for graceful shutdown so the process can clean up connections and release ports. Use 'SIGKILL' (default) for one-shot tasks or when SIGTERM fails.",
+		Description: "Terminate a background process started by terminal with run_in_background:\"async\" or \"interactive\" (the id it returned), and return its final output. Use to stop a server, watcher, or other background command you no longer need. To read output without stopping it, use terminal_output.\n\nFor long-running services (servers, watchers), prefer signal 'SIGTERM' for graceful shutdown so the process can clean up connections and release ports. Use 'SIGKILL' (default) for one-shot tasks or when SIGTERM fails.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -501,7 +560,7 @@ func (t KillShellTool) Execute(ctx context.Context, _ string, input map[string]a
 	// Give the process a moment to flush and the waiter to record exit.
 	time.Sleep(50 * time.Millisecond)
 
-	out, status, _, _ := mgr.Read(id) // found guaranteed: Kill succeeded
+	out, status, _, _, _ := mgr.Read(id) // found guaranteed: Kill succeeded
 	header := "[killed] [status: " + status + "]"
 	if out == "" {
 		return agent.ToolResult{Text: header + "\n(no new output)"}, nil
@@ -524,7 +583,7 @@ func (t TerminalListTool) managerFor(ctx context.Context) *BackgroundManager {
 func (TerminalListTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal_list",
-		Description: "List this session's background processes — those started with terminal run_in_background:true — with their id, status (running / exited), elapsed time, and command. Use to recover a process id you've lost track of, or to see what is still running before checking its output (terminal_output) or stopping it (kill_shell). Detached processes (terminal detached:true) are NOT listed — they're untracked by design.",
+		Description: "List this session's background processes — those started with terminal run_in_background:\"async\" or \"interactive\" — with their id, mode, status (running / exited), elapsed time, and command. Use to recover a process id you've lost track of, or to see what is still running before checking its output (terminal_output) or stopping it (kill_shell). Detached processes (terminal detached:true) are NOT listed — they're untracked by design.",
 		Parameters: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -541,7 +600,7 @@ func (t TerminalListTool) Execute(ctx context.Context, _ string, _ map[string]an
 	var b strings.Builder
 	for _, in := range infos {
 		elapsed := time.Since(in.Start).Round(time.Second)
-		fmt.Fprintf(&b, "%s  [%s]  %s  %s\n", in.ID, in.Status, elapsed, in.Command)
+		fmt.Fprintf(&b, "%s  [%s]  [%s]  %s  %s\n", in.ID, in.Mode, in.Status, elapsed, in.Command)
 	}
 	return agent.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
 }

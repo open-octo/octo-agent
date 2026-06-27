@@ -34,6 +34,17 @@ func TestTerminalTool_Definition(t *testing.T) {
 	if _, ok := props["stdin"]; !ok {
 		t.Error("Parameters.properties.stdin should exist — the executor reads it, so the schema must declare it or the model never sends it")
 	}
+	rib, ok := props["run_in_background"].(map[string]any)
+	if !ok {
+		t.Fatal("Parameters.properties.run_in_background should be a map")
+	}
+	if rib["type"] != "string" {
+		t.Errorf("run_in_background.type = %v, want string", rib["type"])
+	}
+	wantEnum := []string{"async", "interactive"}
+	if got, ok := rib["enum"].([]string); !ok || len(got) != len(wantEnum) {
+		t.Errorf("run_in_background.enum = %v, want %v", rib["enum"], wantEnum)
+	}
 	req, ok := def.Parameters["required"].([]string)
 	if !ok {
 		t.Fatal("Parameters.required is not []string")
@@ -324,7 +335,7 @@ func main() {
 		t.Fatalf("go build helper: %v\n%s", err, buildOut)
 	}
 
-	id, err := mgr.Start(bin)
+	id, err := mgr.Start(bin, BgModeInteractive)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -350,7 +361,7 @@ func main() {
 	// only the last one drops output that arrived before the exit was seen.
 	var out string
 	for i := 0; i < 100; i++ {
-		chunk, status, _, _ := mgr.Read(id)
+		chunk, status, _, _, _ := mgr.Read(id)
 		out += chunk
 		if strings.HasPrefix(status, "exited") {
 			break
@@ -371,13 +382,13 @@ func TestTerminalInputTool_ExitedProcess(t *testing.T) {
 	inputTool := TerminalInputTool{mgr: mgr}
 
 	// Start a trivial command that exits immediately.
-	id, err := mgr.Start("echo done")
+	id, err := mgr.Start("echo done", BgModeInteractive)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	// Wait for it to exit.
 	for i := 0; i < 50; i++ {
-		_, status, _, _ := mgr.Read(id)
+		_, status, _, _, _ := mgr.Read(id)
 		if strings.HasPrefix(status, "exited") {
 			break
 		}
@@ -508,17 +519,17 @@ func TestTerminalTool_Stdin_Background(t *testing.T) {
 
 	res, err := term.ExecuteStream(context.Background(), "terminal", map[string]any{
 		"command":           "cat",
-		"run_in_background": true,
+		"run_in_background": "async",
 		"stdin":             stdinBody,
 	}, nil)
 	if err != nil {
 		t.Fatalf("ExecuteStream bg: %v", err)
 	}
-	if !strings.Contains(res.Text, "Started background process") {
-		t.Fatalf("expected background start, got: %s", res.Text)
+	if !strings.Contains(res.Text, "Started async background process") {
+		t.Fatalf("expected async background start, got: %s", res.Text)
 	}
-	// Extract the process id from "Started background process <id>."
-	id := strings.TrimPrefix(res.Text, "Started background process ")
+	// Extract the process id from "Started async background process <id>."
+	id := strings.TrimPrefix(res.Text, "Started async background process ")
 	id = strings.SplitN(id, ".", 2)[0]
 
 	// Wait for the process to finish, accumulating output as we poll —
@@ -526,7 +537,7 @@ func TestTerminalTool_Stdin_Background(t *testing.T) {
 	var out string
 	exited := false
 	for i := 0; i < 100; i++ {
-		chunk, status, _, _ := mgr.Read(id)
+		chunk, status, _, _, _ := mgr.Read(id)
 		out += chunk
 		if strings.HasPrefix(status, "exited") {
 			exited = true

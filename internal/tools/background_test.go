@@ -33,7 +33,7 @@ func waitFor(t *testing.T, what string, fn func() bool) {
 
 func TestBackgroundManager_RunsAndReportsExit(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("echo hello")
+	id, err := m.Start("echo hello", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestBackgroundManager_RunsAndReportsExit(t *testing.T) {
 	var out, status string
 	waitFor(t, "process to exit", func() bool {
 		var found bool
-		o, s, f, _ := m.Read(id)
+		o, s, f, _, _ := m.Read(id)
 		found = f
 		if o != "" {
 			out += o // accumulate across reads (cursor advances)
@@ -60,31 +60,31 @@ func TestBackgroundManager_RunsAndReportsExit(t *testing.T) {
 
 func TestBackgroundManager_IncrementalRead(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("echo one; sleep 0.3; echo two")
+	id, err := m.Start("echo one; sleep 0.3; echo two", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
 	// First chunk: "one" before "two" is emitted.
 	waitFor(t, "first line", func() bool {
-		o, _, _, _ := m.Read(id)
+		o, _, _, _, _ := m.Read(id)
 		return strings.Contains(o, "one")
 	})
 	// A read right after consuming "one" should not re-return it.
-	o, _, _, _ := m.Read(id)
+	o, _, _, _, _ := m.Read(id)
 	if strings.Contains(o, "one") {
 		t.Errorf("second read re-returned old output: %q", o)
 	}
 	// Eventually "two" arrives as new output.
 	waitFor(t, "second line", func() bool {
-		o, _, _, _ := m.Read(id)
+		o, _, _, _, _ := m.Read(id)
 		return strings.Contains(o, "two")
 	})
 }
 
 func TestBackgroundManager_Kill(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("sleep 30")
+	id, err := m.Start("sleep 30", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestBackgroundManager_Kill(t *testing.T) {
 		t.Fatal("Kill returned false for a live process")
 	}
 	waitFor(t, "killed process to report exit", func() bool {
-		_, s, _, _ := m.Read(id)
+		_, s, _, _, _ := m.Read(id)
 		return strings.HasPrefix(s, "exited")
 	})
 
@@ -106,13 +106,16 @@ func TestTerminalTool_BackgroundLaunch(t *testing.T) {
 	tool := TerminalTool{mgr: m}
 	resTool, err := tool.Execute(context.Background(), "terminal", map[string]any{
 		"command":           "echo hi",
-		"run_in_background": true,
+		"run_in_background": "async",
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if !strings.Contains(resTool.Text, "bg_1") {
 		t.Errorf("result = %q, want it to mention the bg id", resTool.Text)
+	}
+	if !strings.Contains(resTool.Text, "async") {
+		t.Errorf("result = %q, want it to mention async mode", resTool.Text)
 	}
 }
 
@@ -133,7 +136,7 @@ func TestTerminalTool_SyncCommandIsReaped(t *testing.T) {
 		t.Errorf("result = %q, want it to contain the output", res.Text)
 	}
 	// bg_1 was the hidden process — after a clean sync exit it must be gone.
-	if _, _, found, _ := m.Read("bg_1"); found {
+	if _, _, found, _, _ := m.Read("bg_1"); found {
 		t.Error("synchronous command's process should have been reaped from the manager")
 	}
 	if got := m.ListRunning(); len(got) != 0 {
@@ -148,7 +151,7 @@ func TestTerminalOutputTool(t *testing.T) {
 
 	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
 		"command":           "echo from-bg",
-		"run_in_background": true,
+		"run_in_background": "interactive",
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -183,7 +186,7 @@ func TestKillShellTool(t *testing.T) {
 
 	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
 		"command":           "sleep 30",
-		"run_in_background": true,
+		"run_in_background": "async",
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -240,8 +243,8 @@ func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
 	if !strings.Contains(res.Text, "bg_1") {
 		t.Errorf("result should mention bg id, got: %q", res.Text)
 	}
-	// Should contain the anti-polling instruction.
-	if !strings.Contains(res.Text, "DO NOT poll") {
+	// Should contain the async notice warning against polling.
+	if !strings.Contains(res.Text, "ASYNC background process") {
 		t.Errorf("result should warn against polling, got: %q", res.Text)
 	}
 
@@ -250,7 +253,7 @@ func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
 	// can be very slow.
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		_, s, _, _ := m.Read("bg_1")
+		_, s, _, _, _ := m.Read("bg_1")
 		if strings.HasPrefix(s, "exited") {
 			return
 		}
@@ -271,7 +274,7 @@ func TestTerminalOutputTool_SnapshotIdempotent(t *testing.T) {
 
 	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
 		"command":           "sleep 30",
-		"run_in_background": true,
+		"run_in_background": "interactive",
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -301,7 +304,7 @@ func TestTerminalOutputTool_AntiPollBlocksEmptySnapshots(t *testing.T) {
 
 	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
 		"command":           "sleep 30",
-		"run_in_background": true,
+		"run_in_background": "interactive",
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -328,7 +331,7 @@ func TestTerminalOutputTool_ReadOnly(t *testing.T) {
 
 	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
 		"command":           "sleep 30",
-		"run_in_background": true,
+		"run_in_background": "interactive",
 	}); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -344,7 +347,91 @@ func TestTerminalOutputTool_ReadOnly(t *testing.T) {
 	if strings.Contains(resOut.Text, "killed") {
 		t.Errorf("terminal_output must not kill, got %q", resOut.Text)
 	}
-	if _, status, _, _ := m.Read("bg_1"); status != "running" {
+	if _, status, _, _, _ := m.Read("bg_1"); status != "running" {
 		t.Errorf("process should still be running after terminal_output, status=%q", status)
+	}
+}
+
+// TestTerminalOutputTool_RejectsAsync verifies that terminal_output refuses to
+// observe async (one-shot) background tasks. The model must wait for the
+// automatic completion notification instead of polling.
+func TestTerminalOutputTool_RejectsAsync(t *testing.T) {
+	m := NewBackgroundManager()
+	term := TerminalTool{mgr: m}
+	outTool := TerminalOutputTool{mgr: m}
+
+	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
+		"command":           "sleep 30",
+		"run_in_background": "async",
+	}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	_, err := outTool.Execute(context.Background(), "terminal_output", map[string]any{"id": "bg_1"})
+	if err == nil {
+		t.Fatal("terminal_output should reject async processes")
+	}
+	if !strings.Contains(err.Error(), "async task") {
+		t.Errorf("error should explain async rejection, got: %v", err)
+	}
+}
+
+// TestTerminalInputTool_RejectsAsync verifies that terminal_input refuses to
+// send input to async (one-shot) background tasks.
+func TestTerminalInputTool_RejectsAsync(t *testing.T) {
+	m := NewBackgroundManager()
+	term := TerminalTool{mgr: m}
+	inTool := TerminalInputTool{mgr: m}
+
+	if _, err := term.Execute(context.Background(), "terminal", map[string]any{
+		"command":           "sleep 30",
+		"run_in_background": "async",
+	}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	_, err := inTool.Execute(context.Background(), "terminal_input", map[string]any{
+		"id":    "bg_1",
+		"input": "hello\n",
+	})
+	if err == nil {
+		t.Fatal("terminal_input should reject async processes")
+	}
+	if !strings.Contains(err.Error(), "async task") {
+		t.Errorf("error should explain async rejection, got: %v", err)
+	}
+}
+
+// TestTerminalTool_InvalidBackgroundMode verifies that invalid run_in_background
+// values (unknown strings, booleans, or boolean-like strings) surface as clear
+// tool errors mentioning the valid enum values.
+func TestTerminalTool_InvalidBackgroundMode(t *testing.T) {
+	m := NewBackgroundManager()
+	term := TerminalTool{mgr: m}
+
+	cases := []struct {
+		name string
+		val  any
+	}{
+		{"unknown string", "batch"},
+		{"boolean true", true},
+		{"boolean false", false},
+		{"string true", "true"},
+		{"string false", "false"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := term.Execute(context.Background(), "terminal", map[string]any{
+				"command":           "echo hi",
+				"run_in_background": tc.val,
+			})
+			if err == nil {
+				t.Fatal("invalid run_in_background mode should error")
+			}
+			if !strings.Contains(err.Error(), "async") || !strings.Contains(err.Error(), "interactive") {
+				t.Errorf("error should mention valid modes, got: %v", err)
+			}
+		})
 	}
 }

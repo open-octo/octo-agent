@@ -16,12 +16,12 @@ import (
 // (the direct child / group leader) is SIGKILLed instead of the whole group.
 func startWithBackgroundChild(t *testing.T, mgr *BackgroundManager) (id string, childPID int) {
 	t.Helper()
-	id, err := mgr.Start("sleep 60 & echo $! ; wait")
+	id, err := mgr.Start("sleep 60 & echo $! ; wait", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	for i := 0; i < 50 && childPID == 0; i++ {
-		out, _, _, _ := mgr.Read(id)
+		out, _, _, _, _ := mgr.Read(id)
 		if fields := strings.Fields(strings.TrimSpace(out)); len(fields) > 0 {
 			if pid, perr := strconv.Atoi(fields[0]); perr == nil {
 				childPID = pid

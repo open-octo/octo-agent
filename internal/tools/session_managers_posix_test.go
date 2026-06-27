@@ -21,7 +21,7 @@ func TestBackgroundManager_CtxScopedIsolatedAndReaped(t *testing.T) {
 	ctx := WithBackgroundManager(context.Background(), mA)
 	if _, err := (TerminalTool{}).Execute(ctx, "terminal", map[string]any{
 		"command":           "sleep 60",
-		"run_in_background": true,
+		"run_in_background": "async",
 	}); err != nil {
 		t.Fatalf("background launch: %v", err)
 	}

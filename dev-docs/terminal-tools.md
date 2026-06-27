@@ -9,10 +9,10 @@ through one `BackgroundManager`.
 
 | Tool | Purpose |
 |---|---|
-| `terminal` | Run a command. Synchronous, `run_in_background:true`, or `detached:true`. |
-| `terminal_output` | Snapshot the last N lines of a background process's output + status. |
-| `terminal_list` | List this session's background processes (id, status, elapsed, command). |
-| `terminal_input` | Write to a background process's stdin. |
+| `terminal` | Run a command. Synchronous, `run_in_background:"async"` / `"interactive"`, or `detached:true`. |
+| `terminal_output` | Snapshot the last N lines of an **interactive** background process's output + status. |
+| `terminal_list` | List this session's background processes (id, mode, status, elapsed, command). |
+| `terminal_input` | Write to an **interactive** background process's stdin. |
 | `kill_shell` | Signal/terminate a background process and return its final output. |
 
 `terminal` is the only one that starts work; the rest address an existing
@@ -33,15 +33,22 @@ process by the `bg_N` id `terminal` returns.
    wrapping and OS sandbox as any other command (detach controls lifetime, the
    sandbox controls what it may touch — orthogonal).
 
-2. **`run_in_background:true`** — a tracked background process. Returns a
-   `bg_N` id immediately, no timeout. Output is observable via
-   `terminal_output`, the process via `terminal_list` / `kill_shell`, and it is
+2. **`run_in_background:"async"`** — a tracked background process for **one-shot
+   tasks** (tests, builds, installs, CI checks). Returns a `bg_N` id immediately,
+   no timeout. The model **must not** call `terminal_output` or `terminal_input`;
+   completion is pushed automatically via `[BACKGROUND COMPLETED]`. The process is
    **killed when the session ends**.
 
-3. **Synchronous (default)** — runs with a 120 s timeout. Implemented as a
+3. **`run_in_background:"interactive"`** — a tracked background process for
+   **long-running services and REPLs** (servers, watchers, `rails c`, `octo
+   serve`). Returns a `bg_N` id immediately, no timeout. The model may use
+   `terminal_output` to inspect logs and `terminal_input` to send commands. The
+   process is **killed when the session ends**.
+
+4. **Synchronous (default)** — runs with a 120 s timeout. Implemented as a
    hidden (`visible:false`) background process so that on timeout it is simply
-   *promoted* to a visible background task (no kill, no restart) and its id
-   returned. On normal completion it is reaped (`Remove`).
+   *promoted* to a visible **async** background task (no kill, no restart) and its
+   id returned. On normal completion it is reaped (`Remove`).
 
 ## BackgroundManager and the process lifecycle
 
@@ -121,12 +128,14 @@ Two distinct needs, two distinct mechanisms:
   The hook reads via the cursor (`readNew`), so anything pushed is already
   consumed and won't reappear in a later read. Wired in the CLI/TUI REPL only.
 
-- **Progress is pulled, as a snapshot.** `terminal_output` returns the last N
-  lines (`lines`, default 50) plus status via `bgProcess.tail`, which does
-  **not** advance any cursor. Repeated calls return the same view, so there is
-  no "new since last call" to chase and no incentive to loop. `terminal_list`
-  is the other snapshot — the set of live/recent processes — for recovering a
-  lost id.
+- **Progress is pulled, as a snapshot — but only for interactive processes.**
+  `terminal_output` returns the last N lines (`lines`, default 50) plus status
+  via `bgProcess.tail`, which does **not** advance any cursor. Repeated calls
+  return the same view, so there is no "new since last call" to chase and no
+  incentive to loop. `terminal_output` is rejected for async processes; their
+  completion is pushed automatically. `terminal_list` is the other snapshot —
+  the set of live/recent processes, annotated with mode — for recovering a lost
+  id.
 
 The internal cursor read (`readNew`) still exists for the synchronous poll loop
 and the completion push; only the model-facing `terminal_output` uses the
@@ -147,9 +156,11 @@ enforce their own anti-polling limits (see `background.go`).
 
 - `BackgroundManager` is a `map[id]*bgProcess` with two goroutines per process
   (reader + waiter), so N `run_in_background` launches run concurrently. The
-  agent fires several off, continues other work, and reacts to each completion
-  as its push arrives — in completion order. Multiple completions drained in
-  one iteration are surfaced together.
+  launched process stores a `mode` (`async` or `interactive`) that gates whether
+  `terminal_output` / `terminal_input` are allowed. The agent fires several off,
+  continues other work, and reacts to each completion as its push arrives — in
+  completion order. Multiple completions drained in one iteration are surfaced
+  together.
 - Within a single tool batch, the agent loop dispatches calls concurrently
   **only when every call is read-only** (`readOnlyTools`: `read_file`, `glob`,
   `grep`, `web_fetch`, `web_search`) — see `dispatchTools` / `canParallelize`.
