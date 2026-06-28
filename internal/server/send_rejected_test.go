@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,14 +144,20 @@ drain:
 
 // holdSender holds the turn open until the test closes the block channel.
 // Used when we need to inspect mid-turn persisted state before release.
-type holdSender struct{ block <-chan struct{} }
+type holdSender struct {
+	block   <-chan struct{}
+	started chan<- struct{}
+	once    sync.Once
+}
 
 func (s *holdSender) SendMessages(_ context.Context, _, _ string, _ []agent.Message, _ int) (agent.Reply, error) {
+	s.once.Do(func() { close(s.started) })
 	<-s.block
 	return agent.Reply{Content: "stub reply"}, nil
 }
 
 func (s *holdSender) StreamMessages(_ context.Context, _, _ string, _ []agent.Message, _ int, onChunk func(string), _ func(string)) (agent.Reply, error) {
+	s.once.Do(func() { close(s.started) })
 	<-s.block
 	if onChunk != nil {
 		onChunk("stub reply")
@@ -159,11 +166,13 @@ func (s *holdSender) StreamMessages(_ context.Context, _, _ string, _ []agent.Me
 }
 
 func (s *holdSender) SendMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition) (agent.Reply, error) {
+	s.once.Do(func() { close(s.started) })
 	<-s.block
 	return agent.Reply{Content: "stub reply"}, nil
 }
 
 func (s *holdSender) StreamMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition, onChunk func(string), _ agent.ToolInputDeltaFunc, _ agent.ThinkingDeltaFunc) (agent.Reply, error) {
+	s.once.Do(func() { close(s.started) })
 	<-s.block
 	if onChunk != nil {
 		onChunk("stub reply")
@@ -203,13 +212,24 @@ func TestHandleWSUserMessage_ForceTakesOverStaleBinding(t *testing.T) {
 	// Hold the turn open so we can inspect the persisted binding before the
 	// turn goroutine finishes and releases it.
 	block := make(chan struct{})
-	srv.sender = &holdSender{block: block}
+	started := make(chan struct{})
+	srv.sender = &holdSender{block: block, started: started}
 
 	srv.handleWSUserMessage(conn, &wsMsgUserMessage{
 		SessionID: sess.ID,
 		Content:   json.RawMessage(`"hello from web"`),
 		Force:     true,
 	})
+
+	// Wait until the turn goroutine has reached the sender; only then is it
+	// guaranteed to still be holding the binding. Without this synchronization
+	// the goroutine can finish and release the binding before we reload the
+	// session, making the assertion flaky.
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn never reached sender")
+	}
 
 	// The binding is acquired synchronously before the turn goroutine starts;
 	// verify it persisted to disk before the turn completes and releases it.
@@ -225,8 +245,8 @@ func TestHandleWSUserMessage_ForceTakesOverStaleBinding(t *testing.T) {
 	close(block)
 
 	var sawComplete bool
-	deadline := time.After(3 * time.Second)
-drain:
+	drain := time.After(3 * time.Second)
+drainLoop:
 	for {
 		select {
 		case b := <-conn.send:
@@ -237,7 +257,7 @@ drain:
 			typ, _ := ev["type"].(string)
 			if typ == "complete" {
 				sawComplete = true
-				break drain
+				break drainLoop
 			}
 			if typ == "send_rejected" {
 				t.Fatalf("expected takeover success, got send_rejected: %v", ev["message"])
@@ -245,8 +265,8 @@ drain:
 			if typ == "bind_required" {
 				t.Fatalf("expected takeover success, got bind_required: %v", ev["message"])
 			}
-		case <-deadline:
-			break drain
+		case <-drain:
+			break drainLoop
 		}
 	}
 	if !sawComplete {
