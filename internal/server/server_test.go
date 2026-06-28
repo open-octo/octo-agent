@@ -92,6 +92,14 @@ func TestHandleDeleteSession(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
+	// Register a fake connection to capture the global session_deleted broadcast.
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 256),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
+
 	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+sess.ID, nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
@@ -101,6 +109,22 @@ func TestHandleDeleteSession(t *testing.T) {
 	}
 	if _, err := agent.LoadSession(sess.ID); err == nil {
 		t.Fatal("session still loadable after delete")
+	}
+
+	select {
+	case b := <-conn.send:
+		var ev map[string]any
+		if err := json.Unmarshal(b, &ev); err != nil {
+			t.Fatalf("broadcast event unmarshal: %v", err)
+		}
+		if ev["type"] != "session_deleted" {
+			t.Fatalf("broadcast type = %q, want session_deleted", ev["type"])
+		}
+		if got, want := ev["session_id"], sess.ID; got != want {
+			t.Fatalf("broadcast session_id = %q, want %q", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no session_deleted broadcast received")
 	}
 }
 
@@ -120,6 +144,14 @@ func TestHandleDeleteSessions_Batch(t *testing.T) {
 	}
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// Register a fake connection to capture the global session_deleted broadcasts.
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 256),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
 
 	payload, _ := json.Marshal(deleteSessionsRequest{IDs: ids})
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete", bytes.NewReader(payload))
@@ -143,6 +175,29 @@ func TestHandleDeleteSessions_Batch(t *testing.T) {
 	for _, id := range ids {
 		if _, err := agent.LoadSession(id); err == nil {
 			t.Errorf("session %s still loadable after batch delete", id)
+		}
+	}
+
+	deletedBroadcasts := make(map[string]bool)
+	deadline := time.After(2 * time.Second)
+broadcastDrain:
+	for len(deletedBroadcasts) < len(ids) {
+		select {
+		case b := <-conn.send:
+			var ev map[string]any
+			if err := json.Unmarshal(b, &ev); err != nil {
+				continue
+			}
+			if ev["type"] == "session_deleted" {
+				deletedBroadcasts[ev["session_id"].(string)] = true
+			}
+		case <-deadline:
+			break broadcastDrain
+		}
+	}
+	for _, id := range ids {
+		if !deletedBroadcasts[id] {
+			t.Errorf("missing session_deleted broadcast for %s", id)
 		}
 	}
 }
@@ -300,6 +355,7 @@ func mustServer(t *testing.T, cfg Config) *Server {
 		sessionBindingLocks: map[string]*sync.Mutex{},
 		sessionAgents:       make(map[string]*agent.Agent),
 		steerQueues:         make(map[string][]agent.InboxItem),
+		wsHub:               newWSHub(),
 	}
 	srv.registerRoutes()
 	// Wrap with CORS middleware so tests that exercise CORS hit the right layer.
