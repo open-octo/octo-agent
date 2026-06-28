@@ -353,6 +353,13 @@ type tuiModel struct {
 	// or Esc (discarded).
 	pendingAttachments []pendingAttachment
 
+	// inputFolded is set when the input box contains a large amount of pasted
+	// text. When true, the textarea is collapsed and shows a summary like
+	// "[123 lines pasted]" instead of the full content. Tab toggles.
+	inputFolded bool
+	// inputFoldedLines stores the line count when folded for display.
+	inputFoldedLines int
+
 	// modal, when non-nil, is an active Ask prompt (design §6).
 	modal *modalState
 
@@ -420,6 +427,10 @@ type tuiModel struct {
 
 	// height is the terminal height in cells, updated by WindowSizeMsg.
 	height int
+
+	// foldedFullText holds the complete input text when inputFolded is true.
+	// Cleared when expanded.
+	foldedFullText string
 
 	// suggestion is a pending after-turn follow-up suggestion shown as ghost
 	// text in the empty input box (the textarea placeholder). Accepted with

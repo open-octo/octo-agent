@@ -164,6 +164,12 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// Idle: clear the input line and discard any pending attachments.
 		m.pendingAttachments = nil
+		// Also clear folded state
+		if m.inputFolded {
+			m.inputFolded = false
+			m.foldedFullText = ""
+			m.inputFoldedLines = 0
+		}
 		m.ta.Reset()
 		m.inputHistoryIdx = -1
 		return m, m.updateTextAreaHeight()
@@ -186,12 +192,22 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.turnRunning {
 			return m.submit()
 		}
-		text := strings.TrimSpace(m.ta.Value())
+		text := m.ta.Value()
+		if m.inputFolded {
+			text = m.foldedFullText
+		}
+		text = strings.TrimSpace(text)
 		if text == "" {
 			return m, nil
 		}
 		m.ta.Reset()
 		m.inputHistoryIdx = -1
+		// Clear folded state
+		if m.inputFolded {
+			m.inputFolded = false
+			m.foldedFullText = ""
+			m.inputFoldedLines = 0
+		}
 		if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text {
 			m.inputHistory = append(m.inputHistory, text)
 		}
@@ -314,6 +330,27 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// is handled by bubbles/textarea.
 	var cmd tea.Cmd
 	m.ta, cmd = m.ta.Update(msg)
+
+	// Folded state toggle: Tab expands/collapses when there's multi-line content.
+	// This check runs before the image-path detection so it works even when
+	// folded. Tab is only captured when the completion menu is not open.
+	if msg.Type == tea.KeyTab && len(m.complItems) == 0 {
+		if m.inputFolded {
+			// Expand: restore the full text
+			m.ta.SetValue(m.foldedFullText)
+			m.inputFolded = false
+			m.foldedFullText = ""
+			return m, m.updateTextAreaHeight()
+		}
+		// Collapse: fold if there are many lines
+		if lines := strings.Count(m.ta.Value(), "\n") + 1; lines >= 5 {
+			m.foldedFullText = m.ta.Value()
+			m.inputFolded = true
+			m.inputFoldedLines = lines
+			return m, nil
+		}
+	}
+
 	// Detect a dropped image file path (some terminals paste the path as text
 	// when a file is dragged in). If the input box now holds a single image
 	// file path, swallow it and queue it as an attachment instead.
@@ -601,12 +638,23 @@ func humanByteSize(n int) string {
 // Running → steer, queue a slash command, or queue plain text. Empty input
 // with no attachments is ignored.
 func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
-	text := strings.TrimSpace(m.ta.Value())
+	// If folded, expand to get the full text for submission.
+	text := m.ta.Value()
+	if m.inputFolded {
+		text = m.foldedFullText
+	}
+	text = strings.TrimSpace(text)
 	if text == "" && len(m.pendingAttachments) == 0 {
 		return m, nil
 	}
 	m.ta.Reset()
 	m.inputHistoryIdx = -1
+	// Clear folded state after submit
+	if m.inputFolded {
+		m.inputFolded = false
+		m.foldedFullText = ""
+		m.inputFoldedLines = 0
+	}
 	// Save to history for ↑/↓ recall (dedup consecutive identical lines).
 	// Skip empty text (an image-only submit has nothing to recall).
 	if text != "" && (len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text) {
@@ -1269,6 +1317,12 @@ func (m *tuiModel) softWrappedRows() int {
 }
 
 func (m *tuiModel) renderInputBox() string {
+	if m.inputFolded {
+		// When folded, show a compact placeholder instead of the full textarea.
+		// The textarea still exists (holds cursor, etc.) but is hidden.
+		label := fmt.Sprintf("[ %d lines pasted · Tab to expand ]", m.inputFoldedLines)
+		return hintStyle.Render(label)
+	}
 	return m.ta.View()
 }
 

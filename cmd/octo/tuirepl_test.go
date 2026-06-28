@@ -825,3 +825,156 @@ func TestTUI_ThinkingNeverShownInTerminal(t *testing.T) {
 		t.Errorf("turnOutChars = %d, want 12", m.turnOutChars)
 	}
 }
+
+// TestTUI_InputFold_TabToggles tests that Tab toggles the folded state
+// when there are >= 5 lines of input.
+func TestTUI_InputFold_TabToggles(t *testing.T) {
+	m := newTestModel()
+	multiLine := "line1\nline2\nline3\nline4\nline5"
+	setInput(m, multiLine)
+
+	// Tab should fold the input
+	m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+	if !m.inputFolded {
+		t.Fatal("Tab should fold multi-line input")
+	}
+	if m.foldedFullText != multiLine {
+		t.Errorf("foldedFullText = %q, want %q", m.foldedFullText, multiLine)
+	}
+	if m.inputFoldedLines != 5 {
+		t.Errorf("inputFoldedLines = %d, want 5", m.inputFoldedLines)
+	}
+
+	// View should show the folded placeholder
+	view := m.View()
+	if !strings.Contains(view, "5 lines pasted") {
+		t.Errorf("view should show folded placeholder, got:\n%s", view)
+	}
+
+	// Tab again should expand
+	m2, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+	if m.inputFolded {
+		t.Error("Tab should expand folded input")
+	}
+	if m.ta.Value() != multiLine {
+		t.Errorf("textarea value after expand = %q, want %q", m.ta.Value(), multiLine)
+	}
+	if m.foldedFullText != "" {
+		t.Error("foldedFullText should be cleared after expand")
+	}
+}
+
+// TestTUI_InputFold_SubmitUsesFullText tests that submit uses the full text
+// when input is folded.
+func TestTUI_InputFold_SubmitUsesFullText(t *testing.T) {
+	m := newTestModel()
+	multiLine := "hello\nworld\nfoo\nbar\nbaz"
+	setInput(m, multiLine)
+
+	// Fold the input
+	m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+	if !m.inputFolded {
+		t.Fatal("input should be folded")
+	}
+
+	// Submit should use the full text
+	_, _ = m.submit()
+	if !m.turnRunning {
+		t.Fatal("submit should start a turn")
+	}
+	// The history should contain the full multi-line text
+	if len(m.inputHistory) != 1 {
+		t.Fatalf("expected 1 history entry, got %d", len(m.inputHistory))
+	}
+	if m.inputHistory[0] != multiLine {
+		t.Errorf("history[0] = %q, want %q", m.inputHistory[0], multiLine)
+	}
+	// Folded state should be cleared
+	if m.inputFolded {
+		t.Error("folded state should be cleared after submit")
+	}
+}
+
+// TestTUI_InputFold_EscClears tests that Esc clears folded state.
+func TestTUI_InputFold_EscClears(t *testing.T) {
+	m := newTestModel()
+	multiLine := "a\nb\nc\nd\ne"
+	setInput(m, multiLine)
+
+	// Fold
+	m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+	if !m.inputFolded {
+		t.Fatal("input should be folded")
+	}
+
+	// Simulate a running turn so Esc clears instead of interrupting
+	m.turnRunning = false
+	// Esc should clear folded state and reset input
+	m2, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m = m2.(*tuiModel)
+	if m.inputFolded {
+		t.Error("Esc should clear folded state")
+	}
+	if m.ta.Value() != "" {
+		t.Errorf("textarea should be empty after Esc, got %q", m.ta.Value())
+	}
+}
+
+// TestTUI_InputFold_CtrlQUsesFullText tests that Ctrl+Q uses full text when folded.
+func TestTUI_InputFold_CtrlQUsesFullText(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true // Ctrl+Q queues when turn is running
+	multiLine := "q1\nq2\nq3\nq4\nq5"
+	setInput(m, multiLine)
+
+	// Fold
+	m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+	if !m.inputFolded {
+		t.Fatal("input should be folded")
+	}
+
+	// Ctrl+Q should queue the full text
+	m2, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlQ})
+	m = m2.(*tuiModel)
+	if len(m.queue) != 1 {
+		t.Fatalf("expected 1 queued item, got %d", len(m.queue))
+	}
+	if m.queue[0].text != multiLine {
+		t.Errorf("queued text = %q, want %q", m.queue[0].text, multiLine)
+	}
+	if m.inputFolded {
+		t.Error("folded state should be cleared after Ctrl+Q")
+	}
+}
+
+// TestTUI_InputFold_SingleLineNoFold tests that single-line input doesn't fold.
+func TestTUI_InputFold_SingleLineNoFold(t *testing.T) {
+	m := newTestModel()
+	setInput(m, "single line")
+
+	// Tab should not fold (only 1 line)
+	m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+	if m.inputFolded {
+		t.Error("single-line input should not fold")
+	}
+}
+
+// TestTUI_InputFold_FourLinesNoFold tests that 4 lines don't trigger fold.
+func TestTUI_InputFold_FourLinesNoFold(t *testing.T) {
+	m := newTestModel()
+	fourLines := "l1\nl2\nl3\nl4"
+	setInput(m, fourLines)
+
+	// Tab should not fold (only 4 lines, threshold is 5)
+	m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+	if m.inputFolded {
+		t.Error("4-line input should not fold (threshold is 5)")
+	}
+}
