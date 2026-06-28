@@ -31,16 +31,6 @@
     URL.revokeObjectURL(url)
   }
 
-  function openArtifact() {
-    const html = isHtml(cur)
-    const blob = new Blob([html ? (cur?.preview || cur?.code || '') : (cur?.code ?? '')], {
-      type: html ? 'text/html' : 'text/plain',
-    })
-    const url = URL.createObjectURL(blob)
-    window.open(url, '_blank', 'noopener')
-    // Revoke after the new tab has had time to load.
-    setTimeout(() => URL.revokeObjectURL(url), 60000)
-  }
 </script>
 
 <aside class="panel" class:maximized>
@@ -75,7 +65,6 @@
     <button class="icon-btn" title={maximized ? $t('artifacts.restore') : $t('artifacts.maximize')} onclick={() => maximized = !maximized}>
       <iconify-icon icon={maximized ? 'ant-design:compress-outlined' : 'ant-design:expand-outlined'} width="14"></iconify-icon>
     </button>
-    <button class="icon-btn" title={$t('artifacts.open_new_tab')} onclick={openArtifact}><iconify-icon icon="ant-design:export-outlined" width="14"></iconify-icon></button>
     <button class="icon-btn" title={$t('common.close')} onclick={() => artifactsOpen.set(false)}>
       <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
     </button>
