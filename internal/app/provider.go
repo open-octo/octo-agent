@@ -108,8 +108,8 @@ var Registry = []Vendor{
 		},
 	},
 	{
-		ID:             "kimi-for-coding",
-		DisplayName:    "Kimi Coding",
+		ID:             "kimi-coding-plan",
+		DisplayName:    "Kimi Coding Plan",
 		Protocol:       "anthropic",
 		API:            "anthropic-messages",
 		DefaultBaseURL: "https://api.kimi.com/coding",
