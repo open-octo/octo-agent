@@ -30,6 +30,10 @@ func serveLoopback(h http.Handler, w http.ResponseWriter, req *http.Request) {
 }
 
 func TestHandleHealth(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
@@ -49,6 +53,10 @@ func TestHandleHealth(t *testing.T) {
 }
 
 func TestHandleListSessions(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
@@ -68,6 +76,10 @@ func TestHandleListSessions(t *testing.T) {
 }
 
 func TestHandleGetSession_NotFound(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/nonexistent", nil)
@@ -203,6 +215,10 @@ broadcastDrain:
 }
 
 func TestHandleDeleteSessions_EmptyIDs(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/delete", bytes.NewReader([]byte(`{"ids":[]}`)))
@@ -216,6 +232,10 @@ func TestHandleDeleteSessions_EmptyIDs(t *testing.T) {
 }
 
 func TestHandleCreateChat_MissingMessage(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	body := bytes.NewReader([]byte(`{}`))
@@ -230,6 +250,10 @@ func TestHandleCreateChat_MissingMessage(t *testing.T) {
 }
 
 func TestHandleTurn_MissingSession(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	body := bytes.NewReader([]byte(`{"message":"hello"}`))
@@ -244,6 +268,10 @@ func TestHandleTurn_MissingSession(t *testing.T) {
 }
 
 func TestStaticHandler_IndexFallback(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -266,6 +294,10 @@ func TestStaticHandler_IndexFallback(t *testing.T) {
 }
 
 func TestStaticHandler_APIFallback(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/unknown", nil)
@@ -279,6 +311,10 @@ func TestStaticHandler_APIFallback(t *testing.T) {
 }
 
 func TestCORS(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, CORSOrigins: []string{"http://localhost:3000"}})
 
 	req := httptest.NewRequest(http.MethodOptions, "/api/health", nil)
@@ -295,6 +331,10 @@ func TestCORS(t *testing.T) {
 }
 
 func TestCORS_DisallowedOrigin(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, CORSOrigins: []string{"http://localhost:3000"}})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
@@ -308,6 +348,10 @@ func TestCORS_DisallowedOrigin(t *testing.T) {
 }
 
 func TestCORS_WildcardDoesNotReflectOrigin(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, CORSOrigins: []string{"*"}})
 
 	req := httptest.NewRequest(http.MethodOptions, "/api/health", nil)
@@ -447,6 +491,10 @@ func (s *recordingSender) StreamMessagesWithTools(_ context.Context, _, _ string
 // ─── New API tests ──────────────────────────────────────────────────────────
 
 func TestHandleOnboardStatus(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	req := httptest.NewRequest(http.MethodGet, "/api/onboard/status", nil)
 	w := httptest.NewRecorder()
@@ -464,6 +512,10 @@ func TestHandleOnboardStatus(t *testing.T) {
 }
 
 func TestHandleListProviders(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	req := httptest.NewRequest(http.MethodGet, "/api/providers", nil)
 	w := httptest.NewRecorder()
@@ -482,6 +534,10 @@ func TestHandleListProviders(t *testing.T) {
 }
 
 func TestHandleGetConfig(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -499,6 +555,10 @@ func TestHandleGetConfig(t *testing.T) {
 }
 
 func TestHandleTestConfig(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	payload, _ := json.Marshal(testConfigRequest{Model: "gpt-4", BaseURL: "https://api.openai.com/v1"})
 	req := httptest.NewRequest(http.MethodPost, "/api/config/test", bytes.NewReader(payload))
@@ -605,6 +665,10 @@ func TestHandleToggleSkill(t *testing.T) {
 }
 
 func TestHandleToggleSkill_NotFound(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	req := httptest.NewRequest(http.MethodPatch, "/api/skills/nonexistent/toggle", nil)
 	w := httptest.NewRecorder()
@@ -703,6 +767,10 @@ func TestHandleBenchmark_Success(t *testing.T) {
 }
 
 func TestHandleGetMemory_NotFound(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	req := httptest.NewRequest(http.MethodGet, "/api/memories/nonexistent.md", nil)
 	w := httptest.NewRecorder()
@@ -713,6 +781,10 @@ func TestHandleGetMemory_NotFound(t *testing.T) {
 }
 
 func TestHandleGetMemories_DedupesProjectAndHomeDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	// Simulate a setup where the project memory directory is the same as the
@@ -751,6 +823,10 @@ func TestHandleGetMemories_DedupesProjectAndHomeDir(t *testing.T) {
 }
 
 func TestHandleVersionUpgrade_AcceptedAndConflict(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	// While an upgrade runs, a second POST conflicts.
@@ -794,6 +870,10 @@ func TestHandleVersionUpgrade_AcceptedAndConflict(t *testing.T) {
 }
 
 func TestHandleVersion_NoUpdateCheck(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
 	w := httptest.NewRecorder()
@@ -822,6 +902,10 @@ func TestHandleVersion_NoUpdateCheck(t *testing.T) {
 }
 
 func TestHandleVersion_CacheHeaders(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
 	w := httptest.NewRecorder()
@@ -1507,6 +1591,10 @@ drainDedup:
 // tool_error) the stream writer must broadcast a fresh "thinking" progress
 // and keep it in live state for late-subscriber replay.
 func TestWSStreamWriter_ReseedsThinkingAfterTool(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 	srv.initWS()
 

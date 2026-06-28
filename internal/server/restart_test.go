@@ -18,6 +18,7 @@ import (
 )
 
 func TestHandleRestart_Returns202AndMarksPending(t *testing.T) {
+	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/restart", nil)
@@ -38,6 +39,7 @@ func TestHandleRestart_Returns202AndMarksPending(t *testing.T) {
 }
 
 func TestRestart_Idempotent(t *testing.T) {
+	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	srv.Restart("first")
@@ -53,6 +55,7 @@ func TestRestart_Idempotent(t *testing.T) {
 // proves the process-global registry teardown is not executed twice in
 // parallel (the Restart-goroutine vs Ctrl-C-handler race).
 func TestShutdown_SingleFlight(t *testing.T) {
+	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	const callers = 4
@@ -76,6 +79,7 @@ func TestShutdown_SingleFlight(t *testing.T) {
 // ephemeral port, requests a restart, and verifies ListenAndServe comes back
 // with ErrRestartRequested rather than the plain http.ErrServerClosed.
 func TestListenAndServe_RestartReturnsSentinel(t *testing.T) {
+	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -100,6 +104,7 @@ func TestListenAndServe_RestartReturnsSentinel(t *testing.T) {
 // TestListenAndServe_PlainShutdownIsClean verifies a non-restart Shutdown
 // (the Ctrl-C path) does NOT surface as a restart request or an error.
 func TestListenAndServe_PlainShutdownIsClean(t *testing.T) {
+	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -128,6 +133,7 @@ func TestListenAndServe_PlainShutdownIsClean(t *testing.T) {
 // TestRestart_WaitsForInflightTurn: restart must not shut the server down
 // while a turn is active; it proceeds as soon as the turn ends.
 func TestRestart_WaitsForInflightTurn(t *testing.T) {
+	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -163,6 +169,7 @@ func TestRestart_WaitsForInflightTurn(t *testing.T) {
 // TestRestart_DrainTimeoutForcesShutdown: a turn that outlives the drain
 // timeout must not block the restart forever.
 func TestRestart_DrainTimeoutForcesShutdown(t *testing.T) {
+	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.drainTimeout = 100 * time.Millisecond
 
@@ -193,6 +200,10 @@ func TestRestart_DrainTimeoutForcesShutdown(t *testing.T) {
 // TestHandleTurn_DrainingReturns503: new turn requests during a drain get a
 // retryable 503 instead of starting work that the shutdown would cut short.
 func TestHandleTurn_DrainingReturns503(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	sess := agent.NewSession("stub-model", "")
@@ -214,6 +225,7 @@ func TestHandleTurn_DrainingReturns503(t *testing.T) {
 
 // TestRunTask_DrainingRefused: scheduled task runs are refused during drain.
 func TestRunTask_DrainingRefused(t *testing.T) {
+	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.drain.drain(0)
 
@@ -250,6 +262,7 @@ func (a *drainTestAdapter) texts() []string {
 // IM adapters stay up through the drain, and a message arriving mid-drain
 // gets an explicit "try again" reply instead of being dropped silently.
 func TestHandleChannelMessage_DrainingRepliesPolitely(t *testing.T) {
+	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.drain.drain(0)
 
