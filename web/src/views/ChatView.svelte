@@ -78,15 +78,16 @@
   // message stream; the user can expand it into a floating dropdown.
   let planExpanded = $state(false)
 
-  // Tracks optimistic UI state for in-flight sends. If the server rejects the
-  // message (e.g. the session is bound to another entry), we roll back the
-  // pending bubble and restore the streaming flag to its pre-send value.
-  // Content and files are kept so a force takeover can retry the same message.
-  const pendingSends = new Map<string, { pendingId: string; wasStreaming: boolean; text: string; files?: any[] }>()
+  // Tracks optimistic UI state for in-flight sends. A FIFO queue per session
+  // supports multiple messages (e.g. consecutive steer messages mid-turn); if
+  // the server rejects one, we roll back only that pending bubble and restore
+  // the streaming flag to its pre-send value. Content and files are kept so a
+  // force takeover can retry the same message.
+  const pendingSends = new Map<string, { pendingId: string; wasStreaming: boolean; text: string; files?: any[] }[]>()
 
   // Pending steer messages typed while a turn is running. They are shown above
-  // the composer (mirroring the TUI's input-area pending steer) and inserted
-  // into the scrollback in chronological order when the server drains the inbox.
+  // the composer as ghost user bubbles until the server drains the inbox and
+  // confirms them in the scrollback.
   let pendingSteers = $state<{ pendingId: string; text: string; files?: any[] }[]>([])
 
   // Set when the server reports a recoverable binding conflict. The UI shows a
@@ -293,13 +294,14 @@
     }))
 
     // The server rejected a user_message (session bound to another entry,
-    // session not found, etc.). Roll back the optimistic pending bubble and
-    // restore the streaming flag so the composer doesn't get stuck showing
-    // Stop / a phantom steer message. Steer messages are rendered above the
-    // composer, not in the scrollback, so they are dropped from pendingSteers.
+    // session not found, etc.). Roll back the optimistic pending bubble / ghost
+    // steer and restore the streaming flag so the composer doesn't get stuck
+    // showing Stop / a phantom steer message.
     cleanups.push(ws.on('send_rejected', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      const meta = pendingSends.get(sid)
+      const queue = pendingSends.get(sid)
+      const meta = queue?.shift()
+      if (queue && queue.length === 0) pendingSends.delete(sid)
       if (meta) {
         if (meta.wasStreaming) {
           pendingSteers = pendingSteers.filter(s => s.pendingId !== meta.pendingId)
@@ -310,7 +312,6 @@
           }))
         }
         chatStreaming.update(s => ({ ...s, [sid]: meta.wasStreaming }))
-        pendingSends.delete(sid)
       }
       bindRequiredFor = null
       showToast((ev as any).message ?? 'Error', 'error')
@@ -320,7 +321,8 @@
     // a force takeover instead of dropping the message.
     cleanups.push(ws.on('bind_required', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      const meta = pendingSends.get(sid)
+      const queue = pendingSends.get(sid)
+      const meta = queue?.[queue.length - 1]
       if (!meta) return
       // Keep the pending bubble and streaming state; the user can confirm.
       bindRequiredFor = sid
@@ -464,7 +466,13 @@
       const content = (ev as any).content ?? ''
       const createdAt = (ev as any).created_at ?? Date.now()
       const images = (ev as any).images ?? []
-      const meta = pendingSends.get(sid)
+      const queue = pendingSends.get(sid)
+      const meta = queue?.shift()
+      if (queue && queue.length === 0) pendingSends.delete(sid)
+      // Trust the FIFO queue to decide whether this confirmation belongs to a
+      // steer. If the queue is empty (e.g. page refresh), any pendingSteers are
+      // orphaned UI state from before the refresh; don't guess by content and
+      // risk removing the wrong duplicate.
       const isSteer = meta?.wasStreaming ?? false
       let confirmedPendingId: string | null = null
       chatMessages.update(m => {
@@ -493,13 +501,12 @@
         }
         return { ...m, [sid]: msgs }
       })
-      if (isSteer) {
-        // The server drained this steer from the inbox; drop the composer-line.
-        pendingSends.delete(sid)
-        if (pendingSteers.length > 0) pendingSteers = pendingSteers.slice(1)
+      if (isSteer && meta) {
+        // The server drained this steer from the inbox; drop the ghost bubble.
+        pendingSteers = pendingSteers.filter(s => s.pendingId !== meta.pendingId)
       } else if (meta && meta.pendingId === confirmedPendingId) {
         // The server confirmed this optimistic send; stop tracking it for rollback.
-        pendingSends.delete(sid)
+        // (queue already shifted above)
       }
     }))
 
@@ -753,7 +760,9 @@
       chatStreaming.update(s => ({ ...s, [sid]: true }))
     }
     const pendingId = 'pending-' + Date.now()
-    pendingSends.set(sid, { pendingId, wasStreaming, text, files })
+    const queue = pendingSends.get(sid) ?? []
+    queue.push({ pendingId, wasStreaming, text, files })
+    pendingSends.set(sid, queue)
     if (steering) {
       // Mid-turn input: show above the composer, not in the scrollback, until
       // the server drains it into the running turn (mirrors TUI pendingSteer).
@@ -783,7 +792,8 @@
   function forceBindAndSend() {
     const sid = bindRequiredFor
     if (!sid) return
-    const meta = pendingSends.get(sid)
+    const queue = pendingSends.get(sid)
+    const meta = queue?.[queue.length - 1]
     if (!meta) {
       bindRequiredFor = null
       return
@@ -1140,18 +1150,32 @@
       {/if}
 
       <!-- Pending steer messages (mid-turn input) — shown above the composer
-           like the TUI does below the transcript, so they don't break the
-           chronological order of the scrollback while waiting to be drained. -->
+           as ghost user bubbles so they don't break the chronological order
+           of the scrollback while waiting to be drained. -->
       {#if pendingSteers.length > 0}
         <div class="pending-steer-bar fadein">
           {#each pendingSteers as s}
-            <div class="pending-steer-line">
-              <span class="pending-steer-prefix">&gt;</span>
-              <span class="pending-steer-text">{s.text || $t('chat.image_only')}</span>
-              {#if s.files && s.files.length > 0}
-                <iconify-icon icon="ant-design:paper-clip-outlined" width="12" style="color:var(--text-tertiary)"></iconify-icon>
-              {/if}
-              <span class="pending-spinner" title={$t('status.running')}></span>
+            <div class="pending-steer-bubble">
+              <div class="user-avatar" aria-hidden="true">
+                <iconify-icon icon="ant-design:user-outlined" width="16"></iconify-icon>
+              </div>
+              <div class="user-bubble-wrap">
+                <div class="user-bubble pending">
+                  {#if s.files && s.files.length > 0}
+                    <div class="msg-attachments">
+                      {#each s.files as f}
+                        {#if f.mime_type?.startsWith('image/')}
+                          <img src={f.data_url} alt={f.name} class="msg-image" />
+                        {:else}
+                          <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{f.name}</span>
+                        {/if}
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if s.text}{s.text}{/if}
+                  <span class="pending-spinner" title={$t('status.running')}></span>
+                </div>
+              </div>
             </div>
           {/each}
         </div>
@@ -1440,18 +1464,22 @@
 .pending-steer-bar {
   max-width: var(--chat-content-max-width); margin: 0 auto; width: 100%;
   padding: 0 24px 10px;
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: 10px;
 }
-.pending-steer-line {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 13px; color: var(--text-tertiary);
+.pending-steer-bubble {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 10px;
 }
-.pending-steer-prefix {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--blue-6); user-select: none;
+.pending-steer-bubble .user-bubble {
+  border-radius: 12px 12px 4px 12px;
 }
-.pending-steer-text {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.pending-steer-bubble .user-avatar {
+  width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px;
+  background: var(--bg-sidebar); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary);
 }
 
 /* ── Fade-in ─────────────────────────────────────────────────────────────── */
