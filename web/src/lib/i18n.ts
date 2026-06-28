@@ -46,6 +46,7 @@ export const en: Record<string, string> = {
   "chat.no_models": "No models configured",
   "chat.attach_image": "Attach image",
   "chat.insert_slash": "Insert slash command",
+  "chat.image_only": "image",
   "chat.remove": "Remove",
   "upgrade.tooltip.ok": "You're on the latest version",
   "upgrade.tooltip.new": "Update available",
