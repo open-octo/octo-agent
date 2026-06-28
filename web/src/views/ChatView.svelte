@@ -811,8 +811,11 @@
     </div>
   </div>
 
-  <!-- Force-bind banner: session is owned by another entry but can be taken over. -->
-  {#if bindRequiredFor === id}
+  <!-- Force-bind banner: session is owned by another entry but can be taken over.
+       Guard on `id` too: when the active session is deleted, both
+       `bindRequiredFor` and `id` become null, and `null === null` would
+       incorrectly render the banner over the empty chat landing. -->
+  {#if id && bindRequiredFor === id}
     <div class="ws-banner bind-banner">
       <iconify-icon icon="ant-design:warning-outlined" width="15" style="color:var(--warning)"></iconify-icon>
       <span class="ws-msg">{formatBindMessage(bindRequiredMessage)}</span>
