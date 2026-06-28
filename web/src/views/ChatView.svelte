@@ -710,7 +710,7 @@
 
   // ── markdown copy buttons setup ────────────────────────────────────────────
   function setupAssistantEl(el: HTMLElement) {
-    setupCopyButtons(el)
+    return setupCopyButtons(el)
   }
 
   // ── edit a prior user message: load it back into the composer for resend ─────

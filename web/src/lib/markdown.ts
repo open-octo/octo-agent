@@ -50,11 +50,10 @@ export function renderMarkdown(text: string): string {
     } else {
       highlighted = escapeHtml(codeText)
     }
-    const rawForCopy = escapeHtml(codeText)
     return `<div class="code-block">
   <div class="code-header">
     <span class="code-lang">${escapeHtml(language)}</span>
-    <button class="copy-btn" data-copy="${rawForCopy}">Copy</button>
+    <button class="copy-btn">Copy</button>
   </div>
   <pre><code class="hljs language-${escapeHtml(language)}">${highlighted}</code></pre>
 </div>`
@@ -102,18 +101,21 @@ export function renderMarkdown(text: string): string {
   return DOMPurify.sanitize(combined, { ADD_ATTR: ["target"] })
 }
 
-export function setupCopyButtons(el: HTMLElement): void {
-  const buttons = el.querySelectorAll<HTMLButtonElement>("button[data-copy]")
-  buttons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const content = btn.dataset.copy ?? ""
-      navigator.clipboard.writeText(content).then(() => {
-        const original = btn.textContent
-        btn.textContent = "Copied!"
-        setTimeout(() => {
-          btn.textContent = original
-        }, 1500)
-      })
+export function setupCopyButtons(el: HTMLElement): { destroy: () => void } {
+  function onClick(e: MouseEvent) {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button.copy-btn")
+    if (!btn || !el.contains(btn)) return
+    const block = btn.closest(".code-block")
+    const code = block?.querySelector("pre code")
+    const content = code?.textContent ?? ""
+    navigator.clipboard.writeText(content).then(() => {
+      const original = btn.textContent
+      btn.textContent = "Copied!"
+      setTimeout(() => {
+        btn.textContent = original
+      }, 1500)
     })
-  })
+  }
+  el.addEventListener("click", onClick)
+  return { destroy: () => el.removeEventListener("click", onClick) }
 }
