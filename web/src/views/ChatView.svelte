@@ -1241,7 +1241,7 @@
 .msg-agent { display: flex; gap: 12px; }
 .agent-avatar {
   width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px;
-  background: var(--blue-6); color: #fff;
+  background: var(--blue-6); color: var(--blue-6);
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 600;
   overflow: hidden;
