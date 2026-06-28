@@ -192,6 +192,29 @@ octo config path   # print the file location
 
 Precedence is **CLI flag > env var > `~/.octo/config.yaml` > built-in default**. API keys are read from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` first; the wizard can store one in the file (mode `0600`), but the env var is recommended.
 
+### MCP Tool Search
+
+When MCP servers expose many tools, uploading every tool schema on every turn wastes context and hurts accuracy. Tool Search keeps built-in tools visible but defers MCP schemas behind a small bridge:
+
+- `mcp_search` — find MCP tools by keyword (returns names + one-line descriptions).
+- `mcp_describe` — load the full JSON Schema for one discovered tool.
+- `mcp_call` — invoke the tool with arguments matching that schema.
+
+The model uses the same three-step flow automatically. Configure when the bridge activates in `~/.octo/config.yaml`:
+
+```yaml
+tools:
+  tool_search:
+    enabled: auto          # auto (default) | on | off
+    threshold_pct: 10      # auto: activate when deferred schemas ≥ N% of context window
+    search_default_limit: 5
+    max_search_limit: 20
+```
+
+- `auto` (default) — only enable when the deferred MCP schemas would occupy at least `threshold_pct` of the model's context window.
+- `on` — always defer MCP schemas when any MCP tool is connected.
+- `off` — upload all MCP schemas up front, as before.
+
 ## Skills
 
 Skills are reusable instruction sets in Claude Code's SKILL.md format, discovered from:
@@ -243,7 +266,7 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 | Memory & config | done | `~/.octo/octorules.md`, `.octorules`, `octo init`, `@include` |
 | Skills | done | Claude Code-compatible SKILL.md loader (`octo skills`, `/skills`, `/<name>`) |
 | Sandbox | done | OS-enforced `--sandbox` (macOS / Linux) |
-| MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, device-flow OAuth |
+| MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, device-flow OAuth; Tool Search defers large MCP schemas until needed |
 | Memory | done | Persistent cross-session memory under `~/.octo/memories/`, auto extract/consolidate |
 | Sub-agents | done | `sub_agent` fan-out, async + resumable (`sub_agent_send`, `sub_agent_status`, `sub_agent_kill`) |
 | Workflows | done | `workflow` tool — deterministic multi-agent orchestration (parallel/pipeline), background runs with liveness + `workflow_kill`, git worktree isolation, structured-output schema; JS or an embedded-Ruby DSL |
