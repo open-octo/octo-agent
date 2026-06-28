@@ -149,6 +149,20 @@
           : s
         )
       )
+      // Double-check against the server: the store mutation above is the fast
+      // path, but if a slow-consumer drop or a UI reactivity gap hides the
+      // rename, the next REST list will reconcile the sidebar.
+      api.listSessions().then((data: any) => {
+        const list = data.sessions ?? []
+        sessions.set(list)
+        chatShowReasoning.update(m => {
+          const next = { ...m }
+          for (const s of list) {
+            if (typeof s.show_reasoning === 'boolean') next[s.id] = s.show_reasoning
+          }
+          return next
+        })
+      }).catch(() => { /* non-critical: fast-path store update already ran */ })
     })
 
     // REST fallback (WS session_list may be delayed)
