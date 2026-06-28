@@ -248,7 +248,7 @@
   {#if $sidebar === 'rail'}
   <div class="rail">
     <div style="padding:16px 0 8px 0;">
-      <button class="rail-btn primary" title={$t('nav.new_session')} onclick={() => view.set('chat')}>
+      <button class="rail-btn primary" title={$t('nav.new_session')} onclick={newSession}>
         <iconify-icon icon="ant-design:plus-outlined" width="16"></iconify-icon>
       </button>
     </div>
