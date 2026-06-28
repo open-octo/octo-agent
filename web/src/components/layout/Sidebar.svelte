@@ -275,7 +275,7 @@
 
 <style>
 .full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
-.new-btn-wrap { padding: 0 12px 8px; }
+.new-btn-wrap { padding: 12px 12px 8px; }
 .new-btn {
   width: 100%; height: 32px; border: none; border-radius: 6px;
   background: var(--blue-6); color: #fff; font-size: 14px;
