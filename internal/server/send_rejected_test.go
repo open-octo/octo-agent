@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -140,6 +141,36 @@ drain:
 	}
 }
 
+// holdSender holds the turn open until the test closes the block channel.
+// Used when we need to inspect mid-turn persisted state before release.
+type holdSender struct{ block <-chan struct{} }
+
+func (s *holdSender) SendMessages(_ context.Context, _, _ string, _ []agent.Message, _ int) (agent.Reply, error) {
+	<-s.block
+	return agent.Reply{Content: "stub reply"}, nil
+}
+
+func (s *holdSender) StreamMessages(_ context.Context, _, _ string, _ []agent.Message, _ int, onChunk func(string), _ func(string)) (agent.Reply, error) {
+	<-s.block
+	if onChunk != nil {
+		onChunk("stub reply")
+	}
+	return agent.Reply{Content: "stub reply"}, nil
+}
+
+func (s *holdSender) SendMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition) (agent.Reply, error) {
+	<-s.block
+	return agent.Reply{Content: "stub reply"}, nil
+}
+
+func (s *holdSender) StreamMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition, onChunk func(string), _ agent.ToolInputDeltaFunc, _ agent.ThinkingDeltaFunc) (agent.Reply, error) {
+	<-s.block
+	if onChunk != nil {
+		onChunk("stub reply")
+	}
+	return agent.Reply{Content: "stub reply"}, nil
+}
+
 // TestHandleWSUserMessage_ForceTakesOverStaleBinding: force=true lets the web
 // UI take over a session bound to another entry when no turn lease is active.
 func TestHandleWSUserMessage_ForceTakesOverStaleBinding(t *testing.T) {
@@ -169,6 +200,11 @@ func TestHandleWSUserMessage_ForceTakesOverStaleBinding(t *testing.T) {
 	srv.wsHub.register <- conn
 	srv.wsHub.subscribe(conn, sess.ID)
 
+	// Hold the turn open so we can inspect the persisted binding before the
+	// turn goroutine finishes and releases it.
+	block := make(chan struct{})
+	srv.sender = &holdSender{block: block}
+
 	srv.handleWSUserMessage(conn, &wsMsgUserMessage{
 		SessionID: sess.ID,
 		Content:   json.RawMessage(`"hello from web"`),
@@ -184,6 +220,9 @@ func TestHandleWSUserMessage_ForceTakesOverStaleBinding(t *testing.T) {
 	if !fresh.BoundTo(agent.EntryWeb) {
 		t.Fatalf("expected session to be bound to web after force takeover, got %q", fresh.BoundEntry)
 	}
+
+	// Now let the turn finish and wait for its completion broadcast.
+	close(block)
 
 	var sawComplete bool
 	deadline := time.After(3 * time.Second)
