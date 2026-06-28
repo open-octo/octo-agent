@@ -73,24 +73,27 @@ var bannerHints = []string{
 // octopusASCII is the pixel-art octo mascot built from full-width block chars,
 // giving it a crisp, high-contrast silhouette on both light and dark terminals.
 var octopusASCII = []string{
-	"   █████████████",
-	"  ██ ██ ███ ██ ██",
-	" █████████████████",
-	"  ████ ███ ████",
-	"      █████",
-	"     ███████",
-	"   ███ █████ ███",
-	"  ██  ███████  ██",
-	" ██   ███████   ██",
-	"  █████████████",
+	"       ▄▄▄▄▄▄▄",
+	"     ▄██████████▄",
+	"    ████████████████",
+	"   ██████████████████",
+	"   ██  ▐████████▌  ██",
+	"   ██   ████████   ██",
+	"    ██ ▄████████▄ ██",
+	"     ██████████████",
+	"      ████████████",
+	"      ▄███  ████▄",
+	"     ▄████  █████▄",
+	"    ▄██ ██  ██ ███▄",
+	"    ██  ██  ██  ██",
 }
 
 // octoArtWidth is the column the banner text starts at — wide enough to clear
 // the widest art line plus a two-space gutter, so the title/info/hints align.
-const octoArtWidth = 21
+const octoArtWidth = 23
 
 // BannerHeight is the number of lines Banner renders (including the separator).
-const BannerHeight = 11
+const BannerHeight = 14
 
 // Banner renders the octo welcome header with pixel-art mascot.
 // The icon sits left of the title, Claude Code style.
