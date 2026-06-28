@@ -275,6 +275,7 @@ export function setToolError(sessionId: string, toolId: string | undefined, erro
 export interface SubAgentTool {
   name: string
   error: boolean
+  input?: Record<string, any> // optional tool arguments for display
 }
 export interface SubAgentState {
   id: string
@@ -290,9 +291,14 @@ export function resetSubAgents(sessionId: string) {
   chatSubAgents.update(m => ({ ...m, [sessionId]: [] }))
 }
 
-// Remove finished sub-agents from the live panel while keeping any that are
-// still running (e.g. a sync sub-agent promoted to background). Called on
-// `complete` so a done panel doesn't linger until the next page refresh.
+// Remove finished sub-agents from the live panel. Called on `complete` so a
+// done panel doesn't linger until the next page refresh. We filter by status
+// rather than clearing the entire array because async sub-agents (launched
+// with run_in_background=true) may outlive the turn that spawned them — they
+// should remain visible in the panel until they finish. There is a brief race
+// window where `complete` can fire before the final `sub_agent_event` with
+// `kind: done` arrives, but the panel will clear on the next turn start via
+// resetSubAgents(), so this is acceptable.
 export function clearDoneSubAgents(sessionId: string) {
   chatSubAgents.update(m => {
     const remaining = (m[sessionId] || []).filter(a => a.status !== 'done')
@@ -307,6 +313,7 @@ export function applySubAgentEvent(
   agentType: string,
   kind: string,
   toolName: string,
+  toolInput?: Record<string, any>,
 ) {
   chatSubAgents.update(m => {
     const list = [...(m[sessionId] || [])]
@@ -334,7 +341,7 @@ export function applySubAgentEvent(
     if (description && a.description === a.id) a.description = description
     if (agentType && !a.agentType) a.agentType = agentType
     if (kind === 'tool' || kind === 'tool_error') {
-      a.tools.push({ name: toolName || 'tool', error: kind === 'tool_error' })
+      a.tools.push({ name: toolName || 'tool', error: kind === 'tool_error', input: toolInput })
       a.lastTool = toolName || a.lastTool
     } else if (kind === 'done') {
       a.status = 'done'

@@ -20,8 +20,9 @@ type SubAgentEvent struct {
 	//   "tool_error" — a tool returned an error (ToolName set)
 	//   "done"       — the round finished (sync return or async completion);
 	//                  live panels drop the entry on this
-	Kind     string
-	ToolName string
+	Kind      string
+	ToolName  string
+	ToolInput map[string]any // optional: the tool's input arguments for UI display
 }
 
 type subAgentSinkKey struct{}

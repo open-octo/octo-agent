@@ -25,6 +25,7 @@
   let versionStr    = $state('')
   let saving        = $state(false)
   let loading       = $state(true)
+  let providersLoaded = $state(false)
 
   // Original values for dirty-checking
   let origModel        = ''
@@ -54,7 +55,9 @@
     const savedFont = localStorage.getItem('octo.fontSize')
     if (savedFont) fontSize = savedFont
     theme = modeToThemeLabel[getMode()] ?? 'Light'
-    api.listProviders().then(p => (providers = p)).catch(() => {})
+    // Load providers first and wait, so the ModelConfigForm datalist has data
+    // when the Add/Edit modal opens immediately.
+    await api.listProviders().then(p => { providers = p; providersLoaded = true }).catch(() => { providersLoaded = true })
     await Promise.all([loadConfig(), loadVersion()])
   })
 
@@ -65,6 +68,11 @@
   }
   function openEditModel(m: ModelEntry) {
     editingModel = m
+    // Ensure providers are loaded before opening the modal, so the datalist
+    // has options to show. This can happen if the user clicks Edit very early.
+    if (!providersLoaded) {
+      api.listProviders().then(p => { providers = p; providersLoaded = true }).catch(() => { providersLoaded = true })
+    }
     modelModalOpen = true
   }
   async function submitModel(req: ModelConfigInput) {

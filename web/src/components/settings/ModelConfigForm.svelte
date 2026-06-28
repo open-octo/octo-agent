@@ -51,8 +51,36 @@
   let saving       = $state(false)
   let result       = $state<{ ok: boolean; msg: string } | null>(null)
 
-  let preset    = $derived(providers.find(p => p.id === providerId) ?? null)
+  let preset    = $derived.by(() => {
+    if (providerId) {
+      return providers.find(p => p.id === providerId) ?? null
+    }
+    // If providerId is empty but baseUrl is set, try to infer the provider
+    // from the endpoint (for legacy entries without a stored provider field).
+    if (baseUrl) {
+      const normalized = baseUrl.replace(/\/$/, '')
+      for (const p of providers) {
+        if (p.base_url.replace(/\/$/, '') === normalized) {
+          return p
+        }
+        for (const v of p.endpoint_variants ?? []) {
+          if (v.base_url.replace(/\/$/, '') === normalized) {
+            return p
+          }
+        }
+      }
+    }
+    return null
+  })
   let variants  = $derived(preset?.endpoint_variants ?? [])
+
+  // When preset is inferred from baseUrl (providerId is empty), auto-fill
+  // providerId so the datalist renders and the save includes the provider.
+  $effect(() => {
+    if (!providerId && preset && baseUrl) {
+      providerId = preset.id
+    }
+  })
   // Catalogue vendors are pinned to their endpoint; only custom_endpoint
   // providers take a typed Base URL.
   let baseUrlLocked = $derived(!!preset && !preset.custom_endpoint)
@@ -158,7 +186,10 @@
       bind:value={model}
       disabled={saving}
     />
-    {#if preset?.models?.length}
+    <!-- Always render the datalist when a provider is selected, so the dropdown
+         shows all available models. The condition checks for the array explicitly
+         to avoid rendering an empty list during initial load or with unknown providers. -->
+    {#if preset && preset.models && preset.models.length > 0}
       <datalist id="mcf-models">
         {#each preset.models as m}<option value={m}></option>{/each}
       </datalist>
