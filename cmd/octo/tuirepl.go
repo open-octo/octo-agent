@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -109,7 +110,12 @@ func runTUI(cfg replConfig) int {
 		cfg.a.Inbox.Enqueue(tools.FormatWorkflowNote(ev))
 		p.Send(workflowNoteMsg{ev})
 	})
+	// Live workflow events drive the running-workflow panel (started/progress/done).
+	tools.SetDefaultWorkflowOnEvent(func(ev tools.WorkflowEvent) {
+		p.Send(workflowEventMsg{ev})
+	})
 	defer func() {
+		tools.SetDefaultWorkflowOnEvent(nil)
 		tools.SetDefaultWorkflowOnDone(nil)
 		tools.KillDefaultWorkflows()
 	}()
@@ -157,6 +163,7 @@ type subAgentNoteMsg struct{ ev tools.SubAgentNotification } // a sub-agent comp
 type workflowNoteMsg struct{ ev tools.WorkflowNotification } // a background workflow finished (async)
 type mcpReadyMsg struct{ reg *mcp.Registry }                 // background MCP connect finished (async)
 type subAgentEventMsg struct{ ev tools.SubAgentEvent }       // a sub-agent's runtime activity (async)
+type workflowEventMsg struct{ ev tools.WorkflowEvent }       // a background workflow's runtime activity (async)
 type suggestionMsg struct{ text string }                     // an after-turn follow-up suggestion (async)
 type titleMsg struct{ text string }                          // a generated session title (async)
 type tickMsg struct{}                                        // animation tick while a turn runs
@@ -434,6 +441,11 @@ type tuiModel struct {
 	// ↑/↓ moves the focus; Enter toggles expand/collapse; Esc returns focus to
 	// the input box.
 	subAgentFocus int
+
+	// workflows holds the live state of background workflow runs, keyed by run
+	// id (wf_N). An entry appears on the "started" event and is removed when the
+	// "done" event arrives, so only running workflows are shown in the panel.
+	workflows map[string]*workflowUI
 }
 
 // subAgentUI is the live panel state for one running sub-agent.
@@ -446,6 +458,14 @@ type subAgentUI struct {
 	history     []string // complete tool history (expanded view)
 	errored     bool
 	expanded    bool // true when the panel shows the full history
+}
+
+// workflowUI is the live panel state for one background workflow run.
+type workflowUI struct {
+	description string
+	status      string // running | done | error
+	start       time.Time
+	lastLine    string // most recent progress line
 }
 
 // runningTool is the live indicator state for an in-flight card tool.
@@ -493,7 +513,7 @@ func newTUIModel(cfg replConfig) *tuiModel {
 	if !tui.IsDark() {
 		style = "light"
 	}
-	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1}
+	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, workflows: map[string]*workflowUI{}}
 	_ = m.updateTextAreaHeight()
 	return m
 }
@@ -677,10 +697,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.flushPrints()
 
 	case tickMsg:
-		// Animate while a turn runs OR while background processes are still
-		// going (so the live "background (N running)" panel keeps ticking even
-		// between turns); let the ticker die once both are quiet.
-		if !m.turnRunning && len(tools.RunningBackground()) == 0 && len(m.subAgents) == 0 {
+		// Animate while a turn runs OR while background processes/workflows are
+		// still going (so the live bottom panels keep ticking even between turns);
+		// let the ticker die once everything is quiet.
+		if !m.turnRunning && len(tools.RunningBackground()) == 0 && len(m.subAgents) == 0 && len(m.workflows) == 0 {
 			return m, m.flushPrints()
 		}
 		m.spinnerFrame++
@@ -755,6 +775,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleSubAgentEvent(msg.ev)
 		// Ensure the animation ticker is running so the panel's spinner/elapsed
 		// updates even between turns.
+		if !m.turnRunning {
+			return m, tea.Batch(tickCmd(), m.flushPrints())
+		}
+		return m, m.flushPrints()
+
+	case workflowEventMsg:
+		m.handleWorkflowEvent(msg.ev)
+		// Keep the ticker alive for the workflow panel's spinner/elapsed clock.
 		if !m.turnRunning {
 			return m, tea.Batch(tickCmd(), m.flushPrints())
 		}
@@ -901,6 +929,45 @@ func (m *tuiModel) handleSubAgentEvent(ev tools.SubAgentEvent) {
 		}
 		sa.history = append(sa.history, name)
 	}
+}
+
+// handleWorkflowEvent folds one background workflow event into the live panel
+// state. "started" creates the entry; "progress" updates the latest line; "done"
+// removes it (the completion notice is rendered separately by workflowNoteMsg).
+func (m *tuiModel) handleWorkflowEvent(ev tools.WorkflowEvent) {
+	switch ev.Kind {
+	case "started":
+		if m.workflows[ev.RunID] == nil {
+			m.workflows[ev.RunID] = &workflowUI{
+				description: ev.Description,
+				status:      "running",
+				start:       time.Now(),
+			}
+		}
+	case "progress":
+		if wf := m.workflows[ev.RunID]; wf != nil {
+			wf.lastLine = ev.Line
+		}
+	case "done":
+		delete(m.workflows, ev.RunID)
+	}
+}
+
+// workflowOrder returns running workflow ids sorted by start time (oldest first)
+// so the panel order is stable across ticks.
+func (m *tuiModel) workflowOrder() []string {
+	ids := make([]string, 0, len(m.workflows))
+	for id := range m.workflows {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		wi, wj := m.workflows[ids[i]], m.workflows[ids[j]]
+		if !wi.start.Equal(wj.start) {
+			return wi.start.Before(wj.start)
+		}
+		return ids[i] < ids[j]
+	})
+	return ids
 }
 
 // removeSubAgent drops a sub-agent from the live panel once it finishes a round.

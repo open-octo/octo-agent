@@ -956,6 +956,41 @@ func keyIs(msg tea.KeyMsg, r rune) bool {
 	return got == r || got == r-32 || got == r+32
 }
 
+// renderWorkflowsPanel returns the workflow bottom-panel if any workflows are
+// running, otherwise an empty string.
+func (m *tuiModel) renderWorkflowsPanel() string {
+	if len(m.workflows) == 0 {
+		return ""
+	}
+	frame := m.spinnerGlyph()
+	var lines strings.Builder
+	for i, id := range m.workflowOrder() {
+		wf := m.workflows[id]
+		if wf == nil {
+			continue
+		}
+		if i > 0 {
+			lines.WriteByte('\n')
+		}
+		label := id
+		if wf.description != "" {
+			label = truncate1Line(wf.description)
+		}
+		elapsed := time.Since(wf.start).Round(time.Second)
+		status := wf.status
+		if status == "" {
+			status = "running"
+		}
+		chain := "starting…"
+		if wf.lastLine != "" {
+			chain = truncate1Line(wf.lastLine)
+		}
+		fmt.Fprintf(&lines, "  %c %s — %s  (%s, %s)",
+			frame, label, chain, status, elapsed)
+	}
+	return tui.Panel(fmt.Sprintf("workflows (%d running)", len(m.workflows)), lines.String()) + "\n"
+}
+
 // ── View ──
 
 // liveHeight returns the number of lines the "live" region (partial text,
@@ -995,6 +1030,9 @@ func (m *tuiModel) liveHeight() int {
 				h += len(sa.history) // one line per tool in history
 			}
 		}
+	}
+	if n := len(m.workflows); n > 0 {
+		h += 3 + n // panel border (2) + title (1) + one line per workflow
 	}
 	h += m.completionHeight() // slash-completion menu (0 when closed)
 	h += m.ta.Height()        // input box (textarea grows with content)
@@ -1157,6 +1195,8 @@ func (m *tuiModel) View() string {
 		b.WriteString(tui.Panel(title, lines.String()))
 		b.WriteByte('\n')
 	}
+
+	b.WriteString(m.renderWorkflowsPanel())
 
 	// Pending steer — show what the user typed mid-turn, indented right above
 	// the input box (Claude Code style: input上方，比普通消息多了一个indent).

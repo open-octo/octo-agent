@@ -1035,16 +1035,6 @@
             {/if}
           {/each}
 
-          <!-- Background workflows panel (persists across turns) -->
-          {#if workflows.length > 0}
-            <div class="msg-agent fadein">
-              <div class="agent-avatar"><OctoLogo size={18} /></div>
-              <div class="agent-content">
-                <WorkflowsCard runs={workflows} {now} />
-              </div>
-            </div>
-          {/if}
-
           <!-- Live sub-agents panel (current turn) -->
           {#if subAgents.length > 0}
             <div class="msg-agent fadein">
@@ -1102,6 +1092,13 @@
           {/if}
         </div>
       </div>
+
+      <!-- Background workflows panel (persists across turns, pinned above composer) -->
+      {#if workflows.length > 0}
+        <div class="workflows-bar fadein">
+          <WorkflowsCard runs={workflows} {now} />
+        </div>
+      {/if}
 
       <!-- Background processes tray -->
       {#if bgTasks && bgTasks.length > 0}
@@ -1193,6 +1190,11 @@
   /* Keep the chat column narrower than full-width settings pages for
      readability; Composer picks this up via CSS var inheritance. */
   --chat-content-max-width: 800px;
+}
+.workflows-bar {
+  flex: 0 0 auto;
+  max-width: var(--chat-content-max-width); margin: 0 auto; width: 100%;
+  padding: 0 24px 12px;
 }
 .messages {
   flex: 1;

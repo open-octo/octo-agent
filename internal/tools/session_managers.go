@@ -140,6 +140,10 @@ var defaultWorkflowMgr = NewWorkflowManager()
 // (parity with SetBackgroundOnExit / SubAgentManager.SetOnExit). Pass nil to clear.
 func SetDefaultWorkflowOnDone(fn func(WorkflowNotification)) { defaultWorkflowMgr.SetOnDone(fn) }
 
+// SetDefaultWorkflowOnEvent wires the live-progress hook on the process-global
+// workflow manager so the CLI/TUI can show a running-workflow panel. Pass nil to clear.
+func SetDefaultWorkflowOnEvent(fn func(WorkflowEvent)) { defaultWorkflowMgr.SetOnEvent(fn) }
+
 // KillDefaultWorkflows cancels every background workflow on the process-global
 // manager — called on CLI/TUI exit so a detached run doesn't linger.
 func KillDefaultWorkflows() { defaultWorkflowMgr.KillAll() }
