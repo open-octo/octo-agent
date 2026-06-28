@@ -703,6 +703,10 @@ func KillAllBackground() {
 	}
 }
 
+// DefaultBackgroundManager returns the process-wide background manager used by
+// the CLI/TUI and by tools when no per-session manager is injected.
+func DefaultBackgroundManager() *BackgroundManager { return defaultBg }
+
 // SetBackgroundOnExit registers the completion hook on the default manager (the
 // one the built-in terminal tool uses). The REPL wires this to push a
 // "background finished" notice into the conversation + UI. Pass nil to clear.

@@ -31,8 +31,9 @@ func FormatBgNote(e BgExit) string {
 
 // FormatBgNoteWithSummary renders a completion notice plus a summary of other
 // background processes still running. The summary helps the model track
-// in-flight async/interactive work without needing a separate terminal_list
-// poll. Pass nil for mgr to omit the summary (legacy tests / unknown scope).
+// in-flight async/interactive work without a dedicated process-list tool. Pass
+// nil for mgr to omit the summary (e.g. unit tests that only verify the basic
+// note format).
 func FormatBgNoteWithSummary(mgr *BackgroundManager, e BgExit) string {
 	note := FormatBgNote(e)
 	if mgr == nil {
