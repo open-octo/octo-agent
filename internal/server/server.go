@@ -1643,7 +1643,7 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	// rather than interleaving with it across processes.
 	storeID := sess.Store.ID
 	if ok, _, berr := s.acquireSessionBinding(storeID, agent.EntryChannel, false); !ok {
-		ad.SendText(ev.ChatID, "⚠️ "+berr.Error()+"\nReply /new to start a fresh session, or /bind --force to take over.", ev.MessageID)
+		ad.SendText(ev.ChatID, "⚠️ "+berr.Error()+"\nReply /new to start a fresh session, or run /list then /bind --force <number> to take it over.", ev.MessageID)
 		return
 	}
 	defer s.releaseSessionBinding(storeID, agent.EntryChannel)

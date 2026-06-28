@@ -390,7 +390,7 @@ func TestHandleChannelMessage_RejectsTurnWhenBoundToOtherEntry(t *testing.T) {
 
 	for _, txt := range ad.texts() {
 		if strings.Contains(txt, "bound to web") {
-			if !strings.Contains(txt, "/new") || !strings.Contains(txt, "/bind --force") {
+			if !strings.Contains(txt, "/new") || !strings.Contains(txt, "/list") || !strings.Contains(txt, "/bind --force <number>") {
 				t.Errorf("rejection message missing hints: %q", txt)
 			}
 			return
