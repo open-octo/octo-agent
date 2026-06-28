@@ -50,61 +50,35 @@ func Box(content string) string {
 
 // ── Banner ─────────────────────────────────────────────────────────────────
 
-var (
-	bannerStyle = lipgloss.NewStyle().
-			Foreground(ColBrand).
-			Bold(true)
-	bannerSubStyle = lipgloss.NewStyle().
-			Foreground(ColMuted)
-	bannerSepStyle = lipgloss.NewStyle().
-			Foreground(ColBorder)
-	bannerHintStyle = lipgloss.NewStyle().
-			Foreground(ColDimmer).
-			Italic(true)
-)
+// octoASCII is the giant pixel-art "OCTO" logotype rendered with block
+// characters. It assumes a monospace font; proportionally spaced terminals will
+// look misaligned, which is unavoidable for block-char ASCII art in a TUI.
+var octoASCII = `
+██████   ██████  ██████████   ██████
+██    ██ ██    ██     ██      ██    ██
+██    ██ ██           ██      ██    ██
+██    ██ ██           ██      ██    ██
+██    ██ ██           ██      ██    ██
+██    ██ ██    ██     ██      ██    ██
+ ██████   ██████      ██       ██████
+`
 
-// bannerHints are the key bindings shown beside the mascot at startup, so the
-// bottom status bar can stay free of a persistent hint line.
-var bannerHints = []string{
-	"Enter send · Shift+Enter/Ctrl+J newline · Ctrl+Q queue",
-	"Shift+Tab perm-mode · Ctrl+T tasks · Esc interrupt · Ctrl+C quit",
-}
-
-// octopusASCII is the pixel-art octo mascot built from full-width block chars,
-// giving it a crisp, high-contrast silhouette on both light and dark terminals.
-var octopusASCII = []string{
-	"   █████████████",
-	"  ██ ██ ███ ██ ██",
-	" █████████████████",
-	"  ████ ███ ████",
-	"      █████",
-	"     ███████",
-	"   ███ █████ ███",
-	"  ██  ███████  ██",
-	" ██   ███████   ██",
-	"  █████████████",
-}
-
-// octoArtWidth is the column the banner text starts at — wide enough to clear
-// the widest art line plus a two-space gutter, so the title/info/hints align.
-const octoArtWidth = 21
-
-// BannerHeight is the number of lines Banner renders (including the separator).
-const BannerHeight = 11
-
-// Banner renders the octo welcome header with pixel-art mascot.
-// The icon sits left of the title, Claude Code style.
+// Banner renders the octo welcome header with a giant pixel-art "OCTO" mark.
+// The logo sits left of the title and hints, Claude Code style.
 func Banner(version, model, cwd string, width int) string {
 	if width < 20 {
 		width = 20
 	}
 
-	// Build text lines
+	// Title: bold purple "◆ octo" with optional version
+	titleStyle := lipgloss.NewStyle().Foreground(ColBrand).Bold(true)
 	title := "◆ octo"
 	if version != "" {
 		title += "  " + version
 	}
 
+	// Path: muted model + cwd
+	infoStyle := lipgloss.NewStyle().Foreground(ColMuted)
 	info := model
 	if cwd != "" {
 		if info != "" {
@@ -113,38 +87,32 @@ func Banner(version, model, cwd string, width int) string {
 		info += cwd
 	}
 
-	// Merge art + text side-by-side. The mascot renders in the terminal's
-	// default colour; each text line is pushed to a fixed column so the
-	// title/info/hints align past the variable-width art.
-	var b strings.Builder
-	for i, artLine := range octopusASCII {
-		b.WriteString(artLine)
-		gap := octoArtWidth - lipgloss.Width(artLine)
-		if gap < 2 {
-			gap = 2
-		}
-		pad := strings.Repeat(" ", gap)
-		switch i {
-		case 1:
-			b.WriteString(pad)
-			b.WriteString(bannerStyle.Render(title))
-		case 2:
-			b.WriteString(pad)
-			b.WriteString(bannerSubStyle.Render(info))
-		case 3:
-			b.WriteString(pad)
-			b.WriteString(bannerHintStyle.Render(bannerHints[0]))
-		case 4:
-			b.WriteString(pad)
-			b.WriteString(bannerHintStyle.Render(bannerHints[1]))
-		}
-		b.WriteByte('\n')
+	// Hints: dimmest, italic
+	hintStyle := lipgloss.NewStyle().Foreground(ColDimmer).Italic(true)
+	hints := []string{
+		"Enter send · Shift+Enter/Ctrl+J newline · Ctrl+Q queue",
+		"Shift+Tab perm-mode · Ctrl+T tasks · Esc interrupt · Ctrl+C quit",
 	}
 
-	sep := strings.Repeat("─", width)
-	b.WriteString(bannerSepStyle.Render(sep))
-	return b.String()
+	// Build right-side info block vertically
+	infoBlock := lipgloss.JoinVertical(lipgloss.Top,
+		titleStyle.Render(title),
+		infoStyle.Render(info),
+		"", // blank line separator
+		hintStyle.Render(hints[0]),
+		hintStyle.Render(hints[1]),
+	)
+
+	// Horizontal join: art + 2-space gutter + info
+	art := strings.TrimSpace(octoASCII)
+	banner := lipgloss.JoinHorizontal(lipgloss.Top, art, "  ", infoBlock)
+
+	// Outer padding: 1 line top/bottom for breathing room
+	return lipgloss.NewStyle().Padding(1, 0).Render(banner)
 }
+
+// BannerHeight is the number of lines Banner renders.
+const BannerHeight = 9
 
 // ── Status bar ─────────────────────────────────────────────────────────────
 

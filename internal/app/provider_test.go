@@ -13,7 +13,7 @@ func TestVendor_KimiCodingPlan(t *testing.T) {
 		t.Fatal("kimi-coding-plan not found in registry")
 	}
 
-	if v.DisplayName != "Kimi Coding" {
+	if v.DisplayName != "Kimi Coding Plan" {
 		t.Errorf("DisplayName = %q, want Kimi Coding", v.DisplayName)
 	}
 	if v.Protocol != "anthropic" {
@@ -44,6 +44,7 @@ func TestVendor_KimiCodingPlan_BuildClient(t *testing.T) {
 func TestVendor_KimiCodingPlan_BuildClient_CustomBaseURL(t *testing.T) {
 	// Verify the custom base URL override is applied.
 	client, err := buildClient("kimi-coding-plan", "sk-dummy-key", "https://custom.example/v1")
+
 	if err != nil {
 		t.Fatalf("buildClient error: %v", err)
 	}
