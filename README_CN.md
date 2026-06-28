@@ -148,6 +148,29 @@ octo config path   # 打印配置文件路径
 
 优先级：**命令行 flag > 环境变量 > `~/.octo/config.yaml` > 内置默认**。API key 优先从 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 读取；向导可选择把 key 存进文件（权限 `0600`），但推荐用环境变量。
 
+### MCP Tool Search
+
+当 MCP 服务暴露大量工具时，每轮请求都上传全部工具 schema 会浪费上下文并降低准确率。Tool Search 保留内置工具直接可见，但把 MCP 工具 schema 延迟到一个小型桥工具之后：
+
+- `mcp_search` —— 按关键词搜索 MCP 工具（返回名称 + 一行描述）。
+- `mcp_describe` —— 加载某个发现工具的完整 JSON Schema。
+- `mcp_call` —— 用匹配该 schema 的参数调用工具。
+
+模型会自动走这套三步协议。在 `~/.octo/config.yaml` 里配置桥工具的激活时机：
+
+```yaml
+tools:
+  tool_search:
+    enabled: auto          # auto（默认）| on | off
+    threshold_pct: 10      # auto：延迟 schema 占上下文窗口 N% 时启用
+    search_default_limit: 5
+    max_search_limit: 20
+```
+
+- `auto`（默认）—— 仅当延迟加载的 MCP schema 达到模型上下文窗口的 `threshold_pct` 时才启用。
+- `on` —— 只要连了 MCP 工具，就始终延迟加载 schema。
+- `off` —— 像之前一样，预先上传全部 MCP schema。
+
 ## Skills
 
 Skill 是采用 Claude Code SKILL.md 格式的可复用指令集，从以下位置发现：
@@ -190,7 +213,7 @@ octo --sandbox --sandbox-read /opt/data     # 额外可读目录（可重复）
 | 记忆与配置 | 完成 | `~/.octo/octorules.md`、`.octorules`、`octo init`、`@include` |
 | Skills | 完成 | 兼容 Claude Code 的 SKILL.md 加载器（`octo skills`、`/skills`、`/<name>`） |
 | 沙箱 | 完成 | 操作系统强制的 `--sandbox`（macOS / Linux） |
-| MCP 客户端 | 完成 | `mcp.json` 的 stdio + Streamable HTTP 服务，tools/resources/prompts，device-flow OAuth |
+| MCP 客户端 | 完成 | `mcp.json` 的 stdio + Streamable HTTP 服务，tools/resources/prompts，device-flow OAuth；Tool Search 按需延迟加载大量 MCP 工具 schema |
 | 记忆 | 完成 | `~/.octo/memories/` 下的跨会话持久化记忆，自动抽取/整合 |
 | 子代理 | 完成 | `sub_agent` 并行扇出，异步 + 可恢复（`sub_agent_send`、`sub_agent_status`、`sub_agent_kill`） |
 | 工作流 | 完成 | `workflow` 工具 —— 确定性多代理编排（parallel/pipeline）、后台运行带 liveness + `workflow_kill`、git worktree 隔离、结构化输出 schema；支持 JS 或内嵌 Ruby DSL |

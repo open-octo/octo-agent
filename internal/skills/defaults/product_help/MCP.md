@@ -105,6 +105,25 @@ Connected 2 MCP servers: fs, my-api
 
 If a server fails to connect, the error is printed to stderr and that server is skipped — the session continues with the others.
 
+## Tool Search
+
+MCP servers with many tools can push a lot of schema tokens into every request. Tool Search defers those schemas: built-in tools stay visible, but MCP tools are discovered through a small bridge (`mcp_search` → `mcp_describe` → `mcp_call`) and only loaded when the model needs them.
+
+Control it under `tools.tool_search` in `~/.octo/config.yaml`:
+
+```yaml
+tools:
+  tool_search:
+    enabled: auto          # auto | on | off
+    threshold_pct: 10      # auto: activate when deferred schemas >= N% of context window
+    search_default_limit: 5
+    max_search_limit: 20
+```
+
+- `auto` (default) — enable only when deferred MCP schemas would occupy at least `threshold_pct` of the model's context window.
+- `on` — always defer MCP schemas when any MCP tool is connected.
+- `off` — upload every MCP schema upfront (legacy behavior).
+
 ## Troubleshooting
 
 | Symptom | Fix |
