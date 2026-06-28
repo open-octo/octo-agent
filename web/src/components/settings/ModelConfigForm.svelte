@@ -54,7 +54,7 @@
   let preset    = $derived(providers.find(p => p.id === providerId) ?? null)
   let variants  = $derived(preset?.endpoint_variants ?? [])
   // Catalogue vendors are pinned to their endpoint; only custom_endpoint
-  // providers (and Custom) take a typed Base URL.
+  // providers take a typed Base URL.
   let baseUrlLocked = $derived(!!preset && !preset.custom_endpoint)
   let keyPlaceholder = $derived(initial?.api_key_masked || $t('models.apikey.placeholder'))
 
@@ -66,11 +66,10 @@
     return v.label || v.base_url
   }
 
-  // Selecting a preset fills model + base_url; Custom clears them for free entry.
+  // Selecting a preset fills model + base_url.
   function onProviderChange() {
     result = null
-    if (providerId === '__custom__' || providerId === '') {
-      if (providerId === '__custom__') { model = ''; baseUrl = '' }
+    if (providerId === '') {
       return
     }
     if (preset) {
@@ -142,7 +141,6 @@
       {#each providers as p (p.id)}
         <option value={p.id}>{p.name}</option>
       {/each}
-      <option value="__custom__">{$t('models.provider.custom')}</option>
     </select>
     {#if preset?.website_url}
       <a class="field-link" href={preset.website_url} target="_blank" rel="noreferrer">{$t('models.get_apikey')}</a>

@@ -7,10 +7,10 @@ import (
 	"github.com/Leihb/octo-agent/internal/provider/openai"
 )
 
-func TestVendor_KimiCoding(t *testing.T) {
-	v := vendorByID("kimi-coding")
+func TestVendor_KimiForCoding(t *testing.T) {
+	v := vendorByID("kimi-for-coding")
 	if v == nil {
-		t.Fatal("kimi-coding not found in registry")
+		t.Fatal("kimi-for-coding not found in registry")
 	}
 
 	if v.DisplayName != "Kimi Coding" {
@@ -33,17 +33,17 @@ func TestVendor_KimiCoding(t *testing.T) {
 	}
 }
 
-func TestVendor_KimiCoding_BuildClient(t *testing.T) {
+func TestVendor_KimiForCoding_BuildClient(t *testing.T) {
 	// buildClient should succeed with a dummy key for the anthropic protocol.
-	_, err := buildClient("kimi-coding", "sk-dummy-key", "")
+	_, err := buildClient("kimi-for-coding", "sk-dummy-key", "")
 	if err != nil {
-		t.Fatalf("buildClient(kimi-coding) error: %v", err)
+		t.Fatalf("buildClient(kimi-for-coding) error: %v", err)
 	}
 }
 
-func TestVendor_KimiCoding_BuildClient_CustomBaseURL(t *testing.T) {
+func TestVendor_KimiForCoding_BuildClient_CustomBaseURL(t *testing.T) {
 	// Verify the custom base URL override is applied.
-	client, err := buildClient("kimi-coding", "sk-dummy-key", "https://custom.example/v1")
+	client, err := buildClient("kimi-for-coding", "sk-dummy-key", "https://custom.example/v1")
 	if err != nil {
 		t.Fatalf("buildClient error: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestVendor_KimiCoding_BuildClient_CustomBaseURL(t *testing.T) {
 
 func TestIsKnownVendor(t *testing.T) {
 	for _, id := range []string{
-		"openrouter", "deepseek", "minimax", "kimi", "kimi-coding",
+		"openrouter", "deepseek", "minimax", "kimi", "kimi-for-coding",
 		"glm", "openai", "anthropic", "bailian", "mistral", "mimo",
 		"openai_compatible", "anthropic_compatible",
 	} {
@@ -157,7 +157,7 @@ func TestVendorEnvVars(t *testing.T) {
 	tests := []struct {
 		id, wantEnv string
 	}{
-		{"kimi-coding", "MOONSHOT_API_KEY"},
+		{"kimi-for-coding", "MOONSHOT_API_KEY"},
 		{"kimi", "MOONSHOT_API_KEY"},
 		{"deepseek", "DEEPSEEK_API_KEY"},
 		{"openai", "OPENAI_API_KEY"},

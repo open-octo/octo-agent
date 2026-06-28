@@ -103,7 +103,7 @@ var Registry = []Vendor{
 		},
 	},
 	{
-		ID:             "kimi-coding",
+		ID:             "kimi-for-coding",
 		DisplayName:    "Kimi Coding",
 		Protocol:       "anthropic",
 		API:            "anthropic-messages",
