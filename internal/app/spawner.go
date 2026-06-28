@@ -291,7 +291,7 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 		handler = func(ev agent.AgentEvent) {
 			switch ev.Kind {
 			case agent.EventToolStarted:
-				sink(tools.SubAgentEvent{Kind: "tool", ToolName: ev.ToolName})
+				sink(tools.SubAgentEvent{Kind: "tool", ToolName: ev.ToolName, ToolInput: ev.Input})
 			case agent.EventToolError:
 				sink(tools.SubAgentEvent{Kind: "tool_error", ToolName: ev.ToolName})
 			}

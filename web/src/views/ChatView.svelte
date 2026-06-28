@@ -380,6 +380,7 @@
         (ev as any).agent_type ?? '',
         (ev as any).kind ?? '',
         (ev as any).tool_name ?? '',
+        (ev as any).tool_input,
       )
     }))
 

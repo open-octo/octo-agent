@@ -275,6 +275,7 @@ export function setToolError(sessionId: string, toolId: string | undefined, erro
 export interface SubAgentTool {
   name: string
   error: boolean
+  input?: Record<string, any> // optional tool arguments for display
 }
 export interface SubAgentState {
   id: string
@@ -312,6 +313,7 @@ export function applySubAgentEvent(
   agentType: string,
   kind: string,
   toolName: string,
+  toolInput?: Record<string, any>,
 ) {
   chatSubAgents.update(m => {
     const list = [...(m[sessionId] || [])]
@@ -339,7 +341,7 @@ export function applySubAgentEvent(
     if (description && a.description === a.id) a.description = description
     if (agentType && !a.agentType) a.agentType = agentType
     if (kind === 'tool' || kind === 'tool_error') {
-      a.tools.push({ name: toolName || 'tool', error: kind === 'tool_error' })
+      a.tools.push({ name: toolName || 'tool', error: kind === 'tool_error', input: toolInput })
       a.lastTool = toolName || a.lastTool
     } else if (kind === 'done') {
       a.status = 'done'
