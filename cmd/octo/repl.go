@@ -124,7 +124,7 @@ func runOnce(cfg replConfig, prompt string, stream bool) int {
 			cfg.subAgentMgr.KillAll()
 		}()
 	}
-	tools.SetBackgroundOnExit(func(e tools.BgExit) { a.Inbox.Enqueue(tools.FormatBgNote(e)) })
+	tools.SetBackgroundOnExit(func(e tools.BgExit) { a.Inbox.Enqueue(tools.FormatBgNoteWithSummary(nil, e)) })
 	defer tools.SetBackgroundOnExit(nil)
 
 	// Background workflows ride the same inbox path, so a finished detached run

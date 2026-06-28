@@ -84,7 +84,7 @@ func (t TerminalTool) managerFor(ctx context.Context) *BackgroundManager {
 func (TerminalTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal",
-		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, write_file, edit_file, glob, grep) over raw shell commands when they exist.\n\nChoosing sync vs background:\n- Default (no run_in_background): runs synchronously with a 120s timeout. Use for fast commands whose output you need immediately (e.g. `ls`, `git status`, `grep`, short scripts).\n- run_in_background:\"async\" — ONE-SHOT tasks (compiling, testing, installing, building, linting, CI checks): detaches immediately, returns a process id. The system automatically notifies you on completion. DO NOT use terminal_output or terminal_input; wait for the completion notification.\n- run_in_background:\"interactive\" — LONG-RUNNING services, REPLs, watchers, servers (e.g. `rails c`, `octo serve`, `docker compose up`): detaches immediately, returns a process id. You may use terminal_output to inspect logs and terminal_input to feed commands. Verify the service with an external check (e.g., `curl http://localhost:PORT`, `pgrep`) rather than polling terminal_output in a tight loop.\n\nBuffering: the process is connected via pipes, not a terminal, so stdio block-buffers its output — a chatty program's logs can sit unflushed and invisible to terminal_output for a long time. On macOS/Linux, when you will want live logs, prefix the command with `stdbuf -oL` (e.g. `stdbuf -oL npm run dev`) to force line buffering.\n\nTo feed text to a command's stdin, pass it via the stdin parameter instead of embedding it in the command string — embedded text gets interpreted by the shell (backticks, quotes, $), stdin is delivered verbatim.\n\nNEVER put backticks (`) inside a quoted shell string: every shell mangles them — POSIX sh/bash run the backticked text as command substitution (you'll see 'command not found' / 'not found' noise), and PowerShell treats the backtick as an escape character and silently drops it or turns `n/`t into control chars (corrupting the text with no error). For PR/issue/commit bodies (or any text) that contain markdown code spans, ALWAYS pass the text through the stdin parameter with `--body-file -` / `-F -` rather than `--body \"...`...\"`.",
+		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, write_file, edit_file, glob, grep) over raw shell commands when they exist.\n\nChoosing sync vs background:\n- Default (no run_in_background): runs synchronously with a 120s timeout. Use for fast commands whose output you need immediately (e.g. `ls`, `git status`, `grep`, short scripts).\n- run_in_background:\"async\" — ONE-SHOT tasks (compiling, testing, installing, building, linting, CI checks): detaches immediately, returns a process id. The system automatically notifies you on completion. DO NOT use terminal_output or terminal_input; wait for the completion notification.\n- run_in_background:\"interactive\" — LONG-RUNNING services, REPLs, watchers, servers (e.g. `rails c`, `octo serve`, `docker compose up`): detaches immediately, returns a process id. You may use terminal_output to inspect logs and terminal_input to feed commands. Verify the service with an external check (e.g., `curl http://localhost:PORT`, `pgrep`) rather than polling terminal_output in a tight loop.\n\nLost a process id? The [BACKGROUND COMPLETED] notification for each finished task includes a summary of other async and interactive tasks still running, so you can track in-flight work without listing processes.\n\nBuffering: the process is connected via pipes, not a terminal, so stdio block-buffers its output — a chatty program's logs can sit unflushed and invisible to terminal_output for a long time. On macOS/Linux, when you will want live logs, prefix the command with `stdbuf -oL` (e.g. `stdbuf -oL npm run dev`) to force line buffering.\n\nTo feed text to a command's stdin, pass it via the stdin parameter instead of embedding it in the command string — embedded text gets interpreted by the shell (backticks, quotes, $), stdin is delivered verbatim.\n\nNEVER put backticks (`) inside a quoted shell string: every shell mangles them — POSIX sh/bash run the backticked text as command substitution (you'll see 'command not found' / 'not found' noise), and PowerShell treats the backtick as an escape character and silently drops it or turns `n/`t into control chars (corrupting the text with no error). For PR/issue/commit bodies (or any text) that contain markdown code spans, ALWAYS pass the text through the stdin parameter with `--body-file -` / `-F -` rather than `--body \"...`...\"`.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -377,7 +377,7 @@ func (t TerminalOutputTool) managerFor(ctx context.Context) *BackgroundManager {
 func (TerminalOutputTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal_output",
-		Description: "Peek at the recent output of an INTERACTIVE background process launched with terminal run_in_background:\"interactive\". Snapshots the last N lines plus its status (running / exited). Read-only; to stop the process use kill_shell.\n\nUse this to CHECK PROGRESS of a still-running interactive process on demand — e.g. inspect a server's startup logs. You may NOT use terminal_output on async processes; async tasks must not be polled, so wait for the [BACKGROUND COMPLETED] notification instead. This is a snapshot, not a feed — repeated calls return the current tail, so do not call it in a loop. Repeated empty snapshots of a running process are detected as polling and will trigger a hard STOP reminder. To find an id you've lost track of, use terminal_list.",
+		Description: "Peek at the recent output of an INTERACTIVE background process launched with terminal run_in_background:\"interactive\". Snapshots the last N lines plus its status (running / exited). Read-only; to stop the process use kill_shell.\n\nUse this to CHECK PROGRESS of a still-running interactive process on demand — e.g. inspect a server's startup logs. You may NOT use terminal_output on async processes; async tasks must not be polled, so wait for the [BACKGROUND COMPLETED] notification instead. This is a snapshot, not a feed — repeated calls return the current tail, so do not call it in a loop. Repeated empty snapshots of a running process are detected as polling and will trigger a hard STOP reminder.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -415,14 +415,14 @@ func (t TerminalOutputTool) Execute(ctx context.Context, _ string, input map[str
 	mgr := t.managerFor(ctx)
 	mode, ok := mgr.Mode(id)
 	if !ok {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: no background process %q (it may have been reaped — use terminal_list to see live processes)", id)
+		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: no background process %q (it may have been reaped)", id)
 	}
 	if mode != BgModeInteractive {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: process %q is an async task; do not poll it. Wait for the [BACKGROUND COMPLETED] notification instead", id)
 	}
 	out, status, found, blocked, _ := mgr.Tail(id, lines)
 	if !found {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: no background process %q (it may have been reaped — use terminal_list to see live processes)", id)
+		return agent.ToolResult{Text: ""}, fmt.Errorf("terminal_output: no background process %q (it may have been reaped)", id)
 	}
 	header := "[status: " + status + "]"
 	if out == "" {
@@ -566,57 +566,4 @@ func (t KillShellTool) Execute(ctx context.Context, _ string, input map[string]a
 		return agent.ToolResult{Text: header + "\n(no new output)"}, nil
 	}
 	return agent.ToolResult{Text: header + "\n" + MaybeSpillOutput(id, out)}, nil
-}
-
-// TerminalListTool lists this session's background processes (running and
-// recently-finished), so the model can recover a process id it lost track of
-// and see what is still running. The observe surface is push for completion +
-// pull-snapshot for everything else: terminal_list (this), terminal_output
-// (per-process tail). Neither advances any cursor.
-type TerminalListTool struct{ mgr *BackgroundManager }
-
-func (t TerminalListTool) managerFor(ctx context.Context) *BackgroundManager {
-	return resolveBackgroundManager(ctx, t.mgr)
-}
-
-// Definition takes no parameters.
-func (TerminalListTool) Definition() agent.ToolDefinition {
-	return agent.ToolDefinition{
-		Name: "terminal_list",
-		Description: "List this session's background processes — those started with terminal run_in_background:\"async\" or \"interactive\" — with their id, mode, status (running / exited), elapsed time, and command. Use to recover a process id you've lost track of, or to see what is still running before checking its output (terminal_output) or stopping it (kill_shell).\n\n" +
-			"Do NOT call terminal_list in a loop to wait for async background processes to finish. Their completion is pushed automatically via a [BACKGROUND COMPLETED] system notification; polling terminal_list will not make them finish faster and wastes turns.",
-		Parameters: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}
-}
-
-// Execute renders the tracked background processes as a compact table.
-func (t TerminalListTool) Execute(ctx context.Context, _ string, _ map[string]any) (agent.ToolResult, error) {
-	infos := t.managerFor(ctx).List()
-	if len(infos) == 0 {
-		return agent.ToolResult{Text: "No background processes."}, nil
-	}
-	var b strings.Builder
-	now := time.Now()
-	runningAsync := 0
-	for _, in := range infos {
-		var elapsed time.Duration
-		if in.Status == "running" {
-			elapsed = now.Sub(in.Start)
-			if in.Mode == BgModeAsync {
-				runningAsync++
-			}
-		} else {
-			// Use the recorded end time so exited processes don't appear to keep
-			// running every time terminal_list is called.
-			elapsed = in.End.Sub(in.Start)
-		}
-		fmt.Fprintf(&b, "%s  [%s]  [%s]  %s  %s\n", in.ID, in.Mode, in.Status, elapsed.Round(time.Second), in.Command)
-	}
-	if runningAsync > 0 {
-		fmt.Fprintf(&b, "\n<system-reminder>%d async background task(s) are still running. Do not poll terminal_list; the system will push a [BACKGROUND COMPLETED] notification when each finishes.</system-reminder>", runningAsync)
-	}
-	return agent.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
 }

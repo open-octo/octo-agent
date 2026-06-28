@@ -62,9 +62,12 @@ func (s *Server) wireBackgroundTaskNotices(sessionID string) {
 }
 
 // notifyAgentBgExit pushes a background-completion note to the model — parity
-// with the CLI/TUI's SetBackgroundOnExit → Inbox wiring.
+// with the CLI/TUI's SetBackgroundOnExit → Inbox wiring. Includes a summary of
+// other running background tasks so the model can track in-flight work without
+// polling terminal_list.
 func (s *Server) notifyAgentBgExit(sessionID string, e tools.BgExit) {
-	s.deliverModelNote(sessionID, tools.FormatBgNote(e))
+	mgr := tools.SessionBackgroundManager(sessionID)
+	s.deliverModelNote(sessionID, tools.FormatBgNoteWithSummary(mgr, e))
 }
 
 // notifySubAgentExit pushes an async sub-agent completion to the model —

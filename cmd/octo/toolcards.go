@@ -26,8 +26,6 @@ func cardVerbFor(toolName string) string {
 		return "Kill"
 	case "terminal_input":
 		return "Input"
-	case "terminal_list":
-		return "List"
 	case "grep":
 		return "Grep"
 	case "web_search":
@@ -60,9 +58,6 @@ func cardTargetFor(toolName string, input map[string]any) string {
 			}
 			return id
 		}
-	case "terminal_list":
-		// terminal_list takes no parameters; give the card a readable target.
-		return "background"
 	case "grep", "glob":
 		key = "pattern"
 	case "web_search":

@@ -11,12 +11,14 @@ through one `BackgroundManager`.
 |---|---|
 | `terminal` | Run a command. Synchronous, `run_in_background:"async"` / `"interactive"`, or `detached:true`. |
 | `terminal_output` | Snapshot the last N lines of an **interactive** background process's output + status. |
-| `terminal_list` | List this session's background processes (id, mode, status, elapsed, command). |
 | `terminal_input` | Write to an **interactive** background process's stdin. |
 | `kill_shell` | Signal/terminate a background process and return its final output. |
 
 `terminal` is the only one that starts work; the rest address an existing
-process by the `bg_N` id `terminal` returns.
+process by the `bg_N` id `terminal` returns. When a tracked process exits, the
+`[BACKGROUND COMPLETED]` notification carries a summary of other async and
+interactive tasks still running, so the model can track in-flight work without
+listing processes.
 
 ## Three ways to run a command
 
@@ -123,19 +125,20 @@ Two distinct needs, two distinct mechanisms:
   or prepended to the next turn when idle. It is a `<system-reminder>` so the
   model reads it as an environment event, not user speech — and idle delivery
   never auto-starts a turn (the notice waits for the next turn the user
-  initiates; the process is also visible in `terminal_list` meanwhile). The
-  model never needs to poll to learn a process finished or to get its result.
-  The hook reads via the cursor (`readNew`), so anything pushed is already
-  consumed and won't reappear in a later read. Wired in the CLI/TUI REPL only.
+  initiates; the `[BACKGROUND COMPLETED]` notification also lists other tasks
+  still running). The model never needs to poll to learn a process finished or
+  to get its result. The hook reads via the cursor (`readNew`), so anything
+  pushed is already consumed and won't reappear in a later read. Wired in the
+  CLI/TUI REPL only.
 
 - **Progress is pulled, as a snapshot — but only for interactive processes.**
   `terminal_output` returns the last N lines (`lines`, default 50) plus status
   via `bgProcess.tail`, which does **not** advance any cursor. Repeated calls
   return the same view, so there is no "new since last call" to chase and no
   incentive to loop. `terminal_output` is rejected for async processes; their
-  completion is pushed automatically. `terminal_list` is the other snapshot —
-  the set of live/recent processes, annotated with mode — for recovering a lost
-  id.
+  completion is pushed automatically. The `[BACKGROUND COMPLETED]` notification
+  itself carries a summary of other running async and interactive tasks, so the
+  model does not need a separate process-list tool to track in-flight work.
 
 The internal cursor read (`readNew`) still exists for the synchronous poll loop
 and the completion push; only the model-facing `terminal_output` uses the
@@ -148,11 +151,11 @@ processes run at once, but the agent loop still takes one turn at a time.
 
 ### Loop detection exemption
 
-`terminal_output` and `terminal_list` are exempt from the agent loop's
-duplicate-tool-call "stuck" detector. Repeatedly checking on the same background
-process is normal wait behaviour, and the loop should not stop the turn just
-because the model asked for another progress snapshot. The tools themselves still
-enforce their own anti-polling limits (see `background.go`).
+`terminal_output` is exempt from the agent loop's duplicate-tool-call "stuck"
+detector. Repeatedly checking on the same background process is normal wait
+behaviour, and the loop should not stop the turn just because the model asked
+for another progress snapshot. The tool itself still enforces its own
+anti-polling limits (see `background.go`).
 
 - `BackgroundManager` is a `map[id]*bgProcess` with two goroutines per process
   (reader + waiter), so N `run_in_background` launches run concurrently. The

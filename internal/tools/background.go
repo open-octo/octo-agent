@@ -486,8 +486,8 @@ func (m *BackgroundManager) Mode(id string) (BackgroundMode, bool) {
 	return p.mode, true
 }
 
-// BgInfo is a snapshot of a tracked background process — used both by the TUI's
-// live "background (N running)" panel and by the terminal_list tool.
+// BgInfo is a snapshot of a tracked background process — used by the TUI's
+// live "background (N running)" panel and by background-completion summaries.
 type BgInfo struct {
 	ID      string
 	Command string
@@ -504,8 +504,8 @@ func (m *BackgroundManager) ListRunning() []BgInfo {
 }
 
 // List returns every visible tracked process — running AND exited-but-not-yet
-// reaped — oldest first, so the model (via terminal_list) can recover ids and
-// see what has finished. Invisible (sync, pre-timeout) processes are excluded.
+// reaped — oldest first, so the TUI panel and completion summaries can see what
+// has finished. Invisible (sync, pre-timeout) processes are excluded.
 func (m *BackgroundManager) List() []BgInfo {
 	return m.list(true)
 }

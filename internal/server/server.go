@@ -1706,7 +1706,7 @@ func (s *Server) wireChannelCompletionHooks(sess *channel.Session, ad channel.Ad
 	key := "im:" + string(sess.Key)
 	bgMgr := tools.SessionBackgroundManager(key)
 	bgMgr.SetOnExit(func(e tools.BgExit) {
-		sess.Agent.Inbox.Enqueue(tools.FormatBgNote(e))
+		sess.Agent.Inbox.Enqueue(tools.FormatBgNoteWithSummary(bgMgr, e))
 		go s.runChannelIdleTurn(context.Background(), sess, ad, ev)
 	})
 	wfMgr := tools.SessionWorkflowManager(key)

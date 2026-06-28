@@ -12,7 +12,6 @@ func TestCardVerbFor(t *testing.T) {
 		"terminal_output": "Check",
 		"kill_shell":      "Kill",
 		"terminal_input":  "Input",
-		"terminal_list":   "List",
 		"grep":            "Grep",
 		"web_search":      "Search",
 		"glob":            "Glob",
@@ -43,9 +42,6 @@ func TestCardTargetFor(t *testing.T) {
 		// terminal_output names the process by its command; with no live process
 		// to resolve it falls back to the bare internal id (never "id (cmd)").
 		{"terminal_output", map[string]any{"id": "bg_404"}, "bg_404"},
-		// terminal_list has no input; target names what it lists.
-		{"terminal_list", nil, "background"},
-		{"terminal_list", map[string]any{}, "background"},
 	}
 	for _, c := range cases {
 		if got := cardTargetFor(c.tool, c.input); got != c.want {
@@ -75,12 +71,6 @@ func TestRenderToolCard_Dispatch(t *testing.T) {
 		t.Errorf("terminal_output should render an output card; got:\n%s", out)
 	}
 
-	// terminal_list → output card showing the process table.
-	list := renderToolCard("terminal_list", map[string]any{}, "bg_1  [interactive]  [running]  12s  node server.js", false)
-	if !strings.Contains(list, "List(background)") || !strings.Contains(list, "bg_1") {
-		t.Errorf("terminal_list should render a process-list card; got:\n%s", list)
-	}
-
 	// non-card tool → "".
 	if got := renderToolCard("sub_agent", map[string]any{}, "x", false); got != "" {
 		t.Errorf("non-card tool should return \"\"; got %q", got)
@@ -99,10 +89,6 @@ func TestRendersCard_PlainDisablesCards(t *testing.T) {
 	// terminal_output is now a card tool.
 	if !plainOff.rendersCard("terminal_output") {
 		t.Error("with --plain off, terminal_output should render as a card")
-	}
-	// terminal_list is also a card tool.
-	if !plainOff.rendersCard("terminal_list") {
-		t.Error("with --plain off, terminal_list should render as a card")
 	}
 	// A non-card tool is never a card regardless of --plain.
 	if plainOff.rendersCard("sub_agent") {
