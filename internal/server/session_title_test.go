@@ -93,3 +93,61 @@ func TestDoAgentTurn_GeneratesSessionTitle(t *testing.T) {
 		}
 	}
 }
+
+// TestListSessionsBrief_ReflectsGeneratedTitle guards the REST fallback path
+// used by the web UI when the live session_renamed broadcast is missed. The
+// sidebar should be able to refresh from listSessions and see the new title.
+func TestListSessionsBrief_ReflectsGeneratedTitle(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Title = "Session 3"
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Drain the rename broadcast so we know title generation finished.
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 256),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
+
+	srv.doAgentTurn(sess, "hello there", nil, nil)
+
+	deadline := time.After(5 * time.Second)
+wait:
+	for {
+		select {
+		case b := <-conn.send:
+			var ev map[string]any
+			if err := json.Unmarshal(b, &ev); err != nil {
+				continue
+			}
+			if ev["type"] == "session_renamed" && ev["session_id"] == sess.ID {
+				break wait
+			}
+		case <-deadline:
+			t.Fatal("no session_renamed broadcast — title was never generated")
+		}
+	}
+
+	// listSessionsBrief is what the frontend REST fallback calls. It must
+	// report the generated title, not the placeholder.
+	brief := srv.listSessionsBrief()
+	if len(brief) != 1 {
+		t.Fatalf("listSessionsBrief returned %d sessions, want 1", len(brief))
+	}
+	if brief[0].Name != "stub reply" {
+		t.Errorf("Name = %q, want %q", brief[0].Name, "stub reply")
+	}
+}

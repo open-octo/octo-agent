@@ -147,7 +147,6 @@
         {@const editing = $editId === s.id}
         {@const menuOpen = $menuFor === s.id && !$selMode}
         {@const solid = active && !$selMode}
-        {@const displayName = (s as any).name || (s as any).title || s.id}
         {@const icon = sessionIcon(s)}
         <div
           class="nav-row"
@@ -185,7 +184,7 @@
             <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
           </span>
           {:else}
-          <span class="session-title" style="color:{solid ? '#fff' : 'var(--text)'};">{displayName}</span>
+          <span class="session-title" style="color:{solid ? '#fff' : 'var(--text)'};">{(s as any).name || (s as any).title || s.id}</span>
           {#if !menuOpen}
             <span class="session-time" style="color:{solid ? 'rgba(255,255,255,0.75)' : 'var(--text-quaternary)'};">
               {(s as any).source === 'cron' ? $t('sidebar.cron') : ''}
@@ -197,7 +196,7 @@
             </span>
           {/if}
           {#if menuOpen}
-            <span class="row-action" onclick={(e) => { e.stopPropagation(); editId.set(s.id); editDraft.set(displayName); menuFor.set(null) }} title={$t('sidebar.rename')}>
+            <span class="row-action" onclick={(e) => { e.stopPropagation(); editId.set(s.id); editDraft.set((s as any).name || (s as any).title || s.id); menuFor.set(null) }} title={$t('sidebar.rename')}>
               <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
             </span>
             <span class="row-action del" onclick={(e) => { e.stopPropagation(); delSession(s.id) }} title={$t('common.delete')}>
