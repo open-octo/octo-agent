@@ -972,19 +972,13 @@ func (m *tuiModel) renderWorkflowsPanel() string {
 		if i > 0 {
 			lines.WriteByte('\n')
 		}
-		label := id
-		if wf.description != "" {
-			label = truncate1Line(wf.description)
-		}
+		label := truncate1LineOr(wf.description, id)
 		elapsed := time.Since(wf.start).Round(time.Second)
 		status := wf.status
 		if status == "" {
 			status = "running"
 		}
-		chain := "starting…"
-		if wf.lastLine != "" {
-			chain = truncate1Line(wf.lastLine)
-		}
+		chain := truncate1LineOr(wf.lastLine, "starting…")
 		fmt.Fprintf(&lines, "  %c %s — %s  (%s, %s)",
 			frame, label, chain, status, elapsed)
 	}

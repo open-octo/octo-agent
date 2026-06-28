@@ -541,6 +541,20 @@ func truncate1Line(s string) string {
 	return "(empty error)"
 }
 
+// truncate1LineOr is like truncate1Line but returns fallback when s contains no
+// non-empty line, avoiding the error-oriented "(empty error)" placeholder in
+// UI labels.
+func truncate1LineOr(s, fallback string) string {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		return truncateRunes(line, 100)
+	}
+	return fallback
+}
+
 // truncateRunes returns s truncated to at most max runes. If truncation is
 // needed, the result ends with "..." and never splits a multi-byte UTF-8
 // character (byte slicing a CJK string in the middle of a rune produces the

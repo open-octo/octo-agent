@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -954,7 +955,8 @@ func (m *tuiModel) handleWorkflowEvent(ev tools.WorkflowEvent) {
 }
 
 // workflowOrder returns running workflow ids sorted by start time (oldest first)
-// so the panel order is stable across ticks.
+// so the panel order is stable across ticks. Run ids are "wf_N"; if timestamps
+// tie, the numeric suffix is used so "wf_10" sorts after "wf_2".
 func (m *tuiModel) workflowOrder() []string {
 	ids := make([]string, 0, len(m.workflows))
 	for id := range m.workflows {
@@ -965,9 +967,19 @@ func (m *tuiModel) workflowOrder() []string {
 		if !wi.start.Equal(wj.start) {
 			return wi.start.Before(wj.start)
 		}
-		return ids[i] < ids[j]
+		return workflowSeqLess(ids[i], ids[j])
 	})
 	return ids
+}
+
+// workflowSeqLess compares two "wf_N" run ids by their numeric suffix.
+func workflowSeqLess(a, b string) bool {
+	na, errA := strconv.Atoi(strings.TrimPrefix(a, "wf_"))
+	nb, errB := strconv.Atoi(strings.TrimPrefix(b, "wf_"))
+	if errA != nil || errB != nil {
+		return a < b
+	}
+	return na < nb
 }
 
 // removeSubAgent drops a sub-agent from the live panel once it finishes a round.

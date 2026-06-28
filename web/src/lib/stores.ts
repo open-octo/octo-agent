@@ -345,9 +345,10 @@ export function applySubAgentEvent(
 }
 
 // ── Background workflows ─────────────────────────────────────────────────────
-// One entry per background workflow run, driven by the workflow_event stream
-// (kind: started | progress | done). Runs persist across turns, so this is
-// never auto-reset — entries accumulate for the session's lifetime.
+// Live running workflow runs, driven by the workflow_event stream
+// (kind: started | progress | done). The pinned panel only shows workflows that
+// are still running; once a run finishes it is removed so the bar does not grow
+// indefinitely. Completion is already visible as a chat message from the agent.
 const maxWorkflowProgressLines = 200
 
 export interface WorkflowRunState {
@@ -368,11 +369,18 @@ export function applyWorkflowEvent(
 ) {
   if (!runId) return
   chatWorkflows.update(m => {
-    const list = [...(m[sessionId] || [])]
+    let list = [...(m[sessionId] || [])]
     let idx = list.findIndex(r => r.id === runId)
     if (idx < 0) {
       list.push({ id: runId, description: description || runId, status: 'running', progress: [], startedAt: Date.now() })
       idx = list.length - 1
+    }
+    if (kind === 'done') {
+      // Remove finished runs from the live panel; completion lands as a chat
+      // message, so keeping done/error entries here would push the composer
+      // down in long-lived sessions.
+      list = list.filter(r => r.id !== runId)
+      return { ...m, [sessionId]: list }
     }
     const r = { ...list[idx], progress: [...list[idx].progress] }
     if (description && (r.description === r.id || !r.description)) r.description = description
@@ -383,8 +391,6 @@ export function applyWorkflowEvent(
           r.progress = r.progress.slice(r.progress.length - maxWorkflowProgressLines)
         }
       }
-    } else if (kind === 'done') {
-      r.status = status === 'error' ? 'error' : 'done'
     }
     list[idx] = r
     return { ...m, [sessionId]: list }

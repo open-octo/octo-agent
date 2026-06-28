@@ -56,6 +56,19 @@ func TestWorkflowPanel_MultipleOrdering(t *testing.T) {
 	}
 }
 
+func TestWorkflowPanel_TieBreakerNumeric(t *testing.T) {
+	m := newWorkflowPanelModel()
+	now := time.Now()
+	m.workflows["wf_10"] = &workflowUI{description: "Ten", start: now}
+	m.workflows["wf_2"] = &workflowUI{description: "Two", start: now}
+
+	order := m.workflowOrder()
+	want := []string{"wf_2", "wf_10"}
+	if len(order) != len(want) || order[0] != want[0] || order[1] != want[1] {
+		t.Errorf("order = %v, want %v", order, want)
+	}
+}
+
 func TestWorkflowPanel_RenderRendersRunning(t *testing.T) {
 	m := newWorkflowPanelModel()
 	m.width = 120

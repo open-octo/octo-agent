@@ -224,6 +224,18 @@ func TestTruncate1Line_NoMojibakeOnCJK(t *testing.T) {
 	}
 }
 
+func TestTruncate1LineOr_FallsBackOnEmptyOrWhitespace(t *testing.T) {
+	if got := truncate1LineOr("", "fallback"); got != "fallback" {
+		t.Errorf("empty = %q, want fallback", got)
+	}
+	if got := truncate1LineOr("   \n\n  ", "fallback"); got != "fallback" {
+		t.Errorf("whitespace-only = %q, want fallback", got)
+	}
+	if got := truncate1LineOr("real line\n", "fallback"); got != "real line" {
+		t.Errorf("non-empty = %q, want 'real line'", got)
+	}
+}
+
 func TestTruncateRunes(t *testing.T) {
 	cases := []struct {
 		in   string
