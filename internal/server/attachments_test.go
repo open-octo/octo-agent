@@ -204,6 +204,8 @@ func TestHandleWSUserMessage_ImageOnly(t *testing.T) {
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")
+	sess.Title = "fixed title" // suppress async title generation so Windows
+	// cleanup doesn't race a fire-and-forget title goroutine writing the file.
 	if err := sess.Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
