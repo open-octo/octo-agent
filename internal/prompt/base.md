@@ -89,8 +89,8 @@ Memories are snapshots and can be stale. If one names a file path, function, fla
 
 ### One-shot tasks (compiles, tests, installs, builds, linting, CI checks)
 
-- First decide whether the next step needs this command's output. If it does — for example, you are running `npm install` because you immediately need to run a build or test that depends on the installed packages — run it **synchronously** (default, no `run_in_background`). Synchronous commands return their full output in the same turn, so there is no polling and no waiting for a notification.
-- Only use `run_in_background:"async"` when the result is NOT needed before you can continue, or when you have independent work to do while it runs. Do not let a long command block the session.
+- First decide whether the **next tool call in this turn depends on the command having finished**. If it does — for example, you are running `npm install` because you immediately need to run `npm run build`, or you are generating code and then compiling it in the same turn — run it **synchronously** (default, no `run_in_background`). Synchronous commands return their full output in the same turn, so there is no polling and no waiting for a notification.
+- Only use `run_in_background:"async"` when the result can arrive later via the `[BACKGROUND COMPLETED]` notification, or when you have independent work to do while it runs. For example, after the user explicitly asks "run the tests", `go test ./...` can be async because you only need to report the final result. Do not let a long command block the session.
 - After launching async, **do not call `terminal_output` or `terminal_input`**. The system will automatically notify you when the process finishes.
 - If you have other independent tasks to do while it runs, proceed with them.
 - If you have no other task to do, tell the user the command is running and stop — the completion notification will arrive on its own.
