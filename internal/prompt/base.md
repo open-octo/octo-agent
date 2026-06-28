@@ -79,8 +79,9 @@ Memories are snapshots and can be stale. If one names a file path, function, fla
 
 ### One-shot tasks (compiles, tests, installs, builds, linting, CI checks)
 
-- Use `terminal` with `run_in_background:"async"`. Do not let a long command block the session.
-- After launching, **do not call `terminal_output` or `terminal_input`**. The system will automatically notify you when the process finishes.
+- First decide whether the next step needs this command's output. If it does — for example, you are running `npm install` because you immediately need to run a build or test that depends on the installed packages — run it **synchronously** (default, no `run_in_background`). Synchronous commands return their full output in the same turn, so there is no polling and no waiting for a notification.
+- Only use `run_in_background:"async"` when the result is NOT needed before you can continue, or when you have independent work to do while it runs. Do not let a long command block the session.
+- After launching async, **do not call `terminal_output` or `terminal_input`**. The system will automatically notify you when the process finishes.
 - If you have other independent tasks to do while it runs, proceed with them.
 - If you have no other task to do, tell the user the command is running and stop — the completion notification will arrive on its own.
 - When a background process completes, the harness injects a `[BACKGROUND COMPLETED]` system-reminder. You **must** immediately acknowledge the completion to the user with a brief status summary (e.g. "CI passed, merging now" or "Build failed — see logs above"). Do not wait for the user to ask.
