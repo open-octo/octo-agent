@@ -427,8 +427,8 @@
     <div class="container">
       <div class="section-header reveal">
         <h2 data-en="Built for people who ship" data-zh="为真正交付的人打造"></h2>
-        <p data-en="Octo is not a thin wrapper around an API. It is a full agent loop with tools, memory, sandboxing, and autonomy — packaged as one file you can drop anywhere."
-           data-zh="Octo 不是 API 的薄封装，而是带工具、记忆、沙箱与自主能力的完整 agent 循环 —— 打包成一个可随处放置的文件。"></p>
+        <p data-en="Octo is not a thin wrapper around an API. It is a full agent loop with tools, memory, and autonomy — packaged as one file you can drop anywhere."
+           data-zh="Octo 不是 API 的薄封装，而是带工具、记忆与自主能力的完整 agent 循环 —— 打包成一个可随处放置的文件。"></p>
       </div>
       <div class="features">
         <div class="feature reveal">
@@ -460,12 +460,6 @@
           <h3 data-en="Persistent memory" data-zh="持久化记忆"></h3>
           <p data-en="Octo remembers your preferences, project conventions, and past corrections across sessions — stored locally in ~/.octo/memories/, not in the cloud."
              data-zh="Octo 跨会话记住你的偏好、项目约定与过往纠正 —— 本地存于 ~/.octo/memories/，不上云。"></p>
-        </div>
-        <div class="feature reveal">
-          <span class="feature-icon">🔒</span>
-          <h3 data-en="OS-level sandboxing" data-zh="操作系统级沙箱"></h3>
-          <p data-en="Enable --sandbox to confine terminal commands to the project directory with no network access. macOS Seatbelt and Linux Landlock + seccomp."
-             data-zh="开启 --sandbox 把终端命令限制在项目目录、禁网络。由 macOS Seatbelt、Linux Landlock + seccomp 强制执行。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🤖</span>
@@ -532,8 +526,8 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
 <span class="cmd">octo</span> -c  <span class="comment" data-en="# pick a session from a list" data-zh="# 从列表里选一个会话"></span>
 <span class="cmd">octo</span> -c &lt;session-id&gt;
 
-<span class="comment" data-en="# With reasoning and sandbox" data-zh="# 带推理与沙箱"></span>
-<span class="cmd">octo</span> --reasoning-effort high --sandbox</pre>
+<span class="comment" data-en="# With extended reasoning" data-zh="# 带扩展推理"></span>
+<span class="cmd">octo</span> --reasoning-effort high</pre>
         </div>
         <div class="demo-block reveal">
           <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span data-en="Web, IM, and MCP" data-zh="Web、IM 与 MCP"></span></div>
