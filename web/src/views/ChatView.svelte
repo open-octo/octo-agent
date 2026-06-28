@@ -719,21 +719,57 @@
     composer?.setText(content)
   }
 
-  // ── export the visible transcript as a markdown file ─────────────────────────
-  function exportTranscript() {
+  // ── export the visible transcript as a markdown file ────────────────────────
+  async function exportTranscript() {
     const sid = get(activeSessionId)
     if (!sid) return
-    const arr = (get(chatMessages)[sid] ?? []).filter((m: any) => m.type === 'user' || m.type === 'assistant')
-    if (!arr.length) { showToast(tr('chat.nothing_to_export'), 'error'); return }
+
+    // Fetch complete history from server instead of relying on the local
+    // chatMessages store, which may only contain a partial view of the session.
+    let events: any[] = []
+    let hasMore = false
+    try {
+      const data = await api.getSessionMessages(sid)
+      const resp = data as { events?: any[]; has_more?: boolean }
+      events = resp.events ?? []
+      hasMore = resp.has_more ?? false
+    } catch (e) {
+      console.error('Export failed:', e)
+      showToast(tr('chat.export_failed'), 'error')
+      return
+    }
+
+    if (hasMore) {
+      // The server may paginate for very long sessions. For now, warn the user
+      // that the exported transcript may be incomplete.
+      console.warn('Export: server returned has_more=true, transcript may be incomplete')
+    }
+
+    if (!events.length) { showToast(tr('chat.nothing_to_export'), 'error'); return }
+
     const title = currentSession?.title ?? currentSession?.name ?? 'session'
     const lines: string[] = [`# ${title}`, '']
-    for (const m of arr) {
-      lines.push(m.type === 'user' ? '## You' : '## Octo')
-      if (m.type === 'assistant' && m.thinking) {
-        lines.push('<details><summary>Thoughts</summary>', '', m.thinking, '', '</details>', '')
+
+    for (const ev of events) {
+      const type = ev.type ?? ''
+
+      if (type === 'history_user_message') {
+        lines.push('## You', '')
+        lines.push(ev.content ?? '', '')
+      } else if (type === 'assistant_message') {
+        lines.push('## Octo', '')
+        if (ev.thinking) {
+          lines.push('<details><summary>Thoughts</summary>', '', ev.thinking, '', '</details>', '')
+        }
+        lines.push(ev.content ?? '', '')
+      } else if (type === 'thinking' && ev.text) {
+        // Standalone thinking block (tool round) — include as a note.
+        lines.push('<!-- Thinking -->', ev.text, '')
       }
-      lines.push(m.content ?? '', '')
+      // Skip tool_call / tool_result events — they are rendered as tool cards
+      // in the UI but don't belong in a readable markdown transcript.
     }
+
     const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
