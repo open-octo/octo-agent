@@ -1,0 +1,187 @@
+package browser
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+// Browser is a CDP connection to a Chrome instance, optionally one this process
+// launched.
+type Browser struct {
+	cmd         *exec.Cmd
+	cli         *cdpClient
+	ownsProcess bool
+}
+
+// Launch starts a Chrome and connects to it.
+func Launch(ctx context.Context, opts LaunchOptions) (*Browser, error) {
+	cmd, wsURL, err := launchChrome(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	cli, err := dial(ctx, wsURL)
+	if err != nil {
+		cmd.Process.Kill()
+		return nil, err
+	}
+	return &Browser{cmd: cmd, cli: cli, ownsProcess: true}, nil
+}
+
+// Connect attaches to an already-running Chrome via its browser-level CDP
+// websocket URL (e.g. one the user started with --remote-debugging-port so
+// their logged-in session is reused).
+func Connect(ctx context.Context, wsURL string) (*Browser, error) {
+	cli, err := dial(ctx, wsURL)
+	if err != nil {
+		return nil, err
+	}
+	return &Browser{cli: cli, ownsProcess: false}, nil
+}
+
+func dial(ctx context.Context, wsURL string) (*cdpClient, error) {
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dial cdp %s: %w", wsURL, err)
+	}
+	// Screenshots and full AX trees can be large; lift the read cap.
+	conn.SetReadLimit(64 << 20)
+	return newCDPClient(conn), nil
+}
+
+// Close tears down the connection and, if this process launched Chrome, the
+// Chrome process too.
+func (b *Browser) Close() error {
+	b.cli.close()
+	if b.ownsProcess && b.cmd != nil && b.cmd.Process != nil {
+		b.cmd.Process.Kill()
+		b.cmd.Wait()
+	}
+	return nil
+}
+
+// Page is one attached page target (a flattened CDP session).
+type Page struct {
+	cli       *cdpClient
+	sessionID string
+	targetID  string
+}
+
+// NewPage opens a fresh tab at url and attaches to it.
+func (b *Browser) NewPage(ctx context.Context, url string) (*Page, error) {
+	if url == "" {
+		url = "about:blank"
+	}
+	res, err := b.cli.call(ctx, "", "Target.createTarget", map[string]any{"url": url})
+	if err != nil {
+		return nil, err
+	}
+	var created struct {
+		TargetID string `json:"targetId"`
+	}
+	if err := json.Unmarshal(res, &created); err != nil {
+		return nil, err
+	}
+	res, err = b.cli.call(ctx, "", "Target.attachToTarget", map[string]any{
+		"targetId": created.TargetID,
+		"flatten":  true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var attached struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(res, &attached); err != nil {
+		return nil, err
+	}
+	p := &Page{cli: b.cli, sessionID: attached.SessionID, targetID: created.TargetID}
+	for _, domain := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
+		if _, err := p.cli.call(ctx, p.sessionID, domain, nil); err != nil {
+			return nil, fmt.Errorf("%s: %w", domain, err)
+		}
+	}
+	return p, nil
+}
+
+// Navigate loads url and waits for the page load event.
+func (p *Page) Navigate(ctx context.Context, url string) error {
+	events, unsub := p.cli.subscribe("Page.loadEventFired", p.sessionID)
+	defer unsub()
+	if _, err := p.cli.call(ctx, p.sessionID, "Page.navigate", map[string]any{"url": url}); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-events:
+		return nil
+	case <-time.After(30 * time.Second):
+		return fmt.Errorf("navigate %s: timed out waiting for load", url)
+	}
+}
+
+// Eval runs a JS expression in the page and unmarshals its return value into
+// out (pass nil to ignore the value). The expression may be a Promise.
+func (p *Page) Eval(ctx context.Context, expr string, out any) error {
+	res, err := p.cli.call(ctx, p.sessionID, "Runtime.evaluate", map[string]any{
+		"expression":    expr,
+		"returnByValue": true,
+		"awaitPromise":  true,
+	})
+	if err != nil {
+		return err
+	}
+	var r struct {
+		Result struct {
+			Value json.RawMessage `json:"value"`
+		} `json:"result"`
+		ExceptionDetails *struct {
+			Text string `json:"text"`
+		} `json:"exceptionDetails"`
+	}
+	if err := json.Unmarshal(res, &r); err != nil {
+		return err
+	}
+	if r.ExceptionDetails != nil {
+		return fmt.Errorf("eval threw: %s", r.ExceptionDetails.Text)
+	}
+	if out != nil && len(r.Result.Value) > 0 {
+		return json.Unmarshal(r.Result.Value, out)
+	}
+	return nil
+}
+
+// WaitFor polls until a CSS selector matches an element, or the timeout. This
+// is the verify primitive for "the download button appeared after search".
+func (p *Page) WaitFor(ctx context.Context, selector string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	expr := fmt.Sprintf("!!document.querySelector(%s)", jsString(selector))
+	for {
+		var present bool
+		if err := p.Eval(ctx, expr, &present); err != nil {
+			return err
+		}
+		if present {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("wait for %q: timed out after %s", selector, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// jsString encodes s as a JS string literal via JSON (valid JS string syntax).
+func jsString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
