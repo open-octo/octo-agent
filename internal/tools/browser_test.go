@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/browser"
 )
 
@@ -160,5 +161,65 @@ func TestBrowserTool_RequiresAction(t *testing.T) {
 	_, err := BrowserTool{}.Execute(context.Background(), "browser", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing action")
+	}
+}
+
+// TestBrowserTool_ObserveAndScreenshotVision checks that screenshot and observe
+// hand the model an actual image block (not just a file path), and that observe
+// also lists the page's interactable elements with selectors.
+func TestBrowserTool_ObserveAndScreenshotVision(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60_000_000_000) // 60s
+	defer cancel()
+	if !browser.ChromeAvailable("") {
+		t.Skip("chrome not available")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(toolFixtureHTML))
+	}))
+	defer srv.Close()
+
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Headless: true})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	SetBrowserSession(b, page)
+	defer ResetBrowserSession()
+
+	tool := BrowserTool{}
+	if _, err := tool.Execute(ctx, "browser", map[string]any{"action": "navigate", "url": srv.URL}); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+
+	hasImage := func(res agent.ToolResult) bool {
+		for _, blk := range res.Blocks {
+			if blk.Type == "image" && blk.Image != nil && len(blk.Image.Data) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+
+	shot, err := tool.Execute(ctx, "browser", map[string]any{"action": "screenshot"})
+	if err != nil {
+		t.Fatalf("screenshot: %v", err)
+	}
+	if !hasImage(shot) {
+		t.Errorf("screenshot returned no image block; blocks=%d text=%q", len(shot.Blocks), shot.Text)
+	}
+
+	obs, err := tool.Execute(ctx, "browser", map[string]any{"action": "observe"})
+	if err != nil {
+		t.Fatalf("observe: %v", err)
+	}
+	if !hasImage(obs) {
+		t.Errorf("observe returned no image block; blocks=%d", len(obs.Blocks))
+	}
+	// The fixture's #search button must surface in the interactable digest.
+	if !strings.Contains(obs.Text, "#search") {
+		t.Errorf("observe text missing #search selector; got:\n%s", obs.Text)
 	}
 }

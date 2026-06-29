@@ -228,7 +228,10 @@ func InteractiveDigest(ctx context.Context, page *Page, frame string, max int) (
 	if frame != "" {
 		doc = fmt.Sprintf("(document.querySelector(%s)||{}).contentDocument", jsString(frame))
 	}
-	expr := fmt.Sprintf(`JSON.stringify((function(){
+	// Eval uses returnByValue, so return the array directly — wrapping it in
+	// JSON.stringify would yield a JSON *string* that fails to unmarshal into
+	// []DigestElement.
+	expr := fmt.Sprintf(`(function(){
 	  var d = %s; if(!d) return [];
 	  function sel(el){
 	    if(el.id) return '#'+CSS.escape(el.id);
@@ -241,7 +244,7 @@ func InteractiveDigest(ctx context.Context, page *Page, frame string, max int) (
 	  var els=d.querySelectorAll('a,button,input,select,textarea,[role=button],[role=menuitem],[role=tab],label');
 	  for(var i=0;i<els.length && out.length<%d;i++){var el=els[i]; if(el.offsetParent===null) continue; var t=(el.textContent||el.value||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().slice(0,50); out.push({text:t, selector:sel(el)});}
 	  return out;
-	})())`, doc, max)
+	})()`, doc, max)
 	var digest []DigestElement
 	if err := page.Eval(ctx, expr, &digest); err != nil {
 		return nil, err

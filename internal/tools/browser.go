@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
@@ -152,8 +153,8 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "ax", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "run_skill"},
-					"description": "The browser action to perform. record_start/record_stop capture a demonstration into an editable skill; run_skill replays one (deterministic, self-healing).",
+					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "run_skill"},
+					"description": "The browser action to perform. observe returns a screenshot the model can see plus a list of the page's interactable elements with selectors — the way to look at an unfamiliar page before acting. record_start/record_stop capture a demonstration into an editable skill; run_skill replays one (deterministic, self-healing).",
 				},
 				"name":       map[string]any{"type": "string", "description": "Skill name (record_stop / run_skill)."},
 				"params":     map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill)."},
@@ -280,12 +281,44 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if err != nil {
 			return agent.ToolResult{}, err
 		}
-		dir := downloadDir()
-		path := filepath.Join(dir, fmt.Sprintf("screenshot-%d.png", len(shot)))
-		if err := os.WriteFile(path, shot, 0o644); err != nil {
+		path := saveScreenshot(shot)
+		// Return the image as a vision block so the model actually sees the page
+		// (not just a file path), and keep the on-disk copy for artifacts.
+		return agent.ToolResult{
+			Text:   "screenshot saved to " + path,
+			Blocks: []agent.ContentBlock{agent.NewImageBlock("image/png", shot)},
+		}, nil
+
+	case "observe":
+		// "Look at this page": a screenshot the model can see + the interactable
+		// elements with selectors. This is the see-before-you-act primitive that
+		// keeps exploratory navigation from thrashing on unfamiliar pages.
+		shot, err := page.Screenshot(ctx)
+		if err != nil {
 			return agent.ToolResult{}, err
 		}
-		return agent.ToolResult{Text: "screenshot saved to " + path}, nil
+		frame := getStr(input, "frame")
+		digest, derr := browser.InteractiveDigest(ctx, page, frame, 60)
+		var sb strings.Builder
+		path := saveScreenshot(shot)
+		fmt.Fprintf(&sb, "screenshot saved to %s\n\ninteractable elements:\n", path)
+		if derr != nil {
+			fmt.Fprintf(&sb, "(could not read elements: %v)\n", derr)
+		} else if len(digest) == 0 {
+			sb.WriteString("(none found)\n")
+		} else {
+			for _, e := range digest {
+				if e.Text != "" {
+					fmt.Fprintf(&sb, "- %s  →  %s\n", e.Text, e.Selector)
+				} else {
+					fmt.Fprintf(&sb, "- %s\n", e.Selector)
+				}
+			}
+		}
+		return agent.ToolResult{
+			Text:   sb.String(),
+			Blocks: []agent.ContentBlock{agent.NewImageBlock("image/png", shot)},
+		}, nil
 
 	case "ax":
 		raw, err := page.AXTree(ctx)
@@ -486,6 +519,25 @@ func downloadDir() string {
 		return cfg.Browser.DownloadDir
 	}
 	return filepath.Join(os.TempDir(), "octo-browser-downloads")
+}
+
+// screenshotSeq disambiguates screenshot filenames within a session.
+var screenshotSeq atomic.Uint64
+
+// saveScreenshot writes a PNG to the download dir for artifact/preview use and
+// returns the path. Best-effort: a write failure yields a note instead of an
+// error, because the caller's vision image block — not the file — is what the
+// model relies on.
+func saveScreenshot(shot []byte) string {
+	dir := downloadDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "(not saved: " + err.Error() + ")"
+	}
+	path := filepath.Join(dir, fmt.Sprintf("screenshot-%d.png", screenshotSeq.Add(1)))
+	if err := os.WriteFile(path, shot, 0o644); err != nil {
+		return "(not saved: " + err.Error() + ")"
+	}
+	return path
 }
 
 // axNode is the subset of a CDP accessibility node the digest needs.
