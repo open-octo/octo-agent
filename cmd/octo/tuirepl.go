@@ -540,18 +540,28 @@ func newTUIModel(cfg replConfig) *tuiModel {
 	return m
 }
 
+// autoSubmitMsg drives an automatic first turn (e.g. the onboarding ceremony on
+// a first run) as if the user had typed cfg.autoFirstInput.
+type autoSubmitMsg struct{ text string }
+
 func (m *tuiModel) Init() tea.Cmd {
 	boot := tea.Sequence(
 		tea.Println(tui.Banner("", m.a.Model, m.cwd, m.width)),
 		textarea.Blink,
 	)
+	cmds := []tea.Cmd{boot}
 	// Connect MCP concurrently with the first paint (tea.Batch, not Sequence)
 	// so the banner + input appear immediately and the servers' handshake cost
 	// is hidden. The result lands as mcpReadyMsg.
 	if m.cfg.mcpBoot != nil {
-		return tea.Batch(boot, m.connectMCPCmd())
+		cmds = append(cmds, m.connectMCPCmd())
 	}
-	return boot
+	// Auto-submit a first turn (onboarding) once startup is underway.
+	if m.cfg.autoFirstInput != "" {
+		input := m.cfg.autoFirstInput
+		cmds = append(cmds, func() tea.Msg { return autoSubmitMsg{text: input} })
+	}
+	return tea.Batch(cmds...)
 }
 
 // connectMCPCmd returns a tea.Cmd that runs the (slow) MCP handshake off the
@@ -713,6 +723,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case autoSubmitMsg:
+		// Route exactly like a typed line: slash commands (e.g. /onboard) go
+		// through the slash dispatcher; anything else starts a normal turn.
+		if strings.HasPrefix(msg.text, "/") {
+			return m.dispatchSlash(msg.text)
+		}
+		return m, m.startTurnEcho(msg.text, msg.text)
 
 	case turnStartedMsg:
 		m.assistantFirstBlock = true

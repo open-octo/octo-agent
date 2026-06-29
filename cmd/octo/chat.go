@@ -34,6 +34,34 @@ const (
 	providerOpenAI    = "openai"
 )
 
+// soulMissing reports whether the user has no identity profile yet
+// (~/.octo/soul.md) — the signal that onboarding hasn't run.
+func soulMissing() bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	_, statErr := os.Stat(prompt.IdentityPath(filepath.Join(home, ".octo"), "soul.md"))
+	return os.IsNotExist(statErr)
+}
+
+// offerOnboarding asks (on a first run) whether to run the onboarding ceremony.
+// Default is yes; "n"/"no"/"s"/"skip" declines. Returns true to run /onboard.
+func offerOnboarding(reader lineReader, out io.Writer) bool {
+	fmt.Fprintln(out, "octo isn't personalized yet — name it and tell it a bit about you (~2 min).")
+	line, ok := reader.ReadLine("Onboard now? [Y/skip]: ")
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "n", "no", "s", "skip":
+		fmt.Fprintln(out, "Skipped — run /onboard anytime.")
+		return false
+	default:
+		return true
+	}
+}
+
 // errMissingAPIKey is returned by resolveAPIKey when no API key is available.
 // The caller (runChat) can detect this and auto-launch the config wizard on an
 // interactive terminal instead of failing silently.
@@ -795,6 +823,15 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			cfg.tools = tools.DefaultToolsFor(resolvedModel)
 			cfg.executor = toolExecutor
 			cfg.subAgentMgr = subAgentMgr
+		}
+		// First run with a working model but no identity yet: offer the
+		// onboarding ceremony (skippable) so a new CLI user isn't left with an
+		// impersonal agent — mirroring the web's soul_setup nudge. The config
+		// wizard above only sets the key/model; onboard is who-it-is/who-you-are.
+		if isFirstEverSession() && soulMissing() {
+			if offerOnboarding(replReader, stdout) {
+				cfg.autoFirstInput = "/onboard"
+			}
 		}
 		return runTUI(cfg)
 	}
