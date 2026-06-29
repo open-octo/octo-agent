@@ -38,4 +38,9 @@ MRuby::CrossBuild.new('wasi') do |conf|
   conf.gem core: 'mruby-sprintf'
   conf.gem core: 'mruby-numeric-ext'
   conf.gembox 'stdlib'
+
+  # JSON.parse / JSON.generate, so a workflow script can decode the JSON a
+  # schema-constrained agent() returns and encode structured data back into a
+  # prompt. Pure C (no IO), MRB_NO_STDIO-compatible; fetched by minirake at build.
+  conf.gem github: 'mattn/mruby-json'
 end
