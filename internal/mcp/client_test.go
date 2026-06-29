@@ -335,6 +335,37 @@ func TestClient_CallAfterCloseFails(t *testing.T) {
 	}
 }
 
+// TestClient_DefaultTimeoutWhenNoDeadline verifies a Call with a deadline-free
+// context still returns (rather than hanging forever) when the server never
+// replies — the internal defaultCallTimeout kicks in.
+func TestClient_DefaultTimeoutWhenNoDeadline(t *testing.T) {
+	old := defaultCallTimeout
+	defaultCallTimeout = 50 * time.Millisecond
+	defer func() { defaultCallTimeout = old }()
+
+	srv := newMockServer(t)
+	srv.start()
+
+	c := NewClient(srv.tx, Implementation{Name: "test", Version: "0.1"})
+	if err := c.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Stop the server so the next call gets no reply, and call with a
+	// deadline-free context — the default timeout must unblock it.
+	srv.stop()
+
+	done := make(chan error, 1)
+	go func() { _, err := c.ListTools(context.Background()); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected a timeout error from the default deadline")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Call hung past the default timeout — no internal deadline applied")
+	}
+}
+
 func TestClient_ContextCancellation(t *testing.T) {
 	srv := newMockServer(t)
 	srv.start()

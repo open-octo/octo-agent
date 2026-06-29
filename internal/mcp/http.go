@@ -49,7 +49,12 @@ type HTTPTransport struct {
 	// inbox queues the response of each Send so Receive can hand it back.
 	// Buffered so a Send never blocks (paired with one Receive per Send,
 	// the channel never grows unboundedly).
-	inbox  chan *Message
+	inbox chan *Message
+	// done is closed by Close to signal shutdown. We never close inbox itself:
+	// an in-flight doRequest may still be about to send on it, and a send on a
+	// closed channel panics (and would crash the process). Producers and Receive
+	// select on done instead.
+	done   chan struct{}
 	closed atomic.Bool
 }
 
@@ -81,6 +86,7 @@ func NewHTTPTransport(cfg HTTPConfig) (*HTTPTransport, error) {
 		// has one outstanding response, but headroom protects against any
 		// pipelining we might add later.
 		inbox: make(chan *Message, 16),
+		done:  make(chan struct{}),
 	}, nil
 }
 
@@ -202,6 +208,10 @@ func (t *HTTPTransport) doRequest(ctx context.Context, body []byte, forceFreshTo
 	}
 	select {
 	case t.inbox <- &m:
+	case <-t.done:
+		// Transport closed while this request was in flight — drop the response
+		// rather than send on a channel teardown is tearing down.
+		return false, errors.New("mcp: http transport: closed")
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
@@ -217,6 +227,8 @@ func (t *HTTPTransport) Receive(ctx context.Context) (*Message, error) {
 			return nil, io.EOF
 		}
 		return m, nil
+	case <-t.done:
+		return nil, io.EOF
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -228,7 +240,7 @@ func (t *HTTPTransport) Close() error {
 	if !t.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	close(t.inbox)
+	close(t.done)
 	return nil
 }
 

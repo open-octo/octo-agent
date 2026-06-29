@@ -8,7 +8,17 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
+
+// defaultCallTimeout bounds a single request/response when the caller's context
+// carries no deadline of its own. Without it, a server that accepts a request
+// but never sends a response frame (and keeps the transport open, so no EOF)
+// would block Call — and the agent turn — forever. Handshake/list calls in
+// connectOne already impose their own deadlines, so this only affects runtime
+// calls (CallTool/ReadResource/GetPrompt) invoked with a deadline-free ctx.
+// A var (not const) so tests can shrink it.
+var defaultCallTimeout = 60 * time.Second
 
 // Client is a single MCP server connection: one transport, one initialize
 // handshake, request/response dispatch by ID. It's safe for concurrent
@@ -115,6 +125,15 @@ func (c *Client) Instructions() string { return c.instructions }
 func (c *Client) Call(ctx context.Context, method string, params, result any) error {
 	if c.closed.Load() {
 		return errors.New("mcp: client closed")
+	}
+	// Bound the call when the caller gave no deadline, so a server that never
+	// replies can't wedge the turn indefinitely (stdio's Receive can't be
+	// interrupted by ctx once it blocks in Decode — only Close or a deadline
+	// unblocks the waiting caller).
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultCallTimeout)
+		defer cancel()
 	}
 	id := c.nextID.Add(1)
 	idBytes := []byte(strconv.FormatUint(id, 10))

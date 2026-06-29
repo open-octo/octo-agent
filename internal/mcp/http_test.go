@@ -137,3 +137,40 @@ func TestNewHTTPTransport_EmptyURLRejected(t *testing.T) {
 		t.Error("expected error for empty URL")
 	}
 }
+
+// TestHTTPTransport_CloseDoesNotCloseInbox guards the panic fix: Close must not
+// close the inbox channel, because an in-flight doRequest may still be about to
+// send on it (a send on a closed channel panics and crashes the process). The
+// fix closes a separate done channel instead. Sending on inbox after Close must
+// therefore NOT panic.
+func TestHTTPTransport_CloseDoesNotCloseInbox(t *testing.T) {
+	tr, err := NewHTTPTransport(HTTPConfig{URL: "http://example.invalid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = tr.Close()
+	_ = tr.Close() // idempotent — must not panic
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("inbox was closed by Close(); send panicked: %v", r)
+		}
+	}()
+	tr.inbox <- &Message{} // buffered; would panic if Close had closed it
+}
+
+// TestHTTPTransport_ReceiveAfterCloseEOF: a pending Receive is unblocked with
+// io.EOF after Close (via the done channel), preserving the prior contract.
+func TestHTTPTransport_ReceiveAfterCloseEOF(t *testing.T) {
+	tr, err := NewHTTPTransport(HTTPConfig{URL: "http://example.invalid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = tr.Close()
+	if _, err := tr.Receive(context.Background()); err != io.EOF {
+		t.Fatalf("Receive after Close = %v, want io.EOF", err)
+	}
+	if err := tr.Send(context.Background(), &Message{}); err == nil {
+		t.Fatal("Send after Close should return an error")
+	}
+}
