@@ -11,6 +11,8 @@ import (
 func TestSoulMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// os.UserHomeDir() reads %USERPROFILE% on Windows, not $HOME.
+	t.Setenv("USERPROFILE", home)
 
 	if !soulMissing() {
 		t.Fatal("expected soulMissing=true when no soul.md exists")
