@@ -70,6 +70,10 @@ type replConfig struct {
 	// in the TUI (when true) or suppressed (when false). Mirrors the --show-reasoning
 	// flag and config file setting.
 	showReasoning bool
+	// autoFirstInput, when non-empty, is submitted as the TUI's first turn as if
+	// the user typed it (e.g. "/onboard" on a first run). Multi-turn interaction
+	// continues normally afterward. Empty → no auto-submit.
+	autoFirstInput string
 }
 
 // mcpBootstrap carries the inputs runTUI needs to connect MCP servers from a
