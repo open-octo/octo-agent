@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -78,6 +80,41 @@ func TestWebSearch_BravePreferred(t *testing.T) {
 	}
 	if ui["type"] != "web_search" || ui["query"] != "go generics" || ui["total"] != 2 {
 		t.Errorf("UI payload = %+v", ui)
+	}
+}
+
+// TestWebSearch_BraveGzipResponse reproduces the real Brave API, which honours
+// gzip. The transport must transparently decompress; manually setting
+// Accept-Encoding (the prior bug) disables that and fails the decode.
+func TestWebSearch_BraveGzipResponse(t *testing.T) {
+	clearSearchEnv(t)
+	resetDDGCooldown()
+	t.Setenv("BRAVE_SEARCH_API_KEY", "test-key")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		_, _ = gz.Write([]byte(`{"web":{"results":[{"title":"G1","url":"https://g1","description":"d"}]}}`))
+		_ = gz.Close()
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(buf.Bytes())
+	}))
+	defer srv.Close()
+	swapEndpoint(t, &braveEndpoint, srv.URL)
+
+	out, err := WebSearchTool{}.Execute(context.Background(), "web_search", map[string]any{
+		"query": "gzip handling",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var resp WebSearchResponse
+	if err := json.Unmarshal([]byte(out.Text), &resp); err != nil {
+		t.Fatalf("output isn't valid JSON: %v\n%s", err, out.Text)
+	}
+	if resp.Provider != "brave" || len(resp.Results) != 1 || resp.Results[0].URL != "https://g1" {
+		t.Errorf("gzip Brave response not decoded: provider=%q results=%+v", resp.Provider, resp.Results)
 	}
 }
 
