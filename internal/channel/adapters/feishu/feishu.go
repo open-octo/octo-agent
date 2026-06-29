@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -199,9 +201,39 @@ func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 	return channel.SendResult{OK: true, MessageID: msgID}
 }
 
-// SendFile is not yet implemented for Feishu.
+// SendFile uploads a local file to Feishu and sends it to the chat.
+// Images go through the image-upload endpoint and are sent as "image"
+// messages; everything else is uploaded as a generic file and sent as a
+// "file" message.
 func (a *Adapter) SendFile(chatID, path, name, replyTo string) channel.SendResult {
-	return channel.SendResult{OK: false, Error: "SendFile not yet implemented"}
+	if _, err := os.Stat(path); err != nil {
+		return channel.SendResult{OK: false, Error: "file not found: " + path}
+	}
+
+	var msgType, content string
+	var err error
+	if isImagePath(path) {
+		var imageKey string
+		if imageKey, err = a.uploadImage(path); err == nil {
+			b, _ := json.Marshal(map[string]string{"image_key": imageKey})
+			msgType, content = "image", string(b)
+		}
+	} else {
+		var fileKey string
+		if fileKey, err = a.uploadFile(path, name); err == nil {
+			b, _ := json.Marshal(map[string]string{"file_key": fileKey})
+			msgType, content = "file", string(b)
+		}
+	}
+	if err != nil {
+		return channel.SendResult{OK: false, Error: "upload failed: " + err.Error()}
+	}
+
+	msgID, err := a.sendRaw(chatID, msgType, content, replyTo)
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	return channel.SendResult{OK: true, MessageID: msgID}
 }
 
 // UpdateMessage edits an existing message.
@@ -708,11 +740,147 @@ func buildMsgPayload(text string) (msgType, content string) {
 	return "post", string(b)
 }
 
-// sendMessage posts a message to a chat.
+// ─── Upload ────────────────────────────────────────────────────────────────
+
+// uploadImage uploads an image and returns its image_key.
+func (a *Adapter) uploadImage(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("image_type", "message"); err != nil {
+		return "", err
+	}
+	part, err := mw.CreateFormFile("image", filepath.Base(path))
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(data); err != nil {
+		return "", err
+	}
+	mw.Close()
+
+	req, _ := http.NewRequest("POST", a.domain+"/open-apis/im/v1/images", &buf)
+	req.Header.Set("Authorization", "Bearer "+a.getToken())
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var r struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			ImageKey string `json:"image_key"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return "", err
+	}
+	if r.Code != 0 {
+		return "", fmt.Errorf("upload image %d: %s", r.Code, r.Msg)
+	}
+	return r.Data.ImageKey, nil
+}
+
+// uploadFile uploads a generic file and returns its file_key.
+func (a *Adapter) uploadFile(path, name string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	fileName := name
+	if fileName == "" {
+		fileName = filepath.Base(path)
+	}
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("file_type", feishuFileType(fileName)); err != nil {
+		return "", err
+	}
+	if err := mw.WriteField("file_name", fileName); err != nil {
+		return "", err
+	}
+	part, err := mw.CreateFormFile("file", fileName)
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(data); err != nil {
+		return "", err
+	}
+	mw.Close()
+
+	req, _ := http.NewRequest("POST", a.domain+"/open-apis/im/v1/files", &buf)
+	req.Header.Set("Authorization", "Bearer "+a.getToken())
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var r struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			FileKey string `json:"file_key"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return "", err
+	}
+	if r.Code != 0 {
+		return "", fmt.Errorf("upload file %d: %s", r.Code, r.Msg)
+	}
+	return r.Data.FileKey, nil
+}
+
+func isImagePath(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
+		return true
+	}
+	return false
+}
+
+// feishuFileType maps a filename to one of Feishu's accepted file_type values.
+// Unknown extensions fall back to "stream".
+func feishuFileType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".mp4":
+		return "mp4"
+	case ".opus":
+		return "opus"
+	case ".pdf":
+		return "pdf"
+	case ".doc", ".docx":
+		return "doc"
+	case ".xls", ".xlsx":
+		return "xls"
+	case ".ppt", ".pptx":
+		return "ppt"
+	default:
+		return "stream"
+	}
+}
+
+// sendMessage posts a text message to a chat.
 // FEISHU-008: replyTo is passed through as reply_to_message_id when non-empty.
 func (a *Adapter) sendMessage(chatID, text, replyTo string) (string, error) {
 	msgType, content := buildMsgPayload(text)
+	return a.sendRaw(chatID, msgType, content, replyTo)
+}
 
+// sendRaw posts a pre-built message (any msg_type) to a chat.
+func (a *Adapter) sendRaw(chatID, msgType, content, replyTo string) (string, error) {
 	body := map[string]any{
 		"receive_id": chatID,
 		"msg_type":   msgType,
