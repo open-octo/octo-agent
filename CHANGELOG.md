@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-06-29
+
+### Added
+- **Workflow: named workflows, parameterization, and in-script JSON.** Save a
+  Ruby workflow to `~/.octo/workflows` or the project's `.octo/workflows` (via
+  the new `workflow_save` tool) and re-run it by `name`; pass an `args` value,
+  readable in-script as the `args` primitive (parsed to native Ruby); and use
+  `JSON.parse` / `JSON.generate` to decode schema-constrained `agent()` replies
+  and encode structured data back into a prompt (#915).
+- **Send and receive media over IM.** The agent can send files and images
+  through chat channels, and inbound attachments are bridged into the
+  conversation — images as vision blocks, documents as readable notes (#906).
+  Feishu/Lark image and file upload (#905).
+- **TUI folds large pastes into an inline placeholder token** so a big paste no
+  longer floods the composer (#907).
+
+### Fixed
+- **Server concurrency.** Fixed a working-directory race, overlapping parallel
+  turns, a lost note notification, and a `sync.Map` misuse (#912); guarded a
+  worktree leak and a reflect panic (#914).
+- **MCP client** no longer panics when a connection closes with an in-flight
+  request, and now bounds deadline-free calls (#913).
+- **OpenAI streaming** surfaces mid-stream error payloads instead of returning
+  an empty success (#910).
+- **Compaction** overflow loop now measures the chunk being compacted rather
+  than the full history (#909).
+- **Brave web search** stops setting `Accept-Encoding` manually — the gzip
+  response was never decoded (#911).
+- **Web composer** no longer sends early on IME Enter, and auto-grows the
+  textarea (#908).
+
 ## [1.2.0] — 2026-06-27
 
 ### Breaking
