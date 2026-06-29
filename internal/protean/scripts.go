@@ -57,48 +57,6 @@ print(json.dumps({
 }), flush=True)
 `
 
-// generateScript is a Python script run inside the Protean venv to generate a
-// skill from a recording directory using the model config supplied by octo.
-//
-// The provider passed in is octo's vendor name. Anthropic-protocol vendors are
-// routed to Protean's Anthropic client; everything else is treated as
-// OpenAI-compatible (litellm, OpenAI, etc.). For OpenAI-compatible gateways,
-// cookie auth is injected by protean.llm.cookie.openai_default_headers().
-const generateScript = `
-import asyncio
-import json
-import os
-import sys
-from pathlib import Path
-
-from protean.llm import LLM
-from protean.skills.builder import SkillBuilder
-
-async def main():
-    recording_dir = Path(sys.argv[1])
-    skills_dir = Path(sys.argv[2])
-    task_desc = sys.argv[3]
-    provider = sys.argv[4]
-    model = sys.argv[5]
-    base_url = sys.argv[6]
-    api_key = sys.argv[7]
-
-    # Map octo vendor names to Protean provider identifiers.
-    protean_provider = "anthropic" if provider in ("anthropic", "anthropic_compatible") else "openai"
-    llm = LLM(provider=protean_provider, api_key=api_key, model=model, base_url=base_url or None)
-    skill = await SkillBuilder.from_recording(llm, recording_dir, task_desc, model=model)
-    skill_dir = skills_dir / skill.name
-    from protean.skills.renderer import render_skill
-    md_path = render_skill(skill, skill_dir)
-    print(json.dumps({
-        "name": skill.name,
-        "description": skill.description,
-        "skill_dir": str(md_path.parent),
-    }))
-
-asyncio.run(main())
-`
-
 // runSkillScript is a Python script run inside the Protean venv to execute a
 // named skill using the deterministic step_by_step executor. It streams events
 // back as newline-delimited JSON and returns a final result object.

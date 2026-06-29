@@ -56,10 +56,11 @@ func (r *Recorder) Start(ctx context.Context) error {
 		r.stdin = nil
 		return fmt.Errorf("start protean recorder: %w", err)
 	}
-	// Drain stdout in the background so the pipe never blocks the recorder.
-	go io.Copy(io.Discard, stdout)
 	// Wait for the "started" JSON line before returning so callers know the
-	// screen-recording subprocess is alive and permissions are granted.
+	// screen-recording subprocess is alive and permissions are granted. We must
+	// read this synchronously (a single reader) before handing stdout to the
+	// background drain — two goroutines reading the same pipe would race for the
+	// line and could block Start until the recording ends.
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	if scanner.Scan() {
@@ -78,6 +79,10 @@ func (r *Recorder) Start(ctx context.Context) error {
 			}
 		}
 	}
+	// Now drain the rest of stdout in the background so the pipe never blocks
+	// the recorder. The scanner may hold a few buffered bytes past the line, but
+	// the recorder emits nothing until stop, so nothing is lost.
+	go io.Copy(io.Discard, stdout)
 	return nil
 }
 

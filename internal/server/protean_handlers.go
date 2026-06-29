@@ -174,6 +174,12 @@ func (s *Server) handleProteanRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	// Reject names that try to escape the skills directory (matches the
+	// run_protean_skill tool's guard).
+	if filepath.Base(req.Name) != req.Name {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid skill name %q", req.Name))
+		return
+	}
 
 	cfg, _ := config.Load()
 	bridge := protean.NewBridge(cfg.Protean)
