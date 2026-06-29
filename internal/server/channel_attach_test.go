@@ -48,9 +48,12 @@ func TestAttachInboundFiles_DocumentNote(t *testing.T) {
 }
 
 func TestAttachInboundFiles_Image(t *testing.T) {
-	// Redirect ~/.octo/uploads into a temp HOME so the test doesn't touch the
+	// Redirect ~/.octo/uploads into a temp home so the test doesn't touch the
 	// real home dir (saveImageAttachment persists the decoded bytes there).
-	t.Setenv("HOME", t.TempDir())
+	// Both vars: os.UserHomeDir reads HOME on unix, USERPROFILE on Windows.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
 
 	s := &Server{}
 	sess := newAttachSession()
@@ -65,7 +68,7 @@ func TestAttachInboundFiles_Image(t *testing.T) {
 		t.Errorf("content = %q, want %q", got, "what is this")
 	}
 	// A copy of the image should have been persisted under ~/.octo/uploads.
-	dir := filepath.Join(os.Getenv("HOME"), ".octo", "uploads")
+	dir := filepath.Join(tmpHome, ".octo", "uploads")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("uploads dir not created: %v", err)
