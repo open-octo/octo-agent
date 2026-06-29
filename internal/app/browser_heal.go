@@ -54,3 +54,22 @@ func makeBrowserHealer(sender agent.Sender, model string) browser.Healer {
 		return nil
 	}
 }
+
+// makeSkillGenerator builds the LLM-backed skill distiller for record_stop. It
+// refines the deterministic baseline into a clean optimal-path skill, grounded
+// in the captured selectors (the engine enforces the selector constraint).
+// Returns nil when no sender is configured, so generation stays deterministic.
+func makeSkillGenerator(sender agent.Sender, model string) browser.SkillGenerator {
+	if sender == nil {
+		return nil
+	}
+	return func(ctx context.Context, system, user string) (string, error) {
+		reply, err := sender.SendMessages(ctx, model, system, []agent.Message{
+			{Role: agent.RoleUser, Content: user},
+		}, 2048)
+		if err != nil {
+			return "", err
+		}
+		return reply.Content, nil
+	}
+}

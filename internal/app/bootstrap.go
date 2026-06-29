@@ -37,12 +37,14 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	mgr := tools.NewSubAgentManager(spawner)
 	tools.SetDefaultSubAgentManager(mgr)
 
-	// LLM-backed self-heal for recorded browser skills (run_skill).
+	// LLM-backed distill (record_stop) + self-heal (run_skill) for browser skills.
+	tools.SetBrowserSkillGenerator(makeSkillGenerator(a.Sender, a.Model))
 	tools.SetBrowserHealer(makeBrowserHealer(a.Sender, a.Model))
 
 	cleanup := func() {
 		tools.SetDefaultSubAgentManager(nil)
 		tools.SetSpawner(nil)
+		tools.SetBrowserSkillGenerator(nil)
 		tools.SetBrowserHealer(nil)
 		tools.ResetBrowserSession()
 	}

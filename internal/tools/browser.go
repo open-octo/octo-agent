@@ -39,6 +39,7 @@ var (
 	activeRecorder   *browser.Recorder
 	recorderStartURL string
 	browserHealer    browser.Healer
+	browserSkillGen  browser.SkillGenerator
 )
 
 // SetBrowserHealer injects the LLM-backed step healer used by run_skill.
@@ -46,6 +47,14 @@ func SetBrowserHealer(h browser.Healer) {
 	recorderMu.Lock()
 	defer recorderMu.Unlock()
 	browserHealer = h
+}
+
+// SetBrowserSkillGenerator injects the LLM-backed skill distiller used by
+// record_stop (nil falls back to deterministic compilation).
+func SetBrowserSkillGenerator(g browser.SkillGenerator) {
+	recorderMu.Lock()
+	defer recorderMu.Unlock()
+	browserSkillGen = g
 }
 
 // browserSkillsDir is where recorded skills live (editable YAML).
@@ -379,14 +388,14 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, fmt.Errorf("browser: record_stop requires a valid skill name")
 		}
 		recorderMu.Lock()
-		rec, startURL := activeRecorder, recorderStartURL
+		rec, startURL, gen := activeRecorder, recorderStartURL, browserSkillGen
 		activeRecorder = nil
 		recorderMu.Unlock()
 		if rec == nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: no recording in progress")
 		}
 		rec.Stop()
-		skill := browser.CompileSkill(name, "", startURL, rec.Events())
+		skill := browser.GenerateSkill(ctx, name, startURL, rec.Events(), gen)
 		dir := browserSkillsDir()
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return agent.ToolResult{}, err

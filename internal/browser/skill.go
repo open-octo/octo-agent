@@ -62,7 +62,23 @@ func CompileSkill(name, description, startURL string, events []RecordedEvent) Sk
 	if startURL != "" {
 		s.Steps = append(s.Steps, Step{Action: "navigate", URL: startURL})
 	}
+	hasUpload := false
 	for _, e := range events {
+		if e.Type == "upload" {
+			// The user clicked an upload control, then picked a file. Replay
+			// clicks the control and feeds the file through the chooser, so the
+			// preceding click (the button) is the better trigger than the
+			// possibly-transient file input. The file itself can't be captured
+			// (browsers hide the path) so it's auto-parameterized.
+			up := Step{Action: "upload", Frame: e.Frame, Selector: e.Selector, Value: "{{file}}", Label: e.Text}
+			if n := len(s.Steps); n > 0 && s.Steps[n-1].Action == "click" {
+				up.Selector, up.Frame, up.Label = s.Steps[n-1].Selector, s.Steps[n-1].Frame, s.Steps[n-1].Label
+				s.Steps = s.Steps[:n-1]
+			}
+			s.Steps = append(s.Steps, up)
+			hasUpload = true
+			continue
+		}
 		if e.Selector == "" {
 			continue
 		}
@@ -81,7 +97,88 @@ func CompileSkill(name, description, startURL string, events []RecordedEvent) Sk
 		}
 		s.Steps = append(s.Steps, st)
 	}
+	if hasUpload {
+		s.Params = append(s.Params, Param{Name: "file", Description: "path to the file to upload"})
+	}
 	return s
+}
+
+// SkillGenerator asks an LLM to refine a recording into a clean skill. It is a
+// plain string→string call so this package needn't import the agent/provider
+// layers; the app wires a sender-backed implementation.
+type SkillGenerator func(ctx context.Context, system, user string) (string, error)
+
+// GenerateSkill turns a recording into a skill. The deterministic CompileSkill
+// is always the baseline (its selectors are ground truth). When gen is set, the
+// LLM refines that baseline — dropping detours/retries, parameterizing variable
+// inputs, labeling — but is constrained to the captured selectors; any output
+// that fails to parse or invents a selector falls back to the baseline. So the
+// LLM only ever cleans up real events, never hallucinates targets.
+func GenerateSkill(ctx context.Context, name, startURL string, events []RecordedEvent, gen SkillGenerator) Skill {
+	base := CompileSkill(name, "", startURL, events)
+	if gen == nil {
+		return base
+	}
+	baseYAML, err := MarshalSkill(base)
+	if err != nil {
+		return base
+	}
+	const system = "You clean a recorded browser workflow into a minimal, correct, replayable skill. " +
+		"RULES: (1) Use ONLY CSS selectors that appear in the provided baseline — never invent or alter a selector. " +
+		"(2) Drop redundant back-and-forth and retries; keep the intended linear path. " +
+		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}). " +
+		"(4) Preserve step order and the leading navigate. " +
+		"Output ONLY the skill as YAML (keys: name, description, params, steps), no prose, no code fences."
+	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned skill YAML.", baseYAML, renderTrace(events))
+
+	out, err := gen(ctx, system, user)
+	if err != nil {
+		return base
+	}
+	refined, err := ParseSkill([]byte(stripFences(out)))
+	if err != nil || len(refined.Steps) == 0 {
+		return base
+	}
+	refined.Name = name
+	if !selectorsSubset(refined, base) {
+		return base // precision guard: the model used a selector it wasn't given
+	}
+	return refined
+}
+
+func renderTrace(events []RecordedEvent) string {
+	var sb strings.Builder
+	for i, e := range events {
+		fmt.Fprintf(&sb, "%d. %s selector=%q frame=%q tag=%s text=%q value=%q\n", i+1, e.Type, e.Selector, e.Frame, e.Tag, e.Text, e.Value)
+	}
+	return sb.String()
+}
+
+func stripFences(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = s[i+1:]
+		}
+		s = strings.TrimSuffix(strings.TrimSpace(s), "```")
+	}
+	return strings.TrimSpace(s)
+}
+
+// selectorsSubset reports whether every selector/frame the refined skill uses
+// was present in the baseline (the captured ground truth).
+func selectorsSubset(refined, base Skill) bool {
+	allowed := map[string]bool{"": true}
+	for _, st := range base.Steps {
+		allowed[st.Selector] = true
+		allowed[st.Frame] = true
+	}
+	for _, st := range refined.Steps {
+		if !allowed[st.Selector] || !allowed[st.Frame] {
+			return false
+		}
+	}
+	return true
 }
 
 // MarshalSkill renders the skill to YAML.
@@ -252,7 +349,9 @@ func runStep(ctx context.Context, page *Page, step *Step, params map[string]stri
 		if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return err
 		}
-		if err := page.Upload(ctx, target, []string{subst(step.Value, params)}); err != nil {
+		// Click the upload control and feed the file through the chooser — works
+		// for both a button that opens a chooser and a direct file input.
+		if err := page.UploadViaChooser(ctx, target, []string{subst(step.Value, params)}); err != nil {
 			return err
 		}
 	default:

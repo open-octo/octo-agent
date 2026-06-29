@@ -55,7 +55,7 @@ const captureScript = `(function(){
       window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), value:(el.value!==undefined?(''+el.value).slice(0,200):''), url:location.href}));}catch(_){}
   }
   document.addEventListener('click', function(e){report('click',e);}, true);
-  document.addEventListener('change', function(e){report('change',e);}, true);
+  document.addEventListener('change', function(e){var t=e.target; report((t&&t.type==='file')?'upload':'change', e);}, true);
 })();`
 
 // Start begins capturing. The binding and listeners are installed on the live
