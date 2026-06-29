@@ -200,7 +200,10 @@ func searchBrave(ctx context.Context, query string, max int) ([]WebSearchResult,
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	req.Header.Set("X-Subscription-Token", os.Getenv("BRAVE_SEARCH_API_KEY"))
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Accept-Encoding", "gzip")
+	// Do NOT set Accept-Encoding manually: Go's transport only performs
+	// transparent gunzip when it added the header itself. Setting it here would
+	// hand back raw gzip bytes that the JSON decoder below can't read, failing
+	// every real Brave call. Let the transport negotiate and decompress.
 
 	resp, err := webHTTPClient().Do(req)
 	if err != nil {
