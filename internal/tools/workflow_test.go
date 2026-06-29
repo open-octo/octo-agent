@@ -227,8 +227,19 @@ func TestWorkflowTool_RequiresScript(t *testing.T) {
 	t.Cleanup(func() { SetSpawner(nil) })
 
 	_, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "script is required") {
-		t.Errorf("err = %v, want script-required", err)
+	if err == nil || !strings.Contains(err.Error(), "provide a script, or a name") {
+		t.Errorf("err = %v, want script-or-name required", err)
+	}
+}
+
+func TestWorkflowTool_ScriptAndNameMutuallyExclusive(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+
+	_, err := WorkflowTool{}.Execute(context.Background(), "c",
+		map[string]any{"script": `"x"`, "name": "foo"})
+	if err == nil || !strings.Contains(err.Error(), "exactly one of script or name") {
+		t.Errorf("err = %v, want mutual-exclusion error", err)
 	}
 }
 
@@ -250,5 +261,31 @@ func TestWorkflowTool_ScriptErrorIsActionable(t *testing.T) {
 	}
 	if strings.Contains(got, "(unknown)") {
 		t.Errorf("error status leaks mruby position noise: %q", got)
+	}
+}
+
+// TestWorkflowTool_RunsSavedByName runs a workflow from the registry by name and
+// confirms args flow through to the script (the saved script reads args["q"]).
+func TestWorkflowTool_RunsSavedByName(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	user := t.TempDir()
+	useWorkflowRoots(t, user, "")
+	writeWorkflowFile(t, user, "echo.rb", "# @description echo the arg\nagent(args[\"q\"])\n")
+
+	got := startWorkflowAndWait(t, map[string]any{"name": "echo", "args": map[string]any{"q": "hello"}})
+	if !strings.Contains(got, "R[hello]") {
+		t.Errorf("output = %q, want the saved script to run with args (R[hello])", got)
+	}
+}
+
+func TestWorkflowTool_UnknownName(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	useWorkflowRoots(t, t.TempDir(), t.TempDir())
+
+	_, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"name": "nope"})
+	if err == nil || !strings.Contains(err.Error(), "no saved workflow named") {
+		t.Errorf("err = %v, want unknown-name error", err)
 	}
 }

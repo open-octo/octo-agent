@@ -91,7 +91,7 @@ func TestRun_JournalCreatedOnCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadJournal: %v", err)
 	}
-	if hash != scriptHash(`agent("hello")`) {
+	if hash != runIdentityHash(`agent("hello")`, "") {
 		t.Errorf("journal script hash mismatch")
 	}
 	if len(entries) != 1 || entries[0].Prompt != "hello" {
@@ -102,7 +102,7 @@ func TestRun_JournalCreatedOnCompletion(t *testing.T) {
 func TestRun_ResumeSkipsCachedCall(t *testing.T) {
 	dir := t.TempDir()
 	script := `agent("hi")`
-	hash := scriptHash(script)
+	hash := runIdentityHash(script, "")
 
 	j, err := CreateJournal(dir, "wf-cached", hash)
 	if err != nil {
@@ -134,7 +134,7 @@ func TestRun_ResumeSkipsCachedCall(t *testing.T) {
 func TestRun_ResumeContinuesFromCrashPoint(t *testing.T) {
 	dir := t.TempDir()
 	script := `parallel(["a","b","c"]) { |it| agent(it) }.join(",")`
-	hash := scriptHash(script)
+	hash := runIdentityHash(script, "")
 
 	// Only "a" is cached; "b" and "c" must run fresh.
 	j, err := CreateJournal(dir, "wf-partial", hash)
@@ -193,7 +193,7 @@ func TestRun_ResumeScriptMismatch(t *testing.T) {
 func TestRun_NewJournalCreatedOnResume(t *testing.T) {
 	dir := t.TempDir()
 	script := `agent("x")`
-	hash := scriptHash(script)
+	hash := runIdentityHash(script, "")
 
 	j, _ := CreateJournal(dir, "wf-first", hash)
 	_ = j.Append(JournalEntry{Seq: 0, Prompt: "x", Reply: "R[x]"})

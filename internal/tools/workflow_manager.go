@@ -44,6 +44,7 @@ type WorkflowNotification struct {
 type WorkflowRunRequest struct {
 	Description   string
 	Script        string
+	Args          string // the run's input value as a JSON string ("" = none)
 	Agent         workflow.AgentFunc
 	MaxConcurrent int
 	ResumeFrom    string
@@ -232,6 +233,7 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 			},
 			MaxConcurrent: req.MaxConcurrent,
 			ResumeFrom:    req.ResumeFrom,
+			Args:          req.Args,
 		})
 
 		errMsg := ""
