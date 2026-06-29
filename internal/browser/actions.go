@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // point is a viewport coordinate.
@@ -280,6 +281,45 @@ func (p *Page) Upload(ctx context.Context, selector string, files []string) erro
 		"files":    files,
 	})
 	return err
+}
+
+// UploadViaChooser sets files by clicking the control that opens a file chooser
+// (a button or a file input) and intercepting the chooser — handling the common
+// case where there is no persistent <input type=file> to target directly. The
+// real Klook SD upload works this way.
+func (p *Page) UploadViaChooser(ctx context.Context, selector string, files []string) error {
+	if _, err := p.cli.call(ctx, p.sessionID, "Page.setInterceptFileChooserDialog", map[string]any{"enabled": true}); err != nil {
+		return err
+	}
+	defer p.cli.call(ctx, p.sessionID, "Page.setInterceptFileChooserDialog", map[string]any{"enabled": false})
+
+	events, unsub := p.cli.subscribe("Page.fileChooserOpened", p.sessionID)
+	defer unsub()
+
+	if err := p.Click(ctx, selector); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case ev := <-events:
+		var fc struct {
+			BackendNodeID int `json:"backendNodeId"`
+		}
+		if err := json.Unmarshal(ev.Params, &fc); err != nil {
+			return err
+		}
+		if fc.BackendNodeID == 0 {
+			return fmt.Errorf("upload: file chooser had no backendNodeId")
+		}
+		_, err := p.cli.call(ctx, p.sessionID, "DOM.setFileInputFiles", map[string]any{
+			"backendNodeId": fc.BackendNodeID,
+			"files":         files,
+		})
+		return err
+	case <-time.After(15 * time.Second):
+		return fmt.Errorf("upload: file chooser did not open after clicking %q", selector)
+	}
 }
 
 // Back navigates one entry back in history.

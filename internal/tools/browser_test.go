@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/browser"
 )
@@ -98,8 +99,63 @@ func TestBrowserTool_SearchDownloadFlow(t *testing.T) {
 	os.Remove(path)
 }
 
-// TestBrowserTool_UnknownAction surfaces a clean error (no Chrome needed since
-// it should fail before connecting only if a session exists; guard with skip).
+// TestBrowserTool_RecordRunRoundTrip records a demonstration through the tool,
+// saves it as an editable skill, then replays it via run_skill on a fresh load.
+func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60_000_000_000)
+	defer cancel()
+	if !browser.ChromeAvailable("") {
+		t.Skip("chrome not available")
+	}
+	t.Setenv("OCTO_BROWSER_SKILLS_DIR", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>rr</title><button id="b">Go</button>
+<script>window.clicks=0;document.getElementById('b').addEventListener('click',function(){window.clicks++});</script>`))
+	}))
+	defer srv.Close()
+
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Headless: true})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	SetBrowserSession(b, page)
+	defer ResetBrowserSession()
+
+	tool := BrowserTool{}
+	run := func(in map[string]any) (string, error) { r, e := tool.Execute(ctx, "browser", in); return r.Text, e }
+
+	if _, err := run(map[string]any{"action": "wait", "selector": "#b"}); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if _, err := run(map[string]any{"action": "record_start"}); err != nil {
+		t.Fatalf("record_start: %v", err)
+	}
+	if _, err := run(map[string]any{"action": "click", "selector": "#b"}); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond) // let the capture event arrive
+	if _, err := run(map[string]any{"action": "record_stop", "name": "demo"}); err != nil {
+		t.Fatalf("record_stop: %v", err)
+	}
+
+	// Replay: navigates back to the start URL (reset clicks) and re-clicks.
+	if _, err := run(map[string]any{"action": "run_skill", "name": "demo"}); err != nil {
+		t.Fatalf("run_skill: %v", err)
+	}
+	var clicks int
+	if err := page.Eval(ctx, "window.clicks", &clicks); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if clicks < 1 {
+		t.Fatalf("replayed skill did not click (clicks=%d)", clicks)
+	}
+}
+
+// TestBrowserTool_RequiresAction surfaces a clean error for a missing action.
 func TestBrowserTool_RequiresAction(t *testing.T) {
 	_, err := BrowserTool{}.Execute(context.Background(), "browser", map[string]any{})
 	if err == nil {
