@@ -1,14 +1,20 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/config"
 )
+
+// validateConnection probes a provider/model/key against the live endpoint.
+// Package var so tests substitute a fake (the real one makes a network call).
+var validateConnection = app.TestConnection
 
 // firstNonEmpty returns the first non-empty string, or "" if all are empty.
 func firstNonEmpty(vals ...string) string {
@@ -105,7 +111,8 @@ func runConfig(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	switch sub {
 	case "", "setup", "init":
-		return runConfigWizard(stdin, stdout, stderr)
+		// Explicit `octo config` is the full editor (expert prefs included).
+		return runConfigWizard(stdin, stdout, stderr, false)
 	case "show", "get":
 		return runConfigShow(stdout, stderr)
 	case "path":
@@ -223,7 +230,11 @@ func apiKeyStatus(provider string, entry config.ModelEntry) string {
 // runConfigWizard prompts for the persisted defaults and writes the file.
 // Existing values are offered as the default for each prompt so re-running it
 // edits rather than resets.
-func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer) int {
+// runConfigWizard walks the user through setting their default provider/model
+// and key. firstRun trims it to the essentials (provider → model → key) and
+// asks for the key directly, deferring expert prefs (coauthor, reasoning,
+// show-reasoning) to a later `octo config`; the full editor asks everything.
+func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) int {
 	full, _ := config.Load() // a malformed file is treated as empty here — the wizard overwrites it
 	existing := full.DefaultEntry()
 
@@ -383,67 +394,77 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer) int {
 	outEntry.Model = model
 	outEntry.BaseURL = baseURL
 
-	// Co-authored-by: default on; ask once in wizard.
-	coauthorDefault := full.Coauthor == nil || *full.Coauthor
-	coauthorVal, ok := pickYesNo(tty, reader, stdin, stdout,
-		"Append Co-authored-by to git commits?", coauthorDefault)
-	if !ok {
-		return cancelWizard(stderr)
-	}
-	full.Coauthor = &coauthorVal
+	// ── API key — asked right after the model so a brand-new user reaches the
+	// one thing that actually unblocks them, not after a pile of expert
+	// questions. env stays the recommended home; we only prompt when it's empty.
+	keyEntered := collectAPIKey(&outEntry, existing, provider, firstRun, reader, stdout)
 
-	// Reasoning effort: off (empty) by default; offer the existing value.
-	if tty {
-		choice, ok := runSelect(stdin, stdout, "Reasoning effort", []selectItem{
-			{label: "Off", value: ""},
-			{label: "Low", value: "low"},
-			{label: "Medium", value: "medium"},
-			{label: "High", value: "high"},
-			{label: "Extra-high", value: "xhigh"},
-			{label: "Max", value: "max"},
-		}, existing.ReasoningEffort)
+	// Validate a freshly entered key against the live endpoint so a typo is
+	// caught here, not on the first turn. Interactive only (TTY) — piped runs and
+	// tests must not hit the network. First run loops on failure so the user can
+	// retry; the full editor just warns.
+	if keyEntered && tty {
+		for {
+			if reportConnectionCheck(stdout, stderr, provider, outEntry.APIKey, baseURL, model) {
+				break
+			}
+			if !firstRun {
+				break
+			}
+			again := strings.TrimSpace(promptDefault(reader, stdout,
+				"Re-enter API key (empty = keep it and continue)", ""))
+			if again == "" {
+				break
+			}
+			outEntry.APIKey = again
+		}
+	}
+
+	// Expert preferences — skipped on first run (sane defaults: coauthor on,
+	// reasoning off). They stay one `octo config` away.
+	if !firstRun {
+		// Co-authored-by: default on; ask once in wizard.
+		coauthorDefault := full.Coauthor == nil || *full.Coauthor
+		coauthorVal, ok := pickYesNo(tty, reader, stdin, stdout,
+			"Append Co-authored-by to git commits?", coauthorDefault)
 		if !ok {
 			return cancelWizard(stderr)
 		}
-		outEntry.ReasoningEffort = choice.value
-	} else {
-		effortAns := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
-			"Reasoning effort (low | medium | high | xhigh | max, empty = off)", existing.ReasoningEffort)))
-		if !validReasoningEffort(effortAns) {
-			fmt.Fprintf(stderr, "octo config: invalid reasoning effort %q (use 'low', 'medium', 'high', 'xhigh', 'max', or empty)\n", effortAns)
-			return 2
-		}
-		outEntry.ReasoningEffort = effortAns
-	}
+		full.Coauthor = &coauthorVal
 
-	// Surface the reasoning/thinking trace for the Web UI to display (the
-	// terminal never renders it): default off.
-	showDefault := existing.ShowReasoning != nil && *existing.ShowReasoning
-	showVal, ok := pickYesNo(tty, reader, stdin, stdout,
-		"Show the reasoning/thinking trace on the Web UI?", showDefault)
-	if !ok {
-		return cancelWizard(stderr)
-	}
-	outEntry.ShowReasoning = &showVal
-
-	// API key: env is the recommended home for it. Offer to store it only if
-	// the env var is empty, and make declining the obvious default.
-	envVar := app.VendorAPIKeyEnvVar(provider)
-	if envVar == "" {
-		envVar = strings.ToUpper(provider) + "_API_KEY"
-	}
-	// Prompt for key when env is empty AND (no stored key OR switching provider —
-	// a key stored for a different provider doesn't help the new one).
-	needsKeyPrompt := os.Getenv(envVar) == "" &&
-		(existing.APIKey == "" || existing.Provider != provider)
-	if needsKeyPrompt {
-		outEntry.APIKey = ""
-		ans := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
-			"Store the API key in this file? Not recommended — prefer "+envVar+" (y/N)", "n")))
-		if ans == "y" || ans == "yes" {
-			key := strings.TrimSpace(promptDefault(reader, stdout, "API key", ""))
-			outEntry.APIKey = key
+		// Reasoning effort: off (empty) by default; offer the existing value.
+		if tty {
+			choice, ok := runSelect(stdin, stdout, "Reasoning effort", []selectItem{
+				{label: "Off", value: ""},
+				{label: "Low", value: "low"},
+				{label: "Medium", value: "medium"},
+				{label: "High", value: "high"},
+				{label: "Extra-high", value: "xhigh"},
+				{label: "Max", value: "max"},
+			}, existing.ReasoningEffort)
+			if !ok {
+				return cancelWizard(stderr)
+			}
+			outEntry.ReasoningEffort = choice.value
+		} else {
+			effortAns := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
+				"Reasoning effort (low | medium | high | xhigh | max, empty = off)", existing.ReasoningEffort)))
+			if !validReasoningEffort(effortAns) {
+				fmt.Fprintf(stderr, "octo config: invalid reasoning effort %q (use 'low', 'medium', 'high', 'xhigh', 'max', or empty)\n", effortAns)
+				return 2
+			}
+			outEntry.ReasoningEffort = effortAns
 		}
+
+		// Surface the reasoning/thinking trace for the Web UI to display (the
+		// terminal never renders it): default off.
+		showDefault := existing.ShowReasoning != nil && *existing.ShowReasoning
+		showVal, ok := pickYesNo(tty, reader, stdin, stdout,
+			"Show the reasoning/thinking trace on the Web UI?", showDefault)
+		if !ok {
+			return cancelWizard(stderr)
+		}
+		outEntry.ShowReasoning = &showVal
 	}
 
 	full.SetDefaultEntry(outEntry)
@@ -454,12 +475,71 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer) int {
 	path, _ := config.Path()
 	fmt.Fprintln(stdout)
 	fmt.Fprintf(stdout, "Saved %s\n", path)
-	if outEntry.APIKey == "" && os.Getenv(envVar) == "" {
-		fmt.Fprintf(stdout, "Next: export %s=... (or re-run `octo config` to store it), then `octo`.\n", envVar)
+	if outEntry.APIKey == "" && os.Getenv(apiKeyEnvVar(provider)) == "" {
+		fmt.Fprintf(stdout, "Next: export %s=... (or re-run `octo config` to store it), then `octo`.\n", apiKeyEnvVar(provider))
 	} else {
 		fmt.Fprintln(stdout, "Run `octo` to start.")
 	}
 	return 0
+}
+
+// apiKeyEnvVar is the conventional env var holding a provider's key.
+func apiKeyEnvVar(provider string) string {
+	if v := app.VendorAPIKeyEnvVar(provider); v != "" {
+		return v
+	}
+	return strings.ToUpper(provider) + "_API_KEY"
+}
+
+// collectAPIKey prompts for the provider key when none is reachable (env empty
+// and no usable stored key), returning whether a non-empty key was just entered.
+// First run asks for the key directly and stores it — the wizard auto-launched
+// precisely because no key exists, so a "store in file? (not recommended)"
+// double-negative that dead-ends in an env-var detour helps nobody. The full
+// editor keeps that opt-in prompt (env is the recommended home there).
+func collectAPIKey(outEntry *config.ModelEntry, existing config.ModelEntry, provider string, firstRun bool, reader lineReader, stdout io.Writer) bool {
+	if os.Getenv(apiKeyEnvVar(provider)) != "" {
+		return false
+	}
+	// A key stored for a different provider is useless for the new one.
+	if existing.APIKey != "" && existing.Provider == provider {
+		return false
+	}
+	outEntry.APIKey = ""
+	if firstRun {
+		key := strings.TrimSpace(promptDefault(reader, stdout, "Paste your "+app.VendorDisplayName(provider)+" API key", ""))
+		outEntry.APIKey = key
+		return key != ""
+	}
+	ans := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
+		"Store the API key in this file? Not recommended — prefer "+apiKeyEnvVar(provider)+" (y/N)", "n")))
+	if ans == "y" || ans == "yes" {
+		key := strings.TrimSpace(promptDefault(reader, stdout, "API key", ""))
+		outEntry.APIKey = key
+		return key != ""
+	}
+	return false
+}
+
+// reportConnectionCheck tests the entered key against the endpoint, printing a
+// ✓/✗ line. Returns true on success. Resolves the vendor default model/base URL
+// when the user accepted the default (left them empty).
+func reportConnectionCheck(stdout, stderr io.Writer, provider, key, baseURL, model string) bool {
+	if model == "" {
+		model = app.VendorDefaultModel(provider)
+	}
+	if baseURL == "" {
+		baseURL = app.DefaultBaseURL(provider)
+	}
+	fmt.Fprintln(stdout, "Testing connection…")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := validateConnection(ctx, provider, key, baseURL, model); err != nil {
+		fmt.Fprintf(stderr, "✗ Couldn't connect: %v\n", err)
+		return false
+	}
+	fmt.Fprintln(stdout, "✓ Connected.")
+	return true
 }
 
 // customSentinel is the menu value standing in for "let me type my own". It
