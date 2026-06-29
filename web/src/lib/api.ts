@@ -452,6 +452,36 @@ export async function getVersion(): Promise<unknown> {
   return request<unknown>('/api/version', { cache: 'no-store' })
 }
 
+// Browser automation setup
+
+export interface BrowserStatus {
+  configured: boolean
+  connected: boolean
+  port: number
+  attach_running: boolean
+  chrome_available: boolean
+}
+
+export interface BrowserVerifyResult {
+  ok: boolean
+  port: number
+  detail: string
+  saved: boolean
+}
+
+export async function getBrowserStatus(): Promise<BrowserStatus> {
+  return request<BrowserStatus>('/api/browser/status', { cache: 'no-store' })
+}
+
+// verifyBrowser probes the CDP endpoint (the chrome://inspect path) and, on
+// success, persists connect_port — the web equivalent of `octo browser setup`.
+export async function verifyBrowser(port?: number): Promise<BrowserVerifyResult> {
+  return request<BrowserVerifyResult>('/api/browser/verify', {
+    method: 'POST',
+    ...json(port ? { port } : {}),
+  })
+}
+
 // Onboard / first-run
 
 export interface OnboardStatus {

@@ -1,0 +1,108 @@
+<script lang="ts">
+  import { onMount } from 'svelte'
+  import { t, tr } from '../../lib/i18n'
+  import * as api from '../../lib/api'
+  import type { BrowserVerifyResult } from '../../lib/api'
+
+  // Shared browser-automation setup body: the chrome://inspect instructions, a
+  // port field, and a Verify button that probes CDP (and persists connect_port
+  // on success). Used by both the Settings modal and the first-run wizard step.
+  // The parent supplies the secondary action (Cancel / Skip) and the success
+  // handler, so the same verify flow drives both contexts.
+  let { secondaryLabel, onSecondary, onVerified }:
+    {
+      secondaryLabel: string
+      onSecondary: () => void
+      onVerified: (res: BrowserVerifyResult) => void | Promise<void>
+    } = $props()
+
+  let port = $state(9222)
+  let chromeAvailable = $state(true)
+  let verifying = $state(false)
+  let error = $state('')
+
+  onMount(async () => {
+    try {
+      const st = await api.getBrowserStatus()
+      if (st.port) port = st.port
+      chromeAvailable = st.chrome_available
+    } catch { /* defaults are fine */ }
+  })
+
+  async function runVerify() {
+    verifying = true
+    error = ''
+    try {
+      const res = await api.verifyBrowser(port)
+      if (res.ok) {
+        await onVerified(res)
+      } else {
+        error = res.detail || tr('settings.browser.verify_fail')
+      }
+    } catch (e: any) {
+      error = e?.message ?? tr('settings.browser.verify_fail')
+    } finally {
+      verifying = false
+    }
+  }
+</script>
+
+<p class="bs-intro">{$t('settings.browser.modal_intro')}</p>
+<ol class="bs-steps">
+  <li>{$t('settings.browser.step_open')} <code>chrome://inspect/#remote-debugging</code></li>
+  <li>{$t('settings.browser.step_toggle')}</li>
+  <li>{$t('settings.browser.step_verify')}</li>
+  <li>{$t('settings.browser.step_approve')}</li>
+</ol>
+{#if !chromeAvailable}
+  <div class="bs-note">
+    <iconify-icon icon="ant-design:warning-outlined" width="14"></iconify-icon>
+    {$t('settings.browser.no_chrome')}
+  </div>
+{/if}
+<div class="bs-port-row">
+  <label class="bs-lbl" for="bs-port">{$t('settings.browser.port_label')}</label>
+  <input id="bs-port" class="bs-port" type="number" min="1" max="65535" bind:value={port} />
+</div>
+{#if verifying}
+  <div class="bs-hint">
+    <iconify-icon icon="ant-design:loading-outlined" width="14"></iconify-icon>
+    {$t('settings.browser.verify_hint')}
+  </div>
+{/if}
+{#if error}
+  <div class="bs-error">{error}</div>
+{/if}
+<div class="bs-actions">
+  <button class="btn-ghost" onclick={onSecondary} disabled={verifying}>{secondaryLabel}</button>
+  <button class="btn-primary" onclick={runVerify} disabled={verifying}>
+    {verifying ? $t('settings.browser.verifying') : $t('settings.browser.verify')}
+  </button>
+</div>
+
+<style>
+.bs-intro { margin: 0 0 12px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.bs-steps { margin: 0 0 16px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text); line-height: 1.5; }
+.bs-steps code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--bg-table-header); padding: 1px 5px; border-radius: 4px; }
+.bs-note { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; font-size: 12px; color: var(--warning); background: var(--warning-bg); }
+.bs-port-row { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.bs-lbl { font-size: 14px; color: var(--text); }
+.bs-port {
+  width: 120px; height: 32px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+  color: var(--text); font-family: inherit; outline: none; background: var(--bg-container);
+}
+.bs-port:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+.bs-hint { margin-top: 12px; font-size: 12px; color: var(--blue-6); display: flex; align-items: center; gap: 6px; }
+.bs-error { margin-top: 12px; font-size: 12px; color: var(--error); }
+.bs-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.btn-ghost {
+  height: 32px; padding: 0 16px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 6px; font-size: 14px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+}
+.btn-ghost:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
+.btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { height: 32px; padding: 0 16px; border: none; background: var(--blue-6); border-radius: 6px; font-size: 14px; color: #fff; cursor: pointer; font-family: inherit; }
+.btn-primary:hover:not(:disabled) { background: var(--blue-5); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
