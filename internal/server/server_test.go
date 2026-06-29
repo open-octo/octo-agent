@@ -488,6 +488,63 @@ func (s *recordingSender) StreamMessagesWithTools(_ context.Context, _, _ string
 	return agent.Reply{Content: "ok"}, nil
 }
 
+// TestEnsureSender_LazyInitDoesNotDeadlock guards the onboarding-completion
+// path: a server that booted without a key (sender nil) builds the sender on
+// the first turn via ensureSender. ensureSender holds senderMu while it sets
+// the sender, then enables the sub-agent tools — and enableSubAgentTools reads
+// the default sender back through defaultSenderAndModel, which also takes
+// senderMu. Because senderMu is not reentrant, doing that work while still
+// holding the lock self-deadlocks and hangs every subsequent turn (only the
+// lazy path; New() enables tools before locking, which is why restarting the
+// server worked around it). This test fails (times out) if the lock is held
+// across enableSubAgentTools again.
+func TestEnsureSender_LazyInitDoesNotDeadlock(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("OPENAI_API_KEY", "")
+
+	// Boot with no config → onboarding mode (sender nil), tools enabled so the
+	// ensureSender path reaches enableSubAgentTools.
+	srv, err := New(Config{Addr: "127.0.0.1:0", Tools: true, NoChannel: true, NoMemory: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if srv.getSender() != nil {
+		t.Fatal("expected nil sender on keyless start (onboarding mode)")
+	}
+
+	// Simulate onboard saving a keyed model, the way the setup form does.
+	cfgPath := filepath.Join(tmp, ".octo", "config.yml")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgYAML := "models:\n" +
+		"  - name: t\n" +
+		"    provider: openai\n" +
+		"    model: gpt-test\n" +
+		"    base_url: http://127.0.0.1:1/v1\n" +
+		"    api_key: sk-test\n" +
+		"default_model: t\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- srv.ensureSender() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ensureSender: %v", err)
+		}
+		if srv.getSender() == nil {
+			t.Fatal("sender still nil after ensureSender")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ensureSender deadlocked (senderMu held across enableSubAgentTools)")
+	}
+}
+
 // ─── New API tests ──────────────────────────────────────────────────────────
 
 func TestHandleOnboardStatus(t *testing.T) {
