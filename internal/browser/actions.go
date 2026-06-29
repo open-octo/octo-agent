@@ -57,6 +57,56 @@ func (p *Page) Click(ctx context.Context, selector string) error {
 	return nil
 }
 
+// Hover moves the pointer over an element with a real (trusted) mouse move.
+// Synthetic JS events can't trigger CSS :hover reveals — only a genuine pointer
+// move does, which is what this dispatches.
+func (p *Page) Hover(ctx context.Context, selector string) error {
+	pt, err := p.elementCenter(ctx, selector)
+	if err != nil {
+		return err
+	}
+	_, err = p.cli.call(ctx, p.sessionID, "Input.dispatchMouseEvent", map[string]any{
+		"type": "mouseMoved",
+		"x":    pt.X,
+		"y":    pt.Y,
+	})
+	return err
+}
+
+// SelectOption picks an <option> of a native <select> by its value, visible
+// text, or label, then fires input+change so framework bindings react. Native
+// select popups are browser-drawn (not DOM), so this is the reliable path.
+func (p *Page) SelectOption(ctx context.Context, selector, value string) error {
+	expr := fmt.Sprintf(`(() => {
+		const el = document.querySelector(%s);
+		if (!el || el.tagName !== 'SELECT') return 'no-select';
+		let idx = -1;
+		for (let i = 0; i < el.options.length; i++) {
+			const o = el.options[i];
+			if (o.value === %s || o.text === %s || o.label === %s) { idx = i; break; }
+		}
+		if (idx < 0) return 'no-option';
+		el.selectedIndex = idx;
+		el.dispatchEvent(new Event('input', { bubbles: true }));
+		el.dispatchEvent(new Event('change', { bubbles: true }));
+		return 'ok';
+	})()`, jsString(selector), jsString(value), jsString(value), jsString(value))
+	var status string
+	if err := p.Eval(ctx, expr, &status); err != nil {
+		return err
+	}
+	switch status {
+	case "ok":
+		return nil
+	case "no-select":
+		return fmt.Errorf("select: %q is not a <select> element", selector)
+	case "no-option":
+		return fmt.Errorf("select: no option matching %q in %s", value, selector)
+	default:
+		return fmt.Errorf("select: unexpected status %q", status)
+	}
+}
+
 // TypeText focuses the element matched by selector and types text into it.
 func (p *Page) TypeText(ctx context.Context, selector, text string) error {
 	focus := fmt.Sprintf(`(() => { const el = document.querySelector(%s); if (!el) return false; el.focus(); return true; })()`, jsString(selector))

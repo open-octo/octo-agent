@@ -199,6 +199,79 @@ func TestUpload(t *testing.T) {
 	}
 }
 
+// TestHover verifies a trusted pointer move fires real hover DOM events (which
+// synthetic JS events / CSS :hover can't be driven by otherwise).
+func TestHover(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>h</title>
+<div id="t" style="width:100px;height:40px">target</div>
+<script>window.hovered=false;
+document.getElementById('t').addEventListener('mouseover',function(){window.hovered=true});</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#t", 5*time.Second); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if err := page.Hover(ctx, "#t"); err != nil {
+		t.Fatalf("hover: %v", err)
+	}
+	var hovered bool
+	if err := page.Eval(ctx, "window.hovered", &hovered); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if !hovered {
+		t.Fatal("hover did not fire mouseover")
+	}
+}
+
+// TestSelectOption picks a native <select> option and verifies the value + that
+// change fired.
+func TestSelectOption(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>s</title>
+<select id="s"><option value="a">Apple</option><option value="b">Banana</option></select>
+<script>window.changed='';document.getElementById('s').addEventListener('change',function(e){window.changed=e.target.value});</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#s", 5*time.Second); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if err := page.SelectOption(ctx, "#s", "Banana"); err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	var value, changed string
+	if err := page.Eval(ctx, "document.querySelector('#s').value", &value); err != nil {
+		t.Fatalf("eval value: %v", err)
+	}
+	if err := page.Eval(ctx, "window.changed", &changed); err != nil {
+		t.Fatalf("eval changed: %v", err)
+	}
+	if value != "b" {
+		t.Fatalf("select value = %q, want b", value)
+	}
+	if changed != "b" {
+		t.Fatalf("change event value = %q, want b", changed)
+	}
+}
+
 // TestPrimitives covers eval / screenshot / ax-tree / key on the fixture.
 func TestPrimitives(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

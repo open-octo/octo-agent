@@ -111,12 +111,13 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"navigate", "back", "click", "type", "key", "scroll", "wait", "screenshot", "ax", "upload", "download", "pages", "select_page", "close", "eval"},
+					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "ax", "upload", "download", "pages", "select_page", "close", "eval"},
 					"description": "The browser action to perform.",
 				},
 				"url":        map[string]any{"type": "string", "description": "Target URL (navigate)."},
-				"selector":   map[string]any{"type": "string", "description": "CSS selector of the target element (click/type/scroll/wait/upload/download)."},
+				"selector":   map[string]any{"type": "string", "description": "CSS selector of the target element (click/hover/type/select/scroll/wait/upload/download)."},
 				"text":       map[string]any{"type": "string", "description": "Text to type (type)."},
+				"value":      map[string]any{"type": "string", "description": "Option value, text, or label to pick in a <select> (select)."},
 				"keys":       map[string]any{"type": "string", "description": "Key or combo, e.g. enter, escape, ctrl+a (key)."},
 				"js":         map[string]any{"type": "string", "description": "JavaScript expression to evaluate (eval)."},
 				"files":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Absolute file paths to set on a file <input> (upload)."},
@@ -166,6 +167,26 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, err
 		}
 		return agent.ToolResult{Text: "clicked " + sel}, nil
+
+	case "hover":
+		sel := getStr(input, "selector")
+		if sel == "" {
+			return agent.ToolResult{}, fmt.Errorf("browser: hover requires selector")
+		}
+		if err := page.Hover(ctx, sel); err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: "hovered " + sel}, nil
+
+	case "select":
+		sel, val := getStr(input, "selector"), getStr(input, "value")
+		if sel == "" {
+			return agent.ToolResult{}, fmt.Errorf("browser: select requires selector")
+		}
+		if err := page.SelectOption(ctx, sel, val); err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: fmt.Sprintf("selected %q in %s", val, sel)}, nil
 
 	case "type":
 		sel, text := getStr(input, "selector"), getStr(input, "text")
