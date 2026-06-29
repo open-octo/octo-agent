@@ -61,7 +61,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		Messages:  msgs,
 		Stream:    true,
 	}
-	cacheableRequest(&body, req.SystemPrompt, toAPITools(req.Tools))
+	cacheableRequest(&body, req.SystemPrompt, toAPITools(req.Tools), c.staticPrefixCache())
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = DefaultMaxTokens
 	}

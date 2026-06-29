@@ -294,14 +294,34 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 	}, nil
 }
 
+// MistralBaseURL is Mistral's official API host. It speaks the OpenAI protocol
+// and, unlike the auto-caching backends (DeepSeek, GLM, Qwen-implicit, …),
+// caches a prompt prefix ONLY when the request carries a stable prompt_cache_key
+// — so the key must be forwarded there too, not just to OpenAI.
+const MistralBaseURL = "https://api.mistral.ai"
+
+// promptCacheKeyEndpoints is the set of base URLs known to accept the
+// prompt_cache_key field. prompt_cache_key originated as an OpenAI field; most
+// OpenAI-compatible gateways either ignore it or cache automatically without it,
+// and some that proxy other backends (e.g. AWS Bedrock for Anthropic models)
+// reject unknown body fields with a 400 ("Extra inputs are not permitted") — so
+// the key is sent only to endpoints that are known to honour it. Mistral is
+// included because it does not cache at all without the key.
+var promptCacheKeyEndpoints = map[string]bool{
+	DefaultBaseURL: true, // official OpenAI: prompt-cache routing
+	MistralBaseURL: true, // Mistral: prefix caching requires the key
+}
+
 // promptCacheKey returns the prompt-cache routing key only when the client
-// targets the official OpenAI endpoint. prompt_cache_key is an OpenAI-proprietary
-// field: OpenAI-compatible gateways that proxy to other backends (e.g. AWS
-// Bedrock for Anthropic models) reject unknown body fields with a 400
-// ("Extra inputs are not permitted"), so it is omitted for any non-official
-// BaseURL while official OpenAI keeps its prompt-cache routing.
+// targets an endpoint known to accept the prompt_cache_key field (see
+// promptCacheKeyEndpoints); it is omitted everywhere else to avoid a 400 from
+// strict gateways.
 func (c *Client) promptCacheKey(key string) string {
-	if c.BaseURL == "" || c.BaseURL == DefaultBaseURL {
+	base := strings.TrimRight(c.BaseURL, "/")
+	if base == "" {
+		base = DefaultBaseURL // zero value defaults to official OpenAI
+	}
+	if promptCacheKeyEndpoints[base] {
 		return key
 	}
 	return ""

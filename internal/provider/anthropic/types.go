@@ -9,13 +9,23 @@ import "encoding/json"
 // cacheControl marks a prompt-cache breakpoint. Anthropic caches the entire
 // prefix up to and including the block carrying this marker and reuses it on
 // later requests sharing that prefix (billed at the cheaper cached rate).
-// Only "ephemeral" exists today.
+// TTL selects the cache lifetime: empty means the default 5-minute window;
+// "1h" is the extended one-hour window (billed at a 2× write premium vs 1.25×
+// for 5m, but worth it for a prefix re-read across think-time gaps longer than
+// five minutes). Only "ephemeral" exists as a type today.
 type cacheControl struct {
-	Type string `json:"type"` // "ephemeral"
+	Type string `json:"type"`          // "ephemeral"
+	TTL  string `json:"ttl,omitempty"` // "" (5m default) | "1h"
 }
 
-// ephemeral is the shared marker; it's immutable so sharing the pointer is safe.
-var ephemeral = &cacheControl{Type: "ephemeral"}
+// ephemeral is the shared 5-minute marker; immutable so sharing the pointer is
+// safe. ephemeral1h is the one-hour variant used for the static system+tools
+// prefix on the official Anthropic endpoint, where the extended TTL is a
+// documented GA feature — see Client.staticPrefixCache.
+var (
+	ephemeral   = &cacheControl{Type: "ephemeral"}
+	ephemeral1h = &cacheControl{Type: "ephemeral", TTL: "1h"}
+)
 
 // apiSystemBlock is one element of the array form of the `system` field.
 // Anthropic accepts `system` as a plain string OR an array of text blocks;
