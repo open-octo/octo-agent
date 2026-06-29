@@ -91,6 +91,11 @@ func dial(ctx context.Context, wsURL string) (*cdpClient, error) {
 	return newCDPClient(conn), nil
 }
 
+// OwnsProcess reports whether this process launched the Chrome (true) or merely
+// attached to an already-running one (false). Callers use it to decide whether
+// teardown may kill the browser or must only close the tabs it opened.
+func (b *Browser) OwnsProcess() bool { return b.ownsProcess }
+
 // Close tears down the connection and, if this process launched Chrome, the
 // Chrome process too.
 func (b *Browser) Close() error {

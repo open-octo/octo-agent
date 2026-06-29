@@ -480,3 +480,49 @@ func TestPrimitives(t *testing.T) {
 		t.Fatalf("key: %v", err)
 	}
 }
+
+// TestNewPageLeavesOtherTabsUntouched locks the invariant the browser tool
+// relies on: octo opens its own tab and never disturbs tabs the user already
+// has open. Regression guard for the bug where attaching to a running Chrome
+// hijacked pages[0] (the octo web UI itself) and navigated it away.
+func TestNewPageLeavesOtherTabsUntouched(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<!doctype html><html><head><title>t</title></head><body>" + r.URL.Path + "</body></html>"))
+	}))
+	defer srv.Close()
+
+	// The user's tab, sitting on /user.
+	userPage, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("user page: %v", err)
+	}
+	if err := userPage.Navigate(ctx, srv.URL+"/user"); err != nil {
+		t.Fatalf("navigate user: %v", err)
+	}
+
+	// octo's own tab, driven to /octo — must not affect the user's tab.
+	octoPage, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("octo page: %v", err)
+	}
+	if octoPage.TargetID() == userPage.TargetID() {
+		t.Fatal("octo reused the user's tab instead of opening its own")
+	}
+	if err := octoPage.Navigate(ctx, srv.URL+"/octo"); err != nil {
+		t.Fatalf("navigate octo: %v", err)
+	}
+
+	var userPath string
+	if err := userPage.Eval(ctx, "location.pathname", &userPath); err != nil {
+		t.Fatalf("eval user path: %v", err)
+	}
+	if userPath != "/user" {
+		t.Errorf("user tab was disturbed: pathname = %q, want /user", userPath)
+	}
+}
