@@ -112,12 +112,21 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 			return nil, nil, err
 		}
 	default:
-		if b, err = browser.Launch(ctx, browser.LaunchOptions{
-			ExecPath:    bc.ExecPath,
-			UserDataDir: bc.UserDataDir,
-			Headless:    bc.Headless,
-		}); err != nil {
-			return nil, nil, fmt.Errorf("launch Chrome: %w", err)
+		// No explicit attach config: prefer the user's logged-in Chrome if one
+		// is running with remote debugging. Discovery only succeeds when the
+		// user deliberately enabled it (the chrome://inspect toggle or
+		// --remote-debugging-port), so this never hijacks an ordinary browser —
+		// it just means `octo browser setup` users, and anyone who flipped the
+		// toggle, get their logged-in session without extra config. Falls back
+		// to a fresh throwaway Chrome.
+		if b, err = browser.DiscoverRunningChrome(ctx); err != nil {
+			if b, err = browser.Launch(ctx, browser.LaunchOptions{
+				ExecPath:    bc.ExecPath,
+				UserDataDir: bc.UserDataDir,
+				Headless:    bc.Headless,
+			}); err != nil {
+				return nil, nil, fmt.Errorf("launch Chrome: %w", err)
+			}
 		}
 	}
 
@@ -153,8 +162,8 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "run_skill"},
-					"description": "The browser action to perform. observe returns a screenshot the model can see plus a list of the page's interactable elements with selectors — the way to look at an unfamiliar page before acting. record_start/record_stop capture a demonstration into an editable skill; run_skill replays one (deterministic, self-healing).",
+					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "cookies", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "run_skill"},
+					"description": "The browser action to perform. observe returns a screenshot the model can see plus a list of the page's interactable elements with selectors — the way to look at an unfamiliar page before acting. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture a demonstration into an editable skill; run_skill replays one (deterministic, self-healing).",
 				},
 				"name":       map[string]any{"type": "string", "description": "Skill name (record_stop / run_skill)."},
 				"params":     map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill)."},
@@ -326,6 +335,17 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, err
 		}
 		return agent.ToolResult{Text: axDigest(raw)}, nil
+
+	case "cookies":
+		cookies, err := page.Cookies(ctx)
+		if err != nil {
+			return agent.ToolResult{}, err
+		}
+		j, err := json.MarshalIndent(cookies, "", "  ")
+		if err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: fmt.Sprintf("%d cookie(s) for the current page (HttpOnly included):\n%s", len(cookies), j)}, nil
 
 	case "upload":
 		sel := targetSelector(input)

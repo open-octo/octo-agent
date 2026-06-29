@@ -338,3 +338,34 @@ func (p *Page) AXTree(ctx context.Context) (json.RawMessage, error) {
 	}
 	return res, nil
 }
+
+// Cookie is one browser cookie, including HttpOnly ones JS can't read via
+// document.cookie — which is the point: a logged-in session token usually is
+// HttpOnly, so reuse/extraction needs CDP, not Eval.
+type Cookie struct {
+	Name     string  `json:"name"`
+	Value    string  `json:"value"`
+	Domain   string  `json:"domain"`
+	Path     string  `json:"path"`
+	Expires  float64 `json:"expires"`
+	HTTPOnly bool    `json:"httpOnly"`
+	Secure   bool    `json:"secure"`
+	SameSite string  `json:"sameSite,omitempty"`
+}
+
+// Cookies returns the cookies the current page can see (its URL + frames),
+// including HttpOnly. Network.enable is idempotent and a no-op once on.
+func (p *Page) Cookies(ctx context.Context) ([]Cookie, error) {
+	_, _ = p.cli.call(ctx, p.sessionID, "Network.enable", nil)
+	res, err := p.cli.call(ctx, p.sessionID, "Network.getCookies", nil)
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		Cookies []Cookie `json:"cookies"`
+	}
+	if err := json.Unmarshal(res, &r); err != nil {
+		return nil, err
+	}
+	return r.Cookies, nil
+}

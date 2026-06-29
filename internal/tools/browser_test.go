@@ -164,6 +164,45 @@ func TestBrowserTool_RequiresAction(t *testing.T) {
 	}
 }
 
+// TestBrowserTool_CookiesIncludesHttpOnly verifies the cookies action returns
+// the current page's cookies including HttpOnly ones (which document.cookie via
+// eval cannot see) — the reason this needs CDP.
+func TestBrowserTool_CookiesIncludesHttpOnly(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60_000_000_000) // 60s
+	defer cancel()
+	if !browser.ChromeAvailable("") {
+		t.Skip("chrome not available")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "sess", Value: "secret123", Path: "/", HttpOnly: true})
+		w.Write([]byte("<!doctype html><html><head><title>c</title></head><body>hi</body></html>"))
+	}))
+	defer srv.Close()
+
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Headless: true})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	SetBrowserSession(b, page)
+	defer ResetBrowserSession()
+
+	tool := BrowserTool{}
+	if _, err := tool.Execute(ctx, "browser", map[string]any{"action": "navigate", "url": srv.URL}); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	res, err := tool.Execute(ctx, "browser", map[string]any{"action": "cookies"})
+	if err != nil {
+		t.Fatalf("cookies: %v", err)
+	}
+	if !strings.Contains(res.Text, "sess") || !strings.Contains(res.Text, "secret123") {
+		t.Errorf("cookies missing the HttpOnly session cookie; got:\n%s", res.Text)
+	}
+}
+
 // TestBrowserTool_ObserveAndScreenshotVision checks that screenshot and observe
 // hand the model an actual image block (not just a file path), and that observe
 // also lists the page's interactable elements with selectors.
