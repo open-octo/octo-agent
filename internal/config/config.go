@@ -87,6 +87,26 @@ type Config struct {
 	// thinking trace is surfaced. Individual model entries can override this.
 	// nil means the built-in default (enabled).
 	ShowReasoning *bool `yaml:"show_reasoning,omitempty"`
+	// Browser configures the built-in browser automation backend.
+	Browser BrowserConfig `yaml:"browser,omitempty"`
+}
+
+// BrowserConfig configures how the browser tool connects to Chrome.
+type BrowserConfig struct {
+	// ConnectPort attaches to a Chrome already running with
+	// --remote-debugging-port=<port>, reusing its logged-in session. Preferred
+	// over launching a fresh instance.
+	ConnectPort int `yaml:"connect_port,omitempty"`
+	// UserDataDir is the Chrome profile dir used when launching (the fallback
+	// when no running Chrome is attached). Empty uses a throwaway profile.
+	UserDataDir string `yaml:"user_data_dir,omitempty"`
+	// ExecPath overrides Chrome executable auto-detection.
+	ExecPath string `yaml:"exec_path,omitempty"`
+	// Headless launches Chrome headless. Interactive workflows want this off so
+	// the user can watch and intervene.
+	Headless bool `yaml:"headless,omitempty"`
+	// DownloadDir is where captured downloads are written. Empty uses a temp dir.
+	DownloadDir string `yaml:"download_dir,omitempty"`
 }
 
 // EffectiveShowReasoning resolves the effective show-reasoning flag for a
