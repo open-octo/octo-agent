@@ -69,6 +69,69 @@ func TestAskUserQuestionTool_Execute_SingleChoice(t *testing.T) {
 	}
 }
 
+// Claude models trained on Claude Code's AskUserQuestion send options as
+// {label, description} objects rather than bare strings. The tool must accept
+// that shape instead of dropping every entry and failing with "got 0".
+func TestAskUserQuestionTool_Execute_ObjectOptions(t *testing.T) {
+	stub := &stubAsker{resp: AskResponse{Choices: []string{"简洁型 — 极度简短"}}}
+	useAsker(t, stub)
+
+	out, err := AskUserQuestionTool{}.Execute(context.Background(), "ask_user_question", map[string]any{
+		"question": "什么风格?",
+		"options": []any{
+			map[string]any{"label": "简洁型", "description": "极度简短"},
+			map[string]any{"label": "专业型", "description": "精准、结构化"},
+			map[string]any{"label": "友好型"}, // description omitted
+		},
+	})
+	if err != nil {
+		t.Fatalf("object-shaped options should parse, got error: %v", err)
+	}
+	if len(stub.lastReq.Options) != 3 {
+		t.Fatalf("want 3 options forwarded, got %d: %v", len(stub.lastReq.Options), stub.lastReq.Options)
+	}
+	// Description is folded into the label so its context still reaches the user.
+	if stub.lastReq.Options[0] != "简洁型 — 极度简短" {
+		t.Errorf("option[0] = %q, want label folded with description", stub.lastReq.Options[0])
+	}
+	// A label without a description stays bare.
+	if stub.lastReq.Options[2] != "友好型" {
+		t.Errorf("option[2] = %q, want bare label", stub.lastReq.Options[2])
+	}
+	_ = out
+}
+
+func TestOptionLabels(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+		want []string
+	}{
+		{"string []any", []any{"a", "b"}, []string{"a", "b"}},
+		{"typed []string", []string{"a", "b"}, []string{"a", "b"}},
+		{"objects with label", []any{
+			map[string]any{"label": "a"},
+			map[string]any{"label": "b", "description": "d"},
+		}, []string{"a", "b — d"}},
+		{"blank entries dropped", []any{"a", "  ", map[string]any{"label": ""}}, []string{"a"}},
+		{"nil", nil, nil},
+		{"not a slice", "oops", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := optionLabels(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("got[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestAskUserQuestionTool_Execute_MultiChoice(t *testing.T) {
 	stub := &stubAsker{resp: AskResponse{Choices: []string{"OAuth", "API key"}}}
 	useAsker(t, stub)

@@ -148,7 +148,7 @@ func (AskUserQuestionTool) Execute(ctx context.Context, _ string, input map[stri
 	if question == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: question is required")
 	}
-	options := stringSliceArg(input, "options")
+	options := optionLabels(input["options"])
 	if len(options) < 2 || len(options) > 4 {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: options must have 2-4 entries (got %d)", len(options))
 	}
@@ -184,4 +184,51 @@ func formatAskResponse(r AskResponse) string {
 		return "(user cancelled)" // defensive: no choices and no custom → nothing to report
 	}
 	return "User chose: " + strings.Join(r.Choices, ", ")
+}
+
+// optionLabels extracts the option labels from the tool input, tolerating both
+// shapes the model emits. The schema asks for an array of strings, but Claude
+// models trained on Claude Code's AskUserQuestion habitually send an array of
+// {label, description} objects instead; a strict string-only parse drops those
+// silently and the tool fails with "got 0 options". So we accept either:
+//
+//	["A", "B"]                                          → "A", "B"
+//	[{"label":"A","description":"short"}, {"label":"B"}] → "A — short", "B"
+//
+// For object options a non-empty description is folded into the displayed label
+// so the extra context the model provided still reaches the user.
+func optionLabels(raw any) []string {
+	items, ok := raw.([]any)
+	if !ok {
+		// Already-typed []string (e.g. from tests) takes the simple path.
+		if ss, ok := raw.([]string); ok {
+			out := make([]string, 0, len(ss))
+			for _, s := range ss {
+				if s = strings.TrimSpace(s); s != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		}
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		switch v := it.(type) {
+		case string:
+			if s := strings.TrimSpace(v); s != "" {
+				out = append(out, s)
+			}
+		case map[string]any:
+			label := strings.TrimSpace(stringArg(v, "label"))
+			if label == "" {
+				continue
+			}
+			if desc := strings.TrimSpace(stringArg(v, "description")); desc != "" {
+				label += " — " + desc
+			}
+			out = append(out, label)
+		}
+	}
+	return out
 }
