@@ -45,7 +45,8 @@ end
 #   tools:      Array   — restrict the child to this subset of tool names
 #   read_only:  true    — strip the mutating tools (write_file/edit_file)
 #   schema:     String  — a JSON Schema (as a JSON string) the reply must match;
-#                         agent() then returns the sub-agent's JSON as a string
+#                         agent() then returns the sub-agent's reply as a JSON
+#                         string — wrap in JSON.parse(...) to get native Ruby
 #   isolation:  "worktree" — run the sub-agent in a fresh git worktree so its
 #                         file/terminal changes don't touch the main checkout;
 #                         changes are left on a branch (named in the reply)
@@ -79,6 +80,18 @@ end
 # when no budget was set).
 def budget_remaining
   __budget_remaining
+end
+
+# args returns the workflow's input value — whatever the caller passed as the
+# workflow tool's `args` — parsed from JSON into native Ruby (Hash / Array /
+# scalar). Returns nil when no args were supplied. Memoized: the host call and
+# JSON.parse run once. Use it to parameterize a saved/named workflow, e.g.
+#   target = args["target"]
+def args
+  @__wf_args ||= begin
+    s = __args
+    (s.nil? || s.empty?) ? nil : JSON.parse(s)
+  end
 end
 
 # phase(title) marks the start of a named stage so a multi-stage run reads as

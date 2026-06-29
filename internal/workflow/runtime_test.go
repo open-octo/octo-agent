@@ -471,3 +471,65 @@ func TestRun_ParallelResultsMatchOrder(t *testing.T) {
 		t.Errorf("Output = %q", got.Output)
 	}
 }
+
+// TestRun_JSONAvailable guards that the embedded mruby.wasm carries the JSON
+// gem: a script can round-trip JSON.parse / JSON.generate. This is what lets a
+// workflow decode a schema-constrained agent() reply and re-encode structured
+// data into a prompt.
+func TestRun_JSONAvailable(t *testing.T) {
+	got, err := Run(context.Background(),
+		`h = JSON.parse('{"bugs":[{"id":1},{"id":2}]}'); JSON.generate({"n" => h["bugs"].size})`,
+		Options{Agent: echoAgent})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Output != `{"n":2}` {
+		t.Errorf("Output = %q, want {\"n\":2}", got.Output)
+	}
+}
+
+// TestRun_Args proves the args primitive surfaces the run's input JSON as
+// native Ruby (Hash/Array/scalar).
+func TestRun_Args(t *testing.T) {
+	got, err := Run(context.Background(),
+		`"#{args["target"]}:#{args["lenses"].size}"`,
+		Options{Agent: echoAgent, Args: `{"target":"internal/agent","lenses":["a","b","c"]}`})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Output != "internal/agent:3" {
+		t.Errorf("Output = %q, want internal/agent:3", got.Output)
+	}
+}
+
+// TestRun_ArgsNilWhenAbsent: with no Args, the args primitive returns nil.
+func TestRun_ArgsNilWhenAbsent(t *testing.T) {
+	got, err := Run(context.Background(),
+		`args.nil? ? "none" : "some"`,
+		Options{Agent: echoAgent})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Output != "none" {
+		t.Errorf("Output = %q, want none", got.Output)
+	}
+}
+
+// TestRun_ResumeArgsMismatch: resuming the same script with different args is
+// rejected, since args drives control flow and invalidates cached results.
+func TestRun_ResumeArgsMismatch(t *testing.T) {
+	dir := t.TempDir()
+	script := `agent(args["q"])`
+	j, _ := CreateJournal(dir, "wf-args", runIdentityHash(script, `{"q":"first"}`))
+	_ = j.Close()
+
+	_, err := Run(newTestCtx(t), script, Options{
+		Agent:      echoAgent,
+		JournalDir: dir,
+		ResumeFrom: "wf-args",
+		Args:       `{"q":"second"}`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "different script") {
+		t.Errorf("err = %v, want different-script error on args mismatch", err)
+	}
+}

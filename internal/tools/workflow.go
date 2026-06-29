@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -27,7 +28,8 @@ type WorkflowTool struct{}
 func (WorkflowTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "workflow",
-		Description: "Start a Ruby orchestration script for deterministic multi-agent work. " +
+		Description: "Start a Ruby orchestration script for deterministic multi-agent work — " +
+			"either inline via `script`, or a saved workflow by `name` (see the name parameter). " +
 			"Use when a task decomposes into many sub-agent calls with explicit control flow " +
 			"(fan-out, pipelines, loops, conditionals) that you want executed reliably rather " +
 			"than improvised across turns.\n\n" +
@@ -52,7 +54,12 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"- `log(msg)`: surface a progress line.\n" +
 			"- `phase(title)`: mark the start of a named stage; groups the progress " +
 			"stream into steps (cosmetic, does not affect scheduling).\n" +
-			"- `budget_remaining -> Integer`: remaining output-token budget.\n\n" +
+			"- `budget_remaining -> Integer`: remaining output-token budget.\n" +
+			"- `args -> Hash/Array/scalar`: the input value passed as this tool's `args` " +
+			"parameter, parsed from JSON into native Ruby (nil when none). Use it to " +
+			"parameterize a reusable script, e.g. `target = args[\"target\"]`.\n" +
+			"- `JSON.parse(str)` / `JSON.generate(obj)` are available: decode a " +
+			"schema-constrained agent() reply, or encode structured data back into a prompt.\n\n" +
 			"The script's final expression is the run's result. Example:\n" +
 			"```ruby\n" +
 			"findings = parallel(%w[auth db cache]) { |area| agent(\"Audit the #{area} module for bugs\") }\n" +
@@ -63,11 +70,19 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"properties": map[string]any{
 				"script": map[string]any{
 					"type":        "string",
-					"description": "The Ruby workflow script. Its last expression is the run's result. Use agent()/parallel()/pipeline()/log() to orchestrate sub-agents.",
+					"description": "The Ruby workflow script. Its last expression is the run's result. Use agent()/parallel()/pipeline()/log() to orchestrate sub-agents. Provide exactly one of script or name.",
+				},
+				"name": map[string]any{
+					"type":        "string",
+					"description": savedWorkflowsParamDesc(),
 				},
 				"description": map[string]any{
 					"type":        "string",
 					"description": "Short human-readable label for this workflow (3-7 words). Shown in the status list and progress UI.",
+				},
+				"args": map[string]any{
+					"type":        "object",
+					"description": "Input value for the script, readable as the `args` primitive (parsed to native Ruby). Use to parameterize a reusable workflow instead of hardcoding values into the script.",
 				},
 				"resume_from": map[string]any{
 					"type": "string",
@@ -77,9 +92,31 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 						"without re-running. The script must be identical to the original run.",
 				},
 			},
-			"required": []string{"script"},
 		},
 	}
+}
+
+// savedWorkflowsParamDesc builds the `name` parameter description, listing the
+// saved workflows currently in the registries (~/.octo/workflows and the
+// project's .octo/workflows) so the model knows what it can run by name.
+func savedWorkflowsParamDesc() string {
+	var b strings.Builder
+	b.WriteString("Run a saved workflow by name (from ~/.octo/workflows or the project's " +
+		".octo/workflows). Provide exactly one of script or name; args are passed in either way.")
+	saved := listWorkflows()
+	if len(saved) == 0 {
+		b.WriteString(" (No saved workflows found yet — author one with workflow_save.)")
+		return b.String()
+	}
+	b.WriteString(" Available:")
+	for _, w := range saved {
+		if w.description != "" {
+			fmt.Fprintf(&b, "\n- %s — %s", w.name, w.description)
+		} else {
+			fmt.Fprintf(&b, "\n- %s", w.name)
+		}
+	}
+	return b.String()
 }
 
 // Execute starts the workflow in the background and returns its run handle.
@@ -89,8 +126,22 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 	}
 
 	script := strings.TrimSpace(stringArg(input, "script"))
-	if script == "" {
-		return agent.ToolResult{}, fmt.Errorf("workflow: script is required")
+	name := strings.TrimSpace(stringArg(input, "name"))
+	description := strings.TrimSpace(stringArg(input, "description"))
+	switch {
+	case script != "" && name != "":
+		return agent.ToolResult{}, fmt.Errorf("workflow: provide exactly one of script or name, not both")
+	case script == "" && name == "":
+		return agent.ToolResult{}, fmt.Errorf("workflow: provide a script, or a name of a saved workflow")
+	case name != "":
+		w, ok := lookupWorkflow(name)
+		if !ok {
+			return agent.ToolResult{}, fmt.Errorf("workflow: no saved workflow named %q (looked in ~/.octo/workflows and .octo/workflows)", name)
+		}
+		script = w.script
+		if description == "" {
+			description = w.description
+		}
 	}
 
 	spawner := ActiveSpawner()
@@ -120,10 +171,16 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		}
 	}
 
+	argsJSON, err := encodeWorkflowArgs(input["args"])
+	if err != nil {
+		return agent.ToolResult{}, fmt.Errorf("workflow: args must be a JSON value: %w", err)
+	}
+
 	mgr := resolveWorkflowManager(ctx)
 	runID, err := mgr.Start(WorkflowRunRequest{
-		Description:   strings.TrimSpace(stringArg(input, "description")),
+		Description:   description,
 		Script:        script,
+		Args:          argsJSON,
 		Agent:         af,
 		MaxConcurrent: defaultWorkflowConcurrency,
 		ResumeFrom:    stringArg(input, "resume_from"),
@@ -135,6 +192,20 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		"Workflow started in the background as %s. It runs while you continue; "+
 			"call workflow_status(%q) to check progress and collect the result "+
 			"(or workflow_status with no argument to list all runs).", runID, runID)}, nil
+}
+
+// encodeWorkflowArgs serializes the tool's `args` input to the JSON string the
+// workflow runtime serves to the script's args primitive. A nil/absent value
+// yields "" (the script's args returns nil).
+func encodeWorkflowArgs(v any) (string, error) {
+	if v == nil {
+		return "", nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // WorkflowStatusTool reports on background workflow runs: a list with no

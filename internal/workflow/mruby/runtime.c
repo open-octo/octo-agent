@@ -32,6 +32,8 @@ __attribute__((import_module("env"), import_name("log")))
 extern void host_log(const char *p, int plen);
 __attribute__((import_module("env"), import_name("budget_remaining")))
 extern long long host_budget_remaining(void);                  /* -> remaining output-token budget */
+__attribute__((import_module("env"), import_name("args")))
+extern int host_args(char *out, int outcap);                   /* -> args-JSON length (0 = none) */
 
 static mrb_value m_agent_start(mrb_state *mrb, mrb_value self) {
   const char *p; mrb_int plen;
@@ -73,6 +75,16 @@ static mrb_value m_budget_remaining(mrb_state *mrb, mrb_value self) {
   (void)self;
   return mrb_int_value(mrb, (mrb_int)host_budget_remaining());
 }
+static mrb_value m_args(mrb_state *mrb, mrb_value self) {
+  (void)self;
+  int cap = 16 << 20; /* 16 MiB: the args JSON is small, but keep parity with agent_take */
+  char *buf = (char *)malloc(cap);
+  if (!buf) return mrb_str_new(mrb, "", 0);
+  int n = host_args(buf, cap);
+  mrb_value r = mrb_str_new(mrb, buf, n < 0 ? 0 : n);
+  free(buf);
+  return r;
+}
 
 /* Read all of stdin into a heap buffer (the Go side pipes prelude+script). */
 static char *read_all_stdin(size_t *out_len) {
@@ -103,6 +115,7 @@ int main(void) {
   mrb_define_method(mrb, k, "__agent_take",       m_agent_take,       MRB_ARGS_REQ(1));
   mrb_define_method(mrb, k, "__log",              m_log,              MRB_ARGS_REQ(1));
   mrb_define_method(mrb, k, "__budget_remaining", m_budget_remaining, MRB_ARGS_NONE());
+  mrb_define_method(mrb, k, "__args",             m_args,             MRB_ARGS_NONE());
 
   size_t len = 0;
   char *src = read_all_stdin(&len);

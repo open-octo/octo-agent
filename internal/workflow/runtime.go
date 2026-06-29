@@ -83,6 +83,11 @@ type Options struct {
 	Budget int64
 	// MaxConcurrent caps in-flight agent() calls; <= 0 = unlimited.
 	MaxConcurrent int
+	// Args is the workflow's input value as a JSON string, surfaced to the script
+	// as the args primitive (parsed to native Ruby). Empty means the script's
+	// args returns nil. Part of the run identity: resuming with different Args is
+	// rejected, since args drives control flow and would invalidate cached results.
+	Args string
 
 	// JournalDir is the directory for workflow journal files. When empty,
 	// Run uses ~/.octo/workflow-journals/. Pass a temp dir in tests.
@@ -116,7 +121,7 @@ func Run(ctx context.Context, script string, opt Options) (Result, error) {
 		return Result{}, fmt.Errorf("workflow: Options.Agent is required")
 	}
 
-	hash := scriptHash(script)
+	hash := runIdentityHash(script, opt.Args)
 
 	// Resolve the journal directory (best-effort; journaling is non-fatal).
 	jDir := opt.JournalDir
@@ -252,6 +257,8 @@ type backend struct {
 
 	done chan uint32 // tokens of finished agents
 
+	args string // the run's input JSON, served verbatim to the __args host call
+
 	mu        sync.Mutex
 	next      uint32
 	results   map[uint32]AgentResult
@@ -272,6 +279,7 @@ func newBackend(ctx context.Context, opt Options, cached []JournalEntry, j *Jour
 	b := &backend{
 		ctx:     ctx,
 		opt:     opt,
+		args:    opt.Args,
 		done:    make(chan uint32, 1024),
 		results: map[uint32]AgentResult{},
 		prompts: map[uint32]string{},
@@ -302,6 +310,7 @@ func (b *backend) register(ctx context.Context, r wazero.Runtime) (api.Module, e
 		NewFunctionBuilder().WithFunc(b.agentTake).Export("agent_take").
 		NewFunctionBuilder().WithFunc(b.log).Export("log").
 		NewFunctionBuilder().WithFunc(b.budgetRemaining).Export("budget_remaining").
+		NewFunctionBuilder().WithFunc(b.args_).Export("args").
 		Instantiate(ctx)
 }
 
@@ -494,6 +503,17 @@ func (b *backend) log(_ context.Context, mod api.Module, ptr, length uint32) {
 	if b.opt.Log != nil {
 		b.opt.Log(string(msg))
 	}
+}
+
+// args_ writes the run's input JSON into the guest buffer, returning its length
+// (0 = no args). Backs the __args host call; the prelude's args() parses it.
+func (b *backend) args_(_ context.Context, mod api.Module, outPtr, outCap uint32) uint32 {
+	out := []byte(b.args)
+	if uint32(len(out)) > outCap {
+		out = out[:outCap]
+	}
+	mod.Memory().Write(outPtr, out)
+	return uint32(len(out))
 }
 
 func (b *backend) budgetRemaining(_ context.Context, _ api.Module) uint64 {

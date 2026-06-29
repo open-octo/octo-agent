@@ -21,6 +21,15 @@ func scriptHash(script string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// runIdentityHash ties a journal to the run that produced it: a resume is valid
+// only when both the script and the args match. args drives the script's
+// control flow, so the same script with different args may run a different path
+// whose cached agent results aren't interchangeable. The NUL separator keeps
+// (script, args) unambiguous.
+func runIdentityHash(script, args string) string {
+	return scriptHash(script + "\x00" + args)
+}
+
 // NewRunID returns a unique run ID for a new workflow journal.
 // Format: wf-YYYYMMDD-HHMMSS-xxxxxxxx.
 func NewRunID() string {
