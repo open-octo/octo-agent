@@ -61,6 +61,42 @@ func TestBM25Search_SubstringFallback(t *testing.T) {
 	}
 }
 
+func TestSplitCamel(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"appTableRecord", []string{"app", "Table", "Record"}},
+		{"createIssue", []string{"create", "Issue"}},
+		{"XMLParser", []string{"XML", "Parser"}},
+		{"lowercase", []string{"lowercase"}},
+		{"v1", []string{"v1"}}, // digit boundaries are left alone
+		{"", []string{""}},
+	}
+	for _, tc := range cases {
+		got := splitCamel(tc.in)
+		if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+			t.Errorf("splitCamel(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestBM25Search_CamelCaseRecall is the regression guard for the camelCase
+// tokenization fix: a sub-word query must match a tool whose name embeds the
+// word in camelCase (as Lark/Feishu MCP tools do), not just snake_case.
+func TestBM25Search_CamelCaseRecall(t *testing.T) {
+	catalog := []agent.ToolDefinition{
+		{Name: "mcp__lark__bitable_v1_appTableRecord_search", Description: "Search records in a Bitable table",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"app_token": map[string]any{"type": "string"}}}},
+		{Name: "mcp__slack__post_message", Description: "Post a message to a Slack channel",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"channel": map[string]any{"type": "string"}}}},
+	}
+	hits := bm25Search(catalog, "table record", 5)
+	if len(hits) == 0 || hits[0].Name != "mcp__lark__bitable_v1_appTableRecord_search" {
+		t.Errorf("camelCase sub-word query should match appTableRecord; got %+v", hits)
+	}
+}
+
 func TestExecToolSearch_NoSchemaLeaked(t *testing.T) {
 	fakeCatalog(t, sampleCatalog())
 	res, err := execToolSearch(map[string]any{"query": "github issue"})

@@ -24,6 +24,8 @@ func printCommandHelp(name string, w io.Writer) bool {
 		mcpHelp(w)
 	case "serve":
 		serveHelp(w)
+	case "browser":
+		browserHelp(w)
 	default:
 		return false
 	}

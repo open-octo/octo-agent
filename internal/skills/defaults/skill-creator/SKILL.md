@@ -41,9 +41,25 @@ Proactively ask about edge cases, input/output formats, example files, success c
 
 Check available skills and tools — if useful for research, use subagents to search docs or find similar skills in parallel.
 
+### Where the skill lives — user-level vs project-level
+
+A skill is a directory holding a `SKILL.md`. The loader scans two roots:
+
+- **User-level** `~/.octo/skills/<name>/SKILL.md` — available in every session.
+  The default home for a personal skill.
+- **Project-level** `<repo>/.octo/skills/<name>/SKILL.md` — discovered only when
+  octo runs inside that working directory, and it **takes precedence** over a
+  user-level skill of the same name. Use this when the skill is repo-specific or
+  should travel with the code and be shared with the team (commit it to the
+  repo). Ask which the user wants; default to user-level unless the skill is
+  clearly tied to one project.
+
+(`octo skills add` and the web Skills panel install to the user-level root; a
+project-level skill is just a directory you create under the repo.)
+
 ### Write the SKILL.md
 
-Skills live in `~/.octo/skills/<name>/SKILL.md` with YAML frontmatter:
+Both roots use the same format — a `SKILL.md` with YAML frontmatter:
 
 ```markdown
 ---

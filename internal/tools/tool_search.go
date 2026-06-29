@@ -401,10 +401,17 @@ func catalogText(d agent.ToolDefinition) string {
 	return b.String()
 }
 
-// tokenizeForSearch lower-cases and splits on non-alphanumeric runes, and also
-// splits snake_case / mcp__ separators (already covered by the underscore split)
-// and camelCase boundaries so "createIssue" matches "create" and "issue".
+// tokenizeForSearch splits s into search terms: it breaks on non-alphanumeric
+// runes (covering snake_case and the mcp__ separator) AND on camelCase
+// boundaries, then lower-cases. Each raw token contributes its whole lowercased
+// form plus its sub-words, so a query "table record" matches a tool named
+// "appTableRecord" (common in MCP servers like Lark/Feishu that mix snake_case
+// and camelCase, e.g. bitable_v1_appTableRecord_search). Splitting happens
+// before lower-casing — camelCase boundaries are invisible once everything is
+// lowercase.
 func tokenizeForSearch(s string) []string {
+	// Split on non-alphanumeric, preserving case so splitCamel can see the
+	// lower→upper boundaries.
 	var raw []string
 	cur := strings.Builder{}
 	flush := func() {
@@ -415,31 +422,55 @@ func tokenizeForSearch(s string) []string {
 	}
 	for _, r := range s {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			cur.WriteRune(unicode.ToLower(r))
+			cur.WriteRune(r)
 		} else {
 			flush()
 		}
 	}
 	flush()
 
-	// Split camelCase tokens into their parts (kept alongside the whole token).
 	var out []string
 	for _, tok := range raw {
-		out = append(out, tok)
+		whole := strings.ToLower(tok)
+		out = append(out, whole)
 		for _, part := range splitCamel(tok) {
-			if part != tok {
-				out = append(out, part)
+			if p := strings.ToLower(part); p != whole {
+				out = append(out, p)
 			}
 		}
 	}
 	return out
 }
 
-// splitCamel breaks a token on lower→upper boundaries; here the input is
-// already lower-cased, so this only ever returns the token itself. Kept as a
-// hook so future tokenization (raw, pre-lowercase) can split camelCase without
-// touching callers.
-func splitCamel(tok string) []string { return []string{tok} }
+// splitCamel breaks a mixed-case token into its word parts on lower→upper
+// boundaries, treating an acronym run followed by a word as its own part
+// ("XMLParser" → "XML", "Parser"; "appTableRecord" → "app", "Table", "Record").
+// Parts are returned in their original case; the caller lower-cases them. A
+// token with no internal boundary returns a single element (itself), so callers
+// can dedupe against the whole-token form.
+func splitCamel(tok string) []string {
+	rs := []rune(tok)
+	if len(rs) < 2 {
+		return []string{tok}
+	}
+	var parts []string
+	start := 0
+	for i := 1; i < len(rs); i++ {
+		prev, curr := rs[i-1], rs[i]
+		// lower→upper (or digit→upper): "appTable" → app|Table.
+		lowerToUpper := !unicode.IsUpper(prev) && unicode.IsUpper(curr)
+		// acronym→word: the last upper of a run that's followed by a lower
+		// starts a new word, e.g. "XMLParser" → XML|Parser.
+		acronymBoundary := unicode.IsUpper(prev) && unicode.IsUpper(curr) &&
+			i+1 < len(rs) && unicode.IsLower(rs[i+1])
+		if lowerToUpper || acronymBoundary {
+			parts = append(parts, string(rs[start:i]))
+			start = i
+		}
+	}
+	parts = append(parts, string(rs[start:]))
+	return parts
+}
 
 func termFreq(toks []string) map[string]int {
 	m := make(map[string]int, len(toks))

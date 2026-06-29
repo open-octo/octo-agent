@@ -200,9 +200,10 @@ export async function deleteTask(id: string): Promise<void> {
   await request<unknown>(`/api/tasks/${id}`, { method: 'DELETE' })
 }
 
-// Cron tasks are keyed by name on the scheduler side; edits PATCH that route.
-export async function updateTask(name: string, patch: unknown): Promise<void> {
-  await request<unknown>(`/api/cron-tasks/${encodeURIComponent(name)}`, {
+// Edit any subset of a task's fields (cron, prompt, model, agent, directory,
+// notify, enabled) via the single task PATCH endpoint, keyed by task id.
+export async function updateTask(id: string, patch: unknown): Promise<void> {
+  await request<unknown>(`/api/tasks/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     ...json(patch),
   })
@@ -218,12 +219,10 @@ export async function runTask(id: string): Promise<RunTaskResult> {
   return request<RunTaskResult>(`/api/tasks/${id}/run`, { method: 'POST' })
 }
 
-// Pause (enabled:false) or resume (enabled:true) a scheduled task.
+// Pause (enabled:false) or resume (enabled:true) a scheduled task — a thin
+// wrapper over the task PATCH endpoint.
 export async function toggleTask(id: string, enabled: boolean): Promise<void> {
-  await request<unknown>(`/api/tasks/${encodeURIComponent(id)}/toggle`, {
-    method: 'PATCH',
-    ...json({ enabled }),
-  })
+  await updateTask(id, { enabled })
 }
 
 // MCP Servers

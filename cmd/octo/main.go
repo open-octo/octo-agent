@@ -81,6 +81,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runCompletion(args[1:], stdout, stderr)
 	case "upgrade":
 		return runUpgrade(args[1:], stdout, stderr)
+	case "browser":
+		return runBrowser(args[1:], stdin, stdout, stderr)
 	case "__complete":
 		// Hidden subcommand the shell-completion scripts call back into.
 		// Prints newline-separated candidates for the current command line.
@@ -128,6 +130,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  memory     Manage cross-session memory (e.g. `octo memory list`)")
 	fmt.Fprintln(w, "  sessions   List recent saved sessions (resume with `octo -c <id>`)")
 	fmt.Fprintln(w, "  skills     Manage skills (`octo skills list | add | update | path`)")
+	fmt.Fprintln(w, "  browser    Set up browser automation (attach to your logged-in Chrome)")
 	fmt.Fprintln(w, "  upgrade    Download and install the latest release (--check to only compare)")
 	fmt.Fprintln(w, "  completion Print shell-completion snippet (bash | zsh | fish)")
 	fmt.Fprintln(w, "  version    Print the version and exit")

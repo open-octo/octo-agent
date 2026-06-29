@@ -247,8 +247,15 @@ func TestRunNowFiresDisabledTaskAndPersistsBookkeeping(t *testing.T) {
 	}
 
 	waitFor(t, "runner call", func() bool { return len(r.calls()) == 1 })
-	waitFor(t, "run bookkeeping", func() bool {
-		got, err := s.Get("t1")
+	// fire() updates the in-memory task before save() flushes to disk, so wait
+	// on the persisted state (via a fresh reload) rather than the in-memory
+	// copy — otherwise the reload below can race ahead of the disk write.
+	waitFor(t, "persisted bookkeeping", func() bool {
+		sr, err := New(dir, r)
+		if err != nil {
+			return false
+		}
+		got, err := sr.Get("t1")
 		return err == nil && !got.LastRun.IsZero() && got.SessionID == "sess_t1"
 	})
 
