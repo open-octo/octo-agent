@@ -245,6 +245,14 @@ type streamChunk struct {
 	// most chunks have Usage zero; we keep the field so an upstream that
 	// chooses to emit it anyway still gets parsed.
 	Usage *apiUsage `json:"usage,omitempty"`
+	// Error is set when an OpenAI-compatible server reports a failure mid-stream
+	// (after a 200) as a `data: {"error": {...}}` line rather than a normal
+	// chunk. Without this the line parses as a chunk with zero choices and is
+	// silently skipped, so the turn returns empty as if it succeeded.
+	Error *struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+	} `json:"error,omitempty"`
 }
 
 // streamChoice mirrors apiChoice but with Delta in place of Message.

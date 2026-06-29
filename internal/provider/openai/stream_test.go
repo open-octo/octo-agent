@@ -556,3 +556,37 @@ func TestSendStream_MidStreamResetIsTransient(t *testing.T) {
 		t.Errorf("mid-stream reset should be transient, got %v", err)
 	}
 }
+
+// errorMidStream sends real content, then an `error` payload (after a 200), then
+// closes with no [DONE] — the shape some OpenAI-compatible gateways use to
+// report a mid-generation failure.
+const errorMidStreamOpenAI = "" +
+	`data: {"id":"c1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"partial"}}]}` + "\n\n" +
+	`data: {"error":{"message":"upstream model overloaded","type":"server_error"}}` + "\n\n"
+
+// TestSendStream_MidStreamErrorSurfaces verifies a `data: {"error":...}` line
+// after a 200 surfaces as an error instead of being silently dropped and
+// returning the partial turn as success.
+func TestSendStream_MidStreamErrorSurfaces(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, errorMidStreamOpenAI)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	_, err := c.SendStream(context.Background(), provider.Request{
+		Model: "gpt-4o-mini", Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{})
+	if err == nil {
+		t.Fatal("expected an error from the mid-stream error payload, got nil")
+	}
+	if !strings.Contains(err.Error(), "upstream model overloaded") {
+		t.Errorf("error should carry the upstream message, got %v", err)
+	}
+}

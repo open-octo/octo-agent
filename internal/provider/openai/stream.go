@@ -155,6 +155,13 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 			return result, retry.AsTransientStream(fmt.Errorf("openai: parse stream chunk: %w", err))
 		}
 
+		// An OpenAI-compatible server can report a failure AFTER the 200 status
+		// as a `data: {"error": {...}}` line, then close the stream (often with
+		// no [DONE]). Surface it instead of treating the empty result as success,
+		// mirroring the anthropic adapter's `case "error"`.
+		if ch.Error != nil && ch.Error.Message != "" {
+			return result, fmt.Errorf("openai: stream error (%s): %s", ch.Error.Type, ch.Error.Message)
+		}
 		if result.Model == "" && ch.Model != "" {
 			result.Model = ch.Model
 		}
