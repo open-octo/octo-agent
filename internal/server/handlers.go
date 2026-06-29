@@ -257,6 +257,16 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 		s.releaseSessionBinding(id, agent.EntryWeb)
 	}()
 
+	// A WS turn runs in a goroutine after releasing this mutex, guarded only by
+	// turnRunning. Without this check a REST turn would acquire the (free) mutex
+	// and run concurrently with that WS turn — both Save() the same session file,
+	// clobbering history. Honour turnRunning like the WS path does. (deferred
+	// unlock + binding release handle cleanup on this early return.)
+	if s.turnRunning[id] {
+		writeError(w, http.StatusConflict, "a turn is already running for this session")
+		return
+	}
+
 	sess, err = agent.LoadSession(id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -724,7 +734,7 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, error) {
 	executor := tools.NewDefaultRegistry()
 
-	engine, err := permission.New(permissionConfigPath(), s.cwd, resolvePermissionMode(), s.memDir, s.homeMemDir)
+	engine, err := permission.New(permissionConfigPath(), s.curCwd(), resolvePermissionMode(), s.memDir, s.homeMemDir)
 	if err != nil {
 		return ctx, nil, nil, fmt.Errorf("permission engine: %w", err)
 	}
@@ -867,7 +877,7 @@ func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	abs, ok := resolveUnderCWD(s.cwd, req.Path)
+	abs, ok := resolveUnderCWD(s.curCwd(), req.Path)
 	if !ok {
 		writeError(w, http.StatusForbidden, "path is outside the working directory")
 		return
@@ -1209,11 +1219,10 @@ func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	s.cwd = req.WorkingDir
-	s.envCtx = buildEnvContext(s.cwd)
+	s.setCwd(req.WorkingDir)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":          true,
-		"working_dir": s.cwd,
+		"working_dir": s.curCwd(),
 	})
 }

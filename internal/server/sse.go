@@ -57,6 +57,15 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 		s.releaseSessionBinding(id, agent.EntryWeb)
 	}()
 
+	// A WS turn runs in a goroutine after releasing this mutex, guarded only by
+	// turnRunning; refuse to start a concurrent SSE turn that would Save() the
+	// same session file in parallel and clobber history. (deferred unlock +
+	// binding release handle cleanup on this early return.)
+	if s.turnRunning[id] {
+		writeError(w, http.StatusConflict, "a turn is already running for this session")
+		return
+	}
+
 	sess, err := agent.LoadSession(id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())

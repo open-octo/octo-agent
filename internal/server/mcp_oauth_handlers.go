@@ -91,7 +91,7 @@ func (s *Server) handleStartMCPOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	managed, err := mcp.LoadManaged(s.cwd)
+	managed, err := mcp.LoadManaged(s.curCwd())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

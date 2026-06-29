@@ -85,7 +85,7 @@ type mcpServerDetail struct {
 // mcpServerList builds the management view: configured entries joined with
 // live-registry state.
 func (s *Server) mcpServerList() ([]mcpServerInfo, error) {
-	managed, err := mcp.LoadManaged(s.cwd)
+	managed, err := mcp.LoadManaged(s.curCwd())
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (s *Server) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetMCPServer(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	managed, err := mcp.LoadManaged(s.cwd)
+	managed, err := mcp.LoadManaged(s.curCwd())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -296,7 +296,7 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 			s.connectIfLive(r, name, e)
 		}
 	case req.Name != "" && req.Server != nil:
-		managed, err := mcp.LoadManaged(s.cwd)
+		managed, err := mcp.LoadManaged(s.curCwd())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -333,7 +333,7 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 // project-level entries (read-only from the web UI). Writes the HTTP error
 // itself; the second return is false when the caller should stop.
 func (s *Server) userManagedServer(w http.ResponseWriter, name string) (mcp.ManagedServer, bool) {
-	managed, err := mcp.LoadManaged(s.cwd)
+	managed, err := mcp.LoadManaged(s.curCwd())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return mcp.ManagedServer{}, false
@@ -445,7 +445,7 @@ func (s *Server) handleReconnectMCPServer(w http.ResponseWriter, r *http.Request
 	s.mcpMu.Lock()
 	defer s.mcpMu.Unlock()
 
-	managed, err := mcp.LoadManaged(s.cwd)
+	managed, err := mcp.LoadManaged(s.curCwd())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -489,7 +489,7 @@ func (s *Server) handleReloadMCP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "tools are disabled on this server")
 		return
 	}
-	if err := app.SwapMCP(r.Context(), s.cwd, nil); err != nil {
+	if err := app.SwapMCP(r.Context(), s.curCwd(), nil); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

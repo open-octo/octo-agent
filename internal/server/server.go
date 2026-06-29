@@ -105,10 +105,15 @@ type Server struct {
 	// data race between the mutation handlers and concurrent turns.
 	skillsManifest string
 	skillsMu       sync.RWMutex
-	cwd            string
-	envCtx         string
-	memDir         string
-	homeMemDir     string
+	// cwd/envCtx are the server's working directory and its derived env-context
+	// string. They are mutated by the working_dir handler while read on every
+	// turn (prompt composition, permission engine, file/mcp handlers), so cwdMu
+	// guards them — the same pattern as skillsManifest/skillsMu above.
+	cwd        string
+	envCtx     string
+	cwdMu      sync.RWMutex
+	memDir     string
+	homeMemDir string
 
 	// session-scoped turn locks: one turn per session at a time.
 	turnLocks map[string]*sync.Mutex
@@ -378,7 +383,8 @@ func (s *Server) enableSubAgentTools() {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	template.System, template.LeanSystem = prompt.ComposePair(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
+	cwd, envCtx := s.curCwdEnv()
+	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
 	executor := tools.NewDefaultRegistry()
 	spawner := app.NewSpawner(template, executor, func() []agent.ToolDefinition {
 		return tools.DefaultToolsFor(s.model)
@@ -408,7 +414,7 @@ func (s *Server) enableMCP() {
 	app.SetMCPChildStderr(newMCPStderrWriter(slog.Default()))
 	s.mcpMu.Lock()
 	defer s.mcpMu.Unlock()
-	if err := app.SwapMCP(context.Background(), s.cwd, os.Stderr); err != nil {
+	if err := app.SwapMCP(context.Background(), s.curCwd(), os.Stderr); err != nil {
 		slog.Error("mcp setup", "err", err)
 	}
 	s.mcpCleanup = func() {
@@ -877,7 +883,8 @@ func resolveUnderCWD(cwd, path string) (string, bool) {
 func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	sender, model := s.senderForSession(sess)
 	a := agent.New(sender, model)
-	a.CWD = s.cwd
+	cwd, envCtx := s.curCwdEnv()
+	a.CWD = cwd
 	a.MaxTokens = s.cfg.MaxTokens
 	if dir, err := sess.ChunkDir(); err == nil {
 		a.ArchiveDir = dir // recall folded turns via the read tool
@@ -904,7 +911,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	a.System, a.LeanSystem = prompt.ComposePair(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
+	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
 
 	// L2: attention-layer rules injected per user turn (triggered keywords),
 	// plus the save-nudge appended to milestone tool results.
@@ -1175,6 +1182,31 @@ func (s *Server) setSkillsManifest(m string) {
 	s.skillsMu.Unlock()
 }
 
+// curCwd returns the server's working directory under a read lock.
+func (s *Server) curCwd() string {
+	s.cwdMu.RLock()
+	defer s.cwdMu.RUnlock()
+	return s.cwd
+}
+
+// curCwdEnv returns the working directory and its env-context string atomically
+// under a single read lock, so callers that need both (prompt composition)
+// never observe a torn pair across a concurrent setCwd.
+func (s *Server) curCwdEnv() (string, string) {
+	s.cwdMu.RLock()
+	defer s.cwdMu.RUnlock()
+	return s.cwd, s.envCtx
+}
+
+// setCwd replaces the working directory and recomputes its env context under a
+// write lock. Called by the working_dir handler.
+func (s *Server) setCwd(dir string) {
+	s.cwdMu.Lock()
+	s.cwd = dir
+	s.envCtx = buildEnvContext(dir)
+	s.cwdMu.Unlock()
+}
+
 // buildEnvContext mirrors cmd/octo's env context builder.
 func buildEnvContext(cwd string) string {
 	var b strings.Builder
@@ -1439,9 +1471,10 @@ func (s *Server) initChannels() {
 	factory := func() *agent.Agent {
 		defaultSender, model := s.defaultSenderAndModel()
 		a := agent.New(defaultSender, model)
-		a.CWD = s.cwd
+		cwd, envCtx := s.curCwdEnv()
+		a.CWD = cwd
 		a.MaxTokens = s.cfg.MaxTokens
-		a.System, a.LeanSystem = prompt.ComposePair(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
+		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
 		if cfg, err := config.Load(); err == nil {
 			a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 			if a.LiteSender == nil {
@@ -1801,7 +1834,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, s.cwd, s.envCtx, s.curSkillsManifest(), memInjection, true)
+	cwd, envCtx := s.curCwdEnv()
+	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
 
 	// L2 memory hooks, same pair buildAgent gives web turns: keyword
 	// reminders on user input, save-nudge on milestone tool results. The
@@ -1817,7 +1851,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// and consumes the next message as the answer. Built after BeginRun so
 	// it can't race the previous turn's gate. An engine failure aborts the
 	// turn — running ungated is never an acceptable fallback.
-	engine, err := permission.New(permissionConfigPath(), s.cwd, resolvePermissionMode(), s.memDir, s.homeMemDir)
+	engine, err := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(), s.memDir, s.homeMemDir)
 	if err != nil {
 		// Generic chat reply — err.Error() can leak local paths into a
 		// group chat; the operator gets the detail on the server console.
@@ -1904,5 +1938,12 @@ func (s *Server) stopChannels() {
 	if s.channelMgr != nil {
 		_ = s.channelMgr.Stop()
 	}
-	s.runningAdapters = sync.Map{}
+	// Clear entries in place rather than reassigning the sync.Map: a concurrent
+	// HTTP handler (handleListChannels/handleGetChannel → isAdapterRunning) may
+	// be calling Load() during shutdown, and a sync.Map must not be copied or
+	// replaced after first use. Range+Delete is safe under concurrent access.
+	s.runningAdapters.Range(func(k, _ any) bool {
+		s.runningAdapters.Delete(k)
+		return true
+	})
 }

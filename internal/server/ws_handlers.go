@@ -1019,20 +1019,21 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	s.sessionAgentsMu.Lock()
 	s.sessionAgents[sess.ID] = a
 	s.sessionAgentsMu.Unlock()
+	// Teardown: drain any messages still in the Inbox (they arrived during the
+	// final LLM round, or the turn errored before draining them) back to the
+	// steer queue, then deregister — BOTH under sessionAgentsMu so a concurrent
+	// deliverModelNote (background/sub-agent exit hook) either enqueues before
+	// the drain (caught here) or, if it runs after, sees the agent already gone
+	// and routes to the steer queue itself. Splitting these into two locked
+	// sections left a gap where a note enqueued between the drain and the
+	// deregister was silently lost.
 	defer func() {
 		s.sessionAgentsMu.Lock()
-		delete(s.sessionAgents, sess.ID)
-		s.sessionAgentsMu.Unlock()
-	}()
-	// Messages still in the Inbox when the turn ends — they arrived during the
-	// final LLM round, or the turn errored out before draining them — go back
-	// to the steer queue so runAgentTurnLoop chains them into the next turn,
-	// which answers, broadcasts, and persists them exactly once. (Runs before
-	// the deregistration defer above, so no message slips past both homes.)
-	defer func() {
 		if items := a.Inbox.Drain(); len(items) > 0 {
 			s.enqueueSteer(sess.ID, items...)
 		}
+		delete(s.sessionAgents, sess.ID)
+		s.sessionAgentsMu.Unlock()
 	}()
 
 	var toolDefs []agent.ToolDefinition

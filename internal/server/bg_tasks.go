@@ -83,13 +83,18 @@ func (s *Server) notifySubAgentExit(sessionID string, ev tools.SubAgentNotificat
 // does. The note is a <system-reminder> block, so the web transcript never
 // renders it as user speech.
 func (s *Server) deliverModelNote(sessionID, note string) {
+	// Enqueue into the running Agent's Inbox while STILL holding sessionAgentsMu
+	// so this can't interleave with the turn-teardown defer, which drains the
+	// Inbox and deregisters the agent under the same lock. Otherwise a note
+	// landing between the drain and the deregister reaches an Inbox nothing will
+	// drain again — silently lost.
 	s.sessionAgentsMu.Lock()
-	a := s.sessionAgents[sessionID]
-	s.sessionAgentsMu.Unlock()
-	if a != nil {
+	if a := s.sessionAgents[sessionID]; a != nil {
 		a.Inbox.Enqueue(note)
+		s.sessionAgentsMu.Unlock()
 		return
 	}
+	s.sessionAgentsMu.Unlock()
 	s.enqueueSteer(sessionID, agent.InboxItem{Text: note})
 	s.kickIdleSteerTurn(sessionID)
 }
