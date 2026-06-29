@@ -449,7 +449,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if errors.Is(err, errMissingAPIKey) && stdinIsTTY(stdin) {
 			fmt.Fprintln(stderr, "No API key configured — let's set up octo first.")
 			fmt.Fprintln(stderr, "")
-			if runConfigWizard(stdin, stdout, stderr) != 0 {
+			if runConfigWizard(stdin, stdout, stderr, true) != 0 {
 				return 1
 			}
 			// Reload config and retry sender construction.

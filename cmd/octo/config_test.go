@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -290,10 +292,11 @@ func TestRunConfig_Wizard_SwitchesProviderAndPromptsForKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Answers: provider=openai, model=(default), coauthor=y,
-	// reasoning-effort=(off), show-reasoning=(default), store_key=y,
-	// key=new-openai-key. No endpoint question for a pinned vendor.
-	in := strings.NewReader("openai\n\ny\n\n\ny\nnew-openai-key\n")
+	// Answers (key now comes right after model): provider=openai,
+	// model=(default), store_key=y, key=new-openai-key, coauthor=y,
+	// reasoning-effort=(off), show-reasoning=(default). No endpoint question for
+	// a pinned vendor.
+	in := strings.NewReader("openai\n\ny\nnew-openai-key\ny\n\n\n")
 	var stdout, stderr bytes.Buffer
 	if code := runConfig(nil, in, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
@@ -309,6 +312,80 @@ func TestRunConfig_Wizard_SwitchesProviderAndPromptsForKey(t *testing.T) {
 	}
 	if entry.APIKey != "new-openai-key" {
 		t.Errorf("APIKey = %q, want new-openai-key", entry.APIKey)
+	}
+}
+
+// TestRunConfigWizard_FirstRun_MinimalAndKeyDirect verifies the first-run path:
+// it asks for the key directly (not the "store? (y/N)" double-negative), stores
+// it, and skips the expert questions (coauthor / reasoning / show-reasoning).
+func TestRunConfigWizard_FirstRun_MinimalAndKeyDirect(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	// Answers: provider=openai, model=(default), key=sk-first-run. That's all a
+	// first run asks (non-TTY → no live validation).
+	in := strings.NewReader("openai\n\nsk-first-run\n")
+	var stdout, stderr bytes.Buffer
+	if code := runConfigWizard(in, &stdout, &stderr, true); code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+
+	got, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := got.DefaultEntry()
+	if entry.Provider != "openai" {
+		t.Errorf("provider = %q, want openai", entry.Provider)
+	}
+	if entry.APIKey != "sk-first-run" {
+		t.Errorf("APIKey = %q, want sk-first-run stored directly", entry.APIKey)
+	}
+	out := stdout.String()
+	for _, q := range []string{"Co-authored", "Reasoning effort", "thinking trace", "Store the API key"} {
+		if strings.Contains(out, q) {
+			t.Errorf("first run must not ask %q; got:\n%s", q, out)
+		}
+	}
+}
+
+// TestReportConnectionCheck exercises the live-key validation helper with a
+// stubbed connector (no network), both success and failure.
+func TestReportConnectionCheck(t *testing.T) {
+	orig := validateConnection
+	defer func() { validateConnection = orig }()
+
+	var gotModel, gotBase string
+	validateConnection = func(ctx context.Context, provider, key, baseURL, model string) error {
+		gotModel, gotBase = model, baseURL
+		if key == "bad" {
+			return errors.New("401 unauthorized")
+		}
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	// Empty model/baseURL must resolve to the vendor defaults before testing.
+	if ok := reportConnectionCheck(&out, &errb, "anthropic", "good", "", ""); !ok {
+		t.Fatalf("expected success; stderr=%q", errb.String())
+	}
+	if gotModel == "" || gotBase == "" {
+		t.Errorf("defaults not resolved: model=%q base=%q", gotModel, gotBase)
+	}
+	if !strings.Contains(out.String(), "Connected") {
+		t.Errorf("missing success line: %q", out.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	if ok := reportConnectionCheck(&out, &errb, "anthropic", "bad", "", ""); ok {
+		t.Fatal("expected failure for bad key")
+	}
+	if !strings.Contains(errb.String(), "Couldn't connect") {
+		t.Errorf("missing failure line: %q", errb.String())
 	}
 }
 
