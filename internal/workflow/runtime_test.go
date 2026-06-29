@@ -154,7 +154,12 @@ func TestRun_NestedParallelDeadlock(t *testing.T) {
 		if got.res.Output != want {
 			t.Errorf("Output = %q, want %q", got.res.Output, want)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
+		// A real re-entrancy regression hangs forever, so this watchdog only
+		// needs to fail faster than the package-level `go test` timeout — not
+		// race the work. The job is ~80ms of agent sleeps; 5s tripped as a
+		// false positive on a heavily-loaded CI core (goroutine wakeups delayed
+		// under contention). 30s keeps the guard effective without flaking.
 		t.Fatal("workflow deadlocked on nested parallel (re-entrant scheduler regression)")
 	}
 }
