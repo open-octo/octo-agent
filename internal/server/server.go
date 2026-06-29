@@ -1232,21 +1232,32 @@ func (s *Server) ensureSender() error {
 		return nil
 	}
 	s.senderMu.Lock()
-	defer s.senderMu.Unlock()
 	if s.sender != nil {
+		s.senderMu.Unlock()
 		return nil
 	}
 	sender, model, provName, err := resolveProviderAndModel(s.cfg.Provider, s.cfg.Model)
 	if err != nil {
+		s.senderMu.Unlock()
 		return err
 	}
 	if sender == nil {
+		s.senderMu.Unlock()
 		return fmt.Errorf("server not configured: complete setup via the Web UI")
 	}
 	s.sender = sender
 	s.model = model
 	s.provider = provName
-	if s.cfg.Tools {
+	enableTools := s.cfg.Tools
+	s.senderMu.Unlock()
+
+	// enableSubAgentTools reads the default sender via defaultSenderAndModel,
+	// which takes senderMu — so it MUST run after the unlock above. senderMu is
+	// not reentrant; calling it while still holding the lock self-deadlocks and
+	// hangs every subsequent turn. (The startup path in New() enables tools
+	// before any lock is held, which is why only this lazy onboarding-completion
+	// path hit the deadlock — and why restarting the server worked around it.)
+	if enableTools {
 		s.enableSubAgentTools()
 	}
 	return nil
