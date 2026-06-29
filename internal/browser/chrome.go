@@ -222,10 +222,23 @@ func readDevToolsPort(ctx context.Context, dataDir string) (int, error) {
 	}
 }
 
-// browserWebSocketURL fetches the browser-level CDP endpoint from the debug
-// HTTP server, retrying until Chrome is ready.
+// browserWebSocketURL resolves the browser-level CDP WebSocket endpoint for a
+// Chrome on the given debug port.
+//
+// Classic `--remote-debugging-port` launches serve /json/version, whose
+// webSocketDebuggerUrl carries a per-launch UUID path. The chrome://inspect
+// "Allow remote debugging for this browser instance" toggle, by contrast,
+// serves the CDP socket but NOT the /json HTTP endpoints (they 404) — there the
+// browser socket is reachable at the fixed, UUID-less /devtools/browser path.
+// So once the HTTP server answers without a debugger URL, fall back to that
+// fixed path rather than failing. (Matches the web-access skill's CDP proxy.)
+//
+// A connection error (port not up yet) keeps retrying to tolerate a
+// just-launched Chrome; only a live-but-/json-less responder triggers the
+// fallback.
 func browserWebSocketURL(ctx context.Context, port int) (string, error) {
 	url := fmt.Sprintf("http://127.0.0.1:%d/json/version", port)
+	fallback := fmt.Sprintf("ws://127.0.0.1:%d/devtools/browser", port)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -240,6 +253,9 @@ func browserWebSocketURL(ctx context.Context, port int) (string, error) {
 			if derr == nil && v.WebSocketDebuggerURL != "" {
 				return v.WebSocketDebuggerURL, nil
 			}
+			// HTTP server answered but gave no debugger URL → /json is disabled
+			// (chrome://inspect toggle path). Use the fixed browser socket.
+			return fallback, nil
 		}
 		if time.Now().After(deadline) {
 			return "", fmt.Errorf("timed out fetching CDP endpoint on port %d", port)

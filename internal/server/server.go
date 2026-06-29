@@ -569,6 +569,10 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/config/models/{id}/default", s.handleSetDefaultModelConfig)
 	s.api("POST /api/config/models/{id}/lite", s.handleSetLiteModelConfig)
 
+	// Browser automation setup
+	s.api("GET /api/browser/status", s.handleBrowserStatus)
+	s.api("POST /api/browser/verify", s.handleBrowserVerify)
+
 	// Upload
 	s.api("POST /api/upload", s.handleUpload)
 	s.api("GET /api/uploads/{name}", s.handleGetUpload)

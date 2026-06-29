@@ -2,10 +2,13 @@ package browser
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -335,6 +338,65 @@ func TestDevToolsWS(t *testing.T) {
 	}
 	if ws != "ws://127.0.0.1:9222/devtools/browser/abc-123" {
 		t.Fatalf("ws = %q", ws)
+	}
+}
+
+// hostPort extracts the numeric port from an httptest server URL (always
+// 127.0.0.1:N), so browserWebSocketURL's hard-coded 127.0.0.1 host reaches it.
+func hostPort(t *testing.T, raw string) int {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestBrowserWebSocketURL_JSONVersion uses the webSocketDebuggerUrl from
+// /json/version when the classic --remote-debugging-port endpoint serves it.
+func TestBrowserWebSocketURL_JSONVersion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/json/version" {
+			w.Write([]byte(`{"webSocketDebuggerUrl":"ws://127.0.0.1:9999/devtools/browser/uuid-77"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	got, err := browserWebSocketURL(ctx, hostPort(t, srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ws://127.0.0.1:9999/devtools/browser/uuid-77" {
+		t.Fatalf("ws = %q, want the /json/version URL", got)
+	}
+}
+
+// TestBrowserWebSocketURL_Fallback covers the chrome://inspect toggle path:
+// /json/version 404s, so the resolver must fall back to the fixed UUID-less
+// /devtools/browser socket instead of failing.
+func TestBrowserWebSocketURL_Fallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r) // no /json endpoints, like the toggle path
+	}))
+	defer srv.Close()
+
+	port := hostPort(t, srv.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	got, err := browserWebSocketURL(ctx, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("ws://127.0.0.1:%d/devtools/browser", port); got != want {
+		t.Fatalf("ws = %q, want fallback %q", got, want)
 	}
 }
 
