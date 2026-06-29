@@ -74,8 +74,9 @@ descriptor (see below) resolved at action time.
 
 A hand-rolled minimal CDP client, consistent with octo's convention of
 hand-writing wire adapters (the anthropic/openai providers are hand-rolled, not
-SDKs). `web-access`'s `cdp-proxy.mjs` is ~25KB of logic; the Go equivalent is
-small and keeps the dependency tree minimal (over pulling chromedp/go-rod).
+SDKs). `web-access`'s former `cdp-proxy.mjs` was ~25KB of logic; the Go
+equivalent is small and keeps the dependency tree minimal (over pulling
+chromedp/go-rod).
 
 CDP domains required:
 - `Target.*` — attach to targets (`attachToTarget {flatten:true}`), create/close.
@@ -256,11 +257,14 @@ only with locating targets once you can drive the page.
 
 ## web-access evolution
 
-`web-access` is not built upon. It stays a pristine, upstream-tracked vendored
-skill for now, contributing only its browser-discovery logic (borrowed). Once
-the owned backend is first-class, `web-access` rebases onto it — becoming a thin
-exploratory-browsing skill over octo's native browser-use rather than its own
-Node proxy.
+`web-access` rides on the owned backend. It is a thin exploratory-browsing skill
+over octo's native `browser` tool + the built-in `web_search`/`web_fetch` — no
+Node, no `cdp-proxy.mjs`. Its value is the browsing methodology (the
+see→decide→act loop, tool-selection guidance, login judgment, `site-patterns/`
+site-memory), not an execution layer; the Go tool's primitive surface
+(observe/eval/click/type/cookies/upload/download/record/run_skill) supersedes the
+old proxy. The browser-discovery logic it once contributed now lives in
+`internal/browser` (`chrome.go`).
 
 ## Implementation slices
 
