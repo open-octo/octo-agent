@@ -132,7 +132,7 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		MaxTokens: req.MaxTokens,
 		Messages:  msgs,
 	}
-	cacheableRequest(&body, req.SystemPrompt, toAPITools(req.Tools))
+	cacheableRequest(&body, req.SystemPrompt, toAPITools(req.Tools), c.staticPrefixCache())
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = DefaultMaxTokens
 	}
@@ -241,37 +241,59 @@ func (c *Client) endpointURL() string {
 	return strings.TrimRight(base, "/") + MessagesPath
 }
 
+// staticPrefixCache picks the cache_control marker for the static system+tools
+// prefix. The extended one-hour TTL is a documented GA feature only on the
+// official Anthropic endpoint; Anthropic-compatible gateways (Kimi …/coding,
+// DeepSeek …/anthropic, self-hosted shims set via BaseURL) either don't
+// implement it or may reject the unknown `ttl` field — so they fall back to the
+// default 5-minute marker. The rolling message breakpoints stay 5m everywhere.
+func (c *Client) staticPrefixCache() *cacheControl {
+	if c.isOfficialEndpoint() {
+		return ephemeral1h
+	}
+	return ephemeral
+}
+
+// isOfficialEndpoint reports whether the client targets api.anthropic.com (the
+// zero value defaults there too). Anything else is a compatible third party.
+func (c *Client) isOfficialEndpoint() bool {
+	base := strings.TrimRight(c.BaseURL, "/")
+	return base == "" || base == DefaultBaseURL
+}
+
 // buildSystem returns the value for the request's `system` field, placing a
 // cache breakpoint on it when non-empty. Because the cache prefix order is
 // tools → system → messages, a breakpoint on the system block also caches the
 // (stable, every-turn-identical) tools array that precedes it — capturing the
-// bulk of the per-turn input-token cost of an agentic loop. Returns nil for an
-// empty prompt so the field is omitted.
-func buildSystem(prompt string) any {
+// bulk of the per-turn input-token cost of an agentic loop. cc selects the
+// breakpoint's TTL. Returns nil for an empty prompt so the field is omitted.
+func buildSystem(prompt string, cc *cacheControl) any {
 	if prompt == "" {
 		return nil
 	}
-	return []apiSystemBlock{{Type: "text", Text: prompt, CacheControl: ephemeral}}
+	return []apiSystemBlock{{Type: "text", Text: prompt, CacheControl: cc}}
 }
 
-// markToolsCacheable puts a cache breakpoint on the LAST tool so the tools
-// array is cached even with no system prompt to anchor on. No-op when there
-// are no tools.
-func markToolsCacheable(tools []apiTool) []apiTool {
+// markToolsCacheable puts a cache breakpoint (with cc's TTL) on the LAST tool so
+// the tools array is cached even with no system prompt to anchor on. No-op when
+// there are no tools.
+func markToolsCacheable(tools []apiTool, cc *cacheControl) []apiTool {
 	if len(tools) > 0 {
-		tools[len(tools)-1].CacheControl = ephemeral
+		tools[len(tools)-1].CacheControl = cc
 	}
 	return tools
 }
 
 // cacheableRequest places all cache breakpoints on a request: the system/
 // tools prefix (via buildSystem / markToolsCacheable) and the conversation
-// history (via markMessagesCacheable). Shared by Send and SendStream so both
-// paths cache identically. body.Messages must already be populated.
-func cacheableRequest(body *apiRequest, systemPrompt string, tools []apiTool) {
-	body.System = buildSystem(systemPrompt)
+// history (via markMessagesCacheable). staticCC is the marker for the static
+// prefix — ephemeral1h on the official endpoint, ephemeral elsewhere; the
+// message breakpoints are always 5-minute. Shared by Send and SendStream so
+// both paths cache identically. body.Messages must already be populated.
+func cacheableRequest(body *apiRequest, systemPrompt string, tools []apiTool, staticCC *cacheControl) {
+	body.System = buildSystem(systemPrompt, staticCC)
 	if body.System == nil {
-		tools = markToolsCacheable(tools) // no system block to anchor on
+		tools = markToolsCacheable(tools, staticCC) // no system block to anchor on
 	}
 	body.Tools = tools
 	markMessagesCacheable(body.Messages)

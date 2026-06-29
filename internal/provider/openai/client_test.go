@@ -346,6 +346,15 @@ func TestPromptCacheKey_GatedByBaseURL(t *testing.T) {
 	if custom.promptCacheKey("k3") != "" {
 		t.Error("custom BaseURL should drop prompt_cache_key")
 	}
+	// Mistral requires the key to cache at all, so it's on the allowlist.
+	mistral := &Client{BaseURL: MistralBaseURL}
+	if mistral.promptCacheKey("k4") != "k4" {
+		t.Error("Mistral endpoint should forward prompt_cache_key")
+	}
+	mistralSlash := &Client{BaseURL: MistralBaseURL + "/"}
+	if mistralSlash.promptCacheKey("k5") != "k5" {
+		t.Error("Mistral endpoint with trailing slash should forward prompt_cache_key")
+	}
 }
 
 // TestSend_ToolCallWithStopFinishReason verifies a response carrying tool calls

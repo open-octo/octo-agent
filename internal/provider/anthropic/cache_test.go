@@ -11,7 +11,7 @@ import (
 func TestCacheableRequest_SystemBreakpoint(t *testing.T) {
 	var body apiRequest
 	tools := toAPITools([]agent.ToolDefinition{{Name: "t1"}, {Name: "t2"}})
-	cacheableRequest(&body, "you are octo", tools)
+	cacheableRequest(&body, "you are octo", tools, ephemeral)
 
 	sysJSON, _ := json.Marshal(body.System)
 	if !strings.Contains(string(sysJSON), `"ephemeral"`) {
@@ -29,7 +29,7 @@ func TestCacheableRequest_SystemBreakpoint(t *testing.T) {
 func TestCacheableRequest_ToolFallbackWhenNoSystem(t *testing.T) {
 	var body apiRequest
 	tools := toAPITools([]agent.ToolDefinition{{Name: "t1"}, {Name: "t2"}})
-	cacheableRequest(&body, "", tools)
+	cacheableRequest(&body, "", tools, ephemeral)
 
 	if body.System != nil {
 		t.Errorf("empty system should serialize as nil/omitted, got %v", body.System)
@@ -45,7 +45,7 @@ func TestCacheableRequest_ToolFallbackWhenNoSystem(t *testing.T) {
 
 func TestCacheableRequest_NoSystemNoTools(t *testing.T) {
 	var body apiRequest
-	cacheableRequest(&body, "", nil)
+	cacheableRequest(&body, "", nil, ephemeral)
 	if body.System != nil {
 		t.Errorf("system should be nil")
 	}
@@ -116,11 +116,52 @@ func TestCacheableRequest_MarksHistory(t *testing.T) {
 		{Role: "user", Content: json.RawMessage(`"u0"`)},
 		{Role: "assistant", Content: json.RawMessage(`"a0"`)},
 	}}
-	cacheableRequest(&body, "sys", nil)
+	cacheableRequest(&body, "sys", nil, ephemeral)
 	// Both messages (last two of two) carry breakpoints; system too.
 	for i := range body.Messages {
 		if !strings.Contains(string(body.Messages[i].Content), `"ephemeral"`) {
 			t.Errorf("message %d should be cache-marked: %s", i, body.Messages[i].Content)
 		}
+	}
+}
+
+// TestStaticPrefixCache_TTLGating verifies the static system+tools prefix gets
+// the 1-hour TTL only on the official Anthropic endpoint, and that the rolling
+// message breakpoints stay 5-minute (no ttl) regardless of endpoint.
+func TestStaticPrefixCache_TTLGating(t *testing.T) {
+	cases := []struct {
+		name    string
+		baseURL string
+		want1h  bool
+	}{
+		{"default endpoint", "", true},
+		{"official explicit", DefaultBaseURL, true},
+		{"official trailing slash", DefaultBaseURL + "/", true},
+		{"kimi coding shim", "https://api.kimi.com/coding", false},
+		{"deepseek anthropic shim", "https://api.deepseek.com/anthropic", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Client{BaseURL: tc.baseURL}
+			body := apiRequest{Messages: []apiMessage{
+				{Role: "user", Content: json.RawMessage(`"hi"`)},
+			}}
+			cacheableRequest(&body, "you are octo", nil, c.staticPrefixCache())
+
+			sysJSON, _ := json.Marshal(body.System)
+			has1h := strings.Contains(string(sysJSON), `"ttl":"1h"`)
+			if has1h != tc.want1h {
+				t.Errorf("system 1h TTL = %v, want %v: %s", has1h, tc.want1h, sysJSON)
+			}
+			// System always carries an ephemeral breakpoint either way.
+			if !strings.Contains(string(sysJSON), `"ephemeral"`) {
+				t.Errorf("system should always carry an ephemeral breakpoint: %s", sysJSON)
+			}
+			// The rolling message breakpoint is always 5m (never 1h).
+			lastMsg := string(body.Messages[len(body.Messages)-1].Content)
+			if strings.Contains(lastMsg, `"1h"`) {
+				t.Errorf("message breakpoints must stay 5-minute, got: %s", lastMsg)
+			}
+		})
 	}
 }
