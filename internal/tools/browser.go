@@ -71,11 +71,21 @@ func browserSkillsDir() string {
 func ResetBrowserSession() {
 	browserSession.mu.Lock()
 	b := browserSession.b
+	p := browserSession.page
 	browserSession.b, browserSession.page = nil, nil
 	browserSession.mu.Unlock()
-	if b != nil {
-		b.Close()
+	if b == nil {
+		return
 	}
+	// When we attached to the user's own Chrome, Close() only drops the WS and
+	// leaves our tab behind. Close the tab we opened so we don't litter the
+	// user's browser; if we launched Chrome ourselves, Close() kills it whole.
+	if !b.OwnsProcess() && p != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = b.ClosePage(ctx, p.TargetID())
+		cancel()
+	}
+	b.Close()
 }
 
 // browserEnabled gates the tool: advertised only when a Chrome can be located
@@ -130,17 +140,16 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 		}
 	}
 
-	// Prefer an already-open tab (the user's logged-in page) when attaching;
-	// otherwise open a blank one.
-	var page *browser.Page
-	if pages, perr := b.Pages(ctx); perr == nil && len(pages) > 0 {
-		page, err = b.AttachPage(ctx, pages[0].TargetID)
-	} else {
-		page, err = b.NewPage(ctx, "about:blank")
-	}
+	// Always open our own fresh tab — never hijack a tab the user already has
+	// open. When attached to the user's real Chrome, pages[0] could be anything
+	// they're using (including the octo web UI itself), and navigating it away
+	// would clobber their session. Cookies/login are profile-wide, so a new tab
+	// still carries the logged-in session. To drive an existing tab, the model
+	// uses the pages/select_page actions explicitly.
+	page, err := b.NewPage(ctx, "about:blank")
 	if err != nil {
 		b.Close()
-		return nil, nil, fmt.Errorf("attach page: %w", err)
+		return nil, nil, fmt.Errorf("open page: %w", err)
 	}
 	browserSession.b, browserSession.page = b, page
 	return page, b, nil
