@@ -175,6 +175,7 @@ func launchChrome(ctx context.Context, opts LaunchOptions) (*exec.Cmd, string, e
 	args = append(args, opts.ExtraArgs...)
 
 	cmd := exec.Command(exe, args...)
+	setProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		if tempDir != "" {
 			os.RemoveAll(tempDir)
@@ -186,13 +187,13 @@ func launchChrome(ctx context.Context, opts LaunchOptions) (*exec.Cmd, string, e
 	if port == 0 {
 		port, err = readDevToolsPort(ctx, dataDir)
 		if err != nil {
-			cmd.Process.Kill()
+			killProcessGroup(cmd)
 			return nil, "", err
 		}
 	}
 	wsURL, err := browserWebSocketURL(ctx, port)
 	if err != nil {
-		cmd.Process.Kill()
+		killProcessGroup(cmd)
 		return nil, "", err
 	}
 	return cmd, wsURL, nil

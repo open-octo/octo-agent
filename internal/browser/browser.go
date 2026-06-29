@@ -26,7 +26,7 @@ func Launch(ctx context.Context, opts LaunchOptions) (*Browser, error) {
 	}
 	cli, err := dial(ctx, wsURL)
 	if err != nil {
-		cmd.Process.Kill()
+		killProcessGroup(cmd)
 		return nil, err
 	}
 	return &Browser{cmd: cmd, cli: cli, ownsProcess: true}, nil
@@ -96,7 +96,7 @@ func dial(ctx context.Context, wsURL string) (*cdpClient, error) {
 func (b *Browser) Close() error {
 	b.cli.close()
 	if b.ownsProcess && b.cmd != nil && b.cmd.Process != nil {
-		b.cmd.Process.Kill()
+		killProcessGroup(b.cmd)
 		b.cmd.Wait()
 	}
 	return nil

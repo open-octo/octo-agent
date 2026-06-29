@@ -339,7 +339,14 @@ func TestConnectViaProfile(t *testing.T) {
 	if !ChromeAvailable("") {
 		t.Skip("chrome not available")
 	}
-	profile := t.TempDir()
+	// Not t.TempDir(): Chrome's profile dir may still be settling when the test
+	// ends, and t.TempDir's mandatory RemoveAll would fail the test. Clean up
+	// best-effort after Chrome is killed instead.
+	profile, err := os.MkdirTemp("", "octo-test-chrome-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(profile)
 	launched, err := Launch(ctx, LaunchOptions{Headless: true, UserDataDir: profile})
 	if err != nil {
 		t.Fatalf("launch: %v", err)
