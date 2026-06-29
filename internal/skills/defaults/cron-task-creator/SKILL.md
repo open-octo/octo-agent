@@ -63,7 +63,12 @@ in the server's local timezone.
    - Good: "List open issues created in the last 24h via one `gh issue list`
      call. If there are none, reply exactly 'no new issues' and stop. Otherwise
      summarize each in one line and stop — do not re-check."
-5. **Create**, then **verify** by listing. Offer a one-off immediate run to test.
+5. **Create**, then **verify** by listing. To smoke-test it, **point the user to
+   the scheduler panel and have them click Run** on the task — do **not** call
+   the run endpoint yourself from this session. A run is a full agent turn (up
+   to 30 minutes) in the task's *own* session; firing it from here just blocks
+   this conversation and the output lands in a session the user isn't watching.
+   The panel runs it where they can see it.
 
 ## API — one surface, all under `/api/tasks`
 
@@ -78,8 +83,11 @@ curl -s -X POST http://127.0.0.1:8080/api/tasks \
   -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ...","directory":"/srv/repo"}'
 
 curl -s http://127.0.0.1:8080/api/tasks                      # list
-curl -s -X POST   http://127.0.0.1:8080/api/tasks/{id}/run   # run now
 curl -s -X DELETE http://127.0.0.1:8080/api/tasks/{id}       # delete
+
+# Run now — prefer the scheduler panel's Run button (see the workflow). Only
+# call this when the user explicitly asks to trigger a run from here.
+curl -s -X POST http://127.0.0.1:8080/api/tasks/{id}/run
 
 # Edit any subset of fields — this is also how you enable/disable.
 curl -s -X PATCH http://127.0.0.1:8080/api/tasks/{id} \
