@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -121,6 +122,27 @@ type chatAsker struct {
 	sess *channel.Session
 	ad   channel.Adapter
 	ev   channel.InboundEvent
+}
+
+// channelFileSender adapts the platform adapter into a tools.ChannelFileSender
+// for the send_file tool: it pins the inbound chat + reply context so the
+// model can push a file to the user it is talking to. Stamped into the turn
+// ctx by runChannelTurns (tools.WithChannelSender).
+type channelFileSender struct {
+	ad      channel.Adapter
+	chatID  string
+	replyTo string
+}
+
+func (s channelFileSender) SendFile(path, name string) error {
+	res := s.ad.SendFile(s.chatID, path, name, s.replyTo)
+	if !res.OK {
+		if res.Error != "" {
+			return errors.New(res.Error)
+		}
+		return errors.New("the channel rejected the file")
+	}
+	return nil
 }
 
 func (c chatAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse, error) {
