@@ -126,6 +126,15 @@ func (b *Browser) AttachPage(ctx context.Context, targetID string) (*Page, error
 	return p, nil
 }
 
+// ClosePage closes a page target by id.
+func (b *Browser) ClosePage(ctx context.Context, targetID string) error {
+	_, err := b.cli.call(ctx, "", "Target.closeTarget", map[string]any{"targetId": targetID})
+	return err
+}
+
+// TargetID returns the page's target id (for close/switch).
+func (p *Page) TargetID() string { return p.targetID }
+
 // TargetInfo describes an open browser target (tab).
 type TargetInfo struct {
 	TargetID string `json:"targetId"`

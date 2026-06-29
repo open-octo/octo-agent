@@ -169,6 +169,49 @@ func (p *Page) Screenshot(ctx context.Context) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(r.Data)
 }
 
+// Upload sets the files on a file <input> matched by selector, without the OS
+// file-picker dialog (CDP DOM.setFileInputFiles). Paths should be absolute.
+func (p *Page) Upload(ctx context.Context, selector string, files []string) error {
+	docRes, err := p.cli.call(ctx, p.sessionID, "DOM.getDocument", map[string]any{"depth": 0})
+	if err != nil {
+		return err
+	}
+	var doc struct {
+		Root struct {
+			NodeID int `json:"nodeId"`
+		} `json:"root"`
+	}
+	if err := json.Unmarshal(docRes, &doc); err != nil {
+		return err
+	}
+	selRes, err := p.cli.call(ctx, p.sessionID, "DOM.querySelector", map[string]any{
+		"nodeId":   doc.Root.NodeID,
+		"selector": selector,
+	})
+	if err != nil {
+		return err
+	}
+	var node struct {
+		NodeID int `json:"nodeId"`
+	}
+	if err := json.Unmarshal(selRes, &node); err != nil {
+		return err
+	}
+	if node.NodeID == 0 {
+		return fmt.Errorf("upload: selector %q matched no file input", selector)
+	}
+	_, err = p.cli.call(ctx, p.sessionID, "DOM.setFileInputFiles", map[string]any{
+		"nodeId": node.NodeID,
+		"files":  files,
+	})
+	return err
+}
+
+// Back navigates one entry back in history.
+func (p *Page) Back(ctx context.Context) error {
+	return p.Eval(ctx, "window.history.back()", nil)
+}
+
 // AXTree returns the full accessibility tree as raw CDP node JSON — the Tier-2
 // semantic layer used for target resolution and verification.
 func (p *Page) AXTree(ctx context.Context) (json.RawMessage, error) {

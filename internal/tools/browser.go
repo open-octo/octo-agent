@@ -111,14 +111,16 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"navigate", "click", "type", "key", "scroll", "wait", "screenshot", "ax", "download", "pages", "eval"},
+					"enum":        []string{"navigate", "back", "click", "type", "key", "scroll", "wait", "screenshot", "ax", "upload", "download", "pages", "select_page", "close", "eval"},
 					"description": "The browser action to perform.",
 				},
 				"url":        map[string]any{"type": "string", "description": "Target URL (navigate)."},
-				"selector":   map[string]any{"type": "string", "description": "CSS selector of the target element (click/type/scroll/wait/download)."},
+				"selector":   map[string]any{"type": "string", "description": "CSS selector of the target element (click/type/scroll/wait/upload/download)."},
 				"text":       map[string]any{"type": "string", "description": "Text to type (type)."},
 				"keys":       map[string]any{"type": "string", "description": "Key or combo, e.g. enter, escape, ctrl+a (key)."},
 				"js":         map[string]any{"type": "string", "description": "JavaScript expression to evaluate (eval)."},
+				"files":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Absolute file paths to set on a file <input> (upload)."},
+				"index":      map[string]any{"type": "integer", "description": "Page index from the pages list to switch to (select_page)."},
 				"timeout_ms": map[string]any{"type": "integer", "description": "Wait timeout in ms (wait); default 10000."},
 				"dx":         map[string]any{"type": "number", "description": "Horizontal scroll delta (scroll)."},
 				"dy":         map[string]any{"type": "number", "description": "Vertical scroll delta (scroll)."},
@@ -148,6 +150,12 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, err
 		}
 		return agent.ToolResult{Text: "navigated to " + url}, nil
+
+	case "back":
+		if err := page.Back(ctx); err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: "navigated back"}, nil
 
 	case "click":
 		sel := getStr(input, "selector")
@@ -221,6 +229,20 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		}
 		return agent.ToolResult{Text: axDigest(raw)}, nil
 
+	case "upload":
+		sel := getStr(input, "selector")
+		if sel == "" {
+			return agent.ToolResult{}, fmt.Errorf("browser: upload requires selector (the file input)")
+		}
+		files := getStrings(input, "files")
+		if len(files) == 0 {
+			return agent.ToolResult{}, fmt.Errorf("browser: upload requires files")
+		}
+		if err := page.Upload(ctx, sel, files); err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: fmt.Sprintf("set %d file(s) on %s", len(files), sel)}, nil
+
 	case "download":
 		sel := getStr(input, "selector")
 		if sel == "" {
@@ -238,10 +260,36 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, err
 		}
 		var sb strings.Builder
-		for _, p := range pages {
-			fmt.Fprintf(&sb, "- %s — %s\n", p.Title, p.URL)
+		for i, p := range pages {
+			fmt.Fprintf(&sb, "%d. %s — %s\n", i, p.Title, p.URL)
 		}
 		return agent.ToolResult{Text: sb.String()}, nil
+
+	case "select_page":
+		idx := 0
+		if v, ok := input["index"].(float64); ok {
+			idx = int(v)
+		}
+		pages, err := b.Pages(ctx)
+		if err != nil {
+			return agent.ToolResult{}, err
+		}
+		if idx < 0 || idx >= len(pages) {
+			return agent.ToolResult{}, fmt.Errorf("browser: page index %d out of range (%d pages)", idx, len(pages))
+		}
+		np, err := b.AttachPage(ctx, pages[idx].TargetID)
+		if err != nil {
+			return agent.ToolResult{}, err
+		}
+		setBrowserPage(np)
+		return agent.ToolResult{Text: "switched to page " + pages[idx].URL}, nil
+
+	case "close":
+		if err := b.ClosePage(ctx, page.TargetID()); err != nil {
+			return agent.ToolResult{}, err
+		}
+		setBrowserPage(nil)
+		return agent.ToolResult{Text: "closed page"}, nil
 
 	case "eval":
 		js := getStr(input, "js")
@@ -262,6 +310,27 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 func getStr(input map[string]any, key string) string {
 	s, _ := input[key].(string)
 	return s
+}
+
+func getStrings(input map[string]any, key string) []string {
+	raw, ok := input[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// setBrowserPage swaps the active page, keeping the same browser connection.
+func setBrowserPage(p *browser.Page) {
+	browserSession.mu.Lock()
+	browserSession.page = p
+	browserSession.mu.Unlock()
 }
 
 // downloadDir resolves the configured download directory, falling back to a

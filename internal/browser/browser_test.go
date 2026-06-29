@@ -162,6 +162,43 @@ func TestAttachExistingPage(t *testing.T) {
 	}
 }
 
+// TestUpload sets a file on a file input via DOM.setFileInputFiles (no OS
+// dialog) and verifies the page sees it — the upload primitive.
+func TestUpload(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>up</title><input type="file" id="f">`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#f", 5*time.Second); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	dir := t.TempDir()
+	xlsx := dir + "/report.xlsx"
+	if err := os.WriteFile(xlsx, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := page.Upload(ctx, "#f", []string{xlsx}); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	var name string
+	if err := page.Eval(ctx, "document.querySelector('#f').files[0].name", &name); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if name != "report.xlsx" {
+		t.Fatalf("uploaded file name = %q, want report.xlsx", name)
+	}
+}
+
 // TestPrimitives covers eval / screenshot / ax-tree / key on the fixture.
 func TestPrimitives(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
