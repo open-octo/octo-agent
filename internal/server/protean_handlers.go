@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/app"
@@ -21,8 +22,10 @@ type proteanSkillInfo struct {
 }
 
 // proteanRecordState holds the in-flight recorder started from the web UI.
-// It is process-local; a server restart aborts any active recording.
+// It is process-local; a server restart aborts any active recording. The mutex
+// guards against concurrent record start/stop requests racing on recorder.
 var proteanRecordState struct {
+	mu       sync.Mutex
 	recorder *protean.Recorder
 	startAt  time.Time
 }
@@ -60,6 +63,8 @@ func (s *Server) handleProteanRecordStart(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("Protean not available at %s", bridge.Venv()))
 		return
 	}
+	proteanRecordState.mu.Lock()
+	defer proteanRecordState.mu.Unlock()
 	if proteanRecordState.recorder != nil {
 		writeError(w, http.StatusConflict, "recording already in progress")
 		return
@@ -81,16 +86,19 @@ func (s *Server) handleProteanRecordStart(w http.ResponseWriter, r *http.Request
 // handleProteanRecordStop stops the active recording.
 func (s *Server) handleProteanRecordStop(w http.ResponseWriter, r *http.Request) {
 	_ = r
+	proteanRecordState.mu.Lock()
+	defer proteanRecordState.mu.Unlock()
 	if proteanRecordState.recorder == nil {
 		writeError(w, http.StatusConflict, "no recording in progress")
 		return
 	}
 	startAt := proteanRecordState.startAt
-	if err := proteanRecordState.recorder.Stop(); err != nil {
+	rec := proteanRecordState.recorder
+	if err := rec.Stop(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	outDir := proteanRecordState.recorder.OutDir
+	outDir := rec.OutDir
 	proteanRecordState.recorder = nil
 	writeJSON(w, http.StatusOK, map[string]any{
 		"out_dir":  outDir,
@@ -150,9 +158,17 @@ func (s *Server) handleProteanGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bridge := protean.NewBridge(cfg.Protean)
+	// Constrain the recording to the recordings root so the endpoint can't be
+	// pointed at an arbitrary directory on the host.
+	recordingDir := filepath.Clean(req.RecordingDir)
+	root := bridge.RecordingsRoot()
+	if rel, err := filepath.Rel(root, recordingDir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		writeError(w, http.StatusBadRequest, "recording_dir must be under the recordings directory")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	res, err := bridge.Generate(ctx, req.RecordingDir, strings.TrimSpace(req.TaskDesc), entry.Model, sender)
+	res, err := bridge.Generate(ctx, recordingDir, strings.TrimSpace(req.TaskDesc), entry.Model, sender)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

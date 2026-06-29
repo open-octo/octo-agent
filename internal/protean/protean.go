@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/config"
@@ -61,11 +62,15 @@ func (b *Bridge) SkillsDir() string {
 	return filepath.Join(home, defaultRelSkills)
 }
 
+// RecordingsRoot returns the directory that holds all recording sessions.
+func (b *Bridge) RecordingsRoot() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, defaultRelRecordings)
+}
+
 // RecordingsDir returns a fresh recording directory under the default root.
 func (b *Bridge) RecordingsDir() string {
-	home, _ := os.UserHomeDir()
-	root := filepath.Join(home, defaultRelRecordings)
-	return filepath.Join(root, time.Now().Format("20060102-150405"))
+	return filepath.Join(b.RecordingsRoot(), time.Now().Format("20060102-150405"))
 }
 
 // resolveHome expands a leading ~ to the user's home directory.
@@ -88,9 +93,34 @@ func (b *Bridge) Python() string {
 	return filepath.Join(venv, "bin", "python")
 }
 
+// availTTL bounds how long an availability result is reused. Long enough to
+// avoid spawning Python on every tool-list build (once per turn), short enough
+// that a freshly installed Protean is picked up without a restart.
+const availTTL = 30 * time.Second
+
+var availCache sync.Map // python path -> availEntry
+
+type availEntry struct {
+	ok      bool
+	checked time.Time
+}
+
 // Available reports whether the Protean venv and main package look usable.
+// The result is cached per Python path for availTTL because the check spawns a
+// Python subprocess (`import protean`), and the tool gate calls it every turn.
 func (b *Bridge) Available() bool {
 	py := b.Python()
+	if e, ok := availCache.Load(py); ok {
+		if ent := e.(availEntry); time.Since(ent.checked) < availTTL {
+			return ent.ok
+		}
+	}
+	ok := b.checkAvailable(py)
+	availCache.Store(py, availEntry{ok: ok, checked: time.Now()})
+	return ok
+}
+
+func (b *Bridge) checkAvailable(py string) bool {
 	if _, err := os.Stat(py); err != nil {
 		return false
 	}

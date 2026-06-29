@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/config"
@@ -12,10 +13,17 @@ import (
 )
 
 // proteanBridge is the package-level bridge, lazily loaded from config. It is
-// set on first use so tests don't need Protean installed.
-var proteanBridge *protean.Bridge
+// set on first use so tests don't need Protean installed. proteanBridgeMu
+// guards it because the tool gate (proteanSkillEnabled) runs from concurrent
+// server sessions.
+var (
+	proteanBridge   *protean.Bridge
+	proteanBridgeMu sync.Mutex
+)
 
 func getProteanBridge() *protean.Bridge {
+	proteanBridgeMu.Lock()
+	defer proteanBridgeMu.Unlock()
 	if proteanBridge != nil {
 		return proteanBridge
 	}
@@ -25,7 +33,11 @@ func getProteanBridge() *protean.Bridge {
 }
 
 // SetProteanBridge allows tests and server setup to inject a custom bridge.
-func SetProteanBridge(b *protean.Bridge) { proteanBridge = b }
+func SetProteanBridge(b *protean.Bridge) {
+	proteanBridgeMu.Lock()
+	defer proteanBridgeMu.Unlock()
+	proteanBridge = b
+}
 
 // proteanSkillEnabled gates the Protean tools. We only advertise them when a
 // Protean installation is available so the model doesn't try to use them on a
@@ -108,7 +120,11 @@ func (ProteanRecordTool) Definition() agent.ToolDefinition {
 }
 
 // activeRecorder holds the in-flight recorder started via the tool or API.
-var activeRecorder *protean.Recorder
+// activeRecorderMu guards it against concurrent start/stop.
+var (
+	activeRecorder   *protean.Recorder
+	activeRecorderMu sync.Mutex
+)
 
 func (ProteanRecordTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	action, _ := input["action"].(string)
@@ -118,6 +134,8 @@ func (ProteanRecordTool) Execute(ctx context.Context, _ string, input map[string
 		if !b.Available() {
 			return agent.ToolResult{}, fmt.Errorf("protean_record: Protean is not available at %s", b.Venv())
 		}
+		activeRecorderMu.Lock()
+		defer activeRecorderMu.Unlock()
 		if activeRecorder != nil {
 			return agent.ToolResult{}, fmt.Errorf("protean_record: recording already in progress")
 		}
@@ -125,13 +143,15 @@ func (ProteanRecordTool) Execute(ctx context.Context, _ string, input map[string
 		if err := os.MkdirAll(outDir, 0o700); err != nil {
 			return agent.ToolResult{}, fmt.Errorf("protean_record: %w", err)
 		}
-		activeRecorder = protean.NewRecorder(b, outDir)
-		if err := activeRecorder.Start(ctx); err != nil {
-			activeRecorder = nil
+		rec := protean.NewRecorder(b, outDir)
+		if err := rec.Start(ctx); err != nil {
 			return agent.ToolResult{}, err
 		}
+		activeRecorder = rec
 		return agent.ToolResult{Text: "Recording started: " + outDir}, nil
 	case "stop":
+		activeRecorderMu.Lock()
+		defer activeRecorderMu.Unlock()
 		if activeRecorder == nil {
 			return agent.ToolResult{}, fmt.Errorf("protean_record: no recording in progress")
 		}
