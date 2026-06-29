@@ -73,8 +73,6 @@ func contextWindow(model string) int {
 		return 200_000
 
 	// ── Google Gemini ──
-	case strings.Contains(m, "gemini-pro-2.5") || strings.Contains(m, "gemini-pro-2-5"):
-		return 1_000_000
 	case strings.Contains(m, "gemini-3.5") || strings.Contains(m, "gemini3.5"):
 		return 1_000_000
 	case strings.Contains(m, "gemini-3.1") || strings.Contains(m, "gemini3.1"):
@@ -147,13 +145,13 @@ func contextWindow(model string) int {
 		return 4_000
 
 	// ── Mistral ──
-	case strings.Contains(m, "mistral-large") || strings.Contains(m, "mistral-small") || strings.Contains(m, "pixtral-large"):
+	case strings.Contains(m, "mistral-large") || strings.Contains(m, "mistral-small"):
 		return 128_000
 	case strings.Contains(m, "mistral"):
 		return 32_000
 
 	// ── MiniMax ──
-	case strings.Contains(m, "minimax-m3") || strings.Contains(m, "minimax-v1") || strings.Contains(m, "minimax-speech"):
+	case strings.Contains(m, "minimax-m3"):
 		return 256_000
 	case strings.Contains(m, "minimax-m2"):
 		return 256_000
@@ -173,8 +171,8 @@ func contextWindow(model string) int {
 		return 64_000
 
 	// ── XAI Grok ──
-	case strings.Contains(m, "grok-3") || strings.Contains(m, "grok3"):
-		return 128_000
+	case strings.Contains(m, "grok-4") || strings.Contains(m, "grok4"):
+		return 256_000
 	case strings.Contains(m, "grok"):
 		return 64_000
 
