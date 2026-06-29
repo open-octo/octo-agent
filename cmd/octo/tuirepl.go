@@ -360,6 +360,16 @@ type tuiModel struct {
 	// inputFoldedLines stores the line count when folded for display.
 	inputFoldedLines int
 
+	// pastedBlocks holds large bracketed-paste captures that were collapsed
+	// into inline "[#N pasted …]" placeholder tokens in the input box, keeping
+	// the box readable while composing. On submit/queue each token is expanded
+	// back to its full content before the message is sent. Cleared whenever the
+	// box is submitted, queued, or cleared.
+	pastedBlocks []pastedBlock
+	// pasteSeq numbers placeholder tokens within the current draft; reset to 0
+	// with pastedBlocks so a fresh draft starts numbering again at #1.
+	pasteSeq int
+
 	// modal, when non-nil, is an active Ask prompt (design §6).
 	modal *modalState
 

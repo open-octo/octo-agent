@@ -207,6 +207,8 @@ func printTuiHelp(w io.Writer) {
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Keys:")
 	fmt.Fprintln(w, "  Ctrl+V      Paste an image from the clipboard (rides your next message; Esc discards)")
+	fmt.Fprintln(w, "  Paste       A large text paste collapses to a [#N pasted …] token; the full text is")
+	fmt.Fprintln(w, "              sent on submit. Tab folds/expands the whole box for long typed input.")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Type / to open the completion menu (Tab/↑↓ select, Enter complete) — it lists")
 	fmt.Fprintln(w, "every command and skill, so you don't have to remember names.")

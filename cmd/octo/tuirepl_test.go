@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -976,5 +977,131 @@ func TestTUI_InputFold_FourLinesNoFold(t *testing.T) {
 	m = m2.(*tuiModel)
 	if m.inputFolded {
 		t.Error("4-line input should not fold (threshold is 5)")
+	}
+}
+
+// pasteKey builds the bracketed-paste KeyMsg bubbletea delivers for a paste.
+func pasteKey(s string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s), Paste: true}
+}
+
+// TestTUI_Paste_LargeFoldsToToken: a big multi-line paste is replaced by a
+// "[#1 pasted N lines]" placeholder instead of dumping the raw text into the box.
+func TestTUI_Paste_LargeFoldsToToken(t *testing.T) {
+	m := newTestModel()
+	big := "a\nb\nc\nd\ne\nf"
+	m2, _ := m.handleKey(pasteKey(big))
+	m = m2.(*tuiModel)
+
+	if len(m.pastedBlocks) != 1 {
+		t.Fatalf("expected 1 pasted block, got %d", len(m.pastedBlocks))
+	}
+	if got := m.ta.Value(); got != "[#1 pasted 6 lines]" {
+		t.Errorf("box value = %q, want placeholder token", got)
+	}
+	if strings.Contains(m.ta.Value(), "\n") {
+		t.Error("raw multi-line paste must not land in the box")
+	}
+}
+
+// TestTUI_Paste_SmallInsertsVerbatim: a short paste below the threshold is
+// inserted as-is so brief snippets stay visible and editable.
+func TestTUI_Paste_SmallInsertsVerbatim(t *testing.T) {
+	m := newTestModel()
+	small := "one\ntwo"
+	m2, _ := m.handleKey(pasteKey(small))
+	m = m2.(*tuiModel)
+
+	if len(m.pastedBlocks) != 0 {
+		t.Errorf("small paste should not create a token, got %d blocks", len(m.pastedBlocks))
+	}
+	if m.ta.Value() != small {
+		t.Errorf("box value = %q, want %q", m.ta.Value(), small)
+	}
+}
+
+// TestTUI_Paste_LongSingleLineFoldsByChars: a single huge line (no newlines)
+// folds via the character threshold and labels itself in chars.
+func TestTUI_Paste_LongSingleLineFoldsByChars(t *testing.T) {
+	m := newTestModel()
+	long := strings.Repeat("x", pasteFoldMinChars)
+	m2, _ := m.handleKey(pasteKey(long))
+	m = m2.(*tuiModel)
+
+	if len(m.pastedBlocks) != 1 {
+		t.Fatalf("expected 1 pasted block, got %d", len(m.pastedBlocks))
+	}
+	want := fmt.Sprintf("[#1 pasted %d chars]", pasteFoldMinChars)
+	if m.ta.Value() != want {
+		t.Errorf("box value = %q, want %q", m.ta.Value(), want)
+	}
+}
+
+// TestTUI_Paste_SubmitExpands: submit restores the full pasted text (model +
+// history) while the scrollback echo keeps the collapsed token.
+func TestTUI_Paste_SubmitExpands(t *testing.T) {
+	m := newTestModel()
+	big := "x1\nx2\nx3\nx4\nx5\nx6"
+	m2, _ := m.handleKey(pasteKey(big))
+	m = m2.(*tuiModel)
+	// Type a prefix around the token.
+	setInput(m, "review this: "+m.ta.Value())
+
+	_, _ = m.submit()
+	if !m.turnRunning {
+		t.Fatal("submit should start a turn")
+	}
+	wantText := "review this: " + big
+	if len(m.inputHistory) != 1 || m.inputHistory[0] != wantText {
+		t.Errorf("history[0] = %q, want %q", m.inputHistory, wantText)
+	}
+	if len(m.pastedBlocks) != 0 {
+		t.Error("pasted blocks should be cleared after submit")
+	}
+	// Scrollback echo stays collapsed (token, not raw paste).
+	if !strings.Contains(m.echoPending, "[#1 pasted 6 lines]") {
+		t.Errorf("echo should show the collapsed token, got %q", m.echoPending)
+	}
+	if strings.Contains(m.echoPending, "x6") {
+		t.Errorf("echo must not dump the raw paste, got %q", m.echoPending)
+	}
+}
+
+// TestTUI_Paste_CtrlQQueuesExpanded: queuing mid-turn stores the full text.
+func TestTUI_Paste_CtrlQQueuesExpanded(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	big := "q1\nq2\nq3\nq4\nq5\nq6"
+	m2, _ := m.handleKey(pasteKey(big))
+	m = m2.(*tuiModel)
+
+	m2, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlQ})
+	m = m2.(*tuiModel)
+	if len(m.queue) != 1 || m.queue[0].text != big {
+		t.Errorf("queued text = %+v, want full paste", m.queue)
+	}
+	if len(m.pastedBlocks) != 0 {
+		t.Error("pasted blocks should be cleared after Ctrl+Q")
+	}
+}
+
+// TestTUI_Paste_EscClears: Esc on an idle box discards pending pastes.
+func TestTUI_Paste_EscClears(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = false
+	big := "e1\ne2\ne3\ne4\ne5\ne6"
+	m2, _ := m.handleKey(pasteKey(big))
+	m = m2.(*tuiModel)
+	if len(m.pastedBlocks) != 1 {
+		t.Fatalf("expected a pending paste, got %d", len(m.pastedBlocks))
+	}
+
+	m2, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m = m2.(*tuiModel)
+	if len(m.pastedBlocks) != 0 {
+		t.Error("Esc should clear pending pastes")
+	}
+	if m.ta.Value() != "" {
+		t.Errorf("box should be empty after Esc, got %q", m.ta.Value())
 	}
 }

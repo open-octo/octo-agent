@@ -94,6 +94,14 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// A large bracketed paste is collapsed into an inline "[#N pasted …]" token
+	// so the box stays readable; the full text is restored on submit/queue.
+	// Small pastes fall through and insert verbatim so short snippets stay
+	// visible and editable.
+	if msg.Paste && shouldFoldPaste(string(msg.Runes)) {
+		return m.insertPasteToken(string(msg.Runes))
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlD:
 		m.quit = true
@@ -164,6 +172,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// Idle: clear the input line and discard any pending attachments.
 		m.pendingAttachments = nil
+		m.clearPastes()
 		// Also clear folded state
 		if m.inputFolded {
 			m.inputFolded = false
@@ -192,16 +201,18 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.turnRunning {
 			return m.submit()
 		}
-		text := m.ta.Value()
+		raw := m.ta.Value()
 		if m.inputFolded {
-			text = m.foldedFullText
+			raw = m.foldedFullText
 		}
-		text = strings.TrimSpace(text)
+		text := strings.TrimSpace(m.expandPastes(raw))
+		collapsed := strings.TrimSpace(raw)
 		if text == "" {
 			return m, nil
 		}
 		m.ta.Reset()
 		m.inputHistoryIdx = -1
+		m.clearPastes()
 		// Clear folded state
 		if m.inputFolded {
 			m.inputFolded = false
@@ -212,7 +223,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputHistory = append(m.inputHistory, text)
 		}
 		m.queue = append(m.queue, pendingItem{text: text})
-		m.println(queueStyle.Render("＋ queued: " + text))
+		m.println(queueStyle.Render("＋ queued: " + collapsed))
 		return m, nil
 
 	case tea.KeyCtrlX:
@@ -396,6 +407,71 @@ func (m *tuiModel) handleSubAgentPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// pastedBlock is one large bracketed paste captured as an inline placeholder
+// token. placeholder is the exact text inserted into the textarea (e.g.
+// "[#1 pasted 123 lines]"); content is the full pasted text restored verbatim
+// on submit/queue.
+type pastedBlock struct {
+	placeholder string
+	content     string
+}
+
+const (
+	// pasteFoldMinLines / pasteFoldMinChars: a bracketed paste at least this big
+	// is collapsed into a placeholder token instead of being dumped into the box.
+	// The char threshold catches a single huge line (one long paragraph) that
+	// the line threshold alone would miss.
+	pasteFoldMinLines = 5
+	pasteFoldMinChars = 400
+)
+
+// shouldFoldPaste reports whether a pasted string is large enough to collapse
+// into a placeholder token rather than insert verbatim.
+func shouldFoldPaste(s string) bool {
+	if strings.Count(s, "\n")+1 >= pasteFoldMinLines {
+		return true
+	}
+	return len([]rune(s)) >= pasteFoldMinChars
+}
+
+// insertPasteToken records content as a pasted block and inserts a compact
+// "[#N pasted …]" placeholder at the cursor in place of the raw text.
+func (m *tuiModel) insertPasteToken(content string) (tea.Model, tea.Cmd) {
+	m.pasteSeq++
+	var label string
+	if lines := strings.Count(content, "\n") + 1; lines >= 2 {
+		label = fmt.Sprintf("[#%d pasted %d lines]", m.pasteSeq, lines)
+	} else {
+		label = fmt.Sprintf("[#%d pasted %d chars]", m.pasteSeq, len([]rune(content)))
+	}
+	m.pastedBlocks = append(m.pastedBlocks, pastedBlock{placeholder: label, content: content})
+	// Insert the token at the cursor exactly as if the label had been typed.
+	var cmd tea.Cmd
+	m.ta, cmd = m.ta.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(label)})
+	m.complIdx = 0
+	m.updateCompletion()
+	if hcmd := m.updateTextAreaHeight(); hcmd != nil {
+		cmd = tea.Batch(cmd, hcmd)
+	}
+	return m, cmd
+}
+
+// expandPastes replaces each placeholder token in text with its full pasted
+// content. A no-op when no pastes are pending or the tokens were edited away.
+func (m *tuiModel) expandPastes(text string) string {
+	for _, p := range m.pastedBlocks {
+		text = strings.ReplaceAll(text, p.placeholder, p.content)
+	}
+	return text
+}
+
+// clearPastes drops all pending pasted blocks and resets token numbering. Call
+// it whenever the input box content is consumed or discarded.
+func (m *tuiModel) clearPastes() {
+	m.pastedBlocks = nil
+	m.pasteSeq = 0
 }
 
 // imageExts are the file extensions tryAttachDroppedImage recognises.
@@ -639,16 +715,21 @@ func humanByteSize(n int) string {
 // with no attachments is ignored.
 func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	// If folded, expand to get the full text for submission.
-	text := m.ta.Value()
+	raw := m.ta.Value()
 	if m.inputFolded {
-		text = m.foldedFullText
+		raw = m.foldedFullText
 	}
-	text = strings.TrimSpace(text)
+	// text is what the model and history see (paste tokens restored to full
+	// content); collapsed is what the scrollback echo shows, keeping any large
+	// paste folded as "[#N pasted …]" rather than dumping it verbatim.
+	text := strings.TrimSpace(m.expandPastes(raw))
+	collapsed := strings.TrimSpace(raw)
 	if text == "" && len(m.pendingAttachments) == 0 {
 		return m, nil
 	}
 	m.ta.Reset()
 	m.inputHistoryIdx = -1
+	m.clearPastes()
 	// Clear folded state after submit
 	if m.inputFolded {
 		m.inputFolded = false
@@ -676,14 +757,14 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 
 	if !m.turnRunning {
 		// Fold any pending image attachments into this turn's user message.
-		echo := text
+		echo := collapsed
 		if len(m.pendingAttachments) > 0 {
 			blocks := make([]agent.ContentBlock, 0, len(m.pendingAttachments))
 			for _, a := range m.pendingAttachments {
 				blocks = append(blocks, a.block)
 			}
 			m.a.AttachUserBlocks(blocks)
-			echo = strings.TrimSpace(text + "  " + m.attachmentChips())
+			echo = strings.TrimSpace(collapsed + "  " + m.attachmentChips())
 			m.pendingAttachments = nil
 		}
 		return m, m.startTurnEcho(text, echo)
