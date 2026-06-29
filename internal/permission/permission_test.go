@@ -258,6 +258,27 @@ func TestStrictMode_TurnsAskIntoDeny(t *testing.T) {
 	}
 }
 
+// TestDefaultRules_ControlToolsAllowedEvenInStrict guards that control-plane /
+// UX tools are explicitly allow-listed rather than left to the implicit ask.
+// ask_user_question is the load-bearing case: it is the onboard flow's first
+// step, and without an allow rule a non-interactive transport resolves its ask
+// to deny — silently stranding onboarding (the regression that prompted this).
+func TestDefaultRules_ControlToolsAllowedEvenInStrict(t *testing.T) {
+	e, err := New("", "/work", ModeStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{
+		"ask_user_question", "skill",
+		"sub_agent", "sub_agent_send", "sub_agent_status", "sub_agent_kill",
+		"task_create", "task_update", "task_list",
+	} {
+		if got := e.Check(tool, map[string]any{}); got != Allow {
+			t.Errorf("%s: got %s, want Allow (must not fall through to implicit ask→deny)", tool, got)
+		}
+	}
+}
+
 // ─── Remember cache ────────────────────────────────────────────────────────
 
 func TestRemember_ShortCircuits(t *testing.T) {

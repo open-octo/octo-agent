@@ -129,6 +129,15 @@ task_update:
 task_list:
   - allow: { pattern: "" }
 
+# ask_user_question solicits a choice from the user and waits — it has no side
+# effect of its own, and it IS the interaction, so routing it through a separate
+# permission prompt is both redundant (interactive) and fatal everywhere else: a
+# non-interactive transport resolves the implicit ask to deny, silently killing
+# the question — which strands the onboard flow (its first step) and any skill
+# that asks a question. Allow without prompting, like the other control tools.
+ask_user_question:
+  - allow: { pattern: "" }
+
 # Skill invocation is a dispatch to a markdown instruction file — no direct side
 # effect beyond what the skill's own tools (already gated) do. Allow without
 # prompting so the onboard and other skill flows work over HTTP / IM.

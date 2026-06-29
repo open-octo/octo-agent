@@ -124,7 +124,7 @@ Parse freely. Store the user's name as `user.name` (default `"老大"` for zh, `
 
 ### A.6. Collect behaviour preferences
 
-These three settings are saved to `~/.octo/config.yaml` and affect every session.
+These three settings are saved to `~/.octo/config.yml` and affect every session.
 All have fixed choices with a sensible default, so present each as an
 `ask_user_question` (clickable cards) — make the default option's label say
 "(default)". Do NOT print a markdown list and tell the user to "press Enter" to
@@ -255,9 +255,9 @@ zh template:
 [1–2 句话，根据用户目标和背景量身定制。]
 ```
 
-### A.10. Update config.yaml
+### A.10. Update config.yml
 
-Read `~/.octo/config.yaml` (it already exists — the setup panel wrote provider/model/base_url/api_key earlier).
+Read `~/.octo/config.yml` (it already exists — the setup panel wrote provider/model/base_url/api_key earlier).
 Use `write_file` to rewrite it with the behaviour-preference fields appended:
 
 - `permission_mode` — `prefs.permission_mode` (or omit if default `"interactive"`)
