@@ -14,22 +14,52 @@ type point struct {
 	Y float64 `json:"y"`
 }
 
+// frameDelim separates a same-origin iframe selector from the element selector
+// inside it, e.g. "iframe#app >>> #download". One level; cross-origin OOPIFs
+// are not handled (their DOM lives in another process).
+const frameDelim = " >>> "
+
+func splitFrame(selector string) (frame, elem string) {
+	if i := strings.Index(selector, frameDelim); i >= 0 {
+		return selector[:i], selector[i+len(frameDelim):]
+	}
+	return "", selector
+}
+
+// elemRefJS builds a JS expression evaluating to the target element, piercing a
+// same-origin iframe's contentDocument when a frame selector is given.
+func elemRefJS(frame, elem string) string {
+	if frame == "" {
+		return fmt.Sprintf("document.querySelector(%s)", jsString(elem))
+	}
+	return fmt.Sprintf("(()=>{const f=document.querySelector(%s);return f&&f.contentDocument?f.contentDocument.querySelector(%s):null;})()",
+		jsString(frame), jsString(elem))
+}
+
 // elementCenter scrolls an element into view and returns its viewport-center
-// point, or an error if the selector matches nothing.
+// point (adding the iframe's offset for framed targets), or an error if the
+// selector matches nothing.
 func (p *Page) elementCenter(ctx context.Context, selector string) (point, error) {
+	frame, elem := splitFrame(selector)
+	offset := ""
+	if frame != "" {
+		offset = fmt.Sprintf(`{const f=document.querySelector(%s); if(f){const fr=f.getBoundingClientRect(); ox=fr.x; oy=fr.y;}}`, jsString(frame))
+	}
 	expr := fmt.Sprintf(`(() => {
-		const el = document.querySelector(%s);
+		const el = %s;
 		if (!el) return null;
 		el.scrollIntoView({ block: 'center', inline: 'center' });
 		const r = el.getBoundingClientRect();
-		return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-	})()`, jsString(selector))
+		let ox = 0, oy = 0;
+		%s
+		return { x: ox + r.x + r.width / 2, y: oy + r.y + r.height / 2 };
+	})()`, elemRefJS(frame, elem), offset)
 	var pt *point
 	if err := p.Eval(ctx, expr, &pt); err != nil {
 		return point{}, err
 	}
 	if pt == nil {
-		return point{}, fmt.Errorf("click: selector %q matched nothing", selector)
+		return point{}, fmt.Errorf("selector %q matched nothing", selector)
 	}
 	return *pt, nil
 }
@@ -77,8 +107,9 @@ func (p *Page) Hover(ctx context.Context, selector string) error {
 // text, or label, then fires input+change so framework bindings react. Native
 // select popups are browser-drawn (not DOM), so this is the reliable path.
 func (p *Page) SelectOption(ctx context.Context, selector, value string) error {
+	frame, elem := splitFrame(selector)
 	expr := fmt.Sprintf(`(() => {
-		const el = document.querySelector(%s);
+		const el = %s;
 		if (!el || el.tagName !== 'SELECT') return 'no-select';
 		let idx = -1;
 		for (let i = 0; i < el.options.length; i++) {
@@ -90,7 +121,7 @@ func (p *Page) SelectOption(ctx context.Context, selector, value string) error {
 		el.dispatchEvent(new Event('input', { bubbles: true }));
 		el.dispatchEvent(new Event('change', { bubbles: true }));
 		return 'ok';
-	})()`, jsString(selector), jsString(value), jsString(value), jsString(value))
+	})()`, elemRefJS(frame, elem), jsString(value), jsString(value), jsString(value))
 	var status string
 	if err := p.Eval(ctx, expr, &status); err != nil {
 		return err
@@ -109,7 +140,8 @@ func (p *Page) SelectOption(ctx context.Context, selector, value string) error {
 
 // TypeText focuses the element matched by selector and types text into it.
 func (p *Page) TypeText(ctx context.Context, selector, text string) error {
-	focus := fmt.Sprintf(`(() => { const el = document.querySelector(%s); if (!el) return false; el.focus(); return true; })()`, jsString(selector))
+	frame, elem := splitFrame(selector)
+	focus := fmt.Sprintf(`(() => { const el = %s; if (!el) return false; el.focus(); return true; })()`, elemRefJS(frame, elem))
 	var ok bool
 	if err := p.Eval(ctx, focus, &ok); err != nil {
 		return err
@@ -221,38 +253,31 @@ func (p *Page) Screenshot(ctx context.Context) ([]byte, error) {
 
 // Upload sets the files on a file <input> matched by selector, without the OS
 // file-picker dialog (CDP DOM.setFileInputFiles). Paths should be absolute.
+// Resolving the input by JS object (rather than a DOM nodeId) lets it pierce a
+// same-origin iframe via the same frame convention as the other actions.
 func (p *Page) Upload(ctx context.Context, selector string, files []string) error {
-	docRes, err := p.cli.call(ctx, p.sessionID, "DOM.getDocument", map[string]any{"depth": 0})
-	if err != nil {
-		return err
-	}
-	var doc struct {
-		Root struct {
-			NodeID int `json:"nodeId"`
-		} `json:"root"`
-	}
-	if err := json.Unmarshal(docRes, &doc); err != nil {
-		return err
-	}
-	selRes, err := p.cli.call(ctx, p.sessionID, "DOM.querySelector", map[string]any{
-		"nodeId":   doc.Root.NodeID,
-		"selector": selector,
+	frame, elem := splitFrame(selector)
+	res, err := p.cli.call(ctx, p.sessionID, "Runtime.evaluate", map[string]any{
+		"expression":    elemRefJS(frame, elem),
+		"returnByValue": false,
 	})
 	if err != nil {
 		return err
 	}
-	var node struct {
-		NodeID int `json:"nodeId"`
+	var r struct {
+		Result struct {
+			ObjectID string `json:"objectId"`
+		} `json:"result"`
 	}
-	if err := json.Unmarshal(selRes, &node); err != nil {
+	if err := json.Unmarshal(res, &r); err != nil {
 		return err
 	}
-	if node.NodeID == 0 {
+	if r.Result.ObjectID == "" {
 		return fmt.Errorf("upload: selector %q matched no file input", selector)
 	}
 	_, err = p.cli.call(ctx, p.sessionID, "DOM.setFileInputFiles", map[string]any{
-		"nodeId": node.NodeID,
-		"files":  files,
+		"objectId": r.Result.ObjectID,
+		"files":    files,
 	})
 	return err
 }

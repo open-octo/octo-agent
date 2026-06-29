@@ -217,7 +217,8 @@ func (p *Page) Eval(ctx context.Context, expr string, out any) error {
 // is the verify primitive for "the download button appeared after search".
 func (p *Page) WaitFor(ctx context.Context, selector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	expr := fmt.Sprintf("!!document.querySelector(%s)", jsString(selector))
+	frame, elem := splitFrame(selector)
+	expr := "!!(" + elemRefJS(frame, elem) + ")"
 	for {
 		var present bool
 		if err := p.Eval(ctx, expr, &present); err != nil {

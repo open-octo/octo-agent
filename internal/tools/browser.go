@@ -116,6 +116,7 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 				},
 				"url":        map[string]any{"type": "string", "description": "Target URL (navigate)."},
 				"selector":   map[string]any{"type": "string", "description": "CSS selector of the target element (click/hover/type/select/scroll/wait/upload/download)."},
+				"frame":      map[string]any{"type": "string", "description": "Optional CSS selector of a same-origin iframe to scope the selector into (e.g. iframe#app)."},
 				"text":       map[string]any{"type": "string", "description": "Text to type (type)."},
 				"value":      map[string]any{"type": "string", "description": "Option value, text, or label to pick in a <select> (select)."},
 				"keys":       map[string]any{"type": "string", "description": "Key or combo, e.g. enter, escape, ctrl+a (key)."},
@@ -159,7 +160,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		return agent.ToolResult{Text: "navigated back"}, nil
 
 	case "click":
-		sel := getStr(input, "selector")
+		sel := targetSelector(input)
 		if sel == "" {
 			return agent.ToolResult{}, fmt.Errorf("browser: click requires selector")
 		}
@@ -169,7 +170,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		return agent.ToolResult{Text: "clicked " + sel}, nil
 
 	case "hover":
-		sel := getStr(input, "selector")
+		sel := targetSelector(input)
 		if sel == "" {
 			return agent.ToolResult{}, fmt.Errorf("browser: hover requires selector")
 		}
@@ -179,7 +180,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		return agent.ToolResult{Text: "hovered " + sel}, nil
 
 	case "select":
-		sel, val := getStr(input, "selector"), getStr(input, "value")
+		sel, val := targetSelector(input), getStr(input, "value")
 		if sel == "" {
 			return agent.ToolResult{}, fmt.Errorf("browser: select requires selector")
 		}
@@ -189,7 +190,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		return agent.ToolResult{Text: fmt.Sprintf("selected %q in %s", val, sel)}, nil
 
 	case "type":
-		sel, text := getStr(input, "selector"), getStr(input, "text")
+		sel, text := targetSelector(input), getStr(input, "text")
 		if sel == "" {
 			return agent.ToolResult{}, fmt.Errorf("browser: type requires selector")
 		}
@@ -209,7 +210,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		return agent.ToolResult{Text: "pressed " + combo}, nil
 
 	case "scroll":
-		sel := getStr(input, "selector")
+		sel := targetSelector(input)
 		dx, _ := input["dx"].(float64)
 		dy, _ := input["dy"].(float64)
 		if err := page.Scroll(ctx, sel, dx, dy); err != nil {
@@ -218,7 +219,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		return agent.ToolResult{Text: "scrolled"}, nil
 
 	case "wait":
-		sel := getStr(input, "selector")
+		sel := targetSelector(input)
 		if sel == "" {
 			return agent.ToolResult{}, fmt.Errorf("browser: wait requires selector")
 		}
@@ -251,7 +252,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		return agent.ToolResult{Text: axDigest(raw)}, nil
 
 	case "upload":
-		sel := getStr(input, "selector")
+		sel := targetSelector(input)
 		if sel == "" {
 			return agent.ToolResult{}, fmt.Errorf("browser: upload requires selector (the file input)")
 		}
@@ -265,7 +266,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		return agent.ToolResult{Text: fmt.Sprintf("set %d file(s) on %s", len(files), sel)}, nil
 
 	case "download":
-		sel := getStr(input, "selector")
+		sel := targetSelector(input)
 		if sel == "" {
 			return agent.ToolResult{}, fmt.Errorf("browser: download requires selector (the element that starts the download)")
 		}
@@ -331,6 +332,16 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 func getStr(input map[string]any, key string) string {
 	s, _ := input[key].(string)
 	return s
+}
+
+// targetSelector returns the element selector, scoped into a same-origin iframe
+// when a frame is given (via the backend's " >>> " piercing convention).
+func targetSelector(input map[string]any) string {
+	sel := getStr(input, "selector")
+	if frame := getStr(input, "frame"); frame != "" && sel != "" {
+		return frame + " >>> " + sel
+	}
+	return sel
 }
 
 func getStrings(input map[string]any, key string) []string {

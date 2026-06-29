@@ -272,6 +272,46 @@ func TestSelectOption(t *testing.T) {
 	}
 }
 
+// TestSameOriginFrame drives an element inside a same-origin iframe via the
+// " >>> " piercing convention (wait, then a trusted click that lands through
+// the computed frame offset). Same-origin as in Klook's admin system.
+func TestSameOriginFrame(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/child" {
+			w.Write([]byte(`<!doctype html><title>child</title>
+<button id="b" style="position:absolute;left:30px;top:30px;width:120px;height:40px">Go</button>
+<script>document.getElementById('b').addEventListener('click',function(){document.body.setAttribute('data-clicked','1')});</script>`))
+			return
+		}
+		w.Write([]byte(`<!doctype html><title>parent</title>
+<iframe id="fr" src="/child" style="position:absolute;left:50px;top:60px;width:400px;height:300px;border:0"></iframe>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	// Frame-aware wait: the button lives inside the same-origin child frame.
+	if err := page.WaitFor(ctx, "#fr >>> #b", 5*time.Second); err != nil {
+		t.Fatalf("wait in frame: %v", err)
+	}
+	if err := page.Click(ctx, "#fr >>> #b"); err != nil {
+		t.Fatalf("click in frame: %v", err)
+	}
+	var clicked string
+	if err := page.Eval(ctx, "document.querySelector('#fr').contentDocument.body.getAttribute('data-clicked')", &clicked); err != nil {
+		t.Fatalf("eval pierce: %v", err)
+	}
+	if clicked != "1" {
+		t.Fatalf("frame click did not register (data-clicked=%q)", clicked)
+	}
+}
+
 // TestPrimitives covers eval / screenshot / ax-tree / key on the fixture.
 func TestPrimitives(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
