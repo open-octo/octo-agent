@@ -312,6 +312,50 @@ func TestSameOriginFrame(t *testing.T) {
 	}
 }
 
+// TestDevToolsWS parses the DevToolsActivePort file into a ws URL (no Chrome).
+func TestDevToolsWS(t *testing.T) {
+	dir := t.TempDir()
+	if _, ok := devToolsWS(dir); ok {
+		t.Fatal("expected not-ok with no DevToolsActivePort file")
+	}
+	if err := os.WriteFile(dir+"/DevToolsActivePort", []byte("9222\n/devtools/browser/abc-123\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws, ok := devToolsWS(dir)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if ws != "ws://127.0.0.1:9222/devtools/browser/abc-123" {
+		t.Fatalf("ws = %q", ws)
+	}
+}
+
+// TestConnectViaProfile attaches to a running Chrome by reading its profile's
+// DevToolsActivePort — the path used to reuse a logged-in browser without
+// relaunching (and without /json, which recent Chrome disables).
+func TestConnectViaProfile(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if !ChromeAvailable("") {
+		t.Skip("chrome not available")
+	}
+	profile := t.TempDir()
+	launched, err := Launch(ctx, LaunchOptions{Headless: true, UserDataDir: profile})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer launched.Close()
+
+	attached, err := ConnectViaProfile(ctx, profile)
+	if err != nil {
+		t.Fatalf("connect via profile: %v", err)
+	}
+	defer attached.Close()
+	if _, err := attached.Pages(ctx); err != nil {
+		t.Fatalf("pages over attached connection: %v", err)
+	}
+}
+
 // TestPrimitives covers eval / screenshot / ax-tree / key on the fixture.
 func TestPrimitives(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

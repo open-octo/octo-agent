@@ -93,9 +93,14 @@ type Config struct {
 
 // BrowserConfig configures how the browser tool connects to Chrome.
 type BrowserConfig struct {
+	// AttachRunning attaches to the user's already-running Chrome (discovered via
+	// its default profile's DevToolsActivePort), reusing the logged-in session
+	// without relaunching. Requires that Chrome was started with remote
+	// debugging enabled.
+	AttachRunning bool `yaml:"attach_running,omitempty"`
 	// ConnectPort attaches to a Chrome already running with
-	// --remote-debugging-port=<port>, reusing its logged-in session. Preferred
-	// over launching a fresh instance.
+	// --remote-debugging-port=<port> via the /json HTTP endpoint. Use when the
+	// port is known and that endpoint is served.
 	ConnectPort int `yaml:"connect_port,omitempty"`
 	// UserDataDir is the Chrome profile dir used when launching (the fallback
 	// when no running Chrome is attached). Empty uses a throwaway profile.

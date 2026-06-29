@@ -55,6 +55,32 @@ func ConnectByPort(ctx context.Context, port int) (*Browser, error) {
 	return Connect(ctx, wsURL)
 }
 
+// ConnectViaProfile attaches to a Chrome already running with remote debugging
+// by reading its profile's DevToolsActivePort — reusing the user's logged-in
+// session without relaunching, and without the /json HTTP endpoint.
+func ConnectViaProfile(ctx context.Context, userDataDir string) (*Browser, error) {
+	ws, ok := devToolsWS(userDataDir)
+	if !ok {
+		return nil, fmt.Errorf("no DevToolsActivePort in %s (is Chrome running with --remote-debugging-port?)", userDataDir)
+	}
+	return Connect(ctx, ws)
+}
+
+// DiscoverRunningChrome attaches to the first default-profile Chrome found
+// running with remote debugging.
+func DiscoverRunningChrome(ctx context.Context) (*Browser, error) {
+	for _, dir := range defaultProfileDirs() {
+		ws, ok := devToolsWS(dir)
+		if !ok {
+			continue
+		}
+		if b, err := Connect(ctx, ws); err == nil {
+			return b, nil
+		}
+	}
+	return nil, fmt.Errorf("no running Chrome with remote debugging found; launch Chrome with --remote-debugging-port or set browser.connect_port")
+}
+
 func dial(ctx context.Context, wsURL string) (*cdpClient, error) {
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
 	if err != nil {

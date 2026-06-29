@@ -47,7 +47,7 @@ func ResetBrowserSession() {
 // or an explicit debug port is configured.
 func browserEnabled() bool {
 	cfg, _ := config.Load()
-	return cfg.Browser.ConnectPort != 0 || browser.ChromeAvailable(cfg.Browser.ExecPath)
+	return cfg.Browser.ConnectPort != 0 || cfg.Browser.AttachRunning || browser.ChromeAvailable(cfg.Browser.ExecPath)
 }
 
 // browserPage returns the active page, connecting (or launching) Chrome on first
@@ -63,18 +63,25 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 
 	var b *browser.Browser
 	var err error
-	if bc.ConnectPort != 0 {
-		b, err = browser.ConnectByPort(ctx, bc.ConnectPort)
-		if err != nil {
+	switch {
+	case bc.ConnectPort != 0:
+		if b, err = browser.ConnectByPort(ctx, bc.ConnectPort); err != nil {
 			return nil, nil, fmt.Errorf("connect to Chrome on port %d: %w", bc.ConnectPort, err)
 		}
-	} else {
-		b, err = browser.Launch(ctx, browser.LaunchOptions{
+	case bc.AttachRunning && bc.UserDataDir != "":
+		if b, err = browser.ConnectViaProfile(ctx, bc.UserDataDir); err != nil {
+			return nil, nil, err
+		}
+	case bc.AttachRunning:
+		if b, err = browser.DiscoverRunningChrome(ctx); err != nil {
+			return nil, nil, err
+		}
+	default:
+		if b, err = browser.Launch(ctx, browser.LaunchOptions{
 			ExecPath:    bc.ExecPath,
 			UserDataDir: bc.UserDataDir,
 			Headless:    bc.Headless,
-		})
-		if err != nil {
+		}); err != nil {
 			return nil, nil, fmt.Errorf("launch Chrome: %w", err)
 		}
 	}
