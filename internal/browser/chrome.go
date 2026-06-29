@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -70,6 +71,57 @@ func ChromeAvailable(execPath string) bool {
 	return err == nil
 }
 
+// defaultProfileDirs lists the default Chrome/Chromium/Edge user-data
+// directories per platform — where DevToolsActivePort is written.
+func defaultProfileDirs() []string {
+	home, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "darwin":
+		base := filepath.Join(home, "Library/Application Support")
+		return []string{
+			filepath.Join(base, "Google/Chrome"),
+			filepath.Join(base, "Google/Chrome Canary"),
+			filepath.Join(base, "Chromium"),
+			filepath.Join(base, "Microsoft Edge"),
+		}
+	case "windows":
+		local := os.Getenv("LOCALAPPDATA")
+		return []string{
+			filepath.Join(local, `Google\Chrome\User Data`),
+			filepath.Join(local, `Chromium\User Data`),
+			filepath.Join(local, `Microsoft\Edge\User Data`),
+		}
+	default:
+		return []string{
+			filepath.Join(home, ".config/google-chrome"),
+			filepath.Join(home, ".config/chromium"),
+			filepath.Join(home, ".config/microsoft-edge"),
+		}
+	}
+}
+
+// devToolsWS reads <userDataDir>/DevToolsActivePort (line 1 = port, line 2 = ws
+// path) and builds the browser-level CDP websocket URL. Chrome writes this when
+// started with remote debugging; using it avoids the /json HTTP discovery
+// endpoint, which recent Chrome disables — this is how a running, logged-in
+// Chrome is attached without relaunching.
+func devToolsWS(userDataDir string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(userDataDir, "DevToolsActivePort"))
+	if err != nil {
+		return "", false
+	}
+	lines := strings.SplitN(strings.TrimSpace(string(data)), "\n", 2)
+	if len(lines) < 2 {
+		return "", false
+	}
+	port := strings.TrimSpace(lines[0])
+	path := strings.TrimSpace(lines[1])
+	if port == "" || path == "" {
+		return "", false
+	}
+	return fmt.Sprintf("ws://127.0.0.1:%s%s", port, path), true
+}
+
 // findChrome resolves the Chrome executable, honoring an explicit override.
 func findChrome(override string) (string, error) {
 	if override != "" {
@@ -123,6 +175,7 @@ func launchChrome(ctx context.Context, opts LaunchOptions) (*exec.Cmd, string, e
 	args = append(args, opts.ExtraArgs...)
 
 	cmd := exec.Command(exe, args...)
+	setProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		if tempDir != "" {
 			os.RemoveAll(tempDir)
@@ -134,13 +187,13 @@ func launchChrome(ctx context.Context, opts LaunchOptions) (*exec.Cmd, string, e
 	if port == 0 {
 		port, err = readDevToolsPort(ctx, dataDir)
 		if err != nil {
-			cmd.Process.Kill()
+			killProcessGroup(cmd)
 			return nil, "", err
 		}
 	}
 	wsURL, err := browserWebSocketURL(ctx, port)
 	if err != nil {
-		cmd.Process.Kill()
+		killProcessGroup(cmd)
 		return nil, "", err
 	}
 	return cmd, wsURL, nil
