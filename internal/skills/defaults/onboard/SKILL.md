@@ -302,6 +302,10 @@ Do NOT open a new session — the UI handles navigation after the skill finishes
 - Keep both files under 300 words each.
 - Do not ask follow-up questions beyond the cards above.
 - Work with whatever the user provides; fill in sensible defaults.
+- If the user mentioned browser automation, RPA, scraping, or repetitive web
+  tasks (in their profile or links), add one closing line after A.11 pointing
+  them to `octo browser setup` — it connects the `browser` tool to their
+  logged-in Chrome. Skip it otherwise; don't bloat the ceremony for everyone.
 
 ---
 
