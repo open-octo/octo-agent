@@ -3,7 +3,6 @@ package browser
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 )
 
@@ -109,36 +108,12 @@ func (r *Recorder) Events() []RecordedEvent {
 	return out
 }
 
-// Replay re-executes recorded events on a page via the action primitives. It is
-// deterministic — no LLM — and the basis for replacing a recorded GUI workflow.
-// Verify conditions and self-heal layer on top in a later step.
+// Replay re-executes recorded events directly (no skill file, no params,
+// no healer) — a convenience over the skill path for raw record→replay.
 func Replay(ctx context.Context, page *Page, events []RecordedEvent) error {
-	for i, e := range events {
-		sel := e.Selector
-		if sel == "" {
-			continue
-		}
-		if e.Frame != "" {
-			sel = e.Frame + frameDelim + sel
-		}
-		switch e.Type {
-		case "click":
-			if err := page.Click(ctx, sel); err != nil {
-				return fmt.Errorf("replay step %d (click %s): %w", i, sel, err)
-			}
-		case "change":
-			if e.Tag == "SELECT" {
-				if err := page.SelectOption(ctx, sel, e.Value); err != nil {
-					return fmt.Errorf("replay step %d (select %s): %w", i, sel, err)
-				}
-			} else {
-				if err := page.TypeText(ctx, sel, e.Value); err != nil {
-					return fmt.Errorf("replay step %d (type %s): %w", i, sel, err)
-				}
-			}
-		}
-	}
-	return nil
+	skill := CompileSkill("", "", "", events)
+	_, err := ReplaySkill(ctx, page, &skill, nil, ReplayOptions{})
+	return err
 }
 
 // Stop ends capture (the subscription is dropped; the page-side listeners are
