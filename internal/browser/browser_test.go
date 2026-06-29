@@ -113,6 +113,55 @@ func TestSearchThenDownload(t *testing.T) {
 	}
 }
 
+// TestAttachExistingPage covers the real-use path: discover an already-open tab
+// and attach to it (rather than opening a fresh one), as when reusing the user's
+// logged-in session.
+func TestAttachExistingPage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(fixtureHTML))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+
+	opened, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := opened.WaitFor(ctx, "#search", 5*time.Second); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	pages, err := b.Pages(ctx)
+	if err != nil {
+		t.Fatalf("pages: %v", err)
+	}
+	var targetID string
+	for _, p := range pages {
+		if strings.HasPrefix(p.URL, srv.URL) {
+			targetID = p.TargetID
+		}
+	}
+	if targetID == "" {
+		t.Fatalf("fixture tab not found among %d pages", len(pages))
+	}
+
+	page, err := b.AttachPage(ctx, targetID)
+	if err != nil {
+		t.Fatalf("attach existing: %v", err)
+	}
+	var title string
+	if err := page.Eval(ctx, "document.title", &title); err != nil {
+		t.Fatalf("eval on attached page: %v", err)
+	}
+	if title != "fixture" {
+		t.Fatalf("attached page title = %q, want fixture", title)
+	}
+}
+
 // TestPrimitives covers eval / screenshot / ax-tree / key on the fixture.
 func TestPrimitives(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
