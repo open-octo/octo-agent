@@ -40,6 +40,7 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	cleanup := func() {
 		tools.SetDefaultSubAgentManager(nil)
 		tools.SetSpawner(nil)
+		tools.ResetBrowserSession()
 	}
 	if enableTasks {
 		tools.SetTaskStore(tasks.New())

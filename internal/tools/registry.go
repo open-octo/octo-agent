@@ -49,6 +49,7 @@ var allTools = []tool{
 	TaskUpdateTool{},
 	TaskListTool{},
 	RestartServerTool{},
+	BrowserTool{},
 }
 
 // DefaultRegistry is the agent.ToolExecutor used when `octo --tools` is
@@ -237,6 +238,7 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 	askerOn := askerEnabled()
 	tasksOn := tasksEnabled()
 	restarterOn := restarterEnabled()
+	browserOn := browserEnabled()
 	spawnerOn := spawnerEnabled()
 	defs := make([]agent.ToolDefinition, 0, len(allTools))
 	for _, t := range allTools {
@@ -277,6 +279,9 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 			continue
 		}
 		if _, isRestart := t.(RestartServerTool); isRestart && !restarterOn {
+			continue
+		}
+		if _, isBrowser := t.(BrowserTool); isBrowser && !browserOn {
 			continue
 		}
 		if _, isTaskCreate := t.(TaskCreateTool); isTaskCreate && !tasksOn {

@@ -113,6 +113,205 @@ func TestSearchThenDownload(t *testing.T) {
 	}
 }
 
+// TestAttachExistingPage covers the real-use path: discover an already-open tab
+// and attach to it (rather than opening a fresh one), as when reusing the user's
+// logged-in session.
+func TestAttachExistingPage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(fixtureHTML))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+
+	opened, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := opened.WaitFor(ctx, "#search", 5*time.Second); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	pages, err := b.Pages(ctx)
+	if err != nil {
+		t.Fatalf("pages: %v", err)
+	}
+	var targetID string
+	for _, p := range pages {
+		if strings.HasPrefix(p.URL, srv.URL) {
+			targetID = p.TargetID
+		}
+	}
+	if targetID == "" {
+		t.Fatalf("fixture tab not found among %d pages", len(pages))
+	}
+
+	page, err := b.AttachPage(ctx, targetID)
+	if err != nil {
+		t.Fatalf("attach existing: %v", err)
+	}
+	var title string
+	if err := page.Eval(ctx, "document.title", &title); err != nil {
+		t.Fatalf("eval on attached page: %v", err)
+	}
+	if title != "fixture" {
+		t.Fatalf("attached page title = %q, want fixture", title)
+	}
+}
+
+// TestUpload sets a file on a file input via DOM.setFileInputFiles (no OS
+// dialog) and verifies the page sees it — the upload primitive.
+func TestUpload(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>up</title><input type="file" id="f">`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#f", 5*time.Second); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	dir := t.TempDir()
+	xlsx := dir + "/report.xlsx"
+	if err := os.WriteFile(xlsx, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := page.Upload(ctx, "#f", []string{xlsx}); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	var name string
+	if err := page.Eval(ctx, "document.querySelector('#f').files[0].name", &name); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if name != "report.xlsx" {
+		t.Fatalf("uploaded file name = %q, want report.xlsx", name)
+	}
+}
+
+// TestHover verifies a trusted pointer move fires real hover DOM events (which
+// synthetic JS events / CSS :hover can't be driven by otherwise).
+func TestHover(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>h</title>
+<div id="t" style="width:100px;height:40px">target</div>
+<script>window.hovered=false;
+document.getElementById('t').addEventListener('mouseover',function(){window.hovered=true});</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#t", 5*time.Second); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if err := page.Hover(ctx, "#t"); err != nil {
+		t.Fatalf("hover: %v", err)
+	}
+	var hovered bool
+	if err := page.Eval(ctx, "window.hovered", &hovered); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if !hovered {
+		t.Fatal("hover did not fire mouseover")
+	}
+}
+
+// TestSelectOption picks a native <select> option and verifies the value + that
+// change fired.
+func TestSelectOption(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>s</title>
+<select id="s"><option value="a">Apple</option><option value="b">Banana</option></select>
+<script>window.changed='';document.getElementById('s').addEventListener('change',function(e){window.changed=e.target.value});</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#s", 5*time.Second); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if err := page.SelectOption(ctx, "#s", "Banana"); err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	var value, changed string
+	if err := page.Eval(ctx, "document.querySelector('#s').value", &value); err != nil {
+		t.Fatalf("eval value: %v", err)
+	}
+	if err := page.Eval(ctx, "window.changed", &changed); err != nil {
+		t.Fatalf("eval changed: %v", err)
+	}
+	if value != "b" {
+		t.Fatalf("select value = %q, want b", value)
+	}
+	if changed != "b" {
+		t.Fatalf("change event value = %q, want b", changed)
+	}
+}
+
+// TestSameOriginFrame drives an element inside a same-origin iframe via the
+// " >>> " piercing convention (wait, then a trusted click that lands through
+// the computed frame offset). Same-origin as in Klook's admin system.
+func TestSameOriginFrame(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/child" {
+			w.Write([]byte(`<!doctype html><title>child</title>
+<button id="b" style="position:absolute;left:30px;top:30px;width:120px;height:40px">Go</button>
+<script>document.getElementById('b').addEventListener('click',function(){document.body.setAttribute('data-clicked','1')});</script>`))
+			return
+		}
+		w.Write([]byte(`<!doctype html><title>parent</title>
+<iframe id="fr" src="/child" style="position:absolute;left:50px;top:60px;width:400px;height:300px;border:0"></iframe>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	// Frame-aware wait: the button lives inside the same-origin child frame.
+	if err := page.WaitFor(ctx, "#fr >>> #b", 5*time.Second); err != nil {
+		t.Fatalf("wait in frame: %v", err)
+	}
+	if err := page.Click(ctx, "#fr >>> #b"); err != nil {
+		t.Fatalf("click in frame: %v", err)
+	}
+	var clicked string
+	if err := page.Eval(ctx, "document.querySelector('#fr').contentDocument.body.getAttribute('data-clicked')", &clicked); err != nil {
+		t.Fatalf("eval pierce: %v", err)
+	}
+	if clicked != "1" {
+		t.Fatalf("frame click did not register (data-clicked=%q)", clicked)
+	}
+}
+
 // TestPrimitives covers eval / screenshot / ax-tree / key on the fixture.
 func TestPrimitives(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

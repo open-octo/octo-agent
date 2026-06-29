@@ -14,22 +14,52 @@ type point struct {
 	Y float64 `json:"y"`
 }
 
+// frameDelim separates a same-origin iframe selector from the element selector
+// inside it, e.g. "iframe#app >>> #download". One level; cross-origin OOPIFs
+// are not handled (their DOM lives in another process).
+const frameDelim = " >>> "
+
+func splitFrame(selector string) (frame, elem string) {
+	if i := strings.Index(selector, frameDelim); i >= 0 {
+		return selector[:i], selector[i+len(frameDelim):]
+	}
+	return "", selector
+}
+
+// elemRefJS builds a JS expression evaluating to the target element, piercing a
+// same-origin iframe's contentDocument when a frame selector is given.
+func elemRefJS(frame, elem string) string {
+	if frame == "" {
+		return fmt.Sprintf("document.querySelector(%s)", jsString(elem))
+	}
+	return fmt.Sprintf("(()=>{const f=document.querySelector(%s);return f&&f.contentDocument?f.contentDocument.querySelector(%s):null;})()",
+		jsString(frame), jsString(elem))
+}
+
 // elementCenter scrolls an element into view and returns its viewport-center
-// point, or an error if the selector matches nothing.
+// point (adding the iframe's offset for framed targets), or an error if the
+// selector matches nothing.
 func (p *Page) elementCenter(ctx context.Context, selector string) (point, error) {
+	frame, elem := splitFrame(selector)
+	offset := ""
+	if frame != "" {
+		offset = fmt.Sprintf(`{const f=document.querySelector(%s); if(f){const fr=f.getBoundingClientRect(); ox=fr.x; oy=fr.y;}}`, jsString(frame))
+	}
 	expr := fmt.Sprintf(`(() => {
-		const el = document.querySelector(%s);
+		const el = %s;
 		if (!el) return null;
 		el.scrollIntoView({ block: 'center', inline: 'center' });
 		const r = el.getBoundingClientRect();
-		return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-	})()`, jsString(selector))
+		let ox = 0, oy = 0;
+		%s
+		return { x: ox + r.x + r.width / 2, y: oy + r.y + r.height / 2 };
+	})()`, elemRefJS(frame, elem), offset)
 	var pt *point
 	if err := p.Eval(ctx, expr, &pt); err != nil {
 		return point{}, err
 	}
 	if pt == nil {
-		return point{}, fmt.Errorf("click: selector %q matched nothing", selector)
+		return point{}, fmt.Errorf("selector %q matched nothing", selector)
 	}
 	return *pt, nil
 }
@@ -57,9 +87,61 @@ func (p *Page) Click(ctx context.Context, selector string) error {
 	return nil
 }
 
+// Hover moves the pointer over an element with a real (trusted) mouse move.
+// Synthetic JS events can't trigger CSS :hover reveals — only a genuine pointer
+// move does, which is what this dispatches.
+func (p *Page) Hover(ctx context.Context, selector string) error {
+	pt, err := p.elementCenter(ctx, selector)
+	if err != nil {
+		return err
+	}
+	_, err = p.cli.call(ctx, p.sessionID, "Input.dispatchMouseEvent", map[string]any{
+		"type": "mouseMoved",
+		"x":    pt.X,
+		"y":    pt.Y,
+	})
+	return err
+}
+
+// SelectOption picks an <option> of a native <select> by its value, visible
+// text, or label, then fires input+change so framework bindings react. Native
+// select popups are browser-drawn (not DOM), so this is the reliable path.
+func (p *Page) SelectOption(ctx context.Context, selector, value string) error {
+	frame, elem := splitFrame(selector)
+	expr := fmt.Sprintf(`(() => {
+		const el = %s;
+		if (!el || el.tagName !== 'SELECT') return 'no-select';
+		let idx = -1;
+		for (let i = 0; i < el.options.length; i++) {
+			const o = el.options[i];
+			if (o.value === %s || o.text === %s || o.label === %s) { idx = i; break; }
+		}
+		if (idx < 0) return 'no-option';
+		el.selectedIndex = idx;
+		el.dispatchEvent(new Event('input', { bubbles: true }));
+		el.dispatchEvent(new Event('change', { bubbles: true }));
+		return 'ok';
+	})()`, elemRefJS(frame, elem), jsString(value), jsString(value), jsString(value))
+	var status string
+	if err := p.Eval(ctx, expr, &status); err != nil {
+		return err
+	}
+	switch status {
+	case "ok":
+		return nil
+	case "no-select":
+		return fmt.Errorf("select: %q is not a <select> element", selector)
+	case "no-option":
+		return fmt.Errorf("select: no option matching %q in %s", value, selector)
+	default:
+		return fmt.Errorf("select: unexpected status %q", status)
+	}
+}
+
 // TypeText focuses the element matched by selector and types text into it.
 func (p *Page) TypeText(ctx context.Context, selector, text string) error {
-	focus := fmt.Sprintf(`(() => { const el = document.querySelector(%s); if (!el) return false; el.focus(); return true; })()`, jsString(selector))
+	frame, elem := splitFrame(selector)
+	focus := fmt.Sprintf(`(() => { const el = %s; if (!el) return false; el.focus(); return true; })()`, elemRefJS(frame, elem))
 	var ok bool
 	if err := p.Eval(ctx, focus, &ok); err != nil {
 		return err
@@ -167,6 +249,42 @@ func (p *Page) Screenshot(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	return base64.StdEncoding.DecodeString(r.Data)
+}
+
+// Upload sets the files on a file <input> matched by selector, without the OS
+// file-picker dialog (CDP DOM.setFileInputFiles). Paths should be absolute.
+// Resolving the input by JS object (rather than a DOM nodeId) lets it pierce a
+// same-origin iframe via the same frame convention as the other actions.
+func (p *Page) Upload(ctx context.Context, selector string, files []string) error {
+	frame, elem := splitFrame(selector)
+	res, err := p.cli.call(ctx, p.sessionID, "Runtime.evaluate", map[string]any{
+		"expression":    elemRefJS(frame, elem),
+		"returnByValue": false,
+	})
+	if err != nil {
+		return err
+	}
+	var r struct {
+		Result struct {
+			ObjectID string `json:"objectId"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(res, &r); err != nil {
+		return err
+	}
+	if r.Result.ObjectID == "" {
+		return fmt.Errorf("upload: selector %q matched no file input", selector)
+	}
+	_, err = p.cli.call(ctx, p.sessionID, "DOM.setFileInputFiles", map[string]any{
+		"objectId": r.Result.ObjectID,
+		"files":    files,
+	})
+	return err
+}
+
+// Back navigates one entry back in history.
+func (p *Page) Back(ctx context.Context) error {
+	return p.Eval(ctx, "window.history.back()", nil)
 }
 
 // AXTree returns the full accessibility tree as raw CDP node JSON — the Tier-2

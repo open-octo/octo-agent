@@ -43,6 +43,18 @@ func Connect(ctx context.Context, wsURL string) (*Browser, error) {
 	return &Browser{cli: cli, ownsProcess: false}, nil
 }
 
+// ConnectByPort attaches to a Chrome already running with
+// --remote-debugging-port=<port>, resolving the browser-level CDP endpoint from
+// the debug HTTP server. This is how a user's existing, logged-in Chrome is
+// reused.
+func ConnectByPort(ctx context.Context, port int) (*Browser, error) {
+	wsURL, err := browserWebSocketURL(ctx, port)
+	if err != nil {
+		return nil, err
+	}
+	return Connect(ctx, wsURL)
+}
+
 func dial(ctx context.Context, wsURL string) (*cdpClient, error) {
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
@@ -86,8 +98,14 @@ func (b *Browser) NewPage(ctx context.Context, url string) (*Page, error) {
 	if err := json.Unmarshal(res, &created); err != nil {
 		return nil, err
 	}
-	res, err = b.cli.call(ctx, "", "Target.attachToTarget", map[string]any{
-		"targetId": created.TargetID,
+	return b.AttachPage(ctx, created.TargetID)
+}
+
+// AttachPage attaches to an existing page target by id (e.g. the user's already-
+// open, logged-in tab discovered via Pages).
+func (b *Browser) AttachPage(ctx context.Context, targetID string) (*Page, error) {
+	res, err := b.cli.call(ctx, "", "Target.attachToTarget", map[string]any{
+		"targetId": targetID,
 		"flatten":  true,
 	})
 	if err != nil {
@@ -99,13 +117,52 @@ func (b *Browser) NewPage(ctx context.Context, url string) (*Page, error) {
 	if err := json.Unmarshal(res, &attached); err != nil {
 		return nil, err
 	}
-	p := &Page{cli: b.cli, sessionID: attached.SessionID, targetID: created.TargetID}
+	p := &Page{cli: b.cli, sessionID: attached.SessionID, targetID: targetID}
 	for _, domain := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
 		if _, err := p.cli.call(ctx, p.sessionID, domain, nil); err != nil {
 			return nil, fmt.Errorf("%s: %w", domain, err)
 		}
 	}
 	return p, nil
+}
+
+// ClosePage closes a page target by id.
+func (b *Browser) ClosePage(ctx context.Context, targetID string) error {
+	_, err := b.cli.call(ctx, "", "Target.closeTarget", map[string]any{"targetId": targetID})
+	return err
+}
+
+// TargetID returns the page's target id (for close/switch).
+func (p *Page) TargetID() string { return p.targetID }
+
+// TargetInfo describes an open browser target (tab).
+type TargetInfo struct {
+	TargetID string `json:"targetId"`
+	Type     string `json:"type"`
+	Title    string `json:"title"`
+	URL      string `json:"url"`
+}
+
+// Pages lists the open page targets — used to attach to an existing logged-in
+// tab rather than opening a fresh one.
+func (b *Browser) Pages(ctx context.Context) ([]TargetInfo, error) {
+	res, err := b.cli.call(ctx, "", "Target.getTargets", nil)
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		TargetInfos []TargetInfo `json:"targetInfos"`
+	}
+	if err := json.Unmarshal(res, &r); err != nil {
+		return nil, err
+	}
+	pages := r.TargetInfos[:0]
+	for _, ti := range r.TargetInfos {
+		if ti.Type == "page" {
+			pages = append(pages, ti)
+		}
+	}
+	return pages, nil
 }
 
 // Navigate loads url and waits for the page load event.
@@ -160,7 +217,8 @@ func (p *Page) Eval(ctx context.Context, expr string, out any) error {
 // is the verify primitive for "the download button appeared after search".
 func (p *Page) WaitFor(ctx context.Context, selector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	expr := fmt.Sprintf("!!document.querySelector(%s)", jsString(selector))
+	frame, elem := splitFrame(selector)
+	expr := "!!(" + elemRefJS(frame, elem) + ")"
 	for {
 		var present bool
 		if err := p.Eval(ctx, expr, &present); err != nil {

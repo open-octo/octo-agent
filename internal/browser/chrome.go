@@ -63,6 +63,13 @@ func chromePaths() []string {
 	}
 }
 
+// ChromeAvailable reports whether a Chrome executable can be located, so the
+// browser tool is only advertised on setups where it could work.
+func ChromeAvailable(execPath string) bool {
+	_, err := findChrome(execPath)
+	return err == nil
+}
+
 // findChrome resolves the Chrome executable, honoring an explicit override.
 func findChrome(override string) (string, error) {
 	if override != "" {
