@@ -509,6 +509,44 @@ func (f *modelRecordingFake) SendMessages(_ context.Context, model, _ string, _ 
 	return Reply{Content: f.summary}, nil
 }
 
+// msgCountRecordingFake records how many messages the last call received.
+type msgCountRecordingFake struct {
+	summary string
+	lastN   int
+}
+
+func (f *msgCountRecordingFake) SendMessages(_ context.Context, _, _ string, msgs []Message, _ int) (Reply, error) {
+	f.lastN = len(msgs)
+	return Reply{Content: f.summary}, nil
+}
+
+// TestSummarizeOn_OverflowMeasuresSlice guards against measuring the overflow
+// loop with the full-history token count instead of the slice being summarised.
+// With lastInputTokens set high (the primary model's ~75%-of-window prompt
+// count) and a smaller summarising window, the loop must NOT pop a slice that
+// already fits — doing so would discard nearly the whole chunk.
+func TestSummarizeOn_OverflowMeasuresSlice(t *testing.T) {
+	lite := &msgCountRecordingFake{summary: "s"}
+	a := New(&modelRecordingFake{summary: "p"}, "claude-opus-4")
+	// Simulate the provider having reported a huge full-history prompt size.
+	a.lastInputTokens = 5_000_000 // >> defaultContextWindow (128k)
+
+	// A small slice that easily fits the summarising window.
+	msgs := []Message{
+		NewUserMessage("a"), NewAssistantMessage("b"),
+		NewUserMessage("c"), NewAssistantMessage("d"),
+		NewUserMessage("e"), NewAssistantMessage("f"),
+	}
+	if _, err := a.summarizeOn(context.Background(), lite, "lite-model", msgs, nil); err != nil {
+		t.Fatal(err)
+	}
+	// summarizeOn appends one compression prompt, so a slice that fits yields
+	// len(msgs)+1 messages. The bug popped the slice down to 2 (sending 3).
+	if lite.lastN < len(msgs)+1 {
+		t.Errorf("summariser received %d messages; the overflow loop wrongly popped a fitting slice (want %d). lastInputTokens must not size a sub-slice.", lite.lastN, len(msgs)+1)
+	}
+}
+
 func TestSummarize_UsesLiteModelWhenSet(t *testing.T) {
 	primary := &modelRecordingFake{summary: "primary summary"}
 	lite := &modelRecordingFake{summary: "lite summary"}

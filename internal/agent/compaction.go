@@ -506,7 +506,12 @@ func (a *Agent) summarizeOn(ctx context.Context, sender Sender, model string, ms
 	// summarising model's — the lite model may be smaller than the primary.
 	window := contextWindow(model)
 	for {
-		est := a.historyTokens(msgs)
+		// Measure THIS slice, not the whole live history. historyTokens returns
+		// the provider-reported lastInputTokens (full prior prompt) whenever it
+		// is set, which here is the primary model's ~75%-of-window count — using
+		// it would ignore msgs entirely and pop the chunk down to 2 messages when
+		// the summarising (lite) model's window is smaller than the primary's.
+		est := estimateMessages(msgs)
 		if est < window {
 			break
 		}
