@@ -32,6 +32,31 @@ func SetBrowserSession(b *browser.Browser, p *browser.Page) {
 	browserSession.b, browserSession.page = b, p
 }
 
+// Recording + self-heal state. browserHealer is injected by app.WireTools (it
+// needs a model Sender, which tools can't import directly).
+var (
+	recorderMu       sync.Mutex
+	activeRecorder   *browser.Recorder
+	recorderStartURL string
+	browserHealer    browser.Healer
+)
+
+// SetBrowserHealer injects the LLM-backed step healer used by run_skill.
+func SetBrowserHealer(h browser.Healer) {
+	recorderMu.Lock()
+	defer recorderMu.Unlock()
+	browserHealer = h
+}
+
+// browserSkillsDir is where recorded skills live (editable YAML).
+func browserSkillsDir() string {
+	if d := os.Getenv("OCTO_BROWSER_SKILLS_DIR"); d != "" {
+		return d
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".octo", "browser-skills")
+}
+
 // ResetBrowserSession closes and clears the active browser session.
 func ResetBrowserSession() {
 	browserSession.mu.Lock()
@@ -118,9 +143,11 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "ax", "upload", "download", "pages", "select_page", "close", "eval"},
-					"description": "The browser action to perform.",
+					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "ax", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "run_skill"},
+					"description": "The browser action to perform. record_start/record_stop capture a demonstration into an editable skill; run_skill replays one (deterministic, self-healing).",
 				},
+				"name":       map[string]any{"type": "string", "description": "Skill name (record_stop / run_skill)."},
+				"params":     map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill)."},
 				"url":        map[string]any{"type": "string", "description": "Target URL (navigate)."},
 				"selector":   map[string]any{"type": "string", "description": "CSS selector of the target element (click/hover/type/select/scroll/wait/upload/download)."},
 				"frame":      map[string]any{"type": "string", "description": "Optional CSS selector of a same-origin iframe to scope the selector into (e.g. iframe#app)."},
@@ -330,6 +357,76 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, err
 		}
 		return agent.ToolResult{Text: string(raw)}, nil
+
+	case "record_start":
+		recorderMu.Lock()
+		defer recorderMu.Unlock()
+		if activeRecorder != nil {
+			return agent.ToolResult{}, fmt.Errorf("browser: a recording is already in progress")
+		}
+		rec := browser.NewRecorder(page)
+		if err := rec.Start(ctx); err != nil {
+			return agent.ToolResult{}, err
+		}
+		var u string
+		_ = page.Eval(ctx, "location.href", &u)
+		activeRecorder, recorderStartURL = rec, u
+		return agent.ToolResult{Text: "recording started on " + u}, nil
+
+	case "record_stop":
+		name := getStr(input, "name")
+		if name == "" || filepath.Base(name) != name {
+			return agent.ToolResult{}, fmt.Errorf("browser: record_stop requires a valid skill name")
+		}
+		recorderMu.Lock()
+		rec, startURL := activeRecorder, recorderStartURL
+		activeRecorder = nil
+		recorderMu.Unlock()
+		if rec == nil {
+			return agent.ToolResult{}, fmt.Errorf("browser: no recording in progress")
+		}
+		rec.Stop()
+		skill := browser.CompileSkill(name, "", startURL, rec.Events())
+		dir := browserSkillsDir()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return agent.ToolResult{}, err
+		}
+		path := filepath.Join(dir, name+".yaml")
+		if err := browser.SaveSkill(path, skill); err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: fmt.Sprintf("recorded %d step(s) → %s\nReview/edit it there (set params, fix selectors), then replay with action=run_skill name=%q.", len(skill.Steps), path, name)}, nil
+
+	case "run_skill":
+		name := getStr(input, "name")
+		if name == "" || filepath.Base(name) != name {
+			return agent.ToolResult{}, fmt.Errorf("browser: run_skill requires a valid skill name")
+		}
+		path := filepath.Join(browserSkillsDir(), name+".yaml")
+		skill, err := browser.LoadSkill(path)
+		if err != nil {
+			return agent.ToolResult{}, fmt.Errorf("browser: load skill %q: %w", name, err)
+		}
+		params := map[string]string{}
+		if raw, ok := input["params"].(map[string]any); ok {
+			for k, v := range raw {
+				params[k] = fmt.Sprintf("%v", v)
+			}
+		}
+		recorderMu.Lock()
+		healer := browserHealer
+		recorderMu.Unlock()
+		modified, err := browser.ReplaySkill(ctx, page, &skill, params, browser.ReplayOptions{Healer: healer})
+		if err != nil {
+			return agent.ToolResult{}, fmt.Errorf("browser: run_skill %q: %w", name, err)
+		}
+		msg := fmt.Sprintf("ran skill %q (%d steps)", name, len(skill.Steps))
+		if modified {
+			if werr := browser.SaveSkill(path, skill); werr == nil {
+				msg += " — self-healed, skill updated at " + path
+			}
+		}
+		return agent.ToolResult{Text: msg}, nil
 
 	default:
 		return agent.ToolResult{}, fmt.Errorf("browser: unknown action %q", action)

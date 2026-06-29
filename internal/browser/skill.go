@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -91,6 +92,64 @@ func ParseSkill(data []byte) (Skill, error) {
 	var s Skill
 	err := yaml.Unmarshal(data, &s)
 	return s, err
+}
+
+// SaveSkill writes a skill to a YAML file.
+func SaveSkill(path string, s Skill) error {
+	data, err := MarshalSkill(s)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// LoadSkill reads a skill from a YAML file.
+func LoadSkill(path string) (Skill, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Skill{}, err
+	}
+	return ParseSkill(data)
+}
+
+// DigestElement is one interactive element: its visible text and a generated
+// selector. Used to give a healer (or live loop) a textual view of the page so
+// it can repair a drifted selector by intent.
+type DigestElement struct {
+	Text     string `json:"text"`
+	Selector string `json:"selector"`
+}
+
+// InteractiveDigest lists interactive elements (with generated selectors) in the
+// document or a same-origin iframe, capped to max. Text-only, so it feeds any
+// model — no vision needed when the DOM/AX is reachable.
+func InteractiveDigest(ctx context.Context, page *Page, frame string, max int) ([]DigestElement, error) {
+	if max <= 0 {
+		max = 60
+	}
+	doc := "document"
+	if frame != "" {
+		doc = fmt.Sprintf("(document.querySelector(%s)||{}).contentDocument", jsString(frame))
+	}
+	expr := fmt.Sprintf(`JSON.stringify((function(){
+	  var d = %s; if(!d) return [];
+	  function sel(el){
+	    if(el.id) return '#'+CSS.escape(el.id);
+	    for(var i=0;i<4;i++){var a=['data-testid','data-test','name','aria-label'][i];var v=el.getAttribute&&el.getAttribute(a);if(v)return el.tagName.toLowerCase()+'['+a+'="'+CSS.escape(v)+'"]';}
+	    var parts=[],node=el,depth=0;
+	    while(node&&node.nodeType===1&&node.tagName!=='BODY'&&depth<5){var part=node.tagName.toLowerCase();var p=node.parentElement;if(p){var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;});if(same.length>1)part+=':nth-of-type('+(same.indexOf(node)+1)+')';}parts.unshift(part);node=p;depth++;}
+	    return parts.join(' > ');
+	  }
+	  var out=[];
+	  var els=d.querySelectorAll('a,button,input,select,textarea,[role=button],[role=menuitem],[role=tab],label');
+	  for(var i=0;i<els.length && out.length<%d;i++){var el=els[i]; if(el.offsetParent===null) continue; var t=(el.textContent||el.value||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().slice(0,50); out.push({text:t, selector:sel(el)});}
+	  return out;
+	})())`, doc, max)
+	var digest []DigestElement
+	if err := page.Eval(ctx, expr, &digest); err != nil {
+		return nil, err
+	}
+	return digest, nil
 }
 
 func (s Step) target() string {

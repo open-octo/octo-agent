@@ -51,7 +51,8 @@ const captureScript = `(function(){
     return parts.join(' > ');
   }
   function report(type, e){
-    try{var el=e.target; window.__octoRecord(JSON.stringify({type:type, selector:sel(el), tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), value:(el.value!==undefined?(''+el.value).slice(0,200):''), url:location.href}));}catch(_){}
+    try{var el=e.target; var fr=''; try{ if(window.frameElement) fr=sel(window.frameElement); }catch(_2){}
+      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), value:(el.value!==undefined?(''+el.value).slice(0,200):''), url:location.href}));}catch(_){}
   }
   document.addEventListener('click', function(e){report('click',e);}, true);
   document.addEventListener('change', function(e){report('change',e);}, true);
