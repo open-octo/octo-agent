@@ -159,6 +159,9 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 		if !json.Valid([]byte(cleaned)) {
 			r2, in2, out2, stop2, turns2, err2 := s.runChild(ctx, lc, schemaRetryPrompt)
 			if err2 != nil {
+				if wt != nil {
+					wt.finish() // reconcile/clean even on retry error so we don't leak the worktree
+				}
 				return tools.SpawnResult{}, err2
 			}
 			in, out, turns, stop = in+in2, out+out2, turns+turns2, stop2

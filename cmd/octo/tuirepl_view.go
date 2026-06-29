@@ -1305,7 +1305,15 @@ func (m *tuiModel) softWrappedRows() int {
 	// textarea will actually render. Fall back to newline counting if the
 	// internals ever change shape.
 	v := reflect.ValueOf(&m.ta).Elem()
-	width := int(v.FieldByName("width").Int())
+	// Guard the field lookup: if a bubbles upgrade renames/removes the
+	// unexported "width" field, FieldByName returns the zero Value and .Int()
+	// would panic, crashing the TUI on the next keystroke. Fall back to the
+	// newline count instead (same fallback the width<=0 branch already uses).
+	wf := v.FieldByName("width")
+	if !wf.IsValid() || wf.Kind() != reflect.Int {
+		return strings.Count(m.ta.Value(), "\n") + 1
+	}
+	width := int(wf.Int())
 	if width <= 0 {
 		return strings.Count(m.ta.Value(), "\n") + 1
 	}
