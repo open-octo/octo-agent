@@ -30,6 +30,7 @@ var allTools = []tool{
 	WriteFileTool{},
 	EditFileTool{},
 	ShowArtifactTool{},
+	SendFileTool{},
 	GlobTool{},
 	GrepTool{},
 	WebFetchTool{},
@@ -238,6 +239,12 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 	spawnerOn := spawnerEnabled()
 	defs := make([]agent.ToolDefinition, 0, len(allTools))
 	for _, t := range allTools {
+		if _, isSend := t.(SendFileTool); isSend {
+			// IM-only: advertised by runChannelTurns (which injects the
+			// per-chat sender), never in the shared default list — on a
+			// CLI/TUI/Web turn it has no chat to send to and could only error.
+			continue
+		}
 		if _, isSkill := t.(SkillTool); isSkill && !skillsOn {
 			continue
 		}

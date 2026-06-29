@@ -1683,7 +1683,12 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	// after the synchronous turn chain has finished can kick an idle turn.
 	s.wireChannelCompletionHooks(sess, ad, ev)
 
-	s.runChannelTurns(ctx, sess, ad, ev, ev.Text)
+	// Bridge inbound attachments (images, documents) into the turn before it
+	// runs — images become vision blocks on the user message, documents become
+	// read_file-able path notes. Without this only ev.Text reaches the model.
+	content := s.attachInboundFiles(sess, ev)
+
+	s.runChannelTurns(ctx, sess, ad, ev, content)
 
 	// A steer that arrived during a restart drain would die with the
 	// process (the Inbox is memory-only) — give it the same retry notice a
@@ -1693,6 +1698,41 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 		sess.Agent.Inbox.Drain()
 		ad.SendText(ev.ChatID, "The server is restarting — please send that again in a moment.", ev.MessageID)
 	}
+}
+
+// attachInboundFiles bridges an inbound event's attachments into the agent
+// turn, mirroring the web composer's parseUserFiles. Images (delivered as data
+// URLs by the adapters) are decoded, persisted under ~/.octo/uploads, and
+// queued as vision blocks merged into the next user message; documents
+// (delivered as a local Path) become "[Attached file: <path>]" notes so the
+// model can open them with read_file. Per-file failures are logged and
+// skipped. Returns the content to run with any file notes folded in.
+func (s *Server) attachInboundFiles(sess *channel.Session, ev channel.InboundEvent) string {
+	content := ev.Text
+	var blocks []agent.ContentBlock
+	var notes []string
+	for _, f := range ev.Files {
+		switch {
+		case f.DataURL != "":
+			block, _, err := saveImageAttachment(f.Name, f.DataURL)
+			if err != nil {
+				slog.Debug("channel image attachment", "platform", ev.Platform, "name", f.Name, "err", err)
+				continue
+			}
+			blocks = append(blocks, block)
+		case f.Path != "":
+			notes = append(notes, fmt.Sprintf("[Attached file: %s]", f.Path))
+		}
+	}
+	if len(blocks) > 0 {
+		// Consumed once by the first RunAgent's appendUserInput; chained turns
+		// in runChannelTurns won't re-attach them.
+		sess.Agent.AttachUserBlocks(blocks)
+	}
+	if len(notes) > 0 {
+		content = strings.TrimSpace(content + "\n\n" + strings.Join(notes, "\n"))
+	}
+	return content
 }
 
 // wireChannelCompletionHooks registers per-session hooks for background
@@ -1820,6 +1860,13 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// browser tabs an IM session doesn't have (the question would hang
 		// until /stop).
 		ctx = tools.WithAsker(ctx, s.channelAsker(sess, ad, ev))
+		// Turn-scoped file sender + the IM-only send_file tool: the model's
+		// reply carries text, so the only way to put a generated image / chart
+		// / document in front of the user is to push it through the adapter.
+		// Withheld from the shared default tool list (DefaultToolsFor); added
+		// here because only an IM turn has a chat to send to.
+		ctx = tools.WithChannelSender(ctx, channelFileSender{ad: ad, chatID: ev.ChatID, replyTo: ev.MessageID})
+		toolDefs = append(toolDefs, tools.SendFileToolDef())
 	}
 
 	persist := func() {
