@@ -20,12 +20,13 @@ import (
 // ─── Tasks REST API ─────────────────────────────────────────────────────────
 
 type taskRequest struct {
-	Name   string                  `json:"name"`
-	Cron   string                  `json:"cron"`
-	Prompt string                  `json:"prompt"`
-	Model  string                  `json:"model,omitempty"`
-	Agent  string                  `json:"agent,omitempty"`
-	Notify scheduler.NotifyTargets `json:"notify,omitempty"`
+	Name      string                  `json:"name"`
+	Cron      string                  `json:"cron"`
+	Prompt    string                  `json:"prompt"`
+	Model     string                  `json:"model,omitempty"`
+	Agent     string                  `json:"agent,omitempty"`
+	Directory string                  `json:"directory,omitempty"`
+	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
 }
 
 type taskResponse struct {
@@ -35,6 +36,7 @@ type taskResponse struct {
 	Prompt    string                  `json:"prompt"`
 	Model     string                  `json:"model,omitempty"`
 	Agent     string                  `json:"agent,omitempty"`
+	Directory string                  `json:"directory,omitempty"`
 	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
 	Enabled   bool                    `json:"enabled"`
 	CreatedAt string                  `json:"created_at,omitempty"`
@@ -374,13 +376,14 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task := scheduler.Task{
-		Name:    req.Name,
-		Cron:    req.Cron,
-		Prompt:  req.Prompt,
-		Model:   req.Model,
-		Agent:   req.Agent,
-		Notify:  req.Notify,
-		Enabled: true,
+		Name:      req.Name,
+		Cron:      req.Cron,
+		Prompt:    req.Prompt,
+		Model:     req.Model,
+		Agent:     req.Agent,
+		Directory: req.Directory,
+		Notify:    req.Notify,
+		Enabled:   true,
 	}
 	if err := s.scheduler.Add(&task); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -426,9 +429,25 @@ func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "id": id, "session_id": sessionID})
 }
 
-// handleToggleTask pauses or resumes a scheduled task. Update reschedules or
-// unschedules the live cron entry and persists, so the change survives restart.
-func (s *Server) handleToggleTask(w http.ResponseWriter, r *http.Request) {
+// patchTaskRequest is the body for PATCH /api/tasks/{id}. Every field is a
+// pointer so the handler only touches what the caller actually sent — a
+// partial update. Enabling/disabling is just {"enabled": ...}.
+type patchTaskRequest struct {
+	Enabled   *bool                    `json:"enabled,omitempty"`
+	Cron      *string                  `json:"cron,omitempty"`
+	Prompt    *string                  `json:"prompt,omitempty"`
+	Model     *string                  `json:"model,omitempty"`
+	Agent     *string                  `json:"agent,omitempty"`
+	Directory *string                  `json:"directory,omitempty"`
+	Notify    *scheduler.NotifyTargets `json:"notify,omitempty"`
+}
+
+// handlePatchTask updates any subset of a scheduled task's fields and reschedules
+// the live cron entry, persisting so the change survives restart and takes
+// effect immediately. This is the single edit endpoint — it subsumes the former
+// enable/disable toggle (send {"enabled": false}) and the retired
+// /api/cron-tasks/{name} route.
+func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 	s.initScheduler()
 	if s.scheduler == nil {
 		writeError(w, http.StatusInternalServerError, "scheduler not available")
@@ -439,9 +458,7 @@ func (s *Server) handleToggleTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing task id")
 		return
 	}
-	var req struct {
-		Enabled bool `json:"enabled"`
-	}
+	var req patchTaskRequest
 	if err := readBodyJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -451,7 +468,27 @@ func (s *Server) handleToggleTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	task.Enabled = req.Enabled
+	if req.Enabled != nil {
+		task.Enabled = *req.Enabled
+	}
+	if req.Cron != nil {
+		task.Cron = *req.Cron
+	}
+	if req.Prompt != nil {
+		task.Prompt = *req.Prompt
+	}
+	if req.Model != nil {
+		task.Model = *req.Model
+	}
+	if req.Agent != nil {
+		task.Agent = *req.Agent
+	}
+	if req.Directory != nil {
+		task.Directory = *req.Directory
+	}
+	if req.Notify != nil {
+		task.Notify = *req.Notify
+	}
 	if err := s.scheduler.Update(*task); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -461,14 +498,15 @@ func (s *Server) handleToggleTask(w http.ResponseWriter, r *http.Request) {
 
 func taskToResponse(t scheduler.Task) taskResponse {
 	r := taskResponse{
-		ID:      t.ID,
-		Name:    t.Name,
-		Cron:    t.Cron,
-		Prompt:  t.Prompt,
-		Model:   t.Model,
-		Agent:   t.Agent,
-		Notify:  t.Notify,
-		Enabled: t.Enabled,
+		ID:        t.ID,
+		Name:      t.Name,
+		Cron:      t.Cron,
+		Prompt:    t.Prompt,
+		Model:     t.Model,
+		Agent:     t.Agent,
+		Directory: t.Directory,
+		Notify:    t.Notify,
+		Enabled:   t.Enabled,
 	}
 	if !t.CreatedAt.IsZero() {
 		r.CreatedAt = t.CreatedAt.Format("2006-01-02T15:04:05Z")

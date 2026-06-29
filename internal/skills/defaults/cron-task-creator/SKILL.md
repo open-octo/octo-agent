@@ -1,33 +1,37 @@
 ---
 name: cron-task-creator
-description: Create, inspect, run, enable/disable, and delete octo's scheduled cron tasks — recurring agent prompts stored in ~/.octo/tasks/*.json and executed by the octo serve scheduler. Use when the user wants to schedule a recurring task, e.g. "run X every morning", "schedule a daily report", "set up a cron job", "定时任务", "每天自动跑".
+description: Create, inspect, run, edit, enable/disable, and delete octo's scheduled cron tasks — recurring agent prompts stored in ~/.octo/tasks/*.json and executed by the octo serve scheduler. Use when the user wants to schedule a recurring task, e.g. "run X every morning", "schedule a daily report", "set up a cron job", "定时任务", "每天自动跑".
 ---
 
 # Create and manage octo cron tasks
 
-octo can run an agent prompt on a schedule. Each scheduled task is a JSON file
-in `~/.octo/tasks/`, loaded by the scheduler inside `octo serve`. When a task
-fires, the scheduler runs one agent turn with the task's prompt (30-minute
-timeout) and reuses the same session across runs, so the task accumulates
-history from previous executions.
+octo runs an agent prompt on a schedule. Each task is a JSON file in
+`~/.octo/tasks/`, loaded by the scheduler inside `octo serve`. When a task
+fires, the scheduler runs one agent turn with the task's prompt and **reuses the
+same session across runs**, so the task accumulates history from earlier runs.
+Each run is bounded by a **30-minute wall-clock timeout** (the only hard cap on
+a run).
 
 ## Task schema
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `name` | yes | Human-readable task name (also addressable via the API) |
+| `name` | yes | Human-readable task name |
 | `cron` | yes | Schedule expression — see format below |
 | `prompt` | yes | The prompt sent to the agent on each run |
 | `model` | no | Model override; defaults to the server's model |
 | `agent` | no | `"general"` or `"coding"` |
-| `directory` | no | Working directory hint, prepended to the task session's system prompt |
-| `notify` | no | IM chats to push each run's final reply (or a failure note) to: `[{"platform": "feishu", "chat_id": "oc_..."}, {"platform": "weixin", "chat_id": "..."}]` — every entry gets the push. A bare object (single target) is also accepted. |
+| `directory` | no | Working directory the run executes in |
+| `notify` | no | IM chats to push each run's final reply (or failure) to — see the notify table |
 | `enabled` | yes | Whether the schedule is active |
 
-## Cron expression format — 6 fields, seconds first
+`id`, `created_at`, `last_run`, `session_id` are server-managed — never set them
+by hand except `id` in the file-write fallback below.
+
+## Cron expression — 6 fields, seconds first
 
 The scheduler uses robfig/cron **with a seconds field**. A standard 5-field
-crontab line is **invalid** here — always prepend a seconds field:
+crontab line is **invalid** — always prepend a seconds field:
 
 ```
 seconds minutes hours day-of-month month day-of-week
@@ -40,48 +44,59 @@ seconds minutes hours day-of-month month day-of-week
 | Weekdays at 18:30 | `0 30 18 * * 1-5` |
 | 1st of each month at 08:00 | `0 0 8 1 * *` |
 
-Descriptors also work: `@hourly`, `@daily`, `@weekly`, `@every 90m`.
-Times are interpreted in the server's local timezone.
+Descriptors also work: `@hourly`, `@daily`, `@weekly`, `@every 90m`. Times are
+in the server's local timezone.
 
 ## Workflow
 
-1. **Gather** the schedule, the prompt, and any optional fields. If the user
-   gave a vague schedule ("every morning"), pick a concrete time and confirm.
-2. **Translate** the schedule to a 6-field expression and **echo it back in
-   plain words** ("every weekday at 18:30") before creating anything.
+1. **Gather** the schedule, the prompt, and any optional fields. If the schedule
+   is vague ("every morning"), pick a concrete time and confirm.
+2. **Translate** to a 6-field expression and **echo it back in plain words**
+   ("every weekday at 18:30") before creating anything.
 3. **Write a self-contained prompt.** The task session has no access to this
-   conversation — the prompt must carry all context: what to do, where, and
-   what the output should look like.
-4. **Give the prompt an explicit stop condition.** Task runs are capped at
-   100 turns and 30 minutes; an open-ended prompt makes the model keep
-   re-verifying instead of finishing (a real "check for new issues" task spent
-   18 minutes and all 100 turns re-confirming that zero issues existed). Spell
-   out when the task is done, especially for the empty case:
+   conversation — the prompt must carry all context: what to do, where, and what
+   the output should look like.
+4. **Give the prompt an explicit stop condition.** An open-ended prompt makes the
+   model keep re-verifying until the 30-minute timeout instead of finishing.
+   Spell out when the task is done, especially the empty case:
    - Bad: "Check the repository for any new open issues that need attention."
-   - Good: "List open issues created in the last 24h via one
-     `gh issue list` call. If there are none, reply exactly 'no new issues'
-     and stop. Otherwise summarize each in one line and stop — do not
-     re-check."
-5. **Create** the task (see below), then **verify** by listing tasks. Offer a
-   one-off immediate run to test.
+   - Good: "List open issues created in the last 24h via one `gh issue list`
+     call. If there are none, reply exactly 'no new issues' and stop. Otherwise
+     summarize each in one line and stop — do not re-check."
+5. **Create**, then **verify** by listing. Offer a one-off immediate run to test.
 
-## Creating a task
+## API — one surface, all under `/api/tasks`
 
-**Preferred — via the running server.** If `octo serve` is up (default
-`:8080`), POST to the API; the task is registered and starts firing
-immediately:
+Prefer the API whenever `octo serve` is up (default `:8080`): every change
+reschedules the running process immediately.
 
 ```bash
+# Create — returns {"id":"task_..."}. Include any optional field (directory,
+# model, agent, notify) right here.
 curl -s -X POST http://127.0.0.1:8080/api/tasks \
   -H 'Content-Type: application/json' \
-  -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ..."}'
-# → {"id":"task_1717999999999"}
-curl -s http://127.0.0.1:8080/api/tasks   # verify
+  -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ...","directory":"/srv/repo"}'
+
+curl -s http://127.0.0.1:8080/api/tasks                      # list
+curl -s -X POST   http://127.0.0.1:8080/api/tasks/{id}/run   # run now
+curl -s -X DELETE http://127.0.0.1:8080/api/tasks/{id}       # delete
+
+# Edit any subset of fields — this is also how you enable/disable.
+curl -s -X PATCH http://127.0.0.1:8080/api/tasks/{id} \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"new prompt ...","enabled":false}'
 ```
 
-**Fallback — direct file write.** If the server is not running, write
-`~/.octo/tasks/<id>.json` with `write_file` (id format: `task_<unix-millis>`,
-filename must equal `<id>.json`):
+`PATCH /api/tasks/{id}` accepts `enabled`, `cron`, `prompt`, `model`, `agent`,
+`directory`, `notify` — send only the fields you want to change. Look up `{id}`
+from the create response or the list. (Earlier builds had a separate
+`/api/cron-tasks/...` route and a `/toggle` endpoint; both are gone — everything
+is `/api/tasks` now.)
+
+### Fallback — direct file write (server not running)
+
+Write `~/.octo/tasks/<id>.json` with `write_file` (`id` format
+`task_<unix-millis>`; filename must equal `<id>.json`):
 
 ```json
 {
@@ -89,78 +104,35 @@ filename must equal `<id>.json`):
   "name": "daily-report",
   "cron": "0 0 9 * * *",
   "prompt": "Summarize ...",
+  "directory": "/srv/repo",
   "enabled": true,
   "created_at": "2026-06-10T09:00:00Z"
 }
 ```
 
-The file is picked up the next time `octo serve` starts.
+The file is picked up the next time `octo serve` starts. A hand-written file
+with a bad cron expression fails silently at load (logged to stderr only) —
+double-check the 6-field format. **File edits to an already-running server are
+ignored until restart** — when the server is up, always go through the API.
 
-## Editing a task
+## Caveats — mention when relevant
 
-**Always use the API.** After you edit a task file with `edit_file` or `write_file`,
-you **must** immediately PATCH the same change through the API so the running
-scheduler picks it up. File edits alone are ignored until the next restart.
+- **Tasks only fire while `octo serve` is running.** No serve → no runs. Missed
+  schedules are not replayed on restart.
+- **API changes take effect immediately; hand-edited files don't** (until the
+  next serve start).
+- **A failed IM push is logged on the server and never affects the run.**
 
-```bash
-# 1. Edit the file (example: change the prompt)
-edit_file ~/.octo/tasks/task_1781090471651.json  # or write_file
+## notify — per-platform `chat_id`
 
-# 2. PATCH the same field via API so the change takes effect NOW
-curl -s -X PATCH http://127.0.0.1:8080/api/cron-tasks/<name-or-id> \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"new prompt ..."}'
+`notify` is a list (a single bare object is also accepted); every entry is
+pushed: `[{"platform":"feishu","chat_id":"oc_..."}, ...]`.
 
-# Verify
-curl -s http://127.0.0.1:8080/api/tasks
-```
-
-Supported PATCH fields: `enabled`, `cron`, `prompt`, `model`, `agent`, `directory`, `notify`.
-
-## Other operations
-
-```bash
-curl -s http://127.0.0.1:8080/api/tasks                          # list
-curl -s -X POST   http://127.0.0.1:8080/api/tasks/{id}/run      # run now
-curl -s -X DELETE http://127.0.0.1:8080/api/tasks/{id}          # delete
-curl -s -X PATCH  http://127.0.0.1:8080/api/cron-tasks/{name} \
-  -H 'Content-Type: application/json' -d '{"enabled":false}'    # disable
-```
-
-## Caveats — tell the user when relevant
-
-- **Tasks only fire while `octo serve` is running.** No daemon, no serve → no
-  runs. Missed schedules are not replayed on restart.
-- **API changes take effect immediately; file edits don't.** Create, update,
-  enable/disable, and delete through the API reschedule the running process on
-  the spot. Editing a JSON file under `~/.octo/tasks/` by hand only takes
-  effect the next time `octo serve` starts — prefer the API whenever the
-  server is up.
-- **Validate before creating.** A malformed cron expression is rejected at
-  creation time by the API, but a hand-written JSON file with a bad expression
-  fails silently at load (logged to stderr only) — double-check the 6-field
-  format when writing files directly.
-- **IM notification (`notify`) — per-platform `chat_id` rules.** All three
-  platforms can be pushed to; a failed push is logged on the server and never
-  affects the run.
-  - **Feishu**: works with app credentials alone (`~/.octo/channels.yml`);
-    `chat_id` looks like `oc_…` — get it from the chat's settings or by
-    messaging the bot and reading the server log.
-  - **DingTalk**: pushes via the proactive robot APIs. `chat_id` is a staff
-    id (one-on-one) or a `cid…` openConversationId (group) — a DM's
-    conversation id does NOT work, use the user's staff id. Requires the
-    "robot message send" permission on the app in the DingTalk admin console.
-  - **Weixin**: `chat_id` is the iLink user id, and the user must have
-    messaged the bot at least once (the receive loop persists each user's
-    latest `context_token` to `~/.octo/weixin-contexts.json`, which the push
-    reads; a long-stale token may be rejected by WeChat — chatting with the
-    bot refreshes it).
-  - **Telegram**: `chat_id` is the Telegram chat id (user, group, or
-    channel); the bot must be able to message it (user has started the bot,
-    or bot is a member of the group/channel).
-  - **Discord**: `chat_id` is the channel id; the bot needs the Send
-    Messages permission in that channel.
-  - **WeCom**: pushes go through a group-robot webhook — set `webhook_key`
-    (or full `webhook_url`) in the channel config. The webhook is bound to
-    one group, so `chat_id` is ignored for pushes (use the group name as a
-    label).
+| Platform | `chat_id` | Notes |
+|----------|-----------|-------|
+| `feishu` | `oc_…` chat id | Works with app creds in `~/.octo/channels.yml`; get the id from chat settings or the server log after messaging the bot. |
+| `dingtalk` | staff id (1:1) or `cid…` openConversationId (group) | A DM's conversation id does NOT work — use the staff id. Needs "robot message send" permission. |
+| `weixin` | iLink user id | User must have messaged the bot once (refreshes the `context_token` the push reads); a long-stale token may be rejected. |
+| `telegram` | Telegram chat id (user/group/channel) | Bot must be able to message it (user started it, or bot is a member). |
+| `discord` | channel id | Bot needs Send Messages permission in that channel. |
+| `wecom` | (ignored) | Pushes go through a group-robot webhook (`webhook_key`/`webhook_url` in channel config); bound to one group, so `chat_id` is just a label. |

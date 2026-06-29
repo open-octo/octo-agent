@@ -547,7 +547,7 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/tasks", s.handleCreateTask)
 	s.api("DELETE /api/tasks/{id}", s.handleDeleteTask)
 	s.api("POST /api/tasks/{id}/run", s.handleRunTask)
-	s.api("PATCH /api/tasks/{id}/toggle", s.handleToggleTask)
+	s.api("PATCH /api/tasks/{id}", s.handlePatchTask)
 	s.api("GET /api/profile/soul", s.handleGetProfileSoul)
 	s.api("GET /api/profile/user", s.handleGetProfileUser)
 	s.api("GET /api/memories", s.handleGetMemories)
@@ -602,11 +602,6 @@ func (s *Server) registerRoutes() {
 	// Memory detail
 	s.api("GET /api/memories/{filename}", s.handleGetMemory)
 	s.api("DELETE /api/memories/{filename}", s.handleDeleteMemory)
-
-	// Cron tasks (alias for scheduler tasks)
-	s.api("GET /api/cron-tasks", s.handleListCronTasks)
-	s.api("POST /api/cron-tasks/{name}/run", s.handleRunCronTask)
-	s.api("PATCH /api/cron-tasks/{name}", s.handlePatchCronTask)
 
 	// Version & restart
 	s.api("POST /api/version/upgrade", s.handleVersionUpgrade)
