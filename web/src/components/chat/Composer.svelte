@@ -27,6 +27,21 @@
     queueMicrotask(() => textareaEl?.focus())
   }
 
+  // Auto-grow the textarea with its content up to a max height, then scroll
+  // inside (matches the max-height in CSS). The $effect re-runs on every text
+  // change — typing, paste, send-clear, or programmatic setText.
+  const MAX_TEXTAREA_PX = 200
+  function autoResize() {
+    const el = textareaEl
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, MAX_TEXTAREA_PX) + 'px'
+  }
+  $effect(() => {
+    text // track the bound value so the effect re-runs when it changes
+    autoResize()
+  })
+
   function openAttach() {
     fileInputEl?.click()
   }
@@ -339,6 +354,11 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // While an IME composition is active (CJK input via pinyin/kana/etc.), let
+    // the IME own every key. The Enter that confirms a candidate must not also
+    // send the message, and arrows must navigate candidates, not the slash menu.
+    // keyCode 229 covers browsers that don't set isComposing on the final key.
+    if (e.isComposing || e.keyCode === 229) return
     // Slash menu navigation
     if (slashMenu) {
       if (e.key === 'ArrowDown') { e.preventDefault(); moveSlashActive(1); return }
@@ -599,6 +619,7 @@
 textarea {
   border: none; outline: none; resize: none; font-size: 14px; line-height: 1.6;
   font-family: inherit; color: var(--text); background: transparent; width: 100%;
+  max-height: 200px; overflow-y: auto;
 }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .attach-chip {
