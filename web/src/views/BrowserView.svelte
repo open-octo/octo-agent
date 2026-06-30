@@ -36,12 +36,6 @@
     await loadBrowserStatus()
   }
 
-  // Edit modal state.
-  let editOpen = $state(false)
-  let editName = $state('')
-  let editYAML = $state('')
-  let saving = $state(false)
-
   async function reload() {
     loading = true
     try {
@@ -57,31 +51,6 @@
     reload()
     loadBrowserStatus()
   })
-
-  async function openEdit(name: string) {
-    try {
-      const r = await api.getBrowserRecording(name)
-      editName = r.name
-      editYAML = r.yaml
-      editOpen = true
-    } catch (e: any) {
-      showToast(e?.message ?? tr('browser.rec.load_fail'), 'error')
-    }
-  }
-
-  async function save() {
-    saving = true
-    try {
-      await api.saveBrowserRecording(editName, editYAML)
-      showToast(tr('browser.rec.saved'), 'success')
-      editOpen = false
-      await reload()
-    } catch (e: any) {
-      showToast(e?.message ?? tr('browser.rec.save_fail'), 'error')
-    } finally {
-      saving = false
-    }
-  }
 
   async function del(name: string) {
     if (!confirm(tr('browser.rec.delete_confirm').replace('{name}', name))) return
@@ -104,6 +73,12 @@
   // record flow (record_start → hand control to the user → record_stop).
   function record() {
     openAgentSession(tr('browser.rec.record_prompt'), '● ' + tr('browser.rec.record')).catch(() => {})
+  }
+
+  // Edit conversationally (agentic, like Replay/Record) rather than a raw YAML
+  // textarea modal — consistent with the rest of the app.
+  function edit(name: string) {
+    openAgentSession(tr('browser.rec.edit_prompt').replace('{name}', name), '✎ ' + name).catch(() => {})
   }
 </script>
 
@@ -191,7 +166,7 @@
             </div>
             <div class="rec-actions">
               <button class="ghost-btn" onclick={() => run(r.name)}>{$t('browser.rec.run')}</button>
-              <button class="ghost-btn" onclick={() => openEdit(r.name)}>{$t('common.edit')}</button>
+              <button class="ghost-btn" onclick={() => edit(r.name)}>{$t('common.edit')}</button>
               <button class="ghost-btn danger" onclick={() => del(r.name)}>{$t('common.delete')}</button>
             </div>
           </li>
@@ -216,28 +191,6 @@
           onSecondary={() => (setupOpen = false)}
           onVerified={onSetupVerified}
         />
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if editOpen}
-  <div class="modal-overlay" onclick={() => (editOpen = false)} role="presentation">
-    <div class="modal lg" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span class="modal-title">{editName}</span>
-        <button class="modal-close" onclick={() => (editOpen = false)} aria-label={$t('common.close')}>
-          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
-        </button>
-      </div>
-      <div class="modal-body">
-        <textarea class="yaml" bind:value={editYAML} spellcheck="false"></textarea>
-      </div>
-      <div class="modal-foot">
-        <button class="ghost-btn" onclick={() => (editOpen = false)}>{$t('common.cancel')}</button>
-        <button class="primary-btn" disabled={saving} onclick={save}>
-          {saving ? $t('common.saving') : $t('common.save')}
-        </button>
       </div>
     </div>
   </div>
@@ -273,8 +226,6 @@
   .primary-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--blue-6); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
   .primary-btn:hover:not(:disabled) { background: var(--blue-5); }
   .primary-btn:disabled { opacity: 0.6; cursor: default; }
-  .yaml { width: 100%; min-height: 360px; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: 6px; padding: 10px; background: var(--bg); color: var(--text); resize: vertical; box-sizing: border-box; }
-  .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
   .modal-overlay {
     position: fixed; inset: 0; background: var(--text-tertiary);
     display: flex; align-items: flex-start; justify-content: center; z-index: 200;
@@ -285,7 +236,6 @@
     background: var(--bg-container); border-radius: 16px; box-shadow: 0 24px 48px rgba(15,23,42,0.18);
     display: flex; flex-direction: column; overflow: hidden;
   }
-  .modal.lg { width: min(720px, 92vw); }
   .modal-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 18px 24px 16px; border-bottom: 1px solid var(--border-table);
