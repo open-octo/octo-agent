@@ -447,9 +447,24 @@ func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request)
 	}
 
 	updated := false
+	newID := id
 	for i := range cfg.Models {
 		if cfg.Models[i].Name == id {
+			oldName, oldModel := cfg.Models[i].Name, cfg.Models[i].Model
 			applyModelRequestToEntry(req, &cfg.Models[i])
+			// If the name was auto-derived from the model (name == model), keep it
+			// tracking when the model changes, and repair the default/lite refs
+			// that pointed at the old name. A name the user set by hand stays put.
+			if oldName == oldModel && cfg.Models[i].Model != oldModel {
+				newID = cfg.UniqueName(cfg.Models[i].Model)
+				cfg.Models[i].Name = newID
+				if cfg.DefaultModel == oldName {
+					cfg.DefaultModel = newID
+				}
+				if cfg.LiteModel == oldName {
+					cfg.LiteModel = newID
+				}
+			}
 			updated = true
 			break
 		}
@@ -468,7 +483,9 @@ func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request)
 	}
 	s.invalidateSenderCache()
 
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	// id may have changed if the auto-derived name tracked a new model — return
+	// it so the client can refresh its reference.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": newID})
 }
 
 // handleDeleteModelConfig removes the entry named by {id} and repairs the

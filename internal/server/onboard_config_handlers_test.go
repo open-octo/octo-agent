@@ -558,3 +558,34 @@ func TestBuildAgent_ImplicitLiteForBoundSession(t *testing.T) {
 		t.Error("bound session's implicit lite must reuse that session's sender")
 	}
 }
+
+// TestConfigModels_PatchRetracksAutoDerivedName: when an entry's name was
+// auto-derived from its model (name == model), changing the model re-derives
+// the name and repairs the default_model reference. A hand-set name stays put
+// (covered by TestConfigModels_PatchUpdatesAndKeepsKey, where name != model).
+func TestConfigModels_PatchRetracksAutoDerivedName(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Name: "qwen3.7-max", Provider: "openai", Model: "qwen3.7-max", APIKey: "sk-x"},
+		},
+		DefaultModel: "qwen3.7-max",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPatch, "/api/config/models/qwen3.7-max",
+		`{"model":"qwen3.7-plus","base_url":"","api_key":"sk-x****","provider":"openai"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if _, ok := cfg.EntryByName("qwen3.7-plus"); !ok {
+		t.Fatalf("name should track new model qwen3.7-plus: %+v", cfg.Models)
+	}
+	if _, ok := cfg.EntryByName("qwen3.7-max"); ok {
+		t.Errorf("stale name qwen3.7-max should be gone")
+	}
+	if cfg.DefaultModel != "qwen3.7-plus" {
+		t.Errorf("default_model = %q, want qwen3.7-plus (repaired)", cfg.DefaultModel)
+	}
+}

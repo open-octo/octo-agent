@@ -134,15 +134,37 @@ func (c Config) EffectiveShowReasoning(entry *bool) bool {
 
 // ModelVision reports whether the named model accepts image content. name is
 // matched against each entry's Name or Model; an entry's explicit Vision wins,
-// otherwise the default is true (assume vision-capable). Unknown models also
-// default to true — only an explicit `vision: false` opts out.
+// otherwise the capability is inferred from the model id (ModelSupportsVision)
+// so it tracks the model automatically. Unmatched names fall back to the same
+// inference.
 func (c Config) ModelVision(name string) bool {
 	for _, m := range c.Models {
 		if m.Name == name || m.Model == name {
 			if m.Vision != nil {
 				return *m.Vision
 			}
+			return ModelSupportsVision(m.Model)
+		}
+	}
+	return ModelSupportsVision(name)
+}
+
+// ModelSupportsVision is a best-effort guess at whether a model id accepts
+// image input, used when an entry doesn't set Vision explicitly so vision
+// tracks the model automatically. It errs toward true (most frontier chat
+// models are multimodal); only well-known text-only families return false. An
+// explicit vision marker (e.g. qwen-vl) wins over its text-only family. The
+// heuristic is necessarily incomplete — ModelEntry.Vision is the override.
+func ModelSupportsVision(model string) bool {
+	m := strings.ToLower(model)
+	for _, mark := range []string{"-vl", "vl-", "vision", "-omni", "gpt-4o", "gpt-4.1", "claude-3", "claude-4", "claude-opus", "claude-sonnet", "claude-haiku", "gemini", "pixtral", "llava", "internvl"} {
+		if strings.Contains(m, mark) {
 			return true
+		}
+	}
+	for _, textOnly := range []string{"qwen", "deepseek", "kimi", "moonshot", "baichuan", "ernie", "glm-", "spark", "abab", "yi-"} {
+		if strings.Contains(m, textOnly) {
+			return false
 		}
 	}
 	return true

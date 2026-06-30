@@ -236,3 +236,42 @@ func TestModelVision(t *testing.T) {
 		}
 	}
 }
+
+func TestModelSupportsVision(t *testing.T) {
+	cases := map[string]bool{
+		"qwen3.7-max":       false, // text-only qwen
+		"qwen3.7-plus":      false,
+		"qwen-vl-max":       true, // vision marker wins over qwen family
+		"qwen-omni":         true,
+		"deepseek-chat":     false,
+		"gpt-4o":            true,
+		"gpt-4.1-mini":      true,
+		"claude-sonnet-4-6": true,
+		"gemini-2.0-flash":  true,
+		"o3":                true, // unknown family → default true
+		"some-new-llm":      true,
+	}
+	for model, want := range cases {
+		if got := ModelSupportsVision(model); got != want {
+			t.Errorf("ModelSupportsVision(%q) = %v, want %v", model, got, want)
+		}
+	}
+}
+
+func TestModelVision_HeuristicFallback(t *testing.T) {
+	no := false
+	c := Config{Models: []ModelEntry{
+		{Name: "qwen3.7-max", Model: "qwen3.7-plus"},        // no override → heuristic(false)
+		{Name: "vl", Model: "qwen-vl-max"},                  // no override → heuristic(true)
+		{Name: "forced", Model: "qwen-vl-max", Vision: &no}, // override beats heuristic
+	}}
+	if c.ModelVision("qwen3.7-max") != false {
+		t.Error("qwen3.7-plus entry should infer vision=false")
+	}
+	if c.ModelVision("vl") != true {
+		t.Error("qwen-vl-max entry should infer vision=true")
+	}
+	if c.ModelVision("forced") != false {
+		t.Error("explicit Vision override should win over heuristic")
+	}
+}
