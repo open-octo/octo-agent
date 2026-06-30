@@ -99,6 +99,12 @@
   function run(name: string) {
     openAgentSession(tr('browser.rec.run_prompt').replace('{name}', name), '▶ ' + name).catch(() => {})
   }
+
+  // Start a recording: open a fresh session whose first message kicks off the
+  // record flow (record_start → hand control to the user → record_stop).
+  function record() {
+    openAgentSession(tr('browser.rec.record_prompt'), '● ' + tr('browser.rec.record')).catch(() => {})
+  }
 </script>
 
 <div class="view">
@@ -155,9 +161,15 @@
   <section class="card">
     <div class="sec-head">
       <h2 class="sec-title">{$t('browser.view.recordings_title')}</h2>
-      <button class="ghost-btn" onclick={reload} aria-label={$t('common.refresh')}>
-        <iconify-icon icon="ant-design:reload-outlined" width="14"></iconify-icon>
-      </button>
+      <div class="rec-head-actions">
+        <button class="primary-btn" onclick={record}>
+          <iconify-icon icon="ant-design:video-camera-outlined" width="13"></iconify-icon>
+          {$t('browser.rec.record')}
+        </button>
+        <button class="ghost-btn" onclick={reload} aria-label={$t('common.refresh')}>
+          <iconify-icon icon="ant-design:reload-outlined" width="14"></iconify-icon>
+        </button>
+      </div>
     </div>
     <p class="hint">{$t('browser.rec.how')}</p>
 
@@ -257,7 +269,8 @@
   .ghost-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; color: var(--text); }
   .ghost-btn:hover { background: var(--surface-hover); }
   .ghost-btn.danger { color: var(--danger, #d4380d); }
-  .primary-btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .rec-head-actions { display: flex; align-items: center; gap: 8px; }
+  .primary-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
   .primary-btn:disabled { opacity: 0.6; cursor: default; }
   .yaml { width: 100%; min-height: 360px; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: 6px; padding: 10px; background: var(--bg); color: var(--text); resize: vertical; box-sizing: border-box; }
   .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
