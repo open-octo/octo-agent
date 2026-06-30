@@ -128,6 +128,7 @@ func GenerateSkill(ctx context.Context, name, startURL string, events []Recorded
 		"(2) Drop redundant back-and-forth and retries; keep the intended linear path. " +
 		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}). " +
 		"(4) Preserve step order and the leading navigate. " +
+		"(5) Write description as a short statement of what the workflow does, then the natural phrases a user would say to invoke it — in the page's own language AND English (e.g. \"打开知乎热榜并点第一条。当用户说\\\"知乎热榜\\\"、\\\"zhihu hot\\\"时触发\"). This description is the auto-trigger cue, so make those phrases concrete. " +
 		"Output ONLY the skill as YAML (keys: name, description, params, steps), no prose, no code fences."
 	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned skill YAML.", baseYAML, renderTrace(events))
 

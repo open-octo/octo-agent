@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/browser"
+	"github.com/Leihb/octo-agent/internal/skills"
 )
 
 // toolFixtureHTML mirrors the awkward target system: the download button only
@@ -109,6 +111,7 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 		t.Skip("chrome not available")
 	}
 	t.Setenv("OCTO_BROWSER_SKILLS_DIR", t.TempDir())
+	t.Setenv("OCTO_SKILLS_DIR", t.TempDir())
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>rr</title><button id="b">Go</button>
 <script>window.clicks=0;document.getElementById('b').addEventListener('click',function(){window.clicks++});</script>`))
@@ -141,6 +144,20 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	time.Sleep(300 * time.Millisecond) // let the capture event arrive
 	if _, err := run(map[string]any{"action": "record_stop", "name": "demo"}); err != nil {
 		t.Fatalf("record_stop: %v", err)
+	}
+
+	// record_stop also writes a keyword-trigger companion SKILL.md so a fresh
+	// session can auto-replay the recording.
+	doc := filepath.Join(os.Getenv("OCTO_SKILLS_DIR"), "demo", skills.SkillFile)
+	if data, err := os.ReadFile(doc); err != nil {
+		t.Fatalf("companion SKILL.md not written: %v", err)
+	} else if !strings.Contains(string(data), recordingSkillMarker) {
+		t.Fatalf("companion SKILL.md missing generated marker")
+	}
+	// DeleteRecordingSkillDoc removes only our generated companion.
+	DeleteRecordingSkillDoc("demo")
+	if _, err := os.Stat(doc); !os.IsNotExist(err) {
+		t.Fatalf("companion SKILL.md not cleaned up by DeleteRecordingSkillDoc")
 	}
 
 	// Replay: navigates back to the start URL (reset clicks) and re-clicks.

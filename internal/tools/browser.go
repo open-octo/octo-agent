@@ -14,6 +14,7 @@ import (
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/browser"
 	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/Leihb/octo-agent/internal/skills"
 )
 
 // browserSession holds the per-session Chrome connection, reused across tool
@@ -90,6 +91,58 @@ func BrowserSkillsDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".octo", "browser-skills")
+}
+
+// recordingSkillMarker tags the companion SKILL.md that record_stop generates
+// for a recording, so DeleteRecordingSkillDoc only ever removes our own file and
+// never a hand-authored skill that happens to share the recording's name.
+const recordingSkillMarker = "octo_recording: true"
+
+// recordingSkillDir is the companion skill directory (~/.octo/skills/<name>) for
+// a recording, "" when the user skills root can't be resolved.
+func recordingSkillDir(name string) string {
+	root := skills.UserRoot()
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, name)
+}
+
+// WriteRecordingSkillDoc writes the companion SKILL.md that makes a recording
+// keyword-triggerable: a fresh session discovers it and, when the user's request
+// matches description, the model loads it and replays via run_skill. Best-effort.
+func WriteRecordingSkillDoc(name, description string) error {
+	dir := recordingSkillDir(name)
+	if dir == "" {
+		return fmt.Errorf("user skills dir unavailable")
+	}
+	if description == "" {
+		description = "Replay the recorded browser automation " + name + "."
+	}
+	body := fmt.Sprintf("---\nname: %s\ndescription: %s\n%s\n---\n\n"+
+		"# %s\n\nReplay the recorded browser automation %q with the browser tool:\n\n"+
+		"```\nbrowser action=run_skill name=%q\n```\n\n"+
+		"This deterministically replays the recorded steps (with selector self-healing). "+
+		"Pass any required values via params.\n", name, description, recordingSkillMarker, name, name, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, skills.SkillFile), []byte(body), 0o644)
+}
+
+// DeleteRecordingSkillDoc removes a recording's companion SKILL.md directory,
+// but only when it carries our generated marker — never a user-authored skill of
+// the same name. Best-effort; a no-op when nothing matches.
+func DeleteRecordingSkillDoc(name string) {
+	dir := recordingSkillDir(name)
+	if dir == "" {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(dir, skills.SkillFile))
+	if err != nil || !strings.Contains(string(data), recordingSkillMarker) {
+		return
+	}
+	_ = os.RemoveAll(dir)
 }
 
 // ResetBrowserSession closes and clears the active browser session.
@@ -527,7 +580,14 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if err := browser.SaveSkill(path, skill); err != nil {
 			return agent.ToolResult{}, err
 		}
-		return agent.ToolResult{Text: fmt.Sprintf("recorded %d step(s) → %s\nReview/edit it there (set params, fix selectors), then replay with action=run_skill name=%q.", len(skill.Steps), path, name)}, nil
+		// Also write a companion SKILL.md so the recording is keyword-triggerable:
+		// a new session discovers it and the model replays via run_skill when the
+		// user's request matches. Best-effort — never fail the recording over it.
+		trigger := ""
+		if err := WriteRecordingSkillDoc(name, skill.Description); err == nil {
+			trigger = fmt.Sprintf("\nIt's also a keyword-triggerable skill now — in a new session, just say what it does (per its description: %q) and the model will replay it; no need to spell out run_skill.", skill.Description)
+		}
+		return agent.ToolResult{Text: fmt.Sprintf("recorded %d step(s) → %s\nReview/edit it there (set params, fix selectors), then replay with action=run_skill name=%q.%s", len(skill.Steps), path, name, trigger)}, nil
 
 	case "run_skill":
 		name := getStr(input, "name")

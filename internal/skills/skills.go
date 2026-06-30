@@ -52,9 +52,13 @@ type Registry struct {
 	cwd      string
 }
 
-// userSkillsRoot returns ~/.octo/skills, or "" when the home dir can't be
-// resolved. It's a var so tests can point discovery at a temp directory.
+// userSkillsRoot returns ~/.octo/skills (or $OCTO_SKILLS_DIR when set), or ""
+// when the home dir can't be resolved. It's a var so tests can point discovery
+// at a temp directory.
 var userSkillsRoot = func() string {
+	if d := os.Getenv("OCTO_SKILLS_DIR"); d != "" {
+		return d
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
