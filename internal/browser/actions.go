@@ -39,6 +39,50 @@ func elemRefJS(frame, elem string) string {
 		jsString(frame), resolveSelectorJS("f.contentDocument", elem))
 }
 
+// resolveClickTarget picks the selector to act on for a click whose recorded
+// element had stable visible text (anchor). Positional selectors drift, and
+// worse, after a layout change can silently match the WRONG node — so the
+// recorded text is the reliable signal. It polls up to timeout for, in order of
+// preference: the original positional element when its text still contains the
+// anchor (the unchanged-page fast path, preserving the exact original target),
+// or any element carrying the anchor text (drift recovery). If neither appears
+// it returns the positional selector unchanged, so a genuine miss still fails
+// and reaches the healer. anchor must be non-empty.
+func (p *Page) resolveClickTarget(ctx context.Context, frame, elemSel, anchor string, timeout time.Duration) string {
+	posSel := elemSel
+	if frame != "" {
+		posSel = frame + frameDelim + elemSel
+	}
+	textElem := lastTagOf(elemSel) + `:has-text("` + escapeTextArg(anchor) + `")`
+	textSel := textElem
+	if frame != "" {
+		textSel = frame + frameDelim + textElem
+	}
+	check := fmt.Sprintf(`(()=>{let pos=null,txt=null;try{pos=%s;}catch(e){}try{txt=%s;}catch(e){}var a=%s;if(pos&&(pos.textContent||"").trim().includes(a))return "pos";if(txt)return "text";return "";})()`,
+		elemRefJS(frame, elemSel), elemRefJS(frame, textElem), jsString(anchor))
+
+	deadline := time.Now().Add(timeout)
+	for {
+		var choice string
+		if err := p.Eval(ctx, check, &choice); err == nil {
+			switch choice {
+			case "pos":
+				return posSel
+			case "text":
+				return textSel
+			}
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return posSel
+		}
+		select {
+		case <-ctx.Done():
+			return posSel
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+}
+
 // elementCenter scrolls an element into view and returns its viewport-center
 // point (adding the iframe's offset for framed targets), or an error if the
 // selector matches nothing.
