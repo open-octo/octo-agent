@@ -79,7 +79,7 @@ func TestUploadViaChooser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new page: %v", err)
 	}
-	if err := page.WaitFor(ctx, "#btn", 5*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#btn", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
 	dir := t.TempDir()
@@ -228,7 +228,7 @@ func TestReplayClickFollowsNewTab(t *testing.T) {
 	if fp == page {
 		t.Fatal("replay did not follow the new tab opened by the click")
 	}
-	if err := fp.WaitFor(ctx, "#dest", 5*time.Second); err != nil {
+	if err := fp.WaitFor(ctx, "#dest", testWaitTimeout); err != nil {
 		t.Fatalf("final page is not the destination tab: %v", err)
 	}
 }

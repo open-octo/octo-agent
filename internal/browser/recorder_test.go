@@ -27,7 +27,7 @@ func TestRecorderAnchorsSelectorAtNearestID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new page: %v", err)
 	}
-	if err := page.WaitFor(ctx, "#panel a", 5*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#panel a", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
 	rec := NewRecorder(page)
@@ -73,7 +73,7 @@ func TestRecorderCapturesActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new page: %v", err)
 	}
-	if err := page.WaitFor(ctx, "#b", 5*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#b", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestRecorderCapturesActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fresh page: %v", err)
 	}
-	if err := fresh.WaitFor(ctx, "#b", 5*time.Second); err != nil {
+	if err := fresh.WaitFor(ctx, "#b", testWaitTimeout); err != nil {
 		t.Fatalf("wait fresh: %v", err)
 	}
 	if err := Replay(ctx, fresh, evs); err != nil {

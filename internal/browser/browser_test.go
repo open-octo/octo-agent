@@ -13,6 +13,13 @@ import (
 	"time"
 )
 
+// testWaitTimeout caps how long the browser tests wait for a selector to
+// appear. WaitFor returns the instant the element is present, so this ceiling
+// is free on a healthy run — it only matters when a slow/loaded CI runner
+// (Windows cold-starts Chrome notably slower) needs more than a few seconds to
+// finish the first navigation. 5s was too tight there and flaked TestUpload.
+const testWaitTimeout = 20 * time.Second
+
 // fixtureHTML reproduces the awkward shape of the real target system:
 //   - the download button only appears after a search (no pre-constructable URL)
 //   - clicking it generates the file client-side via a Blob (the server never
@@ -91,7 +98,7 @@ func TestSearchThenDownload(t *testing.T) {
 	if err := page.Navigate(ctx, srv.URL); err != nil {
 		t.Fatalf("navigate: %v", err)
 	}
-	if err := page.WaitFor(ctx, "#search", 5*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#search", testWaitTimeout); err != nil {
 		t.Fatalf("wait search: %v", err)
 	}
 
@@ -102,7 +109,7 @@ func TestSearchThenDownload(t *testing.T) {
 		t.Fatalf("click search: %v", err)
 	}
 	// The download button is absent until the (simulated) search completes.
-	if err := page.WaitFor(ctx, "#download", 5*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#download", testWaitTimeout); err != nil {
 		t.Fatalf("wait download button: %v", err)
 	}
 
@@ -143,7 +150,7 @@ func TestAttachExistingPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new page: %v", err)
 	}
-	if err := opened.WaitFor(ctx, "#search", 5*time.Second); err != nil {
+	if err := opened.WaitFor(ctx, "#search", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
 
@@ -190,7 +197,7 @@ func TestUpload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new page: %v", err)
 	}
-	if err := page.WaitFor(ctx, "#f", 5*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#f", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
 
@@ -230,7 +237,7 @@ document.getElementById('t').addEventListener('mouseover',function(){window.hove
 	if err != nil {
 		t.Fatalf("new page: %v", err)
 	}
-	if err := page.WaitFor(ctx, "#t", 5*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#t", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
 	if err := page.Hover(ctx, "#t"); err != nil {
@@ -263,7 +270,7 @@ func TestSelectOption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new page: %v", err)
 	}
-	if err := page.WaitFor(ctx, "#s", 5*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#s", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
 	if err := page.SelectOption(ctx, "#s", "Banana"); err != nil {
@@ -309,7 +316,7 @@ func TestSameOriginFrame(t *testing.T) {
 		t.Fatalf("new page: %v", err)
 	}
 	// Frame-aware wait: the button lives inside the same-origin child frame.
-	if err := page.WaitFor(ctx, "#fr >>> #b", 5*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#fr >>> #b", testWaitTimeout); err != nil {
 		t.Fatalf("wait in frame: %v", err)
 	}
 	if err := page.Click(ctx, "#fr >>> #b"); err != nil {
@@ -449,7 +456,7 @@ func TestPrimitives(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new page: %v", err)
 	}
-	if err := page.WaitFor(ctx, "#search", 5*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#search", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
 
