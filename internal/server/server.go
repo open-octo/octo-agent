@@ -171,10 +171,12 @@ type Server struct {
 	interruptMu sync.Mutex
 
 	// wakeupTimers holds the armed in-session loop wakeup per session
-	// (schedule_wakeup tool / loop skill), guarded by wakeupMu. A new user
-	// turn, a retry, or an interrupt cancels it; interval mode re-arms from the
-	// fired callback. See loop.go.
+	// (schedule_wakeup tool / loop skill), guarded by wakeupMu. The loop
+	// coexists with user messages; it stops on an explicit interrupt / cancel
+	// or the anti-leak lifetime bound. wakeupStart is the per-loop clock
+	// (first-arm time, kept across ticks) backing that bound. See loop.go.
 	wakeupTimers map[string]*time.Timer
+	wakeupStart  map[string]time.Time
 	wakeupMu     sync.Mutex
 
 	// confirmation channels (from request_user_feedback in browser).
@@ -352,6 +354,7 @@ func New(cfg Config) (*Server, error) {
 		askSlots:            make(map[string]chan struct{}),
 		sessionInjectors:    make(map[string]*memory.Injector),
 		wakeupTimers:        make(map[string]*time.Timer),
+		wakeupStart:         make(map[string]time.Time),
 	}
 
 	// Register the WebSocket-backed asker so ask_user_question appears in the

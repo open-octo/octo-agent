@@ -95,6 +95,9 @@ message does *not* stop it. Stop it explicitly:
   or pause** ("停掉", "stop the loop", "够了"). Acknowledge that you've stopped it.
 - In the TUI the user can hard-stop any loop with **Ctrl+C**; over an IM
   channel, `/stop` does the same.
+- **Safety cap**: every loop auto-stops after a maximum total runtime (~12h)
+  so a forgotten loop can't tick forever — don't rely on it, stop loops
+  yourself when the work is done.
 
 When the user interjects mid-loop, answer them normally — and unless they asked
 you to stop, the loop carries on; mention the next tick so they know it's still

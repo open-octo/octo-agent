@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
@@ -47,31 +48,55 @@ func (s *Server) armWakeup(sessionID string, delay time.Duration, prompt string,
 // delivery (web steer-kick, or IM Inbox + idle channel turn). Interval mode
 // (repeat) re-arms from inside the fired callback so the cadence is independent
 // of how long the woken turn runs; dynamic mode fires once.
+//
+// Anti-leak: wakeupStart[key] is stamped on the first arm and kept across ticks
+// (the fired callback clears only the spent timer, not the start), so once the
+// loop has run past tools.MaxLoopLifetime it stops instead of re-arming — the
+// same bound the TUI enforces. A forgotten server-side loop can't tick forever.
 func (s *Server) armWakeupFn(key string, delay time.Duration, repeat bool, fire func()) {
 	s.wakeupMu.Lock()
 	defer s.wakeupMu.Unlock()
+	if s.wakeupStart[key].IsZero() {
+		s.wakeupStart[key] = time.Now()
+	}
+	if tools.LoopExpired(s.wakeupStart[key]) {
+		s.stopWakeupLocked(key)
+		slog.Info("loop stopped: reached max runtime", "session", key, "max", tools.MaxLoopLifetime)
+		return
+	}
 	if t := s.wakeupTimers[key]; t != nil {
 		t.Stop()
 	}
 	s.wakeupTimers[key] = time.AfterFunc(delay, func() {
+		// This timer is spent. Drop it but KEEP wakeupStart so the lifetime
+		// accumulates across ticks (dynamic mode re-arms via the model; the
+		// clock must not reset each tick).
+		s.wakeupMu.Lock()
+		delete(s.wakeupTimers, key)
+		s.wakeupMu.Unlock()
 		if repeat {
 			s.armWakeupFn(key, delay, repeat, fire)
-		} else {
-			s.cancelWakeup(key)
 		}
 		fire()
 	})
 }
 
-// cancelWakeup stops and forgets a session's pending loop wakeup, if any.
-// Called on an explicit stop: an interrupt, or schedule_wakeup(cancel=true).
+// cancelWakeup stops a session's loop and resets its anti-leak clock. Called on
+// an explicit stop: an interrupt, schedule_wakeup(cancel=true), or a context
+// reset (/clear, /new, /bind, /unbind).
 func (s *Server) cancelWakeup(sessionID string) {
 	s.wakeupMu.Lock()
 	defer s.wakeupMu.Unlock()
-	if t := s.wakeupTimers[sessionID]; t != nil {
+	s.stopWakeupLocked(sessionID)
+}
+
+// stopWakeupLocked tears down a session's timer and clock. Caller holds wakeupMu.
+func (s *Server) stopWakeupLocked(key string) {
+	if t := s.wakeupTimers[key]; t != nil {
 		t.Stop()
-		delete(s.wakeupTimers, sessionID)
+		delete(s.wakeupTimers, key)
 	}
+	delete(s.wakeupStart, key)
 }
 
 // wakerFor returns the Waker stamped into a web session's turn ctx.

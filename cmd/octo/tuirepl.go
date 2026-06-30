@@ -314,8 +314,11 @@ type tuiModel struct {
 	// nil when no loop is running. loopActive mirrors it for the activity line.
 	// The loop coexists with user messages (CC-style); it stops only on an
 	// explicit Ctrl+C or schedule_wakeup(cancel=true) — see cancelWakeup.
+	// loopStart is the anti-leak clock: stamped on the first arm, kept across
+	// ticks, so a loop past tools.MaxLoopLifetime stops itself.
 	wakeupTimer *time.Timer
 	loopActive  bool
+	loopStart   time.Time
 
 	// echoPending is the user-message echo held in the live View() area instead
 	// of being committed straight to the scrollback. It commits on the turn's
@@ -623,8 +626,19 @@ func (w tuiWaker) CancelWakeup() error {
 }
 
 // armWakeup (re)starts the loop's wakeup timer, replacing any pending one — a
-// session holds at most one armed loop.
+// session holds at most one armed loop. loopStart is stamped on the first arm
+// and kept across ticks (anti-leak clock); once the loop has run past
+// tools.MaxLoopLifetime it stops instead of re-arming, the same bound the
+// server enforces, so a forgotten loop can't tick forever.
 func (m *tuiModel) armWakeup(delay time.Duration, prompt string, repeat bool) {
+	if m.loopStart.IsZero() {
+		m.loopStart = time.Now()
+	}
+	if tools.LoopExpired(m.loopStart) {
+		m.printlnBlock(noticeStyle.Render("● Loop stopped — reached max runtime"))
+		m.cancelWakeup()
+		return
+	}
 	if m.wakeupTimer != nil {
 		m.wakeupTimer.Stop()
 	}
@@ -634,15 +648,24 @@ func (m *tuiModel) armWakeup(delay time.Duration, prompt string, repeat bool) {
 	m.loopActive = true
 }
 
-// cancelWakeup stops any armed loop. The loop coexists with user messages
-// (CC-style), so this fires only on an explicit stop: Ctrl+C, or the model
-// calling schedule_wakeup(cancel=true) when the user asks to stop.
+// wakeupFired clears the spent timer after a tick but KEEPS the loop clock
+// (loopStart), so a dynamic loop's lifetime accumulates across ticks even
+// though the model re-arms it each turn.
+func (m *tuiModel) wakeupFired() {
+	m.wakeupTimer = nil
+	m.loopActive = false
+}
+
+// cancelWakeup stops any armed loop and resets the clock. The loop coexists
+// with user messages (CC-style), so this fires only on an explicit stop: Ctrl+C,
+// schedule_wakeup(cancel=true), or the anti-leak lifetime bound.
 func (m *tuiModel) cancelWakeup() {
 	if m.wakeupTimer != nil {
 		m.wakeupTimer.Stop()
 		m.wakeupTimer = nil
 	}
 	m.loopActive = false
+	m.loopStart = time.Time{}
 }
 
 // startTurn launches a turn whose transcript echo is the submitted line itself.
@@ -918,7 +941,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.repeat {
 			m.armWakeup(msg.delay, msg.prompt, true)
 		} else {
-			m.cancelWakeup()
+			m.wakeupFired() // dynamic: keep the clock; the model re-arms in the turn
 		}
 		m.printlnBlock(noticeStyle.Render("● Loop tick"))
 		return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(msg.prompt, ""))

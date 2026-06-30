@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/Leihb/octo-agent/internal/tools"
 )
 
 // armWakeupMsg (posted by the schedule_wakeup tool) arms the loop timer.
@@ -61,6 +63,35 @@ func TestTUI_CancelWakeupMsgStopsLoop(t *testing.T) {
 	m.Update(cancelWakeupMsg{})
 	if m.loopActive || m.wakeupTimer != nil {
 		t.Fatal("cancelWakeupMsg should stop the loop")
+	}
+}
+
+// Anti-leak: a loop past tools.MaxLoopLifetime stops on its next re-arm.
+func TestTUI_MaxLifetimeStops(t *testing.T) {
+	m := newTestModel()
+	m.armWakeup(time.Hour, "tick", true)
+	m.loopStart = time.Now().Add(-2 * tools.MaxLoopLifetime) // simulate a long-running loop
+	m.armWakeup(time.Hour, "tick", true)                     // next tick's re-arm
+	if m.loopActive || m.wakeupTimer != nil {
+		t.Fatal("an expired loop must stop instead of re-arming")
+	}
+}
+
+// A dynamic tick keeps the loop clock so its lifetime accumulates across ticks.
+func TestTUI_DynamicTickKeepsClock(t *testing.T) {
+	m := newTestModel()
+	m.armWakeup(time.Hour, "tick", false)
+	start := m.loopStart
+	if start.IsZero() {
+		t.Fatal("arming should stamp the loop clock")
+	}
+	m.wakeupFired() // a dynamic tick fired
+	if m.loopStart != start {
+		t.Fatal("a dynamic tick must keep the loop clock, not reset it")
+	}
+	m.cancelWakeup()
+	if !m.loopStart.IsZero() {
+		t.Fatal("cancel should reset the loop clock")
 	}
 }
 

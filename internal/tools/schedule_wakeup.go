@@ -71,6 +71,22 @@ const (
 	maxWakeupDelay = 3600 * time.Second
 )
 
+// MaxLoopLifetime bounds how long an in-session loop may keep ticking, measured
+// from its first wakeup. A runaway loop — the model re-arming forever, or an
+// interval loop nobody stops — must not tick indefinitely, especially on the
+// server (web/IM) where no one watches it spend tokens. All three surfaces
+// (TUI, web, IM) enforce this same bound via LoopExpired: once a loop has run
+// this long it stops instead of re-arming. For a schedule that must outlive
+// this, use a persistent cron task (cron-task-creator) instead.
+const MaxLoopLifetime = 12 * time.Hour
+
+// LoopExpired reports whether a loop that first armed at start has run past the
+// anti-leak lifetime and must stop. Shared by every surface so the bound is
+// identical everywhere; a zero start (no loop yet) is never expired.
+func LoopExpired(start time.Time) bool {
+	return !start.IsZero() && time.Since(start) >= MaxLoopLifetime
+}
+
 // ScheduleWakeupTool lets the model schedule its own next turn — the mechanism
 // behind the loop skill. The model calls it at the end of a turn to come back
 // later (dynamic, self-paced mode) or to keep a fixed cadence (repeat = interval
