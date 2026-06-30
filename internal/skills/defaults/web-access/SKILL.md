@@ -81,7 +81,7 @@ octo 的联网总入口：把内置的 `web_search` / `web_fetch` 与原生 `bro
 - `cookies` — 当前页 cookie，**含 HttpOnly**（`document.cookie`/eval 读不到的那些）。提取/复用登录会话、OAuth token 用它。
 
 **录制 / 回放（web-access 没有的能力）**
-- `record_start` / `record_stop`（`name`）— 把一次真实演示录成可编辑的 skill。
+- `record_start` / `record_stop`（`name`）— 把**用户本人**的一次真实演示录成可编辑的 skill。录制只捕获用户在浏览器里的真实手势（点击/输入），**不录你自己的工具动作**。所以正确姿势是：`record_start` 之后**把控制权交还用户**——告诉用户「录制已开始，请你在浏览器里完成这些操作，做完告诉我」，等用户说完成，再 `record_stop`。**录制期间不要自己 navigate/click/type**：那不是演示，而且会跳转的点击极易丢失，录出来是空的。
 - `run_skill`（`name`,`params`）— 确定性回放，自带按步隐式等待与选择器自愈。重复性流程（批量操作、定期取数）优先录制回放，而非每次盲驱动。
 
 **收尾**
