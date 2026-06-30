@@ -25,6 +25,11 @@ type Waker interface {
 	// human-facing note. Any wakeup already pending for the session is
 	// replaced — a session has at most one armed wakeup at a time.
 	ScheduleWakeup(delay time.Duration, prompt, reason string, repeat bool) error
+
+	// CancelWakeup stops any pending wakeup for the session — the explicit way
+	// to end an interval loop (the dynamic mode ends by simply not re-arming).
+	// No-op when nothing is armed.
+	CancelWakeup() error
 }
 
 // ctxKeyWaker carries the turn-scoped Waker.
@@ -86,15 +91,18 @@ func (ScheduleWakeupTool) Definition() agent.ToolDefinition {
 			"tool again on the next turn; simply NOT calling it ends the loop. Use when you decide " +
 			"the cadence turn-by-turn or want to stop once the task is done.\n" +
 			"- INTERVAL (repeat=true): the wakeup re-arms itself on the same cadence and keeps firing " +
-			"until the user interrupts or sends a new message. Use for a steady \"every N seconds\" loop.\n\n" +
+			"on schedule. Use for a steady \"every N seconds\" loop.\n\n" +
 			"delay_seconds is clamped to [60, 3600]. Picking a cadence: the model's prompt cache has a " +
 			"~5-minute TTL, so a delay under 300s keeps context warm (right for actively polling " +
 			"external state like a CI run or a deploy), while 300s+ pays a cache miss (right when " +
 			"there's genuinely nothing to check sooner). Avoid exactly 300s — it pays the miss without " +
 			"amortizing it. For idle ticks with no specific signal to watch, default to 1200-1800s.\n\n" +
-			"A new user message cancels the loop and hands control back to the user; you can re-arm " +
-			"later. This is an in-session loop — for a schedule that must survive restarts or run " +
-			"while you're away, use the cron-task-creator skill instead.",
+			"The loop COEXISTS with the user: a message from the user does NOT stop it — the user can " +
+			"chat with you while it keeps ticking. To STOP an interval loop, call this tool with " +
+			"cancel=true (do this when the user asks you to stop, or pause); a dynamic loop also stops " +
+			"by simply not re-arming. The user can also hard-stop with Ctrl+C. This is an in-session " +
+			"loop — for a schedule that must survive restarts or run while you're away, use the " +
+			"cron-task-creator skill instead.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -114,6 +122,10 @@ func (ScheduleWakeupTool) Definition() agent.ToolDefinition {
 					"type":        "boolean",
 					"description": "false (default) for dynamic mode (fires once; re-arm yourself to continue). true for interval mode (re-arms automatically on the same cadence).",
 				},
+				"cancel": map[string]any{
+					"type":        "boolean",
+					"description": "true to STOP the current loop (cancel any pending wakeup). Use when the user asks you to stop or pause. The other fields are ignored when cancel is true.",
+				},
 			},
 			"required": []string{"delay_seconds", "reason", "prompt"},
 		},
@@ -124,6 +136,17 @@ func (ScheduleWakeupTool) Execute(ctx context.Context, _ string, input map[strin
 	w := wakerFrom(ctx)
 	if w == nil {
 		return agent.ToolResult{}, fmt.Errorf("schedule_wakeup: no live session to wake — the loop only runs in the interactive TUI or a server (web/IM) session")
+	}
+
+	// Explicit stop: cancel any pending wakeup and ignore the other fields.
+	if boolArg(input, "cancel") {
+		if err := w.CancelWakeup(); err != nil {
+			return agent.ToolResult{}, fmt.Errorf("schedule_wakeup: %w", err)
+		}
+		return agent.ToolResult{
+			Text: "Loop stopped — no further wakeups scheduled.",
+			UI:   map[string]any{"type": "wakeup", "cancelled": true},
+		}, nil
 	}
 
 	prompt := strings.TrimSpace(stringArg(input, "prompt"))

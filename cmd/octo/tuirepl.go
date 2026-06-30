@@ -177,6 +177,7 @@ type wakeupMsg struct { // an armed loop wakeup fired (async, from the wakeup ti
 	repeat bool
 	delay  time.Duration
 }
+type cancelWakeupMsg struct{}       // schedule_wakeup(cancel=true) asked to stop the loop
 type titleMsg struct{ text string } // a generated session title (async)
 type tickMsg struct{}               // animation tick while a turn runs
 type askMsg struct {
@@ -311,8 +312,8 @@ type tuiModel struct {
 
 	// wakeupTimer is the armed in-session loop wakeup (schedule_wakeup tool),
 	// nil when no loop is running. loopActive mirrors it for the activity line.
-	// A new user message or an interrupt cancels the loop (cancelWakeup) —
-	// matching Claude Code's loop, which yields control back to the user.
+	// The loop coexists with user messages (CC-style); it stops only on an
+	// explicit Ctrl+C or schedule_wakeup(cancel=true) — see cancelWakeup.
 	wakeupTimer *time.Timer
 	loopActive  bool
 
@@ -616,6 +617,11 @@ func (w tuiWaker) ScheduleWakeup(delay time.Duration, prompt, reason string, rep
 	return nil
 }
 
+func (w tuiWaker) CancelWakeup() error {
+	w.prog.Send(cancelWakeupMsg{})
+	return nil
+}
+
 // armWakeup (re)starts the loop's wakeup timer, replacing any pending one — a
 // session holds at most one armed loop.
 func (m *tuiModel) armWakeup(delay time.Duration, prompt string, repeat bool) {
@@ -628,8 +634,9 @@ func (m *tuiModel) armWakeup(delay time.Duration, prompt string, repeat bool) {
 	m.loopActive = true
 }
 
-// cancelWakeup stops any armed loop. Called when the user steps in (a new
-// message) or interrupts — Claude Code's loop hands control back to the user.
+// cancelWakeup stops any armed loop. The loop coexists with user messages
+// (CC-style), so this fires only on an explicit stop: Ctrl+C, or the model
+// calling schedule_wakeup(cancel=true) when the user asks to stop.
 func (m *tuiModel) cancelWakeup() {
 	if m.wakeupTimer != nil {
 		m.wakeupTimer.Stop()
@@ -897,22 +904,32 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.flushPrints()
 
 	case wakeupMsg:
-		// An armed loop wakeup fired. Re-arm first for interval mode (so the
-		// cadence is independent of the turn's own duration), then — if the
-		// session is idle — run the loop prompt as a fresh turn. A new user
-		// message would already have called cancelWakeup, so reaching here while
-		// a turn runs or work is queued means the model itself is still busy:
-		// drop this fire (repeat already re-armed; dynamic mode re-arms in-turn).
-		if msg.repeat && m.loopActive {
+		// An armed loop wakeup fired. The loop COEXISTS with the user, so a
+		// wakeup that lands while a turn is running (a user message, or the
+		// loop's own prior turn) is NOT dropped — re-arm it so the tick runs
+		// once the session is idle again. When idle, run the loop prompt as a
+		// fresh turn: interval mode re-arms for the next tick; dynamic mode
+		// clears, and the model re-arms inside the turn (or ends the loop by
+		// not calling schedule_wakeup).
+		if m.turnRunning || len(m.queue) > 0 {
+			m.armWakeup(msg.delay, msg.prompt, msg.repeat)
+			return m, m.flushPrints()
+		}
+		if msg.repeat {
 			m.armWakeup(msg.delay, msg.prompt, true)
 		} else {
 			m.cancelWakeup()
 		}
-		if m.turnRunning || len(m.queue) > 0 {
-			return m, m.flushPrints()
-		}
 		m.printlnBlock(noticeStyle.Render("● Loop tick"))
 		return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(msg.prompt, ""))
+
+	case cancelWakeupMsg:
+		// schedule_wakeup(cancel=true): the model stopped the loop on request.
+		if m.loopActive {
+			m.printlnBlock(noticeStyle.Render("● Loop stopped"))
+		}
+		m.cancelWakeup()
+		return m, m.flushPrints()
 
 	case suggestionMsg:
 		// Show the follow-up only while idle with an empty input — a new turn or

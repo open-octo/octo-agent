@@ -42,18 +42,29 @@ func TestTUI_WakeupBusyReArms(t *testing.T) {
 	m.cancelWakeup()
 }
 
-// A new user message cancels the loop (CC-style hand-back).
-func TestTUI_UserMessageCancelsLoop(t *testing.T) {
+// A new user message does NOT cancel the loop — they coexist (CC-style).
+func TestTUI_UserMessageKeepsLoop(t *testing.T) {
 	m := newTestModel()
 	m.armWakeup(time.Hour, "tick", true)
 	setInput(m, "do something else")
 	_, _ = m.submit()
+	if !m.loopActive || m.wakeupTimer == nil {
+		t.Fatal("a user message must not cancel the armed loop (they coexist)")
+	}
+	m.cancelWakeup()
+}
+
+// schedule_wakeup(cancel=true) → cancelWakeupMsg stops the loop.
+func TestTUI_CancelWakeupMsgStopsLoop(t *testing.T) {
+	m := newTestModel()
+	m.armWakeup(time.Hour, "tick", true)
+	m.Update(cancelWakeupMsg{})
 	if m.loopActive || m.wakeupTimer != nil {
-		t.Fatal("a user message should cancel the armed loop")
+		t.Fatal("cancelWakeupMsg should stop the loop")
 	}
 }
 
-// An interrupt cancels the loop too.
+// An interrupt (Ctrl+C) is the hard manual stop.
 func TestTUI_InterruptCancelsLoop(t *testing.T) {
 	m := newTestModel()
 	m.turnRunning = true

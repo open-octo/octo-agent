@@ -1644,6 +1644,11 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		s.injectorMu.Lock()
 		delete(s.sessionInjectors, imKey)
 		s.injectorMu.Unlock()
+		// A fresh context drops any armed loop wakeup for this chat.
+		s.cancelWakeup(imKey)
+	case "/stop":
+		// /stop is the IM interrupt — also the hard stop for an armed loop.
+		s.cancelWakeup("im:" + string(s.channelMgr.KeyFor(ev)))
 	}
 	// /compact runs an LLM summarize, so it's handled out of the (synchronous,
 	// reply-string) CommandRouter: run it in a goroutine and report the result.
@@ -1949,6 +1954,11 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// here because only an IM turn has a chat to send to.
 		ctx = tools.WithChannelSender(ctx, channelFileSender{ad: ad, chatID: ev.ChatID, replyTo: ev.MessageID})
 		toolDefs = append(toolDefs, tools.SendFileToolDef())
+		// Per-chat Waker so schedule_wakeup (the loop skill) can pace this and
+		// later turns. On wakeup it routes through runChannelIdleTurn, which
+		// delivers via the adapter — including the wakeup-injected turns, which
+		// flow back through here and re-stamp the waker so the loop continues.
+		ctx = tools.WithWaker(ctx, imWaker{s: s, sess: sess, ad: ad, ev: ev})
 	}
 
 	persist := func() {
