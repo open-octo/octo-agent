@@ -324,6 +324,19 @@
     }
   }
 
+  // Cycle the permission mode like the TUI's shift+tab: interactive ↔ auto
+  // (strict, the unattended posture, normalises back to interactive).
+  async function cyclePermMode() {
+    if (!sid) return
+    const next = permMode === 'interactive' ? 'auto' : 'interactive'
+    try {
+      await api.updateSessionPermissionMode(sid, next)
+      chatPermMode.update(m => ({ ...m, [sid]: next }))
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to switch permission mode', 'error')
+    }
+  }
+
   function closeMenus() { modelMenu = false; reasonMenu = false }
 
   // Show only the last two path segments so a long working dir doesn't push
@@ -449,11 +462,13 @@
       <span class="mono">{ctxUsage}%</span>
     </span>
     <span style="margin-left:auto;"></span>
-    {#if permMode === 'auto'}
-      <StatusTag status="success">{$t('chat.auto_mode')}</StatusTag>
-    {:else}
-      <StatusTag status="warning">{$t('chat.ask_mode')}</StatusTag>
-    {/if}
+    <button class="perm-toggle" onclick={(e) => { e.stopPropagation(); cyclePermMode() }} title={$t('chat.perm_toggle_hint')}>
+      {#if permMode === 'auto'}
+        <StatusTag status="success">{$t('chat.auto_mode')}</StatusTag>
+      {:else}
+        <StatusTag status="warning">{$t('chat.ask_mode')}</StatusTag>
+      {/if}
+    </button>
   </div>
 
   <div class="input-wrap">
@@ -565,6 +580,8 @@
 .chip.static { cursor: default; background: var(--bg-table-header); border-color: var(--border-secondary); }
 .chip.static:hover { border-color: var(--border-secondary); color: var(--text-secondary); }
 .picker { position: relative; }
+.perm-toggle { padding: 0; border: none; background: transparent; cursor: pointer; font-family: inherit; display: inline-flex; }
+.perm-toggle:hover { opacity: 0.82; }
 .menu {
   position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 50;
   min-width: 200px; max-width: 320px; max-height: 280px; overflow-y: auto;

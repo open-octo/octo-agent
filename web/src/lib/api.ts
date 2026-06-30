@@ -104,6 +104,13 @@ export async function updateSessionShowReasoning(id: string, show: boolean): Pro
   })
 }
 
+export async function updateSessionPermissionMode(id: string, mode: string): Promise<void> {
+  await request<unknown>(`/api/sessions/${id}/permission_mode`, {
+    method: 'PATCH',
+    ...json({ permission_mode: mode }),
+  })
+}
+
 export async function updateSessionWorkingDir(id: string, dir: string): Promise<void> {
   await request<unknown>(`/api/sessions/${id}/working_dir`, {
     method: 'PATCH',

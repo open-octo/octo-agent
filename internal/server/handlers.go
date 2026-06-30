@@ -1122,6 +1122,69 @@ func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *ht
 	})
 }
 
+// ─── PATCH /api/sessions/{id}/permission_mode ───────────────────────────────
+
+type updateSessionPermissionModeRequest struct {
+	PermissionMode string `json:"permission_mode"`
+}
+
+// handleUpdateSessionPermissionMode updates the server-wide permission mode —
+// the Web equivalent of the TUI's shift+tab cycle. Valid values: "interactive",
+// "auto", "strict". The per-turn permission engine is rebuilt from this config
+// value (see resolvePermissionMode), so the change takes effect on the next
+// turn without a sender rebuild.
+func (s *Server) handleUpdateSessionPermissionMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+
+	var req updateSessionPermissionModeRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	mode := strings.ToLower(req.PermissionMode)
+	switch mode {
+	case string(permission.ModeInteractive), string(permission.ModeAutoApprove), string(permission.ModeStrict):
+	default:
+		writeError(w, http.StatusBadRequest, "permission_mode must be interactive, auto, or strict")
+		return
+	}
+
+	cfg, _ := config.Load()
+	cfg.PermissionMode = mode
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	// Push the new mode to every known session so each composer status bar
+	// refreshes immediately. The engine reads cfg on its next turn, so no
+	// sender rebuild is needed here.
+	if s.wsHub != nil {
+		wd, pm, re, sr, _ := s.sessionStatusFields()
+		sessions, _ := agent.ListSessions(50)
+		for _, sess := range sessions {
+			s.wsHub.broadcast(sess.ID, map[string]any{
+				"type":             "session_update",
+				"session_id":       sess.ID,
+				"working_dir":      wd,
+				"permission_mode":  pm,
+				"reasoning_effort": re,
+				"show_reasoning":   sr,
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"permission_mode": mode,
+	})
+}
+
 // ─── PATCH /api/sessions/{id}/show_reasoning ────────────────────────────────
 
 type updateSessionShowReasoningRequest struct {
