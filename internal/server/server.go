@@ -600,6 +600,10 @@ func (s *Server) registerRoutes() {
 	// Browser automation setup
 	s.api("GET /api/browser/status", s.handleBrowserStatus)
 	s.api("POST /api/browser/verify", s.handleBrowserVerify)
+	s.api("GET /api/browser/recordings", s.handleListBrowserRecordings)
+	s.api("GET /api/browser/recordings/{name}", s.handleGetBrowserRecording)
+	s.api("PUT /api/browser/recordings/{name}", s.handleSaveBrowserRecording)
+	s.api("DELETE /api/browser/recordings/{name}", s.handleDeleteBrowserRecording)
 
 	// Upload
 	s.api("POST /api/upload", s.handleUpload)
