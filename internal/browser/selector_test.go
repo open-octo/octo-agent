@@ -36,12 +36,12 @@ func TestResolveSelectorJS_Routing(t *testing.T) {
 		in   string
 		want string // a fragment the generated JS must contain
 	}{
-		{`#id`, `document.querySelector(`},                 // plain CSS untouched
-		{`a:has-text("hi")`, `querySelectorAll(`},          // text → scan
-		{`text=Login`, `querySelectorAll("*")`},            // text= engine
-		{`xpath=//a[@id]`, `document.evaluate(`},           // xpath engine
+		{`#id`, `document.querySelector(`},                     // plain CSS untouched
+		{`a:has-text("hi")`, `querySelectorAll(`},              // text → scan
+		{`text=Login`, `querySelectorAll("*")`},                // text= engine
+		{`xpath=//a[@id]`, `document.evaluate(`},               // xpath engine
 		{`css=div.card`, `document.querySelector("div.card")`}, // css= prefix stripped
-		{`button:visible`, `getClientRects`},               // :visible → scan w/ visibility
+		{`button:visible`, `getClientRects`},                   // :visible → scan w/ visibility
 	}
 	for _, c := range cases {
 		got := resolveSelectorJS("document", c.in)
