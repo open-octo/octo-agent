@@ -434,29 +434,30 @@ func TestSend_ImageBlock_WireFormat(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	// user, assistant(tool_call), tool(result with nested [text, image_url])
-	if len(wireReq.Messages) != 3 {
-		t.Fatalf("messages len = %d, want 3: %s", len(wireReq.Messages), capturedBody)
+	// user, assistant(tool_call), tool(result as STRING), user(image_url part).
+	// The image can't ride on the role="tool" message (the protocol rejects an
+	// image part there), so it lands on a separate trailing user message.
+	if len(wireReq.Messages) != 4 {
+		t.Fatalf("messages len = %d, want 4: %s", len(wireReq.Messages), capturedBody)
 	}
-	// msg[2] = tool result with nested content array
+	// msg[2] = tool result, string content (no nested array).
 	if wireReq.Messages[2].Role != "tool" || wireReq.Messages[2].ToolCallID != "call-1" {
 		t.Errorf("msg[2] = %+v, want tool/call-1", wireReq.Messages[2])
 	}
-	// Content should be an array with text + image_url parts.
-	parts, ok := wireReq.Messages[2].Content.([]any)
-	if !ok {
-		t.Fatalf("msg[2].content = %T, want []any (nested content array)", wireReq.Messages[2].Content)
+	if _, isStr := wireReq.Messages[2].Content.(string); !isStr {
+		t.Errorf("msg[2].content = %T, want string (tool messages can't carry images)", wireReq.Messages[2].Content)
 	}
-	if len(parts) != 2 {
-		t.Fatalf("content parts len = %d, want 2 (text + image_url)", len(parts))
+	// msg[3] = user message carrying the image as an image_url content part.
+	if wireReq.Messages[3].Role != "user" {
+		t.Fatalf("msg[3].role = %q, want user", wireReq.Messages[3].Role)
 	}
-	textPart, _ := parts[0].(map[string]any)
-	if textPart["type"] != "text" {
-		t.Errorf("parts[0].type = %v, want text", textPart["type"])
+	parts, ok := wireReq.Messages[3].Content.([]any)
+	if !ok || len(parts) != 1 {
+		t.Fatalf("msg[3].content = %T (len check), want []any with 1 image part: %s", wireReq.Messages[3].Content, capturedBody)
 	}
-	imgPart, _ := parts[1].(map[string]any)
+	imgPart, _ := parts[0].(map[string]any)
 	if imgPart["type"] != "image_url" {
-		t.Errorf("parts[1].type = %v, want image_url", imgPart["type"])
+		t.Errorf("parts[0].type = %v, want image_url", imgPart["type"])
 	}
 	imgURL, _ := imgPart["image_url"].(map[string]any)
 	url, _ := imgURL["url"].(string)
