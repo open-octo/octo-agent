@@ -55,6 +55,19 @@ func SetBrowserVision(on bool) { browserVision.Store(on) }
 // BrowserVisionEnabled reports the current setting (for tests/diagnostics).
 func BrowserVisionEnabled() bool { return browserVision.Load() }
 
+// BrowserHealerSet / BrowserSkillGeneratorSet report whether the LLM-backed
+// browser helpers are wired (for tests/diagnostics).
+func BrowserHealerSet() bool {
+	recorderMu.Lock()
+	defer recorderMu.Unlock()
+	return browserHealer != nil
+}
+func BrowserSkillGeneratorSet() bool {
+	recorderMu.Lock()
+	defer recorderMu.Unlock()
+	return browserSkillGen != nil
+}
+
 // SetBrowserHealer injects the LLM-backed step healer used by run_skill.
 func SetBrowserHealer(h browser.Healer) {
 	recorderMu.Lock()
