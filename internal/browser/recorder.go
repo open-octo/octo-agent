@@ -11,7 +11,7 @@ import (
 // the value for inputs). Frame is set when the element lives in a same-origin
 // iframe, so replay can pierce it via the " >>> " convention.
 type RecordedEvent struct {
-	Type     string `json:"type"`     // click | change
+	Type     string `json:"type"`     // click | change | upload | navigate
 	Selector string `json:"selector"` // best-effort CSS selector within its document
 	Frame    string `json:"frame"`    // iframe selector when the target is in a child frame
 	Tag      string `json:"tag"`      // target tagName (SELECT/INPUT/…), so replay picks the right action
@@ -79,8 +79,13 @@ func (r *Recorder) Start(ctx context.Context) error {
 	}
 
 	events, unsub := p.cli.subscribe("Runtime.bindingCalled", p.sessionID)
+	// Also capture top-level navigations (address-bar, link, SPA history) so a
+	// multi-page demonstration replays from the right pages — otherwise the only
+	// navigate step is the synthesized start URL, and the recording loses every
+	// page the user moved to.
+	navEvents, navUnsub := p.cli.subscribe("Page.frameNavigated", p.sessionID)
 	r.mu.Lock()
-	r.unsub = unsub
+	r.unsub = func() { unsub(); navUnsub() }
 	r.mu.Unlock()
 
 	go func() {
@@ -101,6 +106,31 @@ func (r *Recorder) Start(ctx context.Context) error {
 			r.mu.Unlock()
 		}
 	}()
+	go func() {
+		for ev := range navEvents {
+			var b struct {
+				Frame struct {
+					URL      string `json:"url"`
+					ParentID string `json:"parentId"`
+				} `json:"frame"`
+			}
+			if json.Unmarshal(ev.Params, &b) != nil || b.Frame.ParentID != "" {
+				continue // ignore subframe navigations
+			}
+			u := b.Frame.URL
+			if u == "" || u == "about:blank" {
+				continue
+			}
+			r.mu.Lock()
+			n := len(r.events)
+			if n > 0 && r.events[n-1].Type == "navigate" && r.events[n-1].URL == u {
+				r.mu.Unlock()
+				continue // collapse the initial-load echo / repeat
+			}
+			r.events = append(r.events, RecordedEvent{Type: "navigate", URL: u})
+			r.mu.Unlock()
+		}
+	}()
 	return nil
 }
 
@@ -117,7 +147,7 @@ func (r *Recorder) Events() []RecordedEvent {
 // no healer) — a convenience over the skill path for raw record→replay.
 func Replay(ctx context.Context, page *Page, events []RecordedEvent) error {
 	skill := CompileSkill("", "", "", events)
-	_, err := ReplaySkill(ctx, page, &skill, nil, ReplayOptions{})
+	_, _, err := ReplaySkill(ctx, page, &skill, nil, ReplayOptions{})
 	return err
 }
 
