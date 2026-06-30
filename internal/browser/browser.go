@@ -196,11 +196,21 @@ func (b *Browser) Pages(ctx context.Context) ([]TargetInfo, error) {
 	return pages, nil
 }
 
-// Navigate loads url and waits for the page load event.
+// Navigate loads url and waits for the page load event. When the page is still
+// on the initial about:blank (the tab octo opened), it replaces that history
+// entry instead of pushing one — otherwise a later Back() lands the model back
+// on the blank tab. Navigation between real pages keeps normal history.
 func (p *Page) Navigate(ctx context.Context, url string) error {
 	events, unsub := p.cli.subscribe("Page.loadEventFired", p.sessionID)
 	defer unsub()
-	if _, err := p.cli.call(ctx, p.sessionID, "Page.navigate", map[string]any{"url": url}); err != nil {
+
+	var cur string
+	_ = p.Eval(ctx, "location.href", &cur)
+	if cur == "" || cur == "about:blank" {
+		if err := p.Eval(ctx, fmt.Sprintf("(()=>{location.replace(%s);return true})()", jsString(url)), nil); err != nil {
+			return err
+		}
+	} else if _, err := p.cli.call(ctx, p.sessionID, "Page.navigate", map[string]any{"url": url}); err != nil {
 		return err
 	}
 	select {

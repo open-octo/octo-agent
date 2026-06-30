@@ -601,3 +601,46 @@ func TestClick_PlaywrightSelectors(t *testing.T) {
 		}
 	}
 }
+
+// TestNavigate_ReplacesInitialBlank: the first navigation off about:blank must
+// replace that entry, so going Back from a later page lands on the first real
+// page — not the blank tab octo opened.
+func TestNavigate_ReplacesInitialBlank(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<!doctype html><html><head><title>" + r.URL.Path + "</title></head><body>" + r.URL.Path + "</body></html>"))
+	}))
+	defer srv.Close()
+
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL+"/first"); err != nil {
+		t.Fatalf("navigate first: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL+"/second"); err != nil {
+		t.Fatalf("navigate second: %v", err)
+	}
+	if err := page.Back(ctx); err != nil {
+		t.Fatalf("back: %v", err)
+	}
+	// Back should settle on /first, not about:blank. history.back() is async, so
+	// poll briefly.
+	deadline := time.Now().Add(5 * time.Second)
+	var path string
+	for time.Now().Before(deadline) {
+		_ = page.Eval(ctx, "location.pathname", &path)
+		if path == "/first" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if path != "/first" {
+		t.Errorf("after back, pathname = %q, want /first (about:blank should not be in history)", path)
+	}
+}
