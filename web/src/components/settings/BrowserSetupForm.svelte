@@ -19,7 +19,10 @@
       onVerified: (res: BrowserVerifyResult) => void | Promise<void>
     } = $props()
 
-  let port = $state(9222)
+  // The chrome://inspect "Allow remote debugging" toggle always serves CDP on
+  // 127.0.0.1:9222, so the port is fixed — letting users type one just invites a
+  // typo that can't connect. Advanced custom-port setups use config.yml.
+  const port = 9222
   let chromeAvailable = $state(true)
   let verifying = $state(false)
   let error = $state('')
@@ -27,7 +30,6 @@
   onMount(async () => {
     try {
       const st = await api.getBrowserStatus()
-      if (st.port) port = st.port
       chromeAvailable = st.chrome_available
     } catch { /* defaults are fine */ }
   })
@@ -63,10 +65,6 @@
     {$t('settings.browser.no_chrome')}
   </div>
 {/if}
-<div class="bs-port-row">
-  <label class="bs-lbl" for="bs-port">{$t('settings.browser.port_label')}</label>
-  <input id="bs-port" class="bs-port" type="number" min="1" max="65535" bind:value={port} />
-</div>
 {#if verifying}
   <div class="bs-hint">
     <iconify-icon icon="ant-design:loading-outlined" width="14"></iconify-icon>
@@ -90,14 +88,6 @@
 .bs-steps { margin: 0 0 16px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text); line-height: 1.5; }
 .bs-steps code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--bg-table-header); padding: 1px 5px; border-radius: 4px; }
 .bs-note { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; font-size: 12px; color: var(--warning); background: var(--warning-bg); }
-.bs-port-row { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
-.bs-lbl { font-size: 14px; color: var(--text); }
-.bs-port {
-  width: 120px; height: 32px; padding: 0 10px;
-  border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
-  color: var(--text); font-family: inherit; outline: none; background: var(--bg-container);
-}
-.bs-port:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
 .bs-hint { margin-top: 12px; font-size: 12px; color: var(--blue-6); display: flex; align-items: center; gap: 6px; }
 .bs-error { margin-top: 12px; font-size: 12px; color: var(--error); }
 .bs-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
