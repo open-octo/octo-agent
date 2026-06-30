@@ -8,17 +8,21 @@ import (
 	"syscall"
 )
 
-// detachedProcess tells Windows to create the child without inheriting the
-// parent's console. Combined with stdout/stderr redirected to a log file, the
-// process runs silently in the background with no terminal window.
-const detachedProcess = 0x00000008
+// createNoWindow gives the child its own console but with no visible window.
+// We deliberately avoid DETACHED_PROCESS (0x8) here: a detached child has *no*
+// console at all, so when it spawns its own console-app children (the daemon
+// child is the supervisor, which spawns the serve worker) Windows allocates a
+// fresh *visible* console for each grandchild. With a windowless console the
+// grandchildren inherit it and stay invisible. Combined with stdout/stderr
+// redirected to a log file, the whole tree runs silently in the background.
+const createNoWindow = 0x08000000
 
-// setSysProcAttrDetach creates the child as a detached process so it does not
-// inherit the parent console and does not receive Ctrl-C signals sent to the
-// terminal.
+// setSysProcAttrDetach creates the child with a windowless console so neither it
+// nor any console-app grandchild it spawns pops a terminal window, and it does
+// not receive Ctrl-C signals sent to the parent's terminal.
 func setSysProcAttrDetach(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: detachedProcess,
+		CreationFlags: createNoWindow,
 	}
 }
 
