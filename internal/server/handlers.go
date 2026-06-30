@@ -734,6 +734,15 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, error) {
 	executor := tools.NewDefaultRegistry()
 
+	// Gate browser image content on the active model's vision capability. Unlike
+	// the CLI (which goes through app.WireTools), the server wires tools here, so
+	// this is the only place serve learns whether the model can take images — a
+	// text-only model would otherwise be handed a screenshot it rejects (HTTP
+	// 400). Re-evaluated per turn so a mid-session model switch takes effect.
+	if cfg, err := config.Load(); err == nil {
+		tools.SetBrowserVision(cfg.ModelVision(a.Model))
+	}
+
 	engine, err := permission.New(permissionConfigPath(), s.curCwd(), resolvePermissionMode(), s.memDir, s.homeMemDir)
 	if err != nil {
 		return ctx, nil, nil, fmt.Errorf("permission engine: %w", err)
