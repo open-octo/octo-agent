@@ -113,12 +113,18 @@ export function setActiveSession(id: string) {
   chatMessages.update(m => ({ ...m, [id]: m[id] || [] }))
 }
 
+// Sessions opened by openAgentSession — single-purpose, panel-launched (Browser
+// Replay/Record/Edit, Skills, Tasks, …). The after-turn follow-up suggestion is
+// noise here, so ChatView skips it for these ids.
+export const agenticSessions = new Set<string>()
+
 // Agentic-first entry point shared by the Skills / Tasks / MCP / Channels /
 // Profile panels: open a fresh chat session and queue a slash-command to
 // auto-send once the WS subscription is confirmed (see pendingPrompt). The
 // relevant skill drives the rest of the flow in conversation — no forms.
 export async function openAgentSession(content: string, name?: string): Promise<void> {
   const sess = await api.createSession({ source: 'manual', ...(name ? { name } : {}) })
+  agenticSessions.add(sess.id)
   sessions.update(s => [sess, ...s])
   pendingPrompt.set({ sessionId: sess.id, content })
   activeSessionId.set(sess.id)

@@ -133,7 +133,7 @@ func (AskUserQuestionTool) Definition() agent.ToolDefinition {
 						"properties": map[string]any{
 							"question": map[string]any{
 								"type":        "string",
-								"description": "The question to ask, complete with punctuation. Should be one sentence; if you need more context, put it in the option labels instead of the question itself.",
+								"description": "The question to ask, complete with punctuation. Should be ONE sentence asking ONE thing. Do not pack multiple questions (\"1) … 2) …\") into a single string — ask one, then fire a separate call for the next. If you need more context, put it in the option labels instead of the question itself.",
 							},
 							"header": map[string]any{
 								"type":        "string",

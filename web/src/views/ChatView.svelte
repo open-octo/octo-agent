@@ -40,6 +40,7 @@
     applySubAgentEvent,
     showToast,
     uid,
+    agenticSessions,
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
@@ -688,6 +689,9 @@
 
     cleanups.push(ws.on('next_message_suggestion', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      // Panel-launched agentic sessions (Replay/Record/Edit/…) are single-purpose;
+      // a follow-up suggestion is just noise there.
+      if (agenticSessions.has(sid)) return
       chatSuggestion.update(s => ({ ...s, [sid]: (ev as any).text ?? '' }))
     }))
 
