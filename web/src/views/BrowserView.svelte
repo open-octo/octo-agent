@@ -270,7 +270,8 @@
   .ghost-btn:hover { background: var(--surface-hover); }
   .ghost-btn.danger { color: var(--danger, #d4380d); }
   .rec-head-actions { display: flex; align-items: center; gap: 8px; }
-  .primary-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .primary-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--blue-6); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .primary-btn:hover:not(:disabled) { background: var(--blue-5); }
   .primary-btn:disabled { opacity: 0.6; cursor: default; }
   .yaml { width: 100%; min-height: 360px; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: 6px; padding: 10px; background: var(--bg); color: var(--text); resize: vertical; box-sizing: border-box; }
   .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
