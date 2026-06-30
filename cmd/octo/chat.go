@@ -635,6 +635,11 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		// bubbletea owns stdin and renders its own input; the asker and gate
 		// are wired to the TUI sink inside runTUI.
 		defer tools.SetAsker(nil)
+		// The interactive TUI can re-enter a live session, so advertise the
+		// schedule_wakeup tool (the loop skill's mechanism). The headless
+		// one-shot below leaves it off — a process that exits after one turn
+		// has no session to wake.
+		tools.SetWakerSupported(true)
 	} else {
 		// A TTY reader (a positional message typed at a terminal) makes
 		// permission / Ask prompts interactive. Over a pipe stdin is already

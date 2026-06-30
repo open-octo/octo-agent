@@ -170,6 +170,13 @@ type Server struct {
 	interrupts  map[string]context.CancelFunc
 	interruptMu sync.Mutex
 
+	// wakeupTimers holds the armed in-session loop wakeup per session
+	// (schedule_wakeup tool / loop skill), guarded by wakeupMu. A new user
+	// turn, a retry, or an interrupt cancels it; interval mode re-arms from the
+	// fired callback. See loop.go.
+	wakeupTimers map[string]*time.Timer
+	wakeupMu     sync.Mutex
+
 	// confirmation channels (from request_user_feedback in browser).
 	confirmations map[string]chan string
 	confirmMu     sync.Mutex
@@ -344,6 +351,7 @@ func New(cfg Config) (*Server, error) {
 		pendingConfirms:     make(map[string]wsEventRequestConfirmation),
 		askSlots:            make(map[string]chan struct{}),
 		sessionInjectors:    make(map[string]*memory.Injector),
+		wakeupTimers:        make(map[string]*time.Timer),
 	}
 
 	// Register the WebSocket-backed asker so ask_user_question appears in the
@@ -357,6 +365,11 @@ func New(cfg Config) (*Server, error) {
 	// (including the one calling the tool) before the worker exits with
 	// ExitRestart for the supervisor to respawn.
 	tools.SetRestarter(s.Restart)
+
+	// Server-managed sessions can be re-entered, so advertise schedule_wakeup
+	// (the loop skill's mechanism); the per-session Waker is stamped into each
+	// turn's ctx in runAgentTurnLoop.
+	tools.SetWakerSupported(true)
 
 	s.registerRoutes()
 	s.initWS()

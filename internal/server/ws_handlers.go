@@ -339,6 +339,10 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 		return
 	}
 
+	// A user message takes over: cancel any armed loop so it hands control back
+	// (CC-style). The model can re-arm /loop later.
+	s.cancelWakeup(sid)
+
 	// Session-management slash commands handled inline (no model turn). Other
 	// "/..." text falls through to the model, matching the TUI where unknown
 	// slashes are ordinary input.
@@ -570,6 +574,8 @@ func (s *Server) wsToast(sid, message, level string) {
 // handleWSInterrupt sends an interrupt signal for a session and broadcasts
 // the interrupted event so the frontend shows the cancellation to the user.
 func (s *Server) handleWSInterrupt(sessionID string) {
+	// An interrupt also stops any armed loop wakeup (TUI / CC parity).
+	s.cancelWakeup(sessionID)
 	s.interruptMu.Lock()
 	if cancel, ok := s.interrupts[sessionID]; ok {
 		cancel()
@@ -630,6 +636,8 @@ func (s *Server) broadcastRollback(sessionID string) {
 // handleWSRetry re-runs the last turn by stripping the last assistant reply
 // from the session and resending the last user message.
 func (s *Server) handleWSRetry(conn *wsConn, sessionID string) {
+	// A retry is a user action: cancel any armed loop first.
+	s.cancelWakeup(sessionID)
 	sess, err := agent.LoadSession(sessionID)
 	if err != nil {
 		s.wsHub.broadcast(sessionID, map[string]string{
@@ -986,6 +994,10 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	}()
 
 	runCtx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKeySessionID{}, sess.ID))
+	// Stamp the per-session Waker so schedule_wakeup (the loop skill) can pace
+	// this and later turns — including the wakeup-injected turns kicked via
+	// kickIdleSteerTurn, which also flow through here.
+	runCtx = tools.WithWaker(runCtx, s.wakerFor(sess.ID))
 	s.registerInterrupt(sess.ID, cancel)
 	defer func() {
 		cancel()

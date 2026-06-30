@@ -166,8 +166,19 @@ type mcpReadyMsg struct{ reg *mcp.Registry }                 // background MCP c
 type subAgentEventMsg struct{ ev tools.SubAgentEvent }       // a sub-agent's runtime activity (async)
 type workflowEventMsg struct{ ev tools.WorkflowEvent }       // a background workflow's runtime activity (async)
 type suggestionMsg struct{ text string }                     // an after-turn follow-up suggestion (async)
-type titleMsg struct{ text string }                          // a generated session title (async)
-type tickMsg struct{}                                        // animation tick while a turn runs
+type armWakeupMsg struct {                                   // schedule_wakeup tool asked to arm a loop (from the turn goroutine)
+	delay  time.Duration
+	prompt string
+	reason string
+	repeat bool
+}
+type wakeupMsg struct { // an armed loop wakeup fired (async, from the wakeup timer)
+	prompt string
+	repeat bool
+	delay  time.Duration
+}
+type titleMsg struct{ text string } // a generated session title (async)
+type tickMsg struct{}               // animation tick while a turn runs
 type askMsg struct {
 	prompt UserPrompt
 	resp   chan UserResponse
@@ -297,6 +308,13 @@ type tuiModel struct {
 	// turnRunning is true between starting a turn and turnFinishedMsg.
 	turnRunning bool
 	cancelTurn  context.CancelFunc
+
+	// wakeupTimer is the armed in-session loop wakeup (schedule_wakeup tool),
+	// nil when no loop is running. loopActive mirrors it for the activity line.
+	// A new user message or an interrupt cancels the loop (cancelWakeup) —
+	// matching Claude Code's loop, which yields control back to the user.
+	wakeupTimer *time.Timer
+	loopActive  bool
 
 	// echoPending is the user-message echo held in the live View() area instead
 	// of being committed straight to the scrollback. It commits on the turn's
@@ -585,6 +603,41 @@ func (m *tuiModel) connectMCPCmd() tea.Cmd {
 	}
 }
 
+// tuiWaker implements tools.Waker by posting an armWakeupMsg onto the bubbletea
+// program. The timer and all loop state live on the model (the UI goroutine);
+// only the program send crosses goroutines, the same goroutine-safe path the
+// background-process and sub-agent notices use.
+type tuiWaker struct {
+	prog interface{ Send(tea.Msg) }
+}
+
+func (w tuiWaker) ScheduleWakeup(delay time.Duration, prompt, reason string, repeat bool) error {
+	w.prog.Send(armWakeupMsg{delay: delay, prompt: prompt, reason: reason, repeat: repeat})
+	return nil
+}
+
+// armWakeup (re)starts the loop's wakeup timer, replacing any pending one — a
+// session holds at most one armed loop.
+func (m *tuiModel) armWakeup(delay time.Duration, prompt string, repeat bool) {
+	if m.wakeupTimer != nil {
+		m.wakeupTimer.Stop()
+	}
+	prog := m.sink.prog
+	wm := wakeupMsg{prompt: prompt, repeat: repeat, delay: delay}
+	m.wakeupTimer = time.AfterFunc(delay, func() { prog.Send(wm) })
+	m.loopActive = true
+}
+
+// cancelWakeup stops any armed loop. Called when the user steps in (a new
+// message) or interrupts — Claude Code's loop hands control back to the user.
+func (m *tuiModel) cancelWakeup() {
+	if m.wakeupTimer != nil {
+		m.wakeupTimer.Stop()
+		m.wakeupTimer = nil
+	}
+	m.loopActive = false
+}
+
 // startTurn launches a turn whose transcript echo is the submitted line itself.
 func (m *tuiModel) startTurn(line string) tea.Cmd {
 	return m.startTurnEcho(line, line)
@@ -637,6 +690,7 @@ func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
 	m.toolStreamName, m.toolStreamID, m.toolStreamBytes = "", "", 0
 	m.clearSuggestion() // a new turn supersedes any pending follow-up
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = tools.WithWaker(ctx, tuiWaker{prog: m.sink.prog})
 	m.cancelTurn = cancel
 	a := m.a
 	cfg := m.cfg
@@ -827,6 +881,38 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(tickCmd(), m.flushPrints())
 		}
 		return m, m.flushPrints()
+
+	case armWakeupMsg:
+		// schedule_wakeup fired from the turn goroutine: (re)arm the loop timer.
+		m.armWakeup(msg.delay, msg.prompt, msg.repeat)
+		cadence := "next in " + msg.delay.String()
+		if msg.repeat {
+			cadence = "every " + msg.delay.String()
+		}
+		note := "● Loop armed — " + cadence
+		if msg.reason != "" {
+			note += " · " + msg.reason
+		}
+		m.printlnBlock(noticeStyle.Render(note))
+		return m, m.flushPrints()
+
+	case wakeupMsg:
+		// An armed loop wakeup fired. Re-arm first for interval mode (so the
+		// cadence is independent of the turn's own duration), then — if the
+		// session is idle — run the loop prompt as a fresh turn. A new user
+		// message would already have called cancelWakeup, so reaching here while
+		// a turn runs or work is queued means the model itself is still busy:
+		// drop this fire (repeat already re-armed; dynamic mode re-arms in-turn).
+		if msg.repeat && m.loopActive {
+			m.armWakeup(msg.delay, msg.prompt, true)
+		} else {
+			m.cancelWakeup()
+		}
+		if m.turnRunning || len(m.queue) > 0 {
+			return m, m.flushPrints()
+		}
+		m.printlnBlock(noticeStyle.Render("● Loop tick"))
+		return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(msg.prompt, ""))
 
 	case suggestionMsg:
 		// Show the follow-up only while idle with an empty input — a new turn or

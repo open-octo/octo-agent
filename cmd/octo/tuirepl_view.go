@@ -727,6 +727,8 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	if text == "" && len(m.pendingAttachments) == 0 {
 		return m, nil
 	}
+	// A user message takes over: cancel any armed loop (CC-style hand-back).
+	m.cancelWakeup()
 	m.ta.Reset()
 	m.inputHistoryIdx = -1
 	m.clearPastes()
@@ -940,6 +942,7 @@ func (m *tuiModel) interrupt() {
 	if m.cancelTurn != nil {
 		m.cancelTurn()
 	}
+	m.cancelWakeup()
 	m.pendingSteer = nil
 }
 
