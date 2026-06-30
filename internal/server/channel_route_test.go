@@ -460,7 +460,12 @@ func TestRunChannelIdleTurn_SkipsWhenBoundToOtherEntry(t *testing.T) {
 		return agent.New(&stubSender{}, "stub-model")
 	}, channel.BindByChat)
 	ad := &fullFakeAdapter{}
-	ev := evFor("hello")
+	// Unique chat id so this test's deterministic store ID can't collide with
+	// other channel tests (evFor hardcodes ChatID "c1"). They share the
+	// process-wide TestMain HOME, and turn paths leak fire-and-forget save
+	// goroutines that outlive a test — one of those re-saving its EntryChannel
+	// session over our EntryWeb binding mid-test is what made this flaky.
+	ev := channel.InboundEvent{Platform: "fake", ChatID: "c-idle-skip", UserID: "u1", MessageID: "m1", Text: "hello"}
 
 	// Pre-create the store file bound to web so the idle turn sees the
 	// authoritative binding and refuses to run.
