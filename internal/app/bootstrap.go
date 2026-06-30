@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/config"
 	"github.com/Leihb/octo-agent/internal/tasks"
 	"github.com/Leihb/octo-agent/internal/tools"
 )
@@ -41,11 +42,18 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	tools.SetBrowserSkillGenerator(makeSkillGenerator(a.Sender, a.Model))
 	tools.SetBrowserHealer(makeBrowserHealer(a.Sender, a.Model))
 
+	// Gate image content (browser screenshots) on the active model's vision
+	// capability so a text-only model isn't handed images its endpoint rejects.
+	if cfg, err := config.Load(); err == nil {
+		tools.SetBrowserVision(cfg.ModelVision(a.Model))
+	}
+
 	cleanup := func() {
 		tools.SetDefaultSubAgentManager(nil)
 		tools.SetSpawner(nil)
 		tools.SetBrowserSkillGenerator(nil)
 		tools.SetBrowserHealer(nil)
+		tools.SetBrowserVision(true)
 		tools.ResetBrowserSession()
 	}
 	if enableTasks {

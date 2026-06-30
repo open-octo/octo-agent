@@ -48,6 +48,11 @@ type ModelEntry struct {
 	// streamed to the terminal (dimmed). nil means the built-in default
 	// (enabled).
 	ShowReasoning *bool `yaml:"show_reasoning,omitempty"`
+	// Vision controls whether tools may hand this model images (e.g. the
+	// browser tool's screenshot). nil means the built-in default (enabled).
+	// Set false for text-only models (e.g. qwen-max, as opposed to qwen-vl)
+	// so image content isn't sent and rejected.
+	Vision *bool `yaml:"vision,omitempty"`
 }
 
 // Config is the persisted set of CLI defaults. Every field is optional; a
@@ -123,6 +128,22 @@ func (c Config) EffectiveShowReasoning(entry *bool) bool {
 	}
 	if c.ShowReasoning != nil {
 		return *c.ShowReasoning
+	}
+	return true
+}
+
+// ModelVision reports whether the named model accepts image content. name is
+// matched against each entry's Name or Model; an entry's explicit Vision wins,
+// otherwise the default is true (assume vision-capable). Unknown models also
+// default to true — only an explicit `vision: false` opts out.
+func (c Config) ModelVision(name string) bool {
+	for _, m := range c.Models {
+		if m.Name == name || m.Model == name {
+			if m.Vision != nil {
+				return *m.Vision
+			}
+			return true
+		}
 	}
 	return true
 }

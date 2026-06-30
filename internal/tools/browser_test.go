@@ -262,4 +262,19 @@ func TestBrowserTool_ObserveAndScreenshotVision(t *testing.T) {
 	if !strings.Contains(obs.Text, "#search") {
 		t.Errorf("observe text missing #search selector; got:\n%s", obs.Text)
 	}
+
+	// With vision disabled (text-only model), screenshot must degrade to a
+	// text note and NOT attach an image block the endpoint would reject.
+	SetBrowserVision(false)
+	defer SetBrowserVision(true)
+	noVis, err := tool.Execute(ctx, "browser", map[string]any{"action": "screenshot"})
+	if err != nil {
+		t.Fatalf("screenshot (vision off): %v", err)
+	}
+	if hasImage(noVis) {
+		t.Errorf("screenshot returned an image block while vision is disabled")
+	}
+	if !strings.Contains(noVis.Text, "saved to") {
+		t.Errorf("screenshot (vision off) should still report the saved path; got: %q", noVis.Text)
+	}
 }

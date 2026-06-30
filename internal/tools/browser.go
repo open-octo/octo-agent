@@ -43,6 +43,15 @@ var (
 	browserSkillGen  browser.SkillGenerator
 )
 
+// browserVision gates whether the browser tool hands the model images. Default
+// true (vision-capable); app.WireTools sets it from the active model's config
+// so a text-only model (e.g. qwen-max) gets a text note instead of an image
+// content block that its endpoint would reject.
+var browserVision = func() *atomic.Bool { b := &atomic.Bool{}; b.Store(true); return b }()
+
+// SetBrowserVision enables/disables handing images to the model.
+func SetBrowserVision(on bool) { browserVision.Store(on) }
+
 // SetBrowserHealer injects the LLM-backed step healer used by run_skill.
 func SetBrowserHealer(h browser.Healer) {
 	recorderMu.Lock()
@@ -300,6 +309,11 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, err
 		}
 		path := saveScreenshot(shot)
+		if !browserVision.Load() {
+			// Text-only model: handing it an image block would be rejected by the
+			// endpoint. Return the path and steer the model to the text channels.
+			return agent.ToolResult{Text: "screenshot saved to " + path + " (the current model can't view images — use observe/eval/ax to read the page instead)"}, nil
+		}
 		// Return the image as a vision block so the model actually sees the page
 		// (not just a file path), and keep the on-disk copy for artifacts.
 		return agent.ToolResult{

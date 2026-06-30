@@ -214,3 +214,25 @@ func TestEntryByName_EmptyNeverMatches(t *testing.T) {
 		t.Error("EntryByName(\"\") matched, want no match")
 	}
 }
+
+func TestModelVision(t *testing.T) {
+	yes, no := true, false
+	c := Config{Models: []ModelEntry{
+		{Name: "vl", Model: "qwen-vl-max", Vision: &yes},
+		{Name: "txt", Model: "qwen3.7-max", Vision: &no},
+		{Name: "unset", Model: "claude"},
+	}}
+	cases := map[string]bool{
+		"vl":          true,  // explicit true (by Name)
+		"qwen-vl-max": true,  // explicit true (by Model id)
+		"txt":         false, // explicit false (by Name)
+		"qwen3.7-max": false, // explicit false (by Model id)
+		"unset":       true,  // no flag → default true
+		"not-in-list": true,  // unknown → default true
+	}
+	for name, want := range cases {
+		if got := c.ModelVision(name); got != want {
+			t.Errorf("ModelVision(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
