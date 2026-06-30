@@ -49,7 +49,7 @@
     <div class="modal-header">
       <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
       <span class="modal-title">
-        {$questionModal.header || $questionModal.question}
+        {$questionModal.header || $t('question.title')}
       </span>
       <button class="close-btn" onclick={close} aria-label={$t('common.close')}>
         <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
@@ -57,9 +57,7 @@
     </div>
 
     <div class="modal-body">
-      {#if $questionModal.header}
-        <p class="question-text">{$questionModal.question}</p>
-      {/if}
+      <p class="question-text">{$questionModal.question}</p>
 
       {#if $questionModal.options?.length}
         <div class="options">
@@ -141,6 +139,8 @@
 .question-text {
   margin: 0;
   font-size: 13px; line-height: 1.6; color: var(--text-secondary);
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 40vh; overflow-y: auto;
 }
 .options {
   display: flex; flex-wrap: wrap; gap: 8px;
