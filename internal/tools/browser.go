@@ -34,6 +34,15 @@ func SetBrowserSession(b *browser.Browser, p *browser.Page) {
 	browserSession.b, browserSession.page = b, p
 }
 
+// setActivePage repoints the package-global session at a new tab — e.g. after a
+// click (or a replayed skill) opened and switched to one — so subsequent tool
+// calls act on the page the user actually ended up on.
+func setActivePage(b *browser.Browser, p *browser.Page) {
+	browserSession.mu.Lock()
+	defer browserSession.mu.Unlock()
+	browserSession.b, browserSession.page = b, p
+}
+
 // Recording + self-heal state. browserHealer is injected by app.WireTools (it
 // needs a model Sender, which tools can't import directly).
 var (
@@ -348,10 +357,18 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if sel == "" {
 			return agent.ToolResult{}, fmt.Errorf("browser: click requires selector")
 		}
-		if err := page.Click(ctx, sel); err != nil {
+		// Follow a new tab the click may open (target=_blank / SPA window.open) so
+		// the click doesn't silently look like a no-op on the old page.
+		np, err := b.ClickFollow(ctx, page, sel)
+		if err != nil {
 			return agent.ToolResult{}, err
 		}
-		return agent.ToolResult{Text: "clicked " + sel}, nil
+		text := "clicked " + sel
+		if np != page {
+			setActivePage(b, np)
+			text += " (followed to a new tab)"
+		}
+		return agent.ToolResult{Text: text}, nil
 
 	case "hover":
 		sel := targetSelector(input)
@@ -622,9 +639,14 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		recorderMu.Lock()
 		healer := browserHealer
 		recorderMu.Unlock()
-		modified, err := browser.ReplaySkill(ctx, page, &skill, params, browser.ReplayOptions{Healer: healer})
+		modified, finalPage, err := browser.ReplaySkill(ctx, page, &skill, params, browser.ReplayOptions{Healer: healer, Browser: b})
 		if err != nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: run_skill %q: %w", name, err)
+		}
+		// A click in the skill may have opened (and switched to) a new tab; keep
+		// the session pointed there so follow-up actions act on the right page.
+		if finalPage != nil && finalPage != page {
+			setActivePage(b, finalPage)
 		}
 		msg := fmt.Sprintf("ran skill %q (%d steps)", name, len(skill.Steps))
 		if modified {

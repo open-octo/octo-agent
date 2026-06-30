@@ -121,6 +121,27 @@ func TestCompileSkillDropsConsecutiveDupes(t *testing.T) {
 	}
 }
 
+// TestCompileSkillCapturesNavigations: navigations recorded during the demo
+// become navigate steps in order; an about:blank start URL is dropped (it's the
+// throwaway tab octo opened, not where the user worked).
+func TestCompileSkillCapturesNavigations(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "navigate", URL: "https://www.zhihu.com/hot"},
+		{Type: "navigate", URL: "https://www.zhihu.com/hot"}, // initial-load echo → collapsed
+		{Type: "click", Selector: "section a", Tag: "A", Text: "Top story"},
+	}
+	s := CompileSkill("demo", "", "about:blank", events)
+	if len(s.Steps) != 2 {
+		t.Fatalf("want navigate+click (blank dropped, echo collapsed), got %d: %+v", len(s.Steps), s.Steps)
+	}
+	if s.Steps[0].Action != "navigate" || s.Steps[0].URL != "https://www.zhihu.com/hot" {
+		t.Fatalf("step 0 = %+v, want navigate to /hot", s.Steps[0])
+	}
+	if s.Steps[1].Action != "click" {
+		t.Fatalf("step 1 = %+v, want click", s.Steps[1])
+	}
+}
+
 // TestGenerateSkillDistill: the LLM distiller drops a fumble (a wrong click +
 // going back) and parameterizes a value — and the precision guard rejects any
 // output that invents a selector, falling back to the deterministic baseline.
@@ -159,6 +180,59 @@ func TestGenerateSkillDistill(t *testing.T) {
 	}
 }
 
+// TestRunStepWaitFixedDelay: a wait step with no selector sleeps the requested
+// time (the SPA-settling primitive) — and run_skill no longer rejects it.
+func TestRunStepWaitFixedDelay(t *testing.T) {
+	start := time.Now()
+	if _, err := runStep(context.Background(), nil, nil, &Step{Action: "wait", TimeoutMS: 80}, nil, time.Second); err != nil {
+		t.Fatalf("wait step: %v", err)
+	}
+	if d := time.Since(start); d < 60*time.Millisecond {
+		t.Fatalf("wait returned too fast: %v", d)
+	}
+}
+
+// TestReplayClickFollowsNewTab: a click on a target=_blank link is followed to
+// the tab it opens (the Zhihu-hot-item failure mode), and ReplaySkill returns
+// that tab as the final page.
+func TestReplayClickFollowsNewTab(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><meta charset="utf-8"><title>dest</title><h1 id="dest">DEST</h1>`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><meta charset="utf-8"><title>home</title><a id="open" href="/dest" target="_blank">Open</a>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+
+	skill := &Skill{Name: "x", Steps: []Step{{Action: "click", Selector: "#open"}}}
+	_, fp, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b})
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if fp == page {
+		t.Fatal("replay did not follow the new tab opened by the click")
+	}
+	if err := fp.WaitFor(ctx, "#dest", 5*time.Second); err != nil {
+		t.Fatalf("final page is not the destination tab: %v", err)
+	}
+}
+
 // TestReplayTextAnchorRecoversFromDrift: a recorded positional selector now
 // points at the WRONG element after a layout change, but the recorded text steers
 // replay to the right one — instead of silently clicking the wrong node.
@@ -190,7 +264,7 @@ func TestReplayTextAnchorRecoversFromDrift(t *testing.T) {
 	skill := &Skill{Name: "x", Steps: []Step{
 		{Action: "click", Selector: "div > button:nth-of-type(1)", Label: "Book now"},
 	}}
-	if _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
+	if _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	var hit string
@@ -241,7 +315,7 @@ func TestReplaySkillSelfHeal(t *testing.T) {
 		return context.DeadlineExceeded
 	}
 
-	modified, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal})
+	modified, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}

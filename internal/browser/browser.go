@@ -157,6 +157,40 @@ func (b *Browser) AttachPage(ctx context.Context, targetID string) (*Page, error
 	return p, nil
 }
 
+// ClickFollow clicks target on page and, if the click opened a new tab (a
+// target=_blank link or window.open — common on SPAs whose results open in a new
+// tab, e.g. Zhihu hot items), switches to it. Returns the page to continue on:
+// the new tab when one opened, otherwise the same page. Without this a click that
+// spawns a tab looks like it "did nothing" because the original page is unchanged.
+func (b *Browser) ClickFollow(ctx context.Context, page *Page, target string) (*Page, error) {
+	before := map[string]bool{}
+	if ps, err := b.Pages(ctx); err == nil {
+		for _, p := range ps {
+			before[p.TargetID] = true
+		}
+	}
+	if err := page.Click(ctx, target); err != nil {
+		return page, err
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if ps, err := b.Pages(ctx); err == nil {
+			for _, ti := range ps {
+				if before[ti.TargetID] || ti.TargetID == page.TargetID() {
+					continue
+				}
+				if np, aerr := b.AttachPage(ctx, ti.TargetID); aerr == nil {
+					return np, nil
+				}
+			}
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return page, nil
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+}
+
 // ClosePage closes a page target by id.
 func (b *Browser) ClosePage(ctx context.Context, targetID string) error {
 	_, err := b.cli.call(ctx, "", "Target.closeTarget", map[string]any{"targetId": targetID})

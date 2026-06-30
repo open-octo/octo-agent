@@ -32,13 +32,14 @@ type Param struct {
 // iframe selector) scopes it via the " >>> " convention. Label is a human note;
 // replay ignores it.
 type Step struct {
-	Action   string  `yaml:"action"` // navigate | click | type | select | upload
-	URL      string  `yaml:"url,omitempty"`
-	Frame    string  `yaml:"frame,omitempty"`
-	Selector string  `yaml:"selector,omitempty"`
-	Value    string  `yaml:"value,omitempty"`
-	Label    string  `yaml:"label,omitempty"`
-	Verify   *Verify `yaml:"verify,omitempty"`
+	Action    string  `yaml:"action"` // navigate | click | type | select | upload | wait
+	URL       string  `yaml:"url,omitempty"`
+	Frame     string  `yaml:"frame,omitempty"`
+	Selector  string  `yaml:"selector,omitempty"`
+	Value     string  `yaml:"value,omitempty"`
+	Label     string  `yaml:"label,omitempty"`
+	TimeoutMS int     `yaml:"timeout_ms,omitempty"` // wait: fixed delay when no selector
+	Verify    *Verify `yaml:"verify,omitempty"`
 }
 
 // Verify is an optional post-step assertion. Exists waits for a selector; Text
@@ -55,15 +56,26 @@ type Verify struct {
 // an LLM-backed healer); the engine itself stays LLM-free.
 type Healer func(ctx context.Context, page *Page, step *Step, cause error) error
 
-// CompileSkill turns a recording into an editable Skill. The first step
-// navigates to the start URL; subsequent steps come from the captured events.
+// CompileSkill turns a recording into an editable Skill. It seeds a leading
+// navigate from the start URL (when it's a real page, not the about:blank tab
+// octo opens) and then walks the captured events in order — including the
+// top-level navigations the recorder captured, so a multi-page demonstration
+// replays from the right pages.
 func CompileSkill(name, description, startURL string, events []RecordedEvent) Skill {
 	s := Skill{Name: name, Description: description}
-	if startURL != "" {
+	if startURL != "" && startURL != "about:blank" {
 		s.Steps = append(s.Steps, Step{Action: "navigate", URL: startURL})
 	}
 	hasUpload := false
 	for _, e := range events {
+		if e.Type == "navigate" {
+			// Skip an echo of the page we're already on (start URL or the prior nav).
+			if n := len(s.Steps); n > 0 && s.Steps[n-1].Action == "navigate" && s.Steps[n-1].URL == e.URL {
+				continue
+			}
+			s.Steps = append(s.Steps, Step{Action: "navigate", URL: e.URL})
+			continue
+		}
 		if e.Type == "upload" {
 			// The user clicked an upload control, then picked a file. Replay
 			// clicks the control and feeds the file through the chooser, so the
@@ -147,7 +159,7 @@ func GenerateSkill(ctx context.Context, name, startURL string, events []Recorded
 		"RULES: (1) Use ONLY CSS selectors that appear in the provided baseline — never invent or alter a selector. " +
 		"(2) Drop redundant back-and-forth and retries; keep the intended linear path. " +
 		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}). " +
-		"(4) Preserve step order and the leading navigate. " +
+		"(4) Preserve step order and all navigate steps. " +
 		"(5) Write description as a short statement of what the workflow does, then the natural phrases a user would say to invoke it — in the page's own language AND English (e.g. \"打开知乎热榜并点第一条。当用户说\\\"知乎热榜\\\"、\\\"zhihu hot\\\"时触发\"). This description is the auto-trigger cue, so make those phrases concrete. " +
 		"Output ONLY the skill as YAML (keys: name, description, params, steps), no prose, no code fences."
 	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned skill YAML.", baseYAML, renderTrace(events))
@@ -289,42 +301,50 @@ func subst(s string, params map[string]string) string {
 
 // ReplayOptions tunes a replay. StepTimeout bounds the per-step wait for a
 // target to appear (default 15s — generous for slow back-ends). Healer, when
-// set, is consulted on a step failure.
+// set, is consulted on a step failure. Browser, when set, lets a click follow a
+// new tab it opens (target=_blank / window.open).
 type ReplayOptions struct {
 	StepTimeout time.Duration
 	Healer      Healer
+	Browser     *Browser
 }
 
 // ReplaySkill runs a skill deterministically (no LLM), substituting params. Each
 // step implicitly waits for its target to appear (handling slow loads) and
 // checks any explicit Verify. On a step failure it calls the healer; if the
 // healer repairs the step, replay continues and reports modified=true so the
-// caller can write the corrected skill back.
-func ReplaySkill(ctx context.Context, page *Page, skill *Skill, params map[string]string, opts ReplayOptions) (modified bool, err error) {
+// caller can write the corrected skill back. A click that opens a new tab swaps
+// the active page for subsequent steps; finalPage is the page replay ended on
+// (so the caller can keep its session pointed at the right tab).
+func ReplaySkill(ctx context.Context, page *Page, skill *Skill, params map[string]string, opts ReplayOptions) (modified bool, finalPage *Page, err error) {
 	if opts.StepTimeout <= 0 {
 		opts.StepTimeout = 15 * time.Second
 	}
 	full := mergedParams(skill, params)
+	cur := page
 	for i := range skill.Steps {
-		runErr := runStep(ctx, page, &skill.Steps[i], full, opts.StepTimeout)
+		np, runErr := runStep(ctx, opts.Browser, cur, &skill.Steps[i], full, opts.StepTimeout)
 		if runErr == nil {
+			cur = np
 			continue
 		}
 		if opts.Healer == nil {
-			return modified, fmt.Errorf("step %d (%s): %w", i+1, skill.Steps[i].Action, runErr)
+			return modified, cur, fmt.Errorf("step %d (%s): %w", i+1, skill.Steps[i].Action, runErr)
 		}
 		before := skill.Steps[i]
-		if herr := opts.Healer(ctx, page, &skill.Steps[i], runErr); herr != nil {
-			return modified, fmt.Errorf("step %d (%s): %w", i+1, skill.Steps[i].Action, runErr)
+		if herr := opts.Healer(ctx, cur, &skill.Steps[i], runErr); herr != nil {
+			return modified, cur, fmt.Errorf("step %d (%s): %w", i+1, skill.Steps[i].Action, runErr)
 		}
-		if retryErr := runStep(ctx, page, &skill.Steps[i], full, opts.StepTimeout); retryErr != nil {
-			return modified, fmt.Errorf("step %d (%s) after heal: %w", i+1, skill.Steps[i].Action, retryErr)
+		np, retryErr := runStep(ctx, opts.Browser, cur, &skill.Steps[i], full, opts.StepTimeout)
+		if retryErr != nil {
+			return modified, cur, fmt.Errorf("step %d (%s) after heal: %w", i+1, skill.Steps[i].Action, retryErr)
 		}
+		cur = np
 		if skill.Steps[i] != before {
 			modified = true
 		}
 	}
-	return modified, nil
+	return modified, cur, nil
 }
 
 // mergedParams overlays caller params on declared defaults.
@@ -341,38 +361,61 @@ func mergedParams(skill *Skill, params map[string]string) map[string]string {
 	return out
 }
 
-func runStep(ctx context.Context, page *Page, step *Step, params map[string]string, waitTimeout time.Duration) error {
+// runStep executes one step on page and returns the page subsequent steps should
+// run on — the same page, except a click that opens a new tab returns that tab.
+func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map[string]string, waitTimeout time.Duration) (*Page, error) {
 	target := step.target()
 	switch step.Action {
 	case "navigate":
 		if err := page.Navigate(ctx, subst(step.URL, params)); err != nil {
-			return err
+			return page, err
+		}
+	case "wait":
+		// Wait for an element if a selector is given (the robust form), else a
+		// fixed delay — the natural primitive for letting an SPA settle between
+		// steps. Recordings/edits commonly need it; without it run_skill rejected
+		// the step as "unknown action".
+		if target != "" {
+			if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
+				return page, err
+			}
+		} else {
+			ms := step.TimeoutMS
+			if ms <= 0 {
+				ms = 1000
+			}
+			if ms > 30000 {
+				ms = 30000
+			}
+			select {
+			case <-ctx.Done():
+				return page, ctx.Err()
+			case <-time.After(time.Duration(ms) * time.Millisecond):
+			}
 		}
 	case "click":
 		// When the recording captured the element's visible text, resolve by text
 		// (verifying or replacing the drift-prone positional selector) — this is
 		// what makes replay survive layout changes and stops silent wrong-element
-		// clicks. resolveClickTarget already polled for existence, so click directly.
+		// clicks. resolveClickTarget already polled for existence.
 		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
 			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
-			if err := page.Click(ctx, target); err != nil {
-				return err
-			}
-		} else {
-			if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
-				return err
-			}
-			if err := page.Click(ctx, target); err != nil {
-				return err
-			}
+		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
+			return page, err
 		}
+		// Follow a new tab the click may open (target=_blank / SPA window.open).
+		np, err := clickTarget(ctx, b, page, target)
+		if err != nil {
+			return page, err
+		}
+		page = np
 	case "type":
 		if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
-			return err
+			return page, err
 		}
 		val := subst(step.Value, params)
 		if err := page.TypeText(ctx, target, val); err != nil {
-			return err
+			return page, err
 		}
 		// If a non-empty value didn't land, a disabled/re-rendering/framework input
 		// swallowed the programmatic insert — clear and retry once before failing
@@ -381,18 +424,18 @@ func runStep(ctx context.Context, page *Page, step *Step, params map[string]stri
 		if val != "" && !page.fieldNonEmpty(ctx, target) {
 			page.clearField(ctx, target)
 			if err := page.TypeText(ctx, target, val); err != nil {
-				return err
+				return page, err
 			}
 			if !page.fieldNonEmpty(ctx, target) {
-				return fmt.Errorf("type: %q did not accept input", target)
+				return page, fmt.Errorf("type: %q did not accept input", target)
 			}
 		}
 	case "select":
 		if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
-			return err
+			return page, err
 		}
 		if err := page.SelectOption(ctx, target, subst(step.Value, params)); err != nil {
-			return err
+			return page, err
 		}
 	case "upload":
 		// The upload trigger is a labeled control (e.g. "Choose file"), so prefer
@@ -400,17 +443,30 @@ func runStep(ctx context.Context, page *Page, step *Step, params map[string]stri
 		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
 			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
-			return err
+			return page, err
 		}
 		// Click the upload control and feed the file through the chooser — works
 		// for both a button that opens a chooser and a direct file input.
 		if err := page.UploadViaChooser(ctx, target, []string{subst(step.Value, params)}); err != nil {
-			return err
+			return page, err
 		}
 	default:
-		return fmt.Errorf("unknown action %q", step.Action)
+		return page, fmt.Errorf("unknown action %q", step.Action)
 	}
-	return verify(ctx, page, step, params)
+	return page, verify(ctx, page, step, params)
+}
+
+// clickTarget clicks target on page, following a new tab the click opens when a
+// Browser is available (replay/tools path). Without a Browser it is a plain
+// click on the same page.
+func clickTarget(ctx context.Context, b *Browser, page *Page, target string) (*Page, error) {
+	if b != nil {
+		return b.ClickFollow(ctx, page, target)
+	}
+	if err := page.Click(ctx, target); err != nil {
+		return page, err
+	}
+	return page, nil
 }
 
 func verify(ctx context.Context, page *Page, step *Step, params map[string]string) error {
