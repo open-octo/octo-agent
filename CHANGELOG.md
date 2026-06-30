@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] — 2026-06-30
+
+### Changed
+- **Default serve port is now `8088`** (was `8080`), avoiding the common clash
+  with other local dev servers. The web UI, installer, docs, and `octo serve`
+  help all point at `:8088`; update any bookmarks or scripts that hard-coded
+  `:8080` (#987, #991).
+- **Browser recordings are replay-only.** The keyword-trigger companion skill
+  from 1.4.0 is removed — replay a recording explicitly via the Replay button
+  or `run_skill`, not by describing it to a fresh session (#984). Editing a
+  recording now opens an agentic flow instead of a raw YAML modal (#977).
+
+### Fixed
+- **Browser record/replay reliability.** Replay is text-anchored instead of
+  trusting drift-prone positional selectors (#974); clicks follow popups and
+  new tabs, navigations are captured during recording, and an explicit wait
+  step was added (#982); plus a robustness pass on selectors, distillation, and
+  type verification (#975). The remote-debugging port is fixed at 9222 (the
+  editable field is gone) (#983).
+- **LLM/turn errors surface in the UI** instead of being silently dropped
+  (#973).
+- **ask_user_question:** accepts 0 or 1 options instead of erroring (#981); the
+  web view shows the full question text instead of truncating it in the title
+  (#985); the model is steered to ask one question per call rather than packing
+  several into one string (#988).
+- **Setup wizard:** a connection probe that the endpoint rejects (bad
+  key/model/endpoint) no longer silently saves an unusable config — the wizard
+  keeps you on it until it's fixed, while a transient network failure still
+  saves with a note (#990, #992).
+- **Web:** the permission-confirm reply no longer drops its id and hangs the
+  popup (#976); the after-turn suggestion is suppressed in agentic,
+  panel-launched sessions (#986); the chat column width is tuned so composer
+  status chips don't wrap, and the Browser connection card is tidied into one
+  header with a single Reconfigure button (#978, #979, #980).
+- **Windows:** the scheduler retries the save rename so a tasks-file write no
+  longer flakes (#972).
+
 ## [1.4.0] — 2026-06-30
 
 ### Added
