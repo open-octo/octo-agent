@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-06-30
+
+### Added
+- **Browser computer-use.** octo can drive a real, logged-in Chrome to automate
+  web tasks that have no API — navigate, click, type, scroll, wait, screenshot,
+  capture downloads, read cookies (HttpOnly included), and inspect the page.
+  Built on an owned, Go-native CDP backend (no Node, no Playwright) (#917–#921).
+  - **Attach to your own Chrome** via the chrome://inspect remote-debugging
+    toggle or `--remote-debugging-port`, reusing your logged-in session;
+    `octo browser setup` walks you through it (#920, #928, #931).
+  - **Record → replay → self-heal.** Demonstrate a workflow in your browser and
+    octo distills it into an editable, replayable skill; replay is deterministic
+    with per-step waits and LLM selector self-healing when a page drifts (#921).
+    Recordings are **keyword-triggerable** — a companion skill lets a fresh
+    session replay one just by describing what it does (#966).
+  - **Web Browser view** to set up the connection and manage recordings
+    (view/edit/replay/delete), with a one-click Record button (#957, #959, #962,
+    #963, #967); browser-automation settings panel + onboarding step (#933).
+  - **Vision-aware, model-agnostic.** `observe` returns a text digest of the
+    page's interactable elements (works on any model); `screenshot` returns an
+    image only for vision-capable models, gated per-model (#930, #944, #947,
+    #948). Accepts the common Playwright selector subset — `:has-text`, `text=`,
+    `:visible`, `xpath=`, … (#952). The `web-access` skill is rewritten Node-free
+    over the native browser tool (#932).
+- **First-run onboarding** — a skippable setup wizard on first launch and a
+  novice-friendly, validated, key-first config wizard (#923, #934).
+- **/loop** — a loop skill plus a `schedule_wakeup` tool for self-paced
+  recurring work, with a unified anti-runaway max-runtime cap across CLI, web,
+  and IM (#949, #951, #953).
+- **Toggle permission mode from the web composer** status bar (#941).
+- **Provider prompt-cache** extended: Anthropic 1h TTL on the static prefix and
+  a Mistral cache key (#922). Scheduled-task API consolidated onto a single
+  `/api/tasks` surface (#924).
+
+### Fixed
+- **serve browser wiring.** Per-model vision, self-heal, and skill distillation
+  had no effect in the web UI / IM because serve wires tools separately from the
+  CLI; all three are now wired on the serve path (#954, #956). The browser tool
+  reuses one Chrome connection per process so the authorization prompt appears
+  once instead of on every action (#967), opens its own tab instead of hijacking
+  yours (#939), validates a cached page before reuse (#965), bounds each action
+  with a timeout and a clearer invalid-selector error (#950), and no longer
+  overshoots `back` past the initial blank tab (#955). During recording the
+  model hands control to the user instead of driving the page itself (#960).
+- **ask_user_question** declares a CC-native nested schema and accepts
+  object-shaped options, so the prompt actually renders (#936, #937, #943).
+- **Web:** the permission-confirm modal sends the right decision (was silently
+  denying) (#942); the duplicate first message when opening an agentic session
+  is gone (#964); the Browser view's invisible primary button and unstyled
+  modals are fixed (#963); the channels panel shows a fixed six-channel list
+  with correct configure/unconfigure semantics (#958).
+- **OpenAI** tool-result images are emitted as a trailing user message so
+  text-only gateways stop rejecting them (#940).
+- **Server:** interactive prompts are serialized per session so concurrent asks
+  no longer hang (#945); a sender-mutex self-deadlock that hung onboarding is
+  fixed (#938).
+- **Provider:** phantom/stale model IDs corrected in the vendor registry (#935).
+- **Windows:** the daemon spawns the serve worker with no visible console
+  window (#961).
+
 ## [1.3.0] — 2026-06-29
 
 ### Added
