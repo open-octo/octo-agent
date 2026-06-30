@@ -12,7 +12,7 @@
     discord:  'logos:discord-icon',
     feishu:   'mdi:feather',
     dingtalk: 'ant-design:dingtalk-outlined',
-    wecom:    'simple-icons:wecom',
+    wecom:    'ant-design:wechat-work-filled',
     weixin:   'simple-icons:wechat',
   }
 
@@ -84,26 +84,25 @@
     }
   }
 
-  async function handleDelete(platform: string) {
+  // The six platforms are fixed — "unconfigure" clears the saved credentials
+  // and returns the card to the "Not configured" state rather than removing it.
+  async function handleUnconfigure(platform: string) {
     busyPlatform = platform
     try {
       await api.deleteChannel(platform)
-      rows = rows.filter(r => r.platform !== platform)
-      showToast(`${platform} removed`, 'success')
+      rows = rows.map(r => r.platform === platform
+        ? { ...r, enabled: false, running: false, has_config: false, fields: {} }
+        : r)
+      showToast(`${labelFor(platform)} configuration cleared`, 'success')
     } catch (e: any) {
-      showToast(`Delete failed: ${e.message}`, 'error')
+      showToast(`Failed to clear configuration: ${e.message}`, 'error')
     } finally {
       busyPlatform = null
     }
   }
 
   // Agentic-first: open a fresh chat that invokes the channel-manager skill,
-  // which guides the user through the platform console + credentials. With a
-  // platform it jumps straight to that platform's setup.
-  function openNewSession() {
-    openAgentSession('/channel-manager setup', 'Channel Setup')
-  }
-
+  // which guides the user through the platform console + credentials.
   function openSetup(platform: string) {
     openAgentSession(`/channel-manager setup ${platform}`, `Channel Setup — ${labelFor(platform)}`)
   }
@@ -154,7 +153,6 @@
         <h2>{$t('channels.title')}</h2>
         <p>{$t('channels.subtitle')}</p>
       </div>
-      <button class="btn-primary" onclick={openNewSession}>{$t('channels.connect')}</button>
     </div>
 
     {#if loading}
@@ -180,34 +178,30 @@
             </div>
             <span class="ch-activity">{activityFor(row)}</span>
             <div class="ch-actions">
-              <button
-                class="btn-outline"
-                disabled={busyPlatform === row.platform}
-                onclick={() => handleTest(row.platform)}
-              >
-                <iconify-icon icon="ant-design:check-circle-outlined" width="13"></iconify-icon>
-                {busyPlatform === row.platform ? $t('channels.testing') : $t('channels.diagnostics')}
-              </button>
-              <button
-                class="btn-outline del"
-                disabled={busyPlatform === row.platform}
-                onclick={() => handleDelete(row.platform)}
-              >
-                <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
-              </button>
+              {#if row.has_config}
+                <button
+                  class="btn-outline"
+                  disabled={busyPlatform === row.platform}
+                  onclick={() => handleTest(row.platform)}
+                >
+                  <iconify-icon icon="ant-design:check-circle-outlined" width="13"></iconify-icon>
+                  {busyPlatform === row.platform ? $t('channels.testing') : $t('channels.diagnostics')}
+                </button>
+                <button
+                  class="btn-outline del"
+                  disabled={busyPlatform === row.platform}
+                  onclick={() => handleUnconfigure(row.platform)}
+                >
+                  {$t('channels.unconfigure')}
+                </button>
+              {/if}
               <button class="btn-primary-sm" onclick={() => openSetup(row.platform)}>
                 <iconify-icon icon="ant-design:message-outlined" width="13"></iconify-icon>
-                {$t('channels.setup')}
+                {row.has_config ? $t('channels.reconfigure') : $t('channels.setup')}
               </button>
             </div>
           </div>
         {/each}
-
-        <!-- Add tile -->
-        <div class="add-tile" onclick={openNewSession} role="button" tabindex="0">
-          <iconify-icon icon="ant-design:plus-outlined" width="18"></iconify-icon>
-          <span>{$t('channels.add_tile')}</span>
-        </div>
       </div>
     {/if}
   </div>
@@ -220,8 +214,6 @@
 .title-block { display: flex; flex-direction: column; gap: 4px; }
 h2 { margin: 0; font-size: 24px; font-weight: 600; color: var(--text-heading); }
 p { margin: 0; font-size: 14px; color: var(--text-secondary); }
-.btn-primary { height: 32px; padding: 0 14px; border: none; background: var(--blue-6); border-radius: 6px; font-size: 14px; color: #fff; cursor: pointer; font-family: inherit; }
-.btn-primary:hover { background: var(--blue-5); }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
 .channel-card {
   background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow);
@@ -247,13 +239,6 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .btn-outline.del:hover:not(:disabled) { border-color: var(--error); color: var(--error); }
 .btn-primary-sm { height: 28px; padding: 0 12px; border: none; background: var(--blue-6); border-radius: 6px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #fff; cursor: pointer; font-family: inherit; }
 .btn-primary-sm:hover { background: var(--blue-5); }
-.add-tile {
-  border: 1px dashed var(--border); border-radius: 16px; min-height: 148px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 8px; cursor: pointer; color: var(--text-tertiary);
-  font-size: 13px;
-}
-.add-tile:hover { border-color: var(--blue-6); color: var(--blue-6); background: var(--active-blue-bg); }
 .empty-state { padding: 40px; text-align: center; color: var(--text-tertiary); font-size: 14px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>
