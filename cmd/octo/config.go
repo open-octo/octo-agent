@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -401,18 +402,24 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 
 	// Validate a freshly entered key against the live endpoint so a typo is
 	// caught here, not on the first turn. Interactive only (TTY) — piped runs and
-	// tests must not hit the network. First run loops on failure so the user can
-	// retry; the full editor just warns.
+	// tests must not hit the network. The full editor only warns; first run keeps
+	// the user on a rejected key (which won't fix itself) but lets a network blip
+	// through, since that says nothing about whether the config is right.
 	if keyEntered && tty {
 		for {
-			if reportConnectionCheck(stdout, stderr, provider, outEntry.APIKey, baseURL, model) {
+			res := reportConnectionCheck(stdout, stderr, provider, outEntry.APIKey, baseURL, model)
+			if res == connOK || !firstRun {
 				break
 			}
-			if !firstRun {
+			if res == connNetwork {
+				fmt.Fprintln(stdout, "Couldn't verify the connection — looks like a network or endpoint issue, not the key. Saving anyway; if octo won't start, re-run `octo config`.")
 				break
 			}
+			// connRejected: the endpoint turned the request away, so the saved
+			// config would be unusable. Push the user to fix it; empty enter is an
+			// explicit, eyes-open choice to keep the rejected key.
 			again := strings.TrimSpace(promptDefault(reader, stdout,
-				"Re-enter API key (empty = keep it and continue)", ""))
+				"Re-enter API key (empty = save this rejected key anyway)", ""))
 			if again == "" {
 				break
 			}
@@ -521,10 +528,22 @@ func collectAPIKey(outEntry *config.ModelEntry, existing config.ModelEntry, prov
 	return false
 }
 
+// connResult classifies the outcome of a live connection probe. The wizard
+// treats the two failure classes differently: a rejected key/model/endpoint is
+// the user's config being wrong and won't fix itself, whereas a network blip is
+// orthogonal to whether the config is correct.
+type connResult int
+
+const (
+	connOK       connResult = iota // probe succeeded
+	connRejected                   // endpoint rejected the request (bad key/model/endpoint)
+	connNetwork                    // couldn't reach the endpoint (network/timeout/5xx/429)
+)
+
 // reportConnectionCheck tests the entered key against the endpoint, printing a
-// ✓/✗ line. Returns true on success. Resolves the vendor default model/base URL
-// when the user accepted the default (left them empty).
-func reportConnectionCheck(stdout, stderr io.Writer, provider, key, baseURL, model string) bool {
+// ✓/✗ line. Resolves the vendor default model/base URL when the user accepted
+// the default (left them empty).
+func reportConnectionCheck(stdout, stderr io.Writer, provider, key, baseURL, model string) connResult {
 	if model == "" {
 		model = app.VendorDefaultModel(provider)
 	}
@@ -536,10 +555,52 @@ func reportConnectionCheck(stdout, stderr io.Writer, provider, key, baseURL, mod
 	defer cancel()
 	if err := validateConnection(ctx, provider, key, baseURL, model); err != nil {
 		fmt.Fprintf(stderr, "✗ Couldn't connect: %v\n", err)
-		return false
+		return classifyConnErr(err)
 	}
 	fmt.Fprintln(stdout, "✓ Connected.")
-	return true
+	return connOK
+}
+
+// classifyConnErr decides whether a failed probe means the config is wrong or
+// the network just got in the way. Providers format API rejections as
+// "<vendor>: HTTP <code>: …" (see anthropic/openai client.go), so the status
+// code is the signal: 400/401/403/404 are the config being rejected; a missing
+// HTTP code (dial/timeout) or a transient status (408/409/425/429/5xx) is a
+// network problem the config can't be blamed for.
+func classifyConnErr(err error) connResult {
+	code, ok := httpStatusFromErr(err.Error())
+	if !ok {
+		return connNetwork // no HTTP response reached us at all
+	}
+	switch code {
+	case 400, 401, 403, 404:
+		return connRejected
+	default:
+		return connNetwork
+	}
+}
+
+// httpStatusFromErr extracts the status code from a provider error of the form
+// "…: HTTP <code>: …". Returns ok=false when no such marker is present.
+func httpStatusFromErr(msg string) (int, bool) {
+	const marker = "HTTP "
+	i := strings.Index(msg, marker)
+	if i < 0 {
+		return 0, false
+	}
+	rest := msg[i+len(marker):]
+	end := strings.IndexFunc(rest, func(r rune) bool { return r < '0' || r > '9' })
+	if end < 0 {
+		end = len(rest)
+	}
+	if end == 0 {
+		return 0, false
+	}
+	code, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		return 0, false
+	}
+	return code, true
 }
 
 // customSentinel is the menu value standing in for "let me type my own". It

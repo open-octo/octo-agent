@@ -361,16 +361,19 @@ func TestReportConnectionCheck(t *testing.T) {
 	var gotModel, gotBase string
 	validateConnection = func(ctx context.Context, provider, key, baseURL, model string) error {
 		gotModel, gotBase = model, baseURL
-		if key == "bad" {
-			return errors.New("401 unauthorized")
+		switch key {
+		case "bad":
+			return errors.New("anthropic: HTTP 401: invalid x-api-key")
+		case "offline":
+			return errors.New("dial tcp: lookup api.anthropic.com: no such host")
 		}
 		return nil
 	}
 
 	var out, errb bytes.Buffer
 	// Empty model/baseURL must resolve to the vendor defaults before testing.
-	if ok := reportConnectionCheck(&out, &errb, "anthropic", "good", "", ""); !ok {
-		t.Fatalf("expected success; stderr=%q", errb.String())
+	if res := reportConnectionCheck(&out, &errb, "anthropic", "good", "", ""); res != connOK {
+		t.Fatalf("expected connOK; got %d, stderr=%q", res, errb.String())
 	}
 	if gotModel == "" || gotBase == "" {
 		t.Errorf("defaults not resolved: model=%q base=%q", gotModel, gotBase)
@@ -381,11 +384,40 @@ func TestReportConnectionCheck(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	if ok := reportConnectionCheck(&out, &errb, "anthropic", "bad", "", ""); ok {
-		t.Fatal("expected failure for bad key")
+	// A rejected key (HTTP 4xx) is the config being wrong.
+	if res := reportConnectionCheck(&out, &errb, "anthropic", "bad", "", ""); res != connRejected {
+		t.Fatalf("expected connRejected for bad key; got %d", res)
 	}
 	if !strings.Contains(errb.String(), "Couldn't connect") {
 		t.Errorf("missing failure line: %q", errb.String())
+	}
+
+	// A network error is orthogonal to whether the config is correct.
+	if res := reportConnectionCheck(&out, &errb, "anthropic", "offline", "", ""); res != connNetwork {
+		t.Fatalf("expected connNetwork for unreachable endpoint; got %d", res)
+	}
+}
+
+// TestClassifyConnErr pins the HTTP-status-based split between a rejected
+// config and a transient network failure.
+func TestClassifyConnErr(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want connResult
+	}{
+		{"anthropic: HTTP 401: invalid x-api-key", connRejected},
+		{"openai: HTTP 403: forbidden", connRejected},
+		{"openai: HTTP 400: bad request", connRejected},
+		{"anthropic: HTTP 404: model not found", connRejected},
+		{"openai: HTTP 429: rate limit exceeded", connNetwork},
+		{"anthropic: HTTP 500: internal error", connNetwork},
+		{"dial tcp 1.2.3.4:443: i/o timeout", connNetwork},
+		{"context deadline exceeded", connNetwork},
+	}
+	for _, c := range cases {
+		if got := classifyConnErr(errors.New(c.msg)); got != c.want {
+			t.Errorf("classifyConnErr(%q) = %d, want %d", c.msg, got, c.want)
+		}
 	}
 }
 
