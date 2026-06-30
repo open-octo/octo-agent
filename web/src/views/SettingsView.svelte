@@ -4,12 +4,11 @@
   import Switch from '../components/ui/Switch.svelte'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import ModelConfigForm from '../components/settings/ModelConfigForm.svelte'
-  import BrowserSetupForm from '../components/settings/BrowserSetupForm.svelte'
   import { showToast, activeSessionId } from '../lib/stores'
   import { setLocale, t, tr } from '../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import * as api from '../lib/api'
-  import type { ModelEntry, ProviderPreset, ModelConfigInput, BrowserStatus } from '../lib/api'
+  import type { ModelEntry, ProviderPreset, ModelConfigInput } from '../lib/api'
 
   // --- local state ---
   let language      = $state('en')
@@ -40,11 +39,6 @@
   let editingModel = $state<ModelEntry | null>(null)
   let busyModelId  = $state<string | null>(null)
 
-  // ── Browser automation ───────────────────────────────────────────────────────
-  let browser          = $state<BrowserStatus | null>(null)
-  let browserBusy      = $state(false)
-  let browserModalOpen = $state(false)
-
   const langOptions = [
     { value: 'en', label: 'English' },
     { value: 'zh', label: '简体中文' },
@@ -64,31 +58,8 @@
     // Load providers first and wait, so the ModelConfigForm datalist has data
     // when the Add/Edit modal opens immediately.
     await api.listProviders().then(p => { providers = p; providersLoaded = true }).catch(() => { providersLoaded = true })
-    await Promise.all([loadConfig(), loadVersion(), loadBrowserStatus()])
+    await Promise.all([loadConfig(), loadVersion()])
   })
-
-  // ── browser actions ───────────────────────────────────────────────────────────
-  async function loadBrowserStatus() {
-    try {
-      browser = await api.getBrowserStatus()
-    } catch { /* non-critical */ }
-  }
-  function openBrowserSetup() {
-    browserModalOpen = true
-  }
-  async function onBrowserVerified(res: { detail?: string }) {
-    showToast(tr('settings.browser.verify_ok') + (res.detail ? ` (${res.detail})` : ''), 'success')
-    browserModalOpen = false
-    await loadBrowserStatus()
-  }
-  async function recheckBrowser() {
-    browserBusy = true
-    try {
-      await loadBrowserStatus()
-    } finally {
-      browserBusy = false
-    }
-  }
 
   // ── model actions ───────────────────────────────────────────────────────────
   function openAddModel() {
@@ -387,50 +358,6 @@
         </div>
       </div>
 
-      <!-- Browser automation -->
-      <div class="section-card">
-        <div class="section-head">
-          <span class="section-title-inline">{$t('settings.browser.title')}</span>
-          {#if browser && !browser.configured}
-            <button class="btn-add" onclick={openBrowserSetup}>
-              <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
-              {$t('settings.browser.setup')}
-            </button>
-          {:else if browser}
-            <div class="model-actions">
-              <button class="act-text" disabled={browserBusy} onclick={recheckBrowser}>{$t('settings.browser.recheck')}</button>
-              <button class="act-text" onclick={openBrowserSetup}>{$t('settings.browser.reconfigure')}</button>
-            </div>
-          {/if}
-        </div>
-        <div class="setting-row last">
-          <div class="setting-info">
-            <span class="setting-label">{$t('settings.browser.status')}</span>
-            <span class="setting-desc">{$t('settings.browser.desc')}</span>
-          </div>
-          <div class="browser-status">
-            {#if !browser}
-              <span class="setting-desc">{$t('settings.loading')}</span>
-            {:else if browser.connected}
-              <StatusTag status="success">{$t('settings.browser.connected')}</StatusTag>
-            {:else if browser.configured}
-              <StatusTag status="warning">{$t('settings.browser.unreachable')}</StatusTag>
-            {:else}
-              <StatusTag status="default">{$t('settings.browser.not_setup')}</StatusTag>
-            {/if}
-            {#if browser?.configured}
-              <span class="setting-desc mono">{$t('settings.browser.port')} {browser.port}</span>
-            {/if}
-          </div>
-        </div>
-        {#if browser && !browser.chrome_available}
-          <div class="bs-card-note">
-            <iconify-icon icon="ant-design:warning-outlined" width="14"></iconify-icon>
-            {$t('settings.browser.no_chrome')}
-          </div>
-        {/if}
-      </div>
-
       <!-- Save -->
       <div class="save-row">
         <button class="btn-primary" onclick={handleSave} disabled={saving}>
@@ -463,29 +390,6 @@
           requireKey={!editingModel}
           submitLabel={$t('models.btn.save')}
           onSubmit={submitModel}
-        />
-      </div>
-    </div>
-  </div>
-{/if}
-
-<!-- Browser setup modal -->
-{#if browserModalOpen}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('modal-backdrop')) browserModalOpen = false }}>
-    <div class="modal" role="dialog" aria-modal="true">
-      <div class="modal-header">
-        <span class="modal-title">{$t('settings.browser.modal_title')}</span>
-        <button class="modal-close" onclick={() => (browserModalOpen = false)} aria-label={$t('common.close')}>
-          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
-        </button>
-      </div>
-      <div class="modal-body">
-        <BrowserSetupForm
-          secondaryLabel={$t('common.cancel')}
-          onSecondary={() => (browserModalOpen = false)}
-          onVerified={onBrowserVerified}
         />
       </div>
     </div>
@@ -587,8 +491,4 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 }
 .modal-close:hover { background: var(--hover-neutral); color: var(--text); }
 .modal-body { padding: 20px 24px; }
-
-/* ── Browser automation ───────────────────────────────────────────────────────── */
-.browser-status { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
-.bs-card-note { display: flex; align-items: center; gap: 8px; padding: 12px 24px; border-top: 1px solid var(--border-table); font-size: 12px; color: var(--warning); background: var(--warning-bg); }
 </style>
