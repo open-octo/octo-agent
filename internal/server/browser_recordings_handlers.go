@@ -137,8 +137,5 @@ func (s *Server) handleDeleteBrowserRecording(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("delete recording: %v", err))
 		return
 	}
-	// Drop the keyword-trigger companion SKILL.md too (only if we generated it),
-	// so deleting a recording doesn't leave a trigger that fails on replay.
-	tools.DeleteRecordingSkillDoc(name)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
