@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"strconv"
 	"syscall"
 )
 
@@ -44,10 +45,26 @@ func isProcessAlive(pid int) bool {
 	return code == stillActive
 }
 
-// terminateProcess kills the process. Windows has no SIGTERM equivalent that
-// provides a graceful shutdown via the standard API, so we use Kill which
-// sends WM_CLOSE / TerminateProcess. The server's graceful shutdown on
-// interrupt is still reachable via /api/restart or the web UI stop button.
+// terminateProcess kills the process and its entire child tree. The serve
+// daemon is a process tree — the tracked supervisor pid plus the worker it
+// spawns (and anything the worker starts) — and Windows has no signal the
+// supervisor could forward to bring the tree down on a stop: superviseLoop's
+// forward() is a no-op on Windows, and a plain TerminateProcess on the
+// supervisor pid would orphan the worker, leaving it bound to the port and
+// holding octo.exe locked against an in-place upgrade. taskkill /T walks and
+// kills the whole tree; /F forces it (a console worker has no message loop to
+// act on the WM_CLOSE that /T alone sends). This matches the tree-kill the
+// terminal tool already uses (internal/tools/terminal_kill_windows.go). Falls
+// back to killing just the supervisor if taskkill is somehow unavailable.
+//
+// Windows still has no graceful-stop API here; the round-granularity session
+// persistence and SSE replay buffer cap the loss of a hard cut at one round.
 func terminateProcess(proc *os.Process) error {
-	return proc.Kill()
+	if proc == nil {
+		return nil
+	}
+	if err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(proc.Pid)).Run(); err != nil {
+		return proc.Kill()
+	}
+	return nil
 }
