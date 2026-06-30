@@ -99,6 +99,37 @@ func (s *Server) stopWakeupLocked(key string) {
 	delete(s.wakeupStart, key)
 }
 
+// clearWakeupClockIfIdle drops a session's anti-leak clock once its loop has
+// truly ended — i.e. no wakeup is armed. Called after an idle/wakeup-triggered
+// turn completes: an interval loop re-armed before the turn (timer present →
+// kept); a dynamic loop the model chose not to continue leaves no timer, so its
+// clock is reclaimed here instead of lingering in wakeupStart forever. A no-op
+// for ordinary (non-loop) idle steers, which never set a clock.
+func (s *Server) clearWakeupClockIfIdle(key string) {
+	s.wakeupMu.Lock()
+	defer s.wakeupMu.Unlock()
+	if s.wakeupTimers[key] == nil {
+		delete(s.wakeupStart, key)
+	}
+}
+
+// stopAllWakeups stops every armed loop and clears all clocks. Called on
+// shutdown so no timer callback races teardown (adapters closing, sessions
+// going away) and the maps don't outlive the process intent.
+func (s *Server) stopAllWakeups() {
+	s.wakeupMu.Lock()
+	defer s.wakeupMu.Unlock()
+	for k, t := range s.wakeupTimers {
+		if t != nil {
+			t.Stop()
+		}
+		delete(s.wakeupTimers, k)
+	}
+	for k := range s.wakeupStart {
+		delete(s.wakeupStart, k)
+	}
+}
+
 // wakerFor returns the Waker stamped into a web session's turn ctx.
 func (s *Server) wakerFor(sessionID string) tools.Waker {
 	return serverWaker{s: s, sessionID: sessionID}

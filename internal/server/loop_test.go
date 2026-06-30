@@ -90,6 +90,81 @@ func TestServerWaker_MaxLifetimeStops(t *testing.T) {
 	}
 }
 
+// armWakeupFn actually fires its callback and, in interval mode, re-arms.
+func TestServerWaker_FiresAndReArms(t *testing.T) {
+	s := newLoopTestServer()
+	fired := make(chan struct{}, 8)
+	s.armWakeupFn("sid", 5*time.Millisecond, true, func() { fired <- struct{}{} })
+
+	// First tick.
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("interval wakeup never fired")
+	}
+	// Interval mode re-arms itself → a second tick arrives without re-calling arm.
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("interval wakeup did not re-arm for a second tick")
+	}
+	s.cancelWakeup("sid")
+}
+
+// A dynamic (repeat=false) wakeup fires once and does not re-arm itself.
+func TestServerWaker_DynamicFiresOnce(t *testing.T) {
+	s := newLoopTestServer()
+	fired := make(chan struct{}, 8)
+	s.armWakeupFn("sid", 5*time.Millisecond, false, func() { fired <- struct{}{} })
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dynamic wakeup never fired")
+	}
+	// No second tick without an explicit re-arm.
+	select {
+	case <-fired:
+		t.Fatal("dynamic wakeup must not re-arm itself")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if n := s.armedCount(); n != 0 {
+		t.Fatalf("a spent dynamic timer should leave nothing armed, got %d", n)
+	}
+}
+
+// clearWakeupClockIfIdle reclaims an abandoned dynamic loop's clock but keeps an
+// interval loop's (whose timer is still armed).
+func TestServerWaker_ClockReclaimedWhenIdle(t *testing.T) {
+	s := newLoopTestServer()
+	// Abandoned dynamic loop: clock set, no timer.
+	s.wakeupStart["sid"] = time.Now()
+	s.clearWakeupClockIfIdle("sid")
+	if _, ok := s.wakeupStart["sid"]; ok {
+		t.Fatal("an idle (no-timer) clock should be reclaimed")
+	}
+	// Active loop: timer armed → clock kept.
+	s.armWakeup("sid2", time.Hour, "p", true)
+	s.clearWakeupClockIfIdle("sid2")
+	if _, ok := s.wakeupStart["sid2"]; !ok {
+		t.Fatal("an armed loop's clock must not be reclaimed")
+	}
+	s.cancelWakeup("sid2")
+}
+
+// stopAllWakeups (shutdown) tears down every armed loop and clock.
+func TestServerWaker_StopAll(t *testing.T) {
+	s := newLoopTestServer()
+	s.armWakeup("a", time.Hour, "p", true)
+	s.armWakeup("b", time.Hour, "p", false)
+	s.stopAllWakeups()
+	if n := s.armedCount(); n != 0 {
+		t.Fatalf("stopAllWakeups should clear timers, got %d", n)
+	}
+	if len(s.wakeupStart) != 0 {
+		t.Fatalf("stopAllWakeups should clear clocks, got %d", len(s.wakeupStart))
+	}
+}
+
 func newLoopTestServer() *Server {
 	return &Server{
 		wakeupTimers: map[string]*time.Timer{},

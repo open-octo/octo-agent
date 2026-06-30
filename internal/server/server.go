@@ -517,6 +517,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) doShutdown(ctx context.Context) error {
+	// Stop armed loop wakeups first, so no timer callback fires into adapters or
+	// sessions being torn down below.
+	s.stopAllWakeups()
 	s.stopChannels()
 	// Kill background processes started via web/IM sessions so they don't
 	// outlive the daemon — the same orphan-prevention the CLI/TUI do on exit.
@@ -1875,6 +1878,9 @@ func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, 
 	}
 
 	s.runChannelTurns(ctx, sess, ad, ev, strings.Join(agent.Texts(items), "\n\n"))
+	// Reclaim the loop clock if this was a dynamic tick the model didn't re-arm
+	// (no-op for ordinary completion-note idle turns / interval loops).
+	s.clearWakeupClockIfIdle(imWakeupKey(sess))
 }
 
 // runChannelTurns executes one content-bearing turn plus any chained turns

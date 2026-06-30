@@ -596,6 +596,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.forgetTurnLock(id)
+	s.cancelWakeup(id)                      // stop any armed loop (else an interval timer re-arms into a deleted session)
 	tools.CloseSessionBackgroundManager(id) // reap the session's background daemons
 	tools.CloseSessionSubAgentManager(id)   // and its sub-agents
 	tools.CloseSessionWorkflowManager(id)   // and its background workflows
@@ -628,6 +629,7 @@ func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		s.forgetTurnLock(id)
+		s.cancelWakeup(id)                      // stop any armed loop
 		tools.CloseSessionBackgroundManager(id) // reap the session's background daemons
 		tools.CloseSessionSubAgentManager(id)   // and its sub-agents
 		tools.CloseSessionWorkflowManager(id)   // and its background workflows

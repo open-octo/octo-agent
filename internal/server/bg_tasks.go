@@ -150,6 +150,9 @@ func (s *Server) kickIdleSteerTurn(sessionID string) {
 			s.turnRunning[sessionID] = false
 			mu.Unlock()
 			s.releaseSessionBinding(sessionID, agent.EntryWeb)
+			// Reclaim the loop clock if this was a dynamic tick the model didn't
+			// re-arm (no-op for ordinary steers / interval loops).
+			s.clearWakeupClockIfIdle(sessionID)
 		}()
 		s.runAgentTurnLoop(sess, strings.Join(texts, "\n\n"), blocks, imageRefsFromBlocks(blocks))
 	}()
