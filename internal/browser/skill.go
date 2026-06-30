@@ -329,11 +329,22 @@ func runStep(ctx context.Context, page *Page, step *Step, params map[string]stri
 			return err
 		}
 	case "click":
-		if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
-			return err
-		}
-		if err := page.Click(ctx, target); err != nil {
-			return err
+		// When the recording captured the element's visible text, resolve by text
+		// (verifying or replacing the drift-prone positional selector) — this is
+		// what makes replay survive layout changes and stops silent wrong-element
+		// clicks. resolveClickTarget already polled for existence, so click directly.
+		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
+			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
+			if err := page.Click(ctx, target); err != nil {
+				return err
+			}
+		} else {
+			if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
+				return err
+			}
+			if err := page.Click(ctx, target); err != nil {
+				return err
+			}
 		}
 	case "type":
 		if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
@@ -350,7 +361,11 @@ func runStep(ctx context.Context, page *Page, step *Step, params map[string]stri
 			return err
 		}
 	case "upload":
-		if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
+		// The upload trigger is a labeled control (e.g. "Choose file"), so prefer
+		// its text the same way clicks do.
+		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
+			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
+		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return err
 		}
 		// Click the upload control and feed the file through the chooser — works

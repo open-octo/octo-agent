@@ -80,6 +80,36 @@ func unquote(s string) (string, bool) {
 	return s, false
 }
 
+// lastTagOf extracts the bare tag name of a CSS selector's last segment, so a
+// recorded positional selector like "div > a:nth-of-type(3) > h2" yields "h2" to
+// scope a text-anchored fallback (h2:has-text(...)). Falls back to "*".
+func lastTagOf(sel string) string {
+	if i := strings.LastIndex(sel, ">"); i >= 0 {
+		sel = sel[i+1:]
+	}
+	sel = strings.TrimSpace(sel)
+	var b strings.Builder
+	for _, r := range sel {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+			b.WriteRune(r)
+			continue
+		}
+		break
+	}
+	if b.Len() == 0 {
+		return "*"
+	}
+	return strings.ToLower(b.String())
+}
+
+// escapeTextArg escapes a string for embedding inside a :has-text("...") arg.
+// Only the quote needs escaping — unquote (used when resolving) reverses \" — so
+// a backslash is left as-is (literal backslashes in visible UI text are absent
+// in practice).
+func escapeTextArg(s string) string {
+	return strings.ReplaceAll(s, `"`, `\"`)
+}
+
 // scanJS builds a JS query that walks base-CSS matches and returns the first
 // (or, when filtering by text, the tightest — shortest textContent) element
 // passing the visibility and text filters.

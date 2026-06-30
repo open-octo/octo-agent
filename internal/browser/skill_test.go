@@ -137,6 +137,49 @@ func TestGenerateSkillDistill(t *testing.T) {
 	}
 }
 
+// TestReplayTextAnchorRecoversFromDrift: a recorded positional selector now
+// points at the WRONG element after a layout change, but the recorded text steers
+// replay to the right one — instead of silently clicking the wrong node.
+func TestReplayTextAnchorRecoversFromDrift(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><meta charset="utf-8"><title>t</title>
+<div>
+  <button onclick="window.hit='wrong'">Cancel</button>
+  <button onclick="window.hit='right'">Book now</button>
+</div>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+
+	// The positional selector resolves to the first button ("Cancel") — the wrong
+	// one — but the recorded Label is the second button's text.
+	skill := &Skill{Name: "x", Steps: []Step{
+		{Action: "click", Selector: "div > button:nth-of-type(1)", Label: "Book now"},
+	}}
+	if _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var hit string
+	if err := page.Eval(ctx, "window.hit||''", &hit); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if hit != "right" {
+		t.Fatalf("text anchor did not override the drifted selector: window.hit=%q, want %q", hit, "right")
+	}
+}
+
 // TestReplaySkillSelfHeal: a step has a stale selector, the implicit wait fails,
 // the healer repairs the selector, replay retries and succeeds — and reports the
 // skill as modified so the caller can write the fix back.
