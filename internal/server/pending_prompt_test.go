@@ -106,3 +106,76 @@ func TestWSAsker_RegistersAndClearsPendingQuestion(t *testing.T) {
 		t.Fatal("pending question not cleared after answer")
 	}
 }
+
+// TestAcquireAskSlot_Serializes is the regression guard for the concurrent-
+// prompt clobber: two askers for the same session must not both hold the slot,
+// so a parallel workflow agent / background task can't overwrite an in-flight
+// prompt's pending slot and frontend modal (orphaning the first asker until its
+// timeout — a hang).
+func TestAcquireAskSlot_Serializes(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	const sid = "serialize-session"
+
+	rel1, err := srv.acquireAskSlot(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	acquired := make(chan struct{})
+	go func() {
+		rel2, err := srv.acquireAskSlot(context.Background(), sid)
+		if err == nil {
+			rel2()
+		}
+		close(acquired)
+	}()
+
+	select {
+	case <-acquired:
+		t.Fatal("second acquire returned while the slot was still held")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	rel1()
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("second acquire never proceeded after release")
+	}
+}
+
+// Serialization is per-session: a different session has an independent slot.
+func TestAcquireAskSlot_PerSession(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	rel1, err := srv.acquireAskSlot(context.Background(), "sess-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rel1()
+
+	rel2, err := srv.acquireAskSlot(context.Background(), "sess-b")
+	if err != nil {
+		t.Fatalf("a different session must not block on a held slot: %v", err)
+	}
+	rel2()
+}
+
+// A cancelled ctx returns an error instead of waiting behind a held slot, so a
+// cancelled turn doesn't block until the prompt's own timeout.
+func TestAcquireAskSlot_CtxCancel(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	const sid = "cancel-session"
+
+	rel1, err := srv.acquireAskSlot(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rel1()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := srv.acquireAskSlot(ctx, sid); err == nil {
+		t.Fatal("cancelled ctx should not acquire a held slot")
+	}
+}
