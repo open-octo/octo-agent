@@ -548,11 +548,56 @@ func TestClick_InvalidSelectorMessage(t *testing.T) {
 	if err := page.Navigate(ctx, srv.URL); err != nil {
 		t.Fatalf("navigate: %v", err)
 	}
-	err = page.Click(ctx, `a:has-text("nope")`)
+	// Genuinely malformed CSS (not a supported Playwright form) must still
+	// produce an actionable message, not a bare "eval threw".
+	err = page.Click(ctx, `a:not(`)
 	if err == nil {
-		t.Fatal("expected an error for an invalid (Playwright) selector")
+		t.Fatal("expected an error for a malformed selector")
 	}
-	if !strings.Contains(err.Error(), "invalid CSS selector") {
+	if !strings.Contains(err.Error(), "invalid selector") {
 		t.Errorf("error should name the invalid selector clearly; got: %v", err)
+	}
+}
+
+// TestClick_PlaywrightSelectors verifies the supported Playwright subset
+// actually resolves and clicks the right element.
+func TestClick_PlaywrightSelectors(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><html><head><title>t</title></head><body>
+<a id="a1" href="#" onclick="document.title='clicked-'+this.id;return false">Read the report</a>
+<a id="a2" href="#" onclick="document.title='clicked-'+this.id;return false">Other link</a>
+</body></html>`))
+	}))
+	defer srv.Close()
+
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	cases := map[string]string{
+		`a:has-text("Read the report")`: "clicked-a1",
+		`text=Other link`:               "clicked-a2",
+		`xpath=//a[@id="a1"]`:           "clicked-a1",
+	}
+	for sel, wantTitle := range cases {
+		if err := page.Navigate(ctx, srv.URL); err != nil {
+			t.Fatalf("navigate: %v", err)
+		}
+		if err := page.Click(ctx, sel); err != nil {
+			t.Fatalf("click %q: %v", sel, err)
+		}
+		var title string
+		if err := page.Eval(ctx, "document.title", &title); err != nil {
+			t.Fatalf("read title: %v", err)
+		}
+		if title != wantTitle {
+			t.Errorf("selector %q clicked wrong element: title=%q, want %q", sel, title, wantTitle)
+		}
 	}
 }

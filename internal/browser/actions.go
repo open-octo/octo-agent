@@ -28,13 +28,15 @@ func splitFrame(selector string) (frame, elem string) {
 }
 
 // elemRefJS builds a JS expression evaluating to the target element, piercing a
-// same-origin iframe's contentDocument when a frame selector is given.
+// same-origin iframe's contentDocument when a frame selector is given. The
+// element selector may be plain CSS or the supported Playwright subset
+// (resolveSelectorJS).
 func elemRefJS(frame, elem string) string {
 	if frame == "" {
-		return fmt.Sprintf("document.querySelector(%s)", jsString(elem))
+		return resolveSelectorJS("document", elem)
 	}
-	return fmt.Sprintf("(()=>{const f=document.querySelector(%s);return f&&f.contentDocument?f.contentDocument.querySelector(%s):null;})()",
-		jsString(frame), jsString(elem))
+	return fmt.Sprintf("(()=>{const f=document.querySelector(%s);return f&&f.contentDocument?(%s):null;})()",
+		jsString(frame), resolveSelectorJS("f.contentDocument", elem))
 }
 
 // elementCenter scrolls an element into view and returns its viewport-center
@@ -67,7 +69,7 @@ func (p *Page) elementCenter(ctx context.Context, selector string) (point, error
 		return point{}, fmt.Errorf("selector %q matched nothing", selector)
 	}
 	if res.BadSelector {
-		return point{}, fmt.Errorf("invalid CSS selector %q — :has-text/:contains are Playwright-only, not CSS; use a plain CSS selector (run the observe action to list valid ones)", selector)
+		return point{}, fmt.Errorf("invalid selector %q — use plain CSS or a supported Playwright form (:has-text(\"…\"), text=…, :visible, xpath=…); run the observe action to list valid selectors", selector)
 	}
 	return point{X: res.X, Y: res.Y}, nil
 }

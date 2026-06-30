@@ -186,7 +186,7 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 				"name":       map[string]any{"type": "string", "description": "Skill name (record_stop / run_skill)."},
 				"params":     map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill)."},
 				"url":        map[string]any{"type": "string", "description": "Target URL (navigate)."},
-				"selector":   map[string]any{"type": "string", "description": "CSS selector of the target element (click/hover/type/select/scroll/wait/upload/download)."},
+				"selector":   map[string]any{"type": "string", "description": "Target element selector (click/hover/type/select/scroll/wait/upload/download). Plain CSS, or a Playwright-style form: :has-text(\"…\")/:text(\"…\")/:contains(\"…\"), text=…, :visible, xpath=…, css=…. Use observe to see real selectors."},
 				"frame":      map[string]any{"type": "string", "description": "Optional CSS selector of a same-origin iframe to scope the selector into (e.g. iframe#app)."},
 				"text":       map[string]any{"type": "string", "description": "Text to type (type)."},
 				"value":      map[string]any{"type": "string", "description": "Option value, text, or label to pick in a <select> (select)."},
