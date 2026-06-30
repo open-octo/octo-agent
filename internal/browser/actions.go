@@ -47,7 +47,8 @@ func (p *Page) elementCenter(ctx context.Context, selector string) (point, error
 		offset = fmt.Sprintf(`{const f=document.querySelector(%s); if(f){const fr=f.getBoundingClientRect(); ox=fr.x; oy=fr.y;}}`, jsString(frame))
 	}
 	expr := fmt.Sprintf(`(() => {
-		const el = %s;
+		let el;
+		try { el = %s; } catch (e) { return { badSelector: true }; }
 		if (!el) return null;
 		el.scrollIntoView({ block: 'center', inline: 'center' });
 		const r = el.getBoundingClientRect();
@@ -55,14 +56,20 @@ func (p *Page) elementCenter(ctx context.Context, selector string) (point, error
 		%s
 		return { x: ox + r.x + r.width / 2, y: oy + r.y + r.height / 2 };
 	})()`, elemRefJS(frame, elem), offset)
-	var pt *point
-	if err := p.Eval(ctx, expr, &pt); err != nil {
+	var res *struct {
+		X, Y        float64
+		BadSelector bool `json:"badSelector"`
+	}
+	if err := p.Eval(ctx, expr, &res); err != nil {
 		return point{}, err
 	}
-	if pt == nil {
+	if res == nil {
 		return point{}, fmt.Errorf("selector %q matched nothing", selector)
 	}
-	return *pt, nil
+	if res.BadSelector {
+		return point{}, fmt.Errorf("invalid CSS selector %q — :has-text/:contains are Playwright-only, not CSS; use a plain CSS selector (run the observe action to list valid ones)", selector)
+	}
+	return point{X: res.X, Y: res.Y}, nil
 }
 
 // Click performs a trusted browser-level click at the element's center.

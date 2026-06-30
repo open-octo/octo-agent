@@ -526,3 +526,33 @@ func TestNewPageLeavesOtherTabsUntouched(t *testing.T) {
 		t.Errorf("user tab was disturbed: pathname = %q, want /user", userPath)
 	}
 }
+
+// TestClick_InvalidSelectorMessage: a Playwright-style :has-text selector is
+// not valid CSS; querySelector throws. We should surface an actionable message
+// (not a bare "eval threw: Uncaught") so the model switches to a CSS selector.
+func TestClick_InvalidSelectorMessage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><html><head><title>t</title></head><body><a href="#">x</a></body></html>`))
+	}))
+	defer srv.Close()
+
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	err = page.Click(ctx, `a:has-text("nope")`)
+	if err == nil {
+		t.Fatal("expected an error for an invalid (Playwright) selector")
+	}
+	if !strings.Contains(err.Error(), "invalid CSS selector") {
+		t.Errorf("error should name the invalid selector clearly; got: %v", err)
+	}
+}

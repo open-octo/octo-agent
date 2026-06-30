@@ -208,6 +208,19 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 	if action == "" {
 		return agent.ToolResult{}, fmt.Errorf("browser: action is required")
 	}
+
+	// Bound every action so a CDP call a janky/loading page never acks (e.g. a
+	// mouseWheel scroll on a heavy SPA) fails with a timeout instead of hanging
+	// the whole turn. run_skill replays many steps and download waits for a file
+	// to finish, so they get a much longer ceiling.
+	timeout := 45 * time.Second
+	switch action {
+	case "run_skill", "download":
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	page, b, err := browserPage(ctx)
 	if err != nil {
 		return agent.ToolResult{}, fmt.Errorf("browser: %w", err)
