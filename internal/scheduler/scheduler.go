@@ -383,5 +383,22 @@ func (s *Scheduler) save(task Task) error {
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, p)
+	return renameWithRetry(tmp, p)
+}
+
+// renameWithRetry replaces newpath with oldpath, retrying briefly on transient
+// failures. On Windows, renaming onto an existing file fails with
+// ERROR_ACCESS_DENIED / ERROR_SHARING_VIOLATION when the destination is
+// momentarily open (a concurrent reader, an AV scan) — a flake we hit saving
+// task bookkeeping. POSIX rename is atomic and succeeds on the first try, so
+// this is a no-op cost there.
+func renameWithRetry(oldpath, newpath string) error {
+	var err error
+	for i := 0; i < 20; i++ {
+		if err = os.Rename(oldpath, newpath); err == nil {
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return err
 }

@@ -3,11 +3,37 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+// TestRenameWithRetry overwrites an existing destination, the case that flakes
+// on Windows when the target is momentarily open.
+func TestRenameWithRetry(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "t.json")
+	if err := os.WriteFile(dst, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameWithRetry(tmp, dst); err != nil {
+		t.Fatalf("renameWithRetry: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new" {
+		t.Fatalf("content = %q, want %q", got, "new")
+	}
+}
 
 // recordRunner records every RunTask call for assertions.
 type recordRunner struct {
