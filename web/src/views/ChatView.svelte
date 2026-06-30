@@ -649,7 +649,10 @@
     cleanups.push(ws.on('request_confirmation', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       confirmModal.set({
-        confId: (ev as any).id,
+        // ConfirmModal reads $confirmModal.id when answering; storing it under
+        // any other key sends a confirmation with no id, which the server can't
+        // route back to the waiting tool (the turn then hangs on the popup).
+        id: (ev as any).id,
         sessionId: (ev as any).session_id,
         message: (ev as any).message,
         kind: (ev as any).kind,
