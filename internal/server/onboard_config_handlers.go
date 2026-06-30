@@ -402,10 +402,8 @@ func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
 	applyModelRequestToEntry(req, &entry)
 	entry.Name = cfg.UniqueName(req.Model)
 	cfg.Models = append(cfg.Models, entry)
-	becameDefault := false
 	if cfg.DefaultModel == "" || len(cfg.Models) == 1 {
 		cfg.DefaultModel = entry.Name
-		becameDefault = true
 	}
 	if req.PermissionMode != "" {
 		cfg.PermissionMode = req.PermissionMode
@@ -415,13 +413,12 @@ func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
 	}
-	// When this entry becomes the default (e.g. the first model saved during
-	// first-run onboard), point new sessions at it — otherwise handleCreateSession
-	// keeps using the stale startup s.model. Mirrors handleSetDefaultModelConfig.
-	if becameDefault {
-		s.model = entry.Model
-	}
+	// Rebuild the default sender/model so new unbound sessions pick up the new
+	// entry (e.g. the first model saved during onboard, or a changed default).
 	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after saving model config: %v", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": entry.Name})
 }
@@ -481,7 +478,12 @@ func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
 	}
+	// Editing the default entry (provider/model/endpoint/key) must rebuild the
+	// default sender, or new unbound sessions keep using the stale startup one.
 	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after updating model config: %v", err)
+	}
 
 	// id may have changed if the auto-derived name tracked a new model — return
 	// it so the client can refresh its reference.
@@ -531,7 +533,12 @@ func (s *Server) handleDeleteModelConfig(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
 	}
+	// Deleting an entry may have repaired the default; rebuild the default
+	// sender so new unbound sessions follow the new default.
 	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after deleting model config: %v", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -594,9 +601,12 @@ func (s *Server) handleSetDefaultModelConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// The next agent turn should pick up the new default.
-	s.model = cfg.DefaultEntry().Model
+	// The next agent turn should pick up the new default: rebuild the default
+	// sender/model under senderMu so new unbound sessions follow it.
 	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after setting default model: %v", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
