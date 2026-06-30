@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -61,6 +62,35 @@ func chanServer(t *testing.T) *Server {
 
 func evFor(text string) channel.InboundEvent {
 	return channel.InboundEvent{Platform: "fake", ChatID: "c1", UserID: "u1", MessageID: "m1", Text: text}
+}
+
+// failSender errors every turn so the IM turn-error surfacing path can be
+// exercised. err is returned verbatim from each entry point the agent loop may
+// take (with or without tools, streaming or not).
+type failSender struct{ err error }
+
+func (s failSender) SendMessages(_ context.Context, _, _ string, _ []agent.Message, _ int) (agent.Reply, error) {
+	return agent.Reply{}, s.err
+}
+func (s failSender) StreamMessages(_ context.Context, _, _ string, _ []agent.Message, _ int, _ func(string), _ func(string)) (agent.Reply, error) {
+	return agent.Reply{}, s.err
+}
+func (s failSender) SendMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition) (agent.Reply, error) {
+	return agent.Reply{}, s.err
+}
+func (s failSender) StreamMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition, _ func(string), _ agent.ToolInputDeltaFunc, _ agent.ThinkingDeltaFunc) (agent.Reply, error) {
+	return agent.Reply{}, s.err
+}
+
+// chanServerWithSender mirrors chanServer but lets the test pick the sender so
+// the failure path is reachable.
+func chanServerWithSender(t *testing.T, snd agent.Sender) *Server {
+	t.Helper()
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+		return agent.New(snd, "stub-model")
+	}, channel.BindByChat)
+	return srv
 }
 
 // TestRouteChannelEvent_PendingAskConsumesMessage: while a permission prompt
@@ -129,6 +159,42 @@ func TestRouteChannelEvent_NormalMessageRunsTurn(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// TestHandleChannelMessage_SurfacesTurnError: a failed turn (LLM call errors)
+// must be sent back to the chat. Without this the user just sees silence — no
+// reply, no hint that the request failed.
+func TestHandleChannelMessage_SurfacesTurnError(t *testing.T) {
+	srv := chanServerWithSender(t, failSender{err: errors.New("HTTP 429: rate limit exceeded")})
+	ad := &fullFakeAdapter{}
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+
+	found := false
+	for _, txt := range ad.texts() {
+		if strings.Contains(txt, "HTTP 429: rate limit exceeded") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("turn error not surfaced to chat; got %v", ad.texts())
+	}
+}
+
+// TestHandleChannelMessage_InterruptStaysSilent: a user interrupt
+// (context.Canceled) is expected, not a failure — it must not produce an error
+// message in the chat.
+func TestHandleChannelMessage_InterruptStaysSilent(t *testing.T) {
+	srv := chanServerWithSender(t, failSender{err: context.Canceled})
+	ad := &fullFakeAdapter{}
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+
+	for _, txt := range ad.texts() {
+		if strings.Contains(txt, "context canceled") || strings.Contains(txt, "⚠️") {
+			t.Errorf("interrupt surfaced as an error to chat: %q", txt)
+		}
+	}
 }
 
 // TestHandleChannelMessage_SetsPerTurnGate: every IM turn gets a fresh

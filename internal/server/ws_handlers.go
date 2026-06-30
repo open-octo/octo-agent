@@ -1264,6 +1264,11 @@ func (w *wsStreamWriter) sendRaw(data []byte) {
 // call that errored out. It is distinct from EventToolError (per-tool, keyed by
 // tool_id): a turn error belongs to no tool card, so the frontend renders it as
 // a standalone error notice in the transcript rather than dropping it.
+//
+// The broadcast is live-only: it is neither buffered into replay state nor
+// persisted to history, so a tab subscribing after the failure won't see it.
+// That matches the transient nature of the error on the other transports (SSE
+// one-shot, IM chat line) and CLI/TUI, which print it inline without persisting.
 func (w *wsStreamWriter) error(msg string) {
 	w.hub.broadcast(w.sessionID, map[string]string{
 		"type":       "turn_error",

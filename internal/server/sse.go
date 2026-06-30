@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -101,7 +103,7 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 		var perr error
 		runCtx, executor, mgr, perr = s.prepareToolTurn(runCtx, a)
 		if perr != nil {
-			ev := agent.AgentEvent{Kind: agent.EventToolError, Err: perr.Error()}
+			ev := agent.AgentEvent{Kind: agent.EventTurnError, Err: perr.Error()}
 			b, _ := json.Marshal(ev)
 			sseEvent(w, string(b))
 			return
@@ -133,9 +135,15 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 
 	reply, err := a.RunStream(runCtx, req.Message, toolDefs, executor, eventHandler)
 	if err != nil {
-		ev := agent.AgentEvent{Kind: agent.EventTurnError, Err: err.Error()}
-		b, _ := json.Marshal(ev)
-		sseEvent(w, string(b))
+		// A user interrupt isn't a failure to report — the handler already
+		// streamed the turn_done that finishInterrupted emitted. Other errors
+		// surface as a turn_error so the consumer can tell an abort from a
+		// per-tool failure.
+		if !errors.Is(err, context.Canceled) {
+			ev := agent.AgentEvent{Kind: agent.EventTurnError, Err: err.Error()}
+			b, _ := json.Marshal(ev)
+			sseEvent(w, string(b))
+		}
 		return
 	}
 
