@@ -9,14 +9,14 @@ import (
 	"github.com/Leihb/octo-agent/internal/browser"
 )
 
-// makeBrowserHealer builds the LLM-backed step healer used by the browser tool's
+// MakeBrowserHealer builds the LLM-backed step healer used by the browser tool's
 // run_skill. When a recorded step fails (e.g. a drifted selector), it shows the
 // model the page's current interactive elements (a text digest — model-agnostic,
 // no vision needed when the DOM/AX is reachable) and asks for the corrected
 // selector, which it writes into the step for retry + write-back.
 //
 // Returns nil when no sender is configured, so run_skill stays deterministic.
-func makeBrowserHealer(sender agent.Sender, model string) browser.Healer {
+func MakeBrowserHealer(sender agent.Sender, model string) browser.Healer {
 	if sender == nil {
 		return nil
 	}
@@ -55,11 +55,11 @@ func makeBrowserHealer(sender agent.Sender, model string) browser.Healer {
 	}
 }
 
-// makeSkillGenerator builds the LLM-backed skill distiller for record_stop. It
+// MakeSkillGenerator builds the LLM-backed skill distiller for record_stop. It
 // refines the deterministic baseline into a clean optimal-path skill, grounded
 // in the captured selectors (the engine enforces the selector constraint).
 // Returns nil when no sender is configured, so generation stays deterministic.
-func makeSkillGenerator(sender agent.Sender, model string) browser.SkillGenerator {
+func MakeSkillGenerator(sender agent.Sender, model string) browser.SkillGenerator {
 	if sender == nil {
 		return nil
 	}

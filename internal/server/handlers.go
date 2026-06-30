@@ -743,6 +743,13 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.C
 		tools.SetBrowserVision(cfg.ModelVision(a.Model))
 	}
 
+	// Same omission for the LLM-backed browser helpers: record_stop's skill
+	// distillation and run_skill's selector self-heal need a model. WireTools
+	// installs these for the CLI; serve must too, or the web UI silently falls
+	// back to deterministic compilation and no self-heal.
+	tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.Sender, a.Model))
+	tools.SetBrowserHealer(app.MakeBrowserHealer(a.Sender, a.Model))
+
 	engine, err := permission.New(permissionConfigPath(), s.curCwd(), resolvePermissionMode(), s.memDir, s.homeMemDir)
 	if err != nil {
 		return ctx, nil, nil, fmt.Errorf("permission engine: %w", err)
