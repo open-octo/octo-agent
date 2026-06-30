@@ -55,8 +55,12 @@ func TestAskUserQuestionTool_Schema(t *testing.T) {
 		}
 	}
 	itemReq, _ := item["required"].([]string)
-	if !sliceContains(itemReq, "question") || !sliceContains(itemReq, "options") {
-		t.Errorf("question + options should be required on the item, got %v", itemReq)
+	if !sliceContains(itemReq, "question") {
+		t.Errorf("question should be required on the item, got %v", itemReq)
+	}
+	// options is advisory now — a free-text question omits it entirely.
+	if sliceContains(itemReq, "options") {
+		t.Errorf("options should NOT be required on the item, got %v", itemReq)
 	}
 }
 
@@ -318,27 +322,71 @@ func TestAskUserQuestionTool_Execute_NoAsker(t *testing.T) {
 func TestAskUserQuestionTool_Execute_Validation(t *testing.T) {
 	useAsker(t, &stubAsker{resp: AskResponse{Choices: []string{"a"}}})
 
-	// Missing question.
+	// Missing question is still the one hard error: there is nothing to ask.
 	if _, err := (AskUserQuestionTool{}).Execute(context.Background(), "ask_user_question", map[string]any{
 		"options": []any{"a", "b"},
 	}); err == nil || !strings.Contains(err.Error(), "question is required") {
 		t.Errorf("missing question should error, got %v", err)
 	}
+}
 
-	// Too few options.
-	if _, err := (AskUserQuestionTool{}).Execute(context.Background(), "ask_user_question", map[string]any{
-		"question": "Q?",
-		"options":  []any{"only"},
-	}); err == nil || !strings.Contains(err.Error(), "2-4 entries") {
-		t.Errorf("single option should error, got %v", err)
+// Zero options is a valid open-ended free-text question: the askers all append
+// an "Other" tail, so it degrades to a plain input box. The model used to be
+// forced to invent a placeholder option (and the call failed); now it can just
+// omit options. Regression guard for that reported failure.
+func TestAskUserQuestionTool_Execute_NoOptionsFreeText(t *testing.T) {
+	stub := &stubAsker{resp: AskResponse{Custom: "zhihu-hot-first"}}
+	useAsker(t, stub)
+
+	out, err := AskUserQuestionTool{}.Execute(context.Background(), "ask_user_question", map[string]any{
+		"question": "What should we name the skill?",
+	})
+	if err != nil {
+		t.Fatalf("an option-less question should succeed, got error: %v", err)
 	}
+	if !stub.called {
+		t.Fatal("asker was never invoked")
+	}
+	if len(stub.lastReq.Options) != 0 {
+		t.Errorf("want no options forwarded, got %v", stub.lastReq.Options)
+	}
+	if out.Text != "User chose: Other — zhihu-hot-first" {
+		t.Errorf("Execute result = %q", out.Text)
+	}
+}
 
-	// Too many options.
+// A single option is valid too — it renders as one choice plus the free-text
+// tail. This is the exact shape that produced the "options must have 2-4
+// entries (got 1)" error before.
+func TestAskUserQuestionTool_Execute_SingleOption(t *testing.T) {
+	stub := &stubAsker{resp: AskResponse{Choices: []string{"zhihu-hot-first"}}}
+	useAsker(t, stub)
+
+	if _, err := (AskUserQuestionTool{}).Execute(context.Background(), "ask_user_question", map[string]any{
+		"question": "Name it this?",
+		"options":  []any{"zhihu-hot-first"},
+	}); err != nil {
+		t.Fatalf("a single option should succeed, got error: %v", err)
+	}
+	if len(stub.lastReq.Options) != 1 {
+		t.Errorf("want 1 option forwarded, got %v", stub.lastReq.Options)
+	}
+}
+
+// More than four options is trimmed to four rather than rejected, keeping the
+// prompt UI compact while never erroring on count.
+func TestAskUserQuestionTool_Execute_TooManyOptionsTrimmed(t *testing.T) {
+	stub := &stubAsker{resp: AskResponse{Choices: []string{"a"}}}
+	useAsker(t, stub)
+
 	if _, err := (AskUserQuestionTool{}).Execute(context.Background(), "ask_user_question", map[string]any{
 		"question": "Q?",
 		"options":  []any{"a", "b", "c", "d", "e"},
-	}); err == nil || !strings.Contains(err.Error(), "2-4 entries") {
-		t.Errorf("5 options should error, got %v", err)
+	}); err != nil {
+		t.Fatalf("5 options should be trimmed, not rejected, got error: %v", err)
+	}
+	if len(stub.lastReq.Options) != 4 {
+		t.Errorf("want options trimmed to 4, got %d: %v", len(stub.lastReq.Options), stub.lastReq.Options)
 	}
 }
 
