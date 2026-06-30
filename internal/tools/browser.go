@@ -99,12 +99,17 @@ func ResetBrowserSession() {
 	p := browserSession.page
 	browserSession.b, browserSession.page = nil, nil
 	browserSession.mu.Unlock()
+	closeSession(b, p)
+}
+
+// closeSession tears down a browser session. When we attached to the user's own
+// Chrome, Close() only drops the WS and leaves our tab behind, so close the tab
+// we opened too (don't litter the user's browser); if we launched Chrome
+// ourselves, Close() kills it whole. Safe to call with nils.
+func closeSession(b *browser.Browser, p *browser.Page) {
 	if b == nil {
 		return
 	}
-	// When we attached to the user's own Chrome, Close() only drops the WS and
-	// leaves our tab behind. Close the tab we opened so we don't litter the
-	// user's browser; if we launched Chrome ourselves, Close() kills it whole.
 	if !b.OwnsProcess() && p != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = b.ClosePage(ctx, p.TargetID())
@@ -126,7 +131,19 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 	browserSession.mu.Lock()
 	defer browserSession.mu.Unlock()
 	if browserSession.page != nil {
-		return browserSession.page, browserSession.b, nil
+		// The session is package-global and shared across chat sessions, so a tab
+		// opened (and since navigated/closed) in an earlier session can leave a
+		// stale handle whose CDP target is gone — every action would then fail with
+		// "Session with given id not found" (-32001). Probe liveness before reusing
+		// it; if dead, tear it down (off the lock) and re-establish below.
+		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		err := browserSession.page.Eval(probeCtx, "1", nil)
+		cancel()
+		if err == nil {
+			return browserSession.page, browserSession.b, nil
+		}
+		go closeSession(browserSession.b, browserSession.page)
+		browserSession.b, browserSession.page = nil, nil
 	}
 	cfg, _ := config.Load()
 	bc := cfg.Browser
