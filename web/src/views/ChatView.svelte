@@ -242,7 +242,13 @@
     resetArtifacts(sid)
     resetSessionRuntimeState(sid)
     ws.subscribe(sid)
-    loadHistory(sid)
+    // A freshly opened agentic session (openAgentSession queued a pendingPrompt)
+    // is empty at creation, so loadHistory has nothing to fetch — and worse, its
+    // async GET races the flush-on-subscribe send: by the time it resolves the
+    // server has already persisted the just-sent user message, which it then
+    // appends on top of the optimistic/echoed bubble (the duplicate that vanishes
+    // on refresh). Skip it; the subscribed handler drives the first message.
+    if (get(pendingPrompt)?.sessionId !== sid) loadHistory(sid)
 
     // ── WS event handlers ───────────────────────────────────────────────────
     const cleanups: Array<() => void> = []
