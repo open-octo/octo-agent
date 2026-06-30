@@ -1017,6 +1017,52 @@ func TestHandleUpdateSessionReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateSessionPermissionMode(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	patch := func(mode string) *httptest.ResponseRecorder {
+		payload, _ := json.Marshal(updateSessionPermissionModeRequest{PermissionMode: mode})
+		req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/permission_mode", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		return w
+	}
+
+	if w := patch("auto"); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if cfg, err := config.Load(); err != nil {
+		t.Fatal(err)
+	} else if cfg.PermissionMode != "auto" {
+		t.Fatalf("permission_mode = %q, want auto", cfg.PermissionMode)
+	}
+
+	// Cycling back to interactive persists too.
+	if w := patch("interactive"); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if cfg, err := config.Load(); err != nil {
+		t.Fatal(err)
+	} else if cfg.PermissionMode != "interactive" {
+		t.Fatalf("permission_mode = %q, want interactive", cfg.PermissionMode)
+	}
+
+	// An unknown mode is rejected.
+	if w := patch("bogus"); w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandleUpdateSessionWorkingDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
