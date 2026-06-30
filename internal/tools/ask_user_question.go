@@ -93,10 +93,16 @@ func askerFrom(ctx context.Context) Asker {
 // information to pick a default and asking via free-form prose would
 // produce a sloppy, hard-to-parse answer.
 //
-// Schema mirrors Claude Code's AskUserQuestion at the surface level but
-// caps at ONE question per call (per the M11-prep design): simpler
-// schema, simpler REPL UX, model fires multiple calls if it needs
-// multiple questions.
+// The declared schema mirrors Claude Code's AskUserQuestion natively — a
+// `questions` array of {question, header, multiSelect, options:[{label,
+// description}]} — so the shape the model was trained to emit and the shape we
+// advertise are the same. That alignment is the point: a flat snake_case schema
+// drifted from the model's prior, and it would intermittently revert to the CC
+// shape, fail validation, and the prompt would never reach the user (the
+// "web modal didn't pop up" bug). We still cap at ONE question per call
+// (maxItems:1, per the M11-prep design — simpler REPL/web/IM UX; the model
+// fires multiple calls when it needs multiple), and Execute still tolerates the
+// old flat shape as a fallback. See normalizeAskInput.
 type AskUserQuestionTool struct{}
 
 func (AskUserQuestionTool) Definition() agent.ToolDefinition {
@@ -107,34 +113,60 @@ func (AskUserQuestionTool) Definition() agent.ToolDefinition {
 			"reasonable default — preferences (\"which library?\"), trade-offs (\"prioritize speed " +
 			"or readability?\"), or scope (\"include the migration too?\"). Don't use it for " +
 			"information you could find in the repo or for questions you should have an opinion " +
-			"on yourself. Options must be 2-4 mutually exclusive labels; if you also pass " +
-			"multi_select=true the user can pick more than one. An \"Other\" tail with a free-text " +
-			"follow-up is always added. Result text is shaped like 'User chose: <label>' or, " +
-			"for Other, 'User chose: Other — <free text>'.",
+			"on yourself. Pass exactly one question in the `questions` array; fire another call if " +
+			"you need to ask more. Each question needs 2-4 mutually exclusive options; set " +
+			"multiSelect=true when the choices are NOT mutually exclusive and the user may pick " +
+			"several. An \"Other\" tail with a free-text follow-up is always added. Result text is " +
+			"shaped like 'User chose: <label>' or, for Other, 'User chose: Other — <free text>'.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"question": map[string]any{
-					"type":        "string",
-					"description": "The question to ask, complete with punctuation. Should be one sentence; if you need more context, put it in the option labels instead of the question itself.",
-				},
-				"options": map[string]any{
+				"questions": map[string]any{
 					"type":        "array",
-					"items":       map[string]any{"type": "string"},
-					"minItems":    2,
-					"maxItems":    4,
-					"description": "2-4 mutually exclusive labels. Each label should be a complete choice (\"OAuth with PKCE\" not just \"OAuth\"). The asker adds an \"Other (free text)\" tail automatically — don't include one yourself.",
-				},
-				"multi_select": map[string]any{
-					"type":        "boolean",
-					"description": "Set true when the choices are NOT mutually exclusive (e.g. \"which features should we enable?\"). The user can then pick a comma-separated subset.",
-				},
-				"header": map[string]any{
-					"type":        "string",
-					"description": "Optional short tag shown in the prompt UI (≤12 chars). Helps the user track which question is which when you ask several in sequence. Example: 'auth_method', 'scope'.",
+					"minItems":    1,
+					"maxItems":    1,
+					"description": "The question to ask, as a single-element array. octo asks one question per call — fire another call for the next question.",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"question": map[string]any{
+								"type":        "string",
+								"description": "The question to ask, complete with punctuation. Should be one sentence; if you need more context, put it in the option labels instead of the question itself.",
+							},
+							"header": map[string]any{
+								"type":        "string",
+								"description": "Optional short tag shown in the prompt UI (≤12 chars). Example: 'auth_method', 'scope'.",
+							},
+							"multiSelect": map[string]any{
+								"type":        "boolean",
+								"description": "Set true when the choices are NOT mutually exclusive (e.g. \"which features should we enable?\"). The user can then pick more than one.",
+							},
+							"options": map[string]any{
+								"type":     "array",
+								"minItems": 2,
+								"maxItems": 4,
+								"items": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"label": map[string]any{
+											"type":        "string",
+											"description": "The choice, as a complete label (\"OAuth with PKCE\" not just \"OAuth\"). Don't add an \"Other\" entry — one is appended automatically.",
+										},
+										"description": map[string]any{
+											"type":        "string",
+											"description": "Optional extra context for this choice, shown alongside the label.",
+										},
+									},
+									"required": []string{"label"},
+								},
+								"description": "2-4 mutually exclusive choices.",
+							},
+						},
+						"required": []string{"question", "options"},
+					},
 				},
 			},
-			"required": []string{"question", "options"},
+			"required": []string{"questions"},
 		},
 	}
 }
@@ -144,6 +176,7 @@ func (AskUserQuestionTool) Execute(ctx context.Context, _ string, input map[stri
 	if asker == nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: not available in this mode (REPL only)")
 	}
+	input = normalizeAskInput(input)
 	question := strings.TrimSpace(stringArg(input, "question"))
 	if question == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: question is required")
@@ -152,7 +185,7 @@ func (AskUserQuestionTool) Execute(ctx context.Context, _ string, input map[stri
 	if len(options) < 2 || len(options) > 4 {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: options must have 2-4 entries (got %d)", len(options))
 	}
-	multi, _ := input["multi_select"].(bool)
+	multi := askBool(input, "multi_select") || askBool(input, "multiSelect")
 	header := strings.TrimSpace(stringArg(input, "header"))
 
 	res, err := asker.Ask(ctx, AskRequest{
@@ -184,6 +217,40 @@ func formatAskResponse(r AskResponse) string {
 		return "(user cancelled)" // defensive: no choices and no custom → nothing to report
 	}
 	return "User chose: " + strings.Join(r.Choices, ", ")
+}
+
+// normalizeAskInput flattens the question fields into a single map regardless
+// of which shape the model used. The declared schema is the nested CC shape
+// (a `questions` array wrapping {question, header, options, multiSelect}); the
+// old flat shape (top-level question/options/multi_select) is still accepted as
+// a fallback for any model that reverts to it. When a `questions` array carries
+// entries, promote the first one's fields; we cap at one question, so extra
+// entries are dropped — the model is told to fire multiple calls when it needs
+// to. A present top-level `question` always wins, so a flat call is left as-is.
+func normalizeAskInput(input map[string]any) map[string]any {
+	if strings.TrimSpace(stringArg(input, "question")) != "" {
+		return input // flat shape — use it directly
+	}
+	arr, ok := input["questions"].([]any)
+	if !ok || len(arr) == 0 {
+		return input
+	}
+	if first, ok := arr[0].(map[string]any); ok {
+		return first
+	}
+	return input
+}
+
+// askBool reads a boolean tool argument, tolerating the JSON-string forms
+// ("true"/"false") some models emit instead of a real bool.
+func askBool(input map[string]any, key string) bool {
+	switch v := input[key].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	}
+	return false
 }
 
 // optionLabels extracts the option labels from the tool input, tolerating both

@@ -27,20 +27,36 @@ func useAsker(t *testing.T, a Asker) {
 	t.Cleanup(func() { SetAsker(nil) })
 }
 
+// The declared schema is CC-native: a `questions` array (capped at one entry)
+// whose items carry question/header/multiSelect/options[{label,description}].
 func TestAskUserQuestionTool_Schema(t *testing.T) {
 	def := AskUserQuestionTool{}.Definition()
 	if def.Name != "ask_user_question" {
 		t.Errorf("Name = %q", def.Name)
 	}
 	props, _ := def.Parameters["properties"].(map[string]any)
-	for _, want := range []string{"question", "options", "multi_select", "header"} {
-		if _, ok := props[want]; !ok {
-			t.Errorf("schema missing property %q", want)
-		}
+	questions, ok := props["questions"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema missing top-level `questions` array, got props %v", props)
+	}
+	if questions["maxItems"] != 1 {
+		t.Errorf("questions.maxItems = %v, want 1 (one question per call)", questions["maxItems"])
 	}
 	required, _ := def.Parameters["required"].([]string)
-	if !sliceContains(required, "question") || !sliceContains(required, "options") {
-		t.Errorf("question + options should be required, got %v", required)
+	if !sliceContains(required, "questions") {
+		t.Errorf("`questions` should be required, got %v", required)
+	}
+
+	item, _ := questions["items"].(map[string]any)
+	itemProps, _ := item["properties"].(map[string]any)
+	for _, want := range []string{"question", "options", "multiSelect", "header"} {
+		if _, ok := itemProps[want]; !ok {
+			t.Errorf("question item schema missing property %q", want)
+		}
+	}
+	itemReq, _ := item["required"].([]string)
+	if !sliceContains(itemReq, "question") || !sliceContains(itemReq, "options") {
+		t.Errorf("question + options should be required on the item, got %v", itemReq)
 	}
 }
 
@@ -99,6 +115,88 @@ func TestAskUserQuestionTool_Execute_ObjectOptions(t *testing.T) {
 		t.Errorf("option[2] = %q, want bare label", stub.lastReq.Options[2])
 	}
 	_ = out
+}
+
+// Claude models trained on Claude Code's AskUserQuestion intermittently emit
+// the CC-native shape — a `questions` array wrapping the real fields, with a
+// camelCase `multiSelect` and object-shaped options. Before normalization the
+// top-level `question` read empty and the tool failed with "question is
+// required", so the web modal never appeared (the reported intermittent bug).
+func TestAskUserQuestionTool_Execute_NestedQuestionsShape(t *testing.T) {
+	stub := &stubAsker{resp: AskResponse{Choices: []string{"OAuth"}}}
+	useAsker(t, stub)
+
+	out, err := AskUserQuestionTool{}.Execute(context.Background(), "ask_user_question", map[string]any{
+		"questions": []any{
+			map[string]any{
+				"question": "Which auth methods?",
+				"header":   "auth",
+				"options": []any{
+					map[string]any{"label": "OAuth", "description": "PKCE"},
+					map[string]any{"label": "API key"},
+				},
+				"multiSelect": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("nested CC shape should parse, got error: %v", err)
+	}
+	if !stub.called {
+		t.Fatal("asker was never invoked")
+	}
+	if stub.lastReq.Question != "Which auth methods?" {
+		t.Errorf("question not promoted from questions[0]: %q", stub.lastReq.Question)
+	}
+	if stub.lastReq.Header != "auth" {
+		t.Errorf("header not promoted: %q", stub.lastReq.Header)
+	}
+	if !stub.lastReq.MultiSelect {
+		t.Error("camelCase multiSelect not honored")
+	}
+	if len(stub.lastReq.Options) != 2 || stub.lastReq.Options[0] != "OAuth — PKCE" {
+		t.Errorf("options not parsed from nested shape: %v", stub.lastReq.Options)
+	}
+	_ = out
+}
+
+// A flat call must keep working unchanged once a top-level question is present,
+// even if a stray `questions` key tags along.
+func TestAskUserQuestionTool_Execute_FlatShapeWins(t *testing.T) {
+	stub := &stubAsker{resp: AskResponse{Choices: []string{"a"}}}
+	useAsker(t, stub)
+
+	_, err := AskUserQuestionTool{}.Execute(context.Background(), "ask_user_question", map[string]any{
+		"question":  "Flat?",
+		"options":   []any{"a", "b"},
+		"questions": []any{map[string]any{"question": "Nested?", "options": []any{"x", "y"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stub.lastReq.Question != "Flat?" {
+		t.Errorf("flat question should take precedence, got %q", stub.lastReq.Question)
+	}
+}
+
+func TestAskBool(t *testing.T) {
+	cases := []struct {
+		in   any
+		want bool
+	}{
+		{true, true},
+		{false, false},
+		{"true", true},
+		{"True", true},
+		{"false", false},
+		{"yes", false}, // only "true" counts; anything else is false
+		{nil, false},
+	}
+	for _, tc := range cases {
+		if got := askBool(map[string]any{"k": tc.in}, "k"); got != tc.want {
+			t.Errorf("askBool(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
 }
 
 func TestOptionLabels(t *testing.T) {
