@@ -489,6 +489,32 @@ export async function verifyBrowser(port?: number): Promise<BrowserVerifyResult>
   })
 }
 
+// Browser recordings = the editable YAML skills produced by record_stop and
+// replayed by run_skill.
+export interface BrowserRecording {
+  name: string
+  description?: string
+  steps: number
+  params?: string[]
+}
+
+export async function listBrowserRecordings(): Promise<BrowserRecording[]> {
+  const d = await request<{ recordings: BrowserRecording[] }>('/api/browser/recordings', { cache: 'no-store' })
+  return d.recordings ?? []
+}
+
+export async function getBrowserRecording(name: string): Promise<{ name: string; yaml: string }> {
+  return request<{ name: string; yaml: string }>(`/api/browser/recordings/${encodeURIComponent(name)}`, { cache: 'no-store' })
+}
+
+export async function saveBrowserRecording(name: string, yaml: string): Promise<void> {
+  await request<unknown>(`/api/browser/recordings/${encodeURIComponent(name)}`, { method: 'PUT', ...json({ yaml }) })
+}
+
+export async function deleteBrowserRecording(name: string): Promise<void> {
+  await request<unknown>(`/api/browser/recordings/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
 // Onboard / first-run
 
 export interface OnboardStatus {

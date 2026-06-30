@@ -83,8 +83,8 @@ func SetBrowserSkillGenerator(g browser.SkillGenerator) {
 	browserSkillGen = g
 }
 
-// browserSkillsDir is where recorded skills live (editable YAML).
-func browserSkillsDir() string {
+// BrowserSkillsDir is where recorded browser skills live (editable YAML).
+func BrowserSkillsDir() string {
 	if d := os.Getenv("OCTO_BROWSER_SKILLS_DIR"); d != "" {
 		return d
 	}
@@ -502,7 +502,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		}
 		rec.Stop()
 		skill := browser.GenerateSkill(ctx, name, startURL, rec.Events(), gen)
-		dir := browserSkillsDir()
+		dir := BrowserSkillsDir()
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return agent.ToolResult{}, err
 		}
@@ -517,7 +517,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if name == "" || filepath.Base(name) != name {
 			return agent.ToolResult{}, fmt.Errorf("browser: run_skill requires a valid skill name")
 		}
-		path := filepath.Join(browserSkillsDir(), name+".yaml")
+		path := filepath.Join(BrowserSkillsDir(), name+".yaml")
 		skill, err := browser.LoadSkill(path)
 		if err != nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: load skill %q: %w", name, err)

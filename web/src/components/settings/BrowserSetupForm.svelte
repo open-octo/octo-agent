@@ -9,10 +9,13 @@
   // on success). Used by both the Settings modal and the first-run wizard step.
   // The parent supplies the secondary action (Cancel / Skip) and the success
   // handler, so the same verify flow drives both contexts.
+  // secondaryLabel/onSecondary are optional: the modal and wizard supply a
+  // Cancel/Skip action, but the standalone Browser view embeds this inline with
+  // no secondary action.
   let { secondaryLabel, onSecondary, onVerified }:
     {
-      secondaryLabel: string
-      onSecondary: () => void
+      secondaryLabel?: string
+      onSecondary?: () => void
       onVerified: (res: BrowserVerifyResult) => void | Promise<void>
     } = $props()
 
@@ -74,7 +77,9 @@
   <div class="bs-error">{error}</div>
 {/if}
 <div class="bs-actions">
-  <button class="btn-ghost" onclick={onSecondary} disabled={verifying}>{secondaryLabel}</button>
+  {#if onSecondary}
+    <button class="btn-ghost" onclick={onSecondary} disabled={verifying}>{secondaryLabel}</button>
+  {/if}
   <button class="btn-primary" onclick={runVerify} disabled={verifying}>
     {verifying ? $t('settings.browser.verifying') : $t('settings.browser.verify')}
   </button>
