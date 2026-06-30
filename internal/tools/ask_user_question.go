@@ -114,10 +114,12 @@ func (AskUserQuestionTool) Definition() agent.ToolDefinition {
 			"or readability?\"), or scope (\"include the migration too?\"). Don't use it for " +
 			"information you could find in the repo or for questions you should have an opinion " +
 			"on yourself. Pass exactly one question in the `questions` array; fire another call if " +
-			"you need to ask more. Each question needs 2-4 mutually exclusive options; set " +
+			"you need to ask more. Prefer giving 2-4 mutually exclusive options; set " +
 			"multiSelect=true when the choices are NOT mutually exclusive and the user may pick " +
-			"several. An \"Other\" tail with a free-text follow-up is always added. Result text is " +
-			"shaped like 'User chose: <label>' or, for Other, 'User chose: Other — <free text>'.",
+			"several. When there are no natural choices to offer (e.g. \"what should we name it?\"), " +
+			"omit options for an open-ended free-text question. An \"Other\" free-text tail is " +
+			"always added either way. Result text is shaped like 'User chose: <label>' or, for a " +
+			"free-text answer, 'User chose: Other — <free text>'.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -143,7 +145,6 @@ func (AskUserQuestionTool) Definition() agent.ToolDefinition {
 							},
 							"options": map[string]any{
 								"type":     "array",
-								"minItems": 2,
 								"maxItems": 4,
 								"items": map[string]any{
 									"type": "object",
@@ -159,10 +160,10 @@ func (AskUserQuestionTool) Definition() agent.ToolDefinition {
 									},
 									"required": []string{"label"},
 								},
-								"description": "2-4 mutually exclusive choices.",
+								"description": "Up to 4 mutually exclusive choices. Omit for an open-ended free-text question.",
 							},
 						},
-						"required": []string{"question", "options"},
+						"required": []string{"question"},
 					},
 				},
 			},
@@ -181,9 +182,15 @@ func (AskUserQuestionTool) Execute(ctx context.Context, _ string, input map[stri
 	if question == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: question is required")
 	}
+	// Options are advisory, not required: every asker appends an "Other"
+	// free-text tail, so zero options degrades to a pure free-text prompt and
+	// one option to a single choice + free text. We don't reject on count —
+	// the model used to error out (and re-ask in prose) when it wanted an
+	// open-ended answer but the tool demanded 2-4 choices. We only trim an
+	// over-long list so the prompt UI stays compact.
 	options := optionLabels(input["options"])
-	if len(options) < 2 || len(options) > 4 {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: options must have 2-4 entries (got %d)", len(options))
+	if len(options) > 4 {
+		options = options[:4]
 	}
 	multi := askBool(input, "multi_select") || askBool(input, "multiSelect")
 	header := strings.TrimSpace(stringArg(input, "header"))
