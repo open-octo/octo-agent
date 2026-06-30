@@ -99,6 +99,28 @@ func TestUploadViaChooser(t *testing.T) {
 	}
 }
 
+// TestCompileSkillDropsConsecutiveDupes: a jittery double-fire of the same click
+// is collapsed to one step; distinct steps (and a legitimate repeat of the same
+// selector that is separated by another action) are preserved.
+func TestCompileSkillDropsConsecutiveDupes(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "#go", Tag: "BUTTON", Text: "Go"},
+		{Type: "click", Selector: "#go", Tag: "BUTTON", Text: "Go"}, // immediate dup → dropped
+		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "x"},
+		{Type: "click", Selector: "#go", Tag: "BUTTON", Text: "Go"}, // same selector but not consecutive → kept
+	}
+	s := CompileSkill("demo", "", "", events)
+	clicks := 0
+	for _, st := range s.Steps {
+		if st.Action == "click" && st.Selector == "#go" {
+			clicks++
+		}
+	}
+	if clicks != 2 {
+		t.Fatalf("expected 2 #go clicks (one dup dropped), got %d: %+v", clicks, s.Steps)
+	}
+}
+
 // TestGenerateSkillDistill: the LLM distiller drops a fumble (a wrong click +
 // going back) and parameterizes a value — and the precision guard rejects any
 // output that invents a selector, falling back to the deterministic baseline.

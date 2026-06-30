@@ -100,7 +100,27 @@ func CompileSkill(name, description, startURL string, events []RecordedEvent) Sk
 	if hasUpload {
 		s.Params = append(s.Params, Param{Name: "file", Description: "path to the file to upload"})
 	}
+	s.Steps = dropConsecutiveDupeSteps(s.Steps)
 	return s
+}
+
+// dropConsecutiveDupeSteps removes a step identical to its immediate predecessor
+// (same action/frame/selector/value) — a double-fire the user didn't intend (a
+// jittery double-click, a re-dispatched event). Conservative on purpose: only
+// exact consecutive duplicates, never reordering or dropping distinct steps, so
+// it can't strip a step the workflow actually needs. navigate is exempt.
+func dropConsecutiveDupeSteps(steps []Step) []Step {
+	out := make([]Step, 0, len(steps))
+	for i, st := range steps {
+		if i > 0 {
+			p := steps[i-1]
+			if st.Action != "navigate" && st.Action == p.Action && st.Frame == p.Frame && st.Selector == p.Selector && st.Value == p.Value {
+				continue
+			}
+		}
+		out = append(out, st)
+	}
+	return out
 }
 
 // SkillGenerator asks an LLM to refine a recording into a clean skill. It is a
@@ -350,8 +370,22 @@ func runStep(ctx context.Context, page *Page, step *Step, params map[string]stri
 		if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return err
 		}
-		if err := page.TypeText(ctx, target, subst(step.Value, params)); err != nil {
+		val := subst(step.Value, params)
+		if err := page.TypeText(ctx, target, val); err != nil {
 			return err
+		}
+		// If a non-empty value didn't land, a disabled/re-rendering/framework input
+		// swallowed the programmatic insert — clear and retry once before failing
+		// into the healer. Checks non-empty (not exact match) so masked/formatted
+		// inputs that transform the value aren't wrongly flagged.
+		if val != "" && !page.fieldNonEmpty(ctx, target) {
+			page.clearField(ctx, target)
+			if err := page.TypeText(ctx, target, val); err != nil {
+				return err
+			}
+			if !page.fieldNonEmpty(ctx, target) {
+				return fmt.Errorf("type: %q did not accept input", target)
+			}
 		}
 	case "select":
 		if err := page.WaitFor(ctx, target, waitTimeout); err != nil {

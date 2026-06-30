@@ -207,6 +207,27 @@ func (p *Page) TypeText(ctx context.Context, selector, text string) error {
 	return err
 }
 
+// fieldNonEmpty reports whether a form field currently holds any value/text —
+// the post-type sanity check, since programmatic input can be silently swallowed
+// by a disabled, re-rendering, or framework-controlled input. It checks
+// non-empty (not an exact match) so masked/formatted inputs that transform the
+// typed value aren't mistaken for a failure.
+func (p *Page) fieldNonEmpty(ctx context.Context, selector string) bool {
+	frame, elem := splitFrame(selector)
+	expr := fmt.Sprintf(`(()=>{const el=%s; if(!el) return false; const v=('value' in el)?el.value:el.textContent; return !!(v&&(''+v).length);})()`, elemRefJS(frame, elem))
+	var ok bool
+	_ = p.Eval(ctx, expr, &ok)
+	return ok
+}
+
+// clearField empties an input/textarea/contenteditable and fires input so
+// framework bindings reset, before a re-type retry.
+func (p *Page) clearField(ctx context.Context, selector string) {
+	frame, elem := splitFrame(selector)
+	expr := fmt.Sprintf(`(()=>{const el=%s; if(!el) return; if('value' in el){el.value='';}else{el.textContent='';} el.dispatchEvent(new Event('input',{bubbles:true})); el.focus();})()`, elemRefJS(frame, elem))
+	_ = p.Eval(ctx, expr, nil)
+}
+
 // modifierBits maps modifier names to the CDP modifier bitmask.
 var modifierBits = map[string]int{"alt": 1, "ctrl": 2, "control": 2, "meta": 4, "cmd": 4, "command": 4, "shift": 8}
 

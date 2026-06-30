@@ -43,7 +43,11 @@ const captureScript = `(function(){
     if(el.id) return '#'+CSS.escape(el.id);
     for(var i=0;i<4;i++){var a=['data-testid','data-test','name','aria-label'][i];var v=el.getAttribute&&el.getAttribute(a);if(v)return el.tagName.toLowerCase()+'['+a+'=\"'+CSS.escape(v)+'\"]';}
     var parts=[], node=el, depth=0;
-    while(node && node.nodeType===1 && node.tagName!=='BODY' && depth<5){
+    while(node && node.nodeType===1 && node.tagName!=='BODY' && depth<6){
+      // Anchor the path at the nearest ancestor carrying an id: short and stable,
+      // versus a free-floating nth-of-type chain from <body> that any layout
+      // shift breaks. (el itself has no id here — that returned above.)
+      if(node.id){ parts.unshift('#'+CSS.escape(node.id)); return parts.join(' > '); }
       var part=node.tagName.toLowerCase(); var p=node.parentElement;
       if(p){var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;}); if(same.length>1){part+=':nth-of-type('+(same.indexOf(node)+1)+')';}}
       parts.unshift(part); node=p; depth++;
