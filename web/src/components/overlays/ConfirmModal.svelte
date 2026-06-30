@@ -48,8 +48,11 @@
           {$t('perm.deny')}
         </button>
         <span class="spacer"></span>
-        <button class="btn-secondary" onclick={() => answer('allow_once')}>{$t('perm.allow_once')}</button>
-        <button class="btn-primary" onclick={() => answer('allow_session')}>
+        <!-- Result strings are the wire contract with the server's mapConfirmResult:
+             'yes' = allow once, 'always' = allow + remember for the session.
+             Anything else (incl. 'deny') denies. Don't rename without updating the server. -->
+        <button class="btn-secondary" onclick={() => answer('yes')}>{$t('perm.allow_once')}</button>
+        <button class="btn-primary" onclick={() => answer('always')}>
           <iconify-icon icon="ant-design:check-outlined" width="12"></iconify-icon>
           {$t('perm.allow_session')}
         </button>
