@@ -1327,8 +1327,10 @@
 .conversation {
   flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0;
   /* Keep the chat column narrower than full-width settings pages for
-     readability; Composer picks this up via CSS var inheritance. */
-  --chat-content-max-width: 800px;
+     readability; Composer picks this up via CSS var inheritance. Wide enough
+     that the composer's status chips (model · reasoning · cwd · context · mode)
+     sit on one row without wrapping. */
+  --chat-content-max-width: 1000px;
 }
 .workflows-bar {
   flex: 0 0 auto;
