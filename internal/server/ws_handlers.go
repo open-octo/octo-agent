@@ -1520,9 +1520,40 @@ func (s *Server) sessionStatus(sessionID string) string {
 	return "idle"
 }
 
+// acquireAskSlot blocks until this session's interactive-prompt slot is free,
+// then returns a release func. Only one confirmation or question is outstanding
+// per session at a time, so concurrent askers queue instead of clobbering each
+// other (see Server.askSlots). It respects ctx cancellation so a cancelled turn
+// doesn't wait behind a prompt that may sit until its timeout.
+func (s *Server) acquireAskSlot(ctx context.Context, sessionID string) (func(), error) {
+	s.askSlotsMu.Lock()
+	if s.askSlots == nil {
+		s.askSlots = make(map[string]chan struct{})
+	}
+	sem, ok := s.askSlots[sessionID]
+	if !ok {
+		sem = make(chan struct{}, 1)
+		s.askSlots[sessionID] = sem
+	}
+	s.askSlotsMu.Unlock()
+
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // Request confirmation from user (blocks until user responds in browser or ctx
 // is cancelled).
 func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, kind string) (string, error) {
+	release, err := s.acquireAskSlot(ctx, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("confirmation cancelled")
+	}
+	defer release()
+
 	confID := fmt.Sprintf("conf_%d", time.Now().UnixNano())
 	ch := make(chan string, 1)
 

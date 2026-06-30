@@ -185,6 +185,16 @@ type Server struct {
 	pendingConfirms  map[string]wsEventRequestConfirmation
 	pendingPromptMu  sync.Mutex
 
+	// askSlots serializes interactive prompts per session: at most one
+	// confirmation or question may be outstanding at a time. Concurrent askers
+	// for the same session — parallel workflow agents, background tasks, all
+	// sharing the session's gate — would otherwise each broadcast a prompt and
+	// clobber the single pending* slot and the single frontend modal; only the
+	// last is answerable, and every earlier asker's goroutine blocks until its
+	// timeout (a hang). Each value is a cap-1 channel used as a lock.
+	askSlots   map[string]chan struct{}
+	askSlotsMu sync.Mutex
+
 	// live state tracking per session for WS replay on subscribe.
 	liveStates  map[string]*sessionLiveState
 	liveStateMu sync.RWMutex
@@ -332,6 +342,7 @@ func New(cfg Config) (*Server, error) {
 		questionChans:       make(map[string]chan tools.AskResponse),
 		pendingQuestions:    make(map[string]wsEventRequestUserQuestion),
 		pendingConfirms:     make(map[string]wsEventRequestConfirmation),
+		askSlots:            make(map[string]chan struct{}),
 		sessionInjectors:    make(map[string]*memory.Injector),
 	}
 
@@ -693,6 +704,10 @@ func (s *Server) forgetTurnLock(id string) {
 	s.entryBindingsMu.Lock()
 	delete(s.entryBindings, id)
 	s.entryBindingsMu.Unlock()
+
+	s.askSlotsMu.Lock()
+	delete(s.askSlots, id)
+	s.askSlotsMu.Unlock()
 }
 
 // cachedEntryBinding is a short-lease, in-process cache of a session's binding.
@@ -1324,6 +1339,15 @@ func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse
 	if !ok || sessionID == "" {
 		return tools.AskResponse{}, fmt.Errorf("ask_user_question: no active WebSocket session")
 	}
+
+	// Serialize against other interactive prompts for this session (the same
+	// slot requestConfirmation uses) so concurrent askers don't clobber the
+	// single pending slot / frontend modal.
+	release, err := a.s.acquireAskSlot(ctx, sessionID)
+	if err != nil {
+		return tools.AskResponse{Cancelled: true}, nil
+	}
+	defer release()
 
 	qid := fmt.Sprintf("q_%d", time.Now().UnixNano())
 	ch := make(chan tools.AskResponse, 1)
