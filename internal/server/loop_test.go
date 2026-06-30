@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Leihb/octo-agent/internal/channel"
 	"github.com/Leihb/octo-agent/internal/tools"
 )
 
@@ -45,7 +46,33 @@ func TestServerWaker_ImplementsWaker(t *testing.T) {
 	if n := s.armedCount(); n != 1 {
 		t.Fatalf("ScheduleWakeup should arm a timer, got %d", n)
 	}
-	s.cancelWakeup("sid")
+	if err := w.CancelWakeup(); err != nil {
+		t.Fatalf("CancelWakeup: %v", err)
+	}
+	if n := s.armedCount(); n != 0 {
+		t.Fatalf("CancelWakeup should clear the timer, got %d", n)
+	}
+}
+
+// imWaker arms under the "im:<key>" namespace and delivers through the channel
+// path. A long delay keeps the fire callback (which needs a live Agent) from
+// running, so we test the arm/cancel bookkeeping only.
+func TestIMWaker_ArmAndCancel(t *testing.T) {
+	s := &Server{wakeupTimers: map[string]*time.Timer{}}
+	sess := &channel.Session{Key: channel.SessionKey("k")}
+	var w tools.Waker = imWaker{s: s, sess: sess}
+	if err := w.ScheduleWakeup(time.Hour, "tick", "r", true); err != nil {
+		t.Fatalf("ScheduleWakeup: %v", err)
+	}
+	if _, ok := s.wakeupTimers["im:k"]; !ok {
+		t.Fatal("imWaker should arm a timer under the im: namespace")
+	}
+	if err := w.CancelWakeup(); err != nil {
+		t.Fatalf("CancelWakeup: %v", err)
+	}
+	if n := s.armedCount(); n != 0 {
+		t.Fatalf("CancelWakeup should clear the timer, got %d", n)
+	}
 }
 
 func (s *Server) armedCount() int {

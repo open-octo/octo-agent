@@ -40,8 +40,8 @@ schedule_wakeup(delay_seconds=300, repeat=true,
 ```
 
 You only call it **once** — the cadence holds on its own. Each tick re-runs
-`prompt` as a fresh turn. The loop stops when the user sends a message or
-interrupts. Pass the task verbatim as `prompt` so every tick does the same work.
+`prompt` as a fresh turn. Pass the task verbatim as `prompt` so every tick does
+the same work. The loop keeps ticking until it's stopped (see **Stopping**).
 
 ## Dynamic mode — you set the pace
 
@@ -84,10 +84,21 @@ beats "waiting".
 
 ## Stopping
 
-- **Dynamic mode**: stop by *not* calling `schedule_wakeup` — say the loop is done.
-- **Interval mode**: it runs until the user interrupts or sends a message.
-- Either way, **a new user message cancels the loop** and hands control back to
-  the user. You can re-arm `/loop` later if asked.
+The loop **coexists with the conversation**: the user can talk to you mid-loop —
+ask a question, give a side instruction — and the loop **keeps ticking**. A user
+message does *not* stop it. Stop it explicitly:
+
+- **Dynamic mode**: stop by *not* calling `schedule_wakeup` on a turn — say the
+  loop is done and why.
+- **Interval mode**: it re-arms on its own, so to stop it you must call
+  `schedule_wakeup(cancel=true)`. Do this **as soon as the user asks you to stop
+  or pause** ("停掉", "stop the loop", "够了"). Acknowledge that you've stopped it.
+- In the TUI the user can hard-stop any loop with **Ctrl+C**; over an IM
+  channel, `/stop` does the same.
+
+When the user interjects mid-loop, answer them normally — and unless they asked
+you to stop, the loop carries on; mention the next tick so they know it's still
+running.
 
 ## Give every iteration a clear stop/idle condition
 

@@ -339,9 +339,9 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 		return
 	}
 
-	// A user message takes over: cancel any armed loop so it hands control back
-	// (CC-style). The model can re-arm /loop later.
-	s.cancelWakeup(sid)
+	// Note: a user message does NOT cancel an armed loop — the loop coexists
+	// with the conversation (CC-style). It stops only on an explicit interrupt
+	// or schedule_wakeup(cancel=true).
 
 	// Session-management slash commands handled inline (no model turn). Other
 	// "/..." text falls through to the model, matching the TUI where unknown
@@ -636,8 +636,6 @@ func (s *Server) broadcastRollback(sessionID string) {
 // handleWSRetry re-runs the last turn by stripping the last assistant reply
 // from the session and resending the last user message.
 func (s *Server) handleWSRetry(conn *wsConn, sessionID string) {
-	// A retry is a user action: cancel any armed loop first.
-	s.cancelWakeup(sessionID)
 	sess, err := agent.LoadSession(sessionID)
 	if err != nil {
 		s.wsHub.broadcast(sessionID, map[string]string{

@@ -727,8 +727,9 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	if text == "" && len(m.pendingAttachments) == 0 {
 		return m, nil
 	}
-	// A user message takes over: cancel any armed loop (CC-style hand-back).
-	m.cancelWakeup()
+	// Note: a user message does NOT cancel the loop — the loop coexists with
+	// the conversation (CC-style). Stopping is explicit: Ctrl+C, or the model
+	// calling schedule_wakeup(cancel=true) when the user asks to stop.
 	m.ta.Reset()
 	m.inputHistoryIdx = -1
 	m.clearPastes()

@@ -9,16 +9,22 @@ import (
 )
 
 type fakeWaker struct {
-	delay  time.Duration
-	prompt string
-	reason string
-	repeat bool
-	calls  int
+	delay     time.Duration
+	prompt    string
+	reason    string
+	repeat    bool
+	calls     int
+	cancelled int
 }
 
 func (w *fakeWaker) ScheduleWakeup(delay time.Duration, prompt, reason string, repeat bool) error {
 	w.delay, w.prompt, w.reason, w.repeat = delay, prompt, reason, repeat
 	w.calls++
+	return nil
+}
+
+func (w *fakeWaker) CancelWakeup() error {
+	w.cancelled++
 	return nil
 }
 
@@ -72,6 +78,18 @@ func TestScheduleWakeup_ForwardsArgs(t *testing.T) {
 	}
 	if fw.calls != 1 || !fw.repeat || fw.prompt != "do it" || fw.reason != "why" {
 		t.Fatalf("args not forwarded to the waker: %+v", fw)
+	}
+}
+
+func TestScheduleWakeup_Cancel(t *testing.T) {
+	fw := &fakeWaker{}
+	ctx := WithWaker(context.Background(), fw)
+	_, err := (ScheduleWakeupTool{}).Execute(ctx, "schedule_wakeup", map[string]any{"cancel": true})
+	if err != nil {
+		t.Fatalf("cancel should not error even without prompt: %v", err)
+	}
+	if fw.cancelled != 1 || fw.calls != 0 {
+		t.Fatalf("cancel=true should call CancelWakeup, not ScheduleWakeup: %+v", fw)
 	}
 }
 
