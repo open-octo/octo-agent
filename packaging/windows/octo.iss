@@ -128,7 +128,7 @@ begin
   // Open the onboarding page regardless of the exact exit code — if the server
   // is up, this lands on onboarding; if it never bound, the browser shows a
   // connection error the user can retry, which is no worse than not opening.
-  ShellExec('open', 'http://127.0.0.1:8080', '', '', SW_SHOWNORMAL,
+  ShellExec('open', 'http://127.0.0.1:8088', '', '', SW_SHOWNORMAL,
             ewNoWait, ResultCode);
 end;
 

@@ -168,7 +168,7 @@ func splitComma(s string) []string {
 }
 
 // bindIsLoopback reports whether a bind address only accepts loopback
-// clients. An empty host (":8080") and the wildcard addresses listen on all
+// clients. An empty host (":8088") and the wildcard addresses listen on all
 // interfaces, so they are not loopback.
 func bindIsLoopback(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
