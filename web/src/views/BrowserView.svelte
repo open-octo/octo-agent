@@ -11,23 +11,13 @@
   let loading = $state(false)
 
   // Connection status (moved here from Settings — the Browser view owns it now).
-  let browser     = $state<BrowserStatus | null>(null)
-  let browserBusy = $state(false)
-  let setupOpen   = $state(false)
+  let browser   = $state<BrowserStatus | null>(null)
+  let setupOpen = $state(false)
 
   async function loadBrowserStatus() {
     try {
       browser = await api.getBrowserStatus()
     } catch { /* leave as null */ }
-  }
-
-  async function recheckBrowser() {
-    browserBusy = true
-    try {
-      await loadBrowserStatus()
-    } finally {
-      browserBusy = false
-    }
   }
 
   async function onSetupVerified(res: BrowserVerifyResult) {
@@ -92,16 +82,11 @@
   <section class="card">
     <div class="sec-head">
       <h2 class="sec-title">{$t('browser.view.connect_title')}</h2>
-      {#if browser && !browser.configured}
+      {#if browser}
         <button class="ghost-btn" onclick={() => (setupOpen = true)}>
           <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
-          {$t('settings.browser.setup')}
+          {browser.configured ? $t('settings.browser.reconfigure') : $t('settings.browser.setup')}
         </button>
-      {:else if browser}
-        <div class="conn-actions">
-          <button class="ghost-btn" disabled={browserBusy} onclick={recheckBrowser}>{$t('settings.browser.recheck')}</button>
-          <button class="ghost-btn" onclick={() => (setupOpen = true)}>{$t('settings.browser.reconfigure')}</button>
-        </div>
       {/if}
     </div>
     <div class="conn-row">
@@ -203,7 +188,6 @@
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 18px; }
   .sec-head { display: flex; align-items: center; justify-content: space-between; }
   .sec-title { margin: 0 0 12px; font-size: 15px; }
-  .conn-actions { display: flex; gap: 6px; }
   .conn-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .conn-info { display: flex; flex-direction: column; gap: 2px; }
   .conn-label { font-size: 14px; color: var(--text); }
