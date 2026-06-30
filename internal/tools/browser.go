@@ -187,16 +187,30 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 		// The session is package-global and shared across chat sessions, so a tab
 		// opened (and since navigated/closed) in an earlier session can leave a
 		// stale handle whose CDP target is gone — every action would then fail with
-		// "Session with given id not found" (-32001). Probe liveness before reusing
-		// it; if dead, tear it down (off the lock) and re-establish below.
+		// "Session with given id not found" (-32001). Probe liveness before reusing.
 		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		err := browserSession.page.Eval(probeCtx, "1", nil)
 		cancel()
 		if err == nil {
 			return browserSession.page, browserSession.b, nil
 		}
-		go closeSession(browserSession.b, browserSession.page)
-		browserSession.b, browserSession.page = nil, nil
+		// The page's CDP target is gone, but the browser-level WS is almost always
+		// still fine. Drop ONLY the dead page and keep the connection — reopening a
+		// tab on it below needs no new WS dial. A fresh dial makes Chrome re-show
+		// its remote-debugging authorization prompt every single time, which is
+		// exactly what we must avoid within one process.
+		browserSession.page = nil
+	}
+	// Reuse the live browser connection if we have one: open a fresh tab on it
+	// (same WS → no re-auth). Only if that fails is the connection itself gone
+	// (Chrome closed/restarted), so drop it and fall through to a fresh connect.
+	if browserSession.b != nil {
+		if page, err := browserSession.b.NewPage(ctx, "about:blank"); err == nil {
+			browserSession.page = page
+			return page, browserSession.b, nil
+		}
+		go closeSession(browserSession.b, nil)
+		browserSession.b = nil
 	}
 	cfg, _ := config.Load()
 	bc := cfg.Browser
