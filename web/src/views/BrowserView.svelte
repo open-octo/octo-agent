@@ -80,32 +80,29 @@
 
   <!-- Connection -->
   <section class="card">
-    <div class="sec-head">
-      <h2 class="sec-title">{$t('browser.view.connect_title')}</h2>
-      {#if browser}
-        <button class="ghost-btn" onclick={() => (setupOpen = true)}>
-          <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
-          {browser.configured ? $t('settings.browser.reconfigure') : $t('settings.browser.setup')}
-        </button>
-      {/if}
-    </div>
-    <div class="conn-row">
+    <div class="conn-head">
       <div class="conn-info">
-        <span class="conn-label">{$t('settings.browser.status')}</span>
+        <h2 class="sec-title">{$t('browser.view.connect_title')}</h2>
         <span class="conn-desc">{$t('settings.browser.desc')}</span>
       </div>
-      <div class="conn-status">
+      <div class="conn-right">
         {#if !browser}
           <span class="muted">{$t('common.loading')}</span>
-        {:else if browser.connected}
-          <StatusTag status="success">{$t('settings.browser.connected')}</StatusTag>
-        {:else if browser.configured}
-          <StatusTag status="warning">{$t('settings.browser.unreachable')}</StatusTag>
         {:else}
-          <StatusTag status="default">{$t('settings.browser.not_setup')}</StatusTag>
-        {/if}
-        {#if browser?.configured}
-          <span class="muted mono">{$t('settings.browser.port')} {browser.port}</span>
+          {#if browser.connected}
+            <StatusTag status="success">{$t('settings.browser.connected')}</StatusTag>
+          {:else if browser.configured}
+            <StatusTag status="warning">{$t('settings.browser.unreachable')}</StatusTag>
+          {:else}
+            <StatusTag status="default">{$t('settings.browser.not_setup')}</StatusTag>
+          {/if}
+          {#if browser.configured}
+            <span class="muted mono">{$t('settings.browser.port')} {browser.port}</span>
+          {/if}
+          <button class="ghost-btn" onclick={() => (setupOpen = true)}>
+            <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
+            {browser.configured ? $t('settings.browser.reconfigure') : $t('settings.browser.setup')}
+          </button>
         {/if}
       </div>
     </div>
@@ -188,11 +185,11 @@
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 18px; }
   .sec-head { display: flex; align-items: center; justify-content: space-between; }
   .sec-title { margin: 0 0 12px; font-size: 15px; }
-  .conn-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .conn-info { display: flex; flex-direction: column; gap: 2px; }
-  .conn-label { font-size: 14px; color: var(--text); }
+  .conn-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .conn-info { display: flex; flex-direction: column; gap: 4px; }
+  .conn-info .sec-title { margin: 0; }
   .conn-desc { font-size: 12px; color: var(--text-muted); }
-  .conn-status { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
+  .conn-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   .conn-note { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 12px; color: var(--warning); background: var(--warning-bg); }
   .mono { font-family: ui-monospace, monospace; }
   .hint { color: var(--text-muted); font-size: 12px; margin: 0 0 14px; }
