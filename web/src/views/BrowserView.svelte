@@ -270,9 +270,31 @@
   .ghost-btn:hover { background: var(--surface-hover); }
   .ghost-btn.danger { color: var(--danger, #d4380d); }
   .rec-head-actions { display: flex; align-items: center; gap: 8px; }
-  .primary-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .primary-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--blue-6); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .primary-btn:hover:not(:disabled) { background: var(--blue-5); }
   .primary-btn:disabled { opacity: 0.6; cursor: default; }
   .yaml { width: 100%; min-height: 360px; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: 6px; padding: 10px; background: var(--bg); color: var(--text); resize: vertical; box-sizing: border-box; }
   .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+  .modal-overlay {
+    position: fixed; inset: 0; background: var(--text-tertiary);
+    display: flex; align-items: flex-start; justify-content: center; z-index: 200;
+    padding: 48px 16px; overflow-y: auto;
+  }
+  .modal {
+    width: 520px; max-width: 100%;
+    background: var(--bg-container); border-radius: 16px; box-shadow: 0 24px 48px rgba(15,23,42,0.18);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
   .modal.lg { width: min(720px, 92vw); }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 24px 16px; border-bottom: 1px solid var(--border-table);
+  }
+  .modal-title { font-size: 16px; font-weight: 600; color: var(--text-heading); }
+  .modal-close {
+    width: 28px; height: 28px; border: none; background: transparent; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-tertiary);
+  }
+  .modal-close:hover { background: var(--hover-neutral); color: var(--text); }
+  .modal-body { padding: 20px 24px; }
 </style>
