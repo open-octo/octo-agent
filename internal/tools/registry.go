@@ -49,6 +49,7 @@ var allTools = []tool{
 	TaskUpdateTool{},
 	TaskListTool{},
 	RestartServerTool{},
+	ScheduleWakeupTool{},
 	BrowserTool{},
 }
 
@@ -238,6 +239,7 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 	askerOn := askerEnabled()
 	tasksOn := tasksEnabled()
 	restarterOn := restarterEnabled()
+	wakerOn := wakerEnabled()
 	browserOn := browserEnabled()
 	spawnerOn := spawnerEnabled()
 	defs := make([]agent.ToolDefinition, 0, len(allTools))
@@ -279,6 +281,9 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 			continue
 		}
 		if _, isRestart := t.(RestartServerTool); isRestart && !restarterOn {
+			continue
+		}
+		if _, isWakeup := t.(ScheduleWakeupTool); isWakeup && !wakerOn {
 			continue
 		}
 		if _, isBrowser := t.(BrowserTool); isBrowser && !browserOn {
