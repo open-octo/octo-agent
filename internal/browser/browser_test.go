@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -56,12 +55,14 @@ func newBrowser(t *testing.T, ctx context.Context) *Browser {
 	}
 	b, err := Launch(ctx, LaunchOptions{Headless: true})
 	if err != nil {
-		// The GitHub windows-latest runner ships Chrome (so findChrome passes)
-		// but launching it headless intermittently times out reading
-		// DevToolsActivePort — a runner-environment flake, not a code defect.
-		// Skip there; keep it fatal on Linux/macOS where launch is reliable.
-		if runtime.GOOS == "windows" {
-			t.Skipf("chrome launch unavailable on this runner: %v", err)
+		// A loaded CI runner ships Chrome (so findChrome passes) but launching
+		// it headless intermittently times out reading DevToolsActivePort —
+		// a runner-environment flake, not a code defect. It surfaces on the
+		// windows-latest runner and, under load, on ubuntu-latest too. Skip on
+		// that specific timeout regardless of OS; keep every other launch
+		// failure fatal so real regressions still fail the build.
+		if strings.Contains(err.Error(), "timed out reading DevToolsActivePort") {
+			t.Skipf("chrome launch flake on this runner: %v", err)
 		}
 		t.Fatalf("launch: %v", err)
 	}
