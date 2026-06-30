@@ -52,6 +52,9 @@ var browserVision = func() *atomic.Bool { b := &atomic.Bool{}; b.Store(true); re
 // SetBrowserVision enables/disables handing images to the model.
 func SetBrowserVision(on bool) { browserVision.Store(on) }
 
+// BrowserVisionEnabled reports the current setting (for tests/diagnostics).
+func BrowserVisionEnabled() bool { return browserVision.Load() }
+
 // SetBrowserHealer injects the LLM-backed step healer used by run_skill.
 func SetBrowserHealer(h browser.Healer) {
 	recorderMu.Lock()
