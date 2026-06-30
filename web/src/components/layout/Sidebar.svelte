@@ -5,16 +5,13 @@
   import { t } from '../../lib/i18n'
   import VersionBadge from './VersionBadge.svelte'
 
-  // Real count of configured MCP servers for the nav badge. Seeded here so the
-  // badge is correct before the user ever opens the MCP panel; McpView keeps the
-  // shared store in sync afterward.
-  let mcpCount = $derived(($mcpServers as any[]).length)
-
+  // Seed the shared MCP-server store before the user ever opens the MCP panel;
+  // McpView keeps it in sync afterward.
   onMount(async () => {
     try {
       const d = await api.listMcpServers()
       mcpServers.set(d.servers as any)
-    } catch { /* badge falls back to hidden */ }
+    } catch { /* ignore — McpView will refetch */ }
   })
 
   $effect(() => {
@@ -32,8 +29,8 @@
     { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
     { icon: 'ant-design:clock-circle-outlined', title: 'nav.tasks', v: 'tasks' },
     { icon: 'ant-design:thunderbolt-outlined', title: 'nav.skills', v: 'skills' },
-    { icon: 'ant-design:global-outlined', title: 'nav.browser', v: 'browser' },
     { icon: 'ant-design:api-outlined', title: 'nav.mcp', v: 'mcp' },
+    { icon: 'ant-design:global-outlined', title: 'nav.browser', v: 'browser' },
     { icon: 'ant-design:mobile-outlined', title: 'nav.channels', v: 'channels' },
     { icon: 'ant-design:user-outlined', title: 'nav.memory', v: 'profile' },
     { icon: 'ant-design:folder-open-outlined', title: 'nav.file_recall', v: 'files' },
@@ -210,14 +207,13 @@
         {#each [
           { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
           { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
+          { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
           { icon: 'ant-design:global-outlined', label: 'nav.browser', v: 'browser' },
-          { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp', meta: mcpCount || '' },
           { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
           <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? '#fff' : 'var(--text-tertiary)'}"></iconify-icon>
           <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'var(--text-secondary)'};">{$t(item.label)}</span>
-          {#if item.meta}<span style="margin-left:auto;font-size:11px;color:{navActive(item.v) ? 'rgba(255,255,255,0.75)' : 'var(--text-tertiary)'};">{item.meta}</span>{/if}
         </div>
         {/each}
       </div>
