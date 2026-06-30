@@ -172,7 +172,7 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "cookies", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "run_skill"},
-					"description": "The browser action to perform. observe returns a screenshot the model can see plus a list of the page's interactable elements with selectors — the way to look at an unfamiliar page before acting. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture a demonstration into an editable skill; run_skill replays one (deterministic, self-healing).",
+					"description": "The browser action to perform. observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page for a vision-capable model to actually see (use when content is visual). cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture a demonstration into an editable skill; run_skill replays one (deterministic, self-healing).",
 				},
 				"name":       map[string]any{"type": "string", "description": "Skill name (record_stop / run_skill)."},
 				"params":     map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill)."},
@@ -308,18 +308,22 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		}, nil
 
 	case "observe":
-		// "Look at this page": a screenshot the model can see + the interactable
-		// elements with selectors. This is the see-before-you-act primitive that
-		// keeps exploratory navigation from thrashing on unfamiliar pages.
-		shot, err := page.Screenshot(ctx)
-		if err != nil {
-			return agent.ToolResult{}, err
-		}
+		// Text-only "look at this page": the current URL/title + the page's
+		// interactable elements with selectors. This is the see-before-you-act
+		// primitive and works on any model. Vision is decoupled — call screenshot
+		// to actually see pixels (and only a multimodal model can use that).
 		frame := getStr(input, "frame")
+		var meta struct {
+			URL   string `json:"url"`
+			Title string `json:"title"`
+		}
+		_ = page.Eval(ctx, `({url: location.href, title: document.title})`, &meta)
 		digest, derr := browser.InteractiveDigest(ctx, page, frame, 60)
 		var sb strings.Builder
-		path := saveScreenshot(shot)
-		fmt.Fprintf(&sb, "screenshot saved to %s\n\ninteractable elements:\n", path)
+		if meta.URL != "" {
+			fmt.Fprintf(&sb, "page: %s — %s\n\n", meta.Title, meta.URL)
+		}
+		sb.WriteString("interactable elements:\n")
 		if derr != nil {
 			fmt.Fprintf(&sb, "(could not read elements: %v)\n", derr)
 		} else if len(digest) == 0 {
@@ -333,10 +337,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 				}
 			}
 		}
-		return agent.ToolResult{
-			Text:   sb.String(),
-			Blocks: []agent.ContentBlock{agent.NewImageBlock("image/png", shot)},
-		}, nil
+		return agent.ToolResult{Text: sb.String()}, nil
 
 	case "ax":
 		raw, err := page.AXTree(ctx)

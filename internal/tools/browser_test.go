@@ -203,9 +203,9 @@ func TestBrowserTool_CookiesIncludesHttpOnly(t *testing.T) {
 	}
 }
 
-// TestBrowserTool_ObserveAndScreenshotVision checks that screenshot and observe
-// hand the model an actual image block (not just a file path), and that observe
-// also lists the page's interactable elements with selectors.
+// TestBrowserTool_ObserveAndScreenshotVision checks the decoupling: screenshot
+// returns a vision image block, while observe is text-only (URL/title + the
+// interactable elements with selectors) so it works on any model.
 func TestBrowserTool_ObserveAndScreenshotVision(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60_000_000_000) // 60s
 	defer cancel()
@@ -254,8 +254,9 @@ func TestBrowserTool_ObserveAndScreenshotVision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("observe: %v", err)
 	}
-	if !hasImage(obs) {
-		t.Errorf("observe returned no image block; blocks=%d", len(obs.Blocks))
+	// observe is text-only — no image block (it must work on non-vision models).
+	if hasImage(obs) {
+		t.Errorf("observe should not return an image block (vision is decoupled to screenshot)")
 	}
 	// The fixture's #search button must surface in the interactable digest.
 	if !strings.Contains(obs.Text, "#search") {
