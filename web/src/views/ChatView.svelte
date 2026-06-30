@@ -550,6 +550,23 @@
       setToolError(sid, (ev as any).tool_id, (ev as any).error ?? 'error')
     }))
 
+    // Turn-level failure (sender/tool setup or the LLM call itself errored).
+    // It belongs to no tool card, so render it as a standalone error notice in
+    // the transcript instead of dropping it. `complete` clears the caret.
+    cleanups.push(ws.on('turn_error', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      addChatMsg(sid, {
+        id: uid('err'),
+        type: 'notice',
+        content: `**Error:** ${(ev as any).error ?? 'request failed'}`,
+        level: 'error',
+        createdAt: Date.now(),
+        streaming: false,
+        tools: [],
+        todos: [],
+      })
+    }))
+
     cleanups.push(ws.on('tool_stdout', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       chatMessages.update(m => {

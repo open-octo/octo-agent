@@ -1993,6 +1993,14 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		_, runErr = channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, strings.Join(agent.Texts(items), "\n\n"))
 		persist()
 	}
+
+	// Surface a turn failure to the chat. Without this the user just sees
+	// silence — no reply, no hint that the LLM call (rate limit, HTTP 5xx,
+	// context length, auth) failed. A user interrupt (context.Canceled) is
+	// expected and stays quiet.
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		ad.SendText(ev.ChatID, "⚠️ "+runErr.Error(), ev.MessageID)
+	}
 }
 
 // stopChannels shuts down all channel adapters and their sessions.

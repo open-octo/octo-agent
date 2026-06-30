@@ -1778,6 +1778,46 @@ func TestWSStreamWriter_ReseedsThinkingAfterTool(t *testing.T) {
 	}
 }
 
+// A turn-level failure (sender/tool setup or the LLM call itself) must reach
+// the frontend under its own "turn_error" type. Sending it as "tool_error" —
+// which the frontend keys by tool_id — meant a failure before any tool ran was
+// silently dropped, leaving the user staring at a stalled turn.
+func TestWSStreamWriter_TurnError_DistinctType(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "sess-turnerr"
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 8),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
+	srv.wsHub.subscribe(conn, sid)
+
+	srv.newWSStreamWriter(sid).error("anthropic: HTTP 429: rate limit exceeded")
+
+	select {
+	case b := <-conn.send:
+		var ev map[string]any
+		if err := json.Unmarshal(b, &ev); err != nil {
+			t.Fatalf("unmarshal broadcast: %v", err)
+		}
+		if typ, _ := ev["type"].(string); typ != "turn_error" {
+			t.Errorf("type = %q, want \"turn_error\" (not tool_error — that gets dropped when no tool card exists)", typ)
+		}
+		if msg, _ := ev["error"].(string); msg != "anthropic: HTTP 429: rate limit exceeded" {
+			t.Errorf("error = %q, want the provider message verbatim", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no broadcast after sw.error — the turn failure never reached the client")
+	}
+}
+
 // PATCH /api/sessions/{id} is the sidebar rename action — the title must
 // persist through a session reload, and bad input must not slip through.
 func TestHandleUpdateSession_Rename(t *testing.T) {

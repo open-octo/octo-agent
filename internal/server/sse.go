@@ -133,7 +133,7 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 
 	reply, err := a.RunStream(runCtx, req.Message, toolDefs, executor, eventHandler)
 	if err != nil {
-		ev := agent.AgentEvent{Kind: agent.EventToolError, Err: err.Error()}
+		ev := agent.AgentEvent{Kind: agent.EventTurnError, Err: err.Error()}
 		b, _ := json.Marshal(ev)
 		sseEvent(w, string(b))
 		return

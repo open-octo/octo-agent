@@ -58,6 +58,13 @@ const (
 	// carries the aggregated final Reply.
 	EventTurnDone EventKind = "turn_done"
 
+	// EventTurnError marks a turn-level failure — the LLM call (or turn setup)
+	// errored out, as opposed to a single tool failing (EventToolError). The
+	// agent loop does not emit it; Run/RunStream returns the error directly and
+	// transports surface it under this kind so consumers can tell a turn abort
+	// from a per-tool error. Err carries the failure message.
+	EventTurnError EventKind = "turn_error"
+
 	// EventSteerInjected fires when the agent loop drains the inbox and
 	// injects mid-turn user messages into history. Messages carries the
 	// drained texts so observers (e.g. the TUI) can render them in the

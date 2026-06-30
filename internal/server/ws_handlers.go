@@ -1260,9 +1260,13 @@ func (w *wsStreamWriter) sendRaw(data []byte) {
 	w.hub.broadcast(w.sessionID, json.RawMessage(data))
 }
 
+// error surfaces a turn-level failure — a sender/tool-setup error or an LLM
+// call that errored out. It is distinct from EventToolError (per-tool, keyed by
+// tool_id): a turn error belongs to no tool card, so the frontend renders it as
+// a standalone error notice in the transcript rather than dropping it.
 func (w *wsStreamWriter) error(msg string) {
 	w.hub.broadcast(w.sessionID, map[string]string{
-		"type":       "tool_error",
+		"type":       "turn_error",
 		"session_id": w.sessionID,
 		"error":      msg,
 	})
