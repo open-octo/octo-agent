@@ -1,303 +1,258 @@
 # Browser Computer-Use & Skill Recording
 
-octo's first-class capability for **seeing and operating a browser**, and for
-**recording a human demonstration into a replayable skill** — the foundation
-for replacing brittle, complex RPA.
+octo's first-class capability for **operating a real browser** and for
+**recording a human demonstration into a replayable skill** — the foundation for
+replacing brittle RPA with something an LLM can run, repair, and a human can edit.
 
-This is a core pillar, so it is octo-owned and in-binary: a pure-Go CDP client
-drives Chrome directly (CDP is websocket + JSON, no CGO, cross-platform). The
-only native dependency is the user's own Chrome. The existing `web-access` skill
-is not the foundation — it is demoted to (a) a reference for logged-in-Chrome
-discovery and (b) an exploratory-browsing skill that later rebases onto this
-backend.
+It is a core pillar, so it is octo-owned and in-binary: a pure-Go CDP client
+(`internal/browser`) drives the user's own Chrome over the DevTools Protocol
+(websocket + JSON, no CGO, cross-platform). The only native dependency is the
+user's Chrome. The agent reaches it through one action-multiplexed `browser`
+tool (`internal/tools/browser.go`).
 
 ## Goals / Non-goals
 
 **Goals**
-- A backend-agnostic **action vocabulary** the agent and the replay engine both
-  speak (browser backend now; desktop backend later via the same interface).
-- A Go-native browser backend with no extra runtime (no Node), reusing the
+- A Go-native browser backend with no extra runtime (no Node), driving the
   user's real logged-in Chrome.
-- **Record** a human demonstration and compile it into an inspectable,
-  editable, version-controllable skill.
-- **Replay** deterministically without an LLM, self-checking each step, and
-  hand back to an LLM-driven loop only when a step fails.
-- Robust target resolution across standard web apps, anti-scraping sites, and
-  Canvas-rendered apps.
+- **Record** a human demonstration and compile it into an inspectable, editable,
+  version-controllable skill.
+- **Replay** deterministically without an LLM, self-checking each step, and hand
+  to an LLM-driven repair only when a step actually fails.
+- Replay that survives ordinary page change (layout drift, links opening in new
+  tabs, SPA timing) rather than breaking on the first difference.
 
-**Non-goals (this round)**
-- Desktop (native app) automation — designed for, not built here.
+**Non-goals**
+- Desktop (native app) automation — see `desktop-computer-use-design.md`.
+- Pixel/coordinate-based interaction, visual target matching, or
+  native-computer-use model integration. Targets are resolved through the DOM
+  (selector + recorded text), not screenshots.
 - Guaranteed evasion of anti-bot detection — best-effort, see Reliability.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Agent loop / Replay engine                                   │
-│  (both consume the Action Vocabulary; never touch CDP)        │
-└───────────────┬───────────────────────────┬──────────────────┘
-                │  Action Vocabulary (interface)                 │
-        ┌───────┴────────┐                ┌──┴──────────────┐
-        │ Browser backend │                │ Desktop backend │  (future:
-        │ (Go-native CDP) │                │ (MCP / sidecar) │   MCP/sidecar)
-        └───────┬────────┘                └─────────────────┘
-                │ CDP (websocket+JSON)
-          ┌─────┴─────┐
-          │  Chrome   │  (user's real, logged-in instance)
-          └───────────┘
+┌────────────────────────────────────────────────────────────┐
+│  Agent loop  ──  browser tool (action-multiplexed)           │
+│                  record / replay engine (internal/browser)   │
+└───────────────────────────┬──────────────────────────────────┘
+                            │ CDP (websocket + JSON)
+                      ┌─────┴─────┐
+                      │  Chrome   │  user's real, logged-in instance
+                      └───────────┘
 ```
 
-The agent and the replay engine never branch on backend or protocol. A backend
-implements the action vocabulary; the same recorded skill replays against any
-backend that resolves its targets.
+The session holds one Chrome connection, package-global in `internal/tools`
+(`browserSession`) and reused across tool calls and chat sessions, so
+`navigate → click → …` share one page and Chrome's remote-debugging
+authorization prompt appears once per process.
 
-## Action vocabulary (backend-agnostic)
+## Connecting to Chrome
 
-The contract both live computer-use and replay speak. Deliberately small:
+Chrome 144+ disabled `--remote-debugging-port` on the default profile, so the
+supported path is the **chrome://inspect checkbox**: open
+`chrome://inspect/#remote-debugging`, tick *"Allow remote debugging for this
+browser instance"*, which serves CDP on `127.0.0.1:9222`. The debug port is
+fixed at **9222** (the checkbox's port); it is not user-editable in the setup UI
+— a custom port only via config (`browser.connect_port`).
 
-| Action | Notes |
-|---|---|
-| `navigate(url)` / `back()` | browser-specific; desktop backend may no-op |
-| `click(target)` | resolve `target` (see Target Resolution), then trusted click |
-| `type(text)` | type into the focused element; no target needed |
-| `key(combo)` | physical key / combo (`cmd+a`, `enter`, `escape`) |
-| `scroll(target?, dx, dy)` | |
-| `screenshot()` | full or region; the visual primitive |
-| `set_files(target, paths)` | file inputs |
-| `eval(js) -> value` | DOM read / verify primitive (browser backend only) |
-| `ax_tree() -> nodes` | accessibility tree snapshot (verify + target resolution) |
+`browserPage` (`internal/tools/browser.go`) resolves the connection by config:
+`connect_port` → `ConnectByPort` (`/json/version`, falling back to the fixed
+`/devtools/browser` ws path); `attach_running` → `DiscoverRunningChrome` /
+`ConnectViaProfile` (reading the profile's `DevToolsActivePort`); otherwise
+launch a fresh Chrome. It then **always opens its own tab** (`NewPage`) — never
+hijacking a tab the user already has open, including octo's own web UI. Cookies
+and login are profile-wide, so a new tab still carries the logged-in session.
 
-A **`target`** is never a single CSS string — it is a multi-representation
-descriptor (see below) resolved at action time.
+`octo browser setup` (`cmd/octo/browser.go`) is the onboarding helper: it prints
+the inspect-page steps, probes the attach (connect + a page-level check), and on
+success persists `browser.connect_port`.
 
-## Browser backend: Go-native CDP
+**Connection liveness.** `browserPage` separates *page* lifetime from
+*connection* lifetime. A cached page is probed (a cheap `Eval`) before reuse; if
+its CDP target is gone (a tab opened in an earlier session has since closed) it
+opens a fresh tab **on the existing browser connection** — no redial, so Chrome
+does not re-prompt for authorization. It only redials when the connection itself
+is dead (Chrome closed/restarted).
 
-A hand-rolled minimal CDP client, consistent with octo's convention of
-hand-writing wire adapters (the anthropic/openai providers are hand-rolled, not
-SDKs). `web-access`'s former `cdp-proxy.mjs` was ~25KB of logic; the Go
-equivalent is small and keeps the dependency tree minimal (over pulling
-chromedp/go-rod).
+## The `browser` tool
 
-CDP domains required:
-- `Target.*` — attach to targets (`attachToTarget {flatten:true}`), create/close.
-- `Page.*` — navigate, lifecycle, `captureScreenshot`.
-- `Runtime.*` — `evaluate` (DOM read / eval-verify), `addBinding` /
-  `bindingCalled` (recorder event channel).
-- `DOM.*` — `querySelector`, box model, `setFileInputFiles`.
-- `Input.*` — `dispatchMouseEvent` / `dispatchKeyEvent` (trusted input: counts
-  as a real user gesture, triggers file dialogs, helps against anti-automation).
-- `Accessibility.getFullAXTree` / `getPartialAXTree` — the AX layer.
+One action-multiplexed tool. Actions: `navigate`, `back`, `click`, `hover`,
+`type`, `select`, `key`, `scroll`, `wait`, `screenshot`, `observe`, `ax`,
+`cookies`, `upload`, `download`, `pages`, `select_page`, `close`, `eval`,
+`record_start`, `record_stop`, `run_skill`.
 
-**Logged-in Chrome takeover.** Reuse the user's real Chrome profile (not a fresh
-headed/headless instance) so login state, cookies, and fingerprint are real.
-Discover or launch the debugging endpoint by porting `web-access`'s
-browser-discovery logic (browser detection, `--remote-debugging-port`, profile
-handling) — that discovery work is `web-access`'s genuine accumulated value and
-is borrowed rather than rebuilt from scratch.
+Notable behaviours:
+- **`observe`** returns a text digest of the page's interactable elements
+  (URL/title + element → selector). Model-agnostic, the cheap way to look at an
+  unfamiliar page; works on any model with no vision.
+- **`screenshot`** returns an image for a vision-capable model. It is gated on
+  the active model's vision capability (`tools.SetBrowserVision`, set from the
+  model config); a text-only model gets a text note instead of an image block
+  its endpoint would reject. Vision is opt-in and never forced.
+- **`cookies`** returns the current page's cookies including HttpOnly (CDP
+  `Network.getCookies`) for session reuse / token extraction.
+- **Click follows new tabs.** A click that opens a tab (`target=_blank` /
+  `window.open`) switches the active page to the new tab. Without this a click
+  that spawns a tab looks like a no-op because the original page is unchanged.
+- **Per-action timeout** bounds every action (45s default; 5min for `run_skill`
+  / `download`) so a stuck CDP call fails instead of hanging the turn.
+- **Selectors** accept plain CSS or a Playwright-flavored subset translated to a
+  CDP-evaluable query (`internal/browser/selector.go`): the text engines
+  (`:has-text` / `:text` / `:contains` / `:text-is`, the `text=` prefix), the
+  `:visible` pseudo, and the `xpath=` / `css=` engine prefixes. Models trained on
+  Playwright emit these, so they just work.
 
-## Target resolution — tiered hybrid (core)
+## Recording
 
-A single selector strategy is insufficient: Canvas apps (e.g. 企业微信文档) have
-no usable DOM, and anti-scraping sites (e.g. 小红书) randomize/obfuscate class
-names. Targets are therefore **captured as multiple representations at record
-time** and **resolved by descending reliability at replay/action time**.
+`record_start` installs a recorder (`internal/browser/recorder.go`) on the
+current page; `record_stop <name>` compiles what was captured into a skill.
 
-| Tier | Mechanism | Wins for |
-|---|---|---|
-| **0** | Focus + keyboard (`type`/shortcuts; no element locate) | text entry, Canvas doc editing |
-| **1** | Semantic selector: ARIA role+accessible-name, text content, stable `data-*`, structural path. **Never raw CSS classes** | standard web apps |
-| **2** | AX-tree node (`Accessibility.getFullAXTree`) | hostile-CSS sites / Canvas apps that expose a11y |
-| **3** | **Visual anchor**: a screenshot crop around the target captured at record time; at replay relocate via template match or VLM ("click the thing that looks like this / says X"), then `Input` trusted click at the resolved coordinates | **Canvas, heavy anti-scrape — when DOM is useless** |
+**Recording captures the USER's demonstration, not the model's actions.** After
+`record_start` the agent hands control to the user, who performs the steps in
+their own browser and says when done. The recorder injects capture-phase
+`click` / `change` DOM listeners that report through a `Runtime.addBinding` →
+`Runtime.bindingCalled` channel, re-installed on every future document
+(`Page.addScriptToEvaluateOnNewDocument`) so it survives navigation. It also
+subscribes to `Page.frameNavigated` (top frame only) to capture top-level
+navigations as steps — so a "go to /hot, then click an item" demonstration
+records both the navigation and the click, not just the click.
 
-Visual (Tier 3) is a **first-class fallback, not a backup plan** — it is exactly
-how commercial RPA handles Canvas (image match + OCR + coordinates). Embracing it
-is on-thesis for "replace complex RPA."
+Each captured event carries: action type (`click` / `change`(→`type`/`select`) /
+`upload` / `navigate`), a best-effort CSS selector, the element's visible text,
+tag, an iframe selector when framed, the typed/selected value, and the URL. The
+selector is **anchored at the nearest id-bearing ancestor**
+(`#panel > div > a`) rather than a free `nth-of-type` chain from `<body>` —
+shorter and far more stable across layout changes.
 
-**Verify conditions** mirror the tiers: `text_content`, `ax_element`, and
-`visual` strategies. On Canvas, only `visual` is available.
+Known limit: actions performed *inside a new tab opened during recording* are
+not captured (the recorder stays attached to the origin target). The common
+"click opens an article" flow is covered because the click is captured on the
+origin page and replay follows the popup.
 
-## Recorder
+## Skill artifact
 
-Validated approach (co-attach proof-of-concept passed): a recorder CDP client
-attaches to the **same Chrome** that the driver/proxy is using — two clients,
-two `sessionId`s, concurrent, no conflict. Capture works via an injected DOM
-listener that reports through `Runtime.addBinding` → `Runtime.bindingCalled`.
+A recording compiles to an editable YAML skill at
+`~/.octo/browser-skills/<name>.yaml` (`tools.BrowserSkillsDir`,
+`$OCTO_BROWSER_SKILLS_DIR` to override):
 
-Per captured action, the recorder records **all representations at once** so
-replay has fallbacks regardless of site type:
-- semantic selector candidates (role/name/text/`data-*`/structural path)
-- AX node (role, name, path)
-- coordinate (viewport + page)
-- screenshot crop of the target region
-- action kind + payload (text typed, key combo, scroll delta)
-- the active URL / frame
-
-Injection covers future navigations (`Page.addScriptToEvaluateOnNewDocument`)
-and the live document (`Runtime.evaluate`). Keyboard input is captured for
-`type`/`key` so text entry replays faithfully even on Canvas.
-
-## Skill artifact format
-
-Extend octo's existing CC-compatible skill format (SKILL.md + YAML frontmatter)
-rather than the mruby workflow DSL — the DSL is for code orchestration, not GUI
-steps, and a SKILL.md is human-readable, hand-editable, and git-versionable.
-
-```markdown
----
-name: <kebab-case>
-description: <one line>
-metadata:
-  browser_skill:
-    source: recorded
-    inputs: [ { name: query, default: "" } ]
----
-
-## Steps
-
-### 1. <title>
-action: click
-target:
-  selector: role=button[name="搜索"]
-  ax: { role: button, name: "搜索" }
-  coord: { x: 412, y: 88 }
-  visual: crops/step1.png
-verify:
-  strategy: visual            # text_content | ax_element | visual
-  ref: crops/step1-after.png
+```yaml
+name: open-zhihu-top
+description: Open Zhihu's hot list and click the first item
+params:
+  - { name: query, description: "...", default: "" }
+steps:
+  - action: navigate
+    url: https://www.zhihu.com/hot
+  - action: click
+    selector: "section:nth-of-type(1) > div:nth-of-type(2) > a"
+    label: "Top story title"          # recorded visible text — the text anchor
 ```
 
-`{{param}}` placeholders parameterize typed text and URLs. Crops live beside the
-SKILL.md. Stored separately from octo's own skills (own directory) since the
-on-disk shape differs.
+`Step` fields: `action`, `url`, `frame`, `selector`, `value`, `label`,
+`timeout_ms` (for `wait`), `verify`. `{{param}}` placeholders in `url`/`value`
+are substituted at replay from `params` (falling back to declared defaults). The
+skill is plain YAML — human-readable, hand-editable, git-versionable.
 
-## Replay + verify + self-heal
+**Distillation.** `record_stop` runs `GenerateSkill`:
+- `CompileSkill` produces a deterministic baseline: navigations and gestures in
+  capture order; it drops an `about:blank` start URL (the throwaway tab octo
+  opened), collapses initial-load navigation echoes, and removes a step
+  identical to its immediate predecessor (a jittery double-fire) — conservative,
+  exact-consecutive-dupes only.
+- When a model sender is wired, an LLM **refines** that baseline: drops
+  back-and-forth detours, parameterizes user-specific values into `{{param}}`,
+  and writes a short description. A precision guard (`selectorsSubset`) rejects
+  any refined output that invents a selector not in the baseline, falling back to
+  the deterministic version — so the LLM only ever cleans up real captured
+  events, never hallucinates targets.
+
+## Replay, verification, self-heal
+
+`run_skill <name>` loads the YAML and runs `ReplaySkill` (`internal/browser/
+skill.go`) deterministically — no LLM in the common case. Each step implicitly
+waits for its target, executes, and checks any `verify`. Robustness is built
+into the engine:
+
+- **Text-anchored clicks.** Positional selectors drift and, worse, after a
+  layout change can silently resolve to the *wrong* element. When a step has the
+  recorded `label` text, `resolveClickTarget` polls for, in order: the original
+  positional element when its text still contains the anchor (unchanged-page fast
+  path, preserving the exact original target), else any element carrying the
+  anchor text (drift recovery), else the positional selector unchanged (a real
+  miss then reaches the healer). This stops silent wrong-element clicks and lets
+  replay survive layout change without the LLM.
+- **Popup following.** A click that opens a new tab swaps the active page for the
+  subsequent steps; `ReplaySkill` returns the final page so the tool keeps the
+  session pointed at the right tab.
+- **Type verification.** After a `type`, if a non-empty value left the field
+  empty (a disabled / re-rendering / framework-controlled input swallowed the
+  programmatic insert), the field is cleared and re-typed once before failing.
+  The check is non-empty, not exact-match, so masked/formatted inputs are not
+  wrongly flagged.
+- **`wait`** waits for a selector, or a fixed `timeout_ms` — the SPA-settling
+  primitive.
 
 ```
 for each step:
-    resolve target by descending tier (0→3), using the captured representations
-    execute action via the backend (deterministic, no LLM)
-    evaluate verify condition
-    if verify fails:
-        hand control to the live computer-use loop (LLM) starting from this step
-        the LLM observes (AX digest or screenshot), completes the step, and may
-        repair the recorded step (update selector / re-crop) before resuming
+    resolve target (text-anchored for clicks), waiting for it to appear
+    execute via the CDP backend (deterministic, no LLM); follow any new tab
+    verify (implicit target presence + any explicit verify)
+    if it fails AND a healer is wired:
+        healer inspects the page and repairs the step, then retry once
+        if the repair changed the step, write the corrected skill back
 ```
 
-Deterministic in the common case (no LLM, no token cost); self-healing only when
-a step actually fails. This self-heal is the difference between this and a
-brittle RPA macro.
+**Self-heal** (`app.MakeBrowserHealer`) is the only LLM call in replay and only
+on a hard failure: it shows the model the page's current interactable elements (a
+text digest — model-agnostic, no vision) plus the intended action + label, and
+asks for the corrected selector, which is written into the step for retry and
+persisted (`run_skill` saves the healed skill back). This self-heal is the
+difference between this and a brittle RPA macro.
 
-## Live computer-use loop
+## Managing recordings (web Browser view)
 
-When there is no recorded skill (or during self-heal), the agent drives the
-browser directly. octo is multi-provider, so **the loop's model dependence is
-itself tiered** — the common path runs on any tool-use model; only the pure-
-visual corner needs a specially-trained model.
+A dedicated **Browser** view (`web/src/views/BrowserView.svelte`,
+`GET/PUT/DELETE /api/browser/recordings`) owns the connection status (Connected /
+Unreachable / Not set up + port, with a single Set up / Reconfigure button) and
+the recordings list. Each recording offers **Replay**, **Edit**, **Delete**, and
+the section has a **Record** button.
 
-There are two distinct kinds of "computer use", with very different model
-requirements:
+All three actions are **agentic and consistent**: Replay, Record, and Edit each
+open a fresh agent session (`openAgentSession`) whose first message drives the
+flow — Replay runs `run_skill` through the full agent replay+heal path; Record
+walks the demonstrate-then-stop flow; Edit reads the YAML and edits it
+conversationally. There is no server-side replay endpoint and no raw-YAML modal
+editor — both would be inconsistent with the rest of the agentic-first UI. (The
+after-turn message suggestion is suppressed in these single-purpose sessions.)
 
-1. **Native computer-use tool (model-specific).** Claude, OpenAI
-   (computer-use-preview / Operator), and Gemini each ship a tool type whose
-   model is *trained* to ground a target in a screenshot to precise coordinates.
-   This is protocol-specific (Anthropic tool type + beta header, OpenAI
-   Responses `computer_use`, Gemini's own) and lives in the provider adapter.
-   Only those specific models have it.
-2. **Generic vision + custom action tool (any multimodal model).** Define our
-   own `click(x,y)`/`type(text)` tools and feed a screenshot to any tool-use-
-   capable multimodal model. The catch: general VLMs are **weak at raw
-   coordinate grounding** — they describe what they see but mis-place `(x,y)`.
-
-The technique that makes generic models viable is to **turn grounding into
-selection**: never ask for raw coordinates.
-- **AX/DOM-digest selection** — give the model an enumerated list of interactive
-  elements (role + name + text); it picks by reference. No vision grounding at
-  all when DOM/AX exists.
-- **Set-of-Marks** — overlay numbered boxes on detectable elements, screenshot
-  it, ask "click 7"; map the index back to a real element/coordinate. Works on
-  weaker models — *provided elements can be enumerated to mark them*.
-
-Mapping to the resolution tiers:
-
-| Path | Model requirement |
-|---|---|
-| **DOM/AX available** (Tier 0–2) | model only *selects* among enumerated targets → **any tool-use model; vision optional**. Cheap, broadly compatible. This is the same ordinary tool-use octo already supports — no provider-protocol work. |
-| **Pure-visual** (Tier 3: Canvas / hostile, no DOM) | needs real visual grounding. **Native computer-use model is best.** A generic model can be rescued by Set-of-Marks *only if elements are detectable* — on true Canvas there are no DOM boxes to mark, so a generic model falls back to raw-coordinate prompting (a known **quality cliff**) unless an OCR/detection layer proposes regions to mark. |
-
-Design stance:
-- **Default to a model-agnostic, selection-based loop** (AX/DOM digest + SoM) —
-  maximizes provider compatibility and is the lowest-integration path.
-- **Treat the visual tier as a capability check**: if the bound model advertises
-  native computer-use, use it to upgrade Tier 3 grounding; otherwise use SoM;
-  true Canvas + a weak model is the acknowledged weak corner (optionally close
-  it with an OCR/detection step).
-- **Native computer-use is an enhancement, never a hard requirement.** It is
-  done per-provider in the adapter; present → stronger, absent → not fatal.
-
-Self-heal inherits this: a recorded skill that drops into the live loop on a
-Canvas page is only as reliable as the bound model's visual grounding.
+**Recordings are replay-only.** They run when explicitly replayed (the Replay
+button or `run_skill`); they are not keyword-triggerable. (A companion-`SKILL.md`
+mechanism that auto-triggered a recording by phrase was tried and removed: it was
+unreliable and led the agent to over-promise auto-execution that often did not
+fire. A recording is an automation the user replays, distinct from a SKILL.md the
+model reads as knowledge.)
 
 ## Permissions & safety
 
-Browser actions (click, type, navigate, file upload) are high-impact and route
-through octo's existing permission gate. Operating logged-in sessions can take
-real actions on the user's accounts; gating and clear action summaries are
-mandatory. Recorded screenshots may capture sensitive on-screen content — they
-are stored locally with the skill and only sent to a model during generation or
-self-heal.
+Browser actions (click, type, navigate, upload) are high-impact — they take real
+actions on the user's logged-in accounts — and route through octo's permission
+gate with clear action summaries. Screenshots may capture sensitive on-screen
+content; they are produced only for a vision-capable model and on demand.
 
 ## Reliability & anti-detection (honest limits)
 
-Anti-bot detection (CDP/headless fingerprinting) is orthogonal to target
-resolution and is an **arms race with no guarantee**. Mitigations: trusted
-`Input` gestures, the user's real logged-in profile (not headless), human-like
-timing. Some sites still detect and may **ban accounts** — surfaced to the user,
-not silently absorbed. Pixel-based interaction does not help with detection;
-only with locating targets once you can drive the page.
+Anti-bot detection (CDP/headless fingerprinting) is orthogonal to replay
+robustness and is an arms race with no guarantee. Mitigations: trusted `Input`
+gestures (a real user gesture — also what triggers file dialogs), the user's real
+logged-in profile rather than a headless instance, and human-paced timing. Some
+sites still detect automation and may **ban accounts**; this is surfaced to the
+user, not silently absorbed.
 
-## web-access evolution
+## web-access skill
 
-`web-access` rides on the owned backend. It is a thin exploratory-browsing skill
-over octo's native `browser` tool + the built-in `web_search`/`web_fetch` — no
-Node, no `cdp-proxy.mjs`. Its value is the browsing methodology (the
-see→decide→act loop, tool-selection guidance, login judgment, `site-patterns/`
-site-memory), not an execution layer; the Go tool's primitive surface
-(observe/eval/click/type/cookies/upload/download/record/run_skill) supersedes the
-old proxy. The browser-discovery logic it once contributed now lives in
-`internal/browser` (`chrome.go`).
-
-## Implementation slices
-
-Spike the real product risk first; the technical co-attach unknown is already
-cleared.
-
-1. **Owned CDP backend + action vocabulary.** Hand-rolled Go CDP client; attach
-   to a logged-in Chrome; implement navigate/click/type/key/scroll/screenshot/
-   eval/ax_tree. Acceptance: drive a trivial page end-to-end from Go, no Node.
-2. **Recorder + trivial record→replay.** Co-attach capture; multi-representation
-   per action; compile to SKILL.md; deterministic replay of a Tier-1 flow.
-   Acceptance: record and replay a standard web-app task.
-3. **The real risk — robust resolution + self-heal.** Tiers 2–3 (AX + visual
-   anchor), visual verify, and the self-heal handoff. Acceptance: a recorded
-   skill survives class-name churn (small DOM change) and runs on a Canvas page
-   (企业微信文档) via the visual tier.
-4. **Live computer-use loop.** DOM/AX-first with screenshot+VLM fallback;
-   provider-agnostic, Claude-native computer-use as enhancement.
-5. **Desktop backend (future).** Same action vocabulary behind an MCP/sidecar
-   backend; no core changes.
-
-## Open questions
-
-- Visual matching engine: in-Go template match vs always-VLM vs OCR-assisted —
-  decide during slice 3 against real Canvas pages.
-- AX-tree coverage of target Canvas apps (企业微信文档): confirm whether it
-  exposes a usable a11y mirror; if not, Tier 3 is the only path there.
-- Visual-grounding on the weak corner: for true Canvas + a model without native
-  computer-use, decide whether to add an OCR/element-detection step to enable
-  Set-of-Marks, or to require a native computer-use model for those tasks and
-  degrade explicitly otherwise.
-- Native computer-use integration: which providers' computer-use tools to wire
-  into the adapter first (Claude / OpenAI / Gemini), and the capability-
-  advertisement mechanism the live loop checks.
-- Skill storage/sharing: whether recorded browser skills flow through octo's
-  existing skill import/export.
+`web-access` is a thin exploratory-browsing skill over the native `browser` tool
+plus `web_search` / `web_fetch` — Node-free, no proxy. Its value is the browsing
+methodology (the see→decide→act loop, tool-selection guidance, login judgment,
+per-site memory), not an execution layer; the `browser` tool's primitives
+supersede the old proxy.
