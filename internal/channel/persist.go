@@ -63,7 +63,9 @@ func (s *Session) restoreOrInitStore(id string) {
 	st.Source = "channel"
 	st.BoundEntry = agent.EntryChannel
 	st.BoundAt = time.Now()
-	st.Title = string(s.Key)
+	// Leave Title empty so DisplayTitle() falls back to the first user message
+	// snippet (truncated to 60 chars) instead of showing the raw SessionKey
+	// (e.g. "weixin:o9cq…@im.wechat:o9cq…@im.wechat").
 	// Persist immediately so the entry binding is visible to other processes
 	// (and to the server's authoritative LoadSession in handleChannelMessage).
 	_ = st.Save()
