@@ -412,7 +412,8 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 				break
 			}
 			if res == connNetwork {
-				fmt.Fprintln(stdout, "Couldn't verify the connection — looks like a network or endpoint issue, not the key. Saving anyway; if octo won't start, re-run `octo config`.")
+				// Same stream as the ✗ line it explains, so the two stay together.
+				fmt.Fprintln(stderr, "Couldn't verify the connection — looks like a network or endpoint issue, not the key. Saving anyway; if octo won't start, re-run `octo config`.")
 				break
 			}
 			// connRejected: the endpoint turned the request away, so the saved
@@ -564,26 +565,33 @@ func reportConnectionCheck(stdout, stderr io.Writer, provider, key, baseURL, mod
 // classifyConnErr decides whether a failed probe means the config is wrong or
 // the network just got in the way. Providers format API rejections as
 // "<vendor>: HTTP <code>: …" (see anthropic/openai client.go), so the status
-// code is the signal: 400/401/403/404 are the config being rejected; a missing
-// HTTP code (dial/timeout) or a transient status (408/409/425/429/5xx) is a
-// network problem the config can't be blamed for.
+// code is the signal. A client-error status (4xx) means the request itself was
+// turned away — wrong key/model/endpoint — and won't fix itself, EXCEPT the
+// transient 4xx (408/409/425/429) which, like every 5xx and every error with no
+// HTTP code at all (dial/timeout), is a network problem the config can't be
+// blamed for.
 func classifyConnErr(err error) connResult {
 	code, ok := httpStatusFromErr(err.Error())
 	if !ok {
 		return connNetwork // no HTTP response reached us at all
 	}
-	switch code {
-	case 400, 401, 403, 404:
-		return connRejected
+	switch {
+	case code == 408 || code == 409 || code == 425 || code == 429:
+		return connNetwork // transient — retrying may well succeed
+	case code >= 400 && code < 500:
+		return connRejected // request rejected: bad key/model/endpoint
 	default:
-		return connNetwork
+		return connNetwork // 5xx and anything non-4xx: server-side / unverified
 	}
 }
 
 // httpStatusFromErr extracts the status code from a provider error of the form
-// "…: HTTP <code>: …". Returns ok=false when no such marker is present.
+// "…: HTTP <code>: …". The ": HTTP " marker (with the leading colon-space the
+// providers emit) anchors to the real status prefix, so a status code echoed
+// later inside the response body can't be mistaken for it. Returns ok=false
+// when no such marker is present.
 func httpStatusFromErr(msg string) (int, bool) {
-	const marker = "HTTP "
+	const marker = ": HTTP "
 	i := strings.Index(msg, marker)
 	if i < 0 {
 		return 0, false

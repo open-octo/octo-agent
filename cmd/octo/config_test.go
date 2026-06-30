@@ -409,14 +409,46 @@ func TestClassifyConnErr(t *testing.T) {
 		{"openai: HTTP 403: forbidden", connRejected},
 		{"openai: HTTP 400: bad request", connRejected},
 		{"anthropic: HTTP 404: model not found", connRejected},
+		// Non-transient 4xx a compatible gateway may use for a bad model/path —
+		// still the config being wrong, must not be saved as a "network blip".
+		{"openai: HTTP 422: unknown model", connRejected},
+		{"openai: HTTP 405: method not allowed", connRejected},
+		{"openai: HTTP 402: payment required", connRejected},
+		// Transient codes: retrying may succeed, so they're network-class.
 		{"openai: HTTP 429: rate limit exceeded", connNetwork},
+		{"openai: HTTP 408: request timeout", connNetwork},
 		{"anthropic: HTTP 500: internal error", connNetwork},
+		{"openai: HTTP 503: service unavailable", connNetwork},
 		{"dial tcp 1.2.3.4:443: i/o timeout", connNetwork},
 		{"context deadline exceeded", connNetwork},
+		// A status echoed inside the body must not be mistaken for the real one.
+		{`openai: HTTP 401: {"detail":"upstream returned HTTP 503"}`, connRejected},
 	}
 	for _, c := range cases {
 		if got := classifyConnErr(errors.New(c.msg)); got != c.want {
 			t.Errorf("classifyConnErr(%q) = %d, want %d", c.msg, got, c.want)
+		}
+	}
+}
+
+// TestHTTPStatusFromErr covers the parsing edge cases directly: the body-echo
+// guard, a malformed marker, and a non-numeric code.
+func TestHTTPStatusFromErr(t *testing.T) {
+	cases := []struct {
+		msg      string
+		wantCode int
+		wantOK   bool
+	}{
+		{"anthropic: HTTP 401: invalid x-api-key", 401, true},
+		{`openai: HTTP 500: {"err":"saw HTTP 200 upstream"}`, 500, true},
+		{"dial tcp: no such host", 0, false},
+		{"weird: HTTP : missing code", 0, false},
+		{"weird: HTTP abc: not a number", 0, false},
+	}
+	for _, c := range cases {
+		code, ok := httpStatusFromErr(c.msg)
+		if code != c.wantCode || ok != c.wantOK {
+			t.Errorf("httpStatusFromErr(%q) = (%d, %v), want (%d, %v)", c.msg, code, ok, c.wantCode, c.wantOK)
 		}
 	}
 }
