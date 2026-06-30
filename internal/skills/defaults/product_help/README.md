@@ -97,7 +97,7 @@ octo init
 octo skills list
 
 # Web server + dashboard (binds localhost by default)
-octo serve --addr 127.0.0.1:8080
+octo serve --addr 127.0.0.1:8088
 
 # IM bridge (WeChat iLink): scan-to-login; channels run inside `octo serve`
 octo serve   # WeChat login: Channels panel in the web UI (scan QR)

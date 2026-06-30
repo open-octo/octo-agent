@@ -41,7 +41,7 @@ tail -f /tmp/octo-serve.log
 ```
 
 > Both templates default to a loopback bind. Exposing the server on a LAN/public
-> address requires `-addr :8080` (or similar) **and** an access key — see
+> address requires `-addr :8088` (or similar) **and** an access key — see
 > [SECURITY.md](../SECURITY.md).
 
 ## Windows installer

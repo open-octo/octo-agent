@@ -72,25 +72,25 @@ in the server's local timezone.
 
 ## API — one surface, all under `/api/tasks`
 
-Prefer the API whenever `octo serve` is up (default `:8080`): every change
+Prefer the API whenever `octo serve` is up (default `:8088`): every change
 reschedules the running process immediately.
 
 ```bash
 # Create — returns {"id":"task_..."}. Include any optional field (directory,
 # model, agent, notify) right here.
-curl -s -X POST http://127.0.0.1:8080/api/tasks \
+curl -s -X POST http://127.0.0.1:8088/api/tasks \
   -H 'Content-Type: application/json' \
   -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ...","directory":"/srv/repo"}'
 
-curl -s http://127.0.0.1:8080/api/tasks                      # list
-curl -s -X DELETE http://127.0.0.1:8080/api/tasks/{id}       # delete
+curl -s http://127.0.0.1:8088/api/tasks                      # list
+curl -s -X DELETE http://127.0.0.1:8088/api/tasks/{id}       # delete
 
 # Run now — prefer the scheduler panel's Run button (see the workflow). Only
 # call this when the user explicitly asks to trigger a run from here.
-curl -s -X POST http://127.0.0.1:8080/api/tasks/{id}/run
+curl -s -X POST http://127.0.0.1:8088/api/tasks/{id}/run
 
 # Edit any subset of fields — this is also how you enable/disable.
-curl -s -X PATCH http://127.0.0.1:8080/api/tasks/{id} \
+curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"new prompt ...","enabled":false}'
 ```

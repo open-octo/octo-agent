@@ -25,7 +25,7 @@ A Windows user with no dev toolchain:
    entry in "Add or remove programs". No UAC prompt.
 4. On finish, the installer starts the server in the background
    (`octo serve -d`, which blocks until the port is listening) and opens
-   <http://127.0.0.1:8080> — loopback, so no access key — landing the user in
+   <http://127.0.0.1:8088> — loopback, so no access key — landing the user in
    the web UI's first-run onboarding. It also registers a per-user HKCU `Run`
    entry that re-launches the daemon on each login via a hidden `.vbs`
    (windowless `octo serve -d`), so the dashboard survives a reboot; uninstall

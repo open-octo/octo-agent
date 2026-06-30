@@ -50,7 +50,7 @@ func getDefaultToolsFor(model string) []agent.ToolDefinition {
 
 // Config holds server-level settings.
 type Config struct {
-	// Bind address (e.g. ":8080", "127.0.0.1:8080").
+	// Bind address (e.g. ":8088", "127.0.0.1:8088").
 	Addr string
 
 	// Provider and model override; zero values fall back to env/config.

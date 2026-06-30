@@ -136,16 +136,16 @@ Environment:
 func serveHelp(w io.Writer) {
 	fmt.Fprintln(w, `octo serve — start the HTTP server (REST API + SSE + Web UI).
 
-The server binds to localhost:8080 by default.
+The server binds to localhost:8088 by default.
 
 Examples:
-  octo serve                           Start on :8080
+  octo serve                           Start on :8088
   octo serve --addr 127.0.0.1:3000     Bind to a specific address
   octo serve --no-channel              Skip IM platform bridges
   octo serve --no-tools                Disable the agentic tool loop
 
 Common flags:
-  --addr <host:port>       Bind address (default :8080)
+  --addr <host:port>       Bind address (default :8088)
   --provider <name>        anthropic (default) | openai
   --model <name>           Override the default model
   --system <text>          Custom system prompt

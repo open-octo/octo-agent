@@ -11,7 +11,7 @@ public statement of this threat model.
 
 - **Zero-friction local default.** `octo serve` + a browser on the same
   machine works exactly as before: no key prompt, no setup.
-- **Exposure requires a secret.** Binding beyond loopback (`-addr :8080`,
+- **Exposure requires a secret.** Binding beyond loopback (`-addr :8088`,
   LAN, tailscale) makes every API and WebSocket request require the access
   key.
 - **Browser attacks blocked without the key.** CSRF simple requests and DNS
@@ -40,7 +40,7 @@ public statement of this threat model.
 | Actor | Vector | Defense |
 |---|---|---|
 | LAN / internet attacker | Direct API calls to an exposed bind | Loopback-only default bind; access key required for non-loopback clients |
-| Malicious website in the user's browser | CSRF simple request (form POST, no-cors fetch) to `http://localhost:8080` | Origin validation: browser-sent `Origin` must be local or in the `--cors` allowlist |
+| Malicious website in the user's browser | CSRF simple request (form POST, no-cors fetch) to `http://localhost:8088` | Origin validation: browser-sent `Origin` must be local or in the `--cors` allowlist |
 | Malicious website in the user's browser | DNS rebinding (attacker domain resolves to 127.0.0.1, request is then "same-origin") | Host validation: the loopback exemption requires a local `Host` header |
 | Malicious website in the user's browser | No-`Origin` subresource GETs (`<img>`, `<script src>`) to loopback | All mutations are POST/PATCH/DELETE (blocked by the Origin gate); GET responses are JSON with `X-Content-Type-Options: nosniff` — `/api/uploads/{name}` gains the same header to close the XSSI read channel |
 | IM platforms (Feishu, DingTalk, …) | Inbound messages driving the agent | Out of scope here — adapters hold outbound connections (no inbound HTTP routes) and are authenticated by bot credentials + the chat/user binding |
@@ -135,9 +135,9 @@ never write the user's config.
   falls back to a `<host>` placeholder:
 
   ```
-  octo server listening on http://0.0.0.0:8080
+  octo server listening on http://0.0.0.0:8088
   access key required for non-localhost clients
-  open: http://192.168.1.5:8080/?access_key=<key>
+  open: http://192.168.1.5:8088/?access_key=<key>
   ```
 
 ### Web UI (`auth.js`)
@@ -170,15 +170,15 @@ Everything else, including `POST /api/chat`, `POST /api/restart`, and
 
 ### Default bind change
 
-`octo serve -addr` defaults to `127.0.0.1:8080` (was `:8080`, all
+`octo serve -addr` defaults to `127.0.0.1:8088` (was `:8088`, all
 interfaces). **Breaking**: LAN/phone access now needs an explicit
-`-addr :8080`, which in turn activates the key requirement for those
+`-addr :8088`, which in turn activates the key requirement for those
 clients. Changelog calls out both.
 
 The previous exposure gate — `validateBindAddr` requiring
 `~/.octo/permissions.yml` to exist before a non-localhost bind — is
 retired. It was a weak proxy (file existence, not content) with a hole: the
-empty-host form `:8080` bypassed it entirely. The access key replaces it as
+empty-host form `:8088` bypassed it entirely. The access key replaces it as
 the exposure gate.
 
 ### Onboarding over a non-loopback bind
@@ -231,5 +231,5 @@ a separate-origin frontend authenticates with explicit headers.
 - CHANGELOG: two breaking entries (default bind, non-loopback auth) plus
   the permissions.yml bind-gate retirement.
 - README: serve quickstart shows the loopback default and the exposure
-  workflow (`-addr :8080` + printed bootstrap URL); the feature table
+  workflow (`-addr :8088` + printed bootstrap URL); the feature table
   points at SECURITY.md.

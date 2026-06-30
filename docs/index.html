@@ -489,8 +489,8 @@
         <div class="iface reveal">
           <div class="iface-icon">🌐</div>
           <h3 data-en="Web UI" data-zh="Web 界面"></h3>
-          <p data-en="Local dashboard at :8080. Browse sessions, inspect tool output, manage skills — same agent, richer visuals."
-             data-zh="本地仪表盘（:8080）。浏览会话、查看工具输出、管理 skills —— 同一个 agent，更丰富的可视化。"></p>
+          <p data-en="Local dashboard at :8088. Browse sessions, inspect tool output, manage skills — same agent, richer visuals."
+             data-zh="本地仪表盘（:8088）。浏览会话、查看工具输出、管理 skills —— 同一个 agent，更丰富的可视化。"></p>
         </div>
         <div class="iface reveal">
           <div class="iface-icon">💬</div>
@@ -533,7 +533,7 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
           <div class="demo-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span data-en="Web, IM, and MCP" data-zh="Web、IM 与 MCP"></span></div>
           <pre class="demo-code"><span class="comment" data-en="# Local web dashboard + IM bridges (one process)" data-zh="# 本地 Web 仪表盘 + IM 桥接（同一进程）"></span>
 <span class="cmd">octo serve</span>
-<span class="cmd">octo serve</span> --addr :8080  <span class="comment" data-en="# expose on the LAN" data-zh="# 暴露到局域网"></span>
+<span class="cmd">octo serve</span> --addr :8088  <span class="comment" data-en="# expose on the LAN" data-zh="# 暴露到局域网"></span>
 
 <span class="comment" data-en="# Connect MCP servers; manage skills" data-zh="# 连接 MCP 服务；管理 skills"></span>
 <span class="cmd">octo mcp</span>
@@ -664,7 +664,7 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
           cmd.textContent =
             'curl -fsSL https://octo-agent.dev/install.sh | sh\n' +
             'octo serve -d                       # start the local server\n' +
-            opener + ' http://127.0.0.1:8080      # open the dashboard, then onboard';
+            opener + ' http://127.0.0.1:8088      # open the dashboard, then onboard';
         }
         btns.forEach(function (b) { b.style.display = 'none'; });
         return;

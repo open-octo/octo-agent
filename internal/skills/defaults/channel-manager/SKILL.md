@@ -185,7 +185,7 @@ Weixin uses a QR-code login — no app credentials needed.
 
 1. Start the QR login flow via the serve API (the response carries the QR link):
    ```bash
-   curl -s -X POST http://127.0.0.1:8080/api/channels/weixin/login
+   curl -s -X POST http://127.0.0.1:8088/api/channels/weixin/login
    # → {"status":"pending","qr_url":"https://…"}      (or "already_logged_in")
    ```
    Pass `-d '{"force":true}'` to re-login over existing credentials.
@@ -194,7 +194,7 @@ Weixin uses a QR-code login — no app credentials needed.
    > `<qr_url from the response>`
 3. Poll until the flow finishes (every ~3s, up to 5 minutes):
    ```bash
-   curl -s http://127.0.0.1:8080/api/channels/weixin/login
+   curl -s http://127.0.0.1:8088/api/channels/weixin/login
    ```
    - `"status":"done"` — credentials are saved to `~/.octo/weixin-credentials.json`. Continue.
    - `"status":"pending"` with a new `qr_url` — the QR expired and was refreshed; relay the new link.

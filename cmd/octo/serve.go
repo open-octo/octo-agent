@@ -35,7 +35,7 @@ func serveLogLevel() slog.Level {
 func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	addr := fs.String("addr", "127.0.0.1:8080", "Bind address (e.g. 127.0.0.1:8080; :8080 to expose on all interfaces)")
+	addr := fs.String("addr", "127.0.0.1:8088", "Bind address (e.g. 127.0.0.1:8088; :8088 to expose on all interfaces)")
 	accessKey := fs.String("access-key", "", "Access key for non-localhost clients (default: from OCTO_ACCESS_KEY / config.yml, else auto-generated and persisted)")
 	provider := fs.String("provider", "", "Provider: anthropic | openai")
 	model := fs.String("model", "", "Model name")

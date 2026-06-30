@@ -30,7 +30,7 @@ Then start the local server and onboard in your browser:
 
 ```bash
 octo serve -d                  # run the local server in the background
-open http://127.0.0.1:8080     # Linux: xdg-open — opens the dashboard
+open http://127.0.0.1:8088     # Linux: xdg-open — opens the dashboard
 ```
 
 `127.0.0.1` is loopback, so no access key is needed; the page goes straight
@@ -46,7 +46,7 @@ if you'd rather grab one by hand.
 double-click it. It installs per-user (no administrator prompt), puts `octo` on
 your `PATH`, and adds a Start-menu entry. When it finishes it starts the local
 server in the background (`octo serve -d`) and opens
-<http://127.0.0.1:8080> — a loopback address, so no access key is needed — to
+<http://127.0.0.1:8088> — a loopback address, so no access key is needed — to
 walk you through first-run onboarding (pick a provider, paste a key). The
 server is also registered to start on each login (a per-user `Run` entry, no
 window), so the dashboard is up after a reboot; uninstalling removes it and
@@ -150,9 +150,9 @@ octo init
 # List discovered skills
 octo skills list
 
-# Web server + dashboard (binds 127.0.0.1:8080 by default)
+# Web server + dashboard (binds 127.0.0.1:8088 by default)
 octo serve
-octo serve -addr :8080   # expose on the LAN — non-localhost clients need the
+octo serve -addr :8088   # expose on the LAN — non-localhost clients need the
                          # access key; startup prints a ready-to-open URL
 
 # IM bridge (WeChat iLink): scan-to-login; channels run inside `octo serve`

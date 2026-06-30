@@ -114,7 +114,7 @@ cat <<EOF
 Next steps — start the server and onboard in your browser:
 
   octo serve -d                    # run the local server in the background
-  $opencmd http://127.0.0.1:8080   # open the dashboard → pick a provider, paste a key
+  $opencmd http://127.0.0.1:8088   # open the dashboard → pick a provider, paste a key
 
 127.0.0.1 is loopback, so no access key is needed. Stop it later with
 \`octo serve --stop\`. Or skip the web UI and run \`octo\` for the terminal.

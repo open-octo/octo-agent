@@ -8,7 +8,7 @@ func TestDaemonDialAddr(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"default", nil, "127.0.0.1:8080"},
+		{"default", nil, "127.0.0.1:8088"},
 		{"separate flag", []string{"-addr", "127.0.0.1:3000"}, "127.0.0.1:3000"},
 		{"long separate flag", []string{"--addr", "127.0.0.1:3000"}, "127.0.0.1:3000"},
 		{"equals form", []string{"-addr=127.0.0.1:9000"}, "127.0.0.1:9000"},

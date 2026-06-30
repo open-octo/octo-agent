@@ -30,7 +30,7 @@ curl -fsSL https://octo-agent.dev/install.sh | sh
 
 ```bash
 octo serve -d                  # 后台运行本地服务
-open http://127.0.0.1:8080     # Linux 用 xdg-open —— 打开仪表盘
+open http://127.0.0.1:8088     # Linux 用 xdg-open —— 打开仪表盘
 ```
 
 `127.0.0.1` 是 loopback，无需 access key；页面直接进入首屏 onboarding（选
@@ -109,7 +109,7 @@ octo init
 octo skills list
 
 # Web 服务 + 仪表盘（默认绑定 localhost）
-octo serve --addr 127.0.0.1:8080
+octo serve --addr 127.0.0.1:8088
 
 # IM 桥接（微信 iLink）：扫码登录；渠道随 `octo serve` 一起运行
 octo serve   # 微信登录：在 Web UI 的 Channels 面板扫码

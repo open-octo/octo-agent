@@ -137,10 +137,10 @@ func startDaemon(serveArgs []string, stdout, stderr io.Writer) int {
 }
 
 // daemonDialAddr derives a loopback-dialable host:port from the serve --addr
-// flag (default 127.0.0.1:8080). A wildcard or empty host is dialed on
+// flag (default 127.0.0.1:8088). A wildcard or empty host is dialed on
 // 127.0.0.1 — the server always listens there too.
 func daemonDialAddr(serveArgs []string) string {
-	addr := "127.0.0.1:8080"
+	addr := "127.0.0.1:8088"
 	for i, a := range serveArgs {
 		switch {
 		case a == "-addr" || a == "--addr":

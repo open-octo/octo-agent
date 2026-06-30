@@ -15,8 +15,8 @@ boundary sits, what protects it, and what is deliberately out of scope.
 - **Loopback is trusted.** Requests from `127.0.0.1`/`::1` are exempt from
   key authentication. Anything that can already run code as a local user on
   the machine is outside the boundary.
-- **Everything else needs the key.** The server binds to `127.0.0.1:8080` by
-  default; binding wider (`-addr :8080`) makes every API and WebSocket
+- **Everything else needs the key.** The server binds to `127.0.0.1:8088` by
+  default; binding wider (`-addr :8088`) makes every API and WebSocket
   request from a non-loopback client require the access key.
 
 ### What is defended
@@ -24,7 +24,7 @@ boundary sits, what protects it, and what is deliberately out of scope.
 | Threat | Defense |
 |---|---|
 | LAN / internet attacker calling an exposed API | Loopback-only default bind; 256-bit access key (constant-time compare) on every non-loopback request |
-| Malicious website CSRF-ing `http://localhost:8080` from your own browser | Browser-sent `Origin` must be local or `--cors`-allowlisted (a literal `*` is never honored); the auth cookie is `SameSite=Strict` |
+| Malicious website CSRF-ing `http://localhost:8088` from your own browser | Browser-sent `Origin` must be local or `--cors`-allowlisted (a literal `*` is never honored); the auth cookie is `SameSite=Strict` |
 | DNS rebinding (attacker domain resolving to 127.0.0.1) | The loopback exemption requires a local `Host` header |
 | Spoofed client IPs | `X-Forwarded-For` is never consulted for the loopback exemption |
 | XSSI reads of uploaded files | `X-Content-Type-Options: nosniff` on served uploads |

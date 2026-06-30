@@ -14,7 +14,7 @@ func TestServeDefaultAddrIsLoopback(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("-h exit = %d, want 2", code)
 	}
-	if !strings.Contains(stderr.String(), `"127.0.0.1:8080"`) {
+	if !strings.Contains(stderr.String(), `"127.0.0.1:8088"`) {
 		t.Errorf("usage should show loopback default addr, got:\n%s", stderr.String())
 	}
 }
