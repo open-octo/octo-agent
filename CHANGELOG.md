@@ -63,7 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixed (#938).
 - **Provider:** phantom/stale model IDs corrected in the vendor registry (#935).
 - **Windows:** the daemon spawns the serve worker with no visible console
-  window (#961).
+  window (#961, #970).
+- **Web sidebar:** dropped the MCP server-count badge and moved Browser below
+  MCP (#969).
 
 ## [1.3.0] — 2026-06-29
 
