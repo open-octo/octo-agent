@@ -20,10 +20,11 @@ func (m serverMessenger) SendMessage(platform, chatID, text string) error {
 // KnownChats lists the chats the bot can currently address, derived from the
 // channel manager's live sessions plus the persisted /bind table.
 func (m serverMessenger) KnownChats() []tools.KnownRecipient {
-	if m.s.channelMgr == nil {
+	mgr := m.s.channelManager()
+	if mgr == nil {
 		return nil
 	}
-	known := m.s.channelMgr.KnownChats()
+	known := mgr.KnownChats()
 	out := make([]tools.KnownRecipient, 0, len(known))
 	for _, kc := range known {
 		var tags []string

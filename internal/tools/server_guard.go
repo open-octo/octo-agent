@@ -30,10 +30,11 @@ var (
 func SetServerGuard(on bool) { serverGuardOn.Store(on) }
 
 var (
-	// pkill/killall … octo — signalling octo processes by name. The \bkill\b
-	// word boundary does not match inside "pkill"/"killall", so reKill below
-	// stays limited to a bare `kill`.
-	reKillByName = regexp.MustCompile(`(?i)\b(pkill|killall)\b[^|;&\n]*octo`)
+	// pkill/killall … octo — signalling octo processes by name. `\bocto\b`
+	// matches "octo", "octo serve", and "octo-agent" but not unrelated names
+	// like "octoprint"/"octopus". The `\bkill\b` word boundary does not match
+	// inside "pkill"/"killall", so reKill below stays limited to a bare `kill`.
+	reKillByName = regexp.MustCompile(`(?i)\b(pkill|killall)\b[^|;&\n]*\bocto\b`)
 	// A bare `kill [-SIG] <pid> …` command; its argument tail is scanned for
 	// the protected PIDs.
 	reKill = regexp.MustCompile(`(?i)\bkill\b([^|;&\n]*)`)

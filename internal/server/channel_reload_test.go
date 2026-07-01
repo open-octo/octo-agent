@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/channel"
@@ -49,6 +50,48 @@ func TestReloadChannel_StartAndStop(t *testing.T) {
 	if srv.isAdapterRunning("reloadfake") {
 		t.Fatal("adapter should stop after disable + reload")
 	}
+}
+
+// TestReloadChannel_ConcurrentKnownChats guards the data race the lazy
+// channelMgr build could introduce: reloadChannel writes s.channelMgr while the
+// send_message tool reads it via serverMessenger.KnownChats on another
+// goroutine. Run with -race; must be clean.
+func TestReloadChannel_ConcurrentKnownChats(t *testing.T) {
+	channel.Register("reloadrace", func(channel.PlatformConfig) (channel.Adapter, error) {
+		return &fullFakeAdapter{}, nil
+	})
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	cfgDir := filepath.Join(tmp, ".octo")
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "channels.yml"),
+		[]byte("channels:\n  reloadrace:\n    enabled: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	t.Cleanup(srv.stopChannels)
+	msgr := serverMessenger{s: srv}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			srv.reloadChannel("reloadrace")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			_ = msgr.KnownChats()
+		}
+	}()
+	wg.Wait()
 }
 
 // TestReloadChannel_SkippedWhenNoChannel: --no-channel disables hot-reload too.

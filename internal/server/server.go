@@ -1636,6 +1636,19 @@ func (s *Server) startChannels() {
 	}
 }
 
+// channelManager returns the channel manager under channelMu. reloadChannel can
+// build it lazily at runtime, so readers on other goroutines (notably the
+// send_message tool via serverMessenger) must snapshot it through here rather
+// than touching the field directly — a plain read would race the lazy write.
+// Adapter-path reads (routeChannelEvent/handleChannelMessage) are exempt: their
+// goroutines are only spawned after the manager is set under the same lock, so
+// the write happens-before those reads.
+func (s *Server) channelManager() *channel.Manager {
+	s.channelMu.Lock()
+	defer s.channelMu.Unlock()
+	return s.channelMgr
+}
+
 // channelBaseCtxLocked returns the base context every adapter goroutine derives
 // from, creating it on first use. stopChannels cancels it to bring them all
 // down. Caller holds channelMu.

@@ -667,10 +667,11 @@ type KnownChat struct {
 }
 
 // KnownChats enumerates the chats the bot can address, merging live sessions
-// with the persisted /bind table. Entries are deduplicated by
-// (platform, chatID, userID); a chat that is both active and bound reports
-// both flags. Chat/user IDs are recovered from the session key, whose format
-// depends on the binding mode (see sessionKeyFor).
+// with the persisted /bind table. Entries are deduplicated by session key
+// (which, under the server's BindByChatUser mode, is platform:chatID:userID); a
+// chat that is both active and bound reports both flags. Chat/user IDs are
+// recovered from the session key, whose format depends on the binding mode
+// (see sessionKeyFor).
 func (m *Manager) KnownChats() []KnownChat {
 	idx := map[SessionKey]*KnownChat{}
 	upsert := func(key SessionKey, chatID, userID string) *KnownChat {

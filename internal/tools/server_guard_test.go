@@ -48,6 +48,7 @@ func TestGuardServerSelfKill_Allows(t *testing.T) {
 		"git status",
 		"kill 999999999",          // some unrelated pid, not ours
 		"pkill -f my-test-server", // not octo
+		"killall octoprint",       // 'octo' substring, not the octo binary
 		"echo skill",              // 'skill' must not trip the \bkill\b rule
 		"kill %1",                 // job spec, no pid
 		"grep octo README.md",     // mentions octo but no kill
