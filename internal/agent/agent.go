@@ -1546,6 +1546,18 @@ func (a *Agent) fireStop(userInput string, reply Reply, err error) {
 	a.Hooks.Dispatch(context.Background(), p)
 }
 
+// firePreCompact dispatches the PreCompact hook just before a real compaction
+// fold. Called only once the compaction paths have committed to summarizing
+// (past the reclaim-only and anti-thrash no-op returns), so it doesn't fire on
+// every near-threshold turn. Pure side-effect (notify / archive) — it cannot
+// veto the compaction. Background context so it isn't cancelled with the turn.
+func (a *Agent) firePreCompact() {
+	if a.Hooks == nil || !a.Hooks.Configured(hooks.EventPreCompact) {
+		return
+	}
+	a.Hooks.Dispatch(context.Background(), a.hookPayload(hooks.EventPreCompact))
+}
+
 // flattenResults collapses a per-tool slice-of-slices into a single flat slice.
 func flattenResults(slices [][]ContentBlock) []ContentBlock {
 	var total int
