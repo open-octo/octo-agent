@@ -219,7 +219,7 @@ func TestReplayVerifyURLIgnoresHostInQueryParam(t *testing.T) {
 	skill := &Skill{Name: "x", Steps: []Step{
 		{Action: "navigate", URL: app.URL + "/start", Verify: &Verify{URL: appHost}},
 	}}
-	_, _, err = ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second})
+	_, _, _, err = ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second})
 	if err == nil {
 		t.Fatal("expected failure: bounced to the login host despite the app host appearing in a query param")
 	}
