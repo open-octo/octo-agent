@@ -82,6 +82,17 @@ func (b *bindingStore) get(key SessionKey) (string, bool) {
 	return id, ok
 }
 
+// keys returns a snapshot of the bound session keys, for enumeration.
+func (b *bindingStore) keys() []SessionKey {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]SessionKey, 0, len(b.m))
+	for k := range b.m {
+		out = append(out, k)
+	}
+	return out
+}
+
 // set records a binding and persists the table.
 func (b *bindingStore) set(key SessionKey, id string) error {
 	b.mu.Lock()

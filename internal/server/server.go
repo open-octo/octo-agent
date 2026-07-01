@@ -221,6 +221,16 @@ type Server struct {
 	channelCancel   context.CancelFunc
 	runningAdapters sync.Map // string -> channel.Adapter
 
+	// channelMu guards channel (re)start bookkeeping — startChannels runs at
+	// boot, stopChannels at shutdown, and reloadChannel from an HTTP handler
+	// after a config save; they must not race. channelCtx is the base context
+	// all adapter goroutines derive from (cancelled by stopChannels);
+	// adapterCancels holds each running adapter's own cancel so a single
+	// platform can be stopped and restarted without touching the others.
+	channelMu      sync.Mutex
+	channelCtx     context.Context
+	adapterCancels map[string]context.CancelFunc
+
 	// weixinLogin tracks the in-flight web QR login flow (one at a time).
 	weixinLogin weixinLoginFlow
 
@@ -385,6 +395,15 @@ func New(cfg Config) (*Server, error) {
 	// ExitRestart for the supervisor to respawn.
 	tools.SetRestarter(s.Restart)
 
+	// Advertise send_message so a turn on any surface (web, IM, sub-agent) can
+	// proactively push to an IM chat it isn't currently talking to — e.g. a web
+	// session asked to message the user's WeChat.
+	tools.SetMessenger(serverMessenger{s})
+
+	// Guard the hosting process: the agent must not kill its own octo server
+	// (it would drop the live session); restart_server is the graceful path.
+	tools.SetServerGuard(true)
+
 	// Server-managed sessions can be re-entered, so advertise schedule_wakeup
 	// (the loop skill's mechanism); the per-session Waker is stamped into each
 	// turn's ctx in runAgentTurnLoop.
@@ -542,6 +561,8 @@ func (s *Server) doShutdown(ctx context.Context) error {
 	tools.KillAllSessionSubAgents()
 	tools.SetDefaultSubAgentManager(nil)
 	tools.SetTaskStore(nil)
+	tools.SetMessenger(nil)
+	tools.SetServerGuard(false)
 	// Flush any queued async hooks (retention) to disk so a restart/shutdown
 	// doesn't drop them; the next process redelivers.
 	hooks.DrainSpill(5 * time.Second)
@@ -1559,22 +1580,31 @@ func (s *Server) initChannels() {
 		slog.Error("channel config", "err", err)
 		return
 	}
+	s.channelMu.Lock()
+	defer s.channelMu.Unlock()
+	s.channelCfg = chCfg
 	platforms := chCfg.EnabledPlatforms()
 	if len(platforms) == 0 {
+		// Nothing enabled yet. Keep channelCfg so reloadChannel can lazily
+		// build the manager when the user adds a channel later — no full
+		// server restart needed.
 		return
 	}
+	s.channelMgr = channel.NewManager(chCfg, s.buildChannelFactory(), channel.BindByChatUser)
+	slog.Info("channels enabled", "platforms", strings.Join(platforms, ", "))
+}
 
-	// Build agent factory that mirrors the server's agent setup. No gate is
-	// set here: handleChannelMessage builds a fresh per-turn gate (configured
-	// mode + chat-interactive ask), the same shape prepareToolTurn gives web
-	// turns. A factory-time gate would freeze one policy snapshot for the
-	// session's whole life — and the old `gate, _ :=` form silently ran turns
-	// ungated when engine construction failed.
+// buildChannelFactory returns the agent factory the channel manager uses to
+// spin up a fresh agent per IM session. No gate is set here: handleChannelMessage
+// builds a fresh per-turn gate (configured mode + chat-interactive ask), the
+// same shape prepareToolTurn gives web turns. A factory-time gate would freeze
+// one policy snapshot for the session's whole life.
+func (s *Server) buildChannelFactory() func() *agent.Agent {
 	var memInjection string
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	factory := func() *agent.Agent {
+	return func() *agent.Agent {
 		defaultSender, model := s.defaultSenderAndModel()
 		a := agent.New(defaultSender, model)
 		cwd, envCtx := s.curCwdEnv()
@@ -1592,51 +1622,117 @@ func (s *Server) initChannels() {
 		}
 		return a
 	}
-
-	s.channelCfg = chCfg
-	s.channelMgr = channel.NewManager(chCfg, factory, channel.BindByChatUser)
-
-	slog.Info("channels enabled", "platforms", strings.Join(platforms, ", "))
 }
 
 // startChannels launches all enabled channel adapters in background goroutines.
 func (s *Server) startChannels() {
+	s.channelMu.Lock()
+	defer s.channelMu.Unlock()
 	if s.channelMgr == nil {
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	s.channelCancel = cancel
-
-	// For each enabled platform, create adapter and start it.
 	for _, name := range s.channelCfg.EnabledPlatforms() {
-		pc := s.channelCfg.Platform(name)
-		if pc == nil {
-			continue
-		}
-		ctor, err := channel.Find(name)
-		if err != nil {
-			slog.Error("channel start failed", "channel", name, "err", err)
-			continue
-		}
-		ad, err := ctor(pc)
-		if err != nil {
-			slog.Error("channel adapter failed", "channel", name, "err", err)
-			continue
-		}
-		if errs := ad.ValidateConfig(pc); len(errs) > 0 {
-			for _, e := range errs {
-				slog.Warn("channel config issue", "channel", name, "detail", e)
-			}
-			continue
-		}
+		s.startOneChannelLocked(name)
+	}
+}
 
-		s.runningAdapters.Store(name, ad)
-		go func(a channel.Adapter, platform string) {
-			_ = a.Start(ctx, func(ev channel.InboundEvent) {
-				ev.Platform = platform
-				s.routeChannelEvent(ctx, a, ev)
-			})
-		}(ad, name)
+// channelBaseCtxLocked returns the base context every adapter goroutine derives
+// from, creating it on first use. stopChannels cancels it to bring them all
+// down. Caller holds channelMu.
+func (s *Server) channelBaseCtxLocked() context.Context {
+	if s.channelCtx == nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		s.channelCtx = ctx
+		s.channelCancel = cancel
+	}
+	return s.channelCtx
+}
+
+// startOneChannelLocked builds and launches a single platform adapter from the
+// current channelCfg, tracking its own cancel so it can be stopped
+// independently. No-op if it is already running or its config is missing/
+// invalid. Caller holds channelMu.
+func (s *Server) startOneChannelLocked(name string) {
+	if _, ok := s.runningAdapters.Load(name); ok {
+		return // already running
+	}
+	pc := s.channelCfg.Platform(name)
+	if pc == nil {
+		return
+	}
+	ctor, err := channel.Find(name)
+	if err != nil {
+		slog.Error("channel start failed", "channel", name, "err", err)
+		return
+	}
+	ad, err := ctor(pc)
+	if err != nil {
+		slog.Error("channel adapter failed", "channel", name, "err", err)
+		return
+	}
+	if errs := ad.ValidateConfig(pc); len(errs) > 0 {
+		for _, e := range errs {
+			slog.Warn("channel config issue", "channel", name, "detail", e)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithCancel(s.channelBaseCtxLocked())
+	if s.adapterCancels == nil {
+		s.adapterCancels = make(map[string]context.CancelFunc)
+	}
+	s.adapterCancels[name] = cancel
+	s.runningAdapters.Store(name, ad)
+	go func(a channel.Adapter, platform string) {
+		_ = a.Start(ctx, func(ev channel.InboundEvent) {
+			ev.Platform = platform
+			s.routeChannelEvent(ctx, a, ev)
+		})
+	}(ad, name)
+}
+
+// stopOneChannelLocked stops a single running adapter (cancel its context and
+// call Stop). No-op if it isn't running. Caller holds channelMu.
+func (s *Server) stopOneChannelLocked(name string) {
+	if cancel, ok := s.adapterCancels[name]; ok {
+		cancel()
+		delete(s.adapterCancels, name)
+	}
+	if v, ok := s.runningAdapters.Load(name); ok {
+		_ = v.(channel.Adapter).Stop()
+		s.runningAdapters.Delete(name)
+	}
+}
+
+// reloadChannel applies a saved config change for one platform without a full
+// server restart: it re-reads channels.yml, stops the platform's adapter if
+// running, then starts it again when the new config has it enabled. It handles
+// a fresh add (manager built lazily), a credential change (stop + start), and
+// a disable/delete (stop only). Called from the channels REST handlers after a
+// successful save.
+func (s *Server) reloadChannel(platform string) {
+	if s.cfg.NoChannel || s.getSender() == nil {
+		return
+	}
+	chCfg, err := channel.LoadConfig()
+	if err != nil {
+		slog.Error("channel reload: load config", "channel", platform, "err", err)
+		return
+	}
+
+	s.channelMu.Lock()
+	defer s.channelMu.Unlock()
+	s.channelCfg = chCfg
+	if s.channelMgr == nil {
+		s.channelMgr = channel.NewManager(chCfg, s.buildChannelFactory(), channel.BindByChatUser)
+	}
+
+	s.stopOneChannelLocked(platform)
+	if chCfg.IsEnabled(platform) {
+		s.startOneChannelLocked(platform)
+		slog.Info("channel reloaded", "channel", platform)
+	} else {
+		slog.Info("channel stopped", "channel", platform)
 	}
 }
 
@@ -2069,8 +2165,13 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 
 // stopChannels shuts down all channel adapters and their sessions.
 func (s *Server) stopChannels() {
+	s.channelMu.Lock()
+	defer s.channelMu.Unlock()
 	if s.channelCancel != nil {
 		s.channelCancel()
+	}
+	for name := range s.adapterCancels {
+		delete(s.adapterCancels, name)
 	}
 	if s.channelMgr != nil {
 		_ = s.channelMgr.Stop()

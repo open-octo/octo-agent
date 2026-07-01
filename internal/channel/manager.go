@@ -652,3 +652,79 @@ func (m *Manager) SessionCount() int {
 	})
 	return count
 }
+
+// KnownChat identifies an IM chat the bot can proactively push to: either a
+// live session this process is serving, or a chat explicitly attached via
+// /bind (persisted across restarts). It is the recipient set the send_message
+// tool offers when the model has no bound chat of its own (e.g. a web turn
+// asked to message the user's WeChat).
+type KnownChat struct {
+	Platform string
+	ChatID   string
+	UserID   string
+	Active   bool // a live session in this process run
+	Bound    bool // has an explicit /bind
+}
+
+// KnownChats enumerates the chats the bot can address, merging live sessions
+// with the persisted /bind table. Entries are deduplicated by
+// (platform, chatID, userID); a chat that is both active and bound reports
+// both flags. Chat/user IDs are recovered from the session key, whose format
+// depends on the binding mode (see sessionKeyFor).
+func (m *Manager) KnownChats() []KnownChat {
+	idx := map[SessionKey]*KnownChat{}
+	upsert := func(key SessionKey, chatID, userID string) *KnownChat {
+		if kc, ok := idx[key]; ok {
+			return kc
+		}
+		p, c, u := splitSessionKey(key)
+		if chatID == "" {
+			chatID = c
+		}
+		if userID == "" {
+			userID = u
+		}
+		kc := &KnownChat{Platform: p, ChatID: chatID, UserID: userID}
+		idx[key] = kc
+		return kc
+	}
+
+	m.sessions.Range(func(k, v any) bool {
+		key, _ := k.(SessionKey)
+		sess, _ := v.(*Session)
+		var chatID, userID string
+		if sess != nil {
+			chatID, userID = sess.ChatID, sess.UserID
+		}
+		upsert(key, chatID, userID).Active = true
+		return true
+	})
+	for _, key := range m.bindings.keys() {
+		upsert(key, "", "").Bound = true
+	}
+
+	out := make([]KnownChat, 0, len(idx))
+	for _, kc := range idx {
+		if kc.Platform == "" || kc.ChatID == "" {
+			continue
+		}
+		out = append(out, *kc)
+	}
+	return out
+}
+
+// splitSessionKey recovers (platform, chatID, userID) from a session key.
+// Keys are "platform:chatID[:userID]" (sessionKeyFor); a platform never
+// contains a colon, so the first segment is unambiguous, and the remainder is
+// split once more for the optional user segment.
+func splitSessionKey(key SessionKey) (platform, chatID, userID string) {
+	parts := strings.SplitN(string(key), ":", 3)
+	switch len(parts) {
+	case 3:
+		return parts[0], parts[1], parts[2]
+	case 2:
+		return parts[0], parts[1], ""
+	default:
+		return string(key), "", ""
+	}
+}
