@@ -9,7 +9,43 @@
   <a href="README.md">English</a> · <a href="README_CN.md">简体中文</a>
 </p>
 
-以功能为先的 AI Agent，单一 Go 二进制分发。原生支持两种 API 协议 —— **Anthropic Messages** 和 **OpenAI Chat Completions**，并能对接任何兼容这两种协议的第三方（DeepSeek、Kimi、百炼、OpenRouter、vLLM 等）。目标是 **CLI**、**Web**、**IM** 三种平等的交互界面。
+> 一个 **MIT 开源、单 Go 二进制、零运行时**的 AI Agent。大厂 coding agent 那套能力（skills、CLI / 网页 /
+> 手机 IM、浏览器操作、OS 级沙箱）它都有 —— 区别在于它**完全开源、自包含、不绑任何厂商**，DeepSeek /
+> Kimi / Anthropic / OpenAI 任意模型都能接，服务和数据都留在你自己机器上。直接复用你 `~/.claude/skills` 里的技能。
+> 它既是 **coding agent**（对标 Claude Code），也是**通用 agent**（对标 Hermes）—— 一个二进制同时接管你的编码
+> 和日常自动化，不必装两套工具。
+
+<!-- TODO(demo): 录一段 15–30s 首屏 GIF（装一行 → octo 接 DeepSeek → 解决一个真实编码任务），
+     放到 docs/assets/demo.gif，然后取消下面这段注释。 -->
+<!--
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="octo 演示" width="760">
+</p>
+-->
+
+```bash
+curl -fsSL https://octo-agent.dev/install.sh | sh     # 单二进制，无需 Node / Ruby / Python 环境
+octo config                                            # 选 provider，填 key（DeepSeek / Kimi / 百炼 …）
+octo "给 octo config show 加一个 --json 参数并跑测试"   # 一句话 → 完整 agentic 工具循环
+```
+
+## 为什么用 octo（对比 Claude Code）
+
+octo 不打算在功能上卷赢大厂 agent；它是同一个想法的**开源、可自托管、不绑厂商**版本。如果你乐意用 Claude
+订阅，Claude Code 很好用。octo 是给「宁愿把整套东西攥在自己手里、跑自己的模型」的人准备的。
+
+|  | **octo-agent** | Claude Code |
+|---|---|---|
+| 授权 / 成本 | **MIT 开源，免费，自托管** | 专有，多数场景需 Claude 订阅 |
+| 运行时 | **单个自包含 Go 二进制 —— 无需 Node / Python / Ruby，没有依赖树** | 原生安装，绑定 Anthropic 账户 |
+| 模型 | **双协议原生 + 任意兼容端点**（DeepSeek/Kimi/百炼/OpenRouter/vLLM） | 以 Anthropic 为主（CLI / VS Code 可接第三方） |
+| 部署 / 数据 | **完全自托管，服务与数据都在你手里** | 多数场景由 Anthropic 托管 |
+| 技能 | 直接复用 `~/.claude/skills` | 原生（skills 的发源地） |
+
+<sub>Claude Code 信息据其公开文档（2026-07）。它同样具备 skills、MCP、子代理、OS 沙箱、浏览器 / computer-use、
+IM channels —— 这些 octo 也都有；上表的区别是开源、自托管与模型自由，而非功能清单。</sub>
+
+**一句话**：你想要 Claude Code 那种体验，但要开源、能自托管、不被订阅和单一厂商绑住 —— octo 就是为这个做的。
 
 ## 状态
 
@@ -256,6 +292,17 @@ make fmt-check     # gofmt -l . 必须为空
 ```
 
 项目约定写在 [`.octorules`](.octorules)（面向人类的规则）；[`CLAUDE.md`](CLAUDE.md) 在此基础上补充 AI 编程助手在本仓库工作所需的操作细节。[`CONTRIBUTING.md`](CONTRIBUTING.md) 是人类 PR 流程。
+
+## 致谢与前人工作
+
+octo 站在两个项目的肩膀上，这点不遮掩：
+
+- **[Claude Code](https://code.claude.com)** —— octo 的内部实现大量借鉴了 Claude Code 的做法：agent 循环、
+  工具集、SKILL.md 格式、权限门控、以及整体的 harness 行为。octo 想做的是一个兼容、开源、可自托管的同类实现。
+- **[OpenClacky](https://github.com/clacky-ai/openclacky)** —— octo 的 UI 与交互设计有很大一部分受 OpenClacky
+  启发（它本身也是一个开源、BYOK 的同类 agent）。
+
+有 bug 或者设计得不好的地方，都算 octo 自己的。
 
 ## 许可
 

@@ -9,7 +9,47 @@
   <a href="README.md">English</a> · <a href="README_CN.md">简体中文</a>
 </p>
 
-A functionality-first AI agent, distributed as a single Go binary. Speaks two native API protocols — **Anthropic Messages** and **OpenAI Chat Completions** — and works against any compatible third party (DeepSeek, Kimi, Bailian, OpenRouter, vLLM, …). Aims for three equal interfaces: **CLI**, **Web**, and **IM**.
+> An **MIT-licensed, single Go binary, zero-runtime** AI agent. It does what the big coding agents do —
+> skills, CLI / Web / phone-IM, browser control, an OS-level sandbox — but as an **open, self-contained
+> binary you fully own**, on **any model** (DeepSeek, Kimi, Anthropic, OpenAI, or anything compatible),
+> with the server and your data staying on your own machine. Reuse the skills already in `~/.claude/skills`.
+> It's both a **coding agent** (vs Claude Code) and a **general-purpose agent** (vs Hermes) — one binary for
+> both your coding and your everyday automation, instead of running two separate tools.
+
+<!-- TODO(demo): record a 15–30s hero GIF (one-line install → octo on DeepSeek → solve a real
+     coding task), drop it at docs/assets/demo.gif, and uncomment the block below. -->
+<!--
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="octo demo" width="760">
+</p>
+-->
+
+```bash
+curl -fsSL https://octo-agent.dev/install.sh | sh     # single binary — no Node / Ruby / Python
+octo config                                            # pick a provider, paste a key (DeepSeek / Kimi / …)
+octo "Add a --json flag to 'octo config show' and run the tests"   # one prompt → full agentic loop
+```
+
+## Why octo — vs Claude Code
+
+octo isn't trying to out-feature the big agents; it's the **open, self-hostable, vendor-neutral** take on
+the same idea. If you're happy on a Claude subscription, Claude Code is great. octo is for when you'd
+rather own the whole thing and run it on your own models.
+
+|  | **octo-agent** | Claude Code |
+|---|---|---|
+| License / cost | **MIT, free, self-hosted** | proprietary; most surfaces need a Claude subscription |
+| Runtime | **one self-contained Go binary — no Node / Python / Ruby, no dependency tree** | native install tied to an Anthropic account |
+| Models | **both protocols + any compatible endpoint** (DeepSeek/Kimi/Bailian/OpenRouter/vLLM) | Anthropic-first (third-party providers on Terminal / VS Code) |
+| Deployment / data | **fully self-hosted — server and data stay yours** | Anthropic-managed for most surfaces |
+| Skills | reuse `~/.claude/skills` directly | native (the format's origin) |
+
+<sub>Claude Code details per its public docs (2026-07). It also has skills, MCP, sub-agents, an OS sandbox,
+browser / computer-use, and IM channels — octo covers the same ground. The difference above is openness,
+self-hosting, and model freedom, not a feature checklist.</sub>
+
+**In one line:** you want the Claude Code experience, but open-source, self-hostable, and not locked to a
+subscription or a single vendor — that's octo.
 
 ## Status
 
@@ -311,6 +351,18 @@ make fmt-check     # gofmt -l . must be empty
 ```
 
 Project conventions live in [`.octorules`](.octorules) (the human-facing rules); [`CLAUDE.md`](CLAUDE.md) expands them with the operational detail AI coding agents need in this repo. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the human PR workflow.
+
+## Prior art & acknowledgements
+
+octo stands on the shoulders of two projects and doesn't pretend otherwise:
+
+- **[Claude Code](https://code.claude.com)** — much of octo's internal design is modeled on how Claude Code
+  works: the agent loop, the tool set, the SKILL.md format, permission gating, and general harness behavior.
+  octo aims to be a compatible, open, self-hostable take on the same ideas.
+- **[OpenClacky](https://github.com/clacky-ai/openclacky)** — a large share of octo's UI and interaction
+  design is inspired by OpenClacky (itself a kindred open-source, BYOK agent).
+
+Any bugs or bad decisions are octo's own.
 
 ## License
 
