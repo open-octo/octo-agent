@@ -45,11 +45,11 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 
 	want := Config{
 		Models: []ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "claude-fable-5"},
-			{Name: "kimi", Provider: "kimi", Model: "kimi-k2.6", BaseURL: "https://x.example"},
+			{Provider: "anthropic", Model: "claude-fable-5"},
+			{Provider: "kimi", Model: "kimi-k2.6", BaseURL: "https://x.example"},
 		},
-		DefaultModel: "kimi",
-		LiteModel:    "main",
+		DefaultModel: "kimi-k2.6",
+		LiteModel:    "claude-fable-5",
 	}
 	if err := want.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -62,10 +62,10 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	if len(got.Models) != 2 || got.Models[1] != want.Models[1] {
 		t.Errorf("round-trip models = %+v, want %+v", got.Models, want.Models)
 	}
-	if got.DefaultModel != "kimi" || got.LiteModel != "main" {
+	if got.DefaultModel != "kimi-k2.6" || got.LiteModel != "claude-fable-5" {
 		t.Errorf("round-trip refs = default %q lite %q", got.DefaultModel, got.LiteModel)
 	}
-	if e := got.DefaultEntry(); e.Name != "kimi" || e.BaseURL != "https://x.example" {
+	if e := got.DefaultEntry(); e.Model != "kimi-k2.6" || e.BaseURL != "https://x.example" {
 		t.Errorf("DefaultEntry = %+v, want kimi entry", e)
 	}
 }
@@ -83,12 +83,12 @@ func TestLoad_LegacyYAMLIsNormalised(t *testing.T) {
 		t.Fatalf("Models = %+v, want one synthesized entry", c.Models)
 	}
 	e := c.Models[0]
-	if e.Name != "default" || e.Provider != "openai" || e.Model != "gpt-4o-mini" ||
+	if e.Provider != "openai" || e.Model != "gpt-4o-mini" ||
 		e.BaseURL != "https://x.example" || e.APIKey != "sk-old" || e.ReasoningEffort != "high" {
 		t.Errorf("synthesized entry = %+v", e)
 	}
-	if c.DefaultModel != "default" {
-		t.Errorf("DefaultModel = %q, want default", c.DefaultModel)
+	if c.DefaultModel != "gpt-4o-mini" {
+		t.Errorf("DefaultModel = %q, want gpt-4o-mini", c.DefaultModel)
 	}
 	if c.PermissionMode != "strict" {
 		t.Errorf("global PermissionMode lost: %q", c.PermissionMode)
@@ -99,7 +99,7 @@ func TestLoad_NewFileShadowsLegacy(t *testing.T) {
 	home := setHome(t)
 	writeOcto(t, home, "config.yaml", "model: old-model\nprovider: openai\n")
 	writeOcto(t, home, "config.yml",
-		"models:\n  - name: main\n    provider: anthropic\n    model: new-model\ndefault_model: main\n")
+		"models:\n  - provider: anthropic\n    model: new-model\ndefault_model: new-model\n")
 
 	c, err := Load()
 	if err != nil {
@@ -146,7 +146,7 @@ func TestSave_FileMode0600(t *testing.T) {
 	}
 	home := setHome(t)
 
-	cfg := Config{Models: []ModelEntry{{Name: "main", APIKey: "sk-secret"}}}
+	cfg := Config{Models: []ModelEntry{{Model: "main", APIKey: "sk-secret"}}}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -172,67 +172,46 @@ func TestSetDefaultEntry(t *testing.T) {
 	var c Config
 
 	// Appends when empty.
-	c.SetDefaultEntry(ModelEntry{Name: "main", Model: "m1"})
-	if len(c.Models) != 1 || c.DefaultModel != "main" {
+	c.SetDefaultEntry(ModelEntry{Model: "m1"})
+	if len(c.Models) != 1 || c.DefaultModel != "m1" {
 		t.Fatalf("after first set: %+v", c)
 	}
 
-	// Replaces in place, including a rename, and keeps the lite reference.
-	c.LiteModel = "main"
-	c.SetDefaultEntry(ModelEntry{Name: "primary", Model: "m2"})
-	if len(c.Models) != 1 || c.Models[0].Name != "primary" || c.Models[0].Model != "m2" {
-		t.Fatalf("after rename: %+v", c.Models)
+	// Replaces the default in place when its model changes, carrying the lite
+	// reference over to the new model.
+	c.LiteModel = "m1"
+	c.SetDefaultEntry(ModelEntry{Model: "m2"})
+	if len(c.Models) != 1 || c.Models[0].Model != "m2" {
+		t.Fatalf("after model change: %+v", c.Models)
 	}
-	if c.DefaultModel != "primary" || c.LiteModel != "primary" {
+	if c.DefaultModel != "m2" || c.LiteModel != "m2" {
 		t.Errorf("references not updated: default %q lite %q", c.DefaultModel, c.LiteModel)
 	}
-
-	// Names an unnamed entry "default".
-	var c2 Config
-	c2.SetDefaultEntry(ModelEntry{Model: "m3"})
-	if c2.Models[0].Name != "default" || c2.DefaultModel != "default" {
-		t.Errorf("unnamed entry: %+v", c2)
-	}
 }
 
-func TestUniqueName(t *testing.T) {
-	c := Config{Models: []ModelEntry{{Name: "kimi-k2.6"}, {Name: "kimi-k2.6-2"}}}
-	if got := c.UniqueName("kimi-k2.6"); got != "kimi-k2.6-3" {
-		t.Errorf("UniqueName = %q, want kimi-k2.6-3", got)
-	}
-	if got := c.UniqueName("fresh"); got != "fresh" {
-		t.Errorf("UniqueName = %q, want fresh", got)
-	}
-	if got := c.UniqueName(" "); got != "model" {
-		t.Errorf("UniqueName(blank) = %q, want model", got)
-	}
-}
-
-func TestEntryByName_EmptyNeverMatches(t *testing.T) {
-	c := Config{Models: []ModelEntry{{Name: "", Model: "m"}}}
-	if _, ok := c.EntryByName(""); ok {
-		t.Error("EntryByName(\"\") matched, want no match")
+func TestEntryByModel_EmptyNeverMatches(t *testing.T) {
+	c := Config{Models: []ModelEntry{{Model: "m"}}}
+	if _, ok := c.EntryByModel(""); ok {
+		t.Error("EntryByModel(\"\") matched, want no match")
 	}
 }
 
 func TestModelVision(t *testing.T) {
 	yes, no := true, false
 	c := Config{Models: []ModelEntry{
-		{Name: "vl", Model: "qwen-vl-max", Vision: &yes},
-		{Name: "txt", Model: "qwen3.7-max", Vision: &no},
-		{Name: "unset", Model: "claude"},
+		{Model: "qwen-vl-max", Vision: &yes},
+		{Model: "qwen3.7-max", Vision: &no},
+		{Model: "claude"},
 	}}
 	cases := map[string]bool{
-		"vl":          true,  // explicit true (by Name)
-		"qwen-vl-max": true,  // explicit true (by Model id)
-		"txt":         false, // explicit false (by Name)
-		"qwen3.7-max": false, // explicit false (by Model id)
-		"unset":       true,  // no flag → default true
+		"qwen-vl-max": true,  // explicit true (by model)
+		"qwen3.7-max": false, // explicit false (by model)
+		"claude":      true,  // no flag → heuristic (claude → true)
 		"not-in-list": true,  // unknown → default true
 	}
-	for name, want := range cases {
-		if got := c.ModelVision(name); got != want {
-			t.Errorf("ModelVision(%q) = %v, want %v", name, got, want)
+	for model, want := range cases {
+		if got := c.ModelVision(model); got != want {
+			t.Errorf("ModelVision(%q) = %v, want %v", model, got, want)
 		}
 	}
 }
@@ -261,17 +240,17 @@ func TestModelSupportsVision(t *testing.T) {
 func TestModelVision_HeuristicFallback(t *testing.T) {
 	no := false
 	c := Config{Models: []ModelEntry{
-		{Name: "qwen3.7-max", Model: "qwen3.7-plus"},        // no override → heuristic(false)
-		{Name: "vl", Model: "qwen-vl-max"},                  // no override → heuristic(true)
-		{Name: "forced", Model: "qwen-vl-max", Vision: &no}, // override beats heuristic
+		{Model: "qwen3.7-plus"},        // no override → heuristic(false)
+		{Model: "qwen-vl-max"},         // no override → heuristic(true)
+		{Model: "gpt-4o", Vision: &no}, // override beats heuristic (gpt-4o infers true)
 	}}
-	if c.ModelVision("qwen3.7-max") != false {
+	if c.ModelVision("qwen3.7-plus") != false {
 		t.Error("qwen3.7-plus entry should infer vision=false")
 	}
-	if c.ModelVision("vl") != true {
+	if c.ModelVision("qwen-vl-max") != true {
 		t.Error("qwen-vl-max entry should infer vision=true")
 	}
-	if c.ModelVision("forced") != false {
+	if c.ModelVision("gpt-4o") != false {
 		t.Error("explicit Vision override should win over heuristic")
 	}
 }

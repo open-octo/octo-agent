@@ -37,7 +37,7 @@ func firstNonEmpty(vals ...string) string {
 // the resolved provider has no known default model (i.e. an unknown provider
 // with no explicit model) — the caller prints an error and exits.
 func resolveProviderModel(flagProvider, flagModel string, cfg config.Config) (provider, model string, entry config.ModelEntry, ok bool) {
-	if e, found := cfg.EntryByName(flagModel); found {
+	if e, found := cfg.EntryByModel(flagModel); found {
 		provider = firstNonEmpty(e.Provider, app.ProviderAnthropic)
 		model = firstNonEmpty(e.Model, defaultModels[provider])
 		return provider, model, e, model != ""
@@ -163,7 +163,7 @@ func runConfigShow(stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout)
 	if len(cfg.Models) > 1 {
 		fmt.Fprintf(stdout, "  models:    %d configured, default %q (others: %s)\n",
-			len(cfg.Models), entry.Name, otherEntryNames(cfg, entry.Name))
+			len(cfg.Models), entry.Model, otherEntryModels(cfg, entry.Model))
 	}
 	fmt.Fprintf(stdout, "  provider:  %s (%s)\n", provider, provSrc)
 	fmt.Fprintf(stdout, "  model:     %s (%s)\n", model, modelSrc)
@@ -201,12 +201,12 @@ func runConfigShow(stdout, stderr io.Writer) int {
 	return 0
 }
 
-// otherEntryNames lists the configured entry names besides skip, for display.
-func otherEntryNames(cfg config.Config, skip string) string {
+// otherEntryModels lists the configured entry models besides skip, for display.
+func otherEntryModels(cfg config.Config, skip string) string {
 	names := make([]string, 0, len(cfg.Models))
 	for _, e := range cfg.Models {
-		if e.Name != skip {
-			names = append(names, e.Name)
+		if e.Model != skip {
+			names = append(names, e.Model)
 		}
 	}
 	return strings.Join(names, ", ")

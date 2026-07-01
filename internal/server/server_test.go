@@ -650,9 +650,9 @@ func TestHandleTestConfig_ReusesStoredKey(t *testing.T) {
 
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "openai", Model: "gpt-4o-mini", BaseURL: mock.URL, APIKey: "stored-key"},
+			{Provider: "openai", Model: "gpt-4o-mini", BaseURL: mock.URL, APIKey: "stored-key"},
 		},
-		DefaultModel: "main",
+		DefaultModel: "gpt-4o-mini",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
@@ -1188,10 +1188,10 @@ func TestHandleUpdateSessionModel_EntryNameBindsSession(t *testing.T) {
 
 	seed := config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Name: "kimi", Provider: "kimi", Model: "kimi-k2.6", APIKey: "sk-kimi"},
+			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			{Provider: "kimi", Model: "kimi-k2.6", APIKey: "sk-kimi"},
 		},
-		DefaultModel: "main",
+		DefaultModel: "claude-sonnet-4-6",
 	}
 	if err := seed.Save(); err != nil {
 		t.Fatal(err)
@@ -1204,7 +1204,7 @@ func TestHandleUpdateSessionModel_EntryNameBindsSession(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	payload, _ := json.Marshal(updateSessionModelRequest{ModelID: "kimi"})
+	payload, _ := json.Marshal(updateSessionModelRequest{ModelID: "kimi-k2.6"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/model", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -1218,12 +1218,12 @@ func TestHandleUpdateSessionModel_EntryNameBindsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ModelConfig != "kimi" || got.Model != "kimi-k2.6" {
-		t.Fatalf("session = (%q, %q), want (kimi-k2.6, kimi)", got.Model, got.ModelConfig)
+	if got.ModelConfig != "kimi-k2.6" || got.Model != "kimi-k2.6" {
+		t.Fatalf("session = (%q, %q), want (kimi-k2.6, kimi-k2.6)", got.Model, got.ModelConfig)
 	}
 	cfg, _ := config.Load()
-	if cfg.DefaultModel != "main" {
-		t.Fatalf("global default changed to %q — must stay main", cfg.DefaultModel)
+	if cfg.DefaultModel != "claude-sonnet-4-6" {
+		t.Fatalf("global default changed to %q — must stay claude-sonnet-4-6", cfg.DefaultModel)
 	}
 
 	// The bound session's turns resolve to the entry's sender and model;
@@ -1242,7 +1242,7 @@ func TestHandleUpdateSessionModel_EntryNameBindsSession(t *testing.T) {
 
 	// Deleting the bound entry degrades to the default sender instead of
 	// failing the turn.
-	if w := doJSON(t, srv, http.MethodDelete, "/api/config/models/kimi", ""); w.Code != http.StatusOK {
+	if w := doJSON(t, srv, http.MethodDelete, "/api/config/models/kimi-k2.6", ""); w.Code != http.StatusOK {
 		t.Fatalf("DELETE = %d: %s", w.Code, w.Body.String())
 	}
 	if sender3, _ := srv.senderForSession(got); sender3 != srv.sender {

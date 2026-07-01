@@ -32,9 +32,11 @@ type Session struct {
 	System    string    `json:"system,omitempty"`
 	Title     string    `json:"title,omitempty"`
 	Source    string    `json:"source,omitempty"` // how the session was created: "" (manual) | "cron" | "channel" | "setup"
-	// ModelConfig names the user-config model entry this session is bound to.
-	// Empty means "the default entry at turn time" — also the value for every
-	// session predating per-session model binding.
+	// ModelConfig is the model string of the config entry this session is bound
+	// to. Empty means "the default entry at turn time" — also the value for
+	// every session predating per-session model binding. (Sessions written
+	// before models were keyed by model may carry a legacy entry name here; it
+	// simply fails to match and falls back to the default sender.)
 	ModelConfig string    `json:"model_config,omitempty"`
 	Messages    []Message `json:"messages"`
 
@@ -518,12 +520,12 @@ func (s *Session) SetTitle(title string) error {
 	return nil
 }
 
-// SetModelConfig binds the session to a named config entry (empty name =
-// the default entry) and records the entry's model string so the session
-// displays and resumes on the right model. Like SetTitle, it appends a
-// record when the transcript is already on disk so the binding survives
-// without rewriting the file; a switch to the values already in place is a
-// no-op.
+// SetModelConfig binds the session to a config entry, identified by its model
+// string (empty = the default entry at turn time), and records that model so
+// the session displays and resumes on the right model. Like SetTitle, it
+// appends a record when the transcript is already on disk so the binding
+// survives without rewriting the file; a switch to the values already in place
+// is a no-op.
 func (s *Session) SetModelConfig(name, model string) error {
 	if name == s.ModelConfig && (model == "" || model == s.Model) {
 		return nil

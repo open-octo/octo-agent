@@ -13,10 +13,7 @@ import (
 // oneEntryConfig builds a Config whose default entry has the given fields —
 // the multi-model equivalent of the old top-level provider/model literals.
 func oneEntryConfig(e config.ModelEntry) config.Config {
-	if e.Name == "" {
-		e.Name = "default"
-	}
-	return config.Config{Models: []config.ModelEntry{e}, DefaultModel: e.Name}
+	return config.Config{Models: []config.ModelEntry{e}, DefaultModel: e.Model}
 }
 
 func TestResolveBaseURL_Precedence(t *testing.T) {
@@ -118,13 +115,13 @@ func TestResolveProviderModel_EntryNameSelectsWholeEntry(t *testing.T) {
 	t.Setenv("OCTO_PROVIDER", "")
 	cfg := config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Name: "kimi", Provider: "kimi", Model: "kimi-k2.6", BaseURL: "https://kimi.example", APIKey: "sk-kimi"},
+			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			{Provider: "kimi", Model: "kimi-k2.6", BaseURL: "https://kimi.example", APIKey: "sk-kimi"},
 		},
-		DefaultModel: "main",
+		DefaultModel: "claude-sonnet-4-6",
 	}
 
-	prov, model, entry, ok := resolveProviderModel("", "kimi", cfg)
+	prov, model, entry, ok := resolveProviderModel("", "kimi-k2.6", cfg)
 	if !ok || prov != "kimi" || model != "kimi-k2.6" {
 		t.Fatalf("named entry: got (%q,%q,%v), want (kimi, kimi-k2.6, true)", prov, model, ok)
 	}
@@ -133,7 +130,7 @@ func TestResolveProviderModel_EntryNameSelectsWholeEntry(t *testing.T) {
 	}
 	// The entry wins over an explicit --provider — the combination is
 	// meaningless and the entry is what the user named.
-	if p, _, _, _ := resolveProviderModel("anthropic", "kimi", cfg); p != "kimi" {
+	if p, _, _, _ := resolveProviderModel("anthropic", "kimi-k2.6", cfg); p != "kimi" {
 		t.Errorf("entry name should override --provider, got %q", p)
 	}
 	// A non-matching --model value stays a raw model string on the default entry.
@@ -216,10 +213,10 @@ func TestRunConfig_Wizard_PreservesOtherEntriesAndGlobals(t *testing.T) {
 
 	seed := config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Name: "kimi", Provider: "kimi", Model: "kimi-k2.6"},
+			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			{Provider: "kimi", Model: "kimi-k2.6"},
 		},
-		DefaultModel:   "main",
+		DefaultModel:   "claude-sonnet-4-6",
 		PermissionMode: "strict",
 	}
 	if err := seed.Save(); err != nil {
@@ -241,7 +238,7 @@ func TestRunConfig_Wizard_PreservesOtherEntriesAndGlobals(t *testing.T) {
 	if len(got.Models) != 2 {
 		t.Fatalf("wizard must not drop other entries: %+v", got.Models)
 	}
-	if _, ok := got.EntryByName("kimi"); !ok {
+	if _, ok := got.EntryByModel("kimi-k2.6"); !ok {
 		t.Error("kimi entry lost")
 	}
 	if got.PermissionMode != "strict" {

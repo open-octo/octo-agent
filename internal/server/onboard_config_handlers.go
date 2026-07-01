@@ -155,11 +155,11 @@ type modelConfig struct {
 	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
 }
 
-// defaultEntryIdx returns the index of the default entry: the one named by
-// DefaultModel, else 0.
+// defaultEntryIdx returns the index of the default entry: the one whose model
+// matches DefaultModel, else 0.
 func defaultEntryIdx(cfg config.Config) int {
 	for i, e := range cfg.Models {
-		if e.Name == cfg.DefaultModel {
+		if e.Model == cfg.DefaultModel {
 			return i
 		}
 	}
@@ -174,7 +174,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 	for i, e := range cfg.Models {
 		m := modelConfig{
-			ID:              e.Name,
+			ID:              e.Model,
 			Model:           e.Model,
 			BaseURL:         e.BaseURL,
 			APIKeyMasked:    maskKey(e.APIKey),
@@ -187,7 +187,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		case i == defaultIdx:
 			m.Type = "default"
 			m.PermissionMode = cfg.PermissionMode
-		case e.Name == cfg.LiteModel:
+		case e.Model == cfg.LiteModel:
 			m.Type = "lite"
 		}
 		models = append(models, m)
@@ -428,10 +428,14 @@ func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
 
 	var entry config.ModelEntry
 	applyModelRequestToEntry(req, &entry)
-	entry.Name = cfg.UniqueName(req.Model)
+	// Model is the entry's identity, so it must be unique.
+	if _, exists := cfg.EntryByModel(entry.Model); exists {
+		writeError(w, http.StatusConflict, fmt.Sprintf("a model entry for %q already exists", entry.Model))
+		return
+	}
 	cfg.Models = append(cfg.Models, entry)
 	if cfg.DefaultModel == "" || len(cfg.Models) == 1 {
-		cfg.DefaultModel = entry.Name
+		cfg.DefaultModel = entry.Model
 	}
 	if req.PermissionMode != "" {
 		cfg.PermissionMode = req.PermissionMode
@@ -448,7 +452,7 @@ func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[server] reload default sender after saving model config: %v", err)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": entry.Name})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": entry.Model})
 }
 
 // handleUpdateModelConfig updates the entry named by {id}.
@@ -474,20 +478,24 @@ func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request)
 	updated := false
 	newID := id
 	for i := range cfg.Models {
-		if cfg.Models[i].Name == id {
-			oldName, oldModel := cfg.Models[i].Name, cfg.Models[i].Model
+		if cfg.Models[i].Model == id {
 			applyModelRequestToEntry(req, &cfg.Models[i])
-			// If the name was auto-derived from the model (name == model), keep it
-			// tracking when the model changes, and repair the default/lite refs
-			// that pointed at the old name. A name the user set by hand stays put.
-			if oldName == oldModel && cfg.Models[i].Model != oldModel {
-				newID = cfg.UniqueName(cfg.Models[i].Model)
-				cfg.Models[i].Name = newID
-				if cfg.DefaultModel == oldName {
-					cfg.DefaultModel = newID
+			// Model is the entry id. When it changes, the id changes with it, so
+			// reject a collision with another entry and carry the default/lite
+			// refs that pointed at the old model over to the new one.
+			if newModel := cfg.Models[i].Model; newModel != id {
+				for j := range cfg.Models {
+					if j != i && cfg.Models[j].Model == newModel {
+						writeError(w, http.StatusConflict, fmt.Sprintf("a model entry for %q already exists", newModel))
+						return
+					}
 				}
-				if cfg.LiteModel == oldName {
-					cfg.LiteModel = newID
+				newID = newModel
+				if cfg.DefaultModel == id {
+					cfg.DefaultModel = newModel
+				}
+				if cfg.LiteModel == id {
+					cfg.LiteModel = newModel
 				}
 			}
 			updated = true
@@ -495,7 +503,7 @@ func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	if !updated {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("no model config named %q", id))
+		writeError(w, http.StatusNotFound, fmt.Sprintf("no model config for %q", id))
 		return
 	}
 	if req.PermissionMode != "" {
@@ -513,8 +521,8 @@ func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request)
 		log.Printf("[server] reload default sender after updating model config: %v", err)
 	}
 
-	// id may have changed if the auto-derived name tracked a new model — return
-	// it so the client can refresh its reference.
+	// id may have changed if the model changed — return it so the client can
+	// refresh its reference.
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": newID})
 }
 
@@ -536,21 +544,21 @@ func (s *Server) handleDeleteModelConfig(w http.ResponseWriter, r *http.Request)
 	kept := cfg.Models[:0]
 	removed := false
 	for _, e := range cfg.Models {
-		if e.Name == id {
+		if e.Model == id {
 			removed = true
 			continue
 		}
 		kept = append(kept, e)
 	}
 	if !removed {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("no model config named %q", id))
+		writeError(w, http.StatusNotFound, fmt.Sprintf("no model config for %q", id))
 		return
 	}
 	cfg.Models = kept
 	if cfg.DefaultModel == id {
 		cfg.DefaultModel = ""
 		if len(cfg.Models) > 0 {
-			cfg.DefaultModel = cfg.Models[0].Name
+			cfg.DefaultModel = cfg.Models[0].Model
 		}
 	}
 	if cfg.LiteModel == id {
@@ -586,7 +594,7 @@ func (s *Server) handleSetLiteModelConfig(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
 		return
 	}
-	if _, ok := cfg.EntryByName(id); !ok {
+	if _, ok := cfg.EntryByModel(id); !ok {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("no model config named %q", id))
 		return
 	}
@@ -618,7 +626,7 @@ func (s *Server) handleSetDefaultModelConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
 		return
 	}
-	if _, ok := cfg.EntryByName(id); !ok {
+	if _, ok := cfg.EntryByModel(id); !ok {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("no model config named %q", id))
 		return
 	}
