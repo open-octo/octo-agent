@@ -324,7 +324,7 @@ func New(cfg Config) (*Server, error) {
 	skillReg := skills.Discover(cwd)
 	fileCfg, _ := config.Load()
 	skillReg.SetDisabled(fileCfg.Tools.DisabledSkills)
-	skillsManifest := skills.RenderManifest(skillReg)
+	skillsManifest := tools.SkillsManifest(skillReg)
 	tools.SetSkills(skillReg)
 
 	accessKey, generatedKey := resolveAccessKey(cfg.AccessKey, fileCfg)

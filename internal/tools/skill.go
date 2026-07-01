@@ -18,6 +18,23 @@ var activeSkills *skills.Registry
 // start. Pass nil (or an empty registry) to disable.
 func SetSkills(r *skills.Registry) { activeSkills = r }
 
+// SkillsManifest is the full L1 skills section for the system prompt: the
+// SKILL.md skills (skills.RenderManifest) plus recorded browser skills
+// (RenderBrowserSkillsManifest). Every caller uses this instead of
+// skills.RenderManifest directly so browser recordings are always discoverable
+// and never drop out when the manifest is rebuilt (e.g. on a server-side skill
+// toggle/import). Returns "" when both are empty.
+func SkillsManifest(r *skills.Registry) string {
+	m := skills.RenderManifest(r)
+	if b := RenderBrowserSkillsManifest(); b != "" {
+		if m != "" {
+			m += "\n\n"
+		}
+		m += b
+	}
+	return m
+}
+
 // skillsEnabled reports whether any skill was discovered — the gate for both
 // advertising and dispatching the skill tool.
 func skillsEnabled() bool { return activeSkills != nil && activeSkills.Len() > 0 }

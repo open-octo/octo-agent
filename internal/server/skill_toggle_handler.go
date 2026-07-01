@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/open-octo/octo-agent/internal/config"
-	"github.com/open-octo/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // ─── PATCH /api/skills/{name}/toggle ────────────────────────────────────────
@@ -67,7 +67,7 @@ func (s *Server) handleToggleSkill(w http.ResponseWriter, r *http.Request) {
 
 	// Update in-memory state so new sessions see the change immediately.
 	s.skillReg.SetDisabled(cfg.Tools.DisabledSkills)
-	s.setSkillsManifest(skills.RenderManifest(s.skillReg))
+	s.setSkillsManifest(tools.SkillsManifest(s.skillReg))
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":    name,
@@ -103,7 +103,7 @@ func (s *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update in-memory manifest so new sessions see the change immediately.
-	s.setSkillsManifest(skills.RenderManifest(s.skillReg))
+	s.setSkillsManifest(tools.SkillsManifest(s.skillReg))
 
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": name})
 }

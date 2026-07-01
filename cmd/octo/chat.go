@@ -578,7 +578,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// into the frozen system prompt (L1); the registry backs the `skill` tool so
 	// it can serve full bodies on demand (L2).
 	skillReg := skills.Discover(cwd)
-	skillsManifest := skills.RenderManifest(skillReg)
+	skillsManifest := tools.SkillsManifest(skillReg)
 	tools.SetSkills(skillReg)
 
 	// Cross-session memory (Claude Code model): a per-repo directory of markdown

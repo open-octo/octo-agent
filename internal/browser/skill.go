@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -389,6 +391,30 @@ func LoadSkill(path string) (Skill, error) {
 		return Skill{}, err
 	}
 	return ParseSkill(data)
+}
+
+// ListSkills reads every *.yaml recording in dir and returns them sorted by
+// name. A missing dir yields nil; an unreadable or unparseable file (a
+// half-written or hand-broken skill) is skipped rather than sinking the whole
+// list — this feeds the system-prompt manifest, which must stay robust.
+func ListSkills(dir string) []Skill {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []Skill
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		s, err := LoadSkill(filepath.Join(dir, e.Name()))
+		if err != nil || s.Name == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // DigestElement is one interactive element: its visible text and a generated
