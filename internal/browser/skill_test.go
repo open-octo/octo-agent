@@ -864,6 +864,35 @@ func TestRunStepDownloadExtractGuards(t *testing.T) {
 	}
 }
 
+// TestListSkills: reads *.yaml recordings sorted by name, skipping a nameless
+// skill and non-yaml files; a missing dir yields nil.
+func TestListSkills(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveSkill(dir+"/bravo.yaml", Skill{Name: "bravo", Steps: []Step{{Action: "navigate", URL: "x"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveSkill(dir+"/alpha.yaml", Skill{Name: "alpha", Steps: []Step{{Action: "navigate", URL: "x"}}}); err != nil {
+		t.Fatal(err)
+	}
+	// A parseable YAML with no name (skipped) and a non-yaml file (ignored).
+	if err := os.WriteFile(dir+"/noname.yaml", []byte("description: has no name\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/notes.txt", []byte("ignore me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := ListSkills(dir)
+	if len(got) != 2 {
+		t.Fatalf("want 2 skills (nameless + non-yaml skipped), got %d: %+v", len(got), got)
+	}
+	if got[0].Name != "alpha" || got[1].Name != "bravo" {
+		t.Fatalf("want sorted [alpha bravo], got [%s %s]", got[0].Name, got[1].Name)
+	}
+	if ListSkills(dir+"/nope") != nil {
+		t.Fatal("missing dir should yield nil")
+	}
+}
+
 // TestReplaySkillDownloadNoDoubleBindOnHeal: a download step whose Verify fails
 // first, then passes after a heal, must bind the file exactly once — recoverStep
 // re-runs the whole step, so binding before Verify would double-count the output.

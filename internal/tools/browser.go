@@ -101,6 +101,50 @@ func BrowserSkillsDir() string {
 	return filepath.Join(home, ".octo", "browser-skills")
 }
 
+// RenderBrowserSkillsManifest lists recorded browser skills for the L1 system-
+// prompt manifest, so the model can discover and replay them in a normal
+// conversation instead of the user having to name one explicitly. Returns "" when
+// there are none. Unlike SKILL.md skills, these are replayed via the browser tool
+// (run_skill), not loaded via the skill tool — the note says so.
+func RenderBrowserSkillsManifest() string {
+	list := browser.ListSkills(BrowserSkillsDir())
+	if len(list) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Browser recordings\n\n")
+	b.WriteString("Recorded browser workflows. Replay one with the `browser` tool " +
+		"(action=run_skill, name=<name>, params as declared); it returns the skill's " +
+		"declared outputs (downloaded files, extracted values) as JSON. These are " +
+		"replayed, not loaded via the `skill` tool.\n\n")
+	for _, s := range list {
+		fmt.Fprintf(&b, "- %s", s.Name)
+		if s.Description != "" {
+			fmt.Fprintf(&b, ": %s", s.Description)
+		}
+		if len(s.Params) > 0 {
+			names := make([]string, len(s.Params))
+			for i, p := range s.Params {
+				names[i] = p.Name
+			}
+			fmt.Fprintf(&b, " [params: %s]", strings.Join(names, ", "))
+		}
+		if len(s.Outputs) > 0 {
+			outs := make([]string, len(s.Outputs))
+			for i, o := range s.Outputs {
+				if o.Type != "" {
+					outs[i] = fmt.Sprintf("%s (%s)", o.Name, o.Type)
+				} else {
+					outs[i] = o.Name
+				}
+			}
+			fmt.Fprintf(&b, " [outputs: %s]", strings.Join(outs, ", "))
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // ResetBrowserSession closes and clears the active browser session.
 func ResetBrowserSession() {
 	browserSession.mu.Lock()

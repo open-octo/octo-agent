@@ -17,7 +17,6 @@ import (
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/permission"
-	"github.com/open-octo/octo-agent/internal/skills"
 	"github.com/open-octo/octo-agent/internal/tasks"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
@@ -666,7 +665,7 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	s.skillReg.Reload()
 	// Refresh the manifest for sessions built after this point, same as the
 	// toggle/delete handlers do.
-	s.setSkillsManifest(skills.RenderManifest(s.skillReg))
+	s.setSkillsManifest(tools.SkillsManifest(s.skillReg))
 	list := s.skillReg.All()
 	out := make([]skillInfo, 0, len(list))
 	for _, sk := range list {
