@@ -53,6 +53,29 @@ func TestCliMessenger_RecipientsFromServe(t *testing.T) {
 	}
 }
 
+// Serve reachable but the send fails (502) → the error must surface, NOT fall
+// through to SendOnce. Distinguished by the error text: a serve error mentions
+// the HTTP status; a SendOnce fallback would say "not configured".
+func TestCliMessenger_ServeErrorDoesNotFallThrough(t *testing.T) {
+	isolateHome(t)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "adapter offline", http.StatusBadGateway)
+	}))
+	defer ts.Close()
+	t.Setenv("OCTO_SERVE_ADDR", strings.TrimPrefix(ts.URL, "http://"))
+
+	err := (cliMessenger{}).SendMessage("weixin", "c1", "hi")
+	if err == nil {
+		t.Fatal("want the serve error to surface")
+	}
+	if !strings.Contains(err.Error(), "502") {
+		t.Errorf("want the serve 502 surfaced, got %v", err)
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Errorf("must NOT fall through to SendOnce, got %v", err)
+	}
+}
+
 // No serve reachable → falls back to SendOnce, which errors on an unconfigured
 // platform (proving the fallback path, not the serve path, was taken).
 func TestCliMessenger_FallbackWhenNoServe(t *testing.T) {
