@@ -2,7 +2,7 @@
 
 ## 背景
 
-`internal/workflow` 已经能跑 `agent / parallel / pipeline / log / phase / budget_remaining`,`schema` / `isolation: worktree` / 后台运行 / journal 续跑都在。对照 MiMo/CC 的 workflow,还差三块,本方案一并补齐:
+`internal/workflow` 已经能跑 `agent / parallel / pipeline / log / phase / budget_remaining`,`schema` / `isolation: worktree` / 后台运行 / journal 续跑都在。对照 Claude Code 的 workflow,还差三块,本方案一并补齐:
 
 1. **脚本无法参数化** —— 脚本是一段 Ruby 文本,所有输入只能写死进 `script`。没有等价于 CC `args` 全局的入口。
 2. **没有命名/可复用工作流** —— 每次都重发整段脚本,无法把一条流水线存成一个可反复调用的单元。
