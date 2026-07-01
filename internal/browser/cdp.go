@@ -185,10 +185,20 @@ func (c *cdpClient) subscribe(method, sessionID string) (<-chan rpcResponse, fun
 	c.nextSub++
 	s := &subscription{method: method, sessionID: sessionID, ch: make(chan rpcResponse, 32)}
 	c.subs[id] = s
+	var once sync.Once
 	return s.ch, func() {
-		c.subsMu.Lock()
-		delete(c.subs, id)
-		c.subsMu.Unlock()
+		once.Do(func() {
+			// Delete then close under the same lock the reader holds while sending,
+			// so a `for ev := range ch` consumer actually terminates (unsub used to
+			// only delete, leaving such goroutines blocked forever). readLoop only
+			// sends to subs still in the map and only under subsMu, so closing here
+			// can never race a send onto the closed channel. sync.Once guards against
+			// a double unsub closing twice.
+			c.subsMu.Lock()
+			delete(c.subs, id)
+			close(s.ch)
+			c.subsMu.Unlock()
+		})
 	}
 }
 

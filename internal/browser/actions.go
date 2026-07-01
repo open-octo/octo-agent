@@ -102,8 +102,11 @@ func (p *Page) resolveClickTarget(ctx context.Context, frame, elemSel, anchor st
 // LLM involved; safe to call speculatively before falling back to the healer.
 func (p *Page) DismissOverlay(ctx context.Context) (bool, error) {
 	const expr = `(function(){
-	  var ok=/^(accept|accept all|accept all cookies|agree|i agree|allow all|got it|ok|okay|close|dismiss|no thanks|continue)$/i;
-	  var lab=/(close|dismiss|accept|agree)/i;
+	  // Consent/dismiss affordances only. Deliberately NOT ok/okay/continue/submit/
+	  // next — those are commonly a flow's PRIMARY action, and clicking one on a
+	  // transient (non-overlay) failure would advance/submit the page unintended.
+	  var ok=/^(accept|accept all|accept all cookies|accept cookies|agree|i agree|allow all|got it|close|dismiss)$/i;
+	  var lab=/(close|dismiss)/i;
 	  var els=document.querySelectorAll('button,[role="button"],a,[aria-label]');
 	  for(var i=0;i<els.length;i++){var el=els[i];
 	    if(!(el.offsetParent!==null||el.getClientRects().length)) continue; // visible only
