@@ -195,7 +195,7 @@ const netMonitorScript = `(function(){
   function inc(){ s.n++; s.idleSince=0; }
   function dec(){ s.n=Math.max(0,s.n-1); if(s.n===0) s.idleSince=Date.now(); }
   try{ var of=window.fetch; if(of){ window.fetch=function(){ inc(); return of.apply(this,arguments).then(function(r){dec();return r;},function(e){dec();throw e;}); }; } }catch(_){}
-  try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
+  try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();},{once:true}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
 })();`
 
 // WaitForNetworkIdle is a best-effort settle: it returns once no fetch/XHR has
