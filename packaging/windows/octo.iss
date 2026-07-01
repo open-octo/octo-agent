@@ -149,6 +149,39 @@ begin
   SaveStringToFile(ExpandConstant('{app}\octo-autostart.vbs'), Vbs, False);
 end;
 
+// CommandFound reports whether `where <name>` resolves, i.e. the CLI is on
+// PATH. Run through cmd so redirection hides its output and no window flashes.
+function CommandFound(const Name: string): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant('{cmd}'), '/C where ' + Name + ' >nul 2>&1', '',
+                 SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+// EnsurePowerShell7 best-effort installs PowerShell 7 via winget when it is
+// missing. octo runs hook scripts and the terminal tool through pwsh (7+) when
+// present, falling back to the clumsier Windows PowerShell 5.1 otherwise, so a
+// present pwsh is a better default. Every failure path — pwsh already there,
+// no winget (older Windows / enterprise policy), declined UAC, no network — is
+// a silent no-op: octo simply keeps using 5.1. winget may raise one UAC prompt
+// for the machine-wide PowerShell MSI; that is the only elevation octo asks for.
+procedure EnsurePowerShell7;
+var
+  ResultCode: Integer;
+begin
+  if CommandFound('pwsh') then
+    exit;
+  if not CommandFound('winget') then
+    exit;
+  WizardForm.StatusLabel.Caption := 'Installing PowerShell 7 (recommended)...';
+  Exec(ExpandConstant('{cmd}'),
+       '/C winget install --id Microsoft.PowerShell --source winget --silent ' +
+       '--accept-package-agreements --accept-source-agreements', '',
+       SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Ignore ResultCode: a failed or declined install just leaves octo on 5.1.
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
@@ -167,6 +200,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     AddToPath;
+    EnsurePowerShell7;
     WriteAutostartScript;
     LaunchAndOpenDashboard;
   end;
