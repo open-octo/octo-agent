@@ -77,6 +77,41 @@ func wireSessionHooks(a *agent.Agent, sess *agent.Session, transport string) {
 	a.OnSessionStart = func() { sess.MarkHookStarted() }
 }
 
+// resolveProjectHooksTrust decides whether the project-level <cwd>/.octo/hooks.yml
+// should be loaded, implementing trust-on-first-use. It returns false (skip)
+// when there is no project file. For an untrusted or changed file it prompts
+// once via reader; approving records the content fingerprint so it won't ask
+// again until the file changes. A non-interactive session (no reader / exhausted
+// stdin) declines — an untrusted repo never silently runs shell on startup.
+func resolveProjectHooksTrust(cwd string, reader lineReader, out, errOut io.Writer) bool {
+	path := hooks.ProjectConfigPath(cwd)
+	if path == "" {
+		return false
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false // no project hooks.yml (or unreadable) → nothing to trust
+	}
+	fp := hooks.Fingerprint(content)
+	if hooks.IsTrusted(path, fp) {
+		return true
+	}
+	if reader == nil {
+		fmt.Fprintf(errOut, "octo: project hooks %s is not trusted; skipped\n", path)
+		return false
+	}
+	fmt.Fprintf(out, "\n⚠ This repository defines hooks in %s that can run shell commands on your machine.\n", path)
+	line, ok := reader.ReadLine("  Trust and run this repo's hooks? [y/N]: ")
+	if ok && (strings.EqualFold(strings.TrimSpace(line), "y") || strings.EqualFold(strings.TrimSpace(line), "yes")) {
+		if rerr := hooks.RecordTrust(path, fp); rerr != nil {
+			fmt.Fprintf(errOut, "octo: could not persist hooks trust: %v\n", rerr)
+		}
+		return true
+	}
+	fmt.Fprintln(out, "  Skipped. Project hooks stay disabled until you trust them.")
+	return false
+}
+
 // errMissingAPIKey is returned by resolveAPIKey when no API key is available.
 // The caller (runChat) can detect this and auto-launch the config wizard on an
 // interactive terminal instead of failing silently.
@@ -759,7 +794,8 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// injector's reminder & save-nudge as in-process hooks, unified on one
 	// dispatch path that the agent core drives for every transport. Shares the
 	// process seen-set so SessionStart resume fires once per OS process.
-	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen())
+	projectHooksTrusted := resolveProjectHooksTrust(cwd, replReader, stdout, stderr)
+	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, projectHooksTrusted)
 	hookEngine.Notify = func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) }
 	if memDir != "" {
 		rules := memory.ParseRules(memDir)
