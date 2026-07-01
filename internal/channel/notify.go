@@ -34,3 +34,31 @@ func SendOnce(platform, chatID, text string) error {
 	}
 	return nil
 }
+
+// SendFileOnce is the file counterpart to SendOnce: it delivers a single local
+// file to an IM chat by constructing the platform adapter from config on the
+// fly. Used as the fallback when no live adapter is running for the platform.
+// The adapter picks the wire type (image / video / file) from the extension.
+// The same per-platform credential/target rules as SendOnce apply.
+func SendFileOnce(platform, chatID, path, name string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	pc, ok := cfg.Channels[platform]
+	if !ok {
+		return fmt.Errorf("channel %q not configured", platform)
+	}
+	ctor, err := Find(platform)
+	if err != nil {
+		return err
+	}
+	a, err := ctor(pc)
+	if err != nil {
+		return err
+	}
+	if res := a.SendFile(chatID, path, name, ""); !res.OK {
+		return fmt.Errorf("send file to %s chat %s: %s", platform, chatID, res.Error)
+	}
+	return nil
+}

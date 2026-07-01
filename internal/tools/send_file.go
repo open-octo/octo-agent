@@ -38,32 +38,37 @@ func channelSenderFrom(ctx context.Context) ChannelFileSender {
 	return nil
 }
 
-// SendFileTool delivers a local file to the user through the active IM channel
-// (WeChat, Telegram, Discord, …). It is the only way the model can put a file
-// in front of an IM user: a chat reply carries text, so a generated image,
+// SendFileTool delivers a local file to a user through an IM channel (WeChat,
+// Telegram, Discord, …). A chat reply carries only text, so a generated image,
 // chart, document, or any other artifact must be pushed as a file.
 //
-// The tool lives in allTools so DefaultRegistry can dispatch it, but it is
-// withheld from the advertised tool list everywhere except IM turns — see
-// DefaultToolsFor, which always skips it, and runChannelTurns, which appends
-// its definition and injects the sender. On a non-IM turn channelSenderFrom
-// returns nil and the tool reports a clean, model-readable error.
+// Two modes, mirroring send_message:
+//   - On an IM turn it defaults to the CURRENT chat via the turn-scoped
+//     ChannelFileSender (runChannelTurns injects it with WithChannelSender).
+//   - With an explicit platform + chat_id it targets ANY reachable chat via the
+//     process-global ChannelMessenger — so a web/sub-agent turn can push a file
+//     to the user's WeChat even though it has no chat of its own.
+//
+// Advertised in DefaultToolsFor whenever a messenger is registered (the server),
+// so it is available on both web and IM turns; hidden in CLI/TUI.
 type SendFileTool struct{}
 
-// SendFileToolDef is the definition runChannelTurns appends to the IM tool
-// list. Exported so the server can advertise the tool without re-deriving it.
+// SendFileToolDef exposes the tool definition for callers that assemble a tool
+// list manually.
 func SendFileToolDef() agent.ToolDefinition { return SendFileTool{}.Definition() }
 
 func (SendFileTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "send_file",
-		Description: "Send a local file to the user through the current chat (image, video, " +
-			"document, or any file). Use this whenever the user should receive an actual file — " +
-			"a generated image or chart, a screenshot, a PDF or other document, a data export. " +
-			"A normal reply only carries text, so a file the user asked for MUST go through this " +
-			"tool. The wire type (image / video / file) is chosen automatically from the " +
-			"extension, so name images .png/.jpg and videos .mp4. The file must already exist on " +
-			"disk; create it first (write_file, a script, a download), then send it.",
+		Description: "Send a local file to a user over an IM channel (image, video, document, or any " +
+			"file). Use this whenever the user should receive an actual file — a generated image or " +
+			"chart, a screenshot, a PDF or other document, a data export. A normal reply only carries " +
+			"text, so a file MUST go through this tool. The wire type (image / video / file) is chosen " +
+			"automatically from the extension, so name images .png/.jpg and videos .mp4. The file must " +
+			"already exist on disk; create it first (write_file, a script, a download), then send it.\n\n" +
+			"Recipient: on an IM chat, omit platform/chat_id and it goes to the current chat. To send " +
+			"to a DIFFERENT chat (e.g. from the web UI to the user's WeChat), pass platform + chat_id; " +
+			"if you don't know the chat_id, pass just platform (or nothing) to list reachable chats.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -75,6 +80,14 @@ func (SendFileTool) Definition() agent.ToolDefinition {
 					"type":        "string",
 					"description": "Optional display filename shown to the user. Defaults to the file's basename.",
 				},
+				"platform": map[string]any{
+					"type":        "string",
+					"description": "Target IM platform (e.g. \"weixin\", \"telegram\"). Omit to send to the current IM chat; pass it to target another chat.",
+				},
+				"chat_id": map[string]any{
+					"type":        "string",
+					"description": "Target chat/user ID. Omit to send to the current IM chat, or (with platform) to list reachable chats.",
+				},
 			},
 			"required": []string{"path"},
 		},
@@ -82,11 +95,6 @@ func (SendFileTool) Definition() agent.ToolDefinition {
 }
 
 func (SendFileTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
-	sender := channelSenderFrom(ctx)
-	if sender == nil {
-		return agent.ToolResult{}, fmt.Errorf("send_file: no chat to send to — this tool only works while chatting over an IM channel")
-	}
-
 	path := strings.TrimSpace(stringArg(input, "path"))
 	if path == "" {
 		return agent.ToolResult{}, fmt.Errorf("send_file: path is required")
@@ -108,10 +116,47 @@ func (SendFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 		name = filepath.Base(abs)
 	}
 
-	if err := sender.SendFile(abs, name); err != nil {
-		return agent.ToolResult{}, fmt.Errorf("send_file: %w", err)
+	platform := strings.TrimSpace(stringArg(input, "platform"))
+	chatID := strings.TrimSpace(stringArg(input, "chat_id"))
+
+	// Explicit cross-chat target → go through the messenger.
+	if platform != "" || chatID != "" {
+		m := activeMessenger
+		if m == nil {
+			return agent.ToolResult{}, fmt.Errorf("send_file: sending to another chat is only available on the server")
+		}
+		if chatID == "" {
+			cands := filterRecipients(m.KnownChats(), platform)
+			if len(cands) == 1 {
+				platform, chatID = cands[0].Platform, cands[0].ChatID
+			} else {
+				return listRecipients(cands, platform)
+			}
+		}
+		if platform == "" {
+			return agent.ToolResult{}, fmt.Errorf("send_file: platform is required when chat_id is given")
+		}
+		if err := m.SendFile(platform, chatID, abs, name); err != nil {
+			return agent.ToolResult{}, fmt.Errorf("send_file: %w", err)
+		}
+		return agent.ToolResult{
+			Text: fmt.Sprintf("Sent %s (%d bytes) to %s chat %s.", name, fi.Size(), platform, chatID),
+		}, nil
 	}
-	return agent.ToolResult{
-		Text: fmt.Sprintf("Sent %s (%d bytes) to the chat.", name, fi.Size()),
-	}, nil
+
+	// No explicit target: default to the current IM chat if this turn has one.
+	if sender := channelSenderFrom(ctx); sender != nil {
+		if err := sender.SendFile(abs, name); err != nil {
+			return agent.ToolResult{}, fmt.Errorf("send_file: %w", err)
+		}
+		return agent.ToolResult{
+			Text: fmt.Sprintf("Sent %s (%d bytes) to the chat.", name, fi.Size()),
+		}, nil
+	}
+
+	// Web/other server turn with no target: guide the model to pick a chat.
+	if m := activeMessenger; m != nil {
+		return listRecipients(m.KnownChats(), "")
+	}
+	return agent.ToolResult{}, fmt.Errorf("send_file: no chat to send to — specify platform + chat_id, or use this from an IM chat")
 }

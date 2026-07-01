@@ -2127,13 +2127,12 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// browser tabs an IM session doesn't have (the question would hang
 		// until /stop).
 		ctx = tools.WithAsker(ctx, s.channelAsker(sess, ad, ev))
-		// Turn-scoped file sender + the IM-only send_file tool: the model's
-		// reply carries text, so the only way to put a generated image / chart
-		// / document in front of the user is to push it through the adapter.
-		// Withheld from the shared default tool list (DefaultToolsFor); added
-		// here because only an IM turn has a chat to send to.
+		// Turn-scoped file sender for send_file's default (current-chat) mode:
+		// the model's reply carries only text, so a generated image / chart /
+		// document reaches this chat by pushing it through the adapter. The
+		// send_file tool itself is advertised via DefaultToolsFor (messenger
+		// registered); here we only pin which chat the no-target case sends to.
 		ctx = tools.WithChannelSender(ctx, channelFileSender{ad: ad, chatID: ev.ChatID, replyTo: ev.MessageID})
-		toolDefs = append(toolDefs, tools.SendFileToolDef())
 		// Per-chat Waker so schedule_wakeup (the loop skill) can pace this and
 		// later turns. On wakeup it routes through runChannelIdleTurn, which
 		// delivers via the adapter — including the wakeup-injected turns, which

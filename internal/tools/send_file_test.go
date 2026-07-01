@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -24,10 +25,11 @@ func (f *fakeSender) SendFile(path, name string) error {
 }
 
 func TestSendFileTool_RequiresSender(t *testing.T) {
-	// No sender in ctx → CLI/TUI/Web turn → clean error, no panic.
+	// No sender in ctx and no messenger (CLI/TUI) → clean error, no panic.
+	SetMessenger(nil)
 	_, err := SendFileTool{}.Execute(context.Background(), "send_file", map[string]any{"path": "/tmp/x.png"})
 	if err == nil {
-		t.Fatal("expected error when no channel sender is in ctx")
+		t.Fatal("expected error when no channel sender and no messenger")
 	}
 }
 
@@ -119,13 +121,124 @@ func TestSendFileTool_SenderError(t *testing.T) {
 	}
 }
 
-// send_file is IM-only: it must never appear in the shared default tool list,
-// or CLI/TUI/Web turns would advertise a tool that can only error.
-func TestSendFileTool_NotInDefaultTools(t *testing.T) {
+// send_file needs a chat to push to (server only): hidden without a messenger
+// (CLI/TUI), advertised with one (web + IM).
+func TestSendFileTool_DefaultToolsGating(t *testing.T) {
+	SetMessenger(nil)
 	for _, d := range DefaultToolsFor("") {
 		if d.Name == "send_file" {
-			t.Fatal("send_file must not be advertised in DefaultToolsFor")
+			t.Fatal("send_file must not be advertised without a messenger")
 		}
+	}
+
+	SetMessenger(&fakeMessenger{})
+	defer SetMessenger(nil)
+	var found bool
+	for _, d := range DefaultToolsFor("") {
+		if d.Name == "send_file" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("send_file should be advertised when a messenger is registered")
+	}
+}
+
+// Cross-chat mode: explicit platform + chat_id routes through the messenger,
+// not the current-chat sender.
+func TestSendFileTool_CrossChatSend(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "chart.png")
+	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fm := &fakeMessenger{}
+	SetMessenger(fm)
+	defer SetMessenger(nil)
+
+	res, err := SendFileTool{}.Execute(context.Background(), "send_file",
+		map[string]any{"path": p, "platform": "weixin", "chat_id": "c1"})
+	if err != nil {
+		t.Fatalf("cross-chat send: %v", err)
+	}
+	if len(fm.sentFiles) != 1 || fm.sentFiles[0].platform != "weixin" || fm.sentFiles[0].chatID != "c1" {
+		t.Fatalf("sentFiles = %+v", fm.sentFiles)
+	}
+	if fm.sentFiles[0].name != "chart.png" {
+		t.Errorf("name = %q, want chart.png", fm.sentFiles[0].name)
+	}
+	if res.Text == "" {
+		t.Error("expected result text")
+	}
+}
+
+// Single known candidate on the platform + no chat_id → auto-targets it.
+func TestSendFileTool_CrossChatSingleCandidate(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.png")
+	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fm := &fakeMessenger{chats: []KnownRecipient{{Platform: "weixin", ChatID: "only"}}}
+	SetMessenger(fm)
+	defer SetMessenger(nil)
+
+	if _, err := (SendFileTool{}).Execute(context.Background(), "send_file",
+		map[string]any{"path": p, "platform": "weixin"}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if len(fm.sentFiles) != 1 || fm.sentFiles[0].chatID != "only" {
+		t.Fatalf("sentFiles = %+v", fm.sentFiles)
+	}
+}
+
+// Ambiguous platform (multiple candidates, no chat_id) → lists, does not send.
+func TestSendFileTool_CrossChatAmbiguousLists(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.png")
+	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fm := &fakeMessenger{chats: []KnownRecipient{
+		{Platform: "weixin", ChatID: "c1"},
+		{Platform: "weixin", ChatID: "c2"},
+	}}
+	SetMessenger(fm)
+	defer SetMessenger(nil)
+
+	out, err := SendFileTool{}.Execute(context.Background(), "send_file",
+		map[string]any{"path": p, "platform": "weixin"})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(fm.sentFiles) != 0 {
+		t.Fatalf("must not send when ambiguous; sentFiles = %+v", fm.sentFiles)
+	}
+	if !strings.Contains(out.Text, "c1") || !strings.Contains(out.Text, "c2") {
+		t.Fatalf("expected candidates listed, got %q", out.Text)
+	}
+}
+
+// Web turn (messenger, no ctx sender) with no target → lists reachable chats.
+func TestSendFileTool_WebNoTargetLists(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.png")
+	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fm := &fakeMessenger{chats: []KnownRecipient{{Platform: "telegram", ChatID: "42"}}}
+	SetMessenger(fm)
+	defer SetMessenger(nil)
+
+	out, err := SendFileTool{}.Execute(context.Background(), "send_file", map[string]any{"path": p})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(fm.sentFiles) != 0 {
+		t.Fatal("must not send without a target")
+	}
+	if !strings.Contains(out.Text, "telegram") || !strings.Contains(out.Text, "42") {
+		t.Fatalf("expected discovery listing, got %q", out.Text)
 	}
 }
 

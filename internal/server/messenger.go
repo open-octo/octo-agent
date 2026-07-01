@@ -17,6 +17,11 @@ func (m serverMessenger) SendMessage(platform, chatID, text string) error {
 	return m.s.channelSend(platform, chatID, text)
 }
 
+// SendFile delivers a local file to chatID on platform.
+func (m serverMessenger) SendFile(platform, chatID, path, name string) error {
+	return m.s.channelSendFile(platform, chatID, path, name)
+}
+
 // KnownChats lists the chats the bot can currently address, derived from the
 // channel manager's live sessions plus the persisted /bind table.
 func (m serverMessenger) KnownChats() []tools.KnownRecipient {
