@@ -42,7 +42,7 @@ func preToolAgent(t *testing.T, body string, inner PermissionGate) *Agent {
 	a := New(&fakeSender{}, "m")
 	a.Gate = inner
 	a.Hooks = hooks.NewEngine(nil)
-	if err := a.Hooks.RegisterShellMatched(hooks.EventPreToolUse, mkScript(t, body), "", 0); err != nil {
+	if err := a.Hooks.RegisterShellMatched(hooks.EventPreToolUse, mkScript(t, body), "", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	return a

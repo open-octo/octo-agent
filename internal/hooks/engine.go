@@ -77,11 +77,14 @@ type InProcHook func(ctx context.Context, p Payload) string
 
 // shellHook is one configured shell command for an event. matcher, when set,
 // gates the hook on the tool name for the tool events (PreToolUse/PostToolUse);
-// it is ignored for the other events. Async execution lands in a later phase;
-// for now every shell hook runs synchronously.
+// it is ignored for the other events. async, honoured only for the side-effect
+// events dispatched via Dispatch (Stop/SubagentStop/PreCompact), runs the hook
+// off the turn's critical path through the durable spill queue; it is ignored
+// for injecting events, whose output must be produced synchronously.
 type shellHook struct {
 	command string
 	matcher *regexp.Regexp // nil → match every tool
+	async   bool
 	timeout time.Duration
 }
 
@@ -120,17 +123,18 @@ func NewEngine(seen *SeenSet) *Engine {
 	}
 }
 
-// RegisterShell adds a shell command hook for an event, matching every tool. A
-// zero timeout uses the package default.
+// RegisterShell adds a synchronous shell command hook for an event, matching
+// every tool. A zero timeout uses the package default.
 func (e *Engine) RegisterShell(event Event, command string, timeout time.Duration) {
-	_ = e.RegisterShellMatched(event, command, "", timeout)
+	_ = e.RegisterShellMatched(event, command, "", false, timeout)
 }
 
 // RegisterShellMatched adds a shell command hook whose matcher (a regexp over
 // the tool name, honoured only for PreToolUse/PostToolUse) gates whether it
-// runs. An empty matcher matches every tool. A zero timeout uses the package
+// runs. An empty matcher matches every tool. async runs it off the critical
+// path (honoured only for side-effect events). A zero timeout uses the package
 // default. Returns an error only when matcher is not a valid regexp.
-func (e *Engine) RegisterShellMatched(event Event, command, matcher string, timeout time.Duration) error {
+func (e *Engine) RegisterShellMatched(event Event, command, matcher string, async bool, timeout time.Duration) error {
 	command = strings.TrimSpace(command)
 	if e == nil || command == "" {
 		return nil
@@ -153,7 +157,7 @@ func (e *Engine) RegisterShellMatched(event Event, command, matcher string, time
 	if e.shell == nil {
 		e.shell = make(map[Event][]shellHook)
 	}
-	e.shell[event] = append(e.shell[event], shellHook{command: command, matcher: re, timeout: timeout})
+	e.shell[event] = append(e.shell[event], shellHook{command: command, matcher: re, async: async, timeout: timeout})
 	return nil
 }
 
@@ -220,8 +224,9 @@ func (e *Engine) Inject(ctx context.Context, p Payload) string {
 
 // Dispatch runs the hooks for a side-effect event (Stop / SubagentStop /
 // PreCompact): output is ignored, failures surface via Notify but never
-// propagate. Runs synchronously within each hook's timeout (async execution
-// lands in a later phase). No-op on a nil engine or an unconfigured event.
+// propagate. A hook marked async is handed to the durable spill queue and runs
+// off the critical path; the rest run synchronously within their timeout.
+// No-op on a nil engine or an unconfigured event.
 func (e *Engine) Dispatch(ctx context.Context, p Payload) {
 	if e == nil {
 		return
@@ -230,7 +235,26 @@ func (e *Engine) Dispatch(ctx context.Context, p Payload) {
 	for _, fn := range ip {
 		fn(ctx, p) // side-effect events ignore in-proc output
 	}
-	e.runShellHooks(ctx, sh, p)
+	if len(sh) == 0 {
+		return
+	}
+	stdin, err := json.Marshal(p)
+	if err != nil {
+		e.notify("hooks: marshal " + string(p.Event) + " payload: " + err.Error())
+		return
+	}
+	for _, h := range sh {
+		if !h.matches(p.Event, p.ToolName) {
+			continue
+		}
+		if h.async {
+			enqueueAsync(asyncItem{Command: h.command, Timeout: h.timeout, Payload: p})
+			continue
+		}
+		if _, rerr := execShell(ctx, h.command, stdin, h.timeout); rerr != nil {
+			e.notify(rerr.Error())
+		}
+	}
 }
 
 // runShellHooks marshals the payload once and runs each shell hook, joining the

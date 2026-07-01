@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/hooks"
 	"github.com/Leihb/octo-agent/internal/mcp"
 	"github.com/Leihb/octo-agent/internal/tools"
 	"github.com/Leihb/octo-agent/internal/tui"
@@ -38,6 +39,7 @@ import (
 func runTUI(cfg replConfig) int {
 	defer tools.KillAllBackground()
 	defer tools.CleanSpillFiles()
+	defer hooks.DrainSpill(5 * time.Second) // flush queued async hooks on exit
 	// MCP connects in the background (mcpBoot → connectMCPCmd → mcpReadyMsg),
 	// which installs the registry globally. Tear it down here on exit since the
 	// TUI path owns its lifecycle (chat.go only defers cleanup for the

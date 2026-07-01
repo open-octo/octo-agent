@@ -13,6 +13,7 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/Leihb/octo-agent/internal/hooks"
 	"github.com/Leihb/octo-agent/internal/mcp"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/skills"
@@ -110,6 +111,8 @@ func runOnce(cfg replConfig, prompt string, stream bool) int {
 
 	// Reap background processes the turn spawned so none outlive the run.
 	defer tools.KillAllBackground()
+	// Flush queued async hooks (retention) to disk so exit doesn't drop them.
+	defer hooks.DrainSpill(5 * time.Second)
 	defer tools.CleanSpillFiles()
 
 	// Sub-agent completions and background-process notices ride the inbox, so a
