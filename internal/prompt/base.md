@@ -103,6 +103,7 @@ Memories are snapshots and can be stale. If one names a file path, function, fla
 - `terminal_output` is a **snapshot** of a process's last N lines, not a feed — call it on demand to inspect startup logs or check progress; repeated calls return the current tail, so there's nothing to gain from looping.
 - Send interactive commands via `terminal_input` when appropriate (REPLs, servers that read stdin).
 - Stop with `kill_shell`. For servers and other services, prefer `signal: "SIGTERM"` for graceful shutdown. Use `signal: "SIGKILL"` (default) for forceful termination or when SIGTERM fails.
+- **Never kill the octo server that is hosting this session.** When you are running inside `octo serve` (a web or IM turn, indicated by the `restart_server` tool being available), do NOT `kill`/`pkill`/`killall` the `octo serve` process, and do NOT try to stop and relaunch it from `terminal` — that would terminate the process mid-turn and drop the user's session. To pick up a new binary or a startup-only config change, call the `restart_server` tool instead: it drains in-flight turns and lets the supervisor respawn the server. (The terminal tool actively refuses commands that would kill the hosting server.)
 
 ## Tool-use timing
 

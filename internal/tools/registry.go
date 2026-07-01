@@ -31,6 +31,7 @@ var allTools = []tool{
 	EditFileTool{},
 	ShowArtifactTool{},
 	SendFileTool{},
+	SendMessageTool{},
 	GlobTool{},
 	GrepTool{},
 	WebFetchTool{},
@@ -239,6 +240,7 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 	askerOn := askerEnabled()
 	tasksOn := tasksEnabled()
 	restarterOn := restarterEnabled()
+	messengerOn := messengerEnabled()
 	wakerOn := wakerEnabled()
 	browserOn := browserEnabled()
 	spawnerOn := spawnerEnabled()
@@ -281,6 +283,9 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 			continue
 		}
 		if _, isRestart := t.(RestartServerTool); isRestart && !restarterOn {
+			continue
+		}
+		if _, isSendMsg := t.(SendMessageTool); isSendMsg && !messengerOn {
 			continue
 		}
 		if _, isWakeup := t.(ScheduleWakeupTool); isWakeup && !wakerOn {
