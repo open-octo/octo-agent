@@ -33,12 +33,18 @@ type Param struct {
 // iframe selector) scopes it via the " >>> " convention. Label is a human note;
 // replay ignores it.
 type Step struct {
-	Action    string  `yaml:"action"` // navigate | click | type | select | upload | wait
-	URL       string  `yaml:"url,omitempty"`
-	Frame     string  `yaml:"frame,omitempty"`
-	Selector  string  `yaml:"selector,omitempty"`
-	Value     string  `yaml:"value,omitempty"`
-	Label     string  `yaml:"label,omitempty"`
+	Action   string `yaml:"action"` // navigate | click | type | select | upload | wait
+	URL      string `yaml:"url,omitempty"`
+	Frame    string `yaml:"frame,omitempty"`
+	Selector string `yaml:"selector,omitempty"`
+	Value    string `yaml:"value,omitempty"`
+	Label    string `yaml:"label,omitempty"`
+	// Hint is a form field's accessible name (placeholder/name/aria-label/id or
+	// its <label> text). It's the deterministic fallback for type/select/upload:
+	// when the positional Selector drifts, replay re-locates the field by Hint
+	// before giving up to the healer — the field-input analogue of Label steering
+	// a click by visible text.
+	Hint      string  `yaml:"hint,omitempty"`
 	TimeoutMS int     `yaml:"timeout_ms,omitempty"` // wait: fixed delay when no selector
 	Verify    *Verify `yaml:"verify,omitempty"`
 }
@@ -117,7 +123,7 @@ func CompileSkill(name, description, startURL string, events []RecordedEvent) Sk
 		if e.Selector == "" {
 			continue
 		}
-		st := Step{Frame: e.Frame, Selector: e.Selector, Label: e.Text}
+		st := Step{Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field}
 		switch {
 		case e.Type == "click":
 			st.Action = "click"
@@ -478,7 +484,11 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		}
 		page = np
 	case "type":
-		if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
+		// Re-locate the field by its accessible-name hint when the positional
+		// selector drifted (the type/select analogue of a text-anchored click).
+		if h := strings.TrimSpace(step.Hint); h != "" {
+			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
+		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
 		}
 		val := subst(step.Value, params)
@@ -499,7 +509,9 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 			}
 		}
 	case "select":
-		if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
+		if h := strings.TrimSpace(step.Hint); h != "" {
+			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
+		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
 		}
 		if err := page.SelectOption(ctx, target, subst(step.Value, params)); err != nil {
@@ -507,9 +519,12 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		}
 	case "upload":
 		// The upload trigger is a labeled control (e.g. "Choose file"), so prefer
-		// its text the same way clicks do.
+		// its visible text the same way clicks do, then its field hint, before
+		// falling back to the positional selector (→ healer).
 		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
 			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
+		} else if h := strings.TrimSpace(step.Hint); h != "" {
+			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
 		}
