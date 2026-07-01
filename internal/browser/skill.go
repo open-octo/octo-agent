@@ -433,23 +433,60 @@ func ReplaySkill(ctx context.Context, page *Page, skill *Skill, params map[strin
 			cur = np
 			continue
 		}
-		if opts.Healer == nil {
+		np, healed, runErr := recoverStep(ctx, opts, cur, &skill.Steps[i], full, runErr, &modified)
+		if runErr != nil {
 			return modified, cur, fmt.Errorf("step %d (%s): %w", i+1, skill.Steps[i].Action, runErr)
 		}
-		before := skill.Steps[i]
-		if herr := opts.Healer(ctx, cur, &skill.Steps[i], runErr); herr != nil {
-			return modified, cur, fmt.Errorf("step %d (%s): %w", i+1, skill.Steps[i].Action, runErr)
-		}
-		np, retryErr := runStep(ctx, opts.Browser, cur, &skill.Steps[i], full, opts.StepTimeout)
-		if retryErr != nil {
-			return modified, cur, fmt.Errorf("step %d (%s) after heal: %w", i+1, skill.Steps[i].Action, retryErr)
-		}
+		_ = healed
 		cur = np
-		if skill.Steps[i] != before {
-			modified = true
-		}
 	}
 	return modified, cur, nil
+}
+
+// maxHealRounds bounds how many times the LLM healer is consulted for one step,
+// so a healer that keeps returning a wrong selector can't loop indefinitely.
+const maxHealRounds = 3
+
+// recoverStep tries to get a failed step to pass, in escalating order:
+//  1. Deterministic structural recovery — dismiss a blocking overlay (a cookie/
+//     consent banner or modal covering the target) and retry. No LLM; works even
+//     when no healer is wired.
+//  2. The LLM healer, up to maxHealRounds times — each round may repair the
+//     selector differently as the page settles; the new error feeds the next
+//     round. Stops early when the healer makes no change or errors.
+//
+// It returns the page to continue on, whether a heal mutated the step (for the
+// caller's write-back via *modified), and a non-nil error only if the step could
+// not be recovered.
+func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step, params map[string]string, cause error, modified *bool) (*Page, bool, error) {
+	// 1. Structural: a blocking overlay is the most common non-selector failure.
+	if dismissed, _ := page.DismissOverlay(ctx); dismissed {
+		if np, err := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout); err == nil {
+			return np, true, nil
+		}
+	}
+	if opts.Healer == nil {
+		return page, false, cause
+	}
+	// 2. LLM healer, multi-round.
+	for round := 0; round < maxHealRounds; round++ {
+		before := *step
+		if herr := opts.Healer(ctx, page, step, cause); herr != nil {
+			return page, false, cause
+		}
+		np, retryErr := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout)
+		if retryErr == nil {
+			if *step != before {
+				*modified = true
+			}
+			return np, true, nil
+		}
+		if *step == before {
+			return page, false, retryErr // healer made no change — further rounds won't help
+		}
+		cause = retryErr // feed the fresh failure to the next round
+	}
+	return page, false, cause
 }
 
 // mergedParams overlays caller params on declared defaults.

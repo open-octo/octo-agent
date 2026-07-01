@@ -83,6 +83,33 @@ func (p *Page) resolveClickTarget(ctx context.Context, frame, elemSel, anchor st
 	}
 }
 
+// DismissOverlay makes one deterministic attempt to clear a blocking overlay —
+// a cookie/consent banner or a modal whose backdrop intercepts clicks, the most
+// common non-selector reason a replay step suddenly fails. It clicks the first
+// visible control whose trimmed text or aria-label matches a small allowlist of
+// dismiss/accept affordances (never anything else, so it can't perform an
+// unintended destructive action), and reports whether it clicked something. No
+// LLM involved; safe to call speculatively before falling back to the healer.
+func (p *Page) DismissOverlay(ctx context.Context) (bool, error) {
+	const expr = `(function(){
+	  var ok=/^(accept|accept all|accept all cookies|agree|i agree|allow all|got it|ok|okay|close|dismiss|no thanks|continue)$/i;
+	  var lab=/(close|dismiss|accept|agree)/i;
+	  var els=document.querySelectorAll('button,[role="button"],a,[aria-label]');
+	  for(var i=0;i<els.length;i++){var el=els[i];
+	    if(!(el.offsetParent!==null||el.getClientRects().length)) continue; // visible only
+	    var t=(el.textContent||'').trim();
+	    var al=(el.getAttribute&&el.getAttribute('aria-label')||'').trim();
+	    if(ok.test(t) || (al && lab.test(al) && al.length<40)){ try{ el.click(); return true; }catch(e){} }
+	  }
+	  return false;
+	})()`
+	var clicked bool
+	if err := p.Eval(ctx, expr, &clicked); err != nil {
+		return false, err
+	}
+	return clicked, nil
+}
+
 // resolveFieldTarget picks the selector to act on for a type/select/upload step
 // whose recorded field carried an accessible-name hint (placeholder/name/
 // aria-label/id or its <label> text). Form fields have no visible textContent, so
