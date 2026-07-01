@@ -17,10 +17,10 @@ func TestPrepareToolTurn_WiresBrowserVision(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "txt", Provider: "openai", Model: "qwen3.7-max"}, // heuristic → no vision
-			{Name: "vis", Provider: "openai", Model: "gpt-4o"},      // heuristic → vision
+			{Provider: "openai", Model: "qwen3.7-max"}, // heuristic → no vision
+			{Provider: "openai", Model: "gpt-4o"},      // heuristic → vision
 		},
-		DefaultModel: "txt",
+		DefaultModel: "qwen3.7-max",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 

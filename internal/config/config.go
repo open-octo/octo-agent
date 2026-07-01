@@ -18,7 +18,6 @@ package config
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -27,11 +26,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ModelEntry is one named model configuration: everything needed to build a
-// sender for it. Name is the entry's identity — the HTTP API uses it as the
-// id and `--model <name>` selects the whole entry.
+// ModelEntry is one model configuration: everything needed to build a sender
+// for it. Model is the entry's identity — the HTTP API uses it as the id,
+// `--model <model>` selects the whole entry, and default_model / lite_model
+// reference it. Two entries may not share a model string.
 type ModelEntry struct {
-	Name     string `yaml:"name"`
 	Provider string `yaml:"provider,omitempty"`
 	Model    string `yaml:"model,omitempty"`
 	// Protocol ("anthropic" | "openai") is the wire format for the Custom
@@ -135,21 +134,21 @@ func (c Config) EffectiveShowReasoning(entry *bool) bool {
 	return true
 }
 
-// ModelVision reports whether the named model accepts image content. name is
-// matched against each entry's Name or Model; an entry's explicit Vision wins,
+// ModelVision reports whether the named model accepts image content. model is
+// matched against each entry's Model; an entry's explicit Vision wins,
 // otherwise the capability is inferred from the model id (ModelSupportsVision)
-// so it tracks the model automatically. Unmatched names fall back to the same
+// so it tracks the model automatically. Unmatched models fall back to the same
 // inference.
-func (c Config) ModelVision(name string) bool {
+func (c Config) ModelVision(model string) bool {
 	for _, m := range c.Models {
-		if m.Name == name || m.Model == name {
+		if m.Model == model {
 			if m.Vision != nil {
 				return *m.Vision
 			}
 			return ModelSupportsVision(m.Model)
 		}
 	}
-	return ModelSupportsVision(name)
+	return ModelSupportsVision(model)
 }
 
 // ModelSupportsVision is a best-effort guess at whether a model id accepts
@@ -197,10 +196,10 @@ type ToolSearchConfig struct {
 	MaxSearchLimit int `yaml:"max_search_limit,omitempty"`
 }
 
-// DefaultEntry returns the entry named by DefaultModel, falling back to the
-// first entry, or a zero ModelEntry when none are configured.
+// DefaultEntry returns the entry whose model matches DefaultModel, falling
+// back to the first entry, or a zero ModelEntry when none are configured.
 func (c Config) DefaultEntry() ModelEntry {
-	if e, ok := c.EntryByName(c.DefaultModel); ok {
+	if e, ok := c.EntryByModel(c.DefaultModel); ok {
 		return e
 	}
 	if len(c.Models) > 0 {
@@ -209,61 +208,48 @@ func (c Config) DefaultEntry() ModelEntry {
 	return ModelEntry{}
 }
 
-// EntryByName returns the entry with the given name. An empty name never
-// matches.
-func (c Config) EntryByName(name string) (ModelEntry, bool) {
-	if name == "" {
+// EntryByModel returns the entry with the given model string. An empty model
+// never matches.
+func (c Config) EntryByModel(model string) (ModelEntry, bool) {
+	if model == "" {
 		return ModelEntry{}, false
 	}
 	for _, e := range c.Models {
-		if e.Name == name {
+		if e.Model == model {
 			return e, true
 		}
 	}
 	return ModelEntry{}, false
 }
 
-// SetDefaultEntry replaces the default entry in place (matching by its
-// current name), or appends it when no entry exists yet, and points
-// DefaultModel at it. Writers that previously mutated the top-level
-// provider/model fields go through this.
+// SetDefaultEntry replaces the current default entry in place, or appends it
+// when no entry exists yet, and points DefaultModel at it. The default entry is
+// located the same way DefaultEntry resolves it — by DefaultModel, else the
+// first entry — so it works even when that entry's model is empty (a floating
+// default). Writers that previously mutated the top-level provider/model fields
+// go through this.
 func (c *Config) SetDefaultEntry(e ModelEntry) {
-	if e.Name == "" {
-		e.Name = "default"
-	}
-	cur := c.DefaultEntry()
+	idx := -1
 	for i := range c.Models {
-		if c.Models[i].Name == cur.Name && cur.Name != "" {
-			// Renaming the default entry keeps references consistent.
-			if c.LiteModel == cur.Name {
-				c.LiteModel = e.Name
-			}
-			c.Models[i] = e
-			c.DefaultModel = e.Name
-			return
+		if c.DefaultModel != "" && c.Models[i].Model == c.DefaultModel {
+			idx = i
+			break
 		}
 	}
-	c.Models = append(c.Models, e)
-	c.DefaultModel = e.Name
-}
-
-// UniqueName derives an entry name from base (typically the model string)
-// that does not collide with any existing entry, appending -2, -3, … as
-// needed.
-func (c Config) UniqueName(base string) string {
-	base = strings.TrimSpace(base)
-	if base == "" {
-		base = "model"
+	if idx == -1 && len(c.Models) > 0 {
+		idx = 0 // DefaultEntry falls back to the first entry
 	}
-	if _, ok := c.EntryByName(base); !ok {
-		return base
+	if idx < 0 {
+		c.Models = append(c.Models, e)
+		c.DefaultModel = e.Model
+		return
 	}
-	for i := 2; ; i++ {
-		candidate := fmt.Sprintf("%s-%d", base, i)
-		if _, ok := c.EntryByName(candidate); !ok {
-			return candidate
-		}
+	// Changing the default entry's model keeps the lite reference consistent.
+	if c.LiteModel != "" && c.LiteModel == c.Models[idx].Model {
+		c.LiteModel = e.Model
 	}
+	c.Models[idx] = e
+	c.DefaultModel = e.Model
 }
 
 // Path returns the absolute path to the config file (~/.octo/config.yml).
@@ -316,7 +302,6 @@ func (f fileConfig) normalize() Config {
 		return c
 	}
 	e := ModelEntry{
-		Name:            "default",
 		Provider:        f.LegacyProvider,
 		Model:           f.LegacyModel,
 		BaseURL:         f.LegacyBaseURL,
@@ -326,7 +311,7 @@ func (f fileConfig) normalize() Config {
 	}
 	migrateEntryProvider(&e)
 	c.Models = []ModelEntry{e}
-	c.DefaultModel = "default"
+	c.DefaultModel = f.LegacyModel
 	return c
 }
 

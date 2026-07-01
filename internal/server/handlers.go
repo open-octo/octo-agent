@@ -340,8 +340,8 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		// entry so its turns run on the entry's sender. A non-matching value
 		// stays a raw model string on the default sender.
 		if cfg, err := config.Load(); err == nil {
-			if e, ok := cfg.EntryByName(req.Model); ok {
-				modelConfig = e.Name
+			if e, ok := cfg.EntryByModel(req.Model); ok {
+				modelConfig = e.Model
 				if e.Model != "" {
 					model = e.Model
 				}
@@ -1039,9 +1039,9 @@ func (s *Server) handleUpdateSessionModel(w http.ResponseWriter, r *http.Request
 
 	cfg, _ := config.Load()
 	var model string
-	if entry, ok := cfg.EntryByName(req.ModelID); ok {
+	if entry, ok := cfg.EntryByModel(req.ModelID); ok {
 		model = entry.Model
-		err = sess.SetModelConfig(entry.Name, entry.Model)
+		err = sess.SetModelConfig(entry.Model, entry.Model)
 	} else if req.ModelID == "default" {
 		// Legacy id for "the default entry". Unbind so the session follows
 		// whatever the default is at turn time.
