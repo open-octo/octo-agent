@@ -9,7 +9,7 @@ octo 当前有两套互不相干的 hook 机制:
 
 两套机制叠加暴露出 11 个缺陷(见附录「缺陷映射」)。本设计把它们合并为**一个下沉到 agent core 的 hook 引擎**,统一分发,一次性关闭全部缺陷,并把能力面对齐 Claude Code 的 hook 模型(7 事件 + matcher + 阻断)作为 octo 原生特性。
 
-核心判断:agent 循环本身已经具备所有需要的插桩点。只要把 hook 执行从 CLI 层挪进 agent core,并让 `internal/app` 在构造每个 Agent 时挂上同一个引擎,三端(CLI/TUI、serve web/SSE/WS、IM)与子 agent 就全部自动继承 hook,无需在每个入口各自接线。
+核心判断:agent 循环本身已经具备所有需要的插桩点。只要把 hook 执行从 CLI 层挪进 agent core,并在构造每个 Agent 时挂上一个 Engine(各 Engine 共享进程级 `SeenSet`),三端(CLI/TUI、serve web/SSE/WS、IM)与子 agent 就全部自动继承 hook,无需在每个入口各自实现分发逻辑。
 
 ### 运行时事实(设计前提)
 
@@ -61,7 +61,7 @@ internal/hooks/
   spill.go       // async 落盘队列 + 启动补投(多进程安全)
 ```
 
-`hooks.Runner` 升级为 `hooks.Engine`。`Engine` 是唯一的 hook 执行入口,由 `internal/app` 在 bootstrap 时构造一次,通过新字段 `Agent.Hooks *hooks.Engine` 挂到每个 Agent 上(nil-safe,零值为 no-op)。
+`hooks.Runner` 升级为 `hooks.Engine`。`Engine` 是唯一的 hook 执行入口,通过新字段 `Agent.Hooks *hooks.Engine` 挂到每个 Agent 上(nil-safe,零值为 no-op)。**每个 Agent 持有自己的 Engine**——因为 memory injector 携带每会话状态(recall/nudge 锁存),in-proc hook 必须按会话隔离;但所有 Engine **共享同一个进程级 `SeenSet`**(`hooks.SharedSeen()`),这正是 SessionStart `resume` 每进程只触发一次的依据。Engine 在各入口的会话构造处组装(CLI 的 `runChat`、server 的 `buildAgent` 与 IM 回合刷新),而非单一 bootstrap 点。
 
 现有 `Agent.UserInputHook` / `Agent.ToolResultHook` 两个单槽字段**删除**,其职责(memory 提醒)改为引擎里注册的内置 in-process hook,与 shell hook 走同一条分发路径。
 

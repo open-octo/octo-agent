@@ -94,21 +94,35 @@ func parseTimeout(s string) time.Duration {
 	return d
 }
 
-// EngineFromEnvAndFiles builds the production engine: the OCTO_HOOK_* env shim
-// plus the user-level ~/.octo/hooks.yml layered on top (append semantics). A
-// missing file is fine; a malformed file or a bad entry is surfaced via Notify
-// and otherwise ignored, so one broken hook never blocks the session.
-func EngineFromEnvAndFiles(seen *SeenSet) *Engine {
+// EngineFromEnvAndFiles builds the production engine: the OCTO_HOOK_* env shim,
+// the user-level ~/.octo/hooks.yml, and — when loadProject is true — the
+// project-level <cwd>/.octo/hooks.yml, layered in that order (append semantics,
+// so project hooks run after user hooks). The caller decides loadProject: the
+// CLI resolves trust-on-first-use (prompting for an untrusted project file); a
+// server auto-trusts its operator-chosen cwd. A missing file is fine; a
+// malformed file or bad entry surfaces via Notify and is otherwise ignored, so
+// one broken hook never blocks the session.
+func EngineFromEnvAndFiles(seen *SeenSet, cwd string, loadProject bool) *Engine {
 	e := EngineFromEnv(seen)
-	if p := UserConfigPath(); p != "" {
-		switch fc, err := LoadFileConfig(p); {
-		case err == nil:
-			if cerr := e.LoadConfig(fc); cerr != nil {
-				e.notify(cerr.Error())
-			}
-		case !os.IsNotExist(err):
-			e.notify(err.Error())
-		}
+	e.loadFile(UserConfigPath())
+	if loadProject {
+		e.loadFile(ProjectConfigPath(cwd))
 	}
 	return e
+}
+
+// loadFile parses one hooks.yml and registers its hooks, tolerating a missing
+// file and surfacing parse/validation errors via Notify.
+func (e *Engine) loadFile(path string) {
+	if path == "" {
+		return
+	}
+	switch fc, err := LoadFileConfig(path); {
+	case err == nil:
+		if cerr := e.LoadConfig(fc); cerr != nil {
+			e.notify(cerr.Error())
+		}
+	case !os.IsNotExist(err):
+		e.notify(err.Error())
+	}
 }
