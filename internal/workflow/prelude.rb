@@ -97,6 +97,8 @@ def skill(name, params = {}, opts = {})
           _, result = __take_for({ token => true })
           result
         end
+  # Outputs always marshal to at least "{}", so an empty result only occurs when
+  # the host dropped the call (cancel/skip) — treat as no outputs.
   return {} if raw.nil? || raw.empty?
   # Outputs always cross as valid JSON; a skill failure arrives as an error
   # string instead, so a parse failure means the skill failed — raise it (halting

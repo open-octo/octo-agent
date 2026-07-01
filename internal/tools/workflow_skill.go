@@ -72,22 +72,40 @@ func splitSkillKind(name string) (kind, bare string) {
 	}
 }
 
-// parseSkillParams turns a params JSON object into a flat string map (values
-// stringified), the form both browser replay and the sub-agent inputs expect.
-func parseSkillParams(js string) (map[string]string, error) {
-	out := map[string]string{}
+// parseSkillParams decodes a params JSON object, keeping values structured so an
+// array/object (e.g. a file[] handed from an upstream skill) isn't flattened
+// before it reaches its consumer. Each engine narrows as it needs.
+func parseSkillParams(js string) (map[string]any, error) {
+	out := map[string]any{}
 	js = strings.TrimSpace(js)
 	if js == "" || js == "null" || js == "{}" {
 		return out, nil
 	}
-	var raw map[string]any
-	if err := json.Unmarshal([]byte(js), &raw); err != nil {
+	if err := json.Unmarshal([]byte(js), &out); err != nil {
 		return nil, fmt.Errorf("params must be a JSON object: %w", err)
 	}
-	for k, v := range raw {
-		out[k] = fmt.Sprintf("%v", v)
-	}
 	return out, nil
+}
+
+// stringifyParam renders one param value for browser {{placeholder}} substitution
+// (which is string-only). A scalar renders bare; an array/object is JSON-encoded
+// rather than %v-flattened, so a file[] survives as valid JSON text instead of a
+// corrupted "[a b]" token.
+func stringifyParam(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case float64, bool:
+		return fmt.Sprint(t)
+	default:
+		b, err := json.Marshal(t)
+		if err != nil {
+			return fmt.Sprint(t)
+		}
+		return string(b)
+	}
 }
 
 // browserSkillExists reports whether a recording of that name is on disk. The
@@ -109,11 +127,17 @@ func skillRegistryGet(name string) (skills.Skill, bool) {
 
 // runBrowserWorkflowSkill replays a recording deterministically and returns its
 // declared outputs as JSON. Serialized on the shared Chrome session.
-func runBrowserWorkflowSkill(ctx context.Context, name string, params map[string]string) workflow.AgentResult {
+func runBrowserWorkflowSkill(ctx context.Context, name string, params map[string]any) workflow.AgentResult {
 	path := filepath.Join(BrowserSkillsDir(), name+".yaml")
 	skill, err := browser.LoadSkill(path)
 	if err != nil {
 		return workflow.AgentResult{Err: fmt.Errorf("skill %q: load: %w", name, err)}
+	}
+
+	// Replay substitutes {{placeholder}} with strings, so narrow here.
+	strParams := make(map[string]string, len(params))
+	for k, v := range params {
+		strParams[k] = stringifyParam(v)
 	}
 
 	workflowBrowserMu.Lock()
@@ -127,7 +151,7 @@ func runBrowserWorkflowSkill(ctx context.Context, name string, params map[string
 	healer := browserHealer
 	recorderMu.Unlock()
 
-	modified, finalPage, outputs, err := browser.ReplaySkill(ctx, page, &skill, params, browser.ReplayOptions{
+	modified, finalPage, outputs, err := browser.ReplaySkill(ctx, page, &skill, strParams, browser.ReplayOptions{
 		Healer:      healer,
 		Browser:     b,
 		DownloadDir: downloadDir(),
@@ -152,11 +176,13 @@ func runBrowserWorkflowSkill(ctx context.Context, name string, params map[string
 // as JSON so skill() always parses valid JSON: with a schema it is the
 // structured object the schema produced; without one the free-text reply is
 // JSON-encoded to a string.
-func runMDWorkflowSkill(ctx context.Context, spawner Spawner, name string, params map[string]string, schema string) workflow.AgentResult {
+func runMDWorkflowSkill(ctx context.Context, spawner Spawner, name string, params map[string]any, schema string) workflow.AgentResult {
 	sk, ok := skillRegistryGet(name)
 	if !ok {
 		return workflow.AgentResult{Err: fmt.Errorf("skill %q not found", name)}
 	}
+	// Hand the sub-agent structured inputs: an array/object param stays JSON, not
+	// a flattened string, so a file[] arrives usable.
 	inputs := ""
 	if len(params) > 0 {
 		if pj, err := json.Marshal(params); err == nil {

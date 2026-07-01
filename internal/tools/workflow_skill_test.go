@@ -27,12 +27,19 @@ func TestSplitSkillKind(t *testing.T) {
 }
 
 func TestParseSkillParams(t *testing.T) {
-	m, err := parseSkillParams(`{"month":"2026-06","n":3}`)
+	m, err := parseSkillParams(`{"month":"2026-06","n":3,"files":["a","b"]}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m["month"] != "2026-06" || m["n"] != "3" {
-		t.Fatalf("params = %#v", m)
+	if m["month"] != "2026-06" {
+		t.Errorf("month = %#v", m["month"])
+	}
+	if n, _ := m["n"].(float64); n != 3 {
+		t.Errorf("n = %#v, want number 3", m["n"])
+	}
+	// An array value stays structured (not flattened to a string).
+	if f, ok := m["files"].([]any); !ok || len(f) != 2 {
+		t.Errorf("files = %#v, want a 2-element array", m["files"])
 	}
 	for _, empty := range []string{"", "null", "{}"} {
 		m, err := parseSkillParams(empty)
@@ -42,6 +49,25 @@ func TestParseSkillParams(t *testing.T) {
 	}
 	if _, err := parseSkillParams(`[1,2]`); err == nil {
 		t.Fatal("want error for a non-object params value")
+	}
+}
+
+func TestStringifyParam(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{"2026-06", "2026-06"},
+		{float64(3), "3"},
+		{true, "true"},
+		{nil, ""},
+		{[]any{"a", "b"}, `["a","b"]`},          // array → JSON, not "[a b]"
+		{map[string]any{"k": "v"}, `{"k":"v"}`}, // object → JSON
+	}
+	for _, c := range cases {
+		if got := stringifyParam(c.in); got != c.want {
+			t.Errorf("stringifyParam(%#v) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
@@ -126,6 +152,16 @@ func TestDispatchWorkflowSkill_MD(t *testing.T) {
 	}
 	if !strings.Contains(fs.last.Prompt, "MERGE THE FILES") || !strings.Contains(fs.last.Prompt, `"dir":"/in"`) {
 		t.Errorf("prompt missing body or inputs: %q", fs.last.Prompt)
+	}
+
+	// An array param (a file[] handed from an upstream skill) must reach the
+	// sub-agent as structured JSON, not a flattened "[a b]" blob.
+	fsArr := &captureSpawner{reply: "ok"}
+	if r := dispatchWorkflowSkill(context.Background(), fsArr, "wf_c_only", `{"inputs":["/a.xlsx","/b.xlsx"]}`, ""); r.Err != nil {
+		t.Fatalf("dispatch array: %v", r.Err)
+	}
+	if !strings.Contains(fsArr.last.Prompt, `"inputs":["/a.xlsx","/b.xlsx"]`) {
+		t.Errorf("array param not preserved as JSON in prompt: %q", fsArr.last.Prompt)
 	}
 
 	// With schema → reply passes through raw and the schema is forwarded.
