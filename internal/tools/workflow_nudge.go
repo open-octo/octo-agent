@@ -75,6 +75,10 @@ func (n *WorkflowNudger) observe(toolName string, input map[string]any) string {
 func skillNameFromCall(toolName string, input map[string]any) string {
 	switch toolName {
 	case "skill":
+		// The skill tool loads a SKILL.md body — it doesn't by itself prove the
+		// skill ran to completion (not observable from tool calls). Loading two
+		// distinct skills is a good-enough "chaining" signal; the nudge is hedged
+		// and one-shot, so an occasional false positive is acceptable.
 		name, _ := input["name"].(string)
 		return name
 	case "browser":

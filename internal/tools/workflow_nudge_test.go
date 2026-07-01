@@ -1,8 +1,11 @@
 package tools
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
 // obs is a shorthand for one skill-tool call.
@@ -90,6 +93,43 @@ func TestWorkflowNudger_SuppressedByWorkflowCall(t *testing.T) {
 	n.observe(skillCall("a"))
 	if got := n.observe(skillCall("b")); got == "" {
 		t.Fatalf("after reset (no workflow call) the nudge should fire")
+	}
+}
+
+// TestWorkflowNudger_HookPath drives the real hook engine (RegisterHooks +
+// Inject) rather than calling observe/reset directly, so a wiring mistake (wrong
+// event, wrong Payload field, missing reset) would be caught.
+func TestWorkflowNudger_HookPath(t *testing.T) {
+	e := hooks.NewEngine(nil)
+	NewWorkflowNudger().RegisterHooks(e)
+	ctx := context.Background()
+	post := func(name string) string {
+		return e.Inject(ctx, hooks.Payload{
+			Event:     hooks.EventPostToolUse,
+			ToolName:  "skill",
+			ToolInput: map[string]any{"name": name},
+		})
+	}
+
+	if got := post("a"); got != "" {
+		t.Fatalf("first skill via engine should be silent, got %q", got)
+	}
+	if got := post("b"); !strings.Contains(got, "workflow_save") {
+		t.Fatalf("second distinct skill via engine should nudge, got %q", got)
+	}
+	if got := post("c"); got != "" {
+		t.Fatalf("nudge must not repeat within a turn, got %q", got)
+	}
+
+	// A user turn boundary must re-arm the nudger through the engine.
+	if got := e.Inject(ctx, hooks.Payload{Event: hooks.EventUserPromptSubmit, UserInput: "next"}); got != "" {
+		t.Fatalf("UserPromptSubmit hook should contribute no text, got %q", got)
+	}
+	if got := post("a"); got != "" {
+		t.Fatalf("after re-arm, first skill silent, got %q", got)
+	}
+	if got := post("b"); !strings.Contains(got, "workflow_save") {
+		t.Fatalf("after re-arm, second distinct skill should nudge again, got %q", got)
 	}
 }
 

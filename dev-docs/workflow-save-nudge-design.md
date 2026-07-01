@@ -46,11 +46,11 @@ octo 已有同形的机制可仿:`internal/memory/injector.go` 的 `SaveNudge` �
 
 和 memory injector 一样,在三处 per-session hook engine 上注册,一个 helper 三处共用(`tools.NewWorkflowNudger().RegisterHooks(engine)`):
 
-- CLI —— `cmd/octo/chat.go:848`(`memory.NewInjector(...).RegisterHooks(hookEngine)` 旁)。
-- Web —— `internal/server/server.go:1020`(`injectorFor(sess.ID).RegisterHooks(hookEngine)` 旁)。
-- IM —— `internal/server/server.go:2104`(`injectorFor("im:"+…).RegisterHooks(imEngine)` 旁)。
+- CLI —— `cmd/octo/chat.go`(`memory.NewInjector(...).RegisterHooks(hookEngine)` 旁)。
+- Web —— `internal/server/server.go`(`injectorFor(sess.ID).RegisterHooks(hookEngine)` 旁)。
+- IM —— `internal/server/server.go`(`injectorFor("im:"+…).RegisterHooks(imEngine)` 旁)。
 
-nudger 是 per-session 的(状态随会话),每个 session 注册自己的实例,和 injector 的生命周期一致。
+生命周期(两种,状态都是纯 per-turn,结果等价):**CLI** 整个会话一个 engine + 一个 nudger,靠 `UserPromptSubmit` 的 `reset()` 每 turn 重新武装。**Web/IM** 每 turn 重建 engine 并 `NewWorkflowNudger()`,新实例 latch 本就是零值,`reset()` 冗余但无害,per-turn 新鲜性天然隔离、不跨会话泄漏。注意这与 memory injector 不同——injector 经 `injectorFor(key)` 会话粘连(有 recall latch 要跨 turn 保),nudger 无跨 turn 状态,故不必粘连。
 
 ## 不做的
 
