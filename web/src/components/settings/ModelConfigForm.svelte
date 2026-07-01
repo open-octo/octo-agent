@@ -48,6 +48,10 @@
   let permMode     = $state(seed.permission_mode ?? 'interactive')
   let reasoning    = $state(seed.reasoning_effort ?? 'off')
   let showReason   = $state(seed.show_reasoning ?? false)
+  // Vision is always recorded. Editing seeds from the stored value; a new entry
+  // gets the picked model's catalogue value (via applyPresetVision on select),
+  // falling back to true until the user picks or toggles.
+  let vision       = $state(seed.vision ?? true)
   let showKey      = $state(false)
 
   let testing      = $state(false)
@@ -109,7 +113,17 @@
     if (preset) {
       model = preset.default_model || ''
       baseUrl = preset.base_url || ''
+      applyPresetVision()
     }
+  }
+
+  // A predefined model carries its vision capability in the preset catalogue;
+  // selecting one pre-fills the toggle (the user can still override it, and the
+  // server honours whatever is sent). Custom / unknown models keep the current
+  // value.
+  function applyPresetVision() {
+    const v = preset?.model_vision?.[model]
+    if (v !== undefined) vision = v
   }
 
   // For named vendors the protocol is decided by the chosen preset; for the
@@ -128,10 +142,12 @@
       anthropic_format: anthropic,
     }
     // Onboard hides prefs; leave them to server defaults + the /onboard ceremony.
+    // (Vision, when omitted, is resolved server-side from the catalogue/heuristic.)
     if (showPrefs) {
       req.permission_mode = permMode
       req.reasoning_effort = reasoning
       req.show_reasoning = showReason
+      req.vision = vision
     }
     return req
   }
@@ -201,7 +217,7 @@
          so users can see and pick from all available options. Fall back to a
          free-text input for the custom vendor with no preset model list. -->
     {#if preset && preset.models && preset.models.length > 0}
-      <select class="field-input mono" bind:value={model} disabled={saving}>
+      <select class="field-input mono" bind:value={model} onchange={applyPresetVision} disabled={saving}>
         {#each preset.models as m}
           <option value={m}>{m}</option>
         {/each}
@@ -286,6 +302,11 @@
     <div class="reason-toggle">
       <Switch bind:checked={showReason} />
       <span>{$t('models.show_reasoning')}</span>
+    </div>
+
+    <div class="reason-toggle">
+      <Switch bind:checked={vision} />
+      <span>{$t('models.vision')}</span>
     </div>
   {/if}
 

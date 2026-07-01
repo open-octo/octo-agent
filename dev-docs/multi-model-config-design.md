@@ -39,6 +39,7 @@ models:
     api_key: sk-...                       # optional; env var preferred
     reasoning_effort: high                # optional, per-model
     show_reasoning: true                  # optional, per-model
+    vision: true                          # whether the model accepts image input
   - provider: kimi
     model: kimi-k2.6
 
@@ -67,6 +68,13 @@ Decisions:
   and a non-reasoning model need different settings; `app.SenderOptions`
   carries both per-sender (`internal/app/sender.go`). The `show_reasoning` key
   also exists globally as the default when an entry leaves it unset.
+- **`vision` is always recorded per entry.** Whether a model accepts image
+  input is a fixed property of the model, so it is resolved once at add time —
+  from the vendor catalogue for a predefined model, or answered by the user for
+  a custom one — and written to the entry, rather than re-guessed from the id at
+  runtime. `internal/app.VendorModel` carries the per-model value; a legacy
+  file with no `vision:` key is backfilled from the id heuristic
+  (`config.ModelSupportsVision`) on load and recorded on the next save.
 - **`permission_mode` is global.** `saveModelRequest` carries it on the model
   card, but the backend applies it globally.
 - **default / lite are references, not entry types.** The panel's
