@@ -346,6 +346,50 @@ func TestReplayTextAnchorRecoversFromDrift(t *testing.T) {
 	}
 }
 
+// TestReplayFieldHintRecoversFromDrift: a recorded positional selector for a text
+// input no longer resolves after a layout change, but the field's accessible-name
+// hint (its name) re-locates it — so type lands in the right box instead of failing
+// into the healer.
+func TestReplayFieldHintRecoversFromDrift(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		// The input sits at a different DOM path than the recorded positional
+		// selector expects, but keeps its name="q".
+		w.Write([]byte(`<!doctype html><meta charset="utf-8"><title>t</title>
+<header><nav><span>x</span></nav></header>
+<main><section><div><input name="q" placeholder="Search"></div></section></main>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+
+	// A stale positional selector that matches nothing on the current page; the
+	// hint "q" (the field name) is the recovery signal.
+	skill := &Skill{Name: "x", Steps: []Step{
+		{Action: "type", Selector: "body > div:nth-of-type(9) > input", Hint: "q", Value: "hello"},
+	}}
+	if _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var got string
+	if err := page.Eval(ctx, `document.querySelector('input[name="q"]').value`, &got); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if got != "hello" {
+		t.Fatalf("field hint did not recover the drifted input: value=%q, want %q", got, "hello")
+	}
+}
+
 // TestReplaySkillSelfHeal: a step has a stale selector, the implicit wait fails,
 // the healer repairs the selector, replay retries and succeeds — and reports the
 // skill as modified so the caller can write the fix back.

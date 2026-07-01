@@ -83,6 +83,71 @@ func (p *Page) resolveClickTarget(ctx context.Context, frame, elemSel, anchor st
 	}
 }
 
+// resolveFieldTarget picks the selector to act on for a type/select/upload step
+// whose recorded field carried an accessible-name hint (placeholder/name/
+// aria-label/id or its <label> text). Form fields have no visible textContent, so
+// the click text-anchor can't steer them; this is the field analogue. It polls up
+// to timeout for, in order: the original positional element (unchanged-page fast
+// path, exact original target), or any input/select/textarea whose accessible name
+// equals the hint (drift recovery), returning a freshly generated selector for it.
+// If neither appears it returns the positional selector unchanged, so a genuine
+// miss still fails and reaches the healer. hint must be non-empty.
+func (p *Page) resolveFieldTarget(ctx context.Context, frame, elemSel, hint string, timeout time.Duration) string {
+	posSel := elemSel
+	if frame != "" {
+		posSel = frame + frameDelim + elemSel
+	}
+	doc := "document"
+	if frame != "" {
+		doc = fmt.Sprintf("(document.querySelector(%s)||{}).contentDocument", jsString(frame))
+	}
+	check := fmt.Sprintf(`(()=>{
+	  var pos=null; try{pos=%s;}catch(e){}
+	  if(pos) return {mode:"pos"};
+	  var h=%s; var d=%s; if(!d) return {mode:"none"};
+	  function sel(el){
+	    if(el.id) return '#'+CSS.escape(el.id);
+	    for(var i=0;i<4;i++){var a=['data-testid','data-test','name','aria-label'][i];var v=el.getAttribute&&el.getAttribute(a);if(v)return el.tagName.toLowerCase()+'['+a+'="'+CSS.escape(v)+'"]';}
+	    var parts=[],node=el,depth=0;
+	    while(node&&node.nodeType===1&&node.tagName!=='BODY'&&depth<6){if(node.id){parts.unshift('#'+CSS.escape(node.id));return parts.join(' > ');}var part=node.tagName.toLowerCase();var p=node.parentElement;if(p){var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;});if(same.length>1)part+=':nth-of-type('+(same.indexOf(node)+1)+')';}parts.unshift(part);node=p;depth++;}
+	    return parts.join(' > ');
+	  }
+	  var els=d.querySelectorAll('input,select,textarea,[contenteditable="true"],[contenteditable=""]');
+	  for(var i=0;i<els.length;i++){var el=els[i];
+	    var lbl=''; try{ if(el.labels&&el.labels.length) lbl=(el.labels[0].textContent||'').trim(); }catch(e){}
+	    if(el.placeholder===h||el.name===h||el.id===h||(el.getAttribute&&el.getAttribute('aria-label')===h)||lbl===h){ return {mode:"match", sel:sel(el)}; }
+	  }
+	  return {mode:"none"};
+	})()`, elemRefJS(frame, elemSel), jsString(hint), doc)
+
+	deadline := time.Now().Add(timeout)
+	for {
+		var res struct {
+			Mode string `json:"mode"`
+			Sel  string `json:"sel"`
+		}
+		if err := p.Eval(ctx, check, &res); err == nil {
+			switch {
+			case res.Mode == "pos":
+				return posSel
+			case res.Mode == "match" && res.Sel != "":
+				if frame != "" {
+					return frame + frameDelim + res.Sel
+				}
+				return res.Sel
+			}
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return posSel
+		}
+		select {
+		case <-ctx.Done():
+			return posSel
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+}
+
 // elementCenter scrolls an element into view and returns its viewport-center
 // point (adding the iframe's offset for framed targets), or an error if the
 // selector matches nothing.
