@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] — 2026-07-01
+
+### Fixed
+- **Web Artifacts now run their JavaScript.** Interactive HTML artifacts (a
+  calculator, a demo, anything with `<script>`) rendered but stayed inert: the
+  preview iframe gated scripts behind a lock button that was off by default, and
+  toggling it did nothing anyway — changing an iframe's `sandbox` after load
+  doesn't re-run its scripts. The preview now always runs scripts, still
+  sandboxed to an opaque origin (no `allow-same-origin`), so an artifact can't
+  reach the host app's DOM, cookies, or storage (#1019).
+
 ## [1.5.1] — 2026-07-01
 
 ### Added
