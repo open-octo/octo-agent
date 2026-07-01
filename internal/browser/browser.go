@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -16,6 +17,13 @@ type Browser struct {
 	cmd         *exec.Cmd
 	cli         *cdpClient
 	ownsProcess bool
+
+	// oopifs maps a cross-origin (out-of-process) iframe's frameId to its CDP
+	// session, populated by the target watcher. Cross-origin iframes live in a
+	// separate renderer, so their DOM is unreachable via the parent's
+	// contentDocument; interacting with them means routing to their own session.
+	oopifMu sync.Mutex
+	oopifs  map[string]string
 }
 
 // Launch starts a Chrome and connects to it.
@@ -29,7 +37,15 @@ func Launch(ctx context.Context, opts LaunchOptions) (*Browser, error) {
 		killProcessGroup(cmd)
 		return nil, err
 	}
-	return &Browser{cmd: cmd, cli: cli, ownsProcess: true}, nil
+	return wrapBrowser(cli, cmd, true), nil
+}
+
+// wrapBrowser wraps a live CDP connection and starts the cross-origin iframe
+// target watcher.
+func wrapBrowser(cli *cdpClient, cmd *exec.Cmd, owns bool) *Browser {
+	b := &Browser{cmd: cmd, cli: cli, ownsProcess: owns, oopifs: map[string]string{}}
+	b.watchTargets()
+	return b
 }
 
 // Connect attaches to an already-running Chrome via its browser-level CDP
@@ -40,7 +56,7 @@ func Connect(ctx context.Context, wsURL string) (*Browser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Browser{cli: cli, ownsProcess: false}, nil
+	return wrapBrowser(cli, nil, false), nil
 }
 
 // ConnectByPort attaches to a Chrome already running with
@@ -112,6 +128,7 @@ type Page struct {
 	cli       *cdpClient
 	sessionID string
 	targetID  string
+	browser   *Browser // back-ref for cross-origin iframe session lookup; may be nil
 }
 
 // NewPage opens a fresh tab at url and attaches to it.
@@ -148,12 +165,19 @@ func (b *Browser) AttachPage(ctx context.Context, targetID string) (*Page, error
 	if err := json.Unmarshal(res, &attached); err != nil {
 		return nil, err
 	}
-	p := &Page{cli: b.cli, sessionID: attached.SessionID, targetID: targetID}
+	p := &Page{cli: b.cli, sessionID: attached.SessionID, targetID: targetID, browser: b}
 	for _, domain := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
 		if _, err := p.cli.call(ctx, p.sessionID, domain, nil); err != nil {
 			return nil, fmt.Errorf("%s: %w", domain, err)
 		}
 	}
+	// Auto-attach to child targets (flatten) so a cross-origin iframe surfaces as
+	// its own CDP session the target watcher can register — the only way to reach
+	// an OOPIF's DOM. Best-effort: a backend that rejects it just means no
+	// cross-origin frame support.
+	_, _ = p.cli.call(ctx, p.sessionID, "Target.setAutoAttach", map[string]any{
+		"autoAttach": true, "waitForDebuggerOnStart": false, "flatten": true,
+	})
 	// Install the in-flight network monitor on this and every future document so
 	// WaitForNetworkIdle has data to poll (best-effort; failures are non-fatal).
 	_, _ = p.cli.call(ctx, p.sessionID, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": netMonitorScript})
@@ -339,6 +363,11 @@ func (p *Page) Eval(ctx context.Context, expr string, out any) error {
 func (p *Page) WaitFor(ctx context.Context, selector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	frame, elem := splitFrame(selector)
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return cp.WaitFor(ctx, elem, timeout)
+		}
+	}
 	expr := "!!(" + elemRefJS(frame, elem) + ")"
 	for {
 		var present bool

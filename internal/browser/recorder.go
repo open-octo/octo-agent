@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 )
 
 // RecordedEvent is one captured user action during a demonstration. Each event
@@ -30,11 +31,90 @@ type Recorder struct {
 
 	mu     sync.Mutex
 	events []RecordedEvent
-	unsub  func()
+	unsubs []func()
+	seen   map[string]bool // sessions already instrumented (avoid double-install)
 }
 
 // NewRecorder creates a recorder bound to a page.
-func NewRecorder(page *Page) *Recorder { return &Recorder{page: page} }
+func NewRecorder(page *Page) *Recorder { return &Recorder{page: page, seen: map[string]bool{}} }
+
+// addEvent appends a captured event, forcing frame to frameSel when the event
+// came from a cross-origin iframe session (whose own window.frameElement is
+// unreadable, so the script couldn't tag it).
+func (r *Recorder) addEvent(re RecordedEvent, frameSel string) {
+	if frameSel != "" {
+		re.Frame = frameSel
+	}
+	r.mu.Lock()
+	r.events = append(r.events, re)
+	r.mu.Unlock()
+}
+
+// instrumentSession installs the capture binding + listeners on one CDP session
+// and streams its click/change events into the recording, tagged with frameSel.
+// Used for the top document (frameSel "") and each cross-origin iframe session.
+func (r *Recorder) instrumentSession(ctx context.Context, session, frameSel string) error {
+	if r.seen[session] {
+		return nil
+	}
+	r.seen[session] = true
+	if _, err := r.page.cli.call(ctx, session, "Runtime.addBinding", map[string]any{"name": "__octoRecord"}); err != nil {
+		return err
+	}
+	if _, err := r.page.cli.call(ctx, session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": captureScript}); err != nil {
+		return err
+	}
+	// Install into the already-loaded document too.
+	if _, err := r.page.cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": captureScript}); err != nil {
+		return err
+	}
+	events, unsub := r.page.cli.subscribe("Runtime.bindingCalled", session)
+	r.mu.Lock()
+	r.unsubs = append(r.unsubs, unsub)
+	r.mu.Unlock()
+	go func() {
+		for ev := range events {
+			var b struct {
+				Name    string `json:"name"`
+				Payload string `json:"payload"`
+			}
+			if json.Unmarshal(ev.Params, &b) != nil || b.Name != "__octoRecord" {
+				continue
+			}
+			var re RecordedEvent
+			if json.Unmarshal([]byte(b.Payload), &re) != nil {
+				continue
+			}
+			r.addEvent(re, frameSel)
+		}
+	}()
+	return nil
+}
+
+// instrumentOOPIF resolves a cross-origin iframe session's parent selector and
+// instruments it, so gestures the user performs inside the frame are captured and
+// tagged with the frame replay needs to route back into.
+func (r *Recorder) instrumentOOPIF(ctx context.Context, session string) {
+	res, err := r.page.cli.call(ctx, session, "Page.getFrameTree", nil)
+	if err != nil {
+		return
+	}
+	var ft struct {
+		FrameTree struct {
+			Frame struct {
+				ID string `json:"id"`
+			} `json:"frame"`
+		} `json:"frameTree"`
+	}
+	if json.Unmarshal(res, &ft) != nil || ft.FrameTree.Frame.ID == "" {
+		return
+	}
+	frameSel := ""
+	if r.page.browser != nil {
+		frameSel = r.page.browser.frameSelectorFor(ctx, r.page.sessionID, ft.FrameTree.Frame.ID)
+	}
+	_ = r.instrumentSession(ctx, session, frameSel)
+}
 
 // captureScript installs capture-phase click/change listeners that report each
 // action (with a stable-ish selector) through the __octoRecord binding.
@@ -70,45 +150,55 @@ const captureScript = `(function(){
 // same-origin child frames are covered too).
 func (r *Recorder) Start(ctx context.Context) error {
 	p := r.page
-	if _, err := p.cli.call(ctx, p.sessionID, "Runtime.addBinding", map[string]any{"name": "__octoRecord"}); err != nil {
+	// Instrument the top document.
+	if err := r.instrumentSession(ctx, p.sessionID, ""); err != nil {
 		return err
 	}
-	if _, err := p.cli.call(ctx, p.sessionID, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": captureScript}); err != nil {
-		return err
-	}
-	// Install into the already-loaded document too.
-	if err := p.Eval(ctx, captureScript, nil); err != nil {
-		return err
+	// Instrument cross-origin iframes: those already present, and any that attach
+	// during the demonstration (so gestures inside a payment/OAuth/captcha frame
+	// are captured, tagged with the parent selector replay routes back into).
+	if p.browser != nil {
+		p.browser.oopifMu.Lock()
+		sessions := make([]string, 0, len(p.browser.oopifs))
+		for _, s := range p.browser.oopifs {
+			sessions = append(sessions, s)
+		}
+		p.browser.oopifMu.Unlock()
+		for _, s := range sessions {
+			r.instrumentOOPIF(ctx, s)
+		}
+		attached, attachUnsub := p.cli.subscribe("Target.attachedToTarget", "")
+		r.mu.Lock()
+		r.unsubs = append(r.unsubs, attachUnsub)
+		r.mu.Unlock()
+		go func() {
+			for ev := range attached {
+				var a struct {
+					SessionID  string `json:"sessionId"`
+					TargetInfo struct {
+						Type string `json:"type"`
+					} `json:"targetInfo"`
+				}
+				if json.Unmarshal(ev.Params, &a) == nil && a.TargetInfo.Type == "iframe" && a.SessionID != "" {
+					// The browser watcher enables the child's domains; give it a
+					// moment, then instrument for recording.
+					ictx, icancel := context.WithTimeout(context.Background(), 10*time.Second)
+					r.instrumentOOPIF(ictx, a.SessionID)
+					icancel()
+				}
+			}
+		}()
 	}
 
-	events, unsub := p.cli.subscribe("Runtime.bindingCalled", p.sessionID)
 	// Also capture top-level navigations (address-bar, link, SPA history) so a
 	// multi-page demonstration replays from the right pages — otherwise the only
 	// navigate step is the synthesized start URL, and the recording loses every
 	// page the user moved to.
 	navEvents, navUnsub := p.cli.subscribe("Page.frameNavigated", p.sessionID)
 	r.mu.Lock()
-	r.unsub = func() { unsub(); navUnsub() }
+	r.unsubs = append(r.unsubs, navUnsub)
 	r.mu.Unlock()
 
-	go func() {
-		for ev := range events {
-			var b struct {
-				Name    string `json:"name"`
-				Payload string `json:"payload"`
-			}
-			if json.Unmarshal(ev.Params, &b) != nil || b.Name != "__octoRecord" {
-				continue
-			}
-			var re RecordedEvent
-			if json.Unmarshal([]byte(b.Payload), &re) != nil {
-				continue
-			}
-			r.mu.Lock()
-			r.events = append(r.events, re)
-			r.mu.Unlock()
-		}
-	}()
 	go func() {
 		for ev := range navEvents {
 			var b struct {
@@ -154,14 +244,16 @@ func Replay(ctx context.Context, page *Page, events []RecordedEvent) error {
 	return err
 }
 
-// Stop ends capture (the subscription is dropped; the page-side listeners are
+// Stop ends capture (all subscriptions are dropped; the page-side listeners are
 // harmless and go away on navigation/close).
 func (r *Recorder) Stop() {
 	r.mu.Lock()
-	unsub := r.unsub
-	r.unsub = nil
+	unsubs := r.unsubs
+	r.unsubs = nil
 	r.mu.Unlock()
-	if unsub != nil {
-		unsub()
+	for _, u := range unsubs {
+		if u != nil {
+			u()
+		}
 	}
 }

@@ -362,6 +362,13 @@ func InteractiveDigest(ctx context.Context, page *Page, frame string, max int) (
 	if max <= 0 {
 		max = 60
 	}
+	// A cross-origin iframe's elements are only enumerable in its own session; run
+	// the digest there (frame cleared) so the healer sees the OOPIF's real elements.
+	if frame != "" {
+		if cp, ok := page.oopifPage(ctx, frame); ok {
+			return InteractiveDigest(ctx, cp, "", max)
+		}
+	}
 	doc := "document"
 	if frame != "" {
 		doc = fmt.Sprintf("(document.querySelector(%s)||{}).contentDocument", jsString(frame))
