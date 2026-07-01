@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/channel"
 	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/hooks"
 	"github.com/open-octo/octo-agent/internal/mcp"
@@ -713,6 +714,15 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	defer toolCleanup()
 	toolExecutor = toolEnv.Executor
 	subAgentMgr = toolEnv.SubAgentMgr
+
+	// send_message / send_file for the CLI/TUI: delegate to a local `octo serve`
+	// (live adapters — needed for WeChat) or fall back to a one-shot send from
+	// config. Only wired when the user has configured at least one channel, so
+	// non-IM users don't get the extra tools advertised.
+	if chCfg, err := channel.LoadConfig(); err == nil && len(chCfg.Channels) > 0 {
+		tools.SetMessenger(cliMessenger{})
+		defer tools.SetMessenger(nil)
+	}
 	if useTUI {
 		// bubbletea owns stdin and renders its own input; the asker and gate
 		// are wired to the TUI sink inside runTUI.
