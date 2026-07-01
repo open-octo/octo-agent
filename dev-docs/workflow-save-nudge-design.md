@@ -74,4 +74,4 @@ nudger 是 per-session 的(状态随会话),每个 session 注册自己的实例
 
 ## 落地
 
-单个 PR:`internal/tools/workflow_nudge.go` <!--lint:new-->(nudger + `RegisterHooks`)+ 三处 wiring + 单测。前置:workflow-builder(#1045,已合)——文案要指向它。
+单个 PR:`internal/tools/workflow_nudge.go`(nudger + `RegisterHooks`)+ 三处 wiring + 单测。前置:workflow-builder(#1045,已合)——文案要指向它。

@@ -1019,6 +1019,8 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if s.memDir != "" {
 		s.injectorFor(sess.ID).RegisterHooks(hookEngine)
 	}
+	// Workflow save-nudge — memory-independent, wired for every session.
+	tools.NewWorkflowNudger().RegisterHooks(hookEngine)
 	a.Hooks = hookEngine
 	a.HookMeta = hooks.Meta{SessionID: sess.ID, Transport: sess.BoundEntry, Cwd: cwd}
 	if p, err := sess.SavePath(); err == nil {
@@ -2103,6 +2105,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if s.memDir != "" {
 		s.injectorFor("im:" + string(sess.Key)).RegisterHooks(imEngine)
 	}
+	// Workflow save-nudge — memory-independent, wired for every IM session.
+	tools.NewWorkflowNudger().RegisterHooks(imEngine)
 	sess.Agent.Hooks = imEngine
 	sess.Agent.HookMeta = hooks.Meta{SessionID: string(sess.Key), Transport: agent.EntryChannel, Cwd: cwd}
 	// The persisted backing session (Store) carries the durable SessionStart
