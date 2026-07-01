@@ -6,17 +6,6 @@
 
   let maximized = $state(false)
 
-  function isHtml(a: any): boolean {
-    return /html/i.test(a?.type ?? '') || /^\s*<(!doctype|html)/i.test(a?.code ?? '')
-  }
-
-  function toggleScripts() {
-    if (!cur) return
-    artifacts.update(list =>
-      list.map(a => (a.path === cur.path ? { ...a, allowScripts: !a.allowScripts } : a))
-    )
-  }
-
   function copyArtifact() {
     navigator.clipboard.writeText(cur?.code ?? '').then(() => showToast('Copied to clipboard'))
   }
@@ -57,11 +46,6 @@
     </div>
     <button class="icon-btn" title={$t('artifacts.copy')} onclick={copyArtifact}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
     <button class="icon-btn" title={$t('artifacts.download')} onclick={downloadArtifact}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
-    {#if isHtml(cur)}
-      <button class="icon-btn" title={cur.allowScripts ? 'Disable scripts' : 'Enable scripts'} onclick={toggleScripts}>
-        <iconify-icon icon={cur.allowScripts ? 'ant-design:unlock-outlined' : 'ant-design:lock-outlined'} width="14"></iconify-icon>
-      </button>
-    {/if}
     <button class="icon-btn" title={maximized ? $t('artifacts.restore') : $t('artifacts.maximize')} onclick={() => maximized = !maximized}>
       <iconify-icon icon={maximized ? 'ant-design:compress-outlined' : 'ant-design:expand-outlined'} width="14"></iconify-icon>
     </button>
@@ -82,7 +66,7 @@
   <!-- Body -->
   <div class="body">
     {#if $artifactView === 'preview'}
-      <iframe srcdoc={cur.preview} sandbox={cur.allowScripts ? 'allow-scripts' : ''} title={cur.name}></iframe>
+      <iframe srcdoc={cur.preview} sandbox="allow-scripts" title={cur.name}></iframe>
     {:else}
       <pre class="code-view">{cur.code}</pre>
     {/if}
