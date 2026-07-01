@@ -72,6 +72,15 @@ tool the server exposes.
    stdio servers run locally, so the command must exist on this machine —
    check (`npx --version`, `uvx --version`) and help install if missing.
 
+   **A bare binary is not always the launch command.** Many tools ship a
+   single executable with several subcommands (e.g. `init`, `index`, `serve`)
+   and only start an MCP server under a specific one — running the binary with
+   no args just prints help and exits, which surfaces later as
+   `mcp: initialize: mcp: connection closed`. Before writing `"command": "foo"`
+   with no args, run `foo --help` and look for the MCP/serve subcommand and any
+   flag it needs (commonly `foo serve --mcp` or `foo mcp`). Verify against the
+   tool's docs; don't assume the binary name alone is enough.
+
 4. **Collect secrets carefully.** If the server needs an API key, ask the user
    where it comes from and put it in `env` (stdio) or `headers` (http). Never
    invent placeholder keys without flagging them as placeholders.
@@ -80,19 +89,25 @@ tool the server exposes.
    `{"mcpServers": {}}` if absent), merge the new entry in, and write it back.
    Preserve existing entries verbatim. Echo the final entry back to the user.
 
-6. **Connect and verify.** Tell the user to open the **MCP Servers** panel in
-   the web UI and click **Reload** — it re-reads the config and connects every
-   server, and the card shows connected status plus the tool count. OAuth
-   servers additionally show an **Authorize** button for the device flow. In
-   the CLI, `/mcp reload` does the same. If the connection errors, read the
-   error off the card (or ask the user to paste it) and iterate.
+6. **Verify before handing off.** Don't just write the config and trust it. For
+   a stdio server, do a quick smoke test yourself first — launch the exact
+   command+args you wrote and confirm the process stays up waiting on stdin
+   (an MCP server does not exit immediately; if it prints help and returns, the
+   command is wrong — go back to step 3). Only after that, tell the user to open
+   the **MCP Servers** panel and click **Reload** (CLI: `/mcp reload`) — it
+   re-reads the config and connects every server, and the card shows connected
+   status plus the tool count. OAuth servers additionally show an **Authorize**
+   button for the device flow. If the card still errors, read the error off it
+   (or ask the user to paste it) and iterate.
 
 ## Troubleshooting
 
 - **"must set either 'command' or 'url'"** — the entry mixed transports or
   set neither; keep exactly one.
-- **stdio server exits immediately** — run the command by hand in the
-  terminal to see its real error; usually a missing dependency or API key.
+- **stdio server exits immediately** (`mcp: connection closed` on connect) —
+  run the command by hand in the terminal to see its real error. Usually a
+  missing dependency or API key, or a bare binary that needs its MCP/`serve`
+  subcommand and flags (see step 3) rather than being launched with no args.
 - **401/403 from an http server** — wrong/missing header, or the server wants
   `"auth": "oauth"` instead of a static key.
 - **Name conflicts** — entries are keyed by name; writing an existing name
