@@ -168,6 +168,66 @@ func TestReplayVerifyURLCatchesCrossHostRedirect(t *testing.T) {
 	}
 }
 
+// TestCompileDedupesRepeatedType: a re-dispatched identical `change` event no
+// longer survives parameterization as a spurious extra param+step (the guard that
+// value-placeholders had defeated).
+func TestCompileDedupesRepeatedType(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "change", Selector: "#q", Tag: "INPUT", Field: "query", Value: "abc"},
+		{Type: "change", Selector: "#q", Tag: "INPUT", Field: "query", Value: "abc"}, // re-dispatched dup
+	}
+	s := CompileSkill("demo", "", "", events)
+	types := 0
+	for _, st := range s.Steps {
+		if st.Action == "type" {
+			types++
+		}
+	}
+	if types != 1 {
+		t.Fatalf("want 1 type step after dedup, got %d: %+v", types, s.Steps)
+	}
+	if len(s.Params) != 1 {
+		t.Fatalf("want 1 param after dedup, got %+v", s.Params)
+	}
+}
+
+// TestReplayVerifyURLIgnoresHostInQueryParam: a bounce to a different host whose
+// URL merely echoes the expected host in a query param must still fail the host
+// verify (exact host match, not a naive href substring).
+func TestReplayVerifyURLIgnoresHostInQueryParam(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var app *httptest.Server
+	login := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><title>login</title><h1>Sign in</h1>`))
+	}))
+	defer login.Close()
+	app = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Bounce to the login host, echoing the app host in a query param.
+		http.Redirect(w, r, login.URL+"/?return_to="+app.URL+"%2Fcart", http.StatusFound)
+	}))
+	defer app.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	appHost := strings.TrimPrefix(app.URL, "http://")
+	skill := &Skill{Name: "x", Steps: []Step{
+		{Action: "navigate", URL: app.URL + "/start", Verify: &Verify{URL: appHost}},
+	}}
+	_, _, err = ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second})
+	if err == nil {
+		t.Fatal("expected failure: bounced to the login host despite the app host appearing in a query param")
+	}
+	if !strings.Contains(err.Error(), "verify url") {
+		t.Fatalf("expected a url-verify failure, got: %v", err)
+	}
+}
+
 // TestCompileUploadMerge: a click on the upload button followed by a file
 // selection compiles to a single upload step on the button, auto-parameterized.
 func TestCompileUploadMerge(t *testing.T) {
