@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,11 +32,20 @@ const (
 	spillChanDepth = 64 // in-memory backlog before overflow spills to disk
 )
 
-// asyncItem is one queued async hook: the command, its per-hook timeout, and
-// the stdin payload. Serialised to a pending file when spilled.
+// staleClaimAge is how long a claimed-but-unfinished pending file must sit
+// before another process reclaims it. Set well past any hook's max runtime
+// (timeoutCeiling) so a live sibling's in-flight claim is never stolen; only a
+// crashed claimer's orphan is recovered.
+const staleClaimAge = 2 * timeoutCeiling
+
+// asyncItem is one queued async hook: the command, its per-hook timeout, the
+// originating working directory (so a relative command runs where it was
+// configured, not in whatever process later claims it), and the stdin payload.
+// Serialised to a pending file when spilled.
 type asyncItem struct {
 	Command string        `json:"command"`
 	Timeout time.Duration `json:"timeout"`
+	Cwd     string        `json:"cwd,omitempty"`
 	Payload Payload       `json:"payload"`
 }
 
@@ -71,19 +81,22 @@ func enqueueAsync(item asyncItem) {
 
 // offer hands item to a worker if the in-memory backlog has room, else spills
 // it to disk — overflow (and post-Drain submission) never blocks the caller.
+// The closed-check and the send are done under the SAME lock that Drain holds
+// while it closes the channel, so offer can never send on a closed channel
+// (which would panic). The send is non-blocking (select/default), so holding
+// the lock across it can't deadlock; spillToDisk runs after releasing it.
 func (q *spillQueue) offer(item asyncItem) {
 	q.mu.Lock()
-	closed := q.closed
+	if !q.closed {
+		select {
+		case q.ch <- item:
+			q.mu.Unlock()
+			return
+		default: // backlog full
+		}
+	}
 	q.mu.Unlock()
-	if closed {
-		q.spillToDisk(item)
-		return
-	}
-	select {
-	case q.ch <- item:
-	default:
-		q.spillToDisk(item) // backlog full → durable overflow
-	}
+	q.spillToDisk(item) // closed, or backlog full → durable overflow
 }
 
 func (q *spillQueue) ensureStarted() {
@@ -118,7 +131,7 @@ func (q *spillQueue) worker() {
 // retried — a deterministically failing script shouldn't loop forever; the
 // durability guarantee is against crashes and overflow, not against a bad hook.
 func (q *spillQueue) run(item asyncItem) {
-	if _, err := execShell(context.Background(), item.Command, mustMarshal(item.Payload), item.Timeout); err != nil {
+	if _, err := execShellDir(context.Background(), item.Command, mustMarshal(item.Payload), item.Timeout, item.Cwd); err != nil {
 		q.notifyMsg(err.Error())
 	}
 }
@@ -219,6 +232,7 @@ func (q *spillQueue) redeliverPending() {
 	if q.dir == "" {
 		return
 	}
+	q.reclaimStaleClaims()
 	entries, err := os.ReadDir(q.dir)
 	if err != nil {
 		return
@@ -234,6 +248,10 @@ func (q *spillQueue) redeliverPending() {
 		if err := os.Rename(src, claimed); err != nil {
 			continue // another process claimed it first
 		}
+		// Stamp the claim time so a crash mid-run leaves an orphan that
+		// reclaimStaleClaims recovers only after it's provably stale.
+		now := time.Now()
+		_ = os.Chtimes(claimed, now, now)
 		b, err := os.ReadFile(claimed)
 		if err != nil {
 			_ = os.Remove(claimed)
@@ -246,6 +264,31 @@ func (q *spillQueue) redeliverPending() {
 		}
 		q.run(item)
 		_ = os.Remove(claimed)
+	}
+}
+
+// reclaimStaleClaims renames orphaned "<id>.json.claimed.<pid>" files — left by
+// a claimer that crashed between claiming and deleting — back to "<id>.json" so
+// they're retried, but only once they're older than staleClaimAge (past any
+// hook's max runtime), so a live sibling's in-flight claim is never stolen.
+// This closes the "runs zero times" gap in the durability guarantee.
+func (q *spillQueue) reclaimStaleClaims() {
+	entries, err := os.ReadDir(q.dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		idx := strings.Index(name, ".json.claimed.")
+		if e.IsDir() || idx < 0 {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) < staleClaimAge {
+			continue
+		}
+		orig := name[:idx] + ".json"
+		_ = os.Rename(filepath.Join(q.dir, name), filepath.Join(q.dir, orig))
 	}
 }
 

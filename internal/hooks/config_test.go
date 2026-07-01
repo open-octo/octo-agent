@@ -34,6 +34,22 @@ func TestLoadConfig_RejectsUnknownEvent(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_RejectsAsyncOnInjectingEvent(t *testing.T) {
+	// PostToolUse is an injecting event — its output is folded into the result,
+	// so async must be rejected rather than silently ignored.
+	if err := NewEngine(nil).LoadConfig(FileConfig{Hooks: map[string][]HookSpec{
+		"PostToolUse": {{Command: "x", Async: true}},
+	}}); err == nil {
+		t.Error("async:true on PostToolUse (injecting) must be rejected")
+	}
+	// Stop is a side-effect event — async is allowed.
+	if err := NewEngine(nil).LoadConfig(FileConfig{Hooks: map[string][]HookSpec{
+		"Stop": {{Command: "x", Async: true}},
+	}}); err != nil {
+		t.Errorf("async:true on Stop (side-effect) should be allowed, got %v", err)
+	}
+}
+
 func TestLoadConfig_RejectsBadMatcher(t *testing.T) {
 	e := NewEngine(nil)
 	err := e.LoadConfig(FileConfig{Hooks: map[string][]HookSpec{

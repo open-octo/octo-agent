@@ -182,6 +182,8 @@ hooks:
 
 现有 Hindsight 用户零改动,且因执行下沉 agent core,自动获得 web/IM 覆盖。
 
+**迁移注意(行为变更)**:`Stop` 现在**成功与失败/中断都触发**(旧的 post-turn 只在成功时触发),这是缺陷 #9 的修复。因此经 `OCTO_HOOK_POST_TURN` 接入的留存脚本现在也会在失败/被中断的回合上被调用,此时 `assistant_reply` 可能为空且 payload 带非空 `error` 字段。**留存脚本应检查 `error` 字段**,失败回合按需跳过索引,避免写入残缺记录。payload 是向后兼容的超集(新增 `error` / `tools_used`),只解析 `user_input`/`assistant_reply` 的旧脚本不会解析报错,仅是多了失败回合的调用。
+
 ---
 
 ## Hook 协议

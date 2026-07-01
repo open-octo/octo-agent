@@ -5,9 +5,71 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// TestSpill_ConcurrentOfferDrainNoPanic guards the critical send-on-closed race:
+// many offers racing a Drain that closes the channel must never panic. Run under
+// -race. Pre-fix, an offer that passed the closed-check then sent after Drain's
+// close() would panic "send on closed channel".
+func TestSpill_ConcurrentOfferDrainNoPanic(t *testing.T) {
+	dir := t.TempDir()
+	q := &spillQueue{ch: make(chan asyncItem, 2), dir: dir, started: true}
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			q.offer(asyncItem{Command: "x", Payload: Payload{Event: EventStop}})
+		}()
+	}
+	q.Drain(20 * time.Millisecond) // closes q.ch while offers are in flight
+	wg.Wait()                      // no panic == pass
+}
+
+func TestSpill_ReclaimStaleClaim(t *testing.T) {
+	dir := t.TempDir()
+	q := &spillQueue{dir: dir}
+
+	// An orphaned claim aged past staleClaimAge is reclaimed to <id>.json.
+	stale := filepath.Join(dir, "abc.json.claimed.999")
+	if err := os.WriteFile(stale, []byte(`{"command":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * staleClaimAge)
+	_ = os.Chtimes(stale, old, old)
+
+	// A fresh claim (a live sibling's in-flight work) must NOT be reclaimed.
+	fresh := filepath.Join(dir, "def.json.claimed.888")
+	if err := os.WriteFile(fresh, []byte(`{"command":"y"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	q.reclaimStaleClaims()
+
+	if fileExists(stale) {
+		t.Error("stale claim should have been reclaimed")
+	}
+	if !fileExists(filepath.Join(dir, "abc.json")) {
+		t.Error("stale claim should be renamed back to .json")
+	}
+	if !fileExists(fresh) {
+		t.Error("a fresh claim must not be reclaimed (would steal a live sibling's work)")
+	}
+}
+
+func TestSpill_RunUsesOriginatingCwd(t *testing.T) {
+	posixOnly(t)
+	runDir := t.TempDir()
+	q := &spillQueue{dir: t.TempDir()}
+	// Relative command; must execute in item.Cwd, not the process cwd.
+	q.run(asyncItem{Command: "touch marker", Timeout: DefaultTimeout, Cwd: runDir, Payload: Payload{Event: EventStop}})
+	if !fileExists(filepath.Join(runDir, "marker")) {
+		t.Error("async hook should run in item.Cwd (confused-deputy fix)")
+	}
+}
 
 // posixOnly skips tests that execute POSIX shell commands (touch/cat/…): the
 // hook runner uses PowerShell on Windows, where those commands don't exist.

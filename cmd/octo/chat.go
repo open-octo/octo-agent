@@ -73,17 +73,25 @@ func wireSessionHooks(a *agent.Agent, sess *agent.Session, transport string) {
 	if p, err := sess.SavePath(); err == nil {
 		a.HookMeta.TranscriptPath = p
 	}
-	a.SessionStarted = sess.HookStarted
+	// A session loaded with prior history has effectively been started before,
+	// even if it predates the persisted flag (upgraded sessions have no
+	// hook_started field) — treat it as resume, not startup, on first touch.
+	a.SessionStarted = sess.HookStarted || len(sess.Messages) > 0
 	a.OnSessionStart = func() { sess.MarkHookStarted() }
 }
 
 // resolveProjectHooksTrust decides whether the project-level <cwd>/.octo/hooks.yml
 // should be loaded, implementing trust-on-first-use. It returns false (skip)
 // when there is no project file. For an untrusted or changed file it prompts
-// once via reader; approving records the content fingerprint so it won't ask
-// again until the file changes. A non-interactive session (no reader / exhausted
-// stdin) declines — an untrusted repo never silently runs shell on startup.
-func resolveProjectHooksTrust(cwd string, reader lineReader, out, errOut io.Writer) bool {
+// once (when interactive, i.e. stdin is a TTY — works for both the TUI and a
+// one-shot at a terminal); approving records the content fingerprint so it won't
+// ask again until the file changes. A non-interactive session (piped/redirected
+// stdin) declines silently — an untrusted repo never runs shell unattended.
+//
+// The prompt reads a single line directly from stdin byte-by-byte, WITHOUT
+// buffering ahead, so it never swallows input meant for the REPL reader or the
+// bubbletea TUI that starts afterwards.
+func resolveProjectHooksTrust(cwd string, stdin io.Reader, interactive bool, out, errOut io.Writer) bool {
 	path := hooks.ProjectConfigPath(cwd)
 	if path == "" {
 		return false
@@ -96,20 +104,44 @@ func resolveProjectHooksTrust(cwd string, reader lineReader, out, errOut io.Writ
 	if hooks.IsTrusted(path, fp) {
 		return true
 	}
-	if reader == nil {
-		fmt.Fprintf(errOut, "octo: project hooks %s is not trusted; skipped\n", path)
-		return false
+	if !interactive {
+		return false // can't ask; leave project hooks disabled (no noise)
 	}
 	fmt.Fprintf(out, "\n⚠ This repository defines hooks in %s that can run shell commands on your machine.\n", path)
-	line, ok := reader.ReadLine("  Trust and run this repo's hooks? [y/N]: ")
-	if ok && (strings.EqualFold(strings.TrimSpace(line), "y") || strings.EqualFold(strings.TrimSpace(line), "yes")) {
+	fmt.Fprint(out, "  Trust and run this repo's hooks? [y/N]: ")
+	switch readTrustAnswer(stdin) {
+	case "y", "yes":
 		if rerr := hooks.RecordTrust(path, fp); rerr != nil {
 			fmt.Fprintf(errOut, "octo: could not persist hooks trust: %v\n", rerr)
 		}
 		return true
+	default:
+		fmt.Fprintln(out, "  Skipped. Project hooks stay disabled until you trust them.")
+		return false
 	}
-	fmt.Fprintln(out, "  Skipped. Project hooks stay disabled until you trust them.")
-	return false
+}
+
+// readTrustAnswer reads one newline-terminated line from r one byte at a time
+// (no read-ahead), returning the lowercased, trimmed answer. Byte-by-byte so it
+// consumes exactly the answer line and nothing the REPL/TUI will later read.
+func readTrustAnswer(r io.Reader) string {
+	var b []byte
+	buf := make([]byte, 1)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if buf[0] == '\n' {
+				break
+			}
+			if buf[0] != '\r' {
+				b = append(b, buf[0])
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(string(b)))
 }
 
 // errMissingAPIKey is returned by resolveAPIKey when no API key is available.
@@ -794,7 +826,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// injector's reminder & save-nudge as in-process hooks, unified on one
 	// dispatch path that the agent core drives for every transport. Shares the
 	// process seen-set so SessionStart resume fires once per OS process.
-	projectHooksTrusted := resolveProjectHooksTrust(cwd, replReader, stdout, stderr)
+	projectHooksTrusted := resolveProjectHooksTrust(cwd, stdin, stdinIsTTY(stdin), stdout, stderr)
 	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, projectHooksTrusted)
 	hookEngine.Notify = func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) }
 	hooks.SetSpillNotify(func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) })

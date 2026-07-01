@@ -466,6 +466,18 @@ func (s *Session) rewriteAll() error {
 			return fmt.Errorf("session: write message: %w", err)
 		}
 	}
+	// A turn lease lives only as an append-only "lease" record; truncating the
+	// file here would erase it (widening the cross-process binding-steal window
+	// mid-turn — e.g. when the first-turn MarkHookStarted forces this rewrite).
+	// Re-emit an active lease after the meta+messages so it survives the rewrite.
+	s.mu.Lock()
+	leaseEntry, leaseExpires := s.LeaseEntry, s.LeaseExpires
+	s.mu.Unlock()
+	if leaseEntry != "" && !leaseExpires.IsZero() && time.Now().Before(leaseExpires) {
+		if err := enc.Encode(sessionRecord{Type: "lease", LeaseEntry: leaseEntry, LeaseExpires: leaseExpires}); err != nil {
+			return fmt.Errorf("session: write lease: %w", err)
+		}
+	}
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("session: flush %s: %w", path, err)
 	}

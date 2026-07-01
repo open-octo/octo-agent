@@ -164,7 +164,15 @@ func (r *Runner) run(ctx context.Context, cmd string, stdin []byte) ([]byte, err
 // a timeout from a plain failure (with the stderr tail folded in) to help users
 // debug hook wiring.
 func execShell(ctx context.Context, cmd string, stdin []byte, deadline time.Duration) ([]byte, error) {
-	res := runShellRaw(ctx, cmd, stdin, deadline)
+	return execShellDir(ctx, cmd, stdin, deadline, "")
+}
+
+// execShellDir is execShell with an explicit working directory. An empty dir
+// inherits the process cwd. The async path passes the hook's originating cwd so
+// a relative command runs where it was configured, not in whatever process
+// later claims a spilled item.
+func execShellDir(ctx context.Context, cmd string, stdin []byte, deadline time.Duration, dir string) ([]byte, error) {
+	res := runShellRaw(ctx, cmd, stdin, deadline, dir)
 	if res.timedOut {
 		return res.stdout, fmt.Errorf("hooks: %s timed out after %s", cmd, deadline)
 	}
@@ -192,11 +200,14 @@ type shellResult struct {
 // runShellRaw runs cmd through the platform shell with stdin piped in, bounded
 // by deadline, and reports the full outcome. It is the single place the shell
 // selection, WaitDelay teardown, and timeout live.
-func runShellRaw(ctx context.Context, cmd string, stdin []byte, deadline time.Duration) shellResult {
+func runShellRaw(ctx context.Context, cmd string, stdin []byte, deadline time.Duration, dir string) shellResult {
 	rctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
 	c := shellCmd(rctx, cmd)
+	if dir != "" {
+		c.Dir = dir
+	}
 	c.Stdin = bytes.NewReader(stdin)
 	var out, errBuf bytes.Buffer
 	c.Stdout = &out

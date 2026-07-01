@@ -72,6 +72,32 @@ func TestSessionHookStartedRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSessionLeaseSurvivesForcedRewrite(t *testing.T) {
+	setTempHome(t)
+	s := NewSession("m", "")
+	s.Messages = append(s.Messages, NewUserMessage("hi"))
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := s.WriteLease("web", time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("WriteLease: %v", err)
+	}
+	// MarkHookStarted (first-turn SessionStart) forces the next Save to rewrite
+	// the whole file, which must NOT drop the append-only lease record.
+	s.MarkHookStarted()
+	s.Messages = append(s.Messages, NewAssistantMessage("ok"))
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save (rewrite): %v", err)
+	}
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if holder, active := got.LeaseActive(); !active || holder != "web" {
+		t.Errorf("lease lost across forced rewrite: active=%v holder=%q, want active web", active, holder)
+	}
+}
+
 func TestSessionIDFormat(t *testing.T) {
 	s := NewSession("m", "")
 	// YYYYMMDD-HHMMSS-xxxxxxxx — 24 chars (15 timestamp + '-' + 8 hex suffix).

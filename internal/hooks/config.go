@@ -77,6 +77,9 @@ func (e *Engine) LoadConfig(fc FileConfig) error {
 			return fmt.Errorf("hooks: unknown event %q in hooks.yml", name)
 		}
 		for _, s := range specs {
+			if s.Async && ev.injects() {
+				return fmt.Errorf("hooks: %s: async is not supported for this event — its output is folded into the model stream and must run synchronously", name)
+			}
 			if err := e.RegisterShellMatched(ev, s.Command, s.Matcher, s.Async, parseTimeout(s.Timeout)); err != nil {
 				return fmt.Errorf("hooks: %s: invalid matcher %q: %w", name, s.Matcher, err)
 			}

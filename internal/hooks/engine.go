@@ -238,22 +238,46 @@ func (e *Engine) Dispatch(ctx context.Context, p Payload) {
 	if len(sh) == 0 {
 		return
 	}
-	stdin, err := json.Marshal(p)
-	if err != nil {
-		e.notify("hooks: marshal " + string(p.Event) + " payload: " + err.Error())
-		return
-	}
+	stdin := e.lazyStdin(p)
 	for _, h := range sh {
 		if !h.matches(p.Event, p.ToolName) {
 			continue
 		}
 		if h.async {
-			enqueueAsync(asyncItem{Command: h.command, Timeout: h.timeout, Payload: p})
-			continue
+			enqueueAsync(asyncItem{Command: h.command, Timeout: h.timeout, Cwd: p.Cwd, Payload: p})
+			continue // async path carries the payload itself; no stdin marshal needed
 		}
-		if _, rerr := execShell(ctx, h.command, stdin, h.timeout); rerr != nil {
+		body, ok := stdin()
+		if !ok {
+			return
+		}
+		if _, rerr := execShell(ctx, h.command, body, h.timeout); rerr != nil {
 			e.notify(rerr.Error())
 		}
+	}
+}
+
+// lazyStdin returns a function that marshals p to hook-stdin JSON at most once,
+// on first call — so an event whose hooks are all filtered out by matcher (or
+// all async) never pays the marshal of a possibly-large payload. The second
+// return is false if marshalling failed (surfaced via Notify).
+func (e *Engine) lazyStdin(p Payload) func() ([]byte, bool) {
+	var (
+		body []byte
+		done bool
+		ok   bool
+	)
+	return func() ([]byte, bool) {
+		if !done {
+			done = true
+			b, err := json.Marshal(p)
+			if err != nil {
+				e.notify("hooks: marshal " + string(p.Event) + " payload: " + err.Error())
+			} else {
+				body, ok = b, true
+			}
+		}
+		return body, ok
 	}
 }
 
@@ -265,17 +289,17 @@ func (e *Engine) runShellHooks(ctx context.Context, hooks []shellHook, p Payload
 	if len(hooks) == 0 {
 		return ""
 	}
-	stdin, err := json.Marshal(p)
-	if err != nil {
-		e.notify("hooks: marshal " + string(p.Event) + " payload: " + err.Error())
-		return ""
-	}
+	stdin := e.lazyStdin(p)
 	var parts []string
 	for _, h := range hooks {
 		if !h.matches(p.Event, p.ToolName) {
 			continue
 		}
-		out, err := execShell(ctx, h.command, stdin, h.timeout)
+		body, ok := stdin()
+		if !ok {
+			return strings.Join(parts, "\n\n")
+		}
+		out, err := execShell(ctx, h.command, body, h.timeout)
 		if err != nil {
 			e.notify(err.Error())
 			continue
@@ -340,7 +364,7 @@ func (e *Engine) PreToolUse(ctx context.Context, p Payload) ToolDecision {
 		if !h.matches(EventPreToolUse, p.ToolName) {
 			continue
 		}
-		res := runShellRaw(ctx, h.command, stdin, h.timeout)
+		res := runShellRaw(ctx, h.command, stdin, h.timeout, "")
 		switch {
 		case res.timedOut:
 			e.notify(fmt.Sprintf("hooks: PreToolUse %s timed out after %s (tool allowed to proceed)", h.command, h.timeout))
@@ -448,7 +472,10 @@ func EngineFromEnv(seen *SeenSet) *Engine {
 		e.RegisterShell(EventUserPromptSubmit, r.PreTurnCmd, timeout)
 	}
 	if r.PostTurnCmd != "" {
-		e.RegisterShell(EventStop, r.PostTurnCmd, timeout)
+		// async so a slow retain script doesn't block the next prompt — the
+		// fire-and-forget the legacy post-turn hook intended (and what
+		// `octo hooks list` advertises for this shim).
+		_ = e.RegisterShellMatched(EventStop, r.PostTurnCmd, "", true, timeout)
 	}
 	return e
 }

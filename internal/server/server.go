@@ -294,6 +294,18 @@ func New(cfg Config) (*Server, error) {
 
 	// Surface async-hook (spill queue) errors through the server log.
 	hooks.SetSpillNotify(func(m string) { slog.Warn("hook", "err", m) })
+	// Auto-trust the operator-chosen launch cwd's project hooks (a documented
+	// decision — the operator started serve here). Every later project-hook load
+	// is gated on IsTrusted, so switching working_dir into an untrusted repo does
+	// NOT load its hooks; trusting happens only for this launch dir (recorded) or
+	// dirs a CLI run trusted.
+	if cwd, err := os.Getwd(); err == nil {
+		if p := hooks.ProjectConfigPath(cwd); p != "" {
+			if b, rerr := os.ReadFile(p); rerr == nil {
+				_ = hooks.RecordTrust(p, hooks.Fingerprint(b))
+			}
+		}
+	}
 
 	cwd, _ := os.Getwd()
 	envCtx := buildEnvContext(cwd)
@@ -922,6 +934,23 @@ func resolveUnderCWD(cwd, path string) (string, bool) {
 
 // buildAgent creates a fresh agent for a turn. The caller must have locked
 // the session's turn mutex.
+// projectHooksTrusted reports whether the project-level hooks.yml at cwd is
+// trusted (its current content fingerprint is in the trust store). The launch
+// cwd is auto-trusted at New; other directories a session's working_dir is
+// switched into are trusted only if a prior CLI run approved them — so a
+// working_dir retarget can't silently load an untrusted repo's hooks.
+func (s *Server) projectHooksTrusted(cwd string) bool {
+	path := hooks.ProjectConfigPath(cwd)
+	if path == "" {
+		return false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return hooks.IsTrusted(path, hooks.Fingerprint(b))
+}
+
 func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	sender, model := s.senderForSession(sess)
 	a := agent.New(sender, model)
@@ -959,7 +988,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
 	// hook engine. Shares the process seen-set so SessionStart resume fires once
 	// per OS process across the serve process's many sessions.
-	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, true)
+	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
 	hookEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if s.memDir != "" {
 		s.injectorFor(sess.ID).RegisterHooks(hookEngine)
@@ -969,7 +998,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if p, err := sess.SavePath(); err == nil {
 		a.HookMeta.TranscriptPath = p
 	}
-	a.SessionStarted = sess.HookStarted
+	a.SessionStarted = sess.HookStarted || len(sess.Messages) > 0
 	a.OnSessionStart = func() { sess.MarkHookStarted() }
 
 	if len(sess.Messages) > 0 {
@@ -1922,7 +1951,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and
 	// dropped on /unbind; a fresh engine each turn just re-registers it.
-	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, true)
+	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
 	imEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if s.memDir != "" {
 		s.injectorFor("im:" + string(sess.Key)).RegisterHooks(imEngine)
@@ -1937,7 +1966,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		if p, err := st.SavePath(); err == nil {
 			sess.Agent.HookMeta.TranscriptPath = p
 		}
-		sess.Agent.SessionStarted = st.HookStarted
+		sess.Agent.SessionStarted = st.HookStarted || len(st.Messages) > 0
 		sess.Agent.OnSessionStart = func() { st.MarkHookStarted() }
 	}
 
