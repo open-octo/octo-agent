@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — 2026-07-01
+
+### Added
+- **Hooks system, rebuilt.** octo's two disjoint hook mechanisms (env-only
+  shell pre/post-turn + a hard-wired in-agent reminder) are unified into one
+  engine that fires from the agent core, so hooks run on **every transport** —
+  CLI/TUI, `octo serve` web + IM, and sub-agents — not just the terminal. Seven
+  Claude-Code-style lifecycle events: `SessionStart`, `UserPromptSubmit`,
+  `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `PreCompact`
+  (#1001, #1004–#1009).
+- **`hooks.yml` configuration** at `~/.octo/hooks.yml` (user) and
+  `<repo>/.octo/hooks.yml` (project), with per-event hook arrays and a
+  tool-name `matcher`. Project-level hooks are gated by **trust-on-first-use**
+  (a repo you cloned can't run shell until you approve it once) (#1005, #1007).
+- **`PreToolUse` can block or auto-approve a tool.** A hook exits non-zero (or
+  emits a decision) to deny a call, or approve it to bypass the interactive
+  permission prompt — composed in front of the existing gate (#1006).
+- **Async hooks that never block or lose retention.** Side-effect hooks marked
+  `async: true` run off the turn's critical path through a durable queue that
+  spills to disk on overflow/shutdown and redelivers on the next start (#1008).
+- **`octo hooks list`** shows the hooks configured across env, user, and project
+  sources with their trust status (#1009).
+- Richer hook payloads carry `session_id` / `cwd` / `transcript_path` / `model`
+  / `transport`; `Stop` fires on failed **and** interrupted turns (not just
+  success) and reports the tools used and any error.
+- The legacy `OCTO_HOOK_PRE_TURN` / `OCTO_HOOK_POST_TURN` env vars keep working
+  (mapped onto `UserPromptSubmit` / `Stop`) and now fire on web + IM too.
+
+### Changed
+- **Repository moved to the `open-octo` organization.** The canonical module
+  path is now `github.com/open-octo/octo-agent`; clone and `go get` from
+  `github.com/open-octo/octo-agent`. GitHub redirects the old personal-account
+  URLs, so existing checkouts, `go get`, and `octo upgrade` keep working (#1012).
+- **Config: a model entry is now keyed by its model string**, and the separate
+  `name` field is dropped. Existing config files are migrated automatically on
+  load (#997).
+- **Config: custom OpenAI/Anthropic-compatible endpoints use a single `custom`
+  vendor** (the protocol is chosen explicitly), replacing the two
+  `*_compatible` vendors; the standalone Mistral vendor is dropped. Old configs
+  migrate automatically (#998).
+- **Config: each model records its vision capability** rather than the runtime
+  guessing whether a model accepts images (#1003).
+
+### Fixed
+- Reject an empty model string on the config PATCH endpoint and in the setup
+  wizard, instead of persisting an unusable entry (#999).
+- Model-config web panel: use the live default sender and reuse the stored API
+  key when testing a saved entry (#995).
+- IM channel session titles show a readable name instead of the raw session key
+  (#996).
+
 ## [1.4.1] — 2026-06-30
 
 ### Changed
