@@ -495,6 +495,98 @@ func TestReplayFieldHintRecoversFromDrift(t *testing.T) {
 	}
 }
 
+// TestReplayDismissesOverlayDeterministically: a step's target doesn't exist
+// until a consent overlay is accepted; replay recovers by clicking the allow-list
+// "Accept" control — no healer wired — then the retry succeeds.
+func TestReplayDismissesOverlayDeterministically(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		// Accept injects the real target #go and removes itself.
+		w.Write([]byte(`<!doctype html><meta charset="utf-8"><title>t</title>
+<button id="accept" onclick="var g=document.createElement('button');g.id='go';g.textContent='Go';g.onclick=function(){window.hit=1};document.body.appendChild(g);this.remove();">Accept</button>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+
+	// #go is absent until the overlay is dismissed; no healer is provided, so this
+	// exercises the deterministic structural recovery path.
+	skill := &Skill{Name: "x", Steps: []Step{{Action: "click", Selector: "#go"}}}
+	modified, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Browser: b})
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if modified {
+		t.Fatal("overlay dismissal is runtime-only; it must not mark the skill modified")
+	}
+	var hit int
+	if err := page.Eval(ctx, "window.hit||0", &hit); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if hit != 1 {
+		t.Fatalf("target not clicked after overlay dismissal (hit=%d)", hit)
+	}
+}
+
+// TestReplayMultiRoundHeal: the healer needs two rounds — the first repair is
+// still wrong, the second is correct — and replay keeps consulting it (up to the
+// cap) instead of giving up after one attempt.
+func TestReplayMultiRoundHeal(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>t</title>
+<button id="real">Go</button>
+<script>window.clicks=0;document.getElementById('real').addEventListener('click',function(){window.clicks++});</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+
+	skill := &Skill{Name: "x", Steps: []Step{{Action: "click", Selector: "#stale"}}}
+	rounds := 0
+	heal := func(_ context.Context, _ *Page, step *Step, _ error) error {
+		rounds++
+		if rounds == 1 {
+			step.Selector = "#still-wrong" // a repair that still won't resolve
+		} else {
+			step.Selector = "#real"
+		}
+		return nil
+	}
+	modified, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if rounds < 2 {
+		t.Fatalf("expected the healer to be consulted across rounds, got %d", rounds)
+	}
+	if !modified {
+		t.Fatal("expected modified=true after a successful heal")
+	}
+	if skill.Steps[0].Selector != "#real" {
+		t.Fatalf("step not corrected: %q", skill.Steps[0].Selector)
+	}
+}
+
 // TestReplaySkillSelfHeal: a step has a stale selector, the implicit wait fails,
 // the healer repairs the selector, replay retries and succeeds — and reports the
 // skill as modified so the caller can write the fix back.
