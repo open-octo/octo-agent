@@ -97,7 +97,6 @@ export interface Artifact {
   code: string
   preview: string
   path: string
-  allowScripts?: boolean
 }
 
 // SkillInfo matches the Go server skill struct
