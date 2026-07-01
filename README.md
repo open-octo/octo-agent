@@ -128,11 +128,13 @@ octo --stream=false "..."
 # OpenAI / DeepSeek / Bailian (OpenAI-compatible)
 octo --provider openai --model gpt-4o-mini "..."
 
-# Anthropic-compatible third parties (DeepSeek, Kimi, etc.) — the
-# *_compatible catch-all vendors are the ones that take a custom base URL
-ANTHROPIC_COMPATIBLE_BASE_URL=https://api.deepseek.com/anthropic \
-ANTHROPIC_COMPATIBLE_API_KEY=sk-... \
-  octo --provider anthropic_compatible --model deepseek-chat "..."
+# Self-hosted / third-party endpoints use the `custom` vendor — the only one
+# that takes a custom base URL. Its wire protocol (openai | anthropic) is chosen
+# per config entry, so set it up once with `octo config` (choose Custom → pick
+# the protocol → enter base URL + model), then:
+CUSTOM_BASE_URL=https://api.deepseek.com/anthropic \
+CUSTOM_API_KEY=sk-... \
+  octo --model deepseek-chat "..."
 
 # Extended reasoning: set the intensity (Anthropic thinking / OpenAI reasoning_effort)
 # and stream the dimmed thinking trace. --show-reasoning=false hides the trace.

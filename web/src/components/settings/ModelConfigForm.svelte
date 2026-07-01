@@ -199,8 +199,7 @@
     <span class="field-label">{$t('models.model')}</span>
     <!-- Use a real <select> dropdown when the provider has a model catalogue,
          so users can see and pick from all available options. Fall back to a
-         free-text input for custom providers (e.g. openai_compatible) with no
-         preset model list. -->
+         free-text input for the custom vendor with no preset model list. -->
     {#if preset && preset.models && preset.models.length > 0}
       <select class="field-input mono" bind:value={model} disabled={saving}>
         {#each preset.models as m}

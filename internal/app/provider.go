@@ -193,7 +193,7 @@ var Registry = []Vendor{
 		// the model entry (config.ModelEntry.Protocol), not here.
 		Protocol:       "",
 		API:            "",
-		APIKeyEnvVar:   "OCTO_CUSTOM_API_KEY",
+		APIKeyEnvVar:   "CUSTOM_API_KEY",
 		CustomEndpoint: true,
 	},
 }

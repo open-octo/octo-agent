@@ -454,7 +454,7 @@ func TestRunConfig_Wizard_CustomProviderRequiresProtocolModelAndBaseURL(t *testi
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("OCTO_CUSTOM_API_KEY", "set-so-wizard-skips-key-prompt")
+	t.Setenv("CUSTOM_API_KEY", "set-so-wizard-skips-key-prompt")
 
 	// Answers: provider, protocol, model, base URL — the Custom vendor needs a
 	// protocol, and both free-text fields are required.

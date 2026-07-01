@@ -160,8 +160,7 @@ Environment:
   OPENAI_API_KEY           Required when --provider=openai
   ANTHROPIC_BASE_URL       Override the Anthropic endpoint
   OPENAI_BASE_URL          Override the OpenAI endpoint
-  OPENAI_COMPATIBLE_API_KEY / OPENAI_COMPATIBLE_BASE_URL          Self-hosted / third-party OpenAI-protocol endpoint
-  ANTHROPIC_COMPATIBLE_API_KEY / ANTHROPIC_COMPATIBLE_BASE_URL    ... Anthropic-protocol endpoint
+  CUSTOM_API_KEY / CUSTOM_BASE_URL    Self-hosted / third-party endpoint (provider: custom; set protocol: openai|anthropic via octo config)
 
 Run "octo serve --help" for the full flag list.`)
 }

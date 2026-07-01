@@ -144,7 +144,8 @@ func contextWindow(model string) int {
 	case strings.Contains(m, "llama"):
 		return 4_000
 
-	// ── Mistral ──
+	// ── Mistral ── (vendor removed from the registry, but a custom/openai entry
+	// can still run mistral-* models, so keep the window mapping)
 	case strings.Contains(m, "mistral-large") || strings.Contains(m, "mistral-small"):
 		return 128_000
 	case strings.Contains(m, "mistral"):

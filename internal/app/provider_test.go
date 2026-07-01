@@ -97,8 +97,8 @@ func TestVendor_CustomCatchAll(t *testing.T) {
 	if v.DefaultBaseURL != "" || v.DefaultModel != "" || len(v.Models) != 0 {
 		t.Errorf("%s: catch-all must not carry a fixed endpoint or model catalogue: %+v", ProviderCustom, v)
 	}
-	if v.APIKeyEnvVar != "OCTO_CUSTOM_API_KEY" {
-		t.Errorf("%s: APIKeyEnvVar = %q, want OCTO_CUSTOM_API_KEY", ProviderCustom, v.APIKeyEnvVar)
+	if v.APIKeyEnvVar != "CUSTOM_API_KEY" {
+		t.Errorf("%s: APIKeyEnvVar = %q, want CUSTOM_API_KEY", ProviderCustom, v.APIKeyEnvVar)
 	}
 	if !VendorNeedsProtocol(ProviderCustom) {
 		t.Errorf("VendorNeedsProtocol(%s) = false, want true", ProviderCustom)

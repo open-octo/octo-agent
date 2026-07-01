@@ -298,6 +298,10 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 // and, unlike the auto-caching backends (DeepSeek, GLM, Qwen-implicit, …),
 // caches a prompt prefix ONLY when the request carries a stable prompt_cache_key
 // — so the key must be forwarded there too, not just to OpenAI.
+//
+// The Mistral *vendor* was removed from the registry, but this wire-level entry
+// stays: a `custom`/openai config entry can still point at this host, and it
+// must keep forwarding the cache key. Not dead code.
 const MistralBaseURL = "https://api.mistral.ai"
 
 // promptCacheKeyEndpoints is the set of base URLs known to accept the

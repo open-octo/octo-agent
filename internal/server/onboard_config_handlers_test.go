@@ -258,6 +258,25 @@ func TestListProviders_MarksCustomCatchAll(t *testing.T) {
 	}
 }
 
+func TestApplyModelRequest_ProtocolOnlyForCustom(t *testing.T) {
+	// Selecting Custom records the protocol from the anthropic_format toggle.
+	var e config.ModelEntry
+	applyModelRequestToEntry(saveModelRequest{
+		Provider: "custom", Model: "m", BaseURL: "https://gw.example", AnthropicFormat: true,
+	}, &e)
+	if e.Provider != "custom" || e.Protocol != "anthropic" {
+		t.Fatalf("custom+anthropic: got provider=%q protocol=%q, want custom/anthropic", e.Provider, e.Protocol)
+	}
+
+	// Switching the same entry to a named vendor clears the stale protocol.
+	applyModelRequestToEntry(saveModelRequest{
+		Provider: "openai", Model: "gpt-5.4", BaseURL: "",
+	}, &e)
+	if e.Provider != "openai" || e.Protocol != "" {
+		t.Fatalf("switch to named vendor: got provider=%q protocol=%q, want openai/(empty)", e.Provider, e.Protocol)
+	}
+}
+
 func TestConfigModels_PostFirstEntryBecomesDefault(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
