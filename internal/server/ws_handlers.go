@@ -89,7 +89,7 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 	if err != nil {
 		return nil
 	}
-	wd, pm, re, sr, ctxUsage := s.sessionStatusFields()
+	_, pm, re, sr, ctxUsage := s.sessionStatusFields()
 	out := make([]wsSessionInfo, 0, len(sessions))
 	for _, sess := range sessions {
 		source := sess.Source
@@ -104,7 +104,7 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 			Source:          source,
 			Model:           sess.Model,
 			TotalTurns:      sess.TurnCount(),
-			WorkingDir:      wd,
+			WorkingDir:      s.sessionCwd(sess),
 			PermissionMode:  pm,
 			ReasoningEffort: re,
 			ShowReasoning:   sr,
@@ -151,13 +151,13 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 	if pct > 100 {
 		pct = 100
 	}
-	wd, pm, re, _, _ := s.sessionStatusFields()
+	_, pm, re, _, _ := s.sessionStatusFields()
 	b, err := json.Marshal(map[string]any{
 		"type":             "session_update",
 		"session_id":       sessionID,
 		"context_usage":    pct,
 		"context_tokens":   usedTokens,
-		"working_dir":      wd,
+		"working_dir":      s.sessionCwdByID(sessionID),
 		"permission_mode":  pm,
 		"reasoning_effort": re,
 	})
@@ -286,12 +286,12 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 		_, stillLive := s.liveStates[sessionID]
 		s.liveStateMu.RUnlock()
 		if !stillLive {
-			wd, pm, re, sr, _ := s.sessionStatusFields()
+			_, pm, re, sr, _ := s.sessionStatusFields()
 			if b, err := json.Marshal(map[string]any{
 				"type":             "session_update",
 				"session_id":       sessionID,
 				"status":           "idle",
-				"working_dir":      wd,
+				"working_dir":      s.sessionCwdByID(sessionID),
 				"permission_mode":  pm,
 				"reasoning_effort": re,
 				"show_reasoning":   sr,
@@ -1143,14 +1143,14 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			ctxPct = 100
 		}
 	}
-	wd, pm, re, _, _ := s.sessionStatusFields()
+	_, pm, re, _, _ := s.sessionStatusFields()
 	s.wsHub.broadcast(sess.ID, map[string]any{
 		"type":             "session_update",
 		"session_id":       sess.ID,
 		"status":           "idle",
 		"context_usage":    ctxPct,
 		"context_tokens":   used,
-		"working_dir":      wd,
+		"working_dir":      s.sessionCwd(sess),
 		"permission_mode":  pm,
 		"reasoning_effort": re,
 	})

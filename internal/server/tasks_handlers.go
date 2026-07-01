@@ -278,14 +278,14 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 			ctxPct = 100
 		}
 	}
-	wd, pm, re, _, _ := s.sessionStatusFields()
+	_, pm, re, _, _ := s.sessionStatusFields()
 	s.wsHub.broadcast(sessionID, map[string]any{
 		"type":             "session_update",
 		"session_id":       sessionID,
 		"status":           "idle",
 		"context_usage":    ctxPct,
 		"context_tokens":   used,
-		"working_dir":      wd,
+		"working_dir":      s.sessionCwdByID(sessionID),
 		"permission_mode":  pm,
 		"reasoning_effort": re,
 	})

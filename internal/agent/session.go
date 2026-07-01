@@ -37,8 +37,15 @@ type Session struct {
 	// every session predating per-session model binding. (Sessions written
 	// before models were keyed by model may carry a legacy entry name here; it
 	// simply fails to match and falls back to the default sender.)
-	ModelConfig string    `json:"model_config,omitempty"`
-	Messages    []Message `json:"messages"`
+	ModelConfig string `json:"model_config,omitempty"`
+	// WorkingDir is the session's own working directory: the cwd its tools run
+	// in, the root its project hooks/skills are discovered from, and the path
+	// shown in its env context. Empty means "the server's launch directory at
+	// turn time" — also the value for every session predating per-session
+	// working dirs. Set via the Web UI's PATCH …/working_dir and persisted so a
+	// resumed session lands back in the same place.
+	WorkingDir string    `json:"working_dir,omitempty"`
+	Messages   []Message `json:"messages"`
 
 	// Dir overrides the default ~/.octo/sessions location. Empty means use the
 	// default. Not serialized — it's a runtime override.
@@ -384,7 +391,7 @@ func (s *Session) ChunkDir() (string, error) {
 // type as authoritative; rewriteAll folds them back into the meta header when
 // compacting.
 type sessionRecord struct {
-	Type         string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "lease"
+	Type         string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "working_dir" | "lease"
 	ID           string    `json:"id,omitempty"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	Model        string    `json:"model,omitempty"`
@@ -392,6 +399,7 @@ type sessionRecord struct {
 	Title        string    `json:"title,omitempty"`
 	Source       string    `json:"source,omitempty"`
 	ModelConfig  string    `json:"model_config,omitempty"`
+	WorkingDir   string    `json:"working_dir,omitempty"`
 	BoundEntry   string    `json:"bound_entry,omitempty"`
 	BoundAt      time.Time `json:"bound_at,omitempty"`
 	LeaseEntry   string    `json:"lease_entry,omitempty"`
@@ -401,7 +409,7 @@ type sessionRecord struct {
 }
 
 func (s *Session) metaRecord() sessionRecord {
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -603,6 +611,47 @@ func (s *Session) SetModelConfig(name, model string) error {
 	return nil
 }
 
+// SetWorkingDir records the session's working directory. Same persistence
+// mechanics as SetModelConfig: append a record when the transcript is already
+// on disk so the change survives without rewriting the file, rewrite when the
+// on-disk prefix is stale, and carry the value in memory for a not-yet-saved
+// session until its first Save folds it into the meta header. Setting the dir
+// already in place is a no-op.
+func (s *Session) SetWorkingDir(dir string) error {
+	if dir == s.WorkingDir {
+		return nil
+	}
+	s.WorkingDir = dir
+	if s.persisted == 0 {
+		// See SetModelConfig: a meta-only transcript must be rewritten now, since
+		// the load-modify-discard handler won't get a "next Save"; a session with
+		// no file yet just carries the value until its first Save.
+		if path, perr := s.SavePath(); perr == nil {
+			if _, statErr := os.Stat(path); statErr == nil {
+				return s.rewriteAll()
+			}
+		}
+		return nil
+	}
+	if s.forceRewrite {
+		return s.rewriteAll()
+	}
+	path, err := s.SavePath()
+	if err != nil {
+		return err
+	}
+	// No O_CREATE — see SetTitle: never materialise an orphan transcript.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("session: open %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "working_dir", WorkingDir: dir}); err != nil {
+		return fmt.Errorf("session: append working_dir: %w", err)
+	}
+	return nil
+}
+
 // DisplayTitle returns the label shown for the session in list views: the
 // generated Title when present, otherwise a snippet of the first user message
 // (so pre-title sessions and not-yet-titled ones are still recognisable), and
@@ -739,6 +788,7 @@ func LoadSession(id string) (*Session, error) {
 			s.Title = rec.Title // a compacted file carries the title in its meta header
 			s.Source = rec.Source
 			s.ModelConfig = rec.ModelConfig
+			s.WorkingDir = rec.WorkingDir
 			s.BoundEntry = rec.BoundEntry
 			s.BoundAt = rec.BoundAt
 			s.HookStarted = rec.HookStarted
@@ -750,6 +800,8 @@ func LoadSession(id string) (*Session, error) {
 			if rec.Model != "" {
 				s.Model = rec.Model
 			}
+		case "working_dir":
+			s.WorkingDir = rec.WorkingDir // last one wins, like title
 		case "message":
 			if rec.Message != nil {
 				s.Messages = append(s.Messages, *rec.Message)

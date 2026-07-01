@@ -278,6 +278,9 @@
   let models = $state<api.ModelEntry[]>([])
   let modelMenu = $state(false)
   let reasonMenu = $state(false)
+  let dirMenu = $state(false)
+  let dirDraft = $state('')
+  let dirSaving = $state(false)
   const reasoningLevels = ['low', 'medium', 'high', 'xhigh', 'max']
   const showReasoningIcon = $derived(showReasoning ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined')
 
@@ -337,7 +340,31 @@
     }
   }
 
-  function closeMenus() { modelMenu = false; reasonMenu = false }
+  function closeMenus() { modelMenu = false; reasonMenu = false; dirMenu = false }
+
+  // Open the working-dir editor seeded with the current dir.
+  function openDirMenu() {
+    modelMenu = false; reasonMenu = false
+    dirDraft = workingDir
+    dirMenu = !dirMenu
+  }
+
+  async function saveWorkingDir() {
+    if (!sid) return
+    const dir = dirDraft.trim()
+    if (!dir || dir === workingDir) { dirMenu = false; return }
+    dirSaving = true
+    try {
+      const res = await api.updateSessionWorkingDir(sid, dir)
+      // Store the canonical path the server resolved (~ expanded, absolute).
+      chatWorkingDir.update(w => ({ ...w, [sid]: res.working_dir }))
+      dirMenu = false
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to set working directory', 'error')
+    } finally {
+      dirSaving = false
+    }
+  }
 
   // Show only the last two path segments so a long working dir doesn't push
   // the chip row onto a second line. Full path is in the title tooltip.
@@ -454,7 +481,27 @@
       {/if}
     </div>
     {#if workingDir}
-      <span class="chip static" title={workingDir}><span class="mono">{shortDir(workingDir)}</span></span>
+      <div class="picker">
+        <button class="chip" title={workingDir} onclick={(e) => { e.stopPropagation(); openDirMenu() }}>
+          <iconify-icon icon="ant-design:folder-outlined" width="12"></iconify-icon>
+          <span class="mono">{shortDir(workingDir)}</span>
+          <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
+        </button>
+        {#if dirMenu}
+          <div class="menu dir-menu" onclick={(e) => e.stopPropagation()}>
+            <input
+              class="dir-input mono"
+              bind:value={dirDraft}
+              placeholder="~/code/my-project"
+              spellcheck="false"
+              onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveWorkingDir() } else if (e.key === 'Escape') { dirMenu = false } }}
+            />
+            <button class="dir-save" disabled={dirSaving} onclick={() => saveWorkingDir()}>
+              {dirSaving ? $t('chat.dir_saving') : $t('chat.dir_save')}
+            </button>
+          </div>
+        {/if}
+      </div>
     {/if}
     <span class="chip static context-chip">
       <span>{$t('chat.context')}</span>
@@ -612,6 +659,20 @@
 .mi-name { font-size: 13px; color: var(--text); }
 .mi-model { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
 .menu-empty { padding: 8px 10px; font-size: 12px; color: var(--text-tertiary); }
+.dir-menu { min-width: 300px; display: flex; gap: 6px; padding: 8px; align-items: center; }
+.dir-input {
+  flex: 1; min-width: 0; height: 28px; padding: 0 8px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg-container);
+  color: var(--text); font-size: 12px;
+}
+.dir-input:focus { outline: none; border-color: var(--blue-5); }
+.dir-save {
+  height: 28px; padding: 0 12px; border: none; border-radius: 6px;
+  background: var(--blue-5); color: #fff; font-size: 12px; font-family: inherit;
+  cursor: pointer; white-space: nowrap;
+}
+.dir-save:hover { opacity: 0.9; }
+.dir-save:disabled { opacity: 0.6; cursor: default; }
 .reasoning-chip { padding-right: 8px; }
 .reasoning-eye { color: var(--success); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
