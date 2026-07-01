@@ -50,6 +50,28 @@ func TestSessionSourceRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSessionHookStartedRoundTrip(t *testing.T) {
+	setTempHome(t)
+	s := NewSession("m", "")
+	if s.HookStarted {
+		t.Fatal("new session must start with HookStarted=false")
+	}
+	s.MarkHookStarted()
+	if !s.HookStarted || !s.forceRewrite {
+		t.Fatalf("MarkHookStarted should set the flag and force a rewrite; got started=%v forceRewrite=%v", s.HookStarted, s.forceRewrite)
+	}
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if !got.HookStarted {
+		t.Fatal("HookStarted did not survive the round trip")
+	}
+}
+
 func TestSessionIDFormat(t *testing.T) {
 	s := NewSession("m", "")
 	// YYYYMMDD-HHMMSS-xxxxxxxx — 24 chars (15 timestamp + '-' + 8 hex suffix).

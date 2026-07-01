@@ -1018,6 +1018,11 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		// RunStream appends the user input.
 		a.AttachUserBlocks(blocks)
 	}
+	// The persisted user message RunStream appends must carry the SAME created_at
+	// we broadcast live above, or the frontend double-renders it. Hand the
+	// pre-stamped timestamp to the turn rather than letting appendUserInput mint
+	// a second, later one.
+	a.AttachUserCreatedAt(userMsg.CreatedAt)
 
 	// Flush any steer messages that arrived before the Agent was built into
 	// the Agent's Inbox so the runLoop can drain them between iterations.

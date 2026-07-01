@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/Leihb/octo-agent/internal/hooks"
 	"github.com/Leihb/octo-agent/internal/tools"
 )
 
@@ -314,7 +315,25 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	s.parent.AccrueChildUsage(in, out)
 
 	lc.syncSession()
+	s.fireSubagentStop(r.Content)
 	return r.Content, in, out, r.StopReason, turns, nil
+}
+
+// fireSubagentStop dispatches the parent's SubagentStop hook after a child round
+// completes — the top-level session's signal that a spawned agent finished. Uses
+// the parent's hook identity (a child's own turns fire Stop separately if the
+// child has an engine). Background context so a cancelled parent turn doesn't
+// abort retention. No-op when the parent has no engine.
+func (s *Spawner) fireSubagentStop(reply string) {
+	if s.parent == nil || s.parent.Hooks == nil {
+		return
+	}
+	p := s.parent.HookMeta.Payload(hooks.EventSubagentStop)
+	if p.Model == "" {
+		p.Model = s.parent.Model
+	}
+	p.AssistantReply = reply
+	s.parent.Hooks.Dispatch(context.Background(), p)
 }
 
 // syncSession persists the child's conversation to disk when sessionDir was

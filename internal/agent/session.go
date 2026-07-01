@@ -79,6 +79,12 @@ type Session struct {
 	// InFlight counts active turns on this session within the current process.
 	// It is not persisted; use LeaseEntry/LeaseExpires for cross-process checks.
 	InFlight int `json:"-"`
+
+	// HookStarted records that the SessionStart hook has fired for this session.
+	// Persisted in the meta line and shared across all three transports, so a
+	// re-attach resumes (SessionStart source=resume) rather than starting over.
+	// Set via MarkHookStarted.
+	HookStarted bool `json:"hook_started,omitempty"`
 }
 
 // Common entry names. Use these constants at call sites so typos are caught.
@@ -390,11 +396,27 @@ type sessionRecord struct {
 	BoundAt      time.Time `json:"bound_at,omitempty"`
 	LeaseEntry   string    `json:"lease_entry,omitempty"`
 	LeaseExpires time.Time `json:"lease_expires,omitempty"`
+	HookStarted  bool      `json:"hook_started,omitempty"`
 	Message      *Message  `json:"message,omitempty"`
 }
 
 func (s *Session) metaRecord() sessionRecord {
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted}
+}
+
+// MarkHookStarted records that SessionStart has fired for this session, so a
+// later attach (new process, or a resumed session) resumes rather than starting
+// over. The flag lives in the meta line, so it forces the next Save to rewrite
+// the file — a one-time O(n) cost per session. Idempotent; safe to call every
+// turn. Persistence rides the session layer's existing post-turn Save.
+func (s *Session) MarkHookStarted() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.HookStarted {
+		return
+	}
+	s.HookStarted = true
+	s.forceRewrite = true
 }
 
 func messageRecord(m Message) sessionRecord {
@@ -707,6 +729,7 @@ func LoadSession(id string) (*Session, error) {
 			s.ModelConfig = rec.ModelConfig
 			s.BoundEntry = rec.BoundEntry
 			s.BoundAt = rec.BoundAt
+			s.HookStarted = rec.HookStarted
 			s.InFlight = 0
 		case "title":
 			s.Title = rec.Title // last one wins

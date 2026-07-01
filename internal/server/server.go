@@ -960,6 +960,11 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	}
 	a.Hooks = hookEngine
 	a.HookMeta = hooks.Meta{SessionID: sess.ID, Transport: sess.BoundEntry, Cwd: cwd}
+	if p, err := sess.SavePath(); err == nil {
+		a.HookMeta.TranscriptPath = p
+	}
+	a.SessionStarted = sess.HookStarted
+	a.OnSessionStart = func() { sess.MarkHookStarted() }
 
 	if len(sess.Messages) > 0 {
 		a.History = sess.ToHistory()
@@ -1918,6 +1923,17 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	}
 	sess.Agent.Hooks = imEngine
 	sess.Agent.HookMeta = hooks.Meta{SessionID: string(sess.Key), Transport: agent.EntryChannel, Cwd: cwd}
+	// The persisted backing session (Store) carries the durable SessionStart
+	// flag + transcript path; IM persists it after each turn, so MarkHookStarted
+	// rides that Save. Store can be tombstoned by a concurrent /unbind — nil-skip.
+	if st := sess.Store; st != nil {
+		sess.Agent.HookMeta.SessionID = st.ID
+		if p, err := st.SavePath(); err == nil {
+			sess.Agent.HookMeta.TranscriptPath = p
+		}
+		sess.Agent.SessionStarted = st.HookStarted
+		sess.Agent.OnSessionStart = func() { st.MarkHookStarted() }
+	}
 
 	// Per-turn permission gate, the same shape prepareToolTurn gives web
 	// turns: configured mode + an interactive ask that prompts in the chat

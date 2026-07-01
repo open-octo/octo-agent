@@ -62,6 +62,21 @@ func offerOnboarding(reader lineReader, out io.Writer) bool {
 	}
 }
 
+// wireSessionHooks completes the agent's hook identity once the session exists:
+// the SessionID/transcript/transport the payload envelope carries, the durable
+// SessionStarted seed, and the persist callback the engine invokes when
+// SessionStart first fires (startup). Persistence rides the session layer's
+// existing post-turn Save — MarkHookStarted only marks the meta dirty.
+func wireSessionHooks(a *agent.Agent, sess *agent.Session, transport string) {
+	a.HookMeta.SessionID = sess.ID
+	a.HookMeta.Transport = transport
+	if p, err := sess.SavePath(); err == nil {
+		a.HookMeta.TranscriptPath = p
+	}
+	a.SessionStarted = sess.HookStarted
+	a.OnSessionStart = func() { sess.MarkHookStarted() }
+}
+
 // errMissingAPIKey is returned by resolveAPIKey when no API key is available.
 // The caller (runChat) can detect this and auto-launch the config wizard on an
 // interactive terminal instead of failing silently.
@@ -796,6 +811,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			sess = agent.NewSession(resolvedModel, *system)
 			sess.Bind(agent.EntryTUI, false)
 		}
+		wireSessionHooks(a, sess, agent.EntryTUI)
 		// Persisted (non-ephemeral) sessions archive folded turns so the model
 		// can recall them with the read tool after a compaction.
 		if !*noSave {
@@ -849,9 +865,11 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// ── Headless one-shot (claude -p) ─────────────────────────────────────────
 	// One agentic turn, then exit. The session is ephemeral — one-shot runs are
 	// not persisted (resuming with -c stays a TUI affordance).
+	oneShotSess := agent.NewSession(resolvedModel, *system)
+	wireSessionHooks(a, oneShotSess, agent.EntryCLI)
 	replCfg := replConfig{
 		a:               a,
-		session:         agent.NewSession(resolvedModel, *system),
+		session:         oneShotSess,
 		noSave:          true,
 		plain:           *plain,
 		verbosity:       resolveVerbosity(*quietFlag, *verboseFlag),

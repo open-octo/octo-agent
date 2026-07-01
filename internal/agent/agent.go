@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Leihb/octo-agent/internal/hooks"
 )
@@ -233,10 +234,34 @@ type Agent struct {
 	// input; read and cleared when Stop fires.
 	turnTools []string
 
+	// SessionStarted mirrors the session's durable "SessionStart has fired"
+	// flag, seeded by the session-owning layer before the run. The engine's
+	// SessionStartDecision uses it (with the process seen-set) to pick
+	// startup vs resume; the agent flips it and calls OnSessionStart when
+	// startup fires so the layer can persist it.
+	SessionStarted bool
+
+	// HookClear, when true, makes the next turn's SessionStart fire with
+	// source=clear (set by the session layer right after a /clear). Consumed
+	// once, on the next appended user turn.
+	HookClear bool
+
+	// OnSessionStart, if set, is invoked when SessionStart fires with
+	// source=startup — the seam the session layer uses to persist the durable
+	// flag (Session.MarkHookStarted). Runs on the turn goroutine.
+	OnSessionStart func()
+
 	// pendingUserBlocks holds content blocks (e.g. images pasted in the TUI)
 	// to merge into the next user message. Set via AttachUserBlocks and
 	// consumed exactly once by the next appendUserInput, alongside the text.
 	pendingUserBlocks []ContentBlock
+
+	// pendingUserCreatedAt, when non-zero, is the timestamp the next appended
+	// user message must carry instead of a fresh time.Now(). Set via
+	// AttachUserCreatedAt by a caller (the web server) that already stamped the
+	// same message for a live broadcast, so the persisted copy shares that exact
+	// created_at — the dedup key the frontend matches on. Consumed once.
+	pendingUserCreatedAt time.Time
 
 	// turnIterations is the number of provider round-trips (loop iterations)
 	// executed during the most recent Run/RunStream call. It is set when the
@@ -330,6 +355,15 @@ func (a *Agent) AttachUserBlocks(blocks []ContentBlock) {
 	a.pendingUserBlocks = blocks
 }
 
+// AttachUserCreatedAt pins the timestamp the next appended user message will
+// carry, so a caller that pre-stamped the same message (the web server, which
+// broadcasts a live created_at before the turn) gets an identical persisted
+// timestamp rather than a second, later time.Now(). Consumed once by the next
+// appendUserInput. Mirrors AttachUserBlocks.
+func (a *Agent) AttachUserCreatedAt(t time.Time) {
+	a.pendingUserCreatedAt = t
+}
+
 // hookPayload seeds a hook Payload from the Agent's HookMeta, defaulting Model
 // to the live a.Model when the session layer left it unset.
 func (a *Agent) hookPayload(event hooks.Event) hooks.Payload {
@@ -348,12 +382,52 @@ func (a *Agent) hookPayload(event hooks.Event) hooks.Payload {
 // accumulator surfaced to Stop).
 func (a *Agent) appendUserInput(ctx context.Context, userInput string) {
 	a.turnTools = nil
+	// Stamp the turn's timestamp BEFORE any hook work. The server pre-builds the
+	// same user message to broadcast a live created_at and relies on this
+	// appended copy carrying an identical timestamp (the WS dedup key); letting
+	// hook-dispatch latency sit between them would push this stamp into a later
+	// millisecond and double-render the message. See ws_handlers user-message
+	// build. When a caller pre-stamped the message (AttachUserCreatedAt) reuse
+	// that exact timestamp; otherwise stamp now.
+	createdAt := a.pendingUserCreatedAt
+	a.pendingUserCreatedAt = time.Time{}
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
 	text := userInput
 	if a.Hooks != nil {
-		p := a.hookPayload(hooks.EventUserPromptSubmit)
-		p.UserInput = userInput
-		if extra := a.Hooks.Inject(ctx, p); extra != "" {
-			text = extra + "\n\n" + userInput
+		var injected []string
+
+		// SessionStart fires once per session opening. SessionStartDecision
+		// self-gates on the process seen-set + the durable SessionStarted flag,
+		// so attempting it every turn is cheap and only fires on the first
+		// (startup/resume) or after a /clear. Its output rides this first user
+		// message and thus persists — which is what makes it visible on later
+		// turns even though serve rebuilds the Agent each turn.
+		if src, fire := a.Hooks.SessionStartDecision(a.HookMeta.SessionID, a.SessionStarted, a.HookClear); fire {
+			a.HookClear = false
+			if src == hooks.SourceStartup {
+				a.SessionStarted = true
+				if a.OnSessionStart != nil {
+					a.OnSessionStart()
+				}
+			}
+			sp := a.hookPayload(hooks.EventSessionStart)
+			sp.Source = src
+			if s := a.Hooks.Inject(ctx, sp); s != "" {
+				injected = append(injected, s)
+			}
+		}
+
+		// UserPromptSubmit fires every turn (fresh retrieval / memory reminder).
+		up := a.hookPayload(hooks.EventUserPromptSubmit)
+		up.UserInput = userInput
+		if s := a.Hooks.Inject(ctx, up); s != "" {
+			injected = append(injected, s)
+		}
+
+		if len(injected) > 0 {
+			text = strings.Join(injected, "\n\n") + "\n\n" + userInput
 		}
 	}
 	// Attachments (e.g. a pasted image) ride on the same user turn as the
@@ -366,10 +440,12 @@ func (a *Agent) appendUserInput(ctx context.Context, userInput string) {
 		}
 		blocks = append(blocks, a.pendingUserBlocks...)
 		a.pendingUserBlocks = nil
-		a.History.Append(Message{Role: RoleUser, Blocks: blocks})
+		a.History.Append(Message{Role: RoleUser, Blocks: blocks, CreatedAt: createdAt})
 		return
 	}
-	a.History.Append(NewUserMessage(text))
+	msg := NewUserMessage(text)
+	msg.CreatedAt = createdAt
+	a.History.Append(msg)
 }
 
 // StopReason sentinels set on the Reply when a loop budget is exhausted.
@@ -1579,6 +1655,11 @@ func (a *Agent) addUsage(inputTokens, outputTokens int) {
 func (a *Agent) ClearHistory() {
 	a.History.Reset()
 	a.resetContextTrigger()
+	// A wiped conversation is a fresh opening: re-arm SessionStart so the next
+	// turn fires with source=clear. Effective on transports that keep the Agent
+	// across turns (CLI/TUI/IM); serve rebuilds the Agent per turn, so its /clear
+	// re-opening is governed by the persisted flag instead.
+	a.HookClear = true
 }
 
 // resetContextTrigger zeroes the compaction-trigger context size under the
