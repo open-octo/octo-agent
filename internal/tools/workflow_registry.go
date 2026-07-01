@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"embed"
 	"os"
 	"path/filepath"
 	"sort"
@@ -9,6 +10,15 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/memory"
 )
+
+// defaultWorkflowsFS holds the workflows shipped with the binary — the curated
+// set every install gets out of the box. Unlike default skills they are not
+// materialized to disk (there is no on-disk workflows CLI to list/edit them):
+// discoverWorkflows merges them in-memory as the lowest priority, so a
+// same-named user- or project-level file transparently overrides one.
+//
+//go:embed workflow_defaults
+var defaultWorkflowsFS embed.FS
 
 // savedWorkflow is one named workflow script loaded from a registry directory.
 // The script is the full file content (the @description comment is valid Ruby
@@ -51,18 +61,46 @@ var (
 	discoveredWorkflows   map[string]savedWorkflow
 )
 
-// discoverWorkflows scans the user- then project-level registries and refreshes
-// the package-level cache. Project entries override user-level ones of the same
-// name. Safe to call concurrently; callers that need the freshest set call it
-// before lookupWorkflow / listWorkflows.
+// discoverWorkflows seeds the embedded default workflows, then scans the user-
+// and project-level registries, refreshing the package-level cache. Precedence
+// is embedded < user < project: a same-named file at a higher level overrides
+// the one below. Safe to call concurrently; callers that need the freshest set
+// call it before lookupWorkflow / listWorkflows.
 func discoverWorkflows() {
 	fresh := make(map[string]savedWorkflow)
+	scanEmbeddedWorkflows(fresh)
 	for _, root := range []string{userWorkflowsRoot(), projectWorkflowsRoot()} {
 		scanWorkflowsRoot(root, fresh)
 	}
 	discoveredWorkflowsMu.Lock()
 	discoveredWorkflows = fresh
 	discoveredWorkflowsMu.Unlock()
+}
+
+// scanEmbeddedWorkflows loads the binary's built-in *.rb workflows into dst.
+// Their file name (without .rb) is the authoritative name, matching on-disk
+// discovery so a user/project file of the same name overrides the default.
+func scanEmbeddedWorkflows(dst map[string]savedWorkflow) {
+	entries, err := defaultWorkflowsFS.ReadDir("workflow_defaults")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".rb") {
+			continue
+		}
+		b, err := defaultWorkflowsFS.ReadFile("workflow_defaults/" + e.Name())
+		if err != nil {
+			continue
+		}
+		content := string(b)
+		name := strings.TrimSuffix(e.Name(), ".rb")
+		dst[name] = savedWorkflow{
+			name:        name,
+			description: workflowDescription(content),
+			script:      content,
+		}
+	}
 }
 
 // scanWorkflowsRoot reads *.rb workflow scripts from root into dst (existing

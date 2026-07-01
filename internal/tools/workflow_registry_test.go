@@ -3,6 +3,7 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 )
 
@@ -78,7 +79,49 @@ func TestListWorkflows_SortedUnionOfRoots(t *testing.T) {
 	writeWorkflowFile(t, user, "ignored.txt", "not a workflow")
 
 	got := listWorkflows()
-	if len(got) != 2 || got[0].name != "alpha" || got[1].name != "zeta" {
-		t.Errorf("listWorkflows = %+v, want [alpha zeta]", got)
+	names := make([]string, len(got))
+	for i, w := range got {
+		names[i] = w.name
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Errorf("listWorkflows not sorted: %v", names)
+	}
+	// The union includes the on-disk files plus every embedded default.
+	for _, want := range []string{"alpha", "zeta"} {
+		if !containsName(names, want) {
+			t.Errorf("listWorkflows = %v, missing %q", names, want)
+		}
+	}
+}
+
+func containsName(names []string, want string) bool {
+	for _, n := range names {
+		if n == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {
+	// No user/project roots: the built-in preset must still resolve.
+	useWorkflowRoots(t, "", "")
+	w, ok := lookupWorkflow("adversarial-review")
+	if !ok {
+		t.Fatal("embedded default adversarial-review not found")
+	}
+	if w.script == "" || w.description == "" {
+		t.Errorf("embedded workflow = %+v, want non-empty script and description", w)
+	}
+}
+
+func TestLookupWorkflow_UserOverridesEmbeddedDefault(t *testing.T) {
+	user := t.TempDir()
+	useWorkflowRoots(t, user, "")
+	writeWorkflowFile(t, user, "adversarial-review.rb", "# @description my override\n\"x\"\n")
+
+	w, ok := lookupWorkflow("adversarial-review")
+	if !ok || w.description != "my override" {
+		t.Errorf("workflow = %+v, ok = %v; want the user file to override the embedded default", w, ok)
 	}
 }
