@@ -847,6 +847,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		memory.NewInjector(rules).RegisterHooks(hookEngine)
 	}
+	// Suggest saving a workflow once the model chains >=2 skills by hand in a
+	// turn — independent of memory, so wired unconditionally.
+	tools.NewWorkflowNudger().RegisterHooks(hookEngine)
 	a.Hooks = hookEngine
 	a.HookMeta = hooks.Meta{Cwd: cwd}
 
