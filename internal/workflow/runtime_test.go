@@ -15,6 +15,15 @@ func echoAgent(_ context.Context, prompt string, _ AgentOptions) AgentResult {
 	return AgentResult{Reply: "reply<" + prompt + ">", InputTokens: 5, OutputTokens: 7}
 }
 
+// echoSkill returns outputs echoing the call, so a test can assert dispatch,
+// params, and schema flowed through.
+func echoSkill(_ context.Context, name, paramsJSON, schema string) AgentResult {
+	return AgentResult{
+		Reply:        fmt.Sprintf(`{"name":%q,"params":%s,"schema":%q}`, name, paramsJSON, schema),
+		OutputTokens: 3,
+	}
+}
+
 func TestRun_AgentRoundTrip(t *testing.T) {
 	got, err := Run(context.Background(),
 		`a = agent("hi"); "got: #{a}"`,
@@ -402,6 +411,63 @@ func TestRun_ExceptionHandling(t *testing.T) {
 	}
 	if got.Output != "caught: boom" {
 		t.Errorf("Output = %q", got.Output)
+	}
+}
+
+func TestRun_SkillRoundTrip(t *testing.T) {
+	// skill() returns a native Ruby Hash (parsed from the outputs JSON); params
+	// and name flow through and are readable.
+	got, err := Run(context.Background(),
+		`s = skill("download-excels", {"month" => "2026-06"}); "name=#{s["name"]} month=#{s["params"]["month"]}"`,
+		Options{Agent: echoAgent, Skill: echoSkill})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Output != "name=download-excels month=2026-06" {
+		t.Errorf("Output = %q", got.Output)
+	}
+	if got.OutputTokens != 3 {
+		t.Errorf("skill usage not counted: out=%d, want 3", got.OutputTokens)
+	}
+}
+
+func TestRun_SkillInPipeline(t *testing.T) {
+	// skill() composes in a pipeline: stage 1 replays a skill returning a file
+	// list, stage 2 consumes the parsed Hash.
+	dl := func(_ context.Context, _, _, _ string) AgentResult {
+		return AgentResult{Reply: `{"files":["a","b","c"]}`}
+	}
+	script := `
+		s1 = ->(item) { skill("download") }
+		s2 = ->(prev) { prev["files"].length }
+		pipeline(["x"], s1, s2)[0].to_s
+	`
+	got, err := Run(context.Background(), script, Options{Agent: echoAgent, Skill: dl})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Output != "3" {
+		t.Errorf("Output = %q, want 3", got.Output)
+	}
+}
+
+func TestRun_SkillUnavailable(t *testing.T) {
+	// No Skill wired: skill() fails with a clear error rather than a JSON crash.
+	_, err := Run(context.Background(), `skill("x")`, Options{Agent: echoAgent})
+	if err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("want skill-unavailable error, got %v", err)
+	}
+}
+
+func TestRun_SkillFailureRaises(t *testing.T) {
+	// A skill that errors surfaces as a raised, message-carrying failure (halting
+	// the run) — not a swallowed error string fed downstream.
+	fail := func(_ context.Context, name, _, _ string) AgentResult {
+		return AgentResult{Err: fmt.Errorf("boom in %s", name)}
+	}
+	_, err := Run(context.Background(), `skill("x")`, Options{Agent: echoAgent, Skill: fail})
+	if err == nil || !strings.Contains(err.Error(), "boom in x") {
+		t.Fatalf("want the skill failure surfaced, got %v", err)
 	}
 }
 

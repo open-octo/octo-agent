@@ -46,6 +46,7 @@ type WorkflowRunRequest struct {
 	Script        string
 	Args          string // the run's input value as a JSON string ("" = none)
 	Agent         workflow.AgentFunc
+	Skill         workflow.SkillFunc
 	MaxConcurrent int
 	ResumeFrom    string
 }
@@ -221,6 +222,7 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 		}()
 		res, err := workflow.Run(ctx, req.Script, workflow.Options{
 			Agent: req.Agent,
+			Skill: req.Skill,
 			Log: func(s string) {
 				run.appendLog(s, time.Now())
 				m.emit(WorkflowEvent{RunID: id, Kind: "progress", Line: s})

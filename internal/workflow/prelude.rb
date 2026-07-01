@@ -70,6 +70,44 @@ def agent(prompt, opts = {})
   end
 end
 
+# skill(name, params = {}, opts = {}) runs one skill to completion and returns
+# its declared outputs as a native Ruby Hash (parsed from the skill's outputs
+# JSON). It dispatches by name: a recorded browser skill is replayed
+# deterministically; a SKILL.md skill runs as a sub-agent. Like agent(), inside
+# parallel/pipeline it starts the work then yields its fiber; at top level it
+# blocks for its own result — so skill() composes in the same pipelines.
+#
+#   params:  Hash    — values for the skill's declared params / a recording's
+#                      {{placeholders}}
+#   opts:
+#     schema: String — a JSON Schema (as a JSON string) a SKILL.md skill's reply
+#                      must satisfy (ignored by browser recordings, whose outputs
+#                      are structurally bound)
+#
+# Prefix the name with "browser:" or "md:" to disambiguate when a recording and
+# a SKILL.md skill share a name.
+def skill(name, params = {}, opts = {})
+  params_json = JSON.generate(params || {})
+  schema = (opts[:schema] || opts["schema"]).to_s
+  token = __skill_start(name.to_s, params_json, schema)
+  raise "workflow: token budget exhausted" if token < 0
+  raw = if $__wf_sched
+          Fiber.yield(token)
+        else
+          _, result = __take_for({ token => true })
+          result
+        end
+  return {} if raw.nil? || raw.empty?
+  # Outputs always cross as valid JSON; a skill failure arrives as an error
+  # string instead, so a parse failure means the skill failed — raise it (halting
+  # the pipeline) rather than feeding a malformed value downstream.
+  begin
+    JSON.parse(raw)
+  rescue
+    raise "workflow: skill #{name} failed: #{raw}"
+  end
+end
+
 # log(msg) surfaces a progress line to the user (host event), returns nil.
 def log(msg)
   __log(msg.to_s)

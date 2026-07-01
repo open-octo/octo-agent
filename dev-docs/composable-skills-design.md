@@ -173,24 +173,26 @@ skill(name, params = {}, opts = {})   →  该技能声明的 outputs 对象(直
     · name 是 SKILL.md   → 起 skill 子 agent(opts.schema 可选,见 A.4)
 ```
 
-**名字全目录唯一**:`skill('x')` 只解析到一个条目;一个 YAML 与一个 MD 重名则报错要求改名,不猜。逃生口(可选):`skill('browser:download-excels')` / `skill('md:merge-excels')` 显式指定引擎。
+**名字全目录唯一**:`skill('x')` 只解析到一个条目;一个 YAML 与一个 MD 重名则报错要求消歧,不猜。逃生口(可选):`skill('browser:download-excels')` / `skill('md:merge-excels')` 显式指定引擎。
 
-数据流仿现有 `args`/`agent_take` 的 host import 边界(见 `workflow-named-args-design.md`):脚本 `skill()` → guest import → Go 侧 host 函数查统一目录 → 分派到 `ReplaySkill`(录制)或 skill 子 agent(SKILL.md)→ 把 outputs 序列化成 JSON 回传 guest → 脚本里是原生 `Hash`。JSON 在脚本内已可用(mruby-json 已在,见同上设计)。
+`skill()` 复用 `agent()` 的整套异步机制:`__skill_start` 是**唯一新增的 host import**,拿回结果走的还是 `agent_wait_any`/`agent_take` 同一条完成队列——所以 `skill()` 在 `parallel`/`pipeline` 里和 `agent()` 一样并发、一样可 resume(同一 journal),无需新的 take/wait 原语。Go 侧 host 函数按名字查统一目录,分派到 `ReplaySkill`(录制)或 skill 子 agent(SKILL.md),把 outputs 序列化成 JSON 回传;prelude `JSON.parse` 成原生 Ruby `Hash`(JSON 在脚本内已可用,见 `workflow-named-args-design.md`)。
+
+**产物恒为合法 JSON,失败则 raise**:录制回outputs、带 schema 的 SKILL.md 结果、无 schema 的自由文本(JSON 编码成字符串)三者都是合法 JSON;一旦某步失败,回传的是错误串而非 JSON,`skill()` 就地 `raise` 中止整条管道,而不是把坏值喂给下游。浏览器录制串行化在同一个 Chrome 会话上(单会话资源,`parallel` 里的多个录制步骤自动排队)。
 
 ### 你的三段式,一条管道
 
-```js
-// .octo/workflows/monthly-report.js
-export const meta = { name: 'monthly-report', description: '下载报表 → 合表 → 出 PPT' }
+工作流脚本是 Ruby(mruby),`skill()` 返回原生 `Hash`:
 
-const dl  = await skill('download-excels', { month: args.month })     // 浏览器录制,确定性 → { files: [...] }
-const tbl = await skill('merge-excels', { inputs: dl.files },          // SKILL.md,调用点带 schema → { path: ... }
-                        { schema: { type:'object', properties:{ path:{type:'string'} }, required:['path'] } })
-const ppt = await skill('excels-to-ppt', { table: tbl.path })          // SKILL.md → { path: ... }
-return ppt
+```ruby
+# .octo/workflows/monthly-report — 保存后可命名调用
+dl  = skill("download-excels", { "month" => args["month"] })          # 浏览器录制,确定性 → {"files"=>[...]}
+tbl = skill("merge-excels", { "inputs" => dl["files"] },              # SKILL.md,调用点带 schema → {"path"=>...}
+            schema: '{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}')
+ppt = skill("excels-to-ppt", { "table" => tbl["path"] })              # SKILL.md → {"path"=>...}
+ppt
 ```
 
-`dl.files` 直接喂下一步——这就是"顺畅"。三种跑法都免费得到:
+`dl["files"]` 直接喂下一步——这就是"顺畅"。三种跑法都免费得到:
 
 - **会话里一句话**:"跑 monthly-report,月份 2026-06" → 模型调 `workflow` 命名工作流。
 - **CLI / 定时**:点名这个 saved workflow 配 cron(`scheduler` 已有)。
@@ -198,16 +200,16 @@ return ppt
 
 并行/去重等复杂形态直接吃 workflow 已有原语,例如按月并行下载:
 
-```js
-const months = args.months
-const all = await pipeline(months, m => skill('download-excels', { month: m }))
+```ruby
+all = parallel(args["months"]) { |m| skill("download-excels", { "month" => m }) }
 ```
 
 ### 验证 / 兼容
 
-- `internal/workflow/runtime_test.go` 加烟测:注册一个假技能,脚本 `skill('x', {...})` 能取到预期字段;YAML/MD 两种后端各一例;重名报错一例。
+- `internal/workflow/runtime_test.go`:用假 `SkillFunc` 打通原语端到端——round-trip(参数/名字透传)、`pipeline` 内组合、无 `Skill` 时报错、失败 `raise`。
+- `internal/tools/workflow_skill_test.go`:真派发逻辑——`browser:`/`md:` 前缀、未找到、重名歧义、MD 子 agent(有/无 schema 的回传形态)。
 - `skill()` 是新增原语,不改 `agent/parallel/pipeline` 语义,旧脚本不受影响。
-- 需随该原语重生 `mruby.wasm`(host import 变更),流程同 `workflow-named-args-design.md`。
+- 随该原语重生了 `mruby.wasm`(新增 `skill_start` host import),流程同 `workflow-named-args-design.md`。
 
 ---
 
@@ -215,7 +217,7 @@ const all = await pipeline(months, m => skill('download-excels', { month: m }))
 
 扩展点全部退化为"往统一目录里加一个声明了 `outputs` 的技能":
 
-- 新增一个爬数录制 → 加个 YAML,`runSkill` 立刻可用,清单里立刻可见。
+- 新增一个爬数录制 → 加个 YAML,`skill()` 立刻可用,清单里立刻可见。
 - 某步想从"浏览器录制"换成"直接调 API / MCP" → workflow 里那一行换掉,上下游契约不变。
 - 步骤之间是 Unix 管道式松耦合(载荷只是 `file[]` / `string`),没有任何步骤知道另一步的内部实现。
 
