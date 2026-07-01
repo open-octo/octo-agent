@@ -308,14 +308,15 @@
       </label>
     </div>
 
-    <div class="reason-toggle">
-      <Switch bind:checked={showReason} />
-      <span>{$t('models.show_reasoning')}</span>
-    </div>
-
-    <div class="reason-toggle">
-      <Switch bind:checked={vision} />
-      <span>{$t('models.vision')}</span>
+    <div class="toggles">
+      <div class="toggle-row">
+        <span class="toggle-label">{$t('models.show_reasoning')}</span>
+        <Switch bind:checked={showReason} />
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">{$t('models.vision')}</span>
+        <Switch bind:checked={vision} />
+      </div>
     </div>
   {/if}
 
@@ -368,7 +369,10 @@
 .key-toggle:hover { border-color: var(--blue-5); color: var(--blue-5); }
 .prefs { display: flex; gap: 12px; }
 .field.half { flex: 1; min-width: 0; }
-.reason-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+.toggles { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; }
+.toggle-row + .toggle-row { border-top: 1px solid var(--border); }
+.toggle-label { font-size: 13px; color: var(--text-secondary); }
 .result { font-size: 13px; padding: 8px 12px; border-radius: 8px; }
 .result.ok { background: var(--surface-info); color: var(--success); }
 .result.fail { background: var(--warning-bg); color: var(--error); }
