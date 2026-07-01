@@ -88,7 +88,7 @@ projects). Ask the user if it's unclear. Confirm the name with them first.
 Then tell them the three ways to run it:
 - **In chat** — ask to run the workflow by name (passing `args`).
 - **CLI / headless** — run it by name.
-- **On a schedule** — use the `schedule` skill (or `cron-task-creator`).
+- **On a schedule** — use the `cron-task-creator` skill.
 
 ### 6. State the constraints
 - A workflow that includes a browser recording needs a live Chrome **every time

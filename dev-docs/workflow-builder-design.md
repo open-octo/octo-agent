@@ -26,7 +26,7 @@
    - **上游是 SKILL.md**:清单没有它的 outputs,模型只能从其**描述 / 正文推断**产出形状,并为该步**提议一个调用点 `schema`**(见 A.4:MD 的结构化输出靠调用点 schema),把推断出的形状交用户确认。这一档是"模型提议、人确认",比录制弱——不要伪装成清单驱动。
 3. **生成 Ruby** —— 用 `skill()` 串起来(**产物是 Ruby / mruby,不是 JS**:`skill("name", {"k"=>v}, schema: '…')`、`args["…"]` 读入参),给用户过目。few-shot 例子必须是 Ruby,别继承上游文档里的 JS 写法。
 4. **干跑校验(异步,要轮询)** —— `workflow` 工具是**后台执行**:调用返回一个 run id,得 `workflow_status(id)` 轮询到 done 才能判定接线通不通(设个轮询上限,别未完就报成功)。**且干跑会真的执行**:链里含录制,就会在**授权当下**驱动 Chrome——所以要么先要求接上 Chrome(端口 9222),要么只干跑 MD 尾段(用手喂的样例 `files`),录制那步单独用 `run_skill` 验证。
-5. **保存 + 指路** —— `workflow_save`(`name` / `scope`)。注意 `scope` 默认 `project` 且**不在 git 仓库里会报"no project root"**——所以先问/判断:仓库内用 `project`,否则用 `user`(`~/.octo/workflows`,跨项目可用)。存好后告诉用户三种跑法:会话点名调、CLI 点名、或用 `schedule` / `cron-task-creator` 配定时。
+5. **保存 + 指路** —— `workflow_save`(`name` / `scope`)。注意 `scope` 默认 `project` 且**不在 git 仓库里会报"no project root"**——所以先问/判断:仓库内用 `project`,否则用 `user`(`~/.octo/workflows`,跨项目可用)。存好后告诉用户三种跑法:会话点名调、CLI 点名、或用 `cron-task-creator` 配定时。
 6. **讲清约束** —— 含录制的 workflow 在 run / cron 时也需要活的 Chrome(headless 环境明确报错);MD 技能要可靠结构化交接就靠调用点 `schema`(第 2 步已提议)。
 
 ### 为什么"接线"是重点
