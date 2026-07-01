@@ -209,13 +209,13 @@ func TestKillShellTool(t *testing.T) {
 // background process — no kill, no restart. The agent receives partial output
 // plus the bg id.
 func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
-	// Use a short timeout so the test doesn't take 30 s. The window must be
-	// long enough for the shell to cold-start AND emit its first line before
-	// the timeout fires — otherwise the promotion-to-background snapshot is
-	// taken before any partial output exists and the "partial" assert flakes.
-	// POSIX `sh` starts in a few ms; Windows PowerShell cold-start routinely
-	// exceeds 500 ms on CI, so give it a much wider window (and a proportionally
-	// longer sleep so the command is still running when the timeout fires).
+	// Use a short timeout so the test doesn't take 30 s. The window only needs to
+	// fire while the command is still running, so the process is promoted to
+	// background rather than completing synchronously. It does NOT need to be long
+	// enough to capture the "partial" line in the promotion snapshot — that output
+	// is asserted on the eventual background buffer below, which is deterministic.
+	// Windows PowerShell cold-start is slow on CI, so still give it a wide window
+	// and a proportionally longer sleep to stay running past it.
 	timeout := 500 * time.Millisecond
 	cmd := "echo partial && sleep 2"
 	if runtime.GOOS == "windows" {
@@ -235,11 +235,8 @@ func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	// Should contain the partial output.
-	if !strings.Contains(res.Text, "partial") {
-		t.Errorf("result should contain partial output, got: %q", res.Text)
-	}
-	// Should mention the timeout and that it continues as background.
+	// The promotion markers below are added by the promotion logic itself, not by
+	// the shell, so they're deterministic regardless of CI timing.
 	if !strings.Contains(res.Text, "timeout") {
 		t.Errorf("result should mention timeout, got: %q", res.Text)
 	}
@@ -251,13 +248,24 @@ func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
 		t.Errorf("result should warn against polling, got: %q", res.Text)
 	}
 
-	// The background process should eventually finish. Use a generous deadline:
-	// it must exceed the shell cold-start plus the sleep above (up to ~8 s on
-	// Windows), and CI under -race can be very slow on top of that.
+	// The command's "partial" line must reach the agent, but whether it lands in
+	// the promotion snapshot above or only in the continuing background buffer
+	// depends on whether the shell flushed it before the exact timeout instant —
+	// which CI timing cannot guarantee (a loaded Windows runner may not emit
+	// within the window). What IS guaranteed is that the output is never lost: the
+	// promoted process keeps accumulating into its buffer. So wait for exit, then
+	// assert "partial" on the union of the snapshot and the (non-destructive)
+	// buffer. Tail is used rather than Read so polling doesn't consume the output.
+	//
+	// Generous deadline: it must exceed the shell cold-start plus the sleep above
+	// (up to ~8 s on Windows), and CI under -race can be very slow on top of that.
 	deadline := time.Now().Add(25 * time.Second)
 	for time.Now().Before(deadline) {
-		_, s, _, _, _ := m.Read("bg_1")
-		if strings.HasPrefix(s, "exited") {
+		out, s, found, _, _ := m.Tail("bg_1", -1)
+		if found && strings.HasPrefix(s, "exited") {
+			if !strings.Contains(res.Text+out, "partial") {
+				t.Errorf("partial output was lost: snapshot=%q buffer=%q", res.Text, out)
+			}
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
