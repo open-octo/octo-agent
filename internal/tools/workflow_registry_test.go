@@ -104,14 +104,17 @@ func containsName(names []string, want string) bool {
 }
 
 func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {
-	// No user/project roots: the built-in preset must still resolve.
+	// No user/project roots: every built-in preset must still resolve.
 	useWorkflowRoots(t, "", "")
-	w, ok := lookupWorkflow("adversarial-review")
-	if !ok {
-		t.Fatal("embedded default adversarial-review not found")
-	}
-	if w.script == "" || w.description == "" {
-		t.Errorf("embedded workflow = %+v, want non-empty script and description", w)
+	for _, name := range []string{"adversarial-review", "parallel-understand", "batch-migrate"} {
+		w, ok := lookupWorkflow(name)
+		if !ok {
+			t.Errorf("embedded default %q not found", name)
+			continue
+		}
+		if w.script == "" || w.description == "" {
+			t.Errorf("embedded workflow %q = %+v, want non-empty script and description", name, w)
+		}
 	}
 }
 
