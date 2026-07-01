@@ -285,4 +285,21 @@ drain:
 	if !foundBlock {
 		t.Error("no rehydratable image block persisted in session")
 	}
+
+	// Wait for the background turn goroutine to fully unwind before returning.
+	// It flips turnRunning back to false only after runAgentTurnLoop — and every
+	// Save it makes — has returned, so this is the point past which no goroutine
+	// still holds a session-file handle. Without the barrier, t.TempDir()'s
+	// RemoveAll races that handle on Windows and fails the test with "directory
+	// is not empty" even though every assertion above passed.
+	turnMu := srv.sessionTurnLock(sess.ID)
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		turnMu.Lock()
+		running := srv.turnRunning[sess.ID]
+		turnMu.Unlock()
+		if !running {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

@@ -89,6 +89,11 @@ type Healer func(ctx context.Context, page *Page, step *Step, cause error) error
 // top-level navigations the recorder captured, so a multi-page demonstration
 // replays from the right pages.
 func CompileSkill(name, description, startURL string, events []RecordedEvent) Skill {
+	// Collapse consecutive identical raw events (a jittery double-fire / re-
+	// dispatched event) BEFORE parameterization. dropConsecutiveDupeSteps can't
+	// catch a repeated `type` afterwards, because each gets a distinct {{param}}
+	// placeholder as its value — so a spurious extra param+step would survive.
+	events = dedupeConsecutiveEvents(events)
 	s := Skill{Name: name, Description: description}
 	if startURL != "" && startURL != "about:blank" {
 		s.Steps = append(s.Steps, navStep(startURL))
@@ -234,6 +239,24 @@ func hintFromSelector(sel string) string {
 }
 
 var selectorAttrRe = regexp.MustCompile(`\[(?:name|aria-label|data-testid|data-test)="([^"]+)"\]`)
+
+// dedupeConsecutiveEvents drops a raw event identical to its immediate
+// predecessor (same type/selector/frame/value/tag) — a double-fire or a
+// framework's re-dispatched event. navigate is exempt (CompileSkill collapses
+// navigate echoes itself). Conservative: only exact consecutive duplicates.
+func dedupeConsecutiveEvents(events []RecordedEvent) []RecordedEvent {
+	out := make([]RecordedEvent, 0, len(events))
+	for i, e := range events {
+		if i > 0 && e.Type != "navigate" {
+			p := events[i-1]
+			if e.Type == p.Type && e.Selector == p.Selector && e.Frame == p.Frame && e.Value == p.Value && e.Tag == p.Tag {
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
 
 // dropConsecutiveDupeSteps removes a step identical to its immediate predecessor
 // (same action/frame/selector/value) — a double-fire the user didn't intend (a
@@ -784,10 +807,18 @@ func verify(ctx context.Context, page *Page, step *Step, params map[string]strin
 	}
 	if want := subst(step.Verify.URL, params); want != "" {
 		// Poll: a redirect (e.g. to a login/error host) may resolve a beat after
-		// the load event. Substring (not prefix) match so it's scheme-agnostic —
-		// an http→https upgrade must not read as a wrong-page failure.
+		// the load event. A bare host (no '/', the auto-generated form) is matched
+		// against location's actual host, so a bounce to a different host whose URL
+		// merely echoes ours in a query param (…/login?return_to=ourhost) doesn't
+		// falsely pass; a hand-authored fragment containing '/' falls back to a
+		// scheme-agnostic href substring. Either form ignores an http→https upgrade.
 		deadline := time.Now().Add(10 * time.Second)
-		expr := fmt.Sprintf("(location.href||'').indexOf(%s) >= 0", jsString(want))
+		var expr string
+		if strings.Contains(want, "/") {
+			expr = fmt.Sprintf("(location.href||'').indexOf(%s) >= 0", jsString(want))
+		} else {
+			expr = fmt.Sprintf("(function(){try{return new URL(location.href).host===%s}catch(e){return (location.href||'').indexOf(%s)>=0}})()", jsString(want), jsString(want))
+		}
 		for {
 			var ok bool
 			if err := page.Eval(ctx, expr, &ok); err != nil {

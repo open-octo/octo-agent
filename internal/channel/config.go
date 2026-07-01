@@ -87,6 +87,11 @@ func (c *Config) Platform(name string) PlatformConfig {
 	return c.Channels[name]
 }
 
+// IsEnabled reports whether the named platform is present and enabled.
+func (c *Config) IsEnabled(name string) bool {
+	return isEnabled(c.Channels[name])
+}
+
 // SetPlatform merges fields into a platform's config, creating it if needed.
 // Automatically sets enabled: true unless explicitly provided.
 func (c *Config) SetPlatform(name string, fields map[string]any) {

@@ -125,6 +125,14 @@ func (r *Recorder) instrumentSession(ctx context.Context, session, frameSel stri
 // instruments it, so gestures the user performs inside the frame are captured and
 // tagged with the frame replay needs to route back into.
 func (r *Recorder) instrumentOOPIF(ctx context.Context, session string) {
+	// Enable the domains ourselves rather than depend on the browser watcher's
+	// async registerOOPIF having run first — otherwise getFrameTree/addBinding
+	// below could race it and fail, leaving the frame uninstrumented. Idempotent.
+	for _, d := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
+		if _, err := r.page.cli.call(ctx, session, d, nil); err != nil {
+			return
+		}
+	}
 	res, err := r.page.cli.call(ctx, session, "Page.getFrameTree", nil)
 	if err != nil {
 		return

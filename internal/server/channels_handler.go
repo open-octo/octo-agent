@@ -110,6 +110,10 @@ func (s *Server) handleSaveChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Hot-apply the change so a newly configured (or re-credentialed) channel
+	// starts serving immediately — no manual server restart.
+	s.reloadChannel(platform)
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
@@ -132,6 +136,9 @@ func (s *Server) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
 	}
+
+	// Stop the adapter now that its config is gone — no manual restart.
+	s.reloadChannel(platform)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

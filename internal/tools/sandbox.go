@@ -92,6 +92,9 @@ const windowsSafeRmWrapper = `function Remove-Item {
 // Shell by platform: POSIX `sh -c` on macOS/Linux; PowerShell on Windows (the
 // OS sandbox is macOS/Linux-only, so the Windows branch is never sandboxed).
 func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
+	if err := guardServerSelfKill(command); err != nil {
+		return nil, err
+	}
 	if activeSandbox != nil {
 		cmd, err := sandbox.Command(ctx, command, *activeSandbox)
 		if err == nil && cmd != nil {
