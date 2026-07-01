@@ -438,11 +438,17 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 
 	go func() {
 		defer func() {
+			// Release the binding — which reloads the session and appends a
+			// lease-clear record, writing the session file — BEFORE clearing
+			// turnRunning. That flag is the "turn fully wound down" barrier
+			// (tests and drain logic wait on it); flipping it while a session
+			// write is still pending lets t.TempDir() cleanup race the open
+			// handle on Windows ("directory is not empty").
+			sess.DecFlight()
+			s.releaseSessionBinding(sid, agent.EntryWeb)
 			mu.Lock()
 			s.turnRunning[sid] = false
 			mu.Unlock()
-			sess.DecFlight()
-			s.releaseSessionBinding(sid, agent.EntryWeb)
 		}()
 		s.runAgentTurnLoop(sess, content, att.blocks, att.images)
 	}()
