@@ -183,9 +183,10 @@ File (~/.octo/config.yml):
   provider: openai
   model: gpt-4o-mini
 
-Self-hosted / third-party endpoints use the compatible catch-all vendors —
-the only providers that take a base_url (and require one):
-  provider: openai_compatible          # or anthropic_compatible
+Self-hosted / third-party endpoints use the "custom" vendor — the only
+provider that takes a base_url (and requires one), plus a protocol:
+  provider: custom
+  protocol: openai                     # or anthropic
   model: deepseek-chat
   base_url: https://my-gateway.example
 

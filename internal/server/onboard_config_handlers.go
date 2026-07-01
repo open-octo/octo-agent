@@ -70,6 +70,25 @@ func buildProviderPresets() []providerPreset {
 	return presets
 }
 
+// customProtocol maps the web form's anthropic_format toggle to the stored
+// protocol string ("anthropic" | "openai") for the Custom vendor.
+func customProtocol(anthropicFormat bool) string {
+	if anthropicFormat {
+		return "anthropic"
+	}
+	return "openai"
+}
+
+// entryUsesAnthropic reports whether an entry speaks the Anthropic wire format,
+// so the web form's anthropic_format toggle round-trips. Named vendors use their
+// registry protocol; the Custom vendor carries it in the entry's Protocol field.
+func entryUsesAnthropic(e config.ModelEntry) bool {
+	if app.VendorNeedsProtocol(e.Provider) {
+		return e.Protocol == "anthropic"
+	}
+	return app.IsAnthropicProtocol(e.Provider)
+}
+
 // ─── GET /api/providers ─────────────────────────────────────────────────────
 
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +198,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 			BaseURL:         e.BaseURL,
 			APIKeyMasked:    maskKey(e.APIKey),
 			Provider:        e.Provider,
-			AnthropicFormat: app.IsAnthropicProtocol(e.Provider),
+			AnthropicFormat: entryUsesAnthropic(e),
 			ReasoningEffort: e.ReasoningEffort,
 			ShowReasoning:   e.ShowReasoning,
 		}
@@ -305,22 +324,24 @@ func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the vendor: explicit request field > known endpoint > the
-	// protocol-matching compatible catch-all (the URL is custom by then).
-	providerName := app.ProviderOpenAICompatible
-	if req.AnthropicFormat {
-		providerName = app.ProviderAnthropicCompatible
-	}
+	// Resolve the vendor: explicit request field > known endpoint > the Custom
+	// catch-all (the URL is custom by then).
+	providerName := app.ProviderCustom
 	if req.Provider != "" && app.IsKnownVendor(req.Provider) {
 		providerName = req.Provider
 	} else if v := app.VendorByBaseURL(req.BaseURL); v != "" {
 		providerName = v
 	}
+	// The Custom vendor has no fixed wire format; derive it from the request.
+	protocol := ""
+	if app.VendorNeedsProtocol(providerName) {
+		protocol = customProtocol(req.AnthropicFormat)
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	if err := app.TestConnection(ctx, providerName, key, req.BaseURL, req.Model); err != nil {
+	if err := app.TestConnection(ctx, providerName, key, req.BaseURL, req.Model, protocol); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
 		return
 	}
@@ -361,16 +382,21 @@ func applyModelRequestToEntry(req saveModelRequest, e *config.ModelEntry) {
 	case e.Provider != "":
 		// keep the entry's current vendor
 	case req.BaseURL == "":
-		// No endpoint signal at all — fall back to the protocol root.
+		// No endpoint signal at all — fall back to the protocol root vendor.
 		if req.AnthropicFormat {
 			e.Provider = app.ProviderAnthropic
 		} else {
 			e.Provider = app.ProviderOpenAI
 		}
-	case req.AnthropicFormat:
-		e.Provider = app.ProviderAnthropicCompatible
 	default:
-		e.Provider = app.ProviderOpenAICompatible
+		e.Provider = app.ProviderCustom
+	}
+	// Protocol is stored only for the Custom vendor; a named vendor pins its own,
+	// so clear any stale value carried over from a previous Custom selection.
+	if app.VendorNeedsProtocol(e.Provider) {
+		e.Protocol = customProtocol(req.AnthropicFormat)
+	} else {
+		e.Protocol = ""
 	}
 	if req.ReasoningEffort != "" {
 		e.ReasoningEffort = req.ReasoningEffort

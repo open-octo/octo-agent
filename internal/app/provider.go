@@ -175,17 +175,6 @@ var Registry = []Vendor{
 		},
 	},
 	{
-		ID:             "mistral",
-		DisplayName:    "Mistral",
-		Protocol:       "openai",
-		API:            "openai-completions",
-		DefaultBaseURL: "https://api.mistral.ai",
-		DefaultModel:   "mistral-large-latest",
-		Models:         []string{"mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"},
-		APIKeyEnvVar:   "MISTRAL_API_KEY",
-		WebsiteURL:     "https://console.mistral.ai/api-keys/",
-	},
-	{
 		ID:             "mimo",
 		DisplayName:    "MiMo (Xiaomi)",
 		Protocol:       "openai",
@@ -197,36 +186,40 @@ var Registry = []Vendor{
 		WebsiteURL:     "https://platform.xiaomimimo.com/#/console/api-keys",
 	},
 	{
-		ID:             ProviderOpenAICompatible,
-		DisplayName:    "OpenAI Compatible",
-		Protocol:       "openai",
-		API:            "openai-completions",
-		APIKeyEnvVar:   "OPENAI_COMPATIBLE_API_KEY",
-		CustomEndpoint: true,
-	},
-	{
-		ID:             ProviderAnthropicCompatible,
-		DisplayName:    "Anthropic Compatible",
-		Protocol:       "anthropic",
-		API:            "anthropic-messages",
-		APIKeyEnvVar:   "ANTHROPIC_COMPATIBLE_API_KEY",
+		ID:          ProviderCustom,
+		DisplayName: "Custom",
+		// Protocol is empty: a Custom endpoint has no fixed wire format, so the
+		// user picks "anthropic" or "openai" at config time and it is stored on
+		// the model entry (config.ModelEntry.Protocol), not here.
+		Protocol:       "",
+		API:            "",
+		APIKeyEnvVar:   "OCTO_CUSTOM_API_KEY",
 		CustomEndpoint: true,
 	},
 }
 
-// Catch-all vendor IDs for self-hosted / third-party endpoints speaking a
-// compatible protocol. They are the only vendors that accept a free-form
-// base URL (CustomEndpoint); a base URL is required to build their client.
-const (
-	ProviderOpenAICompatible    = "openai_compatible"
-	ProviderAnthropicCompatible = "anthropic_compatible"
-)
+// ProviderCustom is the catch-all vendor for self-hosted / third-party
+// endpoints. It is the only vendor that accepts a free-form base URL
+// (CustomEndpoint) and the only one whose wire protocol is chosen per config
+// entry rather than pinned in the registry — a base URL and a protocol are
+// both required to build its client.
+const ProviderCustom = "custom"
 
 // VendorCustomEndpoint reports whether the vendor has no fixed endpoint and
 // requires a user-supplied base URL.
 func VendorCustomEndpoint(id string) bool {
 	if v := vendorByID(id); v != nil {
 		return v.CustomEndpoint
+	}
+	return false
+}
+
+// VendorNeedsProtocol reports whether the vendor has no fixed wire protocol, so
+// the caller must supply one ("anthropic" or "openai") from the model entry.
+// Only the Custom catch-all needs this; every named vendor pins its protocol.
+func VendorNeedsProtocol(id string) bool {
+	if v := vendorByID(id); v != nil {
+		return v.Protocol == ""
 	}
 	return false
 }

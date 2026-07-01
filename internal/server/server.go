@@ -1042,10 +1042,17 @@ func resolveProviderAndModel(flagProvider, flagModel string) (agent.Sender, stri
 		// setup via the Web UI.
 		return nil, model, provName, nil
 	}
+	// Protocol is meaningful only for the Custom vendor, and only when the
+	// resolved provider actually matches the config entry (same rule as key/model).
+	protocol := ""
+	if provName == entry.Provider {
+		protocol = entry.Protocol
+	}
 	sender, err := app.NewSender(app.SenderOptions{
 		Provider:        provName,
 		APIKey:          apiKey,
 		BaseURL:         resolveBaseURL(provName, cfg),
+		Protocol:        protocol,
 		ReasoningEffort: entry.ReasoningEffort,
 		ShowReasoning:   cfg.EffectiveShowReasoning(entry.ShowReasoning),
 	})
@@ -1188,6 +1195,7 @@ func senderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 		Provider:        entry.Provider,
 		APIKey:          apiKey,
 		BaseURL:         entry.BaseURL,
+		Protocol:        entry.Protocol,
 		ReasoningEffort: entry.ReasoningEffort,
 		ShowReasoning:   cfg.EffectiveShowReasoning(entry.ShowReasoning),
 	})

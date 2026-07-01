@@ -41,6 +41,9 @@
   // pre-filled and saveable without re-typing.
   let model        = $state(seed.model || (seed as Partial<ModelEntry>).id || '')
   let baseUrl      = $state(seed.base_url ?? '')
+  // Protocol is only meaningful for the Custom vendor; seed from the entry's
+  // stored wire format (surfaced as anthropic_format) so an edit round-trips.
+  let protocol     = $state<'openai' | 'anthropic'>(seed.anthropic_format ? 'anthropic' : 'openai')
   let apiKey       = $state('')            // never prefilled; placeholder shows the masked key
   let permMode     = $state(seed.permission_mode ?? 'interactive')
   let reasoning    = $state(seed.reasoning_effort ?? 'off')
@@ -84,6 +87,9 @@
   // Catalogue vendors are pinned to their endpoint; only custom_endpoint
   // providers take a typed Base URL.
   let baseUrlLocked = $derived(!!preset && !preset.custom_endpoint)
+  // The Custom vendor has no fixed wire protocol (empty api), so the user picks
+  // it explicitly. A hand-typed endpoint with no preset is Custom too.
+  let isCustom = $derived(preset ? (!!preset.custom_endpoint && !preset.api) : !!baseUrl)
   let keyPlaceholder = $derived(initial?.api_key_masked || $t('models.apikey.placeholder'))
 
   function variantLabel(v: api.EndpointVariant): string {
@@ -106,11 +112,13 @@
     }
   }
 
-  // anthropic vs openai protocol is decided by the chosen preset; a hand-typed
-  // endpoint with no preset is the openai-compatible catch-all.
+  // For named vendors the protocol is decided by the chosen preset; for the
+  // Custom vendor (or a hand-typed endpoint with no preset) the user picks it.
   function buildReq(): ModelConfigInput {
-    const providerID = preset ? preset.id : 'openai_compatible'
-    const anthropic = !!(preset && preset.api === 'anthropic-messages')
+    const providerID = preset ? preset.id : 'custom'
+    const anthropic = isCustom
+      ? protocol === 'anthropic'
+      : !!(preset && preset.api === 'anthropic-messages')
     const req: ModelConfigInput = {
       type: 'default',
       model: model.trim(),
@@ -174,6 +182,17 @@
       <a class="field-link" href={preset.website_url} target="_blank" rel="noreferrer">{$t('models.get_apikey')}</a>
     {/if}
   </label>
+
+  <!-- Protocol (Custom vendor only — named vendors pin their own wire format) -->
+  {#if isCustom}
+    <label class="field">
+      <span class="field-label">{$t('models.protocol')}</span>
+      <select class="field-input" bind:value={protocol} disabled={saving}>
+        <option value="openai">{$t('models.protocol.openai')}</option>
+        <option value="anthropic">{$t('models.protocol.anthropic')}</option>
+      </select>
+    </label>
+  {/if}
 
   <!-- Model -->
   <label class="field">

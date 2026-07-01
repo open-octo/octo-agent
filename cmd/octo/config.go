@@ -291,6 +291,36 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	// stored for one vendor must not seed prompts for a different one.
 	sameProvider := existing.Provider == provider
 
+	// Protocol. The Custom vendor has no fixed wire format, so the user picks
+	// one explicitly; named vendors carry their protocol in the registry and
+	// skip this. Stored on the entry (config Protocol field), not the registry.
+	var protocol string
+	if app.VendorNeedsProtocol(provider) {
+		def := "openai"
+		if sameProvider && existing.Protocol != "" {
+			def = existing.Protocol
+		}
+		if tty {
+			items := []selectItem{
+				{label: "OpenAI (Chat Completions)", desc: "openai", value: "openai"},
+				{label: "Anthropic (Messages)", desc: "anthropic", value: "anthropic"},
+			}
+			choice, ok := runSelect(stdin, stdout, "Protocol", items, def)
+			if !ok {
+				return cancelWizard(stderr)
+			}
+			protocol = choice.value
+			fmt.Fprintf(stdout, "Protocol: %s\n\n", protocol)
+		} else {
+			protocol = strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
+				"Protocol (openai | anthropic)", def)))
+			if protocol != "openai" && protocol != "anthropic" {
+				fmt.Fprintf(stderr, "octo config: protocol must be \"openai\" or \"anthropic\"\n")
+				return 2
+			}
+		}
+	}
+
 	// Model. Compatible (custom-endpoint) vendors have no catalogue or default,
 	// so the model is a required free-text answer.
 	var model string
@@ -381,8 +411,8 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 		}
 		ans := strings.TrimSpace(promptDefault(reader, stdout, "Endpoint URL (empty = default)", def))
 		if ans != "" && app.VendorByBaseURL(ans) != provider {
-			fmt.Fprintf(stderr, "octo config: %q is not an endpoint of %s — for a custom endpoint use the %s or %s provider\n",
-				ans, app.VendorDisplayName(provider), app.ProviderOpenAICompatible, app.ProviderAnthropicCompatible)
+			fmt.Fprintf(stderr, "octo config: %q is not an endpoint of %s — for a custom endpoint use the %s provider\n",
+				ans, app.VendorDisplayName(provider), app.ProviderCustom)
 			return 2
 		}
 		baseURL = ans
@@ -394,6 +424,9 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	outEntry.Provider = provider
 	outEntry.Model = model
 	outEntry.BaseURL = baseURL
+	// Protocol is stored only for the Custom vendor; clear it for named vendors
+	// so a switch away from Custom doesn't leave a stale value behind.
+	outEntry.Protocol = protocol
 
 	// ── API key — asked right after the model so a brand-new user reaches the
 	// one thing that actually unblocks them, not after a pile of expert
@@ -407,7 +440,7 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	// through, since that says nothing about whether the config is right.
 	if keyEntered && tty {
 		for {
-			res := reportConnectionCheck(stdout, stderr, provider, outEntry.APIKey, baseURL, model)
+			res := reportConnectionCheck(stdout, stderr, provider, outEntry.APIKey, baseURL, model, protocol)
 			if res == connOK || !firstRun {
 				break
 			}
@@ -544,7 +577,7 @@ const (
 // reportConnectionCheck tests the entered key against the endpoint, printing a
 // ✓/✗ line. Resolves the vendor default model/base URL when the user accepted
 // the default (left them empty).
-func reportConnectionCheck(stdout, stderr io.Writer, provider, key, baseURL, model string) connResult {
+func reportConnectionCheck(stdout, stderr io.Writer, provider, key, baseURL, model, protocol string) connResult {
 	if model == "" {
 		model = app.VendorDefaultModel(provider)
 	}
@@ -554,7 +587,7 @@ func reportConnectionCheck(stdout, stderr io.Writer, provider, key, baseURL, mod
 	fmt.Fprintln(stdout, "Testing connection…")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := validateConnection(ctx, provider, key, baseURL, model); err != nil {
+	if err := validateConnection(ctx, provider, key, baseURL, model, protocol); err != nil {
 		fmt.Fprintf(stderr, "✗ Couldn't connect: %v\n", err)
 		return classifyConnErr(err)
 	}

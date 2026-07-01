@@ -202,46 +202,56 @@ func TestConfigModels_PostAppendsEntry(t *testing.T) {
 	}
 }
 
-func TestConfigModels_PostUnknownEndpointBecomesCompatibleVendor(t *testing.T) {
+func TestConfigModels_PostUnknownEndpointBecomesCustomVendor(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
-	// A hand-typed endpoint that matches no vendor preset lands on the
-	// protocol-matching compatible catch-all, not the real openai/anthropic.
+	// A hand-typed endpoint that matches no vendor preset lands on the Custom
+	// catch-all, with the wire format recorded on the entry's Protocol field.
 	w := doJSON(t, srv, http.MethodPost, "/api/config/models",
-		`{"model":"my-model","base_url":"https://gw.example/v1","api_key":"sk-x"}`)
+		`{"model":"my-model","base_url":"https://gw.example/v1","api_key":"sk-x","provider":"custom"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST = %d: %s", w.Code, w.Body.String())
 	}
 	cfg, _ := config.Load()
-	if got := cfg.Models[0].Provider; got != "openai_compatible" {
-		t.Errorf("provider = %q, want openai_compatible", got)
+	if got := cfg.Models[0].Provider; got != "custom" {
+		t.Errorf("provider = %q, want custom", got)
+	}
+	if got := cfg.Models[0].Protocol; got != "openai" {
+		t.Errorf("protocol = %q, want openai (default)", got)
 	}
 
 	w = doJSON(t, srv, http.MethodPost, "/api/config/models",
-		`{"model":"my-model","base_url":"https://gw2.example","api_key":"sk-x","anthropic_format":true}`)
+		`{"model":"my-model","base_url":"https://gw2.example","api_key":"sk-x","provider":"custom","anthropic_format":true}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST = %d: %s", w.Code, w.Body.String())
 	}
 	cfg, _ = config.Load()
-	if got := cfg.Models[1].Provider; got != "anthropic_compatible" {
-		t.Errorf("anthropic_format provider = %q, want anthropic_compatible", got)
+	if got := cfg.Models[1].Provider; got != "custom" {
+		t.Errorf("anthropic_format provider = %q, want custom", got)
+	}
+	if got := cfg.Models[1].Protocol; got != "anthropic" {
+		t.Errorf("anthropic_format protocol = %q, want anthropic", got)
 	}
 }
 
-func TestListProviders_MarksCompatibleCatchAlls(t *testing.T) {
+func TestListProviders_MarksCustomCatchAll(t *testing.T) {
 	presets := buildProviderPresets()
 	byID := map[string]providerPreset{}
 	for _, p := range presets {
 		byID[p.ID] = p
 	}
-	for _, id := range []string{"openai_compatible", "anthropic_compatible"} {
-		p, ok := byID[id]
-		if !ok {
-			t.Fatalf("%s missing from /api/providers presets", id)
-		}
-		if !p.CustomEndpoint || p.BaseURL != "" {
-			t.Errorf("%s: CustomEndpoint=%v BaseURL=%q, want true/empty", id, p.CustomEndpoint, p.BaseURL)
+	p, ok := byID["custom"]
+	if !ok {
+		t.Fatal("custom missing from /api/providers presets")
+	}
+	if !p.CustomEndpoint || p.BaseURL != "" || p.API != "" {
+		t.Errorf("custom: CustomEndpoint=%v BaseURL=%q API=%q, want true/empty/empty", p.CustomEndpoint, p.BaseURL, p.API)
+	}
+	// The retired compatible catch-alls must no longer appear.
+	for _, id := range []string{"openai_compatible", "anthropic_compatible", "mistral"} {
+		if _, ok := byID[id]; ok {
+			t.Errorf("retired vendor %q still present in presets", id)
 		}
 	}
 	if byID["deepseek"].CustomEndpoint {

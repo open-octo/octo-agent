@@ -33,6 +33,9 @@ type SenderOptions struct {
 	Provider string // vendor ID, e.g. "kimi", "deepseek", "anthropic", "openai"
 	APIKey   string
 	BaseURL  string // optional endpoint override; empty uses the vendor default
+	// Protocol ("anthropic" | "openai") is required only for the Custom vendor,
+	// which has no registry-pinned wire format; named vendors ignore it.
+	Protocol string
 
 	// CacheKey is forwarded as the provider's prompt-cache key, stable across a
 	// conversation's turns so the backend routes them to the same cache.
@@ -74,7 +77,7 @@ func AnthropicThinkingBudget(effort string) int {
 // NewSender builds the provider client for opts and wraps it as an agent.Sender.
 // It is the single entry point through which every transport obtains a sender.
 func NewSender(opts SenderOptions) (agent.Sender, error) {
-	p, err := buildClient(opts.Provider, opts.APIKey, opts.BaseURL)
+	p, err := buildClient(opts.Provider, opts.APIKey, opts.BaseURL, opts.Protocol)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +112,9 @@ func DefaultBaseURL(providerName string) string {
 
 // buildClient constructs the vendor client and applies an optional base-URL
 // override. The caller is responsible for having resolved a non-empty key.
-func buildClient(name, apiKey, baseURL string) (provider.Provider, error) {
+// protocol is used only for vendors with no registry-pinned wire format (the
+// Custom catch-all); named vendors ignore it and use their own protocol.
+func buildClient(name, apiKey, baseURL, protocol string) (provider.Provider, error) {
 	v := vendorByID(name)
 	if v == nil {
 		return nil, fmt.Errorf("unknown provider %q", name)
@@ -126,7 +131,17 @@ func buildClient(name, apiKey, baseURL string) (provider.Provider, error) {
 		baseURL = v.DefaultBaseURL
 	}
 
-	switch v.Protocol {
+	// A registry-pinned protocol always wins; the Custom vendor leaves it empty
+	// and relies on the caller-supplied protocol from the model entry.
+	proto := v.Protocol
+	if proto == "" {
+		proto = protocol
+	}
+	if proto == "" {
+		return nil, fmt.Errorf("provider %q requires a protocol (\"anthropic\" or \"openai\")", name)
+	}
+
+	switch proto {
 	case "anthropic":
 		client, err := anthropic.New(apiKey)
 		if err != nil {
@@ -150,7 +165,7 @@ func buildClient(name, apiKey, baseURL string) (provider.Provider, error) {
 		client.Dialect = name
 		return client, nil
 	default:
-		return nil, fmt.Errorf("unknown protocol %q for provider %q", v.Protocol, name)
+		return nil, fmt.Errorf("unknown protocol %q for provider %q", proto, name)
 	}
 }
 
@@ -328,8 +343,8 @@ func replyFromResponse(resp provider.Response) agent.Reply {
 // TestConnection pings the provider with a minimal request to verify that
 // the API key, base URL, and model all work. It returns a descriptive error
 // on failure (auth, model not found, network, etc.).
-func TestConnection(ctx context.Context, providerName, apiKey, baseURL, model string) error {
-	p, err := buildClient(providerName, apiKey, baseURL)
+func TestConnection(ctx context.Context, providerName, apiKey, baseURL, model, protocol string) error {
+	p, err := buildClient(providerName, apiKey, baseURL, protocol)
 	if err != nil {
 		return err
 	}

@@ -95,6 +95,32 @@ func TestLoad_LegacyYAMLIsNormalised(t *testing.T) {
 	}
 }
 
+func TestLoad_MigratesCompatibleVendorsToCustom(t *testing.T) {
+	home := setHome(t)
+	// A pre-refactor config naming the retired compatible catch-alls.
+	writeOcto(t, home, "config.yml",
+		"models:\n"+
+			"  - name: gw-openai\n    provider: openai_compatible\n    model: m1\n    base_url: https://gw1.example\n"+
+			"  - name: gw-anthropic\n    provider: anthropic_compatible\n    model: m2\n    base_url: https://gw2.example\n"+
+			"  - name: real\n    provider: anthropic\n    model: claude-sonnet-4-6\n"+
+			"default_model: gw-openai\n")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if e := c.Models[0]; e.Provider != "custom" || e.Protocol != "openai" {
+		t.Errorf("openai_compatible entry = %+v, want custom/openai", e)
+	}
+	if e := c.Models[1]; e.Provider != "custom" || e.Protocol != "anthropic" {
+		t.Errorf("anthropic_compatible entry = %+v, want custom/anthropic", e)
+	}
+	// A named vendor is left untouched.
+	if e := c.Models[2]; e.Provider != "anthropic" || e.Protocol != "" {
+		t.Errorf("anthropic entry = %+v, want anthropic/(no protocol)", e)
+	}
+}
+
 func TestLoad_NewFileShadowsLegacy(t *testing.T) {
 	home := setHome(t)
 	writeOcto(t, home, "config.yaml", "model: old-model\nprovider: openai\n")

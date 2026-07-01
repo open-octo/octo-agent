@@ -359,7 +359,7 @@ func TestReportConnectionCheck(t *testing.T) {
 	defer func() { validateConnection = orig }()
 
 	var gotModel, gotBase string
-	validateConnection = func(ctx context.Context, provider, key, baseURL, model string) error {
+	validateConnection = func(ctx context.Context, provider, key, baseURL, model, protocol string) error {
 		gotModel, gotBase = model, baseURL
 		switch key {
 		case "bad":
@@ -372,7 +372,7 @@ func TestReportConnectionCheck(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	// Empty model/baseURL must resolve to the vendor defaults before testing.
-	if res := reportConnectionCheck(&out, &errb, "anthropic", "good", "", ""); res != connOK {
+	if res := reportConnectionCheck(&out, &errb, "anthropic", "good", "", "", ""); res != connOK {
 		t.Fatalf("expected connOK; got %d, stderr=%q", res, errb.String())
 	}
 	if gotModel == "" || gotBase == "" {
@@ -385,7 +385,7 @@ func TestReportConnectionCheck(t *testing.T) {
 	out.Reset()
 	errb.Reset()
 	// A rejected key (HTTP 4xx) is the config being wrong.
-	if res := reportConnectionCheck(&out, &errb, "anthropic", "bad", "", ""); res != connRejected {
+	if res := reportConnectionCheck(&out, &errb, "anthropic", "bad", "", "", ""); res != connRejected {
 		t.Fatalf("expected connRejected for bad key; got %d", res)
 	}
 	if !strings.Contains(errb.String(), "Couldn't connect") {
@@ -393,7 +393,7 @@ func TestReportConnectionCheck(t *testing.T) {
 	}
 
 	// A network error is orthogonal to whether the config is correct.
-	if res := reportConnectionCheck(&out, &errb, "anthropic", "offline", "", ""); res != connNetwork {
+	if res := reportConnectionCheck(&out, &errb, "anthropic", "offline", "", "", ""); res != connNetwork {
 		t.Fatalf("expected connNetwork for unreachable endpoint; got %d", res)
 	}
 }
@@ -453,14 +453,15 @@ func TestHTTPStatusFromErr(t *testing.T) {
 	}
 }
 
-func TestRunConfig_Wizard_CompatibleProviderRequiresModelAndBaseURL(t *testing.T) {
+func TestRunConfig_Wizard_CustomProviderRequiresProtocolModelAndBaseURL(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "set-so-wizard-skips-key-prompt")
+	t.Setenv("OCTO_CUSTOM_API_KEY", "set-so-wizard-skips-key-prompt")
 
-	// Answers: provider, model, base URL — both free-text fields are required.
-	in := strings.NewReader("openai_compatible\ndeepseek-chat\nhttps://gw.example/v1\n")
+	// Answers: provider, protocol, model, base URL — the Custom vendor needs a
+	// protocol, and both free-text fields are required.
+	in := strings.NewReader("custom\nopenai\ndeepseek-chat\nhttps://gw.example/v1\n")
 	var stdout, stderr bytes.Buffer
 	if code := runConfig(nil, in, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
@@ -471,12 +472,12 @@ func TestRunConfig_Wizard_CompatibleProviderRequiresModelAndBaseURL(t *testing.T
 		t.Fatalf("Load after wizard: %v", err)
 	}
 	entry := got.DefaultEntry()
-	if entry.Provider != "openai_compatible" || entry.Model != "deepseek-chat" || entry.BaseURL != "https://gw.example/v1" {
-		t.Errorf("entry = %+v, want openai_compatible/deepseek-chat/https://gw.example/v1", entry)
+	if entry.Provider != "custom" || entry.Protocol != "openai" || entry.Model != "deepseek-chat" || entry.BaseURL != "https://gw.example/v1" {
+		t.Errorf("entry = %+v, want custom/openai/deepseek-chat/https://gw.example/v1", entry)
 	}
 
 	// An empty base URL is a hard error, not a silent default.
-	in = strings.NewReader("openai_compatible\ndeepseek-chat\n\n")
+	in = strings.NewReader("custom\nopenai\ndeepseek-chat\n\n")
 	stdout.Reset()
 	stderr.Reset()
 	// Wipe the entry so its stored URL doesn't become the press-Enter default.
@@ -488,9 +489,15 @@ func TestRunConfig_Wizard_CompatibleProviderRequiresModelAndBaseURL(t *testing.T
 	}
 
 	// An empty model is equally a hard error.
-	in = strings.NewReader("openai_compatible\n\nhttps://gw.example/v1\n")
+	in = strings.NewReader("custom\nopenai\n\nhttps://gw.example/v1\n")
 	if code := runConfig(nil, in, &stdout, &stderr); code != 2 {
 		t.Errorf("empty model: exit = %d, want 2 (stderr=%q)", code, stderr.String())
+	}
+
+	// An invalid protocol is rejected.
+	in = strings.NewReader("custom\nbogus\ndeepseek-chat\nhttps://gw.example/v1\n")
+	if code := runConfig(nil, in, &stdout, &stderr); code != 2 {
+		t.Errorf("invalid protocol: exit = %d, want 2 (stderr=%q)", code, stderr.String())
 	}
 }
 
@@ -511,15 +518,15 @@ func TestRunConfig_Wizard_PinnedVendorRejectsForeignEndpoint(t *testing.T) {
 		t.Errorf("base URL = %q, want the picked variant", got.DefaultEntry().BaseURL)
 	}
 
-	// …but an arbitrary URL is rejected with a pointer to the catch-alls.
+	// …but an arbitrary URL is rejected with a pointer to the custom vendor.
 	in = strings.NewReader("kimi\n\nhttps://evil.example\n")
 	stdout.Reset()
 	stderr.Reset()
 	if code := runConfig(nil, in, &stdout, &stderr); code != 2 {
 		t.Errorf("foreign URL: exit = %d, want 2", code)
 	}
-	if !strings.Contains(stderr.String(), "openai_compatible") {
-		t.Errorf("error should point at the compatible catch-alls; got %q", stderr.String())
+	if !strings.Contains(stderr.String(), "custom") {
+		t.Errorf("error should point at the custom vendor; got %q", stderr.String())
 	}
 }
 

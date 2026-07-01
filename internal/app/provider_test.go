@@ -35,7 +35,7 @@ func TestVendor_KimiCodingPlan(t *testing.T) {
 
 func TestVendor_KimiCodingPlan_BuildClient(t *testing.T) {
 	// buildClient should succeed with a dummy key for the anthropic protocol.
-	_, err := buildClient("kimi-coding-plan", "sk-dummy-key", "")
+	_, err := buildClient("kimi-coding-plan", "sk-dummy-key", "", "")
 	if err != nil {
 		t.Fatalf("buildClient(kimi-coding-plan) error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestVendor_KimiCodingPlan_BuildClient(t *testing.T) {
 
 func TestVendor_KimiCodingPlan_BuildClient_CustomBaseURL(t *testing.T) {
 	// Verify the custom base URL override is applied.
-	client, err := buildClient("kimi-coding-plan", "sk-dummy-key", "https://custom.example/v1")
+	client, err := buildClient("kimi-coding-plan", "sk-dummy-key", "https://custom.example/v1", "")
 
 	if err != nil {
 		t.Fatalf("buildClient error: %v", err)
@@ -64,11 +64,17 @@ func TestVendor_KimiCodingPlan_BuildClient_CustomBaseURL(t *testing.T) {
 func TestIsKnownVendor(t *testing.T) {
 	for _, id := range []string{
 		"openrouter", "deepseek", "minimax", "kimi", "kimi-coding-plan",
-		"glm", "openai", "anthropic", "bailian", "mistral", "mimo",
-		"openai_compatible", "anthropic_compatible",
+		"glm", "openai", "anthropic", "bailian", "mimo",
+		ProviderCustom,
 	} {
 		if !IsKnownVendor(id) {
 			t.Errorf("IsKnownVendor(%q) = false, want true", id)
+		}
+	}
+	// Retired vendors must no longer resolve.
+	for _, id := range []string{"mistral", "openai_compatible", "anthropic_compatible"} {
+		if IsKnownVendor(id) {
+			t.Errorf("IsKnownVendor(%q) = true, want false (retired)", id)
 		}
 	}
 	if IsKnownVendor("bogus") {
@@ -76,50 +82,58 @@ func TestIsKnownVendor(t *testing.T) {
 	}
 }
 
-func TestVendor_CompatibleCatchAlls(t *testing.T) {
-	cases := []struct {
-		id, protocol, api, envVar string
-	}{
-		{ProviderOpenAICompatible, "openai", "openai-completions", "OPENAI_COMPATIBLE_API_KEY"},
-		{ProviderAnthropicCompatible, "anthropic", "anthropic-messages", "ANTHROPIC_COMPATIBLE_API_KEY"},
+func TestVendor_CustomCatchAll(t *testing.T) {
+	v := vendorByID(ProviderCustom)
+	if v == nil {
+		t.Fatalf("%s not found in registry", ProviderCustom)
 	}
-	for _, tc := range cases {
-		v := vendorByID(tc.id)
-		if v == nil {
-			t.Fatalf("%s not found in registry", tc.id)
-		}
-		if !v.CustomEndpoint {
-			t.Errorf("%s: CustomEndpoint = false, want true", tc.id)
-		}
-		if v.Protocol != tc.protocol || v.API != tc.api {
-			t.Errorf("%s: protocol/api = %q/%q, want %q/%q", tc.id, v.Protocol, v.API, tc.protocol, tc.api)
-		}
-		if v.DefaultBaseURL != "" || v.DefaultModel != "" || len(v.Models) != 0 {
-			t.Errorf("%s: catch-all must not carry a fixed endpoint or model catalogue: %+v", tc.id, v)
-		}
-		if v.APIKeyEnvVar != tc.envVar {
-			t.Errorf("%s: APIKeyEnvVar = %q, want %q", tc.id, v.APIKeyEnvVar, tc.envVar)
-		}
+	if !v.CustomEndpoint {
+		t.Errorf("%s: CustomEndpoint = false, want true", ProviderCustom)
 	}
-	// Every other vendor is pinned: it must declare a fixed endpoint.
+	// The Custom vendor has no fixed protocol/api — it is chosen per config entry.
+	if v.Protocol != "" || v.API != "" {
+		t.Errorf("%s: protocol/api = %q/%q, want empty (chosen per entry)", ProviderCustom, v.Protocol, v.API)
+	}
+	if v.DefaultBaseURL != "" || v.DefaultModel != "" || len(v.Models) != 0 {
+		t.Errorf("%s: catch-all must not carry a fixed endpoint or model catalogue: %+v", ProviderCustom, v)
+	}
+	if v.APIKeyEnvVar != "OCTO_CUSTOM_API_KEY" {
+		t.Errorf("%s: APIKeyEnvVar = %q, want OCTO_CUSTOM_API_KEY", ProviderCustom, v.APIKeyEnvVar)
+	}
+	if !VendorNeedsProtocol(ProviderCustom) {
+		t.Errorf("VendorNeedsProtocol(%s) = false, want true", ProviderCustom)
+	}
+	// Every other vendor is pinned: fixed endpoint and a registry protocol.
 	for _, v := range Registry {
-		if !v.CustomEndpoint && v.DefaultBaseURL == "" {
+		if v.CustomEndpoint {
+			continue
+		}
+		if v.DefaultBaseURL == "" {
 			t.Errorf("vendor %q has neither a fixed endpoint nor CustomEndpoint", v.ID)
+		}
+		if VendorNeedsProtocol(v.ID) {
+			t.Errorf("pinned vendor %q must declare a protocol", v.ID)
 		}
 	}
 }
 
-func TestBuildClient_CompatibleRequiresBaseURL(t *testing.T) {
-	for _, id := range []string{ProviderOpenAICompatible, ProviderAnthropicCompatible} {
-		if _, err := buildClient(id, "sk-dummy", ""); err == nil {
-			t.Errorf("buildClient(%s) without base URL must fail", id)
-		}
-		if _, err := buildClient(id, "sk-dummy", "https://gw.example/v1"); err != nil {
-			t.Errorf("buildClient(%s) with base URL: %v", id, err)
+func TestBuildClient_CustomRequiresBaseURLAndProtocol(t *testing.T) {
+	// No base URL → fail regardless of protocol.
+	if _, err := buildClient(ProviderCustom, "sk-dummy", "", "openai"); err == nil {
+		t.Errorf("buildClient(custom) without base URL must fail")
+	}
+	// Base URL but no protocol → fail (Custom has no registry-pinned protocol).
+	if _, err := buildClient(ProviderCustom, "sk-dummy", "https://gw.example/v1", ""); err == nil {
+		t.Errorf("buildClient(custom) without protocol must fail")
+	}
+	// Base URL + protocol → ok, both wire formats.
+	for _, proto := range []string{"openai", "anthropic"} {
+		if _, err := buildClient(ProviderCustom, "sk-dummy", "https://gw.example/v1", proto); err != nil {
+			t.Errorf("buildClient(custom, %s): %v", proto, err)
 		}
 	}
-	// Pinned vendors still build with no override.
-	if _, err := buildClient("anthropic", "sk-dummy", ""); err != nil {
+	// Pinned vendors still build with no override and ignore a supplied protocol.
+	if _, err := buildClient("anthropic", "sk-dummy", "", ""); err != nil {
 		t.Errorf("buildClient(anthropic) without base URL: %v", err)
 	}
 }
@@ -133,7 +147,7 @@ func TestBuildClient_EmptyBaseURL_UsesVendorEndpoint(t *testing.T) {
 		if v.CustomEndpoint {
 			continue
 		}
-		client, err := buildClient(v.ID, "sk-dummy", "")
+		client, err := buildClient(v.ID, "sk-dummy", "", "")
 		if err != nil {
 			t.Errorf("buildClient(%s): %v", v.ID, err)
 			continue
