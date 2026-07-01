@@ -88,6 +88,15 @@
       providerId = preset.id
     }
   })
+  // A named vendor's base URL is resolved from the vendor default at runtime and
+  // may not be persisted in the stored entry. Editing such an entry seeds an
+  // empty baseUrl into a readonly (locked) field, which would fail validation
+  // and block Test/Save. Backfill it from the preset default when empty.
+  $effect(() => {
+    if (preset && !preset.custom_endpoint && !baseUrl && preset.base_url) {
+      baseUrl = preset.base_url
+    }
+  })
   // Catalogue vendors are pinned to their endpoint; only custom_endpoint
   // providers take a typed Base URL.
   let baseUrlLocked = $derived(!!preset && !preset.custom_endpoint)
