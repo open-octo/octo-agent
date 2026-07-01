@@ -40,6 +40,76 @@ func TestCompileAndRoundTrip(t *testing.T) {
 	}
 }
 
+// TestCompileAutoParamsTypeValues: every typed value becomes a declared {{param}}
+// whose Default is the recorded value, so a no-param replay reproduces the demo
+// exactly while each input is now an overridable knob — no LLM distiller needed.
+func TestCompileAutoParamsTypeValues(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "change", Selector: "#q", Tag: "INPUT", Field: "Search query", Value: "hello world"},
+		{Type: "change", Selector: `input[name="email"]`, Tag: "INPUT", Value: "a@b.com"},
+	}
+	s := CompileSkill("demo", "", "", events)
+	if len(s.Steps) != 2 {
+		t.Fatalf("want 2 type steps, got %d: %+v", len(s.Steps), s.Steps)
+	}
+	// Values are placeholders, not the literal recorded text.
+	for _, st := range s.Steps {
+		if !strings.HasPrefix(st.Value, "{{") || strings.Contains(st.Value, "hello") {
+			t.Fatalf("value not parameterized: %+v", st)
+		}
+	}
+	byName := map[string]Param{}
+	for _, p := range s.Params {
+		byName[p.Name] = p
+	}
+	// Field hint drives the name; selector name= is the fallback.
+	if p, ok := byName["search_query"]; !ok || p.Default != "hello world" {
+		t.Fatalf("search_query param wrong: %+v (params=%+v)", p, s.Params)
+	}
+	if p, ok := byName["email"]; !ok || p.Default != "a@b.com" {
+		t.Fatalf("email param wrong: %+v (params=%+v)", p, s.Params)
+	}
+	// Round-trip: with no params, replay substitutes the defaults back in.
+	full := mergedParams(&s, nil)
+	if full["search_query"] != "hello world" || full["email"] != "a@b.com" {
+		t.Fatalf("defaults not recoverable: %+v", full)
+	}
+}
+
+// TestCompileAutoParamsSecretNoDefault: a password field is parameterized without
+// a Default, so the plaintext never lands in the YAML.
+func TestCompileAutoParamsSecretNoDefault(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "change", Selector: "#pw", Tag: "INPUT", Field: "password", Secret: true, Value: "hunter2"},
+	}
+	s := CompileSkill("demo", "", "", events)
+	if len(s.Params) != 1 {
+		t.Fatalf("want 1 param, got %+v", s.Params)
+	}
+	if s.Params[0].Default != "" {
+		t.Fatalf("secret default must be empty, got %q", s.Params[0].Default)
+	}
+	if data, _ := MarshalSkill(s); strings.Contains(string(data), "hunter2") {
+		t.Fatalf("secret leaked into yaml:\n%s", data)
+	}
+}
+
+// TestCompileAutoParamsDedup: two inputs that reduce to the same name get distinct
+// params (foo, foo2) so neither value is lost.
+func TestCompileAutoParamsDedup(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "change", Selector: "#a", Tag: "INPUT", Field: "City", Value: "SFO"},
+		{Type: "change", Selector: "#b", Tag: "INPUT", Field: "City", Value: "LAX"},
+	}
+	s := CompileSkill("demo", "", "", events)
+	if len(s.Params) != 2 || s.Params[0].Name == s.Params[1].Name {
+		t.Fatalf("want two distinct params, got %+v", s.Params)
+	}
+	if s.Steps[0].Value == s.Steps[1].Value {
+		t.Fatalf("distinct inputs must map to distinct params: %+v", s.Steps)
+	}
+}
+
 // TestCompileUploadMerge: a click on the upload button followed by a file
 // selection compiles to a single upload step on the button, auto-parameterized.
 func TestCompileUploadMerge(t *testing.T) {

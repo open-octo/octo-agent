@@ -17,6 +17,8 @@ type RecordedEvent struct {
 	Tag      string `json:"tag"`      // target tagName (SELECT/INPUT/…), so replay picks the right action
 	Value    string `json:"value"`    // input/select value (change events)
 	Text     string `json:"text"`     // element text, for context
+	Field    string `json:"field"`    // input's placeholder/name/aria-label/id — names the auto-param
+	Secret   bool   `json:"secret"`   // password input: don't persist the value as a param default
 	URL      string `json:"url"`      // document URL at capture time
 }
 
@@ -56,7 +58,8 @@ const captureScript = `(function(){
   }
   function report(type, e){
     try{var el=e.target; var fr=''; try{ if(window.frameElement) fr=sel(window.frameElement); }catch(_2){}
-      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), value:(el.value!==undefined?(''+el.value).slice(0,200):''), url:location.href}));}catch(_){}
+      var field=((el.placeholder||el.name||(el.getAttribute?el.getAttribute('aria-label'):'')||el.id||'')+'').trim().slice(0,40);
+      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:(el.type==='password'), value:(el.value!==undefined?(''+el.value).slice(0,200):''), url:location.href}));}catch(_){}
   }
   document.addEventListener('click', function(e){report('click',e);}, true);
   document.addEventListener('change', function(e){var t=e.target; report((t&&t.type==='file')?'upload':'change', e);}, true);

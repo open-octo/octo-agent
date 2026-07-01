@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -66,7 +67,29 @@ func CompileSkill(name, description, startURL string, events []RecordedEvent) Sk
 	if startURL != "" && startURL != "about:blank" {
 		s.Steps = append(s.Steps, Step{Action: "navigate", URL: startURL})
 	}
-	hasUpload := false
+	// Deterministic auto-parameterization: every value the user typed becomes a
+	// declared {{param}} whose Default is the recorded value — so replay with no
+	// params reproduces the demonstration exactly, yet each input is now a named,
+	// overridable knob (no LLM distiller required). Password fields are declared
+	// without a Default so the secret never lands in the YAML.
+	seen := map[string]bool{}
+	addParam := func(hint, def, desc string, secret bool) string {
+		root := slugParam(hint)
+		if root == "" {
+			root = "value"
+		}
+		nm := root
+		for i := 2; seen[nm]; i++ {
+			nm = fmt.Sprintf("%s%d", root, i)
+		}
+		seen[nm] = true
+		p := Param{Name: nm, Description: desc}
+		if !secret {
+			p.Default = def
+		}
+		s.Params = append(s.Params, p)
+		return nm
+	}
 	for _, e := range events {
 		if e.Type == "navigate" {
 			// Skip an echo of the page we're already on (start URL or the prior nav).
@@ -81,14 +104,14 @@ func CompileSkill(name, description, startURL string, events []RecordedEvent) Sk
 			// clicks the control and feeds the file through the chooser, so the
 			// preceding click (the button) is the better trigger than the
 			// possibly-transient file input. The file itself can't be captured
-			// (browsers hide the path) so it's auto-parameterized.
-			up := Step{Action: "upload", Frame: e.Frame, Selector: e.Selector, Value: "{{file}}", Label: e.Text}
+			// (browsers hide the path) so it's auto-parameterized (no default).
+			fp := addParam("file", "", "path to the file to upload", true)
+			up := Step{Action: "upload", Frame: e.Frame, Selector: e.Selector, Value: "{{" + fp + "}}", Label: e.Text}
 			if n := len(s.Steps); n > 0 && s.Steps[n-1].Action == "click" {
 				up.Selector, up.Frame, up.Label = s.Steps[n-1].Selector, s.Steps[n-1].Frame, s.Steps[n-1].Label
 				s.Steps = s.Steps[:n-1]
 			}
 			s.Steps = append(s.Steps, up)
-			hasUpload = true
 			continue
 		}
 		if e.Selector == "" {
@@ -103,18 +126,63 @@ func CompileSkill(name, description, startURL string, events []RecordedEvent) Sk
 			st.Value = e.Value
 		case e.Type == "change":
 			st.Action = "type"
-			st.Value = e.Value
+			hint := e.Field
+			if hint == "" {
+				hint = hintFromSelector(e.Selector)
+			}
+			desc := ""
+			if e.Secret {
+				desc = "secret value (not stored; provide at replay)"
+			}
+			pn := addParam(hint, e.Value, desc, e.Secret)
+			st.Value = "{{" + pn + "}}"
 		default:
 			continue
 		}
 		s.Steps = append(s.Steps, st)
 	}
-	if hasUpload {
-		s.Params = append(s.Params, Param{Name: "file", Description: "path to the file to upload"})
-	}
 	s.Steps = dropConsecutiveDupeSteps(s.Steps)
 	return s
 }
+
+// slugParam reduces a field hint to a safe {{param}} identifier: lowercase, with
+// runs of non-alphanumerics collapsed to a single underscore and trimmed.
+func slugParam(s string) string {
+	var b strings.Builder
+	prevUnderscore := false
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			prevUnderscore = false
+		default:
+			if b.Len() > 0 && !prevUnderscore {
+				b.WriteByte('_')
+				prevUnderscore = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+// hintFromSelector recovers a naming hint from a selector when the recorder
+// captured no field name — pulling an id (#foo) or a stable attribute value
+// (name/aria-label/data-testid/data-test), else "".
+func hintFromSelector(sel string) string {
+	if m := selectorAttrRe.FindStringSubmatch(sel); m != nil {
+		return m[1]
+	}
+	if strings.HasPrefix(sel, "#") {
+		id := sel[1:]
+		if i := strings.IndexAny(id, " >.:["); i >= 0 {
+			id = id[:i]
+		}
+		return id
+	}
+	return ""
+}
+
+var selectorAttrRe = regexp.MustCompile(`\[(?:name|aria-label|data-testid|data-test)="([^"]+)"\]`)
 
 // dropConsecutiveDupeSteps removes a step identical to its immediate predecessor
 // (same action/frame/selector/value) — a double-fire the user didn't intend (a
