@@ -159,6 +159,18 @@ export async function toggleSkill(name: string, enabled: boolean): Promise<void>
   })
 }
 
+// Workflows (read-only discovery of named/preset workflows)
+
+export interface NamedWorkflow {
+  name: string
+  description: string
+}
+
+export async function listWorkflows(): Promise<NamedWorkflow[]> {
+  const d = await request<{ workflows: NamedWorkflow[] }>('/api/workflows')
+  return d.workflows ?? []
+}
+
 export async function deleteSkill(name: string): Promise<void> {
   await request<unknown>(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }

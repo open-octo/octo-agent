@@ -25,6 +25,7 @@ var builtinSlashCommands = []complItem{
 	{"/clear", "Wipe the conversation and start fresh"},
 	{"/skills", "List discovered skills"},
 	{"/mcp", "List connected MCP servers"},
+	{"/workflows", "List available workflows"},
 	{"/memory", "Show cross-session memory"},
 	{"/init", "Generate a .octorules guide for this repo"},
 	{"/save", "Save the current session"},

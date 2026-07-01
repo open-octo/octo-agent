@@ -208,6 +208,7 @@ func printTuiHelp(w io.Writer) {
 	fmt.Fprintln(w, "  /skills     List available skills (trigger one with /<name>)")
 	fmt.Fprintln(w, "  /memory     List what's remembered across sessions")
 	fmt.Fprintln(w, "  /mcp        Show connected MCP servers and their surfaces")
+	fmt.Fprintln(w, "  /workflows  List available workflows (run one by asking, e.g. \"run <name>\")")
 	fmt.Fprintln(w, "  /exit       Save and exit  (also: /quit, Ctrl-C, Ctrl-D)")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Keys:")
@@ -294,7 +295,7 @@ func pluralS(n int) string {
 var reservedReplCommands = map[string]bool{
 	"init": true, "exit": true, "quit": true, "help": true,
 	"save": true, "sessions": true, "skills": true,
-	"memory": true, "mcp": true,
+	"memory": true, "mcp": true, "workflows": true,
 }
 
 // skillTrigger reports whether line is a /<name> invocation of a discovered
@@ -342,6 +343,25 @@ func printSkills(w io.Writer, reg *skills.Registry) {
 	fmt.Fprintln(w, "Available skills (trigger with /<name>):")
 	for _, s := range reg.List() {
 		fmt.Fprintf(w, "  /%-16s [%-7s] %s\n", s.Name, s.Source, s.Description)
+	}
+}
+
+// printWorkflows lists the available named workflows (embedded presets + user +
+// project). They aren't slash-triggered — you run one by asking the agent, e.g.
+// "run adversarial-review" — so this is purely for discovery.
+func printWorkflows(w io.Writer) {
+	wfs := tools.ListNamedWorkflows()
+	if len(wfs) == 0 {
+		fmt.Fprintln(w, "No workflows found (looked in ~/.octo/workflows and ./.octo/workflows).")
+		return
+	}
+	fmt.Fprintln(w, "Available workflows (run by asking, e.g. \"run <name>\"):")
+	for _, wf := range wfs {
+		if wf.Description != "" {
+			fmt.Fprintf(w, "  %-20s %s\n", wf.Name, wf.Description)
+		} else {
+			fmt.Fprintf(w, "  %s\n", wf.Name)
+		}
 	}
 }
 

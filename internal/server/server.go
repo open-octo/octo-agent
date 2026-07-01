@@ -601,6 +601,7 @@ func (s *Server) registerRoutes() {
 	s.api("PATCH /api/sessions/{id}/working_dir", s.handleUpdateSessionWorkingDir)
 	s.api("GET /api/tools", s.handleListTools)
 	s.api("GET /api/skills", s.handleListSkills)
+	s.api("GET /api/workflows", s.handleListWorkflows)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/version", s.handleVersion)
 	s.api("GET /api/channels", s.handleListChannels)

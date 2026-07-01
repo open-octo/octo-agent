@@ -193,3 +193,21 @@ func listWorkflows() []savedWorkflow {
 	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
 	return out
 }
+
+// NamedWorkflow is a public, script-free view of a registered workflow for API
+// surfaces (the web discovery panel). It deliberately omits the script body.
+type NamedWorkflow struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// ListNamedWorkflows returns every registered workflow (embedded defaults +
+// user + project), sorted by name, as a public view for the web panel.
+func ListNamedWorkflows() []NamedWorkflow {
+	saved := listWorkflows()
+	out := make([]NamedWorkflow, 0, len(saved))
+	for _, w := range saved {
+		out = append(out, NamedWorkflow{Name: w.name, Description: w.description})
+	}
+	return out
+}

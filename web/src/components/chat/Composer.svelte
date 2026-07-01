@@ -98,20 +98,22 @@
     attachments = attachments.filter((_, idx) => idx !== i)
   }
 
-  // ── Slash autocomplete (skills + MCP servers/tools) ──────────────────────
+  // ── Slash autocomplete (skills + workflows via /wf + MCP servers/tools) ───
   import type { Skill } from '../../lib/types'
 
   let skills = $state<Skill[]>([])
+  let workflows = $state<api.NamedWorkflow[]>([])
   let mcpServerNames = $state<string[]>([])
   let mcpToolCache = $state<Record<string, McpTool[]>>({})
   let slashMenu = $state(false)
-  let slashMode = $state<'skills' | 'mcp-servers' | 'mcp-tools'>('skills')
+  let slashMode = $state<'skills' | 'workflows' | 'mcp-servers' | 'mcp-tools'>('skills')
   let slashQuery = $state('')
   let slashActiveIndex = $state(-1)
   let slashMcpServer = $state('')
 
   type SlashItem =
     | { kind: 'skill'; skill: Skill }
+    | { kind: 'workflow'; workflow: api.NamedWorkflow }
     | { kind: 'mcp-server'; name: string }
     | { kind: 'mcp-tool'; server: string; tool: McpTool }
 
@@ -134,6 +136,13 @@
       const serverName = spaceIdx >= 0 ? withoutLeadingSlash.slice(0, spaceIdx) : withoutLeadingSlash
       const query = spaceIdx >= 0 ? withoutLeadingSlash.slice(spaceIdx + 1).trimStart().toLowerCase() : ''
       return { mode: 'mcp-tool', query, serverName }
+    }
+    // "/wf" (own trigger, like "/mcp") lists named workflows. Checked before the
+    // generic skill match so it isn't swallowed as a skill query.
+    if (lowerRest === 'wf' || lowerRest.startsWith('wf/') || lowerRest.startsWith('wf ')) {
+      const after = rest.slice(2).trimStart() // after "wf"
+      const query = after.startsWith('/') ? after.slice(1) : after
+      return { mode: 'workflow', query: query.toLowerCase() }
     }
     if (/^\/\S*$/.test(trimmed)) {
       return { mode: 'skill', query: rest.toLowerCase() }
@@ -160,6 +169,13 @@
       scored.sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
       return scored.map(({ skill }) => ({ kind: 'skill', skill }))
     }
+    if (slashMode === 'workflows') {
+      const q = slashQuery
+      return workflows
+        .filter(w => !q || w.name.toLowerCase().includes(q) || w.description.toLowerCase().includes(q))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(workflow => ({ kind: 'workflow', workflow }))
+    }
     if (slashMode === 'mcp-servers') {
       const q = slashQuery
       return mcpServerNames
@@ -177,7 +193,7 @@
     return []
   }
 
-  function showSlashMenu(mode: 'skills' | 'mcp-servers' | 'mcp-tools', query: string, serverName = '') {
+  function showSlashMenu(mode: 'skills' | 'workflows' | 'mcp-servers' | 'mcp-tools', query: string, serverName = '') {
     slashMode = mode
     slashQuery = query
     slashMcpServer = serverName
@@ -213,6 +229,10 @@
       showSlashMenu('skills', parsed.query)
       return
     }
+    if (parsed.mode === 'workflow') {
+      showSlashMenu('workflows', parsed.query)
+      return
+    }
     if (parsed.mode === 'mcp-server') {
       showSlashMenu('mcp-servers', parsed.query)
       return
@@ -228,6 +248,10 @@
   function selectItem(item: SlashItem) {
     if (item.kind === 'skill') {
       text = '/' + item.skill.name + ' '
+    } else if (item.kind === 'workflow') {
+      // Prefill an editable run instruction; the user adds any args, then sends,
+      // and the agent calls the workflow tool by name. (agentic-first)
+      text = `Run the "${item.workflow.name}" workflow`
     } else if (item.kind === 'mcp-server') {
       text = '/mcp/' + item.name + ' '
     } else if (item.kind === 'mcp-tool') {
@@ -287,6 +311,7 @@
   onMount(async () => {
     try { models = (await api.getConfig()).models ?? [] } catch { /* leave empty */ }
     try { skills = await api.listSkills() } catch { /* leave empty */ }
+    try { workflows = await api.listWorkflows() } catch { /* leave empty */ }
     try {
       const data = await api.listMcpServers()
       mcpServerNames = (data.servers ?? [])
@@ -550,7 +575,7 @@
       ></textarea>
       {#if slashMenu}
         <div class="skill-menu">
-          {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'skill' ? item.skill.name : item.kind === 'mcp-server' ? item.name : item.server + '/' + item.tool.name))}
+          {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'skill' ? item.skill.name : item.kind === 'workflow' ? item.workflow.name : item.kind === 'mcp-server' ? item.name : item.server + '/' + item.tool.name))}
             <button
               class="skill-menu-item"
               class:active={i === slashActiveIndex}
@@ -560,6 +585,11 @@
                 <span class="skill-name">/{item.skill.name}</span>
                 {#if item.skill.desc}
                   <span class="skill-desc">{item.skill.desc}</span>
+                {/if}
+              {:else if item.kind === 'workflow'}
+                <span class="skill-name">{item.workflow.name}</span>
+                {#if item.workflow.description}
+                  <span class="skill-desc">{item.workflow.description}</span>
                 {/if}
               {:else if item.kind === 'mcp-server'}
                 <span class="skill-name">/mcp/{item.name}</span>
@@ -573,7 +603,7 @@
             </button>
           {:else}
             <div class="skill-menu-empty">
-              {slashMode === 'skills' ? 'No matching skills' : slashMode === 'mcp-servers' ? 'No matching MCP servers' : 'No tools found'}
+              {slashMode === 'skills' ? 'No matching skills' : slashMode === 'workflows' ? 'No matching workflows' : slashMode === 'mcp-servers' ? 'No matching MCP servers' : 'No tools found'}
             </div>
           {/each}
         </div>

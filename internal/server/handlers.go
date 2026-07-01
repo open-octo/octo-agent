@@ -680,6 +680,16 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"skills": out})
 }
 
+// ─── GET /api/workflows ───────────────────────────────────────────────────────
+
+// handleListWorkflows lists every registered named workflow (embedded defaults +
+// user + project) for the web discovery panel. Read-only; the registry is
+// scanned fresh per request so newly-dropped files show up without a restart.
+func (s *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
+	_ = r
+	writeJSON(w, http.StatusOK, map[string]any{"workflows": tools.ListNamedWorkflows()})
+}
+
 // ─── GET /api/health ────────────────────────────────────────────────────────
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

@@ -833,7 +833,7 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.startCompact()
-	case "/help", "/save", "/sessions", "/skills", "/memory", "/mcp":
+	case "/help", "/save", "/sessions", "/skills", "/memory", "/mcp", "/workflows":
 		var b bytes.Buffer
 		switch cmd {
 		case "/help":
@@ -852,6 +852,8 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 			printMemory(&b, cfg.memDir)
 		case "/mcp":
 			printMCP(&b)
+		case "/workflows":
+			printWorkflows(&b)
 		}
 		m.println(strings.TrimRight(b.String(), "\n"))
 		return m, nil
