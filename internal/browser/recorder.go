@@ -279,7 +279,7 @@ func (r *Recorder) Events() []RecordedEvent {
 // no healer) — a convenience over the skill path for raw record→replay.
 func Replay(ctx context.Context, page *Page, events []RecordedEvent) error {
 	skill := CompileSkill("", "", "", events)
-	_, _, err := ReplaySkill(ctx, page, &skill, nil, ReplayOptions{})
+	_, _, _, err := ReplaySkill(ctx, page, &skill, nil, ReplayOptions{})
 	return err
 }
 
