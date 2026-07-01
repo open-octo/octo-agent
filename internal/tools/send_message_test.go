@@ -7,11 +7,13 @@ import (
 )
 
 type sentMsg struct{ platform, chatID, text string }
+type sentFile struct{ platform, chatID, path, name string }
 
 type fakeMessenger struct {
-	chats []KnownRecipient
-	sent  []sentMsg
-	err   error
+	chats     []KnownRecipient
+	sent      []sentMsg
+	sentFiles []sentFile
+	err       error
 }
 
 func (f *fakeMessenger) SendMessage(platform, chatID, text string) error {
@@ -19,6 +21,14 @@ func (f *fakeMessenger) SendMessage(platform, chatID, text string) error {
 		return f.err
 	}
 	f.sent = append(f.sent, sentMsg{platform, chatID, text})
+	return nil
+}
+
+func (f *fakeMessenger) SendFile(platform, chatID, path, name string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.sentFiles = append(f.sentFiles, sentFile{platform, chatID, path, name})
 	return nil
 }
 

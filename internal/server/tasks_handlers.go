@@ -346,6 +346,18 @@ func (s *Server) channelSend(platform, chatID, text string) error {
 	return channel.SendOnce(platform, chatID, text)
 }
 
+// channelSendFile is the file counterpart to channelSend: same live-adapter-then-
+// SendFileOnce fallback, delivering a local file instead of text.
+func (s *Server) channelSendFile(platform, chatID, path, name string) error {
+	if v, ok := s.runningAdapters.Load(platform); ok {
+		if res := v.(channel.Adapter).SendFile(chatID, path, name, ""); !res.OK {
+			return fmt.Errorf("send file to %s chat %s: %s", platform, chatID, res.Error)
+		}
+		return nil
+	}
+	return channel.SendFileOnce(platform, chatID, path, name)
+}
+
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	s.initScheduler()
 	if s.scheduler == nil {

@@ -28,6 +28,9 @@ type ChannelMessenger interface {
 	// SendMessage delivers text to chatID on platform, preferring a live
 	// adapter and falling back to a one-shot send from config.
 	SendMessage(platform, chatID, text string) error
+	// SendFile delivers a local file to chatID on platform, same live-adapter-
+	// then-one-shot fallback as SendMessage.
+	SendFile(platform, chatID, path, name string) error
 	// KnownChats lists the recipients the bot can currently address.
 	KnownChats() []KnownRecipient
 }
@@ -97,7 +100,7 @@ func (SendMessageTool) Execute(ctx context.Context, _ string, input map[string]a
 		if chatID == "" && text != "" && len(chats) == 1 {
 			return doSend(m, chats[0].Platform, chats[0].ChatID, text)
 		}
-		return listRecipients(chats, platform, text)
+		return listRecipients(chats, platform)
 	}
 
 	if platform == "" {
@@ -129,9 +132,9 @@ func filterRecipients(all []KnownRecipient, platform string) []KnownRecipient {
 }
 
 // listRecipients returns a model-readable roster of reachable chats. It is a
-// normal (non-error) result: the model reads it and calls send_message again
-// with a concrete chat_id.
-func listRecipients(chats []KnownRecipient, platform, text string) (agent.ToolResult, error) {
+// normal (non-error) result: the model reads it and calls the tool again with a
+// concrete platform + chat_id. Shared by send_message and send_file.
+func listRecipients(chats []KnownRecipient, platform string) (agent.ToolResult, error) {
 	if len(chats) == 0 {
 		scope := "any platform"
 		if platform != "" {
@@ -143,7 +146,7 @@ func listRecipients(chats []KnownRecipient, platform, text string) (agent.ToolRe
 		}, nil
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Reachable chats (%d) — call send_message again with the chosen platform and chat_id:\n", len(chats))
+	fmt.Fprintf(&b, "Reachable chats (%d) — call again with the chosen platform and chat_id:\n", len(chats))
 	for _, r := range chats {
 		b.WriteString("  - platform=")
 		b.WriteString(r.Platform)
@@ -155,9 +158,6 @@ func listRecipients(chats []KnownRecipient, platform, text string) (agent.ToolRe
 			b.WriteString(")")
 		}
 		b.WriteString("\n")
-	}
-	if text != "" {
-		b.WriteString("\nThen resend with text set to your message.")
 	}
 	return agent.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
 }
