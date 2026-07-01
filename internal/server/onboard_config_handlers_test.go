@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"testing"
 
@@ -43,12 +42,12 @@ func TestConfigModels_GetListsAllEntries(t *testing.T) {
 	tru := true
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-main-12345678"},
-			{Name: "kimi", Provider: "kimi", Model: "kimi-k2.6", BaseURL: "https://kimi.example", ShowReasoning: &tru},
-			{Name: "cheap", Provider: "deepseek", Model: "deepseek-chat"},
+			{Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-main-12345678"},
+			{Provider: "kimi", Model: "kimi-k2.6", BaseURL: "https://kimi.example", ShowReasoning: &tru},
+			{Provider: "deepseek", Model: "deepseek-chat"},
 		},
-		DefaultModel: "kimi",
-		LiteModel:    "cheap",
+		DefaultModel: "kimi-k2.6",
+		LiteModel:    "deepseek-chat",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
@@ -63,13 +62,13 @@ func TestConfigModels_GetListsAllEntries(t *testing.T) {
 	for _, m := range resp.Models {
 		byID[m.ID] = m
 	}
-	if byID["kimi"].Type != "default" || byID["cheap"].Type != "lite" || byID["main"].Type != "" {
+	if byID["kimi-k2.6"].Type != "default" || byID["deepseek-chat"].Type != "lite" || byID["claude-sonnet-4-6"].Type != "" {
 		t.Errorf("type badges wrong: %+v", resp.Models)
 	}
-	if byID["main"].APIKeyMasked == "" || byID["main"].APIKeyMasked == "sk-main-12345678" {
-		t.Errorf("api_key_masked = %q, want masked non-empty", byID["main"].APIKeyMasked)
+	if byID["claude-sonnet-4-6"].APIKeyMasked == "" || byID["claude-sonnet-4-6"].APIKeyMasked == "sk-main-12345678" {
+		t.Errorf("api_key_masked = %q, want masked non-empty", byID["claude-sonnet-4-6"].APIKeyMasked)
 	}
-	if !byID["main"].AnthropicFormat || byID["cheap"].AnthropicFormat {
+	if !byID["claude-sonnet-4-6"].AnthropicFormat || byID["deepseek-chat"].AnthropicFormat {
 		t.Errorf("anthropic_format flags wrong: %+v", resp.Models)
 	}
 }
@@ -78,9 +77,9 @@ func TestConfig_ShowReasoningGlobalDefault(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
 		},
-		DefaultModel: "main",
+		DefaultModel: "claude-sonnet-4-6",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
@@ -116,9 +115,9 @@ func TestConfig_ShowReasoningReloadsDefaultSender(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-test"},
+			{Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-test"},
 		},
-		DefaultModel: "main",
+		DefaultModel: "claude-sonnet-4-6",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
@@ -161,8 +160,8 @@ func TestConfig_ShowReasoningReloadsDefaultSender(t *testing.T) {
 func TestConfigModels_PostAppendsEntry(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
-		Models:       []config.ModelEntry{{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6"}},
-		DefaultModel: "main",
+		Models:       []config.ModelEntry{{Provider: "anthropic", Model: "claude-sonnet-4-6"}},
+		DefaultModel: "claude-sonnet-4-6",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
@@ -186,10 +185,10 @@ func TestConfigModels_PostAppendsEntry(t *testing.T) {
 	if len(cfg.Models) != 2 {
 		t.Fatalf("entries = %d, want 2 — the second card must not overwrite the first", len(cfg.Models))
 	}
-	if cfg.DefaultModel != "main" {
-		t.Errorf("default moved to %q, want main", cfg.DefaultModel)
+	if cfg.DefaultModel != "claude-sonnet-4-6" {
+		t.Errorf("default moved to %q, want claude-sonnet-4-6", cfg.DefaultModel)
 	}
-	added, ok := cfg.EntryByName(resp.ID)
+	added, ok := cfg.EntryByModel(resp.ID)
 	if !ok {
 		t.Fatalf("entry %q not stored", resp.ID)
 	}
@@ -219,7 +218,7 @@ func TestConfigModels_PostUnknownEndpointBecomesCompatibleVendor(t *testing.T) {
 	}
 
 	w = doJSON(t, srv, http.MethodPost, "/api/config/models",
-		`{"model":"my-model","base_url":"https://gw2.example","api_key":"sk-x","anthropic_format":true}`)
+		`{"model":"my-model-2","base_url":"https://gw2.example","api_key":"sk-x","anthropic_format":true}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST = %d: %s", w.Code, w.Body.String())
 	}
@@ -259,7 +258,7 @@ func TestConfigModels_PostFirstEntryBecomesDefault(t *testing.T) {
 		t.Fatalf("POST = %d: %s", w.Code, w.Body.String())
 	}
 	cfg, _ := config.Load()
-	if len(cfg.Models) != 1 || cfg.DefaultModel != cfg.Models[0].Name {
+	if len(cfg.Models) != 1 || cfg.DefaultModel != cfg.Models[0].Model {
 		t.Fatalf("first entry must become default: %+v", cfg)
 	}
 	if cfg.Models[0].Provider != "anthropic" {
@@ -271,21 +270,21 @@ func TestConfigModels_PatchUpdatesAndKeepsKey(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-keep-me"},
+			{Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-keep-me"},
 		},
-		DefaultModel: "main",
+		DefaultModel: "claude-sonnet-4-6",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
 	// No api_key in the request → stored key survives. A still-masked echo is
 	// also treated as "no change".
-	w := doJSON(t, srv, http.MethodPatch, "/api/config/models/main",
+	w := doJSON(t, srv, http.MethodPatch, "/api/config/models/claude-sonnet-4-6",
 		`{"model":"claude-opus-4-7","base_url":"","api_key":"sk-k****1234"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("PATCH = %d: %s", w.Code, w.Body.String())
 	}
 	cfg, _ := config.Load()
-	e, _ := cfg.EntryByName("main")
+	e, _ := cfg.EntryByModel("claude-opus-4-7")
 	if e.Model != "claude-opus-4-7" {
 		t.Errorf("model = %q, want claude-opus-4-7", e.Model)
 	}
@@ -307,25 +306,25 @@ func TestConfigModels_DeleteRepairsReferences(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "m1"},
-			{Name: "kimi", Provider: "kimi", Model: "m2"},
+			{Provider: "anthropic", Model: "m1"},
+			{Provider: "kimi", Model: "m2"},
 		},
-		DefaultModel: "main",
-		LiteModel:    "kimi",
+		DefaultModel: "m1",
+		LiteModel:    "m2",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
 	// Deleting the default reassigns it to the first remaining entry.
-	if w := doJSON(t, srv, http.MethodDelete, "/api/config/models/main", ""); w.Code != http.StatusOK {
+	if w := doJSON(t, srv, http.MethodDelete, "/api/config/models/m1", ""); w.Code != http.StatusOK {
 		t.Fatalf("DELETE = %d: %s", w.Code, w.Body.String())
 	}
 	cfg, _ := config.Load()
-	if len(cfg.Models) != 1 || cfg.DefaultModel != "kimi" {
+	if len(cfg.Models) != 1 || cfg.DefaultModel != "m2" {
 		t.Fatalf("after delete: %+v", cfg)
 	}
 
 	// Deleting the lite entry clears the lite reference.
-	if w := doJSON(t, srv, http.MethodDelete, "/api/config/models/kimi", ""); w.Code != http.StatusOK {
+	if w := doJSON(t, srv, http.MethodDelete, "/api/config/models/m2", ""); w.Code != http.StatusOK {
 		t.Fatalf("DELETE = %d: %s", w.Code, w.Body.String())
 	}
 	cfg, _ = config.Load()
@@ -342,19 +341,19 @@ func TestConfigModels_SetDefault(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "m1"},
-			{Name: "kimi", Provider: "kimi", Model: "m2"},
+			{Provider: "anthropic", Model: "m1"},
+			{Provider: "kimi", Model: "m2"},
 		},
-		DefaultModel: "main",
+		DefaultModel: "m1",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
-	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/kimi/default", ""); w.Code != http.StatusOK {
+	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/m2/default", ""); w.Code != http.StatusOK {
 		t.Fatalf("set-default = %d: %s", w.Code, w.Body.String())
 	}
 	cfg, _ := config.Load()
-	if cfg.DefaultModel != "kimi" {
-		t.Fatalf("default = %q, want kimi", cfg.DefaultModel)
+	if cfg.DefaultModel != "m2" {
+		t.Fatalf("default = %q, want m2", cfg.DefaultModel)
 	}
 	if srv.model != "m2" {
 		t.Errorf("runtime model = %q, want m2", srv.model)
@@ -365,31 +364,22 @@ func TestConfigModels_SetDefault(t *testing.T) {
 	}
 }
 
-func TestConfigModels_UniqueNameGeneration(t *testing.T) {
+func TestConfigModels_DuplicateModelRejected(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
-	ids := map[string]bool{}
-	for i := 0; i < 3; i++ {
-		w := doJSON(t, srv, http.MethodPost, "/api/config/models",
-			fmt.Sprintf(`{"model":"kimi-k2.6","api_key":"sk-%d"}`, i))
-		if w.Code != http.StatusOK {
-			t.Fatalf("POST #%d = %d: %s", i, w.Code, w.Body.String())
-		}
-		var resp struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-			t.Fatal(err)
-		}
-		if ids[resp.ID] {
-			t.Fatalf("duplicate id %q", resp.ID)
-		}
-		ids[resp.ID] = true
+	// Model is the entry id, so a second entry for the same model is a conflict.
+	if w := doJSON(t, srv, http.MethodPost, "/api/config/models",
+		`{"model":"kimi-k2.6","api_key":"sk-1"}`); w.Code != http.StatusOK {
+		t.Fatalf("first POST = %d: %s", w.Code, w.Body.String())
+	}
+	if w := doJSON(t, srv, http.MethodPost, "/api/config/models",
+		`{"model":"kimi-k2.6","api_key":"sk-2"}`); w.Code != http.StatusConflict {
+		t.Fatalf("duplicate POST = %d, want 409: %s", w.Code, w.Body.String())
 	}
 	cfg, _ := config.Load()
-	if len(cfg.Models) != 3 {
-		t.Fatalf("entries = %d, want 3", len(cfg.Models))
+	if len(cfg.Models) != 1 {
+		t.Fatalf("entries = %d, want 1 (duplicate rejected)", len(cfg.Models))
 	}
 }
 
@@ -397,14 +387,14 @@ func TestCreateSession_EntryIDBindsSession(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Name: "kimi", Provider: "kimi", Model: "kimi-k2.6"},
+			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			{Provider: "kimi", Model: "kimi-k2.6"},
 		},
-		DefaultModel: "main",
+		DefaultModel: "claude-sonnet-4-6",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
-	w := doJSON(t, srv, http.MethodPost, "/api/sessions", `{"model":"kimi"}`)
+	w := doJSON(t, srv, http.MethodPost, "/api/sessions", `{"model":"kimi-k2.6"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST /api/sessions = %d: %s", w.Code, w.Body.String())
 	}
@@ -424,8 +414,8 @@ func TestCreateSession_EntryIDBindsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.ModelConfig != "kimi" {
-		t.Errorf("model_config = %q, want kimi", sess.ModelConfig)
+	if sess.ModelConfig != "kimi-k2.6" {
+		t.Errorf("model_config = %q, want kimi-k2.6", sess.ModelConfig)
 	}
 
 	// A raw model string stays unbound.
@@ -449,31 +439,31 @@ func TestConfigModels_SetLiteToggles(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "m1"},
-			{Name: "cheap", Provider: "deepseek", Model: "m2"},
+			{Provider: "anthropic", Model: "m1"},
+			{Provider: "deepseek", Model: "m2"},
 		},
-		DefaultModel: "main",
+		DefaultModel: "m1",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
 	// Set.
-	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/cheap/lite", ""); w.Code != http.StatusOK {
+	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/m2/lite", ""); w.Code != http.StatusOK {
 		t.Fatalf("set-lite = %d: %s", w.Code, w.Body.String())
 	}
 	cfg, _ := config.Load()
-	if cfg.LiteModel != "cheap" {
-		t.Fatalf("lite = %q, want cheap", cfg.LiteModel)
+	if cfg.LiteModel != "m2" {
+		t.Fatalf("lite = %q, want m2", cfg.LiteModel)
 	}
 	// The badge surfaces in GET /api/config.
 	resp := getConfigResponse(t, srv)
 	for _, m := range resp.Models {
-		if m.ID == "cheap" && m.Type != "lite" {
+		if m.ID == "m2" && m.Type != "lite" {
 			t.Errorf("cheap type = %q, want lite", m.Type)
 		}
 	}
 
 	// Toggle off.
-	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/cheap/lite", ""); w.Code != http.StatusOK {
+	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/m2/lite", ""); w.Code != http.StatusOK {
 		t.Fatalf("unset-lite = %d: %s", w.Code, w.Body.String())
 	}
 	cfg, _ = config.Load()
@@ -515,11 +505,11 @@ func TestBuildAgent_ExplicitLiteBeatsImplicit(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "deepseek", Model: "deepseek-v4-pro", APIKey: "sk-x"},
-			{Name: "cheap", Provider: "kimi", Model: "kimi-k2.5", APIKey: "sk-y"},
+			{Provider: "deepseek", Model: "deepseek-v4-pro", APIKey: "sk-x"},
+			{Provider: "kimi", Model: "kimi-k2.5", APIKey: "sk-y"},
 		},
-		DefaultModel: "main",
-		LiteModel:    "cheap",
+		DefaultModel: "deepseek-v4-pro",
+		LiteModel:    "kimi-k2.5",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 	srv.provider = "deepseek"
@@ -539,17 +529,17 @@ func TestBuildAgent_ImplicitLiteForBoundSession(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "main", Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-a"},
-			{Name: "ds", Provider: "deepseek", Model: "deepseek-v4-pro", APIKey: "sk-d"},
+			{Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-a"},
+			{Provider: "deepseek", Model: "deepseek-v4-pro", APIKey: "sk-d"},
 		},
-		DefaultModel: "main",
+		DefaultModel: "claude-sonnet-4-6",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 	srv.provider = "anthropic"
 	srv.model = "claude-sonnet-4-6"
 
 	sess := agent.NewSession("deepseek-v4-pro", "")
-	sess.ModelConfig = "ds"
+	sess.ModelConfig = "deepseek-v4-pro"
 	a := srv.buildAgent(sess)
 	if a.LiteModel != "deepseek-v4-flash" {
 		t.Errorf("LiteModel = %q, want deepseek-v4-flash from the bound entry's vendor", a.LiteModel)
@@ -559,15 +549,14 @@ func TestBuildAgent_ImplicitLiteForBoundSession(t *testing.T) {
 	}
 }
 
-// TestConfigModels_PatchRetracksAutoDerivedName: when an entry's name was
-// auto-derived from its model (name == model), changing the model re-derives
-// the name and repairs the default_model reference. A hand-set name stays put
-// (covered by TestConfigModels_PatchUpdatesAndKeepsKey, where name != model).
-func TestConfigModels_PatchRetracksAutoDerivedName(t *testing.T) {
+// TestConfigModels_PatchModelChangeRepairsDefault: model is the entry id, so
+// changing it re-keys the entry and repairs the default_model reference that
+// pointed at the old model.
+func TestConfigModels_PatchModelChangeRepairsDefault(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Name: "qwen3.7-max", Provider: "openai", Model: "qwen3.7-max", APIKey: "sk-x"},
+			{Provider: "openai", Model: "qwen3.7-max", APIKey: "sk-x"},
 		},
 		DefaultModel: "qwen3.7-max",
 	})
@@ -579,11 +568,11 @@ func TestConfigModels_PatchRetracksAutoDerivedName(t *testing.T) {
 		t.Fatalf("PATCH = %d: %s", w.Code, w.Body.String())
 	}
 	cfg, _ := config.Load()
-	if _, ok := cfg.EntryByName("qwen3.7-plus"); !ok {
-		t.Fatalf("name should track new model qwen3.7-plus: %+v", cfg.Models)
+	if _, ok := cfg.EntryByModel("qwen3.7-plus"); !ok {
+		t.Fatalf("entry should be re-keyed to new model qwen3.7-plus: %+v", cfg.Models)
 	}
-	if _, ok := cfg.EntryByName("qwen3.7-max"); ok {
-		t.Errorf("stale name qwen3.7-max should be gone")
+	if _, ok := cfg.EntryByModel("qwen3.7-max"); ok {
+		t.Errorf("stale model qwen3.7-max should be gone")
 	}
 	if cfg.DefaultModel != "qwen3.7-plus" {
 		t.Errorf("default_model = %q, want qwen3.7-plus (repaired)", cfg.DefaultModel)

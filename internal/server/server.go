@@ -931,7 +931,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			// lite model on the session's OWN sender, keeping compaction on
 			// the endpoint, key, and prompt cache the conversation uses.
 			prov, baseURL := s.getProvider(), resolveBaseURL(s.getProvider(), cfg)
-			if entry, ok := cfg.EntryByName(sess.ModelConfig); ok {
+			if entry, ok := cfg.EntryByModel(sess.ModelConfig); ok {
 				prov, baseURL = entry.Provider, entry.BaseURL
 			}
 			if lm := app.ImplicitLiteModel(prov, a.Model, baseURL); lm != "" {
@@ -1124,7 +1124,7 @@ func (s *Server) senderForSession(sess *agent.Session) (agent.Sender, string) {
 	if err != nil {
 		return defaultSender, model
 	}
-	entry, ok := cfg.EntryByName(sess.ModelConfig)
+	entry, ok := cfg.EntryByModel(sess.ModelConfig)
 	if !ok {
 		return defaultSender, model
 	}
@@ -1144,7 +1144,7 @@ func (s *Server) senderForSession(sess *agent.Session) (agent.Sender, string) {
 func (s *Server) cachedSenderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 	s.senderCacheMu.Lock()
 	defer s.senderCacheMu.Unlock()
-	if cached, ok := s.senderCache[entry.Name]; ok {
+	if cached, ok := s.senderCache[entry.Model]; ok {
 		return cached, nil
 	}
 	sender, err := senderForEntry(entry)
@@ -1154,7 +1154,7 @@ func (s *Server) cachedSenderForEntry(entry config.ModelEntry) (agent.Sender, er
 	if s.senderCache == nil {
 		s.senderCache = make(map[string]agent.Sender)
 	}
-	s.senderCache[entry.Name] = sender
+	s.senderCache[entry.Model] = sender
 	return sender, nil
 }
 
@@ -1162,7 +1162,7 @@ func (s *Server) cachedSenderForEntry(entry config.ModelEntry) (agent.Sender, er
 // model) pair for compaction, or (nil, "") when none is configured or it
 // can't be built — the agent then compacts on its primary sender.
 func (s *Server) liteSenderFromConfig(cfg config.Config) (agent.Sender, string) {
-	entry, ok := cfg.EntryByName(cfg.LiteModel)
+	entry, ok := cfg.EntryByModel(cfg.LiteModel)
 	if !ok || entry.Model == "" {
 		return nil, ""
 	}
@@ -1181,7 +1181,7 @@ func senderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 		apiKey = entry.APIKey
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("no API key for entry %q (provider %q)", entry.Name, entry.Provider)
+		return nil, fmt.Errorf("no API key for model %q (provider %q)", entry.Model, entry.Provider)
 	}
 	cfg, _ := config.Load()
 	return app.NewSender(app.SenderOptions{

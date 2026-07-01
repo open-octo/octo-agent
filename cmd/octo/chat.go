@@ -552,7 +552,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// History compaction runs on the configured lite model when one is set.
 	// A build failure (missing key, unknown provider) just leaves the primary
 	// in charge — never fail startup over the lite entry.
-	if liteEntry, ok := cfg.EntryByName(cfg.LiteModel); ok && liteEntry.Model != "" {
+	if liteEntry, ok := cfg.EntryByModel(cfg.LiteModel); ok && liteEntry.Model != "" {
 		if liteSender, lerr := buildSender(liteEntry.Provider, liteEntry, io.Discard, senderTuning{}); lerr == nil {
 			a.LiteSender = liteSender
 			a.LiteModel = liteEntry.Model
