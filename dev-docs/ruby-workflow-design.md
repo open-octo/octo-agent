@@ -19,7 +19,7 @@
 
 octo-agent 目前只有**模型驱动**的编排面：`sub_agent`（异步 spawn）、`sub_agent_send/status/kill`、`task_create/update/list`。fan-out 的控制流全靠模型在多轮里自己决定——不可重复、不可确定、无法表达"先全部启动再等全部完成"这类并发结构。缺一个**确定性编排原语**：把"跑哪些 agent、怎么并行、结果怎么汇聚"写成一段可执行的脚本，由 runtime 保证执行。
 
-参考 MiMo Code 的 Dynamic Workflow（`agent()`/`parallel()`/`pipeline()` JS 原语）。本方案用 **Ruby DSL** 实现等价能力，载体是嵌入式 mruby 编译成 WebAssembly、跑在纯 Go 的 wazero 运行时里。
+参考 Claude Code 的 Dynamic Workflow（`agent()`/`parallel()`/`pipeline()` JS 原语）。本方案用 **Ruby DSL** 实现等价能力，载体是嵌入式 mruby 编译成 WebAssembly、跑在纯 Go 的 wazero 运行时里。
 
 ### 为什么是 mruby→WASM→wazero（而非 cgo）
 
