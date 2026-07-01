@@ -119,17 +119,16 @@ func ReplaySkill(...) (modified bool, finalPage *Page, outputs map[string]any, e
 
 `ToolResult.UI` 富卡片**不做**(可选的后续增强):browser 工具其它 action 也都不出卡片,纯 JSON text 在 tool-result 区块本就可读,组合能力不依赖它。只有当 run_skill 成为"用户会长时间盯着看 outputs"的高频交互面时,再据实加一个列出产物的卡片(有 `uiHead`/`uiTail` helper,`project_tool_ui_payload`)。
 
-### A.4 普通技能:outputs 可选,CC 全兼容
+### A.4 普通技能:结构化输出靠调用点 schema,CC 全兼容
 
-SKILL.md 这侧**不加任何必填字段**——库存的 Claude Code 技能拿过来即插即用。它的结构化输出走 `workflow` 里 `agent(prompt, schema:)` 已有的 StructuredOutput 机制,而 schema **可选、且首选放在调用点**,skill 文件一个字不改:
+SKILL.md 这侧**不加任何必填字段**——库存的 Claude Code 技能即插即用。它的结构化输出走 `workflow` 里 `agent(prompt, schema:)` 已有的 StructuredOutput 机制,schema 放在**调用点**:
 
 1. **无 schema** —— 照跑,返回子 agent 的最终文本(`string`)。等价于 `agent()` 不带 schema。
-2. **调用点带 schema**(首选) —— `skill(name, params, {schema})` 起子 agent 时强制该 schema,返回校验过的对象。skill 文件保持纯 CC 形态,由 workflow 作者决定自己要的返回形状。
-3. **frontmatter 声明 outputs**(可选增强) —— octo 里自写的技能愿意的话可在 frontmatter 加 `outputs` schema 当默认,调用点就不用每次带。它是**额外 key,CC 解析时忽略**,所以带了它的技能仍能原样搬回 Claude Code。
+2. **调用点带 schema**(结构化的唯一途径) —— `skill(name, params, {schema})` 起子 agent 时强制该 schema,返回校验过的对象;skill 文件保持纯 CC 形态,由 workflow 作者(或 `workflow-builder`)推断并提议返回形状。
 
-优先级:**调用点 schema > frontmatter outputs > 无(返回文本)**。这不是新机制,就是 `agent(prompt, {schema})` 的那套。
+> **frontmatter 声明 outputs 未实现**:`skills.Skill` 没有 outputs 字段,`RenderManifest` 也不渲染它——所以 MD 技能的产出形状**不出现在系统提示里**。曾设想把它当"可选增强"(额外 key、CC 忽略),但至今没做;要结构化交接就在调用点带 schema。
 
-这带来一处与录制的**声明位置不对称**(对调用方透明):YAML 录制的 outputs 只能写在文件里(`download` 步的 `bind` 是引擎结构性绑定,没有"调用点 schema"能替代);MD 技能的 outputs 首选调用点、frontmatter 声明是锦上添花。两个引擎因此在"声明位置"不同,但对 `skill()` 的调用者行为一致、可预期。
+这带来一处与录制的**非对称**(对调用方透明):录制的 outputs 是引擎结构性绑定、且进 L1 清单可被发现;MD 技能没有 declared outputs,清单里只有名字 + 描述,结构化只能靠调用点 schema。`skill()` 的调用者行为仍一致可预期,但"看清一个技能的输出形状"这件事——录制强(清单直给)、MD 弱(靠推断 + 调用点 schema)。这正是 `workflow-builder`(D 层)接线步骤区别对待两类技能的原因。
 
 ### 验证 / 兼容
 
