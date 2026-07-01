@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] — 2026-07-01
+
+### Added
+- **Windows installer offers to install PowerShell 7.** octo runs hook scripts
+  and the terminal tool through `pwsh` (7+) when present, falling back to the
+  clumsier Windows PowerShell 5.1 otherwise. When `pwsh` is missing, the
+  installer now offers a one-click winget install, with a bilingual heads-up
+  that the Windows UAC prompt is expected; declining just keeps octo on 5.1
+  (#1016).
+
+### Fixed
+- **Web Edit Model:** editing a named-vendor entry (e.g. DeepSeek) whose stored
+  config has no explicit `base_url` no longer fails "Test connection" / "Save"
+  with "Please fill in Model, Base URL and API Key." The base URL is backfilled
+  from the vendor default (#1015).
+
 ## [1.5.0] — 2026-07-01
 
 ### Added

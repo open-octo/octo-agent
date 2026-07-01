@@ -11,7 +11,7 @@ import (
 )
 
 // Version is the SemVer string for this build. Overridden via -ldflags.
-var Version = "1.5.0"
+var Version = "1.5.1"
 
 // Commit is the short git SHA for this build. Overridden via -ldflags.
 // Empty in local `go build` invocations.
