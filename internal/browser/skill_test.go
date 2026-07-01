@@ -320,6 +320,53 @@ func TestRunStepWaitFixedDelay(t *testing.T) {
 	}
 }
 
+// TestWaitForNetworkIdle: a wait{network:true} step blocks until an in-flight
+// fetch the page kicked off completes, then returns — the SPA-settle primitive.
+func TestWaitForNetworkIdle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/slow", func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(600 * time.Millisecond)
+		w.Write([]byte(`{"ok":true}`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		// On load, fire a slow fetch that flips window.done when it resolves.
+		w.Write([]byte(`<!doctype html><meta charset="utf-8"><title>t</title>
+<script>window.done=false;fetch('/slow').then(function(){window.done=true;});</script>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+
+	skill := &Skill{Name: "x", Steps: []Step{{Action: "wait", Network: true, TimeoutMS: 10000}}}
+	start := time.Now()
+	if _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 15 * time.Second}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	// The in-flight fetch (~600ms) must have settled before the wait returned.
+	var done bool
+	if err := page.Eval(ctx, "window.done===true", &done); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if !done {
+		t.Fatal("network-idle wait returned before the in-flight fetch completed")
+	}
+	if d := time.Since(start); d < 500*time.Millisecond {
+		t.Fatalf("network-idle wait returned suspiciously fast (%v) — did it settle?", d)
+	}
+}
+
 // TestReplayClickFollowsNewTab: a click on a target=_blank link is followed to
 // the tab it opens (the Zhihu-hot-item failure mode), and ReplaySkill returns
 // that tab as the final page.

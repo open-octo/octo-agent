@@ -46,7 +46,8 @@ type Step struct {
 	// before giving up to the healer — the field-input analogue of Label steering
 	// a click by visible text.
 	Hint      string  `yaml:"hint,omitempty"`
-	TimeoutMS int     `yaml:"timeout_ms,omitempty"` // wait: fixed delay when no selector
+	Network   bool    `yaml:"network,omitempty"`    // wait: settle for network (fetch/XHR) idle instead of a fixed delay
+	TimeoutMS int     `yaml:"timeout_ms,omitempty"` // wait: fixed delay (ms) when no selector; also caps the network-idle settle
 	Verify    *Verify `yaml:"verify,omitempty"`
 }
 
@@ -475,12 +476,20 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 			return page, err
 		}
 	case "wait":
-		// Wait for an element if a selector is given (the robust form), else a
-		// fixed delay — the natural primitive for letting an SPA settle between
-		// steps. Recordings/edits commonly need it; without it run_skill rejected
-		// the step as "unknown action".
+		// Wait for an element if a selector is given (the robust form); else settle
+		// for network idle when asked (the SPA-aware form — waits until fetch/XHR
+		// activity stops rather than guessing a delay); else a fixed delay. All
+		// three are natural primitives for letting a page settle between steps.
 		if target != "" {
 			if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
+				return page, err
+			}
+		} else if step.Network {
+			to := waitTimeout
+			if step.TimeoutMS > 0 {
+				to = time.Duration(step.TimeoutMS) * time.Millisecond
+			}
+			if err := page.WaitForNetworkIdle(ctx, 0, to); err != nil {
 				return page, err
 			}
 		} else {
