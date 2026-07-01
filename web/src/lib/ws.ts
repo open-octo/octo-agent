@@ -15,6 +15,11 @@ export class WsManager {
   private handlers: Map<string, Set<Handler>> = new Map();
   private anyHandlers: Set<Handler> = new Set();
   private queue: string[] = [];
+  // Session IDs we're subscribed to. Subscriptions are per-connection on the
+  // server, so a reconnect lands on a fresh wsConn with an empty subscriber
+  // set. We replay these on every (re)open, otherwise turn events broadcast to
+  // the session's subscribers never reach us and the composer hangs forever.
+  private subscriptions: Set<string> = new Set();
   private backoffIndex = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
@@ -33,6 +38,12 @@ export class WsManager {
       this.backoffIndex = 0;
       wsReconnect.set(null);
       wsState.set("connected");
+      // Re-subscribe first so the server has registered our sessions before it
+      // processes any queued user_message below (else the turn broadcasts to a
+      // subscriber set we're not yet in).
+      for (const sessionId of this.subscriptions) {
+        this.ws!.send(JSON.stringify({ type: "subscribe", session_id: sessionId }));
+      }
       const pending = this.queue.splice(0);
       for (const msg of pending) {
         this.ws!.send(msg);
@@ -77,10 +88,12 @@ export class WsManager {
   }
 
   subscribe(sessionId: string): void {
+    this.subscriptions.add(sessionId);
     this.send({ type: "subscribe", session_id: sessionId });
   }
 
   unsubscribe(sessionId: string): void {
+    this.subscriptions.delete(sessionId);
     this.send({ type: "unsubscribe", session_id: sessionId });
   }
 
