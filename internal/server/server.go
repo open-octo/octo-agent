@@ -292,6 +292,9 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
+	// Surface async-hook (spill queue) errors through the server log.
+	hooks.SetSpillNotify(func(m string) { slog.Warn("hook", "err", m) })
+
 	cwd, _ := os.Getwd()
 	envCtx := buildEnvContext(cwd)
 
@@ -527,6 +530,9 @@ func (s *Server) doShutdown(ctx context.Context) error {
 	tools.KillAllSessionSubAgents()
 	tools.SetDefaultSubAgentManager(nil)
 	tools.SetTaskStore(nil)
+	// Flush any queued async hooks (retention) to disk so a restart/shutdown
+	// doesn't drop them; the next process redelivers.
+	hooks.DrainSpill(5 * time.Second)
 	if s.mcpCleanup != nil {
 		s.mcpCleanup()
 	}

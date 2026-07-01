@@ -797,6 +797,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	projectHooksTrusted := resolveProjectHooksTrust(cwd, replReader, stdout, stderr)
 	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, projectHooksTrusted)
 	hookEngine.Notify = func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) }
+	hooks.SetSpillNotify(func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) })
 	if memDir != "" {
 		rules := memory.ParseRules(memDir)
 		if homeMemDir != "" {

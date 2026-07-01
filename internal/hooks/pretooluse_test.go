@@ -8,7 +8,7 @@ import (
 func preToolEngine(t *testing.T, body, matcher string) *Engine {
 	t.Helper()
 	e := NewEngine(nil)
-	if err := e.RegisterShellMatched(EventPreToolUse, makeScript(t, body), matcher, 0); err != nil {
+	if err := e.RegisterShellMatched(EventPreToolUse, makeScript(t, body), matcher, false, 0); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -64,10 +64,10 @@ func TestPreToolUse_MatcherGates(t *testing.T) {
 func TestPreToolUse_BlockWinsOverAllow(t *testing.T) {
 	e := NewEngine(nil)
 	// First hook approves, second blocks — block must win.
-	if err := e.RegisterShellMatched(EventPreToolUse, makeScript(t, `echo '{"decision":"approve"}'`), "", 0); err != nil {
+	if err := e.RegisterShellMatched(EventPreToolUse, makeScript(t, `echo '{"decision":"approve"}'`), "", false, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.RegisterShellMatched(EventPreToolUse, makeScript(t, "exit 2"), "", 0); err != nil {
+	if err := e.RegisterShellMatched(EventPreToolUse, makeScript(t, "exit 2"), "", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	dec := e.PreToolUse(context.Background(), Payload{Event: EventPreToolUse, ToolName: "terminal"})

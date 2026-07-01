@@ -27,11 +27,15 @@ type FileConfig struct {
 
 // HookSpec is one configured hook. Matcher is a regexp over the tool name,
 // honoured only for PreToolUse/PostToolUse. Timeout is a Go duration string
-// ("5s"); empty uses the package default.
+// ("5s"); empty uses the package default. Async runs the hook off the turn's
+// critical path via the durable queue — honoured only for the side-effect
+// events (Stop/SubagentStop/PreCompact); ignored where output is folded back
+// into the model stream.
 type HookSpec struct {
 	Command string `yaml:"command"`
 	Matcher string `yaml:"matcher,omitempty"`
 	Timeout string `yaml:"timeout,omitempty"`
+	Async   bool   `yaml:"async,omitempty"`
 }
 
 // UserConfigPath returns ~/.octo/hooks.yml, or "" when the home dir is
@@ -73,7 +77,7 @@ func (e *Engine) LoadConfig(fc FileConfig) error {
 			return fmt.Errorf("hooks: unknown event %q in hooks.yml", name)
 		}
 		for _, s := range specs {
-			if err := e.RegisterShellMatched(ev, s.Command, s.Matcher, parseTimeout(s.Timeout)); err != nil {
+			if err := e.RegisterShellMatched(ev, s.Command, s.Matcher, s.Async, parseTimeout(s.Timeout)); err != nil {
 				return fmt.Errorf("hooks: %s: invalid matcher %q: %w", name, s.Matcher, err)
 			}
 		}
