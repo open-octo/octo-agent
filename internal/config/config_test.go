@@ -4,7 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func setHome(t *testing.T) string {
@@ -223,17 +226,15 @@ func TestEntryByModel_EmptyNeverMatches(t *testing.T) {
 }
 
 func TestModelVision(t *testing.T) {
-	yes, no := true, false
 	c := Config{Models: []ModelEntry{
-		{Model: "qwen-vl-max", Vision: &yes},
-		{Model: "qwen3.7-max", Vision: &no},
-		{Model: "claude"},
+		{Model: "qwen-vl-max", Vision: true},
+		{Model: "qwen3.7-max", Vision: false},
 	}}
 	cases := map[string]bool{
-		"qwen-vl-max": true,  // explicit true (by model)
-		"qwen3.7-max": false, // explicit false (by model)
-		"claude":      true,  // no flag → heuristic (claude → true)
-		"not-in-list": true,  // unknown → default true
+		"qwen-vl-max":   true,  // recorded true
+		"qwen3.7-max":   false, // recorded false
+		"not-in-list":   true,  // unmatched → heuristic default true
+		"deepseek-chat": false, // unmatched → heuristic text-only false
 	}
 	for model, want := range cases {
 		if got := c.ModelVision(model); got != want {
@@ -263,20 +264,35 @@ func TestModelSupportsVision(t *testing.T) {
 	}
 }
 
-func TestModelVision_HeuristicFallback(t *testing.T) {
-	no := false
-	c := Config{Models: []ModelEntry{
-		{Model: "qwen3.7-plus"},        // no override → heuristic(false)
-		{Model: "qwen-vl-max"},         // no override → heuristic(true)
-		{Model: "gpt-4o", Vision: &no}, // override beats heuristic (gpt-4o infers true)
-	}}
-	if c.ModelVision("qwen3.7-plus") != false {
-		t.Error("qwen3.7-plus entry should infer vision=false")
+// TestModelEntryVisionMigration covers the load-time backfill: a legacy file
+// with no `vision:` key gets the heuristic value (matching the behaviour those
+// files had before the field existed), an explicit value is preserved, and Save
+// always records the field.
+func TestModelEntryVisionMigration(t *testing.T) {
+	in := []byte("models:\n" +
+		"  - model: qwen3.7-max\n" + // no vision → heuristic false (text-only qwen)
+		"  - model: claude-sonnet-4-6\n" + // no vision → heuristic true
+		"  - model: gpt-4o\n" +
+		"    vision: false\n") // explicit false must survive despite gpt-4o inferring true
+
+	var c Config
+	if err := yaml.Unmarshal(in, &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if c.ModelVision("qwen-vl-max") != true {
-		t.Error("qwen-vl-max entry should infer vision=true")
+	want := map[string]bool{"qwen3.7-max": false, "claude-sonnet-4-6": true, "gpt-4o": false}
+	for _, e := range c.Models {
+		if got := e.Vision; got != want[e.Model] {
+			t.Errorf("after load, %q vision = %v, want %v", e.Model, got, want[e.Model])
+		}
 	}
-	if c.ModelVision("gpt-4o") != false {
-		t.Error("explicit Vision override should win over heuristic")
+
+	// Marshal always emits vision (no omitempty), so a re-saved file records it
+	// for every entry — no more implicit nil.
+	out, err := yaml.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if n := strings.Count(string(out), "vision:"); n != len(c.Models) {
+		t.Errorf("marshaled config has %d vision: keys, want %d\n%s", n, len(c.Models), out)
 	}
 }

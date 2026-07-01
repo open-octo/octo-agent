@@ -33,6 +33,7 @@ type providerPreset struct {
 	API              string            `json:"api"`
 	DefaultModel     string            `json:"default_model"`
 	Models           []string          `json:"models,omitempty"`
+	ModelVision      map[string]bool   `json:"model_vision,omitempty"` // model id → accepts image input; lets the form pre-fill the vision toggle
 	LiteModel        string            `json:"lite_model,omitempty"`
 	EndpointVariants []endpointVariant `json:"endpoint_variants,omitempty"`
 	WebsiteURL       string            `json:"website_url,omitempty"`
@@ -60,7 +61,8 @@ func buildProviderPresets() []providerPreset {
 			BaseURL:          v.DefaultBaseURL,
 			API:              v.API,
 			DefaultModel:     v.DefaultModel,
-			Models:           v.Models,
+			Models:           app.VendorModels(v.ID),
+			ModelVision:      app.VendorModelVisionMap(v.ID),
 			LiteModel:        v.LiteModel,
 			EndpointVariants: variants,
 			WebsiteURL:       v.WebsiteURL,
@@ -172,6 +174,7 @@ type modelConfig struct {
 	PermissionMode  string `json:"permission_mode,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
+	Vision          bool   `json:"vision"`
 }
 
 // defaultEntryIdx returns the index of the default entry: the one whose model
@@ -201,6 +204,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 			AnthropicFormat: entryUsesAnthropic(e),
 			ReasoningEffort: e.ReasoningEffort,
 			ShowReasoning:   e.ShowReasoning,
+			Vision:          e.Vision,
 		}
 		switch {
 		case i == defaultIdx:
@@ -389,6 +393,7 @@ type saveModelRequest struct {
 	PermissionMode  string `json:"permission_mode,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
+	Vision          *bool  `json:"vision,omitempty"`
 }
 
 // applyModelRequestToEntry overlays the request onto an entry. An empty (or
@@ -431,6 +436,21 @@ func applyModelRequestToEntry(req saveModelRequest, e *config.ModelEntry) {
 	}
 	if req.ShowReasoning != nil {
 		e.ShowReasoning = req.ShowReasoning
+	}
+	// Vision is always recorded. Honour an explicit request value (the form's
+	// toggle); otherwise resolve from the catalogue for a predefined model, or
+	// fall back to the id heuristic for a custom / unknown one. Resolution runs
+	// after the vendor is settled above, so VendorModelVision sees the final
+	// provider.
+	switch {
+	case req.Vision != nil:
+		e.Vision = *req.Vision
+	default:
+		if v, known := app.VendorModelVision(e.Provider, req.Model); known {
+			e.Vision = v
+		} else {
+			e.Vision = config.ModelSupportsVision(req.Model)
+		}
 	}
 }
 

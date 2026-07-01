@@ -19,6 +19,15 @@ type EndpointVariant struct {
 	Region   string `json:"region,omitempty"`
 }
 
+// VendorModel is one catalogue entry: the model id plus whether it accepts
+// image input. Vision is authoritative for predefined vendors — the value is
+// copied onto the model entry when the user picks it, so the capability is
+// recorded rather than re-guessed from the id at runtime.
+type VendorModel struct {
+	ID     string
+	Vision bool
+}
+
 // Vendor is everything needed to bootstrap a provider client and render it in
 type Vendor struct {
 	ID               string            // canonical identifier, e.g. "kimi"
@@ -27,7 +36,7 @@ type Vendor struct {
 	API              string            // "anthropic-messages" or "openai-completions"
 	DefaultBaseURL   string            // vendor's official endpoint (host only; the client appends the protocol path)
 	DefaultModel     string            // cheapest/reasoning-capable default
-	Models           []string          // available models (for UI dropdown)
+	Models           []VendorModel     // available models (for UI dropdown), each with its vision capability
 	LiteModel        string            // lightweight/cheaper model variant
 	APIKeyEnvVar     string            // environment variable name for the key
 	WebsiteURL       string            // link to the key-management page
@@ -48,10 +57,21 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.openai.com",
 		DefaultModel:   "gpt-5.4",
-		Models:         []string{"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o3-mini", "o4-mini"},
-		LiteModel:      "gpt-5.4-mini",
-		APIKeyEnvVar:   "OPENAI_API_KEY",
-		WebsiteURL:     "https://platform.openai.com/api-keys",
+		Models: []VendorModel{
+			{ID: "gpt-5.5", Vision: true},
+			{ID: "gpt-5.4", Vision: true},
+			{ID: "gpt-5.4-mini", Vision: true},
+			{ID: "gpt-5.4-nano", Vision: true},
+			{ID: "gpt-4.1", Vision: true},
+			{ID: "gpt-4.1-mini", Vision: true},
+			{ID: "gpt-4.1-nano", Vision: true},
+			{ID: "o3", Vision: true},
+			{ID: "o3-mini", Vision: false}, // o3-mini has no image input (unlike o3 / o4-mini)
+			{ID: "o4-mini", Vision: true},
+		},
+		LiteModel:    "gpt-5.4-mini",
+		APIKeyEnvVar: "OPENAI_API_KEY",
+		WebsiteURL:   "https://platform.openai.com/api-keys",
 	},
 	{
 		ID:             "anthropic",
@@ -60,10 +80,17 @@ var Registry = []Vendor{
 		API:            "anthropic-messages",
 		DefaultBaseURL: "https://api.anthropic.com",
 		DefaultModel:   "claude-sonnet-4-6",
-		Models:         []string{"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"},
-		LiteModel:      "claude-haiku-4-5",
-		APIKeyEnvVar:   "ANTHROPIC_API_KEY",
-		WebsiteURL:     "https://console.anthropic.com/settings/keys",
+		Models: []VendorModel{
+			{ID: "claude-opus-4-8", Vision: true},
+			{ID: "claude-opus-4-7", Vision: true},
+			{ID: "claude-opus-4-6", Vision: true},
+			{ID: "claude-sonnet-4-6", Vision: true},
+			{ID: "claude-sonnet-4-5", Vision: true},
+			{ID: "claude-haiku-4-5", Vision: true},
+		},
+		LiteModel:    "claude-haiku-4-5",
+		APIKeyEnvVar: "ANTHROPIC_API_KEY",
+		WebsiteURL:   "https://console.anthropic.com/settings/keys",
 	},
 	{
 		ID:             "openrouter",
@@ -72,19 +99,19 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://openrouter.ai/api",
 		DefaultModel:   "anthropic/claude-sonnet-4-6",
-		Models: []string{
-			"anthropic/claude-sonnet-4-6",
-			"anthropic/claude-opus-4-8",
-			"anthropic/claude-opus-4-7",
-			"anthropic/claude-opus-4-6",
-			"anthropic/claude-haiku-4-5",
-			"openai/gpt-5.5",
-			"openai/gpt-5.4",
-			"openai/gpt-5.4-mini",
-			"google/gemini-2.5-pro",
-			"google/gemini-2.5-flash",
-			"meta-llama/llama-3.3-70b-instruct",
-			"x-ai/grok-4.3",
+		Models: []VendorModel{
+			{ID: "anthropic/claude-sonnet-4-6", Vision: true},
+			{ID: "anthropic/claude-opus-4-8", Vision: true},
+			{ID: "anthropic/claude-opus-4-7", Vision: true},
+			{ID: "anthropic/claude-opus-4-6", Vision: true},
+			{ID: "anthropic/claude-haiku-4-5", Vision: true},
+			{ID: "openai/gpt-5.5", Vision: true},
+			{ID: "openai/gpt-5.4", Vision: true},
+			{ID: "openai/gpt-5.4-mini", Vision: true},
+			{ID: "google/gemini-2.5-pro", Vision: true},
+			{ID: "google/gemini-2.5-flash", Vision: true},
+			{ID: "meta-llama/llama-3.3-70b-instruct", Vision: false}, // Llama 3.3 70B is text-only
+			{ID: "x-ai/grok-4.3", Vision: true},
 		},
 		APIKeyEnvVar: "OPENROUTER_API_KEY",
 		WebsiteURL:   "https://openrouter.ai/keys",
@@ -96,10 +123,15 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.deepseek.com",
 		DefaultModel:   "deepseek-v4-pro",
-		Models:         []string{"deepseek-v4-flash", "deepseek-v4-pro"},
-		LiteModel:      "deepseek-v4-flash",
-		APIKeyEnvVar:   "DEEPSEEK_API_KEY",
-		WebsiteURL:     "https://platform.deepseek.com/api_keys",
+		// DeepSeek V4 has vision in the chat app but not over the API — image
+		// content isn't accepted on the endpoint, so treat as text-only here.
+		Models: []VendorModel{
+			{ID: "deepseek-v4-flash", Vision: false},
+			{ID: "deepseek-v4-pro", Vision: false},
+		},
+		LiteModel:    "deepseek-v4-flash",
+		APIKeyEnvVar: "DEEPSEEK_API_KEY",
+		WebsiteURL:   "https://platform.deepseek.com/api_keys",
 	},
 	{
 		ID:             "minimax",
@@ -108,9 +140,13 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.minimaxi.com",
 		DefaultModel:   "MiniMax-M3",
-		Models:         []string{"MiniMax-M2.5", "MiniMax-M2.7", "MiniMax-M3"},
-		APIKeyEnvVar:   "MINIMAX_API_KEY",
-		WebsiteURL:     "https://www.minimaxi.com/user-center/basic-information/interface-key",
+		Models: []VendorModel{
+			{ID: "MiniMax-M2.5", Vision: false}, // text-only generation
+			{ID: "MiniMax-M2.7", Vision: false}, // text-only (image input not supported on the API)
+			{ID: "MiniMax-M3", Vision: true},    // multimodal: text/image/video
+		},
+		APIKeyEnvVar: "MINIMAX_API_KEY",
+		WebsiteURL:   "https://www.minimaxi.com/user-center/basic-information/interface-key",
 		EndpointVariants: []EndpointVariant{
 			{Label: "Mainland China", LabelKey: "settings.models.baseurl.variant.mainland_cn", BaseURL: "https://api.minimaxi.com", Region: "cn"},
 			{Label: "International", LabelKey: "settings.models.baseurl.variant.international", BaseURL: "https://api.minimax.io", Region: "intl"},
@@ -123,9 +159,13 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.moonshot.cn",
 		DefaultModel:   "kimi-k2.6",
-		Models:         []string{"kimi-k2.6", "kimi-k2.7-code"},
-		APIKeyEnvVar:   "MOONSHOT_API_KEY",
-		WebsiteURL:     "https://platform.moonshot.cn/console/api-keys",
+		// Kimi K2 family is natively multimodal (image input via MoonViT).
+		Models: []VendorModel{
+			{ID: "kimi-k2.6", Vision: true},
+			{ID: "kimi-k2.7-code", Vision: true},
+		},
+		APIKeyEnvVar: "MOONSHOT_API_KEY",
+		WebsiteURL:   "https://platform.moonshot.cn/console/api-keys",
 		EndpointVariants: []EndpointVariant{
 			{Label: "Mainland China", LabelKey: "settings.models.baseurl.variant.mainland_cn", BaseURL: "https://api.moonshot.cn", Region: "cn"},
 			{Label: "International", LabelKey: "settings.models.baseurl.variant.international", BaseURL: "https://api.moonshot.ai", Region: "intl"},
@@ -138,9 +178,13 @@ var Registry = []Vendor{
 		API:            "anthropic-messages",
 		DefaultBaseURL: "https://api.kimi.com/coding",
 		DefaultModel:   "kimi-for-coding",
-		Models:         []string{"kimi-for-coding", "kimi-k2.6", "kimi-k2.7-code"},
-		APIKeyEnvVar:   "MOONSHOT_API_KEY",
-		WebsiteURL:     "https://platform.moonshot.cn/console/api-keys",
+		Models: []VendorModel{
+			{ID: "kimi-for-coding", Vision: true},
+			{ID: "kimi-k2.6", Vision: true},
+			{ID: "kimi-k2.7-code", Vision: true},
+		},
+		APIKeyEnvVar: "MOONSHOT_API_KEY",
+		WebsiteURL:   "https://platform.moonshot.cn/console/api-keys",
 	},
 	{
 		ID:             "glm",
@@ -149,10 +193,15 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://open.bigmodel.cn/api/paas/v4",
 		DefaultModel:   "glm-4.5",
-		Models:         []string{"glm-4.5", "glm-4.5-air", "glm-4.5-flash"},
-		LiteModel:      "glm-4.5-flash",
-		APIKeyEnvVar:   "ZHIPU_API_KEY",
-		WebsiteURL:     "https://open.bigmodel.cn/usercenter/apikey",
+		// GLM-4.5 line is text-only; the vision variant (GLM-4.5V) isn't offered here.
+		Models: []VendorModel{
+			{ID: "glm-4.5", Vision: false},
+			{ID: "glm-4.5-air", Vision: false},
+			{ID: "glm-4.5-flash", Vision: false},
+		},
+		LiteModel:    "glm-4.5-flash",
+		APIKeyEnvVar: "ZHIPU_API_KEY",
+		WebsiteURL:   "https://open.bigmodel.cn/usercenter/apikey",
 		EndpointVariants: []EndpointVariant{
 			{Label: "Mainland China", LabelKey: "settings.models.baseurl.variant.mainland_cn", BaseURL: "https://open.bigmodel.cn/api/paas/v4", Region: "cn"},
 			{Label: "International", LabelKey: "settings.models.baseurl.variant.international", BaseURL: "https://api.z.ai", Region: "intl"},
@@ -165,10 +214,18 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://dashscope.aliyuncs.com/compatible-mode",
 		DefaultModel:   "qwen3.7-plus",
-		Models:         []string{"qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash", "qwen3.5-flash", "qwen-plus"},
-		LiteModel:      "qwen3.5-flash",
-		APIKeyEnvVar:   "DASHSCOPE_API_KEY",
-		WebsiteURL:     "https://bailian.console.aliyun.com",
+		// qwen3.7-plus and the flash generations accept image input; qwen3.7-max
+		// and the legacy qwen-plus alias are text-only.
+		Models: []VendorModel{
+			{ID: "qwen3.7-max", Vision: false},
+			{ID: "qwen3.7-plus", Vision: true},
+			{ID: "qwen3.6-flash", Vision: true},
+			{ID: "qwen3.5-flash", Vision: true},
+			{ID: "qwen-plus", Vision: false},
+		},
+		LiteModel:    "qwen3.5-flash",
+		APIKeyEnvVar: "DASHSCOPE_API_KEY",
+		WebsiteURL:   "https://bailian.console.aliyun.com",
 		EndpointVariants: []EndpointVariant{
 			{Label: "Mainland China", LabelKey: "settings.models.baseurl.variant.mainland_cn", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode", Region: "cn"},
 			{Label: "International", LabelKey: "settings.models.baseurl.variant.international", BaseURL: "https://dashscope-us.aliyuncs.com/compatible-mode", Region: "intl"},
@@ -181,9 +238,13 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.xiaomimimo.com",
 		DefaultModel:   "mimo-v2.5-pro",
-		Models:         []string{"mimo-v2.5-pro", "mimo-v2.5-flash"},
-		APIKeyEnvVar:   "MIMO_API_KEY",
-		WebsiteURL:     "https://platform.xiaomimimo.com/#/console/api-keys",
+		// MiMo-V2.5 is a native omnimodal model (image/video/audio input).
+		Models: []VendorModel{
+			{ID: "mimo-v2.5-pro", Vision: true},
+			{ID: "mimo-v2.5-flash", Vision: true},
+		},
+		APIKeyEnvVar: "MIMO_API_KEY",
+		WebsiteURL:   "https://platform.xiaomimimo.com/#/console/api-keys",
 	},
 	{
 		ID:          ProviderCustom,
@@ -261,10 +322,47 @@ func VendorDefaultModel(id string) string {
 // VendorModels returns the catalogue of model IDs offered for a vendor (for a
 // UI dropdown), or nil if the vendor is unknown.
 func VendorModels(id string) []string {
-	if v := vendorByID(id); v != nil {
-		return v.Models
+	v := vendorByID(id)
+	if v == nil || len(v.Models) == 0 {
+		return nil
 	}
-	return nil
+	ids := make([]string, len(v.Models))
+	for i, m := range v.Models {
+		ids[i] = m.ID
+	}
+	return ids
+}
+
+// VendorModelVision reports a predefined model's image-input capability. known
+// is false when the vendor or model isn't in the catalogue (e.g. the Custom
+// vendor, or a model id the user typed by hand) — callers then fall back to the
+// heuristic (config.ModelSupportsVision) or ask the user.
+func VendorModelVision(vendorID, modelID string) (vision, known bool) {
+	v := vendorByID(vendorID)
+	if v == nil {
+		return false, false
+	}
+	for _, m := range v.Models {
+		if m.ID == modelID {
+			return m.Vision, true
+		}
+	}
+	return false, false
+}
+
+// VendorModelVisionMap returns model-id → vision for a vendor's catalogue, for
+// the web form to pre-fill the toggle when a predefined model is picked. Nil for
+// unknown vendors or vendors with no predefined models (e.g. Custom).
+func VendorModelVisionMap(id string) map[string]bool {
+	v := vendorByID(id)
+	if v == nil || len(v.Models) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(v.Models))
+	for _, vm := range v.Models {
+		m[vm.ID] = vm.Vision
+	}
+	return m
 }
 
 // VendorEndpointVariants returns the regional endpoint alternatives for a

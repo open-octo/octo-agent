@@ -435,6 +435,7 @@ export interface ModelEntry {
   permission_mode?: string
   reasoning_effort?: string
   show_reasoning?: boolean
+  vision?: boolean
 }
 export interface ConfigResponse {
   models?: ModelEntry[]
@@ -544,6 +545,7 @@ export interface ProviderPreset {
   api: string                // "anthropic-messages" ⇒ anthropic protocol
   default_model: string
   models?: string[]
+  model_vision?: Record<string, boolean>  // model id → accepts image input, for pre-filling the vision toggle
   lite_model?: string
   endpoint_variants?: EndpointVariant[]
   website_url?: string
@@ -567,6 +569,7 @@ export interface ModelConfigInput {
   permission_mode?: string
   reasoning_effort?: string
   show_reasoning?: boolean
+  vision?: boolean
 }
 
 export interface TestConfigResult {

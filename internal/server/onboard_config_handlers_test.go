@@ -277,6 +277,46 @@ func TestApplyModelRequest_ProtocolOnlyForCustom(t *testing.T) {
 	}
 }
 
+func TestApplyModelRequest_VisionResolution(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name string
+		req  saveModelRequest
+		want bool
+	}{
+		{"explicit true wins", saveModelRequest{Provider: "deepseek", Model: "deepseek-v4-pro", Vision: &yes}, true},
+		{"explicit false wins", saveModelRequest{Provider: "openai", Model: "gpt-4o", Vision: &no}, false},
+		{"predefined resolves from catalogue (vision)", saveModelRequest{Provider: "bailian", Model: "qwen3.7-plus"}, true},
+		{"predefined resolves from catalogue (text-only)", saveModelRequest{Provider: "bailian", Model: "qwen3.7-max"}, false},
+		{"custom falls back to heuristic (vision)", saveModelRequest{Provider: "custom", Model: "gpt-4o", BaseURL: "https://gw.example"}, true},
+		{"custom falls back to heuristic (text-only)", saveModelRequest{Provider: "custom", Model: "some-deepseek", BaseURL: "https://gw.example"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var e config.ModelEntry
+			applyModelRequestToEntry(tc.req, &e)
+			if e.Vision != tc.want {
+				t.Errorf("Vision = %v, want %v", e.Vision, tc.want)
+			}
+		})
+	}
+}
+
+func TestListProviders_IncludesModelVision(t *testing.T) {
+	byID := map[string]providerPreset{}
+	for _, p := range buildProviderPresets() {
+		byID[p.ID] = p
+	}
+	mv := byID["bailian"].ModelVision
+	if mv["qwen3.7-plus"] != true || mv["qwen3.7-max"] != false {
+		t.Errorf("bailian model_vision = %v, want qwen3.7-plus:true qwen3.7-max:false", mv)
+	}
+	// The Custom vendor has no catalogue, so no model_vision map.
+	if byID["custom"].ModelVision != nil {
+		t.Errorf("custom model_vision = %v, want nil", byID["custom"].ModelVision)
+	}
+}
+
 func TestConfigModels_PostFirstEntryBecomesDefault(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})

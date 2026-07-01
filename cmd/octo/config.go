@@ -508,6 +508,25 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 		outEntry.ShowReasoning = &showVal
 	}
 
+	// Vision capability is always recorded on the entry. A predefined model
+	// carries it in the catalogue (the "floats with default" empty-model case
+	// resolves to the vendor default); a custom / unknown model is answered by
+	// the user, or on first run defaults to the id heuristic to keep onboarding
+	// friction-free.
+	effModel := firstNonEmpty(outEntry.Model, defaultModels[provider])
+	if v, known := app.VendorModelVision(provider, effModel); known {
+		outEntry.Vision = v
+	} else if firstRun {
+		outEntry.Vision = config.ModelSupportsVision(effModel)
+	} else {
+		visVal, ok := pickYesNo(tty, reader, stdin, stdout,
+			"Does this model accept image input (vision)?", config.ModelSupportsVision(effModel))
+		if !ok {
+			return cancelWizard(stderr)
+		}
+		outEntry.Vision = visVal
+	}
+
 	// The model is the entry's identity; editing the default entry must not
 	// collide with a different existing entry (the HTTP API enforces this too).
 	for _, m := range full.Models {

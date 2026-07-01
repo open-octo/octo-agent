@@ -219,3 +219,71 @@ func TestImplicitLiteModel(t *testing.T) {
 		}
 	}
 }
+
+func TestVendorModels_ReturnsIDs(t *testing.T) {
+	// VendorModels flattens the catalogue to plain ids for the UI dropdown.
+	ids := VendorModels("deepseek")
+	want := []string{"deepseek-v4-flash", "deepseek-v4-pro"}
+	if len(ids) != len(want) {
+		t.Fatalf("VendorModels(deepseek) = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Errorf("VendorModels(deepseek)[%d] = %q, want %q", i, ids[i], want[i])
+		}
+	}
+	if VendorModels("bogus") != nil {
+		t.Error("VendorModels(unknown) should be nil")
+	}
+	// The Custom vendor has no catalogue.
+	if VendorModels(ProviderCustom) != nil {
+		t.Error("VendorModels(custom) should be nil")
+	}
+}
+
+func TestVendorModelVision(t *testing.T) {
+	cases := []struct {
+		vendor, model string
+		vision, known bool
+	}{
+		{"anthropic", "claude-opus-4-8", true, true},
+		{"deepseek", "deepseek-v4-pro", false, true}, // vision not on the API
+		{"bailian", "qwen3.7-plus", true, true},
+		{"bailian", "qwen3.7-max", false, true}, // text-only flagship
+		{"kimi", "kimi-k2.6", true, true},       // MoonViT multimodal
+		{"openai", "o3-mini", false, true},      // no image input
+		{"openai", "o4-mini", true, true},
+		{"bailian", "not-a-model", false, false}, // unknown model
+		{"bogus", "whatever", false, false},      // unknown vendor
+		{ProviderCustom, "anything", false, false},
+	}
+	for _, tc := range cases {
+		vision, known := VendorModelVision(tc.vendor, tc.model)
+		if vision != tc.vision || known != tc.known {
+			t.Errorf("VendorModelVision(%q,%q) = (%v,%v), want (%v,%v)",
+				tc.vendor, tc.model, vision, known, tc.vision, tc.known)
+		}
+	}
+}
+
+func TestVendorModelVisionMap(t *testing.T) {
+	m := VendorModelVisionMap("bailian")
+	if m["qwen3.7-plus"] != true || m["qwen3.7-max"] != false {
+		t.Errorf("VendorModelVisionMap(bailian) = %v", m)
+	}
+	if VendorModelVisionMap(ProviderCustom) != nil {
+		t.Error("VendorModelVisionMap(custom) should be nil (no catalogue)")
+	}
+}
+
+// TestRegistryModelsHaveDeterministicVision guards against a half-migrated
+// entry: every catalogue model must be reachable via VendorModelVision.
+func TestRegistryModelsHaveDeterministicVision(t *testing.T) {
+	for _, v := range Registry {
+		for _, m := range v.Models {
+			if _, known := VendorModelVision(v.ID, m.ID); !known {
+				t.Errorf("vendor %q model %q not resolvable via VendorModelVision", v.ID, m.ID)
+			}
+		}
+	}
+}

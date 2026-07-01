@@ -51,10 +51,37 @@ type ModelEntry struct {
 	// (enabled).
 	ShowReasoning *bool `yaml:"show_reasoning,omitempty"`
 	// Vision controls whether tools may hand this model images (e.g. the
-	// browser tool's screenshot). nil means the built-in default (enabled).
-	// Set false for text-only models (e.g. qwen-max, as opposed to qwen-vl)
-	// so image content isn't sent and rejected.
-	Vision *bool `yaml:"vision,omitempty"`
+	// browser tool's screenshot). It is always recorded: predefined models get
+	// their catalogue value at add time, custom models are answered by the user.
+	// Set false for text-only models (e.g. qwen-plus) so image content isn't
+	// sent and rejected. A legacy file with no `vision:` key is backfilled from
+	// ModelSupportsVision at load (see UnmarshalYAML).
+	Vision bool `yaml:"vision"`
+}
+
+// UnmarshalYAML backfills Vision for legacy config files written before the
+// field existed. A non-pointer bool can't distinguish an absent key from an
+// explicit `vision: false`, so a small probe detects presence: when the key is
+// missing, the heuristic (ModelSupportsVision) supplies the value — matching the
+// runtime behaviour those files had before — and the next Save records it.
+func (e *ModelEntry) UnmarshalYAML(node *yaml.Node) error {
+	type plain ModelEntry
+	var p plain
+	if err := node.Decode(&p); err != nil {
+		return err
+	}
+	*e = ModelEntry(p)
+
+	var probe struct {
+		Vision *bool `yaml:"vision"`
+	}
+	if err := node.Decode(&probe); err != nil {
+		return err
+	}
+	if probe.Vision == nil {
+		e.Vision = ModelSupportsVision(e.Model)
+	}
+	return nil
 }
 
 // Config is the persisted set of CLI defaults. Every field is optional; a
@@ -134,18 +161,14 @@ func (c Config) EffectiveShowReasoning(entry *bool) bool {
 	return true
 }
 
-// ModelVision reports whether the named model accepts image content. model is
-// matched against each entry's Model; an entry's explicit Vision wins,
-// otherwise the capability is inferred from the model id (ModelSupportsVision)
-// so it tracks the model automatically. Unmatched models fall back to the same
-// inference.
+// ModelVision reports whether the named model accepts image content. When the
+// model matches a configured entry, its recorded Vision value is authoritative
+// (Load backfills legacy entries, so it is always set). A model not present in
+// the config — e.g. a bare `octo --model X` — falls back to the heuristic.
 func (c Config) ModelVision(model string) bool {
 	for _, m := range c.Models {
 		if m.Model == model {
-			if m.Vision != nil {
-				return *m.Vision
-			}
-			return ModelSupportsVision(m.Model)
+			return m.Vision
 		}
 	}
 	return ModelSupportsVision(model)
@@ -308,6 +331,9 @@ func (f fileConfig) normalize() Config {
 		APIKey:          f.LegacyAPIKey,
 		ReasoningEffort: f.LegacyReasoningEffort,
 		ShowReasoning:   c.ShowReasoning,
+		// The legacy schema predates the vision field; backfill from the id so
+		// the first Save records it, mirroring the models-list migration path.
+		Vision: ModelSupportsVision(f.LegacyModel),
 	}
 	migrateEntryProvider(&e)
 	c.Models = []ModelEntry{e}

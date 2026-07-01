@@ -17,8 +17,8 @@ func TestPrepareToolTurn_WiresBrowserVision(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
 		Models: []config.ModelEntry{
-			{Provider: "openai", Model: "qwen3.7-max"}, // heuristic → no vision
-			{Provider: "openai", Model: "gpt-4o"},      // heuristic → vision
+			{Provider: "openai", Model: "qwen3.7-max", Vision: false}, // recorded text-only
+			{Provider: "openai", Model: "gpt-4o", Vision: true},       // recorded vision
 		},
 		DefaultModel: "qwen3.7-max",
 	})
