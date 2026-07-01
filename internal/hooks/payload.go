@@ -30,6 +30,18 @@ const (
 	EventPreCompact Event = "PreCompact"
 )
 
+// valid reports whether e is a known event name (used to reject typos in
+// hooks.yml rather than silently ignoring a misspelled event).
+func (e Event) valid() bool {
+	switch e {
+	case EventSessionStart, EventUserPromptSubmit, EventPreToolUse,
+		EventPostToolUse, EventStop, EventSubagentStop, EventPreCompact:
+		return true
+	default:
+		return false
+	}
+}
+
 // injects reports whether an event's hook stdout is folded back into the model
 // stream. Side-effect events (Stop/SubagentStop/PreCompact) discard stdout.
 func (e Event) injects() bool {

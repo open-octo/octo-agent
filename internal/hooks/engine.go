@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -73,11 +74,28 @@ func (s *SeenSet) markSeen(sessionID string) (already bool) {
 // is the surface the memory injector registers on.
 type InProcHook func(ctx context.Context, p Payload) string
 
-// shellHook is one configured shell command for an event. matcher/async land in
-// a later phase; for now every shell hook runs synchronously and unconditionally.
+// shellHook is one configured shell command for an event. matcher, when set,
+// gates the hook on the tool name for the tool events (PreToolUse/PostToolUse);
+// it is ignored for the other events. Async execution lands in a later phase;
+// for now every shell hook runs synchronously.
 type shellHook struct {
 	command string
+	matcher *regexp.Regexp // nil → match every tool
 	timeout time.Duration
+}
+
+// matches reports whether this hook should run for the given event/tool. A nil
+// matcher, or any non-tool event, matches unconditionally.
+func (h shellHook) matches(event Event, toolName string) bool {
+	if h.matcher == nil {
+		return true
+	}
+	switch event {
+	case EventPreToolUse, EventPostToolUse:
+		return h.matcher.MatchString(toolName)
+	default:
+		return true
+	}
 }
 
 // Session-start source labels (parity with Claude Code's SessionStart.source).
@@ -101,12 +119,28 @@ func NewEngine(seen *SeenSet) *Engine {
 	}
 }
 
-// RegisterShell adds a shell command hook for an event. A zero timeout uses the
-// package default.
+// RegisterShell adds a shell command hook for an event, matching every tool. A
+// zero timeout uses the package default.
 func (e *Engine) RegisterShell(event Event, command string, timeout time.Duration) {
+	_ = e.RegisterShellMatched(event, command, "", timeout)
+}
+
+// RegisterShellMatched adds a shell command hook whose matcher (a regexp over
+// the tool name, honoured only for PreToolUse/PostToolUse) gates whether it
+// runs. An empty matcher matches every tool. A zero timeout uses the package
+// default. Returns an error only when matcher is not a valid regexp.
+func (e *Engine) RegisterShellMatched(event Event, command, matcher string, timeout time.Duration) error {
 	command = strings.TrimSpace(command)
 	if e == nil || command == "" {
-		return
+		return nil
+	}
+	var re *regexp.Regexp
+	if m := strings.TrimSpace(matcher); m != "" {
+		compiled, err := regexp.Compile(m)
+		if err != nil {
+			return err
+		}
+		re = compiled
 	}
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -118,7 +152,8 @@ func (e *Engine) RegisterShell(event Event, command string, timeout time.Duratio
 	if e.shell == nil {
 		e.shell = make(map[Event][]shellHook)
 	}
-	e.shell[event] = append(e.shell[event], shellHook{command: command, timeout: timeout})
+	e.shell[event] = append(e.shell[event], shellHook{command: command, matcher: re, timeout: timeout})
+	return nil
 }
 
 // RegisterInProc adds an in-process hook for an event.
@@ -212,6 +247,9 @@ func (e *Engine) runShellHooks(ctx context.Context, hooks []shellHook, p Payload
 	}
 	var parts []string
 	for _, h := range hooks {
+		if !h.matches(p.Event, p.ToolName) {
+			continue
+		}
 		out, err := execShell(ctx, h.command, stdin, h.timeout)
 		if err != nil {
 			e.notify(err.Error())

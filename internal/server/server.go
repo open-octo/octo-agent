@@ -953,7 +953,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
 	// hook engine. Shares the process seen-set so SessionStart resume fires once
 	// per OS process across the serve process's many sessions.
-	hookEngine := hooks.EngineFromEnv(hooks.SharedSeen())
+	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen())
 	hookEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if s.memDir != "" {
 		s.injectorFor(sess.ID).RegisterHooks(hookEngine)
@@ -1916,7 +1916,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and
 	// dropped on /unbind; a fresh engine each turn just re-registers it.
-	imEngine := hooks.EngineFromEnv(hooks.SharedSeen())
+	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen())
 	imEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if s.memDir != "" {
 		s.injectorFor("im:" + string(sess.Key)).RegisterHooks(imEngine)

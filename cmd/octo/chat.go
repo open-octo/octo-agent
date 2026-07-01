@@ -759,7 +759,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// injector's reminder & save-nudge as in-process hooks, unified on one
 	// dispatch path that the agent core drives for every transport. Shares the
 	// process seen-set so SessionStart resume fires once per OS process.
-	hookEngine := hooks.EngineFromEnv(hooks.SharedSeen())
+	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen())
 	hookEngine.Notify = func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) }
 	if memDir != "" {
 		rules := memory.ParseRules(memDir)
