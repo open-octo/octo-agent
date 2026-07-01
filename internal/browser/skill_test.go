@@ -110,6 +110,64 @@ func TestCompileAutoParamsDedup(t *testing.T) {
 	}
 }
 
+// TestCompileAutoVerifyNavigateHost: navigate steps get an auto URL verify pinned
+// to the destination host, so a redirect elsewhere fails instead of proceeding.
+func TestCompileAutoVerifyNavigateHost(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "navigate", URL: "https://shop.example.com/cart?sid=abc"},
+		{Type: "click", Selector: "#pay", Tag: "BUTTON", Text: "Pay"},
+	}
+	s := CompileSkill("demo", "", "https://shop.example.com/start", events)
+	nav := s.Steps[0]
+	if nav.Action != "navigate" || nav.Verify == nil || nav.Verify.URL != "shop.example.com" {
+		t.Fatalf("leading navigate missing host verify: %+v", nav)
+	}
+	// The click step carries no auto URL verify.
+	for _, st := range s.Steps {
+		if st.Action == "click" && st.Verify != nil && st.Verify.URL != "" {
+			t.Fatalf("click should not get a url verify: %+v", st)
+		}
+	}
+}
+
+// TestReplayVerifyURLCatchesCrossHostRedirect: a navigate whose server 302s to a
+// different host (a stand-in for an SSO/login bounce) fails the auto host verify,
+// instead of replay silently continuing on the wrong page.
+func TestReplayVerifyURLCatchesCrossHostRedirect(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	// The "login" host the redirect lands on.
+	login := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><title>login</title><h1>Sign in</h1>`))
+	}))
+	defer login.Close()
+	// The app host: /start bounces to the login host.
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, login.URL+"/login", http.StatusFound)
+	}))
+	defer app.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	appHost := strings.TrimPrefix(app.URL, "http://")
+	skill := &Skill{Name: "x", Steps: []Step{
+		{Action: "navigate", URL: app.URL + "/start", Verify: &Verify{URL: appHost}},
+	}}
+	_, _, err = ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second})
+	if err == nil {
+		t.Fatal("expected replay to fail: navigation bounced to a different host")
+	}
+	if !strings.Contains(err.Error(), "verify url") {
+		t.Fatalf("expected a url-verify failure, got: %v", err)
+	}
+}
+
 // TestCompileUploadMerge: a click on the upload button followed by a file
 // selection compiles to a single upload step on the button, auto-parameterized.
 func TestCompileUploadMerge(t *testing.T) {

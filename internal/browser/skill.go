@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -50,11 +51,15 @@ type Step struct {
 }
 
 // Verify is an optional post-step assertion. Exists waits for a selector; Text
-// waits for body text to contain a string. Empty means the implicit check only
-// (the step's own target became present).
+// waits for body text to contain a string; URL waits for location.href to contain
+// a substring (auto-set to the destination host on navigate steps, to catch a
+// redirect to a different host — a login/error page — whose DOM often mirrors the
+// target). Empty means the implicit check only (the step's own target became
+// present).
 type Verify struct {
 	Exists string `yaml:"exists,omitempty"`
 	Text   string `yaml:"text,omitempty"`
+	URL    string `yaml:"url,omitempty"`
 }
 
 // Healer is called when a step fails. It may inspect the page and mutate *step
@@ -71,7 +76,7 @@ type Healer func(ctx context.Context, page *Page, step *Step, cause error) error
 func CompileSkill(name, description, startURL string, events []RecordedEvent) Skill {
 	s := Skill{Name: name, Description: description}
 	if startURL != "" && startURL != "about:blank" {
-		s.Steps = append(s.Steps, Step{Action: "navigate", URL: startURL})
+		s.Steps = append(s.Steps, navStep(startURL))
 	}
 	// Deterministic auto-parameterization: every value the user typed becomes a
 	// declared {{param}} whose Default is the recorded value — so replay with no
@@ -102,7 +107,7 @@ func CompileSkill(name, description, startURL string, events []RecordedEvent) Sk
 			if n := len(s.Steps); n > 0 && s.Steps[n-1].Action == "navigate" && s.Steps[n-1].URL == e.URL {
 				continue
 			}
-			s.Steps = append(s.Steps, Step{Action: "navigate", URL: e.URL})
+			s.Steps = append(s.Steps, navStep(e.URL))
 			continue
 		}
 		if e.Type == "upload" {
@@ -149,6 +154,31 @@ func CompileSkill(name, description, startURL string, events []RecordedEvent) Sk
 	}
 	s.Steps = dropConsecutiveDupeSteps(s.Steps)
 	return s
+}
+
+// navStep builds a navigate step, auto-attaching a URL verify pinned to the
+// destination host. This surfaces a redirect to a different host (a login or
+// error page, whose DOM often mirrors the target and would otherwise let replay
+// proceed on the wrong page) as an explicit failure. It matches the host only —
+// scheme-agnostic (an http→https upgrade is not flagged) and blind to same-host
+// path rewrites (canonical/locale), so benign redirects don't cause false
+// failures. The check is a plain substring of location.href, so it's also
+// hand-editable to a fuller URL fragment when a workflow wants a tighter assert.
+func navStep(u string) Step {
+	st := Step{Action: "navigate", URL: u}
+	if h := hostOf(u); h != "" {
+		st.Verify = &Verify{URL: h}
+	}
+	return st
+}
+
+// hostOf returns the host of an http(s) URL, or "".
+func hostOf(raw string) string {
+	pu, err := url.Parse(raw)
+	if err != nil || pu.Host == "" || (pu.Scheme != "http" && pu.Scheme != "https") {
+		return ""
+	}
+	return pu.Host
 }
 
 // slugParam reduces a field hint to a safe {{param}} identifier: lowercase, with
@@ -578,6 +608,32 @@ func verify(ctx context.Context, page *Page, step *Step, params map[string]strin
 			}
 			if time.Now().After(deadline) {
 				return fmt.Errorf("verify text %q not found", want)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}
+	if want := subst(step.Verify.URL, params); want != "" {
+		// Poll: a redirect (e.g. to a login/error host) may resolve a beat after
+		// the load event. Substring (not prefix) match so it's scheme-agnostic —
+		// an http→https upgrade must not read as a wrong-page failure.
+		deadline := time.Now().Add(10 * time.Second)
+		expr := fmt.Sprintf("(location.href||'').indexOf(%s) >= 0", jsString(want))
+		for {
+			var ok bool
+			if err := page.Eval(ctx, expr, &ok); err != nil {
+				return err
+			}
+			if ok {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				var cur string
+				_ = page.Eval(ctx, "location.href", &cur)
+				return fmt.Errorf("verify url: expected to stay on %q, but landed on %q", want, cur)
 			}
 			select {
 			case <-ctx.Done():
