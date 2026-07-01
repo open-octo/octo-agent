@@ -75,6 +75,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runSessions(args[1:], stdout, stderr)
 	case "skills":
 		return runSkills(args[1:], stdout, stderr)
+	case "hooks":
+		return runHooks(args[1:], stdout, stderr)
 	case "serve":
 		return runServe(args[1:], stdin, stdout, stderr)
 	case "completion":

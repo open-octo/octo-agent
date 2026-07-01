@@ -339,6 +339,7 @@ func (a *Agent) maybeCompact(ctx context.Context, handler EventHandler) error {
 		return nil
 	}
 
+	a.firePreCompact()
 	if handler != nil {
 		handler(AgentEvent{Kind: EventCompactStarted, Compact: &CompactStats{
 			BeforeTokens: before,
@@ -415,6 +416,7 @@ func (a *Agent) ForceCompact(ctx context.Context, handler EventHandler) (Compact
 		return stats, nil
 	}
 
+	a.firePreCompact()
 	if handler != nil {
 		handler(AgentEvent{Kind: EventCompactStarted, Compact: &CompactStats{
 			BeforeTokens: before,
