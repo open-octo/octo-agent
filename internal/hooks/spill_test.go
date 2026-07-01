@@ -3,10 +3,21 @@ package hooks
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+// posixOnly skips tests that execute POSIX shell commands (touch/cat/…): the
+// hook runner uses PowerShell on Windows, where those commands don't exist.
+// Matches makeScript's Windows trade-off.
+func posixOnly(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("spill test runs POSIX shell commands; not portable to Windows")
+	}
+}
 
 // waitFor polls until cond is true or the deadline elapses.
 func waitFor(t *testing.T, d time.Duration, cond func() bool) bool {
@@ -24,6 +35,7 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) bool {
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 func TestSpill_ToDiskThenRedeliver(t *testing.T) {
+	posixOnly(t)
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "ran")
 	q := &spillQueue{ch: make(chan asyncItem, 1), dir: dir}
@@ -51,6 +63,7 @@ func TestSpill_ToDiskThenRedeliver(t *testing.T) {
 }
 
 func TestSpill_RunPipesPayloadToStdin(t *testing.T) {
+	posixOnly(t)
 	dir := t.TempDir()
 	out := filepath.Join(dir, "captured.json")
 	q := &spillQueue{ch: make(chan asyncItem, 1), dir: dir}
@@ -86,6 +99,7 @@ func TestSpill_OfferAfterCloseSpills(t *testing.T) {
 }
 
 func TestSpill_AsyncRunsViaWorker(t *testing.T) {
+	posixOnly(t)
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "async-ran")
 	q := &spillQueue{ch: make(chan asyncItem, 4), dir: dir}
