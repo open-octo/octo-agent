@@ -468,6 +468,12 @@ func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// Model is the entry's identity; an empty one would re-key the entry to ""
+	// (unaddressable via the API), so reject it as POST does.
+	if req.Model == "" {
+		writeError(w, http.StatusBadRequest, "model is required")
+		return
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
