@@ -159,7 +159,7 @@ func TestReplayVerifyURLCatchesCrossHostRedirect(t *testing.T) {
 	skill := &Skill{Name: "x", Steps: []Step{
 		{Action: "navigate", URL: app.URL + "/start", Verify: &Verify{URL: appHost}},
 	}}
-	_, _, err = ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second})
+	_, _, _, err = ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second})
 	if err == nil {
 		t.Fatal("expected replay to fail: navigation bounced to a different host")
 	}
@@ -312,7 +312,7 @@ func TestGenerateSkillDistill(t *testing.T) {
 // time (the SPA-settling primitive) — and run_skill no longer rejects it.
 func TestRunStepWaitFixedDelay(t *testing.T) {
 	start := time.Now()
-	if _, err := runStep(context.Background(), nil, nil, &Step{Action: "wait", TimeoutMS: 80}, nil, time.Second); err != nil {
+	if _, err := runStep(context.Background(), nil, nil, &Step{Action: "wait", TimeoutMS: 80}, nil, time.Second, "", nil); err != nil {
 		t.Fatalf("wait step: %v", err)
 	}
 	if d := time.Since(start); d < 60*time.Millisecond {
@@ -351,7 +351,7 @@ func TestWaitForNetworkIdle(t *testing.T) {
 
 	skill := &Skill{Name: "x", Steps: []Step{{Action: "wait", Network: true, TimeoutMS: 10000}}}
 	start := time.Now()
-	if _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 15 * time.Second}); err != nil {
+	if _, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 15 * time.Second}); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	// The in-flight fetch (~600ms) must have settled before the wait returned.
@@ -396,7 +396,7 @@ func TestReplayClickFollowsNewTab(t *testing.T) {
 	}
 
 	skill := &Skill{Name: "x", Steps: []Step{{Action: "click", Selector: "#open"}}}
-	_, fp, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b})
+	_, fp, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestReplayTextAnchorRecoversFromDrift(t *testing.T) {
 	skill := &Skill{Name: "x", Steps: []Step{
 		{Action: "click", Selector: "div > button:nth-of-type(1)", Label: "Book now"},
 	}}
-	if _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
+	if _, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	var hit string
@@ -483,7 +483,7 @@ func TestReplayFieldHintRecoversFromDrift(t *testing.T) {
 	skill := &Skill{Name: "x", Steps: []Step{
 		{Action: "type", Selector: "body > div:nth-of-type(9) > input", Hint: "q", Value: "hello"},
 	}}
-	if _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
+	if _, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	var got string
@@ -522,7 +522,7 @@ func TestReplayDismissesOverlayDeterministically(t *testing.T) {
 	// #go is absent until the overlay is dismissed; no healer is provided, so this
 	// exercises the deterministic structural recovery path.
 	skill := &Skill{Name: "x", Steps: []Step{{Action: "click", Selector: "#go"}}}
-	modified, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Browser: b})
+	modified, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Browser: b})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestReplayMultiRoundHeal(t *testing.T) {
 		}
 		return nil
 	}
-	modified, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
+	modified, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -626,7 +626,7 @@ func TestReplaySkillSelfHeal(t *testing.T) {
 		return context.DeadlineExceeded
 	}
 
-	modified, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal})
+	modified, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -645,5 +645,148 @@ func TestReplaySkillSelfHeal(t *testing.T) {
 	}
 	if clicks < 1 {
 		t.Fatalf("healed click did not register (clicks=%d)", clicks)
+	}
+}
+
+// TestAssembleOutputs: file[] collects every bound value in order; other types
+// take the last; a declared-but-unbound output defaults (empty slice / "").
+func TestAssembleOutputs(t *testing.T) {
+	outs := []Output{
+		{Name: "files", Type: "file[]"},
+		{Name: "id", Type: "string"},
+		{Name: "last", Type: "file"},
+		{Name: "missing", Type: "file[]"},
+	}
+	binds := map[string][]string{
+		"files": {"/a", "/b"},
+		"id":    {"RPT-1"},
+		"last":  {"/x", "/y"},
+		"stray": {"ignored"}, // undeclared → must not surface
+	}
+	got := assembleOutputs(outs, binds)
+	if f, ok := got["files"].([]string); !ok || len(f) != 2 || f[0] != "/a" || f[1] != "/b" {
+		t.Fatalf("files: %#v", got["files"])
+	}
+	if got["id"] != "RPT-1" {
+		t.Fatalf("id: %#v", got["id"])
+	}
+	if got["last"] != "/y" {
+		t.Fatalf("last (want last bound /y): %#v", got["last"])
+	}
+	if m, ok := got["missing"].([]string); !ok || len(m) != 0 {
+		t.Fatalf("missing file[] should be empty slice: %#v", got["missing"])
+	}
+	if _, ok := got["stray"]; ok {
+		t.Fatalf("undeclared bind leaked into outputs: %#v", got)
+	}
+}
+
+// TestSkillYAMLRoundTripOutputs: the new outputs/bind/js fields survive a
+// marshal → parse round-trip (so a hand-edited skill keeps its handoff contract).
+func TestSkillYAMLRoundTripOutputs(t *testing.T) {
+	s := Skill{
+		Name:    "r",
+		Outputs: []Output{{Name: "files", Type: "file[]"}, {Name: "url", Type: "string"}},
+		Steps: []Step{
+			{Action: "download", Selector: "#e", Bind: "files"},
+			{Action: "extract", JS: "location.href", Bind: "url"},
+		},
+	}
+	data, err := MarshalSkill(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"outputs:", "type: file[]", "action: download", "bind: files", "action: extract", "js: location.href"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("yaml missing %q:\n%s", want, data)
+		}
+	}
+	back, err := ParseSkill(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Outputs) != 2 || back.Outputs[0].Type != "file[]" {
+		t.Fatalf("outputs round-trip: %#v", back.Outputs)
+	}
+	if back.Steps[0].Bind != "files" || back.Steps[1].JS != "location.href" {
+		t.Fatalf("step round-trip: %#v", back.Steps)
+	}
+}
+
+// TestReplaySkillDownloadBindsOutputs: a download step captures the file the
+// trigger produces and binds its path into the skill's declared file[] output.
+func TestReplaySkillDownloadBindsOutputs(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/file.csv" {
+			w.Header().Set("Content-Disposition", `attachment; filename="report.csv"`)
+			w.Header().Set("Content-Type", "text/csv")
+			w.Write([]byte("a,b,c\n1,2,3\n"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><title>dl</title><a id="dl" href="/file.csv" download>Export</a>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#dl", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	skill := &Skill{
+		Name:    "dl",
+		Outputs: []Output{{Name: "files", Type: "file[]"}},
+		Steps:   []Step{{Action: "download", Selector: "#dl", Bind: "files"}},
+	}
+	_, _, outputs, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b, DownloadDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	files, ok := outputs["files"].([]string)
+	if !ok || len(files) != 1 {
+		t.Fatalf("want 1 file in outputs, got %#v", outputs["files"])
+	}
+	if _, err := os.Stat(files[0]); err != nil {
+		t.Fatalf("downloaded file missing: %v", err)
+	}
+}
+
+// TestReplaySkillExtractBindsOutput: an extract step evaluates JS and binds the
+// (unwrapped) string result into a declared output.
+func TestReplaySkillExtractBindsOutput(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><title>x</title><div id="rid">RPT-42</div>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#rid", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	skill := &Skill{
+		Name:    "x",
+		Outputs: []Output{{Name: "report_id", Type: "string"}},
+		Steps:   []Step{{Action: "extract", JS: "document.querySelector('#rid').textContent", Bind: "report_id"}},
+	}
+	_, _, outputs, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b})
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if outputs["report_id"] != "RPT-42" {
+		t.Fatalf("want RPT-42, got %#v", outputs["report_id"])
 	}
 }

@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -16,10 +17,11 @@ import (
 // serializes to YAML — human-readable, hand-editable, git-versionable — which is
 // the "editable steps" surface. Replay reads it back; self-heal writes it back.
 type Skill struct {
-	Name        string  `yaml:"name"`
-	Description string  `yaml:"description,omitempty"`
-	Params      []Param `yaml:"params,omitempty"`
-	Steps       []Step  `yaml:"steps"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description,omitempty"`
+	Params      []Param  `yaml:"params,omitempty"`
+	Outputs     []Output `yaml:"outputs,omitempty"`
+	Steps       []Step   `yaml:"steps"`
 }
 
 // Param is a replay-time input; {{name}} placeholders in step values/urls are
@@ -30,11 +32,21 @@ type Param struct {
 	Default     string `yaml:"default,omitempty"`
 }
 
+// Output is a value replay exposes to its caller — the handoff surface that lets
+// a recording feed a downstream step. Steps bind a produced value to an Output
+// by name via Step.Bind (a download binds the captured file path; an extract
+// binds the evaluated string). Type controls aggregation: "file[]" collects
+// every bound value in order; "file"/"string" (and anything else) take the last.
+type Output struct {
+	Name string `yaml:"name"`
+	Type string `yaml:"type,omitempty"` // file | file[] | string
+}
+
 // Step is one action. Selector is within its document; Frame (a same-origin
 // iframe selector) scopes it via the " >>> " convention. Label is a human note;
 // replay ignores it.
 type Step struct {
-	Action   string `yaml:"action"` // navigate | click | type | select | upload | wait
+	Action   string `yaml:"action"` // navigate | click | type | select | upload | wait | download | extract
 	URL      string `yaml:"url,omitempty"`
 	Frame    string `yaml:"frame,omitempty"`
 	Selector string `yaml:"selector,omitempty"`
@@ -46,6 +58,8 @@ type Step struct {
 	// before giving up to the healer — the field-input analogue of Label steering
 	// a click by visible text.
 	Hint      string  `yaml:"hint,omitempty"`
+	Bind      string  `yaml:"bind,omitempty"`       // download/extract: write the produced value into this named Output
+	JS        string  `yaml:"js,omitempty"`         // extract: expression whose value is bound
 	Network   bool    `yaml:"network,omitempty"`    // wait: settle for network (fetch/XHR) idle instead of a fixed delay
 	TimeoutMS int     `yaml:"timeout_ms,omitempty"` // wait: fixed delay (ms) when no selector; also caps the network-idle settle
 	Verify    *Verify `yaml:"verify,omitempty"`
@@ -421,11 +435,13 @@ func subst(s string, params map[string]string) string {
 // ReplayOptions tunes a replay. StepTimeout bounds the per-step wait for a
 // target to appear (default 15s — generous for slow back-ends). Healer, when
 // set, is consulted on a step failure. Browser, when set, lets a click follow a
-// new tab it opens (target=_blank / window.open).
+// new tab it opens (target=_blank / window.open). DownloadDir is where download
+// steps land their files (required only if the skill has download steps).
 type ReplayOptions struct {
 	StepTimeout time.Duration
 	Healer      Healer
 	Browser     *Browser
+	DownloadDir string
 }
 
 // ReplaySkill runs a skill deterministically (no LLM), substituting params. Each
@@ -434,27 +450,55 @@ type ReplayOptions struct {
 // healer repairs the step, replay continues and reports modified=true so the
 // caller can write the corrected skill back. A click that opens a new tab swaps
 // the active page for subsequent steps; finalPage is the page replay ended on
-// (so the caller can keep its session pointed at the right tab).
-func ReplaySkill(ctx context.Context, page *Page, skill *Skill, params map[string]string, opts ReplayOptions) (modified bool, finalPage *Page, err error) {
+// (so the caller can keep its session pointed at the right tab). outputs holds
+// the skill's declared Outputs as bound during replay (download paths, extracted
+// values) — the handoff surface for composing this recording with later steps.
+func ReplaySkill(ctx context.Context, page *Page, skill *Skill, params map[string]string, opts ReplayOptions) (modified bool, finalPage *Page, outputs map[string]any, err error) {
 	if opts.StepTimeout <= 0 {
 		opts.StepTimeout = 15 * time.Second
 	}
 	full := mergedParams(skill, params)
+	binds := map[string][]string{}
 	cur := page
 	for i := range skill.Steps {
-		np, runErr := runStep(ctx, opts.Browser, cur, &skill.Steps[i], full, opts.StepTimeout)
+		np, runErr := runStep(ctx, opts.Browser, cur, &skill.Steps[i], full, opts.StepTimeout, opts.DownloadDir, binds)
 		if runErr == nil {
 			cur = np
 			continue
 		}
-		np, healed, runErr := recoverStep(ctx, opts, cur, &skill.Steps[i], full, runErr, &modified)
+		np, healed, runErr := recoverStep(ctx, opts, cur, &skill.Steps[i], full, runErr, &modified, binds)
 		if runErr != nil {
-			return modified, cur, fmt.Errorf("step %d (%s): %w", i+1, skill.Steps[i].Action, runErr)
+			return modified, cur, nil, fmt.Errorf("step %d (%s): %w", i+1, skill.Steps[i].Action, runErr)
 		}
 		_ = healed
 		cur = np
 	}
-	return modified, cur, nil
+	return modified, cur, assembleOutputs(skill.Outputs, binds), nil
+}
+
+// assembleOutputs turns the ordered values bound during replay into the skill's
+// declared outputs. A "file[]" output yields the full ordered slice (empty slice
+// if never bound); every other type yields the last bound value ("" if never
+// bound). Only declared outputs surface — a stray bind to an undeclared name is
+// ignored, keeping the handoff contract exactly what the skill promised.
+func assembleOutputs(outs []Output, binds map[string][]string) map[string]any {
+	res := make(map[string]any, len(outs))
+	for _, o := range outs {
+		vals := binds[o.Name]
+		if o.Type == "file[]" {
+			if vals == nil {
+				vals = []string{}
+			}
+			res[o.Name] = vals
+			continue
+		}
+		if len(vals) > 0 {
+			res[o.Name] = vals[len(vals)-1]
+		} else {
+			res[o.Name] = ""
+		}
+	}
+	return res
 }
 
 // maxHealRounds bounds how many times the LLM healer is consulted for one step,
@@ -472,10 +516,10 @@ const maxHealRounds = 3
 // It returns the page to continue on, whether a heal mutated the step (for the
 // caller's write-back via *modified), and a non-nil error only if the step could
 // not be recovered.
-func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step, params map[string]string, cause error, modified *bool) (*Page, bool, error) {
+func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step, params map[string]string, cause error, modified *bool, binds map[string][]string) (*Page, bool, error) {
 	// 1. Structural: a blocking overlay is the most common non-selector failure.
 	if dismissed, _ := page.DismissOverlay(ctx); dismissed {
-		if np, err := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout); err == nil {
+		if np, err := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout, opts.DownloadDir, binds); err == nil {
 			return np, true, nil
 		}
 	}
@@ -488,7 +532,7 @@ func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step
 		if herr := opts.Healer(ctx, page, step, cause); herr != nil {
 			return page, false, cause
 		}
-		np, retryErr := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout)
+		np, retryErr := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout, opts.DownloadDir, binds)
 		if retryErr == nil {
 			if *step != before {
 				*modified = true
@@ -519,7 +563,9 @@ func mergedParams(skill *Skill, params map[string]string) map[string]string {
 
 // runStep executes one step on page and returns the page subsequent steps should
 // run on — the same page, except a click that opens a new tab returns that tab.
-func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map[string]string, waitTimeout time.Duration) (*Page, error) {
+// A download/extract step records its produced value into binds under step.Bind;
+// downloadDir is where a download step lands its file.
+func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map[string]string, waitTimeout time.Duration, downloadDir string, binds map[string][]string) (*Page, error) {
 	target := step.target()
 	switch step.Action {
 	case "navigate":
@@ -623,10 +669,58 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		if err := page.UploadViaChooser(ctx, target, []string{subst(step.Value, params)}); err != nil {
 			return page, err
 		}
+	case "download":
+		// Capture the file the trigger produces (client-side-generated files never
+		// appear as a plain HTTP response — only what lands on disk is the file).
+		// Resolve the trigger like a click (text/label first) so a drifted export
+		// button still fires; bind the saved path so it can flow downstream.
+		if b == nil {
+			return page, fmt.Errorf("download: no browser session")
+		}
+		if downloadDir == "" {
+			return page, fmt.Errorf("download: no download directory configured")
+		}
+		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
+			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
+		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
+			return page, err
+		}
+		path, err := b.CaptureDownload(ctx, downloadDir, func() error { return page.Click(ctx, target) })
+		if err != nil {
+			return page, err
+		}
+		bind(binds, step.Bind, path)
+	case "extract":
+		// Read a value off the page (a report id, a status) and bind it — the
+		// scalar analogue of a download for feeding a downstream step. A JSON string
+		// result is unwrapped to its text; anything else is kept as its JSON form.
+		if strings.TrimSpace(step.JS) == "" {
+			return page, fmt.Errorf("extract: js is required")
+		}
+		var raw json.RawMessage
+		if err := page.Eval(ctx, subst(step.JS, params), &raw); err != nil {
+			return page, err
+		}
+		val := string(raw)
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			val = s
+		}
+		bind(binds, step.Bind, val)
 	default:
 		return page, fmt.Errorf("unknown action %q", step.Action)
 	}
 	return page, verify(ctx, page, step, params)
+}
+
+// bind appends a produced value under name, tolerating a nil map (a direct
+// runStep caller that doesn't collect outputs) and an empty name (an unbound
+// download/extract step, which just discards its value).
+func bind(binds map[string][]string, name, value string) {
+	if binds == nil || name == "" {
+		return
+	}
+	binds[name] = append(binds[name], value)
 }
 
 // clickTarget clicks target on page, following a new tab the click opens when a

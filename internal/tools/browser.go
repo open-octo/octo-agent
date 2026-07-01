@@ -588,7 +588,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		recorderMu.Lock()
 		healer := browserHealer
 		recorderMu.Unlock()
-		modified, finalPage, err := browser.ReplaySkill(ctx, page, &skill, params, browser.ReplayOptions{Healer: healer, Browser: b})
+		modified, finalPage, outputs, err := browser.ReplaySkill(ctx, page, &skill, params, browser.ReplayOptions{Healer: healer, Browser: b, DownloadDir: downloadDir()})
 		if err != nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: run_skill %q: %w", name, err)
 		}
@@ -597,13 +597,24 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if finalPage != nil && finalPage != page {
 			setActivePage(b, finalPage)
 		}
-		msg := fmt.Sprintf("ran skill %q (%d steps)", name, len(skill.Steps))
+		// Return a structured envelope (not just a step count) so the skill's
+		// declared outputs — downloaded file paths, extracted values — can flow to
+		// a downstream step or be parsed by an orchestrating workflow.
+		env := map[string]any{
+			"skill":   name,
+			"steps":   len(skill.Steps),
+			"outputs": outputs,
+		}
 		if modified {
 			if werr := browser.SaveSkill(path, skill); werr == nil {
-				msg += " — self-healed, skill updated at " + path
+				env["self_healed"] = true
 			}
 		}
-		return agent.ToolResult{Text: msg}, nil
+		j, err := json.MarshalIndent(env, "", "  ")
+		if err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: string(j)}, nil
 
 	default:
 		return agent.ToolResult{}, fmt.Errorf("browser: unknown action %q", action)

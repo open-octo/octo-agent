@@ -61,7 +61,7 @@ func TestOOPIFReplay(t *testing.T) {
 	}
 
 	skill := &Skill{Name: "x", Steps: []Step{{Action: "click", Frame: "#f", Selector: "#go"}}}
-	if _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 15 * time.Second, Browser: b}); err != nil {
+	if _, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 15 * time.Second, Browser: b}); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	// The click must have run inside the OOPIF: #done appears there. WaitFor also
@@ -90,7 +90,7 @@ func TestOOPIFTypeReplay(t *testing.T) {
 	}
 
 	skill := &Skill{Name: "x", Steps: []Step{{Action: "type", Frame: "#f", Selector: "#q", Value: "hello"}}}
-	if _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 15 * time.Second}); err != nil {
+	if _, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 15 * time.Second}); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	cp, ok := page.oopifPage(ctx, "#f")
