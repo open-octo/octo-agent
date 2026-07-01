@@ -508,6 +508,15 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 		outEntry.ShowReasoning = &showVal
 	}
 
+	// The model is the entry's identity; editing the default entry must not
+	// collide with a different existing entry (the HTTP API enforces this too).
+	for _, m := range full.Models {
+		if m.Model == outEntry.Model && m.Model != existing.Model {
+			fmt.Fprintf(stderr, "octo config: a model entry for %q already exists — pick a different model\n", outEntry.Model)
+			return 2
+		}
+	}
+
 	full.SetDefaultEntry(outEntry)
 	if err := full.Save(); err != nil {
 		fmt.Fprintf(stderr, "octo config: %v\n", err)

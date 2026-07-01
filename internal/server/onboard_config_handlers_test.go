@@ -612,3 +612,26 @@ func TestConfigModels_PatchModelChangeRepairsDefault(t *testing.T) {
 		t.Errorf("default_model = %q, want qwen3.7-plus (repaired)", cfg.DefaultModel)
 	}
 }
+
+// An empty model in a PATCH would re-key the entry to "" — unaddressable via
+// the API and permanently orphaned. It must be rejected, leaving the entry
+// unchanged.
+func TestConfigModels_PatchEmptyModelRejected(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-x"},
+		},
+		DefaultModel: "claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	if w := doJSON(t, srv, http.MethodPatch, "/api/config/models/claude-sonnet-4-6",
+		`{"model":"","base_url":"","api_key":"sk-x****"}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("PATCH empty model = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if len(cfg.Models) != 1 || cfg.Models[0].Model != "claude-sonnet-4-6" || cfg.DefaultModel != "claude-sonnet-4-6" {
+		t.Fatalf("entry must be unchanged and addressable: %+v default=%q", cfg.Models, cfg.DefaultModel)
+	}
+}
