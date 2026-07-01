@@ -4,7 +4,8 @@
   import Switch from '../components/ui/Switch.svelte'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import ModelConfigForm from '../components/settings/ModelConfigForm.svelte'
-  import { showToast, activeSessionId } from '../lib/stores'
+  import { get } from 'svelte/store'
+  import { showToast, activeSessionId, chatWorkingDir } from '../lib/stores'
   import { setLocale, t, tr } from '../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import * as api from '../lib/api'
@@ -55,6 +56,14 @@
     const savedFont = localStorage.getItem('octo.fontSize')
     if (savedFont) fontSize = savedFont
     theme = modeToThemeLabel[getMode()] ?? 'Light'
+    // Seed the working-dir field from the active session's current dir (tracked
+    // in the store from session_update/list), so it shows where tools run
+    // rather than a blank box. Empty leaves the placeholder.
+    const sid = get(activeSessionId)
+    if (sid) {
+      const wd = get(chatWorkingDir)[sid]
+      if (wd) { workdir = wd; origWorkdir = wd }
+    }
     // Load providers first and wait, so the ModelConfigForm datalist has data
     // when the Add/Edit modal opens immediately.
     await api.listProviders().then(p => { providers = p; providersLoaded = true }).catch(() => { providersLoaded = true })

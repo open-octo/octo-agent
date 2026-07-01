@@ -621,16 +621,27 @@
 
     cleanups.push(ws.on('session_update', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      chatContextUsage.update(u => ({ ...u, [sid]: (ev as any).context_usage }))
+      // Guard every field: session_update is sometimes partial (a turn-start
+      // "running" ping, the working-dir PATCH echo), so an absent field must
+      // not overwrite a good value with undefined.
+      if (typeof (ev as any).context_usage === 'number') {
+        chatContextUsage.update(u => ({ ...u, [sid]: (ev as any).context_usage }))
+      }
       if (typeof (ev as any).context_tokens === 'number') {
         chatContextTokens.update(u => ({ ...u, [sid]: (ev as any).context_tokens }))
       }
-      chatPermMode.update(mm => ({ ...mm, [sid]: (ev as any).permission_mode }))
-      chatReasoningEffort.update(r => ({ ...r, [sid]: (ev as any).reasoning_effort }))
+      if (typeof (ev as any).permission_mode === 'string' && (ev as any).permission_mode) {
+        chatPermMode.update(mm => ({ ...mm, [sid]: (ev as any).permission_mode }))
+      }
+      if (typeof (ev as any).reasoning_effort === 'string' && (ev as any).reasoning_effort) {
+        chatReasoningEffort.update(r => ({ ...r, [sid]: (ev as any).reasoning_effort }))
+      }
       if (typeof (ev as any).show_reasoning === 'boolean') {
         chatShowReasoning.update(r => ({ ...r, [sid]: (ev as any).show_reasoning }))
       }
-      chatWorkingDir.update(w => ({ ...w, [sid]: (ev as any).working_dir }))
+      if (typeof (ev as any).working_dir === 'string' && (ev as any).working_dir) {
+        chatWorkingDir.update(w => ({ ...w, [sid]: (ev as any).working_dir }))
+      }
       // An idle snapshot from the server clears a stale thinking indicator.
       if ((ev as any).status === 'idle') {
         resetSessionRuntimeState(sid)

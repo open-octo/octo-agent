@@ -1112,6 +1112,7 @@ func TestHandleUpdateSessionWorkingDir(t *testing.T) {
 	}
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	serverCwd := srv.cwd // capture to assert it is NOT mutated
 
 	payload, _ := json.Marshal(updateSessionWorkingDirRequest{WorkingDir: tmp})
 	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir", bytes.NewReader(payload))
@@ -1129,8 +1130,25 @@ func TestHandleUpdateSessionWorkingDir(t *testing.T) {
 	if body["ok"] != true {
 		t.Fatalf("ok = %v, want true", body["ok"])
 	}
-	if srv.cwd != tmp {
-		t.Fatalf("server cwd = %q, want %q", srv.cwd, tmp)
+	if body["working_dir"] != tmp {
+		t.Fatalf("response working_dir = %v, want %q", body["working_dir"], tmp)
+	}
+
+	// The change is per-session: the session's own WorkingDir is persisted...
+	got, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkingDir != tmp {
+		t.Fatalf("session WorkingDir = %q, want %q", got.WorkingDir, tmp)
+	}
+	// ...while the server default cwd is left alone, so other sessions are not
+	// silently retargeted.
+	if srv.cwd != serverCwd {
+		t.Fatalf("server cwd mutated to %q, want unchanged %q", srv.cwd, serverCwd)
+	}
+	if srv.cwd == tmp {
+		t.Fatalf("server cwd = %q, should not equal the per-session dir", srv.cwd)
 	}
 }
 

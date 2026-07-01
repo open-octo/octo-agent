@@ -106,10 +106,11 @@ type Server struct {
 	// data race between the mutation handlers and concurrent turns.
 	skillsManifest string
 	skillsMu       sync.RWMutex
-	// cwd/envCtx are the server's working directory and its derived env-context
-	// string. They are mutated by the working_dir handler while read on every
-	// turn (prompt composition, permission engine, file/mcp handlers), so cwdMu
-	// guards them — the same pattern as skillsManifest/skillsMu above.
+	// cwd/envCtx are the server's launch directory and its derived env-context
+	// string, fixed at New. They are the DEFAULT a session's tools/prompt use
+	// when it has no working dir of its own (agent.Session.WorkingDir), and the
+	// root MCP/skills/file handlers resolve against. cwdMu guards reads so the
+	// (cwd, envCtx) pair is always observed together.
 	cwd        string
 	envCtx     string
 	cwdMu      sync.RWMutex
@@ -954,7 +955,7 @@ func (s *Server) projectHooksTrusted(cwd string) bool {
 func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	sender, model := s.senderForSession(sess)
 	a := agent.New(sender, model)
-	cwd, envCtx := s.curCwdEnv()
+	cwd, envCtx := s.sessionCwdEnv(sess)
 	a.CWD = cwd
 	a.MaxTokens = s.cfg.MaxTokens
 	if dir, err := sess.ChunkDir(); err == nil {
@@ -1277,22 +1278,54 @@ func (s *Server) curCwd() string {
 	return s.cwd
 }
 
-// curCwdEnv returns the working directory and its env-context string atomically
-// under a single read lock, so callers that need both (prompt composition)
-// never observe a torn pair across a concurrent setCwd.
+// curCwdEnv returns the server default working directory and its env-context
+// string atomically under a single read lock, so callers that need both
+// (prompt composition) never observe a torn pair.
 func (s *Server) curCwdEnv() (string, string) {
 	s.cwdMu.RLock()
 	defer s.cwdMu.RUnlock()
 	return s.cwd, s.envCtx
 }
 
-// setCwd replaces the working directory and recomputes its env context under a
-// write lock. Called by the working_dir handler.
-func (s *Server) setCwd(dir string) {
-	s.cwdMu.Lock()
-	s.cwd = dir
-	s.envCtx = buildEnvContext(dir)
-	s.cwdMu.Unlock()
+// sessionCwdEnv returns the working directory and env-context a turn for sess
+// should run in: the session's own WorkingDir (with a freshly built env context
+// — cheap, DetectToolchain is a PATH lookup) when it has one, otherwise the
+// server default. Threading it through buildAgent means tool cwd, prompt env,
+// and project-hook trust all follow the same per-session directory, so one
+// session retargeting its dir can't silently move another's tools.
+func (s *Server) sessionCwdEnv(sess *agent.Session) (string, string) {
+	if sess != nil && sess.WorkingDir != "" {
+		return sess.WorkingDir, buildEnvContext(sess.WorkingDir)
+	}
+	return s.curCwdEnv()
+}
+
+// sessionCwd returns the session's own working dir, or the server default when
+// it has none. Used by the status/list surfaces so the UI shows where a
+// session's tools actually run rather than the server launch dir.
+func (s *Server) sessionCwd(sess *agent.Session) string {
+	if sess != nil && sess.WorkingDir != "" {
+		return sess.WorkingDir
+	}
+	return s.curCwd()
+}
+
+// sessionCwdByID resolves a session's working dir from its id alone, for the WS
+// status pushes that only carry a session id. A live turn's agent (registered
+// in sessionAgents) already holds the resolved cwd, so the common case avoids a
+// disk read; a cold session falls back to loading its persisted WorkingDir,
+// then to the server default.
+func (s *Server) sessionCwdByID(sessionID string) string {
+	s.sessionAgentsMu.Lock()
+	a := s.sessionAgents[sessionID]
+	s.sessionAgentsMu.Unlock()
+	if a != nil && a.CWD != "" {
+		return a.CWD
+	}
+	if sess, err := agent.LoadSession(sessionID); err == nil && sess.WorkingDir != "" {
+		return sess.WorkingDir
+	}
+	return s.curCwd()
 }
 
 // buildEnvContext mirrors cmd/octo's env context builder.
@@ -1945,7 +1978,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	cwd, envCtx := s.curCwdEnv()
+	cwd, envCtx := s.sessionCwdEnv(sess.Store)
+	sess.Agent.CWD = cwd // keep tool cwd aligned with the per-session dir the prompt/hooks use
 	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,

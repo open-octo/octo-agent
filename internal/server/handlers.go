@@ -96,7 +96,7 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 	if name == "" {
 		name = s.DisplayTitle()
 	}
-	wd, pm, re, sr, ctxUsage := srv.sessionStatusFields()
+	_, pm, re, sr, ctxUsage := srv.sessionStatusFields()
 	return sessionItem{
 		ID:              s.ID,
 		Name:            name,
@@ -110,7 +110,7 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 		Pinned:          false,
 		TotalTasks:      0,
 		TurnCount:       s.TurnCount(),
-		WorkingDir:      wd,
+		WorkingDir:      srv.sessionCwd(s),
 		PermissionMode:  pm,
 		ReasoningEffort: re,
 		ShowReasoning:   sr,
@@ -118,10 +118,12 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 	}
 }
 
-// sessionStatusFields returns the server-level session metadata that is shared
-// across all sessions (cwd, permission mode, reasoning effort, show reasoning,
-// current context usage). The Web UI mirrors the CLI bottom status bar, so
-// these values are surfaced on every session descriptor.
+// sessionStatusFields returns the server-level session metadata (permission
+// mode, reasoning effort, show reasoning, current context usage) plus the
+// DEFAULT working dir. The Web UI mirrors the CLI bottom status bar, so these
+// values are surfaced on every session descriptor. Working dir is per-session:
+// callers with a session in hand override the returned value via sessionCwd /
+// sessionCwdByID; the default here is the fallback for sessions with none.
 func (srv *Server) sessionStatusFields() (workingDir, permissionMode, reasoningEffort string, showReasoning *bool, contextUsage int) {
 	workingDir = srv.cwd
 	permissionMode = string(resolvePermissionMode())
@@ -750,7 +752,11 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.C
 	tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.Sender, a.Model))
 	tools.SetBrowserHealer(app.MakeBrowserHealer(a.Sender, a.Model))
 
-	engine, err := permission.New(permissionConfigPath(), s.curCwd(), resolvePermissionMode(), s.memDir, s.homeMemDir)
+	// Anchor the gate at the agent's per-session cwd (not the server default) so
+	// $CWD path rules and relative-path resolution match where the tools
+	// actually run — buildAgent sets a.CWD before every prepareToolTurn call,
+	// and the task path applies its directory ahead of this too.
+	engine, err := permission.New(permissionConfigPath(), a.CWD, resolvePermissionMode(), s.memDir, s.homeMemDir)
 	if err != nil {
 		return ctx, nil, nil, fmt.Errorf("permission engine: %w", err)
 	}
@@ -1118,13 +1124,13 @@ func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *ht
 	// Push the new effective reasoning_effort to every known session so the
 	// composer status bar refreshes immediately.
 	if s.wsHub != nil {
-		wd, pm, re, sr, _ := s.sessionStatusFields()
+		_, pm, re, sr, _ := s.sessionStatusFields()
 		sessions, _ := agent.ListSessions(50)
 		for _, sess := range sessions {
 			s.wsHub.broadcast(sess.ID, map[string]any{
 				"type":             "session_update",
 				"session_id":       sess.ID,
-				"working_dir":      wd,
+				"working_dir":      s.sessionCwd(sess),
 				"permission_mode":  pm,
 				"reasoning_effort": re,
 				"show_reasoning":   sr,
@@ -1181,13 +1187,13 @@ func (s *Server) handleUpdateSessionPermissionMode(w http.ResponseWriter, r *htt
 	// refreshes immediately. The engine reads cfg on its next turn, so no
 	// sender rebuild is needed here.
 	if s.wsHub != nil {
-		wd, pm, re, sr, _ := s.sessionStatusFields()
+		_, pm, re, sr, _ := s.sessionStatusFields()
 		sessions, _ := agent.ListSessions(50)
 		for _, sess := range sessions {
 			s.wsHub.broadcast(sess.ID, map[string]any{
 				"type":             "session_update",
 				"session_id":       sess.ID,
-				"working_dir":      wd,
+				"working_dir":      s.sessionCwd(sess),
 				"permission_mode":  pm,
 				"reasoning_effort": re,
 				"show_reasoning":   sr,
@@ -1242,13 +1248,13 @@ func (s *Server) handleUpdateSessionShowReasoning(w http.ResponseWriter, r *http
 	// Push the new effective show_reasoning to every known session so the
 	// composer status bar refreshes immediately.
 	if s.wsHub != nil {
-		wd, pm, re, sr, _ := s.sessionStatusFields()
+		_, pm, re, sr, _ := s.sessionStatusFields()
 		sessions, _ := agent.ListSessions(50)
 		for _, sess := range sessions {
 			s.wsHub.broadcast(sess.ID, map[string]any{
 				"type":             "session_update",
 				"session_id":       sess.ID,
-				"working_dir":      wd,
+				"working_dir":      s.sessionCwd(sess),
 				"permission_mode":  pm,
 				"reasoning_effort": re,
 				"show_reasoning":   sr,
@@ -1268,9 +1274,13 @@ type updateSessionWorkingDirRequest struct {
 	WorkingDir string `json:"working_dir"`
 }
 
-// handleUpdateSessionWorkingDir updates the server's working directory. The Web
-// UI exposes this in the session info bar; changing it affects the system
-// prompt, skill discovery, and tool cwd for future turns.
+// handleUpdateSessionWorkingDir sets THIS session's working directory: the cwd
+// its tools run in, the root its project hooks/skills resolve against, and the
+// path shown in its env context, applied from the next turn. It is per-session
+// — other sessions (and the server default for new ones) are untouched — so
+// retargeting one session can't silently move another's tools. The dir must
+// exist; a leading ~ expands to the home directory and relative paths resolve
+// against the server's launch dir.
 func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1288,7 +1298,8 @@ func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	info, err := os.Stat(req.WorkingDir)
+	dir := expandDir(req.WorkingDir)
+	info, err := os.Stat(dir)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid working_dir: %v", err))
 		return
@@ -1298,10 +1309,55 @@ func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	s.setCwd(req.WorkingDir)
+	if _, err := agent.LoadSession(id); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if ok, _, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {
+		writeError(w, http.StatusConflict, berr.Error())
+		return
+	}
+	defer s.releaseSessionBinding(id, agent.EntryWeb)
+
+	// Reload after acquiring the binding in case another process saved.
+	sess, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err := sess.SetWorkingDir(dir); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save session: %v", err))
+		return
+	}
+
+	// Push the new dir so the composer's cwd chip refreshes without waiting for
+	// the next turn's session_update.
+	if s.wsHub != nil {
+		s.wsHub.broadcast(id, map[string]any{
+			"type":        "session_update",
+			"session_id":  id,
+			"working_dir": dir,
+		})
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":          true,
-		"working_dir": s.curCwd(),
+		"working_dir": dir,
 	})
+}
+
+// expandDir resolves a user-entered path to an absolute one: a leading ~ (or
+// ~/…) becomes the home directory, and relative paths are taken against the
+// server process's launch dir. On any failure it returns the input unchanged
+// and lets the caller's os.Stat surface the error.
+func expandDir(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, strings.TrimPrefix(p, "~"))
+		}
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }

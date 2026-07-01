@@ -261,14 +261,14 @@ func (s *Server) handlePutShowReasoning(w http.ResponseWriter, r *http.Request) 
 
 	// Push the new effective default to every open session so the composer
 	// status bar refreshes immediately.
-	wd, pm, re, sr, ctxUsage := s.sessionStatusFields()
+	_, pm, re, sr, ctxUsage := s.sessionStatusFields()
 	if sr != nil {
 		sessions, _ := agent.ListSessions(50)
 		for _, sess := range sessions {
 			s.wsHub.broadcast(sess.ID, map[string]any{
 				"type":             "session_update",
 				"session_id":       sess.ID,
-				"working_dir":      wd,
+				"working_dir":      s.sessionCwd(sess),
 				"permission_mode":  pm,
 				"reasoning_effort": re,
 				"show_reasoning":   *sr,

@@ -833,3 +833,88 @@ func TestSetModelConfig_BeforeSave(t *testing.T) {
 		t.Errorf("loaded = (%q, %q), want (kimi, kimi-k2.6)", got.ModelConfig, got.Model)
 	}
 }
+
+func TestSetWorkingDir_AppendsAndReloads(t *testing.T) {
+	// A working dir set after the first Save is appended as its own record and
+	// survives a reload; setting a new one wins over the old.
+	setTempHome(t)
+
+	s := NewSession("m", "")
+	s.Messages = []Message{NewUserMessage("ping"), NewAssistantMessage("pong")}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetWorkingDir("/tmp/repo-a"); err != nil {
+		t.Fatalf("SetWorkingDir: %v", err)
+	}
+
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkingDir != "/tmp/repo-a" {
+		t.Errorf("reloaded WorkingDir = %q, want /tmp/repo-a", got.WorkingDir)
+	}
+	if len(got.Messages) != 2 {
+		t.Errorf("Messages len = %d, want 2", len(got.Messages))
+	}
+
+	// Last write wins across a reload.
+	if err := got.SetWorkingDir("/tmp/repo-b"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.WorkingDir != "/tmp/repo-b" {
+		t.Errorf("after re-set WorkingDir = %q, want /tmp/repo-b", again.WorkingDir)
+	}
+}
+
+func TestSetWorkingDir_SurvivesRewrite(t *testing.T) {
+	// A full rewrite (compaction path) folds the working dir into the meta header.
+	setTempHome(t)
+
+	s := NewSession("m", "")
+	s.Messages = []Message{NewUserMessage("ping"), NewAssistantMessage("pong")}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetWorkingDir("/tmp/repo-a"); err != nil {
+		t.Fatal(err)
+	}
+	s.forceRewrite = true
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkingDir != "/tmp/repo-a" {
+		t.Errorf("after rewrite WorkingDir = %q, want /tmp/repo-a", got.WorkingDir)
+	}
+}
+
+func TestSetWorkingDir_BeforeSave(t *testing.T) {
+	// A working dir set before the first Save just rides the meta header.
+	setTempHome(t)
+
+	s := NewSession("m", "")
+	if err := s.SetWorkingDir("/tmp/repo-a"); err != nil {
+		t.Fatal(err)
+	}
+	s.Messages = []Message{NewUserMessage("ping")}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkingDir != "/tmp/repo-a" {
+		t.Errorf("loaded WorkingDir = %q, want /tmp/repo-a", got.WorkingDir)
+	}
+}
