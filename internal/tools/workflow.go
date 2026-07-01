@@ -171,6 +171,12 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		}
 	}
 
+	// skill() dispatches by name to a recorded browser skill (deterministic
+	// replay) or a SKILL.md skill (a sub-agent via the same spawner).
+	sf := func(c context.Context, name, paramsJSON, schema string) workflow.AgentResult {
+		return dispatchWorkflowSkill(c, spawner, name, paramsJSON, schema)
+	}
+
 	argsJSON, err := encodeWorkflowArgs(input["args"])
 	if err != nil {
 		return agent.ToolResult{}, fmt.Errorf("workflow: args must be a JSON value: %w", err)
@@ -182,6 +188,7 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		Script:        script,
 		Args:          argsJSON,
 		Agent:         af,
+		Skill:         sf,
 		MaxConcurrent: defaultWorkflowConcurrency,
 		ResumeFrom:    stringArg(input, "resume_from"),
 	})

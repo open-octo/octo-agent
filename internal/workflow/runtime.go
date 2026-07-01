@@ -58,7 +58,8 @@ type AgentOptions struct {
 	Isolation string
 }
 
-// AgentResult is one agent() call's outcome.
+// AgentResult is one agent() call's outcome. It also carries a skill() call's
+// outcome, where Reply holds the skill's outputs as a JSON string.
 type AgentResult struct {
 	Reply        string
 	InputTokens  int
@@ -66,10 +67,20 @@ type AgentResult struct {
 	Err          error
 }
 
+// SkillFunc runs one skill() call to completion: a recorded browser skill or a
+// SKILL.md sub-agent, dispatched by name. paramsJSON is the call's params object
+// (JSON), schema an optional JSON Schema the result must satisfy (SKILL.md path).
+// The returned AgentResult's Reply is the skill's outputs as a JSON string —
+// what skill() returns to the script (parsed to native Ruby). Must be safe for
+// concurrent calls (parallel()/pipeline() invoke it from multiple goroutines).
+type SkillFunc func(ctx context.Context, name, paramsJSON, schema string) AgentResult
+
 // Options configures one workflow run.
 type Options struct {
 	// Agent backs agent(). Required.
 	Agent AgentFunc
+	// Skill backs skill(). Optional: when nil, skill() raises in the script.
+	Skill SkillFunc
 	// Log backs the script's log() calls; nil discards.
 	Log func(string)
 	// Progress, when set, receives human-readable lifecycle lines as the
@@ -308,6 +319,7 @@ func (b *backend) register(ctx context.Context, r wazero.Runtime) (api.Module, e
 		NewFunctionBuilder().WithFunc(b.agentStart).Export("agent_start").
 		NewFunctionBuilder().WithFunc(b.agentWaitAny).Export("agent_wait_any").
 		NewFunctionBuilder().WithFunc(b.agentTake).Export("agent_take").
+		NewFunctionBuilder().WithFunc(b.skillStart).Export("skill_start").
 		NewFunctionBuilder().WithFunc(b.log).Export("log").
 		NewFunctionBuilder().WithFunc(b.budgetRemaining).Export("budget_remaining").
 		NewFunctionBuilder().WithFunc(b.args_).Export("args").
@@ -398,6 +410,79 @@ func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mpt
 		b.deliver(tok, res)
 	}()
 	return tok
+}
+
+// skillStart kicks off one skill() call and returns its token immediately,
+// mirroring agentStart: same token space, budget gate, journal replay, and
+// delivery queue, so skill() composes with parallel()/pipeline() and resumes
+// like agent(). It calls Options.Skill instead of Agent; a nil Skill delivers an
+// error the script raises.
+func (b *backend) skillStart(_ context.Context, mod api.Module, nptr, nlen, pptr, plen, sptr, slen uint32) uint32 {
+	name := readGuestString(mod, nptr, nlen)
+	params := readGuestString(mod, pptr, plen)
+	schema := readGuestString(mod, sptr, slen)
+
+	b.mu.Lock()
+	if b.opt.Budget > 0 && int64(b.outTok) >= b.opt.Budget {
+		b.mu.Unlock()
+		return ^uint32(0) // -1: prelude raises "budget exhausted"
+	}
+	b.next++
+	tok := b.next
+	seq := int(tok) - 1
+	b.prompts[tok] = "skill: " + name
+	b.mu.Unlock()
+
+	if b.opt.Progress != nil {
+		b.opt.Progress("→ skill: " + name)
+	}
+
+	if seq < len(b.cached) {
+		// Replayed from journal: deliver the stored outputs without re-running.
+		ce := b.cached[seq]
+		go func() {
+			var res AgentResult
+			if ce.ErrMsg != "" {
+				res.Err = errors.New(ce.ErrMsg)
+			} else {
+				res.Reply = ce.Reply
+				res.InputTokens = ce.InputTokens
+				res.OutputTokens = ce.OutputTokens
+			}
+			b.deliver(tok, res)
+		}()
+		return tok
+	}
+
+	go func() {
+		if b.sem != nil {
+			select {
+			case b.sem <- struct{}{}:
+				defer func() { <-b.sem }()
+			case <-b.ctx.Done():
+				b.deliver(tok, AgentResult{Err: b.ctx.Err()})
+				return
+			}
+		}
+		if b.opt.Skill == nil {
+			b.deliver(tok, AgentResult{Err: errors.New("skill() is not available in this run")})
+			return
+		}
+		b.deliver(tok, b.opt.Skill(b.ctx, name, params, schema))
+	}()
+	return tok
+}
+
+// readGuestString reads a (ptr,len) string from guest linear memory, returning
+// "" for a zero-length or unreadable span.
+func readGuestString(mod api.Module, ptr, length uint32) string {
+	if length == 0 {
+		return ""
+	}
+	if bs, ok := mod.Memory().Read(ptr, length); ok {
+		return string(bs)
+	}
+	return ""
 }
 
 func (b *backend) deliver(tok uint32, res AgentResult) {

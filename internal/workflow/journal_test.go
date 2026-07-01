@@ -131,6 +131,49 @@ func TestRun_ResumeSkipsCachedCall(t *testing.T) {
 	}
 }
 
+// TestRun_ResumeMixedAgentSkill: agent() and skill() share one token space and
+// journal, so a resume replays them by token order regardless of kind — a cached
+// agent replays without calling Agent while a not-yet-cached skill runs fresh.
+func TestRun_ResumeMixedAgentSkill(t *testing.T) {
+	dir := t.TempDir()
+	script := `a = agent("x"); s = skill("y"); "#{a}|#{s["v"]}"`
+	hash := runIdentityHash(script, "")
+
+	// Cache only the first call (the agent at seq 0); the skill (seq 1) runs fresh.
+	j, err := CreateJournal(dir, "wf-mixed", hash)
+	if err != nil {
+		t.Fatalf("CreateJournal: %v", err)
+	}
+	_ = j.Append(JournalEntry{Seq: 0, Prompt: "x", Reply: "CACHED_A"})
+	_ = j.Close()
+
+	var agentCalls, skillCalls int
+	res, err := Run(newTestCtx(t), script, Options{
+		Agent: func(_ context.Context, _ string, _ AgentOptions) AgentResult {
+			agentCalls++
+			return AgentResult{Reply: "FRESH_A"}
+		},
+		Skill: func(_ context.Context, _, _, _ string) AgentResult {
+			skillCalls++
+			return AgentResult{Reply: `{"v":"FRESH_S"}`}
+		},
+		JournalDir: dir,
+		ResumeFrom: "wf-mixed",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if agentCalls != 0 {
+		t.Errorf("agent called %d times, want 0 (replayed from journal)", agentCalls)
+	}
+	if skillCalls != 1 {
+		t.Errorf("skill called %d times, want 1 (fresh)", skillCalls)
+	}
+	if res.Output != "CACHED_A|FRESH_S" {
+		t.Errorf("Output = %q, want CACHED_A|FRESH_S", res.Output)
+	}
+}
+
 func TestRun_ResumeContinuesFromCrashPoint(t *testing.T) {
 	dir := t.TempDir()
 	script := `parallel(["a","b","c"]) { |it| agent(it) }.join(",")`

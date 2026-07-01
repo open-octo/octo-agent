@@ -28,6 +28,10 @@ __attribute__((import_module("env"), import_name("agent_wait_any")))
 extern int host_agent_wait_any(void);                          /* blocks; -> token (0 = cancelled) */
 __attribute__((import_module("env"), import_name("agent_take")))
 extern int host_agent_take(int token, char *out, int outcap);  /* -> result length */
+__attribute__((import_module("env"), import_name("skill_start")))
+extern int host_skill_start(const char *name, int nlen,
+                            const char *params, int plen,
+                            const char *schema, int slen);      /* -> token, non-blocking */
 __attribute__((import_module("env"), import_name("log")))
 extern void host_log(const char *p, int plen);
 __attribute__((import_module("env"), import_name("budget_remaining")))
@@ -64,6 +68,14 @@ static mrb_value m_agent_take(mrb_state *mrb, mrb_value self) {
   mrb_value r = mrb_str_new(mrb, buf, n < 0 ? 0 : n);
   free(buf);
   return r;
+}
+static mrb_value m_skill_start(mrb_state *mrb, mrb_value self) {
+  const char *name; mrb_int nlen;
+  const char *params; mrb_int plen;
+  const char *schema; mrb_int slen;
+  /* name, params (JSON object), schema (JSON, empty when unset) */
+  mrb_get_args(mrb, "sss", &name, &nlen, &params, &plen, &schema, &slen);
+  return mrb_fixnum_value(host_skill_start(name, (int)nlen, params, (int)plen, schema, (int)slen));
 }
 static mrb_value m_log(mrb_state *mrb, mrb_value self) {
   const char *p; mrb_int len;
@@ -113,6 +125,7 @@ int main(void) {
   mrb_define_method(mrb, k, "__agent_start",      m_agent_start,      MRB_ARGS_REQ(6));
   mrb_define_method(mrb, k, "__agent_wait_any",   m_agent_wait_any,   MRB_ARGS_NONE());
   mrb_define_method(mrb, k, "__agent_take",       m_agent_take,       MRB_ARGS_REQ(1));
+  mrb_define_method(mrb, k, "__skill_start",      m_skill_start,      MRB_ARGS_REQ(3));
   mrb_define_method(mrb, k, "__log",              m_log,              MRB_ARGS_REQ(1));
   mrb_define_method(mrb, k, "__budget_remaining", m_budget_remaining, MRB_ARGS_NONE());
   mrb_define_method(mrb, k, "__args",             m_args,             MRB_ARGS_NONE());
