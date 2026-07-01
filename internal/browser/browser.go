@@ -154,7 +154,53 @@ func (b *Browser) AttachPage(ctx context.Context, targetID string) (*Page, error
 			return nil, fmt.Errorf("%s: %w", domain, err)
 		}
 	}
+	// Install the in-flight network monitor on this and every future document so
+	// WaitForNetworkIdle has data to poll (best-effort; failures are non-fatal).
+	_, _ = p.cli.call(ctx, p.sessionID, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": netMonitorScript})
+	_ = p.Eval(ctx, netMonitorScript, nil)
 	return p, nil
+}
+
+// netMonitorScript maintains window.__octoNet.{n,idleSince} by wrapping fetch and
+// XMLHttpRequest, so replay can wait for XHR/fetch activity to settle. It counts
+// only fetch/XHR (not sub-resources) — which is what "the SPA finished loading
+// its data" means in practice — and resets naturally per document. Idempotent.
+const netMonitorScript = `(function(){
+  if(window.__octoNet) return;
+  var s=window.__octoNet={n:0, idleSince:Date.now()};
+  function inc(){ s.n++; s.idleSince=0; }
+  function dec(){ s.n=Math.max(0,s.n-1); if(s.n===0) s.idleSince=Date.now(); }
+  try{ var of=window.fetch; if(of){ window.fetch=function(){ inc(); return of.apply(this,arguments).then(function(r){dec();return r;},function(e){dec();throw e;}); }; } }catch(_){}
+  try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
+})();`
+
+// WaitForNetworkIdle is a best-effort settle: it returns once no fetch/XHR has
+// been in flight for `quiet`, or when `timeout` elapses — whichever comes first.
+// It never reports a failure (real pages with polling/keep-alive connections may
+// never go fully idle, and a settle helper must not turn that into a step error);
+// only ctx cancellation returns an error. If the monitor isn't present it returns
+// immediately.
+func (p *Page) WaitForNetworkIdle(ctx context.Context, quiet, timeout time.Duration) error {
+	if quiet <= 0 {
+		quiet = 500 * time.Millisecond
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		// Returns ms the network has been idle, or -1 while busy / unavailable.
+		var idleMS float64 = -1
+		_ = p.Eval(ctx, `(function(){var s=window.__octoNet; if(!s) return 1e9; return (s.n===0 && s.idleSince>0) ? (Date.now()-s.idleSince) : -1;})()`, &idleMS)
+		if idleMS >= float64(quiet/time.Millisecond) {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return nil // best-effort: proceed even if never fully idle
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // ClickFollow clicks target on page and, if the click opened a new tab (a

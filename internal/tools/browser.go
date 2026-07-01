@@ -239,20 +239,21 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "cookies", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "run_skill"},
 					"description": "The browser action to perform. observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page for a vision-capable model to actually see (use when content is visual). cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable skill — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop. Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. run_skill replays a recording (deterministic, self-healing).",
 				},
-				"name":       map[string]any{"type": "string", "description": "Skill name (record_stop / run_skill)."},
-				"params":     map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill)."},
-				"url":        map[string]any{"type": "string", "description": "Target URL (navigate)."},
-				"selector":   map[string]any{"type": "string", "description": "Target element selector (click/hover/type/select/scroll/wait/upload/download). Plain CSS, or a Playwright-style form: :has-text(\"…\")/:text(\"…\")/:contains(\"…\"), text=…, :visible, xpath=…, css=…. Use observe to see real selectors."},
-				"frame":      map[string]any{"type": "string", "description": "Optional CSS selector of a same-origin iframe to scope the selector into (e.g. iframe#app)."},
-				"text":       map[string]any{"type": "string", "description": "Text to type (type)."},
-				"value":      map[string]any{"type": "string", "description": "Option value, text, or label to pick in a <select> (select)."},
-				"keys":       map[string]any{"type": "string", "description": "Key or combo, e.g. enter, escape, ctrl+a (key)."},
-				"js":         map[string]any{"type": "string", "description": "JavaScript expression to evaluate (eval)."},
-				"files":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Absolute file paths to set on a file <input> (upload)."},
-				"index":      map[string]any{"type": "integer", "description": "Page index from the pages list to switch to (select_page)."},
-				"timeout_ms": map[string]any{"type": "integer", "description": "Wait timeout in ms (wait); default 10000."},
-				"dx":         map[string]any{"type": "number", "description": "Horizontal scroll delta (scroll)."},
-				"dy":         map[string]any{"type": "number", "description": "Vertical scroll delta (scroll)."},
+				"name":         map[string]any{"type": "string", "description": "Skill name (record_stop / run_skill)."},
+				"params":       map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill)."},
+				"url":          map[string]any{"type": "string", "description": "Target URL (navigate)."},
+				"selector":     map[string]any{"type": "string", "description": "Target element selector (click/hover/type/select/scroll/wait/upload/download). Plain CSS, or a Playwright-style form: :has-text(\"…\")/:text(\"…\")/:contains(\"…\"), text=…, :visible, xpath=…, css=…. Use observe to see real selectors."},
+				"network_idle": map[string]any{"type": "boolean", "description": "wait with no selector: settle until fetch/XHR activity stops (bounded by timeout_ms) instead of a fixed delay — the robust way to wait for an SPA's data to finish loading."},
+				"frame":        map[string]any{"type": "string", "description": "Optional CSS selector of a same-origin iframe to scope the selector into (e.g. iframe#app)."},
+				"text":         map[string]any{"type": "string", "description": "Text to type (type)."},
+				"value":        map[string]any{"type": "string", "description": "Option value, text, or label to pick in a <select> (select)."},
+				"keys":         map[string]any{"type": "string", "description": "Key or combo, e.g. enter, escape, ctrl+a (key)."},
+				"js":           map[string]any{"type": "string", "description": "JavaScript expression to evaluate (eval)."},
+				"files":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Absolute file paths to set on a file <input> (upload)."},
+				"index":        map[string]any{"type": "integer", "description": "Page index from the pages list to switch to (select_page)."},
+				"timeout_ms":   map[string]any{"type": "integer", "description": "Wait timeout in ms (wait); default 10000."},
+				"dx":           map[string]any{"type": "number", "description": "Horizontal scroll delta (scroll)."},
+				"dy":           map[string]any{"type": "number", "description": "Vertical scroll delta (scroll)."},
 			},
 			"required": []string{"action"},
 		},
@@ -367,13 +368,21 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		return agent.ToolResult{Text: "scrolled"}, nil
 
 	case "wait":
-		sel := targetSelector(input)
-		if sel == "" {
-			return agent.ToolResult{}, fmt.Errorf("browser: wait requires selector")
-		}
 		timeout := 10 * time.Second
 		if ms, ok := input["timeout_ms"].(float64); ok && ms > 0 {
 			timeout = time.Duration(ms) * time.Millisecond
+		}
+		sel := targetSelector(input)
+		if sel == "" {
+			// No selector: settle for network idle when asked (SPA data loads), a
+			// robust alternative to guessing a fixed delay.
+			if ni, _ := input["network_idle"].(bool); ni {
+				if err := page.WaitForNetworkIdle(ctx, 0, timeout); err != nil {
+					return agent.ToolResult{}, err
+				}
+				return agent.ToolResult{Text: "network idle"}, nil
+			}
+			return agent.ToolResult{}, fmt.Errorf("browser: wait requires selector or network_idle=true")
 		}
 		if err := page.WaitFor(ctx, sel, timeout); err != nil {
 			return agent.ToolResult{}, err
