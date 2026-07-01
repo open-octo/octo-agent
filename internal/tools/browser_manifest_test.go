@@ -27,14 +27,27 @@ func TestRenderBrowserSkillsManifest(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A second recording whose output declares no type — it should render as a
+	// bare name (no parens), exercising the type-less branch.
+	if err := browser.SaveSkill(dir+"/grab-id.yaml", browser.Skill{
+		Name:    "grab-id",
+		Outputs: []browser.Output{{Name: "raw"}},
+		Steps:   []browser.Step{{Action: "navigate", URL: "x"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	m := RenderBrowserSkillsManifest()
 	for _, want := range []string{
 		"# Browser recordings", "run_skill", "download-excels",
 		"download the monthly reports", "[params: month]", "[outputs: files (file[])]",
+		"grab-id", "[outputs: raw]",
 	} {
 		if !strings.Contains(m, want) {
 			t.Fatalf("manifest missing %q:\n%s", want, m)
 		}
+	}
+	if strings.Contains(m, "raw (") {
+		t.Fatalf("type-less output must render as a bare name, got:\n%s", m)
 	}
 }
 
