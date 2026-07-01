@@ -154,7 +154,16 @@ func (r *Runner) Post(ctx context.Context, userInput, assistantReply string) err
 // write `OCTO_HOOK_PRE_TURN="./script | filter"` pipelines without quoting the
 // shell themselves, in that platform's syntax.
 func (r *Runner) run(ctx context.Context, cmd string, stdin []byte) ([]byte, error) {
-	deadline := r.timeout()
+	return execShell(ctx, cmd, stdin, r.timeout())
+}
+
+// execShell runs cmd through the platform shell with stdin piped in, bounded by
+// deadline. Shared by the legacy Runner and the Engine so the timeout/kill/
+// stderr-tail behaviour stays identical across both. On a non-zero exit it
+// returns whatever stdout was captured plus an error whose wording distinguishes
+// a timeout from a plain failure (with the stderr tail folded in) to help users
+// debug hook wiring.
+func execShell(ctx context.Context, cmd string, stdin []byte, deadline time.Duration) ([]byte, error) {
 	rctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
@@ -170,9 +179,6 @@ func (r *Runner) run(ctx context.Context, cmd string, stdin []byte) ([]byte, err
 	// is plenty for the kernel to tear down the process group.
 	c.WaitDelay = time.Second
 	if err := c.Run(); err != nil {
-		// Distinguish timeout from a script that just exit-1'd. Either
-		// way the caller will surface the message but the wording
-		// helps the user debug Hindsight wiring.
 		if errors.Is(rctx.Err(), context.DeadlineExceeded) {
 			return out.Bytes(), fmt.Errorf("hooks: %s timed out after %s", cmd, deadline)
 		}

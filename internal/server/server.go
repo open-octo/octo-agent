@@ -23,6 +23,7 @@ import (
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/app"
 	"github.com/Leihb/octo-agent/internal/channel"
+	"github.com/Leihb/octo-agent/internal/hooks"
 
 	// The IM adapters self-register into the channel registry at init time.
 	// The server is what runs them (startChannels) and looks them up by name
@@ -948,13 +949,17 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	}
 	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
 
-	// L2: attention-layer rules injected per user turn (triggered keywords),
-	// plus the save-nudge appended to milestone tool results.
+	// L2: attention-layer rules (triggered keywords) + save-nudge on milestone
+	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
+	// hook engine. Shares the process seen-set so SessionStart resume fires once
+	// per OS process across the serve process's many sessions.
+	hookEngine := hooks.EngineFromEnv(hooks.SharedSeen())
+	hookEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if s.memDir != "" {
-		inj := s.injectorFor(sess.ID)
-		a.UserInputHook = inj.Reminder
-		a.ToolResultHook = inj.SaveNudge
+		s.injectorFor(sess.ID).RegisterHooks(hookEngine)
 	}
+	a.Hooks = hookEngine
+	a.HookMeta = hooks.Meta{SessionID: sess.ID, Transport: sess.BoundEntry, Cwd: cwd}
 
 	if len(sess.Messages) > 0 {
 		a.History = sess.ToHistory()
@@ -1903,14 +1908,16 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	cwd, envCtx := s.curCwdEnv()
 	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
 
-	// L2 memory hooks, same pair buildAgent gives web turns: keyword
-	// reminders on user input, save-nudge on milestone tool results. The
-	// injector is session-sticky (recall latch) and dropped on /unbind.
+	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
+	// rebuilt per IM turn. The injector is session-sticky (recall latch) and
+	// dropped on /unbind; a fresh engine each turn just re-registers it.
+	imEngine := hooks.EngineFromEnv(hooks.SharedSeen())
+	imEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if s.memDir != "" {
-		inj := s.injectorFor("im:" + string(sess.Key))
-		sess.Agent.UserInputHook = inj.Reminder
-		sess.Agent.ToolResultHook = inj.SaveNudge
+		s.injectorFor("im:" + string(sess.Key)).RegisterHooks(imEngine)
 	}
+	sess.Agent.Hooks = imEngine
+	sess.Agent.HookMeta = hooks.Meta{SessionID: string(sess.Key), Transport: agent.EntryChannel, Cwd: cwd}
 
 	// Per-turn permission gate, the same shape prepareToolTurn gives web
 	// turns: configured mode + an interactive ask that prompts in the chat

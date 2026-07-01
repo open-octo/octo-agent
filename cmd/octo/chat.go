@@ -740,15 +740,21 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// result when a milestone-shaped command (gh pr create/merge) lands, so the
 	// injector is wired even when MEMORY.md has no structured rules — Reminder
 	// is silent then.
+	// Hook engine: shell hooks (from the OCTO_HOOK_* env shim) plus the memory
+	// injector's reminder & save-nudge as in-process hooks, unified on one
+	// dispatch path that the agent core drives for every transport. Shares the
+	// process seen-set so SessionStart resume fires once per OS process.
+	hookEngine := hooks.EngineFromEnv(hooks.SharedSeen())
+	hookEngine.Notify = func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) }
 	if memDir != "" {
 		rules := memory.ParseRules(memDir)
 		if homeMemDir != "" {
 			rules.Merge(memory.ParseRules(homeMemDir))
 		}
-		inj := memory.NewInjector(rules)
-		a.UserInputHook = inj.Reminder
-		a.ToolResultHook = inj.SaveNudge
+		memory.NewInjector(rules).RegisterHooks(hookEngine)
 	}
+	a.Hooks = hookEngine
+	a.HookMeta = hooks.Meta{Cwd: cwd}
 
 	// Permission engine — gates every tool call; shared by both paths. The
 	// memory directory (outside CWD) is whitelisted for writes so the agent can
@@ -810,9 +816,8 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			stderr:          stderr,
 			skillReg:        skillReg,
 			memDir:          memDir,
-			reader:          replReader,          // shared with the asker / permission gate
-			view:            replView,            // same surface for turn render + Ask prompts
-			hooks:           hooks.LoadFromEnv(), // C9 Phase 3: external retrieval layer hooks
+			reader:          replReader, // shared with the asker / permission gate
+			view:            replView,   // same surface for turn render + Ask prompts
 			permEngine:      permEngine,
 			mcpBoot:         mcpBoot, // nil unless tools on with servers configured
 			modelName:       resolvedModel,
@@ -857,7 +862,6 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		memDir:          memDir,
 		reader:          replReader,
 		view:            replView,
-		hooks:           hooks.LoadFromEnv(),
 		permEngine:      permEngine,
 		modelName:       resolvedModel,
 		reasoningEffort: resolvedEffort,

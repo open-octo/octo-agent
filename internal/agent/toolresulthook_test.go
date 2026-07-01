@@ -4,9 +4,21 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/Leihb/octo-agent/internal/hooks"
 )
 
-func TestToolResultHook_AppendsToMatchingResult(t *testing.T) {
+// postToolUseEngine returns an engine with a single in-process PostToolUse hook,
+// the shape the memory save-nudge takes after the redesign.
+func postToolUseEngine(fn func(name string, input map[string]any) string) *hooks.Engine {
+	e := hooks.NewEngine(nil)
+	e.RegisterInProc(hooks.EventPostToolUse, func(_ context.Context, p hooks.Payload) string {
+		return fn(p.ToolName, p.ToolInput)
+	})
+	return e
+}
+
+func TestPostToolUse_AppendsToMatchingResult(t *testing.T) {
 	send := &fakeToolSender{
 		replies: []Reply{
 			{
@@ -20,7 +32,7 @@ func TestToolResultHook_AppendsToMatchingResult(t *testing.T) {
 	}
 	exec := &fakeExecutor{results: map[string]string{"terminal": "merged"}}
 	a := New(send, "m")
-	a.ToolResultHook = func(name string, input map[string]any) string {
+	a.Hooks = postToolUseEngine(func(name string, input map[string]any) string {
 		if name != "terminal" {
 			t.Errorf("hook saw tool %q, want terminal", name)
 		}
@@ -28,7 +40,7 @@ func TestToolResultHook_AppendsToMatchingResult(t *testing.T) {
 			t.Errorf("hook saw command %q", cmd)
 		}
 		return "<nudge>"
-	}
+	})
 
 	if _, err := a.Run(context.Background(), "merge it", []ToolDefinition{{Name: "terminal"}}, exec); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -48,7 +60,7 @@ func TestToolResultHook_AppendsToMatchingResult(t *testing.T) {
 	}
 }
 
-func TestToolResultHook_EmptyReturnLeavesResultUntouched(t *testing.T) {
+func TestPostToolUse_EmptyReturnLeavesResultUntouched(t *testing.T) {
 	send := &fakeToolSender{
 		replies: []Reply{
 			{
@@ -62,7 +74,7 @@ func TestToolResultHook_EmptyReturnLeavesResultUntouched(t *testing.T) {
 	}
 	exec := &fakeExecutor{results: map[string]string{"terminal": "files"}}
 	a := New(send, "m")
-	a.ToolResultHook = func(string, map[string]any) string { return "" }
+	a.Hooks = postToolUseEngine(func(string, map[string]any) string { return "" })
 
 	if _, err := a.Run(context.Background(), "list", []ToolDefinition{{Name: "terminal"}}, exec); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -79,14 +91,16 @@ func TestToolResultHook_EmptyReturnLeavesResultUntouched(t *testing.T) {
 // A <system-reminder> span appended by the hook (memory save-nudge) is
 // model-facing: it must stay on the persisted block but never reach the UI
 // event stream, where it would render inside the tool card.
-func TestToolResultHook_ReminderStrippedFromEventOutput(t *testing.T) {
+func TestPostToolUse_ReminderStrippedFromEventOutput(t *testing.T) {
 	uses := []ContentBlock{
 		NewToolUseBlock("call-1", "terminal", map[string]any{"command": "gh pr create"}),
 	}
 	results := []ContentBlock{NewToolResultBlock("call-1", "created PR #7", false)}
-	applyToolResultHook(func(string, map[string]any) string {
+	a := New(&fakeSender{}, "m")
+	a.Hooks = postToolUseEngine(func(string, map[string]any) string {
 		return "<system-reminder>\nsave a memory\n</system-reminder>"
-	}, uses, results)
+	})
+	a.applyPostToolUse(context.Background(), uses, results)
 
 	if !strings.Contains(results[0].Result, "<system-reminder>") {
 		t.Fatalf("block must keep the reminder for the model: %q", results[0].Result)
@@ -116,7 +130,7 @@ func TestStripRemindersForDisplay(t *testing.T) {
 	}
 }
 
-func TestApplyToolResultHook_SkipsErroredAndUnmatched(t *testing.T) {
+func TestApplyPostToolUse_SkipsErroredAndUnmatched(t *testing.T) {
 	uses := []ContentBlock{
 		NewToolUseBlock("ok", "terminal", map[string]any{"command": "gh pr create"}),
 		NewToolUseBlock("bad", "terminal", map[string]any{"command": "gh pr merge"}),
@@ -126,11 +140,13 @@ func TestApplyToolResultHook_SkipsErroredAndUnmatched(t *testing.T) {
 		NewToolResultBlock("bad", "denied", true),
 	}
 	var seen []string
-	applyToolResultHook(func(name string, input map[string]any) string {
+	a := New(&fakeSender{}, "m")
+	a.Hooks = postToolUseEngine(func(name string, input map[string]any) string {
 		cmd, _ := input["command"].(string)
 		seen = append(seen, cmd)
 		return "N"
-	}, uses, results)
+	})
+	a.applyPostToolUse(context.Background(), uses, results)
 
 	if len(seen) != 1 || seen[0] != "gh pr create" {
 		t.Errorf("hook calls = %v, want only the successful call", seen)

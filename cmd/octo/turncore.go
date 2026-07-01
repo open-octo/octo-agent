@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/hooks"
 )
 
 // ViewSink is the render-decoupling seam between the turn orchestration core
@@ -64,16 +63,9 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 		turnInput = strings.Join(agent.Texts(pending), "\n\n") + "\n\n" + turnInput
 	}
 
-	// Pre-turn hook: feed the raw user input to an external retrieval layer;
-	// whatever it returns is folded into the user message. Hook errors are
-	// surfaced but never block the turn.
-	if cfg.hooks.Configured() {
-		extra, herr := cfg.hooks.Pre(ctx, line)
-		if herr != nil {
-			sink.Notice(fmt.Sprintf("↳ pre-turn hook: %v", herr))
-		}
-		turnInput = hooks.InjectContext(turnInput, extra)
-	}
+	// UserPromptSubmit / Stop hooks now fire inside the agent core (Agent.Hooks),
+	// so every transport — not just this CLI path — runs them; runTurn no longer
+	// invokes hooks itself.
 
 	sink.TurnStarted()
 
@@ -85,15 +77,6 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 	reply, err := a.RunStream(ctx, turnInput, cfg.tools, cfg.executor, sink.Emit)
 
 	sink.TurnEnded(reply, err)
-
-	// Post-turn hook: fire-and-forget the finished turn at the retain side.
-	// Runs only on success so interrupts/errors don't pollute the index. Uses
-	// a fresh context so an interrupt of the turn doesn't cancel retention.
-	if err == nil && cfg.hooks.Configured() {
-		if herr := cfg.hooks.Post(context.Background(), line, reply.Content); herr != nil {
-			sink.Notice(fmt.Sprintf("↳ post-turn hook: %v", herr))
-		}
-	}
 	return reply, err
 }
 

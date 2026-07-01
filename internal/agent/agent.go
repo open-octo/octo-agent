@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/Leihb/octo-agent/internal/hooks"
 )
 
 // Sender is the minimal slice of provider.Provider the Agent depends on:
@@ -212,23 +214,24 @@ type Agent struct {
 	// Ruby octo's @inbox and keeps mid-turn input handling simple.
 	Inbox Inbox
 
-	// UserInputHook, when set, is called with each user input just before it is
-	// appended to history. A non-empty return is prepended to the user message
-	// (separated by a blank line). It exists to re-surface memory rules at the
-	// point of action without touching the cached system prompt; the reminder
-	// rides the message stream instead. The hook must not mutate state the
-	// caller relies on elsewhere — it's invoked once per appended user turn.
-	UserInputHook func(userInput string) string
+	// Hooks is the per-Agent hook engine. It supersedes the old single-slot
+	// UserInputHook/ToolResultHook: the memory injector registers its reminder
+	// (UserPromptSubmit) and save-nudge (PostToolUse) as in-process hooks on it,
+	// and any shell hooks (env or hooks.yml) live here too, so every transport
+	// runs one dispatch path. The engine shares a process-level seen-set so
+	// SessionStart resume fires once per OS process. Nil is a no-op.
+	Hooks *hooks.Engine
 
-	// ToolResultHook, when set, is called once per successfully executed tool
-	// call, after the whole batch has been dispatched. A non-empty return is
-	// appended to that call's tool_result text (separated by a blank line) —
-	// the channel for surfacing a reminder at the exact moment an action
-	// completed (e.g. the memory save-nudge after a PR merge). It is invoked
-	// serially from the run loop even when the batch itself ran in parallel,
-	// so implementations need no locking of their own. Denied and errored
-	// calls are skipped — a failed action is not a milestone.
-	ToolResultHook func(name string, input map[string]any) string
+	// HookMeta carries the session identity (id, transport, transcript, cwd,
+	// model) folded into every hook Payload. Set by the session-owning layer
+	// before a run, alongside ArchiveDir. Model falls back to a.Model when
+	// unset.
+	HookMeta hooks.Meta
+
+	// turnTools accumulates the tool names dispatched during the current turn,
+	// surfaced to the Stop hook as tools_used. Reset at each turn's first user
+	// input; read and cleared when Stop fires.
+	turnTools []string
 
 	// pendingUserBlocks holds content blocks (e.g. images pasted in the TUI)
 	// to merge into the next user message. Set via AttachUserBlocks and
@@ -327,14 +330,30 @@ func (a *Agent) AttachUserBlocks(blocks []ContentBlock) {
 	a.pendingUserBlocks = blocks
 }
 
+// hookPayload seeds a hook Payload from the Agent's HookMeta, defaulting Model
+// to the live a.Model when the session layer left it unset.
+func (a *Agent) hookPayload(event hooks.Event) hooks.Payload {
+	m := a.HookMeta
+	if m.Model == "" {
+		m.Model = a.Model
+	}
+	return m.Payload(event)
+}
+
 // appendUserInput appends userInput to history, first prepending any
-// UserInputHook output. It stays a single appended message so the error-path
-// popLast contract in Turn/TurnStream/runLoop still removes exactly one turn.
-func (a *Agent) appendUserInput(userInput string) {
+// UserPromptSubmit hook output (the memory reminder + any shell retrieval
+// context, unified through the engine). It stays a single appended message so
+// the error-path popLast contract in Turn/TurnStream/runLoop still removes
+// exactly one turn. It also re-arms per-turn hook state (the tools_used
+// accumulator surfaced to Stop).
+func (a *Agent) appendUserInput(ctx context.Context, userInput string) {
+	a.turnTools = nil
 	text := userInput
-	if a.UserInputHook != nil {
-		if reminder := a.UserInputHook(userInput); reminder != "" {
-			text = reminder + "\n\n" + userInput
+	if a.Hooks != nil {
+		p := a.hookPayload(hooks.EventUserPromptSubmit)
+		p.UserInput = userInput
+		if extra := a.Hooks.Inject(ctx, p); extra != "" {
+			text = extra + "\n\n" + userInput
 		}
 	}
 	// Attachments (e.g. a pasted image) ride on the same user turn as the
@@ -403,7 +422,7 @@ func (a *Agent) Turn(ctx context.Context, userInput string) (Reply, error) {
 	}
 
 	// Append user message first so the snapshot the Sender sees includes it.
-	a.appendUserInput(userInput)
+	a.appendUserInput(ctx, userInput)
 
 	reply, err := a.Sender.SendMessages(ctx, a.Model, a.System, a.History.Snapshot(), a.MaxTokens)
 	if err != nil {
@@ -446,7 +465,7 @@ func (a *Agent) TurnStream(
 		return Reply{}, fmt.Errorf("agent: userInput must be non-empty")
 	}
 
-	a.appendUserInput(userInput)
+	a.appendUserInput(ctx, userInput)
 
 	var (
 		reply Reply
@@ -501,7 +520,7 @@ const truncationResumePrompt = "You were cut off mid-thought. Continue exactly w
 //
 // If tools is nil or executor is nil, Run is equivalent to Turn (single-turn,
 // no tool dispatch).
-func (a *Agent) Run(ctx context.Context, userInput string, tools []ToolDefinition, executor ToolExecutor) (Reply, error) {
+func (a *Agent) Run(ctx context.Context, userInput string, tools []ToolDefinition, executor ToolExecutor) (reply Reply, err error) {
 	if a.Sender == nil {
 		return Reply{}, fmt.Errorf("agent: no Sender configured")
 	}
@@ -511,6 +530,11 @@ func (a *Agent) Run(ctx context.Context, userInput string, tools []ToolDefinitio
 	if userInput == "" && len(a.pendingUserBlocks) == 0 {
 		return Reply{}, fmt.Errorf("agent: userInput must be non-empty")
 	}
+
+	// Fire Stop once the turn concludes — success or failure. Registered after
+	// validation so config errors (no turn ran) don't emit a spurious Stop. The
+	// closure reads the final named returns.
+	defer func() { a.fireStop(userInput, reply, err) }()
 
 	// No tools (or a Sender that can't do tools) → plain Turn.
 	if len(tools) == 0 || executor == nil {
@@ -542,7 +566,7 @@ func (a *Agent) RunStream(
 	tools []ToolDefinition,
 	executor ToolExecutor,
 	handler EventHandler,
-) (Reply, error) {
+) (reply Reply, err error) {
 	if a.Sender == nil {
 		return Reply{}, fmt.Errorf("agent: no Sender configured")
 	}
@@ -552,6 +576,9 @@ func (a *Agent) RunStream(
 	if userInput == "" && len(a.pendingUserBlocks) == 0 {
 		return Reply{}, fmt.Errorf("agent: userInput must be non-empty")
 	}
+
+	// Fire Stop once the turn concludes — success or failure. See Run.
+	defer func() { a.fireStop(userInput, reply, err) }()
 
 	// onChunk adapts text deltas from provider streams into EventTextDelta
 	// events. Nil-safe; empty deltas are silently dropped.
@@ -617,7 +644,7 @@ func (a *Agent) RunStream(
 
 	// Neither tool-aware interface available → plain TurnStream with the
 	// event-adapting onChunk. EventTurnDone fires on success.
-	reply, err := a.TurnStream(ctx, userInput, onChunk, onThinking)
+	reply, err = a.TurnStream(ctx, userInput, onChunk, onThinking)
 	if err == nil && handler != nil {
 		r := reply
 		handler(AgentEvent{Kind: EventTurnDone, Reply: &r})
@@ -665,7 +692,7 @@ func (a *Agent) runLoop(
 	// user input (drained inbox messages), so truncating to this baseline is
 	// what restores the pre-turn state — popLast would only remove one message.
 	baseHistoryLen := a.History.Len()
-	a.appendUserInput(userInput)
+	a.appendUserInput(ctx, userInput)
 
 	limit := a.turnLimit()
 	streamStalls := 0      // transient mid-stream stalls re-issued for the current round
@@ -860,11 +887,19 @@ func (a *Agent) runLoop(
 				return Reply{}, fmt.Errorf("agent: dispatch tools[%d]: %w", i, err)
 			}
 
+			// Record the tool names dispatched this turn for the Stop hook's
+			// tools_used field.
+			for _, b := range reply.Blocks {
+				if b.Type == "tool_use" {
+					a.turnTools = append(a.turnTools, b.Name)
+				}
+			}
+
 			// Decorate results before events and history so the model and
 			// the persisted session see the same text. UI events strip the
 			// <system-reminder> spans (emitToolResultEvents) — hook output
 			// is model-facing, not part of the tool's visible result.
-			applyToolResultHook(a.ToolResultHook, reply.Blocks, resultBlocks)
+			a.applyPostToolUse(ctx, reply.Blocks, resultBlocks)
 
 			// Emit EventToolDone / EventToolError per result, pairing
 			// each result with the originating tool_use block so ToolName
@@ -1374,13 +1409,14 @@ func toolResultBlocks(id string, result ToolResult, err error) []ContentBlock {
 	return blocks
 }
 
-// applyToolResultHook appends the hook's output to each matching successful
-// tool_result block. It runs serially after dispatchTools returns — never
-// inside the parallel read-only batch — so a stateful hook (the memory
-// save-nudge latch) needs no locking. Denied and errored calls carry
-// IsError=true and are skipped.
-func applyToolResultHook(hook func(name string, input map[string]any) string, uses, results []ContentBlock) {
-	if hook == nil {
+// applyPostToolUse fires the PostToolUse hook for each successful tool result
+// and appends any output to that tool_result block. It runs serially after
+// dispatchTools returns — never inside the parallel read-only batch — so a
+// stateful in-process hook (the memory save-nudge latch) needs no locking.
+// Denied and errored calls carry IsError=true and are skipped: a failed action
+// is not a milestone.
+func (a *Agent) applyPostToolUse(ctx context.Context, uses, results []ContentBlock) {
+	if a.Hooks == nil || !a.Hooks.Configured(hooks.EventPostToolUse) {
 		return
 	}
 	byID := make(map[string]*ContentBlock, len(results))
@@ -1397,7 +1433,11 @@ func applyToolResultHook(hook func(name string, input map[string]any) string, us
 		if rb == nil {
 			continue
 		}
-		if extra := hook(u.Name, u.Input); extra != "" {
+		p := a.hookPayload(hooks.EventPostToolUse)
+		p.ToolName = u.Name
+		p.ToolInput = u.Input
+		p.ToolResult = rb.Result
+		if extra := a.Hooks.Inject(ctx, p); extra != "" {
 			if rb.Result == "" {
 				rb.Result = extra
 			} else {
@@ -1405,6 +1445,29 @@ func applyToolResultHook(hook func(name string, input map[string]any) string, us
 			}
 		}
 	}
+}
+
+// fireStop dispatches the Stop hook at a turn's conclusion — on success AND on
+// failure/interrupt alike, since a retention layer wants both (a non-nil err
+// populates the payload's error field so a script can choose to skip failures).
+// userInput is the turn's original input; reply.Content is the final assistant
+// text; tools_used is drained from the per-turn accumulator. Dispatch uses a
+// background context so interrupting the turn (ctx cancelled) doesn't also
+// cancel retention — mirroring the pre-redesign post-turn hook.
+func (a *Agent) fireStop(userInput string, reply Reply, err error) {
+	tools := a.turnTools
+	a.turnTools = nil
+	if a.Hooks == nil || !a.Hooks.Configured(hooks.EventStop) {
+		return
+	}
+	p := a.hookPayload(hooks.EventStop)
+	p.UserInput = userInput
+	p.AssistantReply = reply.Content
+	p.ToolsUsed = tools
+	if err != nil {
+		p.Error = err.Error()
+	}
+	a.Hooks.Dispatch(context.Background(), p)
 }
 
 // flattenResults collapses a per-tool slice-of-slices into a single flat slice.

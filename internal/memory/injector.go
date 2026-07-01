@@ -12,8 +12,11 @@ package memory
 // memory directory while the moment is still in front of it.
 
 import (
+	"context"
 	"regexp"
 	"strings"
+
+	"github.com/Leihb/octo-agent/internal/hooks"
 )
 
 // Injector holds session-scoped recall state for a parsed rule set.
@@ -160,8 +163,9 @@ const saveNudgeText = "<system-reminder>\n" +
 	"A pull request was just created or merged. If this work settled anything durable — a decision (especially an approach ruled OUT), a milestone, or a constraint future sessions must respect — record it in your memory directory now, per the Memory section of your instructions. The diff and git log already hold WHAT changed; memory is for the why, the alternatives rejected, and the don't-redo-this. If nothing here is durable, carry on.\n" +
 	"</system-reminder>"
 
-// SaveNudge is the agent's ToolResultHook: it returns the save-nudge reminder
-// when toolName/input is a milestone-shaped terminal command, at most once per
+// SaveNudge backs the PostToolUse hook (see RegisterHooks): it returns the
+// save-nudge reminder when toolName/input is a milestone-shaped terminal
+// command, at most once per
 // user turn (Reminder re-arms it). It is called serially from the agent run
 // loop, so the latch needs no locking.
 func (in *Injector) SaveNudge(toolName string, input map[string]any) string {
@@ -174,4 +178,23 @@ func (in *Injector) SaveNudge(toolName string, input map[string]any) string {
 	}
 	in.nudged = true
 	return saveNudgeText
+}
+
+// RegisterHooks wires the injector into a hook engine as in-process hooks: the
+// per-turn reminder on UserPromptSubmit and the milestone save-nudge on
+// PostToolUse. This replaces the old direct assignment to the Agent's
+// single-slot UserInputHook/ToolResultHook, so the memory reminders flow through
+// the same dispatch path as shell hooks. The injector's per-session latches
+// (recall map, nudge flag) live on the receiver, so each session registers its
+// own injector on its own engine.
+func (in *Injector) RegisterHooks(e *hooks.Engine) {
+	if in == nil || e == nil {
+		return
+	}
+	e.RegisterInProc(hooks.EventUserPromptSubmit, func(_ context.Context, p hooks.Payload) string {
+		return in.Reminder(p.UserInput)
+	})
+	e.RegisterInProc(hooks.EventPostToolUse, func(_ context.Context, p hooks.Payload) string {
+		return in.SaveNudge(p.ToolName, p.ToolInput)
+	})
 }

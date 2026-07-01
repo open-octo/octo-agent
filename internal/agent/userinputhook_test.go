@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Leihb/octo-agent/internal/hooks"
 )
 
 // userText returns the plain text of a user message regardless of whether it's
@@ -21,31 +23,41 @@ func userText(m Message) string {
 	return ""
 }
 
-func TestUserInputHook_PrependsReminderAsSingleMessage(t *testing.T) {
+// promptSubmitEngine returns an engine with a single in-process UserPromptSubmit
+// hook, the shape the memory injector's reminder takes after the redesign.
+func promptSubmitEngine(fn func(userInput string) string) *hooks.Engine {
+	e := hooks.NewEngine(nil)
+	e.RegisterInProc(hooks.EventUserPromptSubmit, func(_ context.Context, p hooks.Payload) string {
+		return fn(p.UserInput)
+	})
+	return e
+}
+
+func TestUserPromptSubmit_PrependsInjectionAsSingleMessage(t *testing.T) {
 	send := &fakeSender{reply: Reply{Content: "ok"}}
 	a := New(send, "m")
-	a.UserInputHook = func(in string) string { return "<reminder>" + in + "</reminder>" }
+	a.Hooks = promptSubmitEngine(func(in string) string { return "<reminder>" + in + "</reminder>" })
 
 	if _, err := a.Turn(context.Background(), "deploy please"); err != nil {
 		t.Fatalf("Turn: %v", err)
 	}
 
 	if len(send.gotMessages) != 1 {
-		t.Fatalf("sender saw %d messages, want 1 (reminder must fold into the user turn)", len(send.gotMessages))
+		t.Fatalf("sender saw %d messages, want 1 (injection must fold into the user turn)", len(send.gotMessages))
 	}
 	got := userText(send.gotMessages[0])
 	if !strings.Contains(got, "<reminder>deploy please</reminder>") {
-		t.Errorf("reminder not prepended: %q", got)
+		t.Errorf("injection not prepended: %q", got)
 	}
 	if !strings.HasSuffix(got, "deploy please") {
 		t.Errorf("original input not preserved at the end: %q", got)
 	}
 }
 
-func TestUserInputHook_EmptyReturnLeavesInputUntouched(t *testing.T) {
+func TestUserPromptSubmit_EmptyReturnLeavesInputUntouched(t *testing.T) {
 	send := &fakeSender{reply: Reply{Content: "ok"}}
 	a := New(send, "m")
-	a.UserInputHook = func(string) string { return "" }
+	a.Hooks = promptSubmitEngine(func(string) string { return "" })
 
 	if _, err := a.Turn(context.Background(), "hello"); err != nil {
 		t.Fatalf("Turn: %v", err)
@@ -55,10 +67,10 @@ func TestUserInputHook_EmptyReturnLeavesInputUntouched(t *testing.T) {
 	}
 }
 
-func TestUserInputHook_ErrorPathPopsCombinedMessage(t *testing.T) {
+func TestUserPromptSubmit_ErrorPathPopsCombinedMessage(t *testing.T) {
 	send := &fakeSender{err: errors.New("boom")}
 	a := New(send, "m")
-	a.UserInputHook = func(in string) string { return "REMINDER\n\n" + in }
+	a.Hooks = promptSubmitEngine(func(in string) string { return "REMINDER\n\n" + in })
 
 	if _, err := a.Turn(context.Background(), "hi"); err == nil {
 		t.Fatal("expected error")

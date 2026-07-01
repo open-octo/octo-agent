@@ -10,6 +10,7 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/channel"
+	"github.com/Leihb/octo-agent/internal/hooks"
 	"github.com/Leihb/octo-agent/internal/tools"
 )
 
@@ -334,11 +335,11 @@ func TestHandleChannelMessage_WiresMemoryHooks(t *testing.T) {
 	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
 
 	sess := srv.channelMgr.GetSession(evFor("x"))
-	if sess.Agent.UserInputHook == nil {
-		t.Error("IM agent missing UserInputHook (keyword reminders)")
+	if !sess.Agent.Hooks.Configured(hooks.EventUserPromptSubmit) {
+		t.Error("IM agent missing UserPromptSubmit hook (keyword reminders)")
 	}
-	if sess.Agent.ToolResultHook == nil {
-		t.Error("IM agent missing ToolResultHook (save-nudge)")
+	if !sess.Agent.Hooks.Configured(hooks.EventPostToolUse) {
+		t.Error("IM agent missing PostToolUse hook (save-nudge)")
 	}
 }
 

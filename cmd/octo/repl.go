@@ -13,7 +13,6 @@ import (
 
 	"github.com/Leihb/octo-agent/internal/agent"
 	"github.com/Leihb/octo-agent/internal/config"
-	"github.com/Leihb/octo-agent/internal/hooks"
 	"github.com/Leihb/octo-agent/internal/mcp"
 	"github.com/Leihb/octo-agent/internal/permission"
 	"github.com/Leihb/octo-agent/internal/skills"
@@ -38,7 +37,6 @@ type replConfig struct {
 	subAgentMgr *tools.SubAgentManager // nil → sub-agent tools disabled
 	skillReg    *skills.Registry       // discovered skills; backs /skills and /<name>
 	memDir      string                 // per-repo memory directory; backs /memory ("" → disabled)
-	hooks       *hooks.Runner          // C9 Phase 3 pre/post-turn hooks; nil-safe via Configured()
 	// reader, when non-nil, is the line reader to use instead of building
 	// one fresh inside runREPL. Set by cmd/octo so the same instance is
 	// shared with the permission gate and the ask_user_question asker.
