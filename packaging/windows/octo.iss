@@ -24,7 +24,7 @@
 AppId={{8F2A6B1C-3D4E-4F50-9A6B-7C8D9E0F1A2B}
 AppName=octo
 AppVersion={#AppVersion}
-AppPublisher=Leihb
+AppPublisher=open-octo
 AppPublisherURL=https://github.com/open-octo/octo-agent
 DefaultDirName={userpf}\octo
 DisableProgramGroupPage=yes

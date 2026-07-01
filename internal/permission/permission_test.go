@@ -128,14 +128,14 @@ func TestDefaultRules_WebFetchIPv6LoopbackDenied(t *testing.T) {
 func TestDefaultRules_WebFetchPrivateRangeDenied(t *testing.T) {
 	e := newDefaultEngine(t)
 	cases := map[string]Decision{
-		"http://10.0.0.1/secret":          Deny,
-		"http://192.168.1.1/router":       Deny,
-		"http://127.0.0.1:8080/":          Deny,
-		"http://localhost/":               Deny,
-		"http://169.254.169.254/metadata": Deny, // AWS metadata
-		"https://github.com/Leihb/octo":   Allow,
-		"https://pkg.go.dev/net/url":      Allow,
-		"https://random.example.com/":     Ask,
+		"http://10.0.0.1/secret":                  Deny,
+		"http://192.168.1.1/router":               Deny,
+		"http://127.0.0.1:8080/":                  Deny,
+		"http://localhost/":                       Deny,
+		"http://169.254.169.254/metadata":         Deny, // AWS metadata
+		"https://github.com/open-octo/octo-agent": Allow,
+		"https://pkg.go.dev/net/url":              Allow,
+		"https://random.example.com/":             Ask,
 	}
 	for u, want := range cases {
 		got := e.Check("web_fetch", map[string]any{"url": u})

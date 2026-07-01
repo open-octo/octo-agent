@@ -160,7 +160,7 @@ run `octo`. The bash/curl path stays for macOS/Linux.
 
 - **Code signing** — deferred; hook left in the workflow.
 - **winget channel** — complementary and planned next: a winget manifest points
-  `winget install Leihb.octo` at this same `octo-setup.exe`. Not this round.
+  `winget install open-octo.octo` at this same `octo-setup.exe`. Not this round.
 - **arm64-native installer** — amd64 installer covers ARM via emulation for now.
 - **macOS `.pkg` / Linux `.deb`/`.rpm`** — the symmetric idea for other
   platforms; not this round.
