@@ -282,6 +282,27 @@ type testConfigRequest struct {
 	AnthropicFormat bool   `json:"anthropic_format"`
 }
 
+// storedAPIKey returns the saved key of the config entry that best matches
+// (provider, baseURL): an exact provider+endpoint match wins, else the first
+// entry on the same provider. Empty when none is stored. Lets a connection
+// test reuse the stored key when the provider is unchanged.
+func storedAPIKey(cfg config.Config, provider, baseURL string) string {
+	nb := strings.TrimRight(baseURL, "/")
+	var sameProvider string
+	for _, e := range cfg.Models {
+		if e.APIKey == "" || e.Provider != provider {
+			continue
+		}
+		if strings.TrimRight(e.BaseURL, "/") == nb {
+			return e.APIKey
+		}
+		if sameProvider == "" {
+			sameProvider = e.APIKey
+		}
+	}
+	return sameProvider
+}
+
 func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 	var req testConfigRequest
 	if err := readBodyJSON(r, &req); err != nil {
@@ -290,18 +311,6 @@ func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Model == "" || req.BaseURL == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "model and base_url are required"})
-		return
-	}
-
-	key := req.APIKey
-	if key == "" {
-		key = os.Getenv("ANTHROPIC_API_KEY")
-		if key == "" {
-			key = os.Getenv("OPENAI_API_KEY")
-		}
-	}
-	if key == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "no API key provided"})
 		return
 	}
 
@@ -315,6 +324,25 @@ func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 		providerName = req.Provider
 	} else if v := app.VendorByBaseURL(req.BaseURL); v != "" {
 		providerName = v
+	}
+
+	// Resolve the key. An empty or still-masked field means "unchanged" — the
+	// panel never prefills the key input, so editing a model and hitting Test
+	// sends no key. Reuse the stored key of the matching entry instead of
+	// demanding a re-type; fall back to the vendor's env var last.
+	key := req.APIKey
+	if key == "" || strings.Contains(key, "****") {
+		key = ""
+		if cfg, err := config.Load(); err == nil {
+			key = storedAPIKey(cfg, providerName, req.BaseURL)
+		}
+	}
+	if key == "" {
+		key = os.Getenv(app.VendorAPIKeyEnvVar(providerName))
+	}
+	if key == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "no API key provided"})
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -406,10 +434,8 @@ func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg.Models = append(cfg.Models, entry)
-	becameDefault := false
 	if cfg.DefaultModel == "" || len(cfg.Models) == 1 {
 		cfg.DefaultModel = entry.Model
-		becameDefault = true
 	}
 	if req.PermissionMode != "" {
 		cfg.PermissionMode = req.PermissionMode
@@ -419,13 +445,12 @@ func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
 	}
-	// When this entry becomes the default (e.g. the first model saved during
-	// first-run onboard), point new sessions at it — otherwise handleCreateSession
-	// keeps using the stale startup s.model. Mirrors handleSetDefaultModelConfig.
-	if becameDefault {
-		s.model = entry.Model
-	}
+	// Rebuild the default sender/model so new unbound sessions pick up the new
+	// entry (e.g. the first model saved during onboard, or a changed default).
 	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after saving model config: %v", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": entry.Model})
 }
@@ -489,7 +514,12 @@ func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
 	}
+	// Editing the default entry (provider/model/endpoint/key) must rebuild the
+	// default sender, or new unbound sessions keep using the stale startup one.
 	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after updating model config: %v", err)
+	}
 
 	// id may have changed if the model changed — return it so the client can
 	// refresh its reference.
@@ -539,7 +569,12 @@ func (s *Server) handleDeleteModelConfig(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
 	}
+	// Deleting an entry may have repaired the default; rebuild the default
+	// sender so new unbound sessions follow the new default.
 	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after deleting model config: %v", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -602,9 +637,12 @@ func (s *Server) handleSetDefaultModelConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// The next agent turn should pick up the new default.
-	s.model = cfg.DefaultEntry().Model
+	// The next agent turn should pick up the new default: rebuild the default
+	// sender/model under senderMu so new unbound sessions follow it.
 	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after setting default model: %v", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

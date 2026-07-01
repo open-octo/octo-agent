@@ -296,6 +296,11 @@ func TestConfigModels_PatchUpdatesAndKeepsKey(t *testing.T) {
 	if e.Provider != "anthropic" {
 		t.Errorf("provider = %q, want anthropic preserved", e.Provider)
 	}
+	// Editing the default entry must rebuild the runtime default sender/model,
+	// or new unbound sessions keep using the stale startup model.
+	if srv.model != "claude-opus-4-7" {
+		t.Errorf("runtime default model = %q, want claude-opus-4-7 after editing default entry", srv.model)
+	}
 
 	if w := doJSON(t, srv, http.MethodPatch, "/api/config/models/ghost", `{"model":"x"}`); w.Code != http.StatusNotFound {
 		t.Errorf("PATCH unknown id = %d, want 404", w.Code)

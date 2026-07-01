@@ -1313,26 +1313,24 @@ func (s *Server) getProvider() string {
 	return s.provider
 }
 
-// reloadDefaultSender rebuilds the server's default sender from current config.
-// It is used when global settings (e.g. show_reasoning) change so existing
-// sessions pick up the new defaults on their next turn. If the server is still
-// in onboarding mode (nil sender) the call is a no-op.
+// reloadDefaultSender rebuilds the server's default sender and model from the
+// current config so existing unbound sessions pick up the change on their next
+// turn. Called whenever a global setting or a model-config entry changes. In
+// onboarding mode (no API key yet) the sender stays nil, but s.model is still
+// refreshed from config so a session created before ensureSender runs uses the
+// right model.
 func (s *Server) reloadDefaultSender() error {
 	s.senderMu.Lock()
 	defer s.senderMu.Unlock()
-	if s.sender == nil {
-		return nil
-	}
 	sender, model, provName, err := resolveProviderAndModel(s.cfg.Provider, s.cfg.Model)
 	if err != nil {
 		return err
 	}
-	if sender == nil {
-		return nil
-	}
-	s.sender = sender
 	s.model = model
-	s.provider = provName
+	if sender != nil {
+		s.sender = sender
+		s.provider = provName
+	}
 	return nil
 }
 

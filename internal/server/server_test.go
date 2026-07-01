@@ -635,6 +635,44 @@ func TestHandleTestConfig(t *testing.T) {
 	}
 }
 
+// Editing a model and hitting Test sends no api_key (the panel never prefills
+// the key input). The server must reuse the stored key of the matching entry
+// instead of failing with "no API key provided".
+func TestHandleTestConfig_ReusesStoredKey(t *testing.T) {
+	setTestHome(t)
+
+	var gotAuth string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer mock.Close()
+
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Provider: "openai", Model: "gpt-4o-mini", BaseURL: mock.URL, APIKey: "stored-key"},
+		},
+		DefaultModel: "gpt-4o-mini",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/test",
+		`{"model":"gpt-4o-mini","base_url":"`+mock.URL+`","provider":"openai"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["ok"] != true {
+		t.Fatalf("ok = %v, want true (should reuse stored key); msg=%v", body["ok"], body["message"])
+	}
+	if gotAuth != "Bearer stored-key" {
+		t.Errorf("Authorization = %q, want Bearer stored-key (stored key reused)", gotAuth)
+	}
+}
+
 func TestHandleSaveModelConfig(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
