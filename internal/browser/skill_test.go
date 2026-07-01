@@ -790,3 +790,63 @@ func TestReplaySkillExtractBindsOutput(t *testing.T) {
 		t.Fatalf("want RPT-42, got %#v", outputs["report_id"])
 	}
 }
+
+// TestRunStepDownloadExtractGuards: the up-front validation on download/extract
+// fires before touching the page, so it needs no browser.
+func TestRunStepDownloadExtractGuards(t *testing.T) {
+	// download without a Browser session.
+	if _, err := runStep(context.Background(), nil, nil, &Step{Action: "download", Selector: "#x", Bind: "f"}, nil, time.Second, "/tmp", nil); err == nil || !strings.Contains(err.Error(), "no browser session") {
+		t.Fatalf("want no-browser-session error, got %v", err)
+	}
+	// extract with no JS.
+	if _, err := runStep(context.Background(), nil, nil, &Step{Action: "extract", Bind: "v"}, nil, time.Second, "", nil); err == nil || !strings.Contains(err.Error(), "js is required") {
+		t.Fatalf("want js-required error, got %v", err)
+	}
+}
+
+// TestReplaySkillDownloadNoDoubleBindOnHeal: a download step whose Verify fails
+// first, then passes after a heal, must bind the file exactly once — recoverStep
+// re-runs the whole step, so binding before Verify would double-count the output.
+func TestReplaySkillDownloadNoDoubleBindOnHeal(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/file.csv" {
+			w.Header().Set("Content-Disposition", `attachment; filename="report.csv"`)
+			w.Header().Set("Content-Type", "text/csv")
+			w.Write([]byte("a,b\n1,2\n"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><title>dl</title><a id="dl" href="/file.csv" download>Export</a>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#dl", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	// The Verify requires #done, which doesn't exist yet; the healer injects it so
+	// the retry's Verify passes. (The healer leaves the step unchanged.)
+	heal := func(ctx context.Context, p *Page, _ *Step, _ error) error {
+		return p.Eval(ctx, "(function(){var d=document.createElement('div');d.id='done';document.body.appendChild(d);})()", nil)
+	}
+	skill := &Skill{
+		Name:    "dl",
+		Outputs: []Output{{Name: "files", Type: "file[]"}},
+		Steps:   []Step{{Action: "download", Selector: "#dl", Bind: "files", Verify: &Verify{Exists: "#done"}}},
+	}
+	_, _, outputs, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b, DownloadDir: t.TempDir(), Healer: heal})
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	files, ok := outputs["files"].([]string)
+	if !ok || len(files) != 1 {
+		t.Fatalf("download must bind exactly once across a heal retry, got %#v", outputs["files"])
+	}
+}

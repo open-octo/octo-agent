@@ -673,7 +673,10 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		// Capture the file the trigger produces (client-side-generated files never
 		// appear as a plain HTTP response — only what lands on disk is the file).
 		// Resolve the trigger like a click (text/label first) so a drifted export
-		// button still fires; bind the saved path so it can flow downstream.
+		// button still fires. Unlike click this uses a plain page.Click, not
+		// clickTarget: a download trigger doesn't navigate, so there's no new tab
+		// to follow. Verify BEFORE bind so a verify-triggered retry (recoverStep
+		// re-runs the whole step) doesn't append the file to the output twice.
 		if b == nil {
 			return page, fmt.Errorf("download: no browser session")
 		}
@@ -689,11 +692,16 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		if err != nil {
 			return page, err
 		}
+		if err := verify(ctx, page, step, params); err != nil {
+			return page, err
+		}
 		bind(binds, step.Bind, path)
+		return page, nil
 	case "extract":
 		// Read a value off the page (a report id, a status) and bind it — the
 		// scalar analogue of a download for feeding a downstream step. A JSON string
 		// result is unwrapped to its text; anything else is kept as its JSON form.
+		// Verify before bind for the same no-double-bind reason as download.
 		if strings.TrimSpace(step.JS) == "" {
 			return page, fmt.Errorf("extract: js is required")
 		}
@@ -706,7 +714,11 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		if json.Unmarshal(raw, &s) == nil {
 			val = s
 		}
+		if err := verify(ctx, page, step, params); err != nil {
+			return page, err
+		}
 		bind(binds, step.Bind, val)
+		return page, nil
 	default:
 		return page, fmt.Errorf("unknown action %q", step.Action)
 	}
