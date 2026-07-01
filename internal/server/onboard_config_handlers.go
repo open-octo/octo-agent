@@ -653,6 +653,13 @@ func (s *Server) handleSetLiteModelConfig(w http.ResponseWriter, r *http.Request
 	if cfg.LiteModel == id {
 		cfg.LiteModel = "" // toggle off
 	} else {
+		// The default model can't double as its own lite model: they play
+		// mutually exclusive roles, and pointing compaction at the default
+		// buys nothing. Require a separate, cheaper entry.
+		if id == cfg.Models[defaultEntryIdx(cfg)].Model {
+			writeError(w, http.StatusBadRequest, "the default model cannot be set as the lite model")
+			return
+		}
 		cfg.LiteModel = id
 	}
 

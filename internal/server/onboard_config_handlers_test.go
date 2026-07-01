@@ -548,6 +548,15 @@ func TestConfigModels_SetLiteToggles(t *testing.T) {
 	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/ghost/lite", ""); w.Code != http.StatusNotFound {
 		t.Errorf("set-lite unknown id = %d, want 404", w.Code)
 	}
+
+	// The default model can't be set as its own lite model.
+	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/m1/lite", ""); w.Code != http.StatusBadRequest {
+		t.Errorf("set-lite on default = %d, want 400", w.Code)
+	}
+	cfg, _ = config.Load()
+	if cfg.LiteModel != "" {
+		t.Errorf("lite = %q, want unchanged after rejected set", cfg.LiteModel)
+	}
 }
 
 func TestBuildAgent_ImplicitLiteFromVendorRegistry(t *testing.T) {

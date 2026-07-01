@@ -248,7 +248,12 @@
                 {#if m.type !== 'default'}
                   <button class="act-text" disabled={busyModelId === m.id} onclick={() => setDefaultModel(m)}>{$t('settings.models.set_default')}</button>
                 {/if}
-                <button class="act-text" disabled={busyModelId === m.id} title={$t('settings.models.lite_hint')} onclick={() => toggleLite(m)}>
+                <button
+                  class="act-text"
+                  disabled={busyModelId === m.id || m.type === 'default'}
+                  title={m.type === 'default' ? $t('settings.models.lite_default_hint') : $t('settings.models.lite_hint')}
+                  onclick={() => toggleLite(m)}
+                >
                   {m.type === 'lite' ? $t('settings.models.unset_lite') : $t('settings.models.set_lite')}
                 </button>
                 <button class="act-btn" title={$t('common.edit')} onclick={() => openEditModel(m)}>
