@@ -15,9 +15,11 @@ type point struct {
 	Y float64 `json:"y"`
 }
 
-// frameDelim separates a same-origin iframe selector from the element selector
-// inside it, e.g. "iframe#app >>> #download". One level; cross-origin OOPIFs
-// are not handled (their DOM lives in another process).
+// frameDelim separates an iframe selector from the element selector inside it,
+// e.g. "iframe#app >>> #download". One level. Same-origin frames resolve via
+// contentDocument; cross-origin OOPIFs (DOM in another process) are routed to the
+// frame's own CDP session by oopifPage — transparently, so callers use the same
+// "frame >>> element" convention regardless of origin.
 const frameDelim = " >>> "
 
 func splitFrame(selector string) (frame, elem string) {
@@ -49,6 +51,14 @@ func elemRefJS(frame, elem string) string {
 // it returns the positional selector unchanged, so a genuine miss still fails
 // and reaches the healer. anchor must be non-empty.
 func (p *Page) resolveClickTarget(ctx context.Context, frame, elemSel, anchor string, timeout time.Duration) string {
+	// For a cross-origin iframe, resolve inside the frame's own session (where the
+	// element lives at document root), then re-prefix the frame so the subsequent
+	// click re-routes there via the method-level redirect.
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return frame + frameDelim + cp.resolveClickTarget(ctx, "", elemSel, anchor, timeout)
+		}
+	}
 	posSel := elemSel
 	if frame != "" {
 		posSel = frame + frameDelim + elemSel
@@ -120,6 +130,11 @@ func (p *Page) DismissOverlay(ctx context.Context) (bool, error) {
 // If neither appears it returns the positional selector unchanged, so a genuine
 // miss still fails and reaches the healer. hint must be non-empty.
 func (p *Page) resolveFieldTarget(ctx context.Context, frame, elemSel, hint string, timeout time.Duration) string {
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return frame + frameDelim + cp.resolveFieldTarget(ctx, "", elemSel, hint, timeout)
+		}
+	}
 	posSel := elemSel
 	if frame != "" {
 		posSel = frame + frameDelim + elemSel
@@ -214,6 +229,11 @@ func (p *Page) elementCenter(ctx context.Context, selector string) (point, error
 // Trusted input (vs a JS .click()) counts as a real user gesture, which some
 // flows — file dialogs, download buttons — require, and is less detectable.
 func (p *Page) Click(ctx context.Context, selector string) error {
+	if frame, elem := splitFrame(selector); frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return cp.Click(ctx, elem)
+		}
+	}
 	pt, err := p.elementCenter(ctx, selector)
 	if err != nil {
 		return err
@@ -237,6 +257,11 @@ func (p *Page) Click(ctx context.Context, selector string) error {
 // Synthetic JS events can't trigger CSS :hover reveals — only a genuine pointer
 // move does, which is what this dispatches.
 func (p *Page) Hover(ctx context.Context, selector string) error {
+	if frame, elem := splitFrame(selector); frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return cp.Hover(ctx, elem)
+		}
+	}
 	pt, err := p.elementCenter(ctx, selector)
 	if err != nil {
 		return err
@@ -254,6 +279,11 @@ func (p *Page) Hover(ctx context.Context, selector string) error {
 // select popups are browser-drawn (not DOM), so this is the reliable path.
 func (p *Page) SelectOption(ctx context.Context, selector, value string) error {
 	frame, elem := splitFrame(selector)
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return cp.SelectOption(ctx, elem, value)
+		}
+	}
 	expr := fmt.Sprintf(`(() => {
 		const el = %s;
 		if (!el || el.tagName !== 'SELECT') return 'no-select';
@@ -287,6 +317,11 @@ func (p *Page) SelectOption(ctx context.Context, selector, value string) error {
 // TypeText focuses the element matched by selector and types text into it.
 func (p *Page) TypeText(ctx context.Context, selector, text string) error {
 	frame, elem := splitFrame(selector)
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return cp.TypeText(ctx, elem, text)
+		}
+	}
 	focus := fmt.Sprintf(`(() => { const el = %s; if (!el) return false; el.focus(); return true; })()`, elemRefJS(frame, elem))
 	var ok bool
 	if err := p.Eval(ctx, focus, &ok); err != nil {
@@ -306,6 +341,11 @@ func (p *Page) TypeText(ctx context.Context, selector, text string) error {
 // typed value aren't mistaken for a failure.
 func (p *Page) fieldNonEmpty(ctx context.Context, selector string) bool {
 	frame, elem := splitFrame(selector)
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return cp.fieldNonEmpty(ctx, elem)
+		}
+	}
 	expr := fmt.Sprintf(`(()=>{const el=%s; if(!el) return false; const v=('value' in el)?el.value:el.textContent; return !!(v&&(''+v).length);})()`, elemRefJS(frame, elem))
 	var ok bool
 	_ = p.Eval(ctx, expr, &ok)
@@ -316,6 +356,12 @@ func (p *Page) fieldNonEmpty(ctx context.Context, selector string) bool {
 // framework bindings reset, before a re-type retry.
 func (p *Page) clearField(ctx context.Context, selector string) {
 	frame, elem := splitFrame(selector)
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			cp.clearField(ctx, elem)
+			return
+		}
+	}
 	expr := fmt.Sprintf(`(()=>{const el=%s; if(!el) return; if('value' in el){el.value='';}else{el.textContent='';} el.dispatchEvent(new Event('input',{bubbles:true})); el.focus();})()`, elemRefJS(frame, elem))
 	_ = p.Eval(ctx, expr, nil)
 }
@@ -454,6 +500,11 @@ func (p *Page) Upload(ctx context.Context, selector string, files []string) erro
 // case where there is no persistent <input type=file> to target directly. The
 // real Klook SD upload works this way.
 func (p *Page) UploadViaChooser(ctx context.Context, selector string, files []string) error {
+	if frame, elem := splitFrame(selector); frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return cp.UploadViaChooser(ctx, elem, files)
+		}
+	}
 	if _, err := p.cli.call(ctx, p.sessionID, "Page.setInterceptFileChooserDialog", map[string]any{"enabled": true}); err != nil {
 		return err
 	}

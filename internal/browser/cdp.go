@@ -193,3 +193,8 @@ func (c *cdpClient) subscribe(method, sessionID string) (<-chan rpcResponse, fun
 }
 
 func (c *cdpClient) close() { c.shutdown(fmt.Errorf("closed by caller")) }
+
+// done returns a channel closed when the connection shuts down, so long-lived
+// event consumers (e.g. the OOPIF target watcher) can exit instead of blocking
+// forever on a subscription channel the shutdown never closes.
+func (c *cdpClient) done() <-chan struct{} { return c.closed }
