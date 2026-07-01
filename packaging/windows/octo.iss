@@ -162,10 +162,15 @@ end;
 // EnsurePowerShell7 best-effort installs PowerShell 7 via winget when it is
 // missing. octo runs hook scripts and the terminal tool through pwsh (7+) when
 // present, falling back to the clumsier Windows PowerShell 5.1 otherwise, so a
-// present pwsh is a better default. Every failure path — pwsh already there,
-// no winget (older Windows / enterprise policy), declined UAC, no network — is
-// a silent no-op: octo simply keeps using 5.1. winget may raise one UAC prompt
-// for the machine-wide PowerShell MSI; that is the only elevation octo asks for.
+// present pwsh is a better default. Every skip/failure path — pwsh already
+// there, no winget (older Windows / enterprise policy), user declined, no
+// network — is a no-op: octo simply keeps using 5.1.
+//
+// The winget package is a machine-wide MSI, so Windows raises a UAC prompt.
+// Rather than let that prompt appear out of nowhere and alarm a non-technical
+// user, we explain up front what is about to happen and that the Windows
+// permission dialog is expected, and let them decline. This is the only
+// elevation the otherwise UAC-free per-user installer ever asks for.
 procedure EnsurePowerShell7;
 var
   ResultCode: Integer;
@@ -173,6 +178,18 @@ begin
   if CommandFound('pwsh') then
     exit;
   if not CommandFound('winget') then
+    exit;
+  if MsgBox(
+       'octo works best with PowerShell 7, which is not installed yet.' + #13#10#13#10 +
+       'Would you like to install it now? Windows will show a blue "User Account ' +
+       'Control" window asking for permission — this is normal and safe; just ' +
+       'choose "Yes" there.' + #13#10#13#10 +
+       'Choose "No" to skip — octo will still work using the built-in Windows ' +
+       'PowerShell.' + #13#10#13#10 +
+       'octo 建议使用 PowerShell 7。是否现在安装？期间 Windows 会弹出蓝色的' +
+       '"用户账户控制"授权窗口，这是正常且安全的，点"是"即可。选"否"可跳过，' +
+       'octo 仍可正常使用系统自带的 PowerShell。',
+       mbConfirmation, MB_YESNO) <> IDYES then
     exit;
   WizardForm.StatusLabel.Caption := 'Installing PowerShell 7 (recommended)...';
   Exec(ExpandConstant('{cmd}'),
