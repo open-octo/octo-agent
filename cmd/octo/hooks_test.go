@@ -36,6 +36,23 @@ func TestRunHooksList_ShowsUserConfig(t *testing.T) {
 	}
 }
 
+func TestReadTrustAnswer(t *testing.T) {
+	cases := map[string]string{
+		"y\n":      "y",
+		"YES\n":    "yes",
+		"n\n":      "n",
+		"\n":       "",
+		"  y  \n":  "y",
+		"yes\r\n":  "yes", // CRLF stripped
+		"no input": "no input",
+	}
+	for in, want := range cases {
+		if got := readTrustAnswer(strings.NewReader(in)); got != want {
+			t.Errorf("readTrustAnswer(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestRunHooks_UnknownSubcommand(t *testing.T) {
 	var out bytes.Buffer
 	if code := runHooks([]string{"frobnicate"}, &out, &out); code != 2 {
