@@ -209,22 +209,25 @@ func TestKillShellTool(t *testing.T) {
 // background process — no kill, no restart. The agent receives partial output
 // plus the bg id.
 func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
-	// Use a short timeout so the test doesn't take 30 s.  500 ms is enough
-	// for POSIX `sh` and Windows PowerShell to start and emit a line, while
-	// keeping the test fast.
+	// Use a short timeout so the test doesn't take 30 s. The window must be
+	// long enough for the shell to cold-start AND emit its first line before
+	// the timeout fires — otherwise the promotion-to-background snapshot is
+	// taken before any partial output exists and the "partial" assert flakes.
+	// POSIX `sh` starts in a few ms; Windows PowerShell cold-start routinely
+	// exceeds 500 ms on CI, so give it a much wider window (and a proportionally
+	// longer sleep so the command is still running when the timeout fires).
+	timeout := 500 * time.Millisecond
+	cmd := "echo partial && sleep 2"
+	if runtime.GOOS == "windows" {
+		timeout = 4 * time.Second
+		cmd = "Write-Output partial; Start-Sleep -Seconds 8"
+	}
 	oldTimeout := TerminalTimeout
-	TerminalTimeout = 500 * time.Millisecond
+	TerminalTimeout = timeout
 	defer func() { TerminalTimeout = oldTimeout }()
 
 	m := NewBackgroundManager()
 	term := TerminalTool{mgr: m}
-
-	// Use `echo` (fast, cross-platform) piped to a long sleep.  On POSIX
-	// `sleep` is available; on Windows we use `Start-Sleep` via PowerShell.
-	cmd := "echo partial && sleep 1"
-	if runtime.GOOS == "windows" {
-		cmd = "Write-Output partial; Start-Sleep -Seconds 1"
-	}
 	res, err := term.Execute(context.Background(), "terminal", map[string]any{
 		"command": cmd,
 	})
@@ -248,10 +251,10 @@ func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
 		t.Errorf("result should warn against polling, got: %q", res.Text)
 	}
 
-	// The background process should eventually finish (sleep 0.5 + margin).
-	// Use a longer deadline than the default waitFor because CI under -race
-	// can be very slow.
-	deadline := time.Now().Add(10 * time.Second)
+	// The background process should eventually finish. Use a generous deadline:
+	// it must exceed the shell cold-start plus the sleep above (up to ~8 s on
+	// Windows), and CI under -race can be very slow on top of that.
+	deadline := time.Now().Add(25 * time.Second)
 	for time.Now().Before(deadline) {
 		_, s, _, _, _ := m.Read("bg_1")
 		if strings.HasPrefix(s, "exited") {
