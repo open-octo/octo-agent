@@ -164,6 +164,35 @@ func (r *Runner) run(ctx context.Context, cmd string, stdin []byte) ([]byte, err
 // a timeout from a plain failure (with the stderr tail folded in) to help users
 // debug hook wiring.
 func execShell(ctx context.Context, cmd string, stdin []byte, deadline time.Duration) ([]byte, error) {
+	res := runShellRaw(ctx, cmd, stdin, deadline)
+	if res.timedOut {
+		return res.stdout, fmt.Errorf("hooks: %s timed out after %s", cmd, deadline)
+	}
+	if res.runErr != nil {
+		if tail := strings.TrimSpace(string(res.stderr)); tail != "" {
+			return res.stdout, fmt.Errorf("hooks: %s: %w (stderr: %s)", cmd, res.runErr, oneLineCap(tail, 200))
+		}
+		return res.stdout, fmt.Errorf("hooks: %s: %w", cmd, res.runErr)
+	}
+	return res.stdout, nil
+}
+
+// shellResult is the low-level outcome of running a hook command: captured
+// stdout/stderr, the process exit code, and flags distinguishing a deadline
+// kill from a normal non-zero exit. Callers that only need "did it succeed" use
+// execShell; the PreToolUse decision path needs the exit code (2 = block).
+type shellResult struct {
+	stdout   []byte
+	stderr   []byte
+	exitCode int  // 0 on success; the process code on a normal exit; -1 if it never ran
+	timedOut bool // the deadline fired and the process was killed
+	runErr   error
+}
+
+// runShellRaw runs cmd through the platform shell with stdin piped in, bounded
+// by deadline, and reports the full outcome. It is the single place the shell
+// selection, WaitDelay teardown, and timeout live.
+func runShellRaw(ctx context.Context, cmd string, stdin []byte, deadline time.Duration) shellResult {
 	rctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
@@ -178,17 +207,24 @@ func execShell(ctx context.Context, cmd string, stdin []byte, deadline time.Dura
 	// on the shell — Run hangs until the child terminates naturally. 1s
 	// is plenty for the kernel to tear down the process group.
 	c.WaitDelay = time.Second
-	if err := c.Run(); err != nil {
-		if errors.Is(rctx.Err(), context.DeadlineExceeded) {
-			return out.Bytes(), fmt.Errorf("hooks: %s timed out after %s", cmd, deadline)
-		}
-		stderrTail := strings.TrimSpace(errBuf.String())
-		if stderrTail != "" {
-			return out.Bytes(), fmt.Errorf("hooks: %s: %w (stderr: %s)", cmd, err, oneLineCap(stderrTail, 200))
-		}
-		return out.Bytes(), fmt.Errorf("hooks: %s: %w", cmd, err)
+	err := c.Run()
+	res := shellResult{stdout: out.Bytes(), stderr: errBuf.Bytes()}
+	if err == nil {
+		return res
 	}
-	return out.Bytes(), nil
+	if errors.Is(rctx.Err(), context.DeadlineExceeded) {
+		res.timedOut = true
+		res.runErr = err
+		return res
+	}
+	res.runErr = err
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		res.exitCode = ee.ExitCode()
+	} else {
+		res.exitCode = -1 // never started (e.g. shell not found)
+	}
+	return res
 }
 
 // shellCmd wraps cmd in the platform shell: PowerShell on Windows (preferring

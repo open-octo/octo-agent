@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -268,6 +269,112 @@ func (e *Engine) notify(msg string) {
 	if e != nil && e.Notify != nil {
 		e.Notify(msg)
 	}
+}
+
+// ToolDecision is a PreToolUse verdict for a single tool call. At most one of
+// Block/Allow is set; both false means "no opinion" (defer to the permission
+// gate). Reason accompanies a Block, surfaced to the model as the denial text.
+type ToolDecision struct {
+	Block  bool
+	Allow  bool
+	Reason string
+}
+
+// toolDecisionOut is the optional structured stdout a PreToolUse hook may emit
+// to make an explicit allow/deny decision (beyond the exit-code protocol).
+type toolDecisionOut struct {
+	Decision string `json:"decision"` // "approve" | "block"
+	Reason   string `json:"reason,omitempty"`
+}
+
+// PreToolUse runs the PreToolUse shell hooks for a tool call and returns the
+// aggregated verdict. Protocol per hook, matching Claude Code's:
+//   - exit 2                     → block (reason = structured reason, else stderr)
+//   - exit 0 + {"decision":...}  → that decision (block / approve)
+//   - exit 0, no decision        → no opinion (defer to the gate)
+//   - timeout / other exit       → non-blocking error (notify, tool proceeds)
+//
+// Block wins over Allow: the first hook that blocks short-circuits, and an
+// Allow never overrides a later Block. A tool the caller then runs unless
+// blocked; an Allow tells the caller to bypass the interactive gate. In-process
+// hooks are not consulted here — PreToolUse is a shell-configured guard.
+func (e *Engine) PreToolUse(ctx context.Context, p Payload) ToolDecision {
+	if e == nil {
+		return ToolDecision{}
+	}
+	sh, _ := e.hooksFor(EventPreToolUse)
+	if len(sh) == 0 {
+		return ToolDecision{}
+	}
+	stdin, err := json.Marshal(p)
+	if err != nil {
+		e.notify("hooks: marshal PreToolUse payload: " + err.Error())
+		return ToolDecision{}
+	}
+	allow := false
+	for _, h := range sh {
+		if !h.matches(EventPreToolUse, p.ToolName) {
+			continue
+		}
+		res := runShellRaw(ctx, h.command, stdin, h.timeout)
+		switch {
+		case res.timedOut:
+			e.notify(fmt.Sprintf("hooks: PreToolUse %s timed out after %s (tool allowed to proceed)", h.command, h.timeout))
+		case res.exitCode == 2:
+			return ToolDecision{Block: true, Reason: blockReason(res)}
+		case res.exitCode == 0:
+			if d, ok := parseToolDecision(res.stdout); ok {
+				switch d.Decision {
+				case "block":
+					return ToolDecision{Block: true, Reason: firstNonEmpty(strings.TrimSpace(d.Reason), "blocked by PreToolUse hook")}
+				case "approve":
+					allow = true
+				}
+			}
+		default:
+			e.notify(fmt.Sprintf("hooks: PreToolUse %s: exit %d (tool allowed to proceed)", h.command, res.exitCode))
+		}
+	}
+	return ToolDecision{Allow: allow}
+}
+
+// blockReason picks the denial text for an exit-2 (or decision:block) hook:
+// the structured stdout reason if present, else the stderr tail, else a
+// default.
+func blockReason(res shellResult) string {
+	if d, ok := parseToolDecision(res.stdout); ok {
+		if r := strings.TrimSpace(d.Reason); r != "" {
+			return r
+		}
+	}
+	if tail := strings.TrimSpace(string(res.stderr)); tail != "" {
+		return oneLineCap(tail, 500)
+	}
+	return "blocked by PreToolUse hook"
+}
+
+// parseToolDecision tries to read a structured decision from a hook's stdout.
+// Returns ok=false when stdout isn't a JSON object with a recognised decision.
+func parseToolDecision(stdout []byte) (toolDecisionOut, bool) {
+	trimmed := strings.TrimSpace(string(stdout))
+	if !strings.HasPrefix(trimmed, "{") {
+		return toolDecisionOut{}, false
+	}
+	var d toolDecisionOut
+	if err := json.Unmarshal([]byte(trimmed), &d); err != nil {
+		return toolDecisionOut{}, false
+	}
+	if d.Decision != "approve" && d.Decision != "block" {
+		return toolDecisionOut{}, false
+	}
+	return d, true
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // SessionStartDecision resolves the SessionStart source for a turn and reports

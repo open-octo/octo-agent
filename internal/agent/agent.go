@@ -958,7 +958,7 @@ func (a *Agent) runLoop(
 			// handler is threaded through to dispatchTools so streaming
 			// tools (StreamingToolExecutor) can fire EventToolProgress as
 			// output arrives mid-execution.
-			resultBlocks, err := dispatchTools(ctx, executor, reply.Blocks, handler, a.Gate)
+			resultBlocks, err := dispatchTools(ctx, executor, reply.Blocks, handler, a.effectiveGate())
 			if err != nil {
 				return Reply{}, fmt.Errorf("agent: dispatch tools[%d]: %w", i, err)
 			}
