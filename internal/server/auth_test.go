@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 const testAccessKey = "test-access-key-0123456789abcdef"

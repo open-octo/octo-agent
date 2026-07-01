@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
 // sessionStartAgent builds an agent with an isolated hook engine carrying a

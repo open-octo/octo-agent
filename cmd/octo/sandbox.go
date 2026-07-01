@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/sandbox"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/sandbox"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // errSandboxUnavailable is returned (after a message) when --sandbox is asked

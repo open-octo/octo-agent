@@ -7,11 +7,11 @@ import (
 	"io"
 	"os"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/config"
-	"github.com/Leihb/octo-agent/internal/permission"
-	"github.com/Leihb/octo-agent/internal/prompt"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/permission"
+	"github.com/open-octo/octo-agent/internal/prompt"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // initInstruction is the prompt that drives `.octorules` generation, shared by

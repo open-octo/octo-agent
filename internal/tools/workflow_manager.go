@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/workflow"
+	"github.com/open-octo/octo-agent/internal/workflow"
 )
 
 // maxConcurrentWorkflows caps how many background workflows run at once per

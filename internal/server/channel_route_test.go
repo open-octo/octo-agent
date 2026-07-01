@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/channel"
-	"github.com/Leihb/octo-agent/internal/hooks"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // fullFakeAdapter implements the whole channel.Adapter surface with no-ops,

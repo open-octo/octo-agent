@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // newArtifactSession persists a session whose transcript wrote the given

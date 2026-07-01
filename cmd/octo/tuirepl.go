@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/hooks"
-	"github.com/Leihb/octo-agent/internal/mcp"
-	"github.com/Leihb/octo-agent/internal/tools"
-	"github.com/Leihb/octo-agent/internal/tui"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/mcp"
+	"github.com/open-octo/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tui"
 )
 
 // runTUI is the interactive bubbletea REPL: the TTY counterpart to runREPL's

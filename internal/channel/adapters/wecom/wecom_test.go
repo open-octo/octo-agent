@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/channel"
 	"github.com/gorilla/websocket"
+	"github.com/open-octo/octo-agent/internal/channel"
 )
 
 // fakeWecom is a WebSocket server speaking the aibot frame protocol: it acks

@@ -1,10 +1,10 @@
 package app
 
 import (
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/config"
-	"github.com/Leihb/octo-agent/internal/tasks"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/tasks"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // ToolEnv is the wired tool environment for a session: the executor the agent

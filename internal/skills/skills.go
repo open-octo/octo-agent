@@ -23,7 +23,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Leihb/octo-agent/internal/trash"
+	"github.com/open-octo/octo-agent/internal/trash"
 	"gopkg.in/yaml.v3"
 )
 

@@ -13,7 +13,7 @@ package provider
 import (
 	"context"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // Request bundles everything a provider needs to produce one assistant turn.

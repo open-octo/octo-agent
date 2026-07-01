@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/app"
-	"github.com/Leihb/octo-agent/internal/permission"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/permission"
 )
 
 // newCLIGate builds the shared app permission gate wired to an interactive

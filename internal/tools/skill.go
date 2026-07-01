@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/skills"
 )
 
 // activeSkills, when non-nil and non-empty, backs the `skill` tool: it serves

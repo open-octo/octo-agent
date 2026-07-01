@@ -4,7 +4,7 @@ Guidance for Claude Code working in this repository. The octo-agent equivalent i
 
 ## Project
 
-`octo-agent` — a Go 1.22+ AI agent CLI distributed as a single binary. Module path: `github.com/Leihb/octo-agent`. Ships as CLI + embedded Web UI + IM bridges via `octo serve`. Per-feature design notes live under `dev-docs/`.
+`octo-agent` — a Go 1.22+ AI agent CLI distributed as a single binary. Module path: `github.com/open-octo/octo-agent`. Ships as CLI + embedded Web UI + IM bridges via `octo serve`. Per-feature design notes live under `dev-docs/`.
 
 ## Commands
 

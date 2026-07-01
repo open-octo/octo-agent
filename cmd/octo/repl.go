@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/config"
-	"github.com/Leihb/octo-agent/internal/hooks"
-	"github.com/Leihb/octo-agent/internal/mcp"
-	"github.com/Leihb/octo-agent/internal/permission"
-	"github.com/Leihb/octo-agent/internal/skills"
-	"github.com/Leihb/octo-agent/internal/tools"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/mcp"
+	"github.com/open-octo/octo-agent/internal/permission"
+	"github.com/open-octo/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // replConfig holds everything runREPL needs.

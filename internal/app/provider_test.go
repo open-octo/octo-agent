@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/provider/anthropic"
-	"github.com/Leihb/octo-agent/internal/provider/openai"
+	"github.com/open-octo/octo-agent/internal/provider/anthropic"
+	"github.com/open-octo/octo-agent/internal/provider/openai"
 )
 
 func TestVendor_KimiCodingPlan(t *testing.T) {

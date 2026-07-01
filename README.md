@@ -1,6 +1,6 @@
 # octo-agent
 
-[![Go CI](https://img.shields.io/github/actions/workflow/status/Leihb/octo-agent/go.yml?label=ci&style=flat-square)](https://github.com/Leihb/octo-agent/actions)
+[![Go CI](https://img.shields.io/github/actions/workflow/status/open-octo/octo-agent/go.yml?label=ci&style=flat-square)](https://github.com/open-octo/octo-agent/actions)
 [![Website](https://img.shields.io/badge/website-octo--agent.dev-4f46e5?style=flat-square)](https://octo-agent.dev)
 [![Go](https://img.shields.io/badge/go-%3E%3D%201.25-00ADD8?style=flat-square)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE.txt)
@@ -78,11 +78,11 @@ into first-run onboarding (pick a provider, paste a key). Stop the server later
 with `octo serve --stop`. Prefer the terminal? Just run `octo`.
 
 Prebuilt archives (linux / darwin / windows × amd64 + arm64) and `checksums.txt`
-are on the [latest release](https://github.com/Leihb/octo-agent/releases/latest)
+are on the [latest release](https://github.com/open-octo/octo-agent/releases/latest)
 if you'd rather grab one by hand.
 
 **Windows (double-click installer).** Download `octo-setup.exe` from the
-[latest release](https://github.com/Leihb/octo-agent/releases/latest) and
+[latest release](https://github.com/open-octo/octo-agent/releases/latest) and
 double-click it. It installs per-user (no administrator prompt), puts `octo` on
 your `PATH`, and adds a Start-menu entry. When it finishes it starts the local
 server in the background (`octo serve -d`) and opens
@@ -126,13 +126,13 @@ SmartScreen shows "Windows protected your PC" — click **More info → Run anyw
 **From Go:**
 
 ```bash
-go install github.com/Leihb/octo-agent/cmd/octo@latest
+go install github.com/open-octo/octo-agent/cmd/octo@latest
 ```
 
 **From source:**
 
 ```bash
-git clone https://github.com/Leihb/octo-agent.git
+git clone https://github.com/open-octo/octo-agent.git
 cd octo-agent
 make build       # produces ./octo
 ```

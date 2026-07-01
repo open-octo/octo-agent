@@ -4,7 +4,7 @@ The canonical project guidance for contributors and AI coding agents. Keep this 
 
 ## Project
 
-`octo-agent` is a Go AI agent CLI (Go 1.22+, single binary). Module path `github.com/Leihb/octo-agent`. CLI today; Web UI and IM bridges land in M8/M9 — see `dev-docs/go-rewrite-roadmap.md`.
+`octo-agent` is a Go AI agent CLI (Go 1.22+, single binary). Module path `github.com/open-octo/octo-agent`. CLI today; Web UI and IM bridges land in M8/M9 — see `dev-docs/go-rewrite-roadmap.md`.
 
 ## Layering
 

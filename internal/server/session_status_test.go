@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // TestSessionStatus_ReflectsRunningTurn guards the interrupt-button contract:

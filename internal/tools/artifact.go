@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // artifactContentTypes maps previewable extensions to the explicit

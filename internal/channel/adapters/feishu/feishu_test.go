@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/channel"
 )
 
 // fakeFeishu serves the token, upload and message-send REST endpoints.

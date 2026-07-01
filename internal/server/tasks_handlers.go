@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/channel"
-	"github.com/Leihb/octo-agent/internal/scheduler"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/scheduler"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // ─── Tasks REST API ─────────────────────────────────────────────────────────

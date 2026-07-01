@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // TestHandleWSUserMessage_BoundToOtherLeaseActiveEmitsSendRejected guards the

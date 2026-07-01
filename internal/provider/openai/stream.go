@@ -11,10 +11,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/provider"
-	"github.com/Leihb/octo-agent/internal/provider/retry"
-	"github.com/Leihb/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/provider"
+	"github.com/open-octo/octo-agent/internal/provider/retry"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 // toolCallState accumulates streaming fragments for one tool call.

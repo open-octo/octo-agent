@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // mockAdapter is a test double that records sent messages.

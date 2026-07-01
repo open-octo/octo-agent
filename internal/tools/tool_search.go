@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // Tool Search defers MCP tool schemas behind three bridge tools instead of

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // buildEnvContext renders a snapshot of the working environment for the

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // fakeCatalog installs a fixed MCP catalog for the duration of a test, so the

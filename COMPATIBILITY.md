@@ -159,4 +159,4 @@ not a supported surface: octo is distributed as a binary, and
 
 A Stable surface that broke without a major version, or without a CHANGELOG
 **Breaking** callout, is a bug — please
-[open an issue](https://github.com/Leihb/octo-agent/issues).
+[open an issue](https://github.com/open-octo/octo-agent/issues).

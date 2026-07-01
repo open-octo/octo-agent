@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 func TestTUI_TickAdvancesOnlyWhileRunning(t *testing.T) {

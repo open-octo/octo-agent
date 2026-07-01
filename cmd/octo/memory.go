@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/Leihb/octo-agent/internal/memory"
+	"github.com/open-octo/octo-agent/internal/memory"
 )
 
 // runMemory handles `octo memory <subcommand>`:

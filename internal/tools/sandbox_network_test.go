@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/sandbox"
+	"github.com/open-octo/octo-agent/internal/sandbox"
 )
 
 // TestWebFetch_SandboxBlocksNetwork verifies that when a sandbox with

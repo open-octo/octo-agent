@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/tools"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // newPanelModel builds a tuiModel with just the sub-agent panel state, enough to

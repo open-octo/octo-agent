@@ -19,7 +19,7 @@ You have access to octo's product documentation. Use it to answer user questions
    Read the relevant file(s) with `read_file` before answering.
 
 2. **Online docs** (fallback) — if the bundled docs don't cover the question, fetch from the official documentation:
-   - Base URL: `https://github.com/Leihb/octo-agent/blob/main/`
+   - Base URL: `https://github.com/open-octo/octo-agent/blob/main/`
    - Append the relevant doc filename (e.g. `README.md`, `dev-docs/go-rewrite-roadmap.md`)
    - Use `web_fetch` to retrieve the raw markdown content
 

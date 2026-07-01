@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // runSessions handles `octo sessions`: print the most recent saved sessions

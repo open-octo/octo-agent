@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/tasks"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tasks"
 )
 
 // BindingMode determines how an inbound message maps to an agent session.

@@ -6,7 +6,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
 // runHooks backs `octo hooks <subcommand>`. Today it's just `list` — a

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/tools"
 	"github.com/gorilla/websocket"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // wsHub manages all active WebSocket connections and routes events to

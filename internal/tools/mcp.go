@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/mcp"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/mcp"
 )
 
 // MCP integration. The tools package exposes one global *mcp.Registry that

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/app"
-	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // validateConnection probes a provider/model/key against the live endpoint.

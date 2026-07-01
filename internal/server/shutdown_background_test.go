@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // TestShutdown_KillsBackgroundProcesses guards the daemon-shutdown orphan fix:

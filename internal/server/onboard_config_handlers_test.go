@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 func setTestHome(t *testing.T) string {

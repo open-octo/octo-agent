@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/channel"
 	"github.com/gorilla/websocket"
+	"github.com/open-octo/octo-agent/internal/channel"
 )
 
 // fakeDiscord serves /users/@me + message REST endpoints and a gateway

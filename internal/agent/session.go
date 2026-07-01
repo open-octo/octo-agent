@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/trash"
+	"github.com/open-octo/octo-agent/internal/trash"
 )
 
 // Session is a named conversation that persists to disk as a JSONL transcript

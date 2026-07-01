@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/provider"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/provider"
 )
 
 func TestSender_PassesRequestThrough(t *testing.T) {

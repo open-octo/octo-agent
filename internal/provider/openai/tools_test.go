@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/provider"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/provider"
 )
 
 // TestSend_ToolDefinitions_WireFormat verifies that ToolDefinition slices are
@@ -181,7 +181,7 @@ func TestReasoningContent_RoundTrips(t *testing.T) {
 			agent.NewUserMessage("read go.mod"),
 			agent.NewAssistantMessage("an earlier plain reply"),
 			agent.NewToolUseMessage(resp.Blocks),
-			agent.NewToolResultMessage([]agent.ContentBlock{agent.NewToolResultBlock("call-1", "module github.com/Leihb/octo-agent", false)}),
+			agent.NewToolResultMessage([]agent.ContentBlock{agent.NewToolResultBlock("call-1", "module github.com/open-octo/octo-agent", false)}),
 		},
 	})
 	if err != nil {

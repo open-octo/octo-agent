@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // TestEnableSubAgentToolsAdvertises verifies that starting a tools-enabled

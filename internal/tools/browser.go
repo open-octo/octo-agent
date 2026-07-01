@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/browser"
-	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/browser"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // browserSession holds the per-session Chrome connection, reused across tool

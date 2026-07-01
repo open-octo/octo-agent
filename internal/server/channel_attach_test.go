@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/channel"
 )
 
 // 1x1 transparent PNG, base64.

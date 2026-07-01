@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // withFakeProbe swaps attachProbe for the duration of a test.

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/channel"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 func TestIsAffirmative(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/browser"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/browser"
 )
 
 // toolFixtureHTML mirrors the awkward target system: the download button only

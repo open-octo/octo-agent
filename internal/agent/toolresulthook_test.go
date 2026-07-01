@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
 // postToolUseEngine returns an engine with a single in-process PostToolUse hook,

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/skills"
 )
 
 // ─── POST /api/skills/import ────────────────────────────────────────────────

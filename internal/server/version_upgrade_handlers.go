@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/upgrade"
-	"github.com/Leihb/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/upgrade"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 // Latest-version cache TTLs: successes are fresh for 15 minutes, failures

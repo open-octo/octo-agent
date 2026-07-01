@@ -12,13 +12,13 @@ import (
 	"unicode"
 	"unsafe"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/permission"
-	"github.com/Leihb/octo-agent/internal/tools"
-	"github.com/Leihb/octo-agent/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	rw "github.com/mattn/go-runewidth"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/permission"
+	"github.com/open-octo/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tui"
 	"github.com/rivo/uniseg"
 )
 

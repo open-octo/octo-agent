@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/channel"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // serverWaker implements tools.Waker for a server-managed session. On wakeup it

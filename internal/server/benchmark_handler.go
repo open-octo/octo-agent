@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // benchmarkResponse is the JSON shape the Web UI expects.

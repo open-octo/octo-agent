@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
 // mkScript writes an executable /bin/sh script and returns its path. Skips on

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/browser"
-	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/browser"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // defaultDebugPort is the conventional Chrome remote-debugging port. The

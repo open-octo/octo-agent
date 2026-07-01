@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/app"
-	"github.com/Leihb/octo-agent/internal/config"
-	"github.com/Leihb/octo-agent/internal/mcp"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/mcp"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // allowedMCPCommands lists stdio executables that are commonly used to launch

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/workflow"
+	"github.com/open-octo/octo-agent/internal/workflow"
 )
 
 func echoAgentOpts(_ context.Context, prompt string, _ workflow.AgentOptions) workflow.AgentResult {

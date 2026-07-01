@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
 // userText returns the plain text of a user message regardless of whether it's

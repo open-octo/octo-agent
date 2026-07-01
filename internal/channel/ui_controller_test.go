@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 func TestUIController_TextDeltaAccumulation(t *testing.T) {

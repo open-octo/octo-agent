@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/sandbox"
+	"github.com/open-octo/octo-agent/internal/sandbox"
 )
 
 // TestMain lets the test binary stand in for the `octo` executable when the

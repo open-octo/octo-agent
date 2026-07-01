@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // tool is the internal interface every built-in tool implements — both a

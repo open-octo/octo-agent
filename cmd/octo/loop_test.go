@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // armWakeupMsg (posted by the schedule_wakeup tool) arms the loop timer.

@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // lastVisibleUserIdx must land on the typed prompt, not the tool_result

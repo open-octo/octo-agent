@@ -16,7 +16,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
 // Injector holds session-scoped recall state for a parsed rule set.

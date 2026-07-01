@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
 // hookGate composes a PreToolUse hook in front of the interactive permission

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/mcp"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/mcp"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // fakeMCPHTTPServer speaks the minimal JSON-RPC-over-HTTP surface the connect

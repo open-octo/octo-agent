@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Leihb/octo-agent/internal/mcp"
+	"github.com/open-octo/octo-agent/internal/mcp"
 )
 
 // cliOAuthPrompt is the user-facing implementation of mcp.OAuthPrompt for

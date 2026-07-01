@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // WebSearchDefaultMax is the default number of results returned per

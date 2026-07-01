@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/sandbox"
+	"github.com/open-octo/octo-agent/internal/sandbox"
 )
 
 var pidRe = regexp.MustCompile(`pid (\d+)`)

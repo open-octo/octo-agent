@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/tasks"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/open-octo/octo-agent/internal/tasks"
 )
 
 func TestRenderTaskLines_HidesWhenNothingOutstanding(t *testing.T) {

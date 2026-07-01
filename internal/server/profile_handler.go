@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/prompt"
-	"github.com/Leihb/octo-agent/internal/trash"
+	"github.com/open-octo/octo-agent/internal/prompt"
+	"github.com/open-octo/octo-agent/internal/trash"
 )
 
 // ─── Profile API ──────────────────────────────────────────────────────────

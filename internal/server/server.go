@@ -20,28 +20,28 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/app"
-	"github.com/Leihb/octo-agent/internal/channel"
-	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/hooks"
 
 	// The IM adapters self-register into the channel registry at init time.
 	// The server is what runs them (startChannels) and looks them up by name
 	// (channel.Find for task-notify pushes), so it owns the imports.
-	_ "github.com/Leihb/octo-agent/internal/channel/adapters/dingtalk"
-	_ "github.com/Leihb/octo-agent/internal/channel/adapters/discord"
-	_ "github.com/Leihb/octo-agent/internal/channel/adapters/feishu"
-	_ "github.com/Leihb/octo-agent/internal/channel/adapters/telegram"
-	_ "github.com/Leihb/octo-agent/internal/channel/adapters/wecom"
-	_ "github.com/Leihb/octo-agent/internal/channel/adapters/weixin"
-	"github.com/Leihb/octo-agent/internal/config"
-	"github.com/Leihb/octo-agent/internal/memory"
-	"github.com/Leihb/octo-agent/internal/permission"
-	"github.com/Leihb/octo-agent/internal/prompt"
-	"github.com/Leihb/octo-agent/internal/scheduler"
-	"github.com/Leihb/octo-agent/internal/skills"
-	"github.com/Leihb/octo-agent/internal/tasks"
-	"github.com/Leihb/octo-agent/internal/tools"
+	_ "github.com/open-octo/octo-agent/internal/channel/adapters/dingtalk"
+	_ "github.com/open-octo/octo-agent/internal/channel/adapters/discord"
+	_ "github.com/open-octo/octo-agent/internal/channel/adapters/feishu"
+	_ "github.com/open-octo/octo-agent/internal/channel/adapters/telegram"
+	_ "github.com/open-octo/octo-agent/internal/channel/adapters/wecom"
+	_ "github.com/open-octo/octo-agent/internal/channel/adapters/weixin"
+	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/memory"
+	"github.com/open-octo/octo-agent/internal/permission"
+	"github.com/open-octo/octo-agent/internal/prompt"
+	"github.com/open-octo/octo-agent/internal/scheduler"
+	"github.com/open-octo/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/tasks"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // getDefaultToolsFor bridges to tools.DefaultToolsFor for ws_handlers.go.

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // Background-process visibility for the web UI. The frontend renders a

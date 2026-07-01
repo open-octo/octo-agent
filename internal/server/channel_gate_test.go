@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/app"
-	"github.com/Leihb/octo-agent/internal/channel"
-	"github.com/Leihb/octo-agent/internal/permission"
+	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/permission"
 )
 
 // TestChannelPerTurnGate verifies the IM per-turn gate end to end: the same

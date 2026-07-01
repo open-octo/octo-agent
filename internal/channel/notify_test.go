@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/channel"
-	_ "github.com/Leihb/octo-agent/internal/channel/adapters/feishu"
+	"github.com/open-octo/octo-agent/internal/channel"
+	_ "github.com/open-octo/octo-agent/internal/channel/adapters/feishu"
 )
 
 // writeChannelsYML points HOME at a temp dir holding the given channels.yml.

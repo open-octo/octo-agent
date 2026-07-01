@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // blockingToolSender drives a two-round tool turn and blocks at the start of

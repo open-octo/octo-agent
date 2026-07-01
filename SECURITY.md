@@ -73,6 +73,6 @@ sits behind the access-key auth like every other mutating endpoint.
 
 ## Reporting a vulnerability
 
-Open a [GitHub security advisory](https://github.com/Leihb/octo-agent/security/advisories/new)
+Open a [GitHub security advisory](https://github.com/open-octo/octo-agent/security/advisories/new)
 or email the maintainer privately. Please do not file public issues for
 exploitable bugs.

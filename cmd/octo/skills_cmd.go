@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/skills"
-	"github.com/Leihb/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 // runSkills handles `octo skills [list|add|update|path]`. Bare `octo skills`

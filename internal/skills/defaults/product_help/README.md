@@ -1,6 +1,6 @@
 # octo-agent
 
-[![Go CI](https://img.shields.io/github/actions/workflow/status/Leihb/octo-agent/go.yml?label=ci&style=flat-square)](https://github.com/Leihb/octo-agent/actions)
+[![Go CI](https://img.shields.io/github/actions/workflow/status/open-octo/octo-agent/go.yml?label=ci&style=flat-square)](https://github.com/open-octo/octo-agent/actions)
 [![Website](https://img.shields.io/badge/website-octo--agent.dev-4f46e5?style=flat-square)](https://octo-agent.dev)
 [![Go](https://img.shields.io/badge/go-%3E%3D%201.22-00ADD8?style=flat-square)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE.txt)
@@ -18,12 +18,12 @@ A functionality-first AI agent, distributed as a single Go binary. Speaks two na
 ## Install
 
 **Prebuilt binary (no Go toolchain needed).** Grab the archive for your OS/arch
-from the [latest release](https://github.com/Leihb/octo-agent/releases/latest),
+from the [latest release](https://github.com/open-octo/octo-agent/releases/latest),
 unpack it, and put `octo` on your `PATH`:
 
 ```bash
 # macOS (Apple Silicon) example — swap the asset name for your platform
-curl -sSL https://github.com/Leihb/octo-agent/releases/latest/download/octo_<version>_darwin_arm64.tar.gz | tar xz
+curl -sSL https://github.com/open-octo/octo-agent/releases/latest/download/octo_<version>_darwin_arm64.tar.gz | tar xz
 sudo mv octo /usr/local/bin/
 octo version
 ```
@@ -34,13 +34,13 @@ in each release verifies the download.
 **From Go:**
 
 ```bash
-go install github.com/Leihb/octo-agent/cmd/octo@latest
+go install github.com/open-octo/octo-agent/cmd/octo@latest
 ```
 
 **From source:**
 
 ```bash
-git clone https://github.com/Leihb/octo-agent.git
+git clone https://github.com/open-octo/octo-agent.git
 cd octo-agent
 make build       # produces ./octo
 ```

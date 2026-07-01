@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/upgrade"
-	"github.com/Leihb/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/upgrade"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 // fakeLatest serves only the releases/latest redirect — enough for --check.

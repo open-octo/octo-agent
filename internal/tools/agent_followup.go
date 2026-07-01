@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // Follow-up tools for sub-agents: send a message to a running/completed

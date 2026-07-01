@@ -5,10 +5,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/config"
-	"github.com/Leihb/octo-agent/internal/mcp"
-	"github.com/Leihb/octo-agent/internal/tools"
-	"github.com/Leihb/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/mcp"
+	"github.com/open-octo/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 // mcpConnectTimeout bounds the whole non-interactive connect pass. It caps the

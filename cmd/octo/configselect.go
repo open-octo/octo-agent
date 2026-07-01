@@ -3,10 +3,10 @@ package main
 import (
 	"io"
 
-	"github.com/Leihb/octo-agent/internal/tui"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/open-octo/octo-agent/internal/tui"
 )
 
 // selectItem is one row in an arrow-key selection menu. label is the primary

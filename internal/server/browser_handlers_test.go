@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // stubReachable swaps the TCP liveness probe (status path) and records its args.

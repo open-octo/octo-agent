@@ -50,9 +50,9 @@ builds:
     # file so an octo upgrade re-extracts a fresh binary.
     ldflags:
       - -s -w
-      - -X github.com/Leihb/octo-agent/internal/version.Version={{ .Version }}
-      - -X github.com/Leihb/octo-agent/internal/version.Commit={{ .ShortCommit }}
-      - -X github.com/Leihb/octo-agent/internal/tools/rgembed.version={{ .Env.RG_VERSION }}
+      - -X github.com/open-octo/octo-agent/internal/version.Version={{ .Version }}
+      - -X github.com/open-octo/octo-agent/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/open-octo/octo-agent/internal/tools/rgembed.version={{ .Env.RG_VERSION }}
     goos:
       - linux
       - darwin
@@ -111,10 +111,10 @@ changelog:
 
 release:
   github:
-    owner: Leihb
+    owner: open-octo
     name: octo-agent
   # Mark -dev / -rc / -beta tags as pre-releases automatically.
   prerelease: auto
   footer: |
     ---
-    Full, curated changelog: [CHANGELOG.md](https://github.com/Leihb/octo-agent/blob/main/CHANGELOG.md)
+    Full, curated changelog: [CHANGELOG.md](https://github.com/open-octo/octo-agent/blob/main/CHANGELOG.md)

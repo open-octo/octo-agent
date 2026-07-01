@@ -270,7 +270,7 @@ Discord requires manual portal interaction (hCaptcha gates application creation)
 2. Validate the token:
    ```bash
    curl -s -H "Authorization: Bot <BOT_TOKEN>" \
-     -H "User-Agent: DiscordBot (https://github.com/Leihb/octo-agent, 1.0)" \
+     -H "User-Agent: DiscordBot (https://github.com/open-octo/octo-agent, 1.0)" \
      https://discord.com/api/v10/users/@me
    ```
    Success returns the bot user JSON with an `id`. A 401 means a bad token — re-ask.

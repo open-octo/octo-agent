@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // User attachments sent over the WebSocket message payload. Images arrive as

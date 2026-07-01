@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/trash"
+	"github.com/open-octo/octo-agent/internal/trash"
 	"github.com/robfig/cron/v3"
 )
 

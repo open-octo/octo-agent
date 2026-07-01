@@ -39,9 +39,9 @@ RG_TAGS := embedrg
 BASE_VERSION := $(shell sed -n 's/^var Version = "\(.*\)"/\1/p' internal/version/version.go)
 VERSION ?= $(BASE_VERSION)-dev
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-LDFLAGS := -X github.com/Leihb/octo-agent/internal/version.Version=$(VERSION) \
-           -X github.com/Leihb/octo-agent/internal/version.Commit=$(COMMIT) \
-           -X github.com/Leihb/octo-agent/internal/tools/rgembed.version=$(RG_VERSION)
+LDFLAGS := -X github.com/open-octo/octo-agent/internal/version.Version=$(VERSION) \
+           -X github.com/open-octo/octo-agent/internal/version.Commit=$(COMMIT) \
+           -X github.com/open-octo/octo-agent/internal/tools/rgembed.version=$(RG_VERSION)
 
 GOFILES := $(shell find . -name '*.go' -not -path './vendor/*' -not -path '*/_vendor/*')
 

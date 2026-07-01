@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // askInput wires a replAsker around the canned stdin string + a buffer for

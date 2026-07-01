@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/app"
-	"github.com/Leihb/octo-agent/internal/mcp"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/mcp"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // fakeOAuthMCPServer is an MCP endpoint behind a device-flow OAuth gate:

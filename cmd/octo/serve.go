@@ -14,7 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/Leihb/octo-agent/internal/server"
+	"github.com/open-octo/octo-agent/internal/server"
 )
 
 // serveLogLevel reads OCTO_LOG_LEVEL (debug|info|warn|error); defaults to info.

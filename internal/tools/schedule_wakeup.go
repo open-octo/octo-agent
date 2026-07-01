@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // Waker schedules a delayed re-entry into the current interactive session: a

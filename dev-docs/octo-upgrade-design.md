@@ -41,7 +41,7 @@ goreleaser publishes, per tag `v{ver}`:
   (`octo.exe`) binary plus docs.
 - `checksums.txt` — `sha256  filename` lines covering every archive.
 
-`https://github.com/Leihb/octo-agent/releases/latest` redirects to
+`https://github.com/open-octo/octo-agent/releases/latest` redirects to
 `…/releases/tag/v{ver}`; assets download from
 `…/releases/download/v{ver}/{asset}`.
 

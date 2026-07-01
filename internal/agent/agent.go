@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
 // Sender is the minimal slice of provider.Provider the Agent depends on:

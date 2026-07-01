@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/channel"
 )
 
 const (

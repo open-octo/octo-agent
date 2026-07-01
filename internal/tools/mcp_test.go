@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/mcp"
+	"github.com/open-octo/octo-agent/internal/mcp"
 )
 
 func TestMCPToolName_HappyPath(t *testing.T) {

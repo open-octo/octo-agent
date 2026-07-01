@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/skills"
 )
 
 // skillRegFor builds a project-level skill registry from name→SKILL.md content,

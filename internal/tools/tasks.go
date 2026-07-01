@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/tasks"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tasks"
 )
 
 // TaskStore is the surface the task_* tools use to talk to the underlying

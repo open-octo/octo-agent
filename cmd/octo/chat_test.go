@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // TestRunChat_NoArgs_NoStdin_Errors verifies the headless routing: with no

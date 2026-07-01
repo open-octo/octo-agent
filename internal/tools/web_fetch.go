@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 // JinaReaderHost is the public Jina AI Reader endpoint. Sending a URL via

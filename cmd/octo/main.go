@@ -14,9 +14,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/Leihb/octo-agent/internal/sandbox"
-	"github.com/Leihb/octo-agent/internal/skills"
-	"github.com/Leihb/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/sandbox"
+	"github.com/open-octo/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 func main() {

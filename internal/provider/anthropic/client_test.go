@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/provider"
-	"github.com/Leihb/octo-agent/internal/provider/retry"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/provider"
+	"github.com/open-octo/octo-agent/internal/provider/retry"
 )
 
 func TestNew_EmptyKeyRejected(t *testing.T) {

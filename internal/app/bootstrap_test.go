@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 func TestWireTools_SetsUpEnvAndCleansUp(t *testing.T) {

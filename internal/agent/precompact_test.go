@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
 func TestFirePreCompact_DispatchesWhenConfigured(t *testing.T) {

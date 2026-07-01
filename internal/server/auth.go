@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // Access-key authentication. Every /api/* route except /api/health and

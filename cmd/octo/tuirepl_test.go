@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // fakeProg records messages the sink sends, standing in for *tea.Program.

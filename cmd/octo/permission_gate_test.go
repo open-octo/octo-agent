@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/permission"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/permission"
 )
 
 // newGate builds the CLI-wired shared gate over a scripted-stdin plain view, so

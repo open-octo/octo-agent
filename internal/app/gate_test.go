@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/permission"
+	"github.com/open-octo/octo-agent/internal/permission"
 )
 
 func newEngine(t *testing.T, mode permission.Mode) *permission.Engine {

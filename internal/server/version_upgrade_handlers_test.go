@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/upgrade"
-	"github.com/Leihb/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/upgrade"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 // TestLatestVersion_ChecksAndCaches points the upgrade base URL at a fake

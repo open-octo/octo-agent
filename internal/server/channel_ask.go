@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/app"
-	"github.com/Leihb/octo-agent/internal/channel"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // channelAskTimeout bounds how long an IM permission prompt waits for the

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Leihb/octo-agent/internal/memory"
+	"github.com/open-octo/octo-agent/internal/memory"
 )
 
 // savedWorkflow is one named workflow script loaded from a registry directory.

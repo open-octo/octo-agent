@@ -12,11 +12,11 @@
 #   OCTO_VERSION=1.2.3       install this version instead of the latest
 #
 # Windows users: download the double-click installer (octo-setup.exe) from
-# https://github.com/Leihb/octo-agent/releases/latest instead.
+# https://github.com/open-octo/octo-agent/releases/latest instead.
 
 set -eu
 
-REPO="Leihb/octo-agent"
+REPO="open-octo/octo-agent"
 
 err() { printf 'octo install: %s\n' "$1" >&2; exit 1; }
 

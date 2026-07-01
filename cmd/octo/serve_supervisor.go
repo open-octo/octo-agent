@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/Leihb/octo-agent/internal/server"
+	"github.com/open-octo/octo-agent/internal/server"
 )
 
 // serveWorkerEnv marks a process as the serve worker. The supervisor sets it

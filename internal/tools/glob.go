@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/tools/rgembed"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools/rgembed"
 )
 
 // GlobMaxResults caps the number of paths a single glob call returns. The

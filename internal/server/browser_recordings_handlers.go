@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/browser"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/browser"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // Browser recordings = the editable YAML skills produced by record_stop and

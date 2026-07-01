@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/channel"
 )
 
 // ─── Channels REST API ────────────────────────────────────────────────────

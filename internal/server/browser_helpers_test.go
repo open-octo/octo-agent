@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // TestPrepareToolTurn_WiresBrowserLLMHelpers guards the serve path: record_stop

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/Leihb/octo-agent/internal/app"
-	"github.com/Leihb/octo-agent/internal/mcp"
+	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/mcp"
 )
 
 // Web-side MCP OAuth: the CLI runs the device flow inline (print code, wait),

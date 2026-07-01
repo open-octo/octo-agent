@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/Leihb/octo-agent/internal/tools"
-	"github.com/Leihb/octo-agent/internal/tui"
+	"github.com/open-octo/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tui"
 )
 
 // outputCardMaxLines caps how many output lines a tool-result card shows

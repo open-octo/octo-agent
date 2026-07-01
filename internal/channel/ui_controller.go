@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // UIController bridges agent.AgentEvent stream to IM platform messages.

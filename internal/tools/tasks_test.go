@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/tasks"
+	"github.com/open-octo/octo-agent/internal/tasks"
 )
 
 func useTaskStore(t *testing.T) *tasks.Store {

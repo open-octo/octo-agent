@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/provider"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/provider"
 )
 
 // thinkingStream mimics an extended-thinking SSE response: a thinking block
@@ -106,7 +106,7 @@ func TestSend_ThinkingBlock_RoundTrips(t *testing.T) {
 			agent.NewToolUseBlock("call-1", "read_file", map[string]any{"path": "go.mod"}),
 		}),
 		agent.NewToolResultMessage([]agent.ContentBlock{
-			agent.NewToolResultBlock("call-1", "module github.com/Leihb/octo-agent", false),
+			agent.NewToolResultBlock("call-1", "module github.com/open-octo/octo-agent", false),
 		}),
 	}
 	if _, err := c.Send(context.Background(), provider.Request{Model: "k2.6", Messages: msgs}); err != nil {

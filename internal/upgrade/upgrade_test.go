@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 // fakeRelease stands up an httptest GitHub: the releases/latest redirect,

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/Leihb/octo-agent/internal/trash"
+	"github.com/open-octo/octo-agent/internal/trash"
 )
 
 // runTrashBackup copies the given paths into the trash WITHOUT deleting them —

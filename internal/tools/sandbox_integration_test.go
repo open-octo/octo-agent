@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/sandbox"
+	"github.com/open-octo/octo-agent/internal/sandbox"
 )
 
 // TestTerminal_SandboxConfinesIO verifies the wiring: once SetSandbox is active,

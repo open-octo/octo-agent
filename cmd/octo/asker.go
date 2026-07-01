@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // replAsker adapts the ask_user_question tool's tools.Asker contract onto the

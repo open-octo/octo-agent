@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // TestReplayLiveState_ReplaysPendingPrompts is the regression guard for the

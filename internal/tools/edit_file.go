@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // EditFileTool replaces an exact substring inside an existing file. The

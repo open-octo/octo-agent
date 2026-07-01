@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/channel"
 )
 
 // fakeBotAPI is a minimal Telegram Bot API server. It serves getMe, one batch

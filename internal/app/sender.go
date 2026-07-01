@@ -14,10 +14,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/agent"
-	"github.com/Leihb/octo-agent/internal/provider"
-	"github.com/Leihb/octo-agent/internal/provider/anthropic"
-	"github.com/Leihb/octo-agent/internal/provider/openai"
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/provider"
+	"github.com/open-octo/octo-agent/internal/provider/anthropic"
+	"github.com/open-octo/octo-agent/internal/provider/openai"
 )
 
 // Provider name constants (legacy).  New code should use vendor IDs directly.

@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // `octo completion <shell>` and the hidden `octo __complete <words…>` work

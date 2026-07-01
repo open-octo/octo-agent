@@ -3,8 +3,8 @@ package server
 import (
 	"net/http"
 
-	"github.com/Leihb/octo-agent/internal/config"
-	"github.com/Leihb/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/skills"
 )
 
 // ─── PATCH /api/skills/{name}/toggle ────────────────────────────────────────

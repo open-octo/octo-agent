@@ -5,8 +5,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/config"
-	"github.com/Leihb/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 func TestToolSearchConfigFrom(t *testing.T) {

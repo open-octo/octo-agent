@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/channel"
-	"github.com/Leihb/octo-agent/internal/channel/adapters/weixin/ilink"
+	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/channel/adapters/weixin/ilink"
 )
 
 func TestAdapter_ValidateConfig(t *testing.T) {

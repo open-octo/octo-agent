@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Leihb/octo-agent/internal/memory"
+	"github.com/open-octo/octo-agent/internal/memory"
 	"gopkg.in/yaml.v3"
 )
 

@@ -26,11 +26,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 // BaseURL is the release origin. A var so tests point it at httptest.
-var BaseURL = "https://github.com/Leihb/octo-agent"
+var BaseURL = "https://github.com/open-octo/octo-agent"
 
 // MirrorBaseURLs are tried in order when a release asset or checksums.txt
 // fails to download from BaseURL. They must expose the same path layout as
@@ -40,9 +40,9 @@ var BaseURL = "https://github.com/Leihb/octo-agent"
 // extended. Checksum verification still anchors trust to the original
 // checksums.txt content, so a mirror cannot silently install a modified binary.
 var MirrorBaseURLs = []string{
-	"https://ghproxy.net/https://github.com/Leihb/octo-agent",
-	"https://gh-proxy.com/https://github.com/Leihb/octo-agent",
-	"https://gh.ddlc.top/https://github.com/Leihb/octo-agent",
+	"https://ghproxy.net/https://github.com/open-octo/octo-agent",
+	"https://gh-proxy.com/https://github.com/open-octo/octo-agent",
+	"https://gh.ddlc.top/https://github.com/open-octo/octo-agent",
 }
 
 // maxArchiveSize caps the download; a release archive is ~15 MB, so this is

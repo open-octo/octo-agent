@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // ViewSink is the render-decoupling seam between the turn orchestration core

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/server"
+	"github.com/open-octo/octo-agent/internal/server"
 )
 
 // fakeSpawner scripts a sequence of worker lifetimes for superviseLoop. Each

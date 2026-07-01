@@ -31,8 +31,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/channel"
 	"github.com/gorilla/websocket"
+	"github.com/open-octo/octo-agent/internal/channel"
 )
 
 const (

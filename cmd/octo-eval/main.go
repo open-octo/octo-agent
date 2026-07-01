@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Leihb/octo-agent/internal/eval"
+	"github.com/open-octo/octo-agent/internal/eval"
 )
 
 func main() {

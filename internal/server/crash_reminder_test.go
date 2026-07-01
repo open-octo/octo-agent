@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // msgRecordingSender captures the message lists it is asked to stream so a test

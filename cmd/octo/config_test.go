@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // oneEntryConfig builds a Config whose default entry has the given fields —

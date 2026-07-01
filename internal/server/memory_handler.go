@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Leihb/octo-agent/internal/trash"
+	"github.com/open-octo/octo-agent/internal/trash"
 )
 
 // ─── GET /api/memories/{filename} ───────────────────────────────────────────

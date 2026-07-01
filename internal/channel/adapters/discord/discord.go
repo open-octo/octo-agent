@@ -31,9 +31,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Leihb/octo-agent/internal/channel"
-	"github.com/Leihb/octo-agent/internal/version"
 	"github.com/gorilla/websocket"
+	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
 const (
@@ -313,7 +313,7 @@ func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 // ─── REST ───────────────────────────────────────────────────────────────────
 
 func userAgent() string {
-	return "DiscordBot (https://github.com/Leihb/octo-agent, " + version.String() + ")"
+	return "DiscordBot (https://github.com/open-octo/octo-agent, " + version.String() + ")"
 }
 
 func (a *Adapter) rest(method, path string, payload, out any) error {

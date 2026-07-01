@@ -1,4 +1,4 @@
-module github.com/Leihb/octo-agent
+module github.com/open-octo/octo-agent
 
 go 1.25.0
 

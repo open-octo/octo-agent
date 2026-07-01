@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Leihb/octo-agent/internal/sandbox"
-	"github.com/Leihb/octo-agent/internal/trash"
+	"github.com/open-octo/octo-agent/internal/sandbox"
+	"github.com/open-octo/octo-agent/internal/trash"
 )
 
 // activeSandbox, when non-nil, confines every terminal command (foreground and

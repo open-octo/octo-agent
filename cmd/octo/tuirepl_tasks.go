@@ -5,11 +5,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Leihb/octo-agent/internal/tasks"
-	"github.com/Leihb/octo-agent/internal/tools"
-	"github.com/Leihb/octo-agent/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/truncate"
+	"github.com/open-octo/octo-agent/internal/tasks"
+	"github.com/open-octo/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tui"
 )
 
 // Live task-list styles — Claude Code's todo block: glyph and label styled

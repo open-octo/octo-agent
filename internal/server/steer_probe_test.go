@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // midTurnSender simulates a user message arriving while the LLM call is in

@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/Leihb/octo-agent/internal/agent"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // fakeAttachment builds a pendingAttachment with a dummy image block for tests.
