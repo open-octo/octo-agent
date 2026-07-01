@@ -223,6 +223,77 @@ func (s *Server) handleAvailableChannels(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"channels": out})
 }
 
+// ─── Proactive send (used by the CLI messenger to delegate here) ────────────
+
+// handleChannelRecipients lists the chats the bot can currently push to (live
+// sessions + the persisted /bind table), so a CLI/remote client can resolve a
+// recipient the same way the in-process send_message tool does.
+func (s *Server) handleChannelRecipients(w http.ResponseWriter, r *http.Request) {
+	type recipient struct {
+		Platform string `json:"platform"`
+		ChatID   string `json:"chat_id"`
+		UserID   string `json:"user_id,omitempty"`
+		Active   bool   `json:"active"`
+		Bound    bool   `json:"bound"`
+	}
+	out := []recipient{}
+	if mgr := s.channelManager(); mgr != nil {
+		for _, kc := range mgr.KnownChats() {
+			out = append(out, recipient{kc.Platform, kc.ChatID, kc.UserID, kc.Active, kc.Bound})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"recipients": out})
+}
+
+// handleChannelSendText delivers a text message to a chat via the live adapter
+// (falling back to a one-shot send from config). Same path scheduled-task
+// notifications and the send_message tool use.
+func (s *Server) handleChannelSendText(w http.ResponseWriter, r *http.Request) {
+	platform := r.PathValue("platform")
+	var req struct {
+		ChatID string `json:"chat_id"`
+		Text   string `json:"text"`
+	}
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.ChatID) == "" || strings.TrimSpace(req.Text) == "" {
+		writeError(w, http.StatusBadRequest, "chat_id and text are required")
+		return
+	}
+	if err := s.channelSend(platform, req.ChatID, req.Text); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+// handleChannelSendFile delivers a local file to a chat. The path is read from
+// the server's own filesystem — the CLI client and serve run on the same host,
+// so no upload is needed.
+func (s *Server) handleChannelSendFile(w http.ResponseWriter, r *http.Request) {
+	platform := r.PathValue("platform")
+	var req struct {
+		ChatID string `json:"chat_id"`
+		Path   string `json:"path"`
+		Name   string `json:"name"`
+	}
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.ChatID) == "" || strings.TrimSpace(req.Path) == "" {
+		writeError(w, http.StatusBadRequest, "chat_id and path are required")
+		return
+	}
+	if err := s.channelSendFile(platform, req.ChatID, req.Path, req.Name); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 func platformToInfo(name string, pc channel.PlatformConfig) channelInfo {
