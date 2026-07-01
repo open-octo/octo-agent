@@ -111,11 +111,13 @@ func ReplaySkill(...) (modified bool, finalPage *Page, outputs map[string]any, e
 `internal/tools/browser.go` 的 `run_skill` case(`internal/tools/browser.go:563`)从只返回一行文字,改为返回结构化结果:
 
 ```json
-{ "skill": "download-excels",
+{ "skill": "download-excels", "steps": 5,
   "outputs": { "files": ["/dl/order.xlsx", "/dl/refund.xlsx", "/dl/settle.xlsx"] } }
 ```
 
-`ToolResult.Text` 放这段 JSON(模型/脚本可解析),同时填 `ToolResult.UI` 走既有的 ui_payload 富卡片管线(`project_tool_ui_payload`)。自愈发生时(`modified`)仍照旧回写 YAML 并在 UI 注明,与现状一致。
+`ToolResult.Text` 放这段 JSON——模型/脚本可解析,这就是产物交接的载体。自愈发生时(`modified`)照旧回写 YAML,并在 envelope 里加 `"self_healed": true`(不再往 JSON 后面拼自然语言,以免破坏可解析性)。
+
+`ToolResult.UI` 富卡片**不做**(可选的后续增强):browser 工具其它 action 也都不出卡片,纯 JSON text 在 tool-result 区块本就可读,组合能力不依赖它。只有当 run_skill 成为"用户会长时间盯着看 outputs"的高频交互面时,再据实加一个列出产物的卡片(有 `uiHead`/`uiTail` helper,`project_tool_ui_payload`)。
 
 ### A.4 普通技能:outputs 可选,CC 全兼容
 
