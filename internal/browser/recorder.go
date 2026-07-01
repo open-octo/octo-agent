@@ -38,6 +38,27 @@ type Recorder struct {
 // NewRecorder creates a recorder bound to a page.
 func NewRecorder(page *Page) *Recorder { return &Recorder{page: page, seen: map[string]bool{}} }
 
+// claimSession atomically records a session as instrumented, returning false if
+// it already was — the guarded compare-and-set that lets Start and the
+// attach-watcher goroutine race safely.
+func (r *Recorder) claimSession(session string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.seen[session] {
+		return false
+	}
+	r.seen[session] = true
+	return true
+}
+
+// releaseSession undoes a claim so a session whose instrumentation failed can be
+// retried on a later attach event.
+func (r *Recorder) releaseSession(session string) {
+	r.mu.Lock()
+	delete(r.seen, session)
+	r.mu.Unlock()
+}
+
 // addEvent appends a captured event, forcing frame to frameSel when the event
 // came from a cross-origin iframe session (whose own window.frameElement is
 // unreadable, so the script couldn't tag it).
@@ -54,19 +75,28 @@ func (r *Recorder) addEvent(re RecordedEvent, frameSel string) {
 // and streams its click/change events into the recording, tagged with frameSel.
 // Used for the top document (frameSel "") and each cross-origin iframe session.
 func (r *Recorder) instrumentSession(ctx context.Context, session, frameSel string) error {
-	if r.seen[session] {
+	// Claim the session under the lock: instrumentSession runs concurrently from
+	// Start (main) and the attach-watcher goroutine, so an unguarded seen map is a
+	// data race (concurrent map writes → panic). Claiming also dedups. Release on
+	// failure so a session that failed to install can be retried later.
+	if !r.claimSession(session) {
 		return nil
 	}
-	r.seen[session] = true
-	if _, err := r.page.cli.call(ctx, session, "Runtime.addBinding", map[string]any{"name": "__octoRecord"}); err != nil {
+	release := func(err error) error {
+		if err != nil {
+			r.releaseSession(session)
+		}
 		return err
 	}
+	if _, err := r.page.cli.call(ctx, session, "Runtime.addBinding", map[string]any{"name": "__octoRecord"}); err != nil {
+		return release(err)
+	}
 	if _, err := r.page.cli.call(ctx, session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": captureScript}); err != nil {
-		return err
+		return release(err)
 	}
 	// Install into the already-loaded document too.
 	if _, err := r.page.cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": captureScript}); err != nil {
-		return err
+		return release(err)
 	}
 	events, unsub := r.page.cli.subscribe("Runtime.bindingCalled", session)
 	r.mu.Lock()
@@ -139,7 +169,8 @@ const captureScript = `(function(){
   function report(type, e){
     try{var el=e.target; var fr=''; try{ if(window.frameElement) fr=sel(window.frameElement); }catch(_2){}
       var field=((el.placeholder||el.name||(el.getAttribute?el.getAttribute('aria-label'):'')||el.id||'')+'').trim().slice(0,40);
-      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:(el.type==='password'), value:(el.value!==undefined?(''+el.value).slice(0,200):''), url:location.href}));}catch(_){}
+      var secret=(el.type==='password');
+      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:secret, value:(secret?'':(el.value!==undefined?(''+el.value).slice(0,200):'')), url:location.href}));}catch(_){}
   }
   document.addEventListener('click', function(e){report('click',e);}, true);
   document.addEventListener('change', function(e){var t=e.target; report((t&&t.type==='file')?'upload':'change', e);}, true);

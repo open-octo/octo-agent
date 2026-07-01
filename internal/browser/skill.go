@@ -287,7 +287,14 @@ func GenerateSkill(ctx context.Context, name, startURL string, events []Recorded
 func renderTrace(events []RecordedEvent) string {
 	var sb strings.Builder
 	for i, e := range events {
-		fmt.Fprintf(&sb, "%d. %s selector=%q frame=%q tag=%s text=%q value=%q\n", i+1, e.Type, e.Selector, e.Frame, e.Tag, e.Text, e.Value)
+		// Never put a secret field's value in the prompt sent to the LLM distiller.
+		// (The recorder already captures it empty; this is defense in depth so the
+		// plaintext can't reach an off-machine provider or be re-inlined.)
+		val := e.Value
+		if e.Secret {
+			val = "[secret]"
+		}
+		fmt.Fprintf(&sb, "%d. %s selector=%q frame=%q tag=%s text=%q value=%q\n", i+1, e.Type, e.Selector, e.Frame, e.Tag, e.Text, val)
 	}
 	return sb.String()
 }
