@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-07-01
+
+### Added
+- **Composable skills — chain recordings and skills into saved workflows.** A
+  browser recording used to be a replay-only dead end; now it's a first-class,
+  composable step. Recordings declare typed `outputs` (downloaded files,
+  extracted values) and `run_skill` returns them as JSON (#1032); they surface in
+  the system-prompt skill manifest so the model can discover and reuse them
+  mid-conversation (#1038); and a new `skill(name, params, opts)` workflow
+  primitive runs either a recording (deterministic replay) or a SKILL.md skill
+  (a sub-agent) by name, so both flow through one pipeline with typed handoff
+  (#1041). Your "download three reports → merge them → build a deck" is now a
+  single saved workflow instead of three disconnected skills.
+- **workflow-builder skill — build a saved workflow by conversation.** Guides you
+  from "chain these skills" to a saved, validated workflow: it inventories the
+  available skills, proposes how each one's output feeds the next, generates the
+  Ruby, dry-runs it, and saves it with `workflow_save` (#1045).
+- **Workflow save-nudge.** When you run two or more skills by hand in a turn, octo
+  offers to capture the sequence as a reusable workflow — the passive companion to
+  workflow-builder (#1047).
+- **Discoverable named workflows.** Saved workflows autocomplete in the web
+  composer (`/wf`) and list under the TUI's `/workflows` (#1040), and octo ships
+  three ready-made preset workflows — adversarial-review, parallel-understand,
+  batch-migrate (#1033).
+- **More default skills:** deep-research, grill-me, and tech-design join the
+  built-in set (#1034).
+- **Browser automation is far more robust.** Recorded values auto-parameterize
+  into named inputs (#1022); a drifted form field is re-located by its accessible
+  name (#1023); navigations auto-verify they landed on the expected host (#1024);
+  a network-idle wait lets SPAs settle (#1025); a failed replay step recovers via
+  structural + multi-round repair (#1026); and record/replay now works across
+  cross-origin (OOPIF) iframes (#1027).
+- **IM: send messages and files.** A `send_message` tool plus channel hot-reload
+  and an octo-serve self-kill guard (#1031); `send_file` to any chat (#1035); and
+  both reachable from the CLI via local-serve delegation (#1039).
+- **Per-session working directory in `serve`** — each session gets its own cwd
+  instead of one server-global directory (#1036).
+
+### Fixed
+- Browser record/replay review nits: URL-verify, an OOPIF race, XHR counting, and
+  type-step dedup (#1030); plus a secret leak, a recorder race, a goroutine leak,
+  and over-eager overlay dismissal (#1029).
+- Web sessions re-subscribe on WebSocket reconnect, so a dropped connection no
+  longer goes silent (#1042).
+- `serve` clears the per-turn running flag after the lease write, not before,
+  closing a turn-concurrency gap (#1046).
+
 ## [1.5.2] — 2026-07-01
 
 ### Fixed
