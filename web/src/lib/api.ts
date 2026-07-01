@@ -111,8 +111,9 @@ export async function updateSessionPermissionMode(id: string, mode: string): Pro
   })
 }
 
-export async function updateSessionWorkingDir(id: string, dir: string): Promise<void> {
-  await request<unknown>(`/api/sessions/${id}/working_dir`, {
+export async function updateSessionWorkingDir(id: string, dir: string): Promise<{ working_dir: string }> {
+  // The server expands ~ and returns the canonical absolute dir it stored.
+  return request<{ working_dir: string }>(`/api/sessions/${id}/working_dir`, {
     method: 'PATCH',
     ...json({ working_dir: dir }),
   })
