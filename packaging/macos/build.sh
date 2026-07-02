@@ -32,8 +32,7 @@ cp "$SourceDir/LICENSE.txt" "$payload/LICENSE.txt"
 # uv (universal binary), staged by `make bundle-tools-macos` into the same
 # SourceDir before this script runs — see the Makefile for where it's fetched
 # from. bun bundling was considered and deliberately deferred (see the
-# Makefile comment above bundle-tools-macos) — web-artifacts-builder still
-# guides the user to install bun themselves. Optional: a local/CI-check build
+# Makefile comment above bundle-tools-macos) — users who need bun for Optional: a local/CI-check build
 # only stages octo + LICENSE.txt (macos-installer-check.yml), so copy uv in
 # only when present. pkgbuild lands it under this payload's single
 # --install-location alongside octo itself; postinstall then moves it out to

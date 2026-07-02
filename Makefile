@@ -162,12 +162,12 @@ rg-embed-clean:
 # fresh install then has `uv run` working with zero manual download, for the
 # office-xlsx skill (issue #1054's P1 priority: the non-technical-user path).
 #
-# bun bundling (for web-artifacts-builder) was deliberately deferred, not
+# bun bundling was deliberately deferred, not
 # forgotten: uv alone already runs 51-107MB depending on platform, and
 # bundling bun too would roughly double that (a macOS universal bun binary
-# alone is ~132MB) for a more power-user-oriented skill. web-artifacts-builder
-# keeps its existing guided "install bun yourself" path (SKILL.md), the same
-# bar Node had before slice B. The generic bundled-dir mechanism
+# alone is ~132MB) for complex frontend artifacts. Users who need bun
+# install it via the guided one-liner (brew / curl), the same bar Node
+# had before. The generic bundled-dir mechanism
 # (bundledBinDir/withBundledBinPath in internal/tools/sandbox.go, and the
 # toolchain.go presence probe) is NOT bun-specific — it picks up whatever's
 # actually in ~/.octo/bin, so a future bundle-tools-* target (or a user who
