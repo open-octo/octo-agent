@@ -1,6 +1,9 @@
 package tools
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // Unset config: no override, today's behavior (server launch dir) is untouched.
 func TestResolveWorkspaceDir_Empty(t *testing.T) {
@@ -23,5 +26,29 @@ func TestResolveWorkspaceDir_LiteralPath(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("ResolveWorkspaceDir(%q) = %q, want %q", want, got, want)
+	}
+}
+
+func setTestHomeDir(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	return tmp
+}
+
+// "auto" resolves to ~/Desktop/octo — a discoverable, non-technical-user
+// friendly default. No existence check: Desktop (and octo under it) is
+// created lazily via MkdirAll the first time a session actually needs it.
+func TestResolveWorkspaceDir_Auto(t *testing.T) {
+	home := setTestHomeDir(t)
+
+	got, err := ResolveWorkspaceDir("auto")
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceDir(\"auto\") error = %v, want nil", err)
+	}
+	want := filepath.Join(home, "Desktop", "octo")
+	if got != want {
+		t.Fatalf("ResolveWorkspaceDir(\"auto\") = %q, want %q", got, want)
 	}
 }
