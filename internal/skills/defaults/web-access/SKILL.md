@@ -5,7 +5,7 @@ description:
   复杂 web 任务的方法论与跨 session 站点经验库。Use when：抓取反爬或需登录态的平台（小红书、微信公众号、微博、推特、知乎等）、
   目标站点结构未知需要边看边探索、多来源交叉核实信息、分析页面里的图片/视频内容、并行调研多个独立来源、
   或 web_search/web_fetch 拿不到目标内容需要升级到真实浏览器时。
-  简单的已知 URL 抓取或单步页面操作不需要加载本 skill——直接用 web_fetch / browser 工具即可。
+  简单的已知 URL 抓取或单步页面操作（无登录/反爬因素）不需要加载本 skill——直接用 web_fetch / browser 工具即可。
 metadata:
   origin: 浏览方法论改编自 web-access（一泽 Eze，MIT）；执行层改用 octo 原生 browser 工具，无 Node 依赖
 ---

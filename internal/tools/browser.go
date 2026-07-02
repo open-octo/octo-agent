@@ -286,7 +286,8 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 			"task genuinely needs operating a web UI (no API available); for a known URL's " +
 			"public content, web_fetch is cheaper. Before a nontrivial web task — an " +
 			"anti-bot platform, a login wall, an unfamiliar site to explore, multi-source " +
-			"research — load the web-access skill first (via the skill tool, when listed): " +
+			"research — load the web-access skill first (via the skill tool, if it appears " +
+			"under Available skills): " +
 			"it carries tool-routing rules and per-site experience notes from past sessions.",
 		Parameters: map[string]any{
 			"type": "object",
@@ -294,7 +295,7 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "cookies", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "run_skill"},
-					"description": "The browser action to perform. observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page for a vision-capable model to actually see (use when content is visual). cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable skill — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop. Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. run_skill replays a recording (deterministic, self-healing).",
+					"description": "The browser action to perform. observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page for a vision-capable model to actually see (use when content is visual). ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable skill — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop. Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. run_skill replays a recording (deterministic, self-healing).",
 				},
 				"name":         map[string]any{"type": "string", "description": "Skill name (record_stop / run_skill)."},
 				"params":       map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill)."},
@@ -305,8 +306,8 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 				"text":         map[string]any{"type": "string", "description": "Text to type (type)."},
 				"value":        map[string]any{"type": "string", "description": "Option value, text, or label to pick in a <select> (select)."},
 				"keys":         map[string]any{"type": "string", "description": "Key or combo, e.g. enter, escape, ctrl+a (key)."},
-				"js":           map[string]any{"type": "string", "description": "JavaScript expression to evaluate (eval)."},
-				"files":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Absolute file paths to set on a file <input> (upload)."},
+				"js":           map[string]any{"type": "string", "description": "JavaScript expression to evaluate (eval). Runs with full page access — use it to recursively traverse shadow roots or read DOM state that CSS selectors can't reach (click/type don't pierce shadow DOM)."},
+				"files":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Absolute file paths to set on a file <input> (upload). Use this instead of clicking an upload button — a click opens a native file dialog that cannot be driven."},
 				"index":        map[string]any{"type": "integer", "description": "Page index from the pages list to switch to (select_page)."},
 				"timeout_ms":   map[string]any{"type": "integer", "description": "Wait timeout in ms (wait); default 10000."},
 				"dx":           map[string]any{"type": "number", "description": "Horizontal scroll delta (scroll)."},
