@@ -54,6 +54,11 @@ export const chatContextUsage = writable<Record<string, any>>({})
 export const chatContextTokens = writable<Record<string, number>>({})
 export const chatWorkingDir = writable<Record<string, string>>({})
 export const chatPermMode = writable<Record<string, string>>({})
+
+// Per-session goal snapshot (or null when none). Seeded from GET
+// /api/sessions/{id}/goal on session load, refreshed by goal_updated WS
+// events; the Composer renders it as a status chip.
+export const chatGoal = writable<Record<string, any>>({})
 export const chatReasoningEffort = writable<Record<string, string>>({})
 // Effective show-reasoning flag for the current session (global default + per-model override).
 export const chatShowReasoning = writable<Record<string, boolean>>({})

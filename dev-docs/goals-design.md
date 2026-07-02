@@ -283,23 +283,40 @@ pre-session input.
   a modal. Interrupted or errored turns park continuation, and a
   rate-limited continuation turn lands on `usage_limited`, matching the
   server.
-- **web** (`internal/server/ws_handlers.go` `/clear`-`/compact` switch +
-  a small REST surface `GET/PUT/DELETE …/goal` mirroring Codex's
-  `thread/goal/get|set|clear`): confirms reuse the existing confirm-modal wire
-  (#942 `yes` semantics), chip in the session header. **webdist rebuild +
-  commit** required (#718 lesson).
-- **IM** (`internal/channel/manager.go` switch): summary as text; replace
-  confirmation via interactive next-message ask (#601); terminal-transition
-  notifications via the existing notice path.
+- **web** (`internal/server/goal.go`): the composer's `/goal` slash command
+  applies the shared text grammar (`agent.GoalCommand`) and replies as a
+  toast plus a `goal_updated` broadcast; a goal chip next to the context
+  chip shows usage while active and the status label otherwise, seeded from
+  `GET …/goal` on session load. The REST surface (`GET/PUT/DELETE …/goal`)
+  mirrors Codex's `thread/goal/get|set|clear`; `PUT` accepts objective
+  (create-or-edit), user-owned status changes (`active`/`paused` only), or
+  `replace`. Goal commands and the API target the **live** session object
+  when a turn is running (`Server.liveSessions`) — mutating a
+  freshly-loaded copy would be overwritten by the running turn's own goal
+  records. No confirm modal: the same refuse-then-`/goal replace` grammar
+  as the TUI. **webdist rebuild + commit** required (#718 lesson).
+- **IM** (`internal/channel/manager.go` `/goal` + `internal/server`
+  channel-turn wiring): the goal lives on the chat's persisted backing
+  store (`channel.Session.Store`, an `agent.Session`), so it is the same
+  record every transport bound to that session sees; a tombstoned store
+  (concurrent `/unbind`) degrades to "goals unavailable". Same shared text
+  grammar — no interactive-ask confirm. Terminal transitions (`complete`,
+  `blocked`, `budget_limited`, `usage_limited`) arrive as chat messages.
+
+On web and IM, `/goal edit` takes the new objective inline
+(`/goal edit <objective>`) — neither surface can prefill an input with the
+current objective the way the TUI does.
 
 **Continuation kick per transport** — all three already have the idle
 auto-turn path built for `/loop` and background tasks; goals reuse it verbatim:
 
-- server: after a turn completes and the session is idle, if
-  `GoalContinuation()` fires → `enqueueSteer` + `kickIdleSteerTurn`
-  (`internal/server/loop.go` pattern).
-- TUI: post-turn hook posts the same steer through the `tuiWaker`/inbox path.
-- IM: idle channel-turn path (#613 machinery).
+- web server: `runAgentTurnLoop` consults `GoalContinuation()` once the
+  steer queue is empty and chains the hidden turn through the existing
+  steer machinery.
+- TUI: `handleTurnFinished` kicks the continuation turn after the queue and
+  inbox drain.
+- IM: `runChannelTurns`' chained-turn loop pulls the continuation prompt
+  once the inbox is dry, inside the same `BeginRun` window.
 
 The decision (should a turn start, with what prompt) lives once in agent core;
 transports only deliver — same split as `tools.Waker`.

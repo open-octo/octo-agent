@@ -3,7 +3,7 @@
   import { onMount } from 'svelte'
   import {
     running, activeSessionId, chatStreaming, sessions,
-    chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast,
+    chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -293,6 +293,22 @@
   // Effective show-reasoning for this session: live store > session record > default true.
   let showReasoning = $derived($chatShowReasoning[sid] ?? currentSession?.show_reasoning ?? true)
   let ctxUsage = $derived(Number($chatContextUsage[sid] ?? currentSession?.context_usage ?? 0))
+  // Session goal chip: usage while active, status label otherwise. null/absent
+  // hides the chip entirely.
+  let goal = $derived($chatGoal[sid] ?? null)
+  let goalChip = $derived.by(() => {
+    if (!goal) return ''
+    const compact = (n: number) =>
+      n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+      : n >= 1_000 ? `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
+      : `${n}`
+    if (goal.status === 'active') {
+      if (goal.token_budget > 0) return `${compact(goal.tokens_used ?? 0)}/${compact(goal.token_budget)}`
+      const s = goal.time_used_seconds ?? 0
+      return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+    }
+    return String(goal.status ?? '').replace('_', ' ')
+  })
 
   function cap(s: string): string {
     return s ? s[0].toUpperCase() + s.slice(1) : s
@@ -527,6 +543,12 @@
           </div>
         {/if}
       </div>
+    {/if}
+    {#if goalChip}
+      <span class="chip static goal-chip" title={goal?.objective ?? ''}>
+        <span>{$t('chat.goal')}</span>
+        <span class="mono">{goalChip}</span>
+      </span>
     {/if}
     <span class="chip static context-chip">
       <span>{$t('chat.context')}</span>

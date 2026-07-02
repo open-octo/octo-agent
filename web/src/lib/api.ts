@@ -104,6 +104,10 @@ export async function updateSessionShowReasoning(id: string, show: boolean): Pro
   })
 }
 
+export async function getSessionGoal(id: string): Promise<{ goal: any | null }> {
+  return request<{ goal: any | null }>(`/api/sessions/${id}/goal`)
+}
+
 export async function updateSessionPermissionMode(id: string, mode: string): Promise<void> {
   await request<unknown>(`/api/sessions/${id}/permission_mode`, {
     method: 'PATCH',
