@@ -1,5 +1,5 @@
 ---
-name: workflow-builder
+name: workflow-creator
 description: Chain existing skills and browser recordings into a runnable, reusable saved workflow through guided conversation — inventory the available skills, wire each one's output into the next's input, generate the Ruby workflow, dry-run it, and save it with workflow_save. Use when the user wants to combine / chain / orchestrate several EXISTING skills or recordings into one repeatable flow, e.g. "chain these skills", "把这几个技能连起来", "串个流程", "做个 workflow", "编排一下", "build a workflow". Do NOT use to author a single new skill (that is skill-creator) or to run one skill a single time (just call it).
 ---
 

@@ -67,10 +67,10 @@ func TestWorkflowNudger_BrowserOnlyRunSkillCounts(t *testing.T) {
 	}
 }
 
-func TestWorkflowNudger_ExcludesWorkflowBuilder(t *testing.T) {
+func TestWorkflowNudger_ExcludesWorkflowCreator(t *testing.T) {
 	n := NewWorkflowNudger()
-	if got := n.observe(skillCall("workflow-builder")); got != "" {
-		t.Fatalf("workflow-builder itself must not count, got %q", got)
+	if got := n.observe(skillCall("workflow-creator")); got != "" {
+		t.Fatalf("workflow-creator itself must not count, got %q", got)
 	}
 	if got := n.observe(skillCall("real-skill")); got != "" {
 		t.Fatalf("only one countable skill so far, should be silent, got %q", got)
