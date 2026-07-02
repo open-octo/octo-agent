@@ -43,6 +43,10 @@ func TestMaterializeDefaults_WritesEmbeddedAndStamps(t *testing.T) {
 		t.Fatalf("expected implement/SKILL.md materialized: %v", err)
 	}
 	// The workflow-creator skill ships in the default set.
+	// The office-xlsx skill ships in the default set.
+	if _, err := os.Stat(filepath.Join(root, "office-xlsx", "SKILL.md")); err != nil {
+		t.Fatalf("expected office-xlsx/SKILL.md materialized: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(root, "workflow-creator", "SKILL.md")); err != nil {
 		t.Fatalf("expected workflow-creator/SKILL.md materialized: %v", err)
 	}
