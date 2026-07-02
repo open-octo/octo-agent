@@ -257,7 +257,8 @@ transport's idiom.
 | input | behavior |
 |---|---|
 | `/goal` | summary: status, objective, time used, tokens used (+budget), command hints. No goal → usage hint. |
-| `/goal <objective>` | create an active goal. If an unfinished goal exists (any status except `complete`) → confirm "Replace current goal?"; replace = new goal `ID`, fresh usage counters. |
+| `/goal <objective>` | create an active goal. Over an unfinished goal (any status except `complete`) it refuses with a hint; a `complete` goal is replaced silently. |
+| `/goal replace <objective>` | explicit replacement: new goal `ID`, fresh usage counters. (Codex uses a confirm popup; octo's idle command line has no confirm primitive, so destructive replace is its own subcommand a typo can't reach.) |
 | `/goal edit` | edit objective keeping usage/budget; `budget_limited`/`complete` re-activate on edit, other statuses are preserved. Mid-turn edits inject the `objective_updated` steering prompt. |
 | `/goal pause` | status → `paused` (accounts in-flight usage first). |
 | `/goal resume` | status → `active`; continuation kicks if idle. |
@@ -269,9 +270,19 @@ resuming a session whose goal is `paused`/`blocked`/`usage_limited` prompts
 "Resume paused goal?"; `/goal` before the session exists queues like other
 pre-session input.
 
-- **TUI** (`cmd/octo/tuirepl_view.go` switch): summary as printed lines,
-  replace/resume confirms via the existing selection prompt, edit via a
-  prefilled input prompt, indicator in the status line.
+- **TUI** (`cmd/octo/tuirepl_goal.go`): summary as printed lines; `/goal edit`
+  arms the input with the current objective prefilled — the next submitted
+  line is the edited objective (Esc cancels), the next-message-as-answer
+  idiom the IM ask flow established. A `goal` status-bar segment shows
+  `tokens/budget` (budgeted) or elapsed time while active and the status
+  label otherwise; it refreshes on every accounting event rather than
+  ticking locally per second (deviation from Codex's `GoalStatusState` —
+  accounting events arrive every LLM reply, which is live enough for a
+  terminal strip). A resumed session with a non-running goal prints a
+  one-line "● Goal paused … /goal resume" hint under the banner instead of
+  a modal. Interrupted or errored turns park continuation, and a
+  rate-limited continuation turn lands on `usage_limited`, matching the
+  server.
 - **web** (`internal/server/ws_handlers.go` `/clear`-`/compact` switch +
   a small REST surface `GET/PUT/DELETE …/goal` mirroring Codex's
   `thread/goal/get|set|clear`): confirms reuse the existing confirm-modal wire

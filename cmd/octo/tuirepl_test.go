@@ -509,7 +509,7 @@ func TestTUI_TurnFinishedDequeuesNext(t *testing.T) {
 	m.turnRunning = true
 	m.queue = []pendingItem{{text: "next task"}}
 
-	_, _ = m.handleTurnFinished()
+	_, _ = m.handleTurnFinished(nil)
 
 	// Dequeued and a new turn started.
 	if !m.turnRunning {
@@ -527,7 +527,7 @@ func TestTUI_TurnFinishedDispatchesQueuedSlash(t *testing.T) {
 	m.turnRunning = true
 	m.queue = []pendingItem{{text: "/clear"}}
 
-	_, _ = m.handleTurnFinished()
+	_, _ = m.handleTurnFinished(nil)
 
 	// /clear clears history and leaves the queue empty.
 	if m.a.History.Len() != 0 {
@@ -544,7 +544,7 @@ func TestTUI_DegradedInboxRunsBeforeQueue(t *testing.T) {
 	m.a.Inbox.Enqueue("degraded inbox") // never drained during turn → pending at turn end
 	m.queue = []pendingItem{{text: "queued"}}
 
-	_, _ = m.handleTurnFinished()
+	_, _ = m.handleTurnFinished(nil)
 
 	// The degraded inbox message is prepended, so it's the one that starts running and
 	// "queued" remains in the queue.

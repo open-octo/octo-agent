@@ -171,6 +171,12 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Idle: clear the input line and discard any pending attachments.
+		// A pending /goal edit is cancelled too — otherwise the next
+		// unrelated submit would silently become the objective.
+		if m.goalEditPending {
+			m.goalEditPending = false
+			m.println(noticeStyle.Render("Goal edit cancelled"))
+		}
 		m.pendingAttachments = nil
 		m.clearPastes()
 		// Also clear folded state
@@ -724,6 +730,20 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	// paste folded as "[#N pasted …]" rather than dumping it verbatim.
 	text := strings.TrimSpace(m.expandPastes(raw))
 	collapsed := strings.TrimSpace(raw)
+	// A pending /goal edit consumes this submit first: empty text cancels,
+	// a slash command cancels and dispatches normally (the user changed
+	// their mind), anything else is the edited objective. Checked before
+	// the empty early-return so clearing the prefill + Enter cancels.
+	if m.goalEditPending {
+		if !strings.HasPrefix(text, "/") {
+			m.ta.Reset()
+			m.inputHistoryIdx = -1
+			m.clearPastes()
+			return m.submitGoalEdit(text)
+		}
+		m.goalEditPending = false
+		m.println(noticeStyle.Render("Goal edit cancelled"))
+	}
 	if text == "" && len(m.pendingAttachments) == 0 {
 		return m, nil
 	}
@@ -827,6 +847,8 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		return m.dispatchThinking(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/clear":
 		return m.dispatchClear()
+	case "/goal":
+		return m.dispatchGoal(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/compact":
 		if m.turnRunning {
 			m.println(noticeStyle.Render("/compact: wait for the current turn to finish"))
@@ -1444,6 +1466,11 @@ func (m *tuiModel) renderStatusBar() string {
 	}
 	if m.cfg.permEngine != nil {
 		segs = append(segs, [2]string{"perm", string(m.cfg.permEngine.GetMode())})
+	}
+	if m.goalsWired() {
+		if g, ok := m.cfg.session.GoalSnapshot(); ok {
+			segs = append(segs, [2]string{"goal", goalStatusSegment(g)})
+		}
 	}
 	if n := len(tools.RunningBackground()); n > 0 {
 		label := "1 shell"

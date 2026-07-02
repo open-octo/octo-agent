@@ -1147,7 +1147,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// continuation still parks: pending is stale there, but the next
 			// continuation would hit the same limit, so parking early is the
 			// cheaper outcome.)
-			if s.goalsEnabled && goalContWasPending && isRateLimitErr(err) {
+			if s.goalsEnabled && goalContWasPending && agent.IsRateLimitErr(err) {
 				if g, gerr := sess.SetGoalStatus(agent.GoalUsageLimited); gerr == nil {
 					s.broadcastGoalUpdated(sess.ID, g)
 				}

@@ -397,6 +397,24 @@ func (s *Session) SuppressGoalContinuation() {
 	s.goalContSuppressed = true
 }
 
+// IsRateLimitErr classifies a turn error as a provider rate/quota limit.
+// Provider adapters surface non-2xx responses as "<vendor>: HTTP <code>: ..."
+// (the retry layer has already retried transient 429s by the time one
+// reaches here), so a sustained limit is matched on the status code plus the
+// common textual variants gateways use. Transports use it to park a failing
+// goal-continuation turn as usage_limited.
+func IsRateLimitErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "http 429") ||
+		strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "rate_limit") ||
+		strings.Contains(msg, "too many requests") ||
+		strings.Contains(msg, "quota")
+}
+
 // Markers wrapping every runtime-owned goal steering prompt injected as a
 // user message. Model-facing; every UI surface strips them (see
 // StripSystemReminders).
