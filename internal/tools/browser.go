@@ -283,7 +283,11 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 		Description: "Drive a real Chrome browser to automate a web task: navigate, " +
 			"click elements, type, wait for elements, capture file downloads, screenshot, " +
 			"and inspect the page. Reuses the user's logged-in session. Use only when the " +
-			"task genuinely needs operating a web UI (no API available).",
+			"task genuinely needs operating a web UI (no API available); for a known URL's " +
+			"public content, web_fetch is cheaper. Before a nontrivial web task — an " +
+			"anti-bot platform, a login wall, an unfamiliar site to explore, multi-source " +
+			"research — load the web-access skill first (via the skill tool, when listed): " +
+			"it carries tool-routing rules and per-site experience notes from past sessions.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

@@ -2,17 +2,17 @@
 name: web-access
 license: MIT
 description:
-  所有联网操作的统一入口，包括：搜索、网页抓取、浏览器自动化、登录后操作、网络交互等。
-  触发场景：用户要求搜索信息、查看网页内容、操控浏览器操作网页界面、访问需要登录的网站、抓取社交媒体内容（小红书、微博、推特等）、读取动态渲染页面、以及任何需要真实浏览器环境的网络任务。
+  复杂 web 任务的方法论与跨 session 站点经验库。Use when：抓取反爬或需登录态的平台（小红书、微信公众号、微博、推特、知乎等）、
+  目标站点结构未知需要边看边探索、多来源交叉核实信息、分析页面里的图片/视频内容、并行调研多个独立来源、
+  或 web_search/web_fetch 拿不到目标内容需要升级到真实浏览器时。
+  简单的已知 URL 抓取或单步页面操作不需要加载本 skill——直接用 web_fetch / browser 工具即可。
 metadata:
   origin: 浏览方法论改编自 web-access（一泽 Eze，MIT）；执行层改用 octo 原生 browser 工具，无 Node 依赖
 ---
 
 # Skill: web-access
 
-octo 的联网总入口：把内置的 `web_search` / `web_fetch` 与原生 `browser` 工具（纯 Go CDP，驱动你日常的、已登录的 Chrome/Edge）按场景编排起来，并跨 session 积累站点经验。
-
-无需 Node、无需独立 proxy——浏览器操作全部通过 `browser` 工具完成。
+复杂 web 任务的方法论：把内置的 `web_search` / `web_fetch` 与 `browser` 工具（驱动你日常的、已登录的 Chrome/Edge）按场景编排起来，并跨 session 积累站点经验。
 
 ## 前置：浏览器自动化
 
@@ -57,37 +57,12 @@ octo 的联网总入口：把内置的 `web_search` / `web_fetch` 与原生 `bro
 
 `web_search` / `web_fetch` / curl 都不处理登录态。`browser` 不要求 URL 已知——可从任意入口出发，靠页面内搜索、点击、跳转找到目标。
 
-## browser 工具
+## browser 工具要点
 
-一个 action 复用的工具，驱动一个真实 Chrome 会话（navigate→click→download 共享同一页面）。
+action 级用法（observe / click / eval / record / run_skill 等的参数与语义）以 `browser` 工具自身的 schema 描述为准，此处不重复。schema 之外的判断准则：
 
-**看**
-- `observe` — 截图（模型能直接看见）+ 当前页可交互元素清单（带选择器）。看陌生页面、决定下一步的首选。
-- `screenshot` — 仅截图（视觉识别、视频帧）。
-- `eval`（`js`）— 执行任意 JS：读写 DOM、提取数据、操控元素、提交表单、调用内部方法。递归遍历可穿透 Shadow DOM / iframe 等选择器跨不过的边界。
-- `ax` — 无障碍树摘要（语义视图）。
-- `pages` / `select_page`（`index`）— 列出 / 切换标签页。
-
-**做**
-- `navigate`（`url`）、`back`
-- `click`（`selector`，可选 `frame`）— 真实鼠标手势（CDP），能触发文件对话框等。
-- `hover` / `type`（`selector`,`text`）/ `select`（`selector`,`value`）/ `key`（`keys`，如 `enter`、`ctrl+a`）
-- `scroll`（`selector`,`dx`,`dy`）— 触发懒加载。
-- `wait`（`selector`,`timeout_ms`）— 等元素出现（动态页面的校验原语）。
-- `upload`（`selector`,`files`）— 给 file input 设本地路径，绕过文件对话框。
-- `download`（`selector`）— 点击触发并捕获客户端生成的下载文件（落盘）。
-
-**登录态 / 数据**
-- `cookies` — 当前页 cookie，**含 HttpOnly**（`document.cookie`/eval 读不到的那些）。提取/复用登录会话、OAuth token 用它。
-
-**录制 / 回放（web-access 没有的能力）**
-- `record_start` / `record_stop`（`name`）— 把**用户本人**的一次真实演示录成可编辑的 skill。录制只捕获用户在浏览器里的真实手势（点击/输入），**不录你自己的工具动作**。所以正确姿势是：`record_start` 之后**把控制权交还用户**——告诉用户「录制已开始，请你在浏览器里完成这些操作，做完告诉我」，等用户说完成，再 `record_stop`。**录制期间不要自己 navigate/click/type**：那不是演示，而且会跳转的点击极易丢失，录出来是空的。
-- `run_skill`（`name`,`params`）— 确定性回放，自带按步隐式等待与选择器自愈。重复性流程（批量操作、定期取数）优先录制回放，而非每次盲驱动。
-
-**收尾**
-- `close` — 关闭自己开的标签页，保留用户原有标签页。
-
-> 同源 iframe：给需要进 iframe 的动作传 `frame`（iframe 的 CSS 选择器）。跨域 iframe 暂不支持。
+- 重复性流程（批量操作、定期取数）优先录制回放（record → run_skill），而非每次盲驱动。
+- 收尾用 `close` 关闭自己开的标签页，保留用户原有标签页。
 
 ### 程序化 vs GUI 交互
 
