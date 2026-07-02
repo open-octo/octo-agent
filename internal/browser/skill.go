@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -310,17 +311,30 @@ func GenerateSkill(ctx context.Context, name, startURL string, events []Recorded
 
 	out, err := gen(ctx, system, user)
 	if err != nil {
+		slog.Warn("browser: skill distill failed, keeping deterministic baseline", "skill", name, "err", err)
 		return base
 	}
 	refined, err := ParseSkill([]byte(stripFences(out)))
 	if err != nil || len(refined.Steps) == 0 {
-		return base
+		slog.Warn("browser: skill distill output unusable, keeping deterministic baseline", "skill", name, "err", err, "steps", len(refined.Steps))
+		return withDescription(base, refined.Description)
 	}
 	refined.Name = name
 	if !selectorsSubset(refined, base) {
-		return base // precision guard: the model used a selector it wasn't given
+		// Precision guard: the model used a selector it wasn't given. The refined
+		// steps are untrustworthy, but the prose description still is — keep it so
+		// the skills manifest isn't left with a bare name.
+		slog.Warn("browser: skill distill used a selector not in the recording, keeping deterministic baseline", "skill", name)
+		return withDescription(base, refined.Description)
 	}
 	return refined
+}
+
+func withDescription(s Skill, desc string) Skill {
+	if desc != "" {
+		s.Description = desc
+	}
+	return s
 }
 
 func renderTrace(events []RecordedEvent) string {
@@ -363,6 +377,57 @@ func selectorsSubset(refined, base Skill) bool {
 		}
 	}
 	return true
+}
+
+// StepDigest renders a compact one-line summary of what a replay does, e.g.
+// `navigate www.zhihu.com → click "热榜" → click "日元跌破 1 美元兑 162 日元…"`.
+// The skills manifest uses it when a recording has no description, so the model
+// can still see the recording's full path — including its final step, which is
+// what tells it the replay ends somewhere specific.
+func (s Skill) StepDigest() string {
+	var parts []string
+	for _, st := range s.Steps {
+		switch st.Action {
+		case "wait":
+			continue
+		case "navigate":
+			parts = append(parts, "navigate "+truncRunes(digestURL(st.URL), 40))
+		default:
+			label := st.Label
+			if label == "" {
+				label = st.Hint
+			}
+			if label == "" {
+				label = st.Selector
+			}
+			if label == "" {
+				parts = append(parts, st.Action)
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("%s %q", st.Action, truncRunes(label, 30)))
+		}
+	}
+	// Keep the head and the final step: the ending is the part a bare name hides.
+	if len(parts) > 8 {
+		parts = append(parts[:6], "…", parts[len(parts)-1])
+	}
+	return strings.Join(parts, " → ")
+}
+
+func digestURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	return u.Host + strings.TrimSuffix(u.Path, "/")
+}
+
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // MarshalSkill renders the skill to YAML.

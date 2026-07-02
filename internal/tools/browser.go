@@ -116,11 +116,20 @@ func RenderBrowserSkillsManifest() string {
 	b.WriteString("Recorded browser workflows. Replay one with the `browser` tool " +
 		"(action=run_skill, name=<name>, params as declared); it returns the skill's " +
 		"declared outputs (downloaded files, extracted values) as JSON. These are " +
-		"replayed, not loaded via the `skill` tool.\n\n")
+		"replayed, not loaded via the `skill` tool. A replay executes every recorded " +
+		"step verbatim, end to end — it cannot be partially applied or adapted beyond " +
+		"its declared params. Only replay a recording when the request matches what " +
+		"it does exactly; if any detail differs (a different item, target, or date), " +
+		"drive the browser directly instead.\n\n")
 	for _, s := range list {
 		fmt.Fprintf(&b, "- %s", s.Name)
 		if s.Description != "" {
 			fmt.Fprintf(&b, ": %s", s.Description)
+		} else if d := s.StepDigest(); d != "" {
+			// No description (e.g. the LLM distill fell back at record time): show
+			// the step path instead, so the model can judge fit — especially the
+			// final step, which a bare name hides.
+			fmt.Fprintf(&b, ": steps: %s", d)
 		}
 		if len(s.Params) > 0 {
 			names := make([]string, len(s.Params))

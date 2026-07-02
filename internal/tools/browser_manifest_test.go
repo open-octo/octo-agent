@@ -28,11 +28,17 @@ func TestRenderBrowserSkillsManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A second recording whose output declares no type — it should render as a
-	// bare name (no parens), exercising the type-less branch.
+	// bare name (no parens), exercising the type-less branch. It also has no
+	// description, so the manifest must fall back to a step digest: without one
+	// the model only sees the name and replays near-miss recordings (a recording
+	// named for item 1 got replayed for a request about item 2).
 	if err := browser.SaveSkill(dir+"/grab-id.yaml", browser.Skill{
 		Name:    "grab-id",
 		Outputs: []browser.Output{{Name: "raw"}},
-		Steps:   []browser.Step{{Action: "navigate", URL: "x"}},
+		Steps: []browser.Step{
+			{Action: "navigate", URL: "https://example.com/hot"},
+			{Action: "click", Selector: "#a", Label: "第一条"},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -41,6 +47,10 @@ func TestRenderBrowserSkillsManifest(t *testing.T) {
 		"# Browser recordings", "run_skill", "download-excels",
 		"download the monthly reports", "[params: month]", "[outputs: files (file[])]",
 		"grab-id", "[outputs: raw]",
+		// the all-or-nothing usage boundary
+		"verbatim", "drive the browser directly",
+		// the digest fallback for a description-less recording
+		`grab-id: steps: navigate example.com/hot → click "第一条"`,
 	} {
 		if !strings.Contains(m, want) {
 			t.Fatalf("manifest missing %q:\n%s", want, m)
