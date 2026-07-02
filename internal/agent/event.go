@@ -92,6 +92,13 @@ const (
 	// compaction was a no-op (summarization failed or returned nothing) and the
 	// full history was kept. Observers should clear any compaction indicator.
 	EventCompactDone EventKind = "compact_done"
+
+	// EventGoalUpdated fires when the session goal record changes during a
+	// turn — usage accounting moved the counters or a budget crossing flipped
+	// the status. Goal carries the updated snapshot. Mutations made outside a
+	// turn (slash commands, HTTP API) don't flow through here; the mutating
+	// surface returns the Goal to its caller directly.
+	EventGoalUpdated EventKind = "goal_updated"
 )
 
 // EventToolOutputCap is the maximum length of the Output field emitted on
@@ -122,6 +129,7 @@ const EventToolOutputCap = 8 * 1024
 //   - EventCompactStarted:  Compact (BeforeTokens, FoldedMsgs, KeptTurns, MaxTokens)
 //   - EventCompactProgress: Chunk, Compact (SummaryTokens, MaxTokens)
 //   - EventCompactDone:     Compact (BeforeTokens, AfterTokens, FoldedMsgs)
+//   - EventGoalUpdated:     Goal
 //
 // JSON tags are included so HTTP/SSE transports (M8 web server) can
 // marshal events directly without an intermediate type.
@@ -143,6 +151,7 @@ type AgentEvent struct {
 	Reply    *Reply        `json:"reply,omitempty"`
 	Messages []string      `json:"messages,omitempty"`
 	Compact  *CompactStats `json:"compact,omitempty"`
+	Goal     *Goal         `json:"goal,omitempty"`
 
 	// Steer carries the full inbox items behind an EventSteerInjected —
 	// including attachment blocks — for handlers that render more than the

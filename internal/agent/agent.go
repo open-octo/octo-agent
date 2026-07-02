@@ -215,6 +215,20 @@ type Agent struct {
 	// Ruby octo's @inbox and keeps mid-turn input handling simple.
 	Inbox Inbox
 
+	// GoalAcct, when set, receives goal usage accounting after each LLM
+	// reply. Wired by the session-owning layer (Session implements
+	// GoalAccountant); nil disables goal accounting. The durable goal lives
+	// on the Session so per-turn Agents (serve rebuilds one each turn) all
+	// account into the same record.
+	GoalAcct GoalAccountant
+
+	// goalBaseIn/goalBaseOut snapshot the cumulative session counters at the
+	// last goal accounting, so each accounting bills only the delta. Reset at
+	// every turn start (and via ResetGoalBaseline when a goal is created
+	// mid-turn, so pre-goal usage in the same turn is not billed). Turn
+	// goroutine only.
+	goalBaseIn, goalBaseOut int
+
 	// Hooks is the per-Agent hook engine. It supersedes the old single-slot
 	// UserInputHook/ToolResultHook: the memory injector registers its reminder
 	// (UserPromptSubmit) and save-nudge (PostToolUse) as in-process hooks on it,
@@ -500,6 +514,7 @@ func (a *Agent) Turn(ctx context.Context, userInput string) (Reply, error) {
 	// Append user message first so the snapshot the Sender sees includes it.
 	a.appendUserInput(ctx, userInput)
 
+	a.ResetGoalBaseline()
 	reply, err := a.Sender.SendMessages(ctx, a.Model, a.System, a.History.Snapshot(), a.MaxTokens)
 	if err != nil {
 		// Pop the user message we just appended so retrying with the same
@@ -511,6 +526,7 @@ func (a *Agent) Turn(ctx context.Context, userInput string) (Reply, error) {
 
 	a.History.Append(assistantReplyMessage(reply))
 	a.accrueUsage(reply)
+	a.accountGoalUsage(nil)
 	return reply, nil
 }
 
@@ -531,6 +547,19 @@ func (a *Agent) TurnStream(
 	onChunk func(textDelta string),
 	onThinking func(thinkingDelta string),
 ) (Reply, error) {
+	return a.turnStream(ctx, userInput, onChunk, onThinking, nil)
+}
+
+// turnStream is TurnStream plus an optional event handler, so the RunStream
+// no-tools fallback keeps emitting EventGoalUpdated for goal accounting.
+// Direct TurnStream callers have no event channel and pass nil.
+func (a *Agent) turnStream(
+	ctx context.Context,
+	userInput string,
+	onChunk func(textDelta string),
+	onThinking func(thinkingDelta string),
+	handler EventHandler,
+) (Reply, error) {
 	if a.Sender == nil {
 		return Reply{}, fmt.Errorf("agent: no Sender configured")
 	}
@@ -543,6 +572,7 @@ func (a *Agent) TurnStream(
 
 	a.appendUserInput(ctx, userInput)
 
+	a.ResetGoalBaseline()
 	var (
 		reply Reply
 		err   error
@@ -565,6 +595,7 @@ func (a *Agent) TurnStream(
 
 	a.History.Append(assistantReplyMessage(reply))
 	a.accrueUsage(reply)
+	a.accountGoalUsage(handler)
 	return reply, nil
 }
 
@@ -679,7 +710,7 @@ func (a *Agent) RunStream(
 	// terminal EventTurnDone is fired here so the caller's contract is
 	// identical regardless of whether tools were used.
 	if len(tools) == 0 || executor == nil {
-		reply, err := a.TurnStream(ctx, userInput, onChunk, onThinking)
+		reply, err := a.turnStream(ctx, userInput, onChunk, onThinking, handler)
 		if err == nil && handler != nil {
 			r := reply
 			handler(AgentEvent{Kind: EventTurnDone, Reply: &r})
@@ -720,7 +751,7 @@ func (a *Agent) RunStream(
 
 	// Neither tool-aware interface available → plain TurnStream with the
 	// event-adapting onChunk. EventTurnDone fires on success.
-	reply, err = a.TurnStream(ctx, userInput, onChunk, onThinking)
+	reply, err = a.turnStream(ctx, userInput, onChunk, onThinking, handler)
 	if err == nil && handler != nil {
 		r := reply
 		handler(AgentEvent{Kind: EventTurnDone, Reply: &r})
@@ -743,6 +774,13 @@ func (a *Agent) runLoop(
 	handler EventHandler,
 	send func(ctx context.Context, msgs []Message, maxTokens int) (Reply, error),
 ) (Reply, error) {
+	// Goal accounting brackets the whole turn: the baseline reset pins the
+	// counters at turn start (usage accrued between turns is not goal work),
+	// and the deferred call catches the final reply and error/interrupt exits
+	// (the Codex TaskAborted accounting).
+	a.ResetGoalBaseline()
+	defer a.accountGoalUsage(handler)
+
 	// Compact older history before starting a new turn, if the last context
 	// crossed the threshold. Done here (a safe between-turns boundary, history
 	// ends on a complete assistant message) rather than mid-loop, where a
@@ -883,6 +921,11 @@ func (a *Agent) runLoop(
 				return Reply{}, fmt.Errorf("agent: loop[%d] escalate: %w", i, eerr)
 			}
 		}
+
+		// Bill this round's usage to the goal while the turn is still running,
+		// so a budget crossing surfaces (and, once wired, steers) mid-turn
+		// rather than only at the end.
+		a.accountGoalUsage(handler)
 
 		// ── Output-truncation recovery (layer 2) ──
 		// When escalation was attempted (cap raised) but the reply is still
@@ -1630,6 +1673,45 @@ func (a *Agent) accrueUsage(reply Reply) {
 	// three keeps the ctx-usage gauge honest; using InputTokens alone makes it
 	// read far too low once the cached prefix dominates.
 	a.lastInputTokens = reply.InputTokens + reply.CacheReadTokens + reply.CacheWriteTokens
+}
+
+// ResetGoalBaseline pins the goal-accounting baseline to the current session
+// counters and restarts the goal wall clock, so the next accounting bills
+// only usage — tokens and seconds — from this point on. Called at every turn
+// start; the create_goal tool wiring also calls it when a goal is created
+// mid-turn, so the turn's pre-goal usage is not billed.
+func (a *Agent) ResetGoalBaseline() {
+	if a.GoalAcct == nil {
+		return
+	}
+	a.goalBaseIn, a.goalBaseOut = a.SessionTokens()
+	a.GoalAcct.ResetGoalWallClock()
+}
+
+// accountGoalUsage bills the session-counter delta since the last accounting
+// to the goal and emits EventGoalUpdated when the record changed. A nil
+// accountant or handler degrades gracefully (no accounting / no event).
+// The baseline advances even when the goal is not accruing (paused mid-turn),
+// so up to one LLM round of tokens straddling an external pause is dropped
+// rather than billed — paused means not billed, and re-billing them on
+// resume would be worse.
+func (a *Agent) accountGoalUsage(handler EventHandler) {
+	if a.GoalAcct == nil {
+		return
+	}
+	in, out := a.SessionTokens()
+	delta := int64(in-a.goalBaseIn) + int64(out-a.goalBaseOut)
+	if delta < 0 {
+		// Counters shrank (a fresh Agent was handed an old baseline —
+		// defensive; should not happen with turn-start resets).
+		delta = 0
+	}
+	a.goalBaseIn, a.goalBaseOut = in, out
+	goal, changed := a.GoalAcct.AccountGoalUsage(delta)
+	if changed && handler != nil {
+		g := goal
+		handler(AgentEvent{Kind: EventGoalUpdated, Goal: &g})
+	}
 }
 
 // SessionTokens returns the cumulative input and output token counts for all
