@@ -36,10 +36,11 @@ func TestDetectToolchain_PresentAndMissing(t *testing.T) {
 	fakeExe(t, dir, "git")
 	fakeExe(t, dir, "node")
 	fakeExe(t, dir, "python3") // satisfies the "python" probe via its variant
+	fakeExe(t, dir, "bun")
 
 	present, missing := DetectToolchain()
 
-	wantPresent := map[string]bool{"git": true, "node": true, "python": true}
+	wantPresent := map[string]bool{"git": true, "node": true, "python": true, "bun": true}
 	for _, p := range present {
 		if !wantPresent[p] {
 			t.Errorf("unexpected present tool %q", p)
@@ -51,7 +52,7 @@ func TestDetectToolchain_PresentAndMissing(t *testing.T) {
 	}
 
 	for _, m := range missing {
-		if m == "git" || m == "node" || m == "python" {
+		if m == "git" || m == "node" || m == "python" || m == "bun" {
 			t.Errorf("%q reported missing but was planted", m)
 		}
 	}
