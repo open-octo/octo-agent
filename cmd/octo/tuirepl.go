@@ -1444,11 +1444,12 @@ func (m *tuiModel) renderToolOutcome(toolName string, input map[string]any, resu
 	// show_artifact's whole point is "present this file to the user"; the web
 	// UI has the Artifacts panel, the TUI's equivalent is a click-to-open
 	// file:// hyperlink (plain text on terminals without OSC 8 support).
+	// Only absolute paths are linkified: a relative one re-resolved at render
+	// time can diverge from the execute-time cwd on resumed-history replay,
+	// producing a confident link to the wrong file.
 	if toolName == "show_artifact" && !isErr && !m.cfg.plain {
-		if p, _ := input["path"].(string); strings.TrimSpace(p) != "" {
-			if abs, err := filepath.Abs(strings.TrimSpace(p)); err == nil {
-				return tui.RenderArtifactStatus(abs)
-			}
+		if p, _ := input["path"].(string); filepath.IsAbs(strings.TrimSpace(p)) {
+			return tui.RenderArtifactStatus(strings.TrimSpace(p))
 		}
 	}
 	if m.cfg.plain {

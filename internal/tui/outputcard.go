@@ -90,14 +90,24 @@ func Hyperlink(uri, text string) string {
 
 // FileURI converts an absolute filesystem path to a file:// URI, percent-
 // encoding as needed. Windows drive paths gain the required leading slash
-// (C:\x → file:///C:/x).
+// (C:\x → file:///C:/x); UNC paths put the server in the URI authority
+// (\\server\share\x → file://server/share/x). Semicolons are percent-encoded
+// even though URIs allow them raw: the OSC 8 escape that carries this URI is
+// itself semicolon-delimited, and a raw one truncates the link in strict
+// terminal parsers.
 func FileURI(abs string) string {
 	p := filepath.ToSlash(abs)
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
+	u := url.URL{Scheme: "file"}
+	if rest, ok := strings.CutPrefix(p, "//"); ok {
+		host, path, _ := strings.Cut(rest, "/")
+		u.Host, u.Path = host, "/"+path
+	} else {
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		u.Path = p
 	}
-	u := url.URL{Scheme: "file", Path: p}
-	return u.String()
+	return strings.ReplaceAll(u.String(), ";", "%3B")
 }
 
 // RenderArtifactStatus renders show_artifact's success line: the path as an

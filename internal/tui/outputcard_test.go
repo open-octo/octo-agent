@@ -83,6 +83,10 @@ func TestFileURI(t *testing.T) {
 		// A Windows drive path (already slashed — filepath.ToSlash converts the
 		// separators on Windows itself) gains the required leading slash.
 		{"C:/Users/a/chart.html", "file:///C:/Users/a/chart.html"},
+		// UNC: server goes in the URI authority, not a 4-slash legacy form.
+		{"//server/share/x.html", "file://server/share/x.html"},
+		// Raw ';' would truncate the OSC 8 escape in strict parsers.
+		{"/tmp/a;b.html", "file:///tmp/a%3Bb.html"},
 	}
 	for _, c := range cases {
 		if got := FileURI(c.in); got != c.want {
