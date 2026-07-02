@@ -69,7 +69,7 @@ When building anything that looks like a financial model (budgets, valuations, p
 
 - Prefer formulas over Python-computed constants for anything derived from other cells — see the note above.
 - Use cell references for assumptions instead of hardcoding multipliers into formulas (`=B5*(1+$B$6)` rather than `=B5*1.05`), so a reader can find and change the assumption.
-- A common (not mandatory) color convention: blue text for hardcoded inputs, black for formulas, green for cross-sheet links — apply via the `style` op's `font.color` field if the user wants this or it matches an existing template's convention.
+- A common (not mandatory) color convention from financial-modeling style guides (e.g. Wall Street Prep): blue text for hardcoded inputs, black for formulas, green for cross-sheet links — apply via the `style` op's `font.color` field if the user wants this or it matches an existing template's convention.
 - If editing an existing template, match its existing formatting/conventions rather than imposing a different style.
 
 ## Limitations

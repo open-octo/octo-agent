@@ -82,24 +82,59 @@ official documentation and in hundreds of independent tutorials predating
 both repos. This is not the kind of similarity that indicates copying;
 it is the shape any code using this library takes.
 
-One point of genuine, acknowledged influence: the "financial-model
-conventions" section in this skill's SKILL.md (blue=input/black=formula/
-green=cross-sheet-link color coding) restates a color-coding practice that
-is a real, decades-old financial-modeling industry convention (documented
-in modeling texts and courses well before either skills repo existed, e.g.
-Wall Street Prep / Corporate Finance Institute style guides) and which
-Anthropic's own skill also documents. It is presented here as attributed,
-non-mandatory guidance ("a common (not mandatory) color convention"), not
-as a verbatim lift of Anthropic's specific checklist wording — this
-skill's version is three sentences, not Anthropic's multi-page ruleset
-(number-format tables, sourcing-comment format, the full error-prevention
-checklist), and the MIT source repo also independently mentions the same
-convention set at a similar level of generality via its
-`official-skills/xlsx-guide.md` (the file explicitly excluded above), which
-itself is presented as a proprietary-labeled pointer, not as this skill's
-content. Flagging this for visibility rather than treating it as a
-concern: color-by-role conventions for financial models are standard
-industry practice, not Anthropic IP.
+**Citation correction (post-review):** an earlier version of this document
+justified the "financial-model conventions" section's blue/black/green
+color-coding paragraph by pointing partly at the MIT source repo's
+`official-skills/xlsx-guide.md`. That was wrong on inspection: the actual
+adapted source, `xlsx-manipulation/SKILL.md`, contains **no color-coding
+convention at all** (checked directly — no mention of "blue", "black",
+"green", or any input/formula/link color mapping anywhere in that file).
+The three-color/three-role mapping appears only in `official-skills/
+xlsx-guide.md` and in Anthropic's own proprietary `skills/xlsx/SKILL.md` —
+i.e. exactly the file this document already excludes for being
+Anthropic-licensed. Citing it as support for this paragraph while
+excluding it elsewhere was an internal contradiction, not a defensible
+citation.
+
+The correct provenance for this one paragraph: it is **not** attributed to
+either skills repo. Blue-input/black-formula/green-link color coding is a
+public financial-modeling industry convention taught independently of
+both, verified directly (fetched, not taken on faith) during this
+correction:
+
+- Wall Street Prep's own financial modeling guide states the blue/black
+  half of the convention verbatim: "This blue text with a yellow
+  background is a standard practice across Wall Street... Corresponding
+  with this is the practice of using black text font and a clear
+  background to identify formulas in a financial model."
+  (https://www.wallstreetprep.com/knowledge/financial-modeling-techniques/,
+  fetched and confirmed 2026-07-02)
+- WallStreetMojo's reference page states the full blue/black/green/red
+  mapping verbatim: "Blue: For hardcoded (i.e. typed) inputs... Black: For
+  calculation & cell references within the same sheet... Green: For
+  references made to other sheets... Red: For external links outside the
+  working file."
+  (https://www.wallstreetmojo.com/financial-modeling-color-formatting/,
+  fetched and confirmed 2026-07-02)
+
+(A Corporate Finance Institute page was checked as a candidate third
+citation and dropped — the specific page found,
+`corporatefinanceinstitute.com/resources/financial-modeling/financial-modeling-code/`,
+covers general model-quality principles, not this color convention;
+citing it would have repeated the same unverified-citation mistake this
+correction exists to fix.)
+
+Both confirmed sources are public, unrelated to either skills repo, and
+independent of Anthropic's material. SKILL.md's wording has been updated
+to cite Wall Street Prep / WallStreetMojo directly instead of resting on
+the excluded file. The paragraph remains three sentences of attributed,
+non-mandatory guidance ("a common (not mandatory) color convention...
+from financial-modeling style guides"), not a lift of Anthropic's
+multi-page ruleset (number-format tables, sourcing-comment format, the
+full error-prevention checklist) — color-by-role conventions for
+financial models are standard industry practice belonging to no one, but
+the citation must point at that public
+practice directly rather than at a file this document itself excludes.
 
 ## What was NOT reused
 
