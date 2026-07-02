@@ -148,6 +148,27 @@ type skillInfo struct {
 	Enabled     bool   `json:"enabled"`
 }
 
+// applyDefaultWorkspaceDir sets sess's WorkingDir to the server's configured
+// default workspace dir (cfg.WorkspaceDir / tools.ResolveWorkspaceDir),
+// unless the session already has one of its own — so it composes with the
+// PATCH /api/sessions/{id}/working_dir override without special-casing. The
+// directory is created lazily here, the first time a session actually needs
+// it, rather than at server startup. A failure here is logged and otherwise
+// a no-op: the session just falls back to the server's launch directory,
+// exactly like before workspace_dir existed.
+func (s *Server) applyDefaultWorkspaceDir(sess *agent.Session) {
+	if s.workspaceDir == "" || sess.WorkingDir != "" {
+		return
+	}
+	if err := os.MkdirAll(s.workspaceDir, 0o755); err != nil {
+		slog.Warn("workspace dir: mkdir failed, session keeps using the launch directory", "dir", s.workspaceDir, "err", err)
+		return
+	}
+	if err := sess.SetWorkingDir(s.workspaceDir); err != nil {
+		slog.Warn("workspace dir: could not set session working dir", "err", err)
+	}
+}
+
 // ─── POST /api/chat ─────────────────────────────────────────────────────────
 
 func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +192,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		model = req.Model
 	}
 	sess := agent.NewSession(model, s.system)
+	s.applyDefaultWorkspaceDir(sess)
 	sess.Bind(agent.EntryWeb, false)
 	if req.Name != "" {
 		_ = sess.SetTitle(req.Name)
@@ -370,6 +392,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := agent.NewSession(model, "")
+	s.applyDefaultWorkspaceDir(sess)
 	sess.Source = source
 	sess.ModelConfig = modelConfig
 	sess.Bind(agent.EntryWeb, false)

@@ -86,6 +86,14 @@ type Config struct {
 	// constructor (tests included) stays network-silent and the endpoint
 	// degrades to "current is latest".
 	UpdateCheck bool
+
+	// WorkspaceDir overrides the default working directory new web sessions
+	// are created with (see config.Config.WorkspaceDir / tools.ResolveWorkspaceDir).
+	// Empty (default) falls back to ~/.octo/config.yml's workspace_dir, then
+	// to no override at all — unchanged from today's curCwd() behavior. No
+	// `octo serve` flag sets this; it exists mainly so tests can inject a
+	// literal path without touching the real config file.
+	WorkspaceDir string
 }
 
 // Server is the HTTP server skeleton. It owns the mux, the agent factory,
@@ -116,6 +124,13 @@ type Server struct {
 	cwdMu      sync.RWMutex
 	memDir     string
 	homeMemDir string
+
+	// workspaceDir is the resolved default WorkingDir new web sessions get
+	// when the caller requests none of their own (see cfg.WorkspaceDir /
+	// tools.ResolveWorkspaceDir). "" means no override — sessions keep
+	// falling back to cwd, exactly like before this field existed. Resolved
+	// once at New, like cwd, and never mutated afterward.
+	workspaceDir string
 
 	// session-scoped turn locks: one turn per session at a time.
 	turnLocks map[string]*sync.Mutex
@@ -332,6 +347,21 @@ func New(cfg Config) (*Server, error) {
 	skillsManifest := tools.SkillsManifest(skillReg)
 	tools.SetSkills(skillReg)
 
+	// Resolve the default workspace dir new web sessions get. cfg.WorkspaceDir
+	// (no `octo serve` flag sets it today) takes precedence so tests can inject
+	// a literal path without touching ~/.octo/config.yml; production falls back
+	// to the file config's workspace_dir. A resolve error (e.g. no home dir)
+	// degrades to "" — no override — rather than failing server startup.
+	rawWorkspaceDir := cfg.WorkspaceDir
+	if rawWorkspaceDir == "" {
+		rawWorkspaceDir = fileCfg.WorkspaceDir
+	}
+	workspaceDir, err := tools.ResolveWorkspaceDir(rawWorkspaceDir)
+	if err != nil {
+		slog.Warn("could not resolve workspace_dir; new sessions keep using the launch directory", "err", err)
+		workspaceDir = ""
+	}
+
 	accessKey, generatedKey := resolveAccessKey(cfg.AccessKey, fileCfg)
 	if generatedKey {
 		// Persist so the key survives restarts — in particular the
@@ -372,6 +402,7 @@ func New(cfg Config) (*Server, error) {
 		envCtx:              envCtx,
 		memDir:              memDir,
 		homeMemDir:          homeMemDir,
+		workspaceDir:        workspaceDir,
 		turnLocks:           map[string]*sync.Mutex{},
 		turnRunning:         make(map[string]bool),
 		entryBindings:       make(map[string]*cachedEntryBinding),

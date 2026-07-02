@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -506,6 +508,73 @@ func TestCreateSession_EntryIDBindsSession(t *testing.T) {
 	}
 	if sess.ModelConfig != "" || sess.Model != "some-other-model" {
 		t.Errorf("raw session = (%q, %q), want (some-other-model, \"\")", sess.Model, sess.ModelConfig)
+	}
+}
+
+// Regression guard: with no workspace dir configured, a newly created
+// session's WorkingDir stays empty — the server's launch directory keeps
+// being the default, exactly like before workspace_dir existed.
+func TestCreateSession_NoWorkspaceDir_WorkingDirEmpty(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models:       []config.ModelEntry{{Provider: "anthropic", Model: "claude-sonnet-4-6"}},
+		DefaultModel: "claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/sessions", `{}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/sessions = %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Session struct {
+			ID string `json:"id"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := agent.LoadSession(resp.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.WorkingDir != "" {
+		t.Errorf("WorkingDir = %q, want \"\" (no workspace_dir configured)", sess.WorkingDir)
+	}
+}
+
+// With a configured workspace dir, a newly created session's WorkingDir
+// defaults to it (the caller requested no working dir of its own).
+func TestCreateSession_WorkspaceDirConfigured_SetsWorkingDir(t *testing.T) {
+	home := setTestHome(t)
+	seedModels(t, config.Config{
+		Models:       []config.ModelEntry{{Provider: "anthropic", Model: "claude-sonnet-4-6"}},
+		DefaultModel: "claude-sonnet-4-6",
+	})
+	wantDir := filepath.Join(home, "octo-workspace")
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", WorkspaceDir: wantDir})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/sessions", `{}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/sessions = %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Session struct {
+			ID string `json:"id"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := agent.LoadSession(resp.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.WorkingDir != wantDir {
+		t.Errorf("WorkingDir = %q, want %q", sess.WorkingDir, wantDir)
+	}
+	if st, err := os.Stat(wantDir); err != nil || !st.IsDir() {
+		t.Errorf("workspace dir %q was not created: %v", wantDir, err)
 	}
 }
 
