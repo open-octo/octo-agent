@@ -92,6 +92,19 @@ type Session struct {
 	// re-attach resumes (SessionStart source=resume) rather than starting over.
 	// Set via MarkHookStarted.
 	HookStarted bool `json:"hook_started,omitempty"`
+
+	// Goal is the session's persistent objective (at most one). Guarded by mu —
+	// the turn goroutine accounts usage into it while user commands mutate it
+	// from other goroutines. Mutate only through the goal methods (goal.go);
+	// they keep the status invariants and persist via append-only "goal"
+	// records plus the meta header on rewrites.
+	Goal *Goal `json:"goal,omitempty"`
+
+	// goalWallClockAt is the baseline for wall-clock goal accounting: set when
+	// the goal (re)activates, advanced by exactly the seconds accounted. Zero
+	// while no goal is accruing time. Guarded by mu; not serialized — a
+	// resumed session restarts the clock so downtime is never billed.
+	goalWallClockAt time.Time
 }
 
 // Common entry names. Use these constants at call sites so typos are caught.
@@ -391,7 +404,7 @@ func (s *Session) ChunkDir() (string, error) {
 // type as authoritative; rewriteAll folds them back into the meta header when
 // compacting.
 type sessionRecord struct {
-	Type         string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "working_dir" | "lease"
+	Type         string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "working_dir" | "lease" | "goal"
 	ID           string    `json:"id,omitempty"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	Model        string    `json:"model,omitempty"`
@@ -406,10 +419,11 @@ type sessionRecord struct {
 	LeaseExpires time.Time `json:"lease_expires,omitempty"`
 	HookStarted  bool      `json:"hook_started,omitempty"`
 	Message      *Message  `json:"message,omitempty"`
+	Goal         *Goal     `json:"goal,omitempty"`
 }
 
 func (s *Session) metaRecord() sessionRecord {
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, Goal: s.Goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -792,6 +806,7 @@ func LoadSession(id string) (*Session, error) {
 			s.BoundEntry = rec.BoundEntry
 			s.BoundAt = rec.BoundAt
 			s.HookStarted = rec.HookStarted
+			s.Goal = rec.Goal // a rewritten file carries the goal in its meta header
 			s.InFlight = 0
 		case "title":
 			s.Title = rec.Title // last one wins
@@ -810,6 +825,10 @@ func LoadSession(id string) (*Session, error) {
 			// Last lease record wins. An empty lease_entry clears the marker.
 			s.LeaseEntry = rec.LeaseEntry
 			s.LeaseExpires = rec.LeaseExpires
+		case "goal":
+			// Last goal record wins (it may also arrive via the meta header
+			// after a rewrite). A record with no goal payload is a clear.
+			s.Goal = rec.Goal
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -821,6 +840,11 @@ func LoadSession(id string) (*Session, error) {
 		s.ID = strings.TrimSuffix(filepath.Base(path), ".jsonl")
 	}
 	rehydrateImageBlocks(s.Messages)
+	// An accruing goal restarts its wall-clock baseline at load: the time the
+	// session spent on disk is downtime, not goal work.
+	if s.Goal != nil && (s.Goal.Status == GoalActive || s.Goal.Status == GoalBudgetLimited) {
+		s.goalWallClockAt = time.Now()
+	}
 	s.persisted = len(s.Messages) // a resumed session continues appending
 	s.forceRewrite = droppedTail
 	return s, nil
