@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/open-octo/octo-agent/internal/prompt"
 )
 
 // GoalStatus is the lifecycle state of a session goal. Ownership is the core
@@ -93,18 +95,25 @@ type GoalAccountant interface {
 	// ResetGoalWallClock re-baselines the wall clock at turn start, dropping
 	// the idle gap since the previous turn — idle time is not goal work.
 	ResetGoalWallClock()
+	// ConsumeGoalBudgetSteer returns the one-time budget-limit steering
+	// prompt when the last accounting crossed the token budget, for the agent
+	// loop to inject as a hidden steer.
+	ConsumeGoalBudgetSteer() (string, bool)
 }
 
 // ResetGoalWallClock implements GoalAccountant: it restarts the wall-clock
 // baseline for an accruing goal so time that passed between turns is dropped
 // rather than billed. Called from the turn-start baseline reset; a stopped
-// goal (no baseline) is left alone.
+// goal (no baseline) is left alone. A stale mid-turn-creation skip flag is
+// dropped here too — at a turn boundary the token baseline is fresh, so the
+// first accounting must bill normally.
 func (s *Session) ResetGoalWallClock() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.goalWallClockAt.IsZero() {
 		s.goalWallClockAt = time.Now()
 	}
+	s.goalSkipNextTokenDelta = false
 }
 
 // GoalSnapshot returns a copy of the session's goal, or ok=false when none
@@ -168,6 +177,11 @@ func (s *Session) startGoalLocked(objective string, tokenBudget int64) Goal {
 		UpdatedAt:   now,
 	}
 	s.goalWallClockAt = now
+	s.resetGoalRuntimeLocked()
+	// If a turn is running, its token baseline predates this goal; skip that
+	// turn's next accounting tick so the creating round's context input is
+	// not billed to the fresh goal. Cleared unconsumed at the next turn start.
+	s.goalSkipNextTokenDelta = true
 	records := []sessionRecord{{Type: "goal", Goal: s.Goal}}
 	if s.Title == "" {
 		// Seed the title from the objective (the Codex thread-preview
@@ -200,6 +214,7 @@ func (s *Session) EditGoalObjective(objective string) (Goal, error) {
 		s.setGoalStatusLocked(GoalActive)
 	}
 	s.Goal.UpdatedAt = time.Now()
+	s.resetGoalRuntimeLocked()
 	s.appendGoalRecordLocked()
 	return *s.Goal, nil
 }
@@ -224,6 +239,7 @@ func (s *Session) SetGoalStatus(status GoalStatus) (Goal, error) {
 	s.accountGoalWallClockLocked()
 	s.setGoalStatusLocked(status)
 	s.Goal.UpdatedAt = time.Now()
+	s.resetGoalRuntimeLocked()
 	s.appendGoalRecordLocked()
 	return *s.Goal, nil
 }
@@ -254,8 +270,19 @@ func (s *Session) ClearGoal() bool {
 	s.accountGoalWallClockLocked()
 	s.Goal = nil
 	s.goalWallClockAt = time.Time{}
+	s.resetGoalRuntimeLocked()
 	s.appendGoalRecordLocked()
 	return true
+}
+
+// resetGoalRuntimeLocked clears the continuation and steering runtime after
+// any goal mutation: the zero-progress suppression ends (the user or an
+// external actor changed something — a fresh audit is warranted) and a stale
+// unconsumed budget steer must not fire against the mutated goal.
+func (s *Session) resetGoalRuntimeLocked() {
+	s.goalContPending = false
+	s.goalContSuppressed = false
+	s.goalBudgetSteer = ""
 }
 
 // AccountGoalUsage implements GoalAccountant: it folds a token delta and the
@@ -271,8 +298,21 @@ func (s *Session) AccountGoalUsage(tokenDelta int64) (Goal, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.goalSkipNextTokenDelta {
+		// The goal was created mid-turn: the agent's token baseline predates
+		// it, so this tick's delta belongs to pre-goal work. Undershooting by
+		// one round beats billing a whole context input to a fresh goal.
+		s.goalSkipNextTokenDelta = false
+		tokenDelta = 0
+	}
 	if s.Goal == nil || (s.Goal.Status != GoalActive && s.Goal.Status != GoalBudgetLimited) {
 		return Goal{}, false
+	}
+	if tokenDelta > 0 {
+		// Real token progress re-arms the continuation loop: the
+		// zero-progress suppression exists to stop idle spinning, not to
+		// block goals that are being worked on again.
+		s.goalContSuppressed = false
 	}
 	timeDelta := s.goalWallClockDeltaLocked()
 	if tokenDelta == 0 && timeDelta == 0 {
@@ -282,10 +322,89 @@ func (s *Session) AccountGoalUsage(tokenDelta int64) (Goal, bool) {
 	s.Goal.TimeUsedSeconds += timeDelta
 	if s.Goal.Status == GoalActive && goalOverBudget(s.Goal) {
 		s.Goal.Status = GoalBudgetLimited
+		// Stage the one-time wrap-up steer for the agent loop to inject. Only
+		// the accounting crossing steers — external mutations that land on
+		// budget_limited (edit, resume-over-budget) happen outside a turn.
+		s.goalBudgetSteer = WrapGoalContext(prompt.GoalBudgetLimit(goalPromptData(s.Goal)))
 	}
 	s.Goal.UpdatedAt = time.Now()
 	s.appendGoalRecordLocked()
 	return *s.Goal, true
+}
+
+// ConsumeGoalBudgetSteer implements GoalAccountant; see the interface doc.
+func (s *Session) ConsumeGoalBudgetSteer() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	steer := s.goalBudgetSteer
+	s.goalBudgetSteer = ""
+	return steer, steer != ""
+}
+
+// GoalContinuation reports whether an idle follow-up turn should start for
+// the session's goal and returns the hidden prompt to start it with. Call it
+// after a turn fully completes, when no other input is pending; enqueue the
+// prompt as the next turn's user input.
+//
+// It owns the continuation policy: only an active goal continues; a
+// continuation turn that accounted zero tokens suppresses further
+// continuations until real token progress or a goal mutation re-arms them
+// (the zero-progress guard — an idle-spinning loop must stop itself); and
+// each hand-out is audited by the next call, so the caller needs no
+// bookkeeping of its own.
+func (s *Session) GoalContinuation() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Goal == nil || s.Goal.Status != GoalActive {
+		s.goalContPending = false
+		return "", false
+	}
+	if s.goalContPending {
+		s.goalContPending = false
+		if s.Goal.TokensUsed == s.goalContTokensAt {
+			s.goalContSuppressed = true
+		}
+	}
+	if s.goalContSuppressed {
+		return "", false
+	}
+	s.goalContPending = true
+	s.goalContTokensAt = s.Goal.TokensUsed
+	return WrapGoalContext(prompt.GoalContinuation(goalPromptData(s.Goal))), true
+}
+
+// GoalContinuationPending reports whether the most recent turn was started by
+// GoalContinuation and has not been audited yet. Transports use it to tell a
+// failing continuation turn (mark the goal usage_limited on rate-limit
+// errors, so the loop parks itself) from a failing user turn.
+func (s *Session) GoalContinuationPending() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.goalContPending
+}
+
+// Markers wrapping every runtime-owned goal steering prompt injected as a
+// user message. Model-facing; every UI surface strips them (see
+// StripSystemReminders).
+const (
+	goalContextOpen  = "<goal_context>"
+	goalContextClose = "</goal_context>"
+)
+
+// WrapGoalContext wraps a rendered steering prompt in the <goal_context>
+// markers that hide it from UI surfaces while flagging its provenance to the
+// model.
+func WrapGoalContext(text string) string {
+	return goalContextOpen + "\n" + text + "\n" + goalContextClose
+}
+
+func goalPromptData(g *Goal) prompt.GoalPromptData {
+	return prompt.GoalPromptData{
+		Objective:       g.Objective,
+		TokensUsed:      g.TokensUsed,
+		TokenBudget:     g.TokenBudget,
+		TimeUsedSeconds: g.TimeUsedSeconds,
+	}
 }
 
 // goalWallClockDeltaLocked returns whole elapsed seconds since the baseline

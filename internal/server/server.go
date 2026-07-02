@@ -181,6 +181,11 @@ type Server struct {
 	wakeupStart  map[string]time.Time
 	wakeupMu     sync.Mutex
 
+	// goalsEnabled mirrors the config's goal.enabled at server start: it
+	// gates the goal-continuation kick after each turn (the goal tools'
+	// visibility is gated separately via tools.SetGoalsEnabled).
+	goalsEnabled bool
+
 	// confirmation channels (from request_user_feedback in browser).
 	confirmations map[string]chan string
 	confirmMu     sync.Mutex
@@ -456,6 +461,12 @@ func (s *Server) enableSubAgentTools() {
 	mgr.SetSynchronous(true)
 	tools.SetDefaultSubAgentManager(mgr)
 	tools.SetTaskStore(tasks.New())
+	// Session goals: every server turn stamps its session as the ctx-scoped
+	// goal store (doAgentTurn); this only advertises the tools.
+	if cfg, err := config.Load(); err == nil && cfg.GoalEnabled() {
+		tools.SetGoalsEnabled(true)
+		s.goalsEnabled = true
+	}
 }
 
 // enableMCP applies the Tool Search config and connects the configured MCP

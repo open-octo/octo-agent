@@ -105,6 +105,30 @@ type Session struct {
 	// while no goal is accruing time. Guarded by mu; not serialized — a
 	// resumed session restarts the clock so downtime is never billed.
 	goalWallClockAt time.Time
+
+	// Goal-continuation runtime (guarded by mu, not serialized; see
+	// GoalContinuation). goalContPending marks that a continuation prompt was
+	// handed out and its turn hasn't been audited yet; goalContTokensAt is
+	// the TokensUsed reading at hand-out, so the audit can tell whether that
+	// turn made any token progress. goalContSuppressed is the zero-progress
+	// guard: set when a continuation turn accounted nothing, cleared by real
+	// token progress or any goal mutation.
+	goalContPending    bool
+	goalContTokensAt   int64
+	goalContSuppressed bool
+
+	// goalBudgetSteer holds the rendered budget-limit steering prompt from
+	// the accounting tick that crossed the budget, until the agent loop
+	// consumes and injects it. At most one per goal activation — the crossing
+	// itself happens at most once.
+	goalBudgetSteer string
+
+	// goalSkipNextTokenDelta makes the next accounting tick bill zero tokens.
+	// Set when a goal is created mid-turn: the agent-side token baseline
+	// still points at the turn start, and billing the whole context input of
+	// the creating round to a seconds-old goal would instantly exhaust small
+	// budgets. Cleared unconsumed at the next turn start.
+	goalSkipNextTokenDelta bool
 }
 
 // Common entry names. Use these constants at call sites so typos are caught.
@@ -725,23 +749,30 @@ func firstUserSnippet(msgs []Message) string {
 	return ""
 }
 
-// StripSystemReminders removes <system-reminder>…</system-reminder> spans the
-// harness injects into user turns (background-process completion notes,
-// recalled memories, …). They are model-facing context, not user speech —
-// strip them anywhere user text is rendered (session previews, the web
-// transcript) so they don't leak into the UI.
+// StripSystemReminders removes the runtime-injected model-facing spans from
+// user text: <system-reminder> (background-process completion notes, recalled
+// memories, …) and <goal_context> (goal continuation and steering prompts).
+// Neither is user speech — strip them anywhere user text is rendered (session
+// previews, the web transcript, steer bubbles) so they don't leak into the
+// UI. A message that was pure injected context strips to empty, which every
+// caller already treats as "render nothing".
 func StripSystemReminders(s string) string {
+	s = stripSpans(s, "<system-reminder>", "</system-reminder>")
+	return stripSpans(s, goalContextOpen, goalContextClose)
+}
+
+func stripSpans(s, open, close string) string {
 	for {
-		start := strings.Index(s, "<system-reminder>")
+		start := strings.Index(s, open)
 		if start < 0 {
 			break
 		}
-		end := strings.Index(s, "</system-reminder>")
+		end := strings.Index(s, close)
 		if end < 0 || end < start {
 			s = s[:start]
 			break
 		}
-		s = s[:start] + s[end+len("</system-reminder>"):]
+		s = s[:start] + s[end+len(close):]
 	}
 	return s
 }

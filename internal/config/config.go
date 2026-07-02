@@ -123,6 +123,22 @@ type Config struct {
 	ShowReasoning *bool `yaml:"show_reasoning,omitempty"`
 	// Browser configures the built-in browser automation backend.
 	Browser BrowserConfig `yaml:"browser,omitempty"`
+	// Goal configures the session-goal feature (/goal and the goal tools).
+	Goal GoalConfig `yaml:"goal,omitempty"`
+}
+
+// GoalConfig configures session goals (persistent objectives the agent keeps
+// pursuing across turns).
+type GoalConfig struct {
+	// Enabled gates the /goal surface and the get_goal/create_goal/
+	// update_goal tools. nil means enabled — the feature is inert until a
+	// goal is explicitly created, so there is no default-behavior change.
+	Enabled *bool `yaml:"enabled,omitempty"`
+}
+
+// GoalEnabled reports whether the session-goal feature is on (default true).
+func (c *Config) GoalEnabled() bool {
+	return c.Goal.Enabled == nil || *c.Goal.Enabled
 }
 
 // BrowserConfig configures how the browser tool connects to Chrome.

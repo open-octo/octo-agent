@@ -204,6 +204,9 @@ func TestAccountGoalUsage(t *testing.T) {
 	if _, err := s.CreateGoal("g", 1000); err != nil {
 		t.Fatal(err)
 	}
+	// Creation arms the mid-turn skip; the next turn start clears it. These
+	// accountings model turns after the goal exists.
+	s.ResetGoalWallClock()
 	g, changed := s.AccountGoalUsage(400)
 	if !changed || g.TokensUsed != 400 || g.Status != GoalActive {
 		t.Errorf("after 400: changed=%v goal=%+v", changed, g)
@@ -311,6 +314,7 @@ func TestGoal_AppendRecordAfterFirstSave(t *testing.T) {
 	if _, err := s.CreateGoal("first", 0); err != nil {
 		t.Fatal(err)
 	}
+	s.ResetGoalWallClock() // turn start clears the mid-turn-creation skip
 	s.AccountGoalUsage(42)
 	if _, err := s.EditGoalObjective("second"); err != nil {
 		t.Fatal(err)

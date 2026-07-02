@@ -858,6 +858,16 @@ func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, bl
 			}
 			break
 		}
+		// An active goal continues unprompted: enqueue the hidden continuation
+		// prompt so the chain below starts the follow-up turn. User steers
+		// queued meanwhile take priority — GoalContinuation is only consulted
+		// when the queue is empty, and its own guards (status, zero-progress
+		// suppression) decide whether the loop keeps going.
+		if s.goalsEnabled && !s.steerPending(sess.ID) {
+			if prompt, ok := sess.GoalContinuation(); ok {
+				s.enqueueSteer(sess.ID, agent.InboxItem{Text: prompt})
+			}
+		}
 		steerItems := s.drainSteer(sess.ID)
 		if len(steerItems) == 0 {
 			break
@@ -1002,6 +1012,11 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// this and later turns — including the wakeup-injected turns kicked via
 	// kickIdleSteerTurn, which also flow through here.
 	runCtx = tools.WithWaker(runCtx, s.wakerFor(sess.ID))
+	if s.goalsEnabled {
+		// The session is both the goal store the goal tools dispatch to and
+		// the accountant the agent bills usage into (wired below).
+		runCtx = tools.WithGoalStore(runCtx, sess)
+	}
 	s.registerInterrupt(sess.ID, cancel)
 	defer func() {
 		cancel()
@@ -1019,6 +1034,9 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	})
 
 	a := s.buildAgent(sess)
+	if s.goalsEnabled {
+		a.GoalAcct = sess
+	}
 	if len(blocks) > 0 {
 		// Image attachments fold into the same user turn as the text when
 		// RunStream appends the user input.
@@ -1116,6 +1134,14 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// so turn_done + assistant_message were broadcast by the handler.
 			// Nothing more for the reply itself.
 		} else {
+			// A goal-continuation turn failing on provider rate limits must
+			// park the goal instead of letting the idle loop hammer the
+			// endpoint: usage_limited stops continuation until /goal resume.
+			if s.goalsEnabled && sess.GoalContinuationPending() && isRateLimitErr(err) {
+				if g, gerr := sess.SetGoalStatus(agent.GoalUsageLimited); gerr == nil {
+					s.broadcastGoalUpdated(sess.ID, g)
+				}
+			}
 			// Surface the error, then fall through to the common complete +
 			// session_update tail. Returning here would skip `complete`, leaving
 			// the web UI's streaming flag (and its caret) stuck on forever; the
@@ -1483,6 +1509,11 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			// Steer messages persist only at turn end like everything else
 			// in the turn — buffer them so a refresh keeps the bubble.
 			w.bufferTurnEvent(evt)
+		}
+
+	case agent.EventGoalUpdated:
+		if ev.Goal != nil {
+			w.server.broadcastGoalUpdated(w.sessionID, *ev.Goal)
 		}
 
 	case agent.EventTurnDone:

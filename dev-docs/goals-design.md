@@ -220,8 +220,11 @@ New agent event kind (own channel, per the #973 rule):
 EventGoalUpdated EventKind = "goal_updated" // payload: the Goal snapshot
 ```
 
-Emitted on every mutation and every accounting step that changed the record.
-Consumers:
+Emitted from inside a turn whenever accounting changed the record (counters
+moved, budget crossing flipped the status). Mutations made outside a turn —
+slash commands, the HTTP API, server-owned transitions like `usage_limited` —
+don't flow through the agent event stream; the mutating surface returns the
+`Goal` to its caller, which broadcasts/renders it directly. Consumers:
 
 - **web**: WS event `goal_updated` → header status chip; history replay
   re-derives current goal from the session on load.

@@ -1712,6 +1712,12 @@ func (a *Agent) accountGoalUsage(handler EventHandler) {
 		g := goal
 		handler(AgentEvent{Kind: EventGoalUpdated, Goal: &g})
 	}
+	// A budget crossing stages a one-time wrap-up steer; inject it so the
+	// next loop iteration drains it ahead of the LLM call. On the single-shot
+	// Turn/TurnStream paths it reaches the model on the next turn instead.
+	if steer, ok := a.GoalAcct.ConsumeGoalBudgetSteer(); ok {
+		a.Inbox.Enqueue(steer)
+	}
 }
 
 // SessionTokens returns the cumulative input and output token counts for all

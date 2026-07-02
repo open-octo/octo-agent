@@ -49,6 +49,9 @@ var allTools = []tool{
 	TaskCreateTool{},
 	TaskUpdateTool{},
 	TaskListTool{},
+	GetGoalTool{},
+	CreateGoalTool{},
+	UpdateGoalTool{},
 	RestartServerTool{},
 	ScheduleWakeupTool{},
 	BrowserTool{},
@@ -239,6 +242,7 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 	mgrOn := subAgentManagerEnabled()
 	askerOn := askerEnabled()
 	tasksOn := tasksEnabled()
+	goalsOn := goalsEnabled()
 	restarterOn := restarterEnabled()
 	messengerOn := messengerEnabled()
 	wakerOn := wakerEnabled()
@@ -301,6 +305,15 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 			continue
 		}
 		if _, isTaskList := t.(TaskListTool); isTaskList && !tasksOn {
+			continue
+		}
+		if _, isGetGoal := t.(GetGoalTool); isGetGoal && !goalsOn {
+			continue
+		}
+		if _, isCreateGoal := t.(CreateGoalTool); isCreateGoal && !goalsOn {
+			continue
+		}
+		if _, isUpdateGoal := t.(UpdateGoalTool); isUpdateGoal && !goalsOn {
 			continue
 		}
 		defs = append(defs, t.Definition())

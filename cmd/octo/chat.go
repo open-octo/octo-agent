@@ -894,6 +894,16 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			sess.Bind(agent.EntryTUI, false)
 		}
 		wireSessionHooks(a, sess, agent.EntryTUI)
+		// Session goals: the session is the durable goal record and the
+		// accountant; the goal tools reach it through the process-global store
+		// (one session per CLI process). The headless one-shot below stays
+		// unwired — its session is never persisted, so a goal could not
+		// outlive the single turn.
+		if gcfg, gerr := config.Load(); gerr == nil && gcfg.GoalEnabled() {
+			tools.SetGoalStore(sess)
+			defer tools.SetGoalStore(nil)
+			a.GoalAcct = sess
+		}
 		// Persisted (non-ephemeral) sessions archive folded turns so the model
 		// can recall them with the read tool after a compaction.
 		if !*noSave {
