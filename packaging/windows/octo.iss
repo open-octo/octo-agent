@@ -111,6 +111,28 @@ begin
   RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvKey, 'Path', Path);
 end;
 
+// WriteDefaultConfigIfMissing seeds ~/.octo/config.yml with workspace_dir:
+// auto on a genuinely fresh install (no config.yml at all yet — not even one
+// with just an access key, which octo itself writes on first `serve` start).
+// This must run before LaunchAndOpenDashboard's `octo serve -d`, or that
+// first start would write an access-key-only config.yml first and this step
+// would then correctly no-op, leaving the new-web-session default unset.
+// An upgrade/reinstall over an existing config.yml is always a no-op here —
+// the installer must never overwrite a user's existing settings.
+procedure WriteDefaultConfigIfMissing;
+var
+  ConfigDir, ConfigPath: string;
+begin
+  ConfigDir := ExpandConstant('{%USERPROFILE}') + '\.octo';
+  ConfigPath := ConfigDir + '\config.yml';
+  if FileExists(ConfigPath) then
+    exit;
+  if not DirExists(ConfigDir) then
+    if not CreateDir(ConfigDir) then
+      exit;
+  SaveStringToFile(ConfigPath, 'workspace_dir: auto' + #13#10, False);
+end;
+
 // LaunchAndOpenDashboard starts the background server and opens the onboarding
 // page. `octo serve -d` blocks until the server is accepting connections (or it
 // times out), so the browser opens against a live port rather than racing the
@@ -219,6 +241,7 @@ begin
     AddToPath;
     EnsurePowerShell7;
     WriteAutostartScript;
+    WriteDefaultConfigIfMissing;
     LaunchAndOpenDashboard;
   end;
 end;

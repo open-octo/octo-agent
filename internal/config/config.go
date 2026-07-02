@@ -125,6 +125,13 @@ type Config struct {
 	Browser BrowserConfig `yaml:"browser,omitempty"`
 	// Goal configures the session-goal feature (/goal and the goal tools).
 	Goal GoalConfig `yaml:"goal,omitempty"`
+	// WorkspaceDir sets the default working directory new web sessions are
+	// created with. Empty (default) changes nothing: a session still falls
+	// back to the server's own launch directory. "auto" resolves to
+	// ~/Desktop/octo (see tools.ResolveWorkspaceDir); anything else is used
+	// as a literal path. Does not affect CLI/TUI sessions or the server's
+	// own cwd, and composes with the per-session working_dir override.
+	WorkspaceDir string `yaml:"workspace_dir,omitempty"`
 }
 
 // GoalConfig configures session goals (persistent objectives the agent keeps

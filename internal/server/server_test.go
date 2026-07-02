@@ -16,6 +16,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/tools"
 	"github.com/open-octo/octo-agent/internal/upgrade"
 )
 
@@ -377,6 +378,13 @@ func mustAccessKey(cfg Config) string {
 	return key
 }
 
+// mustWorkspaceDir resolves the test server's default workspace dir straight
+// from cfg.WorkspaceDir, bypassing ~/.octo/config.yml — mirrors mustAccessKey.
+func mustWorkspaceDir(cfg Config) string {
+	dir, _ := tools.ResolveWorkspaceDir(cfg.WorkspaceDir)
+	return dir
+}
+
 // mustServer creates a Server for testing. It skips tests that need a real
 // provider by using a stub sender.
 func mustServer(t *testing.T, cfg Config) *Server {
@@ -392,6 +400,7 @@ func mustServer(t *testing.T, cfg Config) *Server {
 		skillsManifest:      "",
 		cwd:                 "",
 		envCtx:              "",
+		workspaceDir:        mustWorkspaceDir(cfg),
 		turnLocks:           map[string]*sync.Mutex{},
 		sender:              &stubSender{},
 		accessKey:           mustAccessKey(cfg),
