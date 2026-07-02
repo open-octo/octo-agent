@@ -1105,3 +1105,29 @@ func TestTUI_Paste_EscClears(t *testing.T) {
 		t.Errorf("box should be empty after Esc, got %q", m.ta.Value())
 	}
 }
+
+// show_artifact's whole point is presenting a file to the user; in the rich
+// TUI its status line carries an OSC 8 file:// hyperlink so the artifact is
+// click-to-open. Errors and --plain keep the generic status forms (no escapes
+// in the plain/headless transcript).
+func TestTUI_RenderToolOutcome_ArtifactHyperlink(t *testing.T) {
+	m := newTestModel()
+	input := map[string]any{"path": "/tmp/report.html"}
+
+	got := m.renderToolOutcome("show_artifact", input, "Artifact presented: /tmp/report.html (12 bytes)", false)
+	if !strings.Contains(got, "\x1b]8;;file:///tmp/report.html\x1b\\") {
+		t.Errorf("success line should carry an OSC 8 file:// hyperlink; got %q", got)
+	}
+	if !strings.Contains(got, "/tmp/report.html") {
+		t.Errorf("success line should show the path; got %q", got)
+	}
+
+	if got := m.renderToolOutcome("show_artifact", input, "boom", true); strings.Contains(got, "\x1b]8;;") {
+		t.Errorf("error outcome should not render a hyperlink; got %q", got)
+	}
+
+	m.cfg.plain = true
+	if got := m.renderToolOutcome("show_artifact", input, "ok", false); strings.Contains(got, "\x1b]8;;") {
+		t.Errorf("--plain outcome should not render a hyperlink; got %q", got)
+	}
+}

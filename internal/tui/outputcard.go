@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -75,4 +77,33 @@ func RenderToolStatus(name, target string, isErr bool, errText string) string {
 		s += " " + outMore.Render("— "+errText)
 	}
 	return s
+}
+
+var linkText = lipgloss.NewStyle().Underline(true)
+
+// Hyperlink wraps text in an OSC 8 terminal hyperlink. Terminals that support
+// OSC 8 (iTerm2, Windows Terminal, kitty, WezTerm) make the text click-to-open;
+// others ignore the escape sequences and show the plain text — a safe fallback.
+func Hyperlink(uri, text string) string {
+	return "\x1b]8;;" + uri + "\x1b\\" + text + "\x1b]8;;\x1b\\"
+}
+
+// FileURI converts an absolute filesystem path to a file:// URI, percent-
+// encoding as needed. Windows drive paths gain the required leading slash
+// (C:\x → file:///C:/x).
+func FileURI(abs string) string {
+	p := filepath.ToSlash(abs)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	u := url.URL{Scheme: "file", Path: p}
+	return u.String()
+}
+
+// RenderArtifactStatus renders show_artifact's success line: the path as an
+// underlined click-to-open file:// hyperlink, so a TUI user can open the
+// artifact directly instead of hunting the file down by hand.
+func RenderArtifactStatus(absPath string) string {
+	return fmt.Sprintf("%s %s %s", outBullet, headerVerb.Render("Artifact"),
+		Hyperlink(FileURI(absPath), linkText.Render(absPath)))
 }

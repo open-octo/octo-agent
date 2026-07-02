@@ -62,7 +62,8 @@ func (ShowArtifactTool) Definition() agent.ToolDefinition {
 			"heredoc/redirect like `cat > x.html`, a script, a build step, or a download). Files you " +
 			"create with write_file/edit_file are surfaced automatically and do NOT need this. In the " +
 			"web UI the file opens in the Artifacts panel (HTML renders in a sandboxed preview); in " +
-			"other clients the path is simply reported. The file must already exist.",
+			"the TUI the path renders as a click-to-open link; elsewhere the path is simply " +
+			"reported. The file must already exist.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

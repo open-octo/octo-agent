@@ -75,3 +75,34 @@ func TestRenderOutputCard_Highlight(t *testing.T) {
 		t.Errorf("expected ANSI escapes from Chroma highlighting; got:\n%s", got)
 	}
 }
+
+func TestFileURI(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/tmp/report.html", "file:///tmp/report.html"},
+		{"/tmp/my report.html", "file:///tmp/my%20report.html"},
+		// A Windows drive path (already slashed — filepath.ToSlash converts the
+		// separators on Windows itself) gains the required leading slash.
+		{"C:/Users/a/chart.html", "file:///C:/Users/a/chart.html"},
+	}
+	for _, c := range cases {
+		if got := FileURI(c.in); got != c.want {
+			t.Errorf("FileURI(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestRenderArtifactStatus(t *testing.T) {
+	got := RenderArtifactStatus("/tmp/report.html")
+	// OSC 8 open + URI, the visible path, and the OSC 8 close must all be there;
+	// terminals without OSC 8 support ignore the escapes and show the path.
+	for _, want := range []string{
+		"\x1b]8;;file:///tmp/report.html\x1b\\",
+		"/tmp/report.html",
+		"\x1b]8;;\x1b\\",
+		"Artifact",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("artifact status missing %q; got:\n%q", want, got)
+		}
+	}
+}

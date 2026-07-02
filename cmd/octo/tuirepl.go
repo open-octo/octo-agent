@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -1439,6 +1440,16 @@ func (m *tuiModel) rendersCard(toolName string) bool {
 func (m *tuiModel) renderToolOutcome(toolName string, input map[string]any, resultText string, isErr bool) string {
 	if m.rendersCard(toolName) {
 		return renderToolCard(toolName, input, resultText, isErr)
+	}
+	// show_artifact's whole point is "present this file to the user"; the web
+	// UI has the Artifacts panel, the TUI's equivalent is a click-to-open
+	// file:// hyperlink (plain text on terminals without OSC 8 support).
+	if toolName == "show_artifact" && !isErr && !m.cfg.plain {
+		if p, _ := input["path"].(string); strings.TrimSpace(p) != "" {
+			if abs, err := filepath.Abs(strings.TrimSpace(p)); err == nil {
+				return tui.RenderArtifactStatus(abs)
+			}
+		}
 	}
 	if m.cfg.plain {
 		if isErr {
