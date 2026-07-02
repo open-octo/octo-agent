@@ -51,6 +51,7 @@ RG_EMBED_BIN := $(RG_EMBED_DIR)/rg
 .PHONY: all build install test cover vet fmt fmt-check tidy clean \
         eval-build eval-list eval \
         rg-embed rg-embed-clean \
+        bundle-tools-windows bundle-tools-macos \
         web-build web-dev dev build-full
 
 all: test
@@ -153,6 +154,74 @@ $(RG_EMBED_BIN):
 
 rg-embed-clean:
 	rm -f $(RG_EMBED_BIN) $(RG_EMBED_BIN).exe
+
+# ── bundled tools (installer-only): uv ───────────────────────────────────────
+# Fetches upstream release binaries for uv (astral-sh/uv) and stages them
+# under dist/bundled-tools/<platform>/ so the Windows/macOS installers
+# (packaging/windows/octo.iss, packaging/macos/build.sh) can bundle it — a
+# fresh install then has `uv run` working with zero manual download, for the
+# office-xlsx skill (issue #1054's P1 priority: the non-technical-user path).
+#
+# bun bundling (for web-artifacts-builder) was deliberately deferred, not
+# forgotten: uv alone already runs 51-107MB depending on platform, and
+# bundling bun too would roughly double that (a macOS universal bun binary
+# alone is ~132MB) for a more power-user-oriented skill. web-artifacts-builder
+# keeps its existing guided "install bun yourself" path (SKILL.md), the same
+# bar Node had before slice B. The generic bundled-dir mechanism
+# (bundledBinDir/withBundledBinPath in internal/tools/sandbox.go, and the
+# toolchain.go presence probe) is NOT bun-specific — it picks up whatever's
+# actually in ~/.octo/bin, so a future bundle-tools-* target (or a user who
+# drops a bun binary there by hand) needs no code change, only a Makefile/
+# packaging addition mirroring this one.
+#
+# Deliberately NOT go:embed'd into the octo binary itself: that would bloat
+# every build on every platform (CLI-only Linux users included) with a binary
+# they'll never use. Instead this target runs once per release. A plain
+# `git clone && make build` / `go install` never runs it and never needs
+# dist/bundled-tools to exist — that's why it isn't in git and isn't a
+# dependency of the `build` target.
+#
+# release.yml's macos-installer job runs bundle-tools-macos directly (macOS
+# runners have `curl`/`unzip`/`lipo` out of the box). The windows-installer
+# job does NOT run bundle-tools-windows — windows-latest isn't guaranteed to
+# have GNU Make, so that job fetches the same asset with native PowerShell
+# instead (see release.yml) and its version pin must be kept in sync with
+# UV_VERSION below by hand. bundle-tools-windows is still here for local
+# testing (works from any host with curl/unzip, Windows included via
+# WSL/Git-Bash) and to keep both platforms documented in one place.
+#
+# Version is pinned (like RG_VERSION above) rather than tracking "latest", so
+# a release build is reproducible; bump deliberately.
+UV_VERSION := 0.11.26
+
+BUNDLE_TOOLS_DIR := dist/bundled-tools
+
+# octo.iss only ever produces a windows/amd64 installer (ArchitecturesAllowed
+# x64compatible), so only that one asset is needed.
+bundle-tools-windows:
+	@echo "Fetching uv $(UV_VERSION) for windows/amd64..."
+	@mkdir -p $(BUNDLE_TOOLS_DIR)/windows-amd64
+	@set -eu; work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; \
+		curl -sL -o "$$work/uv.zip" "https://github.com/astral-sh/uv/releases/download/$(UV_VERSION)/uv-x86_64-pc-windows-msvc.zip"; \
+		unzip -q -o "$$work/uv.zip" -d "$$work/uv"; \
+		cp "$$work/uv/uv.exe" $(BUNDLE_TOOLS_DIR)/windows-amd64/uv.exe; \
+		chmod +x $(BUNDLE_TOOLS_DIR)/windows-amd64/uv.exe
+	@echo "Staged $(BUNDLE_TOOLS_DIR)/windows-amd64/uv.exe"
+
+# octo-setup.pkg ships one universal (amd64+arm64) binary via lipo, same as
+# the octo binary itself (universal_binaries in .goreleaser.yaml) — so uv gets
+# lipo'd into a universal binary here too, rather than shipping two separate
+# per-arch copies in a single pkg.
+bundle-tools-macos:
+	@echo "Fetching uv $(UV_VERSION) for darwin (universal)..."
+	@mkdir -p $(BUNDLE_TOOLS_DIR)/darwin-universal
+	@set -eu; work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; \
+		curl -sL "https://github.com/astral-sh/uv/releases/download/$(UV_VERSION)/uv-aarch64-apple-darwin.tar.gz" | tar -xzf - -C "$$work"; \
+		curl -sL "https://github.com/astral-sh/uv/releases/download/$(UV_VERSION)/uv-x86_64-apple-darwin.tar.gz" | tar -xzf - -C "$$work"; \
+		lipo -create -output $(BUNDLE_TOOLS_DIR)/darwin-universal/uv \
+			"$$work/uv-aarch64-apple-darwin/uv" "$$work/uv-x86_64-apple-darwin/uv"; \
+		chmod +x $(BUNDLE_TOOLS_DIR)/darwin-universal/uv
+	@echo "Staged $(BUNDLE_TOOLS_DIR)/darwin-universal/uv"
 
 # ── octo-eval — lightweight eval (manual; see dev-docs/octo-eval.md) ─────────
 # Each task under evals/tasks/ is a local fixture; no Docker, no clone. Calls a

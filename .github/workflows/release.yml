@@ -59,6 +59,26 @@ jobs:
           Copy-Item LICENSE.txt staging\LICENSE.txt
           "version=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      # Fetches uv.exe from its upstream GitHub release so the installer can
+      # bundle it — see octo.iss's [Files] section. bun bundling was
+      # considered and deliberately deferred (see the Makefile comment above
+      # bundle-tools-windows) — only uv ships today. Native PowerShell rather
+      # than `make bundle-tools-windows` (which does the same fetch and is
+      # kept for local/macOS/Linux dev use — see the Makefile):
+      # windows-latest runners aren't guaranteed to have GNU Make, and this
+      # avoids adding a `choco install make` dependency to the release
+      # pipeline just for one curl+unzip call. The version here must be kept
+      # in sync with UV_VERSION in the Makefile.
+      - name: Fetch bundled uv
+        shell: pwsh
+        run: |
+          $uvVersion = "0.11.26"
+          New-Item -ItemType Directory -Force -Path dl\uv | Out-Null
+
+          Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/download/$uvVersion/uv-x86_64-pc-windows-msvc.zip" -OutFile dl\uv.zip
+          Expand-Archive -Path dl\uv.zip -DestinationPath dl\uv -Force
+          Copy-Item dl\uv\uv.exe staging\uv.exe
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y # not preinstalled on the runner image
@@ -132,6 +152,18 @@ jobs:
           cp dl/octo staging/octo
           cp LICENSE.txt staging/LICENSE.txt
           echo "version=$version" >> "$GITHUB_ENV"
+
+      # Fetches uv (universal amd64+arm64 binary, lipo'd together) from its
+      # upstream GitHub release (pinned version in the Makefile) so build.sh
+      # can bundle it into the pkg payload — see
+      # packaging/macos/scripts/postinstall for where it lands at install
+      # time. bun bundling was considered and deliberately deferred (see the
+      # Makefile comment above bundle-tools-macos) — only uv ships today.
+      - name: Fetch bundled uv
+        run: make bundle-tools-macos
+
+      - name: Copy bundled tools into the installer staging dir
+        run: cp dist/bundled-tools/darwin-universal/uv staging/uv
 
       - name: Build installer
         env:
