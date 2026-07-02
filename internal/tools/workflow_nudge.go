@@ -12,12 +12,12 @@ import (
 // a reusable workflow. Wrapped in <system-reminder> so the display layer strips
 // it (same convention as the memory save-nudge).
 const workflowNudgeText = "<system-reminder>\n" +
-	"You've run more than one skill by hand this turn. If this is a repeatable flow, offer to capture it as a saved workflow — guide it with the workflow-builder skill, or write the script and persist it with workflow_save — so it can be rerun by name (and scheduled). If this was a one-off, ignore this.\n" +
+	"You've run more than one skill by hand this turn. If this is a repeatable flow, offer to capture it as a saved workflow — guide it with the workflow-creator skill, or write the script and persist it with workflow_save — so it can be rerun by name (and scheduled). If this was a one-off, ignore this.\n" +
 	"</system-reminder>"
 
 // WorkflowNudger suggests saving a reusable workflow once the model has manually
 // chained >=2 distinct skills within a single turn (the passive complement to
-// the workflow-builder skill). It mirrors memory.Injector's save-nudge but keys
+// the workflow-creator skill). It mirrors memory.Injector's save-nudge but keys
 // off skill composition instead of a milestone command. One per session; its
 // latches re-arm on each user turn. A mutex guards the state so it is safe even
 // when a transport dispatches hooks off the serial run loop.
@@ -55,9 +55,9 @@ func (n *WorkflowNudger) observe(toolName string, input map[string]any) string {
 	}
 
 	name := skillNameFromCall(toolName, input)
-	// workflow-builder is how you'd *build* a workflow, so running it isn't
+	// workflow-creator is how you'd *build* a workflow, so running it isn't
 	// "manual chaining" worth nudging about.
-	if name == "" || name == "workflow-builder" {
+	if name == "" || name == "workflow-creator" {
 		return ""
 	}
 	n.seen[name] = true

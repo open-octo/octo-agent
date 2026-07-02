@@ -42,9 +42,9 @@ func TestMaterializeDefaults_WritesEmbeddedAndStamps(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "implement", "SKILL.md")); err != nil {
 		t.Fatalf("expected implement/SKILL.md materialized: %v", err)
 	}
-	// The workflow-builder skill ships in the default set.
-	if _, err := os.Stat(filepath.Join(root, "workflow-builder", "SKILL.md")); err != nil {
-		t.Fatalf("expected workflow-builder/SKILL.md materialized: %v", err)
+	// The workflow-creator skill ships in the default set.
+	if _, err := os.Stat(filepath.Join(root, "workflow-creator", "SKILL.md")); err != nil {
+		t.Fatalf("expected workflow-creator/SKILL.md materialized: %v", err)
 	}
 	// tdd bundles four companion references — all must materialize.
 	for _, f := range []string{"SKILL.md", "tests.md", "mocking.md", "deep-modules.md", "interface-design.md", "refactoring.md"} {

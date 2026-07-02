@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Create new skills, modify existing skills, and help users turn repeatable workflows into reusable instructions. Use when the user wants to create a skill from scratch, edit or improve an existing skill, capture a workflow as a skill, or optimize a skill's description for better triggering accuracy. Do NOT use to chain or orchestrate several EXISTING skills/recordings into a runnable saved workflow — that is workflow-builder.
+description: Create new skills, modify existing skills, and help users turn repeatable workflows into reusable instructions. Use when the user wants to create a skill from scratch, edit or improve an existing skill, capture a workflow as a skill, or optimize a skill's description for better triggering accuracy. Do NOT use to chain or orchestrate several EXISTING skills/recordings into a runnable saved workflow — that is workflow-creator.
 ---
 
 # Skill Creator

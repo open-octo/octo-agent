@@ -38,13 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a sub-agent) by name, so both flow through one pipeline with typed handoff
   (#1041). Your "download three reports → merge them → build a deck" is now a
   single saved workflow instead of three disconnected skills.
-- **workflow-builder skill — build a saved workflow by conversation.** Guides you
+- **workflow-creator skill — build a saved workflow by conversation.** Guides you
   from "chain these skills" to a saved, validated workflow: it inventories the
   available skills, proposes how each one's output feeds the next, generates the
   Ruby, dry-runs it, and saves it with `workflow_save` (#1045).
 - **Workflow save-nudge.** When you run two or more skills by hand in a turn, octo
   offers to capture the sequence as a reusable workflow — the passive companion to
-  workflow-builder (#1047).
+  workflow-creator (#1047).
 - **Discoverable named workflows.** Saved workflows autocomplete in the web
   composer (`/wf`) and list under the TUI's `/workflows` (#1040), and octo ships
   three ready-made preset workflows — adversarial-review, parallel-understand,

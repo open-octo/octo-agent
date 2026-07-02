@@ -1,4 +1,4 @@
-# workflow-builder:把技能引导成一条 saved workflow
+# workflow-creator:把技能引导成一条 saved workflow
 
 ## 背景
 
@@ -8,15 +8,15 @@
 
 一个必须诚实面对的**非对称**:B 只把**浏览器录制**的 `params`/`outputs` 渲染进了系统提示(`RenderBrowserSkillsManifest`);**SKILL.md 技能在清单里只有 名字 + 描述**(`skills.RenderManifest` 不含 params/outputs——A.4 设想的 frontmatter outputs 目前未实现,`skills.Skill` 连字段都没有)。所以"看清一个技能的输出形状"这件事,录制是清单直给,MD 技能得靠**描述推断 + 调用点 schema**。这直接影响下面第 2 步的措辞,不能含糊。
 
-本方案加一个 `workflow-builder` 默认技能,对齐 octo 既有的"创建类技能"套路(`mcp-creator` / `skill-creator` / `web-artifacts-builder`),把授权流程固化成一段对话脚本。**纯 SKILL.md,不加任何核心代码或新工具**——复用已有的 `skill()` 原语、`workflow_save`、`workflow` 工具。
+本方案加一个 `workflow-creator` 默认技能,对齐 octo 既有的"创建类技能"套路(`mcp-creator` / `skill-creator` / `web-artifacts-builder`),把授权流程固化成一段对话脚本。**纯 SKILL.md,不加任何核心代码或新工具**——复用已有的 `skill()` 原语、`workflow_save`、`workflow` 工具。
 
 ## 方案
 
 ### 形态
 
-一个默认技能 `internal/skills/defaults/workflow-builder/SKILL.md`,`go:embed` 进二进制、materialize 到 `~/.octo/skills-default`,和其它默认技能一样进 L1 清单。触发词:「串个流程 / 把这几个技能连起来 / 做个 workflow / 编排一下 / build a workflow」。
+一个默认技能 `internal/skills/defaults/workflow-creator/SKILL.md`,`go:embed` 进二进制、materialize 到 `~/.octo/skills-default`,和其它默认技能一样进 L1 清单。触发词:「串个流程 / 把这几个技能连起来 / 做个 workflow / 编排一下 / build a workflow」。
 
-**与 `skill-creator` 划清边界**(两者描述相邻,易误触):workflow-builder = 把**已有的**技能/录制**串成一条可运行的 saved workflow**;skill-creator = **写一个新的 SKILL.md**。两边描述都加上明确的 should-NOT-trigger 提示(builder 不写新技能;skill-creator 不做编排),降低误触/双触。
+**与 `skill-creator` 划清边界**(两者描述相邻,易误触):workflow-creator = 把**已有的**技能/录制**串成一条可运行的 saved workflow**;skill-creator = **写一个新的 SKILL.md**。两边描述都加上明确的 should-NOT-trigger 提示(builder 不写新技能;skill-creator 不做编排),降低误触/双触。
 
 ### 授权流程(SKILL.md 教模型走的步骤)
 
@@ -44,18 +44,18 @@
 
 两条引导路径互补:
 
-- **workflow-builder** 管「我想造一条流程」—— 主动、从零编排。
+- **workflow-creator** 管「我想造一条流程」—— 主动、从零编排。
 - **save-nudge**(复用现有 nudge injector)管「我刚在会话里手动串过一次,帮我收成 workflow」—— 被动、抓已发生的时刻:当模型一个 turn 内连续成功调了 ≥2 个 `skill` / `run_skill`,同 turn 提示一句"要存成 saved workflow 吗"。
 
 本方案只做 builder;nudge 作为紧跟的小增强,单独评估。
 
 ## 验证
 
-- **可发现** —— materialize 后 `skills.Discover` 能列出 `workflow-builder`;`internal/skills/defaults_test.go` 加一条断言它在默认集里(纯指令技能没有单元逻辑可测,保证被打包 + 可发现即可)。
+- **可发现** —— materialize 后 `skills.Discover` 能列出 `workflow-creator`;`internal/skills/defaults_test.go` 加一条断言它在默认集里(纯指令技能没有单元逻辑可测,保证被打包 + 可发现即可)。
 - **端到端(手动)** —— 一次会话说「把 download-excels、merge-excels、excels-to-ppt 串成 monthly-report」,验证模型走完 盘点 → 接线确认 → 生成 → 干跑 → 保存,产物落在 `.octo/workflows/monthly-report.rb`,且 `workflow name=monthly-report` 能跑通。
 
 ## 落地
 
-前置:A(#1032)、B(#1038)、C(#1041)均已合入——`skill()` 原语、录制 outputs、清单发现都在,builder 是它们之上的引导层(D)。单个 PR:新增 `internal/skills/defaults/workflow-builder/SKILL.md` + 收紧 `skill-creator` 描述边界 + 一条 `defaults_test` 断言。
+前置:A(#1032)、B(#1038)、C(#1041)均已合入——`skill()` 原语、录制 outputs、清单发现都在,builder 是它们之上的引导层(D)。单个 PR:新增 `internal/skills/defaults/workflow-creator/SKILL.md` + 收紧 `skill-creator` 描述边界 + 一条 `defaults_test` 断言。
 
 已一并订正:`composable-skills-design.md` A.4 原把"MD frontmatter outputs"写成可选增强,但 `skills.Skill` 无该字段、`RenderManifest` 也不渲染——已改为"MD 结构化输出仅靠调用点 schema;frontmatter outputs 未实现"。
