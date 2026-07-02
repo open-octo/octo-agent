@@ -166,7 +166,11 @@ type Server struct {
 
 	// sessionAgents tracks the currently-running Agent per session so that
 	// mid-turn steer messages can be injected directly into its Inbox.
+	// liveSessions tracks the running turn's Session object under the same
+	// lock: goal commands must mutate the record the turn is accounting
+	// into, not a freshly-loaded copy the turn would later overwrite.
 	sessionAgents   map[string]*agent.Agent
+	liveSessions    map[string]*agent.Session
 	sessionAgentsMu sync.Mutex
 
 	// senderCache holds one sender per config entry name, built lazily for
@@ -409,6 +413,7 @@ func New(cfg Config) (*Server, error) {
 		sessionBindingLocks: map[string]*sync.Mutex{},
 		steerQueues:         make(map[string][]agent.InboxItem),
 		sessionAgents:       make(map[string]*agent.Agent),
+		liveSessions:        make(map[string]*agent.Session),
 		accessKey:           accessKey,
 		confirmations:       make(map[string]chan string),
 		questionChans:       make(map[string]chan tools.AskResponse),
@@ -641,6 +646,9 @@ func (s *Server) registerRoutes() {
 	s.api("PATCH /api/sessions/{id}/show_reasoning", s.handleUpdateSessionShowReasoning)
 	s.api("PATCH /api/sessions/{id}/permission_mode", s.handleUpdateSessionPermissionMode)
 	s.api("PATCH /api/sessions/{id}/working_dir", s.handleUpdateSessionWorkingDir)
+	s.api("GET /api/sessions/{id}/goal", s.handleGetSessionGoal)
+	s.api("PUT /api/sessions/{id}/goal", s.handleUpdateSessionGoal)
+	s.api("DELETE /api/sessions/{id}/goal", s.handleDeleteSessionGoal)
 	s.api("GET /api/tools", s.handleListTools)
 	s.api("GET /api/skills", s.handleListSkills)
 	s.api("GET /api/workflows", s.handleListWorkflows)
@@ -2187,19 +2195,36 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 
 	ctrl := channel.NewUIController(ad, ev.ChatID, ev.MessageID)
 
+	// The persisted backing session carries the conversation's goal — the
+	// same record every transport bound to this session sees. Wire it as the
+	// accountant and the tool store; a tombstoned store (concurrent /unbind)
+	// leaves goals unwired for this turn.
+	goalStore := sess.GoalStore()
+	goalsOn := s.goalsEnabled && goalStore != nil
+	if goalsOn {
+		sess.Agent.GoalAcct = goalStore
+		ctx = tools.WithGoalStore(ctx, goalStore)
+	} else {
+		sess.Agent.GoalAcct = nil
+	}
+
 	var toolDefs []agent.ToolDefinition
 	var executor agent.ToolExecutor
 	if s.cfg.Tools {
 		executor = tools.NewDefaultRegistry()
-		// IM sessions don't carry goals yet (channel.Session has no goal
-		// store) — hide the goal tools rather than advertise ones that can
-		// only error. The IM surface lands with its own wiring.
-		toolDefs = tools.WithoutGoalTools(tools.DefaultToolsFor(sess.Agent.Model))
+		toolDefs = tools.DefaultToolsFor(sess.Agent.Model)
+		if !goalsOn {
+			// Advertising a tool this turn can't execute is the #597 class.
+			toolDefs = tools.WithoutGoalTools(toolDefs)
+		}
 
 		// Per-message sub-agent manager bound to THIS chat's agent —
 		// synchronous, since a chat message is request/response with no
 		// follow-up channel for an async result.
 		spawner := app.NewSpawner(sess.Agent, executor, func() []agent.ToolDefinition {
+			if goalsOn {
+				return tools.DefaultToolsFor(sess.Agent.Model)
+			}
 			return tools.WithoutGoalTools(tools.DefaultToolsFor(sess.Agent.Model))
 		})
 		subMgr := tools.NewSubAgentManager(spawner)
@@ -2241,22 +2266,54 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		}
 	}
 
+	// Goal status before the turn, for the terminal-transition notice below —
+	// an IM user isn't watching a status line, so transitions into a stopped
+	// state must arrive as a chat message.
+	var goalStatusBefore agent.GoalStatus
+	if goalsOn {
+		if g, ok := goalStore.GoalSnapshot(); ok {
+			goalStatusBefore = g.Status
+		}
+	}
+
 	_, runErr := channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, content)
 	persist()
 
 	// Steer messages that arrived after the turn's final inbox drain chain
-	// into follow-up turns (web runAgentTurnLoop parity). Still inside
-	// BeginRun, so no new turn can interleave. Persist after each chained
-	// turn — one crash must cost at most one turn, not the whole chain. A
-	// chained error stops the chain (its rollback already dropped the steer
-	// message; looping would re-fail forever).
+	// into follow-up turns (web runAgentTurnLoop parity), and an active goal
+	// keeps the chain going with hidden continuation prompts once the inbox
+	// is dry (user input always drains first). Still inside BeginRun, so no
+	// new turn can interleave. Persist after each chained turn — one crash
+	// must cost at most one turn, not the whole chain. A chained error stops
+	// the chain (its rollback already dropped the steer message; looping
+	// would re-fail forever).
 	for runErr == nil && ctx.Err() == nil {
-		items := sess.Agent.Inbox.Drain()
-		if len(items) == 0 {
+		next := ""
+		if items := sess.Agent.Inbox.Drain(); len(items) > 0 {
+			next = strings.Join(agent.Texts(items), "\n\n")
+		} else if goalsOn {
+			if prompt, ok := goalStore.GoalContinuation(); ok {
+				next = prompt
+			}
+		}
+		if next == "" {
 			break
 		}
-		_, runErr = channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, strings.Join(agent.Texts(items), "\n\n"))
+		_, runErr = channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, next)
 		persist()
+	}
+
+	if goalsOn && runErr != nil {
+		// Park the continuation loop on any aborted or errored turn (the
+		// zero-progress audit can't catch either — partial replies were
+		// already billed); a rate-limited continuation turn parks harder as
+		// usage_limited, until /goal resume. Web/TUI parity.
+		if goalStore.GoalContinuationPending() && agent.IsRateLimitErr(runErr) {
+			if g, gerr := goalStore.SetGoalStatus(agent.GoalUsageLimited); gerr == nil {
+				ad.SendText(ev.ChatID, "⏸️ Goal usage limited (provider rate limit) — /goal resume to retry: "+g.Objective, ev.MessageID)
+			}
+		}
+		goalStore.SuppressGoalContinuation()
 	}
 
 	// Surface a turn failure to the chat. Without this the user just sees
@@ -2265,6 +2322,21 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// expected and stays quiet.
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
 		ad.SendText(ev.ChatID, "⚠️ "+runErr.Error(), ev.MessageID)
+	}
+
+	// Terminal-transition notice: the model finished, blocked, or exhausted
+	// the budget during this chain. usage_limited already sent its own line.
+	if goalsOn {
+		if g, ok := goalStore.GoalSnapshot(); ok && g.Status != goalStatusBefore {
+			switch g.Status {
+			case agent.GoalComplete:
+				ad.SendText(ev.ChatID, "✅ Goal complete ("+agent.GoalUsageLine(g)+"): "+g.Objective, ev.MessageID)
+			case agent.GoalBlocked:
+				ad.SendText(ev.ChatID, "🚧 Goal blocked — the agent is at an impasse; /goal resume to retry: "+g.Objective, ev.MessageID)
+			case agent.GoalBudgetLimited:
+				ad.SendText(ev.ChatID, "⏸️ Goal budget reached ("+agent.GoalUsageLine(g)+") — /goal edit <objective> to keep going: "+g.Objective, ev.MessageID)
+			}
+		}
 	}
 }
 

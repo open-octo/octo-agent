@@ -41,6 +41,7 @@
     showToast,
     uid,
     agenticSessions,
+    chatGoal,
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
@@ -199,6 +200,11 @@
   // session switch and on a server `history_reload` (after /clear or /compact
   // rewrote history out of band).
   function loadHistory(sid: string) {
+    // Seed the goal chip for this session; failures (older server, goals
+    // disabled) just leave the chip hidden.
+    api.getSessionGoal(sid)
+      .then(resp => chatGoal.update(m => ({ ...m, [sid]: resp?.goal ?? null })))
+      .catch(() => {})
     api.getSessionMessages(sid, { limit: 30 }).then((resp: any) => {
       const events: any[] = resp?.events ?? []
       // Collect the tool_ids that came from history so we only close those,
@@ -269,6 +275,12 @@
 
     // History rewritten out of band (/clear, /compact): drop the rendered
     // transcript and re-fetch the persisted one.
+    cleanups.push(ws.on('goal_updated', (ev) => {
+      const gsid = (ev as any).session_id
+      if (!gsid) return
+      chatGoal.update(m => ({ ...m, [gsid]: (ev as any).goal ?? null }))
+    }))
+
     cleanups.push(ws.on('history_reload', (ev) => {
       if ((ev as any).session_id !== sid) return
       clearMsgs(sid)

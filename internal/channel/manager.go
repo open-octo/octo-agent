@@ -299,9 +299,30 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 		return m.cmdNew(ev)
 	case "/compact":
 		return m.cmdCompact(ev)
+	case "/goal":
+		return m.cmdGoal(ev, strings.Join(args, " "))
 	default:
-		return fmt.Sprintf("Unknown command: %s. Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /stop, /status", cmd)
+		return fmt.Sprintf("Unknown command: %s. Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /goal, /stop, /status", cmd)
 	}
+}
+
+// cmdGoal applies the shared /goal grammar to the chat's persisted session.
+// Goal state lives on the backing store, so it is visible to every transport
+// bound to the same session. Mutations are safe against a running turn — the
+// session's goal methods are mutex-guarded and the turn's accounting picks
+// the change up at its next tick.
+func (m *Manager) cmdGoal(ev InboundEvent, args string) string {
+	key := sessionKeyFor(m.mode, ev)
+	val, loaded := m.sessions.Load(key)
+	if !loaded {
+		return "No active session. Send a message first, or /bind one."
+	}
+	sess := val.(*Session)
+	store := sess.GoalStore()
+	if store == nil {
+		return "Goals are unavailable for this session."
+	}
+	return agent.GoalCommand(store, args)
 }
 
 // cmdClear wipes the current session's conversation history while keeping its

@@ -347,12 +347,17 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	// "/..." text falls through to the model, matching the TUI where unknown
 	// slashes are ordinary input.
 	if len(att.blocks) == 0 && len(att.notes) == 0 {
-		switch strings.ToLower(strings.TrimSpace(content)) {
+		trimmed := strings.TrimSpace(content)
+		switch strings.ToLower(trimmed) {
 		case "/clear":
 			s.wsClearSession(sid)
 			return
 		case "/compact":
 			s.wsCompactSession(sid)
+			return
+		}
+		if trimmed == "/goal" || strings.HasPrefix(trimmed, "/goal ") {
+			s.wsGoalCommand(sid, strings.TrimSpace(strings.TrimPrefix(trimmed, "/goal")))
 			return
 		}
 	}
@@ -1049,6 +1054,10 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// Register this Agent so concurrent mid-turn messages can reach its Inbox.
 	s.sessionAgentsMu.Lock()
 	s.sessionAgents[sess.ID] = a
+	if s.liveSessions == nil { // tests build minimal Servers by hand
+		s.liveSessions = make(map[string]*agent.Session)
+	}
+	s.liveSessions[sess.ID] = sess
 	s.sessionAgentsMu.Unlock()
 	// Teardown: drain any messages still in the Inbox (they arrived during the
 	// final LLM round, or the turn errored before draining them) back to the
@@ -1064,6 +1073,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			s.enqueueSteer(sess.ID, items...)
 		}
 		delete(s.sessionAgents, sess.ID)
+		delete(s.liveSessions, sess.ID)
 		s.sessionAgentsMu.Unlock()
 	}()
 

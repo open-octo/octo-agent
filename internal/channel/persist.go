@@ -91,6 +91,15 @@ func (s *Session) Persist() error {
 	return s.Store.Save()
 }
 
+// GoalStore returns the persisted backing session, which carries the
+// conversation's goal, or nil when a concurrent /unbind tombstoned it.
+// Accessor because Store mutates under storeMu.
+func (s *Session) GoalStore() *agent.Session {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	return s.Store
+}
+
 // deleteStore removes the persisted history and tombstones the store so an
 // in-flight turn can't write it back; used by /unbind and /bind, whose
 // contracts are "history cleared" / "start fresh". Returns the delete error
