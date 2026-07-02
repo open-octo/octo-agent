@@ -75,7 +75,11 @@ func renderGoal(name string, d GoalPromptData) string {
 		// plain struct cannot fail in practice.
 		panic("prompt: goal template " + name + ": " + err.Error())
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	// A Windows checkout embeds the .md templates with CRLF (no
+	// .gitattributes pins LF); normalize so the model-facing prompt — and
+	// the exact-match tests — are identical on every platform.
+	out := strings.ReplaceAll(sb.String(), "\r\n", "\n")
+	return strings.TrimRight(out, "\n")
 }
 
 func escapeXMLText(s string) string {
