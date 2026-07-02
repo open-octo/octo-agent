@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>octo</title>
+    <!-- Per-user only: no admin password, no root-owned files. Mirrors the
+         Windows installer's PrivilegesRequired=lowest — Installer.app skips
+         the credential prompt entirely since localSystem is disabled. -->
+    <domains enable_currentUserHome="true" enable_localSystem="false" enable_anywhere="false"/>
+    <options customize="never" require-scripts="true"/>
+    <choices-outline>
+        <line choice="default">
+            <line choice="dev.octo-agent.octo"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="dev.octo-agent.octo" visible="false">
+        <pkg-ref id="dev.octo-agent.octo"/>
+    </choice>
+    <pkg-ref id="dev.octo-agent.octo" version="{{VERSION}}" onConclusion="none">octo-component.pkg</pkg-ref>
+</installer-gui-script>

@@ -1,0 +1,68 @@
+#!/bin/sh
+# Runs as the installing user (currentUserHome domain — no root, no sudo).
+# Adds ~/Library/Application Support/octo/bin to PATH, registers a login
+# LaunchAgent for `octo serve -d`, writes an uninstall helper (pkg has no
+# native uninstaller, unlike Windows "Add or remove programs"), then starts
+# the server now and opens onboarding — mirroring octo.iss's
+# LaunchAndOpenDashboard exactly, including deferring the login-time
+# autostart to the *next* login rather than firing it here too.
+set -eu
+
+app_dir="$HOME/Library/Application Support/octo"
+bin_dir="$app_dir/bin"
+bin="$bin_dir/octo"
+marker="# added by the octo installer"
+
+add_to_path() {
+  rc="$1"
+  [ -f "$rc" ] || touch "$rc"
+  grep -qF "$marker" "$rc" 2>/dev/null && return
+  printf '\nexport PATH="%s:$PATH"  %s\n' "$bin_dir" "$marker" >> "$rc"
+}
+# .zprofile covers the default zsh login shell (Catalina+); the other two
+# cover bash and any plain POSIX sh setup.
+add_to_path "$HOME/.zprofile"
+add_to_path "$HOME/.bash_profile"
+add_to_path "$HOME/.profile"
+
+mkdir -p "$HOME/Library/LaunchAgents"
+cat > "$HOME/Library/LaunchAgents/dev.octo-agent.serve.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.octo-agent.serve</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$bin</string>
+    <string>serve</string>
+    <string>-d</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+PLIST
+
+cat > "$app_dir/uninstall.sh" <<UNINSTALL
+#!/bin/sh
+set -eu
+bin="$bin"
+[ -x "\$bin" ] && "\$bin" serve --stop >/dev/null 2>&1 || true
+launchctl unload "\$HOME/Library/LaunchAgents/dev.octo-agent.serve.plist" >/dev/null 2>&1 || true
+rm -f "\$HOME/Library/LaunchAgents/dev.octo-agent.serve.plist"
+for rc in "\$HOME/.zprofile" "\$HOME/.bash_profile" "\$HOME/.profile"; do
+  [ -f "\$rc" ] && sed -i '' '/$marker/d' "\$rc"
+done
+rm -rf "$app_dir"
+echo "octo uninstalled."
+UNINSTALL
+chmod +x "$app_dir/uninstall.sh"
+
+# octo serve -d blocks until the server is accepting connections (or it times
+# out), so the browser opens against a live port rather than racing the bind.
+"$bin" serve -d >/dev/null 2>&1 || true
+open "http://127.0.0.1:8088" >/dev/null 2>&1 || true
+
+exit 0

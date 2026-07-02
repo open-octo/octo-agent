@@ -1,0 +1,92 @@
+name: macOS installer check
+
+# Build packaging/macos/octo-setup.pkg whenever a PR touches it, and exercise
+# it for real, so a broken installer surfaces here instead of at release
+# time — release.yml only builds+publishes this on a tag push.
+#
+# The real double-click flow resolves the currentUserHome domain against the
+# logged-in GUI user's session; a headless CI runner has no such session, so
+# `installer -target CurrentUserHomeDirectory` has nothing to resolve against
+# and (when forced via sudo) falls back to root's own home instead of the
+# runner account's — not representative, and not worth fighting. Instead this
+# validates the two halves separately: the package's domain declaration via
+# -dominfo (no sudo needed, no session needed), and the actual pre/postinstall
+# script logic by running the scripts extracted from the built package
+# directly against a scratch $HOME — exactly what they do at install time,
+# minus Installer.app's domain-resolution machinery.
+on:
+  pull_request:
+    paths:
+      - 'packaging/macos/**'
+      - '.github/workflows/macos-installer-check.yml'
+  workflow_dispatch:
+
+# Least-privilege default: this job only checks out, builds, and installs
+# into a scratch directory — no release assets are touched.
+permissions:
+  contents: read
+
+jobs:
+  build-and-install:
+    name: build and install
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Build a binary to package
+        run: |
+          mkdir -p staging
+          go build -o staging/octo ./cmd/octo # plain build; embedded rg is irrelevant to packaging
+          cp LICENSE.txt staging/LICENSE.txt
+
+      - name: Build installer
+        env:
+          AppVersion: 0.0.0-ci
+          SourceDir: ${{ github.workspace }}/staging
+          OutDir: ${{ github.workspace }}/staging
+        run: packaging/macos/build.sh
+
+      - name: Verify the package only offers the per-user domain
+        run: |
+          domains=$(installer -pkg staging/octo-setup.pkg -target CurrentUserHomeDirectory -dominfo)
+          echo "domains: $domains"
+          [ "$domains" = "CurrentUserHomeDirectory" ] || { echo "expected only CurrentUserHomeDirectory, got: $domains"; exit 1; }
+
+      - name: Extract scripts and payload from the built package
+        run: |
+          pkgutil --expand-full staging/octo-setup.pkg expanded
+          test -x expanded/octo-component.pkg/Scripts/preinstall
+          test -x expanded/octo-component.pkg/Scripts/postinstall
+          test -x expanded/octo-component.pkg/Payload/bin/octo
+
+      - name: Run preinstall + postinstall against a scratch HOME
+        run: |
+          fake="$RUNNER_TEMP/fake-home"
+          mkdir -p "$fake"
+
+          HOME="$fake" expanded/octo-component.pkg/Scripts/preinstall
+
+          mkdir -p "$fake/Library/Application Support/octo/bin"
+          cp expanded/octo-component.pkg/Payload/bin/octo "$fake/Library/Application Support/octo/bin/octo"
+          cp expanded/octo-component.pkg/Payload/LICENSE.txt "$fake/Library/Application Support/octo/LICENSE.txt"
+
+          HOME="$fake" expanded/octo-component.pkg/Scripts/postinstall
+
+          bin="$fake/Library/Application Support/octo/bin/octo"
+          test -x "$bin" || { echo "octo binary missing at $bin"; exit 1; }
+          HOME="$fake" "$bin" version
+          grep -qF 'added by the octo installer' "$fake/.zprofile" || { echo "PATH not updated"; exit 1; }
+          test -f "$fake/Library/LaunchAgents/dev.octo-agent.serve.plist" || { echo "LaunchAgent missing"; exit 1; }
+          test -x "$fake/Library/Application Support/octo/uninstall.sh" || { echo "uninstall.sh missing"; exit 1; }
+          HOME="$fake" "$bin" serve --stop || true
+
+      - name: Uninstall it
+        run: |
+          fake="$RUNNER_TEMP/fake-home"
+          HOME="$fake" "$fake/Library/Application Support/octo/uninstall.sh"
+          test ! -d "$fake/Library/Application Support/octo" || { echo "uninstall left files behind"; exit 1; }

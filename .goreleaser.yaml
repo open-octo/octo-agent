@@ -61,6 +61,14 @@ builds:
       - amd64
       - arm64
 
+# A fat darwin/all binary (lipo of amd64+arm64) alongside the per-arch ones,
+# so the macOS .pkg installer can ship one download that runs natively on both
+# Intel and Apple Silicon. replace: false keeps the per-arch darwin archives
+# too — install.sh and manual downloads still need octo_<ver>_darwin_<arch>.tar.gz.
+universal_binaries:
+  - id: octo
+    replace: false
+
 archives:
   - id: octo
     # tar.gz everywhere except Windows, which gets a zip.

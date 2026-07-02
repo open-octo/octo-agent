@@ -655,19 +655,28 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
       else if (/Mac/i.test(plat)) target = { os: 'darwin' };
       else if (/Linux|X11/i.test(plat) && !/Android/i.test(ua)) target = { os: 'linux', arch: arch };
 
-      // macOS / Linux: lead with the install script and the steps to start the
-      // server — these platforms have no auto-starting installer, so the user
-      // runs `octo serve -d` and opens the dashboard themselves.
-      if (target && (target.os === 'darwin' || target.os === 'linux')) {
-        var opener = target.os === 'darwin' ? 'open    ' : 'xdg-open';
+      // Linux: no double-click installer, so lead with the install script and
+      // the steps to start the server — the user runs `octo serve -d` and
+      // opens the dashboard themselves. Download buttons stay hidden.
+      if (target && target.os === 'linux') {
         if (cmd) {
           cmd.textContent =
             'curl -fsSL https://octo-agent.dev/install.sh | sh\n' +
             'octo serve -d                       # start the local server\n' +
-            opener + ' http://127.0.0.1:8088      # open the dashboard, then onboard';
+            'xdg-open http://127.0.0.1:8088      # open the dashboard, then onboard';
         }
         btns.forEach(function (b) { b.style.display = 'none'; });
         return;
+      }
+
+      // macOS: two supported paths, both real — keep the curl one-liner
+      // visible AND point the Download buttons at the double-click .pkg
+      // installer (filled in by the asset fetch below).
+      if (target && target.os === 'darwin' && cmd) {
+        cmd.textContent =
+          'curl -fsSL https://octo-agent.dev/install.sh | sh\n' +
+          'octo serve -d                       # start the local server\n' +
+          'open     http://127.0.0.1:8088      # open the dashboard, then onboard';
       }
 
       // Windows: the Download button is the installer, which starts the server
@@ -677,20 +686,24 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
       // Unknown OS: leave the releases-page button and the curl one-liner both
       // visible so every visitor has a working path.
       if (!btns.length || !target) return;
+      if (target.os !== 'windows' && target.os !== 'darwin') return;
 
-      // Windows: point the Download buttons straight at the installer asset.
+      // Windows / macOS: point the Download buttons straight at the installer asset.
+      var installerAsset = target.os === 'windows' ? 'octo-setup.exe' : 'octo-setup.pkg';
       fetch('https://api.github.com/repos/open-octo/octo-agent/releases/latest', {
         headers: { 'Accept': 'application/vnd.github+json' }
       }).then(function (r) {
         if (!r.ok) throw new Error('release lookup failed');
         return r.json();
       }).then(function (data) {
-        var asset = (data.assets || []).filter(function (a) { return a.name === 'octo-setup.exe'; })[0];
+        var asset = (data.assets || []).filter(function (a) { return a.name === installerAsset; })[0];
         if (!asset) return;
+        var enLabel = target.os === 'windows' ? '⬇️ Download for Windows' : '⬇️ Download for macOS';
+        var zhLabel = target.os === 'windows' ? '⬇️ 下载 Windows 安装器' : '⬇️ 下载 macOS 安装器';
         btns.forEach(function (b) {
           b.setAttribute('href', asset.browser_download_url);
-          b.setAttribute('data-en', '⬇️ Download for Windows');
-          b.setAttribute('data-zh', '⬇️ 下载 Windows 安装器');
+          b.setAttribute('data-en', enLabel);
+          b.setAttribute('data-zh', zhLabel);
         });
         applyLang(currentLang);
       }).catch(function () { /* keep the releases-page fallback */ });
