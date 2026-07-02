@@ -165,12 +165,12 @@ retry forever — same motivation as `EventTurnError` being its own channel,
 #973). On such an error: set `usage_limited`, emit `EventGoalUpdated`, stop.
 `/goal resume` reactivates.
 
-**Safety net (deliberate addition)**: continuation reuses the
-`tools.MaxLoopLifetime` (12 h) bound that already caps `/loop` — measured from
-goal activation, a goal that ticks past it flips to `paused` with a notice.
-Codex has no such cap (it leans on account-level usage limits octo doesn't
-have); octo's own loop machinery already established this guard, so goals
-inherit it.
+No wall-clock lifetime cap, matching Codex: an unbudgeted active goal keeps
+continuing until the status machine stops it — long-running is the point of
+the feature. The zero-progress guard and the `usage_limited` mapping already
+cover the runaway modes a cap would (a spinning loop stops itself, a
+rate-limited loop parks itself); users who want a bound set a token budget.
+`tools.MaxLoopLifetime` stays a `/loop`-only concern.
 
 ### 3. Model-facing tools
 
