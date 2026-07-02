@@ -568,6 +568,14 @@ func newTUIModel(cfg replConfig) *tuiModel {
 		style = "light"
 	}
 	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, workflows: map[string]*workflowUI{}}
+	// Seed the last-seen goal status so a resumed session's first transition
+	// (e.g. the budget crossing) prints its notice instead of being treated
+	// as the baseline.
+	if m.goalsWired() {
+		if g, ok := cfg.session.GoalSnapshot(); ok {
+			m.goalLastStatus = g.Status
+		}
+	}
 	_ = m.updateTextAreaHeight()
 	return m
 }
@@ -725,6 +733,14 @@ func (m *tuiModel) startTurnEcho(line, echo string) tea.Cmd {
 // Pass "" for turns that aren't a verbatim typed message (skills, /init,
 // dequeued items) — those can't be meaningfully restored.
 func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
+	// Any turn start cancels a pending /goal edit — async idle auto-turns
+	// (background exits, sub-agent notes, loop wakeups) can fire while the
+	// edit is armed, and a stale flag would silently consume the user's next
+	// unrelated message as the objective.
+	if m.goalEditPending {
+		m.goalEditPending = false
+		m.printlnBlock(noticeStyle.Render("Goal edit cancelled"))
+	}
 	m.turnRunning = true
 	m.turnStart = time.Now()
 	m.spinnerFrame = 0
@@ -1040,7 +1056,18 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// error/interrupt.
 		if msg.err == nil {
 			cmds := []tea.Cmd{m.flushPrints()}
-			if m.cfg.suggest {
+			// While a goal is active the continuation kick starts the next
+			// turn immediately and would discard the suggestion unread — on
+			// an unbounded loop that is one paid throwaway call per
+			// iteration. An active goal makes "suggest my next message"
+			// noise anyway; skip it.
+			goalActive := false
+			if m.goalsWired() {
+				if g, ok := m.cfg.session.GoalSnapshot(); ok && g.Status == agent.GoalActive {
+					goalActive = true
+				}
+			}
+			if m.cfg.suggest && !goalActive {
 				cmds = append(cmds, m.suggestCmd())
 			}
 			if c := m.titleCmd(); c != nil {

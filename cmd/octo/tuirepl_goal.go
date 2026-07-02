@@ -12,7 +12,7 @@ import (
 // goalsWired reports whether the session-goal feature is wired for this TUI
 // session (chat.go sets the accountant only when goal.enabled and the session
 // persists).
-func (m *tuiModel) goalsWired() bool { return m.a.GoalAcct != nil }
+func (m *tuiModel) goalsWired() bool { return m.a.GoalAcct != nil && m.cfg.session != nil }
 
 const goalUsage = "Usage: /goal <objective> · /goal edit|pause|resume|clear · /goal replace <objective>"
 
@@ -66,10 +66,20 @@ func (m *tuiModel) dispatchGoal(args string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Next submitted line becomes the new objective (usage counters and
-		// budget survive an edit). Esc or an empty submit cancels.
+		// budget survive an edit). Esc, an empty submit, or a slash command
+		// cancels; any turn start (async auto-turns included) cancels too.
 		m.goalEditPending = true
 		m.ta.SetValue(g.Objective)
+		m.ta.CursorEnd()
 		m.println(noticeStyle.Render("Editing goal — change the objective and press Enter (Esc to cancel)"))
+		return m, m.updateTextAreaHeight()
+
+	case sub == "replace":
+		m.println(noticeStyle.Render("Usage: /goal replace <objective>"))
+		return m, nil
+
+	case strings.HasPrefix(sub, "edit "):
+		m.println(noticeStyle.Render("Usage: /goal edit — takes no arguments; it prefills the input for editing"))
 		return m, nil
 
 	case strings.HasPrefix(sub, "replace "):
@@ -188,6 +198,9 @@ func goalStartupNotice(sess *agent.Session) string {
 	case agent.GoalPaused, agent.GoalBlocked, agent.GoalUsageLimited:
 		return noticeStyle.Render("● Goal " + goalStatusLabel(g.Status) + ": " + goalTitleLine(g.Objective) +
 			" — /goal resume to continue")
+	case agent.GoalBudgetLimited:
+		return noticeStyle.Render("● Goal " + goalStatusLabel(g.Status) + ": " + goalTitleLine(g.Objective) +
+			" — /goal edit to keep going, /goal clear to drop it")
 	case agent.GoalActive:
 		return noticeStyle.Render("● Goal active: " + goalTitleLine(g.Objective) + " — continues after your next message")
 	}

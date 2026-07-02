@@ -730,6 +730,20 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	// paste folded as "[#N pasted …]" rather than dumping it verbatim.
 	text := strings.TrimSpace(m.expandPastes(raw))
 	collapsed := strings.TrimSpace(raw)
+	// A pending /goal edit consumes this submit first: empty text cancels,
+	// a slash command cancels and dispatches normally (the user changed
+	// their mind), anything else is the edited objective. Checked before
+	// the empty early-return so clearing the prefill + Enter cancels.
+	if m.goalEditPending {
+		if !strings.HasPrefix(text, "/") {
+			m.ta.Reset()
+			m.inputHistoryIdx = -1
+			m.clearPastes()
+			return m.submitGoalEdit(text)
+		}
+		m.goalEditPending = false
+		m.println(noticeStyle.Render("Goal edit cancelled"))
+	}
 	if text == "" && len(m.pendingAttachments) == 0 {
 		return m, nil
 	}
@@ -749,12 +763,6 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	// Skip empty text (an image-only submit has nothing to recall).
 	if text != "" && (len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text) {
 		m.inputHistory = append(m.inputHistory, text)
-	}
-
-	// /goal edit armed the input: this line is the edited objective, not a
-	// message. Consumed idle-only (the flag is only set while idle).
-	if m.goalEditPending && !m.turnRunning {
-		return m.submitGoalEdit(text)
 	}
 
 	// Slash commands are the TUI's alone — the plain REPL is a pure conversation

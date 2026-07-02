@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/open-octo/octo-agent/internal/agent"
 )
 
@@ -128,13 +130,72 @@ func TestGoalEdit_EmptySubmitCancels(t *testing.T) {
 	m.dispatchGoal("edit")
 	m.ta.Reset()
 	m.submit()
-	// An empty submit is a no-op in submit(); the flag must survive only
-	// until an explicit cancel — emulate Esc.
 	if m.goalEditPending {
-		m.goalEditPending = false // what the Esc handler does
+		t.Error("clearing the prefill and pressing Enter must cancel the edit")
 	}
 	if g, _ := sess.GoalSnapshot(); g.Objective != "keep me" {
 		t.Errorf("cancelled edit must not change the objective: %+v", g)
+	}
+}
+
+func TestGoalEdit_EscCancelsViaKeyHandler(t *testing.T) {
+	m, sess := newGoalTestModel()
+	m.dispatchGoal("keep me")
+	m.dispatchGoal("edit")
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.goalEditPending {
+		t.Error("Esc must cancel a pending goal edit")
+	}
+	// The next submit is an ordinary message again, not an objective.
+	setInput(m, "unrelated message")
+	m.submit()
+	if g, _ := sess.GoalSnapshot(); g.Objective != "keep me" {
+		t.Errorf("post-cancel submit must not touch the goal: %+v", g)
+	}
+}
+
+func TestGoalEdit_SlashCommandCancelsAndDispatches(t *testing.T) {
+	m, sess := newGoalTestModel()
+	m.dispatchGoal("keep me")
+	m.dispatchGoal("edit")
+
+	// The user changed their mind mid-edit and typed a command instead.
+	setInput(m, "/goal")
+	m.submit()
+	if m.goalEditPending {
+		t.Error("a slash command must cancel the pending edit")
+	}
+	if g, _ := sess.GoalSnapshot(); g.Objective != "keep me" {
+		t.Errorf("the command text must not become the objective: %+v", g)
+	}
+	if !strings.Contains(printed(m), "keep me") {
+		t.Errorf("the /goal command should still have dispatched (summary):\n%s", printed(m))
+	}
+}
+
+func TestGoalEdit_AsyncTurnStartCancelsPendingEdit(t *testing.T) {
+	// Regression: an async idle auto-turn (background exit note, loop wakeup)
+	// starting while /goal edit is armed must cancel the edit — otherwise the
+	// user's next unrelated message is silently consumed as the objective.
+	m, sess := newGoalTestModel()
+	m.dispatchGoal("keep me")
+	m.dispatchGoal("edit")
+
+	m.startTurnEcho("background note turn", "")
+	if m.goalEditPending {
+		t.Fatal("a turn start must cancel the pending goal edit")
+	}
+
+	// While that auto-turn runs, the user's text goes out as an ordinary
+	// steer — not as the objective (the exact leak this guards against).
+	setInput(m, "unrelated message")
+	m.submit()
+	if g, _ := sess.GoalSnapshot(); g.Objective != "keep me" {
+		t.Errorf("mid-auto-turn submit must not become the objective: %+v", g)
+	}
+	if len(m.pendingSteer) != 1 || m.pendingSteer[0] != "unrelated message" {
+		t.Errorf("the text should have routed to the steer path, got %v", m.pendingSteer)
 	}
 }
 
