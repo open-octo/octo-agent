@@ -316,7 +316,7 @@ func GenerateSkill(ctx context.Context, name, startURL string, events []Recorded
 	}
 	refined, err := ParseSkill([]byte(stripFences(out)))
 	if err != nil || len(refined.Steps) == 0 {
-		slog.Warn("browser: skill distill output unusable, keeping deterministic baseline", "skill", name, "err", err, "steps", len(refined.Steps))
+		slog.Warn("browser: skill distill output unusable, keeping deterministic baseline steps", "skill", name, "err", err, "steps", len(refined.Steps))
 		return withDescription(base, refined.Description)
 	}
 	refined.Name = name
@@ -324,7 +324,7 @@ func GenerateSkill(ctx context.Context, name, startURL string, events []Recorded
 		// Precision guard: the model used a selector it wasn't given. The refined
 		// steps are untrustworthy, but the prose description still is — keep it so
 		// the skills manifest isn't left with a bare name.
-		slog.Warn("browser: skill distill used a selector not in the recording, keeping deterministic baseline", "skill", name)
+		slog.Warn("browser: skill distill used a selector not in the recording, keeping deterministic baseline steps", "skill", name)
 		return withDescription(base, refined.Description)
 	}
 	return refined
@@ -417,6 +417,9 @@ func (s Skill) StepDigest() string {
 func digestURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
+		// Hand-edited relative/malformed URL: still never let a query string
+		// (which can carry session tokens) into the system prompt.
+		raw, _, _ = strings.Cut(raw, "?")
 		return raw
 	}
 	return u.Host + strings.TrimSuffix(u.Path, "/")

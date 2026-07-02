@@ -372,6 +372,19 @@ func TestGenerateSkillDistill(t *testing.T) {
 	if s2.Description != "open the search page" {
 		t.Fatalf("guard fallback should keep the distilled description, got %q", s2.Description)
 	}
+
+	// A generator whose output has a description but no usable steps -> baseline
+	// steps, distilled description.
+	descOnly := func(_ context.Context, _, _ string) (string, error) {
+		return "name: x\ndescription: search for an order\n", nil
+	}
+	s3 := GenerateSkill(ctx, "demo", "https://x/start", events, descOnly)
+	if len(s3.Steps) == 0 {
+		t.Fatal("steps-empty fallback should keep the baseline steps")
+	}
+	if s3.Description != "search for an order" {
+		t.Fatalf("steps-empty fallback should keep the distilled description, got %q", s3.Description)
+	}
 }
 
 // TestStepDigest: the digest names each step by its label (falling back to hint,
@@ -399,6 +412,20 @@ func TestStepDigest(t *testing.T) {
 	d := long.StepDigest()
 	if !strings.Contains(d, "…") || !strings.Contains(d, `"s10"`) {
 		t.Fatalf("long digest must elide the middle but keep the final step, got %q", d)
+	}
+
+	// Exactly 8 significant steps is the no-elision boundary.
+	eight := Skill{}
+	for i := 0; i < 8; i++ {
+		eight.Steps = append(eight.Steps, Step{Action: "click", Label: fmt.Sprintf("s%d", i)})
+	}
+	if d := eight.StepDigest(); strings.Contains(d, "…") {
+		t.Fatalf("8 steps must not be elided, got %q", d)
+	}
+
+	// A skill with only waits digests to "" (the manifest then shows a bare name).
+	if d := (Skill{Steps: []Step{{Action: "wait", TimeoutMS: 100}}}).StepDigest(); d != "" {
+		t.Fatalf("wait-only skill should digest to empty, got %q", d)
 	}
 }
 
