@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-07-02
+
+### Added
+- **office-xlsx is now a default skill.** Create, read, and edit Excel
+  spreadsheets via `uv run --script` Python scripts (openpyxl). Works
+  zero-config on installer-based installs — uv is now bundled (#1067,
+  #1064).
+- **uv bundled into Windows/macOS installers.** `office-xlsx` skill now
+  works zero-config on a fresh install — uv is fetched at release-build
+  time and staged into `~/.octo/bin` via the installer, no manual
+  download needed. +102MB (macOS universal) / +71MB (Windows).
+  Non-installer installs (`go install`, build-from-source, Linux) are
+  unaffected (#1064).
+
+### Changed
+- **web-artifacts-builder removed from default skills.** It's a
+  power-user skill (React + shadcn/ui artifacts, requires bun) that
+  doesn't belong in every install. Remains in git history for future
+  registry-based install (#1064).
+- **workflow-builder renamed to workflow-creator.** Aligns with the
+  other creator skills (`mcp-creator`, `skill-creator`,
+  `cron-task-creator`) (#1065).
+
 ## [1.6.1] — 2026-07-02
 
 ### Added
