@@ -22,6 +22,7 @@ var toolchainProbes = []struct {
 	{"python", []string{"python3", "python"}},
 	{"pip", []string{"pip3", "pip"}},
 	{"uv", []string{"uv"}},
+	{"bun", []string{"bun"}},
 	{"go", []string{"go"}},
 	{"docker", []string{"docker"}},
 	{"make", []string{"make"}},
