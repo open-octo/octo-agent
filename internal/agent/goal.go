@@ -90,6 +90,21 @@ type GoalAccountant interface {
 	// the elapsed wall-clock time into the goal, returning the updated goal
 	// and whether the record changed.
 	AccountGoalUsage(tokenDelta int64) (Goal, bool)
+	// ResetGoalWallClock re-baselines the wall clock at turn start, dropping
+	// the idle gap since the previous turn — idle time is not goal work.
+	ResetGoalWallClock()
+}
+
+// ResetGoalWallClock implements GoalAccountant: it restarts the wall-clock
+// baseline for an accruing goal so time that passed between turns is dropped
+// rather than billed. Called from the turn-start baseline reset; a stopped
+// goal (no baseline) is left alone.
+func (s *Session) ResetGoalWallClock() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.goalWallClockAt.IsZero() {
+		s.goalWallClockAt = time.Now()
+	}
 }
 
 // GoalSnapshot returns a copy of the session's goal, or ok=false when none
@@ -135,6 +150,9 @@ func (s *Session) ReplaceGoal(objective string, tokenBudget int64) (Goal, error)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Bank the outgoing goal's wall-clock tail before discarding it — the
+	// tail is deliberately thrown away with the goal; accounting first keeps
+	// the invariant that a goal's counters are final at every observation.
 	s.accountGoalWallClockLocked()
 	return s.startGoalLocked(objective, tokenBudget), nil
 }
@@ -150,10 +168,15 @@ func (s *Session) startGoalLocked(objective string, tokenBudget int64) Goal {
 		UpdatedAt:   now,
 	}
 	s.goalWallClockAt = now
+	records := []sessionRecord{{Type: "goal", Goal: s.Goal}}
 	if s.Title == "" {
+		// Seed the title from the objective (the Codex thread-preview
+		// behavior). It needs its own record — a "goal" record doesn't carry
+		// the title, so without one the seed would vanish on reload.
 		s.Title = goalTitle(objective)
+		records = append(records, sessionRecord{Type: "title", Title: s.Title})
 	}
-	s.appendGoalRecordLocked()
+	s.appendRecordsLocked(records...)
 	return *s.Goal
 }
 
@@ -312,23 +335,40 @@ func goalTitle(objective string) string {
 }
 
 // appendGoalRecordLocked persists the current goal (nil = cleared) as an
-// append-only "goal" record, like lease records. When the transcript is not
-// yet on disk or is pending a rewrite, it does nothing: the meta header
-// written by the next Save carries the goal, and appending to an untrusted
-// tail would corrupt the file. Errors are swallowed for the same reason —
-// the in-memory goal is authoritative and the next rewrite folds it in.
+// append-only "goal" record, like lease records.
 func (s *Session) appendGoalRecordLocked() {
-	if s.persisted == 0 || s.forceRewrite {
+	s.appendRecordsLocked(sessionRecord{Type: "goal", Goal: s.Goal})
+}
+
+// appendRecordsLocked appends records to the transcript. When the file is
+// not on disk yet or is pending a rewrite, it does nothing: the meta header
+// written by the next Save carries the goal (and title), and appending to an
+// untrusted tail would corrupt the file. The on-disk check is by existence,
+// not persisted count — a meta-only transcript (saved before its first
+// message) has persisted == 0 but must still receive records, or a caller
+// that never Saves again loses the mutation (the SetModelConfig trap).
+// Errors are swallowed for the same reason the skip is safe: the in-memory
+// state is authoritative and the next rewrite folds it in.
+func (s *Session) appendRecordsLocked(records ...sessionRecord) {
+	if s.forceRewrite {
 		return
 	}
 	path, err := s.SavePath()
 	if err != nil {
 		return
 	}
+	if s.persisted == 0 {
+		if _, err := os.Stat(path); err != nil {
+			return // nothing on disk yet; the first Save writes the meta header
+		}
+	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}
 	defer f.Close()
-	_ = json.NewEncoder(f).Encode(sessionRecord{Type: "goal", Goal: s.Goal})
+	enc := json.NewEncoder(f)
+	for _, rec := range records {
+		_ = enc.Encode(rec)
+	}
 }

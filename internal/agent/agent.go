@@ -1676,19 +1676,25 @@ func (a *Agent) accrueUsage(reply Reply) {
 }
 
 // ResetGoalBaseline pins the goal-accounting baseline to the current session
-// counters, so the next accounting bills only usage from this point on.
-// Called at every turn start; the create_goal tool wiring also calls it when
-// a goal is created mid-turn, so the turn's pre-goal usage is not billed.
+// counters and restarts the goal wall clock, so the next accounting bills
+// only usage — tokens and seconds — from this point on. Called at every turn
+// start; the create_goal tool wiring also calls it when a goal is created
+// mid-turn, so the turn's pre-goal usage is not billed.
 func (a *Agent) ResetGoalBaseline() {
 	if a.GoalAcct == nil {
 		return
 	}
 	a.goalBaseIn, a.goalBaseOut = a.SessionTokens()
+	a.GoalAcct.ResetGoalWallClock()
 }
 
 // accountGoalUsage bills the session-counter delta since the last accounting
 // to the goal and emits EventGoalUpdated when the record changed. A nil
 // accountant or handler degrades gracefully (no accounting / no event).
+// The baseline advances even when the goal is not accruing (paused mid-turn),
+// so up to one LLM round of tokens straddling an external pause is dropped
+// rather than billed — paused means not billed, and re-billing them on
+// resume would be worse.
 func (a *Agent) accountGoalUsage(handler EventHandler) {
 	if a.GoalAcct == nil {
 		return

@@ -423,7 +423,18 @@ type sessionRecord struct {
 }
 
 func (s *Session) metaRecord() sessionRecord {
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, Goal: s.Goal}
+	// Snapshot the goal under mu: unlike the other meta fields (turn-goroutine
+	// serialized), *s.Goal is mutated in place by accounting while user
+	// commands may trigger a rewrite from another goroutine. Callers must not
+	// hold mu (only rewriteAll calls this, and never under the lock).
+	s.mu.Lock()
+	var goal *Goal
+	if s.Goal != nil {
+		g := *s.Goal
+		goal = &g
+	}
+	s.mu.Unlock()
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a

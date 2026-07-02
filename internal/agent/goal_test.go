@@ -432,3 +432,136 @@ func TestAgent_NoGoalAccountantIsANoOp(t *testing.T) {
 		t.Fatalf("Turn: %v", err)
 	}
 }
+
+func TestAgent_Turn_AccountsGoalUsage(t *testing.T) {
+	s := NewSession("m", "")
+	if _, err := s.CreateGoal("g", 0); err != nil {
+		t.Fatal(err)
+	}
+	send := &fakeSender{reply: Reply{Content: "hi", StopReason: "end_turn", InputTokens: 10, OutputTokens: 5}}
+	a := New(send, "claude-test")
+	a.GoalAcct = s
+	if _, err := a.Turn(context.Background(), "hello"); err != nil {
+		t.Fatalf("Turn: %v", err)
+	}
+	if g, _ := s.GoalSnapshot(); g.TokensUsed != 15 {
+		t.Errorf("TokensUsed = %d, want 15", g.TokensUsed)
+	}
+}
+
+func TestAgent_IdleTimeBetweenTurnsIsNotBilled(t *testing.T) {
+	// A stale wall-clock baseline (the session sat idle since the previous
+	// turn) is dropped by the turn-start reset, not banked into the goal.
+	s := NewSession("m", "")
+	if _, err := s.CreateGoal("g", 0); err != nil {
+		t.Fatal(err)
+	}
+	s.goalWallClockAt = time.Now().Add(-30 * time.Minute) // idle gap
+
+	send := &fakeSender{reply: Reply{Content: "hi", StopReason: "end_turn", InputTokens: 10, OutputTokens: 5}}
+	a := New(send, "claude-test")
+	a.GoalAcct = s
+	if _, err := a.Turn(context.Background(), "hello"); err != nil {
+		t.Fatalf("Turn: %v", err)
+	}
+	if g, _ := s.GoalSnapshot(); g.TimeUsedSeconds > 2 {
+		t.Errorf("idle gap was billed: TimeUsedSeconds = %d", g.TimeUsedSeconds)
+	}
+}
+
+func TestGoal_ConcurrentMutationAndAccounting(t *testing.T) {
+	// The turn goroutine accounts while another goroutine pauses/resumes/
+	// clears/recreates — the PR3/PR4 shape (slash commands during a turn).
+	// Exercised under -race; assertions are just sanity.
+	s := NewSession("m", "")
+	if _, err := s.CreateGoal("g", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			switch i % 4 {
+			case 0:
+				s.SetGoalStatus(GoalPaused)
+			case 1:
+				s.SetGoalStatus(GoalActive)
+			case 2:
+				s.ClearGoal()
+			case 3:
+				s.CreateGoal("g", 0)
+			}
+			s.GoalSnapshot()
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		s.AccountGoalUsage(1)
+		s.ResetGoalWallClock()
+	}
+	<-done
+}
+
+func TestGoal_MutationOnMetaOnlyTranscriptSurvivesReload(t *testing.T) {
+	// A transcript saved before its first message (meta-only, persisted == 0)
+	// must still receive goal records — a caller that never Saves again would
+	// otherwise lose the mutation.
+	setTempHome(t)
+
+	s := NewSession("m", "")
+	if err := s.Save(); err != nil { // meta-only file on disk
+		t.Fatal(err)
+	}
+	if _, err := s.CreateGoal("early goal", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, ok := got.GoalSnapshot()
+	if !ok || g.Objective != "early goal" {
+		t.Errorf("goal on meta-only transcript lost: ok=%v goal=%+v", ok, g)
+	}
+	if got.Title != "early goal" {
+		t.Errorf("seeded title not persisted, got %q", got.Title)
+	}
+}
+
+func TestGoal_MutationWhileRewritePendingSurvivesNextSave(t *testing.T) {
+	// With forceRewrite pending the append path must stay hands-off; the goal
+	// rides the meta header of the next Save instead.
+	setTempHome(t)
+
+	s := NewSession("m", "")
+	s.Messages = []Message{NewUserMessage("ping")}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	s.forceRewrite = true
+	if _, err := s.CreateGoal("pending goal", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	// Not on disk yet (append skipped)…
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.GoalSnapshot(); ok {
+		t.Fatal("goal should not have been appended onto an untrusted tail")
+	}
+
+	// …but the next Save rewrites the file with the goal in the meta header.
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err = LoadSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, ok := got.GoalSnapshot(); !ok || g.Objective != "pending goal" {
+		t.Errorf("goal lost across pending rewrite: ok=%v goal=%+v", ok, g)
+	}
+}
