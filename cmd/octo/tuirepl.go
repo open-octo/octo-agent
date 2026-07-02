@@ -367,6 +367,13 @@ type tuiModel struct {
 	// queue holds Ctrl+Q messages to run as future turns (design §8/§10).
 	queue []pendingItem
 
+	// goalEditPending marks that /goal edit armed the input: the next
+	// submitted line is the edited objective, not a message.
+	goalEditPending bool
+	// goalLastStatus is the last goal status seen via EventGoalUpdated, so
+	// only transitions print a notice.
+	goalLastStatus agent.GoalStatus
+
 	// pendingSteer holds steer messages typed during a running turn that
 	// haven't been drained yet. Shown in the live View area (below the
 	// scrollback) so the user sees immediate feedback without breaking
@@ -570,10 +577,16 @@ func newTUIModel(cfg replConfig) *tuiModel {
 type autoSubmitMsg struct{ text string }
 
 func (m *tuiModel) Init() tea.Cmd {
-	boot := tea.Sequence(
-		tea.Println(tui.Banner("", m.a.Model, m.cwd, m.width)),
-		textarea.Blink,
-	)
+	bootCmds := []tea.Cmd{tea.Println(tui.Banner("", m.a.Model, m.cwd, m.width))}
+	// A resumed session carrying a goal gets a one-line reminder under the
+	// banner (the Codex resume-paused prompt, as a hint instead of a modal).
+	if m.goalsWired() {
+		if notice := goalStartupNotice(m.cfg.session); notice != "" {
+			bootCmds = append(bootCmds, tea.Println(notice))
+		}
+	}
+	bootCmds = append(bootCmds, textarea.Blink)
+	boot := tea.Sequence(bootCmds...)
 	cmds := []tea.Cmd{boot}
 	// Connect MCP concurrently with the first paint (tea.Batch, not Sequence)
 	// so the banner + input appear immediately and the servers' handshake cost
@@ -1038,7 +1051,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.flushPrints()
 
 	case turnFinishedMsg:
-		return m.handleTurnFinished()
+		return m.handleTurnFinished(msg.err)
 
 	case askMsg:
 		m.openModal(msg)
@@ -1395,6 +1408,10 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		}
 		return
 
+	case agent.EventGoalUpdated:
+		m.handleGoalUpdated(ev.Goal)
+		return
+
 	case agent.EventSteerInjected:
 		// Inbox drained mid-turn: print the steer messages to the scrollback
 		// immediately so they appear in chronological order (before the next
@@ -1405,11 +1422,12 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		if s, ok := m.flushTextString(); ok {
 			m.printlnBlock(s)
 		}
-		// Skip <system-reminder> blocks (model-facing context) and empty text
-		// (an image-only steer carries its payload in blocks, not Messages).
+		// Skip injected model-facing spans (<system-reminder>, <goal_context>)
+		// and empty text (an image-only steer carries its payload in blocks,
+		// not Messages).
 		for _, s := range ev.Messages {
-			if s != "" && !strings.HasPrefix(s, "<system-reminder>") {
-				m.printlnBlock(userEchoStyle.Render("> ") + s)
+			if visible := strings.TrimSpace(agent.StripSystemReminders(s)); visible != "" {
+				m.printlnBlock(userEchoStyle.Render("> ") + visible)
 			}
 		}
 		// pendingSteer is FIFO and mirrors the inbox, so the drained messages
@@ -1685,7 +1703,7 @@ func (m *tuiModel) flushPrints() tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
+func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 	m.flushSprint() // safety net: never strand held answer text on interrupt
 	m.turnRunning = false
 	m.cancelTurn = nil
@@ -1705,13 +1723,31 @@ func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
 		_ = m.cfg.session.Save()
 	}
 
+	// An aborted or errored turn parks the goal-continuation loop: an
+	// interrupt means the user said stop, and chaining onto a persistent
+	// error is unbounded paid retries. The zero-progress audit can't catch
+	// either (partial replies were already billed). A rate-limited
+	// continuation turn parks harder — usage_limited persists until
+	// /goal resume.
+	if err != nil && m.goalsWired() {
+		if m.cfg.session.GoalContinuationPending() && agent.IsRateLimitErr(err) {
+			if g, gerr := m.cfg.session.SetGoalStatus(agent.GoalUsageLimited); gerr == nil {
+				m.printlnBlock(noticeStyle.Render("● Goal usage limited (provider rate limit) — /goal resume to retry"))
+				m.goalLastStatus = g.Status
+			}
+		}
+		m.cfg.session.SuppressGoalContinuation()
+	}
+
 	// Drain any inbox messages that weren't consumed during the turn and
-	// run them as the next turn, ahead of explicitly-queued items.
+	// run them as the next turn, ahead of explicitly-queued items. Injected
+	// model-facing spans (<system-reminder>, <goal_context>) are not user
+	// speech — strip them from the echo, and skip lines that were nothing else.
 	if items := m.a.Inbox.Drain(); len(items) > 0 {
 		it := pendingFromInbox(items)
 		for _, line := range strings.Split(it.text, "\n\n") {
-			if line != "" && !strings.HasPrefix(line, "<system-reminder>") {
-				m.printlnBlock(userEchoStyle.Render("> ") + line)
+			if visible := strings.TrimSpace(agent.StripSystemReminders(line)); visible != "" {
+				m.printlnBlock(userEchoStyle.Render("> ") + visible)
 			}
 		}
 		m.queue = append([]pendingItem{it}, m.queue...)
@@ -1730,6 +1766,15 @@ func (m *tuiModel) handleTurnFinished() (tea.Model, tea.Cmd) {
 			return model, tea.Sequence(m.flushPrints(), cmd)
 		}
 		return m, m.startQueued(next)
+	}
+
+	// Idle with nothing queued: an active goal keeps going. The session owns
+	// the policy (status, zero-progress suppression); user input always won
+	// above by reaching the queue/inbox branches first.
+	if err == nil {
+		if prompt, ok := m.goalContinuationKick(); ok {
+			return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(prompt, ""))
+		}
 	}
 	return m, nil
 }

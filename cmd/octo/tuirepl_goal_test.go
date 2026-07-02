@@ -1,0 +1,249 @@
+package main
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/open-octo/octo-agent/internal/agent"
+)
+
+// newGoalTestModel builds a TUI model with goals wired: the session is both
+// the store and the accountant, exactly like chat.go's TUI path.
+func newGoalTestModel() (*tuiModel, *agent.Session) {
+	sess := agent.NewSession("m", "")
+	a := agent.New(&stubSender{reply: "ok"}, "m")
+	a.GoalAcct = sess
+	m := newTUIModel(replConfig{a: a, session: sess, noSave: true})
+	m.sink = &tuiSink{prog: &fakeProg{}}
+	return m, sess
+}
+
+func printed(m *tuiModel) string { return strings.Join(m.printlnBuf, "\n") }
+
+func TestDispatchGoal_CreateSummaryAndGuardedReplace(t *testing.T) {
+	m, sess := newGoalTestModel()
+
+	m.dispatchGoal("ship the release")
+	g, ok := sess.GoalSnapshot()
+	if !ok || g.Status != agent.GoalActive || g.Objective != "ship the release" {
+		t.Fatalf("create failed: %+v", g)
+	}
+
+	// Bare /goal shows the summary.
+	m.printlnBuf = nil
+	m.dispatchGoal("")
+	if out := printed(m); !strings.Contains(out, "ship the release") || !strings.Contains(out, "active") {
+		t.Errorf("summary missing fields:\n%s", out)
+	}
+
+	// A new objective over an unfinished goal is refused with a hint.
+	m.printlnBuf = nil
+	m.dispatchGoal("something else")
+	if g2, _ := sess.GoalSnapshot(); g2.Objective != "ship the release" {
+		t.Error("unfinished goal must not be silently replaced")
+	}
+	if !strings.Contains(printed(m), "/goal replace") {
+		t.Errorf("refusal must hint at /goal replace:\n%s", printed(m))
+	}
+
+	// Explicit replace mints a fresh goal.
+	m.dispatchGoal("replace something else")
+	if g3, _ := sess.GoalSnapshot(); g3.Objective != "something else" || g3.ID == g.ID {
+		t.Errorf("replace failed: %+v", g3)
+	}
+
+	// A complete goal is replaced without ceremony.
+	if _, err := sess.SetGoalStatus(agent.GoalComplete); err != nil {
+		t.Fatal(err)
+	}
+	m.dispatchGoal("next objective")
+	if g4, _ := sess.GoalSnapshot(); g4.Objective != "next objective" || g4.Status != agent.GoalActive {
+		t.Errorf("complete goal should be replaced silently: %+v", g4)
+	}
+}
+
+func TestDispatchGoal_PauseResumeClear(t *testing.T) {
+	m, sess := newGoalTestModel()
+	m.dispatchGoal("g")
+
+	m.dispatchGoal("pause")
+	if g, _ := sess.GoalSnapshot(); g.Status != agent.GoalPaused {
+		t.Errorf("pause: %+v", g)
+	}
+
+	// Resume re-activates AND kicks the continuation loop immediately.
+	m.dispatchGoal("resume")
+	if g, _ := sess.GoalSnapshot(); g.Status != agent.GoalActive {
+		t.Errorf("resume: %+v", g)
+	}
+	if !m.turnRunning {
+		t.Error("resume should kick an idle continuation turn")
+	}
+
+	m.turnRunning = false
+	m.dispatchGoal("clear")
+	if _, ok := sess.GoalSnapshot(); ok {
+		t.Error("clear left a goal behind")
+	}
+}
+
+func TestDispatchGoal_UnwiredIsDisabled(t *testing.T) {
+	m := newTestModel() // no GoalAcct, no session
+	if _, cmd := m.dispatchGoal("anything"); cmd != nil {
+		t.Error("unwired /goal must not start anything")
+	}
+	if !strings.Contains(printed(m), "disabled") {
+		t.Errorf("unwired /goal should say so:\n%s", printed(m))
+	}
+}
+
+func TestGoalEditFlow(t *testing.T) {
+	m, sess := newGoalTestModel()
+	m.dispatchGoal("first objective")
+	sess.AccountGoalUsage(0) // consume the mid-turn-creation skip deterministically
+	sess.ResetGoalWallClock()
+	sess.AccountGoalUsage(42)
+
+	m.dispatchGoal("edit")
+	if !m.goalEditPending || m.ta.Value() != "first objective" {
+		t.Fatalf("edit should arm and prefill, pending=%v input=%q", m.goalEditPending, m.ta.Value())
+	}
+
+	// The next submit is the edited objective; counters survive.
+	setInput(m, "revised objective")
+	m.submit()
+	if m.goalEditPending {
+		t.Error("submit should consume the edit")
+	}
+	g, _ := sess.GoalSnapshot()
+	if g.Objective != "revised objective" || g.TokensUsed != 42 {
+		t.Errorf("edit lost state: %+v", g)
+	}
+}
+
+func TestGoalEdit_EmptySubmitCancels(t *testing.T) {
+	m, sess := newGoalTestModel()
+	m.dispatchGoal("keep me")
+	m.dispatchGoal("edit")
+	m.ta.Reset()
+	m.submit()
+	// An empty submit is a no-op in submit(); the flag must survive only
+	// until an explicit cancel — emulate Esc.
+	if m.goalEditPending {
+		m.goalEditPending = false // what the Esc handler does
+	}
+	if g, _ := sess.GoalSnapshot(); g.Objective != "keep me" {
+		t.Errorf("cancelled edit must not change the objective: %+v", g)
+	}
+}
+
+func TestHandleTurnFinished_KicksGoalContinuation(t *testing.T) {
+	m, _ := newGoalTestModel()
+	m.dispatchGoal("keep going")
+	m.turnRunning = false
+
+	m.handleTurnFinished(nil)
+	if !m.turnRunning {
+		t.Fatal("idle turn end with an active goal should start a continuation turn")
+	}
+	// The "Goal continues" notice was already flushed into the returned
+	// tea.Sequence (flushPrints drains the buffer), so the buffer is empty
+	// here — the kick itself (turnRunning) is the observable effect.
+}
+
+func TestHandleTurnFinished_QueuedInputBeatsContinuation(t *testing.T) {
+	m, _ := newGoalTestModel()
+	m.dispatchGoal("keep going")
+	m.turnRunning = false
+	m.queue = append(m.queue, pendingItem{text: "user question"})
+
+	m.handleTurnFinished(nil)
+	if strings.Contains(printed(m), "Goal continues") {
+		t.Error("queued user input must run before any continuation")
+	}
+}
+
+func TestHandleTurnFinished_ErrorParksContinuation(t *testing.T) {
+	m, sess := newGoalTestModel()
+	m.dispatchGoal("keep going")
+	m.turnRunning = false
+
+	m.handleTurnFinished(errors.New("anthropic: HTTP 500: overloaded"))
+	if m.turnRunning {
+		t.Fatal("an errored turn must not chain a continuation")
+	}
+	if _, ok := sess.GoalContinuation(); ok {
+		t.Error("continuation must stay suppressed after an errored turn")
+	}
+	if g, _ := sess.GoalSnapshot(); g.Status != agent.GoalActive {
+		t.Errorf("plain errors must not change goal status: %+v", g)
+	}
+}
+
+func TestHandleTurnFinished_RateLimitedContinuationParks(t *testing.T) {
+	m, sess := newGoalTestModel()
+	m.dispatchGoal("keep going")
+	m.turnRunning = false
+
+	// Hand out a continuation (pending), then its turn fails on a rate limit.
+	if _, ok := sess.GoalContinuation(); !ok {
+		t.Fatal("precondition: continuation fires")
+	}
+	m.handleTurnFinished(errors.New("openai: HTTP 429: rate limited"))
+	if g, _ := sess.GoalSnapshot(); g.Status != agent.GoalUsageLimited {
+		t.Errorf("rate-limited continuation should park usage_limited: %+v", g)
+	}
+}
+
+func TestGoalStatusSegmentAndStartupNotice(t *testing.T) {
+	seg := goalStatusSegment(agent.Goal{Status: agent.GoalActive, TokenBudget: 50000, TokensUsed: 12500})
+	if seg != "12.5K/50K" {
+		t.Errorf("budgeted active segment = %q", seg)
+	}
+	seg = goalStatusSegment(agent.Goal{Status: agent.GoalActive, TimeUsedSeconds: 5400})
+	if seg != "1h 30m" {
+		t.Errorf("unbudgeted active segment = %q", seg)
+	}
+	if seg = goalStatusSegment(agent.Goal{Status: agent.GoalPaused}); seg != "paused" {
+		t.Errorf("paused segment = %q", seg)
+	}
+
+	sess := agent.NewSession("m", "")
+	if goalStartupNotice(sess) != "" {
+		t.Error("no goal → no startup notice")
+	}
+	if _, err := sess.CreateGoal("obj", 0); err != nil {
+		t.Fatal(err)
+	}
+	if n := goalStartupNotice(sess); !strings.Contains(n, "active") {
+		t.Errorf("active goal notice = %q", n)
+	}
+	if _, err := sess.SetGoalStatus(agent.GoalPaused); err != nil {
+		t.Fatal(err)
+	}
+	if n := goalStartupNotice(sess); !strings.Contains(n, "/goal resume") {
+		t.Errorf("paused goal notice should hint resume, got %q", n)
+	}
+}
+
+func TestGoalStatusBar_IncludesGoalSegment(t *testing.T) {
+	m, _ := newGoalTestModel()
+	m.dispatchGoal("visible goal")
+	if out := m.renderStatusBar(); !strings.Contains(out, "goal") {
+		t.Errorf("status bar should carry the goal segment:\n%s", out)
+	}
+}
+
+func TestCompactCountAndElapsed(t *testing.T) {
+	for n, want := range map[int64]string{950: "950", 1200: "1.2K", 50000: "50K", 1_500_000: "1.5M"} {
+		if got := compactCount(n); got != want {
+			t.Errorf("compactCount(%d) = %q, want %q", n, got, want)
+		}
+	}
+	for s, want := range map[int64]string{45: "45s", 720: "12m", 5400: "1h 30m", 7200: "2h", 183900: "2d 3h 5m"} {
+		if got := goalElapsed(s); got != want {
+			t.Errorf("goalElapsed(%d) = %q, want %q", s, got, want)
+		}
+	}
+}

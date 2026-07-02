@@ -171,6 +171,12 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Idle: clear the input line and discard any pending attachments.
+		// A pending /goal edit is cancelled too — otherwise the next
+		// unrelated submit would silently become the objective.
+		if m.goalEditPending {
+			m.goalEditPending = false
+			m.println(noticeStyle.Render("Goal edit cancelled"))
+		}
 		m.pendingAttachments = nil
 		m.clearPastes()
 		// Also clear folded state
@@ -745,6 +751,12 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 		m.inputHistory = append(m.inputHistory, text)
 	}
 
+	// /goal edit armed the input: this line is the edited objective, not a
+	// message. Consumed idle-only (the flag is only set while idle).
+	if m.goalEditPending && !m.turnRunning {
+		return m.submitGoalEdit(text)
+	}
+
 	// Slash commands are the TUI's alone — the plain REPL is a pure conversation
 	// loop. A leading "/" with attachments is treated as ordinary text, not a command.
 	if strings.HasPrefix(text, "/") && len(m.pendingAttachments) == 0 {
@@ -827,6 +839,8 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		return m.dispatchThinking(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/clear":
 		return m.dispatchClear()
+	case "/goal":
+		return m.dispatchGoal(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/compact":
 		if m.turnRunning {
 			m.println(noticeStyle.Render("/compact: wait for the current turn to finish"))
@@ -1444,6 +1458,11 @@ func (m *tuiModel) renderStatusBar() string {
 	}
 	if m.cfg.permEngine != nil {
 		segs = append(segs, [2]string{"perm", string(m.cfg.permEngine.GetMode())})
+	}
+	if m.goalsWired() {
+		if g, ok := m.cfg.session.GoalSnapshot(); ok {
+			segs = append(segs, [2]string{"goal", goalStatusSegment(g)})
+		}
 	}
 	if n := len(tools.RunningBackground()); n > 0 {
 		label := "1 shell"

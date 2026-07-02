@@ -10,28 +10,6 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 )
 
-func TestIsRateLimitErr(t *testing.T) {
-	for _, err := range []error{
-		errors.New("anthropic: HTTP 429: rate limited"),
-		errors.New("openai: HTTP 429 (insufficient_quota): You exceeded your current quota"),
-		errors.New("agent: loop[3]: send: Rate limit reached for requests"),
-		errors.New("gateway: too many requests"),
-	} {
-		if !isRateLimitErr(err) {
-			t.Errorf("should classify as rate limit: %v", err)
-		}
-	}
-	for _, err := range []error{
-		nil,
-		errors.New("anthropic: HTTP 500: overloaded"),
-		errors.New("context deadline exceeded"),
-	} {
-		if isRateLimitErr(err) {
-			t.Errorf("should NOT classify as rate limit: %v", err)
-		}
-	}
-}
-
 // goalRoundSender replies (or errs) per main-loop round, recording each call's
 // message snapshot. Mutex-guarded — the after-turn suggest goroutine calls the
 // sender concurrently. Rounds beyond the script error out as a fail-safe so a
