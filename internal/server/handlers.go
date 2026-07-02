@@ -720,7 +720,7 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 
 	// Tool-enabled path: wire the per-turn tool environment (gate + ctx-scoped
 	// sub-agent manager + task store) bound to this turn's agent.
-	ctx, executor, _, err := s.prepareToolTurn(ctx, a)
+	ctx, executor, _, err := s.prepareToolTurn(ctx, a, sess)
 	if err != nil {
 		return "", err
 	}
@@ -742,8 +742,16 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 // async sub-agent result — and each turn gets a private store, so concurrent
 // sessions never share sub-agent or task state. Returns the augmented ctx, the
 // executor, and the manager so callers can wire live-panel event hooks.
-func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, error) {
+func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agent.Session) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, error) {
 	executor := tools.NewDefaultRegistry()
+
+	// Goal tools dispatch to the turn's session on every tool-enabled path
+	// (WS, SSE, REST, scheduled) — advertising them (SetGoalsEnabled) while
+	// wiring only one path would leave the others erroring on a tool the
+	// schema promised (the #597 class).
+	if s.goalsEnabled && sess != nil {
+		ctx = tools.WithGoalStore(ctx, sess)
+	}
 
 	// Gate browser image content on the active model's vision capability. Unlike
 	// the CLI (which goes through app.WireTools), the server wires tools here, so

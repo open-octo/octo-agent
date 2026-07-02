@@ -224,9 +224,9 @@ type Agent struct {
 
 	// goalBaseIn/goalBaseOut snapshot the cumulative session counters at the
 	// last goal accounting, so each accounting bills only the delta. Reset at
-	// every turn start (and via ResetGoalBaseline when a goal is created
-	// mid-turn, so pre-goal usage in the same turn is not billed). Turn
-	// goroutine only.
+	// every turn start. (Mid-turn goal creation is handled on the Session
+	// side instead: the skip-next-delta flag drops the creating tick's
+	// tokens.) Turn goroutine only.
 	goalBaseIn, goalBaseOut int
 
 	// Hooks is the per-Agent hook engine. It supersedes the old single-slot
@@ -1678,8 +1678,8 @@ func (a *Agent) accrueUsage(reply Reply) {
 // ResetGoalBaseline pins the goal-accounting baseline to the current session
 // counters and restarts the goal wall clock, so the next accounting bills
 // only usage — tokens and seconds — from this point on. Called at every turn
-// start; the create_goal tool wiring also calls it when a goal is created
-// mid-turn, so the turn's pre-goal usage is not billed.
+// start. (A goal created mid-turn is protected by the Session-side
+// skip-next-delta flag instead, since the tool executor never sees the Agent.)
 func (a *Agent) ResetGoalBaseline() {
 	if a.GoalAcct == nil {
 		return

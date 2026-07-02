@@ -99,7 +99,7 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 	var mgr *tools.SubAgentManager
 	if s.cfg.Tools {
 		var perr error
-		runCtx, executor, mgr, perr = s.prepareToolTurn(runCtx, a)
+		runCtx, executor, mgr, perr = s.prepareToolTurn(runCtx, a, sess)
 		if perr != nil {
 			ev := agent.AgentEvent{Kind: agent.EventToolError, Err: perr.Error()}
 			b, _ := json.Marshal(ev)

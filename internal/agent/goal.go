@@ -383,6 +383,20 @@ func (s *Session) GoalContinuationPending() bool {
 	return s.goalContPending
 }
 
+// SuppressGoalContinuation parks the continuation loop without touching the
+// goal itself. Transports call it when a turn was interrupted (the user said
+// stop — continuing immediately would make the loop interrupt-proof) or
+// errored (retrying an erroring turn unprompted is unbounded paid retries).
+// The zero-progress audit can't catch either case: an aborted or errored
+// turn usually still accounted partial tokens. The standard re-arms apply —
+// real token progress from a later user turn, or any goal mutation.
+func (s *Session) SuppressGoalContinuation() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.goalContPending = false
+	s.goalContSuppressed = true
+}
+
 // Markers wrapping every runtime-owned goal steering prompt injected as a
 // user message. Model-facing; every UI surface strips them (see
 // StripSystemReminders).

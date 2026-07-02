@@ -57,6 +57,22 @@ func resolveGoalStore(ctx context.Context) GoalStore {
 	return activeGoalStore
 }
 
+// WithoutGoalTools removes the goal tool definitions from defs. For turn
+// paths that advertise the shared catalog (SetGoalsEnabled) but do not wire
+// a goal store — the IM bridge until its sessions carry goals — advertising
+// a tool that can only error is worse than hiding it.
+func WithoutGoalTools(defs []agent.ToolDefinition) []agent.ToolDefinition {
+	out := defs[:0]
+	for _, d := range defs {
+		switch d.Name {
+		case "get_goal", "create_goal", "update_goal":
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
 // goalToolResponse is the JSON shape all three goal tools return. Remaining
 // tokens and the completion report only appear when meaningful, mirroring
 // the Codex tool contract this is ported from.

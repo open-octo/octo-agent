@@ -211,7 +211,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 	var executor agent.ToolExecutor
 	if s.cfg.Tools {
 		var perr error
-		runCtx, executor, _, perr = s.prepareToolTurn(runCtx, a)
+		runCtx, executor, _, perr = s.prepareToolTurn(runCtx, a, sess)
 		if perr != nil {
 			sw.error(perr.Error())
 			return sessionID, fmt.Errorf("prepare tools: %w", perr)

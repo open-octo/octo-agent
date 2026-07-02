@@ -264,11 +264,11 @@ func TestPrepareToolTurn_SessionScopedAsyncManager(t *testing.T) {
 	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, "sess-mgr-test")
 	t.Cleanup(func() { tools.CloseSessionSubAgentManager("sess-mgr-test") })
 
-	_, _, m1, err := srv.prepareToolTurn(ctx, a)
+	_, _, m1, err := srv.prepareToolTurn(ctx, a, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
-	_, _, m2, err := srv.prepareToolTurn(ctx, a)
+	_, _, m2, err := srv.prepareToolTurn(ctx, a, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestPrepareToolTurn_SessionScopedAsyncManager(t *testing.T) {
 		t.Error("session-scoped manager should be async")
 	}
 
-	_, _, anon, err := srv.prepareToolTurn(context.Background(), a)
+	_, _, anon, err := srv.prepareToolTurn(context.Background(), a, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn (no sid): %v", err)
 	}

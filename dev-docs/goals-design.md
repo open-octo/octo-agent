@@ -184,15 +184,28 @@ consecutive turns", "cannot pause/resume via this tool" contract wording):
   completed budgeted goal's result carries the `completion_budget_report`
   string instructing the model to report final usage to the user
 
-The executors hold a narrow interface implemented by `*agent.Agent`
-(`GetGoal/CreateGoal/UpdateGoalStatus`), constructed per session in
-`app.WireTools` — the same closure-wiring pattern as `sub_agent`/`workflow`.
-Registered in `DefaultTools` only when the feature is enabled. Rule from
-\#597/#600: every `input["…"]` read is declared in `Definition()`.
+The executors hold a narrow `GoalStore` interface implemented by
+`*agent.Session` (`GoalSnapshot/CreateGoal/SetGoalStatus`) — the session owns
+the durable record, so the tools dispatch to it directly, following the task
+tools' registration pattern: a process-global `SetGoalStore` (CLI/TUI, one
+session per process) or `SetGoalsEnabled` for catalog visibility plus a
+per-turn `WithGoalStore` ctx stamp (the server, in `prepareToolTurn`, so every
+tool-enabled turn path — WS, SSE, REST, scheduled — is wired identically; the
+IM bridge filters the goal tools out via `WithoutGoalTools` until its sessions
+carry goals). Rule from #597/#600: every `input["…"]` read is declared in
+`Definition()` — and a path that advertises a tool must wire its store.
 
 `update_goal` marking `complete`/`blocked` also ends the continuation loop by
-plain status effect — no special-casing beyond suppressing the budget steer on
-that same accounting step (Codex `ToolCompletedGoal`).
+plain status effect. A goal created mid-turn sets a skip-next-delta flag so
+the creating round's context input is not billed to the seconds-old goal
+(one-round undershoot, deliberate).
+
+Sub-agents spawned during a wired turn inherit the ctx goal store, so a child
+can read or complete the parent session's goal. This deviates from Codex
+(side conversations are excluded there) but matches how octo children already
+share the task store and background manager; the `create_goal` contract's
+"only when explicitly requested" keeps children from minting goals on their
+own.
 
 ### 4. Prompts
 
