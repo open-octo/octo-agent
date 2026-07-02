@@ -289,10 +289,14 @@ func TestGoalStatusSegmentAndStartupNotice(t *testing.T) {
 }
 
 func TestGoalStatusBar_IncludesGoalSegment(t *testing.T) {
-	m, _ := newGoalTestModel()
-	m.dispatchGoal("visible goal")
-	if out := m.renderStatusBar(); !strings.Contains(out, "goal") {
-		t.Errorf("status bar should carry the goal segment:\n%s", out)
+	// StatusBar renders segment VALUES only (labels pick styles), so assert
+	// on a value no other segment can produce: the budgeted-goal usage.
+	m, sess := newGoalTestModel()
+	if _, err := sess.CreateGoal("visible goal", 50000); err != nil {
+		t.Fatal(err)
+	}
+	if out := m.renderStatusBar(); !strings.Contains(out, "0/50K") {
+		t.Errorf("status bar should carry the goal usage segment:\n%s", out)
 	}
 }
 
