@@ -70,9 +70,6 @@ chmod +x "$app_dir/uninstall.sh"
 # this is an octo-managed binary, not a user setting, so always refreshing it
 # is correct. No-op when this pkg didn't bundle it (local/CI builds).
 #
-# bun bundling was considered and deliberately deferred (see the Makefile
-# comment above bundle-tools-macos) — this loop is written to make adding it
-# back later a one-line change (`for tool in uv bun`), not a new mechanism.
 octo_bin_dir="$HOME/.octo/bin"
 for tool in uv; do
   if [ -f "$bin_dir/$tool" ]; then

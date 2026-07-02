@@ -36,11 +36,10 @@ func TestDetectToolchain_PresentAndMissing(t *testing.T) {
 	fakeExe(t, dir, "git")
 	fakeExe(t, dir, "node")
 	fakeExe(t, dir, "python3") // satisfies the "python" probe via its variant
-	fakeExe(t, dir, "bun")
 
 	present, missing := DetectToolchain()
 
-	wantPresent := map[string]bool{"git": true, "node": true, "python": true, "bun": true}
+	wantPresent := map[string]bool{"git": true, "node": true, "python": true}
 	for _, p := range present {
 		if !wantPresent[p] {
 			t.Errorf("unexpected present tool %q", p)
@@ -52,7 +51,7 @@ func TestDetectToolchain_PresentAndMissing(t *testing.T) {
 	}
 
 	for _, m := range missing {
-		if m == "git" || m == "node" || m == "python" || m == "bun" {
+		if m == "git" || m == "node" || m == "python" {
 			t.Errorf("%q reported missing but was planted", m)
 		}
 	}
@@ -85,12 +84,12 @@ func withFakeHome(t *testing.T) string {
 	return dir
 }
 
-// TestDetectToolchain_BundledFallback confirms uv/bun resolve via octo's
-// bundled ~/.octo/bin even when neither is anywhere on the real PATH — the
-// scenario the Windows/macOS installers create by staging them there instead
+// TestDetectToolchain_BundledFallback confirms uv resolves via octo's
+// bundled ~/.octo/bin even when it's not on the real PATH — the
+// scenario the Windows/macOS installers create by staging it there instead
 // of polluting the system PATH.
 func TestDetectToolchain_BundledFallback(t *testing.T) {
-	withIsolatedPath(t) // PATH points at an empty temp dir — no uv/bun there
+	withIsolatedPath(t) // PATH points at an empty temp dir — no uv there
 	home := withFakeHome(t)
 
 	binDir := filepath.Join(home, ".octo", "bin")
@@ -98,19 +97,18 @@ func TestDetectToolchain_BundledFallback(t *testing.T) {
 		t.Fatalf("mkdir bin dir: %v", err)
 	}
 	fakeExe(t, binDir, "uv")
-	fakeExe(t, binDir, "bun")
 
 	present, missing := DetectToolchain()
 
-	wantPresent := map[string]bool{"uv": true, "bun": true}
+	wantPresent := map[string]bool{"uv": true}
 	for _, p := range present {
 		delete(wantPresent, p)
 	}
 	if len(wantPresent) != 0 {
-		t.Errorf("bundled ~/.octo/bin tools not detected as present: %v", wantPresent)
+		t.Errorf("bundled ~/.octo/bin tool not detected as present: %v", wantPresent)
 	}
 	for _, m := range missing {
-		if m == "uv" || m == "bun" {
+		if m == "uv" {
 			t.Errorf("%q reported missing despite being in the bundled ~/.octo/bin fallback", m)
 		}
 	}
@@ -118,7 +116,7 @@ func TestDetectToolchain_BundledFallback(t *testing.T) {
 
 // TestDetectToolchain_NoBundledDirIsGracefulMiss confirms that when
 // ~/.octo/bin simply doesn't exist (go install / build-from-source / Linux
-// without an installer), uv/bun are reported missing with no error — the
+// without an installer), uv is reported missing with no error — the
 // non-installer install path must not regress.
 func TestDetectToolchain_NoBundledDirIsGracefulMiss(t *testing.T) {
 	withIsolatedPath(t)
@@ -126,12 +124,12 @@ func TestDetectToolchain_NoBundledDirIsGracefulMiss(t *testing.T) {
 
 	_, missing := DetectToolchain()
 
-	wantMissing := map[string]bool{"uv": true, "bun": true}
+	wantMissing := map[string]bool{"uv": true}
 	for _, m := range missing {
 		delete(wantMissing, m)
 	}
 	if len(wantMissing) != 0 {
-		t.Errorf("expected uv/bun reported missing with no bundled dir, got remaining: %v", wantMissing)
+		t.Errorf("expected uv reported missing with no bundled dir, got remaining: %v", wantMissing)
 	}
 }
 

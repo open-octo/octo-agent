@@ -151,9 +151,9 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 }
 
 // bundledBinDir returns ~/.octo/bin if it exists on disk, or "" otherwise.
-// The Windows/macOS installers stage octo-managed helper binaries there
-// (bundled uv/bun — see the Makefile's bundle-tools-windows/-macos targets
-// and packaging/windows/octo.iss + packaging/macos/scripts/postinstall;
+// The Windows/macOS installers stage helper binaries there (bundled uv — see
+// the Makefile's bundle-tools-windows/-macos targets and
+// packaging/windows/octo.iss + packaging/macos/scripts/postinstall;
 // also where internal/tools/rgembed extracts its ripgrep fallback). go
 // install / build-from-source / Linux-without-an-installer users never get
 // this directory, so the empty-string case is the normal, silent no-op path
@@ -172,8 +172,8 @@ func bundledBinDir() string {
 
 // withBundledBinPath returns env with ~/.octo/bin appended to the PATH entry
 // (or a new PATH entry added if none exists), so a child process can resolve
-// octo-bundled uv/bun as a last resort. Appended, not prepended: a system
-// install of uv/bun already on PATH is found first and takes precedence — the
+// octo-bundled uv as a last resort. Appended, not prepended: a system
+// install of uv already on PATH is found first and takes precedence — the
 // bundled copy is a fallback, never a shadow. No-op (returns env unchanged)
 // when ~/.octo/bin doesn't exist, e.g. on non-installer installs. The caller
 // owns env's backing array (typically a fresh os.Environ() call), so this

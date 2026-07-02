@@ -83,7 +83,7 @@ func TestWithBundledBinPath_NoOpWhenBundledDirMissing(t *testing.T) {
 // real child process via shellCommand and confirms the child can execute a
 // fake tool that exists ONLY under a fake ~/.octo/bin — never on the real
 // system PATH — proving the PATH-append actually makes the bundled directory
-// resolvable end to end, the way a skill script invoking bundled uv/bun would
+// resolvable end to end, the way a skill script invoking bundled uv would
 // rely on.
 func TestShellCommand_ResolvesBundledTool(t *testing.T) {
 	home := t.TempDir()

@@ -14,10 +14,7 @@
 ;                not checked into this repo — so a plain `git clone` has no
 ;                uv.exe to find; that's expected, [Files] skips it
 ;                (skipifsourcedoesntexist) when SourceDir doesn't have it.
-;                bun bundling was considered and deliberately deferred (see
-;                the Makefile comment above bundle-tools-windows) — only uv
-;                ships today; users who need bun for complex frontend artifacts
-;                install it via the guided one-liner (brew / curl).
+;                only uv ships today.
 ; Compile locally:  ISCC.exe /DAppVersion=0.0.0 /DSourceDir=path\to\bits octo.iss
 
 #ifndef AppVersion

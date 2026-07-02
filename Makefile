@@ -162,17 +162,10 @@ rg-embed-clean:
 # fresh install then has `uv run` working with zero manual download, for the
 # office-xlsx skill (issue #1054's P1 priority: the non-technical-user path).
 #
-# bun bundling was deliberately deferred, not
-# forgotten: uv alone already runs 51-107MB depending on platform, and
-# bundling bun too would roughly double that (a macOS universal bun binary
-# alone is ~132MB) for complex frontend artifacts. Users who need bun
-# install it via the guided one-liner (brew / curl), the same bar Node
-# had before. The generic bundled-dir mechanism
-# (bundledBinDir/withBundledBinPath in internal/tools/sandbox.go, and the
-# toolchain.go presence probe) is NOT bun-specific — it picks up whatever's
-# actually in ~/.octo/bin, so a future bundle-tools-* target (or a user who
-# drops a bun binary there by hand) needs no code change, only a Makefile/
-# packaging addition mirroring this one.
+# The generic bundled-dir mechanism (bundledBinDir/withBundledBinPath in
+# internal/tools/sandbox.go, and the toolchain.go presence probe) is generic
+# — it picks up whatever's in ~/.octo/bin, so a future bundle-tools-* target
+# needs no code change, only a Makefile/packaging addition.
 #
 # Deliberately NOT go:embed'd into the octo binary itself: that would bloat
 # every build on every platform (CLI-only Linux users included) with a binary

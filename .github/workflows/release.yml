@@ -60,9 +60,7 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       # Fetches uv.exe from its upstream GitHub release so the installer can
-      # bundle it — see octo.iss's [Files] section. bun bundling was
-      # considered and deliberately deferred (see the Makefile comment above
-      # bundle-tools-windows) — only uv ships today. Native PowerShell rather
+      # bundle it — see octo.iss's [Files] section. Native PowerShell rather
       # than `make bundle-tools-windows` (which does the same fetch and is
       # kept for local/macOS/Linux dev use — see the Makefile):
       # windows-latest runners aren't guaranteed to have GNU Make, and this
@@ -157,8 +155,7 @@ jobs:
       # upstream GitHub release (pinned version in the Makefile) so build.sh
       # can bundle it into the pkg payload — see
       # packaging/macos/scripts/postinstall for where it lands at install
-      # time. bun bundling was considered and deliberately deferred (see the
-      # Makefile comment above bundle-tools-macos) — only uv ships today.
+      # time.
       - name: Fetch bundled uv
         run: make bundle-tools-macos
 

@@ -16,10 +16,10 @@ import (
 // pays for on every turn.
 //
 // bundledFallback marks probes that also resolve via the octo-managed
-// ~/.octo/bin fallback (populated by the Windows/macOS installers with uv/bun
-// — see internal/tools/sandbox.go's withBundledBinPath). It's scoped to just
-// those two: every other probe here is a real developer-machine dependency
-// octo never bundles, so checking ~/.octo/bin for them would be pointless.
+// ~/.octo/bin fallback (populated by the Windows/macOS installers — see
+// internal/tools/sandbox.go's withBundledBinPath). Scoped to just uv:
+// every other probe here is a real developer-machine dependency octo never
+// bundles, so checking ~/.octo/bin for them would be pointless.
 var toolchainProbes = []struct {
 	name            string
 	cmds            []string
@@ -32,14 +32,13 @@ var toolchainProbes = []struct {
 	{"python", []string{"python3", "python"}, false},
 	{"pip", []string{"pip3", "pip"}, false},
 	{"uv", []string{"uv"}, true},
-	{"bun", []string{"bun"}, true},
 	{"go", []string{"go"}, false},
 	{"docker", []string{"docker"}, false},
 	{"make", []string{"make"}, false},
 }
 
 // DetectToolchain reports which curated developer tools resolve on the current
-// PATH, plus (for uv/bun) octo's own bundled ~/.octo/bin fallback. The PATH
+// PATH, plus (for uv) octo's own bundled ~/.octo/bin fallback. The PATH
 // check is via exec.LookPath — a filesystem lookup, not a subprocess — so it
 // stays cheap enough to call on every context build, including the server's
 // per-turn recompose. Versions are deliberately not probed; the agent runs
@@ -47,7 +46,7 @@ var toolchainProbes = []struct {
 // LookPath honours PATHEXT, so npm.cmd / npx.cmd resolve as expected.
 //
 // The bundled-dir check matters because withBundledBinPath (sandbox.go)
-// already makes a bundled uv/bun resolvable inside every child process octo
+// already makes a bundled uv resolvable inside every child process octo
 // spawns — without this check, DetectToolchain would wrongly report "missing"
 // for a tool that terminal commands can actually run. The rendered note
 // (ToolchainNote) doesn't distinguish "on system PATH" vs "via octo's bundled
@@ -79,8 +78,8 @@ func DetectToolchain() (present, missing []string) {
 }
 
 // bundledBinName returns the platform-specific file name for cmd inside
-// ~/.octo/bin (the installer stages a plain "uv"/"bun" on macOS/Linux and
-// "uv.exe"/"bun.exe" on Windows).
+// ~/.octo/bin (the installer stages a plain "uv" on macOS/Linux and
+// "uv.exe" on Windows).
 func bundledBinName(cmd string) string {
 	if runtime.GOOS == "windows" {
 		return cmd + ".exe"
