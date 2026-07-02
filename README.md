@@ -59,8 +59,8 @@ subscription or a single vendor — that's octo.
 
 ## Install
 
-**macOS / Linux (install script).** Detects your OS/arch, downloads the matching
-release, verifies its SHA-256, and installs `octo` to your `PATH`:
+**Linux (install script).** Detects your arch, downloads the matching release,
+verifies its SHA-256, and installs `octo` to your `PATH`:
 
 ```bash
 curl -fsSL https://octo-agent.dev/install.sh | sh
@@ -70,7 +70,7 @@ Then start the local server and onboard in your browser:
 
 ```bash
 octo serve -d                  # run the local server in the background
-open http://127.0.0.1:8088     # Linux: xdg-open — opens the dashboard
+xdg-open http://127.0.0.1:8088 # opens the dashboard
 ```
 
 `127.0.0.1` is loopback, so no access key is needed; the page goes straight
@@ -80,6 +80,34 @@ with `octo serve --stop`. Prefer the terminal? Just run `octo`.
 Prebuilt archives (linux / darwin / windows × amd64 + arm64) and `checksums.txt`
 are on the [latest release](https://github.com/open-octo/octo-agent/releases/latest)
 if you'd rather grab one by hand.
+
+**macOS — two ways to install:**
+
+- **Install script (command line).** Same one-liner as Linux:
+
+  ```bash
+  curl -fsSL https://octo-agent.dev/install.sh | sh
+  octo serve -d                  # run the local server in the background
+  open http://127.0.0.1:8088     # opens the dashboard
+  ```
+
+- **Double-click installer.** Download `octo-setup.pkg` from the
+  [latest release](https://github.com/open-octo/octo-agent/releases/latest)
+  (one universal package covers both Apple Silicon and Intel) and
+  double-click it. Installer.app offers only "Install for me only" — no
+  administrator password. It installs octo to
+  `~/Library/Application Support/octo`, adds it to your `PATH` (appends to
+  `~/.zprofile` / `~/.bash_profile` / `~/.profile`), and registers a
+  LaunchAgent that starts `octo serve -d` on every login. When it finishes it
+  starts the server and opens <http://127.0.0.1:8088> — a loopback address, so
+  no access key is needed — to walk you through first-run onboarding (pick a
+  provider, paste a key). For a terminal session, open a **new** terminal and
+  run `octo`. The installer isn't notarized, so Gatekeeper will warn it's from
+  an unidentified developer — right-click (Control-click) the file → **Open**,
+  or allow it via **System Settings → Privacy & Security → Open Anyway**.
+  There's no App Store-style uninstaller for `.pkg`; run
+  `~/Library/Application\ Support/octo/uninstall.sh` to remove everything it
+  installed.
 
 **Windows (double-click installer).** Download `octo-setup.exe` from the
 [latest release](https://github.com/open-octo/octo-agent/releases/latest) and
@@ -105,7 +133,10 @@ versions. The web UI's version badge offers the same flow.
 octo's Windows installer (`octo-setup.exe`) is signed through the free
 open-source program of the [SignPath Foundation](https://signpath.org/),
 which issues the certificate; the signing key is held by SignPath and never
-leaves their infrastructure.
+leaves their infrastructure. The macOS installer (`octo-setup.pkg`) isn't
+signed or notarized yet — there's no Apple Developer Program membership behind
+this project — so Gatekeeper's unidentified-developer warning is expected for
+every release until that changes.
 
 - **What is signed:** the `octo-setup.exe` installer attached to each GitHub
   release. The release archives themselves are integrity-checked via the

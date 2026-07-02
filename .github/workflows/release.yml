@@ -109,3 +109,38 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: gh release upload "${{ github.ref_name }}" staging\octo-setup.exe --clobber
+
+  # Build the double-click macOS installer (octo-setup.pkg) from the universal
+  # (amd64+arm64) binary goreleaser just published, and attach it to the same
+  # release. One .pkg covers both Intel and Apple Silicon. Unsigned for now —
+  # see the README "Install" section for the Gatekeeper bypass this implies.
+  macos-installer:
+    name: macos installer
+    needs: goreleaser
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5 # for packaging/macos/ + LICENSE.txt
+
+      - name: Stage the released binary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p staging dl
+          gh release download "$GITHUB_REF_NAME" --pattern "octo_${version}_darwin_all.tar.gz" --dir dl
+          tar -xzf "dl/octo_${version}_darwin_all.tar.gz" -C dl octo
+          cp dl/octo staging/octo
+          cp LICENSE.txt staging/LICENSE.txt
+          echo "version=$version" >> "$GITHUB_ENV"
+
+      - name: Build installer
+        env:
+          AppVersion: ${{ env.version }}
+          SourceDir: ${{ github.workspace }}/staging
+          OutDir: ${{ github.workspace }}/staging
+        run: packaging/macos/build.sh
+
+      - name: Attach installer to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" staging/octo-setup.pkg --clobber

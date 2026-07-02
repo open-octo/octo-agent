@@ -44,6 +44,15 @@ tail -f /tmp/octo-serve.log
 > address requires `-addr :8088` (or similar) **and** an access key — see
 > [SECURITY.md](../SECURITY.md).
 
+## macOS installer
+
+The double-click `octo-setup.pkg` is built from [`macos/`](macos/) by the
+release workflow (`macos/build.sh` drives `pkgbuild` + `productbuild`). It
+installs to `~/Library/Application Support/octo` and writes its own
+`~/Library/LaunchAgents/dev.octo-agent.serve.plist` — if you already set up
+the manual launchd template above under the same label, the installer
+overwrites it. See the README's Install section.
+
 ## Windows installer
 
 The double-click `octo-setup.exe` is built from

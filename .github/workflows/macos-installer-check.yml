@@ -1,0 +1,60 @@
+name: macOS installer check
+
+# Build packaging/macos/octo-setup.pkg whenever a PR touches it, and actually
+# install it (into the runner's own $HOME — an ephemeral VM, so this is safe)
+# to catch domain/script mistakes that a build-only check would miss. release.yml
+# only builds+publishes this on a tag push.
+on:
+  pull_request:
+    paths:
+      - 'packaging/macos/**'
+      - '.github/workflows/macos-installer-check.yml'
+  workflow_dispatch:
+
+# Least-privilege default: this job only checks out, builds, and installs
+# locally — no release assets are touched.
+permissions:
+  contents: read
+
+jobs:
+  build-and-install:
+    name: build and install
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Build a binary to package
+        run: |
+          mkdir -p staging
+          go build -o staging/octo ./cmd/octo # plain build; embedded rg is irrelevant to packaging
+          cp LICENSE.txt staging/LICENSE.txt
+
+      - name: Build installer
+        env:
+          AppVersion: 0.0.0-ci
+          SourceDir: ${{ github.workspace }}/staging
+          OutDir: ${{ github.workspace }}/staging
+        run: packaging/macos/build.sh
+
+      - name: Install it for real
+        run: sudo installer -pkg staging/octo-setup.pkg -target CurrentUserHomeDirectory -verbose
+
+      - name: Verify the install
+        run: |
+          bin="$HOME/Library/Application Support/octo/bin/octo"
+          test -x "$bin" || { echo "octo binary missing at $bin"; exit 1; }
+          "$bin" version
+          grep -qF 'added by the octo installer' "$HOME/.zprofile" || { echo "PATH not updated"; exit 1; }
+          test -f "$HOME/Library/LaunchAgents/dev.octo-agent.serve.plist" || { echo "LaunchAgent missing"; exit 1; }
+          test -x "$HOME/Library/Application Support/octo/uninstall.sh" || { echo "uninstall.sh missing"; exit 1; }
+          "$bin" serve --stop || true
+
+      - name: Uninstall it
+        run: |
+          "$HOME/Library/Application Support/octo/uninstall.sh"
+          test ! -d "$HOME/Library/Application Support/octo" || { echo "uninstall left files behind"; exit 1; }

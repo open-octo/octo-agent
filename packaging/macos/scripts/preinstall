@@ -1,0 +1,14 @@
+#!/bin/sh
+# Stop a running daemon before its binary is overwritten — an in-place
+# upgrade can't replace an in-use octo.exe-equivalent while `octo serve -d`
+# still holds it open. Runs as the installing user (the distribution's
+# currentUserHome domain executes scripts unprivileged), so $HOME resolves to
+# the real target account. No-op on a first install (no octo yet).
+set -eu
+
+bin="$HOME/Library/Application Support/octo/bin/octo"
+if [ -x "$bin" ]; then
+  "$bin" serve --stop >/dev/null 2>&1 || true
+fi
+
+exit 0
