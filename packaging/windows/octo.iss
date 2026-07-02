@@ -8,7 +8,16 @@
 ;
 ; Compiled in CI by .github/workflows/release.yml. Two defines are passed in:
 ;   AppVersion — the release version, e.g. 0.20.0
-;   SourceDir  — the folder holding octo.exe and LICENSE.txt
+;   SourceDir  — the folder holding octo.exe, LICENSE.txt, and (release builds
+;                only) uv.exe, fetched from astral-sh/uv's GitHub releases at
+;                build time (see the Makefile's bundle-tools-windows target) —
+;                not checked into this repo — so a plain `git clone` has no
+;                uv.exe to find; that's expected, [Files] skips it
+;                (skipifsourcedoesntexist) when SourceDir doesn't have it.
+;                bun bundling was considered and deliberately deferred (see
+;                the Makefile comment above bundle-tools-windows) — only uv
+;                ships today; web-artifacts-builder still guides the user to
+;                install bun themselves.
 ; Compile locally:  ISCC.exe /DAppVersion=0.0.0 /DSourceDir=path\to\bits octo.iss
 
 #ifndef AppVersion
@@ -44,6 +53,15 @@ UninstallDisplayName=octo {#AppVersion}
 [Files]
 Source: "{#SourceDir}\octo.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+; uv, staged by `make bundle-tools-windows` (see the Makefile) into the same
+; SourceDir before ISCC runs. Lands in {%USERPROFILE}\.octo\bin — the same
+; per-user, no-admin directory octo's own rgembed cache uses (~/.octo/bin) —
+; NOT {app}, so skill scripts can find it via PATH injection
+; (internal/tools/sandbox.go) without polluting the user's real PATH.
+; skipifsourcedoesntexist lets a local/CI compile that only stages octo.exe
+; (windows-installer-check.yml, or `ISCC.exe /DSourceDir=...` by hand) still
+; succeed — the release pipeline is the only place this file is expected.
+Source: "{#SourceDir}\uv.exe"; DestDir: "{%USERPROFILE}\.octo\bin"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 ; Open a console with octo started. Invoked by full path so it works even

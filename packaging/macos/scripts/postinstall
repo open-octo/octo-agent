@@ -60,6 +60,28 @@ echo "octo uninstalled."
 UNINSTALL
 chmod +x "$app_dir/uninstall.sh"
 
+# uv (when this pkg bundled it — see packaging/macos/build.sh) lands at
+# $bin_dir alongside octo itself, purely as a side effect of pkgbuild
+# installing the whole payload under one --install-location. Move it out to
+# ~/.octo/bin — the same per-user convention the Windows installer and octo's
+# own rgembed cache use, and where internal/tools/sandbox.go's PATH injection
+# looks — instead of leaving a second, wasted copy sitting in Application
+# Support. Runs on every install/upgrade (unlike the config seeding below):
+# this is an octo-managed binary, not a user setting, so always refreshing it
+# is correct. No-op when this pkg didn't bundle it (local/CI builds).
+#
+# bun bundling was considered and deliberately deferred (see the Makefile
+# comment above bundle-tools-macos) — this loop is written to make adding it
+# back later a one-line change (`for tool in uv bun`), not a new mechanism.
+octo_bin_dir="$HOME/.octo/bin"
+for tool in uv; do
+  if [ -f "$bin_dir/$tool" ]; then
+    mkdir -p "$octo_bin_dir"
+    mv "$bin_dir/$tool" "$octo_bin_dir/$tool"
+    chmod +x "$octo_bin_dir/$tool"
+  fi
+done
+
 # Seed ~/.octo/config.yml with workspace_dir: auto on a genuinely fresh
 # install (no config.yml at all yet — not even one with just an access key,
 # which octo itself writes on first `serve` start). Must run before `octo
