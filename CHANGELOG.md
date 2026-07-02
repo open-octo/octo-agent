@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] — 2026-07-02
+
+### Added
+- **macOS double-click installer (`octo-setup.pkg`).** Mirrors the Windows
+  installer: a per-user package (no admin password) installs to
+  `~/Library/Application Support/octo`, wires `PATH`, registers a login
+  LaunchAgent, and opens onboarding on first run. A single universal binary
+  covers both Intel and Apple Silicon (#1053).
+- **`show_artifact` renders as a clickable link in the TUI.** The status line
+  now prints the file path as an OSC 8 `file://` hyperlink — click-to-open in
+  iTerm2, Windows Terminal, kitty, and WezTerm; terminals without OSC 8
+  support just show the plain path (#1057).
+
+### Fixed
+- **Browser `run_skill` no longer replays near-miss recordings.** A recording
+  without a description rendered as a bare name in the skills manifest, so
+  the model pattern-matched unrelated requests onto it. Descriptions now
+  always render (falling back to a step digest), and the manifest states
+  replay is verbatim-only (#1050).
+
 ## [1.6.0] — 2026-07-01
 
 ### Added
