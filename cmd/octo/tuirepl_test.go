@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tui"
 )
 
 // fakeProg records messages the sink sends, standing in for *tea.Program.
@@ -1112,14 +1114,26 @@ func TestTUI_Paste_EscClears(t *testing.T) {
 // in the plain/headless transcript).
 func TestTUI_RenderToolOutcome_ArtifactHyperlink(t *testing.T) {
 	m := newTestModel()
-	input := map[string]any{"path": "/tmp/report.html"}
+	// Platform-appropriate absolute path: linkify is gated on filepath.IsAbs,
+	// and a rootless /tmp/... is NOT absolute on Windows.
+	path := "/tmp/report.html"
+	if runtime.GOOS == "windows" {
+		path = `C:\tmp\report.html`
+	}
+	input := map[string]any{"path": path}
 
-	got := m.renderToolOutcome("show_artifact", input, "Artifact presented: /tmp/report.html (12 bytes)", false)
-	if !strings.Contains(got, "\x1b]8;;file:///tmp/report.html\x1b\\") {
+	got := m.renderToolOutcome("show_artifact", input, "Artifact presented: "+path+" (12 bytes)", false)
+	if !strings.Contains(got, "\x1b]8;;"+tui.FileURI(path)+"\x1b\\") {
 		t.Errorf("success line should carry an OSC 8 file:// hyperlink; got %q", got)
 	}
-	if !strings.Contains(got, "/tmp/report.html") {
+	if !strings.Contains(got, path) {
 		t.Errorf("success line should show the path; got %q", got)
+	}
+
+	// A relative path must NOT be linkified — re-resolving it at render time
+	// diverges from the execute-time cwd on resumed-history replay.
+	if got := m.renderToolOutcome("show_artifact", map[string]any{"path": "rel/report.html"}, "ok", false); strings.Contains(got, "\x1b]8;;") {
+		t.Errorf("relative path should not render a hyperlink; got %q", got)
 	}
 
 	if got := m.renderToolOutcome("show_artifact", input, "boom", true); strings.Contains(got, "\x1b]8;;") {
