@@ -57,6 +57,15 @@ func DefaultPolicy(cwd string) Policy {
 	for _, p := range systemReadRoots() {
 		add(p)
 	}
+	// ~/.octo/bin holds octo-managed helper binaries (bundled uv/bun on
+	// installer-based installs, the extracted ripgrep fallback) that skill
+	// scripts invoke via PATH — see internal/tools/sandbox.go's PATH
+	// injection. Read+execute only, not a write root, and distinct from the
+	// rest of $HOME (which stays unreadable here to protect secrets like
+	// ~/.ssh, ~/.aws).
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		add(filepath.Join(home, ".octo", "bin"))
+	}
 
 	write := []string{}
 	if cwd != "" {

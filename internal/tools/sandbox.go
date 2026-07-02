@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -99,6 +100,11 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 		cmd, err := sandbox.Command(ctx, command, *activeSandbox)
 		if err == nil && cmd != nil {
 			applyWorkingDir(ctx, cmd)
+			env := cmd.Env
+			if env == nil {
+				env = os.Environ()
+			}
+			cmd.Env = withBundledBinPath(env)
 		}
 		return cmd, err
 	}
@@ -117,9 +123,10 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 		if exe, err := os.Executable(); err == nil && projectDir != "" {
 			wrapped := fmt.Sprintf(windowsSafeRmWrapper, strings.ReplaceAll(exe, "'", "''"), command)
 			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", wrapped)
-			cmd.Env = append(os.Environ(), "OCTO_TRASH_PROJECT="+projectDir)
+			cmd.Env = withBundledBinPath(append(os.Environ(), "OCTO_TRASH_PROJECT="+projectDir))
 		} else {
 			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", command)
+			cmd.Env = withBundledBinPath(os.Environ())
 		}
 	} else {
 		projectDir := WorkingDir(ctx)
@@ -130,9 +137,10 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 			trashDir := trash.ProjectDir(projectDir)
 			wrapped := fmt.Sprintf(safeRmWrapper, command)
 			cmd = exec.CommandContext(ctx, "sh", "-c", wrapped)
-			cmd.Env = append(os.Environ(), "OCTO_TRASH_DIR="+trashDir)
+			cmd.Env = withBundledBinPath(append(os.Environ(), "OCTO_TRASH_DIR="+trashDir))
 		} else {
 			cmd = exec.CommandContext(ctx, "sh", "-c", command)
+			cmd.Env = withBundledBinPath(os.Environ())
 		}
 	}
 	if attr := setProcessGroupOpts(); attr != nil {
@@ -140,6 +148,48 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 	}
 	applyWorkingDir(ctx, cmd)
 	return cmd, nil
+}
+
+// bundledBinDir returns ~/.octo/bin if it exists on disk, or "" otherwise.
+// The Windows/macOS installers stage octo-managed helper binaries there
+// (bundled uv/bun — see the Makefile's bundle-tools-windows/-macos targets
+// and packaging/windows/octo.iss + packaging/macos/scripts/postinstall;
+// also where internal/tools/rgembed extracts its ripgrep fallback). go
+// install / build-from-source / Linux-without-an-installer users never get
+// this directory, so the empty-string case is the normal, silent no-op path
+// for them — not an error.
+func bundledBinDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	dir := filepath.Join(home, ".octo", "bin")
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return ""
+	}
+	return dir
+}
+
+// withBundledBinPath returns env with ~/.octo/bin appended to the PATH entry
+// (or a new PATH entry added if none exists), so a child process can resolve
+// octo-bundled uv/bun as a last resort. Appended, not prepended: a system
+// install of uv/bun already on PATH is found first and takes precedence — the
+// bundled copy is a fallback, never a shadow. No-op (returns env unchanged)
+// when ~/.octo/bin doesn't exist, e.g. on non-installer installs. The caller
+// owns env's backing array (typically a fresh os.Environ() call), so this
+// mutates in place rather than reallocating on the common no-op path.
+func withBundledBinPath(env []string) []string {
+	dir := bundledBinDir()
+	if dir == "" {
+		return env
+	}
+	for i, kv := range env {
+		if len(kv) >= 5 && strings.EqualFold(kv[:5], "path=") {
+			env[i] = kv + string(os.PathListSeparator) + dir
+			return env
+		}
+	}
+	return append(env, "PATH="+dir)
 }
 
 // detachedCommand builds an *exec.Cmd that runs `command` fully detached from
