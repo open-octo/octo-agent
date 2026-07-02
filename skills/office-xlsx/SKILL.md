@@ -42,7 +42,7 @@ uv run <skill-dir>/scripts/xlsx_edit.py --output out.xlsx --ops ops.json
 uv run <skill-dir>/scripts/xlsx_edit.py --input existing.xlsx --output out.xlsx --ops ops.json
 ```
 
-- Omit `--input` to start from a blank workbook.
+- Omit `--input` to start from a blank workbook. Its one default sheet is named `Sheet` (not `Sheet1`) — the first `add_sheet` op on a blank workbook renames that default sheet instead of leaving an empty extra tab, so give it the name you actually want as your first sheet.
 - `--input` and `--output` may be the same path to edit in place.
 - `--ops` points to a JSON file (or pass inline JSON via `--ops-json '...'`) containing a list of operation objects, applied in order. Supported operations:
 

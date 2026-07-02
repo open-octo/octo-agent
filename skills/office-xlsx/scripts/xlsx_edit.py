@@ -95,10 +95,11 @@ def op_style(wb, op, state):
             cell.font = Font(**kwargs)
         if fill_spec:
             color = fill_spec.get("color")
-            if color:
-                cell.fill = PatternFill(
-                    start_color=color, end_color=color, fill_type=fill_spec.get("fill_type", "solid")
-                )
+            if not color:
+                raise OpError(f"style op on {op['range']!r}: fill needs a \"color\" field")
+            cell.fill = PatternFill(
+                start_color=color, end_color=color, fill_type=fill_spec.get("fill_type", "solid")
+            )
         if border_spec:
             thin = Side(style="thin")
             cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -203,8 +204,40 @@ def apply_ops(wb, ops, is_new_workbook):
             raise OpError(f"op #{i}: unknown op {op_name!r}; supported: {list(_OPS)}")
         try:
             handler(wb, op, state)
+        except OpError:
+            raise
         except KeyError as e:
             raise OpError(f"op #{i} ({op_name}): missing required field {e}") from e
+        except Exception as e:
+            # Anything else an op handler can throw (bad range string, bad
+            # chart/validation type, ...) — wrap with the op's position so
+            # the message is actionable instead of a bare library traceback.
+            raise OpError(f"op #{i} ({op_name}): {e}") from e
+
+
+def load_ops(args):
+    """Load and parse the operations list from --ops or --ops-json, raising
+    OpError (not a bare exception) for any file/JSON problem so main() has a
+    single place that turns failures into a clean exit."""
+    if args.ops:
+        try:
+            with open(args.ops) as f:
+                text = f.read()
+        except OSError as e:
+            raise OpError(f"could not read --ops file {args.ops!r}: {e.strerror or e}") from e
+        source = f"--ops file {args.ops!r}"
+    else:
+        text = args.ops_json
+        source = "--ops-json"
+
+    try:
+        ops = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise OpError(f"{source} is not valid JSON: {e}") from e
+
+    if not isinstance(ops, list):
+        raise OpError(f"{source} must be a JSON list of operation objects")
+    return ops
 
 
 def main():
@@ -216,30 +249,31 @@ def main():
     ops_group.add_argument("--ops-json", help="the operations list as an inline JSON string")
     args = parser.parse_args()
 
-    if args.ops:
-        with open(args.ops) as f:
-            ops = json.load(f)
-    else:
-        ops = json.loads(args.ops_json)
-
-    if not isinstance(ops, list):
-        print("error: ops must be a JSON list of operation objects", file=sys.stderr)
-        sys.exit(1)
-
-    if args.input:
-        wb = load_workbook(args.input)
-        is_new_workbook = False
-    else:
-        wb = Workbook()
-        is_new_workbook = True
-
     try:
+        ops = load_ops(args)
+
+        if args.input:
+            try:
+                wb = load_workbook(args.input)
+            except FileNotFoundError:
+                raise OpError(f"no such file: {args.input}") from None
+            except Exception as e:
+                raise OpError(f"could not open {args.input}: {e}") from e
+            is_new_workbook = False
+        else:
+            wb = Workbook()
+            is_new_workbook = True
+
         apply_ops(wb, ops, is_new_workbook)
+
+        try:
+            wb.save(args.output)
+        except OSError as e:
+            raise OpError(f"could not save {args.output}: {e.strerror or e}") from e
     except OpError as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    wb.save(args.output)
     print(json.dumps({"status": "ok", "output": args.output, "sheets": wb.sheetnames}))
 
 
