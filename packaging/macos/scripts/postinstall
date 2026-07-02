@@ -60,6 +60,22 @@ echo "octo uninstalled."
 UNINSTALL
 chmod +x "$app_dir/uninstall.sh"
 
+# Seed ~/.octo/config.yml with workspace_dir: auto on a genuinely fresh
+# install (no config.yml at all yet — not even one with just an access key,
+# which octo itself writes on first `serve` start). Must run before `octo
+# serve -d` below, or that first start would write an access-key-only
+# config.yml first and this step would then correctly no-op, leaving the
+# new-web-session default unset. An upgrade/reinstall over an existing
+# config.yml is always a no-op — never overwrite a user's existing settings.
+config_dir="$HOME/.octo"
+config_path="$config_dir/config.yml"
+if [ ! -f "$config_path" ]; then
+  mkdir -p "$config_dir"
+  chmod 700 "$config_dir"
+  printf 'workspace_dir: auto\n' > "$config_path"
+  chmod 600 "$config_path"
+fi
+
 # octo serve -d blocks until the server is accepting connections (or it times
 # out), so the browser opens against a live port rather than racing the bind.
 "$bin" serve -d >/dev/null 2>&1 || true
