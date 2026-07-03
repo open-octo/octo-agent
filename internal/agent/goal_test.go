@@ -126,6 +126,12 @@ func TestEditGoalObjective(t *testing.T) {
 	if g, _ := s.EditGoalObjective("over budget"); g.Status != GoalBudgetLimited {
 		t.Errorf("over-budget edit should land on budget_limited, got %q", g.Status)
 	}
+	// A goal that lands on budget_limited must not get the "pursue the
+	// updated objective" steer — it's the same "don't start new work"
+	// invariant the budget-limit steer itself enforces.
+	if leftover, ok := s.ConsumeGoalObjectiveSteer(); ok {
+		t.Errorf("edit that lands on budget_limited must not stage the objective steer, got %q", leftover)
+	}
 }
 
 func TestSetGoalStatus(t *testing.T) {

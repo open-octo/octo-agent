@@ -201,6 +201,37 @@ func TestGoalObjectiveSteer_StagedByEditAndDrainedOnce(t *testing.T) {
 	}
 }
 
+// TestGoalObjectiveSteer_NotStagedForDormantGoal guards against telling the
+// model to actively pursue a goal that's supposed to be dormant: editing a
+// paused/blocked/usage_limited goal's objective deliberately preserves that
+// status (EditGoalObjective's own doc comment — "editing a paused goal does
+// not silently resume it"), but the steer's wording ("adjust the current
+// turn to pursue the updated objective") assumes active pursuit. Before this
+// was fixed, editing a dormant goal while an unrelated turn was running would
+// still inject that steer into it.
+func TestGoalObjectiveSteer_NotStagedForDormantGoal(t *testing.T) {
+	for _, status := range []GoalStatus{GoalPaused, GoalBlocked, GoalUsageLimited} {
+		t.Run(string(status), func(t *testing.T) {
+			s := NewSession("m", "")
+			if _, err := s.CreateGoal("g", 0); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.SetGoalStatus(status); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.EditGoalObjective("revised while dormant"); err != nil {
+				t.Fatal(err)
+			}
+			if g, _ := s.GoalSnapshot(); g.Status != status {
+				t.Fatalf("edit must preserve dormant status, got %q", g.Status)
+			}
+			if leftover, ok := s.ConsumeGoalObjectiveSteer(); ok {
+				t.Errorf("editing a %s goal must not stage the pursue-it steer, got %q", status, leftover)
+			}
+		})
+	}
+}
+
 func TestGoalCreatedMidTurn_SkipsThatTicksTokens(t *testing.T) {
 	s := NewSession("m", "")
 	// Mid-turn creation: no turn-start reset between CreateGoal and the next

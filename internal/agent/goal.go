@@ -223,8 +223,17 @@ func (s *Session) EditGoalObjective(objective string) (Goal, error) {
 	// Stage the one-time steer so an in-flight turn adjusts to the new
 	// objective on its next round instead of finishing out the stale one. If
 	// no turn is running, the next turn's first accounting tick drains it —
-	// same degradation the budget-limit steer already accepts.
-	s.goalObjectiveSteer = WrapGoalContext(prompt.GoalObjectiveUpdated(goalPromptData(s.Goal)))
+	// same degradation the budget-limit steer already accepts. Gated on the
+	// goal actually being active: the steer's wording ("adjust the current
+	// turn to pursue the updated objective") assumes active pursuit, so
+	// staging it for a paused/blocked/usage_limited goal — which this method
+	// deliberately leaves in that status on edit — would tell the model to
+	// work on a goal that's supposed to be dormant. A budget_limited goal
+	// (still over budget after the edit) is excluded for the same reason as
+	// the budget-limit steer itself: don't start new work against it.
+	if s.Goal.Status == GoalActive {
+		s.goalObjectiveSteer = WrapGoalContext(prompt.GoalObjectiveUpdated(goalPromptData(s.Goal)))
+	}
 	s.appendGoalRecordLocked()
 	return *s.Goal, nil
 }
