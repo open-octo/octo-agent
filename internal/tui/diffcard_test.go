@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	rw "github.com/mattn/go-runewidth"
 )
 
 func TestCard_Render_Structure(t *testing.T) {
@@ -83,7 +85,7 @@ func TestRenderEditCard_NumbersFromFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := RenderEditCard(path, "func Old() {}", "func New() {}")
+	out := RenderEditCard(path, "func Old() {}", "func New() {}", 0)
 	if !strings.Contains(out, "3") {
 		t.Errorf("expected line number 3 (location of the new function) in output:\n%s", out)
 	}
@@ -94,7 +96,7 @@ func TestRenderEditCard_NumbersFromFile(t *testing.T) {
 
 func TestRenderEditCard_FileMissing_StillRenders(t *testing.T) {
 	// File doesn't exist — card should still render (no line numbers).
-	out := RenderEditCard("/nonexistent/path/that/never/was.go", "alpha", "beta")
+	out := RenderEditCard("/nonexistent/path/that/never/was.go", "alpha", "beta", 0)
 	if !strings.Contains(out, "beta") {
 		t.Errorf("expected new_string in output even on missing file:\n%s", out)
 	}
@@ -150,4 +152,17 @@ func equalSlices(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestRenderEditCard_ClampsRowWidth(t *testing.T) {
+	long := "x := " + strings.Repeat("longvalue+", 30)
+	out := RenderEditCard("/nonexistent/w.go", long, "y := 1", 50)
+	for _, line := range strings.Split(stripANSI(out), "\n") {
+		if w := rw.StringWidth(line); w > 50 {
+			t.Errorf("diff row exceeds width 50 (got %d): %q", w, line)
+		}
+	}
+	if !strings.Contains(stripANSI(out), "…") {
+		t.Errorf("clamped diff rows should end in an ellipsis; got:\n%s", out)
+	}
 }

@@ -503,7 +503,7 @@ func replToolEventHandler(stdout io.Writer, plain bool) func(agent.AgentEvent) {
 			fmt.Fprintf(stdout, "↳ %s: %s\n", ev.ToolName, summariseInput(ev.Input))
 
 		case agent.EventToolProgress:
-			fmt.Fprintf(stdout, "│ %s\n", ev.Chunk)
+			fmt.Fprintf(stdout, "│ %s\n", boundProgressChunk(ev.Chunk))
 
 		case agent.EventToolDone:
 			elapsed := time.Duration(0)
@@ -553,6 +553,21 @@ func summariseInput(input map[string]any) string {
 	}
 	joined := strings.Join(parts, " ")
 	return truncateRunes(joined, 60)
+}
+
+// progressLineCap bounds one streamed progress line's display length. The full
+// output still reaches the model; this only keeps a single enormous line (e.g.
+// minified JSON) from flooding the live transcript.
+const progressLineCap = 300
+
+// boundProgressChunk caps each line of a streamed tool-progress chunk at
+// progressLineCap runes for display.
+func boundProgressChunk(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = truncateRunes(l, progressLineCap)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // truncate1Line collapses a multi-line error to its first non-empty line and

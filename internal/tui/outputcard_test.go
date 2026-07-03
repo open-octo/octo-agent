@@ -1,12 +1,20 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
+
+	rw "github.com/mattn/go-runewidth"
 )
 
+// stripANSI removes CSI escape sequences so tests can measure visible width.
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
+
 func TestRenderOutputCard_HeaderAndBody(t *testing.T) {
-	got := RenderOutputCard("Run", "go test ./...", "ok  pkg/a  0.2s\nok  pkg/b  0.1s", 0, false, "")
+	got := RenderOutputCard("Run", "go test ./...", "ok  pkg/a  0.2s\nok  pkg/b  0.1s", OutputCardOpts{})
 	for _, want := range []string{"Run(go test ./...)", "ok  pkg/a  0.2s", "ok  pkg/b  0.1s"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
@@ -19,7 +27,7 @@ func TestRenderOutputCard_CapsWithMoreMarker(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		lines = append(lines, "line")
 	}
-	got := RenderOutputCard("Search", "foo", strings.Join(lines, "\n"), 5, false, "")
+	got := RenderOutputCard("Search", "foo", strings.Join(lines, "\n"), OutputCardOpts{MaxLines: 5})
 	if !strings.Contains(got, "… +15 lines") {
 		t.Errorf("expected '… +15 lines' marker; got:\n%s", got)
 	}
@@ -30,16 +38,62 @@ func TestRenderOutputCard_CapsWithMoreMarker(t *testing.T) {
 }
 
 func TestRenderOutputCard_EmptyOutput(t *testing.T) {
-	got := RenderOutputCard("Run", "true", "", 0, false, "")
+	got := RenderOutputCard("Run", "true", "", OutputCardOpts{})
 	if !strings.Contains(got, "(no output)") {
 		t.Errorf("expected '(no output)'; got:\n%s", got)
 	}
 }
 
 func TestRenderOutputCard_SingularMoreLine(t *testing.T) {
-	got := RenderOutputCard("Run", "x", "a\nb\nc", 2, false, "")
+	got := RenderOutputCard("Run", "x", "a\nb\nc", OutputCardOpts{MaxLines: 2})
 	if !strings.Contains(got, "… +1 line") || strings.Contains(got, "1 lines") {
 		t.Errorf("expected singular '… +1 line'; got:\n%s", got)
+	}
+}
+
+func TestRenderOutputCard_ClampsLineWidth(t *testing.T) {
+	long := strings.Repeat("x", 500)
+	cjk := strings.Repeat("宽", 200) // double-width runes
+	got := RenderOutputCard("Run", "cmd", long+"\n"+cjk, OutputCardOpts{Width: 40})
+	for _, line := range strings.Split(stripANSI(got), "\n") {
+		if w := rw.StringWidth(line); w > 40 {
+			t.Errorf("row exceeds width 40 (got %d): %q", w, line)
+		}
+	}
+	if !strings.Contains(got, "…") {
+		t.Errorf("clamped rows should end in an ellipsis; got:\n%s", got)
+	}
+}
+
+func TestRenderOutputCard_ClampsHeader(t *testing.T) {
+	target := strings.Repeat("a", 200)
+	got := RenderOutputCard("Run", target, "out", OutputCardOpts{Width: 40, Meta: "1.2s"})
+	header := strings.Split(stripANSI(got), "\n")[0]
+	if w := rw.StringWidth(header); w > 40 {
+		t.Errorf("header exceeds width 40 (got %d): %q", w, header)
+	}
+	if !strings.Contains(header, "(1.2s)") {
+		t.Errorf("meta should survive header clamping; got: %q", header)
+	}
+}
+
+func TestRenderOutputCard_TailMode(t *testing.T) {
+	got := RenderOutputCard("Run", "cmd", "first\nsecond\nthird\nfourth\nfifth", OutputCardOpts{MaxLines: 2, Tail: true})
+	if strings.Contains(got, "first") || !strings.Contains(got, "fifth") {
+		t.Errorf("tail mode should keep the last lines and fold the head; got:\n%s", got)
+	}
+	if !strings.Contains(got, "… +3 lines") {
+		t.Errorf("expected fold marker; got:\n%s", got)
+	}
+	if strings.Index(got, "… +3 lines") > strings.Index(got, "fourth") {
+		t.Errorf("tail-mode marker should precede the body; got:\n%s", got)
+	}
+}
+
+func TestRenderOutputCard_MetaInHeader(t *testing.T) {
+	got := RenderOutputCard("Run", "make", "ok", OutputCardOpts{Meta: "exit 1 · 12s"})
+	if !strings.Contains(got, "(exit 1 · 12s)") {
+		t.Errorf("meta annotation missing from header; got:\n%s", got)
 	}
 }
 
@@ -60,7 +114,7 @@ func TestRenderOutputCard_ExpandsTabs(t *testing.T) {
 	// bleed through. The renderer must expand every tab to spaces.
 	output := "     1\tpackage main\n     2\t\tfield int"
 	for _, lang := range []string{"", "go"} {
-		got := RenderOutputCard("Read", "main.go", output, 0, false, lang)
+		got := RenderOutputCard("Read", "main.go", output, OutputCardOpts{Language: lang})
 		if strings.ContainsRune(got, '\t') {
 			t.Errorf("lang=%q: rendered card still contains a raw tab:\n%q", lang, got)
 		}
@@ -69,7 +123,7 @@ func TestRenderOutputCard_ExpandsTabs(t *testing.T) {
 
 func TestRenderOutputCard_Highlight(t *testing.T) {
 	output := "package main\n\nfunc main() {}"
-	got := RenderOutputCard("Read", "main.go", output, 0, false, "go")
+	got := RenderOutputCard("Read", "main.go", output, OutputCardOpts{Language: "go"})
 	// Chroma highlighting should inject ANSI escape codes.
 	if !strings.Contains(got, "\x1b[") {
 		t.Errorf("expected ANSI escapes from Chroma highlighting; got:\n%s", got)

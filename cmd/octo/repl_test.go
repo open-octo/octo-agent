@@ -461,3 +461,26 @@ func (c *capturingSender) lastUserContent() string {
 	}
 	return ""
 }
+
+func TestBoundProgressChunk(t *testing.T) {
+	// A single enormous line is capped at progressLineCap runes for display.
+	long := strings.Repeat("x", progressLineCap+50)
+	if got := boundProgressChunk(long); len([]rune(got)) != progressLineCap {
+		t.Errorf("long line should cap at %d runes, got %d", progressLineCap, len([]rune(got)))
+	}
+	// Each line of a multi-line chunk is capped independently; short lines and
+	// the trailing newline trim are preserved.
+	chunk := "short\n" + long + "\nend\n"
+	got := boundProgressChunk(chunk)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 3 || lines[0] != "short" || lines[2] != "end" {
+		t.Fatalf("multi-line chunk mangled: %q", got)
+	}
+	if len([]rune(lines[1])) != progressLineCap {
+		t.Errorf("middle line should cap at %d runes, got %d", progressLineCap, len([]rune(lines[1])))
+	}
+	// A short chunk passes through untouched.
+	if got := boundProgressChunk("plain"); got != "plain" {
+		t.Errorf("short chunk should be unchanged, got %q", got)
+	}
+}
