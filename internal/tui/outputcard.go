@@ -38,6 +38,10 @@ type OutputCardOpts struct {
 	// Meta is a dim annotation appended to the header, e.g. "1.2s" or
 	// "exit 1 · 12s".
 	Meta string
+	// FoldLink, when non-empty, is a URI (usually file://) holding the full
+	// output; the "… +N lines" fold marker becomes a click-to-open OSC 8
+	// hyperlink to it. Terminals without OSC 8 show the plain marker.
+	FoldLink string
 }
 
 // cardGutterWidth is the visible width of the "  │ " prefix each body row
@@ -82,7 +86,7 @@ func RenderOutputCard(verb, target, output string, opts OutputCardOpts) string {
 	}
 
 	if extra > 0 && opts.Tail {
-		b.WriteString("\n  " + outMore.Render("… +"+pluralise(extra, "line")))
+		b.WriteString("\n  " + foldMarker(extra, opts.FoldLink))
 	}
 	dark := IsDark()
 	for _, ln := range shown {
@@ -96,9 +100,19 @@ func RenderOutputCard(verb, target, output string, opts OutputCardOpts) string {
 		b.WriteString("\n  " + outGutter.String() + " " + body)
 	}
 	if extra > 0 && !opts.Tail {
-		b.WriteString("\n  " + outMore.Render("… +"+pluralise(extra, "line")))
+		b.WriteString("\n  " + foldMarker(extra, opts.FoldLink))
 	}
 	return b.String()
+}
+
+// foldMarker renders the "… +N lines" collapse marker; with a link it becomes
+// an underlined click-to-open hyperlink to the full output.
+func foldMarker(extra int, link string) string {
+	text := "… +" + pluralise(extra, "line")
+	if link == "" {
+		return outMore.Render(text)
+	}
+	return Hyperlink(link, outMore.Underline(true).Render(text+" ↗"))
 }
 
 // clipLine truncates s to at most limit terminal cells, ending in "…" when

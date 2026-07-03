@@ -125,7 +125,28 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 	case "terminal_output", "kill_shell", "terminal_input":
 		opts.Tail = true
 	}
+	// When the card will fold ("… +N lines"), persist the full output and
+	// hyperlink the marker to it — otherwise the folded content is
+	// unrecoverable in the TUI (issue #1093). Write failure degrades to the
+	// plain marker.
+	if opts.MaxLines > 0 && nonBlankLineCount(output) > opts.MaxLines {
+		if path, err := tools.WriteCardSpill(toolName, output); err == nil {
+			opts.FoldLink = tui.FileURI(path)
+		}
+	}
 	return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, opts)
+}
+
+// nonBlankLineCount mirrors RenderOutputCard's blank-line filtering so the
+// caller can predict whether the card will fold before rendering it.
+func nonBlankLineCount(s string) int {
+	n := 0
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // splitTerminalExit detaches the trailing "[exit: …]" marker the terminal

@@ -1524,7 +1524,20 @@ func (m *tuiModel) renderToolOutcome(toolName string, input map[string]any, resu
 	if isErr {
 		errText = truncate1Line(resultText)
 	}
-	return tui.RenderToolStatus(toolName, summariseInput(input), isErr, errText)
+	status := tui.RenderToolStatus(toolName, summariseInput(input), isErr, errText)
+	// Non-card tools (MCP included) show only their input on the status line —
+	// the result itself is invisible to the user (issue #1093). A short result
+	// rides the line inline; anything longer is persisted and linked so it
+	// stays reachable. Errors already carry their first line via errText.
+	if trimmed := strings.TrimSpace(resultText); trimmed != "" && !isErr {
+		if lines := strings.Count(trimmed, "\n") + 1; lines == 1 && len([]rune(trimmed)) <= 80 {
+			status += " " + hintStyle.Render("— "+trimmed)
+		} else if path, err := tools.WriteCardSpill(toolName, resultText); err == nil {
+			label := fmt.Sprintf("output (%d lines) ↗", lines)
+			status += " " + tui.Hyperlink(tui.FileURI(path), hintStyle.Underline(true).Render(label))
+		}
+	}
+	return status
 }
 
 // replayHistoryLines renders a resumed session's prior turns into scrollback
