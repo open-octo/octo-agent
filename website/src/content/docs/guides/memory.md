@@ -63,10 +63,16 @@ commands doesn't nag repeatedly; see it listed alongside every other configured 
 - **Web and IM** recompose the system prompt fresh on every turn, so anything written to `MEMORY.md`
   — by this session or another — is visible starting the very next turn. IM specifically drops and
   rebuilds this state on `/bind`/`/unbind`, so a rebound chat picks up whatever the session's memory
-  currently contains.
+  currently contains. This matters there because a `octo serve` process, and the sessions it holds
+  open, routinely outlive any single task — across restarts, and across an IM chat being rebound to
+  a different underlying session entirely.
 - **The CLI composes once**, when the interactive session starts, and reuses that system prompt for
-  the rest of the process. What the agent writes to memory during a CLI session surfaces the *next*
-  time you run `octo` in that repo, not later in the same run.
+  the rest of the process. This is deliberate, not an oversight: a CLI session is normally one
+  continuous conversation for one task, opened and closed around it, so anything you tell the agent
+  mid-session is already live in that conversation's own history — the agent doesn't need a fresh
+  read of `MEMORY.md` to know it. What the agent *writes* to memory during that session surfaces the
+  *next* time you run `octo` in that repo, which is exactly when a plain index file is supposed to
+  matter — for a session that hasn't lived through the conversation where it was learned.
 
 ## What ends up in it
 
