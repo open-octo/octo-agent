@@ -587,6 +587,36 @@ func TestSendStream_CleanCloseWithoutTerminalEvent_IsTransient(t *testing.T) {
 	}
 }
 
+// TestSendStream_CleanCloseBeforeAnyContent_IsTransient covers the narrower
+// case the first guard's `contentB.Len() > 0 || ...` condition missed: a
+// connection that drops after only a role-only first chunk (no content, no
+// reasoning, no tool calls yet) and no terminal event. A real response is
+// never legitimately empty this way, so this is truncation just as much as
+// dying mid-content — it must not be silently treated as a valid empty reply.
+func TestSendStream_CleanCloseBeforeAnyContent_IsTransient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant"}}]}`+"\n\n")
+		// Connection closes cleanly here — before any content/tool-call text,
+		// no finish_reason, no [DONE].
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	_, err := c.SendStream(context.Background(), provider.Request{
+		Model: "m", Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{})
+	if err == nil {
+		t.Fatal("expected an error from the terminated-before-any-content stream")
+	}
+	var ts interface{ TransientStream() bool }
+	if !errors.As(err, &ts) || !ts.TransientStream() {
+		t.Errorf("clean close before any content should be transient, got %v", err)
+	}
+}
+
 // errorMidStream sends real content, then an `error` payload (after a 200), then
 // closes with no [DONE] — the shape some OpenAI-compatible gateways use to
 // report a mid-generation failure.

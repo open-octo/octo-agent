@@ -126,6 +126,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		accByIndex = map[int]*blockAccumulator{}
 		// ordered list of block indices to preserve emission order
 		blockOrder  []int
+		sawEvent    bool // at least one event line was parsed (stream reached the server)
 		sawTerminal bool // message_delta carried a stop_reason, or message_stop arrived
 	)
 
@@ -162,6 +163,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 			// re-issues the round, same as a boundary-aligned reset caught below.
 			return result, retry.AsTransientStream(fmt.Errorf("anthropic: parse stream event: %w", err))
 		}
+		sawEvent = true
 
 		switch ev.Type {
 		case "message_start":
@@ -271,7 +273,11 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 	// dropped exactly on an SSE line boundary mid-generation (idle LB/proxy
 	// reset). Treating it as success would silently hand back garbled
 	// tool-call arguments or a truncated reply with no error and no retry.
-	if !sawTerminal && len(blockOrder) > 0 {
+	// Gated on sawEvent (not len(blockOrder)>0): a real response is never
+	// legitimately empty, so a drop right after message_start — before any
+	// content_block_start ever arrives — is truncation too, one event
+	// earlier than the block-accumulation case.
+	if !sawTerminal && sawEvent {
 		return result, retry.AsTransientStream(errors.New("anthropic: stream ended without a terminal event (truncated mid-generation)"))
 	}
 

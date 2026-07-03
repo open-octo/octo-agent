@@ -118,6 +118,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		result      provider.Response
 		toolStates  = map[int]*toolCallState{} // keyed by tool call index
 		toolOrder   []int                      // preserve order
+		sawEvent    bool                       // at least one chunk was parsed (stream reached the server)
 		sawTerminal bool                       // [DONE] or a finish_reason chunk was observed
 	)
 
@@ -157,6 +158,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 			// re-issues the round, same as a boundary-aligned reset caught below.
 			return result, retry.AsTransientStream(fmt.Errorf("openai: parse stream chunk: %w", err))
 		}
+		sawEvent = true
 
 		// An OpenAI-compatible server can report a failure AFTER the 200 status
 		// as a `data: {"error": {...}}` line, then close the stream (often with
@@ -252,7 +254,12 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 	// an SSE line boundary mid-generation (idle LB/proxy reset). Treating it
 	// as success would silently hand back garbled tool-call arguments or a
 	// truncated reply with no error and no retry.
-	if !sawTerminal && (contentB.Len() > 0 || reasoningB.Len() > 0 || len(toolOrder) > 0) {
+	// Gated on sawEvent (not accumulated content/tool length): a real
+	// response is never legitimately empty, so a drop right after a
+	// role-only first chunk — before any content or tool-call text ever
+	// arrives — is truncation too, one chunk earlier than the
+	// content-accumulation case.
+	if !sawTerminal && sawEvent {
 		return result, retry.AsTransientStream(errors.New("openai: stream ended without a terminal event (truncated mid-generation)"))
 	}
 
