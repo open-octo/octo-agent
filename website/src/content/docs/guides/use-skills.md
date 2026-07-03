@@ -78,6 +78,7 @@ matches its description — you rarely need to invoke them by name.
 | `tdd` | The red-green-refactor loop on its own, for one feature or fix rather than a whole design |
 | `code-review` | Reviews the current diff with an isolated sub-agent for unbiased correctness/convention/security feedback |
 | `worktree-isolate` | Does a risky or experimental change in an isolated git worktree, then merge or discard |
+| `zoom-out` | Gives a higher-level map of an unfamiliar area of code — modules, callers, and the project's own domain vocabulary — before diving into details |
 
 **Automation & scheduling**
 

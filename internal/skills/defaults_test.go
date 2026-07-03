@@ -51,6 +51,10 @@ func TestMaterializeDefaults_WritesEmbeddedAndStamps(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "implement", "SKILL.md")); err != nil {
 		t.Fatalf("expected implement/SKILL.md materialized: %v", err)
 	}
+	// The zoom-out skill ships in the default set.
+	if _, err := os.Stat(filepath.Join(root, "zoom-out", "SKILL.md")); err != nil {
+		t.Fatalf("expected zoom-out/SKILL.md materialized: %v", err)
+	}
 	// The workflow-creator skill ships in the default set.
 	// The office-xlsx skill ships in the default set.
 	if _, err := os.Stat(filepath.Join(root, "office-xlsx", "SKILL.md")); err != nil {
