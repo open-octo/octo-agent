@@ -793,8 +793,18 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				mcpBoot = &mcpBootstrap{cfg: mcpCfg, info: info, childErr: childStderr}
 			} else {
 				// Headless: connect now and register before the one-shot turn.
-				// Leave childStderr nil — the transport defaults to os.Stderr, the
-				// only writer safe for the copy goroutine to share concurrently.
+				// A stdio server's subprocess writes diagnostics to its stderr at
+				// arbitrary times (e.g. a file-watcher banner mid-turn); routed to
+				// os.Stderr they interleave with the turn's own output, so send
+				// them to the MCP log file like the TUI does. Connection warnings
+				// still go to the terminal via the warn writer.
+				var childStderr io.Writer
+				if f := openMCPLogFile(); f != nil {
+					childStderr = f
+					defer f.Close()
+				} else {
+					childStderr = io.Discard
+				}
 				mcpReg := mcp.ConnectAll(
 					context.Background(),
 					mcpCfg,
@@ -803,7 +813,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 						return newCLIOAuthPrompt(stdout, serverName)
 					},
 					stderr,
-					nil,
+					childStderr,
 				)
 				if mcpReg.Len() > 0 {
 					tools.SetMCPRegistry(mcpReg)
