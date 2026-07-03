@@ -38,6 +38,10 @@ func TestMaterializeDefaults_WritesEmbeddedAndStamps(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "worktree-isolate", "SKILL.md")); err != nil {
 		t.Fatalf("expected worktree-isolate/SKILL.md materialized: %v", err)
 	}
+	// The loop-engineering skill ships in the default set.
+	if _, err := os.Stat(filepath.Join(root, "loop-engineering", "SKILL.md")); err != nil {
+		t.Fatalf("expected loop-engineering/SKILL.md materialized: %v", err)
+	}
 	// The implement skill ships in the default set.
 	if _, err := os.Stat(filepath.Join(root, "implement", "SKILL.md")); err != nil {
 		t.Fatalf("expected implement/SKILL.md materialized: %v", err)
