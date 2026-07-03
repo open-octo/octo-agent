@@ -242,15 +242,33 @@ func (b *Browser) ClickFollow(ctx context.Context, page *Page, target string) (*
 	if err := page.Click(ctx, target); err != nil {
 		return page, err
 	}
+	myID := page.TargetID()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if ps, err := b.Pages(ctx); err == nil {
+			var newTargets []TargetInfo
 			for _, ti := range ps {
-				if before[ti.TargetID] || ti.TargetID == page.TargetID() {
+				if before[ti.TargetID] || ti.TargetID == myID {
 					continue
 				}
-				if np, aerr := b.AttachPage(ctx, ti.TargetID); aerr == nil {
+				newTargets = append(newTargets, ti)
+			}
+			// Prefer a target Chrome reports as opened by this page — the
+			// precise signal, immune to an unrelated tab (the user's own
+			// browsing, a notification/extension popup) appearing in the
+			// same window during the poll window. Only fall back to "any
+			// new target" when none of the candidates report an opener at
+			// all, so environments where Chrome omits openerId keep the
+			// prior best-effort behavior instead of never following.
+			if candidate, ok := firstByOpener(newTargets, myID); ok {
+				if np, aerr := b.AttachPage(ctx, candidate.TargetID); aerr == nil {
 					return np, nil
+				}
+			} else if !anyReportsOpener(newTargets) {
+				for _, ti := range newTargets {
+					if np, aerr := b.AttachPage(ctx, ti.TargetID); aerr == nil {
+						return np, nil
+					}
 				}
 			}
 		}
@@ -259,6 +277,28 @@ func (b *Browser) ClickFollow(ctx context.Context, page *Page, target string) (*
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
+}
+
+// firstByOpener returns the first target whose OpenerID matches myID.
+func firstByOpener(targets []TargetInfo, myID string) (TargetInfo, bool) {
+	for _, ti := range targets {
+		if ti.OpenerID == myID {
+			return ti, true
+		}
+	}
+	return TargetInfo{}, false
+}
+
+// anyReportsOpener reports whether any target in the set carries opener
+// information at all — used to tell "Chrome doesn't report openerId here" from
+// "none of these were opened by us".
+func anyReportsOpener(targets []TargetInfo) bool {
+	for _, ti := range targets {
+		if ti.OpenerID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ClosePage closes a page target by id.
@@ -276,6 +316,12 @@ type TargetInfo struct {
 	Type     string `json:"type"`
 	Title    string `json:"title"`
 	URL      string `json:"url"`
+	// OpenerID is the target that spawned this one (window.open / a
+	// target=_blank click), when Chrome reports it. Used by ClickFollow to
+	// confirm a newly-seen tab was actually opened by the click it's
+	// following, not an unrelated tab that happened to appear in the same
+	// window (the user's own browsing, a notification/extension popup).
+	OpenerID string `json:"openerId,omitempty"`
 }
 
 // Pages lists the open page targets — used to attach to an existing logged-in

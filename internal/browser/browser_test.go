@@ -652,3 +652,33 @@ func TestNavigate_ReplacesInitialBlank(t *testing.T) {
 		t.Errorf("after back, pathname = %q, want /first (about:blank should not be in history)", path)
 	}
 }
+
+// TestFirstByOpener_PrefersActualOpener guards ClickFollow's race fix: when
+// an unrelated tab (the user's own browsing, a notification/extension popup)
+// appears in the polling window alongside the tab the click actually opened,
+// the opener-matched one must win — not whichever new target is seen first.
+func TestFirstByOpener_PrefersActualOpener(t *testing.T) {
+	targets := []TargetInfo{
+		{TargetID: "unrelated", OpenerID: "some-other-page"},
+		{TargetID: "popup", OpenerID: "me"},
+	}
+	got, ok := firstByOpener(targets, "me")
+	if !ok || got.TargetID != "popup" {
+		t.Fatalf("firstByOpener(targets, \"me\") = %+v, %v, want {popup} true", got, ok)
+	}
+	if _, ok := firstByOpener(targets, "nobody"); ok {
+		t.Error("no target was opened by \"nobody\"")
+	}
+}
+
+// TestAnyReportsOpener distinguishes "Chrome didn't report openerId for any
+// candidate here" (fall back to the old best-effort behavior) from "none of
+// these were opened by us" (opener info is available; trust it).
+func TestAnyReportsOpener(t *testing.T) {
+	if anyReportsOpener([]TargetInfo{{TargetID: "a"}, {TargetID: "b"}}) {
+		t.Error("no target in this set reports an opener")
+	}
+	if !anyReportsOpener([]TargetInfo{{TargetID: "a"}, {TargetID: "b", OpenerID: "x"}}) {
+		t.Error("one target in this set reports an opener")
+	}
+}
