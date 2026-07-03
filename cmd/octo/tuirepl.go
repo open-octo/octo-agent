@@ -1380,22 +1380,30 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		// Rich TUI: progress is deferred to the done card / status line so the
 		// transcript stays quiet; the live spinner already shows activity.
 		if m.cfg.plain {
-			m.commitToolLine("│ " + ev.Chunk)
+			m.commitToolLine("│ " + boundProgressChunk(ev.Chunk))
 		}
 		return
 
 	case agent.EventToolDone:
 		input := m.toolInput[ev.ToolID]
 		delete(m.toolInput, ev.ToolID)
+		elapsed := time.Duration(0)
+		if m.running != nil {
+			elapsed = time.Since(m.running.start)
+		}
 		m.running = nil // the finished card replaces the live indicator
-		m.commitToolLine(m.renderToolOutcome(ev.ToolName, input, ev.Output, false))
+		m.commitToolLine(m.renderToolOutcome(ev.ToolName, input, ev.Output, false, elapsed))
 		return
 
 	case agent.EventToolError:
 		input := m.toolInput[ev.ToolID]
 		delete(m.toolInput, ev.ToolID)
+		elapsed := time.Duration(0)
+		if m.running != nil {
+			elapsed = time.Since(m.running.start)
+		}
 		m.running = nil
-		m.commitToolLine(m.renderToolOutcome(ev.ToolName, input, firstNonEmpty(ev.Output, ev.Err), true))
+		m.commitToolLine(m.renderToolOutcome(ev.ToolName, input, firstNonEmpty(ev.Output, ev.Err), true, elapsed))
 		return
 
 	case agent.EventCompactStarted:
@@ -1479,12 +1487,13 @@ func (m *tuiModel) rendersCard(toolName string) bool {
 // renderToolOutcome produces the scrollback item for a finished tool call: a
 // rich card for card tools, a styled status line otherwise, or the dense
 // one-liner under --plain. resultText is the tool's output (or its error
-// message on failure). This is the single rendering path shared by the live
-// done/error events and resumed-history replay, so a resumed transcript looks
-// byte-for-byte like it did live.
-func (m *tuiModel) renderToolOutcome(toolName string, input map[string]any, resultText string, isErr bool) string {
+// message on failure); elapsed is the call's wall-clock duration (0 = unknown,
+// e.g. resumed-history replay, which doesn't record timings). This is the
+// single rendering path shared by the live done/error events and replay, so a
+// resumed transcript looks like it did live.
+func (m *tuiModel) renderToolOutcome(toolName string, input map[string]any, resultText string, isErr bool, elapsed time.Duration) string {
 	if m.rendersCard(toolName) {
-		return renderToolCard(toolName, input, resultText, isErr)
+		return renderToolCard(toolName, input, resultText, isErr, m.width, elapsed)
 	}
 	// show_artifact's whole point is "present this file to the user"; the web
 	// UI has the Artifacts panel, the TUI's equivalent is a click-to-open
@@ -1556,7 +1565,7 @@ func (m *tuiModel) replayHistoryLines() []string {
 					res := results[b.ID]
 					out = append(out, m.renderToolOutcome(
 						b.Name, b.Input,
-						agent.StripRemindersForDisplay(res.Result), res.IsError))
+						agent.StripRemindersForDisplay(res.Result), res.IsError, 0))
 				}
 			}
 		}

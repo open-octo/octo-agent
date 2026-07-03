@@ -1122,7 +1122,7 @@ func TestTUI_RenderToolOutcome_ArtifactHyperlink(t *testing.T) {
 	}
 	input := map[string]any{"path": path}
 
-	got := m.renderToolOutcome("show_artifact", input, "Artifact presented: "+path+" (12 bytes)", false)
+	got := m.renderToolOutcome("show_artifact", input, "Artifact presented: "+path+" (12 bytes)", false, 0)
 	if !strings.Contains(got, "\x1b]8;;"+tui.FileURI(path)+"\x1b\\") {
 		t.Errorf("success line should carry an OSC 8 file:// hyperlink; got %q", got)
 	}
@@ -1132,16 +1132,16 @@ func TestTUI_RenderToolOutcome_ArtifactHyperlink(t *testing.T) {
 
 	// A relative path must NOT be linkified — re-resolving it at render time
 	// diverges from the execute-time cwd on resumed-history replay.
-	if got := m.renderToolOutcome("show_artifact", map[string]any{"path": "rel/report.html"}, "ok", false); strings.Contains(got, "\x1b]8;;") {
+	if got := m.renderToolOutcome("show_artifact", map[string]any{"path": "rel/report.html"}, "ok", false, 0); strings.Contains(got, "\x1b]8;;") {
 		t.Errorf("relative path should not render a hyperlink; got %q", got)
 	}
 
-	if got := m.renderToolOutcome("show_artifact", input, "boom", true); strings.Contains(got, "\x1b]8;;") {
+	if got := m.renderToolOutcome("show_artifact", input, "boom", true, 0); strings.Contains(got, "\x1b]8;;") {
 		t.Errorf("error outcome should not render a hyperlink; got %q", got)
 	}
 
 	m.cfg.plain = true
-	if got := m.renderToolOutcome("show_artifact", input, "ok", false); strings.Contains(got, "\x1b]8;;") {
+	if got := m.renderToolOutcome("show_artifact", input, "ok", false, 0); strings.Contains(got, "\x1b]8;;") {
 		t.Errorf("--plain outcome should not render a hyperlink; got %q", got)
 	}
 }

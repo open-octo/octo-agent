@@ -42,6 +42,9 @@ type Card struct {
 	Removed  int
 	Lines    []Line
 	Language string
+	// Width, when >0, clips each row (header included) to the terminal width
+	// so a long source line can't soft-wrap the card into many screen rows.
+	Width int
 }
 
 // Render returns the card as an ANSI-coloured string. The trailing newline
@@ -50,12 +53,12 @@ func (c Card) Render() string {
 	var b strings.Builder
 
 	dark := IsDark() // probe once per card; threads to the row washes + Chroma style
-	b.WriteString(renderHeader(c.Verb, c.Path))
+	b.WriteString(renderHeader(c.Verb, c.Path, c.Width))
 	b.WriteString("\n")
 	b.WriteString(renderSummary(c.Added, c.Removed))
 	b.WriteString("\n")
 	for _, ln := range c.Lines {
-		b.WriteString(renderRow(ln, c.Language, dark))
+		b.WriteString(renderRow(ln, c.Language, dark, c.Width))
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
@@ -75,7 +78,8 @@ const ellipsisKind = '…'
 // It reads filePath to compute the line number where newString lands; if
 // the read fails (file moved, perms, etc.) the card still renders, just
 // without line numbers. Language is inferred from the file extension.
-func RenderEditCard(filePath, oldString, newString string) string {
+// width > 0 clips each row to the terminal width.
+func RenderEditCard(filePath, oldString, newString string, width int) string {
 	added := nonEmptyLineCount(newString)
 	removed := nonEmptyLineCount(oldString)
 
@@ -97,6 +101,7 @@ func RenderEditCard(filePath, oldString, newString string) string {
 		Removed:  removed,
 		Lines:    lines,
 		Language: GuessLanguage(filePath),
+		Width:    width,
 	}
 	return c.Render()
 }
@@ -176,11 +181,8 @@ func chromaStyle(dark bool) string {
 	return "github"
 }
 
-func renderHeader(verb, path string) string {
-	return fmt.Sprintf("%s %s",
-		headerBullet,
-		headerVerb.Render(fmt.Sprintf("%s(%s)", verb, path)),
-	)
+func renderHeader(verb, path string, width int) string {
+	return fmt.Sprintf("%s %s", headerBullet, renderCardHeader(verb, path, "", width))
 }
 
 func renderSummary(added, removed int) string {
@@ -190,13 +192,20 @@ func renderSummary(added, removed int) string {
 	)
 }
 
-func renderRow(ln Line, language string, dark bool) string {
+// diffGutterWidth is the visible width of a diff row's prefix — leading
+// space, 4-cell line-number column, space, +/- mark, space — that the body
+// must share the terminal row with.
+const diffGutterWidth = 8
+
+func renderRow(ln Line, language string, dark bool, width int) string {
 	if ln.Kind == ellipsisKind {
 		return "  " + outMore.Render(ln.Text)
 	}
 	noCol := renderLineNo(ln)
 	mark := renderMark(ln.Kind)
-	body := expandTabs(ln.Text)
+	// Clip before highlighting — Chroma output is self-contained per token,
+	// so cutting afterwards could strand an open escape (see RenderOutputCard).
+	body := clipLine(expandTabs(ln.Text), width-diffGutterWidth)
 	if language != "" {
 		body = highlightLine(body, language, dark)
 	}

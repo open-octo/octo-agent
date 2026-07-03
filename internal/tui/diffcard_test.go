@@ -83,7 +83,7 @@ func TestRenderEditCard_NumbersFromFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := RenderEditCard(path, "func Old() {}", "func New() {}")
+	out := RenderEditCard(path, "func Old() {}", "func New() {}", 0)
 	if !strings.Contains(out, "3") {
 		t.Errorf("expected line number 3 (location of the new function) in output:\n%s", out)
 	}
@@ -94,7 +94,7 @@ func TestRenderEditCard_NumbersFromFile(t *testing.T) {
 
 func TestRenderEditCard_FileMissing_StillRenders(t *testing.T) {
 	// File doesn't exist — card should still render (no line numbers).
-	out := RenderEditCard("/nonexistent/path/that/never/was.go", "alpha", "beta")
+	out := RenderEditCard("/nonexistent/path/that/never/was.go", "alpha", "beta", 0)
 	if !strings.Contains(out, "beta") {
 		t.Errorf("expected new_string in output even on missing file:\n%s", out)
 	}

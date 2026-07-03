@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	rw "github.com/mattn/go-runewidth"
+	"github.com/muesli/reflow/truncate"
 )
 
 var (
@@ -16,20 +18,44 @@ var (
 	outMore      = lipgloss.NewStyle().Foreground(ColMuted)
 )
 
+// OutputCardOpts controls how RenderOutputCard clips and annotates the body.
+type OutputCardOpts struct {
+	// MaxLines caps how many output lines the card shows (<=0 = no cap); the
+	// remainder collapses into an "… +N lines" marker.
+	MaxLines int
+	// Width, when >0, clips every rendered row (header included) to the
+	// terminal width so one long line can't soft-wrap into dozens of screen
+	// rows and defeat the MaxLines cap.
+	Width int
+	// Tail shows the LAST MaxLines instead of the first — the right end for
+	// command output, where errors and summaries land at the bottom. The
+	// "… +N lines" marker moves above the body.
+	Tail bool
+	// IsErr tints the bullet red.
+	IsErr bool
+	// Language, when non-empty, syntax-highlights each line with Chroma.
+	Language string
+	// Meta is a dim annotation appended to the header, e.g. "1.2s" or
+	// "exit 1 · 12s".
+	Meta string
+}
+
+// cardGutterWidth is the visible width of the "  │ " prefix each body row
+// carries; body lines are clipped to Width minus this.
+const cardGutterWidth = 4
+
 // RenderOutputCard renders a tool's textual output as a card: a header row
-// (● verb(target)) above the output, each line behind a "│" gutter, capped to
-// maxLines (<=0 = no cap) with an "… +N lines" marker for the remainder.
-// isErr tints the bullet red. Empty output renders "(no output)". The trailing
+// (● verb(target)) above the output, each line behind a "│" gutter, clipped
+// and capped per opts. Empty output renders "(no output)". The trailing
 // newline is omitted so callers control spacing (mirrors Card.Render).
-// When language is non-empty, each line is syntax-highlighted with Chroma.
-func RenderOutputCard(verb, target, output string, maxLines int, isErr bool, language string) string {
+func RenderOutputCard(verb, target, output string, opts OutputCardOpts) string {
 	bullet := outBullet
-	if isErr {
+	if opts.IsErr {
 		bullet = outBulletErr
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%s %s", bullet, headerVerb.Render(fmt.Sprintf("%s(%s)", verb, target))))
+	b.WriteString(fmt.Sprintf("%s %s", bullet, renderCardHeader(verb, target, opts.Meta, opts.Width)))
 
 	all := splitLinesNoTrail(output)
 	// Blank lines waste preview slots without adding information; filter them
@@ -46,22 +72,63 @@ func RenderOutputCard(verb, target, output string, maxLines int, isErr bool, lan
 	}
 
 	shown, extra := lines, 0
-	if maxLines > 0 && len(lines) > maxLines {
-		shown, extra = lines[:maxLines], len(lines)-maxLines
+	if opts.MaxLines > 0 && len(lines) > opts.MaxLines {
+		extra = len(lines) - opts.MaxLines
+		if opts.Tail {
+			shown = lines[len(lines)-opts.MaxLines:]
+		} else {
+			shown = lines[:opts.MaxLines]
+		}
 	}
 
+	if extra > 0 && opts.Tail {
+		b.WriteString("\n  " + outMore.Render("… +"+pluralise(extra, "line")))
+	}
 	dark := IsDark()
 	for _, ln := range shown {
-		body := expandTabs(ln)
-		if language != "" {
-			body = highlightLine(body, language, dark)
+		// Clip the raw line before highlighting: Chroma output is
+		// self-contained (every token carries its own reset), whereas cutting
+		// an already-highlighted string mid-token would strand an open escape.
+		body := clipLine(expandTabs(ln), opts.Width-cardGutterWidth)
+		if opts.Language != "" {
+			body = highlightLine(body, opts.Language, dark)
 		}
 		b.WriteString("\n  " + outGutter.String() + " " + body)
 	}
-	if extra > 0 {
+	if extra > 0 && !opts.Tail {
 		b.WriteString("\n  " + outMore.Render("… +"+pluralise(extra, "line")))
 	}
 	return b.String()
+}
+
+// clipLine truncates s to at most limit terminal cells, ending in "…" when
+// truncation occurred. limit <= 0 (unknown width) leaves s untouched. Wide
+// (CJK) runes are measured by display width, not rune count.
+func clipLine(s string, limit int) string {
+	if limit <= 0 {
+		return s
+	}
+	return truncate.StringWithTail(s, uint(limit), "…")
+}
+
+// renderCardHeader renders "verb(target)" bold plus an optional dim "(meta)",
+// clipping target so the whole header fits in width (2 cells are reserved for
+// the caller's "● " bullet prefix).
+func renderCardHeader(verb, target, meta string, width int) string {
+	if width > 0 {
+		avail := width - 2 - rw.StringWidth(verb) - 2 // bullet+space, parens
+		if meta != "" {
+			avail -= rw.StringWidth(meta) + 3 // " (" + ")"
+		}
+		if avail > 3 {
+			target = clipLine(target, avail)
+		}
+	}
+	h := headerVerb.Render(fmt.Sprintf("%s(%s)", verb, target))
+	if meta != "" {
+		h += " " + outMore.Render("("+meta+")")
+	}
+	return h
 }
 
 // RenderToolStatus renders a tool call that has no body card as a single
