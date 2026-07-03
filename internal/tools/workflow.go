@@ -226,14 +226,15 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		Foreground:    workflowForeground.Load(),
 	}
 
+	runID, err := mgr.Start(req)
+	if err != nil {
+		return agent.ToolResult{}, fmt.Errorf("workflow: %w", err)
+	}
+
 	// Foreground (one-shot) mode: run to completion inside this call and hand
 	// the result back directly. Going through the manager keeps the run visible
 	// to progress hooks and workflow_status, and enforces the concurrency cap.
 	if req.Foreground {
-		runID, err := mgr.Start(req)
-		if err != nil {
-			return agent.ToolResult{}, fmt.Errorf("workflow: %w", err)
-		}
 		snap, werr := mgr.Wait(ctx, runID)
 		if werr != nil {
 			return agent.ToolResult{}, fmt.Errorf("workflow: run interrupted: %w", werr)
@@ -241,10 +242,6 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		return agent.ToolResult{Text: formatRunDetail(snap)}, nil
 	}
 
-	runID, err := mgr.Start(req)
-	if err != nil {
-		return agent.ToolResult{}, fmt.Errorf("workflow: %w", err)
-	}
 	return agent.ToolResult{Text: fmt.Sprintf(
 		"Workflow started in the background as %s.\n"+
 			"<system-reminder>This run executes in the background. DO NOT poll workflow_status "+

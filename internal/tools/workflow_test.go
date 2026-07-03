@@ -373,10 +373,21 @@ func TestWorkflowTool_ForegroundReturnsResult(t *testing.T) {
 	if !strings.Contains(res.Text, "[done]") || !strings.Contains(res.Text, "R[a],R[b],R[c]") {
 		t.Errorf("foreground result = %q, want a done run carrying R[a],R[b],R[c]", res.Text)
 	}
+	// The hook (if wrongly re-enabled) fires from the run goroutine after
+	// finish() unblocks Wait — give it a beat so the assertion can't false-pass
+	// on ordering.
 	select {
 	case ev := <-notified:
 		t.Errorf("foreground run must not fire the completion hook; got %+v", ev)
-	default:
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestWorkflowManager_WaitUnknownRun verifies Wait errors on an unknown id
+// instead of blocking forever.
+func TestWorkflowManager_WaitUnknownRun(t *testing.T) {
+	if _, err := NewWorkflowManager().Wait(context.Background(), "wf_nope"); err == nil {
+		t.Fatal("Wait on an unknown run should error")
 	}
 }
 

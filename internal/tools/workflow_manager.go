@@ -224,7 +224,7 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 		n := m.active
 		m.mu.Unlock()
 		cancel()
-		return "", fmt.Errorf("too many background workflows running (%d/%d) — wait for a completion notification before starting more", n, maxConcurrentWorkflows)
+		return "", fmt.Errorf("too many workflows running (%d/%d) — wait for one to finish before starting more", n, maxConcurrentWorkflows)
 	}
 	m.active++
 	m.seq++

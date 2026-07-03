@@ -215,6 +215,28 @@ func TestRun_Cancellation(t *testing.T) {
 	}
 }
 
+// TestRun_CancellationComputeOnly guards the close-on-context-done path: a
+// runaway script that never re-enters a host call (no agent() in flight) must
+// still observe ctx cancellation, or workflow_kill — and the foreground
+// one-shot's SIGINT — could never stop it.
+func TestRun_CancellationComputeOnly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(ctx, `i = 0; loop { i += 1 }`, Options{Agent: echoAgent})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Errorf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("compute-only loop did not observe cancellation — Run is uninterruptible")
+	}
+}
+
 func TestRun_BudgetExhausted(t *testing.T) {
 	// First agent spends 100 output tokens; Budget is 50, so the budget is
 	// already over after one call and the next agent() raises.
