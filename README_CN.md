@@ -327,7 +327,7 @@ make vet           # go vet ./...
 make fmt-check     # gofmt -l . 必须为空
 ```
 
-项目约定写在 [`.octorules`](.octorules)（面向人类的规则）；[`CLAUDE.md`](CLAUDE.md) 在此基础上补充 AI 编程助手在本仓库工作所需的操作细节。[`CONTRIBUTING.md`](CONTRIBUTING.md) 是人类 PR 流程。
+项目约定同时写在 [`CLAUDE.md`](CLAUDE.md) 和 [`.octorules`](.octorules) 里——这是两份内容对等的文件，分别服务两个不同的 AI 编程工具（Claude Code 读前者；octo 把后者当作系统提示词的一层来读，见上面的"配置"一节）。人类的 PR 流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## 致谢与前人工作
 

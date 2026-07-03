@@ -381,7 +381,7 @@ make vet           # go vet ./...
 make fmt-check     # gofmt -l . must be empty
 ```
 
-Project conventions live in [`.octorules`](.octorules) (the human-facing rules); [`CLAUDE.md`](CLAUDE.md) expands them with the operational detail AI coding agents need in this repo. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the human PR workflow.
+Project conventions live in both [`CLAUDE.md`](CLAUDE.md) and [`.octorules`](.octorules) — parallel files carrying the same guidance for two different AI coding tools (Claude Code reads the former; octo reads the latter as a system-prompt layer, see Configuration above). See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the human PR workflow.
 
 ## Prior art & acknowledgements
 
