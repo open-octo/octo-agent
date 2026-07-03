@@ -9,7 +9,9 @@ import (
 )
 
 func TestWriteCardSpill_PathAndContent(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	path, err := WriteCardSpill("mcp_thing", "line1\nline2")
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +31,9 @@ func TestWriteCardSpill_PathAndContent(t *testing.T) {
 }
 
 func TestCleanSpillFiles_KeepsCardSpills(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	cardPath, err := WriteCardSpill("terminal", "full output")
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +54,9 @@ func TestCleanSpillFiles_KeepsCardSpills(t *testing.T) {
 }
 
 func TestSweepReclaimsOldCardSpills(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	path, err := WriteCardSpill("terminal", "old")
 	if err != nil {
 		t.Fatal(err)

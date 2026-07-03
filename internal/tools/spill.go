@@ -169,15 +169,20 @@ var cardSpillSeq atomic.Int64
 // a folded card's "… +N lines" marker to it. Unlike the model-facing spills,
 // these files survive session exit — the link lives in the terminal
 // scrollback, which outlives the process — and are reclaimed by the age
-// sweep instead of CleanSpillFiles. Returns the absolute path.
+// sweep instead of CleanSpillFiles. The deliberate consequence: tool output
+// (secrets included) persists on disk up to spillMaxAge after the session
+// ends, where term-/webfetch- spills die at shutdown. Returns the absolute
+// path. The timestamp in the name keeps a recycled pid from overwriting a
+// previous session's file while its scrollback link is still alive.
 func WriteCardSpill(toolName, body string) (string, error) {
 	dir, err := spillDir()
 	if err != nil {
 		return "", err
 	}
 	sweepOldSpillFiles(dir)
-	name := fmt.Sprintf("%s%s-%d-%d.log",
-		cardSpillPrefix, sanitizeSpillID(toolName), os.Getpid(), cardSpillSeq.Add(1))
+	name := fmt.Sprintf("%s%s-%d-%d-%d.log",
+		cardSpillPrefix, sanitizeSpillID(toolName), os.Getpid(),
+		time.Now().UnixNano(), cardSpillSeq.Add(1))
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		return "", err
