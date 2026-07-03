@@ -59,6 +59,7 @@ export default defineConfig({
 					translations: { 'zh-CN': '核心概念' },
 					items: [
 						{ label: 'The agent loop', slug: 'concepts/agent-loop', translations: { 'zh-CN': 'Agent 循环' } },
+						{ label: 'History compaction', slug: 'concepts/compaction', translations: { 'zh-CN': '历史压缩' } },
 						{ label: 'Configuration layers', slug: 'concepts/configuration-layers', translations: { 'zh-CN': '配置分层' } },
 						{ label: 'Sessions & history', slug: 'concepts/sessions-and-history', translations: { 'zh-CN': '会话与历史' } },
 					],

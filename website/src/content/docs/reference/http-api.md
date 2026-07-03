@@ -73,5 +73,11 @@ called out in the CHANGELOG — there's no versioned `/api/v1` yet.
 | `GET/PUT/DELETE /api/browser/recordings{,/{name}}` | manage record/replay recordings |
 | `POST /api/upload`, `GET /api/uploads/{name}` | file upload used by chat attachments |
 
+## Server lifecycle
+
+| Route | Purpose |
+|---|---|
+| `POST /api/restart` | request a [restart](/docs/guides/self-host/#restarting); returns `202` immediately, drains in-flight turns in the background |
+
 Next: the [security model](/docs/reference/security/) covers exactly what the access key protects
 and what doesn't need it (loopback).

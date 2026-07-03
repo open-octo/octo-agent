@@ -24,7 +24,7 @@ headless 单发：完整的 agentic 工具循环，然后退出。
 | `--model` | 来自配置 | 所选 provider 下的模型名 |
 | `--system` | — | 单次运行的系统提示覆盖 |
 | `--max-tokens` | `0` | 回复的 `max_tokens`（`0` = provider 默认值） |
-| `--max-tokens-escalate` | `-1` | 回复被输出上限截断时重试一次所用的更高上限（`-1` = provider 感知的默认值，`0` = 禁用） |
+| `--max-tokens-escalate` | `-1` | 回复被截断时重试一次所用的上限（`-1` = 32768，两家 provider 内置默认值都一样；`0` = 禁用这次重试） |
 | `--stream` | `true` | 流式返回；`--stream=false` 改为缓冲，只打印最终文本 |
 | `--tools` / `--no-tools` | `true` | agentic 循环里的内置工具 + MCP/skill 执行 |
 | `--no-memory` | `false` | 本次会话关闭跨会话记忆注入 |
@@ -37,7 +37,8 @@ headless 单发：完整的 agentic 工具循环，然后退出。
 | `--no-coauthor` | `false` | 不在 git commit 消息里追加 `Co-authored-by` |
 | `--max-turns` | `0`（自动） | 单条消息里 provider 往返的最大轮数（`0` = 交互式 200、headless 不限） |
 | `--compact-threshold` | `0`（自动） | 单轮输入 token 超过这个数就压缩；`<0` 禁用 |
-| `--compact-auto-pct` | `0`（→75） | 自动压缩阈值，按上下文窗口的百分比算 |
+| `--compact-auto-pct` | `0`（→75） | `--compact-threshold=0` 时用的自动压缩阈值，按上下文窗口的百分比算 |
+| `--compact-batch-threshold` | `0`（自动 → 85%） | 同样的逻辑，但在一轮内的每个工具调用批次后检查；`<0` 禁用 |
 | `--reasoning-effort` | 关闭 | `low` \| `medium` \| `high` \| `xhigh` \| `max` |
 | `--show-reasoning` | `false` | 把推理轨迹提供给 **Web UI** 显示（终端始终不渲染） |
 | `--sandbox` | `false` | 操作系统级限制，只能碰项目目录 + 临时目录，禁网络 |

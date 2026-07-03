@@ -27,7 +27,24 @@ of, but never looser than, the configured rules.
 
 Long sessions get compacted rather than truncated blindly: octo reclaims context from stale tool
 results before it evicts actual conversation turns, and recovers gracefully from a provider's
-context-length error mid-turn rather than losing the whole session.
+context-length error mid-turn rather than losing the whole session. This is a large enough topic on
+its own — see [History compaction](/docs/concepts/compaction/) for the full mechanism.
+
+## Recovering from a truncated reply
+
+A different problem from running out of input context: the provider's *reply* itself hits the
+output token cap mid-thought. octo escalates in up to two ways before giving up cleanly:
+
+1. **Retry the same round at a higher cap.** Both providers default to a 16,384-token first
+   attempt; if that's truncated, one retry goes out at an escalated 32,768-token cap
+   (`--max-tokens-escalate`, `0` disables it), replayed from unchanged history rather than
+   appending the cut-off reply.
+2. **If still truncated and the reply is plain text (no tool call in progress),** octo appends what
+   was written so far, adds a fixed instruction to continue exactly where it left off, and keeps
+   going — up to 3 such continuations per turn.
+
+A truncated reply that was in the middle of a tool call never retries this way — a tool call either
+completed or it didn't — and stops the turn gracefully instead.
 
 Next: how the system prompt itself is assembled — see
 [Configuration layers](/docs/concepts/configuration-layers/).

@@ -27,6 +27,23 @@ persists one — startup prints a ready-to-open URL with the key embedded
 See the full boundary — what's defended, what's explicitly out of scope — in the
 [security model](/docs/reference/security/).
 
+## Restarting
+
+By default `octo serve` runs as a **supervisor + worker** pair: the supervisor spawns the actual
+worker process, and if the worker exits with code `42` (the same "restart requested" contract from
+the [CLI reference](/docs/reference/cli/)), the supervisor re-resolves the binary path — so a
+replaced binary takes effect — and respawns it. Any other exit code is left alone.
+
+A restart can be triggered by `POST /api/restart` (returns immediately, `202`), or by the model
+calling the `restart_server` tool — which is pinned to the `ask` permission class explicitly, so it
+can never end up on an allow-list by accident. Either path waits for in-flight turns to finish (or a
+30-second timeout, whichever comes first) before the process actually exits; new turns started
+during that drain window are refused with a message asking you to try again in a moment, on every
+transport including IM.
+
+`--no-supervisor` skips all of this and runs the worker directly, so your own init system owns
+restarts instead of octo's:
+
 ## Running as a service
 
 `octo serve` is a single long-running process; the usual approach is to hand it to your init system

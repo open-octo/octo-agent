@@ -22,12 +22,12 @@ file as `config.yaml.bak`.
 |---|---|---|
 | `models` | list of [model entry](#model-entry) | Named model configurations |
 | `default_model` | string | Entry used when nothing else selects one; empty falls back to the first entry |
-| `lite_model` | string | Entry used for cheap internal calls (history compaction) |
+| `lite_model` | string | Entry used for cheap internal calls ([history compaction](/docs/concepts/compaction/)'s summarize step) |
 | `permission_mode` | string | `interactive` \| `strict` \| `auto` |
 | `coauthor` | bool | Append `Co-authored-by` to git commits the agent writes (default `true`) |
 | `access_key` | string | Shared secret for Web UI / API auth when exposed beyond loopback |
 | `compact_auto_pct` | int | Auto-compaction threshold as % of the context window (default `75`) |
-| `compact_batch_threshold` | int | Compaction trigger after a tool batch; `<0` disables |
+| `compact_batch_threshold` | int | Same, checked after each tool-call batch within a turn (default `85`); `<0` disables |
 | `show_reasoning` | bool | Global default for surfacing the reasoning trace to the Web UI |
 | `workspace_dir` | string | Default working dir for new web sessions; `"auto"` → `~/Desktop/octo` |
 | `tools` | [tools block](#tools-block) | Per-tool behavior knobs |
