@@ -1,0 +1,72 @@
+---
+title: 选择 Provider
+description: Anthropic、OpenAI、DeepSeek/Kimi/百炼，或任意兼容端点。
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+octo 原生支持两种协议——Anthropic Messages 和 OpenAI Chat Completions——所以"选哪个 provider"实际上是
+在这两种协议里选一种。
+
+<Tabs>
+<TabItem label="Anthropic">
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+octo --provider anthropic --model claude-sonnet-5 "..."
+```
+
+</TabItem>
+<TabItem label="OpenAI / 兼容端点">
+
+```bash
+export OPENAI_API_KEY=sk-...
+octo --provider openai --model gpt-4o-mini "..."
+```
+
+DeepSeek、百炼，以及其他 OpenAI 兼容 API 都走同一套协议。
+
+</TabItem>
+<TabItem label="自定义端点">
+
+自托管和第三方端点（vLLM、OpenRouter、代理）走 `custom` vendor——唯一支持自定义 base URL 的一种。
+它的协议（`openai` | `anthropic`）按配置项单独选择，用 `octo config` 设置一次即可（选 **Custom** →
+选协议 → 填 base URL + model）：
+
+```bash
+CUSTOM_BASE_URL=https://api.deepseek.com/anthropic \
+CUSTOM_API_KEY=sk-... \
+  octo --model deepseek-chat "..."
+```
+
+</TabItem>
+</Tabs>
+
+## 存成默认值
+
+```bash
+octo config        # 交互式向导
+octo config show   # 打印生效的设置及其来源
+octo config path   # 打印配置文件路径
+```
+
+`octo config` 会把你的默认 provider、model、（可选的）base URL 和推理设置写进 `~/.octo/config.yml`，
+这样裸跑 `octo` 就不用每次重敲 `--provider`/`--model` 了。
+
+<Aside type="note" title="优先级">
+**命令行 flag > 环境变量 > `~/.octo/config.yml` > 内置默认**。API key 优先从
+`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 读取；向导可以把 key 存进文件（权限 `0600`），但更推荐用环境变量。
+</Aside>
+
+## 扩展推理
+
+推理模型可以在回答前先思考。两个开关控制这个行为，同时支持 CLI flag 和 `octo config` 默认值：
+
+- `--reasoning-effort low|medium|high|xhigh|max` —— 推理强度。OpenAI 协议后端会原样收到
+  `reasoning_effort`；Anthropic 协议后端会按模型family映射成自适应思考或扩展思考的 token 预算。
+  留空（默认）表示关闭。
+- `--show-reasoning`（默认**关闭**）—— 把推理/思考轨迹提供给 **Web UI** 显示。终端始终不渲染思考轨迹。
+
+这套机制把 Anthropic 的 `thinking` block 和 OpenAI 的 `reasoning_content` 统一到了同一对开关背后。
+
+下一步：完整 schema 见[配置文件参考](/docs/zh/reference/config-file/)。

@@ -1,0 +1,77 @@
+---
+title: CLI 参考
+description: octo 的每一个命令和 flag。
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="Stable" variant="success" /><br /><br />
+
+优先级是 **命令行 flag > 环境变量 > `~/.octo/config.yml` > 内置默认**。任何子命令都可以运行
+`octo <command> --help` 查看完整 flag 列表——这一页是可搜索的摘要版。
+
+## `octo [message]`
+
+在终端里不带位置参数时会打开交互式 TUI。带一个消息，或者从管道接收 stdin 时，会跑一次
+headless 单发：完整的 agentic 工具循环，然后退出。
+
+| Flag | 默认值 | 说明 |
+|---|---|---|
+| `-c`, `--continue [id]` | — | 恢复一个会话——`last`、一个短 ID，或 ID 的一段子串；不带值时从列表里选 |
+| `--take-over` | `false` | 恢复时，接管一个已经绑定在别处的会话 |
+| `--no-save` | `false` | 关闭 TUI 里的会话自动保存（单发模式本来就不会持久化） |
+| `--provider` | 来自配置 | `anthropic` \| `openai` |
+| `--model` | 来自配置 | 所选 provider 下的模型名 |
+| `--system` | — | 单次运行的系统提示覆盖 |
+| `--max-tokens` | `0` | 回复的 `max_tokens`（`0` = provider 默认值） |
+| `--max-tokens-escalate` | `-1` | 回复被输出上限截断时重试一次所用的更高上限（`-1` = provider 感知的默认值，`0` = 禁用） |
+| `--stream` | `true` | 流式返回；`--stream=false` 改为缓冲，只打印最终文本 |
+| `--tools` / `--no-tools` | `true` | agentic 循环里的内置工具 + MCP/skill 执行 |
+| `--no-memory` | `false` | 本次会话关闭跨会话记忆注入 |
+| `--plain` | `false` | 用一行 `↳` 状态代替富差异卡片 |
+| `--prompt-file <path>` | — | 从文件读取 prompt（和位置参数消息互斥） |
+| `--no-tui` | `false` | 在终端里也强制走 headless 路径，而不是 TUI |
+| `--no-suggest` | `false` | 关闭轮次结束后的后续建议 |
+| `--quiet` / `--verbose` | — | 去掉所有状态装饰 / 打印额外上下文（provider、endpoint、cache 行） |
+| `--permission-mode` | `interactive` | `interactive` \| `strict`（ask 一律拒绝）\| `auto`（ask 一律允许） |
+| `--no-coauthor` | `false` | 不在 git commit 消息里追加 `Co-authored-by` |
+| `--max-turns` | `0`（自动） | 单条消息里 provider 往返的最大轮数（`0` = 交互式 200、headless 不限） |
+| `--compact-threshold` | `0`（自动） | 单轮输入 token 超过这个数就压缩；`<0` 禁用 |
+| `--compact-auto-pct` | `0`（→75） | 自动压缩阈值，按上下文窗口的百分比算 |
+| `--reasoning-effort` | 关闭 | `low` \| `medium` \| `high` \| `xhigh` \| `max` |
+| `--show-reasoning` | `false` | 把推理轨迹提供给 **Web UI** 显示（终端始终不渲染） |
+| `--sandbox` | `false` | 操作系统级限制，只能碰项目目录 + 临时目录，禁网络 |
+| `--sandbox-allow-net` | `false` | 在 `--sandbox` 下允许联网 |
+| `--sandbox-write <dir>` | — | 在 `--sandbox` 下额外的可写目录（可重复） |
+| `--sandbox-read <dir>` | — | 在 `--sandbox` 下额外的只读目录（可重复） |
+
+## 子命令
+
+| 命令 | 作用 |
+|---|---|
+| `octo config` [`show`\|`path`] | 交互式设置向导；打印生效的设置；打印配置文件路径 |
+| `octo init` | 一次性运行，为当前仓库写入/改进 `.octorules` |
+| `octo memory list`\|`path` | 列出或定位项目的和继承来的记忆文件 |
+| `octo skills list`\|`add`\|`update`\|`path` | 管理已发现的 skill |
+| `octo hooks list` | 列出已配置的生命周期 hook |
+| `octo sessions` | 列出已保存的会话 |
+| `octo serve` | 启动 HTTP 服务（REST + SSE + Web UI + IM 桥接） |
+| `octo browser [setup]` | 配置 Chrome DevTools Protocol 自动化 |
+| `octo mcp`（仅帮助信息） | MCP 始终开启；这条命令只打印 `mcp.json` 参考——连接是自动发生的 |
+| `octo upgrade [--check] [--force]` | 原地安装最新 release，或只做检查 |
+| `octo completion bash`\|`zsh`\|`fish`\|`powershell` | 打印对应 shell 的补全脚本 |
+
+### `octo serve`
+
+| Flag | 默认值 | 说明 |
+|---|---|---|
+| `-addr` | `127.0.0.1:8088` | 绑定地址；`:8088` 会暴露到所有网卡 |
+| `--access-key` | 自动生成 | 非回环客户端必须提供——也可以来自 `OCTO_ACCESS_KEY` / 配置文件 |
+| `--stop` | — | 停止一个后台守护进程（用 `-d` 启动的那种） |
+| `--no-channel` | `false` | 跳过 IM 平台桥接 |
+| `--cors` | — | 逗号分隔的允许来源（`*` 表示任意） |
+
+完整内容见[自托管 octo serve](/docs/zh/guides/self-host/)，包括如何把它跑成系统服务。
+
+下一步：上面这些 flag 都能在[配置文件](/docs/zh/reference/config-file/)里找到对应的 key——
+设置一次，不用每次都敲。

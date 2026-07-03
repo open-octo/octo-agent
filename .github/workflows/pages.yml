@@ -1,0 +1,69 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'website/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Least-privilege default; the deploy job elevates only what actions/deploy-pages needs.
+permissions:
+  contents: read
+
+# One deployment in flight at a time — Pages deploys aren't safe to run concurrently.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Build docs site
+        working-directory: website
+        run: npm run build
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          # Root: the hand-rolled landing page + install script, unchanged.
+          cp docs/index.html docs/CNAME docs/install.sh docs/.nojekyll _site/
+          # /docs/*: the generated Starlight site (astro.config.mjs sets base: "/docs").
+          mkdir -p _site/docs
+          cp -r website/dist/. _site/docs/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

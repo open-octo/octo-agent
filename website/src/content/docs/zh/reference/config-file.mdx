@@ -1,0 +1,94 @@
+---
+title: 配置文件
+description: ~/.octo/config.yml 的完整 schema。
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`~/.octo/config.yml` 保存你的默认 provider、model 和全局设置，这样裸跑 `octo` 就不用每次重敲
+flag。所有字段都是可选的——文件不存在，或者字段缺失，都会回退到内置默认值。尽量用
+`octo config` 管理它，而不是手改。
+
+<Aside type="caution" title="从 config.yaml 改名而来">
+老一点的安装可能还留着 `~/.octo/config.yaml`（单个顶层 provider/model 对）。只要 `config.yml`
+不存在,它依然会被读取;第一次 `octo config` 保存时会自动迁移,原文件保留为 `config.yaml.bak`。
+</Aside>
+
+## 顶层字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `models` | [model 条目](#model-条目) 列表 | 有名字的模型配置集合 |
+| `default_model` | string | 没有其他选择时用的条目；留空则用第一个条目 |
+| `lite_model` | string | 用于低成本内部调用（历史压缩）的条目 |
+| `permission_mode` | string | `interactive` \| `strict` \| `auto` |
+| `coauthor` | bool | 在 agent 写的 git commit 里追加 `Co-authored-by`（默认 `true`） |
+| `access_key` | string | 暴露到回环之外时,Web UI / API 认证用的共享密钥 |
+| `compact_auto_pct` | int | 自动压缩阈值,按上下文窗口的百分比（默认 `75`） |
+| `compact_batch_threshold` | int | 一个工具批次后的压缩触发点；`<0` 禁用 |
+| `show_reasoning` | bool | 是否把推理轨迹提供给 Web UI 的全局默认值 |
+| `workspace_dir` | string | 新建 Web 会话的默认工作目录；`"auto"` → `~/Desktop/octo` |
+| `tools` | [tools 配置块](#tools-配置块) | 各工具的行为开关 |
+| `browser` | [browser 配置块](#browser-配置块) | Chrome 连接设置 |
+| `goal` | `{ enabled: bool }` | 控制 `/goal` 和目标相关工具（默认启用） |
+
+## Model 条目
+
+`models:` 里的每一项都是一份完整、可独立选择的配置。`--model <name>` 会选中整个条目；
+两个条目不能用同一个 model 字符串。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `provider` | string | `anthropic` \| `openai` \| `custom` |
+| `model` | string | 这个条目的身份标识——也是 `--model` 和 HTTP API 用的 id |
+| `protocol` | string | 仅 `custom` vendor 使用的协议：`anthropic` \| `openai` |
+| `base_url` | string | 端点覆盖；留空使用该 vendor 的默认端点 |
+| `api_key` | string | 明文兜底,仅当对应环境变量为空时使用（权限 `0600`） |
+| `reasoning_effort` | string | `low` \| `medium` \| `high` \| `xhigh` \| `max`；留空 = 关闭 |
+| `show_reasoning` | bool | 对全局 `show_reasoning` 的按条目覆盖 |
+| `vision` | bool | 这个模型能否接收图片；对已知模型会自动判断 |
+
+```yaml
+models:
+  - provider: anthropic
+    model: claude-sonnet-5
+  - provider: custom
+    protocol: anthropic
+    model: deepseek-chat
+    base_url: https://api.deepseek.com/anthropic
+default_model: claude-sonnet-5
+lite_model: claude-sonnet-5
+permission_mode: interactive
+coauthor: true
+```
+
+## Tools 配置块
+
+```yaml
+tools:
+  tool_search:
+    enabled: auto          # auto（默认）| on | off
+    threshold_pct: 10
+    search_default_limit: 5
+    max_search_limit: 20
+  disabled_skills: []
+```
+
+`disabled_skills` 会把列出的 skill 从模型和 UI 里隐藏，但不会从磁盘删除。`tool_search`
+的作用见[接入 MCP 服务](/docs/zh/guides/connect-mcp-servers/)。
+
+## Browser 配置块
+
+```yaml
+browser:
+  attach_running: true   # 复用你已登录的 Chrome，而不是用一个临时 profile
+  connect_port: 9222      # 或者通过 --remote-debugging-port 接入
+  headless: false          # 默认关闭——交互式工作流需要能看到、能介入
+  user_data_dir: ""
+  exec_path: ""
+  download_dir: ""
+```
+
+详见[浏览器自动化](/docs/zh/guides/browser-automation/)。
+
+下一步：这里的每一项都有对应的 CLI flag——单次运行的临时覆盖见 [CLI 参考](/docs/zh/reference/cli/)。
