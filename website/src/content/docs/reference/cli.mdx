@@ -1,0 +1,78 @@
+---
+title: CLI
+description: Every octo command and flag.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="Stable" variant="success" /><br /><br />
+
+Precedence is **CLI flag > env var > `~/.octo/config.yml` > built-in default**. Run
+`octo <command> --help` for any subcommand's full flag list — this page is the searchable summary.
+
+## `octo [message]`
+
+With no positional message in a terminal, opens the interactive TUI. With one, or with piped
+stdin, runs a headless one-shot: full agentic tool loop, then exit.
+
+| Flag | Default | Description |
+|---|---|---|
+| `-c`, `--continue [id]` | — | Resume a session — `last`, a short ID, or a substring; omit the value to pick from a list |
+| `--take-over` | `false` | When resuming, take over a session bound to another entry |
+| `--no-save` | `false` | Disable session auto-save in the TUI (one-shots never persist) |
+| `--provider` | from config | `anthropic` \| `openai` |
+| `--model` | from config | Model name for the selected provider |
+| `--system` | — | One-off system prompt override |
+| `--max-tokens` | `0` | `max_tokens` for the response (`0` = provider default) |
+| `--max-tokens-escalate` | `-1` | Per-response cap retried once on truncation (`-1` = provider-aware default, `0` = disable) |
+| `--stream` | `true` | Stream the reply; `--stream=false` buffers and prints only the final text |
+| `--tools` / `--no-tools` | `true` | Built-in tools + MCP/skill execution for the agentic loop |
+| `--no-memory` | `false` | Disable cross-session memory injection for this session |
+| `--plain` | `false` | One-line `↳` status lines instead of rich diff cards |
+| `--prompt-file <path>` | — | Read the prompt from a file (mutually exclusive with a positional message) |
+| `--no-tui` | `false` | Force the headless path on a terminal instead of the TUI |
+| `--no-suggest` | `false` | Disable the after-turn follow-up suggestion |
+| `--quiet` / `--verbose` | — | Strip all status chrome / print extra context (provider, endpoint, cache line) |
+| `--permission-mode` | `interactive` | `interactive` \| `strict` (deny on ask) \| `auto` (allow on ask) |
+| `--no-coauthor` | `false` | Don't append `Co-authored-by` to git commit messages |
+| `--max-turns` | `0` (auto) | Max provider round-trips per message (`0` = 200 interactive, unlimited headless) |
+| `--compact-threshold` | `0` (auto) | Compact once a turn's input crosses this many tokens; `<0` disables |
+| `--compact-auto-pct` | `0` (→75) | Auto-compaction threshold as % of the context window |
+| `--reasoning-effort` | off | `low` \| `medium` \| `high` \| `xhigh` \| `max` |
+| `--show-reasoning` | `false` | Surface the reasoning trace for the **Web UI** to display (the terminal never renders it) |
+| `--sandbox` | `false` | OS-enforced confinement to the project dir + tmp, no network |
+| `--sandbox-allow-net` | `false` | Under `--sandbox`, permit network |
+| `--sandbox-write <dir>` | — | Under `--sandbox`, an extra writable dir (repeatable) |
+| `--sandbox-read <dir>` | — | Under `--sandbox`, an extra read-only dir (repeatable) |
+
+## Subcommands
+
+| Command | Purpose |
+|---|---|
+| `octo config` [`show`\|`path`] | Interactive setup wizard; print effective settings; print the config file path |
+| `octo init` | One-shot run that writes/improves `.octorules` for the current repo |
+| `octo memory list`\|`path` | List or locate the project's and inherited memory files |
+| `octo skills list`\|`add`\|`update`\|`path` | Manage discovered skills |
+| `octo hooks list` | List configured lifecycle hooks |
+| `octo sessions` | List saved sessions |
+| `octo serve` | Start the HTTP server (REST + SSE + Web UI + IM bridge) |
+| `octo browser [setup]` | Configure Chrome DevTools Protocol automation |
+| `octo mcp` *(help only)* | MCP is always-on; this prints the `mcp.json` reference — connections happen automatically |
+| `octo upgrade [--check] [--force]` | Install the latest release in place, or just check |
+| `octo completion bash`\|`zsh`\|`fish`\|`powershell` | Print a shell completion script |
+
+### `octo serve`
+
+| Flag | Default | Description |
+|---|---|---|
+| `-addr` | `127.0.0.1:8088` | Bind address; `:8088` exposes on all interfaces |
+| `--access-key` | auto-generated | Required for non-loopback clients — also `OCTO_ACCESS_KEY` / config |
+| `--stop` | — | Stop a background daemon (started with `-d`) |
+| `--no-channel` | `false` | Skip IM platform bridges |
+| `--cors` | — | Comma-separated allowed origins (`*` for any) |
+
+See [Self-host octo serve](/docs/guides/self-host/) for the full picture, including running it as a
+service.
+
+Next: the flags above map onto keys in [the config file](/docs/reference/config-file/) — set once
+instead of retyping.

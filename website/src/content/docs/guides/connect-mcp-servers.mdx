@@ -1,0 +1,94 @@
+---
+title: Connect MCP servers
+description: Give octo extra tools via the Model Context Protocol.
+---
+
+import { Tabs, TabItem, Aside, Badge } from '@astrojs/starlight/components';
+
+<Badge text="Stable" variant="success" /><br /><br />
+
+MCP servers give octo extra tools — databases, ticket trackers, internal APIs — without writing a
+built-in tool for each one. Tools are on by default, so every configured server connects at session
+start; its tools, resources, and prompts ride alongside octo's built-in tools as
+`mcp__<server>__<tool>`.
+
+## Add a server
+
+Servers are declared in `~/.octo/mcp.json` (user-global, always loaded) or `./.octo/mcp.json`
+(project-local, overrides user-global per name), one entry per server:
+
+<Tabs>
+<TabItem label="stdio">
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"]
+    }
+  }
+}
+```
+
+</TabItem>
+<TabItem label="Streamable HTTP">
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "url": "https://mcp.linear.app/sse"
+    }
+  }
+}
+```
+
+</TabItem>
+</Tabs>
+
+<Aside type="note" title="OAuth is automatic">
+Set `"auth": "oauth"` on a Streamable HTTP entry and octo discovers the server's auth metadata on
+the first `401`, then runs a device-flow login (RFC 8628) — open a URL, enter a code. The token is
+cached at `~/.octo/mcp-tokens/<server>.json` and refreshed automatically; an expired refresh token
+just triggers the prompt again.
+</Aside>
+
+Check what's connected with `/mcp` in the TUI, or `octo mcp --help` for the full config reference.
+A server that fails to start or times out during the handshake (10s) is logged and skipped — the
+session continues with the others.
+
+## Tool Search
+
+When MCP servers expose many tools, uploading every schema on every turn wastes context and hurts
+accuracy. Tool Search keeps built-in tools visible but defers MCP schemas behind a small bridge —
+the model finds and loads schemas on demand:
+
+| Tool | Purpose |
+|---|---|
+| `mcp_search` | find MCP tools by keyword (returns names + one-line descriptions) |
+| `mcp_describe` | load the full JSON Schema for one discovered tool |
+| `mcp_call` | invoke the tool with arguments matching that schema |
+
+<Aside type="tip" title="Tuning when it activates">
+Set `threshold_pct` in `~/.octo/config.yml` — Tool Search only turns on once deferred schemas
+would occupy that share of the context window.
+</Aside>
+
+```yaml
+# ~/.octo/config.yml
+tools:
+  tool_search:
+    enabled: auto          # auto (default) | on | off
+    threshold_pct: 10      # activate when deferred schemas ≥ N% of the context window
+    search_default_limit: 5
+    max_search_limit: 20
+```
+
+- `auto` (default) — only enable when the deferred MCP schemas would occupy at least
+  `threshold_pct` of the model's context window.
+- `on` — always defer MCP schemas when any MCP tool is connected.
+- `off` — upload all MCP schemas up front, as before.
+
+Next: MCP tools compose naturally with [skills](/docs/guides/use-skills/) and
+[sub-agents & workflows](/docs/guides/sub-agents-and-workflows/).

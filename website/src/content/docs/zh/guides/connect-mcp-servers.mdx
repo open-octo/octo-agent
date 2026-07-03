@@ -1,0 +1,88 @@
+---
+title: 接入 MCP 服务
+description: 通过 Model Context Protocol 给 octo 添加额外工具。
+---
+
+import { Tabs, TabItem, Aside, Badge } from '@astrojs/starlight/components';
+
+<Badge text="Stable" variant="success" /><br /><br />
+
+MCP 服务能给 octo 添加额外的工具——数据库、工单系统、内部 API——而不用为每一个都写一个内置工具。
+工具默认全部开启，所以每个配置好的服务都会在会话开始时自动连接；它的工具、资源和 prompt 会和 octo
+内置工具一起出现，命名为 `mcp__<server>__<tool>`。
+
+## 添加一个服务
+
+服务在 `~/.octo/mcp.json`（用户级，始终加载）或 `./.octo/mcp.json`（项目级，按名字覆盖用户级）里声明，
+一个条目对应一个服务：
+
+<Tabs>
+<TabItem label="stdio">
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"]
+    }
+  }
+}
+```
+
+</TabItem>
+<TabItem label="Streamable HTTP">
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "url": "https://mcp.linear.app/sse"
+    }
+  }
+}
+```
+
+</TabItem>
+</Tabs>
+
+<Aside type="note" title="OAuth 是自动的">
+需要 OAuth 的服务会在第一次调用工具时带你走一遍 device-flow 登录——不需要手动复制 token
+（RFC 8628）。
+</Aside>
+
+用 TUI 里的 `/mcp` 查看已连接的服务，或者用 `octo mcp --help` 看完整配置参考。启动失败或握手超时
+（10 秒）的服务会被记录日志并跳过——会话会继续跟其余成功连接的服务一起运行。
+
+## Tool Search
+
+当 MCP 服务暴露大量工具时，每一轮都上传全部工具 schema 会浪费上下文、拖累准确率。Tool Search
+让内置工具保持直接可见，但把 MCP 工具 schema 延迟到一个小型桥接工具后面——模型会按需查找并加载 schema：
+
+| 工具 | 作用 |
+|---|---|
+| `mcp_search` | 按关键词搜索 MCP 工具（返回名字 + 一行描述） |
+| `mcp_describe` | 加载某个已发现工具的完整 JSON Schema |
+| `mcp_call` | 用匹配该 schema 的参数调用工具 |
+
+<Aside type="tip" title="调整激活时机">
+在 `~/.octo/config.yml` 里设置 `threshold_pct`——只有当被延迟的 schema 占用上下文窗口的比例
+达到这个值时，Tool Search 才会真正激活。
+</Aside>
+
+```yaml
+# ~/.octo/config.yml
+tools:
+  tool_search:
+    enabled: auto          # auto（默认）| on | off
+    threshold_pct: 10      # 延迟的 schema ≥ 上下文窗口的 N% 时激活
+    search_default_limit: 5
+    max_search_limit: 20
+```
+
+- `auto`（默认）—— 只有当延迟的 MCP schema 会占用至少 `threshold_pct` 的上下文窗口时才启用。
+- `on` —— 只要连接了任意 MCP 工具，就始终延迟 schema。
+- `off` —— 像以前一样，一次性上传所有 schema。
+
+下一步：MCP 工具天然适合跟[技能](/docs/zh/guides/use-skills/)和
+[子代理与工作流](/docs/zh/guides/sub-agents-and-workflows/)组合使用。

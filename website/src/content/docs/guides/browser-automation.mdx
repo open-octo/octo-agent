@@ -1,0 +1,32 @@
+---
+title: Automate with browser control
+description: Go-native Chrome DevTools Protocol automation — record, replay, self-heal.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="Beta" variant="caution" /><br /><br />
+
+octo drives a real Chrome tab over the DevTools Protocol (CDP) — no headless-browser framework
+dependency, no separate runtime.
+
+```bash
+octo browser setup
+```
+
+## Attach to your existing Chrome
+
+Rather than launching a throwaway profile, octo can attach to a Chrome you already have open (with
+your logins intact): enable `chrome://inspect` and connect on port 9222. One connection is reused
+across a session, so you're not re-approving a debugger-attach prompt on every navigation.
+
+## Record, replay, self-heal
+
+- **Record** — you demonstrate the steps once, driving the browser yourself; octo captures the
+  actions (including navigations that open new tabs).
+- **Replay** — `run_skill` (or the web UI's run button) plays a recording back verbatim.
+- **Self-heal** — if a recorded selector no longer matches (the page changed), octo falls back to
+  reasoning about the current DOM instead of failing the whole replay outright.
+
+Next: recordings are a natural fit for [workflows](/docs/guides/sub-agents-and-workflows/) that need
+the same browser task repeated across inputs.

@@ -1,0 +1,36 @@
+---
+title: 运行长周期目标
+description: 给 octo 一个能跨越空闲时段持续推进的目标，而不只是回答一条消息。
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="Beta" variant="caution" /><br /><br />
+
+目标（goal）是 agent 会持续推进的一个长期objective，即使在空闲时段也会继续，而不是回完当前这条
+消息就停下。
+
+```text
+/goal 把内部 API 客户端从 v1 迁移到 v2，覆盖所有调用点
+/goal edit          # 调整当前目标的描述
+/goal replace       # 用一个新目标替换已完成的目标
+```
+
+当一个带着目标的会话进入空闲状态时，octo 会自己继续朝目标推进——用的是和 `/loop` 一样的机制，
+只不过应用在单个持久目标上，而不是一条重复的 prompt。底层工具（`get_goal`、`create_goal`、
+`update_goal`）模型也能直接调用，所以目标可以在对话过程中被创建或调整，不一定非要走 slash 命令。
+
+## 关掉这个功能
+
+目标是按会话可选启用的，也可以整体关闭：
+
+```yaml
+# ~/.octo/config.yml
+goal:
+  enabled: false
+```
+
+关闭之后，`/goal` 会报告自己不可用，而不是悄悄什么都不做。
+
+下一步：目标和[聊天渠道](/docs/zh/guides/channels/)搭配很自然——从手机上启动一个目标，
+让它自己跑，回头再来看结果。

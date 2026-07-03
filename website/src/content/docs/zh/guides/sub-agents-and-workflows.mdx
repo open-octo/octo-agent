@@ -1,0 +1,49 @@
+---
+title: 子代理与工作流
+description: 让模型临时扇出子代理，或者用 workflow 工具做确定性编排。
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="Beta" variant="caution" /><br /><br />
+
+有两种方式让不止一个 agent 一起干活：让模型按需临时扇出子代理，或者写一段确定性的编排脚本，
+用 `workflow` 工具执行。
+
+## 子代理
+
+`sub_agent` 工具会启动一个带有独立上下文的全新 agent——适合把一次大型探索或一次有风险的编辑
+从主对话里隔离出来。启动可以是同步的也可以是异步的；异步的会拿到几个后续工具：
+
+| 工具 | 作用 |
+|---|---|
+| `sub_agent` | 启动一个子代理（同步或异步、fork 或指定类型） |
+| `sub_agent_send` | 给一个正在运行或已结束的异步子代理发送后续消息 |
+| `sub_agent_status` | 不阻塞地查看进度 |
+| `sub_agent_kill` | 提前停止一个子代理 |
+
+一个异步子代理只要没被杀掉、正常结束，就会保持可寻址——是一个存活的句柄，后面对话里
+可以用 `sub_agent_send` 继续跟它说话。
+
+## 工作流
+
+`workflow` 工具会针对一批子代理运行一段确定性的编排脚本（JavaScript 或内嵌的 Ruby DSL），
+而不是把扇出/汇总完全交给模型临时判断：
+
+- **`agent(prompt, opts)`** —— 运行一个子代理直到完成，返回结果。
+- **`parallel(fns)`** —— 并发运行多个 agent，等待全部完成。
+- **`pipeline(items, ...stages)`** —— 让每个 item 独立走完所有阶段，阶段之间没有屏障——
+  item A 可能已经在第 3 阶段，item B 还在第 1 阶段。
+- 运行可以放到**后台**：`workflow_status` 轮询进度，`workflow_kill` 停止运行。
+- 每个碰文件的并行分支都有 **git worktree 隔离**，避免并发 agent 互相踩脏工作区。
+- `workflow_save` 把一段脚本保存成一个可复用的、有名字的工作流。
+
+```js
+// 示意：把一次 review 按维度扇出，再逐条验证发现
+const findings = await parallel(
+  ['correctness', 'security', 'perf'].map((d) => () => agent(`Review for ${d} issues`))
+);
+```
+
+下一步：这两种机制都可以跟[hooks](/docs/zh/guides/hooks/)搭配，对子代理的行为做响应；
+完整工具列表见[工具参考](/docs/zh/reference/tools/)。

@@ -1,0 +1,110 @@
+---
+title: Install
+description: Install octo on Linux, macOS, or Windows.
+---
+
+import { Tabs, TabItem, Steps, Aside } from '@astrojs/starlight/components';
+
+<Tabs syncKey="os">
+<TabItem label="Linux">
+
+The install script detects your architecture, downloads the matching release, verifies its
+SHA-256, and installs `octo` to your `PATH`:
+
+```bash
+curl -fsSL https://octo-agent.dev/install.sh | sh
+```
+
+Then start the local server and onboard in your browser:
+
+```bash
+octo serve -d                  # run the local server in the background
+xdg-open http://127.0.0.1:8088 # opens the dashboard
+```
+
+`127.0.0.1` is loopback, so no access key is needed — the page goes straight into first-run
+onboarding (pick a provider, paste a key). Stop the server later with `octo serve --stop`. Prefer
+the terminal? Just run `octo`.
+
+Prebuilt archives (linux / darwin / windows × amd64 + arm64) and `checksums.txt` are on the
+[latest release](https://github.com/open-octo/octo-agent/releases/latest) if you'd rather grab one
+by hand.
+
+</TabItem>
+<TabItem label="macOS">
+
+**Install script (command line)** — same one-liner as Linux:
+
+```bash
+curl -fsSL https://octo-agent.dev/install.sh | sh
+octo serve -d                  # run the local server in the background
+open http://127.0.0.1:8088     # opens the dashboard
+```
+
+**Double-click installer** — download `octo-setup.pkg` from the
+[latest release](https://github.com/open-octo/octo-agent/releases/latest) (one universal package
+covers both Apple Silicon and Intel) and double-click it.
+
+<Steps>
+1. Installer.app offers only "Install for me only" — no administrator password.
+2. It installs octo to `~/Library/Application Support/octo`, adds it to your `PATH` (appends to
+   `~/.zprofile` / `~/.bash_profile` / `~/.profile`), and registers a LaunchAgent that starts
+   `octo serve -d` on every login.
+3. When it finishes it starts the server and opens `http://127.0.0.1:8088` to walk you through
+   first-run onboarding.
+4. For a terminal session, open a **new** terminal and run `octo`.
+</Steps>
+
+<Aside type="caution" title="Gatekeeper warning expected">
+The installer isn't notarized, so Gatekeeper will warn it's from an unidentified developer —
+right-click (Control-click) the file → **Open**, or allow it via **System Settings → Privacy &
+Security → Open Anyway**. There's no App Store-style uninstaller for `.pkg`; run
+`~/Library/Application\ Support/octo/uninstall.sh` to remove everything it installed.
+</Aside>
+
+</TabItem>
+<TabItem label="Windows">
+
+Download `octo-setup.exe` from the
+[latest release](https://github.com/open-octo/octo-agent/releases/latest) and double-click it.
+
+<Steps>
+1. It installs per-user (no administrator prompt), puts `octo` on your `PATH`, and adds a
+   Start-menu entry.
+2. When it finishes it starts the local server in the background (`octo serve -d`) and opens
+   `http://127.0.0.1:8088` to walk you through first-run onboarding.
+3. The server also registers to start on each login (a per-user `Run` entry, no window), so the
+   dashboard is up after a reboot.
+4. For a terminal session, open a **new** terminal and run `octo`.
+</Steps>
+
+The installer is signed through the [SignPath Foundation](https://signpath.org/)'s free open-source
+program; until that rolls out on a given release, Windows SmartScreen may show "Windows protected
+your PC" — click **More info → Run anyway**. Uninstall from "Add or remove programs" like any other
+app.
+
+</TabItem>
+</Tabs>
+
+## Upgrading
+
+```bash
+octo upgrade         # installs the latest release in place, SHA-256 verified
+octo upgrade --check # only compares versions
+```
+
+The web UI's version badge offers the same flow.
+
+## From Go or from source
+
+```bash
+go install github.com/open-octo/octo-agent/cmd/octo@latest
+```
+
+```bash
+git clone https://github.com/open-octo/octo-agent.git
+cd octo-agent
+make build       # produces ./octo
+```
+
+Next: [Quickstart](/docs/getting-started/quickstart/).

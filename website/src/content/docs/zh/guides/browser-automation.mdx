@@ -1,0 +1,31 @@
+---
+title: 浏览器自动化
+description: 基于 Chrome DevTools Protocol 的原生 Go 浏览器自动化——录制、回放、自愈。
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="Beta" variant="caution" /><br /><br />
+
+octo 通过 DevTools Protocol（CDP）直接操作一个真实的 Chrome 标签页——不依赖任何 headless 浏览器
+框架，也不需要额外的运行时。
+
+```bash
+octo browser setup
+```
+
+## 接入你已经打开的 Chrome
+
+octo 可以直接接入你已经打开的 Chrome（登录态都还在），而不是启动一个用完即弃的临时 profile：
+开启 `chrome://inspect`，连接 9222 端口。一次会话里连接会被复用，不会每次导航都重新弹一次
+调试器授权提示。
+
+## 录制、回放、自愈
+
+- **录制** —— 你亲自操作一遍，演示这些步骤；octo 会记录下这些动作（包括打开新标签页的导航）。
+- **回放** —— `run_skill`（或 Web UI 里的运行按钮）会原样回放一段录制。
+- **自愈** —— 如果录制时用的选择器因为页面变化失效了，octo 会退回到根据当前 DOM 重新推理，
+  而不是让整个回放直接失败。
+
+下一步：录制的操作天然适合搭配[工作流](/docs/zh/guides/sub-agents-and-workflows/)，
+在不同输入上重复同一个浏览器任务。

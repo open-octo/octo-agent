@@ -1,0 +1,49 @@
+---
+title: octo-agent 文档
+description: 开源、可自托管、不绑定模型厂商的 coding agent 体验。
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+octo 是一个 MIT 开源、单个 Go 二进制的 AI agent。大厂 coding agent 那套能力它都有——skills、CLI / 网页 /
+手机 IM、浏览器操作、OS 级沙箱——但区别在于它是一个完全开源、自包含、由你完全掌控的二进制，可以接任意模型
+（DeepSeek、Kimi、Anthropic、OpenAI，或任何兼容协议的模型），服务和数据都留在你自己的机器上。
+
+```bash
+curl -fsSL https://octo-agent.dev/install.sh | sh     # 单二进制 —— 无需 Node / Ruby / Python
+octo config                                            # 选 provider，填 key
+octo "给 octo config show 加一个 --json 参数并跑测试"
+```
+
+## octo 对比同类
+
+|  | **octo-agent** | Claude Code | Codex CLI | Hermes Agent |
+|---|---|---|---|---|
+| 授权 / 成本 | **MIT，免费** | 专有，需订阅 | 开源（Rust），需 OpenAI 套餐 | MIT，免费 |
+| 运行时 | **单个 Go 二进制，零依赖** | 原生安装 | 原生 Rust 二进制 | Python（`uv`） |
+| 模型 | **Anthropic + OpenAI 双协议，任意兼容端点** | 以 Anthropic 为主 | OpenAI | 多 provider |
+| 部署 | **完全自托管** | Anthropic 托管 | OpenAI 托管的 App + 本地 CLI | 自托管 |
+| Skills | **兼容 Claude Code 的 `SKILL.md`** | 原生（发源地） | `AGENTS.md` / 插件 | 自有格式 |
+| 聊天平台 | **内置 6 个**（微信、飞书、钉钉、企微、Discord、Telegram） | 无内置 | Slack / GitHub / Linear 集成 | 约 20 个平台 |
+
+以上信息据各项目公开文档整理。区别在于开源、自托管与模型自由——而不是功能清单；octo 覆盖了闭源方案的同一片能力范围。
+
+## 接下来去哪看
+
+<CardGrid>
+	<Card title="快速上手" icon="rocket">
+		五分钟内装好 octo，跑完第一个任务。从[安装](/docs/zh/getting-started/install/)开始。
+	</Card>
+	<Card title="指南" icon="open-book">
+		任务导向的实操文档——MCP、skills、沙箱、子代理、聊天平台接入。从
+		[接入 MCP 服务](/docs/zh/guides/connect-mcp-servers/)开始。
+	</Card>
+	<Card title="参考手册" icon="document">
+		每一个 CLI flag、配置项、工具，整理成一套可搜索的表格。从
+		[CLI 参考](/docs/zh/reference/cli/)开始。
+	</Card>
+	<Card title="架构" icon="setting">
+		agent 循环、provider、工具是如何拼起来的——写给贡献者看。从
+		[系统分层](/docs/zh/architecture/system-layers/)开始。
+	</Card>
+</CardGrid>
