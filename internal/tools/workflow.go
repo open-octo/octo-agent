@@ -36,8 +36,14 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"Runs in the BACKGROUND: this call returns a run id immediately; collect the result " +
 			"later with the workflow_status tool. (A long multi-agent run won't block you or the " +
 			"user while it executes.)\n\n" +
-			"The script runs in a sandboxed mruby interpreter (no file/network access — all " +
-			"effects go through the primitives). Primitives:\n" +
+			"The script runs in a sandboxed, IO-free mruby interpreter: only Array/Hash/String/" +
+			"Integer logic and JSON.parse/JSON.generate are available. There is NO File, Dir, " +
+			"Time, Process, or shell backticks (`cmd`) — referencing any of them raises a Ruby " +
+			"error before the script produces any result. The ONLY way to touch the filesystem, " +
+			"run a shell/git/gh command, or get the current date is through agent(prompt, opts) " +
+			"below, which delegates to a real sub-agent with real tools. To persist a report or " +
+			"state file, tell an agent() call to write it (it has write_file) — never call " +
+			"File.write yourself. Primitives:\n" +
 			"- `agent(prompt, opts = {}) -> String`: run one sub-agent to completion, return " +
 			"its reply. Inside parallel/pipeline it runs concurrently with siblings. " +
 			"Optional opts: `model:` (override the model for this call, e.g. a cheaper model " +
