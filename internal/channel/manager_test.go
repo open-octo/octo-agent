@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,18 @@ type mockAdapter struct {
 	stopped       bool
 	validateErrs  []string
 	onMessageFunc func(InboundEvent)
+
+	// issueMsgIDs makes SendText return sequential message IDs ("m1", "m2",
+	// …) like real adapters do, so tests can exercise the in-place update
+	// path (it only engages once a message ID is known). Off by default —
+	// legacy tests assert plain send counts.
+	issueMsgIDs bool
+	// noUpdates reports SupportsMessageUpdates() == false (a DingTalk/WeCom/
+	// Weixin-shaped platform).
+	noUpdates bool
+	// failUpdates makes UpdateMessage report failure (edit-size cap /
+	// deleted message), without recording the attempt as delivered.
+	failUpdates bool
 }
 
 type sentText struct {
@@ -55,7 +68,11 @@ func (m *mockAdapter) SendText(chatID, text, replyTo string) SendResult {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sentTexts = append(m.sentTexts, sentText{chatID, text, replyTo})
-	return SendResult{OK: true}
+	res := SendResult{OK: true}
+	if m.issueMsgIDs {
+		res.MessageID = fmt.Sprintf("m%d", len(m.sentTexts))
+	}
+	return res
 }
 func (m *mockAdapter) SendFile(chatID, path, name, replyTo string) SendResult {
 	m.mu.Lock()
@@ -66,10 +83,13 @@ func (m *mockAdapter) SendFile(chatID, path, name, replyTo string) SendResult {
 func (m *mockAdapter) UpdateMessage(chatID, messageID, text string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.failUpdates {
+		return false
+	}
 	m.updatedMsgs = append(m.updatedMsgs, updatedMsg{chatID, messageID, text})
 	return true
 }
-func (m *mockAdapter) SupportsMessageUpdates() bool                 { return true }
+func (m *mockAdapter) SupportsMessageUpdates() bool                 { return !m.noUpdates }
 func (m *mockAdapter) SendTyping(chatID, contextToken string) error { return nil }
 func (m *mockAdapter) StopTyping(chatID, contextToken string) error { return nil }
 func (m *mockAdapter) Flush(chatID string)                          {}

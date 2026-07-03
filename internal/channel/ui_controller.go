@@ -27,6 +27,13 @@ type UIController struct {
 	// used for in-place updates on platforms that support it.
 	pendingTextMsgID string
 
+	// sentText is the raw stream text already delivered into the message
+	// identified by pendingTextMsgID. Platform edits REPLACE the whole
+	// message (Telegram editMessageText; Discord and Feishu likewise), so an
+	// in-place update must carry the full accumulated text — editing with
+	// only the newest chunk would erase what the user already read.
+	sentText string
+
 	// toolCount tracks how many tools have started (for suppression heuristics).
 	toolCount int
 
@@ -132,27 +139,35 @@ func (u *UIController) onTurnDone(reply *agent.Reply) {
 	u.adapter.Flush(u.chatID)
 }
 
-// flushTextLocked sends the accumulated text buffer to the adapter.
+// flushTextLocked delivers the accumulated text buffer to the adapter.
 // Must be called with mu held.
 func (u *UIController) flushTextLocked() {
-	text := strings.TrimSpace(u.textBuf.String())
-	if text == "" {
+	chunk := u.textBuf.String()
+	if strings.TrimSpace(chunk) == "" {
 		return
 	}
 	u.textBuf.Reset()
 
 	// If the platform supports message updates and we already have a pending
-	// message, update it in place rather than sending a new one.
+	// message, edit it in place with the FULL text streamed so far — the raw
+	// chunks are concatenated unmodified so paragraph breaks survive, and
+	// only the outer whitespace is trimmed for display.
 	if u.adapter.SupportsMessageUpdates() && u.pendingTextMsgID != "" {
-		if u.adapter.UpdateMessage(u.chatID, u.pendingTextMsgID, text) {
+		full := u.sentText + chunk
+		if u.adapter.UpdateMessage(u.chatID, u.pendingTextMsgID, strings.TrimSpace(full)) {
+			u.sentText = full
 			return
 		}
-		// Update failed — fall through to sending a new message.
+		// Edit failed (platform edit-size cap, message deleted): fall through
+		// and continue in a fresh message carrying just the not-yet-shown
+		// chunk. The old message keeps its last successfully edited content,
+		// so nothing the user saw is lost.
 	}
 
-	res := u.adapter.SendText(u.chatID, text, u.replyTo)
+	res := u.adapter.SendText(u.chatID, strings.TrimSpace(chunk), u.replyTo)
 	if res.OK {
 		u.pendingTextMsgID = res.MessageID
+		u.sentText = chunk
 	}
 }
 
@@ -160,6 +175,7 @@ func (u *UIController) flushTextLocked() {
 func (u *UIController) resetLocked() {
 	u.textBuf.Reset()
 	u.pendingTextMsgID = ""
+	u.sentText = ""
 	u.toolCount = 0
 	u.inTool = false
 	u.sentTyping = false
