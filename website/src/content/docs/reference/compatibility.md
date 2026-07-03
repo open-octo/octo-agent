@@ -20,7 +20,7 @@ in the [CHANGELOG](https://github.com/open-octo/octo-agent/blob/main/CHANGELOG.m
 | `~/.octo/mcp.json`, `.octo/mcp.json` | The `mcpServers` shape (stdio `command`/`args`/`env`, HTTP `url`/`headers`/`auth`); project file overrides user file by name |
 | `~/.octo/channels.yml` | The `channels` map keyed by platform, each platform's documented keys |
 | `SKILL.md` | YAML frontmatter + markdown body, Claude Code's format, discovered from `~/.octo/skills/` and `.octo/skills/` |
-| `~/.octo/agents/<name>.md` | Custom sub-agent definitions — frontmatter + system prompt |
+| `~/.octo/agents/<name>.md` | Custom [sub-agent](/docs/guides/sub-agents/) definitions — `description`/`read_only`/`tools`/`disallowed_tools`/`model` frontmatter + a system-prompt body; filename is the type name |
 | `soul.md` / `user.md` / `octorules.md` / `.octorules` | Same layering and `@include` support |
 | `~/.octo/memories/<slug>/` | `MEMORY.md` index + on-demand topic files, plain markdown |
 | Sessions (`~/.octo/sessions/*.jsonl`), tasks (`~/.octo/tasks/`) | **Read guarantee**: every 1.x release reads state written by any earlier 1.x (and 0.19+). Downgrades aren't covered. |

@@ -1,0 +1,124 @@
+---
+title: Workflows
+description: Deterministic multi-agent orchestration, scripted in Ruby.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="Beta" variant="caution" /><br /><br />
+
+While [sub-agents](/docs/guides/sub-agents/) let the model fan out ad hoc, the `workflow` tool runs
+a deterministic orchestration **script** against a fleet of sub-agents — the fan-out/fan-in
+structure is fixed in code, not re-decided call by call.
+
+Workflow scripts are **Ruby** (running on an embedded mruby interpreter, compiled to WASM — no
+system Ruby needed). There is no JavaScript option.
+
+## Script primitives
+
+| Call | Returns | Purpose |
+|---|---|---|
+| `agent(prompt, opts = {})` | String | Run one sub-agent to completion. `opts`: `model:`, `tools:` (restrict to these), `read_only: true`, `schema:` (a JSON Schema string — the reply comes back as a JSON string matching it), `isolation: "worktree"` |
+| `skill(name, params = {}, opts = {})` | Hash / Array / scalar | Run a named skill or browser recording. Prefix with `"browser:"` or `"md:"` if a recording and a `SKILL.md` share a name. Unlike `agent`, results with a `schema` come back already parsed |
+| `parallel(items) { \|it\| ... }` | Array | Run the block over every item concurrently; results keep input order |
+| `pipeline(items, *stages)` | Array | Each item flows through every stage independently — no barrier between stages, so item A can be three stages ahead of item B |
+| `log(msg)` | — | A progress line in the run's log |
+| `phase(title)` | — | A cosmetic named marker in the progress stream (no effect on scheduling) |
+| `args` | Hash / Array / scalar / nil | The `args` this run was started with (see [named workflows](#named-and-saved-workflows) below) |
+| `budget_remaining` | Integer | Remaining output-token budget for this run |
+| `JSON.parse` / `JSON.generate` | — | Available for round-tripping `schema:` results and `args` |
+
+```ruby
+# @description Review a diff across three dimensions, in parallel
+findings = parallel(["correctness", "security", "perf"]) do |dimension|
+  agent("Review the current diff for #{dimension} issues", read_only: true)
+end
+findings.each { |f| log(f) }
+```
+
+Concurrency is cooperative under the hood (mruby Fibers plus a Go-side event loop), but real work
+happens on goroutines — `parallel`/`pipeline` genuinely overlap sub-agent calls, capped at **8
+concurrent `agent`/`skill` calls in flight per run** regardless of how many items you hand to
+`parallel`.
+
+## Running in the background
+
+Every `workflow(...)` call is asynchronous — it starts immediately in the background and returns a
+run id (`wf_1`, `wf_2`, …) without waiting for the script to finish.
+
+| Tool | Purpose |
+|---|---|
+| `workflow_status` | no id: list every run in the session with status/elapsed/last-activity. With an id: full result or error, plus up to 500 lines of captured log |
+| `workflow_kill` | cancel a run; propagates to any in-flight sub-agents |
+
+Up to **4 background workflow runs** can be active at once (per CLI process, or per session for
+Web/IM); a fifth `workflow(...)` call errors immediately rather than queuing.
+
+## Worktree isolation
+
+Pass `isolation: "worktree"` to `agent(...)` and that call runs inside a fresh
+`git worktree add -b octo-wf/<label>-<random>` off the current `HEAD` — an isolated checkout so
+concurrent branches touching files never collide. It's opt-in per call, not automatic for
+`parallel`/`pipeline`.
+
+When that agent finishes:
+- **No changes** → the worktree and its branch are removed automatically.
+- **Changes present** → they're committed onto the branch, the worktree is left on disk, and the
+  branch name, path, and a diffstat are appended to the agent's reply text.
+
+Nothing merges the branch back for you — reviewing and merging is on you (or a later `agent()` call
+you write to do it).
+
+## Named and saved workflows
+
+Save a script once, run it by name afterward:
+
+```
+workflow_save(name: "my-check", script: "...")   # writes .octo/workflows/my-check.rb
+workflow(name: "my-check", args: { target: "src/" })
+```
+
+- `name` must match `^[a-z0-9][a-z0-9-]*$`. `scope: "project"` (default) writes to
+  `.octo/workflows/` — this needs a git repo, or the save fails; `scope: "user"` writes to
+  `~/.octo/workflows/` instead.
+- The registry merges **built-in presets < user workflows < project workflows** by name, rescanned
+  fresh on every call — no caching, no restart needed after editing a saved script by hand.
+- A workflow's description comes from a leading `# @description ...` comment line.
+- `args` (any JSON value) is threaded through to the script's `args` call; omit it and `args`
+  returns `nil`.
+
+Three presets ship in the binary and are always available, even with nothing saved yet:
+
+| Name | What it does |
+|---|---|
+| `adversarial-review` | Fans out review findings across dimensions, then kills false positives with independent skeptic votes (default: 3 votes) |
+| `parallel-understand` | Maps a codebase in parallel — one reader per subsystem, synthesized into one architecture map |
+| `batch-migrate` | Applies one mechanical change across many files, each in its own git worktree so parallel edits never collide |
+
+## Resuming a run
+
+A completed `agent`/`skill` call is journaled to
+`~/.octo/workflow-journals/<run-id>.jsonl` as it happens, so a crash loses at most the in-flight
+call. The result or error text names this journal id — a format like `wf-20260703-143000-a1b2c3d4`.
+
+:::caution[Two different IDs]
+The journal id (`wf-YYYYMMDD-...`) is what you pass to `resume_from` — it is **not** the same as the
+`wf_N` handle `workflow_status`/`workflow_kill` use to track the background run itself. Passing the
+wrong one is the easiest mistake to make here.
+:::
+
+`workflow(script: "...", resume_from: "wf-20260703-143000-a1b2c3d4")` replays completed calls from
+the journal by position, skipping straight to where the run left off — but only if the script and
+`args` hash to exactly the same value as the original run; changing either is treated as starting
+over, not a resume (and returns an error telling you to omit `resume_from` if that's actually what
+you want).
+
+## Everyday nudges
+
+If you manually invoke two or more distinct skills or browser recordings in one turn, octo nudges
+(a model-visible, UI-hidden note) toward turning that into a saved workflow — pointing at either the
+`workflow-creator` skill or `workflow_save` directly. It won't nudge again in a turn where you've
+already called `workflow` or `workflow_save`.
+
+Next: browser recordings compose directly into workflow scripts via `skill("browser:<name>")` — see
+[Automate with browser control](/docs/guides/browser-automation/).

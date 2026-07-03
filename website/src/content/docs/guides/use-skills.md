@@ -10,6 +10,9 @@ context on turns that don't need them.
 
 - `~/.octo/skills/<name>/SKILL.md` — user-level, available across all projects.
 - `.octo/skills/<name>/SKILL.md` — project-level, takes precedence over user-level.
+- `~/.octo/skills-default/` — the built-in set below, materialized from the binary on first run
+  (`octo skills update` re-syncs it after an upgrade). Kept in its own directory so refreshing
+  defaults never touches a skill you wrote yourself.
 
 The format is identical to Claude Code's, so you can symlink `~/.claude/skills` to `~/.octo/skills`
 and reuse everything you already have:
@@ -38,8 +41,63 @@ tool) only when a task matches.
 
 ```bash
 octo skills list     # see what's discovered
+octo skills path     # print the user/project/default skill directories
+octo skills add      # install a skill from a source (guided)
+octo skills update   # re-sync the built-in defaults after an upgrade
 ```
 
-In the TUI: `/skills` lists them, and `/<name>` (e.g. `/review`) runs one directly.
+In the TUI, `/skills` lists them and `/<name>` (e.g. `/review`) runs one directly. In the Web UI,
+the composer's `/` menu does the same. **IM channels don't support `/<skill-name>` triggering** —
+any `/text` there is matched against the fixed [slash command](/docs/reference/slash-commands/)
+set, and an unrecognized one returns "Unknown command" rather than falling through to a skill; ask
+for the task in plain language instead and the model loads the matching skill itself.
 
-Next: skills often reach for MCP tools — see [Connect MCP servers](/docs/guides/connect-mcp-servers/).
+## Built-in skills
+
+octo ships 18 skills out of the box. Every one triggers automatically when the model judges a task
+matches its description — you rarely need to invoke them by name.
+
+**Get started**
+
+| Skill | What it does |
+|---|---|
+| `onboard` | First-run setup (name, personality, profile → `soul.md` + `user.md`); also handles narrower re-curation with `scope:soul`, `scope:user`, or a specific memory file path |
+| `product-help` | Answers "how do I…" / "what is…" questions about octo itself by reading its own product docs |
+| `find-skills` | Helps you discover an installable skill for something you want to do |
+| `skill-creator` | Turns a repeatable task into a new `SKILL.md`, or edits/improves an existing one |
+| `workflow-creator` | Chains **existing** skills and browser recordings into one runnable, saved [workflow](/docs/guides/workflows/) |
+
+**Build & ship code**
+
+| Skill | What it does |
+|---|---|
+| `tech-design` | Produces a full backend technical design doc from a PRD or feature description |
+| `grill-me` | Interviews you about a plan until every open decision is resolved — pairs with `tech-design` |
+| `implement` | Decomposes a tech design into dependency-ordered slices, TDD-executes each, reviews each with a sub-agent, and checkpoints progress so it survives a restart |
+| `tdd` | The red-green-refactor loop on its own, for one feature or fix rather than a whole design |
+| `code-review` | Reviews the current diff with an isolated sub-agent for unbiased correctness/convention/security feedback |
+| `worktree-isolate` | Does a risky or experimental change in an isolated git worktree, then merge or discard |
+
+**Automation & scheduling**
+
+| Skill | What it does |
+|---|---|
+| `loop` | Repeats a prompt in the current session — fixed interval or self-paced — without re-prompting each time |
+| `cron-task-creator` | Creates/inspects/edits/deletes recurring prompts that survive a restart, run by `octo serve`'s scheduler |
+
+**Connect things**
+
+| Skill | What it does |
+|---|---|
+| `mcp-creator` | Finds the right MCP server, writes the `mcp.json` entry, and verifies the connection |
+| `channel-manager` | Walks you through setting up an IM platform (Feishu, WeChat, WeCom, DingTalk, Discord, Telegram) and writes `channels.yml` |
+
+**Research & documents**
+
+| Skill | What it does |
+|---|---|
+| `deep-research` | Multi-source, fact-checked research — fans out searches, reads primary sources, adversarially verifies claims, synthesizes a cited report |
+| `web-access` | Methodology + a cross-session experience library for hard web targets: login-gated or anti-bot sites, unknown page structure, cross-source verification |
+| `office-xlsx` | Creates/reads/edits `.xlsx` spreadsheets — formulas, styling, merged cells, multiple sheets, charts, validation |
+
+Next: chaining several of these into one saved flow is exactly what [Workflows](/docs/guides/workflows/) are for.

@@ -13,6 +13,9 @@ stopping once the current message is answered.
 ```text
 /goal Migrate the internal API client from v1 to v2 across all call sites
 /goal edit          # adjust the current goal's objective
+/goal pause         # stop idle continuation without losing the goal
+/goal resume        # pick the continuation loop back up
+/goal clear         # drop the current goal
 /goal replace       # replace a finished goal with a new one
 ```
 
@@ -20,6 +23,14 @@ When a session goes idle with an active goal, octo continues working toward it o
 the same machinery behind `/loop`, applied to a single durable objective instead of a recurring
 prompt. The underlying tools (`get_goal`, `create_goal`, `update_goal`) are also available to the
 model directly, so a goal can be created or refined mid-conversation, not just via the slash command.
+
+:::note[`/goal edit` differs by transport]
+In the TUI, `/goal edit` with no text prefills the input box with the current objective for you to
+revise on the next Enter — `/goal edit <text>` is rejected outright, it's prefill-only. In the Web
+UI and IM channels, `/goal edit <text>` edits the objective inline in one step. Everything else
+(`pause`/`resume`/`clear`/`replace`) works the same way everywhere, since goal state lives on the
+session itself, not the transport.
+:::
 
 ## Turning it off
 

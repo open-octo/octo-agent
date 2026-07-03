@@ -14,19 +14,100 @@ dependency, no separate runtime.
 octo browser setup
 ```
 
-## Attach to your existing Chrome
+## Connecting to Chrome
 
-Rather than launching a throwaway profile, octo can attach to a Chrome you already have open (with
-your logins intact): enable `chrome://inspect` and connect on port 9222. One connection is reused
-across a session, so you're not re-approving a debugger-attach prompt on every navigation.
+Three ways the `browser` tool gets a page, tried in this order:
 
-## Record, replay, self-heal
+1. **A known debug port** (`browser.connect_port` in `config.yml`) — connects directly, no fallback
+   if it fails. This is what `octo browser setup` wires up for you.
+2. **Attach to a Chrome already running** with remote debugging enabled
+   (`browser.attach_running: true`) — reuses your logins; never hijacks a browser that doesn't
+   already have debugging turned on.
+3. **Launch a fresh, throwaway profile** — the default when neither of the above is configured or
+   available.
 
-- **Record** — you demonstrate the steps once, driving the browser yourself; octo captures the
-  actions (including navigations that open new tabs).
-- **Replay** — `run_skill` (or the web UI's run button) plays a recording back verbatim.
-- **Self-heal** — if a recorded selector no longer matches (the page changed), octo falls back to
-  reasoning about the current DOM instead of failing the whole replay outright.
+Whichever path connects, octo always opens a **brand-new tab** rather than reusing one you have
+open (including its own Web UI tab) — driving an existing tab requires an explicit `pages`/
+`select_page` action. The connection is reused across the whole session, so you approve any
+debugger-attach prompt once, not on every navigation.
 
-Next: recordings are a natural fit for [workflows](/docs/guides/sub-agents-and-workflows/) that need
-the same browser task repeated across inputs.
+### `octo browser setup`
+
+```bash
+octo browser setup
+```
+
+Walks you through enabling `chrome://inspect/#remote-debugging` (Chrome 144+ disabled the old
+`--remote-debugging-port` flag on the default profile, so the inspect-page checkbox is the
+supported path), then probes port 9222 in a loop — confirming not just that it connects, but that a
+real page-level CDP call succeeds (a browser-level connection can succeed while page control still
+fails on recent Chrome). On success it saves `browser.connect_port` to your config; on failure it
+prompts you to flip the toggle and retry, or quit and resume later.
+
+## Recording
+
+There's no CLI command for this — recording is driven by the `browser` tool's `record_start` /
+`record_stop` actions, either called by the model or via the Web UI's Record button.
+
+The key thing to understand: **it records what *you* do, not what the model does.** After
+`record_start`, the agent hands the browser to you; you perform the steps yourself, then tell the
+agent you're done and it calls `record_stop <name>`.
+
+What gets captured, per step: the action (`click` / `type` / `select` / `upload` / `navigate`), a
+selector anchored at the nearest element with a stable `id` (not a fragile position-based chain),
+the element's visible text, and the URL. A model pass then distills the raw capture — dropping
+dead-end detours, turning your specific values into `{{param}}` placeholders, and writing a
+description — but it can only reorder or rename real captured steps, never invent a new target: any
+refined step whose selector isn't in the original capture is rejected in favor of the raw version.
+
+Recordings are saved as plain YAML at `~/.octo/browser-skills/<name>.yaml` — readable, editable by
+hand, and diffable in git.
+
+## Replay
+
+```
+browser(action: "run_skill", name: "<recording>", params: { ... })
+```
+
+Replay is deterministic — no model call in the common case. Each step waits for its target,
+executes, and (if the recording declares one) checks a `verify`. A few robustness details worth
+knowing:
+
+- A click looks for the exact original selector first; if the page shifted slightly but an element
+  with the same recorded label text still exists, it clicks that instead of failing outright.
+- If a step opens a new tab, later steps automatically follow it.
+- After typing, an unexpectedly empty field gets one clear-and-retype before the step is marked
+  failed.
+
+The result is a structured object — `{skill, steps, outputs, self_healed?}` — so a recording's
+declared `outputs` (an extracted value, a downloaded file path) can feed directly into a
+[workflow](/docs/guides/workflows/) via `skill("browser:<name>", params)`.
+
+:::caution[Replays are all-or-nothing]
+octo is explicitly instructed not to reach for a recording unless the request matches what it does
+**end to end** — a replay executes every step verbatim and can't be partially applied or adapted
+beyond its declared params. If a request differs in some way the recording doesn't parameterize,
+the model is told to drive the browser directly instead. This is a prompt-level instruction, not a
+code-enforced limit — added after recordings were once over-trusted for partially-matching
+requests. Recordings are also replay-only: there's no keyword-trigger path (an earlier version of
+that was tried and reverted as unreliable).
+:::
+
+## Self-heal
+
+If a step's selector no longer matches anything — and only if a model is configured for this
+purpose — octo takes a **text digest** of the page's currently interactable elements (selector +
+visible text, no screenshot, model-agnostic), and asks the model for a single corrected CSS
+selector given the intended action and the dead one. The fix is retried once and, if it works,
+written back into the recording's YAML — so a heal is durable, not a one-off patch you'd have to
+redo on every future replay.
+
+## Permissions and vision
+
+Browser actions go through the same permission engine as any other tool — a click or a form
+submission on a logged-in account is treated as a real, high-impact action, not a read-only step.
+Screenshots only come back as an image block if the active model is vision-capable; a text-only
+model gets a text note instead of a rejected image.
+
+Next: recordings compose directly into [workflow](/docs/guides/workflows/) scripts via
+`skill("browser:<name>")`.

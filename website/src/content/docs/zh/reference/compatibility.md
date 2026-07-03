@@ -20,7 +20,7 @@ octo 遵循[语义化版本](https://semver.org)。从 v1.0.0 开始，下面这
 | `~/.octo/mcp.json`, `.octo/mcp.json` | `mcpServers` 的结构（stdio 的 `command`/`args`/`env`，HTTP 的 `url`/`headers`/`auth`）；项目文件按名字覆盖用户文件 |
 | `~/.octo/channels.yml` | 按平台名分组的 `channels` map，每个平台文档化的字段 |
 | `SKILL.md` | YAML frontmatter + markdown 正文，Claude Code 的格式，从 `~/.octo/skills/` 和 `.octo/skills/` 发现 |
-| `~/.octo/agents/<name>.md` | 自定义子代理定义——frontmatter + 系统提示 |
+| `~/.octo/agents/<name>.md` | 自定义[子代理](/docs/zh/guides/sub-agents/)定义——`description`/`read_only`/`tools`/`disallowed_tools`/`model` frontmatter + 系统提示正文；文件名就是类型名 |
 | `soul.md` / `user.md` / `octorules.md` / `.octorules` | 同样的分层顺序和 `@include` 支持 |
 | `~/.octo/memories/<slug>/` | `MEMORY.md` 索引 + 按需加载的 topic 文件，纯 markdown |
 | 会话（`~/.octo/sessions/*.jsonl`）、任务（`~/.octo/tasks/`） | **读取保证**：任何 1.x release 都能读懂更早的 1.x（以及 0.19+）写下的状态。降级不在保证范围内 |

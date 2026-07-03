@@ -1,0 +1,117 @@
+---
+title: 工作流
+description: 用 Ruby 写脚本，做确定性的多代理编排。
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="Beta" variant="caution" /><br /><br />
+
+[子代理](/docs/zh/guides/sub-agents/)是让模型临时按需扇出，而 `workflow` 工具是针对一支子代理队伍
+运行一段**确定性的编排脚本**——扇出/汇总的结构写死在脚本里，不是每次调用临时决定的。
+
+工作流脚本是 **Ruby**（跑在内嵌的 mruby 解释器上，编译成 WASM——不需要系统装 Ruby）。没有
+JavaScript 这个选项。
+
+## 脚本原语
+
+| 调用 | 返回值 | 作用 |
+|---|---|---|
+| `agent(prompt, opts = {})` | String | 跑一个子代理直到完成。`opts`：`model:`、`tools:`（限制只能用这些工具）、`read_only: true`、`schema:`（一段 JSON Schema 字符串——回复会是匹配它的 JSON 字符串） |
+| `skill(name, params = {}, opts = {})` | Hash / Array / 标量 | 运行一个具名 skill 或浏览器录制。同名的录制和 `SKILL.md` 冲突时用 `"browser:"` 或 `"md:"` 前缀区分。和 `agent` 不同，带 `schema` 的结果会直接解析好返回 |
+| `parallel(items) { \|it\| ... }` | Array | 对每个 item 并发跑这段代码块；结果保持输入顺序 |
+| `pipeline(items, *stages)` | Array | 每个 item 独立走完所有阶段——阶段之间没有屏障，item A 可能已经领先 item B 好几个阶段 |
+| `log(msg)` | — | 在这次运行的日志里打一行进度 |
+| `phase(title)` | — | 进度流里一个纯展示性的命名标记（不影响调度） |
+| `args` | Hash / Array / 标量 / nil | 这次运行启动时传入的 `args`（见下面的[具名工作流](#具名与保存的工作流)） |
+| `budget_remaining` | Integer | 这次运行还剩多少输出 token 预算 |
+| `JSON.parse` / `JSON.generate` | — | 用来处理 `schema:` 结果和 `args` 的序列化/反序列化 |
+
+```ruby
+# @description 按三个维度并行 review 一次 diff
+findings = parallel(["correctness", "security", "perf"]) do |dimension|
+  agent("Review the current diff for #{dimension} issues", read_only: true)
+end
+findings.each { |f| log(f) }
+```
+
+并发在底层是协作式调度（mruby Fiber 加一个 Go 侧的事件循环），但真正干活是在 goroutine 上——
+`parallel`/`pipeline` 会真的让子代理调用重叠执行，但**每次运行里同时在飞的 `agent`/`skill` 调用
+最多 8 个**，不管你给 `parallel` 传了多少个 item。
+
+## 后台运行
+
+每一次 `workflow(...)` 调用都是异步的——它立刻在后台启动，返回一个运行 id（`wf_1`、`wf_2`……）
+而不等脚本跑完。
+
+| 工具 | 作用 |
+|---|---|
+| `workflow_status` | 不带 id：列出当前会话里的每个运行及其状态/耗时/最近活跃时间。带 id：完整结果或错误，外加最多 500 行捕获到的日志 |
+| `workflow_kill` | 取消一个运行；会传导给所有正在执行的子代理 |
+
+同时最多能有 **4 个后台工作流运行**（CLI 进程内，或 Web/IM 按会话计）；第 5 次 `workflow(...)`
+调用会直接报错，而不是排队等待。
+
+## Worktree 隔离
+
+给 `agent(...)` 传 `isolation: "worktree"`，这次调用就会在一个从当前 `HEAD` 新建的
+`git worktree add -b octo-wf/<label>-<随机串>` 里跑——一个隔离的 checkout，让并发分支碰文件时
+不会互相冲突。这是按调用手动开启的，`parallel`/`pipeline` 本身不会自动套上。
+
+那个 agent 结束时：
+- **没有改动** → worktree 和它的分支会被自动删掉。
+- **有改动** → 改动会被提交到那个分支上，worktree 保留在磁盘上，分支名、路径和一份 diffstat
+  会追加进这个 agent 的回复文本里。
+
+没有任何东西会自动帮你把分支合并回去——review 和合并是你自己（或者你另外写的一次 `agent()`
+调用）的事。
+
+## 具名与保存的工作流
+
+先保存一次脚本，之后按名字跑：
+
+```
+workflow_save(name: "my-check", script: "...")   # 写入 .octo/workflows/my-check.rb
+workflow(name: "my-check", args: { target: "src/" })
+```
+
+- `name` 必须匹配 `^[a-z0-9][a-z0-9-]*$`。`scope: "project"`（默认）写入 `.octo/workflows/`——
+  这需要在一个 git 仓库里，否则保存失败；`scope: "user"` 则写入 `~/.octo/workflows/`。
+- 注册表按**内置预置 < 用户工作流 < 项目工作流**的顺序合并同名条目，每次调用都重新扫描——不缓存，
+  手改保存过的脚本后也不需要重启。
+- 一个工作流的描述来自脚本开头 `# @description ...` 这一行注释。
+- `args`（任意 JSON 值）会一路传给脚本里的 `args` 调用；不传的话 `args` 返回 `nil`。
+
+二进制里内置了三个预置工作流，就算你一个都没保存过也始终可用：
+
+| 名字 | 作用 |
+|---|---|
+| `adversarial-review` | 按维度扇出 review 发现，再用独立的"找茬者"投票（默认 3 票）杀掉假阳性 |
+| `parallel-understand` | 并行梳理一个代码库——每个子系统配一个 reader，最后合成一张架构图 |
+| `batch-migrate` | 在很多文件上应用同一个机械式改动，每个文件各自跑在独立的 git worktree 里，并发编辑不会冲突 |
+
+## 续跑一次运行
+
+每完成一次 `agent`/`skill` 调用，都会实时追加写入
+`~/.octo/workflow-journals/<run-id>.jsonl` 这个 journal（运行记录）文件，所以中途崩溃最多丢掉
+正在进行的那一次调用。结果或错误文本里会带上这个 journal id——格式类似
+`wf-20260703-143000-a1b2c3d4`。
+
+:::caution[两种不同的 id，别搞混]
+journal id（`wf-YYYYMMDD-...`）是传给 `resume_from` 用的——它**不是** `workflow_status`/
+`workflow_kill` 用来追踪后台运行本身的那个 `wf_N` 句柄。传错是这里最容易踩的坑。
+:::
+
+`workflow(script: "...", resume_from: "wf-20260703-143000-a1b2c3d4")` 会按位置从 journal
+里回放已完成的调用，直接跳到上次运行停下的地方——但前提是脚本和 `args` 的哈希必须和原来那次
+运行完全一致；改了任何一个都会被当成重新开始，而不是续跑（并且会报错提示你想真的重新开始就
+不要传 `resume_from`）。
+
+## 日常提醒
+
+如果你在同一轮里手动调用了两个及以上不同的 skill 或浏览器录制，octo 会给出一个提醒（模型可见、
+UI 上不显示），建议你把这个串起来存成一个工作流——指向 `workflow-creator` 这个 skill，或者直接
+用 `workflow_save`。如果这一轮里已经调用过 `workflow` 或 `workflow_save`，就不会再提醒了。
+
+下一步：浏览器录制可以通过 `skill("browser:<name>")` 直接接进工作流脚本——见
+[浏览器自动化](/docs/zh/guides/browser-automation/)。

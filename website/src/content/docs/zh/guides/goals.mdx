@@ -13,12 +13,22 @@ import { Badge } from '@astrojs/starlight/components';
 ```text
 /goal 把内部 API 客户端从 v1 迁移到 v2，覆盖所有调用点
 /goal edit          # 调整当前目标的描述
+/goal pause         # 暂停空闲续跑，目标本身还在
+/goal resume        # 重新捡起续跑循环
+/goal clear         # 清掉当前目标
 /goal replace       # 用一个新目标替换已完成的目标
 ```
 
 当一个带着目标的会话进入空闲状态时，octo 会自己继续朝目标推进——用的是和 `/loop` 一样的机制，
 只不过应用在单个持久目标上，而不是一条重复的 prompt。底层工具（`get_goal`、`create_goal`、
 `update_goal`）模型也能直接调用，所以目标可以在对话过程中被创建或调整，不一定非要走 slash 命令。
+
+:::note[`/goal edit` 在不同端行为不一样]
+在 TUI 里，不带文本的 `/goal edit` 会把当前目标的描述预填进输入框，等你下次按 Enter 才真正提交——
+`/goal edit <文本>` 这种直接带文本的写法会被拒绝，它只支持预填。在 Web UI 和 IM 渠道里，
+`/goal edit <文本>` 一步到位直接改。其余的（`pause`/`resume`/`clear`/`replace`）在所有端行为一致，
+因为目标状态挂在会话本身上，不挂在具体传输方式上。
+:::
 
 ## 关掉这个功能
 
