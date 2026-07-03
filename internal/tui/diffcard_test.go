@@ -172,12 +172,17 @@ func TestRenderEditCard_CRLFFileStillNumbersLines(t *testing.T) {
 	// normalizes CRLF on its side so the line-number lookup still lands.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "w.go")
-	content := "package main\r\nfunc A() {}\r\nfunc B() {}\r\n"
+	content := "package main\r\nfunc A() {}\r\nfunc B() {}\r\nfunc C() {}\r\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out := RenderEditCard(path, "func OLD() {}", "func B() {}", 0)
-	if !strings.Contains(stripANSI(out), "3") {
-		t.Errorf("CRLF file should still get line numbers; got:\n%s", out)
+	// The needle must span a line break: an LF-only multi-line needle can
+	// only match a CRLF file via the normalization; a single-line needle
+	// would match with or without it.
+	out := RenderEditCard(path, "func OLD() {}", "func B() {}\nfunc C() {}", 0)
+	// Assert the number in its row, not a bare "3" — the temp-dir path in the
+	// header contains random digits that a bare Contains could match.
+	if !strings.Contains(stripANSI(out), "3 + func B() {}") {
+		t.Errorf("CRLF file should still get line numbers; got:\n%s", stripANSI(out))
 	}
 }
