@@ -175,7 +175,7 @@ func (v *plainView) Ask(_ context.Context, p UserPrompt) (UserResponse, error) {
 // anything else (incl. empty / N / no reader) → deny.
 func (v *plainView) askPermission(p UserPrompt) UserResponse {
 	fmt.Fprintf(v.out, "\n⚠ permission: %s wants to run\n", p.ToolName)
-	fmt.Fprintf(v.out, "    %s\n", summariseInput(p.ToolInput))
+	fmt.Fprintf(v.out, "%s\n", plainPermissionDetail(p.ToolName, p.ToolInput))
 
 	answer := ""
 	if v.reader != nil {

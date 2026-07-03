@@ -1543,13 +1543,23 @@ func (m *tuiModel) modalView() string {
 
 	if st.prompt.Kind == KindPermission {
 		// Unboxed on purpose: the body must show the full command / diff, and
-		// long unclipped lines inside a lipgloss border make the box wider
-		// than the terminal and garble it. A clipped body would be worse — a
-		// permission prompt that hides the tail of the command it's asking
-		// about. Natural wrapping keeps every character visible.
+		// long lines inside a lipgloss border make the box wider than the
+		// terminal and garble it. Lines are hard-wrapped to the width here —
+		// bubbletea's inline renderer truncates every frame line at terminal
+		// width with NO marker, so anything past the width would silently
+		// vanish from an approval prompt.
+		//
+		// The rendered detail is cached on the modal: View() runs on every
+		// ~120ms spinner tick while the prompt is open, and the edit_file
+		// path reads the target file each time it renders.
+		if !st.detailSet || st.detailWidth != m.width {
+			st.detail = renderPermissionDetail(st.prompt.ToolName, st.prompt.ToolInput, m.width)
+			st.detailWidth = m.width
+			st.detailSet = true
+		}
 		b.WriteString(modalStyle.Render("⚠ permission — " + st.prompt.ToolName))
 		b.WriteByte('\n')
-		b.WriteString(renderPermissionDetail(st.prompt.ToolName, st.prompt.ToolInput, m.width))
+		b.WriteString(st.detail)
 		b.WriteByte('\n')
 		b.WriteString(hintStyle.Render("[y]es · [a]lways this session · [n]o/Esc"))
 		return b.String()
@@ -1590,6 +1600,9 @@ func (m *tuiModel) modalView() string {
 	return tui.Box(b.String())
 }
 
+// permissionMaxKeys caps how many input keys the generic listing shows.
+const permissionMaxKeys = 10
+
 // renderPermissionDetail renders what a permission prompt is actually asking
 // to do: the full command for terminal, the diff for edit_file, and a
 // key: value listing for everything else. Every path favours visibility over
@@ -1600,16 +1613,37 @@ func renderPermissionDetail(toolName string, input map[string]any, width int) st
 	switch toolName {
 	case "terminal":
 		if cmd, _ := input["command"].(string); strings.TrimSpace(cmd) != "" {
-			return renderPermissionBlock(cmd)
+			return renderPermissionBlock(cmd, width)
 		}
 	case "edit_file":
 		path, _ := input["path"].(string)
 		oldS, _ := input["old_string"].(string)
 		newS, _ := input["new_string"].(string)
 		if path != "" {
-			return tui.RenderEditCard(path, oldS, newS, width)
+			// Tabs stay intact: the card expands them itself, and new_string
+			// must match the file bytes for the card's line-number lookup.
+			return tui.RenderEditCard(path, sanitizeControls(oldS, false), sanitizeControls(newS, false), width)
 		}
 	}
+	return renderPermissionGeneric(input, width)
+}
+
+// plainPermissionDetail is renderPermissionDetail for the plain/stdin prompt:
+// same visibility guarantees, but edit_file falls back to the generic listing
+// (the ANSI diff card is TUI-only) and width 0 skips wrapping — the plain
+// path writes to a real terminal, which wraps naturally.
+func plainPermissionDetail(toolName string, input map[string]any) string {
+	if cmd, _ := input["command"].(string); toolName == "terminal" && strings.TrimSpace(cmd) != "" {
+		return renderPermissionBlock(cmd, 0)
+	}
+	return renderPermissionGeneric(input, 0)
+}
+
+// renderPermissionGeneric lists a tool's input as sorted "key: value" lines.
+// Multi-line values (SQL, write_file content, MCP payloads) show their first
+// few lines — enough to judge what's being approved — then fold, so one value
+// can't swallow the whole prompt; the rune cap bounds a single long line.
+func renderPermissionGeneric(input map[string]any, width int) string {
 	if len(input) == 0 {
 		return hintStyle.Render("  (no input)")
 	}
@@ -1620,22 +1654,19 @@ func renderPermissionDetail(toolName string, input map[string]any, width int) st
 	sort.Strings(keys)
 	var b strings.Builder
 	shown := keys
-	if len(shown) > permissionDetailMaxLines {
-		shown = shown[:permissionDetailMaxLines]
+	if len(shown) > permissionMaxKeys {
+		shown = shown[:permissionMaxKeys]
 	}
 	for i, k := range shown {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		v := fmt.Sprintf("%v", input[k])
+		v := sanitizeForPrompt(fmt.Sprintf("%v", input[k]))
 		lines := strings.Split(v, "\n")
 		if len(lines) == 1 {
-			b.WriteString("  " + k + ": " + truncateRunes(v, permissionValueCap))
+			b.WriteString(wrapIndented(k+": "+truncateRunes(v, permissionValueCap), "  ", width))
 			continue
 		}
-		// Multi-line values (SQL, write_file content, MCP payloads) show their
-		// head — enough to judge what's being approved — then fold, so one
-		// value can't swallow the whole prompt. The rune cap bounds long lines.
 		const perValueLines = 4
 		vshown := lines
 		if len(lines) > perValueLines {
@@ -1643,7 +1674,7 @@ func renderPermissionDetail(toolName string, input map[string]any, width int) st
 		}
 		b.WriteString("  " + k + ":")
 		for _, l := range vshown {
-			b.WriteString("\n    " + truncateRunes(l, permissionValueCap))
+			b.WriteString("\n" + wrapIndented(truncateRunes(l, permissionValueCap), "    ", width))
 		}
 		if extra := len(lines) - len(vshown); extra > 0 {
 			b.WriteString("\n    " + hintStyle.Render(fmt.Sprintf("… +%d more lines", extra)))
@@ -1657,10 +1688,13 @@ func renderPermissionDetail(toolName string, input map[string]any, width int) st
 
 // renderPermissionBlock renders a multi-line text body (a shell command)
 // indented, capped at permissionDetailMaxLines with a fold marker. Lines are
-// NOT width-clipped: a permission prompt hiding the tail of a long command
-// would be approving blind; letting the terminal wrap keeps it all visible.
-func renderPermissionBlock(text string) string {
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+// hard-wrapped to width rather than clipped: bubbletea's inline renderer
+// truncates frame lines at terminal width with no marker, and a permission
+// prompt hiding the tail of a long command would be approving blind. The line
+// cap applies to logical lines only — a single long wrapped line stays fully
+// visible.
+func renderPermissionBlock(text string, width int) string {
+	lines := strings.Split(strings.TrimRight(sanitizeForPrompt(text), "\n"), "\n")
 	shown, extra := lines, 0
 	if len(lines) > permissionDetailMaxLines {
 		shown, extra = lines[:permissionDetailMaxLines], len(lines)-permissionDetailMaxLines
@@ -1670,10 +1704,90 @@ func renderPermissionBlock(text string) string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteString("  " + l)
+		b.WriteString(wrapIndented(l, "  ", width))
 	}
 	if extra > 0 {
 		b.WriteString("\n  " + hintStyle.Render(fmt.Sprintf("… +%d more lines", extra)))
+	}
+	return b.String()
+}
+
+// sanitizeForPrompt neutralizes control characters in model-supplied text
+// before it is shown in an approval prompt, so what the user reads is what
+// executes: a raw \r would reposition the cursor and let a command overwrite
+// its own dangerous prefix on screen; a raw ESC could inject cursor-movement
+// or erase sequences. Newlines survive, tabs expand (RuneWidth counts \t as 0,
+// which would break the wrap math), \r is dropped, and every other C0/DEL
+// byte renders in caret notation (ESC → ^[).
+func sanitizeForPrompt(s string) string { return sanitizeControls(s, true) }
+
+// sanitizeControls is sanitizeForPrompt's core; expandTab=false keeps tabs
+// intact for consumers that expand them themselves and need byte-exact text
+// (the edit_file diff card's line-number lookup).
+func sanitizeControls(s string, expandTab bool) string {
+	if !strings.ContainsFunc(s, func(r rune) bool { return (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f }) {
+		if !expandTab || !strings.ContainsRune(s, '\t') {
+			return s
+		}
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteRune(r)
+		case r == '\t':
+			if expandTab {
+				b.WriteString("    ")
+			} else {
+				b.WriteRune(r)
+			}
+		case r == '\r':
+			// Dropped: mid-line it would home the cursor; as part of \r\n it
+			// is redundant with the surviving \n.
+		case r < 0x20:
+			b.WriteByte('^')
+			b.WriteByte(byte(r) ^ 0x40)
+		case r == 0x7f:
+			b.WriteString("^?")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// wrapIndented prefixes line with indent and hard-wraps it to width display
+// cells, indenting continuation rows the same amount. width <= 0 (unknown)
+// emits a single indented line. Wrapping is by display width (CJK = 2 cells),
+// character-exact — an approval prompt must show every character, and
+// bubbletea would otherwise truncate the overflow invisibly.
+func wrapIndented(line, indent string, width int) string {
+	avail := width - rw.StringWidth(indent)
+	if width <= 0 || avail < 1 || rw.StringWidth(line) <= avail {
+		return indent + line
+	}
+	var b strings.Builder
+	var cur strings.Builder
+	w := 0
+	flush := func() {
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(indent + cur.String())
+		cur.Reset()
+		w = 0
+	}
+	for _, r := range line {
+		rw_ := rw.RuneWidth(r)
+		if w+rw_ > avail && cur.Len() > 0 {
+			flush()
+		}
+		cur.WriteRune(r)
+		w += rw_
+	}
+	if cur.Len() > 0 {
+		flush()
 	}
 	return b.String()
 }

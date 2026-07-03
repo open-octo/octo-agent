@@ -542,6 +542,14 @@ type modalState struct {
 	// free text inline inside the modal.
 	otherActive bool
 	otherInput  string
+	// detail caches the rendered permission body (detailWidth is the width it
+	// was rendered for; detailSet distinguishes "not rendered yet" from a
+	// legitimate width of 0). View() runs on every spinner tick while the
+	// prompt is open, and the edit_file detail reads the target file — the
+	// cache keeps that to once per width instead of ~8×/second.
+	detail      string
+	detailWidth int
+	detailSet   bool
 }
 
 func newTUIModel(cfg replConfig) *tuiModel {
