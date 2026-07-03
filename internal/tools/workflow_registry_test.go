@@ -106,7 +106,7 @@ func containsName(names []string, want string) bool {
 func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {
 	// No user/project roots: every built-in preset must still resolve.
 	useWorkflowRoots(t, "", "")
-	for _, name := range []string{"adversarial-review", "parallel-understand", "batch-migrate", "daily-triage", "issue-triage", "pr-babysitter", "ci-sweeper", "dependency-sweeper", "changelog-drafter", "post-merge-cleanup"} {
+	for _, name := range []string{"adversarial-review", "parallel-understand", "batch-migrate", "daily-triage"} {
 		w, ok := lookupWorkflow(name)
 		if !ok {
 			t.Errorf("embedded default %q not found", name)
@@ -114,6 +114,20 @@ func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {
 		}
 		if w.script == "" || w.description == "" {
 			t.Errorf("embedded workflow %q = %+v, want non-empty script and description", name, w)
+		}
+	}
+}
+
+func TestLookupWorkflow_ReferenceTemplatesNotEmbedded(t *testing.T) {
+	// The loop-engineering skill ships several workflow scripts as reference
+	// templates under its own templates/ dir (read + adapted on demand, or
+	// saved with workflow_save) rather than as embedded registry defaults —
+	// only daily-triage graduated to a built-in preset. This guards against
+	// silently re-adding them to workflow_defaults/ without a deliberate call.
+	useWorkflowRoots(t, "", "")
+	for _, name := range []string{"issue-triage", "pr-babysitter", "ci-sweeper", "dependency-sweeper", "changelog-drafter", "post-merge-cleanup"} {
+		if _, ok := lookupWorkflow(name); ok {
+			t.Errorf("%q resolved as an embedded default; expected it to be a loop-engineering reference template only", name)
 		}
 	}
 }

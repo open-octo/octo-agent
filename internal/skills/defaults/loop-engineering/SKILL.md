@@ -146,27 +146,40 @@ After using this skill, you should produce:
 3. Optionally a `workflow` template or a scheduled task definition.
 4. A one-run validation: execute the loop once and report what it found and what it did.
 
-## Built-in workflow templates in octo-agent
+## Built-in workflow
 
-octo-agent ships a set of workflow templates that demonstrate the Loop Engineering
-pattern. You can invoke them directly with the `workflow` tool, or use them as
-starting points for a custom loop.
+octo-agent embeds one workflow that demonstrates the full Loop Engineering
+pattern end-to-end: discover → triage → worktree fix → verify → state → report.
+Invoke it directly with the `workflow` tool by name:
+
+```bash
+octo workflow daily-triage '{"repo": ".", "since": "1d"}'
+```
 
 | Template | Purpose | Risk level | Typical cadence |
 |---|---|---|---|
 | `daily-triage` | Discover open issues, recent CI failures, and commits; draft fixes in worktrees; verify with a second agent. | Medium | Daily |
+
+## Reference templates (this skill's `templates/` directory)
+
+This skill also ships a handful of Loop Engineering examples covering other
+common maintenance loops. They are **not** registered as embedded workflows —
+running `octo workflow issue-triage ...` will not find them. Instead, read the
+one that fits, adapt it (repo path, args, prompts) to the user's actual
+situation, then either pass it inline as `workflow(script: ...)` or persist it
+with `workflow_save` if the user wants to reuse it. Treating them as read-and-adapt
+starting points rather than one-size-fits-all defaults matches the design-process
+rule above: scope, safety, and output are specific to each user's repo, and a
+template that's silently wrong for their case is worse than no template.
+
+| Template | Purpose | Risk level | Typical cadence |
+|---|---|---|---|
 | `issue-triage` | Categorize open issues, suggest labels, identify missing info, and route to owners. | Low | Daily / on new issue |
 | `pr-babysitter` | Watch open PRs, flag stale ones, detect merge conflicts, and suggest next actions. | Low | Daily |
 | `ci-sweeper` | Monitor CI failures, classify root causes, retry flaky jobs, and draft fixes for real failures. | **High** | On CI failure / hourly |
 | `dependency-sweeper` | Update patch/minor dependencies in a worktree and run tests. | Medium | Weekly |
 | `changelog-drafter` | Draft a changelog from commits since the last tag. | Low | Before release |
 | `post-merge-cleanup` | Delete merged branches and plan linked ticket updates. | Low (destructive: branches) | After merge |
-
-Invoke one with:
-
-```bash
-octo workflow daily-triage '{"repo": ".", "since": "1d"}'
-```
 
 All destructive templates default to dry-run unless the user explicitly passes
 `apply: true` or `dry_run: false`.
