@@ -311,12 +311,13 @@ func fingerprintToolUseBlock(b ContentBlock) toolCallFingerprint {
 }
 
 // observationToolNames are tools whose only purpose is to inspect state
-// started by earlier work (background process output). Repeating them while
-// waiting for a long-running process is normal behaviour, not a stuck loop,
-// so the stuck detector ignores them when fingerprinting a batch. The tools
-// themselves still have their own anti-polling guards.
+// started by earlier work (background process output, detached workflow runs).
+// Repeating them while waiting for a long-running process is normal behaviour,
+// not a stuck loop, so the stuck detector ignores them when fingerprinting a
+// batch. The tools themselves still have their own anti-polling guards.
 var observationToolNames = map[string]bool{
 	"terminal_output": true,
+	"workflow_status": true,
 }
 
 // fingerprintToolUseBatch hashes an ordered slice of tool_use blocks.

@@ -900,8 +900,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.printlnBlock(bgDoneStyle.Render(fmt.Sprintf("● Background `%s` %s", msg.e.Command, msg.e.Status)))
 		// Idle auto-turn: if no turn is running and nothing is queued, drain the
 		// inbox (which holds the full <system-reminder> notice) and start a
-		// turn so the model sees the completion immediately — matching the plain
-		// REPL's idleInboxWait behaviour.
+		// turn so the model sees the completion immediately instead of waiting
+		// for the next user message.
 		if !m.turnRunning && len(m.queue) == 0 {
 			if items := m.a.Inbox.Drain(); len(items) > 0 {
 				s := strings.Join(agent.Texts(items), "\n\n")

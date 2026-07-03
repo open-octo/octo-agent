@@ -168,6 +168,58 @@ func TestWorkflowTool_Kill(t *testing.T) {
 	t.Fatal("killed workflow never left running")
 }
 
+// TestWorkflowStatus_AntiPollingGuard verifies that repeated status reads of a
+// still-running run escalate to a hard STOP reminder, and that a read of the
+// finished run carries no reminder (the counter resets).
+func TestWorkflowStatus_AntiPollingGuard(t *testing.T) {
+	SetSpawner(ctxBlockingSpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+
+	res, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"script": `agent("x")`})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	id := wfRunIDRe.FindString(res.Text)
+	if id == "" {
+		t.Fatalf("no run id in %q", res.Text)
+	}
+
+	const stopMarker = "[STOP: repeated workflow_status polling detected"
+	for i := 1; i < workflowPollStopThreshold; i++ {
+		out, err := WorkflowStatusTool{}.Execute(context.Background(), "c", map[string]any{"run_id": id})
+		if err != nil {
+			t.Fatalf("workflow_status #%d: %v", i, err)
+		}
+		if strings.Contains(out.Text, stopMarker) {
+			t.Fatalf("read #%d should not carry the STOP reminder yet: %q", i, out.Text)
+		}
+	}
+	out, err := WorkflowStatusTool{}.Execute(context.Background(), "c", map[string]any{"run_id": id})
+	if err != nil {
+		t.Fatalf("workflow_status at threshold: %v", err)
+	}
+	if !strings.Contains(out.Text, stopMarker) {
+		t.Errorf("read #%d should carry the STOP reminder; got %q", workflowPollStopThreshold, out.Text)
+	}
+
+	// Finish the run; a read of a completed run must not carry the reminder.
+	if _, err := (WorkflowKillTool{}).Execute(context.Background(), "c", map[string]any{"run_id": id}); err != nil {
+		t.Fatalf("workflow_kill: %v", err)
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		out, _ := WorkflowStatusTool{}.Execute(context.Background(), "c", map[string]any{"run_id": id})
+		if !strings.Contains(out.Text, "[running]") {
+			if strings.Contains(out.Text, stopMarker) {
+				t.Errorf("finished-run read should not carry the STOP reminder: %q", out.Text)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("killed workflow never left running")
+}
+
 // TestWorkflowKill_UnknownRun verifies the tool errors on an unknown id.
 func TestWorkflowKill_UnknownRun(t *testing.T) {
 	SetSpawner(replySpawner{})

@@ -586,6 +586,35 @@ func TestAgent_Run_RepeatedTerminalOutput_DoesNotStop(t *testing.T) {
 	}
 }
 
+func TestAgent_Run_RepeatedWorkflowStatus_DoesNotStop(t *testing.T) {
+	// Checking on a detached background workflow with workflow_status is the
+	// same observation pattern as terminal_output: the run makes progress even
+	// though the tool input never changes, so the stuck detector must not fire.
+	// (The workflow_status tool enforces its own anti-polling guard.)
+	mk := func(id string) Reply {
+		return Reply{StopReason: "tool_use", Blocks: []ContentBlock{NewToolUseBlock(id, "workflow_status", map[string]any{"run_id": "wf_1"})}}
+	}
+	replies := []Reply{
+		mk("c1"), mk("c2"), mk("c3"), mk("c4"), mk("c5"), mk("c6"),
+		{Content: "done", StopReason: "end_turn"},
+	}
+	send := &fakeToolSender{replies: replies}
+	exec := &fakeExecutor{}
+	a := New(send, "m")
+	defs := []ToolDefinition{{Name: "workflow_status"}}
+
+	reply, err := a.Run(context.Background(), "go", defs, exec)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reply.StopReason != "end_turn" {
+		t.Errorf("StopReason = %q, want end_turn", reply.StopReason)
+	}
+	if send.calls != 7 {
+		t.Errorf("provider calls = %d, want 7 (stuck detector should not stop early)", send.calls)
+	}
+}
+
 func TestAgent_Run_StuckDetector_ResetsPerUserTurn(t *testing.T) {
 	// A new user turn ("continue") must give the model a fresh stuck-detector
 	// window. Without the per-turn reset the prior turn's fingerprints linger,

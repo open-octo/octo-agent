@@ -56,7 +56,7 @@ first; there's no cap on how many background processes can run at once, and all 
 | `sub_agent` | spawn a sub-agent (sync or async) |
 | `sub_agent_send` / `sub_agent_status` / `sub_agent_kill` | follow up with, poll, or stop an async sub-agent |
 | `workflow` | run a deterministic multi-agent orchestration script |
-| `workflow_status` / `workflow_kill` | poll or stop a background workflow run |
+| `workflow_status` / `workflow_kill` | check on or stop a background workflow run (completion is pushed automatically — no polling) |
 | `workflow_save` | persist a script as a named, reusable workflow |
 | `task_create` / `task_update` / `task_list` | track discrete steps of a larger piece of work |
 | `schedule_wakeup` | ask to be resumed after a delay (used by `/loop`-style recurring work) |

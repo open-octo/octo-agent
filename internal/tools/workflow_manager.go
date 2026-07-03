@@ -18,6 +18,13 @@ const maxConcurrentWorkflows = 4
 // maxWorkflowLogLines bounds the per-run log buffer retained for status reads.
 const maxWorkflowLogLines = 500
 
+// workflowPollStopThreshold is how many consecutive still-running
+// workflow_status reads of one run escalate to a hard "stop polling" reminder.
+// The first couple of checks are legitimate (a quick look after starting, a
+// user-prompted progress check); a third consecutive read of a run that hasn't
+// finished is a polling loop.
+const workflowPollStopThreshold = 3
+
 // WorkflowEvent is emitted as a background run progresses, for live display
 // (the web panel). Kind is "started" | "progress" | "done".
 type WorkflowEvent struct {
@@ -156,6 +163,7 @@ type WorkflowManager struct {
 	seq     int
 	active  int
 	runs    map[string]*workflowRun
+	polls   map[string]int // consecutive workflow_status reads of a still-running run
 	onEvent func(WorkflowEvent)
 	onDone  func(WorkflowNotification)
 }
@@ -202,7 +210,7 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 		n := m.active
 		m.mu.Unlock()
 		cancel()
-		return "", fmt.Errorf("too many background workflows running (%d/%d) — wait for one to finish (poll workflow_status) before starting more", n, maxConcurrentWorkflows)
+		return "", fmt.Errorf("too many background workflows running (%d/%d) — wait for a completion notification before starting more", n, maxConcurrentWorkflows)
 	}
 	m.active++
 	m.seq++
@@ -269,6 +277,24 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 	}()
 
 	return id, nil
+}
+
+// RecordStatusRead tracks consecutive workflow_status reads of a still-running
+// run so the status tool can escalate to a hard "stop polling" reminder (the
+// workflow counterpart of terminal_output's empty-snapshot guard). Returns the
+// updated consecutive count. A read of a finished run resets its counter.
+func (m *WorkflowManager) RecordStatusRead(id string, running bool) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !running {
+		delete(m.polls, id)
+		return 0
+	}
+	if m.polls == nil {
+		m.polls = map[string]int{}
+	}
+	m.polls[id]++
+	return m.polls[id]
 }
 
 // Read returns a snapshot of one run.
@@ -369,7 +395,7 @@ func formatRunDetail(s WorkflowRunSnapshot) string {
 		if idle > 2*time.Minute {
 			b.WriteString(" If the idle gap keeps growing it may be stuck — workflow_kill(run_id) cancels it.")
 		}
-		b.WriteString(" Poll again later to collect the result.")
+		b.WriteString(" You will be notified automatically when it finishes — do not poll.")
 		if n := len(s.Logs); n > 0 {
 			fmt.Fprintf(&b, "\n\n[progress]\n%s", strings.Join(s.Logs, "\n"))
 		}
