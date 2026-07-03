@@ -242,23 +242,74 @@ func (b *Browser) ClickFollow(ctx context.Context, page *Page, target string) (*
 	if err := page.Click(ctx, target); err != nil {
 		return page, err
 	}
+	myID := page.TargetID()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
+		lastPoll := ctx.Err() != nil || !time.Now().Before(deadline)
 		if ps, err := b.Pages(ctx); err == nil {
+			var newTargets []TargetInfo
 			for _, ti := range ps {
-				if before[ti.TargetID] || ti.TargetID == page.TargetID() {
+				if before[ti.TargetID] || ti.TargetID == myID {
 					continue
 				}
+				newTargets = append(newTargets, ti)
+			}
+			for _, ti := range clickFollowCandidates(newTargets, myID, lastPoll) {
 				if np, aerr := b.AttachPage(ctx, ti.TargetID); aerr == nil {
 					return np, nil
 				}
 			}
 		}
-		if ctx.Err() != nil || !time.Now().Before(deadline) {
+		if lastPoll {
 			return page, nil
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
+}
+
+// clickFollowCandidates returns, in attempt order, the targets ClickFollow
+// should try attaching to on this poll. A target Chrome reports as opened by
+// myID always wins — the precise signal, immune to an unrelated tab (the
+// user's own browsing, a notification/extension popup) appearing in the same
+// window during the poll window. The imprecise "any new target" fallback is
+// deliberately held back to the last poll before the deadline: trying it on
+// an early iteration risks grabbing an unrelated opener-less tab that
+// happens to appear before the real popup does — and since ClickFollow
+// returns on the first successful attach, a wrong early guess is never
+// revisited. Waiting gives the real popup every remaining poll to show up
+// with a matching opener; only when the window is about to close and still
+// nobody reports an opener at all (an environment where Chrome omits
+// openerId) does the old best-effort behavior kick in, as a last resort.
+func clickFollowCandidates(newTargets []TargetInfo, myID string, lastPoll bool) []TargetInfo {
+	if candidate, ok := firstByOpener(newTargets, myID); ok {
+		return []TargetInfo{candidate}
+	}
+	if lastPoll && !anyReportsOpener(newTargets) {
+		return newTargets
+	}
+	return nil
+}
+
+// firstByOpener returns the first target whose OpenerID matches myID.
+func firstByOpener(targets []TargetInfo, myID string) (TargetInfo, bool) {
+	for _, ti := range targets {
+		if ti.OpenerID == myID {
+			return ti, true
+		}
+	}
+	return TargetInfo{}, false
+}
+
+// anyReportsOpener reports whether any target in the set carries opener
+// information at all — used to tell "Chrome doesn't report openerId here" from
+// "none of these were opened by us".
+func anyReportsOpener(targets []TargetInfo) bool {
+	for _, ti := range targets {
+		if ti.OpenerID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ClosePage closes a page target by id.
@@ -276,6 +327,12 @@ type TargetInfo struct {
 	Type     string `json:"type"`
 	Title    string `json:"title"`
 	URL      string `json:"url"`
+	// OpenerID is the target that spawned this one (window.open / a
+	// target=_blank click), when Chrome reports it. Used by ClickFollow to
+	// confirm a newly-seen tab was actually opened by the click it's
+	// following, not an unrelated tab that happened to appear in the same
+	// window (the user's own browsing, a notification/extension popup).
+	OpenerID string `json:"openerId,omitempty"`
 }
 
 // Pages lists the open page targets — used to attach to an existing logged-in

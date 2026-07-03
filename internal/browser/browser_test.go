@@ -652,3 +652,76 @@ func TestNavigate_ReplacesInitialBlank(t *testing.T) {
 		t.Errorf("after back, pathname = %q, want /first (about:blank should not be in history)", path)
 	}
 }
+
+// TestFirstByOpener_PrefersActualOpener guards ClickFollow's race fix: when
+// an unrelated tab (the user's own browsing, a notification/extension popup)
+// appears in the polling window alongside the tab the click actually opened,
+// the opener-matched one must win — not whichever new target is seen first.
+func TestFirstByOpener_PrefersActualOpener(t *testing.T) {
+	targets := []TargetInfo{
+		{TargetID: "unrelated", OpenerID: "some-other-page"},
+		{TargetID: "popup", OpenerID: "me"},
+	}
+	got, ok := firstByOpener(targets, "me")
+	if !ok || got.TargetID != "popup" {
+		t.Fatalf("firstByOpener(targets, \"me\") = %+v, %v, want {popup} true", got, ok)
+	}
+	if _, ok := firstByOpener(targets, "nobody"); ok {
+		t.Error("no target was opened by \"nobody\"")
+	}
+}
+
+// TestAnyReportsOpener distinguishes "Chrome didn't report openerId for any
+// candidate here" (fall back to the old best-effort behavior) from "none of
+// these were opened by us" (opener info is available; trust it).
+func TestAnyReportsOpener(t *testing.T) {
+	if anyReportsOpener([]TargetInfo{{TargetID: "a"}, {TargetID: "b"}}) {
+		t.Error("no target in this set reports an opener")
+	}
+	if !anyReportsOpener([]TargetInfo{{TargetID: "a"}, {TargetID: "b", OpenerID: "x"}}) {
+		t.Error("one target in this set reports an opener")
+	}
+}
+
+// TestClickFollowCandidates_DelaysFallbackUntilLastPoll guards the residual
+// race identified in review: an unrelated opener-less tab (the user's own
+// browsing, a notification popup) appearing on an EARLY poll — before the
+// real popup the click opened has shown up — must not be attached to. Only
+// on the LAST poll, with still nobody reporting an opener, is the old
+// best-effort "attach to any new target" fallback allowed to fire.
+func TestClickFollowCandidates_DelaysFallbackUntilLastPoll(t *testing.T) {
+	unrelated := []TargetInfo{{TargetID: "unrelated-no-opener"}}
+
+	if got := clickFollowCandidates(unrelated, "me", false); got != nil {
+		t.Errorf("early poll with only an unrelated opener-less tab must yield no candidates, got %+v", got)
+	}
+
+	// A later poll where the real popup has now appeared, opener-matched,
+	// alongside the still-unrelated tab: the match must win, unconditionally.
+	withPopup := []TargetInfo{
+		{TargetID: "unrelated-no-opener"},
+		{TargetID: "real-popup", OpenerID: "me"},
+	}
+	got := clickFollowCandidates(withPopup, "me", false)
+	if len(got) != 1 || got[0].TargetID != "real-popup" {
+		t.Fatalf("opener-matched target should win once it appears, got %+v", got)
+	}
+
+	// The window is about to close and still nobody reports an opener: the
+	// old best-effort fallback is the only option left, so it's allowed here.
+	got = clickFollowCandidates(unrelated, "me", true)
+	if len(got) != 1 || got[0].TargetID != "unrelated-no-opener" {
+		t.Fatalf("last poll with no opener info anywhere should fall back to any new target, got %+v", got)
+	}
+
+	// Even on the last poll, an opener-matched target still wins over the
+	// fallback if one is present.
+	got = clickFollowCandidates(withPopup, "me", true)
+	if len(got) != 1 || got[0].TargetID != "real-popup" {
+		t.Fatalf("opener match should win over the fallback even on the last poll, got %+v", got)
+	}
+
+	if got := clickFollowCandidates(nil, "me", false); got != nil {
+		t.Errorf("no new targets at all should yield no candidates, got %+v", got)
+	}
+}

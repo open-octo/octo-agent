@@ -229,6 +229,61 @@ func TestReplayVerifyURLIgnoresHostInQueryParam(t *testing.T) {
 	}
 }
 
+// TestReplaySkill_UnknownParamRejected: a caller-supplied param the skill
+// doesn't declare (a typo, or params meant for a different, similarly named
+// skill) is rejected before any step runs, rather than silently ignored by
+// mergedParams — the run_skill near-miss-replay guardrail from #1050 was
+// entirely prompt-text; this is a concrete, code-enforced check on top of it.
+func TestReplaySkill_UnknownParamRejected(t *testing.T) {
+	skill := &Skill{Name: "checkout", Params: []Param{{Name: "city"}}, Steps: []Step{
+		{Action: "navigate", URL: "https://example.com/{{city}}"},
+	}}
+	_, _, _, err := ReplaySkill(context.Background(), nil, skill, map[string]string{"citee": "SFO"}, ReplayOptions{})
+	if err == nil {
+		t.Fatal("expected an error for an undeclared param")
+	}
+	if !strings.Contains(err.Error(), "unknown param") || !strings.Contains(err.Error(), `"citee"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestReplaySkill_MissingRequiredParamRejected: a {{placeholder}} referenced
+// by a step with no default and no caller-supplied value must fail fast,
+// instead of subst() silently sending the literal "{{name}}" text to the
+// browser (a navigate to ".../item/{{item_id}}", a type into a field with
+// that as its value).
+func TestReplaySkill_MissingRequiredParamRejected(t *testing.T) {
+	skill := &Skill{Name: "checkout", Params: []Param{{Name: "city"}}, Steps: []Step{
+		{Action: "navigate", URL: "https://example.com/{{city}}"},
+	}}
+	_, _, _, err := ReplaySkill(context.Background(), nil, skill, nil, ReplayOptions{})
+	if err == nil {
+		t.Fatal("expected an error for an unresolved required param")
+	}
+	if !strings.Contains(err.Error(), "missing required param") || !strings.Contains(err.Error(), "city") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestReplaySkill_DefaultAndSuppliedParamsResolve: a param with a Default
+// needs no caller value, and a caller-supplied value for a param with no
+// default is accepted — the validation added above must not reject either.
+func TestReplaySkill_DefaultAndSuppliedParamsResolve(t *testing.T) {
+	skill := &Skill{Name: "checkout", Params: []Param{
+		{Name: "city", Default: "sfo"},
+		{Name: "item"},
+	}, Steps: []Step{
+		{Action: "extract", JS: "'{{city}}/{{item}}'", Bind: "out"},
+	}}
+	if err := unknownParams(skill, map[string]string{"item": "widget"}); err != nil {
+		t.Fatalf("unknownParams: %v", err)
+	}
+	full := mergedParams(skill, map[string]string{"item": "widget"})
+	if missing := unresolvedPlaceholders(skill, full); len(missing) != 0 {
+		t.Fatalf("expected no unresolved placeholders, got %v", missing)
+	}
+}
+
 // TestCompileUploadMerge: a click on the upload button followed by a file
 // selection compiles to a single upload step on the button, auto-parameterized.
 func TestCompileUploadMerge(t *testing.T) {

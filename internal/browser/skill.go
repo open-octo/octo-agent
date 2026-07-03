@@ -574,7 +574,19 @@ func ReplaySkill(ctx context.Context, page *Page, skill *Skill, params map[strin
 	if opts.StepTimeout <= 0 {
 		opts.StepTimeout = 15 * time.Second
 	}
+	if err := unknownParams(skill, params); err != nil {
+		return false, page, nil, err
+	}
 	full := mergedParams(skill, params)
+	if missing := unresolvedPlaceholders(skill, full); len(missing) > 0 {
+		// Fail before running any step: a {{name}} left unresolved would
+		// otherwise be sent to the browser as literal text (a navigate to
+		// ".../item/{{item_id}}", a type into a field with that as its
+		// value) — silently doing the wrong thing instead of erroring. This
+		// also catches a caller that means to run a different, similarly
+		// named skill and passes params that don't match this one at all.
+		return false, page, nil, fmt.Errorf("run_skill %q: missing required param(s): %s", skill.Name, strings.Join(missing, ", "))
+	}
 	binds := map[string][]string{}
 	cur := page
 	for i := range skill.Steps {
@@ -662,6 +674,64 @@ func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step
 		cause = retryErr // feed the fresh failure to the next round
 	}
 	return page, false, cause
+}
+
+// unknownParams rejects a caller-supplied param key the skill doesn't
+// declare. mergedParams alone would silently drop it (nothing in the skill's
+// steps references it), which hides the two failure modes this guards
+// against: a typo'd param name, or a caller replaying the wrong skill
+// entirely for the request it actually has in hand.
+func unknownParams(skill *Skill, params map[string]string) error {
+	declared := make(map[string]bool, len(skill.Params))
+	for _, p := range skill.Params {
+		declared[p.Name] = true
+	}
+	for k := range params {
+		if !declared[k] {
+			return fmt.Errorf("run_skill %q: unknown param %q (declared: %s)", skill.Name, k, strings.Join(paramNames(skill.Params), ", "))
+		}
+	}
+	return nil
+}
+
+func paramNames(params []Param) []string {
+	names := make([]string, len(params))
+	for i, p := range params {
+		names[i] = p.Name
+	}
+	return names
+}
+
+// placeholderRe matches a {{name}} substitution placeholder in a step field.
+var placeholderRe = regexp.MustCompile(`\{\{(\w+)\}\}`)
+
+// unresolvedPlaceholders scans every step field that subst() ever expands
+// (URL, Value, JS, Verify.Text, Verify.URL) and returns the deduplicated
+// names referenced there that full does not resolve — a missing param with
+// no default, most commonly. Order follows first occurrence in the steps.
+func unresolvedPlaceholders(skill *Skill, full map[string]string) []string {
+	seen := map[string]bool{}
+	var missing []string
+	scan := func(s string) {
+		for _, m := range placeholderRe.FindAllStringSubmatch(s, -1) {
+			name := m[1]
+			if _, ok := full[name]; ok || seen[name] {
+				continue
+			}
+			seen[name] = true
+			missing = append(missing, name)
+		}
+	}
+	for _, st := range skill.Steps {
+		scan(st.URL)
+		scan(st.Value)
+		scan(st.JS)
+		if st.Verify != nil {
+			scan(st.Verify.Text)
+			scan(st.Verify.URL)
+		}
+	}
+	return missing
 }
 
 // mergedParams overlays caller params on declared defaults.
