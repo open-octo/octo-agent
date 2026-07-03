@@ -43,8 +43,13 @@ concurrent `agent`/`skill` calls in flight per run** regardless of how many item
 
 ## Running in the background
 
-Every `workflow(...)` call is asynchronous — it starts immediately in the background and returns a
-run id (`wf_1`, `wf_2`, …) without waiting for the script to finish.
+In interactive transports (TUI, Web, IM) every `workflow(...)` call is asynchronous — it starts
+immediately in the background and returns a run id (`wf_1`, `wf_2`, …) without waiting for the
+script to finish; the agent is notified automatically with the result when the run completes.
+
+In the **headless one-shot** (`octo "prompt"`) the call instead blocks and returns the final result
+directly: the process exits when the turn ends, so a detached run could never deliver its result.
+Progress lines stream to stderr while it runs.
 
 | Tool | Purpose |
 |---|---|

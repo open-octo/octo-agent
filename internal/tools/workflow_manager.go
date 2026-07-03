@@ -56,6 +56,10 @@ type WorkflowRunRequest struct {
 	Skill         workflow.SkillFunc
 	MaxConcurrent int
 	ResumeFrom    string
+	// Foreground marks a run the caller collects inline with Wait (the one-shot
+	// blocking mode). The completion hook is skipped for such runs — the result
+	// returns through the tool call, so a notification would be a duplicate.
+	Foreground bool
 }
 
 // WorkflowRunSnapshot is a point-in-time view of a background run for listing
@@ -82,6 +86,8 @@ type workflowRun struct {
 	description string
 	cancel      context.CancelFunc
 	start       time.Time
+	foreground  bool
+	finished    chan struct{} // closed by finish; Wait blocks on it
 
 	mu           sync.Mutex
 	done         bool
@@ -127,6 +133,7 @@ func (r *workflowRun) finish(output, journalRunID, errMsg string, end time.Time)
 	}
 	r.errMsg = errMsg
 	r.end = end
+	close(r.finished)
 }
 
 func (r *workflowRun) snapshot() WorkflowRunSnapshot {
@@ -223,7 +230,10 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 	m.seq++
 	id := fmt.Sprintf("wf_%d", m.seq)
 	now := time.Now()
-	run := &workflowRun{id: id, description: req.Description, cancel: cancel, start: now, lastActivity: now}
+	run := &workflowRun{
+		id: id, description: req.Description, cancel: cancel, start: now,
+		lastActivity: now, foreground: req.Foreground, finished: make(chan struct{}),
+	}
 	m.runs[id] = run
 	m.mu.Unlock()
 
@@ -268,6 +278,11 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 		m.mu.Lock()
 		hook := m.onDone
 		m.mu.Unlock()
+		// A foreground run's result returns through the blocked tool call
+		// (Wait); a completion notification would reach the model twice.
+		if run.foreground {
+			hook = nil
+		}
 		if hook != nil {
 			result := res.Output
 			if errMsg != "" {
@@ -311,6 +326,28 @@ func (m *WorkflowManager) RecordStatusRead(id string, running bool, lastActivity
 	st.count++
 	m.polls[id] = st
 	return st.count
+}
+
+// Wait blocks until the run finishes or ctx is cancelled. On cancellation it
+// cancels the run (unwinding its in-flight sub-agents), waits for the unwind
+// to complete so no goroutine outlives the call unaccounted, and returns ctx's
+// error alongside the final snapshot. Backs the foreground (one-shot) mode of
+// the workflow tool.
+func (m *WorkflowManager) Wait(ctx context.Context, id string) (WorkflowRunSnapshot, error) {
+	m.mu.Lock()
+	run := m.runs[id]
+	m.mu.Unlock()
+	if run == nil {
+		return WorkflowRunSnapshot{}, fmt.Errorf("no workflow run %q", id)
+	}
+	select {
+	case <-run.finished:
+		return run.snapshot(), nil
+	case <-ctx.Done():
+		run.cancel()
+		<-run.finished
+		return run.snapshot(), ctx.Err()
+	}
 }
 
 // Read returns a snapshot of one run.

@@ -349,6 +349,98 @@ func TestDefaultWorkflowOnDone_FiresOnCompletion(t *testing.T) {
 	}
 }
 
+// TestWorkflowTool_ForegroundReturnsResult drives the one-shot blocking mode:
+// the tool call runs the script to completion, returns the final result
+// inline, and fires no completion notification (the result already came back
+// through the call).
+func TestWorkflowTool_ForegroundReturnsResult(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	SetWorkflowForeground(true)
+	t.Cleanup(func() { SetWorkflowForeground(false) })
+
+	mgr := NewWorkflowManager()
+	ctx := WithWorkflowManager(context.Background(), mgr)
+	notified := make(chan WorkflowNotification, 1)
+	mgr.SetOnDone(func(ev WorkflowNotification) { notified <- ev })
+
+	res, err := WorkflowTool{}.Execute(ctx, "c", map[string]any{
+		"script": `parallel(%w[a b c]) { |x| agent(x) }.join(",")`,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(res.Text, "[done]") || !strings.Contains(res.Text, "R[a],R[b],R[c]") {
+		t.Errorf("foreground result = %q, want a done run carrying R[a],R[b],R[c]", res.Text)
+	}
+	select {
+	case ev := <-notified:
+		t.Errorf("foreground run must not fire the completion hook; got %+v", ev)
+	default:
+	}
+}
+
+// TestWorkflowTool_ForegroundScriptError verifies a failing script surfaces as
+// a normal tool result carrying the error detail and fix guidance, not a Go
+// error (the model should fix the script and re-run).
+func TestWorkflowTool_ForegroundScriptError(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	SetWorkflowForeground(true)
+	t.Cleanup(func() { SetWorkflowForeground(false) })
+
+	ctx := WithWorkflowManager(context.Background(), NewWorkflowManager())
+	res, err := WorkflowTool{}.Execute(ctx, "c", map[string]any{
+		"script": `File.write("x", "y")`,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(res.Text, "[error]") {
+		t.Errorf("foreground error result = %q, want an [error] run detail", res.Text)
+	}
+}
+
+// TestWorkflowTool_ForegroundInterrupt verifies ctx cancellation (SIGINT in the
+// one-shot) unwinds a blocked foreground run and surfaces as an error.
+func TestWorkflowTool_ForegroundInterrupt(t *testing.T) {
+	SetSpawner(ctxBlockingSpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	SetWorkflowForeground(true)
+	t.Cleanup(func() { SetWorkflowForeground(false) })
+
+	mgr := NewWorkflowManager()
+	ctx, cancel := context.WithCancel(WithWorkflowManager(context.Background(), mgr))
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	_, err := WorkflowTool{}.Execute(ctx, "c", map[string]any{"script": `agent("x")`})
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("err = %v, want an interrupted-run error", err)
+	}
+	// The run must have unwound, not linger as running.
+	runs := mgr.List()
+	if len(runs) != 1 || runs[0].Status == "running" {
+		t.Errorf("run after interrupt = %+v, want a single finished run", runs)
+	}
+}
+
+// TestWorkflowTool_DefinitionReflectsMode pins the mode line of the tool
+// description — the model's only way to know whether to expect a run id or an
+// inline result.
+func TestWorkflowTool_DefinitionReflectsMode(t *testing.T) {
+	SetWorkflowForeground(true)
+	t.Cleanup(func() { SetWorkflowForeground(false) })
+	if d := (WorkflowTool{}).Definition().Description; !strings.Contains(d, "FOREGROUND") {
+		t.Errorf("foreground description should say FOREGROUND; got %q", d)
+	}
+	SetWorkflowForeground(false)
+	if d := (WorkflowTool{}).Definition().Description; !strings.Contains(d, "BACKGROUND") {
+		t.Errorf("background description should say BACKGROUND; got %q", d)
+	}
+}
+
 func TestWorkflowTool_RefusesInSubAgent(t *testing.T) {
 	SetSpawner(replySpawner{})
 	t.Cleanup(func() { SetSpawner(nil) })
