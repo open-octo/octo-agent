@@ -137,7 +137,8 @@ manual.
 
 #### Option A: Persistent cron schedule (recommended for production loops)
 
-Use `cron-task-creator` so the loop runs even when you close octo.
+Use `cron-task-creator` so the loop runs even when you close the current TUI/IM
+session. Note: `octo serve` must still be running for scheduled tasks to fire.
 
 ```bash
 octo /cron-task-creator
@@ -145,19 +146,26 @@ octo /cron-task-creator
 
 Fill in:
 - **Name**: the same name as your loop (e.g. `octo-issue-triage`)
-- **Cron**: a valid cron expression (e.g. `0 9 * * *` for daily 09:00 UTC)
-- **Prompt**: the exact command to run the loop, e.g.:
+- **Cron**: a 6-field cron expression `seconds minutes hours day-of-month month day-of-week`,
+  in the server's local timezone. For example, `0 0 9 * * *` means 09:00 every day.
+- **Prompt**: the exact command to run the loop, plus a clear stop condition, e.g.:
 
 ```text
 Run the saved workflow `octo-issue-triage` in L1 mode for the open-octo/octo-agent repository.
 workflow(name: "octo-issue-triage", args: {"mode": "L1", "limit": 30})
+After the workflow finishes, read `.octo/octo-issue-triage-state.md`, summarize the result to the user, and end the session. If there are no open issues, report that and end immediately.
 ```
 
 - **Directory**: the project directory where `.octo/` and the workflow live
 - **Model / Agent**: optional
 
-After saving, the task lives in `~/.octo/tasks/` and runs on schedule via the
-octo scheduler. You can list/disable it later with `cron-task-creator` subcommands.
+After saving, the task lives in `~/.octo/tasks/` and is served by `octo serve`.
+You can list or disable tasks via the HTTP API:
+- `GET /api/tasks` to list
+- `PATCH /api/tasks/{id}` with `{"enabled": false}` to disable
+
+Make sure the workflow has already been saved with `workflow_save` before the
+cron task tries to call it by name.
 
 #### Option B: In-session loop (good for temporary focus)
 
@@ -173,13 +181,20 @@ This is useful for:
 - Re-checking a flaky issue every hour while you debug.
 - Proving a loop works before committing to a cron schedule.
 
-It will **not** survive if you close the session or restart octo serve.
+It will **not** survive if you close the session or restart `octo serve`.
 
 #### Option C: Event-driven trigger
 
-If your loop should react to GitHub events, use a GitHub webhook or a GitHub
-Action that calls octo's HTTP API to trigger the task. This is more work to set
-up, but it avoids polling and wasted runs.
+If your loop should react to GitHub events, set up a GitHub webhook or a GitHub
+Action that can reach your octo instance, then call:
+
+```bash
+POST /api/tasks/{task-id}/run
+```
+
+This requires `octo serve` to be reachable from the internet (or from the
+GitHub Actions runner), and you must handle authentication yourself. For most
+users, Option A is simpler and safer.
 
 ### 8. Start with L1 (report-only)
 
@@ -198,7 +213,11 @@ After using this skill, you must produce:
 1. A `LOOP.md` in the project root describing the loop's purpose, cadence, safety rules, and trigger.
 2. A `STATE.md` template in `.octo/` for the loop to use across runs.
 3. A `workflow` or a concrete set of sub-agent prompts that the loop will execute.
-4. A **scheduled task definition** (via `cron-task-creator`) or an explicit note explaining why this loop should stay manual.
+4. A **trigger definition** chosen from the options above:
+   - a `cron-task-creator` scheduled task,
+   - a `/loop` command for in-session use,
+   - an event-driven trigger config (webhook / GitHub Action URL), or
+   - an explicit note explaining why this loop should stay manual.
 5. A one-run validation: execute the loop once and report what it found and what it did.
 
 If the user wants a self-running loop, do not stop at "here is the design." Stop only when you have either scheduled it or written down the exact command the user can paste to schedule it.
