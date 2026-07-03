@@ -1686,6 +1686,7 @@ func (s *Server) initChannels() {
 		return
 	}
 	s.channelMgr = channel.NewManager(chCfg, s.buildChannelFactory(), channel.BindByChatUser)
+	s.channelMgr.SetGoalsEnabled(s.goalsEnabled)
 	slog.Info("channels enabled", "platforms", strings.Join(platforms, ", "))
 }
 
@@ -1833,6 +1834,7 @@ func (s *Server) reloadChannel(platform string) {
 	s.channelCfg = chCfg
 	if s.channelMgr == nil {
 		s.channelMgr = channel.NewManager(chCfg, s.buildChannelFactory(), channel.BindByChatUser)
+		s.channelMgr.SetGoalsEnabled(s.goalsEnabled)
 	}
 
 	s.stopOneChannelLocked(platform)
