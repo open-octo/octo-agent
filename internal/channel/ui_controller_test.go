@@ -183,3 +183,185 @@ func TestRunAgent(t *testing.T) {
 		t.Fatalf("expected 1 sent text, got %d", mock.sentTextCount())
 	}
 }
+
+// A multi-flush reply on an update-capable platform (Telegram/Discord/Feishu)
+// must edit the message with the FULL text streamed so far — an edit carrying
+// only the newest chunk would erase what the user already read (#1115).
+func TestUIController_UpdateCarriesFullText(t *testing.T) {
+	mock := &mockAdapter{platform: "mock", issueMsgIDs: true}
+	ctrl := NewUIController(mock, "chat1", "")
+	handler := ctrl.Handler()
+
+	// First flush: paragraph break → new message with chunk 1.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Paragraph one.\n\n"})
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("expected 1 sent text after first flush, got %d", mock.sentTextCount())
+	}
+	if got := mock.lastSentText().text; got != "Paragraph one." {
+		t.Fatalf("first message = %q", got)
+	}
+
+	// Second flush: must EDIT message m1 with paragraphs one AND two.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Paragraph two.\n\n"})
+	mock.mu.Lock()
+	updates := append([]updatedMsg(nil), mock.updatedMsgs...)
+	mock.mu.Unlock()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
+	}
+	if updates[0].messageID != "m1" {
+		t.Fatalf("update should target the first message, got %q", updates[0].messageID)
+	}
+	if want := "Paragraph one.\n\nParagraph two."; updates[0].text != want {
+		t.Fatalf("update must carry the full text:\nwant %q\ngot  %q", want, updates[0].text)
+	}
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("no second message expected while edits succeed, got %d", mock.sentTextCount())
+	}
+
+	// Turn end flushes the tail into the same message.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Tail."})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{}})
+	mock.mu.Lock()
+	final := mock.updatedMsgs[len(mock.updatedMsgs)-1]
+	mock.mu.Unlock()
+	if want := "Paragraph one.\n\nParagraph two.\n\nTail."; final.text != want {
+		t.Fatalf("final edit must carry everything:\nwant %q\ngot  %q", want, final.text)
+	}
+}
+
+// When an edit fails (platform edit-size cap, deleted message), the reply
+// continues in a fresh message carrying only the not-yet-shown chunk, and
+// subsequent edits target the new message with its own accumulated text.
+func TestUIController_UpdateFailureStartsFreshMessage(t *testing.T) {
+	mock := &mockAdapter{platform: "mock", issueMsgIDs: true, failUpdates: true}
+	ctrl := NewUIController(mock, "chat1", "")
+	handler := ctrl.Handler()
+
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "One.\n\n"})
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Two.\n\n"})
+
+	if mock.sentTextCount() != 2 {
+		t.Fatalf("expected 2 messages when edits fail, got %d", mock.sentTextCount())
+	}
+	if got := mock.lastSentText().text; got != "Two." {
+		t.Fatalf("second message should carry only the new chunk, got %q", got)
+	}
+
+	// Edits recover: the next flush must edit the SECOND message with its
+	// accumulated text only (not the first message's content).
+	mock.mu.Lock()
+	mock.failUpdates = false
+	mock.mu.Unlock()
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Three.\n\n"})
+	mock.mu.Lock()
+	updates := append([]updatedMsg(nil), mock.updatedMsgs...)
+	mock.mu.Unlock()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update after recovery, got %d", len(updates))
+	}
+	if updates[0].messageID != "m2" {
+		t.Fatalf("update should target the second message, got %q", updates[0].messageID)
+	}
+	if want := "Two.\n\nThree."; updates[0].text != want {
+		t.Fatalf("recovered edit text:\nwant %q\ngot  %q", want, updates[0].text)
+	}
+}
+
+// Platforms without message updates keep the existing behavior: each flush is
+// its own message.
+func TestUIController_NoUpdatesPlatformSendsChunks(t *testing.T) {
+	mock := &mockAdapter{platform: "mock", issueMsgIDs: true, noUpdates: true}
+	ctrl := NewUIController(mock, "chat1", "")
+	handler := ctrl.Handler()
+
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "One.\n\n"})
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Two.\n\n"})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{}})
+
+	if mock.sentTextCount() != 2 {
+		t.Fatalf("expected 2 chunk messages, got %d", mock.sentTextCount())
+	}
+	mock.mu.Lock()
+	nUpdates := len(mock.updatedMsgs)
+	first := mock.sentTexts[0].text
+	second := mock.sentTexts[1].text
+	mock.mu.Unlock()
+	if nUpdates != 0 {
+		t.Fatalf("no edits expected, got %d", nUpdates)
+	}
+	if first != "One." || second != "Two." {
+		t.Fatalf("chunks = %q, %q", first, second)
+	}
+}
+
+// A new turn must not edit the previous turn's message.
+func TestUIController_NewTurnStartsNewMessage(t *testing.T) {
+	mock := &mockAdapter{platform: "mock", issueMsgIDs: true}
+	ctrl := NewUIController(mock, "chat1", "")
+	handler := ctrl.Handler()
+
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Turn one."})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{}})
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Turn two."})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{}})
+
+	if mock.sentTextCount() != 2 {
+		t.Fatalf("expected 2 separate messages, got %d", mock.sentTextCount())
+	}
+	mock.mu.Lock()
+	nUpdates := len(mock.updatedMsgs)
+	mock.mu.Unlock()
+	if nUpdates != 0 {
+		t.Fatalf("a new turn must not edit the old turn's message, got %d edits", nUpdates)
+	}
+}
+
+// When both the edit and the fallback send fail on the same flush, the chunk
+// must not be dropped forever — it is re-queued and retried (carried along
+// with whatever text follows) on the next successful flush.
+func TestUIController_DoubleFailureRetriesChunk(t *testing.T) {
+	mock := &mockAdapter{platform: "mock", issueMsgIDs: true}
+	ctrl := NewUIController(mock, "chat1", "")
+	handler := ctrl.Handler()
+
+	// Establish a pending message normally.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "One.\n\n"})
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("expected 1 sent text, got %d", mock.sentTextCount())
+	}
+
+	// Both the edit and the fallback send fail for the next chunk.
+	mock.mu.Lock()
+	mock.failUpdates = true
+	mock.failSends = true
+	mock.mu.Unlock()
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Two.\n\n"})
+
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("no new message should be delivered on double failure, got %d", mock.sentTextCount())
+	}
+	mock.mu.Lock()
+	nUpdates := len(mock.updatedMsgs)
+	mock.mu.Unlock()
+	if nUpdates != 0 {
+		t.Fatalf("no update should be recorded on double failure, got %d", nUpdates)
+	}
+
+	// Recovery: the next successful flush must carry the RETRIED "Two." along
+	// with "Three." — losing "Two." here would mean silent content loss.
+	mock.mu.Lock()
+	mock.failUpdates = false
+	mock.failSends = false
+	mock.mu.Unlock()
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Three.\n\n"})
+	mock.mu.Lock()
+	updates := append([]updatedMsg(nil), mock.updatedMsgs...)
+	mock.mu.Unlock()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update after recovery, got %d", len(updates))
+	}
+	if want := "One.\n\nTwo.\n\nThree."; updates[0].text != want {
+		t.Fatalf("retried chunk must survive:\nwant %q\ngot  %q", want, updates[0].text)
+	}
+}
