@@ -177,8 +177,14 @@ func Run(ctx context.Context, script string, opt Options) (Result, error) {
 
 	be := newBackend(ctx, opt, cached, j)
 
+	// WithCloseOnContextDone makes in-flight wasm execution observe ctx
+	// cancellation even when the script never re-enters a host call — a
+	// compute-only runaway loop (`loop { }`) is otherwise uninterruptible,
+	// which would hang workflow_kill and, worse, a foreground (one-shot) run
+	// where Wait blocks the whole process with SIGINT already trapped.
 	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
-		WithCoreFeatures(api.CoreFeaturesV2|experimental.CoreFeaturesExceptionHandling))
+		WithCoreFeatures(api.CoreFeaturesV2|experimental.CoreFeaturesExceptionHandling).
+		WithCloseOnContextDone(true))
 	defer r.Close(ctx)
 	wasi_snapshot_preview1.MustInstantiate(ctx, r)
 
@@ -199,7 +205,10 @@ func Run(ctx context.Context, script string, opt Options) (Result, error) {
 	}
 
 	in, out := be.usage()
-	res := Result{InputTokens: in, OutputTokens: out, Canceled: be.canceled(), RunID: runID}
+	// Canceled covers both cancellation avenues: the backend observing it in a
+	// host call, and wazero's close-on-context-done tearing the module down
+	// mid-compute (where no host call was in flight to notice).
+	res := Result{InputTokens: in, OutputTokens: out, Canceled: be.canceled() || ctx.Err() != nil, RunID: runID}
 
 	if err != nil {
 		var ee *sys.ExitError
@@ -214,7 +223,7 @@ func Run(ctx context.Context, script string, opt Options) (Result, error) {
 			}
 			return res, fmt.Errorf("workflow: script error: %s", cleanScriptError(stderr.String()))
 		}
-		if res.Canceled || ctx.Err() != nil {
+		if res.Canceled {
 			return res, context.Canceled
 		}
 		return res, fmt.Errorf("workflow: run: %w", err)

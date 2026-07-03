@@ -957,6 +957,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// ── Headless one-shot (claude -p) ─────────────────────────────────────────
 	// One agentic turn, then exit. The session is ephemeral — one-shot runs are
 	// not persisted (resuming with -c stays a TUI affordance).
+	//
+	// Workflows run foreground-blocking here: the process exits when the turn
+	// ends (killing background work), so a detached run could never deliver its
+	// result. Set before DefaultToolsFor below — the workflow tool's description
+	// advertises which contract the model gets.
+	tools.SetWorkflowForeground(true)
 	oneShotSess := agent.NewSession(resolvedModel, *system)
 	wireSessionHooks(a, oneShotSess, agent.EntryCLI)
 	replCfg := replConfig{

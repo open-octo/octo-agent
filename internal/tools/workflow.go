@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -15,6 +16,19 @@ import (
 // workflow, so a parallel() over a large list can't fan out an unbounded number
 // of concurrent LLM turns.
 const defaultWorkflowConcurrency = 8
+
+// workflowForeground, when set, makes the workflow tool run scripts to
+// completion inside the tool call instead of detaching a background run. The
+// headless one-shot enables it: that mode exits when the turn ends (killing
+// still-running background work), so a detached run could never deliver its
+// result — the completion notification the background texts promise would
+// never arrive. Interactive transports (TUI, web, IM) leave it off.
+var workflowForeground atomic.Bool
+
+// SetWorkflowForeground toggles foreground (blocking) workflow execution for
+// this process. Set it before the tool definitions are built — the workflow
+// tool's description tells the model which mode it is in.
+func SetWorkflowForeground(v bool) { workflowForeground.Store(v) }
 
 // WorkflowTool runs a Ruby (mruby) orchestration script in an embedded wasm
 // interpreter. The script drives sub-agents through the agent() / parallel() /
@@ -27,17 +41,26 @@ const defaultWorkflowConcurrency = 8
 type WorkflowTool struct{}
 
 func (WorkflowTool) Definition() agent.ToolDefinition {
+	// The execution contract differs by transport: interactive transports run
+	// workflows detached (with a completion notification), the headless
+	// one-shot runs them inline. Tell the model which one it gets.
+	mode := "Runs in the BACKGROUND: this call returns a run id immediately, and the system " +
+		"automatically notifies you with the result when the run finishes — do NOT poll " +
+		"workflow_status while it runs. (A long multi-agent run won't block you or the " +
+		"user while it executes.)"
+	if workflowForeground.Load() {
+		mode = "Runs in the FOREGROUND: this call blocks until the script completes and " +
+			"returns the final result directly — no run id to track, nothing to poll, " +
+			"no notification to wait for."
+	}
 	return agent.ToolDefinition{
 		Name: "workflow",
-		Description: "Start a Ruby orchestration script for deterministic multi-agent work — " +
+		Description: "Run a Ruby orchestration script for deterministic multi-agent work — " +
 			"either inline via `script`, or a saved workflow by `name` (see the name parameter). " +
 			"Use when a task decomposes into many sub-agent calls with explicit control flow " +
 			"(fan-out, pipelines, loops, conditionals) that you want executed reliably rather " +
 			"than improvised across turns.\n\n" +
-			"Runs in the BACKGROUND: this call returns a run id immediately, and the system " +
-			"automatically notifies you with the result when the run finishes — do NOT poll " +
-			"workflow_status while it runs. (A long multi-agent run won't block you or the " +
-			"user while it executes.)\n\n" +
+			mode + "\n\n" +
 			"The script runs in a sandboxed, IO-free mruby interpreter: only Array/Hash/String/" +
 			"Integer logic and JSON.parse/JSON.generate are available. There is NO File, Dir, " +
 			"Time, Process, or shell backticks (`cmd`) — referencing any of them raises a Ruby " +
@@ -127,7 +150,8 @@ func savedWorkflowsParamDesc() string {
 	return b.String()
 }
 
-// Execute starts the workflow in the background and returns its run handle.
+// Execute runs the workflow: detached with a run handle in background mode,
+// or to completion with the result returned inline in foreground mode.
 func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	if IsSubAgent(ctx) {
 		return agent.ToolResult{}, fmt.Errorf("workflow: a sub-agent cannot run a workflow")
@@ -191,7 +215,7 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 	}
 
 	mgr := resolveWorkflowManager(ctx)
-	runID, err := mgr.Start(WorkflowRunRequest{
+	req := WorkflowRunRequest{
 		Description:   description,
 		Script:        script,
 		Args:          argsJSON,
@@ -199,10 +223,25 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		Skill:         sf,
 		MaxConcurrent: defaultWorkflowConcurrency,
 		ResumeFrom:    stringArg(input, "resume_from"),
-	})
+		Foreground:    workflowForeground.Load(),
+	}
+
+	runID, err := mgr.Start(req)
 	if err != nil {
 		return agent.ToolResult{}, fmt.Errorf("workflow: %w", err)
 	}
+
+	// Foreground (one-shot) mode: run to completion inside this call and hand
+	// the result back directly. Going through the manager keeps the run visible
+	// to progress hooks and workflow_status, and enforces the concurrency cap.
+	if req.Foreground {
+		snap, werr := mgr.Wait(ctx, runID)
+		if werr != nil {
+			return agent.ToolResult{}, fmt.Errorf("workflow: run interrupted: %w", werr)
+		}
+		return agent.ToolResult{Text: formatRunDetail(snap)}, nil
+	}
+
 	return agent.ToolResult{Text: fmt.Sprintf(
 		"Workflow started in the background as %s.\n"+
 			"<system-reminder>This run executes in the background. DO NOT poll workflow_status "+

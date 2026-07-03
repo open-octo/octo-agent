@@ -134,17 +134,23 @@ func runOnce(cfg replConfig, prompt string, stream bool) int {
 	})
 	defer tools.SetBackgroundOnExit(nil)
 
-	// Background workflows ride the same inbox path, so a finished detached run
-	// is drained on a later iteration of the in-flight turn. Once the turn ends
-	// the one-shot exits (killing still-running workflows via the defer below) —
-	// there is no idle wait for background completions in this mode.
-	tools.SetDefaultWorkflowOnDone(func(ev tools.WorkflowNotification) {
-		a.Inbox.Enqueue(tools.FormatWorkflowNote(ev))
-	})
-	defer func() {
-		tools.SetDefaultWorkflowOnDone(nil)
-		tools.KillDefaultWorkflows()
-	}()
+	// Workflows run foreground-blocking in one-shot mode (SetWorkflowForeground
+	// in runChat): the result returns through the tool call itself, so no
+	// completion notification is wired here. The kill on exit is a safety net —
+	// a foreground run that survives the turn shouldn't exist.
+	defer tools.KillDefaultWorkflows()
+
+	// A foreground workflow blocks its tool call for the whole run; surface its
+	// progress lines as they happen so a long run isn't minutes of silence.
+	// stderr, like the usage line, so piped stdout stays clean.
+	if !cfg.verbosity.quiet() {
+		tools.SetDefaultWorkflowOnEvent(func(ev tools.WorkflowEvent) {
+			if ev.Kind == "progress" {
+				fmt.Fprintf(cfg.stderr, "  · %s\n", ev.Line)
+			}
+		})
+		defer tools.SetDefaultWorkflowOnEvent(nil)
+	}
 
 	// The view sink renders the turn (spinner, streamed text, tool-event lines,
 	// cache/error) and raises Ask prompts. With a TTY reader (a positional
