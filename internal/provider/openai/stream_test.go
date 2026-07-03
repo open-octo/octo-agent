@@ -557,6 +557,66 @@ func TestSendStream_MidStreamResetIsTransient(t *testing.T) {
 	}
 }
 
+// TestSendStream_CleanCloseWithoutTerminalEvent_IsTransient covers a
+// connection that drops exactly on an SSE line boundary mid-tool-call: every
+// `data:` line received is complete, valid JSON (so it doesn't fail to parse
+// and doesn't trip scanner.Err()), but the stream ends with no finish_reason
+// chunk and no [DONE]. Before this was fixed, that silently produced a
+// "successful" tool_use response with nil/garbled arguments instead of an
+// error the agent loop could retry.
+func TestSendStream_CleanCloseWithoutTerminalEvent_IsTransient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"edit_file","arguments":"{\"path\":"}}]}}]}`+"\n\n")
+		// Connection closes cleanly here — no finish_reason, no [DONE].
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	_, err := c.SendStream(context.Background(), provider.Request{
+		Model: "m", Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{})
+	if err == nil {
+		t.Fatal("expected an error from the terminated-without-terminal-event stream")
+	}
+	var ts interface{ TransientStream() bool }
+	if !errors.As(err, &ts) || !ts.TransientStream() {
+		t.Errorf("clean close without a terminal event should be transient, got %v", err)
+	}
+}
+
+// TestSendStream_CleanCloseBeforeAnyContent_IsTransient covers the narrower
+// case the first guard's `contentB.Len() > 0 || ...` condition missed: a
+// connection that drops after only a role-only first chunk (no content, no
+// reasoning, no tool calls yet) and no terminal event. A real response is
+// never legitimately empty this way, so this is truncation just as much as
+// dying mid-content — it must not be silently treated as a valid empty reply.
+func TestSendStream_CleanCloseBeforeAnyContent_IsTransient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant"}}]}`+"\n\n")
+		// Connection closes cleanly here — before any content/tool-call text,
+		// no finish_reason, no [DONE].
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	_, err := c.SendStream(context.Background(), provider.Request{
+		Model: "m", Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{})
+	if err == nil {
+		t.Fatal("expected an error from the terminated-before-any-content stream")
+	}
+	var ts interface{ TransientStream() bool }
+	if !errors.As(err, &ts) || !ts.TransientStream() {
+		t.Errorf("clean close before any content should be transient, got %v", err)
+	}
+}
+
 // errorMidStream sends real content, then an `error` payload (after a 200), then
 // closes with no [DONE] — the shape some OpenAI-compatible gateways use to
 // report a mid-generation failure.

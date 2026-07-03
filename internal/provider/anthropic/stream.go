@@ -125,7 +125,9 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		result     provider.Response
 		accByIndex = map[int]*blockAccumulator{}
 		// ordered list of block indices to preserve emission order
-		blockOrder []int
+		blockOrder  []int
+		sawEvent    bool // at least one event line was parsed (stream reached the server)
+		sawTerminal bool // message_delta carried a stop_reason, or message_stop arrived
 	)
 
 	// Guard the body read against a mid-stream stall: if the server stops
@@ -161,6 +163,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 			// re-issues the round, same as a boundary-aligned reset caught below.
 			return result, retry.AsTransientStream(fmt.Errorf("anthropic: parse stream event: %w", err))
 		}
+		sawEvent = true
 
 		switch ev.Type {
 		case "message_start":
@@ -222,9 +225,13 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 				}
 			}
 
+		case "message_stop":
+			sawTerminal = true
+
 		case "message_delta":
 			if ev.Delta != nil && ev.Delta.StopReason != "" {
 				result.StopReason = ev.Delta.StopReason
+				sawTerminal = true
 			}
 			// Output token count refines as the stream progresses; the
 			// final message_delta carries the authoritative total.
@@ -258,6 +265,20 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		// instead of failing the turn. A caller cancellation passes through
 		// untouched (see retry.AsTransientStream).
 		return result, retry.AsTransientStream(fmt.Errorf("anthropic: stream read: %w", err))
+	}
+	// The scanner hit a clean EOF (no read error) without ever seeing
+	// message_stop or a message_delta carrying stop_reason. Each individual
+	// `data:` line was valid, self-contained JSON, so this isn't caught by
+	// the parse-error or scanner.Err() checks above — it's a connection that
+	// dropped exactly on an SSE line boundary mid-generation (idle LB/proxy
+	// reset). Treating it as success would silently hand back garbled
+	// tool-call arguments or a truncated reply with no error and no retry.
+	// Gated on sawEvent (not len(blockOrder)>0): a real response is never
+	// legitimately empty, so a drop right after message_start — before any
+	// content_block_start ever arrives — is truncation too, one event
+	// earlier than the block-accumulation case.
+	if !sawTerminal && sawEvent {
+		return result, retry.AsTransientStream(errors.New("anthropic: stream ended without a terminal event (truncated mid-generation)"))
 	}
 
 	// Build the final block list in order.
