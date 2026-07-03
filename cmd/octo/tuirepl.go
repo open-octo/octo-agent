@@ -1524,7 +1524,30 @@ func (m *tuiModel) renderToolOutcome(toolName string, input map[string]any, resu
 	if isErr {
 		errText = truncate1Line(resultText)
 	}
-	return tui.RenderToolStatus(toolName, summariseInput(input), isErr, errText)
+	status := tui.RenderToolStatus(toolName, summariseInput(input), isErr, errText)
+	// Non-card tools (MCP included) show only their input on the status line —
+	// the result itself is invisible to the user (issue #1093). A short result
+	// rides the line inline (control bytes neutralized: this is model-supplied
+	// text going straight to the terminal, the same injection surface the
+	// permission prompt sanitizes); anything longer is persisted and linked so
+	// it stays reachable. Errors already carry their first line via errText.
+	if trimmed := strings.TrimSpace(sanitizeForPrompt(resultText)); trimmed != "" && !isErr {
+		if lines := strings.Count(trimmed, "\n") + 1; lines == 1 && len([]rune(trimmed)) <= 80 {
+			status += " " + hintStyle.Render("— "+trimmed)
+		} else if path, err := tools.WriteCardSpill(toolName, resultText); err == nil {
+			label := "output (" + pluraliseLineCount(lines) + ") ↗"
+			status += " " + tui.Hyperlink(tui.FileURI(path), hintStyle.Underline(true).Render(label))
+		}
+	}
+	return status
+}
+
+// pluraliseLineCount renders "1 line" / "N lines" for the status-line link.
+func pluraliseLineCount(n int) string {
+	if n == 1 {
+		return "1 line"
+	}
+	return fmt.Sprintf("%d lines", n)
 }
 
 // replayHistoryLines renders a resumed session's prior turns into scrollback

@@ -1,6 +1,10 @@
 package main
 
 import (
+	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -169,5 +173,107 @@ func TestRendersCard_PlainDisablesCards(t *testing.T) {
 	// A non-card tool is never a card regardless of --plain.
 	if plainOff.rendersCard("sub_agent") {
 		t.Error("sub_agent is not a card tool")
+	}
+}
+
+// setSpillHome points the spill dir at a temp home on every platform
+// (os.UserHomeDir reads HOME on unix, USERPROFILE on Windows).
+func setSpillHome(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+}
+
+// spillURIToPath converts the file:// URI embedded in an OSC 8 escape back to
+// a filesystem path, undoing FileURI's percent-encoding and Windows shaping.
+func spillURIToPath(t *testing.T, uri string) string {
+	t.Helper()
+	u, err := url.Parse(uri)
+	if err != nil {
+		t.Fatalf("bad spill URI %q: %v", uri, err)
+	}
+	p := u.Path
+	if runtime.GOOS == "windows" {
+		p = filepath.FromSlash(strings.TrimPrefix(p, "/"))
+	}
+	return p
+}
+
+func TestRenderToolCard_FoldedOutputGetsHyperlink(t *testing.T) {
+	setSpillHome(t)
+	long := strings.TrimSuffix(strings.Repeat("row\n", 12), "\n")
+	got := renderToolCard("terminal", map[string]any{"command": "ls"}, long, false, 0, 0)
+	if !strings.Contains(got, "\x1b]8;;file://") {
+		t.Errorf("folded card should hyperlink the marker; got:\n%q", got)
+	}
+	// The linked file holds the complete output.
+	i := strings.Index(got, "file://")
+	uri := got[i:]
+	uri = uri[:strings.IndexByte(uri, 0x1b)]
+	data, err := os.ReadFile(spillURIToPath(t, uri))
+	if err != nil || string(data) != long {
+		t.Errorf("linked spill should hold the full output; err %v, got %q", err, data)
+	}
+	// An unfolded card gets no link.
+	short := renderToolCard("terminal", map[string]any{"command": "ls"}, "a\nb", false, 0, 0)
+	if strings.Contains(short, "\x1b]8;;") {
+		t.Errorf("unfolded card should not carry a link; got:\n%q", short)
+	}
+}
+
+func TestRenderToolCard_BlankHeavyOutputNoSpill(t *testing.T) {
+	// Blank lines don't count toward the fold; an output that renders without
+	// folding must not leave a spill file behind (prediction/render parity).
+	setSpillHome(t)
+	out := "a\n\n\n\nb\n\n\n\nc\n\n"
+	got := renderToolCard("terminal", map[string]any{"command": "ls"}, out, false, 0, 0)
+	if strings.Contains(got, "\x1b]8;;") || strings.Contains(got, "…") {
+		t.Errorf("blank-heavy output should neither fold nor link; got:\n%q", got)
+	}
+	home, _ := os.UserHomeDir()
+	entries, _ := os.ReadDir(filepath.Join(home, ".octo", "tmp"))
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "card-") {
+			t.Errorf("no spill file expected, found %s", e.Name())
+		}
+	}
+}
+
+func TestRenderToolOutcome_NonCardOutputVisible(t *testing.T) {
+	setSpillHome(t)
+	m := newTestModel()
+	// Short single-line result rides the status line inline.
+	got := m.renderToolOutcome("mcp_thing", map[string]any{"q": "x"}, "42 rows", false, 0)
+	if !strings.Contains(got, "— 42 rows") {
+		t.Errorf("short result should show inline; got:\n%q", got)
+	}
+	if strings.Contains(got, "\x1b]8;;") {
+		t.Errorf("short result should not spill; got:\n%q", got)
+	}
+	// Multi-line result is persisted and linked.
+	long := strings.TrimSuffix(strings.Repeat("r\n", 6), "\n")
+	got = m.renderToolOutcome("mcp_thing", map[string]any{"q": "x"}, long, false, 0)
+	if !strings.Contains(got, "\x1b]8;;file://") || !strings.Contains(got, "output (6 lines)") {
+		t.Errorf("long result should be linked with a line count; got:\n%q", got)
+	}
+	// Errors keep the existing inline errText, no duplicate link.
+	got = m.renderToolOutcome("mcp_thing", map[string]any{"q": "x"}, "boom", true, 0)
+	if !strings.Contains(got, "— boom") || strings.Contains(got, "\x1b]8;;") {
+		t.Errorf("error line should stay as before; got:\n%q", got)
+	}
+}
+
+func TestRenderToolOutcome_InlineResultSanitized(t *testing.T) {
+	setSpillHome(t)
+	m := newTestModel()
+	// A \r (no \n, under 80 runes) passes the inline check but must not reach
+	// the terminal raw — it would let the result overwrite the status line.
+	got := m.renderToolOutcome("mcp_thing", map[string]any{}, "ok\rSPOOFED", false, 0)
+	if strings.ContainsRune(got, '\r') {
+		t.Errorf("raw \\r reached the status line: %q", got)
+	}
+	if !strings.Contains(got, "SPOOFED") || !strings.Contains(got, "ok") {
+		t.Errorf("sanitized content should keep both halves visible: %q", got)
 	}
 }

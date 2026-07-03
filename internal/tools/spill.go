@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,13 +28,20 @@ const (
 // only catches the leftovers of a crashed session.
 const spillMaxAge = 24 * time.Hour
 
-// spillPrefixes are the filename prefixes used by everything that writes into
-// ~/.octo/tmp: terminal output (`term-`) and web_fetch bodies (`webfetch-`).
-// Both the age-sweep and the shutdown clean must cover every prefix, else a
-// kind whose prefix is missing leaks files forever.
+// spillPrefixes are the filename prefixes of model-facing spill files in
+// ~/.octo/tmp — terminal output (`term-`) and web_fetch bodies (`webfetch-`).
+// These are session-scoped: removed on clean shutdown (CleanSpillFiles) and
+// age-swept as crash leftovers.
 var spillPrefixes = []string{"term-", "webfetch-"}
 
-// hasSpillPrefix reports whether name is one of our spill files.
+// cardSpillPrefix marks user-facing spill files: the full output behind a
+// folded TUI card, hyperlinked from the scrollback. The scrollback outlives
+// the process, so these deliberately survive shutdown and are reclaimed only
+// by the age sweep.
+const cardSpillPrefix = "card-"
+
+// hasSpillPrefix reports whether name is a session-scoped spill file (the
+// kind CleanSpillFiles removes on exit).
 func hasSpillPrefix(name string) bool {
 	for _, p := range spillPrefixes {
 		if strings.HasPrefix(name, p) {
@@ -41,6 +49,12 @@ func hasSpillPrefix(name string) bool {
 		}
 	}
 	return false
+}
+
+// isSweepable reports whether name is any spill file the age sweep may
+// reclaim — session-scoped ones and card spills alike.
+func isSweepable(name string) bool {
+	return hasSpillPrefix(name) || strings.HasPrefix(name, cardSpillPrefix)
 }
 
 // MaybeSpillOutput returns body unchanged when it is small enough to give the
@@ -134,7 +148,7 @@ func sweepOldSpillFiles(dir string) {
 	}
 	cutoff := time.Now().Add(-spillMaxAge)
 	for _, e := range entries {
-		if e.IsDir() || !hasSpillPrefix(e.Name()) {
+		if e.IsDir() || !isSweepable(e.Name()) {
 			continue
 		}
 		info, err := e.Info()
@@ -145,6 +159,35 @@ func sweepOldSpillFiles(dir string) {
 			_ = os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
+}
+
+// cardSpillSeq numbers card spills within this process so two folds in the
+// same session never collide on a filename.
+var cardSpillSeq atomic.Int64
+
+// WriteCardSpill persists a tool call's full output so the TUI can hyperlink
+// a folded card's "… +N lines" marker to it. Unlike the model-facing spills,
+// these files survive session exit — the link lives in the terminal
+// scrollback, which outlives the process — and are reclaimed by the age
+// sweep instead of CleanSpillFiles. The deliberate consequence: tool output
+// (secrets included) persists on disk up to spillMaxAge after the session
+// ends, where term-/webfetch- spills die at shutdown. Returns the absolute
+// path. The timestamp in the name keeps a recycled pid from overwriting a
+// previous session's file while its scrollback link is still alive.
+func WriteCardSpill(toolName, body string) (string, error) {
+	dir, err := spillDir()
+	if err != nil {
+		return "", err
+	}
+	sweepOldSpillFiles(dir)
+	name := fmt.Sprintf("%s%s-%d-%d-%d.log",
+		cardSpillPrefix, sanitizeSpillID(toolName), os.Getpid(),
+		time.Now().UnixNano(), cardSpillSeq.Add(1))
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // CleanSpillFiles removes this process's spill files. Wire it into session
