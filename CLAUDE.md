@@ -47,6 +47,12 @@ Five-layer stack with one-directional dependencies:
    - `terminal.go` — current canonical example. Tool name `terminal` rather than `bash` because the implementation shells out via the platform shell — `sh -c` on macOS/Linux, PowerShell (`pwsh`, else `powershell`) on Windows — not a hard `/bin/bash` dependency. The shell is selected in one place: `shellCommand` in `sandbox.go`. The model is told which shell it's on via the environment context (`cmd/octo/envcontext.go`).
    - `DefaultRegistry` dispatches by tool name. `DefaultTools()` returns the set sent to the LLM (tools are on by default; `--no-tools` disables them).
 
+## Adding capability
+
+- **New provider** — implement `provider.Provider` (required) and optionally `provider.StreamingProvider`, `provider.ToolProvider`, `provider.ToolStreamingProvider`. Put it under `internal/provider/<name>/`. Each protocol's wire-format quirks are isolated inside the package; the agent layer must not learn about them.
+- **New tool** — implement `agent.ToolExecutor` and `Definition() agent.ToolDefinition` returning the JSON Schema the LLM sees. Place it under `internal/tools/<name>.go`. Register it in `tools.DefaultRegistry` and add it to `tools.DefaultTools()` if it belongs in the default set.
+- **New skill** — `~/.octo/skills/<name>/SKILL.md` with the same frontmatter format Claude Code uses. The skill loader composes existing tools — adding a skill should not require new tool code.
+
 ## Conventions
 
 From `.octorules`:
@@ -57,6 +63,9 @@ From `.octorules`:
 - **Comments in English.** Prefer self-documenting names; only comment the **why**, not the **what**.
 - **gofmt is the formatter.** `gofmt -l .` must be empty before push.
 - **Branch off latest main.** Never commit directly on `main`. Squash-and-merge is the default.
+- **No new third-party dependencies** without justification in the PR description.
+- **One concept per PR.** Mass mechanical changes (rename, move) can ride together but should be a single self-contained change set.
+- **Commit messages and PR descriptions in English.**
 
 ## Common pitfalls (from prior incidents)
 

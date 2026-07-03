@@ -6,6 +6,21 @@ The canonical project guidance for contributors and AI coding agents. Keep this 
 
 `octo-agent` is a Go AI agent CLI (Go 1.22+, single binary). Module path `github.com/open-octo/octo-agent`. Ships as CLI + embedded Web UI + IM bridges (see `octo serve`).
 
+## Commands
+
+```bash
+make build                                                  # ./octo (or set VERSION=0.x.y for releases)
+make test                                                   # go test -race ./...
+make vet                                                    # go vet ./...
+make fmt-check                                              # gofmt -l . must print nothing
+make fmt                                                    # gofmt -w .
+make tidy                                                   # go mod tidy
+
+go test ./internal/agent/                                   # single package
+go test ./internal/provider/anthropic/ -run TestSendStream  # single test
+go test -race -v ./internal/tools/                          # verbose race
+```
+
 ## Layering
 
 ```
@@ -43,6 +58,21 @@ Dependency direction is one-way: `provider → agent`, `tools → agent`, never 
 
 - `make test` runs `go test -race ./...` — must be green before pushing.
 - Integration tests against real provider APIs are run by hand with a real key, not in CI.
+
+## Common pitfalls (from prior incidents)
+
+- **`Accept-Encoding: gzip` on Bing's HTML search endpoint** returns a JS skeleton instead of the real results page — `web_search` must omit that header.
+- **OpenAI streaming needs `stream_options.include_usage=true`.** DashScope (Bailian) and real OpenAI emit no usage chunk without it (streamed turn reports zero tokens); DeepSeek sends usage regardless either way.
+- **Cache token semantics differ by protocol, not vendor.** Anthropic-protocol endpoints report `input_tokens` as the uncached remainder with `cache_read_input_tokens` separate; OpenAI-protocol endpoints report `prompt_tokens` as the whole input with `cached_tokens` a subset. `InputTokens`/`CacheReadTokens` must stay non-overlapping buckets — the openai adapter subtracts cached from prompt, the anthropic adapter needs no adjustment.
+- **OpenAI tool-call arguments stream as JSON fragments** across multiple chunks, keyed by `tool_calls[i].index` — concatenate before parsing.
+- **`finish_reason: "tool_calls"` (OpenAI) vs `stop_reason: "tool_use"` (Anthropic)** — normalize to `"tool_use"` at the provider adapter; the agent loop must never branch on the OpenAI spelling.
+
+See `CLAUDE.md` for the full write-up of each incident.
+
+## When in doubt
+
+- Verify external claims (API endpoints, third-party SDK existence, dates) before committing them.
+- If `go test ./...` fails because of an environment issue (missing key, blocked network), say so explicitly rather than commenting out the test.
 
 ## What lives in `dev-docs/`
 
