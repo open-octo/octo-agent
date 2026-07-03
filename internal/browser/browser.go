@@ -245,6 +245,7 @@ func (b *Browser) ClickFollow(ctx context.Context, page *Page, target string) (*
 	myID := page.TargetID()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
+		lastPoll := ctx.Err() != nil || !time.Now().Before(deadline)
 		if ps, err := b.Pages(ctx); err == nil {
 			var newTargets []TargetInfo
 			for _, ti := range ps {
@@ -253,30 +254,40 @@ func (b *Browser) ClickFollow(ctx context.Context, page *Page, target string) (*
 				}
 				newTargets = append(newTargets, ti)
 			}
-			// Prefer a target Chrome reports as opened by this page — the
-			// precise signal, immune to an unrelated tab (the user's own
-			// browsing, a notification/extension popup) appearing in the
-			// same window during the poll window. Only fall back to "any
-			// new target" when none of the candidates report an opener at
-			// all, so environments where Chrome omits openerId keep the
-			// prior best-effort behavior instead of never following.
-			if candidate, ok := firstByOpener(newTargets, myID); ok {
-				if np, aerr := b.AttachPage(ctx, candidate.TargetID); aerr == nil {
+			for _, ti := range clickFollowCandidates(newTargets, myID, lastPoll) {
+				if np, aerr := b.AttachPage(ctx, ti.TargetID); aerr == nil {
 					return np, nil
-				}
-			} else if !anyReportsOpener(newTargets) {
-				for _, ti := range newTargets {
-					if np, aerr := b.AttachPage(ctx, ti.TargetID); aerr == nil {
-						return np, nil
-					}
 				}
 			}
 		}
-		if ctx.Err() != nil || !time.Now().Before(deadline) {
+		if lastPoll {
 			return page, nil
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
+}
+
+// clickFollowCandidates returns, in attempt order, the targets ClickFollow
+// should try attaching to on this poll. A target Chrome reports as opened by
+// myID always wins — the precise signal, immune to an unrelated tab (the
+// user's own browsing, a notification/extension popup) appearing in the same
+// window during the poll window. The imprecise "any new target" fallback is
+// deliberately held back to the last poll before the deadline: trying it on
+// an early iteration risks grabbing an unrelated opener-less tab that
+// happens to appear before the real popup does — and since ClickFollow
+// returns on the first successful attach, a wrong early guess is never
+// revisited. Waiting gives the real popup every remaining poll to show up
+// with a matching opener; only when the window is about to close and still
+// nobody reports an opener at all (an environment where Chrome omits
+// openerId) does the old best-effort behavior kick in, as a last resort.
+func clickFollowCandidates(newTargets []TargetInfo, myID string, lastPoll bool) []TargetInfo {
+	if candidate, ok := firstByOpener(newTargets, myID); ok {
+		return []TargetInfo{candidate}
+	}
+	if lastPoll && !anyReportsOpener(newTargets) {
+		return newTargets
+	}
+	return nil
 }
 
 // firstByOpener returns the first target whose OpenerID matches myID.
