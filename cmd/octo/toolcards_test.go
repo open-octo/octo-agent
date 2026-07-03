@@ -142,6 +142,7 @@ func TestFormatElapsed(t *testing.T) {
 	}{
 		{0, ""},
 		{-time.Second, ""},
+		{30 * time.Millisecond, ""}, // would round to a meaningless "0s"
 		{1234 * time.Millisecond, "1.2s"},
 		{94 * time.Second, "1m34s"},
 	}

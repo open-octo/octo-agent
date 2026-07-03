@@ -147,11 +147,12 @@ func splitTerminalExit(output string) (body, exit string) {
 }
 
 // formatElapsed renders a tool call's duration for the card header: "" when
-// unknown (<=0, e.g. history replay), sub-second precision while short, whole
-// seconds once rounding noise stops mattering.
+// unknown (<=0, e.g. history replay) or too quick to be worth annotating
+// (sub-100ms would render as a meaningless "0s"), sub-second precision while
+// short, whole seconds once rounding noise stops mattering.
 func formatElapsed(d time.Duration) string {
 	switch {
-	case d <= 0:
+	case d < 100*time.Millisecond:
 		return ""
 	case d < 10*time.Second:
 		return d.Round(100 * time.Millisecond).String()

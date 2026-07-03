@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	rw "github.com/mattn/go-runewidth"
 )
 
 func TestCard_Render_Structure(t *testing.T) {
@@ -150,4 +152,17 @@ func equalSlices(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestRenderEditCard_ClampsRowWidth(t *testing.T) {
+	long := "x := " + strings.Repeat("longvalue+", 30)
+	out := RenderEditCard("/nonexistent/w.go", long, "y := 1", 50)
+	for _, line := range strings.Split(stripANSI(out), "\n") {
+		if w := rw.StringWidth(line); w > 50 {
+			t.Errorf("diff row exceeds width 50 (got %d): %q", w, line)
+		}
+	}
+	if !strings.Contains(stripANSI(out), "…") {
+		t.Errorf("clamped diff rows should end in an ellipsis; got:\n%s", out)
+	}
 }

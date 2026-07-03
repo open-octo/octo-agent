@@ -120,9 +120,12 @@ func renderCardHeader(verb, target, meta string, width int) string {
 		if meta != "" {
 			avail -= rw.StringWidth(meta) + 3 // " (" + ")"
 		}
-		if avail > 3 {
-			target = clipLine(target, avail)
+		// Floor at a few cells so a pathologically narrow terminal still gets
+		// a clipped target instead of an unclipped, overflowing one.
+		if avail < 3 {
+			avail = 3
 		}
+		target = clipLine(target, avail)
 	}
 	h := headerVerb.Render(fmt.Sprintf("%s(%s)", verb, target))
 	if meta != "" {
