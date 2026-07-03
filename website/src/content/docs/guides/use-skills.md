@@ -8,11 +8,12 @@ context on turns that don't need them.
 
 ## Where skills live
 
-- `~/.octo/skills/<name>/SKILL.md` — user-level, available across all projects.
-- `.octo/skills/<name>/SKILL.md` — project-level, takes precedence over user-level.
 - `~/.octo/skills-default/` — the built-in set below, materialized from the binary on first run
   (`octo skills update` re-syncs it after an upgrade). Kept in its own directory so refreshing
   defaults never touches a skill you wrote yourself.
+- `~/.octo/skills/<name>/SKILL.md` — user-level, available across all projects. A same-named skill
+  here overrides a default.
+- `.octo/skills/<name>/SKILL.md` — project-level, overrides both of the above on a name collision.
 
 The format is identical to Claude Code's, so you can symlink `~/.claude/skills` to `~/.octo/skills`
 and reuse everything you already have:
