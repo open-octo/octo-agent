@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/workflow"
@@ -252,6 +253,15 @@ func (WorkflowStatusTool) Definition() agent.ToolDefinition {
 	}
 }
 
+// workflowPollStopText is the hard stop appended once a no-progress polling
+// streak crosses workflowPollStopThreshold. The agent loop exempts
+// workflow_status from its duplicate-tool-call detector (it is a legitimate
+// observation tool), so this guard is what breaks a polling loop — mirroring
+// terminal_output's empty-snapshot guard.
+const workflowPollStopText = "\n\n[STOP: repeated workflow_status polling detected. " +
+	"Do not poll again. The system will push a notification with the result " +
+	"when a run finishes.]"
+
 func (WorkflowStatusTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	mgr := resolveWorkflowManager(ctx)
 	runID := strings.TrimSpace(stringArg(input, "run_id"))
@@ -261,25 +271,32 @@ func (WorkflowStatusTool) Execute(ctx context.Context, _ string, input map[strin
 			return agent.ToolResult{Text: "No background workflows have been started in this session."}, nil
 		}
 		lines := make([]string, 0, len(runs))
+		var latest time.Time
+		anyRunning := false
 		for _, r := range runs {
 			lines = append(lines, statusLine(r))
+			if r.Status == "running" {
+				anyRunning = true
+				if r.LastActivity.After(latest) {
+					latest = r.LastActivity
+				}
+			}
 		}
-		return agent.ToolResult{Text: strings.Join(lines, "\n")}, nil
+		text := strings.Join(lines, "\n")
+		// The list form observes running work too; give it the same anti-poll
+		// escalation, keyed under "" off the freshest activity across running runs.
+		if mgr.RecordStatusRead("", anyRunning, latest) >= workflowPollStopThreshold {
+			text += workflowPollStopText
+		}
+		return agent.ToolResult{Text: text}, nil
 	}
 	snap, ok := mgr.Read(runID)
 	if !ok {
 		return agent.ToolResult{}, fmt.Errorf("workflow_status: no run named %q in this session", runID)
 	}
 	text := formatRunDetail(snap)
-	// Hard stop for models that keep polling a running workflow despite the
-	// "do not poll" instructions. The agent loop exempts workflow_status from
-	// its duplicate-tool-call detector (it is a legitimate observation tool),
-	// so this guard is what breaks a polling loop — mirroring terminal_output's
-	// empty-snapshot guard.
-	if mgr.RecordStatusRead(runID, snap.Status == "running") >= workflowPollStopThreshold {
-		text += "\n\n[STOP: repeated workflow_status polling detected. " +
-			"Do not poll this run again. The system will push a notification " +
-			"with the result when it finishes.]"
+	if mgr.RecordStatusRead(runID, snap.Status == "running", snap.LastActivity) >= workflowPollStopThreshold {
+		text += workflowPollStopText
 	}
 	return agent.ToolResult{Text: text}, nil
 }

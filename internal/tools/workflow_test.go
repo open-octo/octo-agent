@@ -83,6 +83,11 @@ func TestWorkflowTool_StartsInBackground(t *testing.T) {
 	if !strings.Contains(res.Text, "background") || wfRunIDRe.FindString(res.Text) == "" {
 		t.Errorf("start result should name a background run id; got %q", res.Text)
 	}
+	// The behavioral steer the anti-poll design relies on: promise the
+	// completion notification and forbid polling.
+	if !strings.Contains(res.Text, "DO NOT poll") || !strings.Contains(res.Text, "automatically notify") {
+		t.Errorf("start result should forbid polling and promise the completion notification; got %q", res.Text)
+	}
 }
 
 // TestWorkflowTool_StatusCollectsResult drives the full async path: start, then
@@ -168,14 +173,53 @@ func TestWorkflowTool_Kill(t *testing.T) {
 	t.Fatal("killed workflow never left running")
 }
 
-// TestWorkflowStatus_AntiPollingGuard verifies that repeated status reads of a
-// still-running run escalate to a hard STOP reminder, and that a read of the
-// finished run carries no reminder (the counter resets).
-func TestWorkflowStatus_AntiPollingGuard(t *testing.T) {
+const wfStopMarker = "[STOP: repeated workflow_status polling detected"
+
+// TestWorkflowManager_RecordStatusRead pins the anti-poll streak semantics:
+// no-progress reads accumulate, a read that observes fresh activity restarts
+// the streak, a finished-run read clears it, and runs are counted independently.
+func TestWorkflowManager_RecordStatusRead(t *testing.T) {
+	m := NewWorkflowManager()
+	t0 := time.Now()
+
+	if got := m.RecordStatusRead("wf_1", true, t0); got != 1 {
+		t.Fatalf("first read = %d, want 1", got)
+	}
+	if got := m.RecordStatusRead("wf_1", true, t0); got != 2 {
+		t.Fatalf("no-progress read = %d, want 2", got)
+	}
+	// Another run's streak is independent.
+	if got := m.RecordStatusRead("wf_2", true, t0); got != 1 {
+		t.Fatalf("other run's first read = %d, want 1", got)
+	}
+	// Fresh activity restarts the streak — a spaced-out check of a live run
+	// must never escalate.
+	if got := m.RecordStatusRead("wf_1", true, t0.Add(time.Second)); got != 1 {
+		t.Fatalf("read after progress = %d, want 1", got)
+	}
+	if got := m.RecordStatusRead("wf_1", true, t0.Add(time.Second)); got != 2 {
+		t.Fatalf("no-progress read after reset = %d, want 2", got)
+	}
+	// A finished-run read clears the state.
+	if got := m.RecordStatusRead("wf_1", false, t0.Add(time.Second)); got != 0 {
+		t.Fatalf("finished read = %d, want 0", got)
+	}
+	if got := m.RecordStatusRead("wf_1", true, t0.Add(time.Second)); got != 1 {
+		t.Fatalf("read after finish-reset = %d, want 1", got)
+	}
+}
+
+// startBlockedRun starts a workflow whose single agent blocks until cancelled,
+// on an isolated manager, and waits for the launch progress line so
+// LastActivity is stable across subsequent status reads (a blocked agent emits
+// nothing further). Returns the ctx carrying the manager and the run id.
+func startBlockedRun(t *testing.T, mgr *WorkflowManager) (context.Context, string) {
+	t.Helper()
 	SetSpawner(ctxBlockingSpawner{})
 	t.Cleanup(func() { SetSpawner(nil) })
+	ctx := WithWorkflowManager(context.Background(), mgr)
 
-	res, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"script": `agent("x")`})
+	res, err := WorkflowTool{}.Execute(ctx, "c", map[string]any{"script": `agent("x")`})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -183,34 +227,50 @@ func TestWorkflowStatus_AntiPollingGuard(t *testing.T) {
 	if id == "" {
 		t.Fatalf("no run id in %q", res.Text)
 	}
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		if snap, ok := mgr.Read(id); ok && len(snap.Logs) > 0 {
+			return ctx, id
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("workflow never logged its launch")
+	return ctx, id
+}
 
-	const stopMarker = "[STOP: repeated workflow_status polling detected"
+// TestWorkflowStatus_AntiPollingGuard verifies that repeated no-progress status
+// reads of a still-running run escalate to a hard STOP reminder, and that a
+// read of the finished run carries no reminder (the state resets).
+func TestWorkflowStatus_AntiPollingGuard(t *testing.T) {
+	mgr := NewWorkflowManager()
+	ctx, id := startBlockedRun(t, mgr)
+
 	for i := 1; i < workflowPollStopThreshold; i++ {
-		out, err := WorkflowStatusTool{}.Execute(context.Background(), "c", map[string]any{"run_id": id})
+		out, err := WorkflowStatusTool{}.Execute(ctx, "c", map[string]any{"run_id": id})
 		if err != nil {
 			t.Fatalf("workflow_status #%d: %v", i, err)
 		}
-		if strings.Contains(out.Text, stopMarker) {
+		if strings.Contains(out.Text, wfStopMarker) {
 			t.Fatalf("read #%d should not carry the STOP reminder yet: %q", i, out.Text)
 		}
 	}
-	out, err := WorkflowStatusTool{}.Execute(context.Background(), "c", map[string]any{"run_id": id})
+	out, err := WorkflowStatusTool{}.Execute(ctx, "c", map[string]any{"run_id": id})
 	if err != nil {
 		t.Fatalf("workflow_status at threshold: %v", err)
 	}
-	if !strings.Contains(out.Text, stopMarker) {
+	if !strings.Contains(out.Text, wfStopMarker) {
 		t.Errorf("read #%d should carry the STOP reminder; got %q", workflowPollStopThreshold, out.Text)
 	}
 
 	// Finish the run; a read of a completed run must not carry the reminder.
-	if _, err := (WorkflowKillTool{}).Execute(context.Background(), "c", map[string]any{"run_id": id}); err != nil {
+	if _, err := (WorkflowKillTool{}).Execute(ctx, "c", map[string]any{"run_id": id}); err != nil {
 		t.Fatalf("workflow_kill: %v", err)
 	}
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		out, _ := WorkflowStatusTool{}.Execute(context.Background(), "c", map[string]any{"run_id": id})
+		out, _ := WorkflowStatusTool{}.Execute(ctx, "c", map[string]any{"run_id": id})
 		if !strings.Contains(out.Text, "[running]") {
-			if strings.Contains(out.Text, stopMarker) {
+			if strings.Contains(out.Text, wfStopMarker) {
 				t.Errorf("finished-run read should not carry the STOP reminder: %q", out.Text)
 			}
 			return
@@ -218,6 +278,32 @@ func TestWorkflowStatus_AntiPollingGuard(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("killed workflow never left running")
+}
+
+// TestWorkflowStatus_AntiPollingGuard_ListForm verifies the no-argument list
+// form escalates the same way — a model must not dodge the per-run guard by
+// polling the list instead.
+func TestWorkflowStatus_AntiPollingGuard_ListForm(t *testing.T) {
+	mgr := NewWorkflowManager()
+	ctx, id := startBlockedRun(t, mgr)
+	defer mgr.Kill(id)
+
+	for i := 1; i < workflowPollStopThreshold; i++ {
+		out, err := WorkflowStatusTool{}.Execute(ctx, "c", map[string]any{})
+		if err != nil {
+			t.Fatalf("workflow_status list #%d: %v", i, err)
+		}
+		if strings.Contains(out.Text, wfStopMarker) {
+			t.Fatalf("list read #%d should not carry the STOP reminder yet: %q", i, out.Text)
+		}
+	}
+	out, err := WorkflowStatusTool{}.Execute(ctx, "c", map[string]any{})
+	if err != nil {
+		t.Fatalf("workflow_status list at threshold: %v", err)
+	}
+	if !strings.Contains(out.Text, wfStopMarker) {
+		t.Errorf("list read #%d should carry the STOP reminder; got %q", workflowPollStopThreshold, out.Text)
+	}
 }
 
 // TestWorkflowKill_UnknownRun verifies the tool errors on an unknown id.

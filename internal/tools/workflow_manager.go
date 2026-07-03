@@ -18,11 +18,11 @@ const maxConcurrentWorkflows = 4
 // maxWorkflowLogLines bounds the per-run log buffer retained for status reads.
 const maxWorkflowLogLines = 500
 
-// workflowPollStopThreshold is how many consecutive still-running
-// workflow_status reads of one run escalate to a hard "stop polling" reminder.
-// The first couple of checks are legitimate (a quick look after starting, a
-// user-prompted progress check); a third consecutive read of a run that hasn't
-// finished is a polling loop.
+// workflowPollStopThreshold is how many consecutive no-progress
+// workflow_status reads escalate to a hard "stop polling" reminder. A read
+// that observes fresh activity resets the count — spaced-out, user-prompted
+// progress checks are legitimate; a third consecutive read that saw nothing
+// new is a polling loop.
 const workflowPollStopThreshold = 3
 
 // WorkflowEvent is emitted as a background run progresses, for live display
@@ -163,9 +163,16 @@ type WorkflowManager struct {
 	seq     int
 	active  int
 	runs    map[string]*workflowRun
-	polls   map[string]int // consecutive workflow_status reads of a still-running run
+	polls   map[string]pollState // no-progress workflow_status read streaks, by run id
 	onEvent func(WorkflowEvent)
 	onDone  func(WorkflowNotification)
+}
+
+// pollState tracks one run's streak of workflow_status reads that observed no
+// new activity, for the anti-polling guard.
+type pollState struct {
+	count        int
+	lastActivity time.Time
 }
 
 // NewWorkflowManager returns an empty manager.
@@ -279,11 +286,14 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 	return id, nil
 }
 
-// RecordStatusRead tracks consecutive workflow_status reads of a still-running
-// run so the status tool can escalate to a hard "stop polling" reminder (the
-// workflow counterpart of terminal_output's empty-snapshot guard). Returns the
-// updated consecutive count. A read of a finished run resets its counter.
-func (m *WorkflowManager) RecordStatusRead(id string, running bool) int {
+// RecordStatusRead tracks workflow_status reads of a still-running run so the
+// status tool can escalate to a hard "stop polling" reminder — the workflow
+// counterpart of terminal_output's empty-snapshot guard. Only reads that
+// observe NO new activity since the previous read extend the streak; a read
+// that sees progress (lastActivity advanced) starts a fresh one, so spaced-out
+// user-prompted checks of a live run never escalate. Returns the streak count;
+// a read of a finished run resets its state.
+func (m *WorkflowManager) RecordStatusRead(id string, running bool, lastActivity time.Time) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !running {
@@ -291,10 +301,16 @@ func (m *WorkflowManager) RecordStatusRead(id string, running bool) int {
 		return 0
 	}
 	if m.polls == nil {
-		m.polls = map[string]int{}
+		m.polls = map[string]pollState{}
 	}
-	m.polls[id]++
-	return m.polls[id]
+	st := m.polls[id]
+	if lastActivity.After(st.lastActivity) {
+		st.count = 0
+		st.lastActivity = lastActivity
+	}
+	st.count++
+	m.polls[id] = st
+	return st.count
 }
 
 // Read returns a snapshot of one run.
