@@ -80,7 +80,7 @@ channels:
 1. Read `~/.octo/channels.yml`. If missing or empty: "No channels configured yet. Run `/channel-manager setup` to get started." and stop.
 2. Check whether the serve process (which hosts the adapters) is running:
    ```bash
-   pgrep -f "octo serve" > /dev/null && echo RUNNING || echo STOPPED
+   pgrep -f "octo.*serve" > /dev/null && echo RUNNING || echo STOPPED
    ```
 3. Display:
 
@@ -101,7 +101,7 @@ dingtalk   ❌ no     (not configured)
 - Discord: show whether `bot_token` is set (`token: present`). Never print the token value.
 - Telegram: show whether `bot_token` is set (`token: present`). Never print the token value.
 
-If the process is STOPPED but at least one platform is enabled, remind: "Run `octo serve` to bring the channels online." If it is RUNNING but was started before this config change, remind the user to restart it.
+If the process is STOPPED but at least one platform is enabled, ask: "`octo serve` 未运行，是否现在启动？" If the user agrees and you can start it safely, run `octo serve` in the background. If it is RUNNING but was started before this config change, ask: "配置已修改，是否立即重启 `octo serve` 让改动生效？" and call `restart_server` if the user agrees. Otherwise, remind the user to restart manually.
 
 ---
 
@@ -177,7 +177,7 @@ Ask with `ask_user_question`:
 #### Phase 7 — Publish
 
 9. "Open 'Version Management & Release' (版本管理与发布), create a version (e.g. 1.0.0) and publish it. Reply done." Wait for "done".
-10. "✅ Feishu channel configured. Find the bot in Feishu and send it a message."
+10. "✅ Feishu channel configured." If `octo serve` is not yet running or was started before any recent config change, ask: "是否立即重启 `octo serve` 让通道上线？" and call `restart_server` if the user agrees. Otherwise remind the user to (re)start `octo serve`. Then say: "Find the bot in Feishu and send it a message."
 
 ### Weixin setup (Personal WeChat via iLink QR login)
 
@@ -189,10 +189,15 @@ Weixin uses a QR-code login — no app credentials needed.
    # → {"status":"pending","qr_url":"https://…"}      (or "already_logged_in")
    ```
    Pass `-d '{"force":true}'` to re-login over existing credentials.
-2. Relay the QR link to the user:
+2. If the response is `already_logged_in`:
+   - Do **not** tell the user the credentials are definitely valid. The cached token may have expired.
+   - Say: "检测到本地已保存微信登录态，但无法确认是否仍有效。是否重新扫码登录？（回复 `重新登录` 强制重新扫码，回复 `继续` 直接复用当前登录态）"
+   - If the user replies `重新登录`, call `POST /api/channels/weixin/login` with `-d '{"force":true}'` and continue from step 3.
+   - If the user replies `继续` (or any other confirmation), proceed to step 4.
+3. Relay the QR link to the user:
    > Open this link and scan the QR code with WeChat, then confirm login in the app:
    > `<qr_url from the response>`
-3. Poll until the flow finishes (every ~3s, up to 5 minutes):
+4. Poll until the flow finishes (every ~3s, up to 5 minutes):
    ```bash
    curl -s http://127.0.0.1:8088/api/channels/weixin/login
    ```
@@ -201,14 +206,15 @@ Weixin uses a QR-code login — no app credentials needed.
    - `"status":"failed"` — show the `error` and offer to retry from step 1.
    This agent-driven flow is the only way to log in; the web Channels panel
    intentionally has no inline QR button.
-4. Enable the platform in `~/.octo/channels.yml` (preserve other platforms), then `chmod 600`:
+5. Enable the platform in `~/.octo/channels.yml` (preserve other platforms), then `chmod 600`:
    ```yaml
    channels:
      weixin:
        enabled: true
    ```
    The adapter reads `~/.octo/weixin-credentials.json` automatically; only set `cred_path` if the user keeps credentials elsewhere.
-5. "✅ Weixin channel configured. (Re)start `octo serve`, then message the bot on WeChat."
+6. After writing `channels.yml`, ask the user: "配置已保存。是否立即重启 `octo serve` 让微信通道上线？（会话会短暂断开后自动重连）" If the user agrees, call `restart_server` with a reason like `weixin channel configured`. If the session is not hosted by `octo serve` (e.g. TUI without `restart_server` available), tell the user to run `octo serve` manually.
+7. "✅ Weixin channel configured. Once `octo serve` is running, message the bot on WeChat."
 
 ### DingTalk setup
 
@@ -231,7 +237,7 @@ Weixin uses a QR-code login — no app credentials needed.
        client_id: <CLIENT_ID>
        client_secret: <CLIENT_SECRET>
    ```
-6. "✅ DingTalk channel configured. Publish the app version if you haven't, (re)start `octo serve`, then message the robot in DingTalk."
+6. Ask: "是否立即重启 `octo serve` 让钉钉通道上线？" If the user agrees, call `restart_server` with reason `dingtalk channel configured`. Otherwise remind the user to (re)start `octo serve` manually. Then say: "✅ DingTalk channel configured. Publish the app version if you haven't, then message the robot in DingTalk."
 
 ### WeCom setup (企业微信 intelligent robot)
 
@@ -251,7 +257,7 @@ WeCom "API mode" intelligent robots connect over a WebSocket long connection —
        secret: <SECRET>
    ```
    There is no public REST endpoint to pre-validate these credentials — they are checked when the WebSocket subscribes. After `octo serve` starts, an invalid pair logs `[wecom] authentication failed`.
-6. "✅ WeCom channel configured. (Re)start `octo serve`, then find the bot in the WeCom client under Contacts → Smart Bot (智能机器人) and message it."
+6. Ask: "是否立即重启 `octo serve` 让企业微信通道上线？" If the user agrees, call `restart_server` with reason `wecom channel configured`. Otherwise remind the user to (re)start `octo serve` manually. Then say: "✅ WeCom channel configured. Find the bot in the WeCom client under Contacts → Smart Bot (智能机器人) and message it."
 
 ### Discord setup
 
@@ -284,7 +290,7 @@ Discord requires manual portal interaction (hCaptcha gates application creation)
 4. Build the invite URL with the Application ID and tell the user to open it:
    `https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot&permissions=274877975552`
    > Pick your server from the dropdown → Continue → Authorize. If the dropdown is empty you don't have a server yet — open <https://discord.com/channels/@me>, click the **+** button → Create My Own, then re-open the invite link.
-5. "✅ Discord channel configured. (Re)start `octo serve`, then @-mention the bot in a channel or DM it."
+5. Ask: "是否立即重启 `octo serve` 让 Discord 通道上线？" If the user agrees, call `restart_server` with reason `discord channel configured`. Otherwise remind the user to (re)start `octo serve` manually. Then say: "✅ Discord channel configured. @-mention the bot in a channel or DM it."
 
 ### Telegram setup (Bot API)
 
@@ -308,7 +314,7 @@ Telegram is the simplest — no browser automation, no QR. The user creates a bo
        enabled: true
        bot_token: <TOKEN>
    ```
-4. "✅ Telegram channel configured. (Re)start `octo serve`, open your bot in Telegram, and send it a message."
+4. Ask: "是否立即重启 `octo serve` 让 Telegram 通道上线？" If the user agrees, call `restart_server` with reason `telegram channel configured`. Otherwise remind the user to (re)start `octo serve` manually. Then say: "✅ Telegram channel configured. Open your bot in Telegram and send it a message."
    > **For group chats**: disable Privacy Mode first (@BotFather → `/mybots` → Bot Settings → Group Privacy → Turn off), then **remove and re-add the bot to the group** — otherwise it cannot receive any group messages, including @-mentions.
 
 ---
@@ -318,7 +324,7 @@ Telegram is the simplest — no browser automation, no QR. The user creates a bo
 1. Read `~/.octo/channels.yml`. If the platform has no entry (or required fields are missing), redirect to `setup`.
 2. Toggle `enabled: true|false` for that platform only; preserve every other field and platform.
 3. Write back, `chmod 600 ~/.octo/channels.yml`.
-4. Say "✅ `<platform>` channel enabled." / "❌ `<platform>` channel disabled.", and remind: "Restart `octo serve` for the change to take effect."
+4. Say "✅ `<platform>` channel enabled." / "❌ `<platform>` channel disabled.", then ask: "是否立即重启 `octo serve` 让改动生效？（会话会短暂断开后自动重连）" If the user agrees and `restart_server` is available, call it with reason like `<platform> channel enabled/disabled`. Otherwise remind the user to restart `octo serve` manually.
 
 ---
 
@@ -340,7 +346,7 @@ Check each item, report ✅ / ❌ with remediation:
 6. **Discord credentials** (if enabled) — run the `/users/@me` curl from Discord setup step 2; an `id` in the response → ✅, else ❌ "Discord token invalid or revoked — re-run setup".
 7. **Telegram credentials** (if enabled) — run the `getMe` curl from Telegram setup step 2; `"ok":true` → ✅, else ❌ "Telegram token rejected by getMe — re-run setup".
 8. **WeCom credentials** (if enabled) — no public REST validation endpoint; check the `octo serve` output for `[wecom] authentication failed` → ❌ "WeCom credentials incorrect — re-run setup", or `[wecom] connected, authenticating` with no auth error → ✅.
-9. **Serve process** — `pgrep -f "octo serve"`; if no enabled platform, skip; if enabled but not running, ❌ "Run `octo serve`".
+9. **Serve process** — `pgrep -f "octo.*serve"`; if no enabled platform, skip; if enabled but not running, ❌ "Run `octo serve`" (and ask to start it if the user agrees).
 
 ---
 
