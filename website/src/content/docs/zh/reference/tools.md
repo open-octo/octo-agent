@@ -24,6 +24,18 @@ description: octo 给模型的每一个内置工具。
 | `terminal_input` | 向后台命令的 stdin 写入内容（仅 POSIX 可靠，见[兼容性](/docs/zh/reference/compatibility/)） |
 | `kill_shell` | 停止一个后台命令 |
 
+要不要放后台是每次调用显式指定的，不是靠猜：`detached`（一个不被追踪的守护进程，比 octo
+自己活得还久）、`run_in_background: "async"`（被追踪、一次性——完成后自动推送结果，
+`terminal_output`/`terminal_input` 对它不适用）、`run_in_background: "interactive"`
+（被追踪且长期运行，这两个工具都能用来读写它）。不放后台的命令同步执行，超时 120 秒。
+
+其实每一条同步命令底层都是先当一个隐藏的后台进程启动的，这样可以提前把它转正，而不是干等超时——
+在 TUI 里，`Ctrl+B` 会把当前正在跑的同步命令（子代理自己跑的 terminal 调用也算）转成一个可见、
+可追踪的后台进程；Web UI 有个按钮效果一样。IM 里没有转正的入口——只有超时会生效。
+
+每个后台进程的输出上限是 stdout+stderr 合计 1MiB，超出部分先丢最老的字节；同时能跑多少个后台进程
+没有上限；宿主进程关闭时，所有被追踪的进程（`detached` 的除外）都会被杀掉。
+
 ## Web
 
 | 工具 | 作用 |
@@ -68,6 +80,6 @@ description: octo 给模型的每一个内置工具。
 | `send_message` | 在当前渠道发一条消息，但不结束这一轮 |
 | `send_file` | 把文件发回去（IM 渠道） |
 | `show_artifact` | 在 Web UI 的 artifact 面板里展示一个构建好的 HTML/Markdown/图片文件 |
-| `restart_server` | 重启 `octo serve`（比如改完配置之后） |
+| `restart_server` | 请求一次服务器[重启](/docs/zh/guides/self-host/#重启)（比如改完配置之后）；始终是 `ask` 档位，不可能被加进白名单 |
 
 下一步：工具调用是怎么被门控的，见 [Agent 循环](/docs/zh/concepts/agent-loop/)。

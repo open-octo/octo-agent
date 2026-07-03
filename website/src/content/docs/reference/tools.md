@@ -25,6 +25,22 @@ execution). Every call goes through the permission engine before it runs.
 | `terminal_input` | write to a background command's stdin (POSIX-only, see [Compatibility](/docs/reference/compatibility/)) |
 | `kill_shell` | stop a background command |
 
+Backgrounding is explicit, chosen per call rather than inferred: `detached` (an untracked daemon
+that outlives octo entirely), `run_in_background: "async"` (tracked, one-shot — its completion is
+pushed automatically, and `terminal_output`/`terminal_input` don't apply to it), or
+`run_in_background: "interactive"` (tracked and long-running, readable and writable via those two
+tools). Anything not backgrounded runs synchronously with a 120-second timeout.
+
+Every synchronous command actually starts out as a hidden background process under the hood, so it
+can be promoted early instead of just timing out — in the TUI, `Ctrl+B` promotes whichever
+synchronous command is currently running (also works for a sub-agent's own terminal call) into a
+visible, trackable one; the Web UI has the equivalent as a button. There's no promote affordance in
+IM — only the timeout applies there.
+
+Output is capped at 1MiB of combined stdout+stderr per background process, oldest bytes trimmed
+first; there's no cap on how many background processes can run at once, and all tracked ones (not
+`detached`) are killed when the host process shuts down.
+
 ## Web
 
 | Tool | Purpose |
@@ -69,6 +85,6 @@ Search is off (or hasn't activated).
 | `send_message` | send a message on the current channel without ending the turn |
 | `send_file` | send a file back (IM channels) |
 | `show_artifact` | display a built HTML/Markdown/image file in the Web UI's artifact panel |
-| `restart_server` | restart `octo serve` (e.g. after a config change) |
+| `restart_server` | request a server [restart](/docs/guides/self-host/#restarting) (e.g. after a config change); always `ask`-class, never allow-listable |
 
 Next: see how tool calls are gated in [The agent loop](/docs/concepts/agent-loop/).

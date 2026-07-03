@@ -24,7 +24,7 @@ stdin, runs a headless one-shot: full agentic tool loop, then exit.
 | `--model` | from config | Model name for the selected provider |
 | `--system` | — | One-off system prompt override |
 | `--max-tokens` | `0` | `max_tokens` for the response (`0` = provider default) |
-| `--max-tokens-escalate` | `-1` | Per-response cap retried once on truncation (`-1` = provider-aware default, `0` = disable) |
+| `--max-tokens-escalate` | `-1` | Cap for one retry on a truncated reply (`-1` = 32768, the built-in default for both providers; `0` disables the retry) |
 | `--stream` | `true` | Stream the reply; `--stream=false` buffers and prints only the final text |
 | `--tools` / `--no-tools` | `true` | Built-in tools + MCP/skill execution for the agentic loop |
 | `--no-memory` | `false` | Disable cross-session memory injection for this session |
@@ -37,7 +37,8 @@ stdin, runs a headless one-shot: full agentic tool loop, then exit.
 | `--no-coauthor` | `false` | Don't append `Co-authored-by` to git commit messages |
 | `--max-turns` | `0` (auto) | Max provider round-trips per message (`0` = 200 interactive, unlimited headless) |
 | `--compact-threshold` | `0` (auto) | Compact once a turn's input crosses this many tokens; `<0` disables |
-| `--compact-auto-pct` | `0` (→75) | Auto-compaction threshold as % of the context window |
+| `--compact-auto-pct` | `0` (→75) | Auto-compaction threshold as % of the context window, used when `--compact-threshold=0` |
+| `--compact-batch-threshold` | `0` (auto → 85%) | Same idea, checked after each tool-call batch within a turn; `<0` disables |
 | `--reasoning-effort` | off | `low` \| `medium` \| `high` \| `xhigh` \| `max` |
 | `--show-reasoning` | `false` | Surface the reasoning trace for the **Web UI** to display (the terminal never renders it) |
 | `--sandbox` | `false` | OS-enforced confinement to the project dir + tmp, no network |

@@ -24,6 +24,20 @@ octo serve -addr :8088 --access-key <key>
 
 完整的安全边界——防住了什么、明确不管什么——见[安全模型](/docs/zh/reference/security/)。
 
+## 重启
+
+默认情况下 `octo serve` 是**supervisor + worker** 两进程结构：supervisor 启动真正干活的 worker
+进程，如果 worker 以退出码 `42` 退出（和 [CLI 参考](/docs/zh/reference/cli/)里"重启请求"是同一套
+契约），supervisor 会重新解析一遍二进制路径——这样换了新二进制也能生效——然后重新拉起它。
+其他任何退出码都不会触发这个逻辑。
+
+触发重启可以通过 `POST /api/restart`（立即返回 `202`），也可以由模型调用 `restart_server` 工具——
+这个工具被显式钉死在 `ask` 权限档位上，不可能被误加进白名单。不管走哪条路，都会先等正在进行的
+轮次跑完（或者等满 30 秒超时，以先到者为准）才真正退出进程；在这段排空窗口期新发起的轮次会被拒绝，
+提示你过一会儿再试一次——所有传输方式（包括 IM）都是这个提示。
+
+`--no-supervisor` 会跳过这整套机制，直接跑 worker——把重启完全交给你自己的 init 系统：
+
 ## 作为系统服务运行
 
 `octo serve` 是一个长期运行的单进程；通常的做法是交给你的 init 系统托管，而不是在终端里挂着：
