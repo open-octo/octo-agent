@@ -168,7 +168,14 @@ func (u *UIController) flushTextLocked() {
 	if res.OK {
 		u.pendingTextMsgID = res.MessageID
 		u.sentText = chunk
+		return
 	}
+	// Both the edit (if attempted) and the fresh send failed. Put the chunk
+	// back into the buffer instead of dropping it forever: pendingTextMsgID
+	// and sentText are left untouched (still tracking the old message's true
+	// last-shown content), and the next flush — a later delta, or the
+	// turn-end flush — retries this text along with whatever comes after it.
+	u.textBuf.WriteString(chunk)
 }
 
 // resetLocked clears per-turn state. Must be called with mu held.

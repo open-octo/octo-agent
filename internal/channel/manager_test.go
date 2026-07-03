@@ -34,6 +34,9 @@ type mockAdapter struct {
 	// failUpdates makes UpdateMessage report failure (edit-size cap /
 	// deleted message), without recording the attempt as delivered.
 	failUpdates bool
+	// failSends makes SendText report failure without recording the attempt
+	// as delivered — simulates a network/API error on the fallback send path.
+	failSends bool
 }
 
 type sentText struct {
@@ -67,6 +70,9 @@ func (m *mockAdapter) Stop() error {
 func (m *mockAdapter) SendText(chatID, text, replyTo string) SendResult {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.failSends {
+		return SendResult{OK: false, Error: "mock send failure"}
+	}
 	m.sentTexts = append(m.sentTexts, sentText{chatID, text, replyTo})
 	res := SendResult{OK: true}
 	if m.issueMsgIDs {

@@ -316,3 +316,52 @@ func TestUIController_NewTurnStartsNewMessage(t *testing.T) {
 		t.Fatalf("a new turn must not edit the old turn's message, got %d edits", nUpdates)
 	}
 }
+
+// When both the edit and the fallback send fail on the same flush, the chunk
+// must not be dropped forever — it is re-queued and retried (carried along
+// with whatever text follows) on the next successful flush.
+func TestUIController_DoubleFailureRetriesChunk(t *testing.T) {
+	mock := &mockAdapter{platform: "mock", issueMsgIDs: true}
+	ctrl := NewUIController(mock, "chat1", "")
+	handler := ctrl.Handler()
+
+	// Establish a pending message normally.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "One.\n\n"})
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("expected 1 sent text, got %d", mock.sentTextCount())
+	}
+
+	// Both the edit and the fallback send fail for the next chunk.
+	mock.mu.Lock()
+	mock.failUpdates = true
+	mock.failSends = true
+	mock.mu.Unlock()
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Two.\n\n"})
+
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("no new message should be delivered on double failure, got %d", mock.sentTextCount())
+	}
+	mock.mu.Lock()
+	nUpdates := len(mock.updatedMsgs)
+	mock.mu.Unlock()
+	if nUpdates != 0 {
+		t.Fatalf("no update should be recorded on double failure, got %d", nUpdates)
+	}
+
+	// Recovery: the next successful flush must carry the RETRIED "Two." along
+	// with "Three." — losing "Two." here would mean silent content loss.
+	mock.mu.Lock()
+	mock.failUpdates = false
+	mock.failSends = false
+	mock.mu.Unlock()
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Three.\n\n"})
+	mock.mu.Lock()
+	updates := append([]updatedMsg(nil), mock.updatedMsgs...)
+	mock.mu.Unlock()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update after recovery, got %d", len(updates))
+	}
+	if want := "One.\n\nTwo.\n\nThree."; updates[0].text != want {
+		t.Fatalf("retried chunk must survive:\nwant %q\ngot  %q", want, updates[0].text)
+	}
+}
