@@ -554,6 +554,87 @@ func TestEnsureSender_LazyInitDoesNotDeadlock(t *testing.T) {
 	}
 }
 
+// TestEnsureSender_GoalsEnabledVisibleAtomicallyWithSender guards against a
+// narrow race: initChannels/reloadChannel gate solely on getSender() != nil
+// and, on first construction, lock in s.goalsEnabled into the channel
+// manager via SetGoalsEnabled — permanently, since reloadChannel only
+// re-syncs when it builds a fresh manager. enableSubAgentTools (which used to
+// be the only place s.goalsEnabled got set) has to run after senderMu is
+// unlocked to avoid a reentrant-lock deadlock (see
+// TestEnsureSender_LazyInitDoesNotDeadlock), which left a gap where a
+// concurrent reader could observe a non-nil sender before goalsEnabled was
+// synced. The fix stages goalsEnabled (now an atomic.Bool) into the same
+// senderMu-guarded critical section that sets s.sender, before the unlock —
+// so this test asserts the invariant structurally: reading sender under
+// senderMu and goalsEnabled via Load() must never observe sender != nil with
+// goalsEnabled still false. Unlike a sleep-based race test, this is
+// deterministic on the fixed code: Store(true) happens-before the Unlock
+// that any subsequent Lock() (including the poller's) synchronizes with, so
+// no interleaving can observe one without the other.
+func TestEnsureSender_GoalsEnabledVisibleAtomicallyWithSender(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("OPENAI_API_KEY", "")
+
+	srv, err := New(Config{Addr: "127.0.0.1:0", Tools: true, NoChannel: true, NoMemory: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	cfgPath := filepath.Join(tmp, ".octo", "config.yml")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// goal.enabled defaults to true (config.Config.GoalEnabled), left unset here.
+	cfgYAML := "models:\n" +
+		"  - name: t\n" +
+		"    provider: openai\n" +
+		"    model: gpt-test\n" +
+		"    base_url: http://127.0.0.1:1/v1\n" +
+		"    api_key: sk-test\n" +
+		"default_model: t\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	violation := make(chan struct{})
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			srv.senderMu.Lock()
+			sender := srv.sender
+			srv.senderMu.Unlock()
+			enabled := srv.goalsEnabled.Load()
+			if sender != nil {
+				if !enabled {
+					close(violation)
+				}
+				return
+			}
+		}
+	}()
+
+	if err := srv.ensureSender(); err != nil {
+		t.Fatalf("ensureSender: %v", err)
+	}
+	close(stop)
+
+	select {
+	case <-violation:
+		t.Fatal("observed sender != nil with goalsEnabled still false — the channel-manager goal.enabled race is back")
+	case <-time.After(2 * time.Second):
+		// The poller never caught sender==nil-but-about-to-flip in time to
+		// race meaningfully; that's fine — the structural guarantee holds
+		// regardless of whether this run actually raced the two goroutines.
+	}
+}
+
 // ─── New API tests ──────────────────────────────────────────────────────────
 
 func TestHandleOnboardStatus(t *testing.T) {

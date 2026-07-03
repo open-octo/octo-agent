@@ -202,8 +202,13 @@ type Server struct {
 
 	// goalsEnabled mirrors the config's goal.enabled at server start: it
 	// gates the goal-continuation kick after each turn (the goal tools'
-	// visibility is gated separately via tools.SetGoalsEnabled).
-	goalsEnabled bool
+	// visibility is gated separately via tools.SetGoalsEnabled). atomic.Bool
+	// because syncGoalsEnabled can write it from inside ensureSender's
+	// senderMu-guarded section (to close a race with initChannels/
+	// reloadChannel, which read it from other goroutines with no lock of
+	// their own) while every other reader/writer here still needs a
+	// consistent, lock-free way to see the same value.
+	goalsEnabled atomic.Bool
 
 	// confirmation channels (from request_user_feedback in browser).
 	confirmations map[string]chan string
@@ -499,9 +504,19 @@ func (s *Server) enableSubAgentTools() {
 	tools.SetTaskStore(tasks.New())
 	// Session goals: every server turn stamps its session as the ctx-scoped
 	// goal store (doAgentTurn); this only advertises the tools.
+	s.syncGoalsEnabled()
+}
+
+// syncGoalsEnabled reads goal.enabled from the on-disk config and applies it
+// to both the process-global tools flag and s.goalsEnabled. It touches
+// neither senderMu nor any other lock — config.Load() only reads the
+// filesystem — so callers can run it while already holding senderMu without
+// risking the reentrant-lock deadlock enableSubAgentTools itself must avoid
+// (see ensureSender).
+func (s *Server) syncGoalsEnabled() {
 	if cfg, err := config.Load(); err == nil && cfg.GoalEnabled() {
 		tools.SetGoalsEnabled(true)
-		s.goalsEnabled = true
+		s.goalsEnabled.Store(true)
 	}
 }
 
@@ -1033,7 +1048,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	cwd, envCtx := s.sessionCwdEnv(sess)
 	a.CWD = cwd
 	a.MaxTokens = s.cfg.MaxTokens
-	if s.goalsEnabled {
+	if s.goalsEnabled.Load() {
 		// The session is the goal accountant on EVERY turn path built from
 		// it (WS, SSE, REST, scheduled) — a goal created over one transport
 		// must keep accounting when later turns arrive over another.
@@ -1454,6 +1469,19 @@ func (s *Server) ensureSender() error {
 	s.model = model
 	s.provider = provName
 	enableTools := s.cfg.Tools
+	if enableTools {
+		// Sync goal.enabled before releasing senderMu, not after. Once
+		// unlocked, getSender() != nil is visible to other goroutines —
+		// initChannels/reloadChannel gate solely on that and construct a
+		// channel.Manager immediately, locking in whatever s.goalsEnabled
+		// holds at that instant via SetGoalsEnabled. reloadChannel only
+		// re-syncs when it constructs a fresh manager, so a channel-settings
+		// save landing in the gap between unlock and enableSubAgentTools
+		// (below) finishing would otherwise capture a stale value
+		// permanently. syncGoalsEnabled needs no lock of its own, so running
+		// it here adds no deadlock risk.
+		s.syncGoalsEnabled()
+	}
 	s.senderMu.Unlock()
 
 	// enableSubAgentTools reads the default sender via defaultSenderAndModel,
@@ -1686,7 +1714,7 @@ func (s *Server) initChannels() {
 		return
 	}
 	s.channelMgr = channel.NewManager(chCfg, s.buildChannelFactory(), channel.BindByChatUser)
-	s.channelMgr.SetGoalsEnabled(s.goalsEnabled)
+	s.channelMgr.SetGoalsEnabled(s.goalsEnabled.Load())
 	slog.Info("channels enabled", "platforms", strings.Join(platforms, ", "))
 }
 
@@ -1834,7 +1862,7 @@ func (s *Server) reloadChannel(platform string) {
 	s.channelCfg = chCfg
 	if s.channelMgr == nil {
 		s.channelMgr = channel.NewManager(chCfg, s.buildChannelFactory(), channel.BindByChatUser)
-		s.channelMgr.SetGoalsEnabled(s.goalsEnabled)
+		s.channelMgr.SetGoalsEnabled(s.goalsEnabled.Load())
 	}
 
 	s.stopOneChannelLocked(platform)
@@ -2202,7 +2230,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// accountant and the tool store; a tombstoned store (concurrent /unbind)
 	// leaves goals unwired for this turn.
 	goalStore := sess.GoalStore()
-	goalsOn := s.goalsEnabled && goalStore != nil
+	goalsOn := s.goalsEnabled.Load() && goalStore != nil
 	if goalsOn {
 		sess.Agent.GoalAcct = goalStore
 		ctx = tools.WithGoalStore(ctx, goalStore)
