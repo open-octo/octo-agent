@@ -1,0 +1,41 @@
+/*
+ * octo docs theme — indigo accent + monospace headings.
+ * Palette and rationale: dev-docs/docs-site-design.md.
+ */
+
+:root {
+	/* Indigo accent (dark theme, Starlight's default) */
+	--sl-color-accent-low: #312e81;
+	--sl-color-accent: #818cf8;
+	--sl-color-accent-high: #c7d2fe;
+
+	--sl-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+	--sl-font-mono: ui-monospace, 'SF Mono', 'Roboto Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #e0e7ff;
+	--sl-color-accent: #4f46e5;
+	--sl-color-accent-high: #3730a3;
+}
+
+/* octo is a terminal-first tool — headings, the site title, and sidebar
+   group labels use the monospace face; body copy stays humanist sans. */
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6):not(:where(.not-content *)),
+.site-title,
+.group-label .large,
+.hero h1,
+.hero .tagline {
+	font-family: var(--__sl-font-mono);
+	letter-spacing: -0.02em;
+}
+
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6):not(:where(.not-content *)) {
+	font-weight: 700;
+}
+
+/* Maturity badges reuse Starlight's Badge component; keep them monospace too. */
+starlight-aside .aside-title,
+.badge {
+	font-family: var(--__sl-font-mono);
+}

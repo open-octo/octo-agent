@@ -1,0 +1,52 @@
+---
+title: octo-agent docs
+description: The open, self-hostable, model-agnostic take on the coding-agent experience.
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+octo is an MIT-licensed, single Go binary AI agent. It does what the big coding agents do — skills,
+CLI / Web / phone-IM, browser control, an OS-level sandbox — but as an open, self-contained binary
+you fully own, on any model (DeepSeek, Kimi, Anthropic, OpenAI, or anything compatible), with the
+server and your data staying on your own machine.
+
+```bash
+curl -fsSL https://octo-agent.dev/install.sh | sh     # single binary — no Node / Ruby / Python
+octo config                                            # pick a provider, paste a key
+octo "Add a --json flag to 'octo config show' and run the tests"
+```
+
+## octo vs. the field
+
+|  | **octo-agent** | Claude Code | Codex CLI | Hermes Agent |
+|---|---|---|---|---|
+| License / cost | **MIT, free** | proprietary, subscription | open source (Rust), OpenAI plan | MIT, free |
+| Runtime | **single Go binary, zero deps** | native install | native Rust binary | Python (`uv`) |
+| Models | **Anthropic + OpenAI protocols, any compatible endpoint** | Anthropic-first | OpenAI | multi-provider |
+| Deployment | **fully self-hosted** | Anthropic-managed | OpenAI-hosted app + local CLI | self-hosted |
+| Skills | **Claude Code-compatible `SKILL.md`** | native (origin format) | `AGENTS.md` / plugins | own format |
+| Chat platforms | **6 built in** (WeChat, Feishu, DingTalk, WeCom, Discord, Telegram) | none built in | Slack / GitHub / Linear integrations | ~20 platforms |
+
+Details per each project's public docs. The difference is openness, self-hosting, and model
+freedom — not a feature checklist; octo covers the same ground as the closed alternatives.
+
+## Where to go next
+
+<CardGrid>
+	<Card title="Getting Started" icon="rocket">
+		Install octo and run your first task in under five minutes. Start with
+		[Install](/docs/getting-started/install/).
+	</Card>
+	<Card title="Guides" icon="open-book">
+		Task-first walkthroughs — MCP, skills, sandboxing, sub-agents, chat bridges. Start with
+		[Connect MCP servers](/docs/guides/connect-mcp-servers/).
+	</Card>
+	<Card title="Reference" icon="document">
+		Every CLI flag, config key, and tool, in one searchable set of tables. Start with the
+		[CLI reference](/docs/reference/cli/).
+	</Card>
+	<Card title="Architecture" icon="setting">
+		How the agent loop, providers, and tools fit together — for contributors. Start with
+		[System layers](/docs/architecture/system-layers/).
+	</Card>
+</CardGrid>

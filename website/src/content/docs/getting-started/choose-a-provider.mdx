@@ -1,0 +1,76 @@
+---
+title: Choose a provider
+description: Anthropic, OpenAI, DeepSeek/Kimi/Bailian, or any compatible endpoint.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+octo speaks two wire protocols natively — Anthropic Messages and OpenAI Chat Completions — so
+"which provider" really means "which of the two protocols does it speak."
+
+<Tabs>
+<TabItem label="Anthropic">
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+octo --provider anthropic --model claude-sonnet-5 "..."
+```
+
+</TabItem>
+<TabItem label="OpenAI / compatible">
+
+```bash
+export OPENAI_API_KEY=sk-...
+octo --provider openai --model gpt-4o-mini "..."
+```
+
+DeepSeek, Bailian, and other OpenAI-compatible APIs use the same protocol.
+
+</TabItem>
+<TabItem label="Custom endpoint">
+
+Self-hosted and third-party endpoints (vLLM, OpenRouter, a proxy) use the `custom` vendor — the
+only one that takes a custom base URL. Its wire protocol (`openai` | `anthropic`) is chosen per
+config entry, so set it up once with `octo config` (choose **Custom** → pick the protocol → enter
+base URL + model):
+
+```bash
+CUSTOM_BASE_URL=https://api.deepseek.com/anthropic \
+CUSTOM_API_KEY=sk-... \
+  octo --model deepseek-chat "..."
+```
+
+</TabItem>
+</Tabs>
+
+## Save it as your default
+
+```bash
+octo config        # interactive wizard
+octo config show   # print the effective settings + where each came from
+octo config path   # print the file location
+```
+
+`octo config` writes your default provider, model, (optionally) base URL, and reasoning settings to
+`~/.octo/config.yml`, so a bare `octo` works without re-typing `--provider`/`--model` every time.
+
+<Aside type="note" title="Precedence">
+`CLI flag > env var > ~/.octo/config.yml > built-in default`. API keys are read from
+`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` first; the wizard can store one in the file (mode `0600`),
+but the env var is recommended.
+</Aside>
+
+## Extended reasoning
+
+Reasoning models can deliberate before answering. Two knobs control it, both available as CLI flags
+and as `octo config` defaults:
+
+- `--reasoning-effort low|medium|high|xhigh|max` — the intensity. OpenAI-protocol backends receive
+  it as `reasoning_effort`; Anthropic-protocol backends map it to adaptive thinking / an
+  extended-thinking token budget, normalized per model family. Empty (the default) means off.
+- `--show-reasoning` (default **off**) — surface the reasoning/thinking trace for the **Web UI**
+  (`octo serve`) to display. The terminal never renders the trace either way.
+
+This unifies Anthropic `thinking` blocks and OpenAI `reasoning_content` behind one pair of controls.
+
+Next: see the full schema in the [config file reference](/docs/reference/config-file/).

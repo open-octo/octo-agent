@@ -1,0 +1,37 @@
+---
+title: Run long-horizon goals
+description: Give octo an objective that survives across idle periods, not just one turn.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="Beta" variant="caution" /><br /><br />
+
+A goal is a standing objective the agent keeps making progress on across idle periods, instead of
+stopping once the current message is answered.
+
+```text
+/goal Migrate the internal API client from v1 to v2 across all call sites
+/goal edit          # adjust the current goal's objective
+/goal replace       # replace a finished goal with a new one
+```
+
+When a session goes idle with an active goal, octo continues working toward it on its own —
+the same machinery behind `/loop`, applied to a single durable objective instead of a recurring
+prompt. The underlying tools (`get_goal`, `create_goal`, `update_goal`) are also available to the
+model directly, so a goal can be created or refined mid-conversation, not just via the slash command.
+
+## Turning it off
+
+Goals are opt-in per session and can be disabled entirely:
+
+```yaml
+# ~/.octo/config.yml
+goal:
+  enabled: false
+```
+
+With goals disabled, `/goal` reports itself as unavailable rather than silently no-op-ing.
+
+Next: goals compose with [channels](/docs/guides/channels/) — start one from your phone, let it run,
+and check back later.

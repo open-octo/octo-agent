@@ -1,0 +1,97 @@
+---
+title: Config file
+description: The ~/.octo/config.yml schema.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`~/.octo/config.yml` holds your default provider(s), model(s), and global settings, so a bare
+`octo` works without re-typing flags. Every field is optional — a missing file, or a missing field,
+falls back to the built-in default. Manage it with `octo config` rather than hand-editing where
+possible.
+
+<Aside type="caution" title="Renamed from config.yaml">
+Older installs may still have `~/.octo/config.yaml` (a single top-level provider/model pair). It's
+still read if `config.yml` is absent; the first `octo config` save migrates it and parks the old
+file as `config.yaml.bak`.
+</Aside>
+
+## Top-level keys
+
+| Key | Type | Description |
+|---|---|---|
+| `models` | list of [model entry](#model-entry) | Named model configurations |
+| `default_model` | string | Entry used when nothing else selects one; empty falls back to the first entry |
+| `lite_model` | string | Entry used for cheap internal calls (history compaction) |
+| `permission_mode` | string | `interactive` \| `strict` \| `auto` |
+| `coauthor` | bool | Append `Co-authored-by` to git commits the agent writes (default `true`) |
+| `access_key` | string | Shared secret for Web UI / API auth when exposed beyond loopback |
+| `compact_auto_pct` | int | Auto-compaction threshold as % of the context window (default `75`) |
+| `compact_batch_threshold` | int | Compaction trigger after a tool batch; `<0` disables |
+| `show_reasoning` | bool | Global default for surfacing the reasoning trace to the Web UI |
+| `workspace_dir` | string | Default working dir for new web sessions; `"auto"` → `~/Desktop/octo` |
+| `tools` | [tools block](#tools-block) | Per-tool behavior knobs |
+| `browser` | [browser block](#browser-block) | Chrome connection settings |
+| `goal` | `{ enabled: bool }` | Gates `/goal` and the goal tools (default enabled) |
+
+## Model entry
+
+Each item in `models:` is a complete, independently-selectable configuration. `--model <name>`
+selects the whole entry; two entries can't share a model string.
+
+| Key | Type | Description |
+|---|---|---|
+| `provider` | string | `anthropic` \| `openai` \| `custom` |
+| `model` | string | The model's identity — also the id used by `--model` and the HTTP API |
+| `protocol` | string | Wire format for the `custom` vendor only: `anthropic` \| `openai` |
+| `base_url` | string | Endpoint override; empty uses the vendor default |
+| `api_key` | string | Plaintext fallback used only if the provider's env var is empty (mode `0600`) |
+| `reasoning_effort` | string | `low` \| `medium` \| `high` \| `xhigh` \| `max`; empty = off |
+| `show_reasoning` | bool | Per-entry override of the global `show_reasoning` |
+| `vision` | bool | Whether tools may hand this model images; auto-detected for known models |
+
+```yaml
+models:
+  - provider: anthropic
+    model: claude-sonnet-5
+  - provider: custom
+    protocol: anthropic
+    model: deepseek-chat
+    base_url: https://api.deepseek.com/anthropic
+default_model: claude-sonnet-5
+lite_model: claude-sonnet-5
+permission_mode: interactive
+coauthor: true
+```
+
+## Tools block
+
+```yaml
+tools:
+  tool_search:
+    enabled: auto          # auto (default) | on | off
+    threshold_pct: 10
+    search_default_limit: 5
+    max_search_limit: 20
+  disabled_skills: []
+```
+
+`disabled_skills` hides listed skills from the model and the UI without deleting them from disk.
+See [Connect MCP servers](/docs/guides/connect-mcp-servers/) for what `tool_search` does.
+
+## Browser block
+
+```yaml
+browser:
+  attach_running: true   # reuse your logged-in Chrome instead of a throwaway profile
+  connect_port: 9222      # attach via --remote-debugging-port instead
+  headless: false          # off by default — interactive workflows want to watch
+  user_data_dir: ""
+  exec_path: ""
+  download_dir: ""
+```
+
+See [Automate with browser control](/docs/guides/browser-automation/).
+
+Next: everything here has a matching CLI flag — see the [CLI reference](/docs/reference/cli/) for
+the per-run override.
