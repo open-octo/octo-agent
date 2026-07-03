@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -1195,9 +1196,6 @@ func (m *tuiModel) View() string {
 	if m.quit {
 		return ""
 	}
-	if m.modal != nil {
-		return m.modalView()
-	}
 
 	var b strings.Builder
 
@@ -1368,6 +1366,15 @@ func (m *tuiModel) View() string {
 		b.WriteByte('\n')
 	}
 
+	// An active Ask prompt (permission / question) takes the input box's place
+	// while everything above — streaming text, activity spinner, task list,
+	// panels — stays visible, so the user decides with the model's reasoning
+	// still on screen instead of a bare full-screen dialog.
+	if m.modal != nil {
+		b.WriteString(m.modalView())
+		return b.String()
+	}
+
 	// Slash-command completion menu, right above the input box (Claude Code style).
 	b.WriteString(m.completionView())
 
@@ -1520,17 +1527,32 @@ func abbreviateHome(path string) string {
 	return path
 }
 
+// permissionDetailMaxLines caps the command / input preview inside the
+// permission prompt. Most real commands fit; the fold marker makes a longer
+// one visible as "there is more you haven't seen" rather than silently hiding it.
+const permissionDetailMaxLines = 10
+
+// permissionValueCap bounds one input value's preview in the generic
+// key: value rendering. Generous — the point of the prompt is that the user
+// sees what they're approving.
+const permissionValueCap = 200
+
 func (m *tuiModel) modalView() string {
 	st := m.modal
 	var b strings.Builder
 
 	if st.prompt.Kind == KindPermission {
-		b.WriteString(modalStyle.Render("⚠ permission"))
+		// Unboxed on purpose: the body must show the full command / diff, and
+		// long unclipped lines inside a lipgloss border make the box wider
+		// than the terminal and garble it. A clipped body would be worse — a
+		// permission prompt that hides the tail of the command it's asking
+		// about. Natural wrapping keeps every character visible.
+		b.WriteString(modalStyle.Render("⚠ permission — " + st.prompt.ToolName))
 		b.WriteByte('\n')
-		b.WriteString(fmt.Sprintf("%s wants to run\n", st.prompt.ToolName))
-		b.WriteString(fmt.Sprintf("  %s\n", summariseInput(st.prompt.ToolInput)))
+		b.WriteString(renderPermissionDetail(st.prompt.ToolName, st.prompt.ToolInput, m.width))
+		b.WriteByte('\n')
 		b.WriteString(hintStyle.Render("[y]es · [a]lways this session · [n]o/Esc"))
-		return tui.Box(b.String())
+		return b.String()
 	}
 
 	header := st.prompt.Header
@@ -1566,6 +1588,94 @@ func (m *tuiModel) modalView() string {
 	}
 	b.WriteString(hintStyle.Render(hint))
 	return tui.Box(b.String())
+}
+
+// renderPermissionDetail renders what a permission prompt is actually asking
+// to do: the full command for terminal, the diff for edit_file, and a
+// key: value listing for everything else. Every path favours visibility over
+// tidiness — the user is authorizing this content, so nothing load-bearing
+// may be truncated to a one-line summary (the pre-#1092 behaviour capped the
+// whole thing at 60 runes).
+func renderPermissionDetail(toolName string, input map[string]any, width int) string {
+	switch toolName {
+	case "terminal":
+		if cmd, _ := input["command"].(string); strings.TrimSpace(cmd) != "" {
+			return renderPermissionBlock(cmd)
+		}
+	case "edit_file":
+		path, _ := input["path"].(string)
+		oldS, _ := input["old_string"].(string)
+		newS, _ := input["new_string"].(string)
+		if path != "" {
+			return tui.RenderEditCard(path, oldS, newS, width)
+		}
+	}
+	if len(input) == 0 {
+		return hintStyle.Render("  (no input)")
+	}
+	keys := make([]string, 0, len(input))
+	for k := range input {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	shown := keys
+	if len(shown) > permissionDetailMaxLines {
+		shown = shown[:permissionDetailMaxLines]
+	}
+	for i, k := range shown {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		v := fmt.Sprintf("%v", input[k])
+		lines := strings.Split(v, "\n")
+		if len(lines) == 1 {
+			b.WriteString("  " + k + ": " + truncateRunes(v, permissionValueCap))
+			continue
+		}
+		// Multi-line values (SQL, write_file content, MCP payloads) show their
+		// head — enough to judge what's being approved — then fold, so one
+		// value can't swallow the whole prompt. The rune cap bounds long lines.
+		const perValueLines = 4
+		vshown := lines
+		if len(lines) > perValueLines {
+			vshown = lines[:perValueLines]
+		}
+		b.WriteString("  " + k + ":")
+		for _, l := range vshown {
+			b.WriteString("\n    " + truncateRunes(l, permissionValueCap))
+		}
+		if extra := len(lines) - len(vshown); extra > 0 {
+			b.WriteString("\n    " + hintStyle.Render(fmt.Sprintf("… +%d more lines", extra)))
+		}
+	}
+	if extra := len(keys) - len(shown); extra > 0 {
+		b.WriteString("\n  " + hintStyle.Render(fmt.Sprintf("… +%d more", extra)))
+	}
+	return b.String()
+}
+
+// renderPermissionBlock renders a multi-line text body (a shell command)
+// indented, capped at permissionDetailMaxLines with a fold marker. Lines are
+// NOT width-clipped: a permission prompt hiding the tail of a long command
+// would be approving blind; letting the terminal wrap keeps it all visible.
+func renderPermissionBlock(text string) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	shown, extra := lines, 0
+	if len(lines) > permissionDetailMaxLines {
+		shown, extra = lines[:permissionDetailMaxLines], len(lines)-permissionDetailMaxLines
+	}
+	var b strings.Builder
+	for i, l := range shown {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString("  " + l)
+	}
+	if extra > 0 {
+		b.WriteString("\n  " + hintStyle.Render(fmt.Sprintf("… +%d more lines", extra)))
+	}
+	return b.String()
 }
 
 // cacheLine formats the per-turn cache footer, or "" when nothing to show.
