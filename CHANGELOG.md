@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] — 2026-07-03
+
+### Added
+- **loop-engineering skill + daily-triage workflow.** Teaches an agent to
+  design a self-running coding loop on octo's existing primitives — trigger
+  → triage → state → worktree → implementer → verifier → human gate. Ships
+  one embedded default workflow, `daily-triage`, that runs the pattern
+  end-to-end; six further examples (`issue-triage`, `pr-babysitter`,
+  `ci-sweeper`, `dependency-sweeper`, `changelog-drafter`,
+  `post-merge-cleanup`) ship as read-and-adapt reference templates bundled
+  with the skill rather than always-on defaults, since several of them take
+  real action on a repo (retrying CI, updating dependencies, deleting
+  branches) (#1083).
+- **zoom-out skill.** Gives a higher-level map of an unfamiliar area of
+  code — modules, responsibilities, callers, and the project's own domain
+  vocabulary (`.octorules`, `CONTEXT.md`, `dev-docs/`) — before diving into
+  implementation details (#1084).
+- **Astro Starlight documentation site.** octo-agent.dev now documents
+  slash commands, built-in skills, workflows, and browser record/replay
+  (#1071, #1081, #1082).
+
+### Fixed
+- **Silent stream truncation and a wedged small-session overflow
+  recovery.** A clean SSE close with no terminal event (`[DONE]`/
+  `finish_reason` on OpenAI, `message_stop` on Anthropic) was presented as
+  a successful reply instead of retried; separately, the overflow-recovery
+  `clamp()` could return an out-of-range bound on small histories,
+  permanently no-op'ing aggressive recovery and wedging sessions that 413
+  on an oversized tool result (#1068).
+- **IM `/goal` command now respects `goal.enabled`.** REST and TUI already
+  gated goal mutations behind the config flag; the IM channel manager's
+  `/goal` didn't, so a goal set over a bound IM platform while goals were
+  disabled silently persisted and reactivated later (#1070).
+- **Goal status transitions guarded; objective-updated steer wired.**
+  `SetGoalStatus` now rejects reactivating a completed goal directly (only
+  `EditGoalObjective`/`ReplaceGoal` may do that); editing a goal's
+  objective mid-turn now injects a steer into the running turn instead of
+  silently continuing toward the stale objective (#1075).
+- **Browser `run_skill` param contract enforced; `ClickFollow` tab race
+  fixed.** Unknown params and unresolved `{{placeholder}}`s are now
+  rejected instead of silently reaching the browser as literal text;
+  `ClickFollow` now prefers the CDP target whose `openerId` matches the
+  clicking page, instead of grabbing any new tab that appears in its poll
+  window (#1076).
+- **WeChat iLink login/restart flow.** The `channel-manager` skill now asks
+  before assuming a cached login is still valid, offers to restart `octo
+  serve` itself after a config change, and fixes macOS `pgrep` process
+  detection (#1078).
+
+### Changed
+- **`.octorules` and `CLAUDE.md` synced**, and a README claim that
+  mischaracterized their relationship (`.octorules` as "human-facing",
+  `CLAUDE.md` as its AI expansion) corrected — both are parallel files for
+  two different AI coding tools (#1085).
+- **README corrections:** stale config filename and inaccurate
+  reasoning-flag claims fixed (#1080).
+- **`docs/` renamed to `landing/`**, freeing up `docs/` for the new
+  documentation site (#1077).
+
 ## [1.7.0] — 2026-07-02
 
 ### Added
