@@ -207,8 +207,8 @@ CUSTOM_BASE_URL=https://api.deepseek.com/anthropic \
 CUSTOM_API_KEY=sk-... \
   octo --model deepseek-chat "..."
 
-# Extended reasoning: set the intensity (Anthropic thinking / OpenAI reasoning_effort)
-# and stream the dimmed thinking trace. --show-reasoning=false hides the trace.
+# Extended reasoning: set the intensity (Anthropic thinking / OpenAI reasoning_effort).
+# --show-reasoning surfaces the trace to the Web UI (octo serve); the terminal never renders it.
 octo --reasoning-effort high "..."
 
 # Plain chat with no tools / MCP / skills
@@ -248,14 +248,14 @@ The identity and rule files support `@include path/to/fragment.md` to pull in sh
 
 Reasoning models can deliberate before answering. Two knobs control it, both available as CLI flags and as `octo config` defaults:
 
-- `--reasoning-effort low|medium|high` — the intensity. OpenAI-protocol backends receive it as `reasoning_effort`; Anthropic-protocol backends map it to an extended-thinking token budget. Empty (the default) means off.
-- `--show-reasoning` (default on) — stream the thinking trace to the terminal, dimmed. `--show-reasoning=false` keeps reasoning enabled but hides the trace.
+- `--reasoning-effort low|medium|high|xhigh|max` — the intensity. OpenAI-protocol backends receive it as `reasoning_effort`; Anthropic-protocol backends map it to adaptive thinking or an extended-thinking token budget, normalized per model family. Empty (the default) means off.
+- `--show-reasoning` (default **off**) — surface the reasoning trace for the **Web UI** (`octo serve`) to display. The terminal never renders it either way.
 
 This unifies Anthropic `thinking` blocks and OpenAI `reasoning_content` behind one pair of controls.
 
 ### Defaults (`octo config`)
 
-`octo config` saves your default provider, model, (optionally) base URL, and reasoning settings to `~/.octo/config.yaml`, so a bare `octo` works without re-typing `--provider`/`--model` every time:
+`octo config` saves your default provider, model, (optionally) base URL, and reasoning settings to `~/.octo/config.yml`, so a bare `octo` works without re-typing `--provider`/`--model` every time:
 
 ```bash
 octo config        # interactive wizard
@@ -263,7 +263,7 @@ octo config show   # print the effective settings + where each comes from
 octo config path   # print the file location
 ```
 
-Precedence is **CLI flag > env var > `~/.octo/config.yaml` > built-in default**. API keys are read from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` first; the wizard can store one in the file (mode `0600`), but the env var is recommended.
+Precedence is **CLI flag > env var > `~/.octo/config.yml` > built-in default**. API keys are read from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` first; the wizard can store one in the file (mode `0600`), but the env var is recommended.
 
 ### MCP Tool Search
 
@@ -273,7 +273,7 @@ When MCP servers expose many tools, uploading every tool schema on every turn wa
 - `mcp_describe` — load the full JSON Schema for one discovered tool.
 - `mcp_call` — invoke the tool with arguments matching that schema.
 
-The model uses the same three-step flow automatically. Configure when the bridge activates in `~/.octo/config.yaml`:
+The model uses the same three-step flow automatically. Configure when the bridge activates in `~/.octo/config.yml`:
 
 ```yaml
 tools:
