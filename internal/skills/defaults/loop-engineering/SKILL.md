@@ -127,7 +127,61 @@ A loop must NOT, without explicit user approval:
 
 When a loop wants to do one of these, stop and ask.
 
-### 7. Start with L1 (report-only)
+### 7. Make it run (the difference between a workflow and a loop)
+
+A **workflow** is a single script. A **loop** is a workflow plus a trigger plus a
+state file that keeps running. After you have a workflow, you must choose a
+trigger and actually schedule it. Do not end this skill without either scheduling
+the loop or explicitly telling the user why this specific case should stay
+manual.
+
+#### Option A: Persistent cron schedule (recommended for production loops)
+
+Use `cron-task-creator` so the loop runs even when you close octo.
+
+```bash
+octo /cron-task-creator
+```
+
+Fill in:
+- **Name**: the same name as your loop (e.g. `octo-issue-triage`)
+- **Cron**: a valid cron expression (e.g. `0 9 * * *` for daily 09:00 UTC)
+- **Prompt**: the exact command to run the loop, e.g.:
+
+```text
+Run the saved workflow `octo-issue-triage` in L1 mode for the open-octo/octo-agent repository.
+workflow(name: "octo-issue-triage", args: {"mode": "L1", "limit": 30})
+```
+
+- **Directory**: the project directory where `.octo/` and the workflow live
+- **Model / Agent**: optional
+
+After saving, the task lives in `~/.octo/tasks/` and runs on schedule via the
+octo scheduler. You can list/disable it later with `cron-task-creator` subcommands.
+
+#### Option B: In-session loop (good for temporary focus)
+
+Use `/loop` when you want octo to keep checking something only while this
+session is alive.
+
+```bash
+octo /loop 1h run octo-issue-triage
+```
+
+This is useful for:
+- Watching a CI job until it finishes.
+- Re-checking a flaky issue every hour while you debug.
+- Proving a loop works before committing to a cron schedule.
+
+It will **not** survive if you close the session or restart octo serve.
+
+#### Option C: Event-driven trigger
+
+If your loop should react to GitHub events, use a GitHub webhook or a GitHub
+Action that calls octo's HTTP API to trigger the task. This is more work to set
+up, but it avoids polling and wasted runs.
+
+### 8. Start with L1 (report-only)
 
 Roll out in phases:
 
@@ -139,12 +193,15 @@ Never jump to L3 on the first run.
 
 ## Output of this skill
 
-After using this skill, you should produce:
+After using this skill, you must produce:
 
-1. A `LOOP.md` in the project root describing the loop's purpose, cadence, and safety rules.
+1. A `LOOP.md` in the project root describing the loop's purpose, cadence, safety rules, and trigger.
 2. A `STATE.md` template in `.octo/` for the loop to use across runs.
-3. Optionally a `workflow` template or a scheduled task definition.
-4. A one-run validation: execute the loop once and report what it found and what it did.
+3. A `workflow` or a concrete set of sub-agent prompts that the loop will execute.
+4. A **scheduled task definition** (via `cron-task-creator`) or an explicit note explaining why this loop should stay manual.
+5. A one-run validation: execute the loop once and report what it found and what it did.
+
+If the user wants a self-running loop, do not stop at "here is the design." Stop only when you have either scheduled it or written down the exact command the user can paste to schedule it.
 
 ## Built-in workflow
 
