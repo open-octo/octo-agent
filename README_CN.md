@@ -157,14 +157,15 @@ octo --stream=false "..."
 # OpenAI / DeepSeek / 百炼（OpenAI 兼容）
 octo --provider openai --model gpt-4o-mini "..."
 
-# Anthropic 协议兼容的第三方（DeepSeek、Kimi 等）——自定义 base URL
-# 走 *_compatible 万能 vendor（也只有它们接受自定义端点）
-ANTHROPIC_COMPATIBLE_BASE_URL=https://api.deepseek.com/anthropic \
-ANTHROPIC_COMPATIBLE_API_KEY=sk-... \
-  octo --provider anthropic_compatible --model deepseek-chat "..."
+# 自托管 / 第三方端点走 `custom` vendor —— 唯一接受自定义 base URL 的 vendor。
+# 它的协议（openai | anthropic）按配置项单独选择，先用 `octo config` 设置一次
+# （选 Custom → 选协议 → 填 base URL + model），然后：
+CUSTOM_BASE_URL=https://api.deepseek.com/anthropic \
+CUSTOM_API_KEY=sk-... \
+  octo --model deepseek-chat "..."
 
-# 扩展推理：设置思考强度（Anthropic thinking / OpenAI reasoning_effort），
-# 并以暗色流式显示思考轨迹。--show-reasoning=false 可隐藏轨迹。
+# 扩展推理：设置思考强度（Anthropic thinking / OpenAI reasoning_effort）。
+# --show-reasoning 会把思考轨迹提供给 Web UI 显示；终端始终不渲染。
 octo --reasoning-effort high "..."
 
 # 纯聊天，关闭工具 / MCP / skills
@@ -202,14 +203,14 @@ Octo 的系统提示由若干可选层叠加而成（后者覆盖前者）：
 
 推理模型可以在回答前先思考。两个开关控制它，都同时支持 CLI flag 和 `octo config` 默认值：
 
-- `--reasoning-effort low|medium|high` —— 思考强度。OpenAI 协议后端作为 `reasoning_effort` 发送；Anthropic 协议后端映射成扩展思考的 token budget。留空（默认）即关闭。
-- `--show-reasoning`（默认开）—— 以暗色把思考轨迹流式打到终端。`--show-reasoning=false` 保留推理但隐藏轨迹。
+- `--reasoning-effort low|medium|high|xhigh|max` —— 思考强度。OpenAI 协议后端作为 `reasoning_effort` 发送；Anthropic 协议后端会按模型 family 映射成自适应思考或扩展思考的 token budget。留空（默认）即关闭。
+- `--show-reasoning`（默认**关闭**）—— 把思考轨迹提供给 **Web UI**（`octo serve`）显示。终端始终不渲染思考轨迹。
 
 这把 Anthropic 的 `thinking` 块和 OpenAI 的 `reasoning_content` 统一到同一对开关之下。
 
 ### 默认值（`octo config`）
 
-`octo config` 把默认 provider、model、（可选）base URL 和推理设置存到 `~/.octo/config.yaml`，这样裸跑 `octo` 就不必每次重敲 `--provider`/`--model`：
+`octo config` 把默认 provider、model、（可选）base URL 和推理设置存到 `~/.octo/config.yml`，这样裸跑 `octo` 就不必每次重敲 `--provider`/`--model`：
 
 ```bash
 octo config        # 交互式向导
@@ -217,7 +218,7 @@ octo config show   # 打印当前生效设置及各项来源
 octo config path   # 打印配置文件路径
 ```
 
-优先级：**命令行 flag > 环境变量 > `~/.octo/config.yaml` > 内置默认**。API key 优先从 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 读取；向导可选择把 key 存进文件（权限 `0600`），但推荐用环境变量。
+优先级：**命令行 flag > 环境变量 > `~/.octo/config.yml` > 内置默认**。API key 优先从 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 读取；向导可选择把 key 存进文件（权限 `0600`），但推荐用环境变量。
 
 ### MCP Tool Search
 
@@ -227,7 +228,7 @@ octo config path   # 打印配置文件路径
 - `mcp_describe` —— 加载某个发现工具的完整 JSON Schema。
 - `mcp_call` —— 用匹配该 schema 的参数调用工具。
 
-模型会自动走这套三步协议。在 `~/.octo/config.yaml` 里配置桥工具的激活时机：
+模型会自动走这套三步协议。在 `~/.octo/config.yml` 里配置桥工具的激活时机：
 
 ```yaml
 tools:
