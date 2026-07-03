@@ -404,3 +404,34 @@ func TestSendStream_MidStreamResetIsTransient(t *testing.T) {
 		t.Errorf("mid-stream reset should be transient, got %v", err)
 	}
 }
+
+// TestSendStream_CleanCloseWithoutTerminalEvent_IsTransient covers a
+// connection that drops exactly on an SSE event boundary mid-tool-call:
+// content_block_start and an input_json_delta both arrive as complete, valid
+// JSON (so neither fails to parse nor trips scanner.Err()), but the stream
+// ends with no message_delta/stop_reason and no message_stop. Before this was
+// fixed, that silently produced a "successful" tool_use response with
+// nil/garbled arguments instead of an error the agent loop could retry.
+func TestSendStream_CleanCloseWithoutTerminalEvent_IsTransient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"edit_file"}}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}`+"\n\n")
+		// Connection closes cleanly here — no message_delta, no message_stop.
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	_, err := c.SendStream(context.Background(), provider.Request{
+		Model: "x", Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{})
+	if err == nil {
+		t.Fatal("expected an error from the terminated-without-terminal-event stream")
+	}
+	var ts interface{ TransientStream() bool }
+	if !errors.As(err, &ts) || !ts.TransientStream() {
+		t.Errorf("clean close without a terminal event should be transient, got %v", err)
+	}
+}

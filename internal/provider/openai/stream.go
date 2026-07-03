@@ -113,11 +113,12 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 	defer resp.Body.Close()
 
 	var (
-		contentB   strings.Builder
-		reasoningB strings.Builder
-		result     provider.Response
-		toolStates = map[int]*toolCallState{} // keyed by tool call index
-		toolOrder  []int                      // preserve order
+		contentB    strings.Builder
+		reasoningB  strings.Builder
+		result      provider.Response
+		toolStates  = map[int]*toolCallState{} // keyed by tool call index
+		toolOrder   []int                      // preserve order
+		sawTerminal bool                       // [DONE] or a finish_reason chunk was observed
 	)
 
 	// Guard the body read against a mid-stream stall: if the server stops
@@ -142,7 +143,9 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		}
 		if data == "[DONE]" {
 			// Terminal sentinel. Some compatible servers omit it; we treat
-			// EOF as equivalent.
+			// EOF as equivalent as long as a finish_reason chunk landed first
+			// (see sawTerminal check after the loop).
+			sawTerminal = true
 			break
 		}
 
@@ -232,6 +235,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 				stopReason = "max_tokens"
 			}
 			result.StopReason = stopReason
+			sawTerminal = true
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -240,6 +244,16 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		// instead of failing the turn. A caller cancellation passes through
 		// untouched (see retry.AsTransientStream).
 		return result, retry.AsTransientStream(fmt.Errorf("openai: stream read: %w", err))
+	}
+	// The scanner hit a clean EOF (no read error) without ever seeing a
+	// finish_reason chunk or [DONE]. Each individual `data:` line was valid,
+	// self-contained JSON, so this isn't caught by the parse-error or
+	// scanner.Err() checks above — it's a connection that dropped exactly on
+	// an SSE line boundary mid-generation (idle LB/proxy reset). Treating it
+	// as success would silently hand back garbled tool-call arguments or a
+	// truncated reply with no error and no retry.
+	if !sawTerminal && (contentB.Len() > 0 || reasoningB.Len() > 0 || len(toolOrder) > 0) {
+		return result, retry.AsTransientStream(errors.New("openai: stream ended without a terminal event (truncated mid-generation)"))
 	}
 
 	result.Content = contentB.String()

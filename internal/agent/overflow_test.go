@@ -41,6 +41,21 @@ func TestParseOverflowTokens(t *testing.T) {
 	}
 }
 
+// TestComputePullBack_SmallHistoryStaysInBounds guards against a regression
+// where clamp(half, 4, historyLen-2) returned an out-of-range value (the
+// floor of 4) whenever historyLen-2 fell below it, which made the caller's
+// own "k >= len(msgs)-1" guard reject every aggressive pull-back attempt for
+// 4-5 message histories — silently disabling Layer 2 overflow recovery
+// exactly when the small, single-turn histories that trip it need it most.
+func TestComputePullBack_SmallHistoryStaysInBounds(t *testing.T) {
+	for historyLen := 4; historyLen <= 10; historyLen++ {
+		k := computePullBack(historyLen, pullBackAggressive)
+		if k <= 0 || k >= historyLen-1 {
+			t.Errorf("computePullBack(%d, aggressive) = %d, want in [1, %d]", historyLen, k, historyLen-2)
+		}
+	}
+}
+
 // dummyOverflowTools gives Run/RunStream enough reason to enter runLoop rather
 // than falling back to the plain Turn path.
 var dummyOverflowTools = []ToolDefinition{{Name: "bash", Description: "shell"}}

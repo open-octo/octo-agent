@@ -242,7 +242,15 @@ func computePullBack(historyLen, mode int) int {
 	return clamp(half, 4, historyLen-2) // keep system + at least 1 message
 }
 
+// clamp bounds v to [min, max]. When the range is infeasible (max < min —
+// e.g. a small history where "keep at least 1 message" caps below the
+// aggressive-mode floor), max wins: it's the hard safety bound against
+// popping too much history, so returning it degrades gracefully instead of
+// handing back an out-of-range value the caller would reject outright.
 func clamp(v, min, max int) int {
+	if max < min {
+		return max
+	}
 	if v < min {
 		return min
 	}
