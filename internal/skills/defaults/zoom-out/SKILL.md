@@ -25,7 +25,8 @@ Figure out what "this area" means before exploring:
 Before naming anything yourself, check for the project's own terms — using the
 project's real names beats inventing generic ones:
 
-- `CLAUDE.md` / `CLAUDE.local.md` (root and any ancestor directory of the area)
+- `.octorules` in the project root (octo's own project-conventions file) and
+  `~/.octo/octorules.md` for cross-project conventions
 - `CONTEXT.md`, `GLOSSARY.md`, or `README.md` at the repo root or in the area
 - Design docs under `dev-docs/`, `docs/adr/`, or similar — often named after the
   subsystem itself
@@ -33,8 +34,8 @@ project's real names beats inventing generic ones:
   files (e.g. "Spawner", "Sender", "prelude") is a domain term worth reusing;
   a name that appears once is probably just a local variable
 
-Cite where a term came from if it's not obvious ("per CLAUDE.md's five-layer
-stack…", "per dev-docs/x-design.md…") so the user can tell you're using their
+Cite where a term came from if it's not obvious ("per .octorules…",
+"per dev-docs/x-design.md…") so the user can tell you're using their
 vocabulary, not a paraphrase.
 
 ## 3. Gather structure efficiently
