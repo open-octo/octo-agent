@@ -868,7 +868,7 @@ func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, bl
 		// queued meanwhile take priority — GoalContinuation is only consulted
 		// when the queue is empty, and its own guards (status, zero-progress
 		// suppression) decide whether the loop keeps going.
-		if s.goalsEnabled && !s.steerPending(sess.ID) {
+		if s.goalsEnabled.Load() && !s.steerPending(sess.ID) {
 			if prompt, ok := sess.GoalContinuation(); ok {
 				s.enqueueSteer(sess.ID, agent.InboxItem{Text: prompt})
 			}
@@ -1116,7 +1116,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	reply, err := a.RunStream(runCtx, content, toolDefs, executor, handler)
 	// Whether this turn was goal-continuation-kicked, read before the error
 	// handling below consumes the pending mark via SuppressGoalContinuation.
-	goalContWasPending := s.goalsEnabled && sess.GoalContinuationPending()
+	goalContWasPending := s.goalsEnabled.Load() && sess.GoalContinuationPending()
 
 	// Save history even on interrupt — finishInterrupted repairs it so the
 	// session stays well-formed for the next turn.
@@ -1140,7 +1140,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		// persistent error is unbounded paid retries. The zero-progress audit
 		// can't catch either — partial replies were already billed. A later
 		// user turn's token progress (or any goal mutation) re-arms.
-		if s.goalsEnabled {
+		if s.goalsEnabled.Load() {
 			sess.SuppressGoalContinuation()
 		}
 		if errors.Is(err, context.Canceled) {
@@ -1157,7 +1157,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// continuation still parks: pending is stale there, but the next
 			// continuation would hit the same limit, so parking early is the
 			// cheaper outcome.)
-			if s.goalsEnabled && goalContWasPending && agent.IsRateLimitErr(err) {
+			if s.goalsEnabled.Load() && goalContWasPending && agent.IsRateLimitErr(err) {
 				if g, gerr := sess.SetGoalStatus(agent.GoalUsageLimited); gerr == nil {
 					s.broadcastGoalUpdated(sess.ID, g)
 				}

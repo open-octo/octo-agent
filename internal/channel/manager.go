@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -164,6 +165,13 @@ type Manager struct {
 	mu      sync.RWMutex
 	running bool
 	cancel  context.CancelFunc
+
+	// goalsEnabled mirrors the main config's goal.enabled (default true,
+	// matching config.Config.GoalEnabled's default). The server sets it via
+	// SetGoalsEnabled once it has loaded the real config; until then /goal
+	// stays enabled so tests and callers that never call SetGoalsEnabled see
+	// the historical always-on behavior.
+	goalsEnabled atomic.Bool
 }
 
 // NewManager creates a Manager. If mode is empty it defaults to BindByChatUser.
@@ -171,12 +179,24 @@ func NewManager(cfg *Config, factory AgentFactory, mode BindingMode) *Manager {
 	if mode == "" {
 		mode = BindByChatUser
 	}
-	return &Manager{
+	m := &Manager{
 		cfg:      cfg,
 		factory:  factory,
 		mode:     mode,
 		bindings: newBindingStore(),
 	}
+	m.goalsEnabled.Store(true)
+	return m
+}
+
+// SetGoalsEnabled mirrors the main config's goal.enabled into the manager, so
+// the IM /goal command is gated the same way the REST and TUI surfaces are
+// (internal/server/goal.go, cmd/octo/chat.go). Without this, /goal.enabled:
+// false could be silently bypassed via any bound IM platform: a goal set
+// through chat would persist to the session's backing store and spring back
+// to life the moment a REST/TUI/Web surface later touches that same session.
+func (m *Manager) SetGoalsEnabled(enabled bool) {
+	m.goalsEnabled.Store(enabled)
 }
 
 // resolveStoreID returns the on-disk session store ID a chat should use: the
@@ -312,6 +332,9 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 // session's goal methods are mutex-guarded and the turn's accounting picks
 // the change up at its next tick.
 func (m *Manager) cmdGoal(ev InboundEvent, args string) string {
+	if !m.goalsEnabled.Load() {
+		return "Goals are disabled (goal.enabled)."
+	}
 	key := sessionKeyFor(m.mode, ev)
 	val, loaded := m.sessions.Load(key)
 	if !loaded {

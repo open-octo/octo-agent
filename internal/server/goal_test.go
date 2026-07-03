@@ -58,7 +58,7 @@ func goalTestServer(t *testing.T) (*Server, *agent.Session) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.initWS()
-	srv.goalsEnabled = true
+	srv.goalsEnabled.Store(true)
 	srv.turnRunning = make(map[string]bool)
 	srv.steerQueues = make(map[string][]agent.InboxItem)
 	srv.sessionAgents = make(map[string]*agent.Agent)
@@ -194,7 +194,7 @@ func TestGoalRESTEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	srv.goalsEnabled = true
+	srv.goalsEnabled.Store(true)
 
 	do := func(method, path, body string) *httptest.ResponseRecorder {
 		var rd io.Reader
@@ -260,7 +260,7 @@ func TestGoalRESTEndpoints(t *testing.T) {
 	}
 
 	// Disabled server rejects mutations.
-	srv.goalsEnabled = false
+	srv.goalsEnabled.Store(false)
 	if w = do(http.MethodPut, goalPath, `{"objective":"x"}`); w.Code != http.StatusForbidden {
 		t.Fatalf("disabled PUT: %d", w.Code)
 	}
@@ -318,7 +318,7 @@ func TestChannelTurn_GoalContinuationAndZeroProgressStop(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	srv := chanServer(t)
-	srv.goalsEnabled = true
+	srv.goalsEnabled.Store(true)
 	ad := &fullFakeAdapter{}
 
 	sess := srv.channelMgr.GetOrCreateSession(evFor("x"))
@@ -361,7 +361,7 @@ func TestChannelTurn_BudgetCrossingSendsNotice(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	srv := chanServer(t)
-	srv.goalsEnabled = true
+	srv.goalsEnabled.Store(true)
 	// Replace the factory-made zero-usage agent with one that reports usage.
 	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
 		return agent.New(&usageStubSender{}, "stub-model")

@@ -61,7 +61,7 @@ func (s *Server) goalSession(sessionID string) (*agent.Session, error) {
 // reports the outcome as a toast plus a goal_updated broadcast so every tab's
 // chip refreshes.
 func (s *Server) wsGoalCommand(sessionID, args string) {
-	if !s.goalsEnabled {
+	if !s.goalsEnabled.Load() {
 		s.wsToast(sessionID, "Goals are disabled (goal.enabled)", "error")
 		return
 	}
@@ -101,7 +101,7 @@ func (s *Server) handleGetSessionGoal(w http.ResponseWriter, r *http.Request) {
 // pauses/resumes; replace=true mints a fresh goal with the given objective
 // and optional budget.
 func (s *Server) handleUpdateSessionGoal(w http.ResponseWriter, r *http.Request) {
-	if !s.goalsEnabled {
+	if !s.goalsEnabled.Load() {
 		writeError(w, http.StatusForbidden, "goals are disabled (goal.enabled)")
 		return
 	}
@@ -155,7 +155,7 @@ func (s *Server) handleUpdateSessionGoal(w http.ResponseWriter, r *http.Request)
 
 // handleDeleteSessionGoal serves DELETE /api/sessions/{id}/goal.
 func (s *Server) handleDeleteSessionGoal(w http.ResponseWriter, r *http.Request) {
-	if !s.goalsEnabled {
+	if !s.goalsEnabled.Load() {
 		writeError(w, http.StatusForbidden, "goals are disabled (goal.enabled)")
 		return
 	}

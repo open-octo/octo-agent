@@ -51,3 +51,31 @@ func TestCmdGoal_AppliesSharedGrammarOnStore(t *testing.T) {
 		t.Errorf("tombstoned-store reply = %q", r)
 	}
 }
+
+// TestCmdGoal_RespectsGoalsEnabledGate guards against IM bypassing the
+// server's goal.enabled kill switch: unlike this, the REST and TUI surfaces
+// both refuse to mutate goal state when it's off. Before SetGoalsEnabled
+// existed, a goal set here would persist straight to the session's backing
+// store and silently reactivate the moment a REST/TUI/Web surface later
+// touched the same session.
+func TestCmdGoal_RespectsGoalsEnabledGate(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c2", UserID: "u2"}
+
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	mgr.SetGoalsEnabled(false)
+	sess := mgr.GetOrCreateSession(ev)
+
+	if r := mgr.cmdGoal(ev, "ship the release"); !strings.Contains(r, "disabled") {
+		t.Errorf("goals-disabled reply = %q, want a disabled notice", r)
+	}
+	if _, ok := sess.GoalStore().GoalSnapshot(); ok {
+		t.Error("goal must not be created on the backing store while goals are disabled")
+	}
+
+	// Re-enabling restores the normal behavior.
+	mgr.SetGoalsEnabled(true)
+	if r := mgr.cmdGoal(ev, "ship the release"); !strings.Contains(r, "Goal set") {
+		t.Errorf("re-enabled create reply = %q", r)
+	}
+}
