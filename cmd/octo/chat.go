@@ -776,25 +776,25 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "octo: mcp config: %v\n", err)
 		} else if len(mcpCfg.Servers) > 0 {
 			info := mcp.Implementation{Name: "octo", Version: version.Version}
+			// A stdio server's subprocess writes diagnostics to its stderr at
+			// arbitrary times, from an exec copy goroutine. Under the bubbletea
+			// TUI a direct terminal write corrupts the frame; in the headless
+			// one-shot it interleaves with the turn's own output (e.g. a
+			// file-watcher banner mid-turn). Route it to a log file in both
+			// modes (recoverable, never the screen). Connection warnings still
+			// reach the terminal via the warn writer. The file is closed when
+			// runChat returns.
+			var childStderr io.Writer
+			if f := openMCPLogFile(); f != nil {
+				childStderr = f
+				defer f.Close()
+			} else {
+				childStderr = io.Discard
+			}
 			if useTUI {
-				// A stdio server's subprocess writes diagnostics to its stderr at
-				// arbitrary times during the session, from an exec copy goroutine.
-				// Under the bubbletea TUI a direct terminal write corrupts the
-				// frame, so route it to a log file (recoverable, never the
-				// screen). The file is closed when runChat returns, i.e. after
-				// runTUI exits.
-				var childStderr io.Writer
-				if f := openMCPLogFile(); f != nil {
-					childStderr = f
-					defer f.Close()
-				} else {
-					childStderr = io.Discard
-				}
 				mcpBoot = &mcpBootstrap{cfg: mcpCfg, info: info, childErr: childStderr}
 			} else {
 				// Headless: connect now and register before the one-shot turn.
-				// Leave childStderr nil — the transport defaults to os.Stderr, the
-				// only writer safe for the copy goroutine to share concurrently.
 				mcpReg := mcp.ConnectAll(
 					context.Background(),
 					mcpCfg,
@@ -803,7 +803,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 						return newCLIOAuthPrompt(stdout, serverName)
 					},
 					stderr,
-					nil,
+					childStderr,
 				)
 				if mcpReg.Len() > 0 {
 					tools.SetMCPRegistry(mcpReg)

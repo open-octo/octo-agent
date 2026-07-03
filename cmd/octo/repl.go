@@ -135,7 +135,9 @@ func runOnce(cfg replConfig, prompt string, stream bool) int {
 	defer tools.SetBackgroundOnExit(nil)
 
 	// Background workflows ride the same inbox path, so a finished detached run
-	// is drained on a later iteration (or by idleInboxWait while idle).
+	// is drained on a later iteration of the in-flight turn. Once the turn ends
+	// the one-shot exits (killing still-running workflows via the defer below) —
+	// there is no idle wait for background completions in this mode.
 	tools.SetDefaultWorkflowOnDone(func(ev tools.WorkflowNotification) {
 		a.Inbox.Enqueue(tools.FormatWorkflowNote(ev))
 	})

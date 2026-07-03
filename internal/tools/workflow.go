@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/workflow"
@@ -33,8 +34,9 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"Use when a task decomposes into many sub-agent calls with explicit control flow " +
 			"(fan-out, pipelines, loops, conditionals) that you want executed reliably rather " +
 			"than improvised across turns.\n\n" +
-			"Runs in the BACKGROUND: this call returns a run id immediately; collect the result " +
-			"later with the workflow_status tool. (A long multi-agent run won't block you or the " +
+			"Runs in the BACKGROUND: this call returns a run id immediately, and the system " +
+			"automatically notifies you with the result when the run finishes — do NOT poll " +
+			"workflow_status while it runs. (A long multi-agent run won't block you or the " +
 			"user while it executes.)\n\n" +
 			"The script runs in a sandboxed, IO-free mruby interpreter: only Array/Hash/String/" +
 			"Integer logic and JSON.parse/JSON.generate are available. There is NO File, Dir, " +
@@ -202,9 +204,13 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		return agent.ToolResult{}, fmt.Errorf("workflow: %w", err)
 	}
 	return agent.ToolResult{Text: fmt.Sprintf(
-		"Workflow started in the background as %s. It runs while you continue; "+
-			"call workflow_status(%q) to check progress and collect the result "+
-			"(or workflow_status with no argument to list all runs).", runID, runID)}, nil
+		"Workflow started in the background as %s.\n"+
+			"<system-reminder>This run executes in the background. DO NOT poll workflow_status "+
+			"while it runs — the system will automatically notify you when it finishes, carrying "+
+			"the result. While it runs, you may continue with other independent tasks. If you have "+
+			"no other task to do, report the launch to the user and stop — do not spin in a "+
+			"polling loop. (workflow_status(%q) exists for on-demand progress checks, e.g. when "+
+			"the user asks.)</system-reminder>", runID, runID)}, nil
 }
 
 // encodeWorkflowArgs serializes the tool's `args` input to the JSON string the
@@ -230,7 +236,11 @@ func (WorkflowStatusTool) Definition() agent.ToolDefinition {
 		Name: "workflow_status",
 		Description: "Check background workflow runs started with the workflow tool. " +
 			"With no run_id: list this session's runs and their status (running/done/error). " +
-			"With a run_id: the full result (or error + how to fix/resume) plus the captured log.",
+			"With a run_id: the full result (or error + how to fix/resume) plus the captured log. " +
+			"Use this for ON-DEMAND checks (e.g. the user asks how a run is going) or to collect " +
+			"a result after the completion notification — do NOT call it in a polling loop; the " +
+			"system pushes a notification when a run finishes. Repeated still-running reads of " +
+			"the same run are detected as polling and trigger a hard STOP reminder.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -243,6 +253,15 @@ func (WorkflowStatusTool) Definition() agent.ToolDefinition {
 	}
 }
 
+// workflowPollStopText is the hard stop appended once a no-progress polling
+// streak crosses workflowPollStopThreshold. The agent loop exempts
+// workflow_status from its duplicate-tool-call detector (it is a legitimate
+// observation tool), so this guard is what breaks a polling loop — mirroring
+// terminal_output's empty-snapshot guard.
+const workflowPollStopText = "\n\n[STOP: repeated workflow_status polling detected. " +
+	"Do not poll again. The system will push a notification with the result " +
+	"when a run finishes.]"
+
 func (WorkflowStatusTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	mgr := resolveWorkflowManager(ctx)
 	runID := strings.TrimSpace(stringArg(input, "run_id"))
@@ -252,16 +271,34 @@ func (WorkflowStatusTool) Execute(ctx context.Context, _ string, input map[strin
 			return agent.ToolResult{Text: "No background workflows have been started in this session."}, nil
 		}
 		lines := make([]string, 0, len(runs))
+		var latest time.Time
+		anyRunning := false
 		for _, r := range runs {
 			lines = append(lines, statusLine(r))
+			if r.Status == "running" {
+				anyRunning = true
+				if r.LastActivity.After(latest) {
+					latest = r.LastActivity
+				}
+			}
 		}
-		return agent.ToolResult{Text: strings.Join(lines, "\n")}, nil
+		text := strings.Join(lines, "\n")
+		// The list form observes running work too; give it the same anti-poll
+		// escalation, keyed under "" off the freshest activity across running runs.
+		if mgr.RecordStatusRead("", anyRunning, latest) >= workflowPollStopThreshold {
+			text += workflowPollStopText
+		}
+		return agent.ToolResult{Text: text}, nil
 	}
 	snap, ok := mgr.Read(runID)
 	if !ok {
 		return agent.ToolResult{}, fmt.Errorf("workflow_status: no run named %q in this session", runID)
 	}
-	return agent.ToolResult{Text: formatRunDetail(snap)}, nil
+	text := formatRunDetail(snap)
+	if mgr.RecordStatusRead(runID, snap.Status == "running", snap.LastActivity) >= workflowPollStopThreshold {
+		text += workflowPollStopText
+	}
+	return agent.ToolResult{Text: text}, nil
 }
 
 // WorkflowKillTool cancels a running background workflow by id — for a run that
