@@ -106,7 +106,7 @@ func containsName(names []string, want string) bool {
 func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {
 	// No user/project roots: every built-in preset must still resolve.
 	useWorkflowRoots(t, "", "")
-	for _, name := range []string{"adversarial-review", "parallel-understand", "batch-migrate", "daily-triage"} {
+	for _, name := range []string{"adversarial-review", "parallel-understand", "batch-migrate", "daily-triage", "issue-triage", "pr-babysitter", "ci-sweeper", "dependency-sweeper", "changelog-drafter", "post-merge-cleanup"} {
 		w, ok := lookupWorkflow(name)
 		if !ok {
 			t.Errorf("embedded default %q not found", name)

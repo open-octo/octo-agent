@@ -146,6 +146,31 @@ After using this skill, you should produce:
 3. Optionally a `workflow` template or a scheduled task definition.
 4. A one-run validation: execute the loop once and report what it found and what it did.
 
+## Built-in workflow templates in octo-agent
+
+octo-agent ships a set of workflow templates that demonstrate the Loop Engineering
+pattern. You can invoke them directly with the `workflow` tool, or use them as
+starting points for a custom loop.
+
+| Template | Purpose | Risk level | Typical cadence |
+|---|---|---|---|
+| `daily-triage` | Discover open issues, recent CI failures, and commits; draft fixes in worktrees; verify with a second agent. | Medium | Daily |
+| `issue-triage` | Categorize open issues, suggest labels, identify missing info, and route to owners. | Low | Daily / on new issue |
+| `pr-babysitter` | Watch open PRs, flag stale ones, detect merge conflicts, and suggest next actions. | Low | Daily |
+| `ci-sweeper` | Monitor CI failures, classify root causes, retry flaky jobs, and draft fixes for real failures. | **High** | On CI failure / hourly |
+| `dependency-sweeper` | Update patch/minor dependencies in a worktree and run tests. | Medium | Weekly |
+| `changelog-drafter` | Draft a changelog from commits since the last tag. | Low | Before release |
+| `post-merge-cleanup` | Delete merged branches and plan linked ticket updates. | Low (destructive: branches) | After merge |
+
+Invoke one with:
+
+```bash
+octo workflow daily-triage '{"repo": ".", "since": "1d"}'
+```
+
+All destructive templates default to dry-run unless the user explicitly passes
+`apply: true` or `dry_run: false`.
+
 ## Template: LOOP.md
 
 ```markdown
