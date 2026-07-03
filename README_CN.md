@@ -16,10 +16,10 @@
 > 和日常自动化，不必装两套工具。
 
 <!-- TODO(demo): 录一段 15–30s 首屏 GIF（装一行 → octo 接 DeepSeek → 解决一个真实编码任务），
-     放到 docs/assets/demo.gif，然后取消下面这段注释。 -->
+     放到 landing/assets/demo.gif，然后取消下面这段注释。 -->
 <!--
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="octo 演示" width="760">
+  <img src="landing/assets/demo.gif" alt="octo 演示" width="760">
 </p>
 -->
 

@@ -1,8 +1,8 @@
 # Documentation site design
 
-Design for `docs.octo-agent.dev` (or `octo-agent.dev/docs`): a multi-page reference and guide site
-that replaces the current "Read the Docs" link, which points straight at `README.md` on GitHub.
-The marketing landing page (`docs/index.html`) stays as-is and links into this site.
+Design for `octo-agent.dev/docs`: a multi-page reference and guide site that replaces the old
+"Read the Docs" link, which used to point straight at `README.md` on GitHub. The marketing landing
+page (`landing/index.html`) stays a separate, hand-rolled page and links into this site.
 
 ## Why a separate site
 
@@ -141,12 +141,16 @@ blocks — logo, search, GitHub star count, EN/中文 toggle, theme toggle.
 
 ## Tooling recommendation
 
-**Astro Starlight**, built to static HTML at CI time and deployed to GitHub Pages exactly like the
-current `docs/` — the Node toolchain is a build-time dependency for doc authors, never something an
-end user runs, so it doesn't conflict with octo's zero-runtime, single-binary positioning. Starlight
-ships sidebar nav, dark/light, i18n routing, and MDX (for tabs/callouts) out of the box; Pagefind
-search bolts on as a static plugin. The hand-rolled landing page stays a plain HTML file at
-`docs/index.html`; Starlight owns everything under `docs/guide/`, `docs/reference/`, etc.
+**Astro Starlight**, built to static HTML at CI time and deployed to GitHub Pages — the Node
+toolchain is a build-time dependency for doc authors, never something an end user runs, so it
+doesn't conflict with octo's zero-runtime, single-binary positioning. Starlight ships sidebar nav,
+dark/light, i18n routing, and MDX (for tabs/callouts) out of the box; Pagefind search bolts on as a
+static plugin.
+
+The source lives in `website/` (an Astro project); the hand-rolled landing page is a separate plain
+HTML file at `landing/index.html`. `.github/workflows/pages.yml` builds `website/` and assembles the
+two into one deploy: `landing/*` at the site root, `website/dist/*` (built with `base: "/docs"`)
+under `/docs/`.
 
 ## Content migration
 

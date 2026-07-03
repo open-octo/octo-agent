@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs/**'
+      - 'landing/**'
       - 'website/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -43,7 +43,7 @@ jobs:
         run: |
           mkdir -p _site
           # Root: the hand-rolled landing page + install script, unchanged.
-          cp docs/index.html docs/CNAME docs/install.sh docs/.nojekyll _site/
+          cp landing/index.html landing/CNAME landing/install.sh landing/.nojekyll _site/
           # /docs/*: the generated Starlight site (astro.config.mjs sets base: "/docs").
           mkdir -p _site/docs
           cp -r website/dist/. _site/docs/

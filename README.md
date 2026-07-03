@@ -17,10 +17,10 @@
 > both your coding and your everyday automation, instead of running two separate tools.
 
 <!-- TODO(demo): record a 15–30s hero GIF (one-line install → octo on DeepSeek → solve a real
-     coding task), drop it at docs/assets/demo.gif, and uncomment the block below. -->
+     coding task), drop it at landing/assets/demo.gif, and uncomment the block below. -->
 <!--
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="octo demo" width="760">
+  <img src="landing/assets/demo.gif" alt="octo demo" width="760">
 </p>
 -->
 
