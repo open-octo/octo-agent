@@ -85,7 +85,11 @@ func RenderEditCard(filePath, oldString, newString string, width int) string {
 
 	startLine := 0
 	if data, err := os.ReadFile(filePath); err == nil {
-		if idx := bytes.Index(data, []byte(newString)); idx >= 0 {
+		// Normalize CRLF so a \n-only needle (callers may strip \r for
+		// display safety) still locates its line in a CRLF file.
+		data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+		needle := []byte(strings.ReplaceAll(newString, "\r\n", "\n"))
+		if idx := bytes.Index(data, needle); idx >= 0 {
 			startLine = 1 + bytes.Count(data[:idx], []byte("\n"))
 		}
 	}

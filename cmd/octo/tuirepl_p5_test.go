@@ -175,3 +175,27 @@ func TestRenderPermissionDetail_NilInput(t *testing.T) {
 		t.Errorf("nil input should render the placeholder; got %q", got)
 	}
 }
+
+func TestRenderPermissionGeneric_SanitizesKeys(t *testing.T) {
+	// Keys come from the model's tool-call JSON too — the same injection
+	// surface as values.
+	got := renderPermissionDetail("mcp_thing", map[string]any{"a\x1b[2Kb": "v"}, 0)
+	if strings.ContainsRune(got, 0x1b) {
+		t.Errorf("raw ESC in an input KEY survived: %q", got)
+	}
+	if !strings.Contains(got, "^[[2K") {
+		t.Errorf("key should render in caret notation: %q", got)
+	}
+}
+
+func TestSanitizeForPrompt_C1Controls(t *testing.T) {
+	// Decoded C1 (U+009B = CSI) is interpreted by xterm-lineage emulators;
+	// it must not reach the terminal raw.
+	got := sanitizeForPrompt("a\u009bb")
+	if strings.ContainsRune(got, '\u009b') {
+		t.Errorf("decoded C1 survived: %q", got)
+	}
+	if got != "a�b" {
+		t.Errorf("C1 should become a visible placeholder, got %q", got)
+	}
+}

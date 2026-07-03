@@ -1621,8 +1621,12 @@ func renderPermissionDetail(toolName string, input map[string]any, width int) st
 		newS, _ := input["new_string"].(string)
 		if path != "" {
 			// Tabs stay intact: the card expands them itself, and new_string
-			// must match the file bytes for the card's line-number lookup.
-			return tui.RenderEditCard(path, sanitizeControls(oldS, false), sanitizeControls(newS, false), width)
+			// must match the file bytes for the card's line-number lookup
+			// (the card normalizes CRLF on its side, matching the \r drop here).
+			// The path is sanitized too — it renders in the card header, the
+			// same display surface as the rest of the prompt.
+			return tui.RenderEditCard(sanitizeControls(path, false),
+				sanitizeControls(oldS, false), sanitizeControls(newS, false), width)
 		}
 	}
 	return renderPermissionGeneric(input, width)
@@ -1662,9 +1666,12 @@ func renderPermissionGeneric(input map[string]any, width int) string {
 			b.WriteByte('\n')
 		}
 		v := sanitizeForPrompt(fmt.Sprintf("%v", input[k]))
+		// Keys come from the model's tool-call JSON too — the same injection
+		// surface as values.
+		key := sanitizeForPrompt(k)
 		lines := strings.Split(v, "\n")
 		if len(lines) == 1 {
-			b.WriteString(wrapIndented(k+": "+truncateRunes(v, permissionValueCap), "  ", width))
+			b.WriteString(wrapIndented(key+": "+truncateRunes(v, permissionValueCap), "  ", width))
 			continue
 		}
 		const perValueLines = 4
@@ -1672,7 +1679,7 @@ func renderPermissionGeneric(input map[string]any, width int) string {
 		if len(lines) > perValueLines {
 			vshown = lines[:perValueLines]
 		}
-		b.WriteString("  " + k + ":")
+		b.WriteString(wrapIndented(key+":", "  ", width))
 		for _, l := range vshown {
 			b.WriteString("\n" + wrapIndented(truncateRunes(l, permissionValueCap), "    ", width))
 		}
@@ -1725,7 +1732,10 @@ func sanitizeForPrompt(s string) string { return sanitizeControls(s, true) }
 // intact for consumers that expand them themselves and need byte-exact text
 // (the edit_file diff card's line-number lookup).
 func sanitizeControls(s string, expandTab bool) string {
-	if !strings.ContainsFunc(s, func(r rune) bool { return (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f }) {
+	hazard := func(r rune) bool {
+		return (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || (r >= 0x80 && r <= 0x9f)
+	}
+	if !strings.ContainsFunc(s, hazard) {
 		if !expandTab || !strings.ContainsRune(s, '\t') {
 			return s
 		}
@@ -1750,6 +1760,11 @@ func sanitizeControls(s string, expandTab bool) string {
 			b.WriteByte(byte(r) ^ 0x40)
 		case r == 0x7f:
 			b.WriteString("^?")
+		case r >= 0x80 && r <= 0x9f:
+			// Decoded C1 controls (e.g. U+009B = CSI): inert on most modern
+			// emulators but xterm-lineage ones interpret them. Replace with a
+			// visible placeholder.
+			b.WriteRune('�')
 		default:
 			b.WriteRune(r)
 		}

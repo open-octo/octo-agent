@@ -166,3 +166,18 @@ func TestRenderEditCard_ClampsRowWidth(t *testing.T) {
 		t.Errorf("clamped diff rows should end in an ellipsis; got:\n%s", out)
 	}
 }
+
+func TestRenderEditCard_CRLFFileStillNumbersLines(t *testing.T) {
+	// Callers may strip \r from new_string for display safety; the card
+	// normalizes CRLF on its side so the line-number lookup still lands.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "w.go")
+	content := "package main\r\nfunc A() {}\r\nfunc B() {}\r\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := RenderEditCard(path, "func OLD() {}", "func B() {}", 0)
+	if !strings.Contains(stripANSI(out), "3") {
+		t.Errorf("CRLF file should still get line numbers; got:\n%s", out)
+	}
+}
