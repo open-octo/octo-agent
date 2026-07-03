@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] — 2026-07-03
+
+### Changed
+- **Workflows run foreground-blocking in the headless one-shot.**
+  `octo "prompt"` previously started workflows detached and exited when
+  the turn ended, killing the run before it could deliver its result —
+  and the only in-turn way to wait, polling `workflow_status`, tripped
+  the loop detector. The `workflow` tool call now blocks until the
+  script completes and returns the final result inline; progress lines
+  stream to stderr while it runs. Interactive transports (TUI, Web, IM)
+  keep the background contract, and the tool description tells the model
+  which mode it is in (#1102).
+- **loop-engineering closes with an actual schedule.** The skill now
+  guides the user to schedule the loop it just authored instead of
+  stopping at the script.
+
+### Fixed
+- **Stuck detector no longer kills legitimate `workflow_status` checks.**
+  Checking on a running background workflow is observation, not a loop:
+  `workflow_status` joined the stuck detector's observation-tool
+  exemption (like `terminal_output`), backed by its own anti-poll guard —
+  three consecutive no-progress reads escalate to a hard STOP reminder, a
+  read that observes fresh activity resets the streak, and the bare list
+  form is guarded the same way. The workflow tool texts now promise the
+  automatic completion notification and forbid polling, matching the
+  terminal tool's async convention (#1099).
+- **Compute-only runaway workflow scripts are now interruptible.** The
+  wasm runtime ran without close-on-context-done, so a script busy-looping
+  in pure Ruby (no `agent()` call in flight) never observed cancellation:
+  `workflow_kill` couldn't stop it in any transport, and a foreground
+  one-shot run turned it into a process-wide hang that Ctrl-C couldn't
+  break (#1102).
+- **stdio MCP server diagnostics no longer leak into one-shot output.**
+  A child process's stderr (e.g. a file-watcher banner printed mid-turn)
+  now goes to `~/.octo/logs/mcp.log` — the TUI's existing sink — instead
+  of interleaving with the turn's own terminal output (#1099).
+- **TUI: tool cards clamp to the terminal width**, and terminal cards
+  show the output tail plus exit code (#1098).
+- **TUI: the permission prompt shows the full command / diff** and keeps
+  the surrounding context visible (#1101).
+
 ## [1.7.1] — 2026-07-03
 
 ### Added
