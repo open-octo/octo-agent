@@ -123,6 +123,15 @@ type Session struct {
 	// itself happens at most once.
 	goalBudgetSteer string
 
+	// goalObjectiveSteer holds the rendered objective-updated steering prompt
+	// staged by EditGoalObjective, until the agent loop consumes and injects
+	// it (same drain point as goalBudgetSteer). EditGoalObjective is called
+	// from outside the agent loop (web/IM/TUI), so the mutation and the
+	// in-flight turn that should see it run on different goroutines/objects;
+	// staging it here and draining it from the next accounting tick is what
+	// bridges that gap.
+	goalObjectiveSteer string
+
 	// goalSkipNextTokenDelta makes the next accounting tick bill zero tokens.
 	// Set when a goal is created mid-turn: the agent-side token baseline
 	// still points at the turn start, and billing the whole context input of

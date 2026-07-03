@@ -177,6 +177,37 @@ func TestSetGoalStatus_ActivatingOverBudgetGoalStaysBudgetLimited(t *testing.T) 
 	}
 }
 
+// TestSetGoalStatus_CannotResumeCompleteGoal guards against every UI surface
+// (TUI /goal resume, IM/web GoalCommand, REST PUT status=active) silently
+// reactivating a finished goal: none of them offer "resume" once a goal is
+// complete, but before this check SetGoalStatus itself never enforced it —
+// so a stray "/goal resume" (or a REST client) would re-arm the continuation
+// loop on a goal the model had already marked done.
+func TestSetGoalStatus_CannotResumeCompleteGoal(t *testing.T) {
+	s := NewSession("m", "")
+	if _, err := s.CreateGoal("g", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetGoalStatus(GoalComplete); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetGoalStatus(GoalActive); err == nil {
+		t.Error("resuming a complete goal via SetGoalStatus should fail")
+	}
+	g, _ := s.GoalSnapshot()
+	if g.Status != GoalComplete {
+		t.Errorf("failed resume must not mutate status, got %q", g.Status)
+	}
+
+	// Editing the objective is the documented way back from complete.
+	if _, err := s.EditGoalObjective("new objective"); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ = s.GoalSnapshot(); g.Status != GoalActive {
+		t.Errorf("editing a complete goal should reactivate it, got %q", g.Status)
+	}
+}
+
 func TestClearGoal(t *testing.T) {
 	s := NewSession("m", "")
 	if s.ClearGoal() {

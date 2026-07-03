@@ -99,6 +99,11 @@ type GoalAccountant interface {
 	// prompt when the last accounting crossed the token budget, for the agent
 	// loop to inject as a hidden steer.
 	ConsumeGoalBudgetSteer() (string, bool)
+	// ConsumeGoalObjectiveSteer returns the one-time steer staged when the
+	// objective was edited while a goal existed, for the agent loop to inject
+	// as a hidden steer so an in-flight turn adjusts to the new objective
+	// instead of finishing out the stale one.
+	ConsumeGoalObjectiveSteer() (string, bool)
 }
 
 // ResetGoalWallClock implements GoalAccountant: it restarts the wall-clock
@@ -215,6 +220,11 @@ func (s *Session) EditGoalObjective(objective string) (Goal, error) {
 	}
 	s.Goal.UpdatedAt = time.Now()
 	s.resetGoalRuntimeLocked()
+	// Stage the one-time steer so an in-flight turn adjusts to the new
+	// objective on its next round instead of finishing out the stale one. If
+	// no turn is running, the next turn's first accounting tick drains it —
+	// same degradation the budget-limit steer already accepts.
+	s.goalObjectiveSteer = WrapGoalContext(prompt.GoalObjectiveUpdated(goalPromptData(s.Goal)))
 	s.appendGoalRecordLocked()
 	return *s.Goal, nil
 }
@@ -223,8 +233,11 @@ func (s *Session) EditGoalObjective(objective string) (Goal, error) {
 // request is that caller's contract (slash commands pause/resume, the
 // update_goal tool completes/blocks, the runtime limits); this method owns
 // the invariants that hold regardless of caller: in-flight wall-clock time
-// is accounted first, re-activating starts a fresh wall-clock baseline, and
-// an already-over-budget goal cannot re-enter active.
+// is accounted first, re-activating starts a fresh wall-clock baseline, an
+// already-over-budget goal cannot re-enter active, and a completed goal
+// cannot be reactivated this way — EditGoalObjective/ReplaceGoal are the
+// only paths back from complete, matching what every UI surface offers a
+// finished goal (edit/clear, never resume).
 func (s *Session) SetGoalStatus(status GoalStatus) (Goal, error) {
 	switch status {
 	case GoalActive, GoalPaused, GoalBlocked, GoalUsageLimited, GoalBudgetLimited, GoalComplete:
@@ -235,6 +248,9 @@ func (s *Session) SetGoalStatus(status GoalStatus) (Goal, error) {
 	defer s.mu.Unlock()
 	if s.Goal == nil {
 		return Goal{}, fmt.Errorf("no goal is currently set")
+	}
+	if status == GoalActive && s.Goal.Status == GoalComplete {
+		return Goal{}, fmt.Errorf("goal is complete; edit the objective or replace it to resume work")
 	}
 	s.accountGoalWallClockLocked()
 	s.setGoalStatusLocked(status)
@@ -278,11 +294,14 @@ func (s *Session) ClearGoal() bool {
 // resetGoalRuntimeLocked clears the continuation and steering runtime after
 // any goal mutation: the zero-progress suppression ends (the user or an
 // external actor changed something — a fresh audit is warranted) and a stale
-// unconsumed budget steer must not fire against the mutated goal.
+// unconsumed budget or objective steer must not fire against the mutated
+// goal. Callers that go on to stage a fresh steer (EditGoalObjective) do so
+// after this reset.
 func (s *Session) resetGoalRuntimeLocked() {
 	s.goalContPending = false
 	s.goalContSuppressed = false
 	s.goalBudgetSteer = ""
+	s.goalObjectiveSteer = ""
 }
 
 // AccountGoalUsage implements GoalAccountant: it folds a token delta and the
@@ -338,6 +357,15 @@ func (s *Session) ConsumeGoalBudgetSteer() (string, bool) {
 	defer s.mu.Unlock()
 	steer := s.goalBudgetSteer
 	s.goalBudgetSteer = ""
+	return steer, steer != ""
+}
+
+// ConsumeGoalObjectiveSteer implements GoalAccountant; see the interface doc.
+func (s *Session) ConsumeGoalObjectiveSteer() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	steer := s.goalObjectiveSteer
+	s.goalObjectiveSteer = ""
 	return steer, steer != ""
 }
 

@@ -1718,6 +1718,12 @@ func (a *Agent) accountGoalUsage(handler EventHandler) {
 	if steer, ok := a.GoalAcct.ConsumeGoalBudgetSteer(); ok {
 		a.Inbox.Enqueue(steer)
 	}
+	// An objective edited mid-turn (web/IM/TUI can mutate the goal on a
+	// different goroutine than the running turn) stages the same kind of
+	// one-time steer; drain it the same way.
+	if steer, ok := a.GoalAcct.ConsumeGoalObjectiveSteer(); ok {
+		a.Inbox.Enqueue(steer)
+	}
 }
 
 // SessionTokens returns the cumulative input and output token counts for all
