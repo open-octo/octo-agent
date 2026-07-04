@@ -225,8 +225,8 @@ func TestSendText_SplitsLongMessages(t *testing.T) {
 		t.Fatalf("expected split into >=2 messages, got %d", len(f.sent))
 	}
 	for _, p := range f.sent {
-		if len([]rune(p["text"].(string))) > maxMessageChars {
-			t.Fatalf("chunk exceeds cap: %d chars", len(p["text"].(string)))
+		if len(p["text"].(string)) > maxMessageBytes {
+			t.Fatalf("chunk exceeds cap: %d bytes", len(p["text"].(string)))
 		}
 	}
 }

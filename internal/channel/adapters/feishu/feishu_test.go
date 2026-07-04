@@ -103,7 +103,10 @@ func TestSendText_SplitsLongMessages(t *testing.T) {
 			t.Fatalf("chunk wildly exceeds cap: %d bytes", len(content))
 		}
 	}
-	// replyTo should only attach to the first chunk, not every one.
+	// replyTo should attach to the first chunk only, not every one.
+	if f.sent[0]["reply_to_message_id"] != "m-0" {
+		t.Fatalf("expected reply_to_message_id on chunk 0, got: %+v", f.sent[0])
+	}
 	if _, ok := f.sent[1]["reply_to_message_id"]; ok {
 		t.Fatalf("reply_to_message_id should only be set on chunk 0, found on chunk 1: %+v", f.sent[1])
 	}

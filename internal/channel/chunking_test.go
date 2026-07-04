@@ -90,11 +90,18 @@ func isValidUTF8Chunk(s string) bool {
 func TestSplitForSend_ClosesAndReopensStraddledFence(t *testing.T) {
 	code := strings.Repeat("line_of_code()\n", 100)
 	text := "intro\n\n```go\n" + code + "```\n\nend"
-	chunks := SplitForSend(text, 400)
+	const limit = 400
+	chunks := SplitForSend(text, limit)
 	if len(chunks) < 2 {
 		t.Fatalf("expected the fence to force multiple chunks, got %d", len(chunks))
 	}
 	for i, c := range chunks {
+		// The synthetic close/reopen markup must never push a chunk over the
+		// requested limit — see TestSplitForSend_FenceOverheadNeverExceedsLimit
+		// for the case that caught this as a real bug.
+		if len(c) > limit {
+			t.Errorf("chunk %d is %d bytes, over the %d limit:\n%s", i, len(c), limit, c)
+		}
 		open, _ := fenceStateAfter(c, false, "")
 		if open {
 			t.Errorf("chunk %d ends with an unclosed fence:\n%s", i, c)
@@ -110,6 +117,42 @@ func TestSplitForSend_ClosesAndReopensStraddledFence(t *testing.T) {
 	for i := 1; i < len(chunks)-1; i++ {
 		if !strings.HasPrefix(chunks[i], "```go\n") {
 			t.Errorf("chunk %d should reopen the go fence, got prefix %q", i, chunks[i][:min(20, len(chunks[i]))])
+		}
+	}
+}
+
+// #1116 review finding: a fence that opens for the FIRST TIME inside the
+// current piece (not carried over from a previous chunk) wasn't budgeted
+// for — cutPoint picked a cut using the full, unreserved limit, and only
+// afterward did the code discover the piece ends mid-fence and append a
+// synthetic "\n```" that pushed the chunk past limit. Reproduced directly
+// against the fix in code review before this test existed: with the bug,
+// chunk 0 below came out at 52 bytes against a 50-byte limit.
+func TestSplitForSend_FenceOverheadNeverExceedsLimit(t *testing.T) {
+	text := "```go\n" + strings.Repeat("a", 42) + "\n" + strings.Repeat("bcdefghij", 20) + "\n```\n\nend"
+	const limit = 50
+	chunks := SplitForSend(text, limit)
+	for i, c := range chunks {
+		if len(c) > limit {
+			t.Errorf("chunk %d is %d bytes, over the %d limit: %q", i, len(c), limit, c)
+		}
+	}
+	if !strings.Contains(strings.Join(chunks, ""), "end") {
+		t.Fatal("lost trailing content after the fence closes")
+	}
+}
+
+// A language tag longer than maxFenceLangRunes must still be reserved for
+// correctly — the overhead calculation must use the ALREADY-TRUNCATED tag's
+// real byte length, not the model's original (possibly much longer) one.
+func TestSplitForSend_LongLanguageTagStillRespectsLimit(t *testing.T) {
+	longTag := strings.Repeat("x", 100) // far past maxFenceLangRunes (20)
+	text := "```" + longTag + "\n" + strings.Repeat("code line\n", 50) + "```\n"
+	const limit = 100
+	chunks := SplitForSend(text, limit)
+	for i, c := range chunks {
+		if len(c) > limit {
+			t.Errorf("chunk %d is %d bytes, over the %d limit: %q", i, len(c), limit, c)
 		}
 	}
 }

@@ -53,8 +53,11 @@ const (
 	maxBackoff            = 30 * time.Second
 	sessionExpiredBackoff = 60 * time.Second
 
-	// Max text chunk size (Unicode chars, per iLink recommendation).
-	maxChunkChars = 2000
+	// maxChunkBytes: max text chunk size (per iLink recommendation). Named
+	// "Bytes" (not "Chars", its pre-#1116 name) because channel.SplitForSend
+	// counts bytes, not runes — for CJK text (weixin's primary use case)
+	// this is more conservative than a character cap, never less.
+	maxChunkBytes = 2000
 )
 
 // sendQueue buffers outgoing text per chat, flushes on threshold/interval,
@@ -178,7 +181,7 @@ func (q *sendQueue) sendBatch(chatID string, entries []sendEntry) {
 	// with "slice bounds out of range". channel.SplitForSend cuts on byte
 	// offsets throughout (backing up to a rune boundary only for the final
 	// hard-cut fallback), so this class of bug can't recur.
-	chunks := channel.SplitForSend(combined, maxChunkChars)
+	chunks := channel.SplitForSend(combined, maxChunkBytes)
 	for _, chunk := range chunks {
 		q.throttle()
 		q.sendWithRetry(chatID, chunk, ctoken)

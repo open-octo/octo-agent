@@ -8,15 +8,12 @@ import (
 // maxFenceLangRunes bounds how much of a code fence's language tag
 // (```python, ```go, …) we echo back when reopening it across a chunk
 // boundary — a model could in principle put something absurdly long after
-// the backticks, and that string factors directly into fenceOverhead below.
+// the backticks.
 const maxFenceLangRunes = 20
 
-// fenceOverhead reserves room, inside each chunk's byte budget, for the
-// synthetic markdown a straddled code fence needs: a closing "\n```" (4
-// bytes) at the end of one chunk and a reopening "```lang\n" line at the
-// start of the next. Sized for the worst case (a maxFenceLangRunes-rune
-// language tag, ASCII) plus slack.
-const fenceOverhead = 4 + 3 + maxFenceLangRunes + 1 + 8
+// closeMarkerBytes is the exact byte cost of the synthetic "\n```" appended
+// when a piece ends with a fence still open.
+const closeMarkerBytes = len("\n```")
 
 // SplitForSend splits text into chunks whose UTF-8 byte length does not
 // exceed limit, for handing to a channel adapter's SendText where the
@@ -41,7 +38,15 @@ const fenceOverhead = 4 + 3 + maxFenceLangRunes + 1 + 8
 // is closed at the end of one chunk and reopened with the same language tag
 // at the start of the next, so every chunk is complete, valid markdown on
 // its own instead of rendering as a permanently-broken code block split
-// across two IM messages.
+// across two IM messages. The reopen/close overhead is reserved from the
+// budget dynamically (based on the real byte length of whatever's actually
+// being reopened/closed), not a fixed guess, so this holds regardless of
+// the fence's language tag — see the retry inside the loop below.
+//
+// limit is assumed to be at least a few dozen bytes, matching every current
+// adapter (smallest is Discord's 2000) — for a limit small enough that even
+// one rune plus fence markup can't fit, individual chunks can exceed limit;
+// that's an intentionally unhandled degenerate case, not a realistic one.
 func SplitForSend(text string, limit int) []string {
 	if text == "" {
 		return nil
@@ -58,13 +63,19 @@ func SplitForSend(text string, limit int) []string {
 	fenceLang := ""
 
 	for len(text) > 0 {
-		budget := limit
+		// Reserve room for reopening a fence carried over from the previous
+		// chunk (exact byte cost of "```" + the actual tag + "\n" — computed
+		// from the real fenceLang bytes, not an assumed-ASCII estimate, so a
+		// multi-byte-rune tag is budgeted correctly too).
+		reopenCost := 0
 		if fenceOpen {
-			budget -= fenceOverhead
-			if budget < 1 {
-				budget = 1
-			}
+			reopenCost = len("```") + len(fenceLang) + len("\n")
 		}
+		budget := limit - reopenCost
+		if budget < 1 {
+			budget = 1
+		}
+
 		if len(text) <= budget {
 			chunks = append(chunks, reopenFence(fenceOpen, fenceLang, text))
 			break
@@ -72,9 +83,30 @@ func SplitForSend(text string, limit int) []string {
 
 		cut := cutPoint(text, budget)
 		piece := text[:cut]
-		rest := strings.TrimLeft(text[cut:], " \n")
-
 		open, lang := fenceStateAfter(piece, fenceOpen, fenceLang)
+
+		// A fence can open for the FIRST time inside this very piece — not
+		// just carry over from the previous chunk — and budget above didn't
+		// reserve for that case. If the piece still ends open (whether it
+		// started that way or opened partway through), re-cut with the
+		// closing "\n```" reserved too, so the synthetic closer this loop is
+		// about to append never pushes the chunk past limit. cutPoint with a
+		// smaller budget always returns a cut at or before the original (its
+		// search window is a byte-for-byte prefix of the wider one), so this
+		// single retry is enough — no risk of looping.
+		if open {
+			closeBudget := budget - closeMarkerBytes
+			if closeBudget < 1 {
+				closeBudget = 1
+			}
+			if closeBudget < cut {
+				cut = cutPoint(text, closeBudget)
+				piece = text[:cut]
+				open, lang = fenceStateAfter(piece, fenceOpen, fenceLang)
+			}
+		}
+
+		rest := strings.TrimLeft(text[cut:], " \n")
 		chunk := reopenFence(fenceOpen, fenceLang, piece)
 		if open {
 			chunk = strings.TrimRight(chunk, "\n") + "\n```"

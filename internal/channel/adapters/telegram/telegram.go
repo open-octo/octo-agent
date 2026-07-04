@@ -41,8 +41,11 @@ const (
 	// don't tear down healthy connections mid-poll.
 	pollHTTPTimeout = longPollTimeout + 10*time.Second
 
-	// maxMessageChars leaves a margin under Telegram's 4096-char cap.
-	maxMessageChars = 4000
+	// maxMessageBytes leaves a margin under Telegram's 4096-char cap. Named
+	// "Bytes" (not "Chars", its pre-#1116 name) because channel.SplitForSend
+	// counts bytes, not runes — for CJK text this is more conservative than
+	// the exact character cap requires, never less.
+	maxMessageBytes = 4000
 )
 
 func init() {
@@ -198,7 +201,7 @@ func (a *Adapter) Stop() error {
 // channel.SplitForSend, which is also code-fence-aware — see chunking.go).
 // Returns the message ID of the last chunk.
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
-	chunks := channel.SplitForSend(text, maxMessageChars)
+	chunks := channel.SplitForSend(text, maxMessageBytes)
 	if len(chunks) == 0 {
 		return channel.SendResult{OK: true}
 	}
