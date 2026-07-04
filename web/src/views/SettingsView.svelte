@@ -15,8 +15,6 @@
   let language      = $state('en')
   let fontSize      = $state('Medium')
   let theme         = $state('Light')
-  let model         = $state('')
-  let modelOptions  = $state<string[]>([])
   let reasoning     = $state('Medium')
   let permMode      = $state('Ask')
   let workdir       = $state('')
@@ -27,11 +25,16 @@
   let providersLoaded = $state(false)
 
   // Original values for dirty-checking
-  let origModel        = ''
   let origWorkdir      = ''
   let origReasoning    = 'Medium'
   let origShowReasoning = true
   let origPermMode     = 'Ask'
+  // Index into `models` for the current default entry — Reasoning Effort and
+  // Permission Mode below are that entry's own settings, saved via
+  // api.updateModel (PATCH /api/config/models/{id}), same as everything in
+  // the Models section below. No session is involved: "Agent Defaults" edits
+  // global config, not whichever chat session happens to be open.
+  let defaultModelIdx = 0
 
   // ── Models section (config-level entries: add/edit/delete/default/lite) ──────
   let models       = $state<ModelEntry[]>([])
@@ -139,16 +142,13 @@
       // models list
       const ms: any[] = cfg.models ?? []
       models = ms as ModelEntry[]
-      modelOptions = ms.map((m: any) => m.model ?? m.id)
-      const defaultIdx = cfg.default_model_idx ?? 0
-      const def = ms[defaultIdx]
+      defaultModelIdx = cfg.default_model_idx ?? 0
+      const def = ms[defaultModelIdx]
       if (def) {
-        model = def.model ?? def.id ?? ''
         reasoning = capitalize(def.reasoning_effort ?? 'medium')
         permMode  = permissionModeToLabel(def.permission_mode ?? 'interactive')
       }
       showReasoning = cfg.show_reasoning ?? true
-      origModel = model
       origReasoning = reasoning
       origShowReasoning = showReasoning
       origPermMode = permMode
@@ -210,71 +210,63 @@
     setLocale(language === 'zh' || language === 'zh-TW' ? 'zh' : 'en')
   })
 
-  // True only when a session-scoped field is actually dirty AND there's no
-  // active session to save it against. Drives the "start a session" hint —
-  // showing it whenever no session happens to be open (regardless of what's
-  // actually dirty) would nag a user who only wants to change a global
-  // setting like Show Reasoning, which never needs a session at all.
-  let needsSession = $derived(
-    !$activeSessionId &&
-    (model !== origModel || workdir !== origWorkdir || reasoning !== origReasoning || permMode !== origPermMode)
-  )
+  const effortMap: Record<string, string> = { Low: 'low', Medium: 'medium', High: 'high', Xhigh: 'xhigh', Max: 'max' }
+
+  // Working directory is the only field left on this page that's genuinely
+  // per-session (there's no such thing as a "default" working directory) —
+  // everything else here is global config. Drives the "start a session"
+  // hint, shown only when it's actually relevant.
+  let needsSession = $derived(!$activeSessionId && workdir !== origWorkdir)
 
   async function handleSave() {
     saving = true
     const sid = $activeSessionId
     try {
-      // Global config (does not require a session).
+      // Agent Defaults (Reasoning Effort + Permission Mode) — the default
+      // model entry's own settings, saved the same way the Models section
+      // below saves any entry: api.updateModel(id, ...the full entry...).
+      // No session is involved; this is config, not session state. update-
+      // Model isn't a partial PATCH, so the rest of the entry's fields (base
+      // URL, key, provider, vision) are resent unchanged alongside the two
+      // that actually changed — dropping them would blank those fields out.
+      if (reasoning !== origReasoning || permMode !== origPermMode) {
+        const def = models[defaultModelIdx]
+        if (def) {
+          await api.updateModel(def.id, {
+            model: def.model,
+            base_url: def.base_url ?? '',
+            api_key: def.api_key_masked ?? '',
+            provider: def.provider,
+            anthropic_format: def.anthropic_format,
+            vision: def.vision,
+            reasoning_effort: effortMap[reasoning] ?? 'medium',
+            permission_mode: labelToPermissionMode(permMode),
+          })
+          origReasoning = reasoning
+          origPermMode = permMode
+        }
+      }
+
+      // Show Reasoning is a separate global fallback (PUT
+      // /api/config/show_reasoning) that entries without their own override
+      // inherit from — see settings.show_reasoning_desc — so it's saved on
+      // its own, not folded into the entry update above.
       if (showReasoning !== origShowReasoning) {
         await api.updateShowReasoning(showReasoning)
         origShowReasoning = showReasoning
       }
 
-      // Session-level settings (require an active session) — only warn about
-      // the missing session when there's actually a session-scoped field to
-      // save. A global-only change (e.g. just Show Reasoning) must still
-      // succeed and report success even with no active session; that's the
-      // exact "silent no-op with a false success toast" #1111 was filed
-      // about, just inverted (a real success wrongly reported as blocked).
-      const sessionDirty =
-        model !== origModel ||
-        workdir !== origWorkdir ||
-        reasoning !== origReasoning ||
-        permMode !== origPermMode
-      if (sessionDirty) {
+      // Working directory: the one field that actually needs an active
+      // session, since it's inherently per-session state.
+      if (workdir !== origWorkdir) {
         if (!sid) {
           showToast(tr('settings.no_session_tooltip'), 'warning')
           return
         }
-        const effortMap: Record<string, string> = { Low: 'low', Medium: 'medium', High: 'high', Xhigh: 'xhigh', Max: 'max' }
-        // Each task commits its own dirty-tracking baseline only once its own
-        // call succeeds, so one field failing while others succeed in the
-        // same batch doesn't lose bookkeeping for the ones that worked (which
-        // would otherwise get redundantly re-sent next Save) or silently drop
-        // which field actually failed.
-        const tasks: Array<{ label: string; run: () => Promise<unknown>; commit: () => void }> = []
-        if (model !== origModel) {
-          tasks.push({ label: 'model', run: () => api.updateSessionModel(sid, model), commit: () => { origModel = model } })
-        }
-        if (workdir !== origWorkdir) {
-          tasks.push({ label: 'working directory', run: () => api.updateSessionWorkingDir(sid, workdir), commit: () => { origWorkdir = workdir } })
-        }
-        if (reasoning !== origReasoning) {
-          tasks.push({ label: 'reasoning effort', run: () => api.updateSessionReasoningEffort(sid, effortMap[reasoning] ?? 'medium'), commit: () => { origReasoning = reasoning } })
-        }
-        if (permMode !== origPermMode) {
-          tasks.push({ label: 'permission mode', run: () => api.updateSessionPermissionMode(sid, labelToPermissionMode(permMode)), commit: () => { origPermMode = permMode } })
-        }
-        const results = await Promise.allSettled(tasks.map(t => t.run()))
-        const failed: string[] = []
-        results.forEach((r, i) => {
-          if (r.status === 'fulfilled') tasks[i].commit()
-          else failed.push(tasks[i].label)
-        })
-        if (failed.length) {
-          throw new Error(`failed to save ${failed.join(', ')}`)
-        }
+        await api.updateSessionWorkingDir(sid, workdir)
+        origWorkdir = workdir
       }
+
       showToast(tr('settings.toast_saved'), 'success')
     } catch (e: any) {
       showToast(`Save failed: ${e.message}`, 'error')
@@ -368,19 +360,9 @@
       <!-- Agent defaults -->
       <div class="section-card">
         <div class="section-title">{$t('settings.agent')}</div>
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">{$t('settings.default_model')}</span>
-            <span class="setting-desc">{$t('settings.default_model_desc')}</span>
-          </div>
-          {#if modelOptions.length > 0}
-            <select class="sel" bind:value={model}>
-              {#each modelOptions as o}<option value={o}>{o}</option>{/each}
-            </select>
-          {:else}
-            <input class="input" bind:value={model} placeholder="e.g. claude-sonnet-4-5" />
-          {/if}
-        </div>
+        <!-- Default Model itself is set from the Models list below (the
+             "Set as default" action on a model card) — no separate control
+             needed here. -->
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-label">{$t('settings.reasoning')}</span>
