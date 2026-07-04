@@ -147,9 +147,9 @@ doesn't conflict with octo's zero-runtime, single-binary positioning. Starlight 
 dark/light, i18n routing, and MDX (for tabs/callouts) out of the box; Pagefind search bolts on as a
 static plugin.
 
-The source lives in `website/` (an Astro project); the hand-rolled landing page is a separate plain
-HTML file at `landing/index.html`. `.github/workflows/pages.yml` builds `website/` and assembles the
-two into one deploy: `landing/*` at the site root, `website/dist/*` (built with `base: "/docs"`)
+The source lives in `docs/` (an Astro project); the hand-rolled landing page is a separate plain
+HTML file at `landing/index.html`. `.github/workflows/pages.yml` builds `docs/` and assembles the
+two into one deploy: `landing/*` at the site root, `docs/dist/*` (built with `base: "/docs"`)
 under `/docs/`.
 
 ## Content migration

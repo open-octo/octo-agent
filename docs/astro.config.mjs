@@ -19,7 +19,7 @@ export default defineConfig({
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/open-octo/octo-agent' },
 			],
 			editLink: {
-				baseUrl: 'https://github.com/open-octo/octo-agent/edit/main/website/',
+				baseUrl: 'https://github.com/open-octo/octo-agent/edit/main/docs/',
 			},
 			customCss: ['./src/styles/custom.css'],
 			defaultLocale: 'root',
