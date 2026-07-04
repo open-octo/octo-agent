@@ -34,6 +34,18 @@ type UIController struct {
 	// only the newest chunk would erase what the user already read.
 	sentText string
 
+	// fenceOpen/fenceLang track a ``` code fence left open by the last text
+	// actually handed to adapter.SendText (#1116). Every SendText call
+	// produces its own standalone IM message — unlike UpdateMessage, which
+	// redraws the full cumulative text each time and so "sees" the true,
+	// complete fence state on its own. A fence opened in one flush and
+	// closed in a later one would otherwise render as a permanently broken
+	// code block on any platform without in-place edits (DingTalk/WeCom/
+	// Weixin: every flush is a SendText call), or after an edit-size-cap
+	// fallback freezes an edit-capable platform's message mid-fence.
+	fenceOpen bool
+	fenceLang string
+
 	// toolCount tracks how many tools have started (for suppression heuristics).
 	toolCount int
 
@@ -160,21 +172,40 @@ func (u *UIController) flushTextLocked() {
 		}
 		// Edit failed (platform edit-size cap, message deleted): fall through
 		// and continue in a fresh message carrying just the not-yet-shown
-		// chunk. The old message keeps its last successfully edited content,
-		// so nothing the user saw is lost.
+		// chunk. The old message keeps its last successfully edited content —
+		// u.sentText, pre-delta — and that's now frozen, so recompute the
+		// fence state from that actual displayed text (#1116). u.fenceOpen
+		// only ever tracked SendText calls, which for an edit-capable
+		// platform means it's stale by everything shown via edits since.
+		u.fenceOpen, u.fenceLang = fenceStateAfter(u.sentText, false, "")
 	}
 
-	res := u.adapter.SendText(u.chatID, strings.TrimSpace(chunk), u.replyTo)
+	// #1116: this chunk becomes its own standalone message. If a fence was
+	// left open by whatever was last actually sent — the previous flush's
+	// SendText, or the frozen content of a message an edit-cap fallback just
+	// abandoned above — reopen it here, and close it again if this chunk
+	// itself ends mid-fence, so a code block spanning two messages still
+	// renders as valid markdown in both.
+	trimmed := strings.TrimSpace(chunk)
+	sendText := reopenFence(u.fenceOpen, u.fenceLang, trimmed)
+	open, lang := fenceStateAfter(trimmed, u.fenceOpen, u.fenceLang)
+	if open {
+		sendText = strings.TrimRight(sendText, "\n") + "\n```"
+	}
+
+	res := u.adapter.SendText(u.chatID, sendText, u.replyTo)
 	if res.OK {
 		u.pendingTextMsgID = res.MessageID
 		u.sentText = chunk
+		u.fenceOpen, u.fenceLang = open, lang
 		return
 	}
 	// Both the edit (if attempted) and the fresh send failed. Put the chunk
-	// back into the buffer instead of dropping it forever: pendingTextMsgID
-	// and sentText are left untouched (still tracking the old message's true
-	// last-shown content), and the next flush — a later delta, or the
-	// turn-end flush — retries this text along with whatever comes after it.
+	// back into the buffer instead of dropping it forever: pendingTextMsgID,
+	// sentText, and the fence state are left untouched (still tracking the
+	// old message's true last-shown content), and the next flush — a later
+	// delta, or the turn-end flush — retries this text along with whatever
+	// comes after it.
 	u.textBuf.WriteString(chunk)
 }
 
@@ -183,6 +214,8 @@ func (u *UIController) resetLocked() {
 	u.textBuf.Reset()
 	u.pendingTextMsgID = ""
 	u.sentText = ""
+	u.fenceOpen = false
+	u.fenceLang = ""
 	u.toolCount = 0
 	u.inTool = false
 	u.sentTyping = false
@@ -203,6 +236,15 @@ func shouldFlush(buf string) bool {
 	if n := len(buf); n > 2 {
 		c := buf[n-2]
 		if (c == '.' || c == '!' || c == '?') && (buf[n-1] == ' ' || buf[n-1] == '\n') {
+			return true
+		}
+	}
+	// #1116: the check above is ASCII-only, so CJK prose never flushed on a
+	// sentence boundary — only on \n\n or the 800-byte cap. Chinese/Japanese
+	// sentence-ending punctuation (。！？) isn't followed by a space the way
+	// English is; the punctuation itself is the boundary.
+	for _, p := range [...]string{"。", "！", "？"} {
+		if strings.HasSuffix(buf, p) {
 			return true
 		}
 	}

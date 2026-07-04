@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -106,6 +107,48 @@ func TestSendText_ProactiveGroupPush(t *testing.T) {
 	}
 	if stub.sends[0].body["openConversationId"] != "cidAbC123==" {
 		t.Errorf("openConversationId = %v", stub.sends[0].body["openConversationId"])
+	}
+}
+
+// #1116: SendText posted content as a single unbounded payload — a reply
+// exceeding maxMessageBytes had no splitting to fall back on and would be
+// rejected or truncated outright by the platform.
+func TestSendText_SplitsLongMessages(t *testing.T) {
+	var mu sync.Mutex
+	var sent []string
+	wh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		md, _ := body["markdown"].(map[string]any)
+		text, _ := md["text"].(string)
+		mu.Lock()
+		sent = append(sent, text)
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0})
+	}))
+	defer wh.Close()
+
+	stub := &stubAPI{}
+	ts := stub.server(t)
+	defer ts.Close()
+
+	a := testAdapter(ts)
+	a.webhooks["chat1"] = webhookEntry{URL: wh.URL, ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli()}
+
+	long := strings.Repeat("word ", 5000) // ~25000 chars, over maxMessageBytes
+	if res := a.SendText("chat1", long, ""); !res.OK {
+		t.Fatalf("send: %s", res.Error)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) < 2 {
+		t.Fatalf("expected split into >=2 messages, got %d", len(sent))
+	}
+	for _, text := range sent {
+		if len(text) > maxMessageBytes {
+			t.Fatalf("chunk exceeds cap: %d bytes", len(text))
+		}
 	}
 }
 

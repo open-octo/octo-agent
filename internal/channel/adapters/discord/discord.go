@@ -48,6 +48,15 @@ const (
 	// readTimeout bounds a silent connection: heartbeat ACKs arrive at least
 	// every heartbeat interval (~41s), so 90s means two missed beats.
 	readTimeout = 90 * time.Second
+
+	// maxMessageBytes is Discord's hard per-message content cap (2000 UTF-16
+	// code units). #1116: SendText used to post content as-is — any reply
+	// over this limit got HTTP 400 and vanished entirely, with nothing
+	// telling the user why. Budgeting in bytes rather than characters is
+	// strictly conservative here: a string's UTF-8 byte length is never
+	// smaller than its UTF-16 code-unit count, so this can only split a
+	// little earlier than the real limit requires, never later.
+	maxMessageBytes = 2000
 )
 
 // fatalCloseCodes are gateway close codes that mean reconnecting cannot help
@@ -179,19 +188,30 @@ func (a *Adapter) Stop() error {
 	return nil
 }
 
-// SendText sends a message via the REST API.
+// SendText sends a message via the REST API, splitting content over
+// Discord's 2000-char cap into consecutive messages (#1116). Returns the
+// message ID of the last chunk.
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
-	payload := map[string]any{"content": text}
-	if replyTo != "" {
-		payload["message_reference"] = map[string]string{"message_id": replyTo}
+	chunks := channel.SplitForSend(text, maxMessageBytes)
+	if len(chunks) == 0 {
+		return channel.SendResult{OK: true}
 	}
-	var msg struct {
-		ID string `json:"id"`
+
+	var lastID string
+	for i, chunk := range chunks {
+		payload := map[string]any{"content": chunk}
+		if replyTo != "" && i == 0 {
+			payload["message_reference"] = map[string]string{"message_id": replyTo}
+		}
+		var msg struct {
+			ID string `json:"id"`
+		}
+		if err := a.rest(http.MethodPost, fmt.Sprintf("/channels/%s/messages", chatID), payload, &msg); err != nil {
+			return channel.SendResult{OK: false, Error: err.Error()}
+		}
+		lastID = msg.ID
 	}
-	if err := a.rest(http.MethodPost, fmt.Sprintf("/channels/%s/messages", chatID), payload, &msg); err != nil {
-		return channel.SendResult{OK: false, Error: err.Error()}
-	}
-	return channel.SendResult{OK: true, MessageID: msg.ID}
+	return channel.SendResult{OK: true, MessageID: lastID}
 }
 
 // SendFile uploads a file to a Discord channel using multipart form data.

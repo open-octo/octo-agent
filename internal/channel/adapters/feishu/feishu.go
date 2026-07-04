@@ -37,6 +37,13 @@ const (
 	reconnectDelay = 5 * time.Second
 	readDeadline   = 120 * time.Second
 	pingInterval   = 90 * time.Second
+
+	// maxMessageBytes: Feishu's documented per-message content limits are far
+	// larger than any normal agentic reply (custom-bot webhook guidance is
+	// "JSON under ~30KB"), so this exists purely as a conservative backstop
+	// against silently failing on a truly pathological reply (#1116), not a
+	// limit anyone should expect to hit in practice.
+	maxMessageBytes = 20000
 )
 
 func init() {
@@ -192,13 +199,31 @@ func (a *Adapter) Stop() error {
 	return nil
 }
 
-// SendText sends a text message.
+// SendText sends a text (or, for code/tables, interactive card) message,
+// splitting content that exceeds maxMessageBytes into consecutive messages
+// (#1116). Returns the message ID of the last chunk. replyTo is only
+// attached to the first chunk — attaching it to every chunk would render as
+// several bubbles all "replying to" the same original message instead of a
+// natural sequential thread.
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
-	msgID, err := a.sendMessage(chatID, text, replyTo)
-	if err != nil {
-		return channel.SendResult{OK: false, Error: err.Error()}
+	chunks := channel.SplitForSend(text, maxMessageBytes)
+	if len(chunks) == 0 {
+		return channel.SendResult{OK: true}
 	}
-	return channel.SendResult{OK: true, MessageID: msgID}
+
+	var lastID string
+	for i, chunk := range chunks {
+		rt := ""
+		if i == 0 {
+			rt = replyTo
+		}
+		msgID, err := a.sendMessage(chatID, chunk, rt)
+		if err != nil {
+			return channel.SendResult{OK: false, Error: err.Error()}
+		}
+		lastID = msgID
+	}
+	return channel.SendResult{OK: true, MessageID: lastID}
 }
 
 // SendFile uploads a local file to Feishu and sends it to the chat.
