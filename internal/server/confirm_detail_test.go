@@ -1,6 +1,10 @@
 package server
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 // TestBuildConfirmDetail_Terminal pins #1105: the permission modal used to
 // show only "Allow terminal?" with the command discarded, so the user
@@ -44,6 +48,21 @@ func TestBuildConfirmDetail_OtherTool(t *testing.T) {
 	}
 }
 
+// TestBuildConfirmDetail_EditFileMissingFields covers the edge case a review
+// pass caught: if old_string/new_string are absent (malformed tool call),
+// EditUIDiff("", "") used to render a bogus near-empty "- " diff line
+// instead of falling back to a generic listing of whatever fields ARE
+// present.
+func TestBuildConfirmDetail_EditFileMissingFields(t *testing.T) {
+	d := buildConfirmDetail("edit_file", map[string]any{"path": "/tmp/foo.go"})
+	if d.Diff != "" {
+		t.Errorf("Diff = %q, want empty when old_string/new_string are missing", d.Diff)
+	}
+	if d.Input != "path: /tmp/foo.go" {
+		t.Errorf("Input = %q, want the generic listing to show what's actually present", d.Input)
+	}
+}
+
 func TestFormatToolInputForConfirm(t *testing.T) {
 	t.Run("empty input", func(t *testing.T) {
 		if got := formatToolInputForConfirm(nil); got != "" {
@@ -68,6 +87,20 @@ func TestFormatToolInputForConfirm(t *testing.T) {
 		got := formatToolInputForConfirm(map[string]any{"k": long})
 		if len(got) >= len(long) {
 			t.Errorf("expected the 300-rune value to be capped, got length %d", len(got))
+		}
+	})
+
+	t.Run("many keys are capped with a fold marker", func(t *testing.T) {
+		input := make(map[string]any, 50)
+		for i := 0; i < 50; i++ {
+			input[fmt.Sprintf("k%02d", i)] = "v"
+		}
+		got := formatToolInputForConfirm(input)
+		if !strings.Contains(got, "… +10 more fields") {
+			t.Errorf("expected a fold marker for the 10 keys past the cap, got:\n%s", got)
+		}
+		if strings.Count(got, "\n") > 41 { // 40 kept keys + 1 fold-marker line, no trailing newline
+			t.Errorf("expected at most 40 key lines + fold marker, got %d lines:\n%s", strings.Count(got, "\n")+1, got)
 		}
 	})
 }

@@ -1675,9 +1675,22 @@ func buildConfirmDetail(toolName string, toolInput map[string]any) confirmDetail
 			detail.Command = cmd
 		}
 	case "edit_file":
-		oldStr, _ := toolInput["old_string"].(string)
-		newStr, _ := toolInput["new_string"].(string)
-		detail.Diff = tools.EditUIDiff(oldStr, newStr)
+		// Best-effort preview: this is the literal old_string/new_string the
+		// model asked for, not the post-normalization result EditFileTool.Execute
+		// actually writes (it additionally runs findActualString/preserveQuoteStyle/
+		// preserveIndentStyle against the real file — see edit_file.go). Re-running
+		// that whole resolution here would mean reading the file a second time
+		// before the user has even approved touching it. What matters for a
+		// permission ask is showing what the model is trying to inject; cosmetic
+		// quote/indent drift, or an old_string that turns out not to match, is
+		// caught (safely, no write happens) when the tool actually runs.
+		oldStr, okOld := toolInput["old_string"].(string)
+		newStr, okNew := toolInput["new_string"].(string)
+		if okOld && okNew && (oldStr != "" || newStr != "") {
+			detail.Diff = tools.EditUIDiff(oldStr, newStr)
+		} else {
+			detail.Input = formatToolInputForConfirm(toolInput)
+		}
 	default:
 		detail.Input = formatToolInputForConfirm(toolInput)
 	}
@@ -1701,12 +1714,19 @@ func formatToolInputForConfirm(toolInput map[string]any) string {
 
 	const maxLineRunes = 200
 	const maxValueLines = 4
+	const maxKeys = 40 // defensive cap: per-value length/lines are bounded above, but not key count
 	capLine := func(s string) string {
 		r := []rune(s)
 		if len(r) > maxLineRunes {
 			return string(r[:maxLineRunes]) + "…"
 		}
 		return s
+	}
+
+	truncatedKeys := 0
+	if len(keys) > maxKeys {
+		truncatedKeys = len(keys) - maxKeys
+		keys = keys[:maxKeys]
 	}
 
 	var b strings.Builder
@@ -1730,6 +1750,9 @@ func formatToolInputForConfirm(toolInput map[string]any) string {
 		if folded {
 			fmt.Fprintf(&b, "  … +%d more lines\n", len(lines)-maxValueLines)
 		}
+	}
+	if truncatedKeys > 0 {
+		fmt.Fprintf(&b, "… +%d more fields\n", truncatedKeys)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

@@ -4,6 +4,18 @@
   import { t } from '../../lib/i18n'
   import StatusTag from '../ui/StatusTag.svelte'
 
+  let modalEl = $state<HTMLDivElement | null>(null)
+
+  // Focus the modal whenever it (re)opens, same as AuthGate/CommandPalette —
+  // review caught that a window-level keydown listener without stealing
+  // focus leaves the chat composer's textarea focused underneath the
+  // backdrop. Enter there both sends the composer's draft AND (via bubbling)
+  // approved the pending tool call — approving blind again, just via
+  // keyboard instead of the backdrop click this fix closed off.
+  $effect(() => {
+    if ($confirmModal && modalEl) modalEl.focus()
+  })
+
   function deny() {
     if (!$confirmModal) return
     ws.answerConfirmation($confirmModal.id, 'deny')
@@ -16,9 +28,12 @@
     confirmModal.set(null)
   }
 
-  // #1105: Esc / Enter, matching AuthGate / CommandPalette. Enter maps to
-  // the primary action — for a permission ask that's now "allow once" (the
-  // least-privilege choice), not "allow for session".
+  // #1105: Esc / Enter, matching AuthGate / CommandPalette. Bound on the
+  // modal element itself (focused via the $effect above), not on
+  // svelte:window — a window-level listener fires *in addition to*
+  // whatever element already has focus, which was the composer textarea.
+  // Enter maps to the primary action — for a permission ask that's now
+  // "allow once" (the least-privilege choice), not "allow for session".
   function onKeydown(e: KeyboardEvent) {
     if (!$confirmModal) return
     if (e.key === 'Escape') {
@@ -41,14 +56,12 @@
   }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
-
 {#if $confirmModal}
 <!-- #1105: backdrop no longer denies on click — a stray click used to
      silently cancel the pending tool call mid-turn. Dismissal now requires
      an explicit button or Esc. -->
 <div class="backdrop" role="presentation">
-  <div class="modal" role="dialog" aria-modal="true">
+  <div class="modal" role="dialog" aria-modal="true" tabindex="-1" bind:this={modalEl} onkeydown={onKeydown}>
     <div class="modal-header">
       <iconify-icon icon="ant-design:safety-outlined" width="16" style="color:var(--warning);flex-shrink:0"></iconify-icon>
       <span class="modal-title">{$t('perm.title')}</span>
@@ -118,6 +131,9 @@
   box-shadow: 0 16px 48px rgba(0,0,0,0.18);
   animation: octo-fadein 0.16s ease;
 }
+/* The modal itself is the focus target (see the $effect above) so Enter/Esc
+   don't leak to whatever was focused underneath (e.g. the chat composer). */
+.modal:focus { outline: none; }
 .modal-header {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 18px;
