@@ -97,9 +97,15 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 	var toolDefs []agent.ToolDefinition
 	var executor agent.ToolExecutor
 	var mgr *tools.SubAgentManager
+	var cleanup func()
+	defer func() {
+		if cleanup != nil {
+			cleanup()
+		}
+	}()
 	if s.cfg.Tools {
 		var perr error
-		runCtx, executor, mgr, perr = s.prepareToolTurn(runCtx, a, sess)
+		runCtx, executor, mgr, cleanup, perr = s.prepareToolTurn(runCtx, a, sess)
 		if perr != nil {
 			ev := agent.AgentEvent{Kind: agent.EventToolError, Err: perr.Error()}
 			b, _ := json.Marshal(ev)

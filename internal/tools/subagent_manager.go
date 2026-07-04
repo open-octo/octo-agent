@@ -122,6 +122,10 @@ var defaultSubAgentMgr *SubAgentManager
 // when no local manager is set.
 func SetDefaultSubAgentManager(m *SubAgentManager) { defaultSubAgentMgr = m }
 
+// DefaultSubAgentManager returns the process-wide manager currently
+// registered, or nil if none.
+func DefaultSubAgentManager() *SubAgentManager { return defaultSubAgentMgr }
+
 // subAgentManagerEnabled reports whether a SubAgentManager is registered,
 // which is required for the Agent tool.
 func subAgentManagerEnabled() bool { return defaultSubAgentMgr != nil }
@@ -158,6 +162,15 @@ func NewSubAgentManager(spawner Spawner) *SubAgentManager {
 		agents:  map[string]*asyncSubAgent{},
 		spawner: spawner,
 	}
+}
+
+// Spawner returns the spawner backing this manager. Exposed so tools that
+// delegate to sub-agents (e.g. workflow) can resolve the spawner from the
+// ctx-scoped manager rather than relying on the process-global singleton.
+func (m *SubAgentManager) Spawner() Spawner {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.spawner
 }
 
 // SetSynchronous selects the sub_agent dispatch model. The default (false)

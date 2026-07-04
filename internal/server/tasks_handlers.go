@@ -209,9 +209,15 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 
 	var toolDefs []agent.ToolDefinition
 	var executor agent.ToolExecutor
+	var cleanup func()
+	defer func() {
+		if cleanup != nil {
+			cleanup()
+		}
+	}()
 	if s.cfg.Tools {
 		var perr error
-		runCtx, executor, _, perr = s.prepareToolTurn(runCtx, a, sess)
+		runCtx, executor, _, cleanup, perr = s.prepareToolTurn(runCtx, a, sess)
 		if perr != nil {
 			sw.error(perr.Error())
 			return sessionID, fmt.Errorf("prepare tools: %w", perr)

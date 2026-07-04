@@ -176,7 +176,17 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		}
 	}
 
-	spawner := ActiveSpawner()
+	// Prefer the ctx-scoped SubAgentManager (server/IM per-turn/per-session) so a
+	// workflow spawned by one session doesn't accidentally use another session's
+	// global Spawner under concurrency. Fall back to the process-global Spawner
+	// for CLI/TUI paths that never stamp a ctx manager.
+	var spawner Spawner
+	if mgr := resolveSubAgentManager(ctx, nil); mgr != nil {
+		spawner = mgr.Spawner()
+	}
+	if spawner == nil {
+		spawner = ActiveSpawner()
+	}
 	if spawner == nil {
 		return agent.ToolResult{}, fmt.Errorf("workflow: sub-agent dispatch is not configured for this session")
 	}
