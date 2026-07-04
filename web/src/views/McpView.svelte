@@ -136,6 +136,12 @@
 
   let oauth = $state<{ name: string; state: string; userCode: string; link: string; error: string } | null>(null)
   let oauthTimer: ReturnType<typeof setInterval> | null = null
+  // #1109: the poll had no upper bound — a device flow that never completes
+  // (user never visits the link, or abandons it) polled forever. 2 minutes
+  // matches typical device-code TTLs; past that we stop and show a timeout
+  // instead of leaving the modal spinning silently.
+  const OAUTH_TIMEOUT_MS = 120_000
+  let oauthDeadline: ReturnType<typeof setTimeout> | null = null
 
   function oauthSettled(state: string): boolean {
     return state === 'connected' || state === 'failed'
@@ -153,6 +159,7 @@
 
   function stopPolling() {
     if (oauthTimer) { clearInterval(oauthTimer); oauthTimer = null }
+    if (oauthDeadline) { clearTimeout(oauthDeadline); oauthDeadline = null }
   }
 
   async function authorize(name: string) {
@@ -168,6 +175,12 @@
           if (oauthSettled(s.state)) { stopPolling(); onOAuthSettled(s.state) }
         } catch { /* transient — keep polling until the modal closes */ }
       }, 1500)
+      oauthDeadline = setTimeout(() => {
+        stopPolling()
+        if (oauth?.name === name && !oauthSettled(oauth.state)) {
+          oauth = { ...oauth, state: 'failed', error: 'Authorization timed out — the link may have expired. Try again.' }
+        }
+      }, OAUTH_TIMEOUT_MS)
     } catch (e: any) {
       showToast(e.message ?? 'Authorization failed', 'error')
     }
@@ -178,11 +191,17 @@
     if (state === 'connected') setTimeout(() => { oauth = null }, 1200)
   }
 
-  // Closing just stops watching — the device flow continues server-side and the
-  // token caches on success regardless.
+  // #1109: closing only stopped watching — the device flow continues
+  // server-side and a token cached right after close never refreshed the
+  // list, so a server the user just authorized could still show
+  // "disconnected" until the next full reload. One extra reload on close
+  // covers the flow finishing right around that moment; it doesn't chase a
+  // flow that completes long after the modal is gone (matching the issue's
+  // proposed fix — server state is still correct, just not reflected here).
   function closeOAuth() {
     stopPolling()
     oauth = null
+    reload()
   }
 
   onDestroy(stopPolling)

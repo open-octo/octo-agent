@@ -82,7 +82,10 @@
 
   async function forgetMemory(f: Memory) {
     try {
-      await fetch(`/api/memories/${encodeURIComponent(f.name)}?source=${encodeURIComponent(f.source)}`, { method: 'DELETE' })
+      // #1109: was a raw fetch() with no res.ok check — a failing delete
+      // (404/500) still reported "Memory removed" and the row reappeared on
+      // reload. api.deleteMemory throws on non-2xx via request().
+      await api.deleteMemory(f.name, f.source)
       memFiles = memFiles.filter(m => m.path !== f.path)
       showToast('Memory removed', 'success')
     } catch (e: any) {

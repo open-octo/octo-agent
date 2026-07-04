@@ -15,10 +15,26 @@ export interface TaskResponse {
   session_id: string
 }
 
+// #1109: every caller below throws through here, and every error toast in
+// Settings/MCP/Skills/Tasks/Channels/Profile/FileRecall renders e.message —
+// which used to be just the HTTP status line ("500 Internal Server Error")
+// because the server's JSON error body ({"error": "..."}, see writeError in
+// internal/server/server.go) was discarded. One fix here fixes every toast.
+async function readErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json()
+    if (typeof body?.error === 'string' && body.error) return body.error
+    if (typeof body?.message === 'string' && body.message) return body.message
+  } catch {
+    // Not JSON (proxy error page, empty body, …) — fall back to the status line.
+  }
+  return fallback
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init)
   if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText}`)
+    throw new Error(await readErrorMessage(res, `${res.status} ${res.statusText}`))
   }
   return res.json() as Promise<T>
 }
@@ -413,6 +429,14 @@ export async function getMemory(name: string, source?: string): Promise<{ conten
   // inherited (home) memory dirs.
   const qs = source ? `?source=${encodeURIComponent(source)}` : ''
   return request<{ content: string; path: string }>(`/api/memories/${encodeURIComponent(name)}${qs}`)
+}
+
+// #1109: ProfileView.forgetMemory used a raw fetch() with no res.ok check —
+// a failing DELETE (404/expired session/etc) still reported "Memory removed"
+// and the entry reappeared on reload. Routing through request() makes a
+// non-2xx throw instead of silently succeeding.
+export async function deleteMemory(name: string, source: string): Promise<void> {
+  await request<unknown>(`/api/memories/${encodeURIComponent(name)}?source=${encodeURIComponent(source)}`, { method: 'DELETE' })
 }
 
 // Trash
