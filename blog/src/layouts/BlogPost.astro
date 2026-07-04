@@ -2,32 +2,46 @@
 import type { CollectionEntry } from 'astro:content';
 import '../styles/blog.css';
 
-type Props = CollectionEntry<'posts'>['data'] & { slug?: string };
+type Props = CollectionEntry<'posts'>['data'] & { slug?: string; locale?: string; alternateSlug?: string };
 
-const { title, description, pubDate, updatedDate, author, tags } = Astro.props;
-const dateFormatter = new Intl.DateTimeFormat('en-US', {
+const { title, description, pubDate, updatedDate, author, tags, locale = 'zh', alternateSlug } = Astro.props;
+const dateFormatter = new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
 	year: 'numeric',
 	month: 'long',
 	day: 'numeric',
 });
+
+const navLabels = {
+	en: { home: 'octo blog', docs: 'Docs', github: 'GitHub', lang: 'EN' },
+	zh: { home: 'octo 博客', docs: '文档', github: 'GitHub', lang: '中文' },
+};
+const labels = navLabels[locale as keyof typeof navLabels] || navLabels.zh;
+
+const alternateLocale = locale === 'zh' ? 'en' : 'zh';
+const alternateUrl = alternateSlug
+	? `/blog/posts/${alternateLocale}/${alternateSlug}/`
+	: `/blog/${alternateLocale === 'zh' ? '' : 'en/'}`;
+const alternateLabel = locale === 'zh' ? 'English' : '中文';
 ---
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang={locale === 'zh' ? 'zh-CN' : 'en'}>
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>{title} | octo blog</title>
 		<meta name="description" content={description} />
 		<link rel="icon" type="image/svg+xml" href="/blog/favicon.svg" />
+		<link rel="alternate" hreflang={locale === 'zh' ? 'en' : 'zh-CN'} href={alternateUrl} />
 	</head>
 	<body>
 		<header class="site-header">
 			<div class="container">
-				<a href="/blog/" class="site-title">octo blog</a>
+				<a href={locale === 'zh' ? '/blog/' : '/blog/en/'} class="site-title">{labels.home}</a>
 				<nav class="site-nav">
-					<a href="/docs/">Docs</a>
-					<a href="https://github.com/open-octo/octo-agent">GitHub</a>
+					<a href="/docs/">{labels.docs}</a>
+					<a href="https://github.com/open-octo/octo-agent">{labels.github}</a>
+					<a class="lang-switch" href={alternateUrl} title={alternateLabel}>{alternateLabel}</a>
 				</nav>
 			</div>
 		</header>
@@ -69,5 +83,25 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 				</p>
 			</div>
 		</footer>
+
+		<script type="module">
+			import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+			mermaid.initialize({ startOnLoad: false, theme: 'default' });
+			const blocks = document.querySelectorAll('pre code.language-mermaid');
+			blocks.forEach((block) => {
+				const pre = block.parentElement;
+				const source = block.textContent || '';
+				const id = 'mermaid-' + Math.random().toString(36).slice(2, 9);
+				const container = document.createElement('div');
+				container.className = 'mermaid-diagram';
+				container.id = id;
+				pre.replaceWith(container);
+				mermaid.render(id, source).then(({ svg }) => {
+					container.innerHTML = svg;
+				}).catch((err) => {
+					container.innerHTML = '<pre class="mermaid-error">' + (err?.message || 'Mermaid render failed') + '</pre>';
+				});
+			});
+		</script>
 	</body>
 </html>

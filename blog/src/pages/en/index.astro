@@ -1,12 +1,12 @@
 ---
 import { getCollection } from 'astro:content';
-import '../styles/blog.css';
+import '../../styles/blog.css';
 
 const posts = (await getCollection('posts'))
-	.filter((post) => !post.data.draft && post.data.locale === 'zh')
+	.filter((post) => !post.data.draft && post.data.locale === 'en')
 	.sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf());
 
-const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
+const dateFormatter = new Intl.DateTimeFormat('en-US', {
 	year: 'numeric',
 	month: 'long',
 	day: 'numeric',
@@ -14,46 +14,46 @@ const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
 ---
 
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>octo 博客</title>
+		<title>octo blog</title>
 		<meta
 			name="description"
-			content="octo-agent 团队的工程笔记、版本更新与技术深度文章。"
+			content="Engineering notes, release updates, and deep dives from the octo-agent team."
 		/>
 		<link rel="icon" type="image/svg+xml" href="/blog/favicon.svg" />
-		<link rel="alternate" hreflang="en" href="/blog/en/" />
+		<link rel="alternate" hreflang="zh-CN" href="/blog/" />
 	</head>
 	<body>
 		<header class="site-header">
 			<div class="container">
-				<a href="/blog/" class="site-title">octo 博客</a>
+				<a href="/blog/en/" class="site-title">octo blog</a>
 				<nav class="site-nav">
-					<a href="/docs/">文档</a>
+					<a href="/docs/">Docs</a>
 					<a href="https://github.com/open-octo/octo-agent">GitHub</a>
-					<a class="lang-switch" href="/blog/en/" title="English">English</a>
+					<a class="lang-switch" href="/blog/" title="中文">中文</a>
 				</nav>
 			</div>
 		</header>
 
 		<main class="container">
 			<section class="hero">
-				<h1>octo 博客</h1>
+				<h1>octo blog</h1>
 				<p>
-					octo-agent 团队的工程笔记、版本更新与技术深度文章。
+					Engineering notes, release updates, and deep dives from the octo-agent team.
 				</p>
 			</section>
 
 			<section class="post-list">
-				<h2>最新文章</h2>
-				{posts.length === 0 && <p>暂无文章。</p>}
+				<h2>Latest posts</h2>
+				{posts.length === 0 && <p>No posts yet.</p>}
 				<ul>
 					{
 						posts.map((post) => (
 							<li class="post-card">
-								<a href={`/blog/posts/${post.id.slice(3)}/`} class="post-card-title">
+								<a href={`/blog/posts/${post.id}/`} class="post-card-title">
 									{post.data.title}
 								</a>
 								<p class="post-card-description">{post.data.description}</p>

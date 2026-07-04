@@ -11,6 +11,8 @@ const postsCollection = defineCollection({
 		author: z.string().default('octo-agent team'),
 		tags: z.array(z.string()).default([]),
 		draft: z.boolean().default(false),
+		locale: z.enum(['en', 'zh']).default('zh'),
+		originalSlug: z.string().optional(),
 	}),
 });
 

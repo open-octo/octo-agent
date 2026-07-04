@@ -4,16 +4,26 @@ import BlogPost from '../../layouts/BlogPost.astro';
 
 export async function getStaticPaths() {
 	const posts = await getCollection('posts');
-	return posts.map((post) => ({
-		params: { slug: post.id },
-		props: post,
-	}));
+	return posts.map((post) => {
+		const slug = post.id.startsWith('zh/') ? post.id.slice(3) : post.id;
+		const locale = post.data.locale || (post.id.startsWith('zh/') ? 'zh' : 'en');
+		// Find alternate-language version of the same post
+		const alternate = posts.find(
+			(p) =>
+				p.data.originalSlug === post.data.originalSlug &&
+				p.data.locale !== locale,
+		);
+		return {
+			params: { slug },
+			props: { post, alternateSlug: alternate?.id.startsWith('zh/') ? alternate.id.slice(3) : alternate?.id },
+		};
+	});
 }
 
-const post = Astro.props;
+const { post, alternateSlug } = Astro.props;
 const { Content } = await render(post);
 ---
 
-<BlogPost {...post.data} slug={post.id}>
+<BlogPost {...post.data} slug={post.id} locale={post.data.locale} alternateSlug={alternateSlug}>
 	<Content />
 </BlogPost>

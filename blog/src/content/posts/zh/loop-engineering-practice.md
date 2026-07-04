@@ -4,6 +4,8 @@ description: "记录在 open-octo/octo-agent 仓库上落地 issue triage、PR r
 pubDate: 2026-07-04
 author: "octo-agent team"
 tags: ["loop-engineering", "octo-agent", "workflow", "github-automation"]
+locale: zh
+originalSlug: loop-engineering-practice
 ---
 
 # Loop Engineering 实战：用 octo-agent 自动循环打理开源仓库
