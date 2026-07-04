@@ -134,7 +134,7 @@ func savedWorkflowsParamDesc() string {
 	var b strings.Builder
 	b.WriteString("Run a saved workflow by name (from ~/.octo/workflows or the project's " +
 		".octo/workflows). Provide exactly one of script or name; args are passed in either way.")
-	saved := listWorkflows()
+	saved := listWorkflows(context.Background())
 	if len(saved) == 0 {
 		b.WriteString(" (No saved workflows found yet — author one with workflow_save.)")
 		return b.String()
@@ -166,7 +166,7 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 	case script == "" && name == "":
 		return agent.ToolResult{}, fmt.Errorf("workflow: provide a script, or a name of a saved workflow")
 	case name != "":
-		w, ok := lookupWorkflow(name)
+		w, ok := lookupWorkflow(ctx, name)
 		if !ok {
 			return agent.ToolResult{}, fmt.Errorf("workflow: no saved workflow named %q (looked in ~/.octo/workflows and .octo/workflows)", name)
 		}

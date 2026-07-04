@@ -88,6 +88,9 @@ workflow(name: "my-check", args: { target: "src/" })
   `~/.octo/workflows/` instead.
 - The registry merges **built-in presets < user workflows < project workflows** by name, rescanned
   fresh on every call — no caching, no restart needed after editing a saved script by hand.
+  Project workflows are resolved from the **current working directory** of the turn (the directory
+  you ran `octo` from, or the `directory` of a scheduled cron task), not necessarily the server's
+  process CWD.
 - A workflow's description comes from a leading `# @description ...` comment line.
 - `args` (any JSON value) is threaded through to the script's `args` call; omit it and `args`
   returns `nil`.
