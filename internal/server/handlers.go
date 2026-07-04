@@ -814,8 +814,9 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 
 	// Anchor the gate at the agent's per-session cwd (not the server default) so
 	// $CWD path rules and relative-path resolution match where the tools
-	// actually run — buildAgent sets a.CWD before every prepareToolTurn call,
-	// and the task path applies its directory ahead of this too.
+	// actually run — buildAgent sets a.CWD from sess.WorkingDir before every
+	// prepareToolTurn call, cron-scheduled sessions included (task.Directory
+	// only ever seeds sess.WorkingDir once, at session creation).
 	engine, err := permission.New(permissionConfigPath(), a.CWD, resolvePermissionMode(), s.memDir, s.homeMemDir)
 	if err != nil {
 		return ctx, nil, nil, func() {}, fmt.Errorf("permission engine: %w", err)

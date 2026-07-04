@@ -92,8 +92,17 @@ func TestCreateSession_InvalidDirectoryErrors(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	missing := filepath.Join(t.TempDir(), "nope")
-	if _, err := srv.CreateSession(scheduler.Task{Name: "t", Directory: missing}); err == nil {
-		t.Error("expected an error for a missing task directory")
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t", Directory: missing})
+	if err == nil {
+		t.Fatal("expected an error for a missing task directory")
+	}
+	// The failed seed means sess.Save() was never called — sess.ID names a
+	// session that exists only in memory. Returning it anyway would let
+	// scheduler.fire() (which persists task.SessionID unconditionally,
+	// without checking RunTask's error) permanently dangle the task on a
+	// session ID agent.LoadSession can never load.
+	if sessionID != "" {
+		t.Errorf("sessionID = %q, want empty on error (must not return an unsaved session's ID)", sessionID)
 	}
 }
 

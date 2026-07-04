@@ -94,11 +94,20 @@ func (s *Server) CreateSession(task scheduler.Task) (string, error) {
 		// for this task, never one that already exists.
 		if task.Directory != "" {
 			if err := seedSessionDirectory(sess, task.Directory); err != nil {
-				return sess.ID, err
+				// sess was never Saved — sess.ID names a session that exists
+				// only in memory, not on disk. Returning it here would let
+				// fire() (internal/scheduler/scheduler.go) persist it onto
+				// task.SessionID unconditionally (it doesn't check err before
+				// writing), permanently dangling the task on a session
+				// agent.LoadSession can never load — every subsequent cron
+				// tick would then hit this exact same error again with a
+				// fresh throwaway ID, forever. Return "" instead so a bad
+				// task.Directory can never leak into task.SessionID.
+				return "", err
 			}
 		}
 		if err := sess.Save(); err != nil {
-			return sess.ID, fmt.Errorf("save session: %w", err)
+			return "", fmt.Errorf("save session: %w", err)
 		}
 	}
 	return sess.ID, nil
