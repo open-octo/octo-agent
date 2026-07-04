@@ -153,7 +153,7 @@ func TestConfig_ShowReasoningReloadsDefaultSender(t *testing.T) {
 	}
 
 	// The effective show_reasoning broadcast value should reflect the new default.
-	_, _, _, sr, _ := srv.sessionStatusFields()
+	_, _, _, sr, _ := srv.sessionStatusFields(sess)
 	if sr == nil || *sr {
 		t.Fatalf("effective show_reasoning = %+v, want false", sr)
 	}

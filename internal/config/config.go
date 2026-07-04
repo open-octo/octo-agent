@@ -298,6 +298,22 @@ func (c *Config) SetDefaultEntry(e ModelEntry) {
 	c.DefaultModel = e.Model
 }
 
+// SetEntry replaces the entry matching e.Model in place. Unlike
+// SetDefaultEntry, it never appends a new entry and never touches
+// DefaultModel/LiteModel — it's for updating an already-configured entry by
+// name (e.g. a per-session setting change that should land on the specific
+// model that session runs, not necessarily the default one). Reports whether
+// a matching entry was found.
+func (c *Config) SetEntry(e ModelEntry) bool {
+	for i := range c.Models {
+		if c.Models[i].Model == e.Model {
+			c.Models[i] = e
+			return true
+		}
+	}
+	return false
+}
+
 // Path returns the absolute path to the config file (~/.octo/config.yml).
 func Path() (string, error) {
 	home, err := os.UserHomeDir()

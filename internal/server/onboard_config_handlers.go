@@ -259,22 +259,26 @@ func (s *Server) handlePutShowReasoning(w http.ResponseWriter, r *http.Request) 
 		log.Printf("[server] reload default sender after show_reasoning change: %v", err)
 	}
 
-	// Push the new effective default to every open session so the composer
-	// status bar refreshes immediately.
-	_, pm, re, sr, ctxUsage := s.sessionStatusFields()
-	if sr != nil {
-		sessions, _ := agent.ListSessions(50)
-		for _, sess := range sessions {
-			s.wsHub.broadcast(sess.ID, map[string]any{
-				"type":             "session_update",
-				"session_id":       sess.ID,
-				"working_dir":      s.sessionCwd(sess),
-				"permission_mode":  pm,
-				"reasoning_effort": re,
-				"show_reasoning":   *sr,
-				"context_usage":    ctxUsage,
-			})
+	// Push each session's own effective show_reasoning — resolved against ITS
+	// OWN model entry (see entryForSession), which falls back to this new
+	// global default only when that entry has no explicit override of its
+	// own — so this doesn't paint a session pinned to a model with its own
+	// show_reasoning: true/false with the new global value it's shielded from.
+	sessions, _ := agent.ListSessions(50)
+	for _, sess := range sessions {
+		_, pm, re, sr, ctxUsage := s.sessionStatusFields(sess)
+		if sr == nil {
+			continue
 		}
+		s.wsHub.broadcast(sess.ID, map[string]any{
+			"type":             "session_update",
+			"session_id":       sess.ID,
+			"working_dir":      s.sessionCwd(sess),
+			"permission_mode":  pm,
+			"reasoning_effort": re,
+			"show_reasoning":   *sr,
+			"context_usage":    ctxUsage,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "show_reasoning": req.ShowReasoning})
