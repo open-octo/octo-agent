@@ -5,11 +5,13 @@
   const ICON: Record<string, string> = {
     success: 'ant-design:check-circle-filled',
     error:   'ant-design:close-circle-filled',
+    warning: 'ant-design:warning-outlined',
     info:    'ant-design:info-circle-filled',
   }
   const COLOR: Record<string, string> = {
     success: 'var(--success)',
     error:   'var(--error)',
+    warning: 'var(--warning)',
     info:    'var(--blue-6)',
   }
 </script>
