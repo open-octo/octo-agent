@@ -106,19 +106,53 @@ func TestRenderToolCard_TerminalShowsTail(t *testing.T) {
 }
 
 func TestRenderToolCard_TerminalExitLiftedToHeader(t *testing.T) {
-	out := "compiling\nfailure detail\n[exit: 1]"
+	// "exit status 1" is the real marker shape terminal.go embeds — Go's
+	// *exec.ExitError.Error() passed through verbatim, not the bare "1"
+	// this test used before #1146. The bare-code fixture let the header
+	// silently render "exit exit status 1" for every real failing command
+	// while this test stayed green, since it never exercised the real shape.
+	out := "compiling\nfailure detail\n[exit: exit status 1]"
 	got := renderToolCard("terminal", map[string]any{"command": "make"}, out, false, 0, 1500*time.Millisecond)
 	if !strings.Contains(got, "exit 1") {
 		t.Errorf("exit code should surface in the header meta; got:\n%s", got)
 	}
+	if strings.Contains(got, "exit exit status 1") {
+		t.Errorf("header must not show the raw ExitError text verbatim; got:\n%s", got)
+	}
 	if !strings.Contains(got, "1.5s") {
 		t.Errorf("elapsed should surface in the header meta; got:\n%s", got)
 	}
-	if strings.Contains(got, "[exit: 1]") {
+	if strings.Contains(got, "[exit: exit status 1]") {
 		t.Errorf("raw exit marker should be stripped from the body; got:\n%s", got)
 	}
 	if !strings.Contains(got, "failure detail") {
 		t.Errorf("body should keep the real output; got:\n%s", got)
+	}
+}
+
+func TestRenderToolCard_TerminalKilledSignalInHeader(t *testing.T) {
+	out := "long output\n[exit: signal: killed]"
+	got := renderToolCard("terminal", map[string]any{"command": "sleep 999"}, out, false, 0, 0)
+	if !strings.Contains(got, "signal: killed") {
+		t.Errorf("signal text should surface in the header meta; got:\n%s", got)
+	}
+	if strings.Contains(got, "exit signal: killed") {
+		t.Errorf(`signal text should not be double-prefixed with "exit "; got:`+"\n%s", got)
+	}
+}
+
+func TestFormatExitReason(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"exit status 1", "exit 1"},
+		{"exit status 127", "exit 127"},
+		{"signal: killed", "signal: killed"},
+		{"signal: segmentation fault", "signal: segmentation fault"},
+		{"1", "1"}, // unrecognized/legacy shape: pass through, don't guess
+	}
+	for _, c := range cases {
+		if got := formatExitReason(c.in); got != c.want {
+			t.Errorf("formatExitReason(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
