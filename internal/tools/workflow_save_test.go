@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,60 +45,16 @@ func TestWorkflowSave_ProjectScopeUsesContextWorkingDir(t *testing.T) {
 	// When the server process is not in the project directory but the context
 	// carries a working directory, project-scope saves should land in the
 	// context's project root, not the process CWD.
-	project := t.TempDir()
-
-	ou, op := userWorkflowsRoot, projectWorkflowsRoot
-	var seenCWD string
-	userWorkflowsRoot = func() string { return "" }
-	projectWorkflowsRoot = func(cwd string) string {
-		seenCWD = cwd
-		return project
-	}
-	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot = ou, op })
-
-	ctx := WithWorkingDir(context.Background(), project)
-	if _, err := (WorkflowSaveTool{}).Execute(ctx, "c", map[string]any{
-		"name":   "ctx-wf",
-		"script": `"ok"`,
-	}); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if seenCWD != project {
-		t.Errorf("projectWorkflowsRoot got cwd %q, want %q", seenCWD, project)
-	}
-
-	// Without context working dir, falls back to process CWD.
-	seenCWD = ""
-	otherDir := t.TempDir()
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(otherDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(origDir); err != nil {
-			t.Error(err)
+	n := 0
+	assertProjectWorkflowsRootSeesCWDFallback(t, func(ctx context.Context) {
+		n++
+		if _, err := (WorkflowSaveTool{}).Execute(ctx, "c", map[string]any{
+			"name":   fmt.Sprintf("ctx-wf-%d", n),
+			"script": `"ok"`,
+		}); err != nil {
+			t.Fatalf("Execute: %v", err)
 		}
 	})
-	if _, err := (WorkflowSaveTool{}).Execute(context.Background(), "c", map[string]any{
-		"name":   "fallback-wf",
-		"script": `"ok"`,
-	}); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	resolvedSeen, err := filepath.EvalSymlinks(seenCWD)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolvedOther, err := filepath.EvalSymlinks(otherDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolvedSeen != resolvedOther {
-		t.Errorf("projectWorkflowsRoot fallback cwd = %q, want %q", resolvedSeen, resolvedOther)
-	}
 }
 
 func TestWorkflowSave_UserScope(t *testing.T) {

@@ -113,10 +113,7 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 		// -NoProfile: reproducible env (don't run the user's $PROFILE).
 		// -NonInteractive: never block on a PowerShell prompt mid-command.
 		ps := resolvePowerShell()
-		projectDir := WorkingDir(ctx)
-		if projectDir == "" {
-			projectDir, _ = os.Getwd()
-		}
+		projectDir := WorkingDirOrCWD(ctx)
 		// Wrap Remove-Item to copy to trash first (parity with the POSIX rm
 		// wrapper), but only when we can locate the octo binary and a project
 		// dir; otherwise run the command bare (no protection, but never broken).
@@ -129,10 +126,7 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 			cmd.Env = withBundledBinPath(os.Environ())
 		}
 	} else {
-		projectDir := WorkingDir(ctx)
-		if projectDir == "" {
-			projectDir, _ = os.Getwd()
-		}
+		projectDir := WorkingDirOrCWD(ctx)
 		if projectDir != "" {
 			trashDir := trash.ProjectDir(projectDir)
 			wrapped := fmt.Sprintf(safeRmWrapper, command)

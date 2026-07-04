@@ -72,7 +72,7 @@ func (WorkflowSaveTool) Execute(ctx context.Context, _ string, input map[string]
 	var root string
 	switch scope {
 	case "project":
-		root = projectWorkflowsRoot(resolveWorkflowCWD(ctx))
+		root = projectWorkflowsRoot(WorkingDirOrCWD(ctx))
 		if root == "" {
 			return agent.ToolResult{}, fmt.Errorf("workflow_save: no project root for scope \"project\" — run inside a repository or use scope \"user\"")
 		}

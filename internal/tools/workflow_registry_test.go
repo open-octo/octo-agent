@@ -144,37 +144,30 @@ func TestLookupWorkflow_UserOverridesEmbeddedDefault(t *testing.T) {
 	}
 }
 
-func TestLookupWorkflow_UsesContextWorkingDir(t *testing.T) {
-	// When the process CWD is not inside the project but the context carries a
-	// working directory, lookupWorkflow should resolve project-level workflows
-	// from that directory.
-	project := t.TempDir()
-
-	// Capture the cwd argument passed to projectWorkflowsRoot.
+// assertProjectWorkflowsRootSeesCWDFallback verifies that invoking fn with a
+// WithWorkingDir-stamped ctx resolves the project-level registry from that
+// stamped directory, and from the process CWD when ctx carries none — the
+// shared "does this ctx-aware entrypoint fall back correctly" check needed by
+// both lookupWorkflow (workflow_registry_test.go) and WorkflowSaveTool.Execute
+// (workflow_save_test.go), which each depend on the exact same guarantee.
+func assertProjectWorkflowsRootSeesCWDFallback(t *testing.T, fn func(ctx context.Context)) {
+	t.Helper()
 	ou, op := userWorkflowsRoot, projectWorkflowsRoot
 	var seenCWD string
 	userWorkflowsRoot = func() string { return "" }
 	projectWorkflowsRoot = func(cwd string) string {
 		seenCWD = cwd
-		return project
+		return t.TempDir() // any writable root; its content isn't asserted here
 	}
 	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot = ou, op })
 
-	writeWorkflowFile(t, project, "context-wf.rb", "# @description from context\n\"ok\"\n")
-
-	ctx := WithWorkingDir(context.Background(), project)
-	w, ok := lookupWorkflow(ctx, "context-wf")
-	if !ok {
-		t.Fatal("lookupWorkflow: not found from context working dir")
-	}
-	if w.description != "from context" {
-		t.Errorf("description = %q, want 'from context'", w.description)
-	}
-	if seenCWD != project {
-		t.Errorf("projectWorkflowsRoot got cwd %q, want %q", seenCWD, project)
+	stamped := t.TempDir()
+	fn(WithWorkingDir(context.Background(), stamped))
+	if seenCWD != stamped {
+		t.Errorf("projectWorkflowsRoot got cwd %q, want the stamped dir %q", seenCWD, stamped)
 	}
 
-	// Without the context working dir, the fallback CWD should be passed.
+	// Without a stamped working dir, the process CWD fallback should be passed.
 	seenCWD = ""
 	otherDir := t.TempDir()
 	origDir, err := os.Getwd()
@@ -189,7 +182,7 @@ func TestLookupWorkflow_UsesContextWorkingDir(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	lookupWorkflow(context.Background(), "context-wf")
+	fn(context.Background())
 	resolvedSeen, err := filepath.EvalSymlinks(seenCWD)
 	if err != nil {
 		t.Fatal(err)
@@ -201,4 +194,15 @@ func TestLookupWorkflow_UsesContextWorkingDir(t *testing.T) {
 	if resolvedSeen != resolvedOther {
 		t.Errorf("projectWorkflowsRoot fallback cwd = %q, want %q", resolvedSeen, resolvedOther)
 	}
+}
+
+func TestLookupWorkflow_UsesContextWorkingDir(t *testing.T) {
+	// When the process CWD is not inside the project but the context carries a
+	// working directory, lookupWorkflow should resolve project-level workflows
+	// from that directory (content-parsing itself is already covered by
+	// TestLookupWorkflow_LoadsAndParsesDescription; this test is only about
+	// which directory gets used).
+	assertProjectWorkflowsRootSeesCWDFallback(t, func(ctx context.Context) {
+		lookupWorkflow(ctx, "whatever")
+	})
 }

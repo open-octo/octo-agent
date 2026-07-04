@@ -60,6 +60,17 @@ type WorkflowRunRequest struct {
 	// blocking mode). The completion hook is skipped for such runs — the result
 	// returns through the tool call, so a notification would be a duplicate.
 	Foreground bool
+	// WorkingDir is the directory this run's own tool calls (agent()'s
+	// sub-agents, and any nested workflow()/workflow_save() they make) should
+	// resolve relative paths and project-level workflows against. Start()
+	// launches every run under a fresh, detached context (so it survives past
+	// the request that started it) — WorkingDir is what lets that detached
+	// context still carry the caller's WithWorkingDir value instead of
+	// silently reverting to the server's own launch directory once the script
+	// starts running (#1140 follow-up: the outer workflow(name: ...) lookup
+	// was fixed to honor the caller's cwd, but a script's own internal calls
+	// were still losing it here).
+	WorkingDir string
 }
 
 // WorkflowRunSnapshot is a point-in-time view of a background run for listing
@@ -217,7 +228,13 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 		return "", fmt.Errorf("workflow: no agent dispatch configured")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// Detached from the caller's ctx (so the run survives past the turn that
+	// started it), but re-stamped with the caller's working directory — a
+	// bare context.Background() would otherwise strip it, and every tool call
+	// the script's own agent()/skill() calls make (including a nested
+	// workflow()/workflow_save()) would silently fall back to the server's
+	// launch directory instead of req.WorkingDir.
+	ctx, cancel := context.WithCancel(WithWorkingDir(context.Background(), req.WorkingDir))
 
 	m.mu.Lock()
 	if m.active >= maxConcurrentWorkflows {

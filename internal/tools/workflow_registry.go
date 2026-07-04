@@ -43,6 +43,12 @@ var userWorkflowsRoot = func() string {
 // working directory, or "" when it can't be resolved. Project-level workflows
 // override user-level ones of the same name (matching .octo/agents semantics).
 // A var so tests can point discovery at a temp directory.
+//
+// Every current caller pre-resolves cwd via WorkingDirOrCWD before calling
+// this, so the os.Getwd() fallback below is normally unreachable — it's kept
+// as defense in depth for any future or direct caller that passes "" without
+// going through that helper first (os.Getwd() itself failing is the only way
+// today's callers would still hit it).
 var projectWorkflowsRoot = func(cwd string) string {
 	if cwd == "" {
 		var err error
@@ -57,10 +63,6 @@ var projectWorkflowsRoot = func(cwd string) string {
 	}
 	return filepath.Join(root, ".octo", "workflows")
 }
-
-// discoveredWorkflows holds the last scanned named workflows.
-// (removed: per-call discovery now returns a fresh map to avoid cross-CWD cache
-// pollution when workflows are resolved from different context working dirs.)
 
 // discoverWorkflows seeds the embedded default workflows, then scans the user-
 // and project-level registries, and returns a fresh map. Precedence is
@@ -171,23 +173,12 @@ func workflowDescription(script string) string {
 	return first
 }
 
-// resolveWorkflowCWD returns the working directory to use for workflow
-// discovery. It prefers a directory stamped into ctx by WithWorkingDir (used by
-// cron tasks and worktree-isolated turns), falling back to the process CWD.
-func resolveWorkflowCWD(ctx context.Context) string {
-	if cwd := WorkingDir(ctx); cwd != "" {
-		return cwd
-	}
-	cwd, _ := os.Getwd()
-	return cwd
-}
-
 // lookupWorkflow returns the named workflow, scanning the registries fresh so a
 // just-authored file is picked up without a restart. The project-level registry
 // is resolved from ctx's working directory when present (e.g. a cron task's
 // directory), otherwise from the process CWD.
 func lookupWorkflow(ctx context.Context, name string) (savedWorkflow, bool) {
-	workflows := discoverWorkflows(resolveWorkflowCWD(ctx))
+	workflows := discoverWorkflows(WorkingDirOrCWD(ctx))
 	w, ok := workflows[name]
 	return w, ok
 }
@@ -196,7 +187,7 @@ func lookupWorkflow(ctx context.Context, name string) (savedWorkflow, bool) {
 // The project-level registry is resolved from ctx's working directory when
 // present, otherwise from the process CWD.
 func listWorkflows(ctx context.Context) []savedWorkflow {
-	workflows := discoverWorkflows(resolveWorkflowCWD(ctx))
+	workflows := discoverWorkflows(WorkingDirOrCWD(ctx))
 	out := make([]savedWorkflow, 0, len(workflows))
 	for _, w := range workflows {
 		out = append(out, w)
@@ -213,10 +204,11 @@ type NamedWorkflow struct {
 }
 
 // ListNamedWorkflows returns every registered workflow (embedded defaults +
-// user + project), sorted by name, as a public view for the web panel. It uses
-// the process CWD to resolve the project-level registry.
+// user + project), sorted by name, as a public view for the web panel.
+// Project-level workflows are resolved from ActiveWorkflowDiscoveryCWD when a
+// turn has stamped one (see workflow.go), otherwise the process CWD.
 func ListNamedWorkflows() []NamedWorkflow {
-	saved := listWorkflows(context.Background())
+	saved := listWorkflows(WithWorkingDir(context.Background(), ActiveWorkflowDiscoveryCWD()))
 	out := make([]NamedWorkflow, 0, len(saved))
 	for _, w := range saved {
 		out = append(out, NamedWorkflow{Name: w.name, Description: w.description})

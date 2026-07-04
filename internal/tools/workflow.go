@@ -30,6 +30,33 @@ var workflowForeground atomic.Bool
 // tool's description tells the model which mode it is in.
 func SetWorkflowForeground(v bool) { workflowForeground.Store(v) }
 
+// workflowDiscoveryCWD holds the working directory savedWorkflowsParamDesc and
+// ListNamedWorkflows resolve project-level workflows from. It exists because
+// agent.ToolDefinition's Definition() method takes no context — there is no
+// way for it to see a specific turn's WithWorkingDir value directly — so
+// prepareToolTurn (regular sessions) and the scheduled-task runner (cron
+// tasks) stamp this process-global right before building tool definitions
+// for their turn, mirroring the existing SetSpawner/SetDefaultSubAgentManager
+// save-and-restore pattern in prepareToolTurn. Empty (the zero value) falls
+// back to the process CWD, matching every caller that never sets it (CLI,
+// tests).
+var workflowDiscoveryCWD atomic.Value // string
+
+// SetWorkflowDiscoveryCWD records the directory the next Definition()-driven
+// workflow listing (the `workflow` tool's `name` parameter description, and
+// ListNamedWorkflows for the web panel) should resolve project-level
+// workflows from. Callers should restore the previous value (via
+// ActiveWorkflowDiscoveryCWD, read before overwriting) once their turn ends,
+// the same way prepareToolTurn restores the spawner/sub-agent-manager globals.
+func SetWorkflowDiscoveryCWD(cwd string) { workflowDiscoveryCWD.Store(cwd) }
+
+// ActiveWorkflowDiscoveryCWD returns the cwd most recently set by
+// SetWorkflowDiscoveryCWD, or "" if never set.
+func ActiveWorkflowDiscoveryCWD() string {
+	v, _ := workflowDiscoveryCWD.Load().(string)
+	return v
+}
+
 // WorkflowTool runs a Ruby (mruby) orchestration script in an embedded wasm
 // interpreter. The script drives sub-agents through the agent() / parallel() /
 // pipeline() primitives; each agent() call delegates to the same Spawner that
@@ -130,11 +157,15 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 // savedWorkflowsParamDesc builds the `name` parameter description, listing the
 // saved workflows currently in the registries (~/.octo/workflows and the
 // project's .octo/workflows) so the model knows what it can run by name.
+// Project-level workflows are resolved from ActiveWorkflowDiscoveryCWD when
+// set (prepareToolTurn / the scheduled-task runner stamp it before building
+// tool definitions for their turn) — Definition() itself takes no context, so
+// this is the only way it can see a specific turn's working directory.
 func savedWorkflowsParamDesc() string {
 	var b strings.Builder
 	b.WriteString("Run a saved workflow by name (from ~/.octo/workflows or the project's " +
 		".octo/workflows). Provide exactly one of script or name; args are passed in either way.")
-	saved := listWorkflows(context.Background())
+	saved := listWorkflows(WithWorkingDir(context.Background(), ActiveWorkflowDiscoveryCWD()))
 	if len(saved) == 0 {
 		b.WriteString(" (No saved workflows found yet — author one with workflow_save.)")
 		return b.String()
@@ -234,6 +265,12 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		MaxConcurrent: defaultWorkflowConcurrency,
 		ResumeFrom:    stringArg(input, "resume_from"),
 		Foreground:    workflowForeground.Load(),
+		// Carried into Start's detached context so the script's own
+		// agent()/skill() calls (and anything nested they do, like
+		// workflow_save) still resolve against this turn's directory instead
+		// of falling back to the server's own launch directory once the run
+		// is no longer tied to this request's ctx.
+		WorkingDir: WorkingDirOrCWD(ctx),
 	}
 
 	runID, err := mgr.Start(req)

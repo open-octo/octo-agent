@@ -797,6 +797,21 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.Sender, a.Model))
 	tools.SetBrowserHealer(app.MakeBrowserHealer(a.Sender, a.Model))
 
+	// Stamp the agent's per-session cwd into ctx so every WorkingDir(ctx)
+	// consumer (read_file/write_file/edit_file/glob/grep, terminal via
+	// sandbox.go, and the workflow registry) resolves relative paths and
+	// project roots against a.CWD instead of the server process's own launch
+	// directory. Before this, only cron tasks and worktree-isolated sub-agents
+	// stamped this key (via their own WithWorkingDir calls) — a session whose
+	// working_dir was retargeted via PATCH .../working_dir away from the
+	// server default hit the exact same "resolves from the wrong directory"
+	// class of bug the workflow registry fix (#1140) addressed, just for
+	// every tool, not only workflow lookup. a.CWD is never empty (buildAgent
+	// falls back to the server default), so this never disables the existing
+	// os.Getwd() fallback those tools already have — it only ever narrows an
+	// ambiguous "" to the concrete directory this turn is actually anchored to.
+	ctx = tools.WithWorkingDir(ctx, a.CWD)
+
 	// Anchor the gate at the agent's per-session cwd (not the server default) so
 	// $CWD path rules and relative-path resolution match where the tools
 	// actually run — buildAgent sets a.CWD before every prepareToolTurn call,
@@ -903,9 +918,15 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	}
 	tools.SetSpawner(spawner)
 	tools.SetDefaultSubAgentManager(mgr)
+	// Same save-and-restore shape for the workflow tool's Definition(), which
+	// takes no ctx and so can't see a.CWD directly — see workflow.go's
+	// ActiveWorkflowDiscoveryCWD doc comment.
+	prevWorkflowDiscoveryCWD := tools.ActiveWorkflowDiscoveryCWD()
+	tools.SetWorkflowDiscoveryCWD(a.CWD)
 	cleanup := func() {
 		tools.SetSpawner(prevSpawner)
 		tools.SetDefaultSubAgentManager(prevSubAgentMgr)
+		tools.SetWorkflowDiscoveryCWD(prevWorkflowDiscoveryCWD)
 	}
 
 	return ctx, executor, mgr, cleanup, nil
