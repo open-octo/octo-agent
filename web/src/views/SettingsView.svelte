@@ -21,8 +21,6 @@
   let permMode      = $state('Ask')
   let workdir       = $state('')
   let showReasoning = $state(true)
-  let desktopNotif  = $state(true)
-  let failureNotif  = $state(true)
   let versionStr    = $state('')
   let saving        = $state(false)
   let loading       = $state(true)
@@ -31,7 +29,9 @@
   // Original values for dirty-checking
   let origModel        = ''
   let origWorkdir      = ''
+  let origReasoning    = 'Medium'
   let origShowReasoning = true
+  let origPermMode     = 'Ask'
 
   // ── Models section (config-level entries: add/edit/delete/default/lite) ──────
   let models       = $state<ModelEntry[]>([])
@@ -145,11 +145,13 @@
       if (def) {
         model = def.model ?? def.id ?? ''
         reasoning = capitalize(def.reasoning_effort ?? 'medium')
-        permMode  = capitalize(def.permission_mode ?? 'ask')
+        permMode  = permissionModeToLabel(def.permission_mode ?? 'interactive')
       }
       showReasoning = cfg.show_reasoning ?? true
       origModel = model
+      origReasoning = reasoning
       origShowReasoning = showReasoning
+      origPermMode = permMode
       // Font size is a client-only preference (persisted in localStorage); the
       // server only hardcodes a placeholder, so don't let it clobber the saved
       // choice. Language still seeds from config when present.
@@ -173,6 +175,24 @@
     return s[0].toUpperCase() + s.slice(1).toLowerCase()
   }
 
+  function permissionModeToLabel(mode: string): string {
+    const map: Record<string, string> = {
+      interactive: 'Ask',
+      auto: 'Auto',
+      strict: 'Strict',
+    }
+    return map[mode.toLowerCase()] ?? 'Ask'
+  }
+
+  function labelToPermissionMode(label: string): string {
+    const map: Record<string, string> = {
+      Ask: 'interactive',
+      Auto: 'auto',
+      Strict: 'strict',
+    }
+    return map[label] ?? 'interactive'
+  }
+
   $effect(() => {
     // Apply font size via zoom and remember it across reloads.
     ;(document.documentElement.style as any).zoom = fontZoomMap[fontSize] ?? '1'
@@ -194,24 +214,39 @@
     saving = true
     const sid = $activeSessionId
     try {
-      if (sid) {
-        const promises: Promise<unknown>[] = []
-        if (model !== origModel) {
-          promises.push(api.updateSessionModel(sid, model))
-        }
-        if (workdir !== origWorkdir) {
-          promises.push(api.updateSessionWorkingDir(sid, workdir))
-        }
-        const effortMap: Record<string, string> = { Low: 'low', Medium: 'medium', High: 'high', Xhigh: 'xhigh', Max: 'max' }
-        promises.push(api.updateSessionReasoningEffort(sid, effortMap[reasoning] ?? 'medium'))
-        await Promise.all(promises)
-        origModel   = model
-        origWorkdir = workdir
-      }
+      // Global config (does not require a session).
       if (showReasoning !== origShowReasoning) {
         await api.updateShowReasoning(showReasoning)
         origShowReasoning = showReasoning
       }
+
+      // Session-level settings (require an active session).
+      if (!sid) {
+        showToast(tr('settings.no_session_tooltip'), 'warning')
+        saving = false
+        return
+      }
+      const promises: Promise<unknown>[] = []
+      if (model !== origModel) {
+        promises.push(api.updateSessionModel(sid, model))
+      }
+      if (workdir !== origWorkdir) {
+        promises.push(api.updateSessionWorkingDir(sid, workdir))
+      }
+      const effortMap: Record<string, string> = { Low: 'low', Medium: 'medium', High: 'high', Xhigh: 'xhigh', Max: 'max' }
+      if (reasoning !== origReasoning) {
+        promises.push(api.updateSessionReasoningEffort(sid, effortMap[reasoning] ?? 'medium'))
+      }
+      if (permMode !== origPermMode) {
+        promises.push(api.updateSessionPermissionMode(sid, labelToPermissionMode(permMode)))
+      }
+      if (promises.length) {
+        await Promise.all(promises)
+      }
+      origModel   = model
+      origWorkdir = workdir
+      origReasoning = reasoning
+      origPermMode = permMode
       showToast(tr('settings.toast_saved'), 'success')
     } catch (e: any) {
       showToast(`Save failed: ${e.message}`, 'error')
@@ -330,7 +365,7 @@
             <span class="setting-label">{$t('settings.perm_mode')}</span>
             <span class="setting-desc">{$t('settings.perm_mode_desc')}</span>
           </div>
-          <Segment options={['Ask', 'Auto']} labels={{ Ask: $t('settings.pm_ask'), Auto: $t('settings.pm_auto') }} bind:value={permMode} />
+          <Segment options={['Ask', 'Auto', 'Strict']} labels={{ Ask: $t('settings.pm_ask'), Auto: $t('settings.pm_auto'), Strict: $t('settings.pm_strict') ?? 'Strict' }} bind:value={permMode} />
         </div>
         <div class="setting-row">
           <div class="setting-info">
@@ -348,30 +383,19 @@
         </div>
       </div>
 
-      <!-- Notifications -->
-      <div class="section-card">
-        <div class="section-title">{$t('settings.notifications')}</div>
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">{$t('settings.desktop_notif')}</span>
-            <span class="setting-desc">{$t('settings.desktop_notif_desc')}</span>
-          </div>
-          <Switch bind:checked={desktopNotif} />
-        </div>
-        <div class="setting-row last">
-          <div class="setting-info">
-            <span class="setting-label">{$t('settings.failure_notif')}</span>
-            <span class="setting-desc">{$t('settings.failure_notif_desc')}</span>
-          </div>
-          <Switch bind:checked={failureNotif} />
-        </div>
-      </div>
-
       <!-- Save -->
       <div class="save-row">
-        <button class="btn-primary" onclick={handleSave} disabled={saving}>
+        <button
+          class="btn-primary"
+          onclick={handleSave}
+          disabled={saving || !$activeSessionId}
+          title={!$activeSessionId ? tr('settings.no_session_tooltip') : ''}
+        >
           {saving ? $t('settings.saving') : $t('settings.save_changes')}
         </button>
+        {#if !$activeSessionId}
+          <span class="session-hint">{tr('settings.no_session_tooltip')}</span>
+        {/if}
         {#if versionStr}
           <span class="version-badge">{$t('common.version')} {versionStr}</span>
         {/if}
@@ -439,6 +463,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .btn-primary:hover:not(:disabled) { background: var(--blue-5); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .version-badge { font-size: 12px; color: var(--text-tertiary); }
+.session-hint { font-size: 12px; color: var(--text-tertiary); }
 
 /* ── Models section ─────────────────────────────────────────────────────────── */
 .section-head {
