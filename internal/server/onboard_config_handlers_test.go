@@ -113,6 +113,45 @@ func TestConfig_ShowReasoningGlobalDefault(t *testing.T) {
 	}
 }
 
+func TestConfig_CoauthorGlobalDefault(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+		},
+		DefaultModel: "claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	// No config.yml value yet — GET reports the built-in default (true).
+	resp := getConfigResponse(t, srv)
+	if resp.Coauthor == nil || !*resp.Coauthor {
+		t.Fatalf("initial coauthor = %+v, want true", resp.Coauthor)
+	}
+
+	// Set global default to false.
+	if w := doJSON(t, srv, http.MethodPut, "/api/config/coauthor", `{"coauthor":false}`); w.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.Coauthor == nil || *cfg.Coauthor {
+		t.Fatalf("stored global = %+v, want false", cfg.Coauthor)
+	}
+	resp = getConfigResponse(t, srv)
+	if resp.Coauthor == nil || *resp.Coauthor {
+		t.Fatalf("response coauthor = %+v, want false", resp.Coauthor)
+	}
+
+	// OCTO_COAUTHOR overrides the stored config value — GET must reflect the
+	// effective value the agent actually uses, not the raw config.yml field,
+	// since Coauthor (unlike ShowReasoning) has an env-var layer above it.
+	t.Setenv("OCTO_COAUTHOR", "1")
+	resp = getConfigResponse(t, srv)
+	if resp.Coauthor == nil || !*resp.Coauthor {
+		t.Fatalf("response coauthor with OCTO_COAUTHOR=1 = %+v, want true (env should win over stored false)", resp.Coauthor)
+	}
+}
+
 func TestConfig_ShowReasoningReloadsDefaultSender(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{

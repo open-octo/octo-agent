@@ -217,13 +217,18 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		models = append(models, m)
 	}
 
+	// Coauthor, unlike ShowReasoning, has an OCTO_COAUTHOR env-var layer above
+	// the config file, so the raw cfg.Coauthor pointer can disagree with what
+	// commits actually get. Report the resolved value the Settings toggle is
+	// meant to reflect, not the on-disk-only one.
+	effCoauthor := cfg.EffectiveCoauthor()
 	writeJSON(w, http.StatusOK, configResponse{
 		Models:          models,
 		DefaultModelIdx: defaultIdx,
 		FontSize:        "medium",
 		Language:        "en",
 		ShowReasoning:   cfg.ShowReasoning,
-		Coauthor:        cfg.Coauthor,
+		Coauthor:        &effCoauthor,
 	})
 }
 
