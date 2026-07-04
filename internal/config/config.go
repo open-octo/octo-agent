@@ -184,6 +184,24 @@ func (c Config) EffectiveShowReasoning(entry *bool) bool {
 	return true
 }
 
+// EffectiveCoauthor resolves whether commits should get a Co-authored-by
+// line: the OCTO_COAUTHOR env var when set, else the config value, else the
+// built-in default (true). Mirrors cmd/octo's CLI-only resolveCoauthor
+// (which layers a --no-coauthor flag ahead of this same precedence) so every
+// caller — CLI or server — resolves the config/env layers identically.
+func (c Config) EffectiveCoauthor() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OCTO_COAUTHOR"))) {
+	case "0", "false", "off", "no":
+		return false
+	case "1", "true", "on", "yes":
+		return true
+	}
+	if c.Coauthor != nil {
+		return *c.Coauthor
+	}
+	return true
+}
+
 // ModelVision reports whether the named model accepts image content. When the
 // model matches a configured entry, its recorded Vision value is authoritative
 // (Load backfills legacy entries, so it is always set). A model not present in

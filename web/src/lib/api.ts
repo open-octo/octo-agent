@@ -489,6 +489,7 @@ export interface ConfigResponse {
   font_size?: string
   language?: string
   show_reasoning?: boolean
+  coauthor?: boolean
 }
 
 export async function getConfig(): Promise<ConfigResponse> {
@@ -499,6 +500,13 @@ export async function updateShowReasoning(showReasoning: boolean): Promise<{ ok:
   return request<{ ok: boolean; show_reasoning?: boolean }>('/api/config/show_reasoning', {
     method: 'PUT',
     ...json({ show_reasoning: showReasoning }),
+  })
+}
+
+export async function updateCoauthor(coauthor: boolean): Promise<{ ok: boolean; coauthor?: boolean }> {
+  return request<{ ok: boolean; coauthor?: boolean }>('/api/config/coauthor', {
+    method: 'PUT',
+    ...json({ coauthor }),
   })
 }
 

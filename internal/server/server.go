@@ -529,7 +529,7 @@ func (s *Server) enableSubAgentTools() {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
 	cwd, envCtx := s.curCwdEnv()
-	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
+	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor())
 	executor := tools.NewDefaultRegistry()
 	spawner := app.NewSpawner(template, executor, func() []agent.ToolDefinition {
 		return tools.DefaultToolsFor(s.model)
@@ -736,6 +736,7 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/providers", s.handleListProviders)
 	s.api("GET /api/config", s.handleGetConfig)
 	s.api("PUT /api/config/show_reasoning", s.handlePutShowReasoning)
+	s.api("PUT /api/config/coauthor", s.handlePutCoauthor)
 	s.api("POST /api/config/test", s.handleTestConfig)
 	s.api("POST /api/config/models", s.handleSaveModelConfig)
 	s.api("PATCH /api/config/models/{id}", s.handleUpdateModelConfig)
@@ -1115,7 +1116,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
+	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor())
 
 	// L2: attention-layer rules (triggered keywords) + save-nudge on milestone
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
@@ -1290,6 +1291,23 @@ func (s *Server) defaultSenderAndModel() (agent.Sender, string) {
 	s.senderMu.Lock()
 	defer s.senderMu.Unlock()
 	return s.sender, s.model
+}
+
+// effectiveCoauthor resolves whether the system prompt should instruct the
+// agent to append a Co-authored-by line to git commits, for every code path
+// that composes one via prompt.ComposePair. Before this existed, every one
+// of those call sites passed a hardcoded `true` and never consulted
+// cfg.Coauthor at all — the CLI (cmd/octo) correctly resolved it, but every
+// web/API/channel turn ignored the setting entirely, coauthoring commits
+// unconditionally no matter what config.yml said. config.Load() failing
+// (e.g. no config file yet) defaults to true, matching every other
+// resolution of this setting.
+func (s *Server) effectiveCoauthor() bool {
+	cfg, err := config.Load()
+	if err != nil {
+		return true
+	}
+	return cfg.EffectiveCoauthor()
 }
 
 // senderForSession resolves the (sender, model) a turn should run on. A
@@ -1871,7 +1889,7 @@ func (s *Server) buildChannelFactory() func() *agent.Agent {
 		cwd, envCtx := s.curCwdEnv()
 		a.CWD = cwd
 		a.MaxTokens = s.cfg.MaxTokens
-		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
+		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor())
 		if cfg, err := config.Load(); err == nil {
 			a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 			if a.LiteSender == nil {
@@ -2448,7 +2466,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	}
 	cwd, envCtx := s.sessionCwdEnv(sess.Store)
 	sess.Agent.CWD = cwd // keep tool cwd aligned with the per-session dir the prompt/hooks use
-	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
+	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor())
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and

@@ -161,6 +161,7 @@ type configResponse struct {
 	FontSize        string        `json:"font_size,omitempty"`
 	Language        string        `json:"language,omitempty"`
 	ShowReasoning   *bool         `json:"show_reasoning,omitempty"`
+	Coauthor        *bool         `json:"coauthor,omitempty"`
 }
 
 type modelConfig struct {
@@ -222,6 +223,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		FontSize:        "medium",
 		Language:        "en",
 		ShowReasoning:   cfg.ShowReasoning,
+		Coauthor:        cfg.Coauthor,
 	})
 }
 
@@ -282,6 +284,41 @@ func (s *Server) handlePutShowReasoning(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "show_reasoning": req.ShowReasoning})
+}
+
+// ─── PUT /api/config/coauthor ───────────────────────────────────────────────
+
+type putCoauthorRequest struct {
+	Coauthor bool `json:"coauthor"`
+}
+
+// handlePutCoauthor updates config.Coauthor — whether the agent should
+// append a Co-authored-by line to git commit messages. Unlike
+// show_reasoning, this value is never baked into a cached sender:
+// effectiveCoauthor (server.go) reads it fresh from config on every turn's
+// prompt composition, so no sender-cache invalidation/reload and no
+// per-session WS broadcast are needed here — the next turn on any session
+// just picks it up.
+func (s *Server) handlePutCoauthor(w http.ResponseWriter, r *http.Request) {
+	var req putCoauthorRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+		return
+	}
+
+	cfg.Coauthor = &req.Coauthor
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "coauthor": req.Coauthor})
 }
 
 // maskKey masks most of an API key, keeping the first and last four runes
