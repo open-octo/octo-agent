@@ -29,6 +29,12 @@ export default defineConfig({
 			},
 			sidebar: [
 				{
+					label: 'Home',
+					translations: { 'zh-CN': '首页' },
+					link: 'https://octo-agent.dev/',
+					attrs: { target: '_blank' },
+				},
+				{
 					label: 'Blog',
 					translations: { 'zh-CN': '博客' },
 					link: 'https://octo-agent.dev/blog/',
