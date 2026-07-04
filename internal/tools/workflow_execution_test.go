@@ -90,7 +90,7 @@ func TestEmbeddedDefaultWorkflows_Execute(t *testing.T) {
 
 	for _, r := range runs {
 		t.Run(fmt.Sprintf("%s/%s", r.name, r.args), func(t *testing.T) {
-			w, ok := lookupWorkflow(r.name)
+			w, ok := lookupWorkflow(context.Background(), r.name)
 			if !ok {
 				t.Fatalf("lookupWorkflow(%q): not found", r.name)
 			}

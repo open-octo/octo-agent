@@ -379,18 +379,6 @@ func TestExtractText_QuotedMessage(t *testing.T) {
 	}
 }
 
-func TestSmartChunkText(t *testing.T) {
-	chunks := smartChunkText("hello", 10)
-	if len(chunks) != 1 || chunks[0] != "hello" {
-		t.Fatalf("unexpected chunks: %v", chunks)
-	}
-
-	chunks = smartChunkText("hello world foo bar", 5)
-	if len(chunks) < 2 {
-		t.Fatalf("expected at least 2 chunks, got %d", len(chunks))
-	}
-}
-
 func TestMarkdownToPlain(t *testing.T) {
 	md := "**bold** and *italic* and [link](http://x)"
 	plain := markdownToPlain(md)

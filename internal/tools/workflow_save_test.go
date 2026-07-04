@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,10 +35,26 @@ func TestWorkflowSave_ProjectScopeRoundTrips(t *testing.T) {
 	}
 
 	// And it's immediately resolvable by name.
-	w, ok := lookupWorkflow("bug-hunt")
+	w, ok := lookupWorkflow(context.Background(), "bug-hunt")
 	if !ok || w.description != "Find and verify bugs" {
 		t.Errorf("lookupWorkflow = %+v, ok = %v", w, ok)
 	}
+}
+
+func TestWorkflowSave_ProjectScopeUsesContextWorkingDir(t *testing.T) {
+	// When the server process is not in the project directory but the context
+	// carries a working directory, project-scope saves should land in the
+	// context's project root, not the process CWD.
+	n := 0
+	assertProjectWorkflowsRootSeesCWDFallback(t, func(ctx context.Context) {
+		n++
+		if _, err := (WorkflowSaveTool{}).Execute(ctx, "c", map[string]any{
+			"name":   fmt.Sprintf("ctx-wf-%d", n),
+			"script": `"ok"`,
+		}); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
 }
 
 func TestWorkflowSave_UserScope(t *testing.T) {

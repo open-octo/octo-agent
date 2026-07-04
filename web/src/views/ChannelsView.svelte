@@ -22,6 +22,9 @@
     running: boolean
     has_config: boolean
     fields: Record<string, string>
+    // #1121: why the adapter isn't healthy — a startup skip reason or the
+    // latest crash/restart status. Absent when healthy.
+    issue?: string
   }
 
   let rows = $state<ChannelRow[]>([])
@@ -114,11 +117,16 @@
   function tagFor(row: ChannelRow): { status: string; label: string } {
     if (!row.has_config) return { status: 'default', label: 'Not configured' }
     if (!row.enabled)    return { status: 'default', label: 'Disabled' }
+    // #1121: a config/startup problem or an ongoing crash-restart loop — show
+    // it distinctly from a plain "Stopped" (which reads as "not started yet",
+    // not "something is wrong").
+    if (row.issue)       return { status: 'error', label: 'Error' }
     if (row.running)     return { status: 'success', label: 'Running' }
     return { status: 'warning', label: 'Stopped' }
   }
 
   function activityFor(row: ChannelRow): string {
+    if (row.issue) return row.issue
     if (row.running) return 'Adapter is running and accepting messages'
     if (row.enabled) return 'Enabled but not yet started — restart the server to activate'
     return 'Disabled'

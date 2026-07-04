@@ -265,6 +265,37 @@ func TestResolveShowReasoning(t *testing.T) {
 	}
 }
 
+func TestResolveCoauthor(t *testing.T) {
+	tru, fls := true, false
+	cases := []struct {
+		name        string
+		noCoauthor  bool
+		env         string
+		cfgCoauthor *bool
+		want        bool
+	}{
+		{"default true", false, "", nil, true},
+		{"config false", false, "", &fls, false},
+		{"config true", false, "", &tru, true},
+		{"flag beats config true", true, "", &tru, false},
+		{"flag beats env on", true, "1", nil, false},
+		{"env beats config", false, "0", &tru, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.env != "" {
+				t.Setenv("OCTO_COAUTHOR", c.env)
+			} else {
+				t.Setenv("OCTO_COAUTHOR", "")
+			}
+			cfg := config.Config{Coauthor: c.cfgCoauthor}
+			if got := resolveCoauthor(c.noCoauthor, cfg); got != c.want {
+				t.Errorf("resolveCoauthor(%v, %+v) with env=%q = %v, want %v", c.noCoauthor, cfg, c.env, got, c.want)
+			}
+		})
+	}
+}
+
 func TestResolveReasoningEffort(t *testing.T) {
 	if got := resolveReasoningEffort("high", config.ModelEntry{ReasoningEffort: "low"}); got != "high" {
 		t.Errorf("flag should win: got %q", got)

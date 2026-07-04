@@ -160,6 +160,31 @@
     return m ? m[1].trim() : null
   }
 
+  // A non-zero exit is not a tool error either — terminal reports it via the
+  // structured ui_payload.status rather than tool.error, and appends a
+  // trailing "[exit: …]" marker to the output (internal/tools/terminal.go).
+  // Without this, a failed command got the same green check as a success,
+  // with the marker buried behind the fold.
+  function terminalFailure(tool: any): string | null {
+    const p = tool.ui_payload
+    if (!p || p.type !== 'terminal' || p.status !== 'failed' || tool.error) return null
+    const src = typeof tool.result === 'string' ? tool.result
+      : (typeof p.output_preview === 'string' ? p.output_preview : '')
+    const m = src.match(/\[exit: ([^\]]+)\]\s*$/)
+    if (!m) return 'failed'
+    // The marker embeds Go's *exec.ExitError.Error() text verbatim: a normal
+    // nonzero exit reads "exit status N" (not a bare "N"), a killed process
+    // reads "signal: NAME". Strip the verbose "exit status" wrapper down to
+    // "exit N"; "signal: NAME" already reads fine standalone.
+    const reason = m[1].trim()
+    const code = reason.match(/^exit status (\d+)$/)
+    return code ? `exit ${code[1]}` : reason
+  }
+
+  function isTerminalTool(tool: any): boolean {
+    return tool.name === 'terminal' || tool.name === 'bash'
+  }
+
   // While a turn is still running, keep the LATEST tool open (whether or not it
   // has finished) so its output stays readable until the next step replaces it
   // — a finished tool only collapses once the next tool appears, and the whole
@@ -182,12 +207,18 @@
   }
 
   // Long output folding: show the first FOLD_LINES, reveal the rest on click.
+  // For terminal/bash (tail=true) show the LAST FOLD_LINES instead — errors
+  // and summaries land at the bottom of shell output, not the top, so a
+  // head-fold buries exactly the lines the user needs to see (#1106).
   const FOLD_LINES = 14
   let expanded = $state<Record<string, boolean>>({})
-  function foldInfo(id: string, text: string) {
+  function foldInfo(id: string, text: string, tail = false) {
     const lines = text.split('\n')
     if (lines.length <= FOLD_LINES || expanded[id]) {
       return { shown: text, hidden: 0 }
+    }
+    if (tail) {
+      return { shown: lines.slice(-FOLD_LINES).join('\n'), hidden: lines.length - FOLD_LINES }
     }
     return { shown: lines.slice(0, FOLD_LINES).join('\n'), hidden: lines.length - FOLD_LINES }
   }
@@ -217,6 +248,7 @@
       {@const meta = toolMeta(tool)}
       {@const todos = todoItems(tool)}
       {@const fErr = fetchError(tool)}
+      {@const tErr = terminalFailure(tool)}
       <details open={defaultOpen(tool, lastId, groupStreaming)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
@@ -227,8 +259,8 @@
           {:else if tool.args}
             <span class="tool-arg mono">{argSummary(tool.name, tool.args)}</span>
           {/if}
-          {#if meta && !fErr}<span class="tool-meta" style="margin-left:auto">{meta}</span>{/if}
-          <span style="{(meta && !fErr) ? '' : 'margin-left:auto;'}flex:0 0 auto;display:flex;align-items:center">
+          {#if meta && !fErr && !tErr}<span class="tool-meta" style="margin-left:auto">{meta}</span>{/if}
+          <span style="{(meta && !fErr && !tErr) ? '' : 'margin-left:auto;'}flex:0 0 auto;display:flex;align-items:center">
             {#if tool.error}
               <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--error)">
                 <iconify-icon icon="ant-design:close-circle-outlined" width="14"></iconify-icon>
@@ -238,6 +270,11 @@
               <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--warning)">
                 <iconify-icon icon="ant-design:warning-outlined" width="14"></iconify-icon>
                 {fErr}
+              </span>
+            {:else if tErr}
+              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--warning)">
+                <iconify-icon icon="ant-design:warning-outlined" width="14"></iconify-icon>
+                {tErr}
               </span>
             {:else if tool.done}
               <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:var(--success)"></iconify-icon>
@@ -296,11 +333,18 @@
           </div>
         {:else if tool.stdout && tool.stdout.length > 0}
           {@const full = tool.stdout.join('\n')}
-          {@const fold = foldInfo(tool.id, full)}
+          {@const isTerm = isTerminalTool(tool)}
+          {@const fold = foldInfo(tool.id, full, isTerm)}
           <div class="term-wrap">
+            {#if isTerm && fold.hidden > 0}
+              <button class="fold-btn" onclick={() => expanded[tool.id] = true}>
+                <iconify-icon icon="lucide:chevron-up" width="13"></iconify-icon>
+                Show {fold.hidden} earlier lines
+              </button>
+            {/if}
             <pre class="terminal-output">{#each fold.shown.split('\n') as line}{#if line.startsWith('$ ') || line === '$'}<span class="term-prompt">$</span>{line.slice(1)}{:else}{line}{/if}
 {/each}{#if !tool.done}<span class="blink-caret"></span>{/if}</pre>
-            {#if fold.hidden > 0}
+            {#if !isTerm && fold.hidden > 0}
               <button class="fold-btn" onclick={() => expanded[tool.id] = true}>
                 <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
                 Show {fold.hidden} more lines
@@ -333,10 +377,17 @@
           </div>
         {:else if tool.result}
           {@const pretty = prettyResult(tool.result)}
-          {@const fold = foldInfo(tool.id, pretty)}
+          {@const isTerm = isTerminalTool(tool)}
+          {@const fold = foldInfo(tool.id, pretty, isTerm)}
           <div>
+            {#if isTerm && fold.hidden > 0}
+              <button class="fold-btn light" onclick={() => expanded[tool.id] = true}>
+                <iconify-icon icon="lucide:chevron-up" width="13"></iconify-icon>
+                Show {fold.hidden} earlier lines
+              </button>
+            {/if}
             <pre class="tool-output">{fold.shown}</pre>
-            {#if fold.hidden > 0}
+            {#if !isTerm && fold.hidden > 0}
               <button class="fold-btn light" onclick={() => expanded[tool.id] = true}>
                 <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
                 Show {fold.hidden} more lines

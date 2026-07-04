@@ -184,6 +184,24 @@ func (c Config) EffectiveShowReasoning(entry *bool) bool {
 	return true
 }
 
+// EffectiveCoauthor resolves whether commits should get a Co-authored-by
+// line: the OCTO_COAUTHOR env var when set, else the config value, else the
+// built-in default (true). Mirrors cmd/octo's CLI-only resolveCoauthor
+// (which layers a --no-coauthor flag ahead of this same precedence) so every
+// caller — CLI or server — resolves the config/env layers identically.
+func (c Config) EffectiveCoauthor() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OCTO_COAUTHOR"))) {
+	case "0", "false", "off", "no":
+		return false
+	case "1", "true", "on", "yes":
+		return true
+	}
+	if c.Coauthor != nil {
+		return *c.Coauthor
+	}
+	return true
+}
+
 // ModelVision reports whether the named model accepts image content. When the
 // model matches a configured entry, its recorded Vision value is authoritative
 // (Load backfills legacy entries, so it is always set). A model not present in
@@ -296,6 +314,22 @@ func (c *Config) SetDefaultEntry(e ModelEntry) {
 	}
 	c.Models[idx] = e
 	c.DefaultModel = e.Model
+}
+
+// SetEntry replaces the entry matching e.Model in place. Unlike
+// SetDefaultEntry, it never appends a new entry and never touches
+// DefaultModel/LiteModel — it's for updating an already-configured entry by
+// name (e.g. a per-session setting change that should land on the specific
+// model that session runs, not necessarily the default one). Reports whether
+// a matching entry was found.
+func (c *Config) SetEntry(e ModelEntry) bool {
+	for i := range c.Models {
+		if c.Models[i].Model == e.Model {
+			c.Models[i] = e
+			return true
+		}
+	}
+	return false
 }
 
 // Path returns the absolute path to the config file (~/.octo/config.yml).

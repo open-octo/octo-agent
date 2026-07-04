@@ -161,6 +161,7 @@ type configResponse struct {
 	FontSize        string        `json:"font_size,omitempty"`
 	Language        string        `json:"language,omitempty"`
 	ShowReasoning   *bool         `json:"show_reasoning,omitempty"`
+	Coauthor        *bool         `json:"coauthor,omitempty"`
 }
 
 type modelConfig struct {
@@ -216,12 +217,18 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		models = append(models, m)
 	}
 
+	// Coauthor, unlike ShowReasoning, has an OCTO_COAUTHOR env-var layer above
+	// the config file, so the raw cfg.Coauthor pointer can disagree with what
+	// commits actually get. Report the resolved value the Settings toggle is
+	// meant to reflect, not the on-disk-only one.
+	effCoauthor := cfg.EffectiveCoauthor()
 	writeJSON(w, http.StatusOK, configResponse{
 		Models:          models,
 		DefaultModelIdx: defaultIdx,
 		FontSize:        "medium",
 		Language:        "en",
 		ShowReasoning:   cfg.ShowReasoning,
+		Coauthor:        &effCoauthor,
 	})
 }
 
@@ -259,25 +266,64 @@ func (s *Server) handlePutShowReasoning(w http.ResponseWriter, r *http.Request) 
 		log.Printf("[server] reload default sender after show_reasoning change: %v", err)
 	}
 
-	// Push the new effective default to every open session so the composer
-	// status bar refreshes immediately.
-	_, pm, re, sr, ctxUsage := s.sessionStatusFields()
-	if sr != nil {
-		sessions, _ := agent.ListSessions(50)
-		for _, sess := range sessions {
-			s.wsHub.broadcast(sess.ID, map[string]any{
-				"type":             "session_update",
-				"session_id":       sess.ID,
-				"working_dir":      s.sessionCwd(sess),
-				"permission_mode":  pm,
-				"reasoning_effort": re,
-				"show_reasoning":   *sr,
-				"context_usage":    ctxUsage,
-			})
+	// Push each session's own effective show_reasoning — resolved against ITS
+	// OWN model entry (see entryForSession), which falls back to this new
+	// global default only when that entry has no explicit override of its
+	// own — so this doesn't paint a session pinned to a model with its own
+	// show_reasoning: true/false with the new global value it's shielded from.
+	sessions, _ := agent.ListSessions(50)
+	for _, sess := range sessions {
+		_, pm, re, sr, ctxUsage := s.sessionStatusFields(sess)
+		if sr == nil {
+			continue
 		}
+		s.wsHub.broadcast(sess.ID, map[string]any{
+			"type":             "session_update",
+			"session_id":       sess.ID,
+			"working_dir":      s.sessionCwd(sess),
+			"permission_mode":  pm,
+			"reasoning_effort": re,
+			"show_reasoning":   *sr,
+			"context_usage":    ctxUsage,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "show_reasoning": req.ShowReasoning})
+}
+
+// ─── PUT /api/config/coauthor ───────────────────────────────────────────────
+
+type putCoauthorRequest struct {
+	Coauthor bool `json:"coauthor"`
+}
+
+// handlePutCoauthor updates config.Coauthor — whether the agent should
+// append a Co-authored-by line to git commit messages. Unlike
+// show_reasoning, this value is never baked into a cached sender:
+// effectiveCoauthor (server.go) reads it fresh from config on every turn's
+// prompt composition, so no sender-cache invalidation/reload and no
+// per-session WS broadcast are needed here — the next turn on any session
+// just picks it up.
+func (s *Server) handlePutCoauthor(w http.ResponseWriter, r *http.Request) {
+	var req putCoauthorRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+		return
+	}
+
+	cfg.Coauthor = &req.Coauthor
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "coauthor": req.Coauthor})
 }
 
 // maskKey masks most of an API key, keeping the first and last four runes

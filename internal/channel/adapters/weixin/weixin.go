@@ -53,8 +53,11 @@ const (
 	maxBackoff            = 30 * time.Second
 	sessionExpiredBackoff = 60 * time.Second
 
-	// Max text chunk size (Unicode chars, per iLink recommendation).
-	maxChunkChars = 2000
+	// maxChunkBytes: max text chunk size (per iLink recommendation). Named
+	// "Bytes" (not "Chars", its pre-#1116 name) because channel.SplitForSend
+	// counts bytes, not runes — for CJK text (weixin's primary use case)
+	// this is more conservative than a character cap, never less.
+	maxChunkBytes = 2000
 )
 
 // sendQueue buffers outgoing text per chat, flushes on threshold/interval,
@@ -171,7 +174,14 @@ func (q *sendQueue) sendBatch(chatID string, entries []sendEntry) {
 	// Use the last entry's context_token.
 	ctoken := entries[len(entries)-1].contextToken
 
-	chunks := smartChunkText(combined, maxChunkChars)
+	// #1116: was smartChunkText, a local implementation that converted a
+	// byte offset from strings.LastIndex directly into a rune-slice index —
+	// for CJK text (3 bytes/rune in UTF-8) with a separator late in the
+	// window, that byte offset could exceed len(runes) entirely, panicking
+	// with "slice bounds out of range". channel.SplitForSend cuts on byte
+	// offsets throughout (backing up to a rune boundary only for the final
+	// hard-cut fallback), so this class of bug can't recur.
+	chunks := channel.SplitForSend(combined, maxChunkBytes)
 	for _, chunk := range chunks {
 		q.throttle()
 		q.sendWithRetry(chatID, chunk, ctoken)
@@ -950,37 +960,12 @@ func markdownToPlain(text string) string {
 	return strings.TrimSpace(text)
 }
 
-// smartChunkText splits text into ≤N Unicode character chunks, preferring
-// paragraph (double-newline), then line, then space boundaries.
-func smartChunkText(text string, maxChars int) []string {
-	runes := []rune(text)
-	if len(runes) <= maxChars {
-		return []string{text}
-	}
-	var chunks []string
-	for len(runes) > 0 {
-		if len(runes) <= maxChars {
-			chunks = append(chunks, string(runes))
-			break
-		}
-		window := string(runes[:maxChars])
-		cut := maxChars
-		// Prefer \n\n, then \n, then space.
-		for _, sep := range []string{"\n\n", "\n", " "} {
-			if idx := strings.LastIndex(window, sep); idx > 0 {
-				cut = idx + len(sep)
-				break
-			}
-		}
-		chunks = append(chunks, strings.TrimSpace(string(runes[:cut])))
-		runes = runes[cut:]
-		// Trim leading whitespace of remainder.
-		for len(runes) > 0 && (runes[0] == ' ' || runes[0] == '\n') {
-			runes = runes[1:]
-		}
-	}
-	return chunks
-}
+// The length-cap chunker used to live here (smartChunkText); it's now
+// channel.SplitForSend, shared by every adapter (#1116) — see
+// internal/channel/chunking.go. The local version converted a byte offset
+// from strings.LastIndex directly into a rune-slice index, which could
+// panic ("slice bounds out of range") on CJK text with a separator late in
+// the chunk window; SplitForSend cuts on byte offsets throughout instead.
 
 func truncate(s string, max int) string {
 	runes := []rune(s)

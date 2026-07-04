@@ -5,7 +5,8 @@ on:
     branches: [main]
     paths:
       - 'landing/**'
-      - 'website/**'
+      - 'docs/**'
+      - 'blog/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -29,24 +30,36 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: '**/package-lock.json'
 
-      - name: Install dependencies
-        working-directory: website
+      - name: Install docs dependencies
+        working-directory: docs
         run: npm ci
 
       - name: Build docs site
-        working-directory: website
+        working-directory: docs
+        run: npm run build
+
+      - name: Install blog dependencies
+        working-directory: blog
+        run: npm ci
+
+      - name: Build blog site
+        working-directory: blog
         run: npm run build
 
       - name: Assemble site
         run: |
           mkdir -p _site
-          # Root: the hand-rolled landing page + install script, unchanged.
-          cp landing/index.html landing/CNAME landing/install.sh landing/.nojekyll _site/
+          # Root: copy all landing files so new files like robots.txt, OG images,
+          # and Google Search Console verification files are deployed automatically.
+          cp -a landing/. _site/
           # /docs/*: the generated Starlight site (astro.config.mjs sets base: "/docs").
           mkdir -p _site/docs
-          cp -r website/dist/. _site/docs/
+          cp -r docs/dist/. _site/docs/
+          # /blog/*: the generated Astro blog site (astro.config.mjs sets base: "/blog").
+          mkdir -p _site/blog
+          cp -r blog/dist/. _site/blog/
 
       - uses: actions/configure-pages@v5
 

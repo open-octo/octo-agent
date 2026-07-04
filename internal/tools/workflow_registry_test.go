@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,7 +13,7 @@ func useWorkflowRoots(t *testing.T, userDir, projectDir string) {
 	t.Helper()
 	ou, op := userWorkflowsRoot, projectWorkflowsRoot
 	userWorkflowsRoot = func() string { return userDir }
-	projectWorkflowsRoot = func() string { return projectDir }
+	projectWorkflowsRoot = func(_ string) string { return projectDir }
 	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot = ou, op })
 }
 
@@ -31,7 +32,7 @@ func TestLookupWorkflow_LoadsAndParsesDescription(t *testing.T) {
 	useWorkflowRoots(t, user, "")
 	writeWorkflowFile(t, user, "bug-hunt.rb", "# @description Find and verify bugs\nagent(args[\"q\"])\n")
 
-	w, ok := lookupWorkflow("bug-hunt")
+	w, ok := lookupWorkflow(context.Background(), "bug-hunt")
 	if !ok {
 		t.Fatal("lookupWorkflow: not found")
 	}
@@ -58,7 +59,7 @@ func TestLookupWorkflow_ProjectOverridesUser(t *testing.T) {
 	writeWorkflowFile(t, user, "dup.rb", "# @description user version\n\"u\"\n")
 	writeWorkflowFile(t, project, "dup.rb", "# @description project version\n\"p\"\n")
 
-	w, ok := lookupWorkflow("dup")
+	w, ok := lookupWorkflow(context.Background(), "dup")
 	if !ok || w.description != "project version" {
 		t.Errorf("workflow = %+v, ok = %v; want project version to win", w, ok)
 	}
@@ -66,7 +67,7 @@ func TestLookupWorkflow_ProjectOverridesUser(t *testing.T) {
 
 func TestLookupWorkflow_UnknownName(t *testing.T) {
 	useWorkflowRoots(t, t.TempDir(), t.TempDir())
-	if _, ok := lookupWorkflow("nope"); ok {
+	if _, ok := lookupWorkflow(context.Background(), "nope"); ok {
 		t.Error("lookupWorkflow returned ok for unknown name")
 	}
 }
@@ -78,7 +79,7 @@ func TestListWorkflows_SortedUnionOfRoots(t *testing.T) {
 	writeWorkflowFile(t, project, "alpha.rb", "\"a\"\n")
 	writeWorkflowFile(t, user, "ignored.txt", "not a workflow")
 
-	got := listWorkflows()
+	got := listWorkflows(context.Background())
 	names := make([]string, len(got))
 	for i, w := range got {
 		names[i] = w.name
@@ -107,7 +108,7 @@ func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {
 	// No user/project roots: every built-in preset must still resolve.
 	useWorkflowRoots(t, "", "")
 	for _, name := range []string{"adversarial-review", "parallel-understand", "batch-migrate", "daily-triage"} {
-		w, ok := lookupWorkflow(name)
+		w, ok := lookupWorkflow(context.Background(), name)
 		if !ok {
 			t.Errorf("embedded default %q not found", name)
 			continue
@@ -126,7 +127,7 @@ func TestLookupWorkflow_ReferenceTemplatesNotEmbedded(t *testing.T) {
 	// silently re-adding them to workflow_defaults/ without a deliberate call.
 	useWorkflowRoots(t, "", "")
 	for _, name := range []string{"issue-triage", "pr-babysitter", "ci-sweeper", "dependency-sweeper", "changelog-drafter", "post-merge-cleanup"} {
-		if _, ok := lookupWorkflow(name); ok {
+		if _, ok := lookupWorkflow(context.Background(), name); ok {
 			t.Errorf("%q resolved as an embedded default; expected it to be a loop-engineering reference template only", name)
 		}
 	}
@@ -137,8 +138,71 @@ func TestLookupWorkflow_UserOverridesEmbeddedDefault(t *testing.T) {
 	useWorkflowRoots(t, user, "")
 	writeWorkflowFile(t, user, "adversarial-review.rb", "# @description my override\n\"x\"\n")
 
-	w, ok := lookupWorkflow("adversarial-review")
+	w, ok := lookupWorkflow(context.Background(), "adversarial-review")
 	if !ok || w.description != "my override" {
 		t.Errorf("workflow = %+v, ok = %v; want the user file to override the embedded default", w, ok)
 	}
+}
+
+// assertProjectWorkflowsRootSeesCWDFallback verifies that invoking fn with a
+// WithWorkingDir-stamped ctx resolves the project-level registry from that
+// stamped directory, and from the process CWD when ctx carries none — the
+// shared "does this ctx-aware entrypoint fall back correctly" check needed by
+// both lookupWorkflow (workflow_registry_test.go) and WorkflowSaveTool.Execute
+// (workflow_save_test.go), which each depend on the exact same guarantee.
+func assertProjectWorkflowsRootSeesCWDFallback(t *testing.T, fn func(ctx context.Context)) {
+	t.Helper()
+	ou, op := userWorkflowsRoot, projectWorkflowsRoot
+	var seenCWD string
+	userWorkflowsRoot = func() string { return "" }
+	projectWorkflowsRoot = func(cwd string) string {
+		seenCWD = cwd
+		return t.TempDir() // any writable root; its content isn't asserted here
+	}
+	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot = ou, op })
+
+	stamped := t.TempDir()
+	fn(WithWorkingDir(context.Background(), stamped))
+	if seenCWD != stamped {
+		t.Errorf("projectWorkflowsRoot got cwd %q, want the stamped dir %q", seenCWD, stamped)
+	}
+
+	// Without a stamped working dir, the process CWD fallback should be passed.
+	seenCWD = ""
+	otherDir := t.TempDir()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(otherDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(origDir); err != nil {
+			t.Error(err)
+		}
+	})
+	fn(context.Background())
+	resolvedSeen, err := filepath.EvalSymlinks(seenCWD)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedOther, err := filepath.EvalSymlinks(otherDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolvedSeen != resolvedOther {
+		t.Errorf("projectWorkflowsRoot fallback cwd = %q, want %q", resolvedSeen, resolvedOther)
+	}
+}
+
+func TestLookupWorkflow_UsesContextWorkingDir(t *testing.T) {
+	// When the process CWD is not inside the project but the context carries a
+	// working directory, lookupWorkflow should resolve project-level workflows
+	// from that directory (content-parsing itself is already covered by
+	// TestLookupWorkflow_LoadsAndParsesDescription; this test is only about
+	// which directory gets used).
+	assertProjectWorkflowsRootSeesCWDFallback(t, func(ctx context.Context) {
+		lookupWorkflow(ctx, "whatever")
+	})
 }

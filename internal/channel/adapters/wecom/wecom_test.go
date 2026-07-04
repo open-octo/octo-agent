@@ -243,6 +243,45 @@ func TestSendText_WaitsForAck(t *testing.T) {
 	}
 }
 
+// #1116: SendText previously sent content as a single unbounded payload.
+// WeCom rejects markdown content over 4096 bytes outright (errcode 40058)
+// rather than truncating it, so an unsplit long reply was dropped entirely.
+func TestSendText_SplitsLongMessages(t *testing.T) {
+	f := newFakeWecom(t)
+	a := newTestAdapter(t, f, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Start(ctx, func(channel.InboundEvent) {})
+
+	long := strings.Repeat("word ", 1500) // ~7500 bytes, over maxMessageBytes
+	deadline := time.Now().Add(2 * time.Second)
+	var res channel.SendResult
+	for {
+		res = a.SendText("chat-1", long, "")
+		if res.OK {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("send never succeeded: %+v", res)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) < 2 {
+		t.Fatalf("expected split into >=2 messages, got %d", len(f.sent))
+	}
+	for _, frame := range f.sent {
+		md, _ := frame["markdown"].(map[string]any)
+		content, _ := md["content"].(string)
+		if len(content) > maxMessageBytes {
+			t.Fatalf("chunk exceeds cap: %d bytes", len(content))
+		}
+	}
+}
+
 func TestValidateConfig(t *testing.T) {
 	a := &Adapter{}
 	if errs := a.ValidateConfig(channel.PlatformConfig{}); len(errs) != 1 {

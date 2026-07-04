@@ -347,6 +347,11 @@ Check each item, report ✅ / ❌ with remediation:
 7. **Telegram credentials** (if enabled) — run the `getMe` curl from Telegram setup step 2; `"ok":true` → ✅, else ❌ "Telegram token rejected by getMe — re-run setup".
 8. **WeCom credentials** (if enabled) — no public REST validation endpoint; check the `octo serve` output for `[wecom] authentication failed` → ❌ "WeCom credentials incorrect — re-run setup", or `[wecom] connected, authenticating` with no auth error → ✅.
 9. **Serve process** — `pgrep -f "octo.*serve"`; if no enabled platform, skip; if enabled but not running, ❌ "Run `octo serve`" (and ask to start it if the user agrees).
+10. **Recorded issue** (if serve is running) — query the live status instead of only grepping logs:
+    ```bash
+    curl -s http://127.0.0.1:8088/api/channels
+    ```
+    Each entry's `issue` field (omitted when healthy) carries the exact reason the adapter isn't running: an unregistered/misconfigured/invalid-config skip at startup, or a crash-and-restart status such as `restarting (2/10) after crash: ...` or `gave up after 11 crashes: ...`. A non-empty `issue` → ❌, quote it verbatim, and point at the matching setup step; a "gave up" issue means retries are exhausted and the platform needs `enable`/`disable` (or a config fix + `restart_server`) to try again — it will not recover on its own.
 
 ---
 

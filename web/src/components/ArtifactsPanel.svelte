@@ -6,8 +6,13 @@
 
   let maximized = $state(false)
 
+  // #1109: had no .catch — on a non-secure context or a permission denial,
+  // clipboard writes reject and the failure was invisible (no toast either
+  // way, so it looked identical to success).
   function copyArtifact() {
-    navigator.clipboard.writeText(cur?.code ?? '').then(() => showToast('Copied to clipboard'))
+    navigator.clipboard.writeText(cur?.code ?? '')
+      .then(() => showToast('Copied to clipboard'))
+      .catch(() => showToast('Copy failed — clipboard access denied', 'error'))
   }
 
   function downloadArtifact() {

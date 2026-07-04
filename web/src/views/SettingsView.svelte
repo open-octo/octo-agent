@@ -19,6 +19,7 @@
   let permMode      = $state('Ask')
   let workdir       = $state('')
   let showReasoning = $state(true)
+  let coauthor      = $state(true)
   let versionStr    = $state('')
   let saving        = $state(false)
   let loading       = $state(true)
@@ -28,6 +29,7 @@
   let origWorkdir      = ''
   let origReasoning    = 'Medium'
   let origShowReasoning = true
+  let origCoauthor = true
   let origPermMode     = 'Ask'
   // Index into `models` for the current default entry — Reasoning Effort and
   // Permission Mode below are that entry's own settings, saved via
@@ -149,9 +151,11 @@
         permMode  = permissionModeToLabel(def.permission_mode ?? 'interactive')
       }
       showReasoning = cfg.show_reasoning ?? true
+      coauthor = cfg.coauthor ?? true
       origReasoning = reasoning
       origShowReasoning = showReasoning
       origPermMode = permMode
+      origCoauthor = coauthor
       // Font size is a client-only preference (persisted in localStorage); the
       // server only hardcodes a placeholder, so don't let it clobber the saved
       // choice. Language still seeds from config when present.
@@ -254,6 +258,10 @@
       if (showReasoning !== origShowReasoning) {
         await api.updateShowReasoning(showReasoning)
         origShowReasoning = showReasoning
+      }
+      if (coauthor !== origCoauthor) {
+        await api.updateCoauthor(coauthor)
+        origCoauthor = coauthor
       }
 
       // Working directory: the one field that actually needs an active
@@ -383,6 +391,13 @@
             <span class="setting-desc">{$t('settings.show_reasoning_desc')}</span>
           </div>
           <Switch bind:checked={showReasoning} />
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{$t('settings.coauthor')}</span>
+            <span class="setting-desc">{$t('settings.coauthor_desc')}</span>
+          </div>
+          <Switch bind:checked={coauthor} />
         </div>
         <div class="setting-row last">
           <div class="setting-info">

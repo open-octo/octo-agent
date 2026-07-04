@@ -89,13 +89,13 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 	if err != nil {
 		return nil
 	}
-	_, pm, re, sr, ctxUsage := s.sessionStatusFields()
 	out := make([]wsSessionInfo, 0, len(sessions))
 	for _, sess := range sessions {
 		source := sess.Source
 		if source == "" {
 			source = "manual"
 		}
+		_, pm, re, sr, ctxUsage := s.sessionStatusFields(sess)
 		out = append(out, wsSessionInfo{
 			ID:              sess.ID,
 			Name:            sess.DisplayTitle(),
@@ -132,18 +132,17 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 	s.sessionAgentsMu.Lock()
 	a := s.sessionAgents[sessionID]
 	s.sessionAgentsMu.Unlock()
+	sess, _ := agent.LoadSession(sessionID)
 	if a != nil {
 		if used, window := a.ContextUsage(); window > 0 && used > 0 {
 			pct = used * 100 / window
 			usedTokens = used
 		}
 	}
-	if pct == 0 {
-		if sess, err := agent.LoadSession(sessionID); err == nil {
-			pct = estimateContextPct(sess)
-			// Cold/resumed session: only a % estimate is available, no exact
-			// token count — leave usedTokens 0 so the UI shows a bare arrow.
-		}
+	if pct == 0 && sess != nil {
+		pct = estimateContextPct(sess)
+		// Cold/resumed session: only a % estimate is available, no exact
+		// token count — leave usedTokens 0 so the UI shows a bare arrow.
 	}
 	if pct <= 0 {
 		return
@@ -151,7 +150,7 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 	if pct > 100 {
 		pct = 100
 	}
-	_, pm, re, _, _ := s.sessionStatusFields()
+	_, pm, re, _, _ := s.sessionStatusFields(sess)
 	b, err := json.Marshal(map[string]any{
 		"type":             "session_update",
 		"session_id":       sessionID,
@@ -286,7 +285,8 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 		_, stillLive := s.liveStates[sessionID]
 		s.liveStateMu.RUnlock()
 		if !stillLive {
-			_, pm, re, sr, _ := s.sessionStatusFields()
+			sess, _ := agent.LoadSession(sessionID)
+			_, pm, re, sr, _ := s.sessionStatusFields(sess)
 			if b, err := json.Marshal(map[string]any{
 				"type":             "session_update",
 				"session_id":       sessionID,
@@ -1201,7 +1201,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			ctxPct = 100
 		}
 	}
-	_, pm, re, _, _ := s.sessionStatusFields()
+	_, pm, re, _, _ := s.sessionStatusFields(sess)
 	s.wsHub.broadcast(sess.ID, map[string]any{
 		"type":             "session_update",
 		"session_id":       sess.ID,
@@ -1627,9 +1627,19 @@ func (s *Server) acquireAskSlot(ctx context.Context, sessionID string) (func(), 
 	}
 }
 
+// confirmDetail carries the "what am I actually approving" fields for a
+// permission ask (#1105). At most one of Command/Diff/Input is populated,
+// chosen by tool kind in permissionAskFrom.
+type confirmDetail struct {
+	ToolName string
+	Command  string
+	Diff     string
+	Input    string
+}
+
 // Request confirmation from user (blocks until user responds in browser or ctx
 // is cancelled).
-func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, kind string) (string, error) {
+func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, kind string, detail confirmDetail) (string, error) {
 	release, err := s.acquireAskSlot(ctx, sessionID)
 	if err != nil {
 		return "", fmt.Errorf("confirmation cancelled")
@@ -1649,6 +1659,10 @@ func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, ki
 		ConfID:    confID,
 		Message:   message,
 		Kind:      kind,
+		ToolName:  detail.ToolName,
+		Command:   detail.Command,
+		Diff:      detail.Diff,
+		Input:     detail.Input,
 	}
 
 	// Record the outstanding confirmation so a tab that (re)subscribes

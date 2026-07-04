@@ -680,6 +680,12 @@
         sessionId: (ev as any).session_id,
         message: (ev as any).message,
         kind: (ev as any).kind,
+        // #1105: detail fields so the modal shows what it's approving
+        // instead of just "Allow <tool>?".
+        toolName: (ev as any).tool_name,
+        command: (ev as any).command,
+        diff: (ev as any).diff,
+        input: (ev as any).input,
       })
     }))
 

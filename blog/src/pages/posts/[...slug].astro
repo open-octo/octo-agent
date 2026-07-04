@@ -1,0 +1,33 @@
+---
+import { getCollection, render } from 'astro:content';
+import BlogPost from '../../layouts/BlogPost.astro';
+
+export async function getStaticPaths() {
+	const posts = await getCollection('posts');
+	return posts.map((post) => {
+		const slug = post.id.startsWith('zh/') ? post.id.slice(3) : post.id;
+		const locale = post.data.locale || (post.id.startsWith('zh/') ? 'zh' : 'en');
+		// Find alternate-language version of the same post
+		const alternate = posts.find(
+			(p) =>
+				p.data.originalSlug === post.data.originalSlug &&
+				p.data.locale !== locale,
+		);
+		const alternateSlug = alternate?.id.startsWith('zh/') || alternate?.id.startsWith('en/')
+			? alternate.id.slice(3)
+			: alternate?.id;
+		return {
+			params: { slug },
+			props: { post, alternateSlug },
+		};
+	});
+}
+
+const { post, alternateSlug } = Astro.props;
+const slug = Astro.params.slug;
+const { Content } = await render(post);
+---
+
+<BlogPost {...post.data} slug={slug} locale={post.data.locale} alternateSlug={alternateSlug}>
+	<Content />
+</BlogPost>

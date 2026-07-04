@@ -1,0 +1,106 @@
+---
+import { getCollection } from 'astro:content';
+import '../../styles/blog.css';
+
+const posts = (await getCollection('posts'))
+	.filter((post) => !post.data.draft && post.data.locale === 'en')
+	.sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf());
+
+const dateFormatter = new Intl.DateTimeFormat('en-US', {
+	year: 'numeric',
+	month: 'long',
+	day: 'numeric',
+});
+
+const siteUrl = 'https://octo-agent.dev';
+const canonicalUrl = `${siteUrl}/blog/en/`;
+const alternateUrl = `${siteUrl}/blog/`;
+const title = 'octo blog';
+const description = 'Engineering notes, release updates, and deep dives from the octo-agent team.';
+const ogImage = `${siteUrl}/blog/og-default.svg`;
+---
+
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonicalUrl} />
+		<link rel="icon" type="image/svg+xml" href="/blog/favicon.svg" />
+		<link rel="alternate" hreflang="zh-CN" href={alternateUrl} />
+
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:url" content={canonicalUrl} />
+		<meta property="og:type" content="website" />
+		<meta property="og:locale" content="en" />
+		<meta property="og:site_name" content={title} />
+		<meta property="og:image" content={ogImage} />
+
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content={title} />
+		<meta name="twitter:description" content={description} />
+		<meta name="twitter:image" content={ogImage} />
+	</head>
+	<body>
+		<header class="site-header">
+			<div class="container">
+				<a href="/blog/en/" class="site-title">octo blog</a>
+				<nav class="site-nav">
+					<a href="https://octo-agent.dev/">Octo</a>
+					<a href="/docs/">Docs</a>
+					<a href="https://github.com/open-octo/octo-agent">GitHub</a>
+					<a class="lang-switch" href={alternateUrl} title="中文">中文</a>
+				</nav>
+			</div>
+		</header>
+
+		<main class="container">
+			<section class="hero">
+				<h1>octo blog</h1>
+				<p>
+					Engineering notes, release updates, and deep dives from the octo-agent team.
+				</p>
+			</section>
+
+			<section class="post-list">
+				<h2>Latest posts</h2>
+				{posts.length === 0 && <p>No posts yet.</p>}
+				<ul>
+					{
+						posts.map((post) => (
+							<li class="post-card">
+								<a href={`/blog/posts/${post.id}/`} class="post-card-title">
+									{post.data.title}
+								</a>
+								<p class="post-card-description">{post.data.description}</p>
+								<p class="post-card-meta">
+									<time datetime={post.data.pubDate.toISOString()}>
+										{dateFormatter.format(post.data.pubDate)}
+									</time>
+									{' · '}
+									{post.data.tags.slice(0, 3).map((tag, i) => (
+											<>
+												{i > 0 && ', '}
+												<span class="tag">{tag}</span>
+											</>
+									))}
+								</p>
+							</li>
+						))
+					}
+				</ul>
+			</section>
+		</main>
+
+		<footer class="site-footer">
+			<div class="container">
+				<p>
+					© {new Date().getFullYear()} <a href="https://octo-agent.dev/">octo-agent</a>. Built with <a href="https://astro.build">Astro</a>.
+				</p>
+			</div>
+		</footer>
+	</body>
+</html>

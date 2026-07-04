@@ -54,6 +54,12 @@ const (
 	readTimeout = 75 * time.Second
 	// ackTimeout bounds send_frame_and_wait round-trips.
 	ackTimeout = 30 * time.Second
+
+	// maxMessageBytes: WeCom rejects a markdown message whose content exceeds
+	// 4096 bytes with errcode 40058 ("markdown.content exceed max length
+	// 4096") — a hard, documented, byte-counted (not character-counted) cap.
+	// SendText previously sent content as a single unbounded payload (#1116).
+	maxMessageBytes = 4096
 )
 
 func init() {
@@ -187,24 +193,41 @@ func (a *Adapter) Stop() error {
 // connected. Without a connection — channel.SendOnce from octo serve, which
 // runs no inbound adapters — it falls back to the group-robot webhook, which
 // delivers to the webhook's bound group (chatID cannot select a chat there).
+//
+// Content over maxMessageBytes is split into consecutive messages (#1116):
+// WeCom rejects an oversized markdown payload outright (errcode 40058)
+// rather than truncating it, so an unsplit long reply was dropped entirely.
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
+	chunks := channel.SplitForSend(text, maxMessageBytes)
+	if len(chunks) == 0 {
+		return channel.SendResult{OK: true}
+	}
+
 	a.connMu.Lock()
 	connected := a.conn != nil
 	a.connMu.Unlock()
 
-	if !connected {
-		return a.sendWebhook(text)
+	var res channel.SendResult
+	for _, chunk := range chunks {
+		if !connected {
+			res = a.sendWebhook(chunk)
+		} else {
+			_, err := a.sendFrameAndWait("aibot_send_msg", map[string]any{
+				"chatid":   chatID,
+				"msgtype":  "markdown",
+				"markdown": map[string]string{"content": chunk},
+			})
+			if err != nil {
+				res = channel.SendResult{OK: false, Error: err.Error()}
+			} else {
+				res = channel.SendResult{OK: true}
+			}
+		}
+		if !res.OK {
+			return res
+		}
 	}
-
-	_, err := a.sendFrameAndWait("aibot_send_msg", map[string]any{
-		"chatid":   chatID,
-		"msgtype":  "markdown",
-		"markdown": map[string]string{"content": text},
-	})
-	if err != nil {
-		return channel.SendResult{OK: false, Error: err.Error()}
-	}
-	return channel.SendResult{OK: true}
+	return res
 }
 
 // sendWebhook posts a markdown message to the configured group-robot webhook.

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -261,6 +262,41 @@ type Server struct {
 	channelCtx     context.Context
 	adapterCancels map[string]context.CancelFunc
 
+	// channelGen bumps every time startOneChannelLocked (re)starts a platform
+	// from scratch, and is handed to that start's runChannelWithRestart
+	// goroutine as a snapshot. A crashed adapter's restart loop rebuilds a
+	// fresh instance via ctor(pc) — a call that does not observe ctx
+	// cancellation — so a concurrent stop/reload/restart of the SAME
+	// platform (e.g. an operator reacting to the crash-loop this fix makes
+	// visible in the Channels view) can advance the generation while that
+	// ctor(pc) call is still in flight. Before writing anything back to
+	// runningAdapters/adapterCancels, the restart loop re-checks its
+	// snapshot against the current generation under channelMu; a mismatch
+	// means another goroutine now owns this platform name, so it discards
+	// its work instead of clobbering the new owner's bookkeeping.
+	channelGen map[string]uint64
+
+	// channelIssues records, per platform, why its adapter isn't healthy: a
+	// startup skip reason (unregistered/construction failed/invalid config)
+	// or the latest crash-and-restart status (#1121 — these used to be
+	// logged, if at all, with no queryable record, so a misconfigured or
+	// crashing platform's only visible symptom was "the bot never replies").
+	// Absent (or "") means healthy. Guarded by its own mutex rather than
+	// channelMu since it's read from the REST handlers on any goroutine,
+	// independent of the (re)start bookkeeping channelMu protects.
+	channelIssuesMu sync.Mutex
+	channelIssues   map[string]string
+
+	// channelWG tracks every runChannelWithRestart goroutine currently in
+	// flight. Nothing in production Waits on it — stopChannels/reloadChannel
+	// only cancel the relevant context(s) and return, which is enough for
+	// correct shutdown behavior. It exists so tests can deterministically
+	// block until a stopped adapter's goroutine has actually returned before
+	// tearing down state that goroutine still reads (e.g. restoring a
+	// package-level test override), instead of racing a fire-and-forget
+	// background goroutine against test cleanup.
+	channelWG sync.WaitGroup
+
 	// weixinLogin tracks the in-flight web QR login flow (one at a time).
 	weixinLogin weixinLoginFlow
 
@@ -493,7 +529,8 @@ func (s *Server) enableSubAgentTools() {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
 	cwd, envCtx := s.curCwdEnv()
-	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
+	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
+	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
 	executor := tools.NewDefaultRegistry()
 	spawner := app.NewSpawner(template, executor, func() []agent.ToolDefinition {
 		return tools.DefaultToolsFor(s.model)
@@ -700,6 +737,7 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/providers", s.handleListProviders)
 	s.api("GET /api/config", s.handleGetConfig)
 	s.api("PUT /api/config/show_reasoning", s.handlePutShowReasoning)
+	s.api("PUT /api/config/coauthor", s.handlePutCoauthor)
 	s.api("POST /api/config/test", s.handleTestConfig)
 	s.api("POST /api/config/models", s.handleSaveModelConfig)
 	s.api("PATCH /api/config/models/{id}", s.handleUpdateModelConfig)
@@ -1057,7 +1095,13 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if dir, err := sess.ChunkDir(); err == nil {
 		a.ArchiveDir = dir // recall folded turns via the read tool
 	}
-	if cfg, err := config.Load(); err == nil {
+	// Loaded once and reused below for effectiveCoauthor — a second
+	// config.Load() there would re-read and re-parse the same file. A load
+	// error leaves cfg at its zero value, which EffectiveCoauthor still
+	// resolves correctly (OCTO_COAUTHOR checked before falling back to the
+	// built-in default), so callers don't need a separate error branch for it.
+	cfg, cfgErr := config.Load()
+	if cfgErr == nil {
 		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 		if a.LiteSender == nil {
 			// No explicit lite entry — fall back to the vendor's registry
@@ -1079,7 +1123,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
+	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2: attention-layer rules (triggered keywords) + save-nudge on milestone
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
@@ -1254,6 +1298,27 @@ func (s *Server) defaultSenderAndModel() (agent.Sender, string) {
 	s.senderMu.Lock()
 	defer s.senderMu.Unlock()
 	return s.sender, s.model
+}
+
+// effectiveCoauthor resolves whether the system prompt should instruct the
+// agent to append a Co-authored-by line to git commits, for every code path
+// that composes one via prompt.ComposePair. Before this existed, every one
+// of those call sites passed a hardcoded `true` and never consulted
+// cfg.Coauthor at all — the CLI (cmd/octo) correctly resolved it, but every
+// web/API/channel turn ignored the setting entirely, coauthoring commits
+// unconditionally no matter what config.yml said.
+//
+// Takes an already-loaded cfg instead of loading its own: every call site
+// either already has one in scope for another purpose (buildAgent,
+// buildChannelFactory need it for LiteSender resolution too) or loads exactly
+// one for this call — either way, avoiding a second disk read + YAML parse
+// of config.yml per turn. A zero-value cfg (config.Load failed) still
+// resolves correctly, since EffectiveCoauthor checks OCTO_COAUTHOR before
+// falling back to its built-in default (true) — unlike the old inline
+// "config.Load() failed → return true" branch this replaced, which skipped
+// the env check entirely on a load error.
+func (s *Server) effectiveCoauthor(cfg config.Config) bool {
+	return cfg.EffectiveCoauthor()
 }
 
 // senderForSession resolves the (sender, model) a turn should run on. A
@@ -1643,16 +1708,117 @@ func (s *Server) handleWSUserQuestionAnswer(qid string, choices []string, custom
 // interactively. The modal offers yes / no / always; "always" allows AND
 // remembers the decision in the session's Remembered store, so the same
 // (tool, input) pair stops prompting for the rest of the session.
+//
+// #1105: the message alone ("Allow terminal?") gave the user nothing to
+// judge — they authorized blind. buildConfirmDetail fills in what's
+// actually being approved (the full command, the pending diff, or a
+// generic listing of the tool's input) so ConfirmModal has something to
+// render.
 func (s *Server) permissionAskFrom(sessionID string) app.PermissionAsk {
 	return func(ctx context.Context, toolName string, toolInput map[string]any) (bool, bool, error) {
 		msg := fmt.Sprintf("Allow %s?", toolName)
-		result, err := s.requestConfirmation(ctx, sessionID, msg, "yes_no_always")
+		detail := buildConfirmDetail(toolName, toolInput)
+		result, err := s.requestConfirmation(ctx, sessionID, msg, "yes_no_always", detail)
 		if err != nil {
 			return false, false, err
 		}
 		allow, remember := mapConfirmResult(result)
 		return allow, remember, nil
 	}
+}
+
+// buildConfirmDetail renders a tool's pending input for the permission
+// modal. Terminal gets the literal command; edit_file gets the same
+// removed/added preview as the post-execution result card (tools.EditUIDiff);
+// everything else falls back to a sorted, length-capped key: value listing.
+func buildConfirmDetail(toolName string, toolInput map[string]any) confirmDetail {
+	detail := confirmDetail{ToolName: toolName}
+	switch toolName {
+	case "terminal":
+		if cmd, ok := toolInput["command"].(string); ok {
+			detail.Command = cmd
+		}
+	case "edit_file":
+		// Best-effort preview: this is the literal old_string/new_string the
+		// model asked for, not the post-normalization result EditFileTool.Execute
+		// actually writes (it additionally runs findActualString/preserveQuoteStyle/
+		// preserveIndentStyle against the real file — see edit_file.go). Re-running
+		// that whole resolution here would mean reading the file a second time
+		// before the user has even approved touching it. What matters for a
+		// permission ask is showing what the model is trying to inject; cosmetic
+		// quote/indent drift, or an old_string that turns out not to match, is
+		// caught (safely, no write happens) when the tool actually runs.
+		oldStr, okOld := toolInput["old_string"].(string)
+		newStr, okNew := toolInput["new_string"].(string)
+		if okOld && okNew && (oldStr != "" || newStr != "") {
+			detail.Diff = tools.EditUIDiff(oldStr, newStr)
+		} else {
+			detail.Input = formatToolInputForConfirm(toolInput)
+		}
+	default:
+		detail.Input = formatToolInputForConfirm(toolInput)
+	}
+	return detail
+}
+
+// formatToolInputForConfirm renders a tool's input map as sorted "key: value"
+// lines for display in the permission modal. Multi-line values show their
+// first 4 lines; each line is capped at 200 runes. Mirrors (at reduced
+// complexity — no terminal wrapping/control-byte concerns in an HTML <pre>)
+// the detail rules from the TUI's #1101 fix.
+func formatToolInputForConfirm(toolInput map[string]any) string {
+	if len(toolInput) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(toolInput))
+	for k := range toolInput {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	const maxLineRunes = 200
+	const maxValueLines = 4
+	const maxKeys = 40 // defensive cap: per-value length/lines are bounded above, but not key count
+	capLine := func(s string) string {
+		r := []rune(s)
+		if len(r) > maxLineRunes {
+			return string(r[:maxLineRunes]) + "…"
+		}
+		return s
+	}
+
+	truncatedKeys := 0
+	if len(keys) > maxKeys {
+		truncatedKeys = len(keys) - maxKeys
+		keys = keys[:maxKeys]
+	}
+
+	var b strings.Builder
+	for _, k := range keys {
+		val := fmt.Sprintf("%v", toolInput[k])
+		lines := strings.Split(val, "\n")
+		if len(lines) == 1 {
+			fmt.Fprintf(&b, "%s: %s\n", k, capLine(lines[0]))
+			continue
+		}
+		fmt.Fprintf(&b, "%s:\n", k)
+		shown := lines
+		folded := false
+		if len(shown) > maxValueLines {
+			shown = shown[:maxValueLines]
+			folded = true
+		}
+		for _, l := range shown {
+			fmt.Fprintf(&b, "  %s\n", capLine(l))
+		}
+		if folded {
+			fmt.Fprintf(&b, "  … +%d more lines\n", len(lines)-maxValueLines)
+		}
+	}
+	if truncatedKeys > 0 {
+		fmt.Fprintf(&b, "… +%d more fields\n", truncatedKeys)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // mapConfirmResult maps the confirmation modal's reply onto the permission
@@ -1734,8 +1900,12 @@ func (s *Server) buildChannelFactory() func() *agent.Agent {
 		cwd, envCtx := s.curCwdEnv()
 		a.CWD = cwd
 		a.MaxTokens = s.cfg.MaxTokens
-		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
-		if cfg, err := config.Load(); err == nil {
+		// Loaded once and reused below for LiteSender resolution — see the
+		// matching comment on effectiveCoauthor's doc for why a second
+		// config.Load() here would be wasted work.
+		cfg, cfgErr := config.Load()
+		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
+		if cfgErr == nil {
 			a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 			if a.LiteSender == nil {
 				if lm := app.ImplicitLiteModel(s.getProvider(), model, resolveBaseURL(s.getProvider(), cfg)); lm != "" {
@@ -1800,17 +1970,20 @@ func (s *Server) startOneChannelLocked(name string) {
 	ctor, err := channel.Find(name)
 	if err != nil {
 		slog.Error("channel start failed", "channel", name, "err", err)
+		s.recordChannelIssue(name, "adapter not registered: "+err.Error())
 		return
 	}
 	ad, err := ctor(pc)
 	if err != nil {
 		slog.Error("channel adapter failed", "channel", name, "err", err)
+		s.recordChannelIssue(name, "construction failed: "+err.Error())
 		return
 	}
 	if errs := ad.ValidateConfig(pc); len(errs) > 0 {
 		for _, e := range errs {
 			slog.Warn("channel config issue", "channel", name, "detail", e)
 		}
+		s.recordChannelIssue(name, "invalid config: "+strings.Join(errs, "; "))
 		return
 	}
 
@@ -1818,14 +1991,137 @@ func (s *Server) startOneChannelLocked(name string) {
 	if s.adapterCancels == nil {
 		s.adapterCancels = make(map[string]context.CancelFunc)
 	}
+	if s.channelGen == nil {
+		s.channelGen = make(map[string]uint64)
+	}
+	s.channelGen[name]++
+	gen := s.channelGen[name]
 	s.adapterCancels[name] = cancel
 	s.runningAdapters.Store(name, ad)
-	go func(a channel.Adapter, platform string) {
-		_ = a.Start(ctx, func(ev channel.InboundEvent) {
-			ev.Platform = platform
-			s.routeChannelEvent(ctx, a, ev)
+	s.clearChannelIssue(name)
+	s.channelWG.Add(1)
+	go s.runChannelWithRestart(ctx, name, gen, pc, ctor, ad)
+}
+
+// channelRestartDelays bounds how aggressively a crashed adapter retries: a
+// short delay for the first attempt (a transient network blip recovers
+// fast), backing off so a persistently broken platform (revoked auth, a dead
+// endpoint) doesn't hot-loop.
+var channelRestartDelays = []time.Duration{
+	2 * time.Second, 5 * time.Second, 15 * time.Second, 30 * time.Second, time.Minute,
+}
+
+// maxChannelRestarts caps how many times a crashing adapter is restarted
+// before giving up — still crashing after this many attempts means something
+// structurally broken (revoked credentials, a permanently unreachable
+// endpoint), not a transient blip, and endless retries would just spam logs
+// forever with nothing for the user to act on differently.
+const maxChannelRestarts = 10
+
+// runChannelWithRestart runs ad to completion, then — unless ctx was
+// cancelled deliberately (Stop()/reloadChannel) — logs the crash, records it
+// where the Channels web view and the channel-manager skill's doctor flow
+// can see it (recordChannelIssue), and retries with backoff instead of
+// leaving the platform silently dead (#1121: previously `_ = a.Start(...)`
+// discarded the error entirely and nothing ever ran again). Each retry
+// rebuilds a fresh adapter instance via ctor rather than reusing the crashed
+// one — Start isn't guaranteed reentrant (each adapter owns its own
+// connections, goroutines, and internal queues), so a clean instance is the
+// only safe way to retry, matching what a full server restart would do
+// anyway. Config is not re-validated on retries: ValidateConfig failures are
+// a permanent skip (startOneChannelLocked never reaches this function for
+// those), not something a backoff loop should keep re-attempting.
+//
+// gen is the generation snapshot startOneChannelLocked captured when it
+// launched this goroutine (see channelGen's doc comment) — every write back
+// to runningAdapters/adapterCancels re-checks it first, since a concurrent
+// stop/reload/restart of this same platform can slip in during the ctor(pc)
+// call below, which does not observe ctx cancellation.
+func (s *Server) runChannelWithRestart(ctx context.Context, name string, gen uint64, pc channel.PlatformConfig, ctor func(channel.PlatformConfig) (channel.Adapter, error), ad channel.Adapter) {
+	defer s.channelWG.Done()
+	restarts := 0
+	for {
+		err := ad.Start(ctx, func(ev channel.InboundEvent) {
+			ev.Platform = name
+			s.routeChannelEvent(ctx, ad, ev)
 		})
-	}(ad, name)
+		if ctx.Err() != nil {
+			return // deliberate stop, not a crash
+		}
+
+		restarts++
+		slog.Error("channel adapter exited unexpectedly", "channel", name, "err", err, "restart_attempt", restarts)
+		if restarts > maxChannelRestarts {
+			slog.Error("channel adapter exceeded restart limit — giving up", "channel", name, "restarts", restarts)
+			s.recordChannelIssue(name, fmt.Sprintf("gave up after %d crashes: %v", restarts, err))
+			s.channelMu.Lock()
+			if s.channelGen[name] == gen {
+				s.runningAdapters.Delete(name)
+				delete(s.adapterCancels, name)
+			}
+			s.channelMu.Unlock()
+			return
+		}
+		s.recordChannelIssue(name, fmt.Sprintf("restarting (%d/%d) after crash: %v", restarts, maxChannelRestarts, err))
+
+		delay := channelRestartDelays[len(channelRestartDelays)-1]
+		if restarts-1 < len(channelRestartDelays) {
+			delay = channelRestartDelays[restarts-1]
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+
+		newAd, cerr := ctor(pc)
+		if cerr != nil {
+			slog.Error("channel restart: rebuild failed", "channel", name, "err", cerr, "restart_attempt", restarts)
+			s.recordChannelIssue(name, fmt.Sprintf("restart %d/%d rebuild failed: %v", restarts, maxChannelRestarts, cerr))
+			continue // try again next loop, same restart budget and backoff schedule
+		}
+		ad = newAd
+		s.channelMu.Lock()
+		if s.channelGen[name] != gen {
+			// Superseded while ctor(pc) was in flight — a concurrent
+			// stop/reload/restart now owns this platform name. ad was never
+			// Start()-ed, so there's nothing to Stop(); just discard it and
+			// let this goroutine end without touching the new owner's state.
+			s.channelMu.Unlock()
+			slog.Warn("channel restart: superseded during rebuild, discarding stale instance", "channel", name)
+			return
+		}
+		s.runningAdapters.Store(name, ad)
+		s.channelMu.Unlock()
+		s.clearChannelIssue(name)
+	}
+}
+
+// recordChannelIssue notes why a platform's adapter isn't healthy (a startup
+// skip reason, or a crash/restart status), queryable via GET /api/channels
+// and the channel-manager skill's doctor flow.
+func (s *Server) recordChannelIssue(name, reason string) {
+	s.channelIssuesMu.Lock()
+	if s.channelIssues == nil {
+		s.channelIssues = make(map[string]string)
+	}
+	s.channelIssues[name] = reason
+	s.channelIssuesMu.Unlock()
+}
+
+// clearChannelIssue marks a platform healthy again (a (re)start succeeded).
+func (s *Server) clearChannelIssue(name string) {
+	s.channelIssuesMu.Lock()
+	delete(s.channelIssues, name)
+	s.channelIssuesMu.Unlock()
+}
+
+// channelIssue returns the recorded reason a platform isn't healthy, or ""
+// when it's never had one recorded (running fine, or never started).
+func (s *Server) channelIssue(name string) string {
+	s.channelIssuesMu.Lock()
+	defer s.channelIssuesMu.Unlock()
+	return s.channelIssues[name]
 }
 
 // stopOneChannelLocked stops a single running adapter (cancel its context and
@@ -1839,6 +2135,10 @@ func (s *Server) stopOneChannelLocked(name string) {
 		_ = v.(channel.Adapter).Stop()
 		s.runningAdapters.Delete(name)
 	}
+	// A deliberate stop (disable/delete/reload) isn't a health problem — clear
+	// any crash/restart status left over from before it, so re-enabling later
+	// starts from a clean slate instead of showing a stale crash reason.
+	s.clearChannelIssue(name)
 }
 
 // reloadChannel applies a saved config change for one platform without a full
@@ -2180,8 +2480,9 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
 	cwd, envCtx := s.sessionCwdEnv(sess.Store)
-	sess.Agent.CWD = cwd // keep tool cwd aligned with the per-session dir the prompt/hooks use
-	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
+	sess.Agent.CWD = cwd    // keep tool cwd aligned with the per-session dir the prompt/hooks use
+	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
+	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and

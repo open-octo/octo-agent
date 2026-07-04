@@ -95,7 +95,7 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 	if name == "" {
 		name = s.DisplayTitle()
 	}
-	_, pm, re, sr, ctxUsage := srv.sessionStatusFields()
+	_, pm, re, sr, ctxUsage := srv.sessionStatusFields(s)
 	return sessionItem{
 		ID:              s.ID,
 		Name:            name,
@@ -117,17 +117,39 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 	}
 }
 
+// entryForSession returns the model-config entry that actually backs sess's
+// turns — the same resolution senderForSession uses (sess.ModelConfig when
+// set and still configured, else the default entry) — or the default entry
+// when sess is nil (no specific session in scope, e.g. the onboarding
+// response). Before this existed, every reasoning_effort/show_reasoning
+// status read and every "toggle it for this session" write resolved from
+// cfg.DefaultEntry() unconditionally: a session actually running a
+// non-default model (turns themselves were never affected — senderForSession
+// already resolved the right entry for those) still saw the WRONG value in
+// its own status bar, and toggling it via that session's Composer visibly
+// flipped the icon — since the read and the write both used the same wrong
+// entry — while never touching the entry that session's real turns read.
+func entryForSession(cfg config.Config, sess *agent.Session) config.ModelEntry {
+	if sess != nil && sess.ModelConfig != "" {
+		if e, ok := cfg.EntryByModel(sess.ModelConfig); ok {
+			return e
+		}
+	}
+	return cfg.DefaultEntry()
+}
+
 // sessionStatusFields returns the server-level session metadata (permission
 // mode, reasoning effort, show reasoning, current context usage) plus the
-// DEFAULT working dir. The Web UI mirrors the CLI bottom status bar, so these
-// values are surfaced on every session descriptor. Working dir is per-session:
-// callers with a session in hand override the returned value via sessionCwd /
-// sessionCwdByID; the default here is the fallback for sessions with none.
-func (srv *Server) sessionStatusFields() (workingDir, permissionMode, reasoningEffort string, showReasoning *bool, contextUsage int) {
+// DEFAULT working dir, resolved against sess's own model-config entry (see
+// entryForSession) — pass nil when no specific session is in scope. Working
+// dir is per-session regardless: callers with a session in hand override the
+// returned value via sessionCwd / sessionCwdByID; the default here is the
+// fallback for sessions with none.
+func (srv *Server) sessionStatusFields(sess *agent.Session) (workingDir, permissionMode, reasoningEffort string, showReasoning *bool, contextUsage int) {
 	workingDir = srv.cwd
 	permissionMode = string(resolvePermissionMode())
 	if cfg, err := config.Load(); err == nil {
-		entry := cfg.DefaultEntry()
+		entry := entryForSession(cfg, sess)
 		reasoningEffort = entry.ReasoningEffort
 		eff := cfg.EffectiveShowReasoning(entry.ShowReasoning)
 		showReasoning = &eff
@@ -797,10 +819,26 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.Sender, a.Model))
 	tools.SetBrowserHealer(app.MakeBrowserHealer(a.Sender, a.Model))
 
+	// Stamp the agent's per-session cwd into ctx so every WorkingDir(ctx)
+	// consumer (read_file/write_file/edit_file/glob/grep, terminal via
+	// sandbox.go, and the workflow registry) resolves relative paths and
+	// project roots against a.CWD instead of the server process's own launch
+	// directory. Before this, only cron tasks and worktree-isolated sub-agents
+	// stamped this key (via their own WithWorkingDir calls) — a session whose
+	// working_dir was retargeted via PATCH .../working_dir away from the
+	// server default hit the exact same "resolves from the wrong directory"
+	// class of bug the workflow registry fix (#1140) addressed, just for
+	// every tool, not only workflow lookup. a.CWD is never empty (buildAgent
+	// falls back to the server default), so this never disables the existing
+	// os.Getwd() fallback those tools already have — it only ever narrows an
+	// ambiguous "" to the concrete directory this turn is actually anchored to.
+	ctx = tools.WithWorkingDir(ctx, a.CWD)
+
 	// Anchor the gate at the agent's per-session cwd (not the server default) so
 	// $CWD path rules and relative-path resolution match where the tools
-	// actually run — buildAgent sets a.CWD before every prepareToolTurn call,
-	// and the task path applies its directory ahead of this too.
+	// actually run — buildAgent sets a.CWD from sess.WorkingDir before every
+	// prepareToolTurn call, cron-scheduled sessions included (task.Directory
+	// only ever seeds sess.WorkingDir once, at session creation).
 	engine, err := permission.New(permissionConfigPath(), a.CWD, resolvePermissionMode(), s.memDir, s.homeMemDir)
 	if err != nil {
 		return ctx, nil, nil, func() {}, fmt.Errorf("permission engine: %w", err)
@@ -903,9 +941,15 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	}
 	tools.SetSpawner(spawner)
 	tools.SetDefaultSubAgentManager(mgr)
+	// Same save-and-restore shape for the workflow tool's Definition(), which
+	// takes no ctx and so can't see a.CWD directly — see workflow.go's
+	// ActiveWorkflowDiscoveryCWD doc comment.
+	prevWorkflowDiscoveryCWD := tools.ActiveWorkflowDiscoveryCWD()
+	tools.SetWorkflowDiscoveryCWD(a.CWD)
 	cleanup := func() {
 		tools.SetSpawner(prevSpawner)
 		tools.SetDefaultSubAgentManager(prevSubAgentMgr)
+		tools.SetWorkflowDiscoveryCWD(prevWorkflowDiscoveryCWD)
 	}
 
 	return ctx, executor, mgr, cleanup, nil
@@ -1141,7 +1185,10 @@ type updateSessionReasoningEffortRequest struct {
 	ReasoningEffort string `json:"reasoning_effort"`
 }
 
-// handleUpdateSessionReasoningEffort updates the global reasoning-effort tuning.
+// handleUpdateSessionReasoningEffort updates the reasoning-effort tuning for
+// the model THIS session actually runs on (see entryForSession) — not always
+// the default entry, for the same reason and by the same fix as
+// handleUpdateSessionShowReasoning's doc comment describes.
 // Valid levels: "off", "low", "medium", "high", "xhigh", "max". Empty is normalised to "off".
 func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -1165,10 +1212,22 @@ func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *ht
 		return
 	}
 
+	sess, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	// Resolve and mutate the entry THIS session actually runs on (see
+	// entryForSession) — not always the default entry, so a session pinned
+	// to a non-default model actually gets its own reasoning_effort changed
+	// instead of silently editing an unrelated model's config.
 	cfg, _ := config.Load()
-	entry := cfg.DefaultEntry()
+	entry := entryForSession(cfg, sess)
 	entry.ReasoningEffort = level
-	cfg.SetDefaultEntry(entry)
+	if !cfg.SetEntry(entry) {
+		cfg.SetDefaultEntry(entry)
+	}
 	if err := cfg.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
@@ -1182,12 +1241,14 @@ func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *ht
 		slog.Error("reload default sender after reasoning_effort change", "err", err)
 	}
 
-	// Push the new effective reasoning_effort to every known session so the
-	// composer status bar refreshes immediately.
+	// Push each session's own effective reasoning_effort — resolved against
+	// ITS OWN model entry, not the one that just changed — so a toggle for
+	// this session's model doesn't paint every other open tab's status bar
+	// with this session's value.
 	if s.wsHub != nil {
-		_, pm, re, sr, _ := s.sessionStatusFields()
 		sessions, _ := agent.ListSessions(50)
 		for _, sess := range sessions {
+			_, pm, re, sr, _ := s.sessionStatusFields(sess)
 			s.wsHub.broadcast(sess.ID, map[string]any{
 				"type":             "session_update",
 				"session_id":       sess.ID,
@@ -1246,11 +1307,14 @@ func (s *Server) handleUpdateSessionPermissionMode(w http.ResponseWriter, r *htt
 
 	// Push the new mode to every known session so each composer status bar
 	// refreshes immediately. The engine reads cfg on its next turn, so no
-	// sender rebuild is needed here.
+	// sender rebuild is needed here. permission_mode itself has no per-entry
+	// variance, but reasoning_effort/show_reasoning do — resolve each per its
+	// own session (see entryForSession) so this broadcast doesn't paint every
+	// session with whichever model's values happen to be looked up first.
 	if s.wsHub != nil {
-		_, pm, re, sr, _ := s.sessionStatusFields()
 		sessions, _ := agent.ListSessions(50)
 		for _, sess := range sessions {
+			_, pm, re, sr, _ := s.sessionStatusFields(sess)
 			s.wsHub.broadcast(sess.ID, map[string]any{
 				"type":             "session_update",
 				"session_id":       sess.ID,
@@ -1274,9 +1338,15 @@ type updateSessionShowReasoningRequest struct {
 	ShowReasoning bool `json:"show_reasoning"`
 }
 
-// handleUpdateSessionShowReasoning updates whether reasoning traces are shown.
-// Like reasoning_effort, this is stored on the default model entry and
-// broadcast to all sessions so the composer status bar updates immediately.
+// handleUpdateSessionShowReasoning updates whether reasoning traces are shown
+// for the model THIS session actually runs on (see entryForSession) — not
+// always the default entry. Before this, the toggle always wrote to
+// cfg.DefaultEntry(): for a session pinned to a non-default model, the
+// Composer's eye icon still visibly flipped (the status read came from the
+// same wrong entry the write used), but the session's real turns — gated by
+// senderForSession's correct per-entry resolution — never actually changed,
+// so reasoning kept showing (or hiding) no matter how many times it was
+// toggled.
 func (s *Server) handleUpdateSessionShowReasoning(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1290,28 +1360,39 @@ func (s *Server) handleUpdateSessionShowReasoning(w http.ResponseWriter, r *http
 		return
 	}
 
+	sess, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
 	cfg, _ := config.Load()
-	entry := cfg.DefaultEntry()
+	entry := entryForSession(cfg, sess)
 	entry.ShowReasoning = &req.ShowReasoning
-	cfg.SetDefaultEntry(entry)
+	if !cfg.SetEntry(entry) {
+		cfg.SetDefaultEntry(entry)
+	}
 	if err := cfg.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
 	}
 
 	// The default sender embeds show_reasoning; rebuild it so existing
-	// unbound sessions pick up the new value on their next turn.
+	// unbound sessions pick up the new value on their next turn. Per-entry
+	// senders are rebuilt lazily via invalidateSenderCache.
 	s.invalidateSenderCache()
 	if err := s.reloadDefaultSender(); err != nil {
 		slog.Error("reload default sender after show_reasoning change", "err", err)
 	}
 
-	// Push the new effective show_reasoning to every known session so the
-	// composer status bar refreshes immediately.
+	// Push each session's own effective show_reasoning — resolved against ITS
+	// OWN model entry, not the one that just changed — so a toggle for this
+	// session's model doesn't paint every other open tab's status bar with
+	// this session's value.
 	if s.wsHub != nil {
-		_, pm, re, sr, _ := s.sessionStatusFields()
 		sessions, _ := agent.ListSessions(50)
 		for _, sess := range sessions {
+			_, pm, re, sr, _ := s.sessionStatusFields(sess)
 			s.wsHub.broadcast(sess.ID, map[string]any{
 				"type":             "session_update",
 				"session_id":       sess.ID,

@@ -18,10 +18,7 @@ import (
 // logFile is resolved relative to the working dir when not absolute; an empty
 // logFile defaults to "nohup.out" there, matching the nohup convention.
 func startDetached(ctx context.Context, command, logFile string) (pid int, logPath string, err error) {
-	workdir := WorkingDir(ctx)
-	if workdir == "" {
-		workdir, _ = os.Getwd()
-	}
+	workdir := WorkingDirOrCWD(ctx)
 
 	logPath = resolveLogPath(workdir, logFile)
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)

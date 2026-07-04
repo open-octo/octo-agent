@@ -19,7 +19,7 @@ export default defineConfig({
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/open-octo/octo-agent' },
 			],
 			editLink: {
-				baseUrl: 'https://github.com/open-octo/octo-agent/edit/main/website/',
+				baseUrl: 'https://github.com/open-octo/octo-agent/edit/main/docs/',
 			},
 			customCss: ['./src/styles/custom.css'],
 			defaultLocale: 'root',
@@ -28,6 +28,18 @@ export default defineConfig({
 				zh: { label: '简体中文', lang: 'zh-CN' },
 			},
 			sidebar: [
+				{
+					label: 'Home',
+					translations: { 'zh-CN': '首页' },
+					link: 'https://octo-agent.dev/',
+					attrs: { target: '_blank' },
+				},
+				{
+					label: 'Blog',
+					translations: { 'zh-CN': '博客' },
+					link: 'https://octo-agent.dev/blog/',
+					attrs: { target: '_blank' },
+				},
 				{
 					label: 'Getting Started',
 					translations: { 'zh-CN': '快速上手' },

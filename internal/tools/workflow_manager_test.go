@@ -53,6 +53,69 @@ func TestWorkflowManager_RunToCompletion(t *testing.T) {
 	}
 }
 
+// #1140 follow-up: Start launches every run under a context detached from the
+// caller (so it survives past the request that started it) — that detach used
+// to silently drop WithWorkingDir along with it, so a script's own
+// agent()/skill() calls (and anything nested they do, like workflow_save)
+// fell back to the server's launch directory regardless of what directory the
+// top-level workflow(name: ...) call was resolved from. WorkflowRunRequest.
+// WorkingDir is what re-stamps it onto the detached context.
+func TestWorkflowManager_Start_PropagatesWorkingDirIntoAgentCalls(t *testing.T) {
+	m := NewWorkflowManager()
+	var seenCWD string
+	captureAgent := func(ctx context.Context, prompt string, _ workflow.AgentOptions) workflow.AgentResult {
+		seenCWD = WorkingDir(ctx)
+		return workflow.AgentResult{Reply: "ok"}
+	}
+
+	id, err := m.Start(WorkflowRunRequest{
+		Description: "cwd-check",
+		Script:      `agent("hi")`,
+		Agent:       captureAgent,
+		WorkingDir:  "/some/project/dir",
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	snap := waitForDone(t, m, id)
+	if snap.Status != "done" {
+		t.Fatalf("status = %q, want done (err=%q)", snap.Status, snap.ErrMsg)
+	}
+	if seenCWD != "/some/project/dir" {
+		t.Errorf("agent() call saw WorkingDir(ctx) = %q, want %q", seenCWD, "/some/project/dir")
+	}
+}
+
+// An empty WorkingDir (a caller that never resolved one — shouldn't happen in
+// practice since callers use WorkingDirOrCWD, but defends against a future
+// caller that forgets to set it) must not panic and must leave the detached
+// context with no working directory stamped, same as before this field
+// existed.
+func TestWorkflowManager_Start_EmptyWorkingDirIsANoOp(t *testing.T) {
+	m := NewWorkflowManager()
+	var sawEmpty bool
+	captureAgent := func(ctx context.Context, prompt string, _ workflow.AgentOptions) workflow.AgentResult {
+		sawEmpty = WorkingDir(ctx) == ""
+		return workflow.AgentResult{Reply: "ok"}
+	}
+
+	id, err := m.Start(WorkflowRunRequest{
+		Description: "no-cwd",
+		Script:      `agent("hi")`,
+		Agent:       captureAgent,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	snap := waitForDone(t, m, id)
+	if snap.Status != "done" {
+		t.Fatalf("status = %q, want done (err=%q)", snap.Status, snap.ErrMsg)
+	}
+	if !sawEmpty {
+		t.Error("expected WorkingDir(ctx) to be empty when WorkingDir was never set")
+	}
+}
+
 // TestWorkflowManager_Events verifies the live event sink (the web panel's feed)
 // sees a started event, progress lines, and a terminal done event.
 func TestWorkflowManager_Events(t *testing.T) {

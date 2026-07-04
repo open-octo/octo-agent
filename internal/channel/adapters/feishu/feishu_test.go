@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -72,6 +73,43 @@ func newTestAdapter(t *testing.T, f *fakeFeishu) *Adapter {
 		t.Fatalf("New: %v", err)
 	}
 	return a.(*Adapter)
+}
+
+// #1116: SendText posted content as a single unbounded payload with no
+// split at all; a reply exceeding maxMessageBytes would fail outright with
+// no chunking to fall back on.
+func TestSendText_SplitsLongMessages(t *testing.T) {
+	f := newFakeFeishu(t)
+	a := newTestAdapter(t, f)
+
+	long := strings.Repeat("word ", 5000) // ~25000 chars, over maxMessageBytes
+	res := a.SendText("chat-1", long, "m-0")
+	if !res.OK {
+		t.Fatalf("send failed: %+v", res)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) < 2 {
+		t.Fatalf("expected split into >=2 messages, got %d", len(f.sent))
+	}
+	for _, p := range f.sent {
+		// p["content"] is the JSON-marshaled post/card envelope, not the raw
+		// chunk — it carries a small, fixed structural overhead (tag/key
+		// names) on top of the actual text, so allow slack rather than
+		// asserting the exact raw-chunk cap here (that's what
+		// chunking_test.go pins directly against SplitForSend).
+		content, _ := p["content"].(string)
+		if len(content) > maxMessageBytes+200 {
+			t.Fatalf("chunk wildly exceeds cap: %d bytes", len(content))
+		}
+	}
+	// replyTo should attach to the first chunk only, not every one.
+	if f.sent[0]["reply_to_message_id"] != "m-0" {
+		t.Fatalf("expected reply_to_message_id on chunk 0, got: %+v", f.sent[0])
+	}
+	if _, ok := f.sent[1]["reply_to_message_id"]; ok {
+		t.Fatalf("reply_to_message_id should only be set on chunk 0, found on chunk 1: %+v", f.sent[1])
+	}
 }
 
 func TestSendFile_Image(t *testing.T) {

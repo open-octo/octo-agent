@@ -244,21 +244,13 @@ func tuiDisabledByEnv() bool {
 
 // resolveCoauthor determines whether the agent should append a Co-authored-by
 // line to git commit messages. Precedence: --no-coauthor flag > OCTO_COAUTHOR
-// env > config file > default (true).
+// env > config file > default (true) — the last three layers are shared with
+// every other caller (server included) via config.Config.EffectiveCoauthor.
 func resolveCoauthor(noCoauthorFlag bool, cfg config.Config) bool {
 	if noCoauthorFlag {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("OCTO_COAUTHOR"))) {
-	case "0", "false", "off", "no":
-		return false
-	case "1", "true", "on", "yes":
-		return true
-	}
-	if cfg.Coauthor != nil {
-		return *cfg.Coauthor
-	}
-	return true
+	return cfg.EffectiveCoauthor()
 }
 
 // resolveShowReasoning determines whether the reasoning/thinking trace is

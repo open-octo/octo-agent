@@ -530,3 +530,73 @@ func TestWorkflowTool_UnknownName(t *testing.T) {
 		t.Errorf("err = %v, want unknown-name error", err)
 	}
 }
+
+// #1140 follow-up: Definition() takes no context, so savedWorkflowsParamDesc
+// (the `name` parameter's "Available: ..." listing shown to the model) can
+// only see a specific turn's working directory through
+// ActiveWorkflowDiscoveryCWD — prepareToolTurn / the scheduled-task runner
+// set it right before building tool definitions for their turn. Without
+// this, a cron task's project-level workflows were never listed even though
+// calling one by its exact name already resolved correctly (the original
+// #1140 fix, which only covered lookupWorkflow/listWorkflows called directly
+// with a real ctx).
+func TestSavedWorkflowsParamDesc_UsesActiveDiscoveryCWD(t *testing.T) {
+	repoA := t.TempDir()
+	ou, op := userWorkflowsRoot, projectWorkflowsRoot
+	userWorkflowsRoot = func() string { return "" }
+	projectWorkflowsRoot = func(cwd string) string {
+		if cwd == "/repo/A" {
+			return repoA
+		}
+		return "" // server's own CWD (or unset) sees no project workflows
+	}
+	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot = ou, op })
+	writeWorkflowFile(t, repoA, "deploy-check.rb", "# @description Deploy sanity check\n\"ok\"\n")
+
+	SetWorkflowDiscoveryCWD("")
+	t.Cleanup(func() { SetWorkflowDiscoveryCWD("") })
+	if d := savedWorkflowsParamDesc(); strings.Contains(d, "deploy-check") {
+		t.Errorf("expected no deploy-check without a discovery cwd set, got: %q", d)
+	}
+
+	SetWorkflowDiscoveryCWD("/repo/A")
+	if d := savedWorkflowsParamDesc(); !strings.Contains(d, "deploy-check") {
+		t.Errorf("expected deploy-check listed once discovery cwd is /repo/A, got: %q", d)
+	}
+}
+
+// ListNamedWorkflows (the web panel's workflow list) shares the same
+// ActiveWorkflowDiscoveryCWD lookup as savedWorkflowsParamDesc.
+func TestListNamedWorkflows_UsesActiveDiscoveryCWD(t *testing.T) {
+	repoB := t.TempDir()
+	ou, op := userWorkflowsRoot, projectWorkflowsRoot
+	userWorkflowsRoot = func() string { return "" }
+	projectWorkflowsRoot = func(cwd string) string {
+		if cwd == "/repo/B" {
+			return repoB
+		}
+		return ""
+	}
+	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot = ou, op })
+	writeWorkflowFile(t, repoB, "release.rb", "# @description Cut a release\n\"ok\"\n")
+
+	SetWorkflowDiscoveryCWD("")
+	t.Cleanup(func() { SetWorkflowDiscoveryCWD("") })
+	if names := ListNamedWorkflows(); containsWorkflowNamed(names, "release") {
+		t.Error("expected no 'release' workflow without a discovery cwd set")
+	}
+
+	SetWorkflowDiscoveryCWD("/repo/B")
+	if names := ListNamedWorkflows(); !containsWorkflowNamed(names, "release") {
+		t.Error("expected 'release' listed once discovery cwd is /repo/B")
+	}
+}
+
+func containsWorkflowNamed(names []NamedWorkflow, name string) bool {
+	for _, w := range names {
+		if w.Name == name {
+			return true
+		}
+	}
+	return false
+}

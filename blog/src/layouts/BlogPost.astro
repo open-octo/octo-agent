@@ -1,0 +1,141 @@
+---
+import type { CollectionEntry } from 'astro:content';
+import '../styles/blog.css';
+
+type Props = CollectionEntry<'posts'>['data'] & { slug?: string; locale?: string; alternateSlug?: string };
+
+const { title, description, pubDate, updatedDate, author, tags, image, slug, locale = 'zh', alternateSlug } = Astro.props;
+const dateFormatter = new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+	year: 'numeric',
+	month: 'long',
+	day: 'numeric',
+});
+
+const siteUrl = 'https://octo-agent.dev';
+const pageSlug = slug ?? '';
+const canonicalPath = pageSlug.startsWith('en/')
+	? `/blog/posts/${pageSlug}/`
+	: `/blog/posts/${pageSlug}/`;
+const canonicalUrl = `${siteUrl}${canonicalPath}`;
+
+const navLabels = {
+	en: { home: 'octo blog', landing: 'Octo', docs: 'Docs', github: 'GitHub', lang: 'EN' },
+	zh: { home: 'octo 博客', landing: 'Octo', docs: '文档', github: 'GitHub', lang: '中文' },
+};
+const labels = navLabels[locale as keyof typeof navLabels] || navLabels.zh;
+
+const alternateLocale = locale === 'zh' ? 'en' : 'zh';
+const alternateUrl = alternateSlug
+	? `${siteUrl}/blog/posts/${alternateLocale === 'en' ? 'en/' : ''}${alternateSlug}/`
+	: `${siteUrl}/blog/${alternateLocale === 'zh' ? '' : 'en/'}`;
+const alternateLabel = locale === 'zh' ? 'English' : '中文';
+
+const ogImage = image ? (image.startsWith('http') ? image : `${siteUrl}${image}`) : `${siteUrl}/blog/og-default.svg`;
+const ogType = 'article';
+const siteName = locale === 'zh' ? 'octo 博客' : 'octo blog';
+---
+
+<!DOCTYPE html>
+<html lang={locale === 'zh' ? 'zh-CN' : 'en'}>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>{title} | {siteName}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonicalUrl} />
+		<link rel="icon" type="image/svg+xml" href="/blog/favicon.svg" />
+		<link rel="alternate" hreflang={alternateLocale} href={alternateUrl} />
+
+		<!-- Open Graph -->
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:url" content={canonicalUrl} />
+		<meta property="og:type" content={ogType} />
+		<meta property="og:locale" content={locale === 'zh' ? 'zh-CN' : 'en'} />
+		<meta property="og:site_name" content={siteName} />
+		<meta property="og:image" content={ogImage} />
+
+		<!-- Twitter Card -->
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content={title} />
+		<meta name="twitter:description" content={description} />
+		<meta name="twitter:image" content={ogImage} />
+
+		<!-- Article meta -->
+		<meta property="article:published_time" content={pubDate.toISOString()} />
+		{updatedDate && <meta property="article:modified_time" content={updatedDate.toISOString()} />}
+		<meta property="article:author" content={author} />
+		{tags.map((tag) => <meta property="article:tag" content={tag} />)}
+	</head>
+	<body>
+		<header class="site-header">
+			<div class="container">
+				<a href={locale === 'zh' ? '/blog/' : '/blog/en/'} class="site-title">{labels.home}</a>
+				<nav class="site-nav">
+					<a href="https://octo-agent.dev/">{labels.landing}</a>
+					<a href="/docs/">{labels.docs}</a>
+					<a href="https://github.com/open-octo/octo-agent">{labels.github}</a>
+					<a class="lang-switch" href={alternateUrl} title={alternateLabel}>{alternateLabel}</a>
+				</nav>
+			</div>
+		</header>
+
+		<main class="container">
+			<article class="blog-post">
+				<header class="post-header">
+					<h1>{title}</h1>
+					<p class="post-meta">
+						<time datetime={pubDate.toISOString()}>{dateFormatter.format(pubDate)}</time>
+						{updatedDate && (
+							<>
+								{' · updated '}
+								<time datetime={updatedDate.toISOString()}>{dateFormatter.format(updatedDate)}</time>
+							</>
+						)}
+						{' · '}
+						<span class="author">{author}</span>
+					</p>
+					{tags.length > 0 && (
+						<div class="tags">
+							{tags.map((tag) => (
+								<span class="tag">{tag}</span>
+							))}
+						</div>
+					)}
+				</header>
+
+				<div class="post-content">
+					<slot />
+				</div>
+			</article>
+		</main>
+
+		<footer class="site-footer">
+			<div class="container">
+				<p>
+					© {new Date().getFullYear()} <a href="https://octo-agent.dev/">octo-agent</a>. Built with <a href="https://astro.build">Astro</a>.
+				</p>
+			</div>
+		</footer>
+
+		<script type="module">
+			import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+			mermaid.initialize({ startOnLoad: false, theme: 'default' });
+			const blocks = document.querySelectorAll('pre code.language-mermaid');
+			blocks.forEach((block) => {
+				const pre = block.parentElement;
+				const source = block.textContent || '';
+				const id = 'mermaid-' + Math.random().toString(36).slice(2, 9);
+				const container = document.createElement('div');
+				container.className = 'mermaid-diagram';
+				container.id = id;
+				pre.replaceWith(container);
+				mermaid.render(id, source).then(({ svg }) => {
+					container.innerHTML = svg;
+				}).catch((err) => {
+					container.innerHTML = '<pre class="mermaid-error">' + (err?.message || 'Mermaid render failed') + '</pre>';
+				});
+			});
+		</script>
+	</body>
+</html>

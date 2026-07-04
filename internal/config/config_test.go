@@ -296,3 +296,38 @@ func TestModelEntryVisionMigration(t *testing.T) {
 		t.Errorf("marshaled config has %d vision: keys, want %d\n%s", n, len(c.Models), out)
 	}
 }
+
+// EffectiveCoauthor is the shared precedence (env > config > default) behind
+// both cmd/octo's resolveCoauthor (which layers a --no-coauthor flag ahead of
+// it) and the server's effectiveCoauthor (server.go) — before that existed,
+// every web/API/channel turn hardcoded true and never consulted this at all.
+func TestEffectiveCoauthor(t *testing.T) {
+	tru, fls := true, false
+	cases := []struct {
+		name   string
+		env    string
+		config *bool
+		want   bool
+	}{
+		{"no env, no config → default true", "", nil, true},
+		{"no env, config false", "", &fls, false},
+		{"no env, config true", "", &tru, true},
+		{"env off beats config true", "0", &tru, false},
+		{"env on beats config false", "1", &fls, true},
+		{"env off, no config", "off", nil, false},
+		{"env on, no config", "yes", nil, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.env != "" {
+				t.Setenv("OCTO_COAUTHOR", c.env)
+			} else {
+				t.Setenv("OCTO_COAUTHOR", "")
+			}
+			cfg := Config{Coauthor: c.config}
+			if got := cfg.EffectiveCoauthor(); got != c.want {
+				t.Errorf("EffectiveCoauthor() with env=%q config=%v = %v, want %v", c.env, c.config, got, c.want)
+			}
+		})
+	}
+}

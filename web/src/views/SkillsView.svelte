@@ -54,13 +54,30 @@
   }
 
   // Export downloads the skill folder as a .zip from the server.
-  function handleExport(name: string) {
-    const a = document.createElement('a')
-    a.href = `/api/skills/${encodeURIComponent(name)}/export`
-    a.download = `${name}.zip`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
+  //
+  // #1109: this used to point an <a download> straight at the endpoint —
+  // if the server 404/500'd, the browser has no way to surface that to JS,
+  // so a failing export produced zero download and zero feedback. Fetching
+  // first lets a non-2xx response throw with the server's actual error
+  // instead of silently doing nothing.
+  async function handleExport(name: string) {
+    try {
+      const res = await fetch(`/api/skills/${encodeURIComponent(name)}/export`)
+      if (!res.ok) {
+        throw new Error(await api.readErrorMessage(res, `${res.status} ${res.statusText}`))
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${name}.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e: any) {
+      showToast(`Export failed: ${e.message}`, 'error')
+    }
   }
 
   // Editing a skill's files is agent-assisted: open a session that drives the

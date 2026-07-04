@@ -225,27 +225,9 @@ func TestSendText_SplitsLongMessages(t *testing.T) {
 		t.Fatalf("expected split into >=2 messages, got %d", len(f.sent))
 	}
 	for _, p := range f.sent {
-		if len([]rune(p["text"].(string))) > maxMessageChars {
-			t.Fatalf("chunk exceeds cap: %d chars", len(p["text"].(string)))
+		if len(p["text"].(string)) > maxMessageBytes {
+			t.Fatalf("chunk exceeds cap: %d bytes", len(p["text"].(string)))
 		}
-	}
-}
-
-func TestSplitMessage_Boundaries(t *testing.T) {
-	if got := splitMessage("", 10); got != nil {
-		t.Fatalf("empty input: %v", got)
-	}
-	if got := splitMessage("short", 10); len(got) != 1 || got[0] != "short" {
-		t.Fatalf("short input: %v", got)
-	}
-	chunks := splitMessage("para one\n\npara two\n\npara three", 12)
-	if len(chunks) != 3 {
-		t.Fatalf("expected paragraph split, got %v", chunks)
-	}
-	// Hard cut when no boundary exists.
-	chunks = splitMessage(strings.Repeat("x", 25), 10)
-	if len(chunks) != 3 {
-		t.Fatalf("expected hard cut into 3, got %v", chunks)
 	}
 }
 

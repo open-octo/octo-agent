@@ -1,64 +1,31 @@
 package server
 
 import (
-	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
-	"github.com/open-octo/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/scheduler"
 )
 
-func TestApplyTaskDirectory_RootsTheRun(t *testing.T) {
+func TestSeedSessionDirectory_SetsWorkingDir(t *testing.T) {
 	dir := t.TempDir()
-	a := agent.New(nil, "m")
-	a.System = "SYS"
-	a.LeanSystem = "LEAN"
-
-	ctx, err := applyTaskDirectory(context.Background(), a, dir)
-	if err != nil {
-		t.Fatalf("applyTaskDirectory: %v", err)
+	sess := agent.NewSession("m", "")
+	if err := seedSessionDirectory(sess, dir); err != nil {
+		t.Fatalf("seedSessionDirectory: %v", err)
 	}
-	// Tools resolve against the dir.
-	if got := tools.WorkingDir(ctx); got != dir {
-		t.Errorf("WorkingDir(ctx) = %q, want %q", got, dir)
-	}
-	// Planner / project context use it.
-	if a.CWD != dir {
-		t.Errorf("a.CWD = %q, want %q", a.CWD, dir)
-	}
-	// The model is told its cwd in both system-prompt variants, and the
-	// original content is preserved.
-	want := "Working directory: " + dir
-	if !strings.HasPrefix(a.System, want) || !strings.HasSuffix(a.System, "SYS") {
-		t.Errorf("a.System = %q", a.System)
-	}
-	if !strings.HasPrefix(a.LeanSystem, want) || !strings.HasSuffix(a.LeanSystem, "LEAN") {
-		t.Errorf("a.LeanSystem = %q", a.LeanSystem)
+	if sess.WorkingDir != dir {
+		t.Errorf("sess.WorkingDir = %q, want %q", sess.WorkingDir, dir)
 	}
 }
 
-func TestApplyTaskDirectory_EmptyLeanSystemUntouched(t *testing.T) {
-	a := agent.New(nil, "m")
-	a.System = "SYS"
-	// No LeanSystem (e.g. a path that didn't compose one).
-	if _, err := applyTaskDirectory(context.Background(), a, t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
-	if a.LeanSystem != "" {
-		t.Errorf("empty LeanSystem should stay empty, got %q", a.LeanSystem)
-	}
-}
-
-func TestApplyTaskDirectory_InvalidDirErrors(t *testing.T) {
-	a := agent.New(nil, "m")
-	a.System = "SYS"
+func TestSeedSessionDirectory_InvalidDirErrors(t *testing.T) {
+	sess := agent.NewSession("m", "")
 
 	// Missing directory.
 	missing := filepath.Join(t.TempDir(), "nope")
-	if _, err := applyTaskDirectory(context.Background(), a, missing); err == nil {
+	if err := seedSessionDirectory(sess, missing); err == nil {
 		t.Error("expected an error for a missing directory")
 	}
 
@@ -67,12 +34,111 @@ func TestApplyTaskDirectory_InvalidDirErrors(t *testing.T) {
 	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := applyTaskDirectory(context.Background(), a, f); err == nil {
+	if err := seedSessionDirectory(sess, f); err == nil {
 		t.Error("expected an error when the path is a file, not a directory")
 	}
 
-	// A failed apply must not have mutated the system prompt.
-	if a.System != "SYS" {
-		t.Errorf("System mutated on error: %q", a.System)
+	// A failed seed must not have mutated WorkingDir.
+	if sess.WorkingDir != "" {
+		t.Errorf("WorkingDir mutated on error: %q", sess.WorkingDir)
+	}
+}
+
+// task.Directory only seeds a NEW session's WorkingDir, once, at creation
+// (see CreateSession's doc comment) — this pins that behavior end to end.
+func TestCreateSession_SeedsWorkingDirFromTaskDirectory(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	dir := t.TempDir()
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t", Directory: dir})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	sess, err := agent.LoadSession(sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if sess.WorkingDir != dir {
+		t.Errorf("sess.WorkingDir = %q, want %q", sess.WorkingDir, dir)
+	}
+}
+
+// No Directory set on the task → the session is created with no WorkingDir
+// of its own, falling back to the server default like any other session.
+func TestCreateSession_NoDirectoryLeavesWorkingDirEmpty(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess, err := agent.LoadSession(sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if sess.WorkingDir != "" {
+		t.Errorf("sess.WorkingDir = %q, want empty", sess.WorkingDir)
+	}
+}
+
+// An invalid task.Directory must fail session creation outright rather than
+// silently falling back to the server default — the same standard
+// applyTaskDirectory used to hold before this was moved to creation time.
+func TestCreateSession_InvalidDirectoryErrors(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	missing := filepath.Join(t.TempDir(), "nope")
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t", Directory: missing})
+	if err == nil {
+		t.Fatal("expected an error for a missing task directory")
+	}
+	// The failed seed means sess.Save() was never called — sess.ID names a
+	// session that exists only in memory. Returning it anyway would let
+	// scheduler.fire() (which persists task.SessionID unconditionally,
+	// without checking RunTask's error) permanently dangle the task on a
+	// session ID agent.LoadSession can never load.
+	if sessionID != "" {
+		t.Errorf("sessionID = %q, want empty on error (must not return an unsaved session's ID)", sessionID)
+	}
+}
+
+// Once a session exists for a task, re-running CreateSession (as every
+// subsequent cron fire does) must reuse it untouched — task.Directory plays
+// no further role, even if it was edited via PATCH /api/tasks/{id} in the
+// meantime. This is the behavior change from the old "apply task.Directory
+// fresh on every run" design: editing a task's directory only affects the
+// NEXT session created for it, never one that's already running.
+func TestCreateSession_ReusesExistingSession_LaterDirectoryEditIgnored(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	firstDir := t.TempDir()
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t", Directory: firstDir})
+	if err != nil {
+		t.Fatalf("CreateSession (first): %v", err)
+	}
+
+	// Simulate the task being edited (PATCH /api/tasks/{id}) to point at a
+	// different directory, then firing again with the existing SessionID —
+	// exactly what every real cron trigger after the first does.
+	secondDir := t.TempDir()
+	sessionID2, err := srv.CreateSession(scheduler.Task{Name: "t", Directory: secondDir, SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("CreateSession (reuse): %v", err)
+	}
+	if sessionID2 != sessionID {
+		t.Fatalf("expected the existing session to be reused, got a new id %q", sessionID2)
+	}
+
+	sess, err := agent.LoadSession(sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if sess.WorkingDir != firstDir {
+		t.Errorf("sess.WorkingDir = %q, want unchanged %q (task.Directory edits shouldn't touch an existing session)", sess.WorkingDir, firstDir)
 	}
 }

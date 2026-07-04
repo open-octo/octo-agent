@@ -120,7 +120,7 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 		if body, exit := splitTerminalExit(output); exit != "" {
 			output = body
 			opts.IsErr = true
-			opts.Meta = joinMeta("exit "+exit, opts.Meta)
+			opts.Meta = joinMeta(formatExitReason(exit), opts.Meta)
 		}
 	case "terminal_output", "kill_shell", "terminal_input":
 		opts.Tail = true
@@ -151,8 +151,11 @@ func nonBlankLineCount(s string) int {
 
 // splitTerminalExit detaches the trailing "[exit: …]" marker the terminal
 // tool appends on a non-zero exit (internal/tools/terminal.go). It returns
-// the output without the marker line plus the exit text ("1", "signal:
-// killed"), or (output, "") when no marker is present.
+// the output without the marker line plus the raw exit text embedded in the
+// marker — Go's *exec.ExitError.Error() string passed straight through,
+// e.g. "exit status 1" for a normal nonzero exit or "signal: killed" for a
+// killed process, never a bare code — or (output, "") when no marker is
+// present.
 func splitTerminalExit(output string) (body, exit string) {
 	trimmed := strings.TrimRight(output, "\n")
 	last := trimmed
@@ -165,6 +168,21 @@ func splitTerminalExit(output string) (body, exit string) {
 	exit = strings.TrimSuffix(strings.TrimPrefix(last, "[exit: "), "]")
 	body = strings.TrimRight(trimmed[:len(trimmed)-len(last)], "\n")
 	return body, exit
+}
+
+// formatExitReason turns splitTerminalExit's raw exit text into the card
+// header meta string. The text is Go's *exec.ExitError.Error() passed
+// through verbatim, so "exit status N" — not a bare "N" — is what a normal
+// nonzero exit actually looks like; without stripping that wrapper, the
+// header rendered the redundant "exit exit status 1" for every ordinary
+// failing command (#1146, found while fixing the identical bug in the web
+// client's equivalent card, #1106/#1145). "signal: NAME" already reads fine
+// standalone and is returned as-is, not double-prefixed with "exit ".
+func formatExitReason(exit string) string {
+	if code, ok := strings.CutPrefix(exit, "exit status "); ok {
+		return "exit " + code
+	}
+	return exit
 }
 
 // formatElapsed renders a tool call's duration for the card header: "" when

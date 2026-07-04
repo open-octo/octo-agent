@@ -54,7 +54,7 @@ func (WorkflowSaveTool) Definition() agent.ToolDefinition {
 	}
 }
 
-func (WorkflowSaveTool) Execute(_ context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
+func (WorkflowSaveTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	name := strings.TrimSpace(stringArg(input, "name"))
 	if !workflowNamePattern.MatchString(name) {
 		return agent.ToolResult{}, fmt.Errorf("workflow_save: invalid name %q — use lowercase letters, digits and dashes", name)
@@ -72,7 +72,7 @@ func (WorkflowSaveTool) Execute(_ context.Context, _ string, input map[string]an
 	var root string
 	switch scope {
 	case "project":
-		root = projectWorkflowsRoot()
+		root = projectWorkflowsRoot(WorkingDirOrCWD(ctx))
 		if root == "" {
 			return agent.ToolResult{}, fmt.Errorf("workflow_save: no project root for scope \"project\" — run inside a repository or use scope \"user\"")
 		}
