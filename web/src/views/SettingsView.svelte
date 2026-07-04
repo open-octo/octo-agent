@@ -210,6 +210,16 @@
     setLocale(language === 'zh' || language === 'zh-TW' ? 'zh' : 'en')
   })
 
+  // True only when a session-scoped field is actually dirty AND there's no
+  // active session to save it against. Drives the "start a session" hint —
+  // showing it whenever no session happens to be open (regardless of what's
+  // actually dirty) would nag a user who only wants to change a global
+  // setting like Show Reasoning, which never needs a session at all.
+  let needsSession = $derived(
+    !$activeSessionId &&
+    (model !== origModel || workdir !== origWorkdir || reasoning !== origReasoning || permMode !== origPermMode)
+  )
+
   async function handleSave() {
     saving = true
     const sid = $activeSessionId
@@ -220,33 +230,51 @@
         origShowReasoning = showReasoning
       }
 
-      // Session-level settings (require an active session).
-      if (!sid) {
-        showToast(tr('settings.no_session_tooltip'), 'warning')
-        saving = false
-        return
+      // Session-level settings (require an active session) — only warn about
+      // the missing session when there's actually a session-scoped field to
+      // save. A global-only change (e.g. just Show Reasoning) must still
+      // succeed and report success even with no active session; that's the
+      // exact "silent no-op with a false success toast" #1111 was filed
+      // about, just inverted (a real success wrongly reported as blocked).
+      const sessionDirty =
+        model !== origModel ||
+        workdir !== origWorkdir ||
+        reasoning !== origReasoning ||
+        permMode !== origPermMode
+      if (sessionDirty) {
+        if (!sid) {
+          showToast(tr('settings.no_session_tooltip'), 'warning')
+          return
+        }
+        const effortMap: Record<string, string> = { Low: 'low', Medium: 'medium', High: 'high', Xhigh: 'xhigh', Max: 'max' }
+        // Each task commits its own dirty-tracking baseline only once its own
+        // call succeeds, so one field failing while others succeed in the
+        // same batch doesn't lose bookkeeping for the ones that worked (which
+        // would otherwise get redundantly re-sent next Save) or silently drop
+        // which field actually failed.
+        const tasks: Array<{ label: string; run: () => Promise<unknown>; commit: () => void }> = []
+        if (model !== origModel) {
+          tasks.push({ label: 'model', run: () => api.updateSessionModel(sid, model), commit: () => { origModel = model } })
+        }
+        if (workdir !== origWorkdir) {
+          tasks.push({ label: 'working directory', run: () => api.updateSessionWorkingDir(sid, workdir), commit: () => { origWorkdir = workdir } })
+        }
+        if (reasoning !== origReasoning) {
+          tasks.push({ label: 'reasoning effort', run: () => api.updateSessionReasoningEffort(sid, effortMap[reasoning] ?? 'medium'), commit: () => { origReasoning = reasoning } })
+        }
+        if (permMode !== origPermMode) {
+          tasks.push({ label: 'permission mode', run: () => api.updateSessionPermissionMode(sid, labelToPermissionMode(permMode)), commit: () => { origPermMode = permMode } })
+        }
+        const results = await Promise.allSettled(tasks.map(t => t.run()))
+        const failed: string[] = []
+        results.forEach((r, i) => {
+          if (r.status === 'fulfilled') tasks[i].commit()
+          else failed.push(tasks[i].label)
+        })
+        if (failed.length) {
+          throw new Error(`failed to save ${failed.join(', ')}`)
+        }
       }
-      const promises: Promise<unknown>[] = []
-      if (model !== origModel) {
-        promises.push(api.updateSessionModel(sid, model))
-      }
-      if (workdir !== origWorkdir) {
-        promises.push(api.updateSessionWorkingDir(sid, workdir))
-      }
-      const effortMap: Record<string, string> = { Low: 'low', Medium: 'medium', High: 'high', Xhigh: 'xhigh', Max: 'max' }
-      if (reasoning !== origReasoning) {
-        promises.push(api.updateSessionReasoningEffort(sid, effortMap[reasoning] ?? 'medium'))
-      }
-      if (permMode !== origPermMode) {
-        promises.push(api.updateSessionPermissionMode(sid, labelToPermissionMode(permMode)))
-      }
-      if (promises.length) {
-        await Promise.all(promises)
-      }
-      origModel   = model
-      origWorkdir = workdir
-      origReasoning = reasoning
-      origPermMode = permMode
       showToast(tr('settings.toast_saved'), 'success')
     } catch (e: any) {
       showToast(`Save failed: ${e.message}`, 'error')
@@ -388,12 +416,12 @@
         <button
           class="btn-primary"
           onclick={handleSave}
-          disabled={saving || !$activeSessionId}
-          title={!$activeSessionId ? tr('settings.no_session_tooltip') : ''}
+          disabled={saving}
+          title={needsSession ? tr('settings.no_session_tooltip') : ''}
         >
           {saving ? $t('settings.saving') : $t('settings.save_changes')}
         </button>
-        {#if !$activeSessionId}
+        {#if needsSession}
           <span class="session-hint">{tr('settings.no_session_tooltip')}</span>
         {/if}
         {#if versionStr}
