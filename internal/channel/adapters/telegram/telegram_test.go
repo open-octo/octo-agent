@@ -231,24 +231,6 @@ func TestSendText_SplitsLongMessages(t *testing.T) {
 	}
 }
 
-func TestSplitMessage_Boundaries(t *testing.T) {
-	if got := splitMessage("", 10); got != nil {
-		t.Fatalf("empty input: %v", got)
-	}
-	if got := splitMessage("short", 10); len(got) != 1 || got[0] != "short" {
-		t.Fatalf("short input: %v", got)
-	}
-	chunks := splitMessage("para one\n\npara two\n\npara three", 12)
-	if len(chunks) != 3 {
-		t.Fatalf("expected paragraph split, got %v", chunks)
-	}
-	// Hard cut when no boundary exists.
-	chunks = splitMessage(strings.Repeat("x", 25), 10)
-	if len(chunks) != 3 {
-		t.Fatalf("expected hard cut into 3, got %v", chunks)
-	}
-}
-
 func TestValidateConfig(t *testing.T) {
 	a := &Adapter{}
 	if errs := a.ValidateConfig(channel.PlatformConfig{}); len(errs) != 1 {

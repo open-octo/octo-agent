@@ -43,6 +43,11 @@ const (
 	msgTopic        = "/v1.0/im/bot/messages/get"
 	reconnectDelay  = 5 * time.Second
 	webhookSafetyMs = 5 * 60 * 1000 // 5 min in ms
+
+	// maxMessageBytes: DingTalk's custom-robot markdown message content is
+	// commonly documented at ~20000 bytes; SendText previously posted content
+	// as a single unbounded payload with no split at all (#1116).
+	maxMessageBytes = 20000
 )
 
 func init() {
@@ -201,12 +206,27 @@ func (a *Adapter) Stop() error {
 	return nil
 }
 
-// SendText sends a Markdown message via sessionWebhook or proactive OAPI.
+// SendText sends a Markdown message via sessionWebhook or proactive OAPI,
+// splitting content over maxMessageBytes into consecutive messages (#1116).
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
-	if url := a.resolveWebhook(chatID); url != "" {
-		return a.sendWebhook(url, text)
+	chunks := channel.SplitForSend(text, maxMessageBytes)
+	if len(chunks) == 0 {
+		return channel.SendResult{OK: true}
 	}
-	return a.sendProactive(chatID, text)
+
+	url := a.resolveWebhook(chatID)
+	var res channel.SendResult
+	for _, chunk := range chunks {
+		if url != "" {
+			res = a.sendWebhook(url, chunk)
+		} else {
+			res = a.sendProactive(chatID, chunk)
+		}
+		if !res.OK {
+			return res
+		}
+	}
+	return res
 }
 
 // SendFile uploads a file and sends it as a media message via OAPI.

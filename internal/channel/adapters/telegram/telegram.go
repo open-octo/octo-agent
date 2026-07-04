@@ -194,9 +194,11 @@ func (a *Adapter) Stop() error {
 }
 
 // SendText sends a message, splitting content over Telegram's length cap into
-// consecutive messages. Returns the message ID of the last chunk.
+// consecutive messages (#1116: shared with every other adapter via
+// channel.SplitForSend, which is also code-fence-aware — see chunking.go).
+// Returns the message ID of the last chunk.
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
-	chunks := splitMessage(text, maxMessageChars)
+	chunks := channel.SplitForSend(text, maxMessageChars)
 	if len(chunks) == 0 {
 		return channel.SendResult{OK: true}
 	}
@@ -742,39 +744,8 @@ func (a *Adapter) stripBotMention(text string) string {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-// splitMessage splits text at the length cap, preferring paragraph / line /
-// space boundaries and hard-cutting as a last resort.
-func splitMessage(text string, limit int) []string {
-	if text == "" {
-		return nil
-	}
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return []string{text}
-	}
-
-	var chunks []string
-	for len(runes) > limit {
-		window := string(runes[:limit])
-		cut := strings.LastIndex(window, "\n\n")
-		if cut <= 0 {
-			cut = strings.LastIndex(window, "\n")
-		}
-		if cut <= 0 {
-			cut = strings.LastIndex(window, " ")
-		}
-		if cut <= 0 {
-			cut = limit
-		} else {
-			// LastIndex returned a byte offset into window; convert to runes.
-			cut = len([]rune(window[:cut]))
-		}
-		chunks = append(chunks, strings.TrimRight(string(runes[:cut]), " \n"))
-		runes = []rune(strings.TrimLeft(string(runes[cut:]), " \n"))
-	}
-	if len(runes) > 0 {
-		chunks = append(chunks, string(runes))
-	}
-	return chunks
-}
+//
+// The length-cap splitter used to live here (splitMessage); it's now
+// channel.SplitForSend, shared by every adapter (#1116) — see
+// internal/channel/chunking.go and its tests for the splitting behavior
+// itself.

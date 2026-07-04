@@ -118,6 +118,21 @@ func TestUIController_ShouldFlush(t *testing.T) {
 	if shouldFlush("Hel") {
 		t.Error("expected no flush on short text")
 	}
+	// #1116: the ASCII-only sentence check never flushed CJK prose, which
+	// doesn't put a space after 。！？ the way English does after . ! ? —
+	// only the 800-byte cap or \n\n ever flushed Chinese/Japanese text.
+	if !shouldFlush("你好，世界。") {
+		t.Error("expected flush on CJK period 。")
+	}
+	if !shouldFlush("太好了！") {
+		t.Error("expected flush on CJK exclamation ！")
+	}
+	if !shouldFlush("真的吗？") {
+		t.Error("expected flush on CJK question mark ？")
+	}
+	if shouldFlush("还没说完") {
+		t.Error("expected no flush on CJK text with no sentence-ending punctuation")
+	}
 }
 
 func TestUIController_Truncate(t *testing.T) {
@@ -363,5 +378,88 @@ func TestUIController_DoubleFailureRetriesChunk(t *testing.T) {
 	}
 	if want := "One.\n\nTwo.\n\nThree."; updates[0].text != want {
 		t.Fatalf("retried chunk must survive:\nwant %q\ngot  %q", want, updates[0].text)
+	}
+}
+
+// #1116: on a platform without in-place edits, every flush is its own
+// standalone IM message. A code fence spanning two flushes must close at
+// the end of the first message and reopen (same language tag) at the start
+// of the second — otherwise the first message renders a permanently
+// unclosed code block and the second resumes mid-code with no fence at all.
+func TestUIController_NoUpdatesPlatformCarriesFenceAcrossFlushes(t *testing.T) {
+	mock := &mockAdapter{platform: "mock", issueMsgIDs: true, noUpdates: true}
+	ctrl := NewUIController(mock, "chat1", "")
+	handler := ctrl.Handler()
+
+	// Flush 1 (paragraph-break heuristic fires mid-fence): the buffer has an
+	// opened but not yet closed ```go block.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "```go\nline1\n\n"})
+	// Flush 2 (turn end): the fence closes here, with more text after it.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "line2\n```\n\nDone"})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{}})
+
+	mock.mu.Lock()
+	texts := make([]string, len(mock.sentTexts))
+	for i, s := range mock.sentTexts {
+		texts[i] = s.text
+	}
+	mock.mu.Unlock()
+	if len(texts) != 2 {
+		t.Fatalf("expected 2 messages, got %d: %v", len(texts), texts)
+	}
+	if want := "```go\nline1\n```"; texts[0] != want {
+		t.Errorf("message 1:\nwant %q\ngot  %q", want, texts[0])
+	}
+	if want := "```go\nline2\n```\n\nDone"; texts[1] != want {
+		t.Errorf("message 2:\nwant %q\ngot  %q", want, texts[1])
+	}
+	for i, text := range texts {
+		if open, _ := fenceStateAfter(text, false, ""); open {
+			t.Errorf("message %d ends with an unclosed fence: %q", i, text)
+		}
+	}
+}
+
+// #1116: when an in-place edit fails partway through a code block, the
+// fallback to a fresh SendText message must reopen the fence based on the
+// FROZEN message's actual content (u.sentText) — not on some earlier
+// SendText call's fence state, which predates everything the user has seen
+// via edits since and would be stale.
+func TestUIController_EditFailureRecomputesFenceFromFrozenText(t *testing.T) {
+	mock := &mockAdapter{platform: "mock", issueMsgIDs: true}
+	ctrl := NewUIController(mock, "chat1", "")
+	handler := ctrl.Handler()
+
+	// Flush 1 (SendText — no pending message yet): plain text, no fence.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Intro.\n\n"})
+	// Flush 2 (successful edit): opens a fence inside the edited message.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "```go\nfunc foo() {\n\n"})
+
+	mock.mu.Lock()
+	if len(mock.sentTexts) != 1 {
+		t.Fatalf("expected exactly 1 SendText (the first message), got %d", len(mock.sentTexts))
+	}
+	if len(mock.updatedMsgs) != 1 {
+		t.Fatalf("expected exactly 1 successful edit, got %d", len(mock.updatedMsgs))
+	}
+	// Now the edit-size cap kicks in for the next flush.
+	mock.failUpdates = true
+	mock.mu.Unlock()
+
+	// Flush 3 (turn end, edit fails): closes the fence and adds trailing text.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "more code\n```\n\nDone"})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{}})
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.sentTexts) != 2 {
+		t.Fatalf("expected a second standalone message after the edit failed, got %d sends", len(mock.sentTexts))
+	}
+	fallback := mock.sentTexts[1].text
+	if want := "```go\nmore code\n```\n\nDone"; fallback != want {
+		t.Errorf("fallback message:\nwant %q\ngot  %q", want, fallback)
+	}
+	if open, _ := fenceStateAfter(fallback, false, ""); open {
+		t.Errorf("fallback message ends with an unclosed fence: %q", fallback)
 	}
 }

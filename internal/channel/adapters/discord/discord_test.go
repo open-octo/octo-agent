@@ -264,6 +264,34 @@ func TestSendText(t *testing.T) {
 	}
 }
 
+// #1116: SendText used to post content as-is with no cap at all — any reply
+// over Discord's 2000-char limit got HTTP 400 and the entire message
+// vanished, with nothing telling the user why.
+func TestSendText_SplitsLongMessages(t *testing.T) {
+	f := newFakeDiscord(t)
+	a := newTestAdapter(t, f, nil)
+
+	long := strings.Repeat("word ", 500) // ~2500 chars
+	res := a.SendText("chan-1", long, "")
+	if !res.OK {
+		t.Fatalf("send failed: %+v", res)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) < 2 {
+		t.Fatalf("expected split into >=2 messages, got %d", len(f.sent))
+	}
+	for _, p := range f.sent {
+		if len(p["content"].(string)) > maxMessageBytes {
+			t.Fatalf("chunk exceeds cap: %d bytes", len(p["content"].(string)))
+		}
+	}
+	// replyTo should only attach to the first chunk, not every one.
+	if f.sent[0]["message_reference"] != nil {
+		t.Fatalf("no replyTo was passed, but message_reference is set on chunk 0")
+	}
+}
+
 func TestUpdateMessageAndTyping(t *testing.T) {
 	f := newFakeDiscord(t)
 	a := newTestAdapter(t, f, nil)
