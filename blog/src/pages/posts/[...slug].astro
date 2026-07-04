@@ -13,17 +13,21 @@ export async function getStaticPaths() {
 				p.data.originalSlug === post.data.originalSlug &&
 				p.data.locale !== locale,
 		);
+		const alternateSlug = alternate?.id.startsWith('zh/') || alternate?.id.startsWith('en/')
+			? alternate.id.slice(3)
+			: alternate?.id;
 		return {
 			params: { slug },
-			props: { post, alternateSlug: alternate?.id.startsWith('zh/') ? alternate.id.slice(3) : alternate?.id },
+			props: { post, alternateSlug },
 		};
 	});
 }
 
 const { post, alternateSlug } = Astro.props;
+const slug = Astro.params.slug;
 const { Content } = await render(post);
 ---
 
-<BlogPost {...post.data} slug={post.id} locale={post.data.locale} alternateSlug={alternateSlug}>
+<BlogPost {...post.data} slug={slug} locale={post.data.locale} alternateSlug={alternateSlug}>
 	<Content />
 </BlogPost>

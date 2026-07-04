@@ -11,6 +11,13 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 	month: 'long',
 	day: 'numeric',
 });
+
+const siteUrl = 'https://octo-agent.dev';
+const canonicalUrl = `${siteUrl}/blog/en/`;
+const alternateUrl = `${siteUrl}/blog/`;
+const title = 'octo blog';
+const description = 'Engineering notes, release updates, and deep dives from the octo-agent team.';
+const ogImage = `${siteUrl}/blog/og-default.svg`;
 ---
 
 <!DOCTYPE html>
@@ -18,13 +25,24 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>octo blog</title>
-		<meta
-			name="description"
-			content="Engineering notes, release updates, and deep dives from the octo-agent team."
-		/>
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonicalUrl} />
 		<link rel="icon" type="image/svg+xml" href="/blog/favicon.svg" />
-		<link rel="alternate" hreflang="zh-CN" href="/blog/" />
+		<link rel="alternate" hreflang="zh-CN" href={alternateUrl} />
+
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:url" content={canonicalUrl} />
+		<meta property="og:type" content="website" />
+		<meta property="og:locale" content="en" />
+		<meta property="og:site_name" content={title} />
+		<meta property="og:image" content={ogImage} />
+
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content={title} />
+		<meta name="twitter:description" content={description} />
+		<meta name="twitter:image" content={ogImage} />
 	</head>
 	<body>
 		<header class="site-header">
@@ -33,7 +51,7 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 				<nav class="site-nav">
 					<a href="/docs/">Docs</a>
 					<a href="https://github.com/open-octo/octo-agent">GitHub</a>
-					<a class="lang-switch" href="/blog/" title="中文">中文</a>
+					<a class="lang-switch" href={alternateUrl} title="中文">中文</a>
 				</nav>
 			</div>
 		</header>
@@ -63,10 +81,10 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 									</time>
 									{' · '}
 									{post.data.tags.slice(0, 3).map((tag, i) => (
-										<>
-											{i > 0 && ', '}
-											<span class="tag">{tag}</span>
-										</>
+											<>
+												{i > 0 && ', '}
+												<span class="tag">{tag}</span>
+											</>
 									))}
 								</p>
 							</li>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0b0f19"/>
+  <circle cx="600" cy="315" r="280" fill="#2F54EB" opacity="0.12"/>
+  <rect x="520" y="195" width="160" height="160" rx="40" fill="#2F54EB"/>
+  <path fill="#ffffff" d="M600 218c-16 0-24 12-24 26 0 10 6 16 10 18-2 8-8 16-16 20-2 1-2 4 0 6 2 1 5 1 7-1 6-4 12-11 15-19 2 1 5 2 8 2v12c0 3 3 5 6 4 2-1 3-3 2-5l-2-11c3 0 6-1 8-2 3 8 9 15 15 19 2 2 5 2 7 1 2-2 2-5 0-6-8-4-14-12-16-20 4-2 10-8 10-18 0-14-8-26-24-26z"/>
+  <circle cx="570" cy="242" r="5" fill="#2F54EB"/>
+  <circle cx="630" cy="242" r="5" fill="#2F54EB"/>
+  <text x="600" y="430" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="72" font-weight="700" fill="#f3f4f6" text-anchor="middle">octo blog</text>
+  <text x="600" y="490" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="32" fill="#9ca3af" text-anchor="middle">octo-agent engineering notes and deep dives</text>
+</svg>

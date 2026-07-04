@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://octo-agent.dev/docs/sitemap-index.xml
+Sitemap: https://octo-agent.dev/blog/sitemap-index.xml

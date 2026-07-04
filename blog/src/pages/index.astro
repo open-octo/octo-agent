@@ -11,6 +11,13 @@ const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
 	month: 'long',
 	day: 'numeric',
 });
+
+const siteUrl = 'https://octo-agent.dev';
+const canonicalUrl = `${siteUrl}/blog/`;
+const alternateUrl = `${siteUrl}/blog/en/`;
+const title = 'octo 博客';
+const description = 'octo-agent 团队的工程笔记、版本更新与技术深度文章。';
+const ogImage = `${siteUrl}/blog/og-default.svg`;
 ---
 
 <!DOCTYPE html>
@@ -18,13 +25,24 @@ const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>octo 博客</title>
-		<meta
-			name="description"
-			content="octo-agent 团队的工程笔记、版本更新与技术深度文章。"
-		/>
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonicalUrl} />
 		<link rel="icon" type="image/svg+xml" href="/blog/favicon.svg" />
-		<link rel="alternate" hreflang="en" href="/blog/en/" />
+		<link rel="alternate" hreflang="en" href={alternateUrl} />
+
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:url" content={canonicalUrl} />
+		<meta property="og:type" content="website" />
+		<meta property="og:locale" content="zh-CN" />
+		<meta property="og:site_name" content={title} />
+		<meta property="og:image" content={ogImage} />
+
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content={title} />
+		<meta name="twitter:description" content={description} />
+		<meta name="twitter:image" content={ogImage} />
 	</head>
 	<body>
 		<header class="site-header">
@@ -33,7 +51,7 @@ const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
 				<nav class="site-nav">
 					<a href="/docs/">文档</a>
 					<a href="https://github.com/open-octo/octo-agent">GitHub</a>
-					<a class="lang-switch" href="/blog/en/" title="English">English</a>
+					<a class="lang-switch" href={alternateUrl} title="English">English</a>
 				</nav>
 			</div>
 		</header>
