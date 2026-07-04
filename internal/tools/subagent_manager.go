@@ -116,19 +116,34 @@ func truncateSubAgentResult(s string) string {
 
 // defaultSubAgentMgr is the process-wide manager used by the built-in tools
 // when no manager is injected.
-var defaultSubAgentMgr *SubAgentManager
+var (
+	defaultSubAgentMgrMu sync.RWMutex
+	defaultSubAgentMgr   *SubAgentManager
+)
 
 // SetDefaultSubAgentManager registers the global manager used by AgentTool
 // when no local manager is set.
-func SetDefaultSubAgentManager(m *SubAgentManager) { defaultSubAgentMgr = m }
+func SetDefaultSubAgentManager(m *SubAgentManager) {
+	defaultSubAgentMgrMu.Lock()
+	defaultSubAgentMgr = m
+	defaultSubAgentMgrMu.Unlock()
+}
 
 // DefaultSubAgentManager returns the process-wide manager currently
 // registered, or nil if none.
-func DefaultSubAgentManager() *SubAgentManager { return defaultSubAgentMgr }
+func DefaultSubAgentManager() *SubAgentManager {
+	defaultSubAgentMgrMu.RLock()
+	defer defaultSubAgentMgrMu.RUnlock()
+	return defaultSubAgentMgr
+}
 
 // subAgentManagerEnabled reports whether a SubAgentManager is registered,
 // which is required for the Agent tool.
-func subAgentManagerEnabled() bool { return defaultSubAgentMgr != nil }
+func subAgentManagerEnabled() bool {
+	defaultSubAgentMgrMu.RLock()
+	defer defaultSubAgentMgrMu.RUnlock()
+	return defaultSubAgentMgr != nil
+}
 
 // maxConcurrentSubAgents caps how many async sub-agents may run at once, so a
 // model that fires off a large fan-out of run_in_background:true calls can't
