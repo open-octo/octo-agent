@@ -1145,6 +1145,144 @@ func TestHandleUpdateSessionReasoningEffort(t *testing.T) {
 	}
 }
 
+// A session pinned to a NON-default model must have ITS OWN entry's
+// reasoning_effort changed — not the unrelated default model's. Before this
+// was fixed, every PATCH landed on cfg.DefaultEntry() regardless of which
+// session triggered it, so a multi-model setup's per-session tuning silently
+// no-opped for any session not running the default model.
+func TestHandleUpdateSessionReasoningEffort_NonDefaultModel(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			{Provider: "deepseek", Model: "deepseek-v4-flash"},
+		},
+		DefaultModel: "claude-sonnet-4-6",
+	})
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sess := agent.NewSession("deepseek-v4-flash", "")
+	sess.ModelConfig = "deepseek-v4-flash"
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	payload, _ := json.Marshal(updateSessionReasoningEffortRequest{ReasoningEffort: "xhigh"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/reasoning_effort", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := cfg.EntryByModel("deepseek-v4-flash")
+	if !ok {
+		t.Fatal("deepseek-v4-flash entry vanished")
+	}
+	if e.ReasoningEffort != "xhigh" {
+		t.Errorf("deepseek-v4-flash reasoning_effort = %q, want xhigh (this session's own entry should change)", e.ReasoningEffort)
+	}
+	if def := cfg.DefaultEntry(); def.ReasoningEffort != "" {
+		t.Errorf("default entry (claude-sonnet-4-6) reasoning_effort = %q, want untouched (empty)", def.ReasoningEffort)
+	}
+}
+
+// The reported bug (#web show_reasoning field not respected): a session
+// pinned to a non-default model must have ITS OWN entry's show_reasoning
+// toggled. Before this fix, the toggle always wrote to cfg.DefaultEntry()
+// while the session's actual turns (senderForSession) already correctly
+// resolved the session's own entry — so the Composer's eye icon flipped
+// (read and write both hit the same wrong entry) while reasoning kept
+// showing/hiding no matter how many times it was toggled.
+func TestHandleUpdateSessionShowReasoning_NonDefaultModel(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			{Provider: "deepseek", Model: "deepseek-v4-flash"},
+		},
+		DefaultModel: "claude-sonnet-4-6",
+	})
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sess := agent.NewSession("deepseek-v4-flash", "")
+	sess.ModelConfig = "deepseek-v4-flash"
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	payload, _ := json.Marshal(updateSessionShowReasoningRequest{ShowReasoning: false})
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/show_reasoning", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := cfg.EntryByModel("deepseek-v4-flash")
+	if !ok {
+		t.Fatal("deepseek-v4-flash entry vanished")
+	}
+	if e.ShowReasoning == nil || *e.ShowReasoning {
+		t.Errorf("deepseek-v4-flash show_reasoning = %v, want false (this session's own entry should be toggled)", e.ShowReasoning)
+	}
+	if def := cfg.DefaultEntry(); def.ShowReasoning != nil {
+		t.Errorf("default entry (claude-sonnet-4-6) show_reasoning = %v, want untouched (nil)", def.ShowReasoning)
+	}
+
+	// senderForSession must resolve this session's turns against the SAME
+	// (now-updated) entry the toggle just wrote — proving the fix actually
+	// changes what the session's real turns do, not just what the config
+	// file happens to say.
+	if got := cfg.EffectiveShowReasoning(entryForSession(cfg, sess).ShowReasoning); got {
+		t.Error("entryForSession(sess) still resolves show_reasoning=true after toggling it off for this session")
+	}
+}
+
+// entryForSession must resolve the SAME entry senderForSession does: the
+// session's own ModelConfig when it's still configured, else the default
+// entry — including graceful fallback when a session references a model
+// that's since been removed from config.
+func TestEntryForSession(t *testing.T) {
+	cfg := config.Config{
+		Models: []config.ModelEntry{
+			{Model: "model-a"},
+			{Model: "model-b"},
+		},
+		DefaultModel: "model-a",
+	}
+
+	cases := []struct {
+		name      string
+		sess      *agent.Session
+		wantModel string
+	}{
+		{"nil session falls back to default", nil, "model-a"},
+		{"unbound session falls back to default", &agent.Session{}, "model-a"},
+		{"bound to a configured non-default model", &agent.Session{ModelConfig: "model-b"}, "model-b"},
+		{"bound to a since-deleted model falls back to default", &agent.Session{ModelConfig: "model-gone"}, "model-a"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := entryForSession(cfg, c.sess); got.Model != c.wantModel {
+				t.Errorf("entryForSession(...).Model = %q, want %q", got.Model, c.wantModel)
+			}
+		})
+	}
+}
+
 func TestHandleUpdateSessionPermissionMode(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

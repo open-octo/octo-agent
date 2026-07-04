@@ -315,7 +315,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 			ctxPct = 100
 		}
 	}
-	_, pm, re, _, _ := s.sessionStatusFields()
+	_, pm, re, _, _ := s.sessionStatusFields(sess)
 	s.wsHub.broadcast(sessionID, map[string]any{
 		"type":             "session_update",
 		"session_id":       sessionID,
