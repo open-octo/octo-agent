@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1643,16 +1644,94 @@ func (s *Server) handleWSUserQuestionAnswer(qid string, choices []string, custom
 // interactively. The modal offers yes / no / always; "always" allows AND
 // remembers the decision in the session's Remembered store, so the same
 // (tool, input) pair stops prompting for the rest of the session.
+//
+// #1105: the message alone ("Allow terminal?") gave the user nothing to
+// judge — they authorized blind. buildConfirmDetail fills in what's
+// actually being approved (the full command, the pending diff, or a
+// generic listing of the tool's input) so ConfirmModal has something to
+// render.
 func (s *Server) permissionAskFrom(sessionID string) app.PermissionAsk {
 	return func(ctx context.Context, toolName string, toolInput map[string]any) (bool, bool, error) {
 		msg := fmt.Sprintf("Allow %s?", toolName)
-		result, err := s.requestConfirmation(ctx, sessionID, msg, "yes_no_always")
+		detail := buildConfirmDetail(toolName, toolInput)
+		result, err := s.requestConfirmation(ctx, sessionID, msg, "yes_no_always", detail)
 		if err != nil {
 			return false, false, err
 		}
 		allow, remember := mapConfirmResult(result)
 		return allow, remember, nil
 	}
+}
+
+// buildConfirmDetail renders a tool's pending input for the permission
+// modal. Terminal gets the literal command; edit_file gets the same
+// removed/added preview as the post-execution result card (tools.EditUIDiff);
+// everything else falls back to a sorted, length-capped key: value listing.
+func buildConfirmDetail(toolName string, toolInput map[string]any) confirmDetail {
+	detail := confirmDetail{ToolName: toolName}
+	switch toolName {
+	case "terminal":
+		if cmd, ok := toolInput["command"].(string); ok {
+			detail.Command = cmd
+		}
+	case "edit_file":
+		oldStr, _ := toolInput["old_string"].(string)
+		newStr, _ := toolInput["new_string"].(string)
+		detail.Diff = tools.EditUIDiff(oldStr, newStr)
+	default:
+		detail.Input = formatToolInputForConfirm(toolInput)
+	}
+	return detail
+}
+
+// formatToolInputForConfirm renders a tool's input map as sorted "key: value"
+// lines for display in the permission modal. Multi-line values show their
+// first 4 lines; each line is capped at 200 runes. Mirrors (at reduced
+// complexity — no terminal wrapping/control-byte concerns in an HTML <pre>)
+// the detail rules from the TUI's #1101 fix.
+func formatToolInputForConfirm(toolInput map[string]any) string {
+	if len(toolInput) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(toolInput))
+	for k := range toolInput {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	const maxLineRunes = 200
+	const maxValueLines = 4
+	capLine := func(s string) string {
+		r := []rune(s)
+		if len(r) > maxLineRunes {
+			return string(r[:maxLineRunes]) + "…"
+		}
+		return s
+	}
+
+	var b strings.Builder
+	for _, k := range keys {
+		val := fmt.Sprintf("%v", toolInput[k])
+		lines := strings.Split(val, "\n")
+		if len(lines) == 1 {
+			fmt.Fprintf(&b, "%s: %s\n", k, capLine(lines[0]))
+			continue
+		}
+		fmt.Fprintf(&b, "%s:\n", k)
+		shown := lines
+		folded := false
+		if len(shown) > maxValueLines {
+			shown = shown[:maxValueLines]
+			folded = true
+		}
+		for _, l := range shown {
+			fmt.Fprintf(&b, "  %s\n", capLine(l))
+		}
+		if folded {
+			fmt.Fprintf(&b, "  … +%d more lines\n", len(lines)-maxValueLines)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // mapConfirmResult maps the confirmation modal's reply onto the permission
