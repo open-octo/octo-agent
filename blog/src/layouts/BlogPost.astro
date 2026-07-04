@@ -1,0 +1,73 @@
+---
+import type { CollectionEntry } from 'astro:content';
+import '../styles/blog.css';
+
+type Props = CollectionEntry<'posts'>['data'] & { slug?: string };
+
+const { title, description, pubDate, updatedDate, author, tags } = Astro.props;
+const dateFormatter = new Intl.DateTimeFormat('en-US', {
+	year: 'numeric',
+	month: 'long',
+	day: 'numeric',
+});
+---
+
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>{title} | octo blog</title>
+		<meta name="description" content={description} />
+		<link rel="icon" type="image/svg+xml" href="/blog/favicon.svg" />
+	</head>
+	<body>
+		<header class="site-header">
+			<div class="container">
+				<a href="/blog/" class="site-title">octo blog</a>
+				<nav class="site-nav">
+					<a href="/docs/">Docs</a>
+					<a href="https://github.com/open-octo/octo-agent">GitHub</a>
+				</nav>
+			</div>
+		</header>
+
+		<main class="container">
+			<article class="blog-post">
+				<header class="post-header">
+					<h1>{title}</h1>
+					<p class="post-meta">
+						<time datetime={pubDate.toISOString()}>{dateFormatter.format(pubDate)}</time>
+						{updatedDate && (
+							<>
+								{' · updated '}
+								<time datetime={updatedDate.toISOString()}>{dateFormatter.format(updatedDate)}</time>
+							</>
+						)}
+						{' · '}
+						<span class="author">{author}</span>
+					</p>
+					{tags.length > 0 && (
+						<div class="tags">
+							{tags.map((tag) => (
+								<span class="tag">{tag}</span>
+							))}
+						</div>
+					)}
+				</header>
+
+				<div class="post-content">
+					<slot />
+				</div>
+			</article>
+		</main>
+
+		<footer class="site-footer">
+			<div class="container">
+				<p>
+					© {new Date().getFullYear()} octo-agent. Built with <a href="https://astro.build">Astro</a>.
+				</p>
+			</div>
+		</footer>
+	</body>
+</html>

@@ -1,0 +1,85 @@
+---
+import { getCollection } from 'astro:content';
+import '../styles/blog.css';
+
+const posts = (await getCollection('posts'))
+	.filter((post) => !post.data.draft)
+	.sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf());
+
+const dateFormatter = new Intl.DateTimeFormat('en-US', {
+	year: 'numeric',
+	month: 'long',
+	day: 'numeric',
+});
+---
+
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>octo blog</title>
+		<meta
+			name="description"
+			content="Engineering notes, release updates, and deep dives from the octo-agent team."
+		/>
+		<link rel="icon" type="image/svg+xml" href="/blog/favicon.svg" />
+	</head>
+	<body>
+		<header class="site-header">
+			<div class="container">
+				<a href="/blog/" class="site-title">octo blog</a>
+				<nav class="site-nav">
+					<a href="/docs/">Docs</a>
+					<a href="https://github.com/open-octo/octo-agent">GitHub</a>
+				</nav>
+			</div>
+		</header>
+
+		<main class="container">
+			<section class="hero">
+				<h1>octo blog</h1>
+				<p>
+					Engineering notes, release updates, and deep dives from the octo-agent team.
+				</p>
+			</section>
+
+			<section class="post-list">
+				<h2>Latest posts</h2>
+				{posts.length === 0 && <p>No posts yet.</p>}
+				<ul>
+					{
+						posts.map((post) => (
+							<li class="post-card">
+								<a href={`/blog/posts/${post.id}/`} class="post-card-title">
+									{post.data.title}
+								</a>
+								<p class="post-card-description">{post.data.description}</p>
+								<p class="post-card-meta">
+									<time datetime={post.data.pubDate.toISOString()}>
+										{dateFormatter.format(post.data.pubDate)}
+									</time>
+									{' · '}
+									{post.data.tags.slice(0, 3).map((tag, i) => (
+										<>
+											{i > 0 && ', '}
+											<span class="tag">{tag}</span>
+										</>
+									))}
+								</p>
+							</li>
+						))
+					}
+				</ul>
+			</section>
+		</main>
+
+		<footer class="site-footer">
+			<div class="container">
+				<p>
+					© {new Date().getFullYear()} octo-agent. Built with <a href="https://astro.build">Astro</a>.
+				</p>
+			</div>
+		</footer>
+	</body>
+</html>

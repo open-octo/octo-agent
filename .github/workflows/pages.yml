@@ -6,6 +6,7 @@ on:
     paths:
       - 'landing/**'
       - 'website/**'
+      - 'blog/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -29,14 +30,22 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: '**/package-lock.json'
 
-      - name: Install dependencies
+      - name: Install docs dependencies
         working-directory: website
         run: npm ci
 
       - name: Build docs site
         working-directory: website
+        run: npm run build
+
+      - name: Install blog dependencies
+        working-directory: blog
+        run: npm ci
+
+      - name: Build blog site
+        working-directory: blog
         run: npm run build
 
       - name: Assemble site
@@ -47,6 +56,9 @@ jobs:
           # /docs/*: the generated Starlight site (astro.config.mjs sets base: "/docs").
           mkdir -p _site/docs
           cp -r website/dist/. _site/docs/
+          # /blog/*: the generated Astro blog site (astro.config.mjs sets base: "/blog").
+          mkdir -p _site/blog
+          cp -r blog/dist/. _site/blog/
 
       - uses: actions/configure-pages@v5
 
