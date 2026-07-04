@@ -19,8 +19,8 @@ const canonicalPath = pageSlug.startsWith('en/')
 const canonicalUrl = `${siteUrl}${canonicalPath}`;
 
 const navLabels = {
-	en: { home: 'octo blog', docs: 'Docs', github: 'GitHub', lang: 'EN' },
-	zh: { home: 'octo 博客', docs: '文档', github: 'GitHub', lang: '中文' },
+	en: { home: 'octo blog', landing: 'Octo', docs: 'Docs', github: 'GitHub', lang: 'EN' },
+	zh: { home: 'octo 博客', landing: 'Octo', docs: '文档', github: 'GitHub', lang: '中文' },
 };
 const labels = navLabels[locale as keyof typeof navLabels] || navLabels.zh;
 
@@ -72,6 +72,7 @@ const siteName = locale === 'zh' ? 'octo 博客' : 'octo blog';
 			<div class="container">
 				<a href={locale === 'zh' ? '/blog/' : '/blog/en/'} class="site-title">{labels.home}</a>
 				<nav class="site-nav">
+					<a href="https://octo-agent.dev/">{labels.landing}</a>
 					<a href="/docs/">{labels.docs}</a>
 					<a href="https://github.com/open-octo/octo-agent">{labels.github}</a>
 					<a class="lang-switch" href={alternateUrl} title={alternateLabel}>{alternateLabel}</a>
@@ -112,7 +113,7 @@ const siteName = locale === 'zh' ? 'octo 博客' : 'octo blog';
 		<footer class="site-footer">
 			<div class="container">
 				<p>
-					© {new Date().getFullYear()} octo-agent. Built with <a href="https://astro.build">Astro</a>.
+					© {new Date().getFullYear()} <a href="https://octo-agent.dev/">octo-agent</a>. Built with <a href="https://astro.build">Astro</a>.
 				</p>
 			</div>
 		</footer>
