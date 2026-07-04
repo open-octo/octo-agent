@@ -529,7 +529,8 @@ func (s *Server) enableSubAgentTools() {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
 	cwd, envCtx := s.curCwdEnv()
-	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
+	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
+	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
 	executor := tools.NewDefaultRegistry()
 	spawner := app.NewSpawner(template, executor, func() []agent.ToolDefinition {
 		return tools.DefaultToolsFor(s.model)
@@ -736,6 +737,7 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/providers", s.handleListProviders)
 	s.api("GET /api/config", s.handleGetConfig)
 	s.api("PUT /api/config/show_reasoning", s.handlePutShowReasoning)
+	s.api("PUT /api/config/coauthor", s.handlePutCoauthor)
 	s.api("POST /api/config/test", s.handleTestConfig)
 	s.api("POST /api/config/models", s.handleSaveModelConfig)
 	s.api("PATCH /api/config/models/{id}", s.handleUpdateModelConfig)
@@ -1093,7 +1095,13 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if dir, err := sess.ChunkDir(); err == nil {
 		a.ArchiveDir = dir // recall folded turns via the read tool
 	}
-	if cfg, err := config.Load(); err == nil {
+	// Loaded once and reused below for effectiveCoauthor — a second
+	// config.Load() there would re-read and re-parse the same file. A load
+	// error leaves cfg at its zero value, which EffectiveCoauthor still
+	// resolves correctly (OCTO_COAUTHOR checked before falling back to the
+	// built-in default), so callers don't need a separate error branch for it.
+	cfg, cfgErr := config.Load()
+	if cfgErr == nil {
 		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 		if a.LiteSender == nil {
 			// No explicit lite entry — fall back to the vendor's registry
@@ -1115,7 +1123,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
+	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2: attention-layer rules (triggered keywords) + save-nudge on milestone
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
@@ -1290,6 +1298,27 @@ func (s *Server) defaultSenderAndModel() (agent.Sender, string) {
 	s.senderMu.Lock()
 	defer s.senderMu.Unlock()
 	return s.sender, s.model
+}
+
+// effectiveCoauthor resolves whether the system prompt should instruct the
+// agent to append a Co-authored-by line to git commits, for every code path
+// that composes one via prompt.ComposePair. Before this existed, every one
+// of those call sites passed a hardcoded `true` and never consulted
+// cfg.Coauthor at all — the CLI (cmd/octo) correctly resolved it, but every
+// web/API/channel turn ignored the setting entirely, coauthoring commits
+// unconditionally no matter what config.yml said.
+//
+// Takes an already-loaded cfg instead of loading its own: every call site
+// either already has one in scope for another purpose (buildAgent,
+// buildChannelFactory need it for LiteSender resolution too) or loads exactly
+// one for this call — either way, avoiding a second disk read + YAML parse
+// of config.yml per turn. A zero-value cfg (config.Load failed) still
+// resolves correctly, since EffectiveCoauthor checks OCTO_COAUTHOR before
+// falling back to its built-in default (true) — unlike the old inline
+// "config.Load() failed → return true" branch this replaced, which skipped
+// the env check entirely on a load error.
+func (s *Server) effectiveCoauthor(cfg config.Config) bool {
+	return cfg.EffectiveCoauthor()
 }
 
 // senderForSession resolves the (sender, model) a turn should run on. A
@@ -1871,8 +1900,12 @@ func (s *Server) buildChannelFactory() func() *agent.Agent {
 		cwd, envCtx := s.curCwdEnv()
 		a.CWD = cwd
 		a.MaxTokens = s.cfg.MaxTokens
-		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
-		if cfg, err := config.Load(); err == nil {
+		// Loaded once and reused below for LiteSender resolution — see the
+		// matching comment on effectiveCoauthor's doc for why a second
+		// config.Load() here would be wasted work.
+		cfg, cfgErr := config.Load()
+		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
+		if cfgErr == nil {
 			a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 			if a.LiteSender == nil {
 				if lm := app.ImplicitLiteModel(s.getProvider(), model, resolveBaseURL(s.getProvider(), cfg)); lm != "" {
@@ -2447,8 +2480,9 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
 	cwd, envCtx := s.sessionCwdEnv(sess.Store)
-	sess.Agent.CWD = cwd // keep tool cwd aligned with the per-session dir the prompt/hooks use
-	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, true)
+	sess.Agent.CWD = cwd    // keep tool cwd aligned with the per-session dir the prompt/hooks use
+	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
+	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and
