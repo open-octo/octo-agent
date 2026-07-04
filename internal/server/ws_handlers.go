@@ -1081,9 +1081,15 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	var executor agent.ToolExecutor
 	if s.cfg.Tools {
 		var perr error
+		var cleanup func()
+		defer func() {
+			if cleanup != nil {
+				cleanup()
+			}
+		}()
 		// prepareToolTurn wires the session-scoped sub-agent manager's hooks
 		// (live-panel events + completion notes to the model).
-		runCtx, executor, _, perr = s.prepareToolTurn(runCtx, a, sess)
+		runCtx, executor, _, cleanup, perr = s.prepareToolTurn(runCtx, a, sess)
 		if perr != nil {
 			sw.error(perr.Error())
 			return

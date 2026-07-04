@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -264,11 +265,11 @@ func TestPrepareToolTurn_SessionScopedAsyncManager(t *testing.T) {
 	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, "sess-mgr-test")
 	t.Cleanup(func() { tools.CloseSessionSubAgentManager("sess-mgr-test") })
 
-	_, _, m1, err := srv.prepareToolTurn(ctx, a, nil)
+	_, _, m1, _, err := srv.prepareToolTurn(ctx, a, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
-	_, _, m2, err := srv.prepareToolTurn(ctx, a, nil)
+	_, _, m2, _, err := srv.prepareToolTurn(ctx, a, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
@@ -279,7 +280,7 @@ func TestPrepareToolTurn_SessionScopedAsyncManager(t *testing.T) {
 		t.Error("session-scoped manager should be async")
 	}
 
-	_, _, anon, err := srv.prepareToolTurn(context.Background(), a, nil)
+	_, _, anon, _, err := srv.prepareToolTurn(context.Background(), a, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn (no sid): %v", err)
 	}
@@ -289,4 +290,114 @@ func TestPrepareToolTurn_SessionScopedAsyncManager(t *testing.T) {
 	if anon == m1 {
 		t.Error("sid-less manager must not be the session-scoped one")
 	}
+}
+
+// TestPrepareToolTurn_AdvertisesSubAgentAndWorkflow guards the core fix for
+// cron/server sessions: after prepareToolTurn, DefaultToolsFor must include
+// both sub_agent and workflow so the model can invoke them.
+func TestPrepareToolTurn_AdvertisesSubAgentAndWorkflow(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	// Preserve and restore global state so this test doesn't leak to others.
+	prevSpawner := tools.ActiveSpawner()
+	prevMgr := tools.DefaultSubAgentManager()
+	t.Cleanup(func() {
+		tools.SetSpawner(prevSpawner)
+		tools.SetDefaultSubAgentManager(prevMgr)
+	})
+
+	// Ensure we start from a clean slate; prepareToolTurn should install its own.
+	tools.SetSpawner(nil)
+	tools.SetDefaultSubAgentManager(nil)
+
+	srv := mustServer(t, Config{Tools: true})
+	a := agent.New(&stubSender{}, "stub-model")
+	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, "adv-test")
+	t.Cleanup(func() { tools.CloseSessionSubAgentManager("adv-test") })
+
+	_, _, _, cleanup, err := srv.prepareToolTurn(ctx, a, nil)
+	if err != nil {
+		t.Fatalf("prepareToolTurn: %v", err)
+	}
+	defer cleanup()
+
+	names := toolNames(tools.DefaultToolsFor(a.Model))
+	if !slices.Contains(names, "sub_agent") {
+		t.Errorf("DefaultToolsFor missing sub_agent; got %v", names)
+	}
+	if !slices.Contains(names, "workflow") {
+		t.Errorf("DefaultToolsFor missing workflow; got %v", names)
+	}
+}
+
+// TestPrepareToolTurn_CleanupRestoresGlobalSpawner verifies that the cleanup
+// returned by prepareToolTurn restores the previous global spawner and
+// sub-agent manager, so later server turns or CLI paths see their own state.
+func TestPrepareToolTurn_CleanupRestoresGlobalSpawner(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	prevSpawner := tools.ActiveSpawner()
+	prevMgr := tools.DefaultSubAgentManager()
+	t.Cleanup(func() {
+		tools.SetSpawner(prevSpawner)
+		tools.SetDefaultSubAgentManager(prevMgr)
+	})
+
+	// Pre-seed the global slots with sentinel values so we can prove restoration.
+	fake := &fakeGlobalSpawner{}
+	prevMgrForTest := tools.NewSubAgentManager(nil)
+	tools.SetSpawner(fake)
+	tools.SetDefaultSubAgentManager(prevMgrForTest)
+
+	srv := mustServer(t, Config{Tools: true})
+	a := agent.New(&stubSender{}, "stub-model")
+	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, "cleanup-test")
+	t.Cleanup(func() { tools.CloseSessionSubAgentManager("cleanup-test") })
+
+	_, _, _, cleanup, err := srv.prepareToolTurn(ctx, a, nil)
+	if err != nil {
+		t.Fatalf("prepareToolTurn: %v", err)
+	}
+	if tools.ActiveSpawner() == nil {
+		t.Error("global spawner should be set during the turn")
+	}
+	if tools.DefaultSubAgentManager() == nil {
+		t.Error("global sub-agent manager should be set during the turn")
+	}
+
+	cleanup()
+
+	if tools.ActiveSpawner() != fake {
+		t.Error("cleanup did not restore previous global spawner")
+	}
+	if tools.DefaultSubAgentManager() != prevMgrForTest {
+		t.Error("cleanup did not restore previous global sub-agent manager")
+	}
+
+	// Restore the truly original values so the test cleanup doesn't leak.
+	tools.SetSpawner(prevSpawner)
+	tools.SetDefaultSubAgentManager(prevMgr)
+}
+
+func toolNames(defs []agent.ToolDefinition) []string {
+	names := make([]string, len(defs))
+	for i, d := range defs {
+		names[i] = d.Name
+	}
+	return names
+}
+
+// fakeGlobalSpawner is a minimal Spawner used only to prove that
+// prepareToolTurn's cleanup restores the previous global value.
+type fakeGlobalSpawner struct{}
+
+func (fakeGlobalSpawner) Spawn(context.Context, tools.SpawnRequest) (tools.SpawnResult, error) {
+	return tools.SpawnResult{}, nil
+}
+func (fakeGlobalSpawner) Continue(context.Context, string, string) (tools.SpawnResult, error) {
+	return tools.SpawnResult{}, nil
 }

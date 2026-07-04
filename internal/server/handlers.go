@@ -743,10 +743,11 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 
 	// Tool-enabled path: wire the per-turn tool environment (gate + ctx-scoped
 	// sub-agent manager + task store) bound to this turn's agent.
-	ctx, executor, _, err := s.prepareToolTurn(ctx, a, sess)
+	ctx, executor, _, cleanup, err := s.prepareToolTurn(ctx, a, sess)
 	if err != nil {
 		return "", err
 	}
+	defer cleanup()
 
 	reply, err := a.Run(ctx, userInput, tools.DefaultToolsFor(a.Model), executor)
 	if err != nil {
@@ -763,9 +764,13 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 // dispatch to them rather than the process-global gating sentinels. The manager
 // runs synchronously — a request/response turn has no follow-up channel for an
 // async sub-agent result — and each turn gets a private store, so concurrent
-// sessions never share sub-agent or task state. Returns the augmented ctx, the
-// executor, and the manager so callers can wire live-panel event hooks.
-func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agent.Session) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, error) {
+// sessions never share sub-agent or task state.
+//
+// It also temporarily installs the turn's spawner / sub-agent manager into the
+// process-global slots so that tools.DefaultToolsFor() advertises the sub_agent
+// and workflow tools to the model for this turn. The returned cleanup restores
+// the previous global values and must be deferred by the caller.
+func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agent.Session) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, func(), error) {
 	executor := tools.NewDefaultRegistry()
 
 	// Goal tools dispatch to the turn's session on every tool-enabled path
@@ -798,7 +803,7 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	// and the task path applies its directory ahead of this too.
 	engine, err := permission.New(permissionConfigPath(), a.CWD, resolvePermissionMode(), s.memDir, s.homeMemDir)
 	if err != nil {
-		return ctx, nil, nil, fmt.Errorf("permission engine: %w", err)
+		return ctx, nil, nil, func() {}, fmt.Errorf("permission engine: %w", err)
 	}
 	// Wire interactive permission confirmation when we know the session, and
 	// scope background processes to a per-session manager so one session's
@@ -887,7 +892,23 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	ctx = tools.WithSubAgentManager(ctx, mgr)
 	ctx = tools.WithTaskStore(ctx, tasks.New())
 
-	return ctx, executor, mgr, nil
+	// Temporarily install the turn's spawner/manager into the process-global
+	// slots so that DefaultToolsFor() advertises sub_agent and workflow. Save
+	// the previous values so callers can restore them after the turn.
+	prevSpawner := tools.ActiveSpawner()
+	prevSubAgentMgr := tools.DefaultSubAgentManager()
+	spawner := mgr.Spawner()
+	if spawner == nil {
+		spawner = mkSpawner()
+	}
+	tools.SetSpawner(spawner)
+	tools.SetDefaultSubAgentManager(mgr)
+	cleanup := func() {
+		tools.SetSpawner(prevSpawner)
+		tools.SetDefaultSubAgentManager(prevSubAgentMgr)
+	}
+
+	return ctx, executor, mgr, cleanup, nil
 }
 
 func permissionConfigPath() string {

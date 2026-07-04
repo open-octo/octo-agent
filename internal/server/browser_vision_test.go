@@ -25,7 +25,7 @@ func TestPrepareToolTurn_WiresBrowserVision(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
 	tools.SetBrowserVision(true) // start opposite of expected to prove it's set
-	if _, _, _, err := srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "qwen3.7-max"), nil); err != nil {
+	if _, _, _, _, err := srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "qwen3.7-max"), nil); err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
 	if tools.BrowserVisionEnabled() {
@@ -33,7 +33,7 @@ func TestPrepareToolTurn_WiresBrowserVision(t *testing.T) {
 	}
 
 	tools.SetBrowserVision(false)
-	if _, _, _, err := srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "gpt-4o"), nil); err != nil {
+	if _, _, _, _, err := srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "gpt-4o"), nil); err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
 	if !tools.BrowserVisionEnabled() {

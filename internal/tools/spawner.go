@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"sync"
 )
 
 // Spawner runs one sub-agent task to completion and returns the final reply.
@@ -107,16 +108,31 @@ type SpawnResult struct {
 // advertisement in DefaultTools. Set once at session start via SetSpawner.
 // Nil disables sub-agent dispatch — the tool stays out of the LLM-facing
 // schema and Execute errors.
-var activeSpawner Spawner
+var (
+	activeSpawnerMu sync.RWMutex
+	activeSpawner   Spawner
+)
 
 // SetSpawner registers the function the Agent tool delegates to. Pass
 // nil to disable (the tool then doesn't appear in DefaultTools).
-func SetSpawner(s Spawner) { activeSpawner = s }
+func SetSpawner(s Spawner) {
+	activeSpawnerMu.Lock()
+	activeSpawner = s
+	activeSpawnerMu.Unlock()
+}
 
 // ActiveSpawner returns the currently registered Spawner, or nil if none.
-func ActiveSpawner() Spawner { return activeSpawner }
+func ActiveSpawner() Spawner {
+	activeSpawnerMu.RLock()
+	defer activeSpawnerMu.RUnlock()
+	return activeSpawner
+}
 
-func spawnerEnabled() bool { return activeSpawner != nil }
+func spawnerEnabled() bool {
+	activeSpawnerMu.RLock()
+	defer activeSpawnerMu.RUnlock()
+	return activeSpawner != nil
+}
 
 // subAgentCtxKey marks a context as belonging to a sub-agent's run. The
 // Agent tool checks for it to refuse recursive nesting.

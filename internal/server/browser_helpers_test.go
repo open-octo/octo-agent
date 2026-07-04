@@ -21,7 +21,7 @@ func TestPrepareToolTurn_WiresBrowserLLMHelpers(t *testing.T) {
 	tools.SetBrowserSkillGenerator(nil)
 
 	a := agent.New(&stubSender{}, "stub-model")
-	if _, _, _, err := srv.prepareToolTurn(context.Background(), a, nil); err != nil {
+	if _, _, _, _, err := srv.prepareToolTurn(context.Background(), a, nil); err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
 	if !tools.BrowserHealerSet() {
