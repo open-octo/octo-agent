@@ -1185,7 +1185,10 @@ type updateSessionReasoningEffortRequest struct {
 	ReasoningEffort string `json:"reasoning_effort"`
 }
 
-// handleUpdateSessionReasoningEffort updates the global reasoning-effort tuning.
+// handleUpdateSessionReasoningEffort updates the reasoning-effort tuning for
+// the model THIS session actually runs on (see entryForSession) — not always
+// the default entry, for the same reason and by the same fix as
+// handleUpdateSessionShowReasoning's doc comment describes.
 // Valid levels: "off", "low", "medium", "high", "xhigh", "max". Empty is normalised to "off".
 func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
