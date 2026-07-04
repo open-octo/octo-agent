@@ -1,6 +1,6 @@
 ---
 title: "Loop Engineering Series (2): In Practice — Using octo-agent to Automate an Open-Source Repository"
-description: "A full walkthrough of building three loops (issue triage, PR review, auto issue-fix) on the open-octo/octo-agent repository, with real flowcharts and lessons learned."
+description: "A walkthrough of building three loops (issue triage, PR review, auto issue-fix) on the open-octo/octo-agent repo, with flowcharts and lessons learned."
 pubDate: 2026-07-04
 author: "octo-agent team"
 tags: ["loop-engineering", "octo-agent", "workflow", "github-automation"]
