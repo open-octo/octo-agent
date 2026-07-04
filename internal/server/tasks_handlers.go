@@ -83,14 +83,48 @@ func (s *Server) CreateSession(task scheduler.Task) (string, error) {
 		sess = agent.NewSession(model, s.system)
 		sess.Source = "cron"
 		sess.Title = task.Name
-		// task.Directory is applied at run time: buildAgent recomposes the
-		// system prompt from s.system every turn, so stashing it on sess.System
-		// here would be silently dropped.
+		// task.Directory only seeds the session's WorkingDir here, once, at
+		// creation. After that, sess.WorkingDir (editable any time via the
+		// web Composer's directory chip, PATCH /api/sessions/{id}/working_dir)
+		// is the single source of truth for where this session's tools run —
+		// buildAgent derives both a.CWD and the system prompt's "Working
+		// directory" note from it every turn, and prepareToolTurn wires
+		// tools.WithWorkingDir from a.CWD, so nothing else needs to touch it.
+		// Editing task.Directory later only affects the NEXT session created
+		// for this task, never one that already exists.
+		if task.Directory != "" {
+			if err := seedSessionDirectory(sess, task.Directory); err != nil {
+				// sess was never Saved — sess.ID names a session that exists
+				// only in memory, not on disk. Returning it here would let
+				// fire() (internal/scheduler/scheduler.go) persist it onto
+				// task.SessionID unconditionally (it doesn't check err before
+				// writing), permanently dangling the task on a session
+				// agent.LoadSession can never load — every subsequent cron
+				// tick would then hit this exact same error again with a
+				// fresh throwaway ID, forever. Return "" instead so a bad
+				// task.Directory can never leak into task.SessionID.
+				return "", err
+			}
+		}
 		if err := sess.Save(); err != nil {
-			return sess.ID, fmt.Errorf("save session: %w", err)
+			return "", fmt.Errorf("save session: %w", err)
 		}
 	}
 	return sess.ID, nil
+}
+
+// seedSessionDirectory validates dir and applies it as sess's working
+// directory (see CreateSession's doc comment for why this only ever happens
+// once, at session creation).
+func seedSessionDirectory(sess *agent.Session, dir string) error {
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("task directory %q: %w", dir, err)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("task directory %q is not a directory", dir)
+	}
+	return sess.SetWorkingDir(dir)
 }
 
 // RunTask implements scheduler.Runner. It executes a scheduled task by
@@ -196,16 +230,13 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 		"status":     "running",
 	})
 
+	// buildAgent derives a.CWD (and the system prompt's "Working directory"
+	// note) from sess.WorkingDir, which CreateSession seeded from
+	// task.Directory when this session was first created — nothing task-
+	// specific needs to happen here; prepareToolTurn below wires
+	// tools.WithWorkingDir from a.CWD the same way it does for every other
+	// session.
 	a := s.buildAgent(sess)
-
-	// Apply the task's working directory so the run actually happens there.
-	if task.Directory != "" {
-		var derr error
-		if runCtx, derr = applyTaskDirectory(runCtx, a, task.Directory); derr != nil {
-			sw.error(derr.Error())
-			return sessionID, derr
-		}
-	}
 
 	var toolDefs []agent.ToolDefinition
 	var executor agent.ToolExecutor
@@ -300,29 +331,6 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 		return sessionID, fmt.Errorf("run task: %w", err)
 	}
 	return sessionID, nil
-}
-
-// applyTaskDirectory roots a task run at dir: tools (terminal + file ops)
-// resolve relative paths against it via WorkingDir(ctx), the planner uses it
-// (a.CWD), and the model is told its cwd in both system-prompt variants (so a
-// lean explore sub-agent sees it too) — buildAgent composed System/LeanSystem
-// from the server cwd, so this note corrects it. Errors if dir isn't a usable
-// directory rather than running the whole turn against a broken root.
-func applyTaskDirectory(ctx context.Context, a *agent.Agent, dir string) (context.Context, error) {
-	fi, err := os.Stat(dir)
-	if err != nil {
-		return ctx, fmt.Errorf("task directory %q: %w", dir, err)
-	}
-	if !fi.IsDir() {
-		return ctx, fmt.Errorf("task directory %q is not a directory", dir)
-	}
-	a.CWD = dir
-	note := "Working directory: " + dir
-	a.System = note + "\n\n" + a.System
-	if a.LeanSystem != "" {
-		a.LeanSystem = note + "\n\n" + a.LeanSystem
-	}
-	return tools.WithWorkingDir(ctx, dir), nil
 }
 
 // notifyTaskResult pushes a task run's outcome to every configured IM notify
