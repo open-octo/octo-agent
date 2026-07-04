@@ -1627,9 +1627,19 @@ func (s *Server) acquireAskSlot(ctx context.Context, sessionID string) (func(), 
 	}
 }
 
+// confirmDetail carries the "what am I actually approving" fields for a
+// permission ask (#1105). At most one of Command/Diff/Input is populated,
+// chosen by tool kind in permissionAskFrom.
+type confirmDetail struct {
+	ToolName string
+	Command  string
+	Diff     string
+	Input    string
+}
+
 // Request confirmation from user (blocks until user responds in browser or ctx
 // is cancelled).
-func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, kind string) (string, error) {
+func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, kind string, detail confirmDetail) (string, error) {
 	release, err := s.acquireAskSlot(ctx, sessionID)
 	if err != nil {
 		return "", fmt.Errorf("confirmation cancelled")
@@ -1649,6 +1659,10 @@ func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, ki
 		ConfID:    confID,
 		Message:   message,
 		Kind:      kind,
+		ToolName:  detail.ToolName,
+		Command:   detail.Command,
+		Diff:      detail.Diff,
+		Input:     detail.Input,
 	}
 
 	// Record the outstanding confirmation so a tab that (re)subscribes

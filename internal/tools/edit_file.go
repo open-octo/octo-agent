@@ -387,7 +387,7 @@ func (EditFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 		"type":        "edit",
 		"path":        abs,
 		"occurrences": occurrences,
-		"diff":        editUIDiff(actualOldStr, actualNewStr),
+		"diff":        EditUIDiff(actualOldStr, actualNewStr),
 	}
 	if replaceAll {
 		return agent.ToolResult{Text: fmt.Sprintf("Replaced %d occurrence(s) in %s", count, abs), UI: ui}, nil
@@ -395,10 +395,12 @@ func (EditFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 	return agent.ToolResult{Text: fmt.Sprintf("Replaced 1 occurrence in %s", abs), UI: ui}, nil
 }
 
-// editUIDiff renders the replacement as a removed/added block for the web
+// EditUIDiff renders the replacement as a removed/added block for the web
 // UI's diff view. The edit is an exact substring swap, so old/new lines ARE
-// the change — no diff algorithm needed.
-func editUIDiff(oldStr, newStr string) string {
+// the change — no diff algorithm needed. Exported so the server package can
+// reuse it to preview the pending edit in the permission-ask confirmation
+// (see Server.permissionAskFrom), not just the post-execution result card.
+func EditUIDiff(oldStr, newStr string) string {
 	var b strings.Builder
 	for _, l := range strings.Split(strings.TrimRight(oldStr, "\n"), "\n") {
 		b.WriteString("- " + l + "\n")

@@ -275,6 +275,11 @@ export interface WsEventRequestConfirmation {
   id: string
   message: string
   kind: string
+  // #1105: what's actually being approved. At most one is set.
+  tool_name?: string
+  command?: string // terminal
+  diff?: string // edit_file
+  input?: string // other tools
 }
 
 export interface WsEventRequestUserQuestion {

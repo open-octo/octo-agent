@@ -205,6 +205,14 @@ type wsEventRequestConfirmation struct {
 	ConfID    string `json:"id"`
 	Message   string `json:"message"`
 	Kind      string `json:"kind"` // "yes_no" | "yes_no_always" | "ok"
+
+	// Detail fields for #1105: the modal used to show only Message ("Allow
+	// terminal?") with no indication of what's actually being approved. At
+	// most one of these is set, chosen by tool kind in permissionAskFrom.
+	ToolName string `json:"tool_name,omitempty"`
+	Command  string `json:"command,omitempty"` // terminal: the full command
+	Diff     string `json:"diff,omitempty"`    // edit_file: removed/added preview (tools.EditUIDiff)
+	Input    string `json:"input,omitempty"`   // other tools: sorted "key: value" lines
 }
 
 type wsEventRequestUserQuestion struct {
