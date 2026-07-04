@@ -17,6 +17,12 @@ type channelInfo struct {
 	Running   bool              `json:"running"`
 	HasConfig bool              `json:"has_config"`
 	Fields    map[string]string `json:"fields"`
+	// Issue is why the adapter isn't healthy — a startup skip reason
+	// (unregistered / construction failed / invalid config) or the latest
+	// crash-and-restart status — omitted when there's none recorded (#1121:
+	// previously the only symptom of any of these was "the bot never
+	// replies", with no queryable reason anywhere).
+	Issue string `json:"issue,omitempty"`
 }
 
 var secretKeys = map[string]bool{
@@ -40,6 +46,7 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	for name, pc := range cfg.Channels {
 		info := platformToInfo(name, pc)
 		info.Running = s.isAdapterRunning(name)
+		info.Issue = s.channelIssue(name)
 		out = append(out, info)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"channels": out})
@@ -67,6 +74,7 @@ func (s *Server) handleGetChannel(w http.ResponseWriter, r *http.Request) {
 
 	info := platformToInfo(platform, pc)
 	info.Running = s.isAdapterRunning(platform)
+	info.Issue = s.channelIssue(platform)
 	writeJSON(w, http.StatusOK, info)
 }
 

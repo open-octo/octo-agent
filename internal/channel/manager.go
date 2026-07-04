@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -223,26 +224,41 @@ func (m *Manager) Start(ctx context.Context) error {
 	for _, name := range m.cfg.EnabledPlatforms() {
 		pc := m.cfg.Platform(name)
 		if pc == nil {
-			continue
+			continue // not in Config.Channels at all — EnabledPlatforms shouldn't produce this, but no name to log against either way
 		}
 		ctor, err := Find(name)
 		if err != nil {
-			continue // adapter not registered, skip
+			slog.Error("channel start failed: adapter not registered", "channel", name, "err", err)
+			continue
 		}
 		ad, err := ctor(pc)
 		if err != nil {
-			continue // construction failed, skip
+			slog.Error("channel start failed: construction failed", "channel", name, "err", err)
+			continue
 		}
 		if errs := ad.ValidateConfig(pc); len(errs) > 0 {
-			continue // invalid config, skip
+			for _, e := range errs {
+				slog.Warn("channel config issue", "channel", name, "detail", e)
+			}
+			continue
 		}
 		m.adapters.Store(name, ad)
 
+		// #1121: the run error used to be discarded (`_ = a.Start(...)`), so
+		// an adapter crash mid-session (auth revoked, websocket dies
+		// unrecoverably) went dead with zero diagnostics — the only symptom
+		// was "the bot never replies". Logging it here at least gets the
+		// reason into octo serve's own log; internal/server's parallel
+		// startOneChannelLocked/runChannelWithRestart (the path octo serve
+		// actually runs) goes further and also retries with backoff and
+		// records the reason somewhere queryable (GET /api/channels).
 		go func(a Adapter, platform string) {
-			_ = a.Start(ctx, func(ev InboundEvent) {
+			if err := a.Start(ctx, func(ev InboundEvent) {
 				ev.Platform = platform
 				m.handleInbound(ctx, ev)
-			})
+			}); err != nil && ctx.Err() == nil {
+				slog.Error("channel adapter exited unexpectedly", "channel", platform, "err", err)
+			}
 		}(ad, name)
 	}
 
