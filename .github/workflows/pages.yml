@@ -52,7 +52,7 @@ jobs:
         run: |
           mkdir -p _site
           # Root: the hand-rolled landing page + install script, unchanged.
-          cp landing/index.html landing/CNAME landing/install.sh landing/.nojekyll _site/
+          cp landing/index.html landing/CNAME landing/install.sh landing/.nojekyll landing/robots.txt landing/og-image.svg _site/
           # /docs/*: the generated Starlight site (astro.config.mjs sets base: "/docs").
           mkdir -p _site/docs
           cp -r docs/dist/. _site/docs/
