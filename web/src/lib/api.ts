@@ -20,7 +20,12 @@ export interface TaskResponse {
 // which used to be just the HTTP status line ("500 Internal Server Error")
 // because the server's JSON error body ({"error": "..."}, see writeError in
 // internal/server/server.go) was discarded. One fix here fixes every toast.
-async function readErrorMessage(res: Response, fallback: string): Promise<string> {
+//
+// Exported so callers that can't go through request() — because they need
+// the raw Response (e.g. SkillsView.handleExport, which reads a Blob on
+// success) — parse a failing response's error body the same way, instead of
+// re-implementing (and drifting from) the same fallback logic inline.
+export async function readErrorMessage(res: Response, fallback: string): Promise<string> {
   try {
     const body = await res.json()
     if (typeof body?.error === 'string' && body.error) return body.error

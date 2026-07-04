@@ -171,6 +171,13 @@
       oauthTimer = setInterval(async () => {
         try {
           const s = await api.mcpOAuthStatus(name)
+          // clearInterval() only cancels *future* ticks — a tick already
+          // in flight when the user closes this modal or opens a different
+          // server's flow still resolves and lands here. Without this guard
+          // it reassigns `oauth` unconditionally: a closed modal pops back
+          // open with stale data, or server B's flow gets clobbered by a
+          // late response for server A.
+          if (oauth?.name !== name) return
           applyOAuth(name, s)
           if (oauthSettled(s.state)) { stopPolling(); onOAuthSettled(s.state) }
         } catch { /* transient — keep polling until the modal closes */ }

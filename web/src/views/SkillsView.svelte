@@ -64,12 +64,7 @@
     try {
       const res = await fetch(`/api/skills/${encodeURIComponent(name)}/export`)
       if (!res.ok) {
-        let message = `${res.status} ${res.statusText}`
-        try {
-          const body = await res.json()
-          if (body?.error) message = body.error
-        } catch { /* not JSON — keep the status line */ }
-        throw new Error(message)
+        throw new Error(await api.readErrorMessage(res, `${res.status} ${res.statusText}`))
       }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
