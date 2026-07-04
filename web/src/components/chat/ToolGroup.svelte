@@ -162,16 +162,23 @@
 
   // A non-zero exit is not a tool error either — terminal reports it via the
   // structured ui_payload.status rather than tool.error, and appends a
-  // trailing "[exit: N]" (or "[exit: signal: killed]") marker to the output
-  // (internal/tools/terminal.go). Without this, a failed command got the
-  // same green check as a success, with the marker buried behind the fold.
+  // trailing "[exit: …]" marker to the output (internal/tools/terminal.go).
+  // Without this, a failed command got the same green check as a success,
+  // with the marker buried behind the fold.
   function terminalFailure(tool: any): string | null {
     const p = tool.ui_payload
     if (!p || p.type !== 'terminal' || p.status !== 'failed' || tool.error) return null
     const src = typeof tool.result === 'string' ? tool.result
       : (typeof p.output_preview === 'string' ? p.output_preview : '')
     const m = src.match(/\[exit: ([^\]]+)\]\s*$/)
-    return m ? `exit ${m[1].trim()}` : 'failed'
+    if (!m) return 'failed'
+    // The marker embeds Go's *exec.ExitError.Error() text verbatim: a normal
+    // nonzero exit reads "exit status N" (not a bare "N"), a killed process
+    // reads "signal: NAME". Strip the verbose "exit status" wrapper down to
+    // "exit N"; "signal: NAME" already reads fine standalone.
+    const reason = m[1].trim()
+    const code = reason.match(/^exit status (\d+)$/)
+    return code ? `exit ${code[1]}` : reason
   }
 
   function isTerminalTool(tool: any): boolean {
