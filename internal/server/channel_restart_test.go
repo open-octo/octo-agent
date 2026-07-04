@@ -22,6 +22,14 @@ type crashingAdapterState struct {
 	failCount   int32   // Start fails this many times total, across all instances
 	constructed int32   // instances built so far
 	startedOn   []int32 // construction id Start was invoked on, in call order
+
+	// gateConstruction/ctorGate let a test deterministically land a restart
+	// loop's rebuild inside its ctor(pc) call — the one gap that doesn't
+	// observe ctx cancellation — so a concurrent stop/reload can race it.
+	// The construction with id == gateConstruction blocks until ctorGate is
+	// closed; every other construction proceeds immediately.
+	gateConstruction int32
+	ctorGate         chan struct{}
 }
 
 // crashingFakeAdapter fails its first N Start calls (simulating a crash —
@@ -42,7 +50,12 @@ func newCrashingAdapterCtorWithState(state *crashingAdapterState, failCount int3
 		state.mu.Lock()
 		state.constructed++
 		id := state.constructed
+		gate := state.ctorGate
+		gateID := state.gateConstruction
 		state.mu.Unlock()
+		if gate != nil && id == gateID {
+			<-gate
+		}
 		return &crashingFakeAdapter{id: id, state: state}, nil
 	}
 }
@@ -159,6 +172,110 @@ func TestChannelRestart_RecoversFromTransientCrash(t *testing.T) {
 			t.Errorf("instance %d had Start called on it more than once — should rebuild fresh each retry", id)
 		}
 		seen[id] = true
+	}
+}
+
+// A crashed adapter's restart loop rebuilds via ctor(pc) — a call that does
+// not observe ctx cancellation — before writing the fresh instance back to
+// runningAdapters. If an operator stops/reloads the same platform while that
+// rebuild is still in flight (entirely plausible: this fix is what makes the
+// crash visible as an "Error" status in the Channels view in the first
+// place, which is exactly what would prompt someone to intervene), the
+// generation check added alongside runningAdapters.Store must detect it's
+// been superseded and discard the stale instance instead of clobbering the
+// reload's fresh one.
+func TestChannelRestart_ConcurrentReloadDuringRebuildDiscardsStaleInstance(t *testing.T) {
+	orig := channelRestartDelays
+	channelRestartDelays = []time.Duration{time.Millisecond}
+	t.Cleanup(func() { channelRestartDelays = orig })
+
+	state := &crashingAdapterState{}
+	// Instance #1's Start crashes once; instance #2 (the stale rebuild) is
+	// gated so the test can hold it inside ctor(pc); instance #3 (the
+	// reload's fresh start) must succeed and keep running.
+	channel.Register("crashfake-superseded", newCrashingAdapterCtorWithState(state, 1))
+	state.ctorGate = make(chan struct{})
+	state.gateConstruction = 2
+
+	writeChannelsYML(t, "channels:\n  crashfake-superseded:\n    enabled: true\n")
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	t.Cleanup(func() {
+		srv.stopChannels()
+		srv.channelWG.Wait()
+	})
+
+	srv.reloadChannel("crashfake-superseded")
+
+	// Wait until the restart loop's rebuild (construction #2) has started
+	// and is blocked in ctor(pc) — state.constructed is bumped before the
+	// gate wait, so seeing it reach 2 proves the goroutine is parked there.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		state.mu.Lock()
+		constructed := state.constructed
+		state.mu.Unlock()
+		if constructed >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	state.mu.Lock()
+	constructed := state.constructed
+	state.mu.Unlock()
+	if constructed < 2 {
+		t.Fatal("restart loop never reached the gated rebuild (construction #2)")
+	}
+
+	// Simulate an operator reacting to the crash-loop: reload the platform
+	// while the stale rebuild is still parked in ctor(pc). This stops
+	// generation 1 (cancelling its ctx, which the parked ctor call can't see)
+	// and starts generation 2 with a fresh instance #3.
+	srv.reloadChannel("crashfake-superseded")
+
+	// Now release the stale rebuild. Without the generation check, it would
+	// go on to overwrite runningAdapters with instance #2 (never Started).
+	close(state.ctorGate)
+
+	// Poll for the state to settle: exactly instance #3 owns runningAdapters,
+	// and it never moves off that once settled.
+	var stableSince time.Time
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		v, ok := srv.runningAdapters.Load("crashfake-superseded")
+		fa, isFake := v.(*crashingFakeAdapter)
+		if ok && isFake && fa.id == 3 {
+			if stableSince.IsZero() {
+				stableSince = time.Now()
+			}
+			if time.Since(stableSince) > 100*time.Millisecond {
+				break // held steady long enough to be confident it's final
+			}
+		} else {
+			stableSince = time.Time{}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	v, ok := srv.runningAdapters.Load("crashfake-superseded")
+	if !ok {
+		t.Fatal("expected an adapter running after reload, found none")
+	}
+	fa, isFake := v.(*crashingFakeAdapter)
+	if !isFake {
+		t.Fatalf("runningAdapters holds unexpected type %T", v)
+	}
+	if fa.id != 3 {
+		t.Errorf("runningAdapters holds instance %d, want instance 3 (the reload's fresh start) — "+
+			"the stale rebuild (instance 2) must have clobbered it", fa.id)
+	}
+
+	state.mu.Lock()
+	startedOn := append([]int32(nil), state.startedOn...)
+	state.mu.Unlock()
+	for _, id := range startedOn {
+		if id == 2 {
+			t.Error("instance 2 (the discarded stale rebuild) had Start called on it — it should have been discarded unstarted")
+		}
 	}
 }
 

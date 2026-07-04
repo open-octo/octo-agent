@@ -224,7 +224,12 @@ func (m *Manager) Start(ctx context.Context) error {
 	for _, name := range m.cfg.EnabledPlatforms() {
 		pc := m.cfg.Platform(name)
 		if pc == nil {
-			continue // not in Config.Channels at all — EnabledPlatforms shouldn't produce this, but no name to log against either way
+			// Shouldn't happen — EnabledPlatforms is derived from Config.Channels,
+			// so every name it yields should resolve back to a config here — but
+			// log it like every other skip in this loop rather than silently
+			// continuing, in case that invariant is ever violated.
+			slog.Error("channel start failed: enabled platform has no config", "channel", name)
+			continue
 		}
 		ctor, err := Find(name)
 		if err != nil {

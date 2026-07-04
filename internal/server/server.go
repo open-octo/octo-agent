@@ -262,6 +262,20 @@ type Server struct {
 	channelCtx     context.Context
 	adapterCancels map[string]context.CancelFunc
 
+	// channelGen bumps every time startOneChannelLocked (re)starts a platform
+	// from scratch, and is handed to that start's runChannelWithRestart
+	// goroutine as a snapshot. A crashed adapter's restart loop rebuilds a
+	// fresh instance via ctor(pc) — a call that does not observe ctx
+	// cancellation — so a concurrent stop/reload/restart of the SAME
+	// platform (e.g. an operator reacting to the crash-loop this fix makes
+	// visible in the Channels view) can advance the generation while that
+	// ctor(pc) call is still in flight. Before writing anything back to
+	// runningAdapters/adapterCancels, the restart loop re-checks its
+	// snapshot against the current generation under channelMu; a mismatch
+	// means another goroutine now owns this platform name, so it discards
+	// its work instead of clobbering the new owner's bookkeeping.
+	channelGen map[string]uint64
+
 	// channelIssues records, per platform, why its adapter isn't healthy: a
 	// startup skip reason (unregistered/construction failed/invalid config)
 	// or the latest crash-and-restart status (#1121 — these used to be
@@ -1944,11 +1958,16 @@ func (s *Server) startOneChannelLocked(name string) {
 	if s.adapterCancels == nil {
 		s.adapterCancels = make(map[string]context.CancelFunc)
 	}
+	if s.channelGen == nil {
+		s.channelGen = make(map[string]uint64)
+	}
+	s.channelGen[name]++
+	gen := s.channelGen[name]
 	s.adapterCancels[name] = cancel
 	s.runningAdapters.Store(name, ad)
 	s.clearChannelIssue(name)
 	s.channelWG.Add(1)
-	go s.runChannelWithRestart(ctx, name, pc, ctor, ad)
+	go s.runChannelWithRestart(ctx, name, gen, pc, ctor, ad)
 }
 
 // channelRestartDelays bounds how aggressively a crashed adapter retries: a
@@ -1979,7 +1998,13 @@ const maxChannelRestarts = 10
 // anyway. Config is not re-validated on retries: ValidateConfig failures are
 // a permanent skip (startOneChannelLocked never reaches this function for
 // those), not something a backoff loop should keep re-attempting.
-func (s *Server) runChannelWithRestart(ctx context.Context, name string, pc channel.PlatformConfig, ctor func(channel.PlatformConfig) (channel.Adapter, error), ad channel.Adapter) {
+//
+// gen is the generation snapshot startOneChannelLocked captured when it
+// launched this goroutine (see channelGen's doc comment) — every write back
+// to runningAdapters/adapterCancels re-checks it first, since a concurrent
+// stop/reload/restart of this same platform can slip in during the ctor(pc)
+// call below, which does not observe ctx cancellation.
+func (s *Server) runChannelWithRestart(ctx context.Context, name string, gen uint64, pc channel.PlatformConfig, ctor func(channel.PlatformConfig) (channel.Adapter, error), ad channel.Adapter) {
 	defer s.channelWG.Done()
 	restarts := 0
 	for {
@@ -1997,8 +2022,10 @@ func (s *Server) runChannelWithRestart(ctx context.Context, name string, pc chan
 			slog.Error("channel adapter exceeded restart limit — giving up", "channel", name, "restarts", restarts)
 			s.recordChannelIssue(name, fmt.Sprintf("gave up after %d crashes: %v", restarts, err))
 			s.channelMu.Lock()
-			s.runningAdapters.Delete(name)
-			delete(s.adapterCancels, name)
+			if s.channelGen[name] == gen {
+				s.runningAdapters.Delete(name)
+				delete(s.adapterCancels, name)
+			}
 			s.channelMu.Unlock()
 			return
 		}
@@ -2022,6 +2049,15 @@ func (s *Server) runChannelWithRestart(ctx context.Context, name string, pc chan
 		}
 		ad = newAd
 		s.channelMu.Lock()
+		if s.channelGen[name] != gen {
+			// Superseded while ctor(pc) was in flight — a concurrent
+			// stop/reload/restart now owns this platform name. ad was never
+			// Start()-ed, so there's nothing to Stop(); just discard it and
+			// let this goroutine end without touching the new owner's state.
+			s.channelMu.Unlock()
+			slog.Warn("channel restart: superseded during rebuild, discarding stale instance", "channel", name)
+			return
+		}
 		s.runningAdapters.Store(name, ad)
 		s.channelMu.Unlock()
 		s.clearChannelIssue(name)
