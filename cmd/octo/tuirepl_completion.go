@@ -100,16 +100,6 @@ func (m *tuiModel) complWindow() (start, end int) {
 	return start, start + maxComplVisible
 }
 
-// completionHeight is the row count completionView occupies, so liveHeight can
-// reserve space in the inline layout.
-func (m *tuiModel) completionHeight() int {
-	if len(m.complItems) == 0 {
-		return 0
-	}
-	start, end := m.complWindow()
-	return (end - start) + 1 // rows + the hint line
-}
-
 // completionView renders the menu: one row per candidate (name + description),
 // the selection marked, and a key-hint footer.
 func (m *tuiModel) completionView() string {

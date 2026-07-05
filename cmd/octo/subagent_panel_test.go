@@ -179,20 +179,3 @@ func TestSubAgentPanel_RemoveAdjustsFocus(t *testing.T) {
 		t.Errorf("focus = %d, want -1 (none left)", m.subAgentFocus)
 	}
 }
-
-func TestSubAgentPanel_LiveHeightExpanded(t *testing.T) {
-	m := newPanelModel()
-	m.handleSubAgentEvent(tools.SubAgentEvent{AgentID: "agent_1", Kind: "started"})
-	for i := 0; i < 5; i++ {
-		m.handleSubAgentEvent(tools.SubAgentEvent{AgentID: "agent_1", Kind: "tool", ToolName: "t"})
-	}
-	m.subAgents["agent_1"].expanded = true
-
-	// liveHeight includes textarea + status bar even on an empty model.
-	// We only care that expansion adds len(history) extra lines.
-	collapsedH := m.liveHeight()
-	m.subAgents["agent_1"].expanded = false
-	if got := m.liveHeight(); got != collapsedH-5 {
-		t.Errorf("collapsed liveHeight = %d, want %d (diff should be 5 history lines)", got, collapsedH-5)
-	}
-}

@@ -95,9 +95,6 @@ func TestCompletion_ViewRendersMenuAndHint(t *testing.T) {
 	if !strings.Contains(out, "Enter run") {
 		t.Errorf("View should render the completion key hint; got:\n%s", out)
 	}
-	if h := m.completionHeight(); h != 2 { // 1 row + hint line
-		t.Errorf("completionHeight for one match = %d, want 2", h)
-	}
 }
 
 func TestCompletion_NavigationCycles(t *testing.T) {
