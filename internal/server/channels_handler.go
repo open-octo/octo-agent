@@ -152,19 +152,22 @@ func (s *Server) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleTestChannel tests a connection to a platform with the given credentials.
+// Loads the saved config from ~/.octo/channels.yml rather than requiring a body,
+// since the frontend already stores the fields and just needs a validation trigger.
 func (s *Server) handleTestChannel(w http.ResponseWriter, r *http.Request) {
-	var req channelUpdateRequest
-	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	platform := r.PathValue("platform")
+
+	// Load the saved channel config and get the saved fields for this platform.
+	cfg, err := channel.LoadConfig()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load channel config: %v", err))
 		return
 	}
 
-	platform := r.PathValue("platform")
-
-	// Build PlatformConfig from request.
-	pc := make(channel.PlatformConfig)
-	for k, v := range req.Fields {
-		pc[k] = v
+	pc := cfg.Platform(platform)
+	if pc == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "no configuration saved for this platform"})
+		return
 	}
 
 	ctor, err := channel.Find(platform)
