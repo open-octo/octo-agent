@@ -180,6 +180,53 @@ func TestStart_GroupChatType(t *testing.T) {
 	}
 }
 
+// #1122: without bot_nickname configured, group gating stays off — matches
+// pre-fix behavior so existing deployments that haven't set it don't
+// suddenly go silent in every group.
+func TestStart_GroupChatType_NoNicknameConfiguredNoGate(t *testing.T) {
+	f := newFakeWecom(t)
+	f.callbacks = []map[string]any{textCallback("chat-g", "group", "user-7", "hi, no mention here")}
+	a := newTestAdapter(t, f, nil)
+
+	events := collectEvents(t, a, 1)
+	if len(events) != 1 {
+		t.Fatalf("expected the ungated group message to pass through, got %+v", events)
+	}
+}
+
+// #1122: with bot_nickname configured, a group message that doesn't mention
+// the bot is dropped — previously every group message was processed
+// regardless of chat type.
+func TestStart_GroupRequiresMentionWhenNicknameConfigured(t *testing.T) {
+	f := newFakeWecom(t)
+	f.callbacks = []map[string]any{
+		textCallback("chat-g", "group", "user-7", "hi everyone, no mention here"),
+		textCallback("chat-g", "group", "user-7", "@octo help me with this"),
+	}
+	a := newTestAdapter(t, f, map[string]any{"bot_nickname": "octo"})
+
+	events := collectEvents(t, a, 1)
+	if len(events) != 1 {
+		t.Fatalf("expected only the @-mentioning message to pass, got %+v", events)
+	}
+	if events[0].Text != "@octo help me with this" {
+		t.Fatalf("unexpected event text: %+v", events[0])
+	}
+}
+
+// A single (non-group) chat should never be mention-gated, even with
+// bot_nickname configured — the gate only applies to groups.
+func TestStart_SingleChatNeverMentionGated(t *testing.T) {
+	f := newFakeWecom(t)
+	f.callbacks = []map[string]any{textCallback("user-7", "single", "user-7", "no mention needed here")}
+	a := newTestAdapter(t, f, map[string]any{"bot_nickname": "octo"})
+
+	events := collectEvents(t, a, 1)
+	if len(events) != 1 {
+		t.Fatalf("expected the DM to pass through ungated, got %+v", events)
+	}
+}
+
 func TestStart_AllowedUsersFilters(t *testing.T) {
 	f := newFakeWecom(t)
 	f.callbacks = []map[string]any{

@@ -212,3 +212,75 @@ func TestHandleInbound_UnsupportedMediaAcknowledged(t *testing.T) {
 		t.Fatalf("expected one acknowledgement to be sent, got %d", len(stub.sends))
 	}
 }
+
+// #1122: a group message containing a bare "@" character (mentioning someone
+// else entirely) used to pass the gate anyway via a loose substring match —
+// the bot barged into unrelated group conversations. AtUsers is the real
+// signal and should be the only one consulted.
+func TestHandleInbound_GroupRequiresRealMention(t *testing.T) {
+	stub := &stubAPI{}
+	ts := stub.server(t)
+	defer ts.Close()
+
+	a := testAdapter(ts)
+	a.routes = make(map[string]routeEntry)
+
+	raw := []byte(`{
+		"senderId": "user-1",
+		"conversationId": "conv-1",
+		"conversationType": "2",
+		"chatbotUserId": "bot-1",
+		"msgtype": "text",
+		"text": {"content": "@someone-else 帮我看下"},
+		"atUsers": [{"dingtalkId": "someone-else"}]
+	}`)
+
+	gotEvent := false
+	a.handleInbound(raw, func(ev channel.InboundEvent) {
+		gotEvent = true
+	})
+
+	if gotEvent {
+		t.Fatal("expected the message to be dropped — the bot wasn't actually @-mentioned")
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.sends) != 0 {
+		t.Fatalf("expected no send for a dropped group message, got %d", len(stub.sends))
+	}
+}
+
+// A group message that genuinely @-mentions the bot (its ID present in
+// atUsers) should still pass through normally.
+func TestHandleInbound_GroupRealMentionPasses(t *testing.T) {
+	stub := &stubAPI{}
+	ts := stub.server(t)
+	defer ts.Close()
+
+	a := testAdapter(ts)
+	a.routes = make(map[string]routeEntry)
+
+	raw := []byte(`{
+		"senderId": "user-1",
+		"conversationId": "conv-1",
+		"conversationType": "2",
+		"chatbotUserId": "bot-1",
+		"msgtype": "text",
+		"text": {"content": "@octo 帮我看下"},
+		"atUsers": [{"dingtalkId": "bot-1"}]
+	}`)
+
+	var got channel.InboundEvent
+	gotEvent := false
+	a.handleInbound(raw, func(ev channel.InboundEvent) {
+		gotEvent = true
+		got = ev
+	})
+
+	if !gotEvent {
+		t.Fatal("expected the message to be delivered — the bot was actually @-mentioned")
+	}
+	if got.ChatType != "group" {
+		t.Fatalf("expected group chat type, got %+v", got)
+	}
+}

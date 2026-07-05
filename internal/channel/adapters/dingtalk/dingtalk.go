@@ -590,7 +590,12 @@ func (a *Adapter) handleInbound(raw json.RawMessage, onMessage func(channel.Inbo
 	}
 	a.routeMu.Unlock()
 
-	// Group chat: only @-mention.
+	// Group chat: only @-mention. #1122: this used to also pass on any
+	// message containing a bare "@" character (e.g. "@someone-else 帮我看下"),
+	// which let the bot barge into unrelated group conversations. AtUsers
+	// already carries the precisely-mentioned staff IDs from the webhook, so
+	// there is no need for — and no correctness reason to keep — the
+	// substring fallback.
 	if ev.ConversationType == "2" {
 		mentioned := false
 		for _, u := range ev.AtUsers {
@@ -599,8 +604,7 @@ func (a *Adapter) handleInbound(raw json.RawMessage, onMessage func(channel.Inbo
 				break
 			}
 		}
-		content := ev.Text.Content
-		if !mentioned && !strings.Contains(content, "@") {
+		if !mentioned {
 			return
 		}
 	}
