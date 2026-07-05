@@ -18,17 +18,18 @@ import (
 // WebSocket that runs hello → identify → READY → one MESSAGE_CREATE per
 // queued message.
 type fakeDiscord struct {
-	mu        sync.Mutex
-	sent      []map[string]any
-	edited    []map[string]any
-	messages  []dcMessage
-	srv       *httptest.Server
-	wsURL     string
-	rateLimit int // return 429 for the first N message sends
+	mu             sync.Mutex
+	sent           []map[string]any
+	edited         []map[string]any
+	messages       []dcMessage
+	srv            *httptest.Server
+	wsURL          string
+	rateLimit      int     // return 429 for the first N message sends
+	rateLimitAfter float64 // retry_after seconds reported on those 429s
 }
 
 func newFakeDiscord(t *testing.T) *fakeDiscord {
-	f := &fakeDiscord{}
+	f := &fakeDiscord{rateLimitAfter: 0.01}
 	upgrader := websocket.Upgrader{}
 
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,9 +55,10 @@ func newFakeDiscord(t *testing.T) *fakeDiscord {
 			f.mu.Lock()
 			if f.rateLimit > 0 {
 				f.rateLimit--
+				retryAfter := f.rateLimitAfter
 				f.mu.Unlock()
 				w.WriteHeader(http.StatusTooManyRequests)
-				json.NewEncoder(w).Encode(map[string]any{"message": "You are being rate limited.", "retry_after": 0.01})
+				json.NewEncoder(w).Encode(map[string]any{"message": "You are being rate limited.", "retry_after": retryAfter})
 				return
 			}
 			var p map[string]any
@@ -301,6 +303,37 @@ func TestSendText_GivesUpAfterMaxRateLimitRetries(t *testing.T) {
 	res := a.SendText("chan-1", "hello", "")
 	if res.OK {
 		t.Fatalf("expected send to fail after exhausting retries, got %+v", res)
+	}
+}
+
+// The retry wait must actually be cancellable — the point of threading ctx
+// through rest() rather than a bare time.Sleep. A long retry_after (5s) that
+// gets interrupted well before it elapses (ctx cancelled at ~50ms) proves the
+// wait was really interrupted rather than just being short.
+func TestRest_CancelsDuringRateLimitWait(t *testing.T) {
+	f := newFakeDiscord(t)
+	f.rateLimit = 1
+	f.rateLimitAfter = 5
+	a := newTestAdapter(t, f, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	var msg struct {
+		ID string `json:"id"`
+	}
+	err := a.rest(ctx, http.MethodPost, "/channels/chan-1/messages", map[string]any{"content": "hello"}, &msg)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error from the cancelled wait")
+	}
+	if elapsed > time.Second {
+		t.Fatalf("expected the wait to be interrupted well under the 5s retry_after, took %v", elapsed)
 	}
 }
 

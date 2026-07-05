@@ -150,7 +150,7 @@ func (a *Adapter) Platform() string { return platformName }
 func (a *Adapter) Start(ctx context.Context, onMessage func(channel.InboundEvent)) error {
 	ctx, a.cancel = context.WithCancel(ctx)
 
-	me, err := a.usersMe()
+	me, err := a.usersMe(ctx)
 	if err != nil {
 		return fmt.Errorf("discord: /users/@me: %w", err)
 	}
@@ -214,7 +214,7 @@ func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 		var msg struct {
 			ID string `json:"id"`
 		}
-		if err := a.rest(http.MethodPost, fmt.Sprintf("/channels/%s/messages", chatID), payload, &msg); err != nil {
+		if err := a.rest(context.Background(), http.MethodPost, fmt.Sprintf("/channels/%s/messages", chatID), payload, &msg); err != nil {
 			return channel.SendResult{OK: false, Error: err.Error()}
 		}
 		lastID = msg.ID
@@ -306,7 +306,7 @@ func (a *Adapter) SendFile(chatID, path, name, replyTo string) channel.SendResul
 
 // UpdateMessage edits an existing message.
 func (a *Adapter) UpdateMessage(chatID, messageID, text string) bool {
-	err := a.rest(http.MethodPatch, fmt.Sprintf("/channels/%s/messages/%s", chatID, messageID),
+	err := a.rest(context.Background(), http.MethodPatch, fmt.Sprintf("/channels/%s/messages/%s", chatID, messageID),
 		map[string]any{"content": text}, nil)
 	if err != nil {
 		log.Printf("[discord] update_message failed: %v", err)
@@ -320,7 +320,7 @@ func (a *Adapter) SupportsMessageUpdates() bool { return true }
 
 // SendTyping triggers the "is typing…" indicator (expires after ~10s).
 func (a *Adapter) SendTyping(chatID, contextToken string) error {
-	return a.rest(http.MethodPost, fmt.Sprintf("/channels/%s/typing", chatID), nil, nil)
+	return a.rest(context.Background(), http.MethodPost, fmt.Sprintf("/channels/%s/typing", chatID), nil, nil)
 }
 
 // StopTyping — Discord's typing indicator expires automatically; nothing to cancel.
@@ -344,7 +344,23 @@ func userAgent() string {
 	return "DiscordBot (https://github.com/open-octo/octo-agent, " + version.String() + ")"
 }
 
-func (a *Adapter) rest(method, path string, payload, out any) error {
+// waitForRetry sleeps for d (capped and floored by the caller), honoring ctx
+// cancellation. Returns false if ctx was cancelled first. Mirrors the
+// telegram adapter's helper of the same name — kept as a per-package copy
+// since the two callers differ (Discord's retry_after is a fractional-second
+// float already converted to a Duration by the caller; Telegram's is a bare
+// integer of seconds), not shared plumbing worth a common package for two
+// call sites.
+func waitForRetry(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-time.After(d):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (a *Adapter) rest(ctx context.Context, method, path string, payload, out any) error {
 	var bodyBytes []byte
 	if payload != nil {
 		bodyBytes, _ = json.Marshal(payload)
@@ -355,7 +371,7 @@ func (a *Adapter) rest(method, path string, payload, out any) error {
 		if bodyBytes != nil {
 			body = bytes.NewReader(bodyBytes)
 		}
-		req, err := http.NewRequest(method, a.apiBase+path, body)
+		req, err := http.NewRequestWithContext(ctx, method, a.apiBase+path, body)
 		if err != nil {
 			return err
 		}
@@ -387,7 +403,9 @@ func (a *Adapter) rest(method, path string, payload, out any) error {
 			if wait > maxRateLimitWait {
 				wait = maxRateLimitWait
 			}
-			time.Sleep(wait)
+			if !waitForRetry(ctx, wait) {
+				return ctx.Err()
+			}
 			continue
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -413,9 +431,9 @@ type dcUser struct {
 	Bot      bool   `json:"bot"`
 }
 
-func (a *Adapter) usersMe() (*dcUser, error) {
+func (a *Adapter) usersMe(ctx context.Context) (*dcUser, error) {
 	var me dcUser
-	if err := a.rest(http.MethodGet, "/users/@me", nil, &me); err != nil {
+	if err := a.rest(ctx, http.MethodGet, "/users/@me", nil, &me); err != nil {
 		return nil, err
 	}
 	if me.ID == "" {
