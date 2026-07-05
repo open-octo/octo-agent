@@ -46,7 +46,7 @@ func TestExtractJSON(t *testing.T) {
 func TestAgentSpawner_SchemaInjectsInstruction(t *testing.T) {
 	send := &subAgentSender{reply: `{"ok":true}`}
 	parent := agent.New(send, "parent-model")
-	sp := NewSpawner(parent, nilExecutor{}, func() []agent.ToolDefinition { return nil })
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
 
 	_, err := sp.Spawn(context.Background(), tools.SpawnRequest{
 		Prompt: "extract the fields",
@@ -71,7 +71,7 @@ func TestAgentSpawner_SchemaRetriesOnInvalidJSON(t *testing.T) {
 		`{"ok":true}`,                      // retry: valid
 	}}
 	parent := agent.New(send, "parent-model")
-	sp := NewSpawner(parent, nilExecutor{}, func() []agent.ToolDefinition { return nil })
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
 
 	res, err := sp.Spawn(context.Background(), tools.SpawnRequest{
 		Prompt: "do it",
@@ -93,7 +93,7 @@ func TestAgentSpawner_SchemaRetriesOnInvalidJSON(t *testing.T) {
 func TestAgentSpawner_SchemaCleansFencesNoRetry(t *testing.T) {
 	send := &subAgentSender{reply: "```json\n{\"a\":1}\n```"}
 	parent := agent.New(send, "parent-model")
-	sp := NewSpawner(parent, nilExecutor{}, func() []agent.ToolDefinition { return nil })
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
 
 	res, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "x", Schema: `{}`})
 	if err != nil {

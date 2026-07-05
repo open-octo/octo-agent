@@ -532,8 +532,8 @@ func (s *Server) enableSubAgentTools() {
 	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
 	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
 	executor := tools.NewDefaultRegistry()
-	spawner := app.NewSpawner(template, executor, func() []agent.ToolDefinition {
-		return tools.DefaultToolsFor(s.model)
+	spawner := app.NewSpawner(template, executor, func(ctx context.Context) []agent.ToolDefinition {
+		return tools.DefaultToolsForCtx(ctx, s.model)
 	})
 	mgr := tools.NewSubAgentManager(spawner)
 	mgr.SetSynchronous(true)
@@ -2567,11 +2567,11 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// Per-message sub-agent manager bound to THIS chat's agent —
 		// synchronous, since a chat message is request/response with no
 		// follow-up channel for an async result.
-		spawner := app.NewSpawner(sess.Agent, executor, func() []agent.ToolDefinition {
+		spawner := app.NewSpawner(sess.Agent, executor, func(ctx context.Context) []agent.ToolDefinition {
 			if goalsOn {
-				return tools.DefaultToolsFor(sess.Agent.Model)
+				return tools.DefaultToolsForCtx(ctx, sess.Agent.Model)
 			}
-			return tools.WithoutGoalTools(tools.DefaultToolsFor(sess.Agent.Model))
+			return tools.WithoutGoalTools(tools.DefaultToolsForCtx(ctx, sess.Agent.Model))
 		})
 		subMgr := tools.NewSubAgentManager(spawner)
 		subMgr.SetSynchronous(true)

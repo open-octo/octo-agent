@@ -1094,7 +1094,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			sw.error(perr.Error())
 			return
 		}
-		toolDefs = tools.DefaultToolsFor(a.Model)
+		toolDefs = tools.DefaultToolsForCtx(runCtx, a.Model)
 		// Surface background-process completions (badge + chat notice).
 		s.wireBackgroundTaskNotices(sess.ID)
 	}

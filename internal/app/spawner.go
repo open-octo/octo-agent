@@ -24,14 +24,18 @@ import (
 // sub_agent tool_result; the child's token usage is rolled into the
 // parent's session totals so they report one consolidated number.
 //
-// toolsFn is a deferred lookup of the LLM-facing tool catalog (DefaultTools).
-// Resolving it on each Spawn — rather than capturing a slice at construction
-// — lets cmd/octo set up the spawner before computing the tool list, since
-// SetSpawner has to run first for sub_agent to appear in DefaultTools().
+// toolsFn is a deferred lookup of the LLM-facing tool catalog (DefaultTools),
+// given the ctx the child is being spawned under — so a server/cron caller
+// can pass tools.DefaultToolsForCtx and have the child's own tool list
+// reflect that turn's ctx-scoped sub-agent manager instead of depending on
+// process-global state (#1133). Resolving it on each Spawn — rather than
+// capturing a slice at construction — also lets cmd/octo set up the spawner
+// before computing the tool list, since SetSpawner has to run first for
+// sub_agent to appear in DefaultTools().
 type Spawner struct {
 	parent   *agent.Agent
 	executor agent.ToolExecutor
-	toolsFn  func() []agent.ToolDefinition
+	toolsFn  func(ctx context.Context) []agent.ToolDefinition
 	// reg keeps spawned children alive after Spawn returns so a later
 	// Continue can re-run them with their history intact. In-memory and
 	// session-scoped: it lives as long as this spawner (one per REPL session),
@@ -39,7 +43,7 @@ type Spawner struct {
 	reg *childRegistry
 }
 
-func NewSpawner(parent *agent.Agent, executor agent.ToolExecutor, toolsFn func() []agent.ToolDefinition) *Spawner {
+func NewSpawner(parent *agent.Agent, executor agent.ToolExecutor, toolsFn func(ctx context.Context) []agent.ToolDefinition) *Spawner {
 	return &Spawner{
 		parent:   parent,
 		executor: executor,
@@ -58,7 +62,7 @@ const childMaxTurns = 100
 // a later Continue can resume it, runs the first prompt, and returns the
 // child's id alongside its reply.
 func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.SpawnResult, error) {
-	childTools := filterChildTools(s.toolsFn(), req.Tools, req.DisallowedTools, req.ReadOnly)
+	childTools := filterChildTools(s.toolsFn(ctx), req.Tools, req.DisallowedTools, req.ReadOnly)
 
 	// Pick the child's sender + model. A lean preset (explore/plan) runs on the
 	// parent's lite model when one is configured — its own cheaper sender, not

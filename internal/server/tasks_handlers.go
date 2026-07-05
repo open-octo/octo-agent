@@ -253,7 +253,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 			sw.error(perr.Error())
 			return sessionID, fmt.Errorf("prepare tools: %w", perr)
 		}
-		toolDefs = tools.DefaultToolsFor(a.Model)
+		toolDefs = tools.DefaultToolsForCtx(runCtx, a.Model)
 		s.wireBackgroundTaskNotices(sessionID)
 	}
 

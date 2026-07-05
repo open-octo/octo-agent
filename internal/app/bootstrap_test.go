@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -26,7 +27,7 @@ func TestWireTools_SetsUpEnvAndCleansUp(t *testing.T) {
 	// The sub-agent manager must be registered globally so that DefaultToolsFor
 	// advertises the sub_agent tool to the LLM.
 	hasSubAgent := false
-	for _, d := range env.ToolsFor() {
+	for _, d := range env.ToolsFor(context.Background()) {
 		if d.Name == "sub_agent" {
 			hasSubAgent = true
 			break
@@ -39,7 +40,7 @@ func TestWireTools_SetsUpEnvAndCleansUp(t *testing.T) {
 		t.Fatal("WireTools should return a tool-list function")
 	}
 	// ToolsFor is model-aware and must at least return the core built-ins.
-	if len(env.ToolsFor()) == 0 {
+	if len(env.ToolsFor(context.Background())) == 0 {
 		t.Error("ToolsFor returned an empty tool list")
 	}
 
@@ -51,7 +52,7 @@ func TestWireTools_SetsUpEnvAndCleansUp(t *testing.T) {
 		t.Error("cleanup should reset the task store")
 	}
 	// After cleanup, the sub_agent tool should no longer be advertised.
-	for _, d := range env.ToolsFor() {
+	for _, d := range env.ToolsFor(context.Background()) {
 		if d.Name == "sub_agent" {
 			t.Error("cleanup should reset the sub-agent manager so sub_agent is no longer advertised")
 			break

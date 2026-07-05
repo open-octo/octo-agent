@@ -771,7 +771,7 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 	}
 	defer cleanup()
 
-	reply, err := a.Run(ctx, userInput, tools.DefaultToolsFor(a.Model), executor)
+	reply, err := a.Run(ctx, userInput, tools.DefaultToolsForCtx(ctx, a.Model), executor)
 	if err != nil {
 		return "", err
 	}
@@ -881,8 +881,8 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	a.Gate = app.NewPermissionGate(engine, ask)
 
 	mkSpawner := func() tools.Spawner {
-		return app.NewSpawner(a, executor, func() []agent.ToolDefinition {
-			return tools.DefaultToolsFor(a.Model)
+		return app.NewSpawner(a, executor, func(ctx context.Context) []agent.ToolDefinition {
+			return tools.DefaultToolsForCtx(ctx, a.Model)
 		})
 	}
 	var mgr *tools.SubAgentManager
@@ -930,25 +930,21 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	ctx = tools.WithSubAgentManager(ctx, mgr)
 	ctx = tools.WithTaskStore(ctx, tasks.New())
 
-	// Temporarily install the turn's spawner/manager into the process-global
-	// slots so that DefaultToolsFor() advertises sub_agent and workflow. Save
-	// the previous values so callers can restore them after the turn.
-	prevSpawner := tools.ActiveSpawner()
-	prevSubAgentMgr := tools.DefaultSubAgentManager()
-	spawner := mgr.Spawner()
-	if spawner == nil {
-		spawner = mkSpawner()
-	}
-	tools.SetSpawner(spawner)
-	tools.SetDefaultSubAgentManager(mgr)
-	// Same save-and-restore shape for the workflow tool's Definition(), which
-	// takes no ctx and so can't see a.CWD directly — see workflow.go's
-	// ActiveWorkflowDiscoveryCWD doc comment.
+	// #1133: sub_agent/workflow advertisement no longer needs the turn's
+	// spawner/manager installed into the process-global slots — callers use
+	// tools.DefaultToolsForCtx(ctx, ...) with the ctx returned above, which
+	// sees the ctx-scoped manager just stamped in directly. That removes a
+	// data-race-prone per-turn mutation of process-global state on a server
+	// that's inherently multi-session; see tools.DefaultToolsForCtx's doc
+	// comment.
+	//
+	// The workflow tool's Definition(), unlike its Execute, takes no ctx and
+	// so can't see a.CWD directly — that one remains a save-and-restore
+	// process-global swap (a separate concern from advertisement gating; see
+	// workflow.go's ActiveWorkflowDiscoveryCWD doc comment).
 	prevWorkflowDiscoveryCWD := tools.ActiveWorkflowDiscoveryCWD()
 	tools.SetWorkflowDiscoveryCWD(a.CWD)
 	cleanup := func() {
-		tools.SetSpawner(prevSpawner)
-		tools.SetDefaultSubAgentManager(prevSubAgentMgr)
 		tools.SetWorkflowDiscoveryCWD(prevWorkflowDiscoveryCWD)
 	}
 
