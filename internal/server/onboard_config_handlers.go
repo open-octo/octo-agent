@@ -226,7 +226,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		Models:          models,
 		DefaultModelIdx: defaultIdx,
 		FontSize:        "medium",
-		Language:        "en",
+		Language:        cfg.Language,
 		ShowReasoning:   cfg.ShowReasoning,
 		Coauthor:        &effCoauthor,
 	})
@@ -324,6 +324,38 @@ func (s *Server) handlePutCoauthor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "coauthor": req.Coauthor})
+}
+
+// ─── PUT /api/config/language ────────────────────────────────────────────────
+
+type putLanguageRequest struct {
+	Language string `json:"language"`
+}
+
+func (s *Server) handlePutLanguage(w http.ResponseWriter, r *http.Request) {
+	var req putLanguageRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Language != "en" && req.Language != "zh" {
+		writeError(w, http.StatusBadRequest, "language must be 'en' or 'zh'")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+		return
+	}
+
+	cfg.Language = req.Language
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "language": req.Language})
 }
 
 // maskKey masks most of an API key, keeping the first and last four runes

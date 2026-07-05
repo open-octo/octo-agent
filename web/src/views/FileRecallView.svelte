@@ -76,7 +76,7 @@
   }
 
   async function handleEmptyAll() {
-    if (!confirm(`Permanently delete all ${totalCount} files? This cannot be undone.`)) return
+    if (!confirm(tr('files.confirm_empty_all').replace('{n}', String(totalCount)))) return
     try {
       await api.emptyTrash({ mode: 'all' })
       items = []
@@ -119,9 +119,9 @@
     try {
       const ms = Date.now() - new Date(iso).getTime()
       const days = Math.floor(ms / 86400000)
-      if (days === 0) return 'Today'
-      if (days === 1) return 'Yesterday'
-      return `${days} days ago`
+      if (days === 0) return tr('files.age_today')
+      if (days === 1) return tr('files.age_yesterday')
+      return tr('files.age_days_ago').replace('{n}', String(days))
     } catch { return iso }
   }
 
@@ -156,7 +156,7 @@
     <!-- Stats + actions -->
     <div class="stats-bar">
       <span class="stats-text">
-        {totalCount} {totalCount === 1 ? 'file' : 'files'}, {fmtSize(totalSize)}{#if orphanCount > 0} · {orphanCount} {orphanCount === 1 ? 'orphan' : 'orphans'}{/if}
+        {$t('files.count_files').replace('{n}', String(totalCount))}, {fmtSize(totalSize)}{#if orphanCount > 0} · {$t('files.count_orphans').replace('{n}', String(orphanCount))}{/if}
       </span>
       <div class="bar-actions">
         <button class="btn-outline" onclick={reload} disabled={loading}>

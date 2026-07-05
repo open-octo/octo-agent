@@ -11,8 +11,8 @@
   // way, so it looked identical to success).
   function copyArtifact() {
     navigator.clipboard.writeText(cur?.code ?? '')
-      .then(() => showToast('Copied to clipboard'))
-      .catch(() => showToast('Copy failed — clipboard access denied', 'error'))
+      .then(() => showToast(tr('artifacts.copied')))
+      .catch(() => showToast(tr('artifacts.copy_failed'), 'error'))
   }
 
   function downloadArtifact() {

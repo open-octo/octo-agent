@@ -48,7 +48,7 @@
     {#if runningCount > 0}
       <span class="running-badge">
         <iconify-icon icon="ant-design:loading-outlined" width="12" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
-        {runningCount} running
+        {runningCount} {$t('tools.running')}
       </span>
     {:else}
       <span class="running-badge done">
@@ -75,12 +75,12 @@
         {#if a.status === 'running'}
           <span class="status-running">
             <iconify-icon icon="ant-design:loading-outlined" width="12" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
-            <span class="mono">{a.lastTool || $t('agent.working')} · {a.tools.length} tool{a.tools.length === 1 ? '' : 's'}</span>
+            <span class="mono">{a.lastTool || $t('agent.working')} · {$t('agent.n_tools').replace('{n}', String(a.tools.length))}</span>
           </span>
         {:else}
           <span class="status-done">
             <iconify-icon icon="ant-design:check-circle-outlined" width="13"></iconify-icon>
-            done · {a.tools.length} tool{a.tools.length === 1 ? '' : 's'}
+            {$t('agent.done_n_tools').replace('{n}', String(a.tools.length))}
           </span>
         {/if}
         <iconify-icon icon={(expanded[a.id] ?? (a.status === 'done')) ? 'lucide:chevron-down' : 'lucide:chevron-right'} width="13" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>

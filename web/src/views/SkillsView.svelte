@@ -31,11 +31,11 @@
   }
 
   async function handleDelete(name: string) {
-    if (!confirm(`Delete skill "${name}"?`)) return
+    if (!confirm(tr('skills.confirm_delete').replace('{name}', name))) return
     try {
       await api.deleteSkill(name)
       skills.update(list => list.filter(s => s.name !== name))
-      showToast(`Skill "${name}" deleted`)
+      showToast(tr('skills.toast_deleted').replace('{name}', name))
     } catch (err: any) {
       showToast(err.message, 'error')
     }
@@ -137,7 +137,7 @@
         return
       }
       skills.set(await api.listSkills())
-      showToast(`Skill "${r.name}" imported`)
+      showToast(tr('skills.toast_imported').replace('{name}', r.name))
       importOpen = false
     } catch (err: any) {
       showToast(tr('skills.import_error') + err.message, 'error')

@@ -107,7 +107,7 @@
     try {
       await api.deleteMcpServer(name)
       mcpServers.update(list => (list as any[]).filter((s: any) => s.name !== name))
-      showToast('Server removed')
+      showToast(tr('mcp.toast_removed'))
     } catch (e: any) {
       showToast(e.message ?? 'Failed to delete server', 'error')
     }
@@ -218,7 +218,7 @@
   async function reconnect(name: string) {
     try {
       await api.reconnectMcpServer(name)
-      showToast('Reconnecting ' + name + '…')
+      showToast(tr('mcp.toast_reconnecting') + ' ' + name + '…')
       setTimeout(reload, 1500)
     } catch (e: any) {
       showToast(e.message ?? 'Failed to reconnect', 'error')
@@ -314,11 +314,11 @@
                   <span class="transport-badge mono">{srv.transport}</span>
                 {/if}
                 {#if srv.source === 'project'}
-                  <span class="transport-badge mono">project</span>
+                  <span class="transport-badge mono">{$t('mcp.badge_project')}</span>
                 {/if}
                 <StatusTag status={tag.tagStatus}>{tag.tagLabel}</StatusTag>
                 {#if srv.status === 'connected'}
-                  <span class="tool-count">{srv.tools} tool{srv.tools !== 1 ? 's' : ''}</span>
+                  <span class="tool-count">{$t('mcp.tool_count').replace('{n}', String(srv.tools))}</span>
                 {/if}
               </div>
               <span class="server-cmd mono">{srv.command || srv.url || ''}</span>

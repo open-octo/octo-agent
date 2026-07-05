@@ -255,7 +255,7 @@
     } else if (item.kind === 'mcp-server') {
       text = '/mcp/' + item.name + ' '
     } else if (item.kind === 'mcp-tool') {
-      text = `请帮我调用 mcp__${item.server}__${item.tool.name}，并说明需要什么参数`
+      text = $t('composer.mcp_tool_prompt').replace('{server}', item.server).replace('{tool}', item.tool.name)
     }
     hideSlashMenu()
     queueMicrotask(() => textareaEl?.focus())
@@ -615,7 +615,7 @@
                 {/if}
               {:else if item.kind === 'mcp-server'}
                 <span class="skill-name">/mcp/{item.name}</span>
-                <span class="skill-desc">MCP server</span>
+                <span class="skill-desc">{$t('composer.label_mcp_server')}</span>
               {:else}
                 <span class="skill-name">mcp__{item.server}__{item.tool.name}</span>
                 {#if item.tool.description}
@@ -625,7 +625,7 @@
             </button>
           {:else}
             <div class="skill-menu-empty">
-              {slashMode === 'skills' ? 'No matching skills' : slashMode === 'workflows' ? 'No matching workflows' : slashMode === 'mcp-servers' ? 'No matching MCP servers' : 'No tools found'}
+              {slashMode === 'skills' ? $t('composer.no_match_skills') : slashMode === 'workflows' ? $t('composer.no_match_workflows') : slashMode === 'mcp-servers' ? $t('composer.no_match_servers') : $t('composer.no_match_tools')}
             </div>
           {/each}
         </div>

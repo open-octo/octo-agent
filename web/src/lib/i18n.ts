@@ -121,6 +121,63 @@ export const en: Record<string, string> = {
   "tools.results": "results",
   "tools.changes": "changes",
   "tools.matches": "matches",
+  // tool group (ToolGroup.svelte)
+  "tools.n_used": "{n} tools used",
+  "tools.n_used_one": "{n} tool used",
+  "tools.background": "Background",
+  "tools.show_earlier": "Show {n} earlier lines",
+  "tools.show_more": "Show {n} more lines",
+  "tools.n_more_lines": "{n} more lines",
+  // MCP view (McpView.svelte)
+  "mcp.toast_removed": "Server removed",
+  "mcp.toast_reconnecting": "Reconnecting",
+  "mcp.badge_project": "project",
+  "mcp.tool_count": "{n} tool(s)",
+  // Skills view
+  "skills.confirm_delete": "Delete skill \"{name}\"?",
+  "skills.toast_deleted": "Skill \"{name}\" deleted",
+  "skills.toast_imported": "Skill \"{name}\" imported",
+  // Tasks view
+  "tasks.toast_started": "Task started",
+  "tasks.toast_deleted": "Task deleted",
+  // Channels view
+  "channels.not_configured": "Not configured",
+  "status.stopped": "Stopped",
+  "channels.activity_running": "Adapter is running and accepting messages",
+  "channels.activity_enabled": "Enabled but not yet started — restart the server to activate",
+  // Profile view
+  "profile.n_entries": "{n} entries",
+  // File recall view
+  "files.confirm_empty_all": "Permanently delete all {n} files? This cannot be undone.",
+  "files.age_today": "Today",
+  "files.age_yesterday": "Yesterday",
+  "files.age_days_ago": "{n} days ago",
+  "files.count_files": "{n} files",
+  "files.count_file": "{n} file",
+  "files.count_orphans": "{n} orphans",
+  "files.count_orphan": "{n} orphan",
+  // Sidebar
+  "sidebar.n_selected": "{n} selected",
+  // Sub-agents card
+  "agent.n_running": "{n} running",
+  "agent.n_tools": "{n} tools",
+  "agent.done_n_tools": "done · {n} tools",
+  // Background processes
+  "bgtask.n_processes": "{n} background processes",
+  "bgtask.n_process": "{n} background process",
+  "bgtask.running_elapsed": "running · {elapsed}",
+  // Artifacts panel
+  "artifacts.copied": "Copied to clipboard",
+  "artifacts.copy_failed": "Copy failed — clipboard access denied",
+  // Command palette
+  "cmdk.no_matches": "No matches for \"{query}\"",
+  // Composer
+  "composer.mcp_tool_prompt": "Please help me call mcp__{server}__{tool} and explain what params are needed",
+  "composer.label_mcp_server": "MCP server",
+  "composer.no_match_skills": "No matching skills",
+  "composer.no_match_workflows": "No matching workflows",
+  "composer.no_match_servers": "No matching MCP servers",
+  "composer.no_match_tools": "No tools found",
   "agent.plan": "Plan",
   "agent.thoughts": "Thoughts",
   "agent.sub_agents": "Sub-agents",
@@ -550,6 +607,63 @@ export const zh: Record<string, string> = {
   "tools.results": "条结果",
   "tools.changes": "处修改",
   "tools.matches": "处匹配",
+  // tool group (ToolGroup.svelte)
+  "tools.n_used": "使用了 {n} 个工具",
+  "tools.n_used_one": "使用了 {n} 个工具",
+  "tools.background": "后台运行",
+  "tools.show_earlier": "显示前 {n} 行",
+  "tools.show_more": "显示剩余 {n} 行",
+  "tools.n_more_lines": "剩余 {n} 行",
+  // MCP 视图 (McpView.svelte)
+  "mcp.toast_removed": "服务器已移除",
+  "mcp.toast_reconnecting": "重新连接中",
+  "mcp.badge_project": "项目",
+  "mcp.tool_count": "{n} 个工具",
+  // 技能视图
+  "skills.confirm_delete": "删除技能 \"{name}\"?",
+  "skills.toast_deleted": "技能 \"{name}\" 已删除",
+  "skills.toast_imported": "技能 \"{name}\" 已导入",
+  // 任务视图
+  "tasks.toast_started": "任务已启动",
+  "tasks.toast_deleted": "任务已删除",
+  // 渠道视图
+  "channels.not_configured": "未配置",
+  "status.stopped": "已停止",
+  "channels.activity_running": "适配器正在运行并接受消息",
+  "channels.activity_enabled": "已启用但尚未启动 — 重启服务器以激活",
+  // 助手记忆视图
+  "profile.n_entries": "{n} 条记录",
+  // 文件回收站视图
+  "files.confirm_empty_all": "确定要永久删除全部 {n} 个文件吗？此操作不可撤销。",
+  "files.age_today": "今天",
+  "files.age_yesterday": "昨天",
+  "files.age_days_ago": "{n} 天前",
+  "files.count_files": "{n} 个文件",
+  "files.count_file": "{n} 个文件",
+  "files.count_orphans": "{n} 个孤立文件",
+  "files.count_orphan": "{n} 个孤立文件",
+  // 侧边栏
+  "sidebar.n_selected": "已选择 {n} 项",
+  // 子 Agent 卡片
+  "agent.n_running": "{n} 个运行中",
+  "agent.n_tools": "{n} 个工具",
+  "agent.done_n_tools": "完成 · {n} 个工具",
+  // 后台进程
+  "bgtask.n_processes": "{n} 个后台进程",
+  "bgtask.n_process": "{n} 个后台进程",
+  "bgtask.running_elapsed": "运行中 · {elapsed}",
+  // 制品面板
+  "artifacts.copied": "已复制到剪贴板",
+  "artifacts.copy_failed": "复制失败 — 剪贴板访问被拒绝",
+  // 命令面板
+  "cmdk.no_matches": "未找到 \"{query}\" 的匹配项",
+  // 编辑器
+  "composer.mcp_tool_prompt": "请帮我调用 mcp__{server}__{tool}，并说明需要什么参数",
+  "composer.label_mcp_server": "MCP 服务器",
+  "composer.no_match_skills": "未找到匹配的技能",
+  "composer.no_match_workflows": "未找到匹配的工作流",
+  "composer.no_match_servers": "未找到匹配的 MCP 服务器",
+  "composer.no_match_tools": "未找到工具",
   "agent.plan": "计划",
   "agent.thoughts": "思考",
   "agent.sub_agents": "子 Agent",

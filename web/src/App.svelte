@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning } from './lib/stores'
   import { ws, wsState } from './lib/ws'
-  import { locale, t } from './lib/i18n'
+  import { locale, t, setLocale } from './lib/i18n'
   import { checkAuth } from './lib/auth'
   import { get } from 'svelte/store'
   import * as api from './lib/api'
@@ -95,6 +95,12 @@
 
   function bootMain() {
     ws.connect()
+
+    // Restore the persisted UI language from server config so a refresh
+    // keeps the user's locale choice.
+    api.getConfig().then(cfg => {
+      if (cfg.language) setLocale(cfg.language)
+    }).catch(() => { /* non-critical */ })
 
     ws.on('session_list', (ev: any) => {
       const list = ev.sessions ?? []

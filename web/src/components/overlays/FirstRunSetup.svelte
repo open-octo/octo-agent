@@ -42,6 +42,8 @@
   // onboarding complete and hand off to the personalisation chat. The gate falls
   // through to the normal UI, where ChatView auto-sends the queued /onboard.
   async function finishOnboard() {
+    // Persist the language choice so a refresh lands on it.
+    await api.updateLanguage(lang).catch(() => {})
     await api.completeOnboard()
     await openAgentSession(`/onboard lang:${lang}`, '✨ Onboard')
     onboardPhase.set('')

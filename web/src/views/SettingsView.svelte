@@ -26,6 +26,7 @@
   let providersLoaded = $state(false)
 
   // Original values for dirty-checking
+  let origLanguage    = 'en'
   let origWorkdir      = ''
   let origReasoning    = 'Medium'
   let origShowReasoning = true
@@ -160,6 +161,7 @@
       // server only hardcodes a placeholder, so don't let it clobber the saved
       // choice. Language still seeds from config when present.
       if (cfg.language)   language = cfg.language
+      origLanguage = language
     } catch (e: any) {
       showToast(`Failed to load config: ${e.message}`, 'error')
     } finally {
@@ -262,6 +264,14 @@
       if (coauthor !== origCoauthor) {
         await api.updateCoauthor(coauthor)
         origCoauthor = coauthor
+      }
+
+      // Language: persisted globally on the server so a refresh lands on the
+      // same locale, then immediately applied.
+      if (language !== origLanguage) {
+        await api.updateLanguage(language)
+        origLanguage = language
+        setLocale(language === 'zh' || language === 'zh-TW' ? 'zh' : 'en')
       }
 
       // Working directory: the one field that actually needs an active

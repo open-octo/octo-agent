@@ -148,7 +148,7 @@
           {/if}
         </div>
         {#if loadingSoul}
-          <div class="card-loading">Loading…</div>
+          <div class="card-loading">{$t('common.loading')}</div>
         {:else if soulData}
           <div class="card-body md-content">{@html renderMarkdown(soulData.content)}</div>
         {:else}
@@ -176,7 +176,7 @@
           {/if}
         </div>
         {#if loadingUser}
-          <div class="card-loading">Loading…</div>
+          <div class="card-loading">{$t('common.loading')}</div>
         {:else if userData}
           <div class="card-body md-content">{@html renderMarkdown(userData.content)}</div>
         {:else}
@@ -196,7 +196,7 @@
         <div class="card-header">
           <div style="display:flex;align-items:center;gap:8px;">
             <span class="card-title">{$t('profile.memories_title')}</span>
-            <span class="mem-count">{memFiles.length} entries</span>
+            <span class="mem-count">{$t('profile.n_entries').replace('{n}', String(memFiles.length))}</span>
           </div>
           <span class="auto-badge">
             <iconify-icon icon="ant-design:thunderbolt-outlined" width="13"></iconify-icon>
@@ -227,7 +227,7 @@
               </summary>
               <div class="mem-body">
                 {#if memContent[f.path] === undefined || memContent[f.path] === ''}
-                  <span class="mem-loading">Loading…</span>
+                  <span class="mem-loading">{$t('common.loading')}</span>
                 {:else}
                   <div class="md-content">{@html renderMarkdown(memContent[f.path])}</div>
                 {/if}

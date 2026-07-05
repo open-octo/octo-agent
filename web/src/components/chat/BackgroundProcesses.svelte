@@ -17,7 +17,7 @@
     <details>
       <summary class="tray-summary">
         <span class="dot"></span>
-        <span class="lbl">{tasks.length} background {tasks.length === 1 ? 'process' : 'processes'}</span>
+        <span class="lbl">{$t('bgtask.n_processes').replace('{n}', String(tasks.length))}</span>
         <span style="margin-left:auto"></span>
         <iconify-icon icon="lucide:chevron-up" width="14" style="color:var(--text-tertiary)"></iconify-icon>
       </summary>
@@ -28,7 +28,7 @@
           <div class="proc-info">
             <span class="proc-cmd mono">{p.command}</span>
           </div>
-          <span class="proc-time">running · {fmtElapsed(p.elapsed)}</span>
+          <span class="proc-time">{$t('bgtask.running_elapsed').replace('{elapsed}', fmtElapsed(p.elapsed))}</span>
         </div>
         {/each}
       </div>

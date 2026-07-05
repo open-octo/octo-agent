@@ -126,7 +126,7 @@
 
         {#if $selMode && Object.keys($sel).length > 0}
         <div class="batch-bar">
-          <span class="batch-count">{Object.keys($sel).length} selected</span>
+          <span class="batch-count">{$t('sidebar.n_selected').replace('{n}', String(Object.keys($sel).length))}</span>
           <button class="batch-del" onclick={delSelected}>
             <iconify-icon icon="ant-design:delete-outlined" width="12"></iconify-icon>
             {$t('common.delete')}

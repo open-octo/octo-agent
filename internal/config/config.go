@@ -132,6 +132,9 @@ type Config struct {
 	// as a literal path. Does not affect CLI/TUI sessions or the server's
 	// own cwd, and composes with the per-session working_dir override.
 	WorkspaceDir string `yaml:"workspace_dir,omitempty"`
+	// Language persists the user's UI language preference ("en" | "zh").
+	// Empty means the default (English).
+	Language string `yaml:"language,omitempty"`
 }
 
 // GoalConfig configures session goals (persistent objectives the agent keeps

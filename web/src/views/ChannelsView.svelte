@@ -4,7 +4,7 @@
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
   import * as api from '../lib/api'
-  import { t } from '../lib/i18n'
+  import { t, tr } from '../lib/i18n'
 
   // platform-to-icon mapping for well-known channels
   const platformIcons: Record<string, string> = {
@@ -115,21 +115,21 @@
   }
 
   function tagFor(row: ChannelRow): { status: string; label: string } {
-    if (!row.has_config) return { status: 'default', label: 'Not configured' }
-    if (!row.enabled)    return { status: 'default', label: 'Disabled' }
+    if (!row.has_config) return { status: 'default', label: tr('channels.not_configured') }
+    if (!row.enabled)    return { status: 'default', label: tr('status.disabled') }
     // #1121: a config/startup problem or an ongoing crash-restart loop — show
     // it distinctly from a plain "Stopped" (which reads as "not started yet",
     // not "something is wrong").
-    if (row.issue)       return { status: 'error', label: 'Error' }
-    if (row.running)     return { status: 'success', label: 'Running' }
-    return { status: 'warning', label: 'Stopped' }
+    if (row.issue)       return { status: 'error', label: tr('status.error') }
+    if (row.running)     return { status: 'success', label: tr('status.running') }
+    return { status: 'warning', label: tr('status.stopped') }
   }
 
   function activityFor(row: ChannelRow): string {
     if (row.issue) return row.issue
-    if (row.running) return 'Adapter is running and accepting messages'
-    if (row.enabled) return 'Enabled but not yet started — restart the server to activate'
-    return 'Disabled'
+    if (row.running) return tr('channels.activity_running')
+    if (row.enabled) return tr('channels.activity_enabled')
+    return tr('status.disabled')
   }
 
   function labelFor(platform: string): string {

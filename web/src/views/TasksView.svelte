@@ -63,7 +63,7 @@
   async function handleRun(t: api.TaskResponse) {
     try {
       const res = await api.runTask(t.id)
-      showToast('Task started')
+      showToast(tr('tasks.toast_started'))
       if (res.session_id) {
         // Refresh the session list so the new session shows in the sidebar,
         // then activate it and switch to chat. The streamed turn events will
@@ -93,7 +93,7 @@
     try {
       await api.deleteTask(t.id)
       rawTasks = rawTasks.filter(r => r.id !== t.id)
-      showToast('Task deleted')
+      showToast(tr('tasks.toast_deleted'))
     } catch (e: any) {
       showToast(e?.message ?? 'Failed to delete task', 'error')
     }

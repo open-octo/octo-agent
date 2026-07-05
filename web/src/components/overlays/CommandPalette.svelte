@@ -116,7 +116,7 @@
     </div>
     <div class="results">
       {#if flatItems.length === 0}
-        <div class="empty">No matches for "{query}"</div>
+        <div class="empty">{$t('cmdk.no_matches').replace('{query}', query)}</div>
       {/if}
 
       {#if matchedSessions.length > 0}

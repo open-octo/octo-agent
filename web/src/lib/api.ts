@@ -505,6 +505,13 @@ export async function updateCoauthor(coauthor: boolean): Promise<{ ok: boolean; 
   })
 }
 
+export async function updateLanguage(language: string): Promise<{ ok: boolean; language?: string }> {
+  return request<{ ok: boolean; language?: string }>('/api/config/language', {
+    method: 'PUT',
+    ...json({ language }),
+  })
+}
+
 export async function getVersion(): Promise<unknown> {
   return request<unknown>('/api/version', { cache: 'no-store' })
 }

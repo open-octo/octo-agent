@@ -232,7 +232,7 @@
   <div class="tool-group">
     <div class="group-header">
       <iconify-icon icon="ant-design:tool-outlined" width="14" style="color:var(--text-tertiary)"></iconify-icon>
-      <span class="hdr-label">{tools.length} {tools.length === 1 ? 'tool' : 'tools'} used</span>
+      <span class="hdr-label">{$t('tools.n_used').replace('{n}', String(tools.length))}</span>
       {#if groupStreaming}
         <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:12px;color:var(--blue-6)">
           <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
@@ -284,11 +284,11 @@
                 {$t('tools.running')}
                 {#if tool.name === 'terminal' || tool.name === 'bash'}
                   <button class="promote-btn" onclick={(e) => { e.preventDefault(); e.stopPropagation(); promoteTerminal() }}>
-                    Background
+                    {$t('tools.background')}
                   </button>
                 {:else if tool.name === 'sub_agent'}
                   <button class="promote-btn" onclick={(e) => { e.preventDefault(); e.stopPropagation(); promoteSubAgent() }}>
-                    Background
+                    {$t('tools.background')}
                   </button>
                 {/if}
               </span>
@@ -339,7 +339,7 @@
             {#if isTerm && fold.hidden > 0}
               <button class="fold-btn" onclick={() => expanded[tool.id] = true}>
                 <iconify-icon icon="lucide:chevron-up" width="13"></iconify-icon>
-                Show {fold.hidden} earlier lines
+                {$t('tools.show_earlier').replace('{n}', String(fold.hidden))}
               </button>
             {/if}
             <pre class="terminal-output">{#each fold.shown.split('\n') as line}{#if line.startsWith('$ ') || line === '$'}<span class="term-prompt">$</span>{line.slice(1)}{:else}{line}{/if}
@@ -347,7 +347,7 @@
             {#if !isTerm && fold.hidden > 0}
               <button class="fold-btn" onclick={() => expanded[tool.id] = true}>
                 <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
-                Show {fold.hidden} more lines
+                {$t('tools.show_more').replace('{n}', String(fold.hidden))}
               </button>
             {/if}
           </div>
@@ -371,7 +371,7 @@
             {#if tool.ui_payload.preview_truncated}
               <div class="fold-info">
                 <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
-                {tool.ui_payload.line_count - 30} more lines
+                {$t('tools.n_more_lines').replace('{n}', String(tool.ui_payload.line_count - 30))}
               </div>
             {/if}
           </div>
@@ -383,14 +383,14 @@
             {#if isTerm && fold.hidden > 0}
               <button class="fold-btn light" onclick={() => expanded[tool.id] = true}>
                 <iconify-icon icon="lucide:chevron-up" width="13"></iconify-icon>
-                Show {fold.hidden} earlier lines
+                {$t('tools.show_earlier').replace('{n}', String(fold.hidden))}
               </button>
             {/if}
             <pre class="tool-output">{fold.shown}</pre>
             {#if !isTerm && fold.hidden > 0}
               <button class="fold-btn light" onclick={() => expanded[tool.id] = true}>
                 <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
-                Show {fold.hidden} more lines
+                {$t('tools.show_more').replace('{n}', String(fold.hidden))}
               </button>
             {/if}
           </div>
