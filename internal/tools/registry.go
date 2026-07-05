@@ -233,11 +233,35 @@ func DefaultTools() []agent.ToolDefinition { return DefaultToolsFor("") }
 // SubAgentManager. Advertising a tool that can only error wastes a slot and
 // confuses the model.
 //
+// This is the process-global-only gate: it sees a session/turn's sub-agent
+// manager only if something wrote it into the CLI/TUI's process-wide slot
+// (tools.SetSpawner / tools.SetDefaultSubAgentManager), which is only correct
+// for a single-session process. Server/cron turns — inherently multi-session —
+// must use DefaultToolsForCtx instead so per-turn advertisement doesn't depend
+// on process-global state (#1133).
+//
 // MCP surfaces ride alongside the built-ins. When Tool Search is active for
 // this model (see toolSearchActive) the full per-tool catalog is replaced by
 // the three search/describe/call bridge tools, so the model's tools array
 // carries three small schemas instead of every MCP tool's schema every turn.
 func DefaultToolsFor(model string) []agent.ToolDefinition {
+	return defaultToolsFor(context.Background(), model)
+}
+
+// DefaultToolsForCtx is DefaultToolsFor, but also advertises sub_agent* and
+// workflow* when THIS turn has a ctx-scoped SubAgentManager (tools.
+// WithSubAgentManager) — even if no process-global spawner/manager is
+// registered. Server/cron turns each carry their own per-turn manager in ctx
+// (see prepareToolTurn); this lets them advertise correctly without the
+// per-turn tools.SetSpawner/tools.SetDefaultSubAgentManager swap-and-restore
+// that used to be required, which mutated process-global state on every turn
+// of an inherently multi-session process (#1133). CLI/TUI callers, which have
+// no ctx-scoped manager, see identical behavior to DefaultToolsFor.
+func DefaultToolsForCtx(ctx context.Context, model string) []agent.ToolDefinition {
+	return defaultToolsFor(ctx, model)
+}
+
+func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 	skillsOn := skillsEnabled()
 	mgrOn := subAgentManagerEnabled()
 	askerOn := askerEnabled()
@@ -248,6 +272,15 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 	wakerOn := wakerEnabled()
 	browserOn := browserEnabled()
 	spawnerOn := spawnerEnabled()
+	// A ctx-scoped manager (per-turn, server/IM — see WithSubAgentManager)
+	// makes both gates true for this turn even when the process-global
+	// spawner/manager slots are untouched.
+	if ctxMgr := subAgentManagerFromContext(ctx); ctxMgr != nil {
+		mgrOn = true
+		if ctxMgr.Spawner() != nil {
+			spawnerOn = true
+		}
+	}
 	defs := make([]agent.ToolDefinition, 0, len(allTools))
 	for _, t := range allTools {
 		if _, isSendFile := t.(SendFileTool); isSendFile && !messengerOn {

@@ -293,8 +293,11 @@ func TestPrepareToolTurn_SessionScopedAsyncManager(t *testing.T) {
 }
 
 // TestPrepareToolTurn_AdvertisesSubAgentAndWorkflow guards the core fix for
-// cron/server sessions: after prepareToolTurn, DefaultToolsFor must include
-// both sub_agent and workflow so the model can invoke them.
+// cron/server sessions: after prepareToolTurn, tools.DefaultToolsForCtx(ctx,
+// ...) — using the ctx prepareToolTurn returns — must include both sub_agent
+// and workflow so the model can invoke them, and (#1133) it must do so
+// without writing to the process-global spawner/sub-agent-manager slots,
+// since those are only meaningful for a single-session CLI process.
 func TestPrepareToolTurn_AdvertisesSubAgentAndWorkflow(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -308,7 +311,8 @@ func TestPrepareToolTurn_AdvertisesSubAgentAndWorkflow(t *testing.T) {
 		tools.SetDefaultSubAgentManager(prevMgr)
 	})
 
-	// Ensure we start from a clean slate; prepareToolTurn should install its own.
+	// Start from a clean slate: nothing but the ctx-scoped manager
+	// prepareToolTurn stamps into ctx should make the gate pass.
 	tools.SetSpawner(nil)
 	tools.SetDefaultSubAgentManager(nil)
 
@@ -317,25 +321,36 @@ func TestPrepareToolTurn_AdvertisesSubAgentAndWorkflow(t *testing.T) {
 	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, "adv-test")
 	t.Cleanup(func() { tools.CloseSessionSubAgentManager("adv-test") })
 
-	_, _, _, cleanup, err := srv.prepareToolTurn(ctx, a, nil)
+	turnCtx, _, _, cleanup, err := srv.prepareToolTurn(ctx, a, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
 	defer cleanup()
 
-	names := toolNames(tools.DefaultToolsFor(a.Model))
+	names := toolNames(tools.DefaultToolsForCtx(turnCtx, a.Model))
 	if !slices.Contains(names, "sub_agent") {
-		t.Errorf("DefaultToolsFor missing sub_agent; got %v", names)
+		t.Errorf("DefaultToolsForCtx missing sub_agent; got %v", names)
 	}
 	if !slices.Contains(names, "workflow") {
-		t.Errorf("DefaultToolsFor missing workflow; got %v", names)
+		t.Errorf("DefaultToolsForCtx missing workflow; got %v", names)
+	}
+
+	// #1133's whole point: the turn must not have installed itself into the
+	// process-global slots to get there.
+	if tools.ActiveSpawner() != nil {
+		t.Error("prepareToolTurn must not write the process-global spawner")
+	}
+	if tools.DefaultSubAgentManager() != nil {
+		t.Error("prepareToolTurn must not write the process-global sub-agent manager")
 	}
 }
 
-// TestPrepareToolTurn_CleanupRestoresGlobalSpawner verifies that the cleanup
-// returned by prepareToolTurn restores the previous global spawner and
-// sub-agent manager, so later server turns or CLI paths see their own state.
-func TestPrepareToolTurn_CleanupRestoresGlobalSpawner(t *testing.T) {
+// TestPrepareToolTurn_DoesNotTouchGlobalSpawner (#1133) replaces the old
+// swap-and-restore contract: prepareToolTurn must leave the process-global
+// spawner/sub-agent-manager slots completely alone — not set them and
+// restore them, just never touch them — since a multi-session server can't
+// safely mutate process-global state per turn.
+func TestPrepareToolTurn_DoesNotTouchGlobalSpawner(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
@@ -347,11 +362,11 @@ func TestPrepareToolTurn_CleanupRestoresGlobalSpawner(t *testing.T) {
 		tools.SetDefaultSubAgentManager(prevMgr)
 	})
 
-	// Pre-seed the global slots with sentinel values so we can prove restoration.
-	fake := &fakeGlobalSpawner{}
-	prevMgrForTest := tools.NewSubAgentManager(nil)
-	tools.SetSpawner(fake)
-	tools.SetDefaultSubAgentManager(prevMgrForTest)
+	// Pre-seed the global slots with sentinel values so any write during the
+	// turn (or its cleanup) would be observable.
+	sentinelMgr := tools.NewSubAgentManager(nil)
+	tools.SetSpawner(nil)
+	tools.SetDefaultSubAgentManager(sentinelMgr)
 
 	srv := mustServer(t, Config{Tools: true})
 	a := agent.New(&stubSender{}, "stub-model")
@@ -362,25 +377,21 @@ func TestPrepareToolTurn_CleanupRestoresGlobalSpawner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
-	if tools.ActiveSpawner() == nil {
-		t.Error("global spawner should be set during the turn")
+	if tools.ActiveSpawner() != nil {
+		t.Error("prepareToolTurn wrote the process-global spawner during the turn")
 	}
-	if tools.DefaultSubAgentManager() == nil {
-		t.Error("global sub-agent manager should be set during the turn")
+	if tools.DefaultSubAgentManager() != sentinelMgr {
+		t.Error("prepareToolTurn overwrote the process-global sub-agent manager during the turn")
 	}
 
 	cleanup()
 
-	if tools.ActiveSpawner() != fake {
-		t.Error("cleanup did not restore previous global spawner")
+	if tools.ActiveSpawner() != nil {
+		t.Error("cleanup should not have touched the process-global spawner")
 	}
-	if tools.DefaultSubAgentManager() != prevMgrForTest {
-		t.Error("cleanup did not restore previous global sub-agent manager")
+	if tools.DefaultSubAgentManager() != sentinelMgr {
+		t.Error("cleanup should not have touched the process-global sub-agent manager")
 	}
-
-	// Restore the truly original values so the test cleanup doesn't leak.
-	tools.SetSpawner(prevSpawner)
-	tools.SetDefaultSubAgentManager(prevMgr)
 }
 
 func toolNames(defs []agent.ToolDefinition) []string {
@@ -389,15 +400,4 @@ func toolNames(defs []agent.ToolDefinition) []string {
 		names[i] = d.Name
 	}
 	return names
-}
-
-// fakeGlobalSpawner is a minimal Spawner used only to prove that
-// prepareToolTurn's cleanup restores the previous global value.
-type fakeGlobalSpawner struct{}
-
-func (fakeGlobalSpawner) Spawn(context.Context, tools.SpawnRequest) (tools.SpawnResult, error) {
-	return tools.SpawnResult{}, nil
-}
-func (fakeGlobalSpawner) Continue(context.Context, string, string) (tools.SpawnResult, error) {
-	return tools.SpawnResult{}, nil
 }

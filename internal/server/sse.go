@@ -112,7 +112,7 @@ func (s *Server) handleTurnSSE(w http.ResponseWriter, r *http.Request) {
 			sseEvent(w, string(b))
 			return
 		}
-		toolDefs = tools.DefaultToolsFor(a.Model)
+		toolDefs = tools.DefaultToolsForCtx(runCtx, a.Model)
 	}
 
 	eventHandler := func(ev agent.AgentEvent) {

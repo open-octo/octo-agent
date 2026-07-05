@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/tasks"
@@ -11,11 +13,15 @@ import (
 // loop dispatches tool calls through, the manager that tracks async sub-agents
 // (sub_agent), and a model-aware tool-list function. Call
 // ToolsFor again after MCP connects so the list (or its Tool Search bridge)
-// picks up the new surface.
+// picks up the new surface. ToolsFor takes a ctx (server/cron callers pass the
+// turn's ctx so tools.DefaultToolsForCtx can see that turn's ctx-scoped
+// sub-agent manager, #1133); the CLI/TUI's single-session path can pass any
+// ctx since it has no ctx-scoped manager and always resolves through the
+// process-global slots this function also registers.
 type ToolEnv struct {
 	Executor    tools.DefaultRegistry
 	SubAgentMgr *tools.SubAgentManager
-	ToolsFor    func() []agent.ToolDefinition
+	ToolsFor    func(ctx context.Context) []agent.ToolDefinition
 }
 
 // WireTools sets up the tool environment every full-loop entry point shares —
@@ -31,7 +37,7 @@ type ToolEnv struct {
 // MCP connection strategy — those legitimately differ per entry point.
 func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	executor := tools.NewDefaultRegistry()
-	toolsFor := func() []agent.ToolDefinition { return tools.DefaultToolsFor(a.Model) }
+	toolsFor := func(ctx context.Context) []agent.ToolDefinition { return tools.DefaultToolsForCtx(ctx, a.Model) }
 
 	spawner := NewSpawner(a, executor, toolsFor)
 	tools.SetSpawner(spawner)

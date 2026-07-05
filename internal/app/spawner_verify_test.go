@@ -19,7 +19,7 @@ func TestVerify_AgentToolAsyncLaunchAndResume(t *testing.T) {
 	parent.System = "PARENT"
 
 	// Real spawner with the real childRegistry underneath.
-	sp := NewSpawner(parent, nilExecutor{}, func() []agent.ToolDefinition { return nil })
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
 
 	// Wire the manager exactly like cmd/octo/tuirepl.go does in production:
 	// SetDefaultSubAgentManager so the bare tools resolve it via t.manager().
