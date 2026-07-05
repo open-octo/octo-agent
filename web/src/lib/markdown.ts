@@ -26,7 +26,7 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;")
 }
 
-export function renderMarkdown(text: string): string {
+export function renderMarkdown(text: string, showReasoning = true): string {
   if (!text) return ""
 
   // 1. Extract <think>...</think> blocks, replace with placeholders
@@ -34,6 +34,7 @@ export function renderMarkdown(text: string): string {
   const PLACEHOLDER = "\x00THINK_BLOCK_\x00"
 
   const textWithPlaceholders = text.replace(/<think>([\s\S]*?)<\/think>/g, (_match, content: string) => {
+    if (!showReasoning) return ""
     const index = thinkSegments.length
     thinkSegments.push(content)
     return `${PLACEHOLDER}${index}\x00`

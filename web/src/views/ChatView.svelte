@@ -75,6 +75,7 @@
   let currentSession = $derived($sessions.find(s => s.id === $activeSessionId) ?? null)
   let artifactCount  = $derived($artifacts.length)
   let wsDisconnected = $derived($wsState === 'disconnected')
+  let showReasoning  = $derived($chatShowReasoning[$activeSessionId ?? ''] ?? currentSession?.show_reasoning ?? true)
 
   // Session-level plan panel: collapsed by default so it never occludes the
   // message stream; the user can expand it into a floating dropdown.
@@ -1087,7 +1088,7 @@
                   {/if}
 
                   <!-- Thoughts / reasoning block -->
-                  {#if msg.thinking}
+                  {#if msg.thinking && showReasoning}
                     <details class="think-block">
                       <summary class="think-summary">
                         <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
@@ -1104,7 +1105,7 @@
                       class="rich-answer"
                       use:setupAssistantEl
                     >
-                      {@html renderMarkdown(msg.content)}
+                      {@html renderMarkdown(msg.content, showReasoning)}
                     </div>
                   {/if}
 
@@ -1127,7 +1128,7 @@
                 </div>
               </div>
 
-            {:else if msg.type === 'thinking'}
+            {:else if msg.type === 'thinking' && showReasoning}
               <!-- Standalone Thoughts segment (reasoning before a tool round) -->
               <div class="msg-agent fadein">
                 <div class="agent-avatar"><OctoLogo size={18} /></div>
@@ -1169,7 +1170,7 @@
                   <iconify-icon icon="lucide:info" width="14"></iconify-icon>
                 </div>
                 <div class="agent-content">
-                  <div class="notice-line" data-level={msg.level}>{@html renderMarkdown(msg.content)}</div>
+                  <div class="notice-line" data-level={msg.level}>{@html renderMarkdown(msg.content, showReasoning)}</div>
                 </div>
               </div>
             {/if}
@@ -1186,7 +1187,7 @@
           {/if}
 
           <!-- Live thinking block while streaming -->
-          {#if streaming && thinking}
+          {#if streaming && thinking && showReasoning}
             <div class="msg-agent fadein">
               <div class="agent-avatar"><OctoLogo size={18} /></div>
               <div class="agent-content">
@@ -1196,7 +1197,7 @@
                     <span>{$t('chat.thinking')}</span>
                     <span class="think-meta mono">{fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↓ ~{fmtTokens(thinkTokens)} tokens{:else if ctxTokens > 0} · ↑ ~{fmtTokens(ctxTokens)} tokens{:else} · ↑{/if}</span>
                   </summary>
-                  <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(thinking)}</div>
+                  <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(thinking, showReasoning)}</div>
                 </details>
               </div>
             </div>
