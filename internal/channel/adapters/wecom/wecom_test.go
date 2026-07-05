@@ -216,6 +216,23 @@ func TestStart_GroupRequiresMentionWhenNicknameConfigured(t *testing.T) {
 	}
 }
 
+// The mention match is case-insensitive, matching Telegram's own
+// text-based mention comparison (strings.EqualFold) — a user typing
+// "@Octo" instead of the configured "octo" should still reach the bot.
+func TestStart_GroupMentionMatchIsCaseInsensitive(t *testing.T) {
+	f := newFakeWecom(t)
+	f.callbacks = []map[string]any{textCallback("chat-g", "group", "user-7", "@Octo help me with this")}
+	a := newTestAdapter(t, f, map[string]any{"bot_nickname": "octo"})
+
+	events := collectEvents(t, a, 1)
+	if len(events) != 1 {
+		t.Fatalf("expected the differently-cased mention to still pass, got %+v", events)
+	}
+	if events[0].Text != "help me with this" {
+		t.Fatalf("expected the mention to be stripped regardless of case, got: %+v", events[0])
+	}
+}
+
 // A single (non-group) chat should never be mention-gated, even with
 // bot_nickname configured — the gate only applies to groups.
 func TestStart_SingleChatNeverMentionGated(t *testing.T) {

@@ -852,13 +852,19 @@ func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.Inb
 	// configured; without it, behavior is unchanged from before this fix.
 	if msg.ChatType == "group" && a.botNickname != "" {
 		mention := "@" + a.botNickname
-		if !strings.Contains(msg.Text.Content, mention) {
+		// Case-insensitive, matching Telegram's own text-based mention
+		// comparison (strings.EqualFold on @username) — a user typing
+		// "@Octo" instead of "@octo" shouldn't silently fail to reach the bot.
+		idx := strings.Index(strings.ToLower(msg.Text.Content), strings.ToLower(mention))
+		if idx < 0 {
 			return
 		}
-		// Strip the literal "@<nickname>" from the text that reaches the
-		// agent, same as Telegram/Feishu/DingTalk already do for their own
-		// mention syntax — it's UI-level addressing, not part of the query.
-		msg.Text.Content = strings.TrimSpace(strings.Replace(msg.Text.Content, mention, "", 1))
+		// Strip the literal mention from the text that reaches the agent,
+		// same as Telegram/Feishu/DingTalk already do for their own mention
+		// syntax — it's UI-level addressing, not part of the query. Slicing
+		// by byte offset (not strings.Replace) preserves the original
+		// casing of whatever text remains.
+		msg.Text.Content = strings.TrimSpace(msg.Text.Content[:idx] + msg.Text.Content[idx+len(mention):])
 	}
 
 	switch msg.MsgType {
