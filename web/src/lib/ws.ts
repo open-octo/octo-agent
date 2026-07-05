@@ -99,7 +99,14 @@ export class WsManager {
   // committing to a backoff cycle that would otherwise retry the same
   // rejection forever with no way out.
   private async handleUnexpectedClose(): Promise<void> {
-    if (!(await isUnauthorized())) {
+    const unauthorized = await isUnauthorized();
+    // The probe is async — disconnect() (e.g. an unmount/HMR teardown) may
+    // have run while it was in flight. Its contract is to stop all future
+    // reconnect attempts, so re-check here before arming anything: even a
+    // timer whose own callback later no-ops still resurrects the
+    // "reconnecting" banner via wsReconnect.set() the moment it's scheduled.
+    if (this.intentionalClose) return;
+    if (!unauthorized) {
       this.scheduleReconnect();
       return;
     }
