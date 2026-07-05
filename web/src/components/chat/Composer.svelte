@@ -3,7 +3,7 @@
   import { onMount } from 'svelte'
   import {
     running, activeSessionId, chatStreaming, sessions,
-    chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal,
+    chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -286,7 +286,7 @@
 
   // Session meta chips — pull live values from per-session stores, fall back
   // to the session record, then to sensible defaults.
-  let modelName = $derived(currentSession?.model || currentSession?.model_id || '—')
+  let modelName = $derived($chatModel[sid] || currentSession?.model || currentSession?.model_id || '—')
   let reasoning = $derived($chatReasoningEffort[sid] || currentSession?.reasoning_effort || 'medium')
   let workingDir = $derived($chatWorkingDir[sid] || currentSession?.working_dir || '')
   let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || 'ask')
@@ -342,6 +342,7 @@
     try {
       const res = await api.updateSessionModel(sid, m.id)
       sessions.update(list => list.map((s: any) => s.id === sid ? { ...s, model: res.model, model_id: res.model_id } : s))
+      chatModel.update(mx => ({ ...mx, [sid]: res.model }))
     } catch (e: any) {
       showToast(e.message ?? 'Failed to switch model', 'error')
     }

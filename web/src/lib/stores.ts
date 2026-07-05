@@ -63,6 +63,9 @@ export const chatReasoningEffort = writable<Record<string, string>>({})
 // Effective show-reasoning flag for the current session (global default + per-model override).
 export const chatShowReasoning = writable<Record<string, boolean>>({})
 export const chatSuggestion = writable<Record<string, string>>({})
+// Per-session model name, updated on model switch so the Composer chip stays
+// reactive independently of the sessions store array subscription.
+export const chatModel = writable<Record<string, string>>({})
 // Live thinking buffer (thinking_delta) shown as a Thoughts block while streaming.
 export const chatThinking = writable<Record<string, string>>({})
 // Live sub-agents, keyed by session. Fed by the sub_agent_event WS stream.
