@@ -199,14 +199,16 @@
 
   // loadHistory fetches and renders a session's persisted transcript. Used on
   // session switch and on a server `history_reload` (after /clear or /compact
-  // rewrote history out of band).
-  function loadHistory(sid: string) {
+  // rewrote history out of band). Returns a promise that resolves once the
+  // fetch settles (success or failure) — the mount effect below awaits it
+  // before subscribing over WS; see the comment there for why.
+  function loadHistory(sid: string): Promise<void> {
     // Seed the goal chip for this session; failures (older server, goals
     // disabled) just leave the chip hidden.
     api.getSessionGoal(sid)
       .then(resp => chatGoal.update(m => ({ ...m, [sid]: resp?.goal ?? null })))
       .catch(() => {})
-    api.getSessionMessages(sid).then((resp: any) => {
+    return api.getSessionMessages(sid).then((resp: any) => {
       const events: any[] = resp?.events ?? []
       // Collect the tool_ids that came from history so we only close those,
       // leaving any concurrently-replayed live-turn tools untouched.
@@ -239,6 +241,7 @@
   // $activeSessionId makes this effect re-run whenever the session changes.
   $effect(() => {
     const sid = $activeSessionId
+    let cancelled = false
     if (!sid) {
       // No active session: drop any stale force-bind banner so a deleted session
       // does not leave the chat view showing "Session is bound to another entry."
@@ -249,14 +252,38 @@
     clearMsgs(sid)
     resetArtifacts(sid)
     resetSessionRuntimeState(sid)
-    ws.subscribe(sid)
-    // A freshly opened agentic session (openAgentSession queued a pendingPrompt)
-    // is empty at creation, so loadHistory has nothing to fetch — and worse, its
-    // async GET races the flush-on-subscribe send: by the time it resolves the
-    // server has already persisted the just-sent user message, which it then
-    // appends on top of the optimistic/echoed bubble (the duplicate that vanishes
-    // on refresh). Skip it; the subscribed handler drives the first message.
-    if (get(pendingPrompt)?.sessionId !== sid) loadHistory(sid)
+    if (get(pendingPrompt)?.sessionId === sid) {
+      // A freshly opened agentic session (openAgentSession queued a
+      // pendingPrompt) is empty at creation, so loadHistory has nothing to
+      // fetch — and worse, its async GET races the flush-on-subscribe send:
+      // by the time it resolves the server has already persisted the
+      // just-sent user message, which it then appends on top of the
+      // optimistic/echoed bubble (the duplicate that vanishes on refresh).
+      // Skip it; the subscribed handler drives the first message, so
+      // subscribe immediately.
+      ws.subscribe(sid)
+    } else {
+      // Subscribe only after history renders (#1125, #1129): the WS
+      // subscribe's replay of this turn's live tool activity is a separate,
+      // faster round-trip than this REST fetch — if it were fired
+      // concurrently, the replayed tool cards (append-only, no causal
+      // reordering) would land and render *before* loadHistory's slower
+      // response inserts the user message that started that very turn,
+      // putting the question after its own tool output, or — if the turn
+      // ran long enough to evict its own early rounds from the server's
+      // bounded replay buffer before the (delayed) subscribe request even
+      // arrives — never showing them at all. Delaying the subscribe send
+      // costs nothing: the server's replay buffer is per-session, not
+      // per-connection, so it still holds everything broadcast since turn
+      // start whenever we do subscribe.
+      loadHistory(sid).then(() => {
+        // The user may have switched sessions (or this view unmounted)
+        // while the fetch was in flight — the effect's cleanup below already
+        // unsubscribed sid in that case, so subscribing now would resurrect
+        // a stale WS subscription nothing is listening for any more.
+        if (!cancelled) ws.subscribe(sid)
+      })
+    }
 
     // ── WS event handlers ───────────────────────────────────────────────────
     const cleanups: Array<() => void> = []
@@ -726,6 +753,7 @@
     }))
 
     return () => {
+      cancelled = true
       ws.unsubscribe(sid)
       for (const cleanup of cleanups) cleanup()
     }
