@@ -1,10 +1,13 @@
 package server
 
 import (
+	"bufio"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/open-octo/octo-agent/internal/memory"
 	"github.com/open-octo/octo-agent/internal/trash"
 )
 
@@ -65,6 +68,31 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	if err := trash.Move(p, filepath.Dir(p)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Update MEMORY.md in the same directory: remove any lines that reference
+	// the deleted topic file, so the index stays consistent.
+	memDir := filepath.Dir(p)
+	indexPath := filepath.Join(memDir, memory.IndexFile)
+	if idxData, err := os.ReadFile(indexPath); err == nil {
+		var outLines []string
+		sc := bufio.NewScanner(strings.NewReader(string(idxData)))
+		for sc.Scan() {
+			line := sc.Text()
+			// Skip lines that reference the deleted filename (e.g.
+			// "- [topic](topic.md)" or "topic.md inline reference").
+			if strings.Contains(line, fname) {
+				continue
+			}
+			outLines = append(outLines, line)
+		}
+		if err := sc.Err(); err == nil && len(outLines) > 0 {
+			cleaned := strings.Join(outLines, "\n") + "\n"
+			// Only write if we actually removed something.
+			if cleaned != string(idxData) {
+				_ = os.WriteFile(indexPath, []byte(cleaned), 0o600)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
