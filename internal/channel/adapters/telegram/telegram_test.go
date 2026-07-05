@@ -306,3 +306,58 @@ func TestSendTyping(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// #1123: a voice/video/sticker/location-only message used to be a bare drop
+// — the user got no signal it was even received. It should now get a text
+// acknowledgement instead, and not be forwarded as an agent turn.
+func TestProcessUpdate_UnsupportedMediaAcknowledged(t *testing.T) {
+	f := newFakeBotAPI(t)
+	a := newTestAdapter(t, f, nil)
+
+	var msg tgMessage
+	msg.MessageID = 1
+	msg.Chat.ID = 123
+	msg.Chat.Type = "private"
+	msg.From.ID = 42
+	msg.Voice = json.RawMessage(`{}`)
+
+	gotEvent := false
+	a.processUpdate(tgUpdate{UpdateID: 1, Message: &msg}, func(ev channel.InboundEvent) {
+		gotEvent = true
+	})
+
+	if gotEvent {
+		t.Fatal("expected no InboundEvent for an unsupported-media-only message")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) != 1 {
+		t.Fatalf("expected one acknowledgement to be sent, got %d", len(f.sent))
+	}
+	if f.sent[0]["text"] != unsupportedMediaNotice {
+		t.Fatalf("unexpected ack text: %v", f.sent[0]["text"])
+	}
+}
+
+// A legitimately empty message (no text, no attachment, no unsupported-media
+// marker) must keep dropping silently — the ack is specifically for
+// unsupported media, not every no-op update.
+func TestProcessUpdate_EmptyMessageStaysSilent(t *testing.T) {
+	f := newFakeBotAPI(t)
+	a := newTestAdapter(t, f, nil)
+
+	var msg tgMessage
+	msg.MessageID = 1
+	msg.Chat.ID = 123
+	msg.From.ID = 42
+
+	a.processUpdate(tgUpdate{UpdateID: 1, Message: &msg}, func(ev channel.InboundEvent) {
+		t.Fatal("unexpected event for an empty message")
+	})
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) != 0 {
+		t.Fatalf("expected no acknowledgement for a legitimately empty message, got %d", len(f.sent))
+	}
+}

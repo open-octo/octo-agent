@@ -60,6 +60,11 @@ const (
 	// 4096") — a hard, documented, byte-counted (not character-counted) cap.
 	// SendText previously sent content as a single unbounded payload (#1116).
 	maxMessageBytes = 4096
+
+	// unsupportedMediaNotice is sent in place of silence (#1123) when a
+	// message is a msgtype we don't decode (voice, video, …). Transcription/
+	// decoding can come later; going silent is the bug being fixed here.
+	unsupportedMediaNotice = "This message type isn't supported yet — please send text."
 )
 
 func init() {
@@ -812,13 +817,6 @@ func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.Inb
 		return
 	}
 
-	switch msg.MsgType {
-	case "text", "image", "file":
-		// handled below
-	default:
-		return
-	}
-
 	chatID := msg.ChatID
 	if chatID == "" {
 		chatID = msg.From.UserID
@@ -828,6 +826,18 @@ func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.Inb
 	}
 
 	if len(a.allowedUsers) > 0 && !a.allowedUsers[msg.From.UserID] {
+		return
+	}
+
+	switch msg.MsgType {
+	case "text", "image", "file":
+		// handled below
+	default:
+		// #1123: voice/video/other unsupported msgtypes used to bare-return
+		// here with not even a log line — the user had no idea their message
+		// was received at all.
+		log.Printf("[wecom] unsupported msgtype=%s from %s, acknowledging", msg.MsgType, msg.From.UserID)
+		a.SendText(chatID, unsupportedMediaNotice, "")
 		return
 	}
 

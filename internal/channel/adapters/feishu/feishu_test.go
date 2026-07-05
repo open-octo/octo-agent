@@ -56,6 +56,18 @@ func newFakeFeishu(t *testing.T) *fakeFeishu {
 				"code": 0, "data": map[string]any{"message_id": "m-1"},
 			})
 		default:
+			if strings.HasPrefix(r.URL.Path, "/open-apis/docx/v1/documents/") {
+				// #1123: docToken "badtoken" simulates a failed doc fetch
+				// (deleted doc, no permission, …) — everything else succeeds.
+				if strings.Contains(r.URL.Path, "badtoken") {
+					json.NewEncoder(w).Encode(map[string]any{"code": 99999})
+					return
+				}
+				json.NewEncoder(w).Encode(map[string]any{
+					"code": 0, "data": map[string]any{"content": "doc body"},
+				})
+				return
+			}
 			w.WriteHeader(404)
 		}
 	}))
@@ -182,6 +194,79 @@ func TestSendFile_Missing(t *testing.T) {
 	res := a.SendFile("chat-1", "/no/such/file", "", "")
 	if res.OK {
 		t.Fatal("expected failure for missing file")
+	}
+}
+
+// #1123: a message of an unhandled type (voice, rich-post/video, …) used to
+// fall straight through to the drop with no signal to the user at all. It
+// should now get a text acknowledgement instead, and not be forwarded as an
+// agent turn.
+func TestHandleEvent_UnsupportedMediaAcknowledged(t *testing.T) {
+	f := newFakeFeishu(t)
+	a := newTestAdapter(t, f)
+
+	raw := []byte(`{
+		"schema": "2.0",
+		"header": {"event_type": "im.message.receive_v1"},
+		"event": {
+			"message": {
+				"message_id": "m-1",
+				"chat_id": "chat-1",
+				"chat_type": "p2p",
+				"message_type": "audio",
+				"content": "{}"
+			},
+			"sender": {"sender_id": {"open_id": "user-1"}}
+		}
+	}`)
+
+	gotEvent := false
+	a.handleEvent(raw, func(ev channel.InboundEvent) {
+		gotEvent = true
+	})
+
+	if gotEvent {
+		t.Fatal("expected no InboundEvent for an unsupported-media-only message")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) != 1 {
+		t.Fatalf("expected one acknowledgement to be sent, got %d", len(f.sent))
+	}
+	content, _ := f.sent[0]["content"].(string)
+	if !strings.Contains(content, unsupportedMediaNotice) {
+		t.Fatalf("expected the ack notice in sent content, got: %s", content)
+	}
+}
+
+// #1123: a doc-fetch failure used to only log server-side — the user pasted
+// a doc link, got an answer that silently ignored it, and no hint why.
+func TestEnrichDocContent_FetchFailureAppendsNote(t *testing.T) {
+	f := newFakeFeishu(t)
+	a := newTestAdapter(t, f)
+
+	text := "check this doc: https://example.feishu.cn/docx/badtoken"
+	got := a.enrichDocContent(text)
+
+	if !strings.Contains(got, "Couldn't read the linked doc") {
+		t.Fatalf("expected a failure note appended, got: %s", got)
+	}
+	if !strings.HasPrefix(got, text) {
+		t.Fatalf("expected the original text preserved, got: %s", got)
+	}
+}
+
+// A successful doc fetch should still just append the content, unaffected
+// by the failure-note path above.
+func TestEnrichDocContent_Success(t *testing.T) {
+	f := newFakeFeishu(t)
+	a := newTestAdapter(t, f)
+
+	text := "check this doc: https://example.feishu.cn/docx/goodtoken"
+	got := a.enrichDocContent(text)
+
+	if !strings.Contains(got, "doc body") {
+		t.Fatalf("expected fetched doc content appended, got: %s", got)
 	}
 }
 

@@ -194,6 +194,38 @@ func TestStart_AllowedUsersFilters(t *testing.T) {
 	}
 }
 
+// #1123: an unsupported msgtype (voice, video, …) used to hit a bare
+// `return` before chatID was even resolved — not even a log line, and
+// certainly no signal to the user their message was received. It should now
+// get a text acknowledgement instead, and not be forwarded as an agent turn.
+func TestStart_UnsupportedMediaAcknowledged(t *testing.T) {
+	f := newFakeWecom(t)
+	f.callbacks = []map[string]any{
+		{
+			"msgtype":  "voice",
+			"chatid":   "chat-1",
+			"chattype": "single",
+			"msgid":    "msg-1",
+			"from":     map[string]string{"userid": "user-7"},
+		},
+	}
+	a := newTestAdapter(t, f, nil)
+
+	// want=1 is unreachable (no InboundEvent should fire); collectEvents
+	// still returns once its internal 3s timeout elapses, by which point the
+	// ack round-trip below has long completed.
+	events := collectEvents(t, a, 1)
+	if len(events) != 0 {
+		t.Fatalf("expected no InboundEvent for an unsupported-media-only message, got %+v", events)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) != 1 {
+		t.Fatalf("expected one acknowledgement to be sent, got %d", len(f.sent))
+	}
+}
+
 func TestStart_AuthFailureIsFatal(t *testing.T) {
 	f := newFakeWecom(t)
 	cfg := channel.PlatformConfig{"bot_id": "aib123", "secret": "wrong", "ws_url": f.wsURL}

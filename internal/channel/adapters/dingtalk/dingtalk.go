@@ -48,6 +48,12 @@ const (
 	// commonly documented at ~20000 bytes; SendText previously posted content
 	// as a single unbounded payload with no split at all (#1116).
 	maxMessageBytes = 20000
+
+	// unsupportedMediaNotice is sent in place of silence (#1123) when a
+	// message is a msgtype we don't decode (voice, audio, video, …).
+	// Transcription/decoding can come later; going silent is the bug being
+	// fixed here.
+	unsupportedMediaNotice = "This message type isn't supported yet — please send text."
 )
 
 func init() {
@@ -603,9 +609,15 @@ func (a *Adapter) handleInbound(raw json.RawMessage, onMessage func(channel.Inbo
 		return
 	}
 
-	text, files := a.extractPayload(ev)
+	text, files, unsupported := a.extractPayload(ev)
 	// DT-005: guard changed to check both text and files.
 	if strings.TrimSpace(text) == "" && len(files) == 0 {
+		// #1123: an unsupported msgtype (voice, audio, video, …) used to
+		// drop here with only a server-side log — the user got no signal
+		// their message was even received.
+		if unsupported {
+			a.SendText(chatID, unsupportedMediaNotice, "")
+		}
 		return
 	}
 
@@ -628,8 +640,10 @@ func (a *Adapter) handleInbound(raw json.RawMessage, onMessage func(channel.Inbo
 }
 
 // extractPayload parses text and file attachments from an inbound event.
-// DT-005, DT-006: handles picture, file, and richText msgtypes.
-func (a *Adapter) extractPayload(ev dtEvent) (string, []channel.FileAttachment) {
+// DT-005, DT-006: handles picture, file, and richText msgtypes. The third
+// return value reports an unsupported msgtype (#1123), letting the caller
+// acknowledge instead of dropping silently.
+func (a *Adapter) extractPayload(ev dtEvent) (string, []channel.FileAttachment, bool) {
 	var text string
 	var files []channel.FileAttachment
 
@@ -712,9 +726,10 @@ func (a *Adapter) extractPayload(ev dtEvent) (string, []channel.FileAttachment) 
 
 	default:
 		log.Printf("[dingtalk] unsupported msgtype=%s, ignoring", ev.MsgType)
+		return text, files, true
 	}
 
-	return text, files
+	return text, files, false
 }
 
 // downloadDTFile fetches a file by downloadCode from the DingTalk robot API.

@@ -44,6 +44,12 @@ const (
 	// against silently failing on a truly pathological reply (#1116), not a
 	// limit anyone should expect to hit in practice.
 	maxMessageBytes = 20000
+
+	// unsupportedMediaNotice is sent in place of silence (#1123) when a
+	// message is a kind we don't decode (voice, post/rich-text video, …).
+	// Transcription/decoding can come later; going silent is the bug being
+	// fixed here.
+	unsupportedMediaNotice = "This message type isn't supported yet — please send text."
 )
 
 func init() {
@@ -531,6 +537,7 @@ func (a *Adapter) handleEvent(raw json.RawMessage, onMessage func(channel.Inboun
 
 	var text string
 	var files []channel.FileAttachment
+	unsupported := false
 
 	switch msg.MessageType {
 	case "text":
@@ -554,10 +561,18 @@ func (a *Adapter) handleEvent(raw json.RawMessage, onMessage func(channel.Inboun
 				files = append(files, fa)
 			}
 		}
+	default:
+		// #1123: voice, post (rich text/video), and other kinds we don't
+		// decode land here — used to fall straight through to the drop below
+		// with no signal to the user at all.
+		unsupported = true
 	}
 
 	// FEISHU-006: drop only if both text and files are empty.
 	if text == "" && len(files) == 0 {
+		if unsupported {
+			a.SendText(msg.ChatID, unsupportedMediaNotice, "")
+		}
 		return
 	}
 
@@ -649,7 +664,10 @@ func (a *Adapter) downloadResource(messageID, key, resourceType, fileName string
 }
 
 // enrichDocContent fetches inline Feishu doc content and appends it to the text.
-// FEISHU-011: silently skips on error.
+// #1123: a fetch failure used to only log server-side — the user pasted a
+// doc link, got an answer that silently ignored it, and no hint why. Now
+// appends a short note instead so the agent (and, through it, the user)
+// knows the doc couldn't be read.
 func (a *Adapter) enrichDocContent(text string) string {
 	matches := feishuDocURLRe.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 {
@@ -662,6 +680,7 @@ func (a *Adapter) enrichDocContent(text string) string {
 		content, err := a.fetchDocRawContent(docToken)
 		if err != nil {
 			log.Printf("[feishu] doc fetch failed for %s: %v", docToken, err)
+			sections = append(sections, fmt.Sprintf("[Couldn't read the linked doc %s]", m[0]))
 			continue
 		}
 		if content != "" {

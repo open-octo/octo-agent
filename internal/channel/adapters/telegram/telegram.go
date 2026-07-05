@@ -46,6 +46,12 @@ const (
 	// counts bytes, not runes — for CJK text this is more conservative than
 	// the exact character cap requires, never less.
 	maxMessageBytes = 4000
+
+	// unsupportedMediaNotice is sent in place of silence (#1123) when a
+	// message contains only a kind we don't process (voice, video, sticker,
+	// location, …). Transcription/decoding can come later; going silent is
+	// the bug being fixed here.
+	unsupportedMediaNotice = "This message type isn't supported yet — please send text."
 )
 
 func init() {
@@ -545,6 +551,25 @@ type tgMessage struct {
 			ID int64 `json:"id"`
 		} `json:"from"`
 	} `json:"reply_to_message"`
+
+	// #1123: presence-only markers for message kinds we don't process (no
+	// transcription/decoding path) — used solely to tell "the user sent
+	// something we can't handle" apart from "the user sent nothing", so we
+	// can acknowledge instead of going silent. json.RawMessage is nil when
+	// the field is absent and non-nil (even "{}") when Telegram includes it.
+	Voice     json.RawMessage `json:"voice,omitempty"`
+	Audio     json.RawMessage `json:"audio,omitempty"`
+	Video     json.RawMessage `json:"video,omitempty"`
+	VideoNote json.RawMessage `json:"video_note,omitempty"`
+	Sticker   json.RawMessage `json:"sticker,omitempty"`
+	Location  json.RawMessage `json:"location,omitempty"`
+}
+
+// hasUnsupportedMedia reports whether the message carries a kind we
+// recognize but don't process (see the presence markers above).
+func (m *tgMessage) hasUnsupportedMedia() bool {
+	return m.Voice != nil || m.Audio != nil || m.Video != nil ||
+		m.VideoNote != nil || m.Sticker != nil || m.Location != nil
 }
 
 func (a *Adapter) callMessage(method string, params map[string]any) (*tgMessage, error) {
@@ -679,6 +704,14 @@ func (a *Adapter) processUpdate(upd tgUpdate, onMessage func(channel.InboundEven
 	}
 
 	if text == "" && len(files) == 0 {
+		// #1123: voice/audio/video/video_note/sticker/location arrive with no
+		// text and nothing we download, so this used to be a bare drop — the
+		// user sees the bot simply ignore them, indistinguishable from
+		// broken. Acknowledge instead of going silent; a legitimately empty
+		// message (no such marker) still drops with no reply, as before.
+		if msg.hasUnsupportedMedia() {
+			a.SendText(fmt.Sprintf("%d", msg.Chat.ID), unsupportedMediaNotice, fmt.Sprintf("%d", msg.MessageID))
+		}
 		return
 	}
 

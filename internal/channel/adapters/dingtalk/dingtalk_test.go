@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/channel"
 )
 
 // stubAPI fakes the DingTalk token + robot send endpoints and records the
@@ -179,5 +181,34 @@ func TestSendText_PrefersSessionWebhook(t *testing.T) {
 	defer stub.mu.Unlock()
 	if len(stub.sends) != 0 {
 		t.Fatalf("robot api sends = %d, want 0", len(stub.sends))
+	}
+}
+
+// #1123: an unsupported msgtype (voice, audio, video, …) used to drop at
+// extractPayload's default branch with only a server-side log — the user
+// got no signal their message was even received. It should now get a text
+// acknowledgement instead, and not be forwarded as an agent turn.
+func TestHandleInbound_UnsupportedMediaAcknowledged(t *testing.T) {
+	stub := &stubAPI{}
+	ts := stub.server(t)
+	defer ts.Close()
+
+	a := testAdapter(ts)
+	a.routes = make(map[string]routeEntry)
+
+	raw := []byte(`{"senderId": "user-1", "msgtype": "audio"}`)
+
+	gotEvent := false
+	a.handleInbound(raw, func(ev channel.InboundEvent) {
+		gotEvent = true
+	})
+
+	if gotEvent {
+		t.Fatal("expected no InboundEvent for an unsupported-media-only message")
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.sends) != 1 {
+		t.Fatalf("expected one acknowledgement to be sent, got %d", len(stub.sends))
 	}
 }
