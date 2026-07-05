@@ -100,10 +100,54 @@ fi
 
 printf 'octo install: installed octo %s to %s/octo\n' "$version" "$dir"
 
-# --- PATH hint ---------------------------------------------------------------
+# --- PATH setup ---------------------------------------------------------------
 case ":$PATH:" in
   *":$dir:"*) ;;
-  *) printf 'octo install: %s is not on your PATH. Add it, e.g.:\n  export PATH="%s:$PATH"\n' "$dir" "$dir" ;;
+  *)
+    marker="# added by octo installer"
+
+    # Detect the user's shell and pick the right rc file
+    shell_name=$(basename "${SHELL:-}" 2>/dev/null || echo "")
+    case "$shell_name" in
+      zsh)
+        # macOS Terminal opens zsh as a login shell → .zprofile takes effect
+        # Linux interactive zsh → .zshrc
+        if [ "$os" = "darwin" ]; then
+          rc="$HOME/.zprofile"
+        else
+          rc="$HOME/.zshrc"
+        fi
+        ;;
+      bash)
+        # macOS bash as login → .bash_profile; Linux → .bashrc
+        if [ "$os" = "darwin" ]; then
+          rc="$HOME/.bash_profile"
+        else
+          rc="$HOME/.bashrc"
+        fi
+        ;;
+      *)
+        rc="$HOME/.profile"
+        ;;
+    esac
+
+    # Write to the primary rc file (idempotent — marker prevents duplication)
+    [ -f "$rc" ] || touch "$rc"
+    if ! grep -qF "$marker" "$rc" 2>/dev/null; then
+      printf '\nexport PATH="%s:$PATH"  %s\n' "$dir" "$marker" >> "$rc"
+      printf 'octo install: added %s to %s\n' "$dir" "$rc"
+    fi
+
+    # Also add to ~/.profile as a universal fallback (skip if same file already written)
+    if [ "$rc" != "$HOME/.profile" ]; then
+      [ -f "$HOME/.profile" ] || touch "$HOME/.profile"
+      if ! grep -qF "$marker" "$HOME/.profile" 2>/dev/null; then
+        printf '\nexport PATH="%s:$PATH"  %s\n' "$dir" "$marker" >> "$HOME/.profile"
+      fi
+    fi
+
+    printf 'octo install: restart your shell or run:\n  export PATH="%s:$PATH"\n' "$dir"
+    ;;
 esac
 
 # --- next steps --------------------------------------------------------------
