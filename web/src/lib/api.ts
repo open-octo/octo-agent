@@ -89,17 +89,12 @@ export async function updateSession(id: string, patch: { name?: string }): Promi
   return request<Session>(`/api/sessions/${id}`, { method: 'PATCH', ...json(patch) })
 }
 
-export interface MessagesOpts {
-  limit?: number
-  before?: string
-}
-
-export async function getSessionMessages(id: string, opts?: MessagesOpts): Promise<unknown> {
-  const params = new URLSearchParams()
-  if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
-  if (opts?.before !== undefined) params.set('before', opts.before)
-  const qs = params.toString()
-  return request<unknown>(`/api/sessions/${id}/messages${qs ? `?${qs}` : ''}`)
+// The server returns a session's full persisted transcript in one shot — it
+// has no limit/before pagination (GET /api/sessions/:id/messages ignores
+// those params entirely and always returns everything), so there is nothing
+// to page through here.
+export async function getSessionMessages(id: string): Promise<unknown> {
+  return request<unknown>(`/api/sessions/${id}/messages`)
 }
 
 // The server keys session model by the named entry id (or "default" / a raw

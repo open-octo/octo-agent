@@ -205,7 +205,7 @@
     api.getSessionGoal(sid)
       .then(resp => chatGoal.update(m => ({ ...m, [sid]: resp?.goal ?? null })))
       .catch(() => {})
-    api.getSessionMessages(sid, { limit: 30 }).then((resp: any) => {
+    api.getSessionMessages(sid).then((resp: any) => {
       const events: any[] = resp?.events ?? []
       // Collect the tool_ids that came from history so we only close those,
       // leaving any concurrently-replayed live-turn tools untouched.
@@ -785,30 +785,24 @@
     if (!sid) return
 
     // Fetch complete history from server instead of relying on the local
-    // chatMessages store, which may only contain a partial view of the session.
+    // chatMessages store, which may only contain a partial view of the
+    // session. The server has no pagination (GET .../messages always returns
+    // the full transcript), so there is nothing to page through here.
     let events: any[] = []
-    let hasMore = false
     try {
       const data = await api.getSessionMessages(sid)
-      const resp = data as { events?: any[]; has_more?: boolean }
-      events = resp.events ?? []
-      hasMore = resp.has_more ?? false
+      events = (data as { events?: any[] }).events ?? []
     } catch (e) {
       console.error('Export failed:', e)
       showToast(tr('chat.export_failed'), 'error')
       return
     }
 
-    if (hasMore) {
-      // The server may paginate for very long sessions. For now, warn the user
-      // that the exported transcript may be incomplete.
-      console.warn('Export: server returned has_more=true, transcript may be incomplete')
-    }
-
     if (!events.length) { showToast(tr('chat.nothing_to_export'), 'error'); return }
 
     const title = currentSession?.title ?? currentSession?.name ?? 'session'
     const lines: string[] = [`# ${title}`, '']
+    let omittedToolEvents = false
 
     for (const ev of events) {
       const type = ev.type ?? ''
@@ -825,9 +819,11 @@
       } else if (type === 'thinking' && ev.text) {
         // Standalone thinking block (tool round) — include as a note.
         lines.push('<!-- Thinking -->', ev.text, '')
+      } else if (type === 'tool_call' || type === 'tool_result') {
+        // Rendered as tool cards in the UI but don't belong in a readable
+        // markdown transcript — noted below rather than silently dropped.
+        omittedToolEvents = true
       }
-      // Skip tool_call / tool_result events — they are rendered as tool cards
-      // in the UI but don't belong in a readable markdown transcript.
     }
 
     const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
@@ -837,6 +833,10 @@
     a.download = `${title.replace(/[^\w.-]+/g, '_')}.md`
     a.click()
     URL.revokeObjectURL(url)
+
+    if (omittedToolEvents) {
+      showToast(tr('chat.export_tools_omitted'), 'info')
+    }
   }
 
   // ── send message ───────────────────────────────────────────────────────────
