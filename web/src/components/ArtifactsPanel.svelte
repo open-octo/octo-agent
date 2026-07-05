@@ -71,7 +71,7 @@
   <!-- Body -->
   <div class="body">
     {#if $artifactView === 'preview'}
-      <iframe srcdoc={cur.preview} sandbox="allow-scripts" title={cur.name}></iframe>
+      <iframe srcdoc={cur.preview} sandbox="allow-scripts clipboard-write" title={cur.name}></iframe>
     {:else}
       <pre class="code-view">{cur.code}</pre>
     {/if}

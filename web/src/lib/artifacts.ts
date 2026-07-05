@@ -128,7 +128,47 @@ export async function observeArtifact(
           preview = code
         }
       } else if (kind === 'markdown') {
-        preview = `<body style="margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:#1f1f1f">${renderMarkdown(code)}</body>`
+        // Markdown is rendered inside a sandboxed srcdoc iframe which has no
+        // access to the host app's CSS or JS.  Inline the highlight.js theme
+        // CSS, code-block layout, and a copy-button handler so syntax
+        // highlighting and the "Copy" button actually work in preview mode.
+        const MD_STYLES = [
+          // code-block layout (mirrors ChatView.svelte :global rules)
+          `.code-block{border:1px solid #30363d;border-radius:8px;overflow:hidden;background:#1e1e1e;margin:10px 0}`,
+          `.code-header{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 12px;background:#2d2d2d;border-bottom:1px solid #30363d}`,
+          `.code-lang{font-size:11px;color:#888;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}`,
+          `.copy-btn{margin-left:auto;height:24px;padding:0 8px;border:none;background:transparent;border-radius:5px;font-size:11px;color:#888;cursor:pointer;font-family:inherit}`,
+          `.copy-btn:hover{background:#3d3d3d;color:#58a6ff}`,
+          `pre{margin:0;padding:12px 14px;overflow-x:auto;font-size:13px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#d4d4d4}`,
+          `code.hljs{background:transparent;padding:0}`,
+          // highlight.js GitHub Dark theme (simplified — 1:1 with upstream)
+          `.hljs{color:#c9d1d9;background:#0d1117}`,
+          `.hljs-keyword,.hljs-doctag,.hljs-meta\\ .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable\\.language_{color:#ff7b72}`,
+          `.hljs-title,.hljs-title\\.class_,.hljs-title\\.class_\\.inherited__,.hljs-title\\.function_{color:#d2a8ff}`,
+          `.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-variable,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id{color:#79c0ff}`,
+          `.hljs-regexp,.hljs-string,.hljs-meta\\ .hljs-string{color:#a5d6ff}`,
+          `.hljs-built_in,.hljs-symbol{color:#ffa657}`,
+          `.hljs-comment,.hljs-code,.hljs-formula{color:#8b949e}`,
+          `.hljs-name,.hljs-quote,.hljs-selector-tag,.hljs-selector-pseudo,.hljs-tag{color:#7ee787}`,
+          `.hljs-subst{color:#c9d1d9}`,
+          `.hljs-section{color:#1f6feb;font-weight:700}`,
+          `.hljs-bullet{color:#f2cc60}`,
+          `.hljs-emphasis{font-style:italic}`,
+          `.hljs-strong{font-weight:700}`,
+          `.hljs-addition{color:#aff5b4;background:#033a16}`,
+          `.hljs-deletion{color:#ffdcd7;background:#67060c}`,
+        ].join('')
+        const COPY_SCRIPT = `<script>
+document.querySelector('.body').addEventListener('click',function(e){
+  var b=e.target.closest('.copy-btn');if(!b)return;
+  var c=b.closest('.code-block').querySelector('pre code');
+  navigator.clipboard.writeText(c?c.textContent:'').then(function(){
+    var o=b.textContent;b.textContent='Copied!';
+    setTimeout(function(){b.textContent=o},1500);
+  })
+});
+<\/script>`
+        preview = `<style>${MD_STYLES}</style><body style="margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:#d4d4d4;background:#1e1e1e">${renderMarkdown(code)}${COPY_SCRIPT}</body>`
       } else {
         // code kind: show with a dark monospace style
         const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

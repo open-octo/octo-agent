@@ -8,6 +8,11 @@ import python from "highlight.js/lib/languages/python"
 import bash from "highlight.js/lib/languages/bash"
 import json from "highlight.js/lib/languages/json"
 import xml from "highlight.js/lib/languages/xml"
+// Side-effect import: bundles the GitHub Dark highlight.js CSS theme so that
+// hljs-* class names (hljs-keyword, hljs-string, etc.) are styled in the main
+// DOM (ChatView, ProfileView, etc.). Without this, highlight() runs and
+// produces the right HTML spans but the colors are invisible.
+import "highlight.js/styles/github-dark.css"
 
 hljs.registerLanguage("javascript", javascript)
 hljs.registerLanguage("typescript", typescript)
