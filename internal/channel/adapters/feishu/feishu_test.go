@@ -281,3 +281,67 @@ func TestFeishuFileType(t *testing.T) {
 		}
 	}
 }
+
+// #1119: an inline image reference used to be stripped entirely — not even
+// the URL survived. It should become a clickable link instead, since
+// Feishu's markdown has no inline-image tag but does render links.
+func TestBuildMsgPayload_ImageBecomesLink(t *testing.T) {
+	msgType, content := buildMsgPayload("see ![a diagram](https://example.com/d.png) below")
+	if msgType != "post" {
+		t.Fatalf("expected post msg_type for plain text, got %q", msgType)
+	}
+	if !strings.Contains(content, "[a diagram](https://example.com/d.png)") {
+		t.Fatalf("expected image to become a link, got: %s", content)
+	}
+	if strings.Contains(content, "![") {
+		t.Fatalf("expected the image marker to be gone, got: %s", content)
+	}
+}
+
+// An image with no alt text still needs a non-empty link label.
+func TestBuildMsgPayload_ImageWithNoAltGetsPlaceholderLabel(t *testing.T) {
+	_, content := buildMsgPayload("![](https://example.com/d.png)")
+	if !strings.Contains(content, "[image](https://example.com/d.png)") {
+		t.Fatalf("expected a placeholder label, got: %s", content)
+	}
+}
+
+// An image with no URL at all degrades to just the alt text (nothing to link to).
+func TestBuildMsgPayload_ImageWithNoURLDegradesToAltText(t *testing.T) {
+	msgType, content := buildMsgPayload("![a diagram]()")
+	if msgType != "post" {
+		t.Fatalf("expected post msg_type, got %q", msgType)
+	}
+	if !strings.Contains(content, "a diagram") || strings.Contains(content, "![") {
+		t.Fatalf("expected bare alt text, got: %s", content)
+	}
+}
+
+// #1119: prose containing "|" characters (but no real table) must not flip
+// the message into card rendering — the previous \|.+\| regex false-positived
+// on any line with two pipes.
+func TestBuildMsgPayload_PipeInProseDoesNotTriggerCardMode(t *testing.T) {
+	msgType, _ := buildMsgPayload("the pattern is a | b | c, not a table")
+	if msgType != "post" {
+		t.Fatalf("expected plain post rendering for prose with pipes, got %q", msgType)
+	}
+}
+
+// A genuine Markdown table (header row + separator row) must still trigger
+// card rendering, since that's how Feishu actually renders tables.
+func TestBuildMsgPayload_RealTableTriggersCardMode(t *testing.T) {
+	msgType, content := buildMsgPayload("| A | B |\n| --- | --- |\n| 1 | 2 |")
+	if msgType != "interactive" {
+		t.Fatalf("expected interactive (card) rendering for a real table, got %q", msgType)
+	}
+	if !strings.Contains(content, "| A | B |") {
+		t.Fatalf("expected the table markdown to be preserved in the card content, got: %s", content)
+	}
+}
+
+func TestBuildMsgPayload_CodeFenceTriggersCardMode(t *testing.T) {
+	msgType, _ := buildMsgPayload("```go\nfmt.Println(1)\n```")
+	if msgType != "interactive" {
+		t.Fatalf("expected interactive (card) rendering for a code fence, got %q", msgType)
+	}
+}

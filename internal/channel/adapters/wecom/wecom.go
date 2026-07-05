@@ -218,7 +218,18 @@ func (a *Adapter) Stop() error {
 // Content over maxMessageBytes is split into consecutive messages (#1116):
 // WeCom rejects an oversized markdown payload outright (errcode 40058)
 // rather than truncating it, so an unsplit long reply was dropped entirely.
+//
+// WeCom's "markdown" msgtype (the only one this adapter sends) supports only
+// a documented subset — headings, bold, links, inline code spans, quotes,
+// and 3 built-in font colors (#1119). Notably unsupported: tables, lists,
+// and multi-line fenced code blocks (only single-line inline code works) —
+// a fenced ```block``` arrives with its fence markers rendered as literal
+// text. Pipe tables are flattened to readable lines before sending rather
+// than left as raw "| a | b |" rows with no table rendering to give them
+// structure; code fences are sent through unchanged since there's no lossless
+// plain-text substitute for them worth the added complexity here.
 func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
+	text = channel.FlattenPipeTables(text)
 	chunks := channel.SplitForSend(text, maxMessageBytes)
 	if len(chunks) == 0 {
 		return channel.SendResult{OK: true}

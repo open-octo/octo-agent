@@ -341,6 +341,43 @@ func TestSendText_WaitsForAck(t *testing.T) {
 	}
 }
 
+// #1119: WeCom's markdown renderer has no table support — raw "| a | b |"
+// rows used to arrive completely unrendered, separator row and all.
+func TestSendText_FlattensPipeTables(t *testing.T) {
+	f := newFakeWecom(t)
+	a := newTestAdapter(t, f, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Start(ctx, func(channel.InboundEvent) {})
+
+	table := "| Name | Age |\n| --- | --- |\n| Alice | 30 |"
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		res := a.SendText("chat-1", table, "")
+		if res.OK {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("send never succeeded: %+v", res)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) == 0 {
+		t.Fatal("no aibot_send_msg frame received")
+	}
+	last := f.sent[len(f.sent)-1]
+	md, _ := last["markdown"].(map[string]any)
+	content, _ := md["content"].(string)
+	want := "Name | Age\nAlice | 30"
+	if content != want {
+		t.Fatalf("content = %q, want %q", content, want)
+	}
+}
+
 // #1116: SendText previously sent content as a single unbounded payload.
 // WeCom rejects markdown content over 4096 bytes outright (errcode 40058)
 // rather than truncating it, so an unsplit long reply was dropped entirely.

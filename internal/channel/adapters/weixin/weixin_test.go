@@ -452,6 +452,17 @@ func TestMarkdownToPlain_LinkWithEmptyURL(t *testing.T) {
 	}
 }
 
+// #1119: WeChat has no table rendering — raw "| a | b |" rows used to arrive
+// completely unrendered, separator row and all.
+func TestMarkdownToPlain_FlattensPipeTables(t *testing.T) {
+	md := "| Name | Age |\n| --- | --- |\n| Alice | 30 |"
+	plain := markdownToPlain(md)
+	want := "Name | Age\nAlice | 30"
+	if plain != want {
+		t.Errorf("markdownToPlain(%q) = %q, want %q", md, plain, want)
+	}
+}
+
 func TestAdapter_StartWithCredentials(t *testing.T) {
 	// Create a mock iLink server.
 	var mu sync.Mutex

@@ -64,11 +64,11 @@ const (
 	cfgAllowedUsers = "allowed_users"
 )
 
-// Package-level compiled regexps (avoids recompiling on every message send).
-var (
-	feishuStripImgRe = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
-	feishuTableRe    = regexp.MustCompile(`\|.+\|`)
-)
+// feishuImageRe matches Markdown image syntax so it can be converted to a
+// clickable link (#1119) — Feishu's markdown renderer (both the "post" md
+// tag and the card "markdown" element) has no inline-image tag, so
+// "![alt](url)" used to be stripped entirely, losing the URL along with it.
+var feishuImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]*)\)`)
 
 // Adapter implements channel.Adapter for Feishu.
 type Adapter struct {
@@ -751,11 +751,27 @@ func stripAtMentions(text string) string {
 // buildMsgPayload selects msg_type and content based on text content.
 // FEISHU-010: uses "post" (md) for plain text, "interactive" (card) for code/tables.
 func buildMsgPayload(text string) (msgType, content string) {
-	// Strip image markdown before rendering.
-	cleaned := feishuStripImgRe.ReplaceAllString(text, "")
+	// Feishu's markdown has no inline-image tag, so a "![alt](url)" reference
+	// is rewritten as a clickable "[alt](url)" link instead of being dropped
+	// (#1119) — links render fine in both the "post" and card paths below.
+	cleaned := feishuImageRe.ReplaceAllStringFunc(text, func(m string) string {
+		parts := feishuImageRe.FindStringSubmatch(m)
+		alt, url := parts[1], parts[2]
+		if url == "" {
+			return alt
+		}
+		if alt == "" {
+			alt = "image"
+		}
+		return "[" + alt + "](" + url + ")"
+	})
 
+	// #1119: a naive "line has 2+ pipes" check false-positived on ordinary
+	// prose that happens to contain "|", flipping the message into card
+	// rendering for text that isn't a table at all. LooksLikeMarkdownTable
+	// requires an actual header-separator row.
 	hasCodeOrTable := strings.Contains(cleaned, "```") ||
-		feishuTableRe.MatchString(cleaned)
+		channel.LooksLikeMarkdownTable(cleaned)
 
 	if hasCodeOrTable {
 		// Use interactive card (schema 2.0) with markdown element.

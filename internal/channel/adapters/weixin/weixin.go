@@ -974,6 +974,11 @@ func markdownToPlain(text string) string {
 	// Horizontal rules.
 	text = regexp.MustCompile(`(?m)^[-*_]{3,}\s*$`).ReplaceAllString(text, "")
 
+	// Pipe tables: WeChat has no table rendering, so raw "| a | b |" rows
+	// used to arrive completely unrendered (#1119). Flatten to readable
+	// "a | b" lines instead of dropping the structure entirely.
+	text = channel.FlattenPipeTables(text)
+
 	return strings.TrimSpace(text)
 }
 
