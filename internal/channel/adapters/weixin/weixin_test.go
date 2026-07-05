@@ -436,6 +436,20 @@ func TestMarkdownToPlain(t *testing.T) {
 	if strings.Contains(plain, "[link]") {
 		t.Errorf("expected link text, got: %q", plain)
 	}
+	// #1119: Weixin has no clickable-link markdown, and the URL used to be
+	// discarded entirely — "see [the doc](url)" arrived as just "see the
+	// doc", with no way to reach the doc.
+	if !strings.Contains(plain, "link (http://x)") {
+		t.Errorf("expected the URL to be preserved as \"text (url)\", got: %q", plain)
+	}
+}
+
+// A link with an empty URL (`[text]()`) shouldn't render a dangling "()".
+func TestMarkdownToPlain_LinkWithEmptyURL(t *testing.T) {
+	plain := markdownToPlain("see [the doc]()")
+	if plain != "see the doc" {
+		t.Errorf("expected the empty URL to be omitted, got: %q", plain)
+	}
 }
 
 func TestAdapter_StartWithCredentials(t *testing.T) {

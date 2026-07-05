@@ -274,6 +274,26 @@ func TestSendText(t *testing.T) {
 	}
 }
 
+// #1119: content was sent with no allowed_mentions field, so agent-generated
+// text containing "@everyone", "@here", or a raw <@id> mention actually
+// pinged the channel or those users — the model has no way to know plain
+// text in its output carries that side effect.
+func TestSendText_SuppressesMentions(t *testing.T) {
+	f := newFakeDiscord(t)
+	a := newTestAdapter(t, f, nil)
+
+	if res := a.SendText("chan-1", "hey @everyone check this out", ""); !res.OK {
+		t.Fatalf("send failed: %+v", res)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	mentions, _ := f.sent[0]["allowed_mentions"].(map[string]any)
+	parse, ok := mentions["parse"].([]any)
+	if !ok || len(parse) != 0 {
+		t.Fatalf("expected allowed_mentions.parse to be an empty list, got: %+v", f.sent[0]["allowed_mentions"])
+	}
+}
+
 // #1118: a 429 used to fail SendText outright — with a multi-chunk message
 // that meant chunk 1 arrives and chunk 2 silently vanishes. It should now
 // honor retry_after and retry instead of dropping the chunk.
@@ -377,6 +397,15 @@ func TestUpdateMessageAndTyping(t *testing.T) {
 	}
 	if err := a.SendTyping("chan-1", ""); err != nil {
 		t.Fatal(err)
+	}
+
+	// #1119: an edit is as capable of pinging @everyone as an initial send.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	mentions, _ := f.edited[0]["allowed_mentions"].(map[string]any)
+	parse, ok := mentions["parse"].([]any)
+	if !ok || len(parse) != 0 {
+		t.Fatalf("expected allowed_mentions.parse to be an empty list on edit, got: %+v", f.edited[0]["allowed_mentions"])
 	}
 }
 

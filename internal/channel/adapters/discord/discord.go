@@ -196,6 +196,13 @@ func (a *Adapter) Stop() error {
 	return nil
 }
 
+// noMentionsParse suppresses Discord's default mention parsing on outbound
+// content. #1119: agent-generated text containing "@everyone", "@here", or a
+// raw <@id>/<@&id> mention used to actually ping the channel or those
+// users/roles — the model has no way to know that plain text in its output
+// carries that side effect. An empty "parse" list disables all of them.
+var noMentionsParse = map[string]any{"parse": []string{}}
+
 // SendText sends a message via the REST API, splitting content over
 // Discord's 2000-char cap into consecutive messages (#1116). Returns the
 // message ID of the last chunk.
@@ -207,7 +214,7 @@ func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 
 	var lastID string
 	for i, chunk := range chunks {
-		payload := map[string]any{"content": chunk}
+		payload := map[string]any{"content": chunk, "allowed_mentions": noMentionsParse}
 		if replyTo != "" && i == 0 {
 			payload["message_reference"] = map[string]string{"message_id": replyTo}
 		}
@@ -307,7 +314,7 @@ func (a *Adapter) SendFile(chatID, path, name, replyTo string) channel.SendResul
 // UpdateMessage edits an existing message.
 func (a *Adapter) UpdateMessage(chatID, messageID, text string) bool {
 	err := a.rest(context.Background(), http.MethodPatch, fmt.Sprintf("/channels/%s/messages/%s", chatID, messageID),
-		map[string]any{"content": text}, nil)
+		map[string]any{"content": text, "allowed_mentions": noMentionsParse}, nil)
 	if err != nil {
 		log.Printf("[discord] update_message failed: %v", err)
 		return false

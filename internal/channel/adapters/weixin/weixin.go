@@ -949,8 +949,18 @@ func markdownToPlain(text string) string {
 	// Images.
 	text = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`).ReplaceAllString(text, "")
 
-	// Links: keep text, drop URL.
-	text = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`).ReplaceAllString(text, "$1")
+	// Links: Weixin has no clickable-link markdown, so render as "text (url)"
+	// instead of discarding the URL entirely (#1119) — "see [the doc](url)"
+	// used to arrive as just "see the doc", with no way to reach the doc.
+	linkRe := regexp.MustCompile(`\[([^\]]+)\]\(([^)]*)\)`)
+	text = linkRe.ReplaceAllStringFunc(text, func(m string) string {
+		parts := linkRe.FindStringSubmatch(m)
+		label, url := parts[1], parts[2]
+		if url == "" {
+			return label
+		}
+		return label + " (" + url + ")"
+	})
 
 	// Bold/italic markers.
 	text = regexp.MustCompile(`\*\*([^*]+)\*\*`).ReplaceAllString(text, "$1")
