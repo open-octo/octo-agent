@@ -197,8 +197,8 @@ func TestLiteralPathPrefix(t *testing.T) {
 		{"**/*.go", ""},
 		{"*.go", ""},
 		{"src/*/foo.go", "src"},
-		{"../sibling/*.go", ""},        // ".." must never anchor outside the search root
-		{"foo/../bar/*.go", "foo"},     // stops at ".." rather than treating it as literal
+		{"../sibling/*.go", ""},                    // ".." must never anchor outside the search root
+		{"foo/../bar/*.go", "foo"},                 // stops at ".." rather than treating it as literal
 		{"/internal/tools/*.go", "internal/tools"}, // leading "/" doesn't shift the prefix
 		{"./internal/tools/*.go", "internal/tools"},
 	}
