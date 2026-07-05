@@ -186,6 +186,175 @@ func TestGlob_FileRoot(t *testing.T) {
 	}
 }
 
+func TestLiteralPathPrefix(t *testing.T) {
+	cases := []struct {
+		pattern string
+		want    string
+	}{
+		{"internal/tools/**/*.go", "internal/tools"},
+		{"cmd/octo/config.go", "cmd/octo/config.go"}, // fully literal, no wildcard at all
+		{"src/**/*.ts", "src"},
+		{"**/*.go", ""},
+		{"*.go", ""},
+		{"src/*/foo.go", "src"},
+		{"../sibling/*.go", ""},                    // ".." must never anchor outside the search root
+		{"foo/../bar/*.go", "foo"},                 // stops at ".." rather than treating it as literal
+		{"/internal/tools/*.go", "internal/tools"}, // leading "/" doesn't shift the prefix
+		{"./internal/tools/*.go", "internal/tools"},
+	}
+	for _, c := range cases {
+		if got := literalPathPrefix(c.pattern); got != c.want {
+			t.Errorf("literalPathPrefix(%q) = %q, want %q", c.pattern, got, c.want)
+		}
+	}
+}
+
+// TestGlob_PrunesToLiteralPrefix verifies a pattern anchored under a literal
+// directory prefix never walks into an unrelated, unreadable sibling
+// directory. Before the pruning fix, glob always walked the whole root
+// (ripgrep has no reason to skip a dir it wasn't told to avoid), so the
+// unreadable sibling would trip the "partial results" warning even though
+// the pattern couldn't possibly match anything under it.
+func TestGlob_PrunesToLiteralPrefix(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "readable", "ok.go"), "")
+	writeTestFile(t, filepath.Join(dir, "unreadable", "secret.go"), "")
+
+	unreadable := filepath.Join(dir, "unreadable")
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatalf("chmod unreadable: %v", err)
+	}
+	defer os.Chmod(unreadable, 0o755)
+
+	if f, err := os.Open(unreadable); err == nil {
+		f.Close()
+		t.Skip("chmod 000 did not prevent directory listing; skipping permission test")
+	}
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "readable/*.go",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "ok.go") {
+		t.Errorf("expected ok.go in output:\n%s", out.Text)
+	}
+	// The pattern is anchored to "readable/", so the walk should never touch
+	// "unreadable/" — no warning should surface.
+	if strings.Contains(out.Text, "[warning:") {
+		t.Errorf("pruned walk should not have visited the unreadable sibling dir:\n%s", out.Text)
+	}
+}
+
+// TestGlob_DotDotPatternNeverEscapesRoot is a regression test: an earlier
+// version of the pruning logic treated ".." as an ordinary literal path
+// segment, so a pattern like "../sibling/*.go" would get pruned to
+// filepath.Join(root, "../sibling") — a directory outside root — and
+// ripgrep would then walk and return files from there. Before pruning
+// existed at all, this pattern could never match anything (no real path
+// component is literally ".."), so the correct, safe behavior is "no
+// matches", not "leak the parent/sibling directory's contents".
+func TestGlob_DotDotPatternNeverEscapesRoot(t *testing.T) {
+	requireRg(t)
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	sibling := filepath.Join(base, "sibling")
+	writeTestFile(t, filepath.Join(root, "ok.go"), "")
+	writeTestFile(t, filepath.Join(sibling, "secret.go"), "")
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "../sibling/*.go",
+		"path":    root,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(out.Text, "secret.go") {
+		t.Errorf("pattern with \"..\" must never match outside the search root:\n%s", out.Text)
+	}
+	if !strings.Contains(out.Text, "no matches") {
+		t.Errorf("expected 'no matches', got:\n%s", out.Text)
+	}
+}
+
+// TestGlob_CaseMismatchedPrefixDoesNotMatch is a regression test: os.Stat
+// resolves case-insensitively on the filesystems most developers actually
+// run this on (macOS APFS, Windows NTFS default), so an earlier version of
+// the pruning logic trusted a case-mismatched literal prefix (e.g.
+// "Readable/*.go" against a real "readable/") and pruned to it — silently
+// turning a case-sensitive glob into a case-insensitive one, and reporting
+// matches under a path whose casing doesn't exist on disk. On a
+// case-sensitive filesystem (Linux) this bug can't reproduce since the
+// os.Stat itself would fail — this test only exercises the code path, not
+// the specific filesystem-dependent symptom.
+func TestGlob_CaseMismatchedPrefixDoesNotMatch(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "readable", "ok.go"), "")
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "Readable/*.go",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(out.Text, "ok.go") {
+		t.Errorf("case-mismatched pattern must not match (glob is case-sensitive):\n%s", out.Text)
+	}
+	if !strings.Contains(out.Text, "no matches") {
+		t.Errorf("expected 'no matches', got:\n%s", out.Text)
+	}
+}
+
+// TestGlob_LiteralPrefixMissingSkipsWalk verifies that when the pattern's
+// literal prefix doesn't exist on disk, glob returns "no matches" without
+// invoking ripgrep at all. It deliberately does not call requireRg — if this
+// regresses to calling rg anyway, the test still passes as long as rg is
+// present, so the meaningful signal is that this test never needs it.
+func TestGlob_LiteralPrefixMissingSkipsWalk(t *testing.T) {
+	dir := t.TempDir()
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "does-not-exist/*.go",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "no matches") {
+		t.Errorf("expected 'no matches' message: %q", out.Text)
+	}
+}
+
+// TestGlob_FullyLiteralPatternMatchesSingleFile exercises the fast path
+// where the entire pattern is a literal path (no wildcard characters at
+// all): literalPathPrefix returns the whole pattern, which resolves
+// straight to a single file instead of a directory to walk.
+func TestGlob_FullyLiteralPatternMatchesSingleFile(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "pkg", "single.go"), "")
+	writeTestFile(t, filepath.Join(dir, "pkg", "other.go"), "")
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "pkg/single.go",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "single.go") {
+		t.Errorf("expected single.go in output:\n%s", out.Text)
+	}
+	if strings.Contains(out.Text, "other.go") {
+		t.Errorf("other.go should not match a fully literal pattern:\n%s", out.Text)
+	}
+}
+
 func TestGlob_UnreadableSubdirReturnsPartialResults(t *testing.T) {
 	requireRg(t)
 	dir := t.TempDir()
