@@ -1,6 +1,6 @@
 <script lang="ts">
   import { artifacts, artifactsOpen, artifactSel, artifactView, showToast } from '../lib/stores'
-  import { t } from '../lib/i18n'
+  import { t, tr } from '../lib/i18n'
 
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
 

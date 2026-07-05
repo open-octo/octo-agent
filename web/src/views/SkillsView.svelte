@@ -137,7 +137,7 @@
         return
       }
       skills.set(await api.listSkills())
-      showToast(tr('skills.toast_imported').replace('{name}', r.name))
+      showToast(tr('skills.toast_imported').replace('{name}', r.name ?? ''))
       importOpen = false
     } catch (err: any) {
       showToast(tr('skills.import_error') + err.message, 'error')
