@@ -153,6 +153,54 @@ func TestAdapter_SendText_BufferedMerge(t *testing.T) {
 	}
 }
 
+// #1118: a transient network failure (not iLink's own -2 rate-limit code)
+// used to skip the retry loop entirely and drop the message on the first
+// attempt. sendWithRetry now retries any error that isn't a recognized
+// *ilink.APIError too.
+func TestSendQueue_RetriesOnNetworkError(t *testing.T) {
+	var mu sync.Mutex
+	attempts := 0
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ilink/bot/sendmessage" {
+			return
+		}
+		mu.Lock()
+		attempts++
+		n := attempts
+		mu.Unlock()
+		if n == 1 {
+			// Simulate a transient network failure: hijack and close the
+			// connection without responding, producing a plain client error
+			// (not an *ilink.APIError).
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatal("ResponseWriter does not support hijacking")
+			}
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn.Close()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ret": 0})
+	}))
+	defer ts.Close()
+
+	q := newSendQueue(ilink.NewClient(), ts.URL, "tok")
+	defer q.stop()
+
+	q.sendWithRetry("user1", "hello", "ctx1")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if attempts < 2 {
+		t.Fatalf("expected the network failure to trigger a retry (>=2 attempts), got %d", attempts)
+	}
+}
+
 func TestAdapter_SendFile(t *testing.T) {
 	// Create a real temp file to upload.
 	tmpFile, err := os.CreateTemp(t.TempDir(), "test*.txt")

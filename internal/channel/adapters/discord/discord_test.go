@@ -18,12 +18,13 @@ import (
 // WebSocket that runs hello → identify → READY → one MESSAGE_CREATE per
 // queued message.
 type fakeDiscord struct {
-	mu       sync.Mutex
-	sent     []map[string]any
-	edited   []map[string]any
-	messages []dcMessage
-	srv      *httptest.Server
-	wsURL    string
+	mu        sync.Mutex
+	sent      []map[string]any
+	edited    []map[string]any
+	messages  []dcMessage
+	srv       *httptest.Server
+	wsURL     string
+	rateLimit int // return 429 for the first N message sends
 }
 
 func newFakeDiscord(t *testing.T) *fakeDiscord {
@@ -50,9 +51,16 @@ func newFakeDiscord(t *testing.T) *fakeDiscord {
 			}
 			json.NewEncoder(w).Encode(dcUser{ID: "bot-1", Username: "octo"})
 		case strings.HasSuffix(r.URL.Path, "/messages") && r.Method == http.MethodPost:
+			f.mu.Lock()
+			if f.rateLimit > 0 {
+				f.rateLimit--
+				f.mu.Unlock()
+				w.WriteHeader(http.StatusTooManyRequests)
+				json.NewEncoder(w).Encode(map[string]any{"message": "You are being rate limited.", "retry_after": 0.01})
+				return
+			}
 			var p map[string]any
 			json.NewDecoder(r.Body).Decode(&p)
-			f.mu.Lock()
 			f.sent = append(f.sent, p)
 			f.mu.Unlock()
 			json.NewEncoder(w).Encode(map[string]any{"id": "m-1"})
@@ -261,6 +269,38 @@ func TestSendText(t *testing.T) {
 	}
 	if f.sent[0]["message_reference"] == nil {
 		t.Fatal("expected message_reference for reply")
+	}
+}
+
+// #1118: a 429 used to fail SendText outright — with a multi-chunk message
+// that meant chunk 1 arrives and chunk 2 silently vanishes. It should now
+// honor retry_after and retry instead of dropping the chunk.
+func TestSendText_RetriesOnRateLimit(t *testing.T) {
+	f := newFakeDiscord(t)
+	f.rateLimit = 1
+	a := newTestAdapter(t, f, nil)
+
+	res := a.SendText("chan-1", "hello", "")
+	if !res.OK {
+		t.Fatalf("expected retry to succeed, got %+v", res)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) != 1 {
+		t.Fatalf("expected exactly one delivered message after the retry, got %d", len(f.sent))
+	}
+}
+
+// #1118: retries are bounded — a channel that's rate-limited past the retry
+// budget must still surface a real error, not hang or silently swallow it.
+func TestSendText_GivesUpAfterMaxRateLimitRetries(t *testing.T) {
+	f := newFakeDiscord(t)
+	f.rateLimit = maxRateLimitRetries + 1
+	a := newTestAdapter(t, f, nil)
+
+	res := a.SendText("chan-1", "hello", "")
+	if res.OK {
+		t.Fatalf("expected send to fail after exhausting retries, got %+v", res)
 	}
 }
 

@@ -1,8 +1,10 @@
 package channel
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -356,6 +358,41 @@ func TestManager_SendReply(t *testing.T) {
 	last := mock.lastSentText()
 	if last.text != "hello back" || last.chatID != "c1" {
 		t.Fatalf("unexpected sent text: %+v", last)
+	}
+}
+
+// #1118: a failed reply send used to just evaporate — the SendResult was
+// discarded with nothing logged, so a broken /list or /bind confirmation
+// left no trace explaining why the user never saw it.
+func TestManager_SendReply_LogsFailure(t *testing.T) {
+	tempHome(t)
+	mock := &mockAdapter{platform: "mock4", failSends: true}
+	Register("mock4", func(pc PlatformConfig) (Adapter, error) {
+		return mock, nil
+	})
+
+	cfg := &Config{
+		Channels: map[string]PlatformConfig{
+			"mock4": {"enabled": true},
+		},
+	}
+	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
+	mgr.adapters.Store("mock4", mock)
+
+	var buf bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(orig) })
+
+	ev := InboundEvent{Platform: "mock4", ChatID: "c1", MessageID: "m1"}
+	mgr.sendReply(ev, "hello back")
+
+	if mock.sentTextCount() != 0 {
+		t.Fatalf("expected no delivered text on a failed send, got %d", mock.sentTextCount())
+	}
+	logged := buf.String()
+	if !strings.Contains(logged, "channel reply send failed") || !strings.Contains(logged, "mock4") {
+		t.Fatalf("expected the failed send to be logged, got: %s", logged)
 	}
 }
 

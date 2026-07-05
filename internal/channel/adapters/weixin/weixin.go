@@ -211,8 +211,15 @@ func (q *sendQueue) sendWithRetry(chatID, text, contextToken string) {
 			return
 		}
 		apiErr, ok := err.(*ilink.APIError)
-		if ok && apiErr.ErrCode == -2 && i < len(retryDelays)-1 {
-			log.Printf("[weixin] rate-limited for %s, retry in %v (%d/%d)", chatID, delay, i+1, len(retryDelays))
+		// -2 is iLink's own rate-limit code. #1118: anything that ISN'T a
+		// recognized iLink error — a network timeout, connection reset, DNS
+		// hiccup — used to skip the retry loop entirely and drop the reply on
+		// the first attempt; those are exactly the transient failures a retry
+		// is for. A recognized API error with some other code is presumed
+		// permanent (bad request, etc.) and still fails fast.
+		retryable := (ok && apiErr.ErrCode == -2) || !ok
+		if retryable && i < len(retryDelays)-1 {
+			log.Printf("[weixin] send failed for %s, retry in %v (%d/%d): %v", chatID, delay, i+1, len(retryDelays), err)
 			time.Sleep(delay)
 			continue
 		}

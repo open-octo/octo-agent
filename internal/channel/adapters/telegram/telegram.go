@@ -423,6 +423,35 @@ func isParseError(err error) bool {
 	return strings.Contains(d, "can't parse entities") || strings.Contains(d, "markdown")
 }
 
+// #1118: a 429 used to just fail the call outright — with SendText's
+// per-chunk loop, that meant "chunk 1 arrives, chunk 3 silently missing"
+// partial delivery on any burst. Telegram reports how long to back off in
+// parameters.retry_after, so honor it with a small bounded retry instead of
+// dropping the chunk.
+const (
+	maxRateLimitRetries = 3
+	maxRateLimitWait    = 30 * time.Second
+)
+
+// waitForRetry sleeps for the API's requested backoff (capped, and floored at
+// one second when the server didn't say), honoring ctx cancellation. Returns
+// false if ctx was cancelled first.
+func waitForRetry(ctx context.Context, seconds int) bool {
+	d := time.Duration(seconds) * time.Second
+	if d <= 0 {
+		d = time.Second
+	}
+	if d > maxRateLimitWait {
+		d = maxRateLimitWait
+	}
+	select {
+	case <-time.After(d):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // call POSTs JSON to /bot<TOKEN>/<method> and returns the raw `result`.
 // A nil ctx means context.Background(); the long-poll path passes the Start
 // context so Stop cancels an in-flight getUpdates promptly.
@@ -432,35 +461,50 @@ func (a *Adapter) call(ctx context.Context, method string, params map[string]any
 	}
 	b, _ := json.Marshal(params)
 	url := fmt.Sprintf("%s/bot%s/%s", a.baseURL, a.token, method)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
 
-	var r struct {
-		OK          bool            `json:"ok"`
-		Result      json.RawMessage `json:"result"`
-		ErrorCode   int             `json:"error_code"`
-		Description string          `json:"description"`
-	}
-	if err := json.Unmarshal(body, &r); err != nil {
-		return nil, fmt.Errorf("invalid JSON response: %w", err)
-	}
-	if !r.OK {
+		var r struct {
+			OK          bool            `json:"ok"`
+			Result      json.RawMessage `json:"result"`
+			ErrorCode   int             `json:"error_code"`
+			Description string          `json:"description"`
+			Parameters  *struct {
+				RetryAfter int `json:"retry_after"`
+			} `json:"parameters"`
+		}
+		if err := json.Unmarshal(body, &r); err != nil {
+			return nil, fmt.Errorf("invalid JSON response: %w", err)
+		}
+		if r.OK {
+			return r.Result, nil
+		}
+		if r.ErrorCode == http.StatusTooManyRequests && attempt < maxRateLimitRetries {
+			wait := 0
+			if r.Parameters != nil {
+				wait = r.Parameters.RetryAfter
+			}
+			if !waitForRetry(ctx, wait) {
+				return nil, ctx.Err()
+			}
+			continue
+		}
 		return nil, &apiError{Code: r.ErrorCode, Description: r.Description}
 	}
-	return r.Result, nil
 }
 
 type tgPhotoSize struct {

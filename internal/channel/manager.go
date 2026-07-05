@@ -657,7 +657,13 @@ func (m *Manager) sendReply(ev InboundEvent, text string) {
 		return
 	}
 	ad := val.(Adapter)
-	ad.SendText(ev.ChatID, text, ev.MessageID)
+	// #1118: the SendResult was previously discarded — a failed /list or
+	// /bind confirmation just evaporated with nothing in the logs to explain
+	// why the user never saw it. There's no in-band way to notify the user
+	// here (this send *is* the notification), so log loudly instead.
+	if res := ad.SendText(ev.ChatID, text, ev.MessageID); !res.OK {
+		slog.Error("channel reply send failed", "platform", ev.Platform, "chat_id", ev.ChatID, "err", res.Error)
+	}
 }
 
 // sendTyping sends a typing indicator to the chat.

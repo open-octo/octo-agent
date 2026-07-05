@@ -57,6 +57,14 @@ const (
 	// smaller than its UTF-16 code-unit count, so this can only split a
 	// little earlier than the real limit requires, never later.
 	maxMessageBytes = 2000
+
+	// #1118: a 429 used to fail the REST call outright — with SendText's
+	// per-chunk loop, that meant "chunk 1 arrives, chunk 3 silently missing"
+	// partial delivery on any burst. Discord reports how long to back off in
+	// the response body's retry_after (seconds, fractional), so honor it with
+	// a small bounded retry instead of dropping the chunk.
+	maxRateLimitRetries = 3
+	maxRateLimitWait    = 30 * time.Second
 )
 
 // fatalCloseCodes are gateway close codes that mean reconnecting cannot help
@@ -337,45 +345,66 @@ func userAgent() string {
 }
 
 func (a *Adapter) rest(method, path string, payload, out any) error {
-	var body io.Reader
+	var bodyBytes []byte
 	if payload != nil {
-		b, _ := json.Marshal(payload)
-		body = bytes.NewReader(b)
-	}
-	req, err := http.NewRequest(method, a.apiBase+path, body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bot "+a.token)
-	req.Header.Set("User-Agent", userAgent())
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
+		bodyBytes, _ = json.Marshal(payload)
 	}
 
-	resp, err := a.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	for attempt := 0; ; attempt++ {
+		var body io.Reader
+		if bodyBytes != nil {
+			body = bytes.NewReader(bodyBytes)
+		}
+		req, err := http.NewRequest(method, a.apiBase+path, body)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bot "+a.token)
+		req.Header.Set("User-Agent", userAgent())
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var e struct {
-			Message string `json:"message"`
+		resp, err := a.http.Do(req)
+		if err != nil {
+			return err
 		}
-		_ = json.Unmarshal(data, &e)
-		if e.Message == "" {
-			e.Message = strings.TrimSpace(string(data))
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("discord API %d: %s", resp.StatusCode, e.Message)
+
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRateLimitRetries {
+			var e struct {
+				RetryAfter float64 `json:"retry_after"`
+			}
+			_ = json.Unmarshal(data, &e)
+			wait := time.Duration(e.RetryAfter * float64(time.Second))
+			if wait <= 0 {
+				wait = time.Second
+			}
+			if wait > maxRateLimitWait {
+				wait = maxRateLimitWait
+			}
+			time.Sleep(wait)
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			var e struct {
+				Message string `json:"message"`
+			}
+			_ = json.Unmarshal(data, &e)
+			if e.Message == "" {
+				e.Message = strings.TrimSpace(string(data))
+			}
+			return fmt.Errorf("discord API %d: %s", resp.StatusCode, e.Message)
+		}
+		if out != nil && len(data) > 0 {
+			return json.Unmarshal(data, out)
+		}
+		return nil
 	}
-	if out != nil && len(data) > 0 {
-		return json.Unmarshal(data, out)
-	}
-	return nil
 }
 
 type dcUser struct {

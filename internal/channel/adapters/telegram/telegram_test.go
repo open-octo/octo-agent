@@ -21,6 +21,7 @@ type fakeBotAPI struct {
 	served    bool
 	sent      []map[string]any
 	sendFail  int // fail the first N sendMessage calls with a parse error
+	rateLimit int // return 429 for the first N sendMessage calls
 	srv       *httptest.Server
 	botUserID int64
 }
@@ -48,6 +49,11 @@ func newFakeBotAPI(t *testing.T) *fakeBotAPI {
 		case strings.HasSuffix(r.URL.Path, "/sendMessage"):
 			f.mu.Lock()
 			defer f.mu.Unlock()
+			if f.rateLimit > 0 {
+				f.rateLimit--
+				writeRateLimited(w, 1)
+				return
+			}
 			if f.sendFail > 0 && params["parse_mode"] != nil {
 				f.sendFail--
 				writeError(w, 400, "Bad Request: can't parse entities")
@@ -73,6 +79,15 @@ func writeResult(w http.ResponseWriter, result any) {
 
 func writeError(w http.ResponseWriter, code int, desc string) {
 	json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": code, "description": desc})
+}
+
+func writeRateLimited(w http.ResponseWriter, retryAfter int) {
+	json.NewEncoder(w).Encode(map[string]any{
+		"ok":          false,
+		"error_code":  429,
+		"description": "Too Many Requests: retry after",
+		"parameters":  map[string]any{"retry_after": retryAfter},
+	})
 }
 
 func newTestAdapter(t *testing.T, f *fakeBotAPI, extra map[string]any) *Adapter {
@@ -191,6 +206,38 @@ func TestStart_AllowedUsersFilters(t *testing.T) {
 	events := collectEvents(t, a, 1)
 	if len(events) != 1 || events[0].Text != "friend" {
 		t.Fatalf("allowed_users not enforced: %+v", events)
+	}
+}
+
+// #1118: a 429 used to fail SendText outright — with a multi-chunk message
+// that meant chunk 1 arrives and chunk 2 silently vanishes. It should now
+// honor retry_after and retry instead of dropping the chunk.
+func TestSendText_RetriesOnRateLimit(t *testing.T) {
+	f := newFakeBotAPI(t)
+	f.rateLimit = 1
+	a := newTestAdapter(t, f, nil)
+
+	res := a.SendText("123", "hello", "")
+	if !res.OK {
+		t.Fatalf("expected retry to succeed, got %+v", res)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) != 1 {
+		t.Fatalf("expected exactly one delivered message after the retry, got %d", len(f.sent))
+	}
+}
+
+// #1118: retries are bounded — a chat that's rate-limited past the retry
+// budget must still surface a real error, not hang or silently swallow it.
+func TestSendText_GivesUpAfterMaxRateLimitRetries(t *testing.T) {
+	f := newFakeBotAPI(t)
+	f.rateLimit = maxRateLimitRetries + 1
+	a := newTestAdapter(t, f, nil)
+
+	res := a.SendText("123", "hello", "")
+	if res.OK {
+		t.Fatalf("expected send to fail after exhausting retries, got %+v", res)
 	}
 }
 
