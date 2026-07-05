@@ -342,8 +342,10 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 		return m.cmdCompact(ev)
 	case "/goal":
 		return m.cmdGoal(ev, strings.Join(args, " "))
+	case "/help":
+		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /goal, /stop, /status, /help"
 	default:
-		return fmt.Sprintf("Unknown command: %s. Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /goal, /stop, /status", cmd)
+		return fmt.Sprintf("Unknown command: %s", cmd)
 	}
 }
 
@@ -604,8 +606,17 @@ func (m *Manager) cmdStatus(ev InboundEvent) string {
 	}
 	sess := val.(*Session)
 	inTok, outTok := sess.Agent.SessionTokens()
-	return fmt.Sprintf("Session active since %s. Input: %d tokens, Output: %d tokens.",
-		sess.BoundAt.Format("15:04:05"), inTok, outTok)
+	model := sess.Agent.Model
+	status := "idle"
+	if sess.IsRunning() {
+		status = "running"
+	}
+	title := sess.Store.Title
+	if title == "" {
+		title = sess.Store.DisplayTitle()
+	}
+	return fmt.Sprintf("Session: %s | Model: %s | Status: %s | Since: %s | Tokens: %d in / %d out",
+		title, model, status, sess.BoundAt.Format("15:04:05"), inTok, outTok)
 }
 
 // cmdList shows the persisted sessions a chat can attach to with /bind,

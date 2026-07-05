@@ -2249,6 +2249,12 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		s.handleChannelCompact(ad, ev)
 		return true
 	}
+	// Unknown slash tokens that match a skill name are passed through as
+	// normal user messages, same as the Web and TUI surfaces.
+	skillName := strings.TrimPrefix(cmd, "/")
+	if _, ok := s.skillReg.Get(skillName); ok {
+		return false
+	}
 	if reply := s.channelMgr.CommandRouter(ev); reply != "" {
 		ad.SendText(ev.ChatID, reply, ev.MessageID)
 	}
