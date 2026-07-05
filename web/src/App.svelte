@@ -244,8 +244,6 @@
 <FeedbackModal />
 <Toast />
 
-<!-- WS reconnect banner lives in Header, driven by wsState store -->
-
 <style>
 .app {
   height: 100vh;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { view, cmdkOpen, sidebar, showToast } from '../../lib/stores'
   import { t, tr } from '../../lib/i18n'
+  import { ws, wsState } from '../../lib/ws'
   import OctoLogo from './OctoLogo.svelte'
 
   function cycleSidebar() {
@@ -44,6 +45,15 @@
   </div>
 
   <div class="right">
+    <!-- Visible on every view, not just ChatView, whose own inline banner only
+         renders while a chat session is open — Settings/MCP/Skills/Tasks/etc.
+         otherwise had no indication a dropped socket was silently failing
+         their actions. -->
+    {#if $wsState !== 'connected'}
+      <button class="icon-btn" title={$t('chat.connection_lost')} onclick={() => ws.connect()}>
+        <iconify-icon icon="ant-design:loading-outlined" width="16" style="color:var(--warning);animation:octo-spin 0.8s linear infinite"></iconify-icon>
+      </button>
+    {/if}
     <button class="search-pill" onclick={() => cmdkOpen.set(true)}>
       <iconify-icon icon="ant-design:search-outlined" width="14"></iconify-icon>
       <span>{$t('header.search_sessions')}</span>

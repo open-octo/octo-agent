@@ -1,4 +1,5 @@
 import { writable } from "svelte/store";
+import { isUnauthorized, reauth } from "./auth";
 
 export const wsState = writable<"connecting" | "connected" | "disconnected">("disconnected");
 
@@ -23,6 +24,12 @@ export class WsManager {
   private backoffIndex = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
+  // False until the first successful open. Distinguishes a genuine reconnect
+  // (where subscribed sessions need a history resync below) from the very
+  // first connect of the app's lifetime, where each view's own mount effect
+  // already loads history and a synthetic resync would just be a redundant
+  // fetch.
+  private hasConnectedOnce = false;
 
   connect(): void {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
@@ -35,6 +42,8 @@ export class WsManager {
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
+      const isReconnect = this.hasConnectedOnce;
+      this.hasConnectedOnce = true;
       this.backoffIndex = 0;
       wsReconnect.set(null);
       wsState.set("connected");
@@ -47,6 +56,16 @@ export class WsManager {
       const pending = this.queue.splice(0);
       for (const msg of pending) {
         this.ws!.send(msg);
+      }
+      // The socket carries no backlog: any turn output broadcast to a
+      // subscribed session while we were down (laptop sleep, a network blip)
+      // is otherwise a permanent hole in the rendered transcript — missing
+      // text, tool cards stuck "running". Synthesize the same event ChatView
+      // already handles for /clear and /compact to force a re-fetch.
+      if (isReconnect) {
+        for (const sessionId of this.subscriptions) {
+          this.dispatch({ type: "history_reload", session_id: sessionId });
+        }
       }
     };
 
@@ -63,7 +82,7 @@ export class WsManager {
     this.ws.onclose = () => {
       wsState.set("disconnected");
       if (!this.intentionalClose) {
-        this.scheduleReconnect();
+        void this.handleUnexpectedClose();
       }
     };
 
@@ -71,6 +90,27 @@ export class WsManager {
       wsState.set("disconnected");
       // onclose will also fire after onerror, so reconnect is handled there
     };
+  }
+
+  // A revoked/expired access key fails the WS upgrade at the HTTP layer
+  // before any frame ever opens, so the browser's close event carries no
+  // status the client can read — it looks identical to a dropped connection.
+  // Probe a real authenticated endpoint to tell the two apart before
+  // committing to a backoff cycle that would otherwise retry the same
+  // rejection forever with no way out.
+  private async handleUnexpectedClose(): Promise<void> {
+    if (!(await isUnauthorized())) {
+      this.scheduleReconnect();
+      return;
+    }
+    const ok = await reauth();
+    if (this.intentionalClose) return;
+    if (ok) {
+      this.connect();
+    }
+    // ok === false: the user cancelled or exhausted their retries — stay
+    // disconnected rather than looping on a rejection that will not resolve
+    // itself. AuthGate's own retry limit already gave them the chance.
   }
 
   disconnect(): void {

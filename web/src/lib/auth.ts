@@ -81,23 +81,15 @@ export function checkAuth(): Promise<boolean> {
   return checkPromise;
 }
 
-async function doCheck(): Promise<boolean> {
-  adoptQueryKey();
-  // Re-seed the cookie from storage in case it was cleared.
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) setCookie(stored);
-
-  let status = await probe();
-  // ok — or a server/network error, which is not an auth failure and gets
-  // surfaced by whichever real call hits it; don't block boot on it.
-  if (status !== "unauthorized") return true;
-
+// Shared retry loop: prompt for a key up to MAX_PROMPT_TRIES times, probing
+// after each submission. Used both at boot (doCheck) and by a live client
+// that discovers mid-session its key was revoked (reauth).
+async function promptAndVerify(): Promise<boolean> {
   for (let i = 0; i < MAX_PROMPT_TRIES; i++) {
     const key = await askUserForKey(i > 0);
     if (!key) break; // user cancelled
     setCookie(key);
-    status = await probe();
-    if (status === "ok") {
+    if ((await probe()) === "ok") {
       localStorage.setItem(STORAGE_KEY, key);
       return true;
     }
@@ -105,4 +97,37 @@ async function doCheck(): Promise<boolean> {
   clearCookie();
   localStorage.removeItem(STORAGE_KEY);
   return false;
+}
+
+async function doCheck(): Promise<boolean> {
+  adoptQueryKey();
+  // Re-seed the cookie from storage in case it was cleared.
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored) setCookie(stored);
+
+  const status = await probe();
+  // ok — or a server/network error, which is not an auth failure and gets
+  // surfaced by whichever real call hits it; don't block boot on it.
+  if (status !== "unauthorized") return true;
+  return promptAndVerify();
+}
+
+// Confirms whether the *current* cookie is rejected right now — a fresh,
+// uncached probe (unlike checkAuth(), which memoizes its result for the
+// process lifetime). Used by the WebSocket reconnect loop to tell a revoked
+// key apart from an ordinary network drop: only a real 401 justifies giving
+// up on backoff and re-prompting; a fetch failure here just means the network
+// is down, which the caller should retry as usual.
+export async function isUnauthorized(): Promise<boolean> {
+  return (await probe()) === "unauthorized";
+}
+
+// Re-probes and, if still rejected, re-runs the same prompt-and-verify loop
+// checkAuth() uses at boot — for a live client that already passed the boot
+// check but later finds its key no longer works (e.g. the operator rotated
+// it). Not memoized: each call re-probes, so it reflects the current cookie.
+export async function reauth(): Promise<boolean> {
+  const status = await probe();
+  if (status !== "unauthorized") return true;
+  return promptAndVerify();
 }
