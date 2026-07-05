@@ -435,3 +435,87 @@ func TestDeleteStore_TombstonesAgainstZombiePersist(t *testing.T) {
 		t.Error("zombie turn resurrected the deleted history file")
 	}
 }
+
+// #1079: if the session file is deleted externally (e.g. from the web UI)
+// while this IM session sits idle in the manager's cache, the in-memory
+// Store pointer goes stale. Without EnsureStoreExists, the next message from
+// that chat hit acquireSessionBinding's authoritative reload and failed with
+// a confusing "session ... not found" error instead of just starting fresh.
+func TestEnsureStoreExists_RecreatesDeletedFile(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	m := testManager()
+	sess := m.GetOrCreateSession(ev)
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "hello"})
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	oldID := sess.Store.ID
+	path, err := sess.Store.SavePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	sess.EnsureStoreExists()
+
+	if sess.Store == nil {
+		t.Fatal("Store is nil after EnsureStoreExists")
+	}
+	if sess.Store.ID != oldID {
+		t.Errorf("store ID changed: got %q, want %q (same key must map to the same store)", sess.Store.ID, oldID)
+	}
+	if sess.Store.Source != "channel" || sess.Store.BoundEntry != agent.EntryChannel {
+		t.Errorf("recreated store has wrong shape: source=%q boundEntry=%q", sess.Store.Source, sess.Store.BoundEntry)
+	}
+	if got := len(sess.Agent.History.Snapshot()); got != 0 {
+		t.Errorf("history not reset after store recreation: %d messages", got)
+	}
+	if _, err := agent.LoadSession(sess.Store.ID); err != nil {
+		t.Errorf("LoadSession still fails after EnsureStoreExists: %v", err)
+	}
+}
+
+func TestEnsureStoreExists_NoOpWhenFileStillExists(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	m := testManager()
+	sess := m.GetOrCreateSession(ev)
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "hello"})
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	before := sess.Store
+
+	sess.EnsureStoreExists()
+
+	if sess.Store != before {
+		t.Error("EnsureStoreExists replaced a Store whose file still exists")
+	}
+	if got := len(sess.Agent.History.Snapshot()); got != 1 {
+		t.Errorf("EnsureStoreExists wiped history when the file was intact: %d messages", got)
+	}
+}
+
+// A tombstoned store (deleteStore, used by /unbind and /bind) must stay nil —
+// EnsureStoreExists is not the right place to undo an explicit tombstone.
+func TestEnsureStoreExists_NoOpWhenStoreIsNil(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+	m := testManager()
+	sess := m.GetOrCreateSession(ev)
+	if err := sess.deleteStore(); err != nil {
+		t.Fatal(err)
+	}
+
+	sess.EnsureStoreExists()
+
+	if sess.Store != nil {
+		t.Error("EnsureStoreExists should not resurrect a tombstoned store")
+	}
+}

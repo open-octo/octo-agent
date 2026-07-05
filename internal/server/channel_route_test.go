@@ -400,6 +400,52 @@ func TestHandleChannelMessage_RejectsTurnWhenBoundToOtherEntry(t *testing.T) {
 	t.Fatal("expected rejection text from adapter")
 }
 
+// TestHandleChannelMessage_RecoversWhenSessionFileDeletedExternally (#1079):
+// if the chat's bound session was deleted from the web UI while this IM
+// session sat idle in the manager's cache, the next message used to hit
+// acquireSessionBinding's authoritative LoadSession and fail outright with a
+// confusing "session ... not found" error — the reporter's expectation was
+// that the chat should just start fresh instead.
+func TestHandleChannelMessage_RecoversWhenSessionFileDeletedExternally(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	// Establish the chat's session and give it some history, exactly like an
+	// ordinary prior conversation.
+	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"))
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "old message"})
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	path, err := sess.Store.SavePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the web UI deleting the session file entirely — nothing else
+	// (no other entry's binding) takes its place.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello again"))
+
+	waitFor(t, func() bool { return len(ad.texts()) > 0 })
+
+	for _, txt := range ad.texts() {
+		if strings.Contains(txt, "not found") {
+			t.Fatalf("turn surfaced the stale-session error instead of starting fresh: %q", txt)
+		}
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("session file was not recreated on disk: %v", err)
+	}
+}
+
 // TestHandleChannelMessage_BackgroundCompletionTriggersIdleTurn: when an
 // async background process finishes after the synchronous turn chain has
 // ended, the completion note is drained into a follow-up idle turn so the
