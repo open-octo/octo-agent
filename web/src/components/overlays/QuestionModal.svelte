@@ -109,7 +109,7 @@
   padding: 24px;
 }
 .modal {
-  width: 100%; max-width: 480px;
+  width: 100%; max-width: 560px;
   background: var(--bg-container);
   border-radius: 12px;
   overflow: hidden;
@@ -118,7 +118,7 @@
 }
 .modal-header {
   display: flex; align-items: center; gap: 8px;
-  padding: 14px 18px;
+  padding: 14px 24px;
   border-bottom: 1px solid var(--border-table);
 }
 .modal-title {
@@ -133,21 +133,21 @@
 .close-btn:hover { background: var(--hover-neutral); }
 
 .modal-body {
-  padding: 16px 18px;
-  display: flex; flex-direction: column; gap: 14px;
+  padding: 20px 24px;
+  display: flex; flex-direction: column; gap: 16px;
 }
 .question-text {
   margin: 0;
-  font-size: 13px; line-height: 1.6; color: var(--text-secondary);
+  font-size: 14px; line-height: 1.6; color: var(--text-secondary);
   white-space: pre-wrap; word-break: break-word;
   max-height: 40vh; overflow-y: auto;
 }
 .options {
-  display: flex; flex-wrap: wrap; gap: 8px;
+  display: flex; flex-wrap: wrap; gap: 10px;
 }
 .option-pill {
   display: inline-flex; align-items: center; gap: 5px;
-  height: 30px; padding: 0 12px;
+  height: 34px; padding: 0 14px;
   border: 1px solid var(--border); background: var(--bg-container);
   border-radius: 9999px;
   font-size: 13px; color: var(--text-secondary);
@@ -168,7 +168,7 @@
 .custom-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
 
 .modal-footer {
-  padding: 12px 18px;
+  padding: 14px 24px;
   border-top: 1px solid var(--border-table);
   display: flex; align-items: center; gap: 8px;
 }
