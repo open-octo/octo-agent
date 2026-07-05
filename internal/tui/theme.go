@@ -103,16 +103,25 @@ func Banner(version, model, cwd string, width int) string {
 		hintStyle.Render(hints[1]),
 	)
 
-	// Horizontal join: art + 2-space gutter + info
+	// Horizontal join: art + 2-space gutter + info. Below ~75 columns this
+	// join no longer fits the terminal width and lipgloss.JoinHorizontal
+	// doesn't wrap — the result would wrap unpredictably wherever the
+	// terminal itself line-wraps, misaligning the art and info block against
+	// each other (#1095). Fall back to a text-only banner instead; the
+	// width<20 floor above already keeps that block itself from being
+	// squeezed further than makes sense.
 	art := strings.TrimSpace(octoASCII)
-	banner := lipgloss.JoinHorizontal(lipgloss.Top, art, "  ", infoBlock)
+	const gutter = 2
+	var banner string
+	if lipgloss.Width(art)+gutter+lipgloss.Width(infoBlock) <= width {
+		banner = lipgloss.JoinHorizontal(lipgloss.Top, art, "  ", infoBlock)
+	} else {
+		banner = infoBlock
+	}
 
 	// Outer padding: 1 line top/bottom for breathing room
 	return lipgloss.NewStyle().Padding(1, 0).Render(banner)
 }
-
-// BannerHeight is the number of lines Banner renders.
-const BannerHeight = 9
 
 // ── Status bar ─────────────────────────────────────────────────────────────
 
@@ -128,6 +137,7 @@ var (
 // StatusBar renders the bottom status line with styled segments.
 // Each segment is a [label, value] pair; the hint is shown on a second line.
 func StatusBar(segments [][2]string, hint string, width int) string {
+	segments = clampSegmentsToWidth(segments, width)
 	var b strings.Builder
 	if width > 3 {
 		b.WriteString(statusBarStyle.Render(strings.Repeat("─", width)))
@@ -156,4 +166,72 @@ func StatusBar(segments [][2]string, hint string, width int) string {
 		b.WriteString(statusHintStyle.Render(hint))
 	}
 	return b.String()
+}
+
+// clampSegmentsToWidth shortens the "cwd" segment's value — the one whose
+// length varies most and is the most tolerant of abbreviation — so the
+// segment line fits within width instead of silently wrapping onto a second
+// line on a deep working directory (#1095). Other segments (model, ctx%,
+// perm, ...) are short, fixed-shape labels and are left alone.
+func clampSegmentsToWidth(segments [][2]string, width int) [][2]string {
+	if width <= 0 {
+		return segments
+	}
+	over := segmentsWidth(segments) - width
+	if over <= 0 {
+		return segments
+	}
+	out := make([][2]string, len(segments))
+	copy(out, segments)
+	for i, seg := range out {
+		if seg[0] != "cwd" {
+			continue
+		}
+		budget := lipgloss.Width(seg[1]) - over
+		if budget < 1 {
+			budget = 1
+		}
+		out[i] = [2]string{seg[0], shortenMiddle(seg[1], budget)}
+		break
+	}
+	return out
+}
+
+// segmentsWidth measures the plain display width the segment line will
+// render at: each segment's value (labels aren't rendered, only used to pick
+// a style) plus a " · " separator between segments.
+func segmentsWidth(segments [][2]string) int {
+	w := 0
+	for i, seg := range segments {
+		if i > 0 {
+			w += 3 // " · "
+		}
+		w += lipgloss.Width(seg[1])
+	}
+	return w
+}
+
+// shortenMiddle shortens s to at most maxW display columns by cutting from
+// the middle and inserting "…", keeping both the start and the end visible
+// (e.g. "~/Projects/github/octo-agent" → "~/Pro…/octo-agent") — the leaf
+// directory name is usually the most useful part of a path, and padCol's
+// tail-truncation would hide it entirely.
+func shortenMiddle(s string, maxW int) string {
+	if maxW <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxW {
+		return s
+	}
+	if maxW == 1 {
+		return "…"
+	}
+	r := []rune(s)
+	avail := maxW - 1 // reserve 1 column for "…"
+	left := avail / 2
+	right := avail - left
+	if left+right >= len(r) {
+		return s
+	}
+	return string(r[:left]) + "…" + string(r[len(r)-right:])
 }

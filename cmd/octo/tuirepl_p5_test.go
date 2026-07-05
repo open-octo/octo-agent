@@ -22,6 +22,28 @@ func TestTUI_QueuePanelIsBordered(t *testing.T) {
 	}
 }
 
+// #1095: a long or multi-line queued message used to render verbatim, which
+// could blow the panel border apart. Each item must collapse to one bounded
+// line.
+func TestTUI_QueuePanelTruncatesLongMultilineItems(t *testing.T) {
+	m := newTestModel()
+	longLine := strings.Repeat("x", 200)
+	m.queue = []pendingItem{
+		{text: "first line\nsecond line\nthird line"},
+		{text: longLine},
+	}
+	out := m.View()
+	if strings.Contains(out, "second line") || strings.Contains(out, "third line") {
+		t.Errorf("multi-line queued item should collapse to its first line; got:\n%s", out)
+	}
+	if !strings.Contains(out, "first line") {
+		t.Errorf("queue should still show the item's first line; got:\n%s", out)
+	}
+	if strings.Contains(out, longLine) {
+		t.Errorf("a 200-char queued item should be truncated, not rendered in full; got:\n%s", out)
+	}
+}
+
 func TestTUI_PermissionPromptShowsFullCommand(t *testing.T) {
 	m := newTestModel()
 	// A command long past the old 60-rune summary cap: every character must be

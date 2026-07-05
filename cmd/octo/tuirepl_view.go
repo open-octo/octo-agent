@@ -1145,53 +1145,6 @@ func (m *tuiModel) renderWorkflowsPanel() string {
 
 // ── View ──
 
-// liveHeight returns the number of lines the "live" region (partial text,
-// spinner, queue, background, input box, status bar) occupies.
-func (m *tuiModel) liveHeight() int {
-	h := 0
-	if m.echoPending != "" {
-		h += strings.Count(m.echoPending, "\n") + 1
-	}
-	if m.partial.String() != "" {
-		h++
-	}
-	if m.running != nil || (m.turnRunning && m.partial.Len() == 0) {
-		h++
-	}
-	if m.running != nil && (tools.HasActiveSync() || tools.HasActiveSubAgentSync()) {
-		h++ // Ctrl+B hint line
-	}
-	if n := len(m.pendingSteer); n > 0 {
-		h += n // one line per pending steer message
-	}
-	if n := len(m.queue); n > 0 {
-		h += 3 + n // panel border (2) + title (1) + n body lines
-	}
-	if !m.turnRunning && len(tools.RunningBackground()) > 0 {
-		h++ // single idle "N shells still running" line
-	}
-	if n := len(m.subAgentOrder); n > 0 {
-		h += 3 // panel border (2) + title (1)
-		for _, id := range m.subAgentOrder {
-			sa := m.subAgents[id]
-			if sa == nil {
-				continue
-			}
-			h++ // header line
-			if sa.expanded {
-				h += len(sa.history) // one line per tool in history
-			}
-		}
-	}
-	if n := len(m.workflows); n > 0 {
-		h += 3 + n // panel border (2) + title (1) + one line per workflow
-	}
-	h += m.completionHeight() // slash-completion menu (0 when closed)
-	h += m.ta.Height()        // input box (textarea grows with content)
-	h += 2                    // status bar: separator + segments (no hint line)
-	return h
-}
-
 func (m *tuiModel) View() string {
 	if m.quit {
 		return ""
@@ -1275,7 +1228,10 @@ func (m *tuiModel) View() string {
 			if i > 0 {
 				items.WriteByte('\n')
 			}
-			items.WriteString(queueStyle.Render(fmt.Sprintf("%d. %s", i+1, q.text)))
+			// A queued item is user-typed and can be arbitrarily long or
+			// span multiple lines; render it as one bounded line so it
+			// can't blow apart the panel border (#1095).
+			items.WriteString(queueStyle.Render(fmt.Sprintf("%d. %s", i+1, truncate1Line(q.text))))
 		}
 		b.WriteString(tui.Panel(fmt.Sprintf("queue (%d)", len(m.queue)), items.String()))
 		b.WriteByte('\n')
