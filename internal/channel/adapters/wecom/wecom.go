@@ -850,8 +850,15 @@ func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.Inb
 	// aibot_msg_callback carries no structured "was the bot mentioned" field
 	// (see cfgBotNickname), so this only engages when bot_nickname is
 	// configured; without it, behavior is unchanged from before this fix.
-	if msg.ChatType == "group" && a.botNickname != "" && !strings.Contains(msg.Text.Content, "@"+a.botNickname) {
-		return
+	if msg.ChatType == "group" && a.botNickname != "" {
+		mention := "@" + a.botNickname
+		if !strings.Contains(msg.Text.Content, mention) {
+			return
+		}
+		// Strip the literal "@<nickname>" from the text that reaches the
+		// agent, same as Telegram/Feishu/DingTalk already do for their own
+		// mention syntax — it's UI-level addressing, not part of the query.
+		msg.Text.Content = strings.TrimSpace(strings.Replace(msg.Text.Content, mention, "", 1))
 	}
 
 	switch msg.MsgType {

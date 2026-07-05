@@ -196,7 +196,9 @@ func TestStart_GroupChatType_NoNicknameConfiguredNoGate(t *testing.T) {
 
 // #1122: with bot_nickname configured, a group message that doesn't mention
 // the bot is dropped — previously every group message was processed
-// regardless of chat type.
+// regardless of chat type. The mention itself is stripped from the text
+// that reaches the agent, matching Telegram/Feishu/DingTalk's own handling
+// of their mention syntax.
 func TestStart_GroupRequiresMentionWhenNicknameConfigured(t *testing.T) {
 	f := newFakeWecom(t)
 	f.callbacks = []map[string]any{
@@ -209,8 +211,8 @@ func TestStart_GroupRequiresMentionWhenNicknameConfigured(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("expected only the @-mentioning message to pass, got %+v", events)
 	}
-	if events[0].Text != "@octo help me with this" {
-		t.Fatalf("unexpected event text: %+v", events[0])
+	if events[0].Text != "help me with this" {
+		t.Fatalf("expected the mention to be stripped from the forwarded text, got: %+v", events[0])
 	}
 }
 
