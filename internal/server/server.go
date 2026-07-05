@@ -2249,11 +2249,19 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		s.handleChannelCompact(ad, ev)
 		return true
 	}
-	// Unknown slash tokens that match a skill name are passed through as
-	// normal user messages, same as the Web and TUI surfaces.
-	skillName := strings.TrimPrefix(cmd, "/")
-	if _, ok := s.skillReg.Get(skillName); ok {
-		return false
+	// Reserved commands must not be intercepted by a skill (matching
+	// the TUI reservedReplCommands pattern).
+	switch cmd {
+	case "/stop", "/bind", "/unbind", "/clear", "/new", "/status", "/list", "/help", "/goal", "/compact":
+		// fall through to CommandRouter
+	default:
+		// Unknown slash tokens that match a skill name are passed through as
+		// normal user messages, same as the Web and TUI surfaces.
+		skillName := strings.TrimPrefix(cmd, "/")
+		s.skillReg.Reload()
+		if _, ok := s.skillReg.Get(skillName); ok {
+			return false
+		}
 	}
 	if reply := s.channelMgr.CommandRouter(ev); reply != "" {
 		ad.SendText(ev.ChatID, reply, ev.MessageID)
