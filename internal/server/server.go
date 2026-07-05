@@ -2566,15 +2566,16 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	var executor agent.ToolExecutor
 	if s.cfg.Tools {
 		executor = tools.NewDefaultRegistry()
-		toolDefs = tools.DefaultToolsFor(sess.Agent.Model)
-		if !goalsOn {
-			// Advertising a tool this turn can't execute is the #597 class.
-			toolDefs = tools.WithoutGoalTools(toolDefs)
-		}
 
 		// Per-message sub-agent manager bound to THIS chat's agent —
 		// synchronous, since a chat message is request/response with no
-		// follow-up channel for an async result.
+		// follow-up channel for an async result. Stamped into ctx BEFORE
+		// toolDefs is computed below (#1133 follow-up) — the process-global
+		// spawner slot is never set in server mode (only
+		// SetDefaultSubAgentManager is, in enableSubAgentTools), so without
+		// this ordering the top-level turn's own toolDefs would never
+		// advertise workflow, even though this chat's spawned children (via
+		// this spawner's own toolsFn) correctly would.
 		spawner := app.NewSpawner(sess.Agent, executor, func(ctx context.Context) []agent.ToolDefinition {
 			if goalsOn {
 				return tools.DefaultToolsForCtx(ctx, sess.Agent.Model)
@@ -2584,6 +2585,13 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		subMgr := tools.NewSubAgentManager(spawner)
 		subMgr.SetSynchronous(true)
 		ctx = tools.WithSubAgentManager(ctx, subMgr)
+
+		toolDefs = tools.DefaultToolsForCtx(ctx, sess.Agent.Model)
+		if !goalsOn {
+			// Advertising a tool this turn can't execute is the #597 class.
+			toolDefs = tools.WithoutGoalTools(toolDefs)
+		}
+
 		// The task store lives on the session, so the task list persists
 		// across messages in this chat.
 		ctx = tools.WithTaskStore(ctx, sess.Tasks)

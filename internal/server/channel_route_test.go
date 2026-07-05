@@ -446,6 +446,43 @@ func TestHandleChannelMessage_RecoversWhenSessionFileDeletedExternally(t *testin
 	}
 }
 
+// TestHandleChannelMessage_AdvertisesWorkflowToTopLevelTurn (#1133 follow-up):
+// runChannelTurns used to compute the top-level turn's tool list before
+// stamping the ctx-scoped sub-agent manager that carries its spawner, so
+// tools.DefaultToolsForCtx saw no manager yet for that call — the IM
+// channel's own turn never advertised workflow (only its spawned children
+// did, via their own ctx-threaded toolsFn), even though the IM path never
+// depended on prepareToolTurn's removed global swap in the first place (it
+// doesn't call prepareToolTurn at all — it builds its own sub-agent manager
+// inline).
+func TestHandleChannelMessage_AdvertisesWorkflowToTopLevelTurn(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	rec := &recordingSender{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+		return agent.New(rec, "stub-model")
+	}, channel.BindByChat)
+
+	ad := &fullFakeAdapter{}
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+
+	waitFor(t, func() bool { return len(rec.lastTools) > 0 })
+
+	found := false
+	for _, d := range rec.lastTools {
+		if d.Name == "workflow" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("workflow not advertised to top-level IM turn; got %v", rec.lastTools)
+	}
+}
+
 // TestHandleChannelMessage_BackgroundCompletionTriggersIdleTurn: when an
 // async background process finishes after the synchronous turn chain has
 // ended, the completion note is drained into a follow-up idle turn so the

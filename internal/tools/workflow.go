@@ -35,19 +35,20 @@ func SetWorkflowForeground(v bool) { workflowForeground.Store(v) }
 // agent.ToolDefinition's Definition() method takes no context — there is no
 // way for it to see a specific turn's WithWorkingDir value directly — so
 // prepareToolTurn (regular sessions) and the scheduled-task runner (cron
-// tasks) stamp this process-global right before building tool definitions
-// for their turn, mirroring the existing SetSpawner/SetDefaultSubAgentManager
-// save-and-restore pattern in prepareToolTurn. Empty (the zero value) falls
-// back to the process CWD, matching every caller that never sets it (CLI,
-// tests).
+// tasks) stamp this process-global right before building tool definitions for
+// their turn, restoring the previous value once the turn ends (see
+// SetWorkflowDiscoveryCWD). This is the one process-global swap-and-restore
+// prepareToolTurn still does — sub_agent/workflow advertisement itself moved
+// to the ctx-aware DefaultToolsForCtx and no longer needs one (#1133). Empty
+// (the zero value) falls back to the process CWD, matching every caller that
+// never sets it (CLI, tests).
 var workflowDiscoveryCWD atomic.Value // string
 
 // SetWorkflowDiscoveryCWD records the directory the next Definition()-driven
 // workflow listing (the `workflow` tool's `name` parameter description, and
 // ListNamedWorkflows for the web panel) should resolve project-level
 // workflows from. Callers should restore the previous value (via
-// ActiveWorkflowDiscoveryCWD, read before overwriting) once their turn ends,
-// the same way prepareToolTurn restores the spawner/sub-agent-manager globals.
+// ActiveWorkflowDiscoveryCWD, read before overwriting) once their turn ends.
 func SetWorkflowDiscoveryCWD(cwd string) { workflowDiscoveryCWD.Store(cwd) }
 
 // ActiveWorkflowDiscoveryCWD returns the cwd most recently set by

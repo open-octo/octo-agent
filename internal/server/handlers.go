@@ -788,10 +788,14 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 // async sub-agent result — and each turn gets a private store, so concurrent
 // sessions never share sub-agent or task state.
 //
-// It also temporarily installs the turn's spawner / sub-agent manager into the
-// process-global slots so that tools.DefaultToolsFor() advertises the sub_agent
-// and workflow tools to the model for this turn. The returned cleanup restores
-// the previous global values and must be deferred by the caller.
+// Callers must build this turn's tool list with tools.DefaultToolsForCtx(ctx,
+// ...) — using the ctx returned here — rather than the ctx-blind
+// tools.DefaultToolsFor, so sub_agent/workflow are advertised off the
+// ctx-scoped manager just stamped in above (#1133). prepareToolTurn no longer
+// touches the process-global spawner/sub-agent-manager slots at all; the
+// returned cleanup only restores the separate ActiveWorkflowDiscoveryCWD swap
+// (see its doc comment — a different concern, since WorkflowTool.Definition()
+// has no ctx to read a.CWD from).
 func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agent.Session) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, func(), error) {
 	executor := tools.NewDefaultRegistry()
 
