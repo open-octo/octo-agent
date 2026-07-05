@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from '../../lib/i18n'
+
   // Real background tasks come from the background_task_update WS event.
   // Each task: { handle_id, command, elapsed } (elapsed in seconds).
   let { tasks = [] }: { tasks?: any[] } = $props()
