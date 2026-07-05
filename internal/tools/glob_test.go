@@ -186,6 +186,110 @@ func TestGlob_FileRoot(t *testing.T) {
 	}
 }
 
+func TestLiteralPathPrefix(t *testing.T) {
+	cases := []struct {
+		pattern string
+		want    string
+	}{
+		{"internal/tools/**/*.go", "internal/tools"},
+		{"cmd/octo/config.go", "cmd/octo/config.go"}, // fully literal, no wildcard at all
+		{"src/**/*.ts", "src"},
+		{"**/*.go", ""},
+		{"*.go", ""},
+		{"src/*/foo.go", "src"},
+	}
+	for _, c := range cases {
+		if got := literalPathPrefix(c.pattern); got != c.want {
+			t.Errorf("literalPathPrefix(%q) = %q, want %q", c.pattern, got, c.want)
+		}
+	}
+}
+
+// TestGlob_PrunesToLiteralPrefix verifies a pattern anchored under a literal
+// directory prefix never walks into an unrelated, unreadable sibling
+// directory. Before the pruning fix, glob always walked the whole root
+// (ripgrep has no reason to skip a dir it wasn't told to avoid), so the
+// unreadable sibling would trip the "partial results" warning even though
+// the pattern couldn't possibly match anything under it.
+func TestGlob_PrunesToLiteralPrefix(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "readable", "ok.go"), "")
+	writeTestFile(t, filepath.Join(dir, "unreadable", "secret.go"), "")
+
+	unreadable := filepath.Join(dir, "unreadable")
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatalf("chmod unreadable: %v", err)
+	}
+	defer os.Chmod(unreadable, 0o755)
+
+	if f, err := os.Open(unreadable); err == nil {
+		f.Close()
+		t.Skip("chmod 000 did not prevent directory listing; skipping permission test")
+	}
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "readable/*.go",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "ok.go") {
+		t.Errorf("expected ok.go in output:\n%s", out.Text)
+	}
+	// The pattern is anchored to "readable/", so the walk should never touch
+	// "unreadable/" — no warning should surface.
+	if strings.Contains(out.Text, "[warning:") {
+		t.Errorf("pruned walk should not have visited the unreadable sibling dir:\n%s", out.Text)
+	}
+}
+
+// TestGlob_LiteralPrefixMissingSkipsWalk verifies that when the pattern's
+// literal prefix doesn't exist on disk, glob returns "no matches" without
+// invoking ripgrep at all. It deliberately does not call requireRg — if this
+// regresses to calling rg anyway, the test still passes as long as rg is
+// present, so the meaningful signal is that this test never needs it.
+func TestGlob_LiteralPrefixMissingSkipsWalk(t *testing.T) {
+	dir := t.TempDir()
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "does-not-exist/*.go",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "no matches") {
+		t.Errorf("expected 'no matches' message: %q", out.Text)
+	}
+}
+
+// TestGlob_FullyLiteralPatternMatchesSingleFile exercises the fast path
+// where the entire pattern is a literal path (no wildcard characters at
+// all): literalPathPrefix returns the whole pattern, which resolves
+// straight to a single file instead of a directory to walk.
+func TestGlob_FullyLiteralPatternMatchesSingleFile(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "pkg", "single.go"), "")
+	writeTestFile(t, filepath.Join(dir, "pkg", "other.go"), "")
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": "pkg/single.go",
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "single.go") {
+		t.Errorf("expected single.go in output:\n%s", out.Text)
+	}
+	if strings.Contains(out.Text, "other.go") {
+		t.Errorf("other.go should not match a fully literal pattern:\n%s", out.Text)
+	}
+}
+
 func TestGlob_UnreadableSubdirReturnsPartialResults(t *testing.T) {
 	requireRg(t)
 	dir := t.TempDir()

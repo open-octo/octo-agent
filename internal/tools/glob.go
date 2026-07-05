@@ -85,7 +85,38 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 		return agent.ToolResult{Text: ""}, err
 	}
 
-	files, warning, err := listProjectFiles(ctx, absRoot)
+	// Anchor the walk to the pattern's literal (non-wildcard) leading path
+	// segments when it has any — e.g. "internal/tools/**/*.go" can only
+	// match under "internal/tools", so there's no reason to hand ripgrep
+	// the whole repo root and filter everything else out afterward. This
+	// is the difference between listing one subtree and listing the entire
+	// project on every single glob call, regardless of how specific the
+	// pattern is.
+	scanRoot := absRoot
+	if prefix := literalPathPrefix(pattern); prefix != "" {
+		candidate := filepath.Join(absRoot, prefix)
+		switch _, statErr := os.Stat(candidate); {
+		case statErr == nil:
+			scanRoot = candidate
+		case os.IsNotExist(statErr):
+			// The literal prefix doesn't exist on disk, so no file can
+			// possibly match — skip the rg subprocess and the walk
+			// entirely instead of confirming "nothing matched" the slow way.
+			text := fmt.Sprintf("(no matches for %q under %s)", pattern, absRoot)
+			return agent.ToolResult{Text: text, UI: map[string]any{
+				"type":    "file_list",
+				"path":    absRoot,
+				"entries": []map[string]any{},
+				"total":   0,
+			}}, nil
+		default:
+			// Ambiguous error (e.g. permission denied on an ancestor dir) —
+			// fall back to the unpruned walk rather than risk a false
+			// "no matches".
+		}
+	}
+
+	files, warning, err := listProjectFiles(ctx, scanRoot)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("glob: %w", err)
 	}
@@ -164,6 +195,25 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 		fmt.Fprintf(&out, "\n[warning: %s]\n", warning)
 	}
 	return agent.ToolResult{Text: out.String(), UI: ui}, nil
+}
+
+// literalPathPrefix returns the leading path segments of pattern that
+// contain no glob metacharacters, joined with "/". Every match for pattern
+// must live under this prefix, so callers use it to anchor the filesystem
+// walk to a subtree instead of the whole search root — e.g.
+// "internal/tools/**/*.go" yields "internal/tools". Returns "" when the
+// pattern has no literal prefix (e.g. "**/*.go", "*.go"), in which case no
+// pruning is possible and the full root must be walked.
+func literalPathPrefix(pattern string) string {
+	segs := strings.Split(filepath.ToSlash(pattern), "/")
+	var lit []string
+	for _, seg := range segs {
+		if strings.ContainsAny(seg, "*?[") {
+			break
+		}
+		lit = append(lit, seg)
+	}
+	return strings.Join(lit, "/")
 }
 
 // listProjectFiles enumerates every file under root that ripgrep would search,
