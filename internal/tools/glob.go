@@ -97,7 +97,27 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 		candidate := filepath.Join(absRoot, prefix)
 		switch _, statErr := os.Stat(candidate); {
 		case statErr == nil:
-			scanRoot = candidate
+			// os.Stat resolves case-insensitively on the filesystems most
+			// developers actually run this on (macOS APFS, Windows NTFS,
+			// both case-insensitive by default) — so a pattern whose
+			// casing doesn't match what's on disk (e.g. "Internal/*.go"
+			// against a real "internal/") would otherwise get pruned to
+			// that wrong-case candidate anyway, and rg would then report
+			// matches under the wrong-case path. glob's matching is
+			// documented as path.Match semantics, i.e. case-sensitive —
+			// on a case-sensitive filesystem (Linux) that mismatch would
+			// already fail the stat and never reach here, so only trust
+			// the prune once we've confirmed the same case-sensitive
+			// result by checking each segment's on-disk name byte-for-byte.
+			if onDiskCaseMatches(absRoot, prefix) {
+				scanRoot = candidate
+			}
+			// else: leave scanRoot as absRoot — the prune target only
+			// exists via a case-insensitive lookup, so pruning to it would
+			// make this pattern match when it shouldn't. Falling back to
+			// the unpruned walk keeps the pre-existing case-sensitive
+			// matching behavior; globMatch (still case-sensitive) will
+			// correctly find nothing.
 		case os.IsNotExist(statErr):
 			// The literal prefix doesn't exist on disk, so no file can
 			// possibly match — skip the rg subprocess and the walk
@@ -204,16 +224,60 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 // "internal/tools/**/*.go" yields "internal/tools". Returns "" when the
 // pattern has no literal prefix (e.g. "**/*.go", "*.go"), in which case no
 // pruning is possible and the full root must be walked.
+//
+// A ".." segment stops collection (and is not itself included): unlike an
+// ordinary literal segment it doesn't name a real path component to anchor
+// on, it navigates to the parent directory. Treating it as literal would
+// let filepath.Join walk the prefix outside the caller's search root — no
+// on-disk path can ever contain a literal ".." segment, so a pattern like
+// "../sibling/*.go" can never actually match anything (a leftover ".."
+// segment always fails path.Match against a real path component), and
+// stopping here just preserves that: it neither prunes nor matches, same
+// as before this optimization existed. Empty segments (a leading "/") and
+// "." are skipped rather than stopping collection, since neither changes
+// which directory the rest of the prefix resolves to.
 func literalPathPrefix(pattern string) string {
 	segs := strings.Split(filepath.ToSlash(pattern), "/")
 	var lit []string
 	for _, seg := range segs {
-		if strings.ContainsAny(seg, "*?[") {
+		if seg == "" || seg == "." {
+			continue
+		}
+		if seg == ".." || strings.ContainsAny(seg, "*?[") {
 			break
 		}
 		lit = append(lit, seg)
 	}
 	return strings.Join(lit, "/")
+}
+
+// onDiskCaseMatches reports whether every segment of prefix (a "/"-joined
+// relative path, as returned by literalPathPrefix) matches the real on-disk
+// entry name byte-for-byte, walking down from base. It exists because
+// os.Stat alone can't tell a case-correct path from a case-mismatched one
+// on case-insensitive filesystems — this reads each directory's entries
+// and compares names directly, which is unaffected by filesystem case
+// folding.
+func onDiskCaseMatches(base, prefix string) bool {
+	dir := base
+	for _, seg := range strings.Split(prefix, "/") {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return false
+		}
+		found := false
+		for _, e := range entries {
+			if e.Name() == seg {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+		dir = filepath.Join(dir, seg)
+	}
+	return true
 }
 
 // listProjectFiles enumerates every file under root that ripgrep would search,
