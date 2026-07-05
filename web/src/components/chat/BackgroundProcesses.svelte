@@ -17,7 +17,7 @@
     <details>
       <summary class="tray-summary">
         <span class="dot"></span>
-        <span class="lbl">{$t('bgtask.n_processes').replace('{n}', String(tasks.length))}</span>
+        <span class="lbl">{$t(tasks.length === 1 ? 'bgtask.n_process' : 'bgtask.n_processes').replace('{n}', String(tasks.length))}</span>
         <span style="margin-left:auto"></span>
         <iconify-icon icon="lucide:chevron-up" width="14" style="color:var(--text-tertiary)"></iconify-icon>
       </summary>

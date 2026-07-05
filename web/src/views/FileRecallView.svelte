@@ -156,7 +156,7 @@
     <!-- Stats + actions -->
     <div class="stats-bar">
       <span class="stats-text">
-        {$t('files.count_files').replace('{n}', String(totalCount))}, {fmtSize(totalSize)}{#if orphanCount > 0} · {$t('files.count_orphans').replace('{n}', String(orphanCount))}{/if}
+        {$t(totalCount === 1 ? 'files.count_file' : 'files.count_files').replace('{n}', String(totalCount))}, {fmtSize(totalSize)}{#if orphanCount > 0} · {$t(orphanCount === 1 ? 'files.count_orphan' : 'files.count_orphans').replace('{n}', String(orphanCount))}{/if}
       </span>
       <div class="bar-actions">
         <button class="btn-outline" onclick={reload} disabled={loading}>

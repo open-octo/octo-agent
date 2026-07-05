@@ -48,7 +48,7 @@
     {#if runningCount > 0}
       <span class="running-badge">
         <iconify-icon icon="ant-design:loading-outlined" width="12" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
-        {runningCount} {$t('tools.running')}
+        {$t('agent.n_running').replace('{n}', String(runningCount))}
       </span>
     {:else}
       <span class="running-badge done">

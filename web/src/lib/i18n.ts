@@ -130,7 +130,7 @@ export const en: Record<string, string> = {
   "tools.n_more_lines": "{n} more lines",
   // MCP view (McpView.svelte)
   "mcp.toast_removed": "Server removed",
-  "mcp.toast_reconnecting": "Reconnecting",
+  "mcp.toast_reconnecting": "Reconnecting {name}…",
   "mcp.badge_project": "project",
   "mcp.tool_count": "{n} tool(s)",
   // Skills view
@@ -616,7 +616,7 @@ export const zh: Record<string, string> = {
   "tools.n_more_lines": "剩余 {n} 行",
   // MCP 视图 (McpView.svelte)
   "mcp.toast_removed": "服务器已移除",
-  "mcp.toast_reconnecting": "重新连接中",
+  "mcp.toast_reconnecting": "正在重新连接 {name}…",
   "mcp.badge_project": "项目",
   "mcp.tool_count": "{n} 个工具",
   // 技能视图

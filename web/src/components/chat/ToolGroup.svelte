@@ -232,7 +232,7 @@
   <div class="tool-group">
     <div class="group-header">
       <iconify-icon icon="ant-design:tool-outlined" width="14" style="color:var(--text-tertiary)"></iconify-icon>
-      <span class="hdr-label">{$t('tools.n_used').replace('{n}', String(tools.length))}</span>
+      <span class="hdr-label">{$t(tools.length === 1 ? 'tools.n_used_one' : 'tools.n_used').replace('{n}', String(tools.length))}</span>
       {#if groupStreaming}
         <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:12px;color:var(--blue-6)">
           <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>

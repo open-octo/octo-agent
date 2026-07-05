@@ -218,7 +218,7 @@
   async function reconnect(name: string) {
     try {
       await api.reconnectMcpServer(name)
-      showToast(tr('mcp.toast_reconnecting') + ' ' + name + '…')
+      showToast(tr('mcp.toast_reconnecting').replace('{name}', name))
       setTimeout(reload, 1500)
     } catch (e: any) {
       showToast(e.message ?? 'Failed to reconnect', 'error')
