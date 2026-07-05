@@ -20,6 +20,7 @@ type fakeBotAPI struct {
 	updates   []tgUpdate
 	served    bool
 	sent      []map[string]any
+	edited    []map[string]any
 	sendFail  int // fail the first N sendMessage calls with a parse error
 	rateLimit int // return 429 for the first N sendMessage calls
 	srv       *httptest.Server
@@ -62,6 +63,9 @@ func newFakeBotAPI(t *testing.T) *fakeBotAPI {
 			f.sent = append(f.sent, params)
 			writeResult(w, map[string]any{"message_id": 100 + len(f.sent)})
 		case strings.HasSuffix(r.URL.Path, "/editMessageText"):
+			f.mu.Lock()
+			f.edited = append(f.edited, params)
+			f.mu.Unlock()
 			writeResult(w, map[string]any{"message_id": 7})
 		case strings.HasSuffix(r.URL.Path, "/sendChatAction"):
 			writeResult(w, true)
@@ -278,6 +282,73 @@ func TestSendText_SplitsLongMessages(t *testing.T) {
 	}
 }
 
+// #1119: HTML is now the default parse_mode, and outgoing text is rendered
+// through the goldmark-based converter before it's sent.
+func TestSendText_DefaultsToRenderedHTML(t *testing.T) {
+	f := newFakeBotAPI(t)
+	a := newTestAdapter(t, f, nil)
+
+	res := a.SendText("123", "**bold** and _italic_", "")
+	if !res.OK {
+		t.Fatalf("send failed: %+v", res)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) != 1 {
+		t.Fatalf("expected one message, got %d", len(f.sent))
+	}
+	if f.sent[0]["parse_mode"] != "HTML" {
+		t.Fatalf("expected parse_mode=HTML, got %v", f.sent[0]["parse_mode"])
+	}
+	want := "<b>bold</b> and <i>italic</i>"
+	if f.sent[0]["text"] != want {
+		t.Fatalf("text = %q, want %q", f.sent[0]["text"], want)
+	}
+}
+
+// An explicit parse_mode override (legacy Markdown, MarkdownV2, or "" for
+// plain text) must bypass the HTML renderer entirely and go out unchanged,
+// same as before #1119.
+func TestSendText_ExplicitParseModeBypassesRenderer(t *testing.T) {
+	f := newFakeBotAPI(t)
+	a := newTestAdapter(t, f, map[string]any{"parse_mode": ""})
+
+	res := a.SendText("123", "**not rendered**", "")
+	if !res.OK {
+		t.Fatalf("send failed: %+v", res)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sent[0]["parse_mode"] != nil {
+		t.Fatalf("expected no parse_mode, got %v", f.sent[0]["parse_mode"])
+	}
+	if f.sent[0]["text"] != "**not rendered**" {
+		t.Fatalf("text was rendered despite explicit plain parse_mode: %v", f.sent[0]["text"])
+	}
+}
+
+// If tag overhead pushes a rendered chunk past Telegram's real 4096-char hard
+// cap, renderForSend must fall back to the plain chunk rather than send an
+// oversized (or truncated) request.
+func TestRenderForSend_FallsBackWhenRenderedExceedsHardCap(t *testing.T) {
+	a := &Adapter{parseMode: "HTML"}
+
+	// Each word individually bolded inflates size well past the plain length.
+	var sb strings.Builder
+	for i := 0; i < 600; i++ {
+		sb.WriteString("**w** ")
+	}
+	chunk := sb.String()
+
+	body, mode := a.renderForSend(chunk)
+	if mode != "" {
+		t.Fatalf("expected fallback to drop parse_mode, got %q", mode)
+	}
+	if body != chunk {
+		t.Fatalf("expected fallback to send the original plain chunk unchanged")
+	}
+}
+
 func TestValidateConfig(t *testing.T) {
 	a := &Adapter{}
 	if errs := a.ValidateConfig(channel.PlatformConfig{}); len(errs) != 1 {
@@ -296,6 +367,26 @@ func TestUpdateMessage(t *testing.T) {
 	}
 	if !a.SupportsMessageUpdates() {
 		t.Fatal("telegram supports message updates")
+	}
+}
+
+// #1119: streamed edits go through the same HTML renderer as SendText.
+func TestUpdateMessage_RendersHTML(t *testing.T) {
+	f := newFakeBotAPI(t)
+	a := newTestAdapter(t, f, nil)
+	if !a.UpdateMessage("1", "7", "**bold** edit") {
+		t.Fatal("expected update to succeed")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.edited) != 1 {
+		t.Fatalf("expected one edit, got %d", len(f.edited))
+	}
+	if f.edited[0]["parse_mode"] != "HTML" {
+		t.Fatalf("expected parse_mode=HTML, got %v", f.edited[0]["parse_mode"])
+	}
+	if f.edited[0]["text"] != "<b>bold</b> edit" {
+		t.Fatalf("text = %v, want rendered HTML", f.edited[0]["text"])
 	}
 }
 

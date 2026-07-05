@@ -47,6 +47,13 @@ const (
 	// the exact character cap requires, never less.
 	maxMessageBytes = 4000
 
+	// telegramHardCap is Telegram's actual message length limit. HTML
+	// rendering (see markdown.go) adds tag overhead on top of the
+	// maxMessageBytes-capped plain-text chunk, so a heavily-formatted chunk
+	// can occasionally cross 4096 even though the source didn't. renderForSend
+	// checks against this before deciding whether to send the rendered HTML.
+	telegramHardCap = 4096
+
 	// unsupportedMediaNotice is sent in place of silence (#1123) when a
 	// message contains only a kind we don't process (voice, video, sticker,
 	// location, …). Transcription/decoding can come later; going silent is
@@ -98,8 +105,14 @@ func New(cfg channel.PlatformConfig) (channel.Adapter, error) {
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	// Default Markdown; an explicit empty parse_mode disables formatting.
-	parseMode := "Markdown"
+	// Default HTML (#1119): legacy Markdown mode is Telegram's strictest and
+	// most fragile parser — any unbalanced/unescaped reserved character fails
+	// the whole chunk. HTML only requires escaping &, <, > in literal text,
+	// and our renderer (markdown.go) produces well-formed tags from the real
+	// parsed Markdown AST, so a single stray '*' in the model's output can no
+	// longer take down the entire message's formatting. An explicit empty
+	// parse_mode disables formatting.
+	parseMode := "HTML"
 	if v, ok := cfg[cfgParseMode].(string); ok {
 		parseMode = v
 	}
@@ -214,13 +227,14 @@ func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 
 	var lastID string
 	for i, chunk := range chunks {
+		body, mode := a.renderForSend(chunk)
 		params := map[string]any{
 			"chat_id":                  chatID,
-			"text":                     chunk,
+			"text":                     body,
 			"disable_web_page_preview": true,
 		}
-		if a.parseMode != "" {
-			params["parse_mode"] = a.parseMode
+		if mode != "" {
+			params["parse_mode"] = mode
 		}
 		if replyTo != "" && i == 0 {
 			params["reply_to_message_id"] = replyTo
@@ -228,10 +242,12 @@ func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 
 		msg, err := a.callMessage("sendMessage", params)
 		if err != nil {
-			// Markdown parse failures fall back to plain text — the usual cause
-			// is unescaped Markdown reserved chars in the agent's output.
-			if a.parseMode != "" && isParseError(err) {
+			// Parse failures fall back to the original plain chunk — the usual
+			// cause is a construct our renderer/the configured parse_mode
+			// doesn't handle the way Telegram expects.
+			if mode != "" && isParseError(err) {
 				log.Printf("[telegram] parse_mode failed, retrying as plain text: %v", err)
+				params["text"] = chunk
 				delete(params, "parse_mode")
 				msg, err = a.callMessage("sendMessage", params)
 			}
@@ -242,6 +258,25 @@ func (a *Adapter) SendText(chatID, text, replyTo string) channel.SendResult {
 		lastID = fmt.Sprintf("%d", msg.MessageID)
 	}
 	return channel.SendResult{OK: true, MessageID: lastID}
+}
+
+// renderForSend converts chunk for the wire according to a.parseMode. HTML
+// mode runs it through the goldmark-based renderer in markdown.go (#1119);
+// other modes (legacy Markdown, MarkdownV2, or "" for plain text) are sent
+// as-is, unchanged from before this fix. If the rendered HTML would cross
+// Telegram's real 4096-char hard cap — formatting tags add overhead on top of
+// the plain-text byte budget chunks are split on — fall back to the plain
+// chunk rather than risk an oversized request.
+func (a *Adapter) renderForSend(chunk string) (body, mode string) {
+	if a.parseMode != "HTML" {
+		return chunk, a.parseMode
+	}
+	rendered := renderTelegramHTML(chunk)
+	if len(rendered) > telegramHardCap {
+		log.Printf("[telegram] rendered HTML (%d bytes) exceeds hard cap, sending plain", len(rendered))
+		return chunk, ""
+	}
+	return rendered, "HTML"
 }
 
 // SendFile sends a local file to the chat. Images (png/jpg/jpeg/gif/webp) are
@@ -364,17 +399,19 @@ func mimeForExt(ext string) string {
 
 // UpdateMessage edits a previously sent message in place.
 func (a *Adapter) UpdateMessage(chatID, messageID, text string) bool {
+	body, mode := a.renderForSend(text)
 	params := map[string]any{
 		"chat_id":                  chatID,
 		"message_id":               messageID,
-		"text":                     text,
+		"text":                     body,
 		"disable_web_page_preview": true,
 	}
-	if a.parseMode != "" {
-		params["parse_mode"] = a.parseMode
+	if mode != "" {
+		params["parse_mode"] = mode
 	}
 	_, err := a.callMessage("editMessageText", params)
-	if err != nil && a.parseMode != "" && isParseError(err) {
+	if err != nil && mode != "" && isParseError(err) {
+		params["text"] = text
 		delete(params, "parse_mode")
 		_, err = a.callMessage("editMessageText", params)
 	}
