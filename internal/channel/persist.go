@@ -39,6 +39,24 @@ func sessionStoreID(key SessionKey) string {
 	return fmt.Sprintf("im-%s-%08x", safe, h.Sum32())
 }
 
+// newChannelStore builds a fresh, persisted-shape store for a channel
+// session: source "channel", bound to EntryChannel, Title left empty so
+// DisplayTitle() falls back to the first user message snippet (truncated to
+// 60 chars) instead of showing the raw SessionKey (e.g.
+// "weixin:o9cq…@im.wechat:o9cq…@im.wechat"). Shared by restoreOrInitStore
+// (first-ever store for a session) and EnsureStoreExists (#1079 — recovering
+// after the file was deleted out from under an already-running session), so
+// both give a fresh channel session the exact same shape.
+func newChannelStore(id, model string) *agent.Session {
+	st := agent.NewSession(model, "")
+	st.ID = id
+	st.CreatedAt = time.Now()
+	st.Source = "channel"
+	st.BoundEntry = agent.EntryChannel
+	st.BoundAt = time.Now()
+	return st
+}
+
 // restoreOrInitStore attaches the persistent store to a freshly built
 // session: an existing file rehydrates the agent's history, otherwise a new
 // store is initialised. The store ID is resolved by the manager (a /bind
@@ -57,19 +75,42 @@ func (s *Session) restoreOrInitStore(id string) {
 		}
 		return
 	}
-	st := agent.NewSession(s.Agent.Model, "")
-	st.ID = id
-	st.CreatedAt = time.Now()
-	st.Source = "channel"
-	st.BoundEntry = agent.EntryChannel
-	st.BoundAt = time.Now()
-	// Leave Title empty so DisplayTitle() falls back to the first user message
-	// snippet (truncated to 60 chars) instead of showing the raw SessionKey
-	// (e.g. "weixin:o9cq…@im.wechat:o9cq…@im.wechat").
 	// Persist immediately so the entry binding is visible to other processes
 	// (and to the server's authoritative LoadSession in handleChannelMessage).
+	st := newChannelStore(id, s.Agent.Model)
 	_ = st.Save()
 	s.Store = st
+}
+
+// EnsureStoreExists recreates the backing store if its file was deleted out
+// from under this session (e.g. the user deleted it from the web UI) after
+// the session was already loaded into the manager's in-memory cache (#1079).
+// restoreOrInitStore only runs once, when a session is first created; a
+// session that then sits in the cache while its file disappears externally
+// keeps a stale Store pointer, and the server's authoritative reload
+// (acquireSessionBinding's LoadSession) fails with a confusing "session not
+// found" error instead of the chat just starting fresh.
+//
+// The existence check is a stat (SessionMTime), not a full LoadSession — this
+// runs on every inbound message, so it must not pay a full read-and-parse of
+// the session's history just to confirm the file is still there. That means
+// a corrupt-but-present file (rather than a deleted one) isn't recovered
+// here; it still surfaces as an error via acquireSessionBinding's own reload
+// immediately after this call, unchanged from before this fix. Only the
+// reported scenario — the file is gone — is what this recovers from.
+func (s *Session) EnsureStoreExists() {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	if s.Store == nil {
+		return
+	}
+	if _, err := agent.SessionMTime(s.Store.ID); err == nil {
+		return
+	}
+	st := newChannelStore(s.Store.ID, s.Agent.Model)
+	_ = st.Save()
+	s.Store = st
+	s.Agent.History = agent.NewHistory()
 }
 
 // Persist writes the agent's current history to the session store. Called by

@@ -2318,21 +2318,12 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	}
 
 	// If the session store file was deleted externally (e.g., from the web
-	// UI), the in-memory Session still carries the old store ID. Recreate
-	// the file so acquireSessionBinding can verify the binding, and reset
-	// the agent History to match the empty store — the user deleted it for
-	// a reason.
-	if _, err := agent.LoadSession(sess.Store.ID); err != nil {
-		st := agent.NewSession(sess.Agent.Model, "")
-		st.ID = sess.Store.ID
-		st.CreatedAt = time.Now()
-		st.Source = "channel"
-		st.BoundEntry = agent.EntryChannel
-		st.BoundAt = time.Now()
-		sess.Store = st
-		sess.Agent.History = agent.NewHistory()
-		_ = st.Save()
-	}
+	// UI) since this in-memory Session was created, its Store pointer goes
+	// stale — acquireSessionBinding's authoritative reload below would
+	// otherwise fail with a confusing "session ... not found" error instead
+	// of the chat just starting fresh (#1079). Recreate the backing store to
+	// match.
+	sess.EnsureStoreExists()
 
 	// Enforce entry binding: the session file is the single source of truth.
 	// If another entry (web/tui/cli) owns this session, refuse to run the turn
