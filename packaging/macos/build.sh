@@ -44,12 +44,17 @@ for tool in uv; do
   fi
 done
 
+# The distribution is currentUserHome-only, so the target volume is the
+# installing user's home directory. --install-location must be a path relative
+# to that volume; pkgbuild does NOT expand '~', so a literal '~/Library...'
+# would create a directory named '~' instead of installing into the user's
+# real Library folder.
 pkgbuild \
   --root "$payload" \
   --scripts "$script_dir/scripts" \
   --identifier dev.octo-agent.octo \
   --version "$AppVersion" \
-  --install-location '~/Library/Application Support/octo' \
+  --install-location 'Library/Application Support/octo' \
   "$work/octo-component.pkg"
 
 distribution="$work/distribution.xml"
