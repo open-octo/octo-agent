@@ -336,6 +336,65 @@ func (a *Adapter) StopTyping(chatID, contextToken string) error { return nil }
 // Flush — Discord has no outgoing buffer.
 func (a *Adapter) Flush(chatID string) {}
 
+func (a *Adapter) SupportsButtons() bool { return true }
+
+// SendButtons sends a text message with component buttons. Up to 5 buttons
+// per action row (Discord's limit); subsequent rows for more buttons.
+func (a *Adapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	chunks := channel.SplitForSend(text, maxMessageBytes)
+	if len(chunks) == 0 {
+		return channel.SendResult{OK: true, MessageID: ""}
+	}
+
+	var lastID string
+	for i, chunk := range chunks {
+		payload := map[string]any{
+			"content":          chunk,
+			"allowed_mentions": noMentionsParse,
+		}
+		if replyTo != "" && i == 0 {
+			payload["message_reference"] = map[string]string{"message_id": replyTo}
+		}
+		// Only the first chunk carries the buttons.
+		if i == 0 {
+			var rows []any
+			for j := 0; j < len(buttons); j += 5 {
+				end := j + 5
+				if end > len(buttons) {
+					end = len(buttons)
+				}
+				var comps []any
+				for _, b := range buttons[j:end] {
+					style := 1 // Primary (blue) by default
+					if b.ID == "deny" {
+						style = 4 // Danger (red)
+					}
+					comps = append(comps, map[string]any{
+						"type":      2, // Button
+						"style":     style,
+						"label":     b.Label,
+						"custom_id": b.ID,
+					})
+				}
+				rows = append(rows, map[string]any{
+					"type":       1, // ActionRow
+					"components": comps,
+				})
+			}
+			payload["components"] = rows
+		}
+
+		var msg struct {
+			ID string `json:"id"`
+		}
+		if err := a.rest(context.Background(), http.MethodPost, fmt.Sprintf("/channels/%s/messages", chatID), payload, &msg); err != nil {
+			return channel.SendResult{OK: false, Error: err.Error()}
+		}
+		lastID = msg.ID
+	}
+	return channel.SendResult{OK: true, MessageID: lastID}
+}
+
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 	var errs []string
@@ -676,7 +735,95 @@ func (a *Adapter) handleDispatch(typ string, data json.RawMessage, onMessage fun
 			return
 		}
 		a.handleMessage(&msg, onMessage)
+	case "INTERACTION_CREATE":
+		var interaction struct {
+			ID        string `json:"id"`
+			Type      int    `json:"type"`
+			Token     string `json:"token"`
+			ChannelID string `json:"channel_id"`
+			Member    *struct {
+				User dcUser `json:"user"`
+			} `json:"member"`
+			User *dcUser `json:"user"`
+			Data *struct {
+				CustomID string `json:"custom_id"`
+			} `json:"data"`
+			Message *dcMessage `json:"message"`
+		}
+		if err := json.Unmarshal(data, &interaction); err != nil {
+			return
+		}
+		// Only handle Message Component interactions (type 3).
+		if interaction.Type != 3 || interaction.Data == nil {
+			return
+		}
+		a.handleComponentInteraction(&interaction, onMessage)
 	}
+}
+
+// handleComponentInteraction processes a Discord button click interaction:
+// acknowledges the interaction with a deferred response, then routes the
+// button press as an InboundEvent with ButtonID set.
+func (a *Adapter) handleComponentInteraction(interaction *struct {
+	ID        string `json:"id"`
+	Type      int    `json:"type"`
+	Token     string `json:"token"`
+	ChannelID string `json:"channel_id"`
+	Member    *struct {
+		User dcUser `json:"user"`
+	} `json:"member"`
+	User *dcUser `json:"user"`
+	Data *struct {
+		CustomID string `json:"custom_id"`
+	} `json:"data"`
+	Message *dcMessage `json:"message"`
+}, onMessage func(channel.InboundEvent)) {
+	userID := ""
+	if interaction.Member != nil {
+		userID = interaction.Member.User.ID
+	} else if interaction.User != nil {
+		userID = interaction.User.ID
+	}
+	if userID == "" {
+		return
+	}
+	if len(a.allowedUsers) > 0 && !a.allowedUsers[userID] {
+		return
+	}
+	if interaction.Data == nil || interaction.Data.CustomID == "" {
+		return
+	}
+
+	// Acknowledge the interaction with a deferred update (type 5) so the
+	// user sees the button press register and Discord doesn't timeout.
+	a.rest(context.Background(), http.MethodPost,
+		fmt.Sprintf("/interactions/%s/%s/callback", interaction.ID, interaction.Token),
+		map[string]any{"type": 5}, nil)
+
+	channelID := interaction.ChannelID
+	if channelID == "" && interaction.Message != nil {
+		channelID = interaction.Message.ChannelID
+	}
+	if channelID == "" {
+		return
+	}
+
+	msgID := interaction.ID
+	if interaction.Message != nil && interaction.Message.ID != "" {
+		msgID = interaction.Message.ID
+	}
+
+	log.Printf("[discord] button click from user %s: %s", userID, interaction.Data.CustomID)
+	onMessage(channel.InboundEvent{
+		Type:      "message",
+		Platform:  platformName,
+		ChatID:    channelID,
+		UserID:    userID,
+		MessageID: msgID,
+		ButtonID:  interaction.Data.CustomID,
+		ChatType:  "direct",
+		Raw:       interaction,
+	})
 }
 
 // discordCDNHosts are the only hosts Discord serves attachment content from.

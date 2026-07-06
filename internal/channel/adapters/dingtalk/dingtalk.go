@@ -280,6 +280,13 @@ func (a *Adapter) StopTyping(chatID, contextToken string) error { return nil }
 // Flush — DingTalk has no outgoing buffer.
 func (a *Adapter) Flush(chatID string) {}
 
+func (a *Adapter) SupportsButtons() bool { return false }
+
+func (a *Adapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	// Fall back to plain text — DingTalk doesn't support interactive buttons.
+	return a.SendText(chatID, text, replyTo)
+}
+
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 	var errs []string

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -221,5 +222,173 @@ func TestChannelAsker_TimeoutCancels(t *testing.T) {
 	}
 	if !res.Cancelled {
 		t.Error("timeout must report Cancelled")
+	}
+}
+
+// ─── Button tests ────────────────────────────────────────────────────────────
+
+// fakeButtonAdapter supports buttons and records SendButtons calls.
+type fakeButtonAdapter struct {
+	channel.Adapter
+	mu         sync.Mutex
+	sent       []string
+	buttonSent bool
+}
+
+func (a *fakeButtonAdapter) text() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.sent) == 0 {
+		return ""
+	}
+	return a.sent[0]
+}
+
+func (a *fakeButtonAdapter) Platform() string { return "button-fake" }
+func (a *fakeButtonAdapter) Start(ctx context.Context, _ func(channel.InboundEvent)) error {
+	<-ctx.Done()
+	return nil
+}
+func (a *fakeButtonAdapter) Stop() error { return nil }
+func (a *fakeButtonAdapter) SendText(chatID, text, replyTo string) channel.SendResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sent = append(a.sent, text)
+	return channel.SendResult{OK: true, MessageID: "bt1"}
+}
+func (a *fakeButtonAdapter) SendFile(chatID, path, name, replyTo string) channel.SendResult {
+	return channel.SendResult{OK: true}
+}
+func (a *fakeButtonAdapter) UpdateMessage(chatID, messageID, text string) bool { return true }
+func (a *fakeButtonAdapter) SupportsMessageUpdates() bool                      { return false }
+func (a *fakeButtonAdapter) SupportsButtons() bool                             { return true }
+func (a *fakeButtonAdapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.buttonSent = true
+	a.sent = append(a.sent, text)
+	_ = buttons
+	return channel.SendResult{OK: true, MessageID: "bb1"}
+}
+func (a *fakeButtonAdapter) SendTyping(chatID, contextToken string) error   { return nil }
+func (a *fakeButtonAdapter) StopTyping(chatID, contextToken string) error   { return nil }
+func (a *fakeButtonAdapter) Flush(chatID string)                            {}
+func (a *fakeButtonAdapter) ValidateConfig(channel.PlatformConfig) []string { return nil }
+
+func buttonAskEnv(t *testing.T) (*Server, *channel.Session, *fakeButtonAdapter, channel.InboundEvent) {
+	t.Helper()
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	sess := &channel.Session{}
+	ad := &fakeButtonAdapter{}
+	ev := channel.InboundEvent{ChatID: "c1", MessageID: "m1", Text: "original"}
+	return srv, sess, ad, ev
+}
+
+func TestChannelPermissionAsk_ButtonAllow(t *testing.T) {
+	srv, sess, ad, ev := buttonAskEnv(t)
+	ask := srv.channelPermissionAsk(sess, ad, ev)
+
+	done := make(chan struct{})
+	var allow, remember bool
+	var err error
+	go func() {
+		allow, remember, err = ask(context.Background(), "terminal", map[string]any{"command": "ls"})
+		close(done)
+	}()
+
+	waitFor(t, func() bool { return ad.text() != "" })
+	if !strings.Contains(ad.text(), "terminal") {
+		t.Errorf("prompt %q should name the tool", ad.text())
+	}
+	if !ad.buttonSent {
+		t.Error("SendButtons was never called")
+	}
+
+	if !sess.DeliverAskButton("c1", "", "allow") {
+		t.Fatal("ask slot should accept button press")
+	}
+	<-done
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if !allow {
+		t.Error("allow button should allow")
+	}
+	if remember {
+		t.Error("allow button must not set remember")
+	}
+}
+
+func TestChannelPermissionAsk_ButtonAlways(t *testing.T) {
+	srv, sess, ad, ev := buttonAskEnv(t)
+	ask := srv.channelPermissionAsk(sess, ad, ev)
+
+	done := make(chan struct{})
+	var allow, remember bool
+	go func() {
+		allow, remember, _ = ask(context.Background(), "terminal", map[string]any{"command": "ls"})
+		close(done)
+	}()
+	waitFor(t, func() bool { return ad.text() != "" })
+
+	if !sess.DeliverAskButton("c1", "", "always") {
+		t.Fatal("ask slot should accept button press")
+	}
+	<-done
+	if !allow || !remember {
+		t.Error("always button should allow and remember")
+	}
+}
+
+func TestChannelPermissionAsk_ButtonDeny(t *testing.T) {
+	srv, sess, ad, ev := buttonAskEnv(t)
+	ask := srv.channelPermissionAsk(sess, ad, ev)
+
+	done := make(chan struct{})
+	var allow bool
+	go func() {
+		allow, _, _ = ask(context.Background(), "terminal", map[string]any{"command": "ls"})
+		close(done)
+	}()
+	waitFor(t, func() bool { return ad.text() != "" })
+
+	if !sess.DeliverAskButton("c1", "", "deny") {
+		t.Fatal("ask slot should accept button press")
+	}
+	<-done
+	if allow {
+		t.Error("deny button must deny")
+	}
+}
+
+func TestChannelPermissionAsk_ButtonIgnoresText(t *testing.T) {
+	// When buttons are active, a plain text message must NOT be consumed
+	// (the ask slot stays armed for a button press).
+	old := channelAskTimeout
+	channelAskTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { channelAskTimeout = old })
+
+	srv, sess, ad, ev := buttonAskEnv(t)
+	ask := srv.channelPermissionAsk(sess, ad, ev)
+
+	done := make(chan struct{})
+	var allow bool
+	go func() {
+		allow, _, _ = ask(context.Background(), "terminal", map[string]any{"command": "ls"})
+		close(done)
+	}()
+	waitFor(t, func() bool { return ad.text() != "" })
+
+	// DeliverAskReply must return false — text should NOT be consumed.
+	if sess.DeliverAskReply("c1", "", "yes") {
+		t.Error("text reply must NOT be consumed while buttons are active")
+	}
+	// The button press must still resolve the ask.
+	if !sess.DeliverAskButton("c1", "", "allow") {
+		t.Fatal("button press must be consumed after ignored text")
+	}
+	<-done
+	if !allow {
+		t.Error("allow button press should allow")
 	}
 }

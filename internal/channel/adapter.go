@@ -37,6 +37,11 @@ type InboundEvent struct {
 	// echoing this on every outbound message).
 	ContextToken string
 
+	// ButtonID is set when the event originates from a button press rather
+	// than a plain-text message. The value matches the ID field of the Button
+	// that was pressed. Empty for ordinary messages.
+	ButtonID string
+
 	// Raw is the platform-native payload, kept for adapter-internal use.
 	Raw any
 }
@@ -57,6 +62,17 @@ type FileAttachment struct {
 
 	// DataURL is a base64 data URL (for inline images sent to vision models).
 	DataURL string
+}
+
+// Button describes one clickable button in an interactive ask prompt.
+// Platforms that support native buttons (Telegram inline keyboards, Discord
+// components, Feishu interactive cards) render these as tappable controls;
+// other platforms fall back to the text-only ask flow.
+type Button struct {
+	// ID is the callback data returned when the button is pressed.
+	ID string
+	// Label is the human-readable text shown on the button.
+	Label string
 }
 
 // SendResult is returned by outbound send operations.
@@ -92,6 +108,20 @@ type Adapter interface {
 
 	// UpdateMessage edits an existing message in-place. Returns true on success.
 	UpdateMessage(chatID, messageID, text string) bool
+
+	// SupportsButtons reports whether the platform can render interactive
+	// buttons inline in messages (Telegram inline keyboards, Discord components,
+	// Feishu interactive cards). When true, the permission ask sends buttons
+	// instead of relying on the next-plain-message contract, eliminating the
+	// swallowed-message trap (#1120).
+	SupportsButtons() bool
+
+	// SendButtons sends a message with interactive buttons attached. buttons
+	// must contain at least one entry. Platforms that do not support buttons
+	// (SupportsButtons returns false) are expected to fall back to SendText
+	// when called — callers SHOULD check SupportsButtons first. Returns the
+	// message ID of the sent message for correlation with button callbacks.
+	SendButtons(chatID, text string, buttons []Button, replyTo string) SendResult
 
 	// SupportsMessageUpdates reports whether the platform can edit sent messages.
 	SupportsMessageUpdates() bool

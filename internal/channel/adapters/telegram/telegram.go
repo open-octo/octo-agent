@@ -437,6 +437,69 @@ func (a *Adapter) StopTyping(chatID, contextToken string) error { return nil }
 // Flush — Telegram has no outgoing buffer.
 func (a *Adapter) Flush(chatID string) {}
 
+func (a *Adapter) SupportsButtons() bool { return true }
+
+// SendButtons sends a text message with inline keyboard buttons. Up to 3
+// buttons per row; subsequent chunks (if the text exceeds maxMessageBytes)
+// are sent without buttons since only the first chunk carries the prompt.
+func (a *Adapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	// Build inline keyboard rows: up to 3 buttons per row.
+	var rows [][]map[string]any
+	for i := 0; i < len(buttons); i += 3 {
+		end := i + 3
+		if end > len(buttons) {
+			end = len(buttons)
+		}
+		row := make([]map[string]any, 0, end-i)
+		for _, b := range buttons[i:end] {
+			row = append(row, map[string]any{
+				"text":          b.Label,
+				"callback_data": b.ID,
+			})
+		}
+		rows = append(rows, row)
+	}
+
+	chunks := channel.SplitForSend(text, maxMessageBytes)
+	if len(chunks) == 0 {
+		return channel.SendResult{OK: true, MessageID: ""}
+	}
+
+	var lastID string
+	for i, chunk := range chunks {
+		body, mode := a.renderForSend(chunk)
+		params := map[string]any{
+			"chat_id":                  chatID,
+			"text":                     body,
+			"disable_web_page_preview": true,
+		}
+		if mode != "" {
+			params["parse_mode"] = mode
+		}
+		if replyTo != "" && i == 0 {
+			params["reply_to_message_id"] = replyTo
+		}
+		if i == 0 {
+			params["reply_markup"] = map[string]any{"inline_keyboard": rows}
+		}
+
+		msg, err := a.callMessage("sendMessage", params)
+		if err != nil {
+			if mode != "" && isParseError(err) {
+				log.Printf("[telegram] parse_mode failed, retrying as plain text: %v", err)
+				delete(params, "parse_mode")
+				params["text"] = chunk
+				msg, err = a.callMessage("sendMessage", params)
+			}
+			if err != nil {
+				return channel.SendResult{OK: false, Error: err.Error()}
+			}
+		}
+		lastID = fmt.Sprintf("%d", msg.MessageID)
+	}
+	return channel.SendResult{OK: true, MessageID: lastID}
+}
+
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 	var errs []string
@@ -641,15 +704,25 @@ func (a *Adapter) fetchBotIdentity(ctx context.Context) error {
 	return nil
 }
 
+type tgCallbackQuery struct {
+	ID   string `json:"id"`
+	From struct {
+		ID int64 `json:"id"`
+	} `json:"from"`
+	Message *tgMessage `json:"message"`
+	Data    string     `json:"data"`
+}
+
 type tgUpdate struct {
-	UpdateID int64      `json:"update_id"`
-	Message  *tgMessage `json:"message"`
+	UpdateID      int64            `json:"update_id"`
+	Message       *tgMessage       `json:"message"`
+	CallbackQuery *tgCallbackQuery `json:"callback_query"`
 }
 
 func (a *Adapter) getUpdates(ctx context.Context, offset int64) ([]tgUpdate, error) {
 	params := map[string]any{
 		"timeout":         int(longPollTimeout.Seconds()),
-		"allowed_updates": []string{"message"},
+		"allowed_updates": []string{"message", "callback_query"},
 	}
 	if offset > 0 {
 		params["offset"] = offset
@@ -668,6 +741,12 @@ func (a *Adapter) getUpdates(ctx context.Context, offset int64) ([]tgUpdate, err
 // ─── Inbound ────────────────────────────────────────────────────────────────
 
 func (a *Adapter) processUpdate(upd tgUpdate, onMessage func(channel.InboundEvent)) {
+	// Handle callback queries (inline keyboard button presses) first.
+	if cb := upd.CallbackQuery; cb != nil {
+		a.processCallbackQuery(cb, onMessage)
+		return
+	}
+
 	msg := upd.Message
 	if msg == nil || msg.Chat.ID == 0 || msg.From.ID == 0 {
 		return
@@ -768,6 +847,38 @@ func (a *Adapter) processUpdate(upd tgUpdate, onMessage func(channel.InboundEven
 		MessageID: fmt.Sprintf("%d", msg.MessageID),
 		ChatType:  chatType,
 		Raw:       msg,
+	})
+}
+
+// processCallbackQuery handles an inline keyboard button press. It answers
+// the callback query to dismiss the loading indicator, then routes the button
+// press as an InboundEvent with ButtonID set.
+func (a *Adapter) processCallbackQuery(cb *tgCallbackQuery, onMessage func(channel.InboundEvent)) {
+	// Answer the callback query so Telegram dismisses the loading UI.
+	a.call(nil, "answerCallbackQuery", map[string]any{
+		"callback_query_id": cb.ID,
+		// No text — we don't need to show a toast notification.
+	}, a.http)
+
+	if cb.Message == nil || cb.Data == "" {
+		return
+	}
+
+	userID := fmt.Sprintf("%d", cb.From.ID)
+	if len(a.allowedUsers) > 0 && !a.allowedUsers[userID] {
+		return
+	}
+
+	log.Printf("[telegram] callback from user %s: %s", userID, cb.Data)
+	onMessage(channel.InboundEvent{
+		Type:      "message",
+		Platform:  platformName,
+		ChatID:    fmt.Sprintf("%d", cb.Message.Chat.ID),
+		UserID:    userID,
+		MessageID: fmt.Sprintf("%d", cb.Message.MessageID),
+		ButtonID:  cb.Data,
+		ChatType:  "direct", // callback queries from groups still work per-user
+		Raw:       cb,
 	})
 }
 

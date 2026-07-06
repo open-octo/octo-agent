@@ -45,12 +45,15 @@ func isAlways(text string) bool {
 // approving. The IM transport shows no tool cards before the gate fires, so
 // without this the user would approve blind — "Allow terminal?" tells them
 // nothing about WHICH command. Known primary fields come first; anything
-// else falls back to a JSON head.
+// else falls back to a JSON head. Mirror #1101: budget large enough for
+// ~10 lines of content (600 runes) so the user can see the actual command
+// instead of a truncated snippet that hides the tail (approve-what-you-can't-
+// see concern from #1092/#1105).
 func askInputSummary(toolInput map[string]any) string {
-	const maxLen = 160
+	const maxRunes = 600
 	for _, key := range []string{"command", "path", "url", "reason", "pattern"} {
 		if v, ok := toolInput[key].(string); ok && strings.TrimSpace(v) != "" {
-			return truncateForAsk(v, maxLen)
+			return truncateForAsk(v, maxRunes)
 		}
 	}
 	if len(toolInput) == 0 {
@@ -60,24 +63,40 @@ func askInputSummary(toolInput map[string]any) string {
 	if err != nil {
 		return ""
 	}
-	return truncateForAsk(string(b), maxLen)
+	return truncateForAsk(string(b), maxRunes)
 }
 
-func truncateForAsk(s string, maxLen int) string {
-	if len(s) <= maxLen {
+// truncateForAsk truncates s to at most maxRunes runes, never mid-rune.
+// Uses rune-aware slicing so multi-byte CJK characters are never split
+// (byte-slicing a CJK string mid-rune would produce "�" replacement chars).
+func truncateForAsk(s string, maxRunes int) string {
+	r := []rune(s)
+	if len(r) <= maxRunes {
 		return s
 	}
-	return s[:maxLen] + "…"
+	return string(r[:maxRunes]) + "…"
 }
+
+// Button IDs used in IM permission ask prompts. When the platform supports
+// interactive buttons, these are sent as callback_data / custom_id / button
+// value; on text-only platforms the user types the corresponding keyword.
+const (
+	askButtonAllow  = "allow"
+	askButtonAlways = "always"
+	askButtonDeny   = "deny"
+)
 
 // channelPermissionAsk builds the app.PermissionAsk for one IM turn: it sends
 // a confirmation prompt into the chat and consumes the requesting user's next
-// plain message in that chat as the answer (routed by the inbound dispatcher
-// via DeliverAskReply, ahead of the turn path — see routeChannelEvent).
-// Approval requires an explicit affirmative; the "always" variants also
-// remember the decision in the session's Remembered store (exact tool+input
-// signature, session lifetime, never persisted to permissions.yml). Any
-// other reply, the turn being cancelled (/stop), or the timeout denies.
+// plain message or button press as the answer (routed by the inbound dispatcher
+// via DeliverAskReply or DeliverAskButton, ahead of the turn path — see
+// routeChannelEvent). On platforms with native button support (Telegram,
+// Discord, Feishu), buttons are used instead of the next-plain-message contract,
+// eliminating the swallowed-message trap (#1120). Approval requires an explicit
+// affirmative; the "always" variants also remember the decision in the session's
+// Remembered store (exact tool+input signature, session lifetime, never persisted
+// to permissions.yml). Any other reply, the turn being cancelled (/stop), or the
+// timeout denies.
 func (s *Server) channelPermissionAsk(sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent) app.PermissionAsk {
 	return func(ctx context.Context, toolName string, toolInput map[string]any) (bool, bool, error) {
 		replyCh, release, err := sess.BeginAsk(ev.ChatID, ev.UserID)
@@ -90,10 +109,21 @@ func (s *Server) channelPermissionAsk(sess *channel.Session, ad channel.Adapter,
 		if detail := askInputSummary(toolInput); detail != "" {
 			what = fmt.Sprintf("%s — %q", toolName, detail)
 		}
-		prompt := fmt.Sprintf(
-			"⚠️ Allow %s? Reply yes / 允许 to approve once, always / 总是允许 to stop asking for this exact call — any other reply denies; only the requester's reply counts. (Auto-deny in %s; /stop cancels the task.)",
-			what, channelAskTimeout)
-		ad.SendText(ev.ChatID, prompt, ev.MessageID)
+
+		useButtons := ad.SupportsButtons()
+		if useButtons {
+			sess.SetAskButtonsOnly()
+			ad.SendButtons(ev.ChatID, fmt.Sprintf("⚠️ Allow %s?", what), []channel.Button{
+				{ID: askButtonAllow, Label: "✅ Allow once"},
+				{ID: askButtonAlways, Label: "🔄 Always allow"},
+				{ID: askButtonDeny, Label: "❌ Deny"},
+			}, ev.MessageID)
+		} else {
+			prompt := fmt.Sprintf(
+				"⚠️ Allow %s? Reply yes / 允许 to approve once, always / 总是允许 to stop asking for this exact call — any other reply denies; only the requester's reply counts. (Auto-deny in %s; /stop cancels the task.)",
+				what, channelAskTimeout)
+			ad.SendText(ev.ChatID, prompt, ev.MessageID)
+		}
 
 		timer := time.NewTimer(channelAskTimeout)
 		defer timer.Stop()
