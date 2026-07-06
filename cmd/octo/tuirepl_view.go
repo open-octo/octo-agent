@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -856,6 +857,8 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.startCompact()
+	case "/transcript":
+		return m.dispatchTranscript(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/help", "/save", "/sessions", "/skills", "/memory", "/mcp", "/workflows":
 		var b bytes.Buffer
 		switch cmd {
@@ -904,6 +907,38 @@ func (m *tuiModel) dispatchClear() (tea.Model, tea.Cmd) {
 	}
 	m.assistantFirstBlock = true
 	m.println(noticeStyle.Render("✦ context cleared — starting fresh"))
+	return m, nil
+}
+
+// dispatchTranscript handles "/transcript [count]" — re-prints the most
+// recent tool call(s) with their output fully uncapped. A folded card's
+// "… +N lines ↗" marker already links to the full output, but only on
+// terminals with OSC 8 support; this is the in-terminal fallback (issue
+// #1093). With no argument it expands the single most recent tool call; a
+// count argument expands that many, oldest first.
+func (m *tuiModel) dispatchTranscript(arg string) (tea.Model, tea.Cmd) {
+	n := 1
+	if arg != "" {
+		v, err := strconv.Atoi(arg)
+		if err != nil || v < 1 {
+			m.println(errorStyle.Render("Usage: /transcript [count]"))
+			return m, nil
+		}
+		n = v
+	}
+	calls := m.recentToolCalls(n)
+	if len(calls) == 0 {
+		m.println(noticeStyle.Render("/transcript: no completed tool calls yet"))
+		return m, nil
+	}
+	var b strings.Builder
+	for i, c := range calls {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(m.renderToolOutcomeFull(c.name, c.input, c.result, c.isErr))
+	}
+	m.printlnBlock(b.String())
 	return m, nil
 }
 

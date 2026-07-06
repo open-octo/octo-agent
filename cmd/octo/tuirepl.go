@@ -1550,6 +1550,69 @@ func pluraliseLineCount(n int) string {
 	return fmt.Sprintf("%d lines", n)
 }
 
+// renderToolOutcomeFull is renderToolOutcome's uncapped counterpart, used by
+// /transcript to re-print a past tool call in full. Non-card tools already
+// render their complete result (inline or hyperlinked, see renderToolOutcome)
+// so only card tools need the dedicated uncapped path.
+func (m *tuiModel) renderToolOutcomeFull(toolName string, input map[string]any, resultText string, isErr bool) string {
+	if m.rendersCard(toolName) {
+		if full := renderToolFull(toolName, input, resultText, isErr, m.width); full != "" {
+			return full
+		}
+	}
+	return m.renderToolOutcome(toolName, input, resultText, isErr, 0)
+}
+
+// toolCallRecord is one completed tool_use/tool_result pair pulled from
+// history for /transcript's re-print.
+type toolCallRecord struct {
+	name   string
+	input  map[string]any
+	result string
+	isErr  bool
+}
+
+// recentToolCalls returns the last n completed tool calls from history in
+// chronological order, pairing each tool_use with its tool_result the same
+// way replayHistoryLines does. Calls still awaiting a result (mid-flight) are
+// skipped. Returns fewer than n if history doesn't have that many.
+func (m *tuiModel) recentToolCalls(n int) []toolCallRecord {
+	msgs := m.a.History.Snapshot()
+	results := map[string]agent.ContentBlock{}
+	for _, msg := range msgs {
+		for _, b := range msg.Blocks {
+			if b.Type == "tool_result" {
+				results[b.ToolUseID] = b
+			}
+		}
+	}
+	var all []toolCallRecord
+	for _, msg := range msgs {
+		if msg.Role != agent.RoleAssistant {
+			continue
+		}
+		for _, b := range msg.Blocks {
+			if b.Type != "tool_use" {
+				continue
+			}
+			res, ok := results[b.ID]
+			if !ok {
+				continue
+			}
+			all = append(all, toolCallRecord{
+				name:   b.Name,
+				input:  b.Input,
+				result: agent.StripRemindersForDisplay(res.Result),
+				isErr:  res.IsError,
+			})
+		}
+	}
+	if len(all) > n {
+		all = all[len(all)-n:]
+	}
+	return all
+}
+
 // replayHistoryLines renders a resumed session's prior turns into scrollback
 // lines exactly as they appeared live: user prompts and assistant replies
 // verbatim (markdown unless --plain), tool calls through the same

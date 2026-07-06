@@ -94,6 +94,25 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 		newS, _ := input["new_string"].(string)
 		return tui.RenderEditCard(path, oldS, newS, width)
 	}
+	output, opts := toolCardOpts(toolName, input, output, isErr, width, elapsed)
+	// When the card will fold ("… +N lines"), persist the full output and
+	// hyperlink the marker to it — otherwise the folded content is
+	// unrecoverable in the TUI (issue #1093). Write failure degrades to the
+	// plain marker.
+	if opts.MaxLines > 0 && nonBlankLineCount(output) > opts.MaxLines {
+		if path, err := tools.WriteCardSpill(toolName, output); err == nil {
+			opts.FoldLink = tui.FileURI(path)
+		}
+	}
+	return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, opts)
+}
+
+// toolCardOpts builds the per-tool OutputCardOpts (tail direction, exit-code
+// lifting, syntax language, meta) shared by renderToolCard's capped card and
+// renderToolFull's uncapped re-print — everything except the fold cap itself,
+// which the two callers apply differently. Returns output as well since the
+// terminal case rewrites it (splitTerminalExit strips the trailing marker).
+func toolCardOpts(toolName string, input map[string]any, output string, isErr bool, width int, elapsed time.Duration) (string, tui.OutputCardOpts) {
 	opts := tui.OutputCardOpts{
 		MaxLines: outputCardMaxLines,
 		Width:    width,
@@ -125,15 +144,27 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 	case "terminal_output", "kill_shell", "terminal_input":
 		opts.Tail = true
 	}
-	// When the card will fold ("… +N lines"), persist the full output and
-	// hyperlink the marker to it — otherwise the folded content is
-	// unrecoverable in the TUI (issue #1093). Write failure degrades to the
-	// plain marker.
-	if opts.MaxLines > 0 && nonBlankLineCount(output) > opts.MaxLines {
-		if path, err := tools.WriteCardSpill(toolName, output); err == nil {
-			opts.FoldLink = tui.FileURI(path)
-		}
+	return output, opts
+}
+
+// renderToolFull re-renders a finished tool call with its output fully
+// uncapped, for the /transcript command's fallback recovery path — the fold
+// marker's hyperlink (see renderToolCard) already recovers folded output, but
+// only on terminals with OSC 8 support; this reprints the same call natively
+// in-terminal instead (issue #1093).
+func renderToolFull(toolName string, input map[string]any, output string, isErr bool, width int) string {
+	verb := cardVerbFor(toolName)
+	if verb == "" {
+		return ""
 	}
+	if toolName == "edit_file" && !isErr {
+		path, _ := input["path"].(string)
+		oldS, _ := input["old_string"].(string)
+		newS, _ := input["new_string"].(string)
+		return tui.RenderEditCard(path, oldS, newS, width)
+	}
+	output, opts := toolCardOpts(toolName, input, output, isErr, width, 0)
+	opts.MaxLines = 0
 	return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, opts)
 }
 

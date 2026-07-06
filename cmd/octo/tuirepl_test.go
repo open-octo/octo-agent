@@ -463,6 +463,92 @@ func TestTUI_ReplayHistoryLines(t *testing.T) {
 	}
 }
 
+// recentToolCalls pairs tool_use with tool_result across history, in
+// chronological order, and skips a call still awaiting its result.
+func TestTUI_RecentToolCalls(t *testing.T) {
+	m := newTestModel()
+	h := m.a.History
+	h.Append(agent.NewToolUseMessage([]agent.ContentBlock{
+		agent.NewToolUseBlock("c1", "terminal", map[string]any{"command": "one"}),
+	}))
+	h.Append(agent.NewToolResultMessage([]agent.ContentBlock{
+		agent.NewToolResultBlock("c1", "out1", false),
+	}))
+	h.Append(agent.NewToolUseMessage([]agent.ContentBlock{
+		agent.NewToolUseBlock("c2", "terminal", map[string]any{"command": "two"}),
+	}))
+	h.Append(agent.NewToolResultMessage([]agent.ContentBlock{
+		agent.NewToolResultBlock("c2", "out2", false),
+	}))
+	// c3 has no matching tool_result yet — still running, must be skipped.
+	h.Append(agent.NewToolUseMessage([]agent.ContentBlock{
+		agent.NewToolUseBlock("c3", "terminal", map[string]any{"command": "three"}),
+	}))
+
+	all := m.recentToolCalls(10)
+	if len(all) != 2 {
+		t.Fatalf("recentToolCalls(10) = %d calls, want 2 (mid-flight call skipped); got %+v", len(all), all)
+	}
+	if all[0].result != "out1" || all[1].result != "out2" {
+		t.Fatalf("recentToolCalls should preserve chronological order, got %+v", all)
+	}
+
+	last := m.recentToolCalls(1)
+	if len(last) != 1 || last[0].result != "out2" {
+		t.Fatalf("recentToolCalls(1) should return the most recent call, got %+v", last)
+	}
+}
+
+// /transcript re-prints the last tool call with its full, uncapped output —
+// the in-terminal fallback for #1093's folded-output recovery.
+func TestTUI_DispatchTranscript(t *testing.T) {
+	setSpillHome(t)
+	m := newTestModel()
+	m.width = 80
+	h := m.a.History
+	long := strings.TrimSuffix(strings.Repeat("row\n", 12), "\n")
+	h.Append(agent.NewToolUseMessage([]agent.ContentBlock{
+		agent.NewToolUseBlock("c1", "terminal", map[string]any{"command": "ls"}),
+	}))
+	h.Append(agent.NewToolResultMessage([]agent.ContentBlock{
+		agent.NewToolResultBlock("c1", long, false),
+	}))
+
+	_, _ = m.dispatchTranscript("")
+	got := stripANSI(strings.Join(m.printlnBuf, "\n"))
+	if strings.Contains(got, "…") {
+		t.Errorf("/transcript should show uncapped output, got:\n%s", got)
+	}
+	if n := strings.Count(got, "row"); n != 12 {
+		t.Errorf("/transcript should show all 12 lines, got %d occurrences:\n%s", n, got)
+	}
+}
+
+// No completed tool calls yet — /transcript reports that instead of a
+// misleading empty print.
+func TestTUI_DispatchTranscript_NoCalls(t *testing.T) {
+	m := newTestModel()
+	if _, _ = m.dispatchTranscript(""); len(m.printlnBuf) != 1 {
+		t.Fatalf("dispatchTranscript should print a notice, got %v", m.printlnBuf)
+	}
+	if !strings.Contains(m.printlnBuf[0], "no completed tool calls") {
+		t.Errorf("expected a 'no tool calls' notice, got %q", m.printlnBuf[0])
+	}
+}
+
+// A non-numeric or non-positive count argument is rejected with a usage hint
+// rather than silently falling back to some default.
+func TestTUI_DispatchTranscript_BadArg(t *testing.T) {
+	m := newTestModel()
+	if _, _ = m.dispatchTranscript("nope"); len(m.printlnBuf) != 1 || !strings.Contains(m.printlnBuf[0], "Usage") {
+		t.Errorf("bad count should print usage, got %v", m.printlnBuf)
+	}
+	m.printlnBuf = nil
+	if _, _ = m.dispatchTranscript("0"); len(m.printlnBuf) != 1 || !strings.Contains(m.printlnBuf[0], "Usage") {
+		t.Errorf("zero count should print usage, got %v", m.printlnBuf)
+	}
+}
+
 // stripANSI removes ANSI SGR escape sequences so assertions can match the
 // underlying text (glamour splits words across color spans).
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)

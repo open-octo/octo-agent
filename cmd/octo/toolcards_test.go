@@ -298,6 +298,34 @@ func TestRenderToolOutcome_NonCardOutputVisible(t *testing.T) {
 	}
 }
 
+// renderToolFull is the /transcript command's uncapped re-print (#1093): it
+// must show every line and never fold, even where renderToolCard would.
+func TestRenderToolFull_NeverFolds(t *testing.T) {
+	setSpillHome(t)
+	long := strings.TrimSuffix(strings.Repeat("row\n", 12), "\n")
+	folded := renderToolCard("terminal", map[string]any{"command": "ls"}, long, false, 0, 0)
+	if !strings.Contains(folded, "…") {
+		t.Fatalf("sanity: capped card should fold; got:\n%q", folded)
+	}
+	full := renderToolFull("terminal", map[string]any{"command": "ls"}, long, false, 0)
+	if strings.Contains(full, "…") || strings.Contains(full, "\x1b]8;;") {
+		t.Errorf("uncapped render should not fold or link; got:\n%q", full)
+	}
+	for i := 1; i <= 12; i++ {
+		if !strings.Contains(full, "row") {
+			t.Fatalf("uncapped render missing line %d; got:\n%q", i, full)
+			break
+		}
+	}
+	if got := strings.Count(full, "row"); got != 12 {
+		t.Errorf("uncapped render should show all 12 lines, got %d occurrences", got)
+	}
+	// Non-card tools return "" — the caller falls back to renderToolOutcome.
+	if got := renderToolFull("sub_agent", map[string]any{}, "x", false, 0); got != "" {
+		t.Errorf("non-card tool should return empty; got %q", got)
+	}
+}
+
 func TestRenderToolOutcome_InlineResultSanitized(t *testing.T) {
 	setSpillHome(t)
 	m := newTestModel()
