@@ -33,6 +33,7 @@
     commitThinking,
     updateToolResult,
     setToolError,
+    appendToolStdout,
     finishAllTools,
     finishToolsById,
     resetSubAgents,
@@ -610,19 +611,7 @@
 
     cleanups.push(ws.on('tool_stdout', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      chatMessages.update(m => {
-        const msgs = [...(m[sid] || [])]
-        const lastGroup = msgs.findLastIndex((x: any) => x.type === 'tool_group')
-        if (lastGroup >= 0) {
-          const tools = [...msgs[lastGroup].tools]
-          const lastTool = tools.length - 1
-          if (lastTool >= 0) {
-            tools[lastTool] = { ...tools[lastTool], stdout: [...(tools[lastTool].stdout ?? []), ...((ev as any).lines ?? [])] }
-          }
-          msgs[lastGroup] = { ...msgs[lastGroup], tools }
-        }
-        return { ...m, [sid]: msgs }
-      })
+      appendToolStdout(sid, (ev as any).tool_id, (ev as any).lines ?? [])
     }))
 
     cleanups.push(ws.on('progress', (ev) => {
@@ -835,10 +824,36 @@
     return setupCopyButtons(el)
   }
 
+  // ── throttled markdown rendering while streaming ────────────────────────────
+  // marked.parse() re-parses the ENTIRE accumulated text on every delta, which
+  // is O(n²) over the life of a long streamed reply and shows up as visible
+  // jank (#1114). Re-parse at most every RENDER_THROTTLE_MS while a bubble is
+  // still streaming; once it finishes, always render fresh so the final
+  // content is never stale. This only throttles the *view*, not the
+  // underlying store, so it can't reorder anything else that reads chatMessages.
+  const RENDER_THROTTLE_MS = 80
+  const renderCache = new Map<string, { html: string; at: number; content: string }>()
+  function throttledMarkdown(cacheKey: string, content: string, streaming: boolean, showReasoning = true): string {
+    const cached = renderCache.get(cacheKey)
+    if (streaming && cached && (content === cached.content || Date.now() - cached.at < RENDER_THROTTLE_MS)) {
+      return cached.html
+    }
+    const html = renderMarkdown(content, showReasoning)
+    renderCache.set(cacheKey, { html, at: Date.now(), content })
+    return html
+  }
+
   // ── edit a prior user message: load it back into the composer for resend ─────
   let composer = $state<{ setText: (v: string) => void } | null>(null)
   function editMessage(content: string) {
     composer?.setText(content)
+  }
+
+  // ── suggestion chip: fill the composer, don't fire (mirrors the TUI's Tab) ──
+  function fillSuggestion(text: string) {
+    composer?.setText(text)
+    const sid = get(activeSessionId)
+    if (sid) chatSuggestion.update(s => ({ ...s, [sid]: '' }))
   }
 
   // ── export the visible transcript as a markdown file ────────────────────────
@@ -1166,7 +1181,7 @@
                       class="rich-answer"
                       use:setupAssistantEl
                     >
-                      {@html renderMarkdown(msg.content, showReasoning)}
+                      {@html throttledMarkdown(msg.id, msg.content, msg.streaming, showReasoning)}
                     </div>
                   {/if}
 
@@ -1258,7 +1273,7 @@
                     <span>{$t('chat.thinking')}</span>
                     <span class="think-meta mono">{fmtDur(thinkElapsed)}{#if thinkTokens > 0} · ↓ ~{fmtTokens(thinkTokens)} tokens{:else if ctxTokens > 0} · ↑ ~{fmtTokens(ctxTokens)} tokens{:else} · ↑{/if}</span>
                   </summary>
-                  <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(thinking, showReasoning)}</div>
+                  <div class="think-body" use:setupAssistantEl>{@html throttledMarkdown('live-thinking:' + id, thinking, true, showReasoning)}</div>
                 </details>
               </div>
             </div>
@@ -1286,7 +1301,7 @@
           <!-- Suggestion chip -->
           {#if suggestion && !streaming}
             <div class="suggestion-row">
-              <button class="suggestion-chip" onclick={() => send(suggestion)}>
+              <button class="suggestion-chip" onclick={() => fillSuggestion(suggestion)}>
                 <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
                 {suggestion}
               </button>

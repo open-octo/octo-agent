@@ -287,6 +287,18 @@ func (s *Scheduler) schedule(id, expr string) {
 	s.mu.Unlock()
 }
 
+// NextRun returns the next scheduled fire time for an enabled task, or the
+// zero time if the task is disabled (no live cron entry).
+func (s *Scheduler) NextRun(id string) time.Time {
+	s.mu.Lock()
+	eid, ok := s.entries[id]
+	s.mu.Unlock()
+	if !ok {
+		return time.Time{}
+	}
+	return s.cron.Entry(eid).Next
+}
+
 // unschedule removes the task's live cron entry, if any.
 func (s *Scheduler) unschedule(id string) {
 	s.mu.Lock()

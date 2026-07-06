@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store'
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import {
     running, activeSessionId, chatStreaming, sessions,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
@@ -15,6 +15,14 @@
   let { onSend }: { onSend?: (text: string, files?: any[]) => void } = $props()
 
   let text = $state('')
+  // Per-session composer draft: keyed by session id so switching sessions
+  // doesn't carry a half-typed message (or its staged attachments) into — or
+  // send them to — the wrong conversation. Plain objects, not $state —
+  // nothing renders them directly, they are only read/written from the
+  // session-switch effect below.
+  let draftsBySession: Record<string, string> = {}
+  let attachmentsBySession: Record<string, { name: string; data_url: string; mime_type: string }[]> = {}
+  let draftSid = ''
   let textareaEl = $state<HTMLTextAreaElement | null>(null)
   let fileInputEl = $state<HTMLInputElement | null>(null)
   let attachments = $state<{ name: string; data_url: string; mime_type: string }[]>([])
@@ -281,6 +289,29 @@
 
   // $store autosubscription is reactive inside $derived (get() is not).
   let sid = $derived($activeSessionId ?? '')
+
+  // Swap the composer's live text + staged attachments for the session's own
+  // draft on every session switch: save the departing session's in-progress
+  // state, restore the incoming session's (or start blank). Also resets
+  // input-history navigation, which is likewise per-session (see
+  // recallOlder/recallNewer). `sid` is the only tracked dependency — reading
+  // text/attachments inside untrack() keeps this from re-running on every
+  // keystroke or attachment change.
+  $effect(() => {
+    const nextSid = sid
+    if (nextSid === draftSid) return
+    untrack(() => {
+      if (draftSid) {
+        draftsBySession[draftSid] = text
+        attachmentsBySession[draftSid] = attachments
+      }
+      text = draftsBySession[nextSid] ?? ''
+      attachments = attachmentsBySession[nextSid] ?? []
+      draftSid = nextSid
+      historyIndex = null
+    })
+  })
+
   let isStreaming = $derived($chatStreaming[sid] ?? false)
   let currentSession = $derived($sessions.find(s => s.id === sid) ?? null)
 
@@ -369,11 +400,14 @@
     }
   }
 
-  // Cycle the permission mode like the TUI's shift+tab: interactive ↔ auto
-  // (strict, the unattended posture, normalises back to interactive).
+  // Cycle the permission mode through all three engine modes: interactive
+  // (ask) → auto (auto-approve) → strict (auto-deny) → back to interactive.
+  // Strict used to be unreachable from this chip (#1114).
+  const PERM_MODE_CYCLE = ['interactive', 'auto', 'strict']
   async function cyclePermMode() {
     if (!sid) return
-    const next = permMode === 'interactive' ? 'auto' : 'interactive'
+    const idx = PERM_MODE_CYCLE.indexOf(permMode)
+    const next = PERM_MODE_CYCLE[(idx + 1) % PERM_MODE_CYCLE.length]
     try {
       await api.updateSessionPermissionMode(sid, next)
       chatPermMode.update(m => ({ ...m, [sid]: next }))
@@ -420,6 +454,7 @@
     if (!text.trim() && attachments.length === 0) return
     const v = text.trim()
     const files = attachments.length ? [...attachments] : undefined
+    pushHistory(sid, v)
     text = ''
     attachments = []
     if (onSend) {
@@ -433,6 +468,61 @@
     const s = get(activeSessionId)
     if (s) ws.interrupt(s)
     running.set(false)
+  }
+
+  // ── Input history (↑/↓ recall of previously sent messages) ────────────────
+  // Keyed by session id, like the draft above, so recall never surfaces
+  // another conversation's messages. Plain object — not rendered, only read
+  // from keyboard handlers.
+  let sentHistory: Record<string, string[]> = {}
+  let historyIndex = $state<number | null>(null)
+  let historyDraft = ''
+
+  function pushHistory(forSid: string, sent: string) {
+    if (!forSid || !sent) return
+    const list = sentHistory[forSid] ?? (sentHistory[forSid] = [])
+    if (list[list.length - 1] !== sent) list.push(sent)
+    historyIndex = null
+  }
+
+  function caretAtStart(el: HTMLTextAreaElement): boolean {
+    return el.selectionStart === 0 && el.selectionEnd === 0
+  }
+  function caretAtEnd(el: HTMLTextAreaElement): boolean {
+    return el.selectionStart === el.value.length && el.selectionEnd === el.value.length
+  }
+
+  // Recall the previous (older) sent message. Only armed when the caret sits
+  // at the very start of the textarea so it doesn't hijack normal cursor
+  // movement inside a multi-line draft.
+  function recallOlder() {
+    const list = sentHistory[sid] ?? []
+    if (list.length === 0) return
+    if (historyIndex === null) {
+      historyDraft = text
+      historyIndex = list.length - 1
+    } else if (historyIndex > 0) {
+      historyIndex -= 1
+    } else {
+      return
+    }
+    text = list[historyIndex]
+    queueMicrotask(() => textareaEl?.setSelectionRange(text.length, text.length))
+  }
+
+  // Recall the next (newer) sent message, or restore the in-progress draft
+  // once history is exhausted.
+  function recallNewer() {
+    if (historyIndex === null) return
+    const list = sentHistory[sid] ?? []
+    if (historyIndex < list.length - 1) {
+      historyIndex += 1
+      text = list[historyIndex]
+    } else {
+      historyIndex = null
+      text = historyDraft
+    }
+    queueMicrotask(() => textareaEl?.setSelectionRange(text.length, text.length))
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -460,6 +550,19 @@
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
+      return
+    }
+
+    // History recall — armed only at the start/end of the textarea so it
+    // doesn't hijack cursor movement inside a multi-line draft.
+    if (e.key === 'ArrowUp' && textareaEl && caretAtStart(textareaEl)) {
+      e.preventDefault()
+      recallOlder()
+      return
+    }
+    if (e.key === 'ArrowDown' && textareaEl && historyIndex !== null && caretAtEnd(textareaEl)) {
+      e.preventDefault()
+      recallNewer()
       return
     }
   }
@@ -560,6 +663,8 @@
     <button class="perm-toggle" onclick={(e) => { e.stopPropagation(); cyclePermMode() }} title={$t('chat.perm_toggle_hint')}>
       {#if permMode === 'auto'}
         <StatusTag status="success">{$t('chat.auto_mode')}</StatusTag>
+      {:else if permMode === 'strict'}
+        <StatusTag status="error">{$t('chat.strict_mode')}</StatusTag>
       {:else}
         <StatusTag status="warning">{$t('chat.ask_mode')}</StatusTag>
       {/if}

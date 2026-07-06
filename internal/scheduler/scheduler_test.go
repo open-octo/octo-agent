@@ -101,6 +101,55 @@ func TestAddRejectsInvalidCron(t *testing.T) {
 	}
 }
 
+func TestNextRun(t *testing.T) {
+	s, _ := newTestScheduler(t)
+	// cron.Entry.Next is computed by the running scheduler loop, not at
+	// registration time — unlike the other tests in this file, which only
+	// assert on entry bookkeeping (Entries()/entries map) and never need
+	// Start(), this one reads the actual computed time.
+	s.Start()
+	defer s.Stop()
+
+	if got := s.NextRun("no-such-task"); !got.IsZero() {
+		t.Fatalf("NextRun(unknown) = %v, want zero time", got)
+	}
+
+	task := Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}
+	if err := s.Add(&task); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	got := s.NextRun("t1")
+	if got.IsZero() {
+		t.Fatal("NextRun(enabled) = zero time, want a future time")
+	}
+	if !got.After(time.Now()) {
+		t.Fatalf("NextRun(enabled) = %v, want a time after now", got)
+	}
+
+	// Disabling drops the live cron entry, so NextRun has nothing to report.
+	task.Enabled = false
+	if err := s.Update(task); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got := s.NextRun("t1"); !got.IsZero() {
+		t.Fatalf("NextRun(disabled) = %v, want zero time", got)
+	}
+
+	// Re-enabling with a different expression reschedules and reports the new time.
+	task.Enabled = true
+	task.Cron = "0 30 18 * * *"
+	if err := s.Update(task); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	rescheduled := s.NextRun("t1")
+	if rescheduled.IsZero() {
+		t.Fatal("NextRun(re-enabled) = zero time, want a future time")
+	}
+	if rescheduled.Equal(got) {
+		t.Fatal("NextRun after rescheduling should differ from the disabled reading")
+	}
+}
+
 func TestUpdateReschedulesEntry(t *testing.T) {
 	s, _ := newTestScheduler(t)
 	task := Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}

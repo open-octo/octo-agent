@@ -323,7 +323,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .btn-secondary:hover { border-color: var(--blue-5); color: var(--blue-5); }
 .toolbar-row { display: flex; align-items: center; justify-content: space-between; }
 .system-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
-.table-card { background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow); overflow: hidden; }
+.table-card { background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow); overflow-x: auto; }
 .table-header, .table-row {
   display: grid;
   grid-template-columns: minmax(150px,2.2fr) minmax(120px,3fr) 96px 72px 100px;
