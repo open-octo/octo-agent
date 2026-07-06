@@ -1,10 +1,22 @@
 package tools
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+// hookTimeout bounds how long a test waits for the onExit hook to fire.
+// Windows CI runners spawn PowerShell per command (see shellCommand in
+// sandbox.go), which is far slower to start than POSIX sh -c — the same
+// reason waitFor in background_test.go extends its own limit on Windows.
+func hookTimeout() time.Duration {
+	if runtime.GOOS == "windows" {
+		return 45 * time.Second
+	}
+	return 3 * time.Second
+}
 
 // TestBackgroundManager_OnExitHookFires verifies the completion hook fires once
 // with the final status and the still-unread output, and that consuming it via
@@ -30,8 +42,8 @@ func TestBackgroundManager_OnExitHookFires(t *testing.T) {
 	var got BgExit
 	select {
 	case got = <-fired:
-	case <-time.After(3 * time.Second):
-		t.Fatal("onExit hook did not fire within 3s")
+	case <-time.After(hookTimeout()):
+		t.Fatal("onExit hook did not fire in time")
 	}
 
 	if got.ID != id {
@@ -140,8 +152,8 @@ func TestBackgroundManager_OnExitFiresAfterPromote(t *testing.T) {
 	var got BgExit
 	select {
 	case got = <-fired:
-	case <-time.After(3 * time.Second):
-		t.Fatal("onExit hook did not fire after Promote within 3s")
+	case <-time.After(hookTimeout()):
+		t.Fatal("onExit hook did not fire after Promote in time")
 	}
 
 	if got.ID != id {
