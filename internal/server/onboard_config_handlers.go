@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/prompt"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // ─── Provider Presets ───────────────────────────────────────────────────────
@@ -154,7 +156,7 @@ func (s *Server) handleOnboardComplete(w http.ResponseWriter, r *http.Request) {
 
 // ─── GET /api/config ────────────────────────────────────────────────────────
 
-// configResponse mirrors what the Ruby frontend expects.
+// configResponse mirrors what the Svelte frontend expects.
 type configResponse struct {
 	Models          []modelConfig `json:"models,omitempty"`
 	DefaultModelIdx int           `json:"default_model_idx,omitempty"`
@@ -162,6 +164,7 @@ type configResponse struct {
 	Language        string        `json:"language,omitempty"`
 	ShowReasoning   *bool         `json:"show_reasoning,omitempty"`
 	Coauthor        *bool         `json:"coauthor,omitempty"`
+	WorkspaceDir    string        `json:"workspace_dir,omitempty"`
 }
 
 type modelConfig struct {
@@ -229,6 +232,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		Language:        cfg.Language,
 		ShowReasoning:   cfg.ShowReasoning,
 		Coauthor:        &effCoauthor,
+		WorkspaceDir:    cfg.WorkspaceDir,
 	})
 }
 
@@ -358,7 +362,50 @@ func (s *Server) handlePutLanguage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "language": req.Language})
 }
 
-// maskKey masks most of an API key, keeping the first and last four runes
+// ─── PUT /api/config/workspace_dir ───────────────────────────────────────────
+
+type putWorkspaceDirRequest struct {
+	WorkspaceDir string `json:"workspace_dir"`
+}
+
+// handlePutWorkspaceDir updates the global default working directory used for
+// new web sessions. It accepts the raw config value: empty clears the override
+// and falls back to the server's launch directory, "auto" resolves to
+// ~/Desktop/octo, and anything else is stored as a literal path. The server's
+// resolved default is also updated so new sessions pick it up immediately
+// without a restart.
+func (s *Server) handlePutWorkspaceDir(w http.ResponseWriter, r *http.Request) {
+	var req putWorkspaceDirRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+		return
+	}
+
+	cfg.WorkspaceDir = req.WorkspaceDir
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	// Resolve the new value immediately so the running server applies it to
+	// new sessions without needing a restart. On error, fall back to no
+	// override; the config is already saved.
+	resolved, err := tools.ResolveWorkspaceDir(req.WorkspaceDir)
+	if err != nil {
+		slog.Warn("could not resolve workspace_dir; new sessions keep using the launch directory", "err", err)
+		resolved = ""
+	}
+	s.workspaceDir = resolved
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "workspace_dir": req.WorkspaceDir})
+}
+
 // visible. It measures by runes so it never splits a multi-byte UTF-8 character.
 func maskKey(k string) string {
 	if k == "" {

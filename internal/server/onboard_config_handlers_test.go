@@ -783,3 +783,44 @@ func TestConfigModels_PatchEmptyModelRejected(t *testing.T) {
 		t.Fatalf("entry must be unchanged and addressable: %+v default=%q", cfg.Models, cfg.DefaultModel)
 	}
 }
+
+func TestGetConfig_WorkspaceDir(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models:       []config.ModelEntry{{Provider: "anthropic", Model: "claude-sonnet-4-6"}},
+		DefaultModel: "claude-sonnet-4-6",
+		WorkspaceDir: "~/octo-projects",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	resp := getConfigResponse(t, srv)
+	if resp.WorkspaceDir != "~/octo-projects" {
+		t.Errorf("workspace_dir = %q, want %q", resp.WorkspaceDir, "~/octo-projects")
+	}
+}
+
+func TestPutWorkspaceDir_UpdatesConfigAndServerDefault(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models:       []config.ModelEntry{{Provider: "anthropic", Model: "claude-sonnet-4-6"}},
+		DefaultModel: "claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	wantDir := filepath.Join(t.TempDir(), "workspace")
+	w := doJSON(t, srv, http.MethodPut, "/api/config/workspace_dir", `{"workspace_dir": "`+wantDir+`"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT /api/config/workspace_dir = %d: %s", w.Code, w.Body.String())
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WorkspaceDir != wantDir {
+		t.Errorf("config.WorkspaceDir = %q, want %q", cfg.WorkspaceDir, wantDir)
+	}
+	if srv.workspaceDir != wantDir {
+		t.Errorf("server.workspaceDir = %q, want %q", srv.workspaceDir, wantDir)
+	}
+}

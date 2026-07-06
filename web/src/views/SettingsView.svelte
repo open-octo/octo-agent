@@ -4,8 +4,7 @@
   import Switch from '../components/ui/Switch.svelte'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import ModelConfigForm from '../components/settings/ModelConfigForm.svelte'
-  import { get } from 'svelte/store'
-  import { showToast, activeSessionId, chatWorkingDir } from '../lib/stores'
+  import { showToast } from '../lib/stores'
   import { setLocale, t, tr } from '../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import * as api from '../lib/api'
@@ -17,7 +16,7 @@
   let theme         = $state('Light')
   let reasoning     = $state('Medium')
   let permMode      = $state('Ask')
-  let workdir       = $state('')
+  let workspaceDir  = $state('')
   let showReasoning = $state(true)
   let coauthor      = $state(true)
   let versionStr    = $state('')
@@ -26,8 +25,8 @@
   let providersLoaded = $state(false)
 
   // Original values for dirty-checking
-  let origLanguage    = 'en'
-  let origWorkdir      = ''
+  let origLanguage     = 'en'
+  let origWorkspaceDir = ''
   let origReasoning    = 'Medium'
   let origShowReasoning = true
   let origCoauthor = true
@@ -72,14 +71,6 @@
     const savedFont = localStorage.getItem('octo.fontSize')
     if (savedFont) fontSize = savedFont
     theme = modeToThemeLabel[getMode()] ?? 'Light'
-    // Seed the working-dir field from the active session's current dir (tracked
-    // in the store from session_update/list), so it shows where tools run
-    // rather than a blank box. Empty leaves the placeholder.
-    const sid = get(activeSessionId)
-    if (sid) {
-      const wd = get(chatWorkingDir)[sid]
-      if (wd) { workdir = wd; origWorkdir = wd }
-    }
     // Load providers first and wait, so the ModelConfigForm datalist has data
     // when the Add/Edit modal opens immediately.
     await api.listProviders().then(p => { providers = p; providersLoaded = true }).catch(() => { providersLoaded = true })
@@ -163,10 +154,12 @@
       }
       showReasoning = cfg.show_reasoning ?? true
       coauthor = cfg.coauthor ?? true
+      workspaceDir = cfg.workspace_dir ?? ''
       origReasoning = reasoning
       origShowReasoning = showReasoning
       origPermMode = permMode
       origCoauthor = coauthor
+      origWorkspaceDir = workspaceDir
       // Font size is a client-only preference (persisted in localStorage); the
       // server only hardcodes a placeholder, so don't let it clobber the saved
       // choice. Language still seeds from config when present.
@@ -228,15 +221,8 @@
 
   const effortMap: Record<string, string> = { Low: 'low', Medium: 'medium', High: 'high', Xhigh: 'xhigh', Max: 'max' }
 
-  // Working directory is the only field left on this page that's genuinely
-  // per-session (there's no such thing as a "default" working directory) —
-  // everything else here is global config. Drives the "start a session"
-  // hint, shown only when it's actually relevant.
-  let needsSession = $derived(!$activeSessionId && workdir !== origWorkdir)
-
   async function handleSave() {
     saving = true
-    const sid = $activeSessionId
     try {
       // Agent Defaults (Reasoning Effort + Permission Mode) — the default
       // model entry's own settings, saved the same way the Models section
@@ -284,15 +270,12 @@
         setLocale(language === 'zh' || language === 'zh-TW' ? 'zh' : 'en')
       }
 
-      // Working directory: the one field that actually needs an active
-      // session, since it's inherently per-session state.
-      if (workdir !== origWorkdir) {
-        if (!sid) {
-          showToast(tr('settings.no_session_tooltip'), 'warning')
-          return
-        }
-        await api.updateSessionWorkingDir(sid, workdir)
-        origWorkdir = workdir
+      // Default workspace directory: global config for new web sessions.
+      // Empty = no override (use the server's launch directory); "auto" =
+      // ~/Desktop/octo; anything else is used as a literal path.
+      if (workspaceDir !== origWorkspaceDir) {
+        await api.updateWorkspaceDir(workspaceDir)
+        origWorkspaceDir = workspaceDir
       }
 
       showToast(tr('settings.toast_saved'), 'success')
@@ -421,10 +404,10 @@
         </div>
         <div class="setting-row last">
           <div class="setting-info">
-            <span class="setting-label">{$t('settings.workdir')}</span>
-            <span class="setting-desc">{$t('settings.workdir_desc')}</span>
+            <span class="setting-label">{$t('settings.workspace_dir')}</span>
+            <span class="setting-desc">{$t('settings.workspace_dir_desc')}</span>
           </div>
-          <input class="input" bind:value={workdir} placeholder="~/code/my-project" />
+          <input class="input" bind:value={workspaceDir} placeholder="auto or ~/code/my-project" />
         </div>
       </div>
 
@@ -434,13 +417,9 @@
           class="btn-primary"
           onclick={handleSave}
           disabled={saving}
-          title={needsSession ? tr('settings.no_session_tooltip') : ''}
         >
           {saving ? $t('settings.saving') : $t('settings.save_changes')}
         </button>
-        {#if needsSession}
-          <span class="session-hint">{tr('settings.no_session_tooltip')}</span>
-        {/if}
         {#if versionStr}
           <span class="version-badge">{$t('common.version')} {versionStr}</span>
         {/if}
@@ -508,7 +487,6 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .btn-primary:hover:not(:disabled) { background: var(--blue-5); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .version-badge { font-size: 12px; color: var(--text-tertiary); }
-.session-hint { font-size: 12px; color: var(--text-tertiary); }
 
 /* ── Models section ─────────────────────────────────────────────────────────── */
 .section-head {

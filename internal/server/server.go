@@ -739,6 +739,7 @@ func (s *Server) registerRoutes() {
 	s.api("PUT /api/config/show_reasoning", s.handlePutShowReasoning)
 	s.api("PUT /api/config/coauthor", s.handlePutCoauthor)
 	s.api("PUT /api/config/language", s.handlePutLanguage)
+	s.api("PUT /api/config/workspace_dir", s.handlePutWorkspaceDir)
 	s.api("POST /api/config/test", s.handleTestConfig)
 	s.api("POST /api/config/models", s.handleSaveModelConfig)
 	s.api("PATCH /api/config/models/{id}", s.handleUpdateModelConfig)

@@ -486,6 +486,7 @@ export interface ConfigResponse {
   language?: string
   show_reasoning?: boolean
   coauthor?: boolean
+  workspace_dir?: string
 }
 
 export async function getConfig(): Promise<ConfigResponse> {
@@ -510,6 +511,13 @@ export async function updateLanguage(language: string): Promise<{ ok: boolean; l
   return request<{ ok: boolean; language?: string }>('/api/config/language', {
     method: 'PUT',
     ...json({ language }),
+  })
+}
+
+export async function updateWorkspaceDir(workspaceDir: string): Promise<{ ok: boolean; workspace_dir?: string }> {
+  return request<{ ok: boolean; workspace_dir?: string }>('/api/config/workspace_dir', {
+    method: 'PUT',
+    ...json({ workspace_dir: workspaceDir }),
   })
 }
 
