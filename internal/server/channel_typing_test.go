@@ -74,9 +74,7 @@ func TestStartTypingKeepalive_RepeatsUntilStopped(t *testing.T) {
 		t.Fatalf("StopTyping should not fire before stop() is called, count = %d", stopBefore)
 	}
 
-	stop()
-	// Let the goroutine observe the close and call StopTyping.
-	time.Sleep(20 * time.Millisecond)
+	stop() // blocks until the keepalive goroutine has actually called StopTyping
 	sendAfterStop, stopAfter := ad.counts()
 	if stopAfter != 1 {
 		t.Fatalf("StopTyping should fire exactly once after stop(), count = %d", stopAfter)
@@ -100,7 +98,6 @@ func TestStartTypingKeepalive_StopIsIdempotent(t *testing.T) {
 	stop()
 	stop()
 	stop()
-	time.Sleep(20 * time.Millisecond)
 
 	if _, stopCount := ad.counts(); stopCount != 1 {
 		t.Fatalf("StopTyping should fire exactly once no matter how many times stop() is called, count = %d", stopCount)
