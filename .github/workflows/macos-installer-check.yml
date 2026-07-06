@@ -64,6 +64,18 @@ jobs:
           test -x expanded/octo-component.pkg/Scripts/postinstall
           test -x expanded/octo-component.pkg/Payload/bin/octo
 
+      - name: Verify the package installs under the user's real home directory
+        run: |
+          install_loc=$(sed -n 's/.*install-location="\([^"]*\)".*/\1/p' expanded/octo-component.pkg/PackageInfo)
+          echo "install-location: $install_loc"
+          [ "$install_loc" = "Library/Application Support/octo" ] || { echo "expected install-location 'Library/Application Support/octo', got: $install_loc"; exit 1; }
+          case "$install_loc" in
+            *~*)
+              echo "install-location must not contain a literal '~': $install_loc"
+              exit 1
+              ;;
+          esac
+
       - name: Run preinstall + postinstall against a scratch HOME
         run: |
           fake="$RUNNER_TEMP/fake-home"
