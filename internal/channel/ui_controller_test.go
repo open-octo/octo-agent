@@ -10,7 +10,7 @@ import (
 
 func TestUIController_TextDeltaAccumulation(t *testing.T) {
 	mock := &mockAdapter{platform: "mock"}
-	ctrl := NewUIController(mock, "chat1", "msg1")
+	ctrl := NewUIController(mock, "chat1", "msg1", nil)
 	handler := ctrl.Handler()
 
 	// Simulate streaming text deltas.
@@ -39,7 +39,7 @@ func TestUIController_TextDeltaAccumulation(t *testing.T) {
 
 func TestUIController_ToolEventsSuppressed(t *testing.T) {
 	mock := &mockAdapter{platform: "mock"}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	// Tool started — should not send anything.
@@ -64,7 +64,7 @@ func TestUIController_ToolEventsSuppressed(t *testing.T) {
 
 func TestUIController_ToolDoneSuppressed(t *testing.T) {
 	mock := &mockAdapter{platform: "mock"}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	output := "Read file: /path/to/file.go\nContent: package main"
@@ -89,7 +89,7 @@ func TestUIController_ToolDoneSuppressed(t *testing.T) {
 
 func TestUIController_ToolErrorSuppressed(t *testing.T) {
 	mock := &mockAdapter{platform: "mock"}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	handler(agent.AgentEvent{Kind: agent.EventToolStarted, ToolName: "read_file"})
@@ -146,7 +146,7 @@ func TestUIController_Truncate(t *testing.T) {
 
 func TestUIController_MessageUpdate(t *testing.T) {
 	mock := &mockAdapter{platform: "mock"}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	// First delta — should send a new message.
@@ -159,7 +159,7 @@ func TestUIController_MessageUpdate(t *testing.T) {
 
 	// Reset and simulate a platform that supports updates.
 	mock = &mockAdapter{platform: "mock"}
-	ctrl = NewUIController(mock, "chat1", "")
+	ctrl = NewUIController(mock, "chat1", "", nil)
 	handler = ctrl.Handler()
 
 	// Simulate a large text that gets flushed mid-stream, then updated.
@@ -176,7 +176,7 @@ func TestUIController_MessageUpdate(t *testing.T) {
 
 func TestRunAgent(t *testing.T) {
 	mock := &mockAdapter{platform: "mock"}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 
 	sess := &Session{
 		Key:    "test",
@@ -204,7 +204,7 @@ func TestRunAgent(t *testing.T) {
 // only the newest chunk would erase what the user already read (#1115).
 func TestUIController_UpdateCarriesFullText(t *testing.T) {
 	mock := &mockAdapter{platform: "mock", issueMsgIDs: true}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	// First flush: paragraph break → new message with chunk 1.
@@ -250,7 +250,7 @@ func TestUIController_UpdateCarriesFullText(t *testing.T) {
 // subsequent edits target the new message with its own accumulated text.
 func TestUIController_UpdateFailureStartsFreshMessage(t *testing.T) {
 	mock := &mockAdapter{platform: "mock", issueMsgIDs: true, failUpdates: true}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "One.\n\n"})
@@ -287,7 +287,7 @@ func TestUIController_UpdateFailureStartsFreshMessage(t *testing.T) {
 // its own message.
 func TestUIController_NoUpdatesPlatformSendsChunks(t *testing.T) {
 	mock := &mockAdapter{platform: "mock", issueMsgIDs: true, noUpdates: true}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "One.\n\n"})
@@ -313,7 +313,7 @@ func TestUIController_NoUpdatesPlatformSendsChunks(t *testing.T) {
 // A new turn must not edit the previous turn's message.
 func TestUIController_NewTurnStartsNewMessage(t *testing.T) {
 	mock := &mockAdapter{platform: "mock", issueMsgIDs: true}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Turn one."})
@@ -337,7 +337,7 @@ func TestUIController_NewTurnStartsNewMessage(t *testing.T) {
 // with whatever text follows) on the next successful flush.
 func TestUIController_DoubleFailureRetriesChunk(t *testing.T) {
 	mock := &mockAdapter{platform: "mock", issueMsgIDs: true}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	// Establish a pending message normally.
@@ -388,7 +388,7 @@ func TestUIController_DoubleFailureRetriesChunk(t *testing.T) {
 // unclosed code block and the second resumes mid-code with no fence at all.
 func TestUIController_NoUpdatesPlatformCarriesFenceAcrossFlushes(t *testing.T) {
 	mock := &mockAdapter{platform: "mock", issueMsgIDs: true, noUpdates: true}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	// Flush 1 (paragraph-break heuristic fires mid-fence): the buffer has an
@@ -427,7 +427,7 @@ func TestUIController_NoUpdatesPlatformCarriesFenceAcrossFlushes(t *testing.T) {
 // via edits since and would be stale.
 func TestUIController_EditFailureRecomputesFenceFromFrozenText(t *testing.T) {
 	mock := &mockAdapter{platform: "mock", issueMsgIDs: true}
-	ctrl := NewUIController(mock, "chat1", "")
+	ctrl := NewUIController(mock, "chat1", "", nil)
 	handler := ctrl.Handler()
 
 	// Flush 1 (SendText — no pending message yet): plain text, no fence.
@@ -461,5 +461,53 @@ func TestUIController_EditFailureRecomputesFenceFromFrozenText(t *testing.T) {
 	}
 	if open, _ := fenceStateAfter(fallback, false, ""); open {
 		t.Errorf("fallback message ends with an unclosed fence: %q", fallback)
+	}
+}
+
+// stopTyping must fire exactly once, on the first flush that actually
+// delivers text — not on every flush, and not on a flush of an empty/
+// whitespace-only buffer (#1117).
+func TestUIController_StopTypingFiresOnceOnFirstFlush(t *testing.T) {
+	mock := &mockAdapter{platform: "mock"}
+	var stops int
+	ctrl := NewUIController(mock, "chat1", "", func() { stops++ })
+	handler := ctrl.Handler()
+
+	// A tool-only turn with no text must not fire stopTyping — there is
+	// nothing to show the user yet.
+	handler(agent.AgentEvent{Kind: agent.EventToolStarted, ToolName: "read_file"})
+	handler(agent.AgentEvent{Kind: agent.EventToolDone, ToolName: "read_file"})
+	if stops != 0 {
+		t.Fatalf("stopTyping fired before any text flushed, count = %d", stops)
+	}
+
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "One.\n\n"})
+	if stops != 1 {
+		t.Fatalf("stopTyping should fire on the first real flush, count = %d", stops)
+	}
+
+	// A later flush in the same turn, and a whole new chained turn, must not
+	// fire it again.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Two.\n\n"})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{}})
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Turn two."})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{}})
+	if stops != 1 {
+		t.Fatalf("stopTyping should fire at most once across chained turns, count = %d", stops)
+	}
+}
+
+// A nil stopTyping (e.g. idle follow-up turns, which don't run a keepalive)
+// must not panic.
+func TestUIController_NilStopTypingIsSafe(t *testing.T) {
+	mock := &mockAdapter{platform: "mock"}
+	ctrl := NewUIController(mock, "chat1", "", nil)
+	handler := ctrl.Handler()
+
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Hello"})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{}})
+
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("expected 1 sent text, got %d", mock.sentTextCount())
 	}
 }

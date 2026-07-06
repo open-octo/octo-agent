@@ -52,16 +52,31 @@ type UIController struct {
 	// inTool is true while we're between EventToolStarted and its matching done/error.
 	inTool bool
 
-	// sentTyping tracks whether we've already sent a typing indicator this turn.
-	sentTyping bool
+	// stopTyping cancels the caller's typing-keepalive ticker (see
+	// startTypingKeepalive in internal/server). Invoked once, the first time
+	// this turn's reply text is actually flushed to the adapter — the reply
+	// itself is then evidence the bot is alive, so there's no need to keep
+	// re-asserting typing for the rest of the turn or any turns chained after
+	// it (#1117). nil for callers that don't drive a keepalive (e.g. idle
+	// follow-up turns).
+	stopTyping func()
+
+	// typingStopped guards stopTyping so it fires at most once. Deliberately
+	// not reset by resetLocked: this controller is reused across chained
+	// turns within one inbound message, and once the user has seen a reply
+	// there's no need to re-arm typing for later turns in the same chain.
+	typingStopped bool
 }
 
 // NewUIController creates a controller bound to one chat conversation.
-func NewUIController(adapter Adapter, chatID, replyTo string) *UIController {
+// stopTyping, if non-nil, is invoked once on the first text this turn (or
+// any turn chained after it) flushes to the adapter.
+func NewUIController(adapter Adapter, chatID, replyTo string, stopTyping func()) *UIController {
 	return &UIController{
-		adapter: adapter,
-		chatID:  chatID,
-		replyTo: replyTo,
+		adapter:    adapter,
+		chatID:     chatID,
+		replyTo:    replyTo,
+		stopTyping: stopTyping,
 	}
 }
 
@@ -160,6 +175,13 @@ func (u *UIController) flushTextLocked() {
 	}
 	u.textBuf.Reset()
 
+	if !u.typingStopped {
+		u.typingStopped = true
+		if u.stopTyping != nil {
+			u.stopTyping()
+		}
+	}
+
 	// If the platform supports message updates and we already have a pending
 	// message, edit it in place with the FULL text streamed so far — the raw
 	// chunks are concatenated unmodified so paragraph breaks survive, and
@@ -218,7 +240,6 @@ func (u *UIController) resetLocked() {
 	u.fenceLang = ""
 	u.toolCount = 0
 	u.inTool = false
-	u.sentTyping = false
 }
 
 // shouldFlush returns true when the buffer should be sent.

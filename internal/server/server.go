@@ -2361,19 +2361,16 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	ctx, done := sess.BeginRun(ctx)
 	defer done()
 
-	// Start typing keepalive BEFORE sending any text. The WeChat iLink protocol
-	// cancels the typing indicator on sendmessage, so the keepalive must already
-	// be running when the acknowledgment message is sent so it can immediately
-	// re-assert the typing state. Other platforms treat this as a no-op or a
-	// self-expiring hint (Telegram, Discord) — safe to call universally.
-	if err := ad.SendTyping(ev.ChatID, ev.ContextToken); err != nil {
-		slog.Debug("channel sendTyping", "platform", ev.Platform, "err", err)
-	}
-	defer func() {
-		if err := ad.StopTyping(ev.ChatID, ev.ContextToken); err != nil {
-			slog.Debug("channel stopTyping", "platform", ev.Platform, "err", err)
-		}
-	}()
+	// Start a typing keepalive BEFORE sending any text — the WeChat iLink
+	// protocol cancels the typing indicator on sendmessage, so it must
+	// already be running when the acknowledgment message is sent so it can
+	// immediately re-assert the typing state. It re-fires every 5s for the
+	// rest of the turn — and any turns chained after it — so a multi-minute
+	// agentic turn never goes dark; ctrl (built in runChannelTurns) stops it
+	// early the moment the reply's first chunk actually reaches the user
+	// (#1117).
+	stopTyping := startTypingKeepalive(ad, ev.ChatID, ev.ContextToken)
+	defer stopTyping()
 
 	// Acknowledge receipt immediately so the user knows the message landed
 	// while the agent is working. Mirrors Ruby channel_manager behaviour.
@@ -2389,7 +2386,7 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	// read_file-able path notes. Without this only ev.Text reaches the model.
 	content := s.attachInboundFiles(sess, ev)
 
-	s.runChannelTurns(ctx, sess, ad, ev, content)
+	s.runChannelTurns(ctx, sess, ad, ev, content, stopTyping)
 
 	// A steer that arrived during a restart drain would die with the
 	// process (the Inbox is memory-only) — give it the same retry notice a
@@ -2486,13 +2483,17 @@ func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, 
 		return
 	}
 
-	s.runChannelTurns(ctx, sess, ad, ev, strings.Join(agent.Texts(items), "\n\n"))
+	// No typing keepalive here: idle turns fire from a background completion,
+	// not a message the user is actively waiting on — nothing to reassure.
+	s.runChannelTurns(ctx, sess, ad, ev, strings.Join(agent.Texts(items), "\n\n"), nil)
 }
 
 // runChannelTurns executes one content-bearing turn plus any chained turns
 // drained from the agent's Inbox. It is shared between user-initiated and
-// idle-triggered channel turns.
-func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent, content string) {
+// idle-triggered channel turns. stopTyping, if non-nil, cancels the caller's
+// typing-keepalive ticker the first time this chain's reply text reaches the
+// user (see channel.NewUIController).
+func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent, content string, stopTyping func()) {
 	// Recompose the system prompt every turn so memory written and skills
 	// imported/toggled since server start are visible — web turns get this
 	// for free from buildAgent; the IM factory's compose-once snapshot went
@@ -2547,7 +2548,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	engine.AttachRemembered(s.rememberedFor("im:" + string(sess.Key)))
 	sess.Agent.Gate = app.NewPermissionGate(engine, s.channelPermissionAsk(sess, ad, ev))
 
-	ctrl := channel.NewUIController(ad, ev.ChatID, ev.MessageID)
+	ctrl := channel.NewUIController(ad, ev.ChatID, ev.MessageID, stopTyping)
 
 	// The persisted backing session carries the conversation's goal — the
 	// same record every transport bound to this session sees. Wire it as the
