@@ -46,6 +46,9 @@ func TestTUI_QueuePanelTruncatesLongMultilineItems(t *testing.T) {
 
 func TestTUI_PermissionPromptShowsFullCommand(t *testing.T) {
 	m := newTestModel()
+	// Wide enough that the command below renders on one line — this test
+	// checks against truncation, not the (separately-tested) line-wrapping.
+	m.width = 200
 	// A command long past the old 60-rune summary cap: every character must be
 	// visible — the user is authorizing it.
 	cmd := "git push --force origin main && rm -rf ./dist && echo " + strings.Repeat("x", 120)

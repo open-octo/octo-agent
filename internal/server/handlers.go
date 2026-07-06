@@ -1313,6 +1313,19 @@ func (s *Server) handleUpdateSessionPermissionMode(w http.ResponseWriter, r *htt
 	// own session (see entryForSession) so this broadcast doesn't paint every
 	// session with whichever model's values happen to be looked up first.
 	if s.wsHub != nil {
+		// wsHub.broadcast(sessionID, ...) below only reaches connections
+		// subscribed to that particular session (ws.ts: the frontend only
+		// subscribes to the currently-open one), so a browser sitting on a
+		// DIFFERENT session never sees these targeted events and its sessions
+		// store — and thus that session's composer pill — goes stale on
+		// switch. permission_mode has no per-session variance, so fire it as
+		// one true global broadcast (empty session ID) too, reaching every
+		// connected tab regardless of subscription.
+		s.wsHub.broadcast("", map[string]any{
+			"type":            "session_update",
+			"global":          true,
+			"permission_mode": mode,
+		})
 		sessions, _ := agent.ListSessions(50)
 		for _, sess := range sessions {
 			_, pm, re, sr, _ := s.sessionStatusFields(sess)
