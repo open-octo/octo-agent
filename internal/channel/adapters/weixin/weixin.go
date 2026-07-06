@@ -44,9 +44,9 @@ const (
 	flushInterval      = 2 * time.Second
 	minSendInterval    = time.Second
 
-	// Typing keepalive (matches @tencent-weixin/openclaw-weixin npm package).
-	typingKeepaliveInterval = 5 * time.Second
-	typingTicketTTL         = 24 * time.Hour
+	// typingTicketTTL bounds how long a cached typing ticket is reused before
+	// SendTyping re-fetches one via GetConfig.
+	typingTicketTTL = 24 * time.Hour
 
 	// Error backoff.
 	reconnectDelay        = 5 * time.Second
@@ -241,8 +241,6 @@ type Adapter struct {
 
 	bot           *ilinkBot
 	sendQ         *sendQueue
-	keepalives    map[string]context.CancelFunc
-	keepalivesMu  sync.Mutex
 	typingTickets map[string]typingTicket
 	typingMu      sync.Mutex
 }
@@ -292,7 +290,6 @@ func New(cfg channel.PlatformConfig) (channel.Adapter, error) {
 		credPath:      credPath,
 		client:        client,
 		allowed:       allowed,
-		keepalives:    make(map[string]context.CancelFunc),
 		typingTickets: make(map[string]typingTicket),
 	}, nil
 }
@@ -395,7 +392,6 @@ func (a *Adapter) Stop() error {
 	if a.sendQ != nil {
 		a.sendQ.stop()
 	}
-	a.stopAllKeepalives()
 	return nil
 }
 
@@ -621,17 +617,22 @@ func (a *Adapter) UpdateMessage(chatID, messageID, text string) bool { return fa
 // SupportsMessageUpdates returns false.
 func (a *Adapter) SupportsMessageUpdates() bool { return false }
 
-// SelfSustainingTyping reports that a single SendTyping call already starts
-// a persistent internal keepalive (see startTypingKeepalive below) — callers
-// that re-invoke SendTyping on a fixed interval should skip the repeats for
-// this adapter (channel.SelfSustainingTyper).
-func (a *Adapter) SelfSustainingTyping() bool { return true }
-
-// StopTyping cancels the keepalive goroutine and sends sendtyping(status=2)
-// to clear the typing indicator in the WeChat client.
+// StopTyping sends sendtyping(status=2) to clear the typing indicator, using
+// the ticket cached by the last SendTyping call. A no-op if SendTyping was
+// never called for this chat (nothing to clear).
 func (a *Adapter) StopTyping(chatID, contextToken string) error {
-	a.stopTypingKeepalive(chatID)
-	return nil
+	if a.bot == nil || a.bot.creds == nil {
+		return nil
+	}
+	a.typingMu.Lock()
+	cached, ok := a.typingTickets[chatID]
+	a.typingMu.Unlock()
+	if !ok {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return a.bot.client.SendTyping(ctx, a.bot.creds.BaseURL, a.bot.creds.Token, chatID, cached.ticket, 2)
 }
 
 // Flush immediately drains any buffered outgoing messages for the chat.
@@ -648,34 +649,53 @@ func (a *Adapter) SendButtons(chatID, text string, buttons []channel.Button, rep
 	return a.SendText(chatID, text, replyTo)
 }
 
-// SendTyping triggers a typing indicator and starts keepalive.
+// SendTyping sends a single typing(status=1) ping using a cached ticket when
+// still fresh, or fetches a new one otherwise. Unlike the old implementation
+// this starts no background goroutine — the external typing keepalive
+// (internal/server) re-invokes SendTyping every 5s for the life of a turn,
+// uniformly across every adapter; the TTL cache here just keeps repeated
+// calls cheap (skipping the GetConfig round trip) instead of needing an
+// adapter-specific keepalive to avoid it.
 func (a *Adapter) SendTyping(chatID, contextToken string) error {
 	if a.bot == nil || a.bot.creds == nil {
 		return fmt.Errorf("not logged in")
 	}
 
+	ticket, err := a.typingTicketFor(chatID, contextToken)
+	if err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	return a.bot.client.SendTyping(ctx, a.bot.creds.BaseURL, a.bot.creds.Token, chatID, ticket, 1)
+}
 
+// typingTicketFor returns the cached typing ticket for chatID if it's still
+// within typingTicketTTL, fetching and caching a fresh one via GetConfig
+// otherwise.
+func (a *Adapter) typingTicketFor(chatID, contextToken string) (string, error) {
+	a.typingMu.Lock()
+	cached, ok := a.typingTickets[chatID]
+	a.typingMu.Unlock()
+	if ok && time.Since(cached.cachedAt) < typingTicketTTL {
+		return cached.ticket, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 	cfg, err := a.bot.client.GetConfig(ctx, a.bot.creds.BaseURL, a.bot.creds.Token, chatID, contextToken)
 	if err != nil {
-		return fmt.Errorf("getconfig: %w", err)
+		return "", fmt.Errorf("getconfig: %w", err)
 	}
 	if cfg.TypingTicket == "" {
-		return fmt.Errorf("no typing_ticket")
+		return "", fmt.Errorf("no typing_ticket")
 	}
 
-	// Cache the ticket.
 	a.typingMu.Lock()
 	a.typingTickets[chatID] = typingTicket{ticket: cfg.TypingTicket, cachedAt: time.Now()}
 	a.typingMu.Unlock()
-
-	// Send initial typing.
-	a.bot.client.SendTyping(ctx, a.bot.creds.BaseURL, a.bot.creds.Token, chatID, cfg.TypingTicket, 1)
-
-	// Start keepalive goroutine.
-	a.startTypingKeepalive(chatID, contextToken, cfg.TypingTicket)
-	return nil
+	return cfg.TypingTicket, nil
 }
 
 // ValidateConfig checks for token or credential file presence.
@@ -897,57 +917,6 @@ func detectImageMIME(raw []byte) string {
 		return "image/webp"
 	default:
 		return "image/jpeg"
-	}
-}
-
-// ─── Typing keepalive ────────────────────────────────────────────────────
-
-func (a *Adapter) startTypingKeepalive(userID, contextToken, ticket string) {
-	a.stopTypingKeepalive(userID)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	a.keepalivesMu.Lock()
-	a.keepalives[userID] = cancel
-	a.keepalivesMu.Unlock()
-
-	go func() {
-		ticker := time.NewTicker(typingKeepaliveInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				// Send status=2 (stop typing) on exit.
-				sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
-				a.bot.client.SendTyping(sctx, a.bot.creds.BaseURL, a.bot.creds.Token, userID, ticket, 2)
-				scancel()
-				return
-			case <-ticker.C:
-				sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
-				a.bot.client.SendTyping(sctx, a.bot.creds.BaseURL, a.bot.creds.Token, userID, ticket, 1)
-				scancel()
-			}
-		}
-	}()
-}
-
-func (a *Adapter) stopTypingKeepalive(userID string) {
-	a.keepalivesMu.Lock()
-	cancel, ok := a.keepalives[userID]
-	if ok {
-		delete(a.keepalives, userID)
-	}
-	a.keepalivesMu.Unlock()
-	if ok && cancel != nil {
-		cancel()
-	}
-}
-
-func (a *Adapter) stopAllKeepalives() {
-	a.keepalivesMu.Lock()
-	defer a.keepalivesMu.Unlock()
-	for userID, cancel := range a.keepalives {
-		cancel()
-		delete(a.keepalives, userID)
 	}
 }
 

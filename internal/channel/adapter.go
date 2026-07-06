@@ -143,18 +143,6 @@ type Adapter interface {
 	ValidateConfig(cfg PlatformConfig) []string
 }
 
-// SelfSustainingTyper is implemented by adapters whose SendTyping already
-// runs its own persistent keepalive after a single call (currently only
-// Weixin, whose iLink typing ticket has to be re-fetched and its internal
-// ticker restarted on every SendTyping call). A caller that re-invokes
-// SendTyping on a fixed interval (see internal/server's typing keepalive)
-// should check for this and skip the repeat calls — for a self-sustaining
-// adapter they'd just rack up redundant backend round-trips for no
-// additional user-visible effect.
-type SelfSustainingTyper interface {
-	SelfSustainingTyping() bool
-}
-
 // Registry maps platform names to adapter constructors.
 var registry = make(map[string]func(PlatformConfig) (Adapter, error))
 
