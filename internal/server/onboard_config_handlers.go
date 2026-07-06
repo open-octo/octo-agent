@@ -401,11 +401,12 @@ func (s *Server) handlePutWorkspaceDir(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("could not resolve workspace_dir; new sessions keep using the launch directory", "err", err)
 		resolved = ""
 	}
-	s.workspaceDir = resolved
+	s.setWorkspaceDir(resolved)
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "workspace_dir": req.WorkspaceDir})
 }
 
+// maskKey masks most of an API key, keeping the first and last four runes
 // visible. It measures by runes so it never splits a multi-byte UTF-8 character.
 func maskKey(k string) string {
 	if k == "" {

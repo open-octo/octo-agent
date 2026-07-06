@@ -129,9 +129,12 @@ type Server struct {
 	// workspaceDir is the resolved default WorkingDir new web sessions get
 	// when the caller requests none of their own (see cfg.WorkspaceDir /
 	// tools.ResolveWorkspaceDir). "" means no override — sessions keep
-	// falling back to cwd, exactly like before this field existed. Resolved
-	// once at New, like cwd, and never mutated afterward.
-	workspaceDir string
+	// falling back to cwd, exactly like before this field existed. Set at
+	// New and updated by PUT /api/config/workspace_dir; workspaceDirMu guards
+	// it against a data race between that handler and concurrent session
+	// creation reading it.
+	workspaceDir   string
+	workspaceDirMu sync.RWMutex
 
 	// session-scoped turn locks: one turn per session at a time.
 	turnLocks map[string]*sync.Mutex
@@ -1434,6 +1437,21 @@ func (s *Server) setSkillsManifest(m string) {
 	s.skillsMu.Lock()
 	s.skillsManifest = m
 	s.skillsMu.Unlock()
+}
+
+// curWorkspaceDir returns the server's default workspace dir under a read lock.
+func (s *Server) curWorkspaceDir() string {
+	s.workspaceDirMu.RLock()
+	defer s.workspaceDirMu.RUnlock()
+	return s.workspaceDir
+}
+
+// setWorkspaceDir replaces the server's default workspace dir under a write
+// lock. Called by handlePutWorkspaceDir when the setting changes.
+func (s *Server) setWorkspaceDir(dir string) {
+	s.workspaceDirMu.Lock()
+	s.workspaceDir = dir
+	s.workspaceDirMu.Unlock()
 }
 
 // curCwd returns the server's working directory under a read lock.

@@ -29,6 +29,21 @@ func TestResolveWorkspaceDir_LiteralPath(t *testing.T) {
 	}
 }
 
+// A leading "~" in a literal path is expanded to the user's home directory,
+// matching the "~/code/my-project" example shown in the Settings UI.
+func TestResolveWorkspaceDir_TildeExpansion(t *testing.T) {
+	home := setTestHomeDir(t)
+
+	got, err := ResolveWorkspaceDir("~/code/my-project")
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceDir(\"~/code/my-project\") error = %v, want nil", err)
+	}
+	want := filepath.Join(home, "code", "my-project")
+	if got != want {
+		t.Fatalf("ResolveWorkspaceDir(\"~/code/my-project\") = %q, want %q", got, want)
+	}
+}
+
 func setTestHomeDir(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()

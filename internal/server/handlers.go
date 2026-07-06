@@ -179,14 +179,15 @@ type skillInfo struct {
 // a no-op: the session just falls back to the server's launch directory,
 // exactly like before workspace_dir existed.
 func (s *Server) applyDefaultWorkspaceDir(sess *agent.Session) {
-	if s.workspaceDir == "" || sess.WorkingDir != "" {
+	dir := s.curWorkspaceDir()
+	if dir == "" || sess.WorkingDir != "" {
 		return
 	}
-	if err := os.MkdirAll(s.workspaceDir, 0o755); err != nil {
-		slog.Warn("workspace dir: mkdir failed, session keeps using the launch directory", "dir", s.workspaceDir, "err", err)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		slog.Warn("workspace dir: mkdir failed, session keeps using the launch directory", "dir", dir, "err", err)
 		return
 	}
-	if err := sess.SetWorkingDir(s.workspaceDir); err != nil {
+	if err := sess.SetWorkingDir(dir); err != nil {
 		slog.Warn("workspace dir: could not set session working dir", "err", err)
 	}
 }
