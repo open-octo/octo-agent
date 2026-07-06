@@ -13,6 +13,16 @@
   // Connection status (moved here from Settings — the Browser view owns it now).
   let browser   = $state<BrowserStatus | null>(null)
   let setupOpen = $state(false)
+  let setupModalEl = $state<HTMLDivElement | null>(null)
+
+  // Focus trap so Esc doesn't leak past the modal (#1112).
+  $effect(() => {
+    if (setupOpen) setupModalEl?.focus()
+  })
+
+  function closeSetup() {
+    setupOpen = false
+  }
 
   async function loadBrowserStatus() {
     try {
@@ -159,18 +169,20 @@
 </div>
 
 {#if setupOpen}
-  <div class="modal-overlay" onclick={() => (setupOpen = false)} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
+  <!-- #1112: overlay is inert (no dismiss-on-click) — a stray click used to
+       silently discard the in-progress setup form. Esc closes explicitly. -->
+  <div class="modal-overlay" role="presentation">
+    <div class="modal" bind:this={setupModalEl} onkeydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeSetup() } }} role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <span class="modal-title">{$t('settings.browser.modal_title')}</span>
-        <button class="modal-close" onclick={() => (setupOpen = false)} aria-label={$t('common.close')}>
+        <button class="modal-close" onclick={closeSetup} aria-label={$t('common.close')}>
           <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
         </button>
       </div>
       <div class="modal-body">
         <BrowserSetupForm
           secondaryLabel={$t('common.cancel')}
-          onSecondary={() => (setupOpen = false)}
+          onSecondary={closeSetup}
           onVerified={onSetupVerified}
         />
       </div>
@@ -217,6 +229,7 @@
     background: var(--bg-container); border-radius: 16px; box-shadow: 0 24px 48px rgba(15,23,42,0.18);
     display: flex; flex-direction: column; overflow: hidden;
   }
+  .modal:focus { outline: none; }
   .modal-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 18px 24px 16px; border-bottom: 1px solid var(--border-table);

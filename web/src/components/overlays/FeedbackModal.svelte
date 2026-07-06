@@ -1,35 +1,52 @@
 <script lang="ts">
-  import { feedbackModal, activeSessionId } from '../../lib/stores'
+  import { feedbackModal } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import { t } from '../../lib/i18n'
 
   let selectedOption = $state('')
   let customText = $state('')
+  let modalEl = $state<HTMLDivElement | null>(null)
 
-  // Reset state when a new feedback request arrives
+  // Reset state when a new feedback request arrives, and focus the modal so
+  // Esc/Enter don't leak to the chat composer underneath (matches
+  // ConfirmModal, #1105).
   $effect(() => {
     if ($feedbackModal) {
       selectedOption = ''
       customText = ''
+      modalEl?.focus()
     }
   })
 
   function submit() {
-    if (!$feedbackModal || !$activeSessionId) return
+    if (!$feedbackModal) return
     const answer = selectedOption || customText.trim()
     if (!answer) return
-    ws.sendMessage($activeSessionId, answer)
+    // #1112: bind to the session that raised this prompt (captured on the
+    // modal payload when it opened), not whichever session happens to be
+    // active at submit time — switching sessions while the modal is open used
+    // to send the answer to the wrong conversation.
+    ws.sendMessage($feedbackModal.sessionId, answer)
     feedbackModal.set(null)
   }
 
   function dismiss() {
     feedbackModal.set(null)
   }
+
+  // dismiss() never answers the agent (no ws call), so mapping Esc to it is
+  // safe — unlike QuestionModal, there's no "wrong answer" risk here, just
+  // losing the prompt, same as clicking "Not Now" explicitly.
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') { e.preventDefault(); dismiss() }
+  }
 </script>
 
 {#if $feedbackModal}
-<div class="backdrop" onclick={dismiss} role="presentation">
-  <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+<!-- #1112: backdrop is inert (no onclick) — a stray click used to silently
+     drop the prompt with no way back. Esc now serves that role explicitly. -->
+<div class="backdrop" role="presentation">
+  <div class="modal" bind:this={modalEl} onkeydown={onKeydown} role="dialog" aria-modal="true" tabindex="-1">
     <div class="modal-header">
       <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
       <span class="modal-title">{$feedbackModal.question}</span>
@@ -99,6 +116,7 @@
   box-shadow: 0 16px 48px rgba(0,0,0,0.18);
   animation: octo-fadein 0.16s ease;
 }
+.modal:focus { outline: none; }
 .modal-header {
   display: flex; align-items: center; gap: 8px;
   padding: 14px 18px;

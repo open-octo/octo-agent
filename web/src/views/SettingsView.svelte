@@ -45,6 +45,16 @@
   let modelModalOpen = $state(false)
   let editingModel = $state<ModelEntry | null>(null)
   let busyModelId  = $state<string | null>(null)
+  let modelModalEl = $state<HTMLDivElement | null>(null)
+
+  // Focus trap so Esc doesn't leak past the modal (#1112).
+  $effect(() => {
+    if (modelModalOpen) modelModalEl?.focus()
+  })
+
+  function closeModelModal() {
+    modelModalOpen = false
+  }
 
   const langOptions = [
     { value: 'en', label: 'English' },
@@ -441,13 +451,13 @@
 
 <!-- Add / edit model modal -->
 {#if modelModalOpen}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('modal-backdrop')) modelModalOpen = false }}>
-    <div class="modal" role="dialog" aria-modal="true">
+  <!-- #1112: backdrop is inert (no dismiss-on-click) — a stray click used to
+       silently discard the in-progress form. Esc closes explicitly. -->
+  <div class="modal-backdrop" role="presentation">
+    <div class="modal" bind:this={modelModalEl} onkeydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeModelModal() } }} role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <span class="modal-title">{editingModel ? $t('settings.models.modal_edit') : $t('settings.models.modal_add')}</span>
-        <button class="modal-close" onclick={() => (modelModalOpen = false)} aria-label={$t('common.close')}>
+        <button class="modal-close" onclick={closeModelModal} aria-label={$t('common.close')}>
           <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
         </button>
       </div>
@@ -549,6 +559,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
   background: var(--bg-container); border-radius: 16px; box-shadow: 0 24px 48px rgba(15,23,42,0.18);
   display: flex; flex-direction: column; overflow: hidden;
 }
+.modal:focus { outline: none; }
 .modal-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 18px 24px 16px; border-bottom: 1px solid var(--border-table);

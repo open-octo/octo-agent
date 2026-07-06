@@ -95,10 +95,21 @@
   let importSource = $state('')
   let importing = $state(false)
   let uploading = $state(false)
+  let importInputEl = $state<HTMLInputElement | null>(null)
 
   function handleImportClick() {
     importSource = ''
     importOpen = true
+  }
+
+  // Autofocus the source field on open (#1112 — was inconsistent with
+  // AuthGate/CommandPalette).
+  $effect(() => {
+    if (importOpen) importInputEl?.focus()
+  })
+
+  function closeImport() {
+    importOpen = false
   }
 
   function browseFile() {
@@ -227,19 +238,20 @@
 
 <!-- Import modal: GitHub URL / owner-repo / local path, or browse to upload -->
 {#if importOpen}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('modal-backdrop')) importOpen = false }}>
-    <div class="modal" role="dialog" aria-modal="true">
+  <!-- #1112: backdrop is inert (no dismiss-on-click) — a stray click used to
+       silently discard whatever was typed/uploaded. Esc closes explicitly. -->
+  <div class="modal-backdrop" role="presentation">
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" onkeydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeImport() } }}>
       <div class="modal-header">
         <span class="modal-title">{$t('skills.import_title')}</span>
-        <button class="modal-close" onclick={() => (importOpen = false)} aria-label={$t('common.close')}>
+        <button class="modal-close" onclick={closeImport} aria-label={$t('common.close')}>
           <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
         </button>
       </div>
       <div class="modal-body">
         <div class="import-row">
           <input
+            bind:this={importInputEl}
             class="field-input mono"
             type="text"
             placeholder={$t('skills.import_placeholder')}
@@ -254,7 +266,7 @@
         <span class="field-hint">{$t('skills.import_hint')}</span>
       </div>
       <div class="modal-footer">
-        <button class="btn-secondary" onclick={() => (importOpen = false)} disabled={importing}>{$t('common.cancel')}</button>
+        <button class="btn-secondary" onclick={closeImport} disabled={importing}>{$t('common.cancel')}</button>
         <button class="btn-primary" onclick={() => doImport()} disabled={importing || uploading || !importSource.trim()}>
           {importing ? $t('skills.import_installing') : $t('skills.import_install')}
         </button>
