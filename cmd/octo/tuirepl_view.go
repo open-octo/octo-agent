@@ -1188,6 +1188,12 @@ func (m *tuiModel) View() string {
 	} else if m.running != nil {
 		b.WriteString(m.spinnerLine(m.running.verb+"("+m.running.target+")", m.running.start))
 		b.WriteByte('\n')
+		// A dimmed tail of the command's own output so a long-running terminal
+		// call reads as progress, not a hang (issue #1094).
+		for _, line := range m.running.tail {
+			b.WriteString(hintStyle.Render("  " + lastRunes(line, 100)))
+			b.WriteByte('\n')
+		}
 		if tools.HasActiveSync() || tools.HasActiveSubAgentSync() {
 			b.WriteString(hintStyle.Render("  [Ctrl+B] background  [Esc] kill"))
 			b.WriteByte('\n')

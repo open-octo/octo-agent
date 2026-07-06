@@ -266,6 +266,68 @@ func TestTUI_ToolInputStreamProgress(t *testing.T) {
 	}
 }
 
+// A running terminal command's live output shows as a dimmed tail under the
+// spinner (issue #1094) instead of vanishing until the done card commits.
+func TestTUI_RunningToolShowsLiveTail(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+
+	m.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal",
+		Input: map[string]any{"command": "make test"},
+	})
+	if m.running == nil {
+		t.Fatal("EventToolStarted should set m.running")
+	}
+
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: "compiling..."})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: "running tests"})
+
+	out := stripANSI(m.View())
+	if !strings.Contains(out, "compiling...") || !strings.Contains(out, "running tests") {
+		t.Errorf("view should show the streamed tail; got:\n%s", out)
+	}
+	if len(m.printlnBuf) != 0 {
+		t.Errorf("rich TUI must not commit progress to the scrollback, got %v", m.printlnBuf)
+	}
+
+	// The tail is capped — older lines fall off once it exceeds the cap.
+	for i := 0; i < runningTailMaxLines+2; i++ {
+		m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: fmt.Sprintf("line-%d", i)})
+	}
+	if len(m.running.tail) != runningTailMaxLines {
+		t.Fatalf("tail length = %d, want %d", len(m.running.tail), runningTailMaxLines)
+	}
+	if m.running.tail[len(m.running.tail)-1] != fmt.Sprintf("line-%d", runningTailMaxLines+1) {
+		t.Errorf("tail should keep the most recent lines, got %v", m.running.tail)
+	}
+
+	// The done card clears the live indicator, and with it the tail.
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "c1", Output: "ok"})
+	if m.running != nil {
+		t.Error("EventToolDone should clear m.running (and its tail)")
+	}
+}
+
+// --plain keeps its existing dense one-line-per-chunk behavior; progress
+// commits straight to the scrollback instead of a live tail (design decision
+// #8: the plain path never renders live/animated state).
+func TestTUI_PlainModeProgressUnchanged(t *testing.T) {
+	m := newTestModel()
+	m.cfg.plain = true
+	m.turnRunning = true
+
+	m.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal",
+		Input: map[string]any{"command": "make test"},
+	})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: "compiling..."})
+
+	if len(m.printlnBuf) == 0 || !strings.Contains(m.printlnBuf[len(m.printlnBuf)-1], "compiling...") {
+		t.Fatalf("plain mode should commit progress to the scrollback, got %v", m.printlnBuf)
+	}
+}
+
 // The reasoning trace stays out of the scrollback — only its size feeds the
 // live activity line's "↓ ~N tokens" readout, so a long agentic turn doesn't
 // fill the transcript with thinking text.

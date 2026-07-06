@@ -18,6 +18,10 @@ import (
 type sessionLiveState struct {
 	progress    *wsEventProgress
 	stdoutLines []string
+	// stdoutToolID is the tool_id stdoutLines belongs to, so a late-
+	// subscribing tab's replayed tool_stdout can attribute the lines to the
+	// right card (see #1193's pickToolIndex on the frontend).
+	stdoutToolID string
 
 	// events buffers the turn's already-broadcast transcript events
 	// (tool_call / tool_result / tool_error / steer history_user_message,
@@ -49,6 +53,12 @@ type sessionLiveState struct {
 // without bound. The cap stays under the 256-slot conn send buffer so a full
 // replay can never overflow a fresh connection.
 const maxLiveTurnEvents = 200
+
+// maxLiveStdoutLines caps how many lines of a running tool's live output
+// replayLiveState keeps for a late-subscribing tab. The full output still
+// reaches the model and lands in the eventual tool_result — this only bounds
+// what a page refresh mid-command can catch up on.
+const maxLiveStdoutLines = 200
 
 // appendEvent adds an already-broadcast turn event to the replay buffer.
 // Caller holds liveStateMu.
@@ -253,6 +263,7 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 			if b, err := json.Marshal(map[string]any{
 				"type":       "tool_stdout",
 				"session_id": sessionID,
+				"tool_id":    state.stdoutToolID,
 				"lines":      state.stdoutLines,
 			}); err == nil {
 				replay = append(replay, b)
@@ -1363,6 +1374,11 @@ func (w *wsStreamWriter) reseedThinkingProgress() {
 			Phase:        "active",
 			StartedAt:    startedAt,
 		}
+		// The finished tool's output is done streaming — drop it so a tab
+		// subscribing during this "thinking" gap doesn't replay stale stdout
+		// under the wrong progress heading.
+		ls.stdoutLines = nil
+		ls.stdoutToolID = ""
 	}
 	w.server.liveStateMu.Unlock()
 	w.hub.broadcast(w.sessionID, map[string]any{
@@ -1416,6 +1432,33 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 				ProgressType: "tool",
 				Phase:        "active",
 				StartedAt:    time.Now().UnixMilli(),
+			}
+			// A new tool call starts with no output of its own; the previous
+			// call's leftover stdout (if reseedThinkingProgress somehow missed
+			// it) must not bleed into this one's replay.
+			ls.stdoutLines = nil
+			ls.stdoutToolID = ""
+		}
+		w.server.liveStateMu.Unlock()
+
+	case agent.EventToolProgress:
+		// Live output for a running terminal command (issue #1094). Only
+		// StreamingToolExecutor tools (currently just terminal) emit this;
+		// most tools never reach here. tool_id lets the frontend attribute the
+		// chunk to the right card (see #1193's pickToolIndex).
+		evt := map[string]any{
+			"type":       "tool_stdout",
+			"session_id": w.sessionID,
+			"tool_id":    ev.ToolID,
+			"lines":      []string{ev.Chunk},
+		}
+		w.hub.broadcast(w.sessionID, evt)
+		w.server.liveStateMu.Lock()
+		if ls, ok := w.server.liveStates[w.sessionID]; ok {
+			ls.stdoutToolID = ev.ToolID
+			ls.stdoutLines = append(ls.stdoutLines, ev.Chunk)
+			if n := len(ls.stdoutLines) - maxLiveStdoutLines; n > 0 {
+				ls.stdoutLines = ls.stdoutLines[n:]
 			}
 		}
 		w.server.liveStateMu.Unlock()

@@ -78,6 +78,21 @@ func NewDefaultRegistry() DefaultRegistry {
 
 // Execute implements agent.ToolExecutor.
 func (r DefaultRegistry) Execute(ctx context.Context, name string, input map[string]any) (agent.ToolResult, error) {
+	return r.ExecuteStream(ctx, name, input, nil)
+}
+
+// ExecuteStream implements agent.StreamingToolExecutor. It dispatches by name
+// exactly like Execute, but when progress is non-nil and the target tool
+// implements agent.StreamingToolExecutor (currently just TerminalTool), it
+// calls the tool's ExecuteStream instead of Execute so callers get
+// incremental chunks.
+//
+// This method is what makes agent.go's executor.(StreamingToolExecutor) type
+// assertion succeed for the registry as a whole — that assertion is on the
+// single ToolExecutor passed to the agent loop, not on individual tools, so
+// without it EventToolProgress never fires for ANY tool even though
+// TerminalTool has implemented ExecuteStream since #49 (issue #1094).
+func (r DefaultRegistry) ExecuteStream(ctx context.Context, name string, input map[string]any, progress func(chunk string)) (agent.ToolResult, error) {
 	// MCP tools land here too — route them first so an "mcp__…" name
 	// never falls through to the unknown-tool path. executeMCP returns
 	// ok=false when the name isn't ours, then dispatch continues below.
@@ -110,7 +125,7 @@ func (r DefaultRegistry) Execute(ctx context.Context, name string, input map[str
 
 	for _, t := range allTools {
 		if t.Definition().Name == name {
-			out, err := t.Execute(ctx, name, input)
+			out, err := callTool(ctx, t, name, input, progress)
 			// On a successful read OR write, (re)stamp the tracker so the
 			// file is considered "read at its current mtime" — this lets a
 			// write be followed by an edit without a redundant re-read.
@@ -132,6 +147,18 @@ func (r DefaultRegistry) Execute(ctx context.Context, name string, input map[str
 		}
 	}
 	return agent.ToolResult{Text: ""}, fmt.Errorf("unknown tool %q", name)
+}
+
+// callTool runs a single tool, using its ExecuteStream when the tool
+// implements agent.StreamingToolExecutor and a progress callback was given;
+// otherwise (nil progress, or a non-streaming tool) it calls plain Execute.
+func callTool(ctx context.Context, t tool, name string, input map[string]any, progress func(chunk string)) (agent.ToolResult, error) {
+	if progress != nil {
+		if streaming, ok := t.(agent.StreamingToolExecutor); ok {
+			return streaming.ExecuteStream(ctx, name, input, progress)
+		}
+	}
+	return t.Execute(ctx, name, input)
 }
 
 // recordTerminalReads parses a successful terminal command for common file-

@@ -527,7 +527,16 @@ type runningTool struct {
 	verb   string
 	target string
 	start  time.Time
+	// tail holds the last few lines of streamed output (StreamingToolExecutor
+	// tools only — currently just terminal) so the live spinner can show a
+	// dimmed preview of what's happening during a long-running command
+	// instead of going dark (issue #1094). Capped at runningTailMaxLines.
+	tail []string
 }
+
+// runningTailMaxLines bounds the live preview under the spinner to a few
+// lines — enough to show the command is progressing, not a full replay.
+const runningTailMaxLines = 3
 
 // modalState renders a permission / question prompt and collects the answer.
 type modalState struct {
@@ -1385,10 +1394,18 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		return
 
 	case agent.EventToolProgress:
-		// Rich TUI: progress is deferred to the done card / status line so the
-		// transcript stays quiet; the live spinner already shows activity.
+		// Rich TUI: keep a dimmed tail under the live spinner (see View) instead
+		// of committing to the transcript — the done card/status line still
+		// carries the full output once the call finishes.
 		if m.cfg.plain {
 			m.commitToolLine("│ " + boundProgressChunk(ev.Chunk))
+			return
+		}
+		if m.running != nil && ev.Chunk != "" {
+			m.running.tail = append(m.running.tail, boundProgressChunk(ev.Chunk))
+			if n := len(m.running.tail) - runningTailMaxLines; n > 0 {
+				m.running.tail = m.running.tail[n:]
+			}
 		}
 		return
 

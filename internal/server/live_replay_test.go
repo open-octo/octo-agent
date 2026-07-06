@@ -248,3 +248,120 @@ func TestSessionLiveState_EventBufferCap(t *testing.T) {
 		t.Errorf("oldest kept event seq = %v, want 50", first)
 	}
 }
+
+// EventToolProgress must reach subscribed tabs immediately as tool_stdout
+// (issue #1094) — before this, the agent loop never even called
+// ExecuteStream (see DefaultRegistry.ExecuteStream), so this event never
+// fired in production regardless of what handleEvent did with it.
+func TestHandleEvent_ToolProgress_BroadcastsToolStdout(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "progress-broadcast-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+	seedLiveTurn(srv, sid)
+	sw := srv.newWSStreamWriter(sid)
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.wsHub.subscribe(conn, sid)
+
+	sw.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolName: "terminal", ToolID: "t1",
+		Input: map[string]any{"command": "make test"},
+	})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "t1", Chunk: "compiling..."})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "t1", Chunk: "ok"})
+
+	// hub.broadcast is delivered by the hub's async dispatch goroutine, not
+	// inline in handleEvent — wait for it instead of draining immediately.
+	waitFor(t, func() bool { return len(conn.send) >= 3 }) // tool_call + 2 tool_stdout
+
+	var stdoutEvents []map[string]any
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] == "tool_stdout" {
+			stdoutEvents = append(stdoutEvents, ev)
+		}
+	}
+	if len(stdoutEvents) != 2 {
+		t.Fatalf("got %d tool_stdout broadcasts, want 2", len(stdoutEvents))
+	}
+	if stdoutEvents[0]["tool_id"] != "t1" {
+		t.Errorf("tool_stdout missing tool_id, got %v", stdoutEvents[0])
+	}
+	if lines, ok := stdoutEvents[1]["lines"].([]any); !ok || len(lines) != 1 || lines[0] != "ok" {
+		t.Errorf("second tool_stdout lines = %v, want [\"ok\"]", stdoutEvents[1]["lines"])
+	}
+}
+
+// A late-subscribing tab (page refresh mid-command) must catch up on the
+// running tool's output so far via replayLiveState.
+func TestReplayLiveState_IncludesLiveStdout(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "replay-stdout-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+	seedLiveTurn(srv, sid)
+	sw := srv.newWSStreamWriter(sid)
+
+	sw.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolName: "terminal", ToolID: "t1",
+		Input: map[string]any{"command": "make test"},
+	})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "t1", Chunk: "line one"})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "t1", Chunk: "line two"})
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	var found bool
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] != "tool_stdout" {
+			continue
+		}
+		found = true
+		lines, ok := ev["lines"].([]any)
+		if !ok || len(lines) != 2 || lines[0] != "line one" || lines[1] != "line two" {
+			t.Errorf("replayed tool_stdout lines = %v", ev["lines"])
+		}
+		if ev["tool_id"] != "t1" {
+			t.Errorf("replayed tool_stdout tool_id = %v, want t1", ev["tool_id"])
+		}
+	}
+	if !found {
+		t.Fatal("replay did not include the in-flight tool's stdout")
+	}
+}
+
+// A finished tool's stdout must not bleed into the next round's replay: once
+// reseedThinkingProgress fires (tool done/errored), a tab subscribing before
+// the next tool call starts should see no leftover stdout.
+func TestReplayLiveState_StdoutClearsAfterToolDone(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "replay-stdout-cleared-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+	seedLiveTurn(srv, sid)
+	sw := srv.newWSStreamWriter(sid)
+
+	sw.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolName: "terminal", ToolID: "t1",
+		Input: map[string]any{"command": "make test"},
+	})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "t1", Chunk: "line one"})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "t1", Output: "done"})
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] == "tool_stdout" {
+			t.Errorf("stale tool_stdout replayed after the tool finished: %v", ev)
+		}
+	}
+}
