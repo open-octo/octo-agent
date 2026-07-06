@@ -100,11 +100,20 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 		// A one-liner with the line count (and a click-to-open link to the
 		// full content, matching the #1093 fold-link pattern) is cheaper and
 		// no less useful (#1097).
+		n := readFileLineCount(output)
 		link := ""
-		if path, err := tools.WriteCardSpill(toolName, output); err == nil {
-			link = tui.FileURI(path)
+		// Only spill to disk when there's actually folded content behind the
+		// link — same threshold the generic card path uses to decide whether
+		// to fold at all. Spilling every read unconditionally, even a 1-line
+		// read, would widen every file the agent touches into a plaintext
+		// copy under ~/.octo/tmp for no reason: nothing is hidden when the
+		// whole thing already fits in the one-liner.
+		if n > outputCardMaxLines {
+			if path, err := tools.WriteCardSpill(toolName, output); err == nil {
+				link = tui.FileURI(path)
+			}
 		}
-		return tui.RenderReadFileStatus(cardTargetFor(toolName, input), readFileLineCount(output), formatElapsed(elapsed), link, width)
+		return tui.RenderReadFileStatus(cardTargetFor(toolName, input), n, formatElapsed(elapsed), link, width)
 	}
 	opts := tui.OutputCardOpts{
 		MaxLines: outputCardMaxLines,

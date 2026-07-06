@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -97,6 +98,12 @@ func TestRenderToolCard_ReadFileIsOneLiner(t *testing.T) {
 	if strings.Contains(got, "package main") {
 		t.Errorf("should not preview file content anymore; got:\n%s", got)
 	}
+	// A read this small has nothing folded/hidden behind a link — spilling it
+	// to disk anyway would needlessly widen every file read into a plaintext
+	// copy under ~/.octo/tmp for no reason (#1097 review feedback).
+	if strings.Contains(got, "\x1b]8;;") {
+		t.Errorf("a short read should not spill to disk or link; got:\n%s", got)
+	}
 
 	// read_file errors keep the generic short-preview card (the output is an
 	// error message, not file content worth folding). Chroma highlights each
@@ -104,6 +111,24 @@ func TestRenderToolCard_ReadFileIsOneLiner(t *testing.T) {
 	errGot := renderToolCard("read_file", map[string]any{"path": "main.go"}, "no such file", true, 0, 0)
 	if !strings.Contains(errGot, "file") {
 		t.Errorf("error card should still show the error text; got:\n%s", errGot)
+	}
+}
+
+// TestRenderToolCard_ReadFileLargeGetsLink checks the flip side of the
+// gating above: a read past the fold threshold DOES get a click-to-open
+// link, since its content genuinely isn't visible in the one-liner.
+func TestRenderToolCard_ReadFileLargeGetsLink(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 20; i++ {
+		lines = append(lines, fmt.Sprintf("%6d\tline %d", i, i))
+	}
+	output := strings.Join(lines, "\n") + "\n\n[end of file: 20 lines total]\n"
+	got := renderToolCard("read_file", map[string]any{"path": "big.go"}, output, false, 0, 0)
+	if !strings.Contains(got, "20 lines") {
+		t.Errorf("missing line count; got:\n%s", got)
+	}
+	if !strings.Contains(got, "\x1b]8;;") {
+		t.Errorf("a large read should link to the spilled full content; got:\n%s", got)
 	}
 }
 

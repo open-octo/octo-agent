@@ -508,6 +508,27 @@ func TestTUI_ReplayHistoryLines_CapsOldTurns(t *testing.T) {
 	}
 }
 
+// TestTUI_ReplayHistoryLines_SingularOmission checks the omission line's
+// singular/plural wording at the exact cap+1 boundary ("1 turn", not "1 turns").
+func TestTUI_ReplayHistoryLines_SingularOmission(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	h := m.a.History
+	total := replayMaxTurns + 1
+	for i := 0; i < total; i++ {
+		h.Append(agent.NewUserMessage(fmt.Sprintf("turn %d", i)))
+		h.Append(agent.NewAssistantMessage(fmt.Sprintf("reply %d", i)))
+	}
+
+	joined := stripANSI(strings.Join(m.replayHistoryLines(), "\n"))
+	if !strings.Contains(joined, "earlier history omitted (1 turn)") {
+		t.Errorf("want singular '1 turn' in omission line; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "1 turns") {
+		t.Errorf("wrong plural for a single omitted turn; got:\n%s", joined)
+	}
+}
+
 // A failed tool call replays as its live error card, carrying the real error
 // message (the regression: the old collapsed line dropped it).
 func TestTUI_ReplayHistoryLines_ToolError(t *testing.T) {
@@ -1088,6 +1109,26 @@ func TestTUI_InputFold_FourLinesNoFold(t *testing.T) {
 	m = m2.(*tuiModel)
 	if m.inputFolded {
 		t.Error("4-line input should not fold (threshold is 5)")
+	}
+}
+
+// TestTUI_InputFold_ShortTextTabFallsThroughToTextarea guards the non-fold
+// path after the #1097 reorder: Tab on short (<5 line) input must still
+// reach the textarea's own Update instead of being swallowed entirely by
+// the fold-check, leaving the value unchanged and unfolded.
+func TestTUI_InputFold_ShortTextTabFallsThroughToTextarea(t *testing.T) {
+	m := newTestModel()
+	setInput(m, "short")
+	before := m.ta.Value()
+
+	m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+
+	if m.inputFolded {
+		t.Error("short input should not fold")
+	}
+	if m.ta.Value() != before {
+		t.Errorf("textarea value = %q, want unchanged %q", m.ta.Value(), before)
 	}
 }
 
