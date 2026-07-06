@@ -808,7 +808,11 @@ func TestPutWorkspaceDir_UpdatesConfigAndServerDefault(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
 	wantDir := filepath.Join(t.TempDir(), "workspace")
-	w := doJSON(t, srv, http.MethodPut, "/api/config/workspace_dir", `{"workspace_dir": "`+wantDir+`"}`)
+	reqBody, err := json.Marshal(map[string]string{"workspace_dir": wantDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := doJSON(t, srv, http.MethodPut, "/api/config/workspace_dir", string(reqBody))
 	if w.Code != http.StatusOK {
 		t.Fatalf("PUT /api/config/workspace_dir = %d: %s", w.Code, w.Body.String())
 	}
