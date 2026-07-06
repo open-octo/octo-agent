@@ -228,6 +228,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text {
 			m.inputHistory = append(m.inputHistory, text)
+			appendInputHistoryLine(m.historyFile, text)
 		}
 		m.queue = append(m.queue, pendingItem{text: text})
 		m.println(queueStyle.Render("＋ queued: " + collapsed))
@@ -764,6 +765,7 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	// Skip empty text (an image-only submit has nothing to recall).
 	if text != "" && (len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text) {
 		m.inputHistory = append(m.inputHistory, text)
+		appendInputHistoryLine(m.historyFile, text)
 	}
 
 	// Slash commands are the TUI's alone — the plain REPL is a pure conversation

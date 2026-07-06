@@ -295,9 +295,11 @@ type tuiModel struct {
 	// ta is the multi-line text input (bubbles/textarea).
 	ta textarea.Model
 
-	// inputHistory stores submitted lines for ↑/↓ recall.
+	// inputHistory stores submitted lines for ↑/↓ recall, seeded from and
+	// appended to historyFile so it survives restart.
 	inputHistory    []string
-	inputHistoryIdx int // -1 = not browsing, 0..len-1 = browsing
+	inputHistoryIdx int    // -1 = not browsing, 0..len-1 = browsing
+	historyFile     string // path from defaultInputHistoryFile(); "" disables persistence
 	// inputDraft holds the text that was in the input box before the user
 	// started browsing history with ↑, so ↓ can restore it.
 	inputDraft string
@@ -575,7 +577,8 @@ func newTUIModel(cfg replConfig) *tuiModel {
 	if !tui.IsDark() {
 		style = "light"
 	}
-	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, workflows: map[string]*workflowUI{}}
+	historyFile := defaultInputHistoryFile()
+	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistory: loadInputHistory(historyFile), inputHistoryIdx: -1, historyFile: historyFile, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, workflows: map[string]*workflowUI{}}
 	// Seed the last-seen goal status so a resumed session's first transition
 	// (e.g. the budget crossing) prints its notice instead of being treated
 	// as the baseline.
