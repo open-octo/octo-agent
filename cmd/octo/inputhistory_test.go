@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -73,6 +74,32 @@ func TestInputHistory_LoadCapsAndTrimsFile(t *testing.T) {
 	got2 := loadInputHistory(path)
 	if len(got2) != inputHistoryCap {
 		t.Fatalf("second load returned %d entries, want cap %d", len(got2), inputHistoryCap)
+	}
+}
+
+// TestInputHistory_OversizedLineDoesNotTruncateLoad guards against
+// bufio.Scanner's buffer-cap failure mode: a Scanner aborts the whole read
+// the instant one physical line is too long, silently dropping every entry
+// after it — including the newest ones. A folded multi-line paste is stored
+// as a single JSON-encoded line and can plausibly exceed a fixed buffer, so
+// the loader must not lose newer entries just because an older one is huge.
+func TestInputHistory_OversizedLineDoesNotTruncateLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "input_history")
+	appendInputHistoryLine(path, "before")
+	// Bigger than bufio.Scanner's typical max-token-size caps (well past 1MB).
+	huge := strings.Repeat("x", 2*1024*1024)
+	appendInputHistoryLine(path, huge)
+	appendInputHistoryLine(path, "after")
+
+	got := loadInputHistory(path)
+	want := []string{"before", huge, "after"}
+	if len(got) != len(want) {
+		t.Fatalf("loadInputHistory returned %d entries, want %d — an oversized line must not truncate the rest of the file", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d mismatch (got len=%d, want len=%d)", i, len(got[i]), len(want[i]))
+		}
 	}
 }
 

@@ -44,19 +44,25 @@ func loadInputHistory(path string) []string {
 	}
 	defer f.Close()
 
+	// bufio.Reader.ReadString, not Scanner: a Scanner aborts the whole read
+	// (dropping every entry after the bad line, including the newest ones)
+	// the moment one physical line exceeds its buffer cap — a real risk here
+	// since a folded multi-line paste is stored as a single JSON-encoded
+	// line. ReadString has no such limit, so one oversized entry just gets
+	// skipped instead of truncating the load.
 	var lines []string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
-		raw := strings.TrimSpace(sc.Text())
-		if raw == "" {
-			continue
+	r := bufio.NewReader(f)
+	for {
+		raw, readErr := r.ReadString('\n')
+		if trimmed := strings.TrimSpace(raw); trimmed != "" {
+			var entry string
+			if err := json.Unmarshal([]byte(trimmed), &entry); err == nil {
+				lines = append(lines, entry)
+			} // skip corrupt/foreign/oversized lines rather than failing the load
 		}
-		var entry string
-		if err := json.Unmarshal([]byte(raw), &entry); err != nil {
-			continue // skip corrupt/foreign lines rather than failing the load
+		if readErr != nil {
+			break // EOF, or an I/O error — either way, stop with what was read
 		}
-		lines = append(lines, entry)
 	}
 	if len(lines) <= inputHistoryCap {
 		return lines
@@ -68,7 +74,9 @@ func loadInputHistory(path string) []string {
 
 // rewriteInputHistory overwrites the history file with exactly entries, used
 // to enforce inputHistoryCap on load. Best-effort: failures are ignored, same
-// as appendInputHistoryLine.
+// as appendInputHistoryLine. Not coordinated with a concurrent process's
+// O_APPEND writes (individually atomic, but this truncate+rewrite isn't) —
+// last writer wins, same tolerance as the plain REPL's readline history.
 func rewriteInputHistory(path string, entries []string) {
 	if path == "" {
 		return

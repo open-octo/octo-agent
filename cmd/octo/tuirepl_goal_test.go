@@ -13,6 +13,7 @@ import (
 // newGoalTestModel builds a TUI model with goals wired: the session is both
 // the store and the accountant, exactly like chat.go's TUI path.
 func newGoalTestModel() (*tuiModel, *agent.Session) {
+	isolateTestInputHistory()
 	sess := agent.NewSession("m", "")
 	a := agent.New(&stubSender{reply: "ok"}, "m")
 	a.GoalAcct = sess
