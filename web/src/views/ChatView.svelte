@@ -777,8 +777,36 @@
     }
     scroller.addEventListener('scroll', onScroll, { passive: true })
 
+    // The content resizes far more often than just while a reply streams —
+    // a background workflow/sub-agent card's elapsed-time ticker (`now`,
+    // updated every second) keeps nudging layout even after the turn ends.
+    // Relying on 'scroll' alone to unstick means a manual scroll-up near the
+    // bottom gets raced and snapped back before the position update lands,
+    // which reads as the message jittering up and down (#1069). 'wheel'
+    // disengages stick synchronously the instant an upward gesture starts,
+    // before the browser even applies the delta. Dragging the scrollbar
+    // thumb (or a touch drag) emits no 'wheel' events at all, so `interacting`
+    // additionally blocks the ResizeObserver outright for the duration of any
+    // pointer press on the scroller.
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) stick = false
+    }
+    scroller.addEventListener('wheel', onWheel, { passive: true })
+
+    let interacting = false
+    const onPointerDown = () => { interacting = true }
+    const onPointerUp = () => { interacting = false; onScroll() }
+    scroller.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerUp)
+    // A drag released outside the window (e.g. the pointer is still down when
+    // focus is stolen by alt-tabbing) never fires 'pointerup' on this
+    // document, which would otherwise leave `interacting` stuck true and
+    // silently disable auto-scroll for the rest of the tab's life.
+    window.addEventListener('blur', onPointerUp)
+
     const ro = new ResizeObserver(() => {
-      if (stick) scroller.scrollTop = scroller.scrollHeight
+      if (stick && !interacting) scroller.scrollTop = scroller.scrollHeight
     })
     ro.observe(content)
 
@@ -787,6 +815,11 @@
 
     return () => {
       scroller.removeEventListener('scroll', onScroll)
+      scroller.removeEventListener('wheel', onWheel)
+      scroller.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerUp)
+      window.removeEventListener('blur', onPointerUp)
       ro.disconnect()
     }
   })
