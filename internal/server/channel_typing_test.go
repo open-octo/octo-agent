@@ -102,3 +102,39 @@ func TestStartTypingKeepalive_StopIsIdempotent(t *testing.T) {
 		t.Fatalf("StopTyping should fire exactly once no matter how many times stop() is called, count = %d", stopCount)
 	}
 }
+
+// selfSustainingTypingCountAdapter is a typingCountAdapter that opts out of
+// repeated SendTyping calls via channel.SelfSustainingTyper, mirroring the
+// Weixin adapter (whose SendTyping already starts its own internal
+// keepalive, so repeat calls would just re-fetch its typing ticket and
+// restart that internal keepalive for no user-visible benefit).
+type selfSustainingTypingCountAdapter struct {
+	typingCountAdapter
+}
+
+func (a *selfSustainingTypingCountAdapter) SelfSustainingTyping() bool { return true }
+
+func TestStartTypingKeepalive_SelfSustainingAdapterSkipsRepeats(t *testing.T) {
+	ad := &selfSustainingTypingCountAdapter{}
+	stop := startTypingKeepaliveInterval(ad, "chat1", "", 10*time.Millisecond)
+
+	if send, _ := ad.counts(); send != 1 {
+		t.Fatalf("SendTyping should fire exactly once up front, count = %d", send)
+	}
+
+	// Long enough for several ticks of the (skipped) interval loop.
+	time.Sleep(50 * time.Millisecond)
+	if send, stopped := ad.counts(); send != 1 || stopped != 0 {
+		t.Fatalf("self-sustaining adapter should get no repeat SendTyping calls before stop, got send=%d stop=%d", send, stopped)
+	}
+
+	stop()
+	time.Sleep(20 * time.Millisecond)
+	send, stopped := ad.counts()
+	if send != 1 {
+		t.Fatalf("SendTyping should still be called only once total, got %d", send)
+	}
+	if stopped != 1 {
+		t.Fatalf("StopTyping should fire exactly once after stop(), got %d", stopped)
+	}
+}

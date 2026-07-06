@@ -18,8 +18,10 @@ import (
 // recording SendText calls — handleChannelMessage runs a real turn through
 // the UIController, which touches typing/update methods too.
 type fullFakeAdapter struct {
-	mu   sync.Mutex
-	sent []string
+	mu              sync.Mutex
+	sent            []string
+	sendTypingCount int
+	stopTypingCount int
 }
 
 func (a *fullFakeAdapter) Platform() string { return "fake" }
@@ -39,15 +41,31 @@ func (a *fullFakeAdapter) SendFile(chatID, path, name, replyTo string) channel.S
 }
 func (a *fullFakeAdapter) UpdateMessage(chatID, messageID, text string) bool { return true }
 func (a *fullFakeAdapter) SupportsMessageUpdates() bool                      { return false }
-func (a *fullFakeAdapter) SendTyping(chatID, contextToken string) error      { return nil }
-func (a *fullFakeAdapter) StopTyping(chatID, contextToken string) error      { return nil }
-func (a *fullFakeAdapter) Flush(chatID string)                               {}
-func (a *fullFakeAdapter) ValidateConfig(channel.PlatformConfig) []string    { return nil }
+func (a *fullFakeAdapter) SendTyping(chatID, contextToken string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sendTypingCount++
+	return nil
+}
+func (a *fullFakeAdapter) StopTyping(chatID, contextToken string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.stopTypingCount++
+	return nil
+}
+func (a *fullFakeAdapter) Flush(chatID string)                            {}
+func (a *fullFakeAdapter) ValidateConfig(channel.PlatformConfig) []string { return nil }
 
 func (a *fullFakeAdapter) texts() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]string(nil), a.sent...)
+}
+
+func (a *fullFakeAdapter) typingCounts() (sendTyping, stopTyping int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sendTypingCount, a.stopTypingCount
 }
 
 // chanServer returns a mustServer with a channel manager wired to stub agents.
@@ -148,6 +166,28 @@ func TestHandleChannelMessage_SetsPerTurnGate(t *testing.T) {
 
 	if sess.Agent.Gate == nil {
 		t.Error("handleChannelMessage must set a per-turn permission gate")
+	}
+}
+
+// TestHandleChannelMessage_TypingKeepaliveWired is an end-to-end regression
+// test for #1117: handleChannelMessage must start the typing keepalive
+// before running the turn and stop it exactly once by the time it returns.
+// This catches a future refactor silently dropping stopTyping somewhere in
+// the handleChannelMessage -> runChannelTurns -> NewUIController chain — the
+// unit tests for channel_typing.go and UIController's stopTyping callback
+// each pass even if the wiring between them breaks.
+func TestHandleChannelMessage_TypingKeepaliveWired(t *testing.T) {
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+
+	sendTyping, stopTyping := ad.typingCounts()
+	if sendTyping == 0 {
+		t.Error("handleChannelMessage must call SendTyping at least once")
+	}
+	if stopTyping != 1 {
+		t.Errorf("handleChannelMessage must call StopTyping exactly once, got %d", stopTyping)
 	}
 }
 

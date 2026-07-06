@@ -621,6 +621,12 @@ func (a *Adapter) UpdateMessage(chatID, messageID, text string) bool { return fa
 // SupportsMessageUpdates returns false.
 func (a *Adapter) SupportsMessageUpdates() bool { return false }
 
+// SelfSustainingTyping reports that a single SendTyping call already starts
+// a persistent internal keepalive (see startTypingKeepalive below) — callers
+// that re-invoke SendTyping on a fixed interval should skip the repeats for
+// this adapter (channel.SelfSustainingTyper).
+func (a *Adapter) SelfSustainingTyping() bool { return true }
+
 // StopTyping cancels the keepalive goroutine and sends sendtyping(status=2)
 // to clear the typing indicator in the WeChat client.
 func (a *Adapter) StopTyping(chatID, contextToken string) error {
