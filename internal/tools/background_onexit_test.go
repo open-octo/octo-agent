@@ -58,6 +58,15 @@ func TestBackgroundManager_OnExitHookFires(t *testing.T) {
 	if !strings.Contains(got.NewOutput, "hi-from-bg") {
 		t.Errorf("NewOutput = %q, want it to contain 'hi-from-bg'", got.NewOutput)
 	}
+	if got.Mode != BgModeAsync {
+		t.Errorf("Mode = %q, want %q", got.Mode, BgModeAsync)
+	}
+	// `echo` exits near-instantly; Duration must reflect that (and, in
+	// particular, must not be left as the zero value — FormatBgNote treats
+	// Duration==0 as "unknown" and skips the short-async nudge for it).
+	if got.Duration <= 0 || got.Duration > hookTimeout() {
+		t.Errorf("Duration = %v, want a small positive duration (<= %v)", got.Duration, hookTimeout())
+	}
 
 	// Dedup: the hook already consumed the output via readNew, so a subsequent
 	// terminal_output-style poll must not re-report the same bytes.

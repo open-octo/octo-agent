@@ -3,6 +3,7 @@ package tools
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFormatBgNote_WrapsAsSystemReminder(t *testing.T) {
@@ -33,6 +34,59 @@ func TestFormatBgNote_CarriesNonZeroExit(t *testing.T) {
 	got := FormatBgNote(BgExit{ID: "bg_3", Command: "false", Status: "exited: exit status 1"})
 	if !strings.Contains(got, "exit status 1") {
 		t.Errorf("want the non-zero exit surfaced; got:\n%s", got)
+	}
+}
+
+// TestFormatBgNote_NudgesUnnecessaryAsync verifies that an "async" launch
+// which finished well under shortAsyncDuration gets a corrective note: the
+// whole point of async is to background work you expect to run long, and a
+// launch that turns out to finish in a couple of seconds would have
+// returned this same output synchronously, in the same tool call, with none
+// of the background bookkeeping.
+func TestFormatBgNote_NudgesUnnecessaryAsync(t *testing.T) {
+	got := FormatBgNote(BgExit{
+		ID: "bg_1", Command: "go build ./...", Status: "exited: 0",
+		NewOutput: "ok\n", Mode: BgModeAsync, Duration: 2 * time.Second,
+	})
+	if !strings.Contains(got, "didn't need run_in_background") {
+		t.Errorf("expected the short-async nudge; got:\n%s", got)
+	}
+}
+
+// TestFormatBgNote_NoNudgeForGenuinelyLongAsync verifies a long-running async
+// task (the case the mode exists for) does not get flagged.
+func TestFormatBgNote_NoNudgeForGenuinelyLongAsync(t *testing.T) {
+	got := FormatBgNote(BgExit{
+		ID: "bg_1", Command: "go build ./...", Status: "exited: 0",
+		NewOutput: "ok\n", Mode: BgModeAsync, Duration: 90 * time.Second,
+	})
+	if strings.Contains(got, "didn't need run_in_background") {
+		t.Errorf("did not expect the short-async nudge for a long-running task; got:\n%s", got)
+	}
+}
+
+// TestFormatBgNote_NoNudgeForInteractive verifies interactive processes never
+// get the nudge, even if they exit quickly — an interactive service that
+// exits fast is more likely a crash than a mode-choice mistake, and the mode
+// exists for services that are *meant* to run indefinitely, not one-shot
+// results, so "should have been sync" doesn't apply to it the same way.
+func TestFormatBgNote_NoNudgeForInteractive(t *testing.T) {
+	got := FormatBgNote(BgExit{
+		ID: "bg_1", Command: "octo serve", Status: "exited: 1",
+		NewOutput: "address already in use\n", Mode: BgModeInteractive, Duration: 1 * time.Second,
+	})
+	if strings.Contains(got, "didn't need run_in_background") {
+		t.Errorf("did not expect the short-async nudge for an interactive process; got:\n%s", got)
+	}
+}
+
+// TestFormatBgNote_NoNudgeWithZeroDuration guards the Duration>0 check: a
+// caller that forgets to populate Duration (e.g. an older test fixture or a
+// future call site) must not get a false-positive nudge from the zero value.
+func TestFormatBgNote_NoNudgeWithZeroDuration(t *testing.T) {
+	got := FormatBgNote(BgExit{ID: "bg_1", Command: "true", Status: "exited: 0", Mode: BgModeAsync})
+	if strings.Contains(got, "didn't need run_in_background") {
+		t.Errorf("zero Duration must not trigger the nudge; got:\n%s", got)
 	}
 }
 

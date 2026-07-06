@@ -211,11 +211,16 @@ func (p *bgProcess) readNew() (string, string, bool) {
 // process finishes. NewOutput is whatever hadn't been consumed by Read yet at
 // exit (so a push notification and a later terminal_output poll don't
 // double-report the same bytes — the readNew cursor advances either way).
+// Mode and Duration exist so the notification can tell the model when an
+// async launch didn't need to be backgrounded at all (see
+// shortAsyncDuration in bgnotify.go).
 type BgExit struct {
 	ID        string
 	Command   string
 	Status    string // "exited: 0" / "exited: <err>" — same shape readNew returns
 	NewOutput string
+	Mode      BackgroundMode
+	Duration  time.Duration // wall-clock time from launch to exit
 }
 
 // SyncSession is the promote handle for one in-flight synchronous terminal
@@ -433,7 +438,10 @@ func (m *BackgroundManager) Start(command string, mode BackgroundMode, opts ...S
 			// its result was already returned synchronously — no notification.
 			if visible {
 				out, status, _ := p.readNew()
-				hook(BgExit{ID: p.id, Command: p.command, Status: status, NewOutput: out})
+				hook(BgExit{
+					ID: p.id, Command: p.command, Status: status, NewOutput: out,
+					Mode: p.mode, Duration: p.end.Sub(p.start),
+				})
 			}
 		}
 	}()

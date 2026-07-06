@@ -3,7 +3,21 @@ package tools
 import (
 	"fmt"
 	"strings"
+	"time"
 )
+
+// shortAsyncDuration is the threshold below which an "async" background
+// launch is flagged as unnecessary. The synchronous terminal path already
+// auto-promotes to background on its own if a command runs past
+// TerminalTimeout, so there's never a need to predict "will this be slow?"
+// up front — a command that turns out to finish in a couple of seconds
+// would have returned its output in the very same tool call had it just
+// run synchronously, with no extra id, no detached-process bookkeeping, and
+// no second turn spent waiting for this very notification. Ten seconds is
+// comfortably below TerminalTimeout (120s) and well above normal tool-call
+// jitter, so it only fires for launches that clearly didn't need
+// backgrounding, not ones that were a reasonable judgment call.
+const shortAsyncDuration = 10 * time.Second
 
 // FormatBgNote renders a background-process completion as a <system-reminder>
 // block. It rides the steer path of whichever frontend wires it (CLI/TUI:
@@ -24,6 +38,16 @@ func FormatBgNote(e BgExit) string {
 		b.WriteString(MaybeSpillOutput(e.ID, out))
 	} else {
 		b.WriteString("\n(no new output)")
+	}
+	if e.Mode == BgModeAsync && e.Duration > 0 && e.Duration < shortAsyncDuration {
+		fmt.Fprintf(&b,
+			"\n\n[Note: this finished in %s — that's fast enough it didn't need run_in_background at all. "+
+				"A synchronous terminal call (no run_in_background) would have returned this same output "+
+				"immediately, in the same turn, and it auto-promotes to background on its own if a command "+
+				"turns out to run long — so there's no need to guess duration up front. Reserve "+
+				"run_in_background:\"async\" for commands you have concrete reason to expect will run well "+
+				"past a few seconds, or when you have other independent work to do while it runs.]",
+			e.Duration.Round(100*time.Millisecond))
 	}
 	b.WriteString("\n</system-reminder>")
 	return b.String()
