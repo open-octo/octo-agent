@@ -7,7 +7,7 @@ here, assume Internal.
 
 **Status:** as of v1.0.0 the tiers below are a hard commitment: breaking a
 Stable surface requires a major version, always with a **Breaking** callout
-in the [CHANGELOG](CHANGELOG.md).
+in the [release notes](https://github.com/open-octo/octo-agent/releases).
 
 ## What the versions mean
 
@@ -23,7 +23,7 @@ in the [CHANGELOG](CHANGELOG.md).
   removals, and semantic changes happen only in a major, after a
   deprecation window.
 - **Best-effort** — documented and real, but not covered. Changes land in
-  minors and are called out in the CHANGELOG.
+  minors and are called out in the release notes.
 - **Internal** — implementation detail. May change in any release without
   notice.
 
@@ -122,7 +122,7 @@ additive.
   Web UI's private API; the UI ships in the same binary, so they can never
   drift apart. Scripting it with `curl` works and is documented behavior
   (see [SECURITY.md](SECURITY.md) for authentication), but routes, fields,
-  and events may change in any minor — with a CHANGELOG callout. A
+  and events may change in any minor — with a release-notes callout. A
   versioned `/api/v1` becomes worth doing when third-party integrations
   exist; until then there is no API stability promise.
 - **Default content**: the embedded default permission rules, default
@@ -148,7 +148,7 @@ not a supported surface: octo is distributed as a binary, and
   way the legacy flat `config.yaml` migrates into the `models:` list today
   (the original is kept as `config.yaml.bak`). No manual migration step.
 - **Deprecation window**: a deprecated format or CLI spelling keeps working
-  for **at least one minor release** after the CHANGELOG announces it
+  for **at least one minor release** after the release notes announce it
   (under a *Deprecated* heading, plus a runtime warning where feasible).
 - **Removing read support for an old format is a breaking change** and
   happens only in a major release.
@@ -157,6 +157,6 @@ not a supported surface: octo is distributed as a binary, and
 
 ## Reporting
 
-A Stable surface that broke without a major version, or without a CHANGELOG
-**Breaking** callout, is a bug — please
+A Stable surface that broke without a major version, or without a
+**Breaking** callout in the release notes, is a bug — please
 [open an issue](https://github.com/open-octo/octo-agent/issues).

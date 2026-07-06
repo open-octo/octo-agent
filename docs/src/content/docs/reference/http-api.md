@@ -9,7 +9,7 @@ any non-loopback bind. `GET /api/health` and `GET /api/version` are the two unau
 
 This API is **Best-effort** (see [Compatibility](/docs/reference/compatibility/)): scripting it
 with `curl` is documented, supported behavior, but routes and fields may change in a minor release,
-called out in the CHANGELOG — there's no versioned `/api/v1` yet.
+called out in the release notes — there's no versioned `/api/v1` yet.
 
 ## Chat & streaming
 
