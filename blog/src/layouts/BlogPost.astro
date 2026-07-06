@@ -121,10 +121,10 @@ const siteName = locale === 'zh' ? 'octo 博客' : 'octo blog';
 		<script type="module">
 			import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
 			mermaid.initialize({ startOnLoad: false, theme: 'default' });
-			const blocks = document.querySelectorAll('pre code.language-mermaid');
-			blocks.forEach((block) => {
-				const pre = block.parentElement;
-				const source = block.textContent || '';
+			const blocks = document.querySelectorAll('pre[data-language="mermaid"]');
+			blocks.forEach((pre) => {
+				const code = pre.querySelector('code');
+				const source = code ? (code.textContent || '') : '';
 				const id = 'mermaid-' + Math.random().toString(36).slice(2, 9);
 				const container = document.createElement('div');
 				container.className = 'mermaid-diagram';
