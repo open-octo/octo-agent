@@ -777,6 +777,18 @@
     }
     scroller.addEventListener('scroll', onScroll, { passive: true })
 
+    // A streamed reply resizes the content on nearly every token, so the
+    // ResizeObserver below fires far more often than 'scroll' does. Relying on
+    // 'scroll' alone to unstick means a small wheel-up while near the bottom
+    // gets raced and snapped back before the position update lands, which
+    // reads as the message jittering up and down (#1069). Handling 'wheel'
+    // directly disengages stick synchronously, before the browser even
+    // applies the scroll delta.
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) stick = false
+    }
+    scroller.addEventListener('wheel', onWheel, { passive: true })
+
     const ro = new ResizeObserver(() => {
       if (stick) scroller.scrollTop = scroller.scrollHeight
     })
@@ -787,6 +799,7 @@
 
     return () => {
       scroller.removeEventListener('scroll', onScroll)
+      scroller.removeEventListener('wheel', onWheel)
       ro.disconnect()
     }
   })
