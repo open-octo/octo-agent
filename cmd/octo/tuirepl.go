@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -20,6 +21,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/mcp"
 	"github.com/open-octo/octo-agent/internal/tools"
 	"github.com/open-octo/octo-agent/internal/tui"
+	"golang.org/x/term"
 )
 
 // runTUI is the interactive bubbletea REPL: the TTY counterpart to runREPL's
@@ -594,7 +596,17 @@ func newTUIModel(cfg replConfig) *tuiModel {
 		style = "light"
 	}
 	historyFile := defaultInputHistoryFile()
-	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistory: loadInputHistory(historyFile), inputHistoryIdx: -1, historyFile: historyFile, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, workflows: map[string]*workflowUI{}}
+	// Bubbletea reports the real terminal size asynchronously via the first
+	// WindowSizeMsg, which arrives only after Init() has already run — too
+	// late for Init's banner print, which would otherwise always see width 0
+	// and fall back to the narrow-terminal text-only banner. Query it
+	// synchronously up front instead; the WindowSizeMsg handler still
+	// overwrites these on resize.
+	width, height := 80, 24
+	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+		width, height = w, h
+	}
+	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistory: loadInputHistory(historyFile), inputHistoryIdx: -1, historyFile: historyFile, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, workflows: map[string]*workflowUI{}, width: width, height: height}
 	// Seed the last-seen goal status so a resumed session's first transition
 	// (e.g. the budget crossing) prints its notice instead of being treated
 	// as the baseline.
