@@ -309,6 +309,31 @@ func TestTUI_RunningToolShowsLiveTail(t *testing.T) {
 	}
 }
 
+// A command's streamed chunk is raw stdout/stderr — a stray \r or ESC must
+// not reach the terminal unsanitized (the same control-byte injection
+// surface #1101/#1104 closed for tool results/inputs), or it could overwrite
+// the spinner line or spoof displayed text.
+func TestTUI_RunningToolTailSanitizesControlBytes(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+
+	m.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal",
+		Input: map[string]any{"command": "malicious"},
+	})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: "ok\rSPOOFED"})
+
+	if m.running == nil || len(m.running.tail) != 1 {
+		t.Fatalf("expected one tail line, got %+v", m.running)
+	}
+	if strings.ContainsRune(m.running.tail[0], '\r') {
+		t.Errorf("raw \\r reached the live tail: %q", m.running.tail[0])
+	}
+	if !strings.Contains(m.running.tail[0], "SPOOFED") || !strings.Contains(m.running.tail[0], "ok") {
+		t.Errorf("sanitized content should keep both halves visible: %q", m.running.tail[0])
+	}
+}
+
 // --plain keeps its existing dense one-line-per-chunk behavior; progress
 // commits straight to the scrollback instead of a live tail (design decision
 // #8: the plain path never renders live/animated state).

@@ -1396,13 +1396,18 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 	case agent.EventToolProgress:
 		// Rich TUI: keep a dimmed tail under the live spinner (see View) instead
 		// of committing to the transcript — the done card/status line still
-		// carries the full output once the call finishes.
+		// carries the full output once the call finishes. The chunk is raw
+		// command stdout/stderr — sanitize before it ever reaches the terminal,
+		// the same control-byte injection surface #1101/#1104 closed for tool
+		// results and inputs (a stray ESC could move the cursor or erase the
+		// "[Ctrl+B] background" hint on the next line).
+		chunk := boundProgressChunk(sanitizeForPrompt(ev.Chunk))
 		if m.cfg.plain {
-			m.commitToolLine("│ " + boundProgressChunk(ev.Chunk))
+			m.commitToolLine("│ " + chunk)
 			return
 		}
-		if m.running != nil && ev.Chunk != "" {
-			m.running.tail = append(m.running.tail, boundProgressChunk(ev.Chunk))
+		if m.running != nil && chunk != "" {
+			m.running.tail = append(m.running.tail, chunk)
 			if n := len(m.running.tail) - runningTailMaxLines; n > 0 {
 				m.running.tail = m.running.tail[n:]
 			}
