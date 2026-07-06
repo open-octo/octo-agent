@@ -1442,6 +1442,10 @@ func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Re
 
 	dir := expandDir(req.WorkingDir)
 	info, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("working_dir does not exist: %s (create it first)", dir))
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid working_dir: %v", err))
 		return

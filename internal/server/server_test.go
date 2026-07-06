@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1377,6 +1378,40 @@ func TestHandleUpdateSessionWorkingDir(t *testing.T) {
 	}
 	if srv.cwd == tmp {
 		t.Fatalf("server cwd = %q, should not equal the per-session dir", srv.cwd)
+	}
+}
+
+func TestHandleUpdateSessionWorkingDir_NotExist(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	missing := filepath.Join(tmp, "does-not-exist")
+	payload, _ := json.Marshal(updateSessionWorkingDirRequest{WorkingDir: missing})
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+	// The error should tell the user the dir doesn't exist and to create it
+	// first (#1073), not surface a raw os.Stat error string.
+	want := fmt.Sprintf("working_dir does not exist: %s (create it first)", missing)
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["error"] != want {
+		t.Fatalf("error = %q, want %q", body["error"], want)
 	}
 }
 
