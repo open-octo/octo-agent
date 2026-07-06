@@ -75,9 +75,11 @@ waiting out the full 5 minutes.
 
 ## Per-turn gate
 
-`handleChannelMessage` builds a fresh gate for every IM turn — engine with
-the configured permission mode (`resolvePermissionMode`, same as web) plus
-`channelPermissionAsk` — and sets it on the session agent after `BeginRun`
+`handleChannelMessage` (via `runChannelTurns`) builds a fresh gate for every
+IM turn — engine with the session's own permission mode when set, falling
+back to the configured global default otherwise (`resolvePermissionMode`,
+same fallback web uses) — plus `channelPermissionAsk` — and sets it on the
+session agent after `BeginRun`
 (turns are serialised, so this cannot race a running turn). This replaces
 the old factory-time gate, which froze a hard-coded strict-mode policy
 snapshot at session creation and — via its `gate, _ :=` construction —

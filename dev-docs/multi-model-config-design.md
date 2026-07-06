@@ -75,8 +75,14 @@ Decisions:
   runtime. `internal/app.VendorModel` carries the per-model value; a legacy
   file with no `vision:` key is backfilled from the id heuristic
   (`config.ModelSupportsVision`) on load and recorded on the next save.
-- **`permission_mode` is global.** `saveModelRequest` carries it on the model
-  card, but the backend applies it globally.
+- **`permission_mode` in config.yml is only the default new sessions inherit.**
+  `saveModelRequest` carries it on the model card and writes this global
+  field, but each `agent.Session` snapshots it into its own `PermissionMode`
+  at creation time and is independent afterward — changing a session's mode
+  (the Web composer's toggle, `PATCH /api/sessions/{id}/permission_mode`)
+  updates only that session, never this global field or other sessions. See
+  `internal/permission.ResolveDefaultMode` (reads this field) and
+  `agent.Session.SetPermissionMode` (per-session override).
 - **default / lite are references, not entry types.** The panel's
   `type: "default" | "lite"` badges are derived by the server from
   `default_model` / `lite_model` when building `GET /api/config`; nothing is

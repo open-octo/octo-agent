@@ -22,7 +22,7 @@ export interface Session {
   total_tasks: number
   turn_count: number
   working_dir: string
-  permission_mode: 'ask' | 'auto' | string
+  permission_mode: 'interactive' | 'auto' | 'strict' | string
   reasoning_effort: 'low' | 'medium' | 'high' | string
   show_reasoning?: boolean
   context_usage: number
@@ -168,7 +168,7 @@ export interface WsSessionInfo {
   model: string
   total_turns: number
   working_dir: string
-  permission_mode: 'ask' | 'auto'
+  permission_mode: 'interactive' | 'auto' | 'strict'
   reasoning_effort: 'low' | 'medium' | 'high'
   show_reasoning?: boolean
   context_usage: number
@@ -246,7 +246,7 @@ export interface WsEventSessionUpdate {
   latency: number
   context_usage: number
   working_dir: string
-  permission_mode: 'ask' | 'auto'
+  permission_mode: 'interactive' | 'auto' | 'strict'
   reasoning_effort: 'low' | 'medium' | 'high'
   show_reasoning: boolean
 }
