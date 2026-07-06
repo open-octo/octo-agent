@@ -1130,6 +1130,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		persistTurnProgress()
 	}
 
+	turnCallStart := time.Now()
 	reply, err := a.RunStream(runCtx, content, toolDefs, executor, handler)
 	// Whether this turn was goal-continuation-kicked, read before the error
 	// handling below consumes the pending mark via SuppressGoalContinuation.
@@ -1198,11 +1199,21 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		sw.sendRaw(b)
 	}
 
-	s.wsHub.broadcast(sess.ID, map[string]any{
+	completeEvent := map[string]any{
 		"type":       "complete",
 		"session_id": sess.ID,
 		"iterations": a.TurnIterations(),
-	})
+	}
+	if err == nil {
+		// a is freshly built per turn (buildAgent), so its usage counters start
+		// at zero — no before/after diff needed, unlike the CLI/IM persistent-
+		// Agent call sites. Omitted on error/interrupt, matching the CLI's
+		// summary line which only prints on a clean completion.
+		inTok, outTok := a.SessionTokens()
+		completeEvent["duration_ms"] = time.Since(turnCallStart).Milliseconds()
+		completeEvent["tokens"] = inTok + outTok
+	}
+	s.wsHub.broadcast(sess.ID, completeEvent)
 
 	used, window := a.ContextUsage()
 	ctxPct := 0

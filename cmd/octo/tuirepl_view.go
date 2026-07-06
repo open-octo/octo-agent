@@ -1785,6 +1785,17 @@ func wrapIndented(line, indent string, width int) string {
 	return b.String()
 }
 
+// turnSummaryLine formats the always-on per-turn "elapsed, tokens" footer, or
+// "" in quiet mode. Uses FormatElapsedSeconds/FormatGoalTokens so the readout
+// is consistent across the CLI, Web, and IM surfaces.
+func turnSummaryLine(v verbosity, stats TurnStats) string {
+	if v.quiet() {
+		return ""
+	}
+	return noticeStyle.Render(fmt.Sprintf("  ⏱ %s, %s tokens",
+		agent.FormatElapsedSeconds(int64(stats.Elapsed.Seconds())), agent.FormatGoalTokens(int64(stats.Tokens))))
+}
+
 // cacheLine formats the per-turn cache footer, or "" when nothing to show.
 // Verbose-only: at default verbosity the footer would land after every turn
 // (cache moves on essentially every Anthropic-protocol call) and the status

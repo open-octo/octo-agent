@@ -151,6 +151,22 @@ func FormatGoalElapsed(seconds int64) string {
 	return fmt.Sprintf("%dh %dm", hours, remMin)
 }
 
+// FormatElapsedSeconds renders whole seconds always down to the second: 45s,
+// 12m30s. Unlike FormatGoalElapsed (which drops the remainder once minutes
+// take over, since goal budgets run long), a single turn is short enough that
+// dropping the seconds reads as suspiciously round — this mirrors the web
+// frontend's fmtDur exactly so the per-turn summary line looks identical
+// across the CLI, Web, and IM surfaces.
+func FormatElapsedSeconds(seconds int64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	return fmt.Sprintf("%dm%ds", seconds/60, seconds%60)
+}
+
 // GoalUsageLine summarizes a goal's spend: "12m, 63.9K/50K tokens".
 func GoalUsageLine(g Goal) string {
 	var parts []string

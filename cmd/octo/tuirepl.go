@@ -159,6 +159,7 @@ type turnStartedMsg struct{}
 type agentEventMsg struct{ ev agent.AgentEvent }
 type turnEndedMsg struct {
 	reply agent.Reply
+	stats TurnStats
 	err   error
 }
 type turnFinishedMsg struct{ err error } // the turn goroutine returned
@@ -249,8 +250,8 @@ type tuiSink struct {
 func (s *tuiSink) TurnStarted()             { s.prog.Send(turnStartedMsg{}) }
 func (s *tuiSink) Emit(ev agent.AgentEvent) { s.prog.Send(agentEventMsg{ev}) }
 func (s *tuiSink) Notice(msg string)        { s.prog.Send(noticeMsg{msg}) }
-func (s *tuiSink) TurnEnded(r agent.Reply, e error) {
-	s.prog.Send(turnEndedMsg{reply: r, err: e})
+func (s *tuiSink) TurnEnded(r agent.Reply, stats TurnStats, e error) {
+	s.prog.Send(turnEndedMsg{reply: r, stats: stats, err: e})
 }
 
 func (s *tuiSink) Ask(ctx context.Context, p UserPrompt) (UserResponse, error) {
@@ -1059,8 +1060,13 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil && msg.err != context.Canceled {
 			m.printlnBlock(errorStyle.Render("error: " + msg.err.Error()))
-		} else if c := cacheLine(m.cfg.verbosity, msg.reply); c != "" {
-			m.printlnBlock(c)
+		} else {
+			if s := turnSummaryLine(m.cfg.verbosity, msg.stats); s != "" {
+				m.printlnBlock(s)
+			}
+			if c := cacheLine(m.cfg.verbosity, msg.reply); c != "" {
+				m.printlnBlock(c)
+			}
 		}
 		// turnEndedMsg only marks the end of the agent loop's output; the turn
 		// goroutine is still alive until turnFinishedMsg. Do NOT reset turnRunning

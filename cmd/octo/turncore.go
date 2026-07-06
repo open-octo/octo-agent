@@ -31,14 +31,26 @@ type ViewSink interface {
 	// loop (same contract as agent.EventHandler).
 	Emit(ev agent.AgentEvent)
 
-	// TurnEnded fires once after the run returns, carrying the final reply and
-	// any error (including context.Canceled for an interrupt), so the view can
-	// tear down per-turn state and render the outcome (cache line, ^C, error).
-	TurnEnded(reply agent.Reply, err error)
+	// TurnEnded fires once after the run returns, carrying the final reply,
+	// this turn's elapsed time + token usage, and any error (including
+	// context.Canceled for an interrupt), so the view can tear down per-turn
+	// state and render the outcome (summary line, cache line, ^C, error).
+	TurnEnded(reply agent.Reply, stats TurnStats, err error)
 
 	// Notice surfaces an out-of-band message not tied to the model stream
 	// (e.g. a pre/post-turn hook failure). Never blocks the turn.
 	Notice(msg string)
+}
+
+// TurnStats carries the wall-clock time and token spend of a single turn,
+// computed by runTurn from Agent.SessionTokens() deltas (Reply.InputTokens/
+// OutputTokens alone only reflect the turn's last LLM call, not the whole
+// multi-iteration tool loop). Every ViewSink renders it into an always-on
+// per-turn summary line so the user knows what a turn cost regardless of
+// verbosity.
+type TurnStats struct {
+	Elapsed time.Duration
+	Tokens  int // input + output tokens billed during this turn
 }
 
 // runTurn executes one user turn: it applies the memory nudge and the pre-turn
@@ -69,6 +81,9 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 
 	sink.TurnStarted()
 
+	turnStart := time.Now()
+	inBefore, outBefore := a.SessionTokens()
+
 	// RunStream owns the streaming + agentic tool loop. With no tools it falls
 	// back internally to TurnStream, adapting text deltas into EventTextDelta
 	// and firing a terminal EventTurnDone — so a single call path covers both
@@ -76,7 +91,13 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 	// stream regardless.
 	reply, err := a.RunStream(ctx, turnInput, cfg.tools, cfg.executor, sink.Emit)
 
-	sink.TurnEnded(reply, err)
+	inAfter, outAfter := a.SessionTokens()
+	stats := TurnStats{
+		Elapsed: time.Since(turnStart),
+		Tokens:  (inAfter - inBefore) + (outAfter - outBefore),
+	}
+
+	sink.TurnEnded(reply, stats, err)
 	return reply, err
 }
 
@@ -126,7 +147,7 @@ func (v *plainView) Emit(ev agent.AgentEvent) {
 	v.inner(ev)
 }
 
-func (v *plainView) TurnEnded(reply agent.Reply, err error) {
+func (v *plainView) TurnEnded(reply agent.Reply, stats TurnStats, err error) {
 	v.spin.Stop() // belt-and-braces in case the turn produced zero events
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -136,10 +157,12 @@ func (v *plainView) TurnEnded(reply agent.Reply, err error) {
 		fmt.Fprintf(v.errOut, "\nerror: %v\n", err)
 	default:
 		fmt.Fprintln(v.out) // newline after the streamed reply
-		// Surface cache activity per turn so the win is visible. Suppressed in
-		// quiet mode; always-on in verbose (so "0 read, 0 write" is a useful
-		// debugging signal there).
 		if !v.verbosity.quiet() {
+			// Always-on per-turn summary: how long it took and what it cost.
+			fmt.Fprintf(v.out, "  ⏱ %s, %s tokens\n",
+				agent.FormatElapsedSeconds(int64(stats.Elapsed.Seconds())), agent.FormatGoalTokens(int64(stats.Tokens)))
+			// Surface cache activity per turn so the win is visible. Verbose-only
+			// (always-on there so "0 read, 0 write" is a useful debugging signal).
 			show := reply.CacheReadTokens > 0 || reply.CacheWriteTokens > 0
 			if v.verbosity.verbose() {
 				show = true

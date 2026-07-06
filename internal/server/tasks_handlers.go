@@ -272,6 +272,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 		persistTurnProgress()
 	}
 
+	turnCallStart := time.Now()
 	reply, err := a.RunStream(runCtx, task.Prompt, toolDefs, executor, handler)
 
 	sess.SyncFrom(a.History)
@@ -302,11 +303,19 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, erro
 		s.notifyTaskResult(task, fmt.Sprintf("⏰ %s\n\n%s", task.Name, reply.Content))
 	}
 
-	s.wsHub.broadcast(sessionID, map[string]any{
+	completeEvent := map[string]any{
 		"type":       "complete",
 		"session_id": sessionID,
 		"iterations": a.TurnIterations(),
-	})
+	}
+	if err == nil {
+		// a is freshly built per turn (buildAgent), so its usage counters start
+		// at zero — no before/after diff needed here.
+		inTok, outTok := a.SessionTokens()
+		completeEvent["duration_ms"] = time.Since(turnCallStart).Milliseconds()
+		completeEvent["tokens"] = inTok + outTok
+	}
+	s.wsHub.broadcast(sessionID, completeEvent)
 
 	used, window := a.ContextUsage()
 	ctxPct := 0

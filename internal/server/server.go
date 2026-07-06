@@ -2650,6 +2650,12 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		}
 	}
 
+	// sess.Agent is persistent across turns (unlike Web's per-turn buildAgent),
+	// so SessionTokens() is cumulative — snapshot it before the chain and diff
+	// after, the same technique the goal accountant uses for its own totals.
+	turnStart := time.Now()
+	inBefore, outBefore := sess.Agent.SessionTokens()
+
 	_, runErr := channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, content)
 	persist()
 
@@ -2700,17 +2706,37 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 
 	// Terminal-transition notice: the model finished, blocked, or exhausted
 	// the budget during this chain. usage_limited already sent its own line.
+	// Built (not yet sent) before the per-turn summary below so a goal-ending
+	// turn's summary can be skipped — the terminal notice already carries the
+	// goal's own cumulative time/tokens, and sending both would double up.
+	goalTerminalNotice := ""
 	if goalsOn {
 		if g, ok := goalStore.GoalSnapshot(); ok && g.Status != goalStatusBefore {
 			switch g.Status {
 			case agent.GoalComplete:
-				ad.SendText(ev.ChatID, "✅ Goal complete ("+agent.GoalUsageLine(g)+"): "+g.Objective, ev.MessageID)
+				goalTerminalNotice = "✅ Goal complete (" + agent.GoalUsageLine(g) + "): " + g.Objective
 			case agent.GoalBlocked:
-				ad.SendText(ev.ChatID, "🚧 Goal blocked — the agent is at an impasse; /goal resume to retry: "+g.Objective, ev.MessageID)
+				goalTerminalNotice = "🚧 Goal blocked — the agent is at an impasse; /goal resume to retry: " + g.Objective
 			case agent.GoalBudgetLimited:
-				ad.SendText(ev.ChatID, "⏸️ Goal budget reached ("+agent.GoalUsageLine(g)+") — /goal edit <objective> to keep going: "+g.Objective, ev.MessageID)
+				goalTerminalNotice = "⏸️ Goal budget reached (" + agent.GoalUsageLine(g) + ") — /goal edit <objective> to keep going: " + g.Objective
 			}
 		}
+	}
+
+	// Per-turn summary: elapsed time + tokens spent across this whole chain
+	// (the user-visible message plus any chained continuation turns). Only on
+	// a clean completion — an error already got its own message above, an
+	// interrupt should stay quiet (matching the CLI's summary line), and a
+	// goal-terminal turn skips it in favor of the terminal notice below.
+	if runErr == nil && goalTerminalNotice == "" {
+		inAfter, outAfter := sess.Agent.SessionTokens()
+		tokens := (inAfter - inBefore) + (outAfter - outBefore)
+		elapsed := agent.FormatElapsedSeconds(int64(time.Since(turnStart).Seconds()))
+		ad.SendText(ev.ChatID, "⏱ "+elapsed+", "+agent.FormatGoalTokens(int64(tokens))+" tokens", ev.MessageID)
+	}
+
+	if goalTerminalNotice != "" {
+		ad.SendText(ev.ChatID, goalTerminalNotice, ev.MessageID)
 	}
 }
 

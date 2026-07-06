@@ -646,6 +646,22 @@
       // Dismiss finished sub-agents from the live panel. Agents still running
       // (e.g. a sync sub-agent promoted to background) remain visible.
       clearDoneSubAgents(sid)
+      // Per-turn summary: elapsed time + tokens spent. The backend omits both
+      // fields on error/interrupt, so this only fires on a clean completion.
+      const durationMs = (ev as any).duration_ms
+      const tokens = (ev as any).tokens
+      if (typeof durationMs === 'number' && typeof tokens === 'number') {
+        addChatMsg(sid, {
+          id: uid('sum'),
+          type: 'notice',
+          content: `⏱ ${fmtDur(Math.round(durationMs / 1000))}, ${fmtTokens(tokens)} tokens`,
+          level: 'info',
+          createdAt: Date.now(),
+          streaming: false,
+          tools: [],
+          todos: [],
+        })
+      }
     }))
 
     cleanups.push(ws.on('session_update', (ev) => {

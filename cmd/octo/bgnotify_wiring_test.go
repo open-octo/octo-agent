@@ -13,10 +13,10 @@ import (
 // terminal or spinner.
 type noopSink struct{}
 
-func (noopSink) TurnStarted()                 {}
-func (noopSink) Emit(agent.AgentEvent)        {}
-func (noopSink) TurnEnded(agent.Reply, error) {}
-func (noopSink) Notice(string)                {}
+func (noopSink) TurnStarted()                            {}
+func (noopSink) Emit(agent.AgentEvent)                   {}
+func (noopSink) TurnEnded(agent.Reply, TurnStats, error) {}
+func (noopSink) Notice(string)                           {}
 func (noopSink) Ask(context.Context, UserPrompt) (UserResponse, error) {
 	return UserResponse{Cancelled: true}, nil
 }
