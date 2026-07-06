@@ -5,12 +5,22 @@
 
   let selected = $state<string[]>([])
   let customText = $state('')
+  let inputEl = $state<HTMLInputElement | null>(null)
+  let modalEl = $state<HTMLDivElement | null>(null)
+  // Backdrop click / X / Esc no longer answer the agent (#1112) — they used to
+  // route through cancel(), so a stray click silently sent "cancelled" and
+  // discarded anything typed/selected. Hiding instead keeps the question
+  // pending; the reopen pill below gets the user back to it.
+  let dismissed = $state(false)
 
-  // Reset state whenever a new question arrives
+  // Reset state whenever a new question arrives, and autofocus the free-text
+  // input (was inconsistent with AuthGate/CommandPalette, which both do this).
   $effect(() => {
     if ($questionModal) {
       selected = []
       customText = ''
+      dismissed = false
+      inputEl?.focus()
     }
   })
 
@@ -27,12 +37,15 @@
 
   function submit() {
     if (!$questionModal) return
+    if (selected.length === 0 && !customText.trim()) return
     const q = $questionModal
     // ChatView stores the server field `question_id` as `questionId`.
     ws.answerQuestion(q.questionId, [...selected], customText)
     questionModal.set(null)
   }
 
+  // The only path that actually answers "cancelled" to the agent — reached
+  // solely via the explicit Cancel button, an unambiguous user decision.
   function cancel() {
     if (!$questionModal) return
     const q = $questionModal
@@ -40,18 +53,38 @@
     questionModal.set(null)
   }
 
-  function close() { cancel() }
+  // Safe close: hides the modal without telling the agent anything. The
+  // question is still pending — the reopen pill brings the modal back with
+  // whatever was selected/typed still intact.
+  function softClose() {
+    dismissed = true
+  }
+
+  function reopen() {
+    dismissed = false
+    inputEl?.focus()
+  }
+
+  // Only Escape is handled at the modal level — Enter-to-submit already works
+  // from the free-text input, and a focused option-pill/button already
+  // activates on Enter natively, so a second modal-level handler would double
+  // fire.
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') { e.preventDefault(); softClose() }
+  }
 </script>
 
-{#if $questionModal}
-<div class="backdrop" onclick={close} role="presentation">
-  <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+{#if $questionModal && !dismissed}
+<!-- #1112: backdrop is inert (no onclick) — matches ConfirmModal (#1105).
+     Dismissal without answering only happens via Esc/softClose. -->
+<div class="backdrop" role="presentation">
+  <div class="modal" bind:this={modalEl} onkeydown={onKeydown} role="dialog" aria-modal="true" tabindex="-1">
     <div class="modal-header">
       <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
       <span class="modal-title">
         {$questionModal.header || $t('question.title')}
       </span>
-      <button class="close-btn" onclick={close} aria-label={$t('common.close')}>
+      <button class="close-btn" onclick={softClose} aria-label={$t('common.close')}>
         <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
       </button>
     </div>
@@ -78,10 +111,11 @@
 
       <div class="custom-input-wrap">
         <input
+          bind:this={inputEl}
           class="custom-input"
           placeholder={$t('question.custom_placeholder')}
           bind:value={customText}
-          onkeydown={(e) => { if (e.key === 'Enter') submit() }}
+          onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
         />
       </div>
     </div>
@@ -99,6 +133,11 @@
     </div>
   </div>
 </div>
+{:else if $questionModal && dismissed}
+<button class="reopen-pill" onclick={reopen}>
+  <iconify-icon icon="ant-design:form-outlined" width="14"></iconify-icon>
+  {$t('question.reopen')}
+</button>
 {/if}
 
 <style>
@@ -116,6 +155,17 @@
   box-shadow: 0 16px 48px rgba(0,0,0,0.18);
   animation: octo-fadein 0.16s ease;
 }
+.modal:focus { outline: none; }
+.reopen-pill {
+  position: fixed; left: 24px; bottom: 24px; z-index: 1100;
+  display: flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 14px;
+  border: 1px solid var(--blue-2); background: var(--surface-info);
+  border-radius: 9999px; box-shadow: 0 8px 24px rgba(15,23,42,0.14);
+  font-size: 13px; color: var(--blue-6); cursor: pointer; font-family: inherit;
+  animation: octo-fadein 0.16s ease;
+}
+.reopen-pill:hover { border-color: var(--blue-5); }
 .modal-header {
   display: flex; align-items: center; gap: 8px;
   padding: 14px 24px;
@@ -147,10 +197,11 @@
 }
 .option-pill {
   display: inline-flex; align-items: center; gap: 5px;
-  height: 34px; padding: 0 14px;
+  min-height: 34px; padding: 7px 14px;
   border: 1px solid var(--border); background: var(--bg-container);
   border-radius: 9999px;
-  font-size: 13px; color: var(--text-secondary);
+  font-size: 13px; color: var(--text-secondary); line-height: 1.4;
+  text-align: left; white-space: normal; word-break: break-word;
   cursor: pointer; font-family: inherit;
   transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
