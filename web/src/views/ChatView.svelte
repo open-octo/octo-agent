@@ -2,6 +2,7 @@
   import { get } from 'svelte/store'
   import {
     activeSessionId,
+    activeSession,
     sessions,
     chatMessages,
     chatStreaming,
@@ -932,10 +933,31 @@
     }
   }
 
+  // ensureActiveSession returns the active session id, creating one first if
+  // none is active — e.g. right after deleting the session that was open.
+  // Mirrors Sidebar's "+" new-session flow so typing into that empty state
+  // and hitting send works instead of silently dropping the message.
+  async function ensureActiveSession(): Promise<string | null> {
+    const existing = get(activeSessionId)
+    if (existing) return existing
+    try {
+      const created = await api.createSession({ source: 'manual' }) as any
+      const newSess = created.session ?? created
+      sessions.update(ss => [newSess, ...ss])
+      activeSessionId.set(newSess.id)
+      activeSession.set(newSess.id)
+      return newSess.id
+    } catch (e: any) {
+      showToast(e.message, 'error')
+      return null
+    }
+  }
+
   // ── send message ───────────────────────────────────────────────────────────
-  function send(text: string, files?: any[]) {
-    const sid = get(activeSessionId)
-    if (!sid || (!text.trim() && !(files && files.length))) return
+  async function send(text: string, files?: any[]) {
+    if (!text.trim() && !(files && files.length)) return
+    const sid = await ensureActiveSession()
+    if (!sid) return
     // Steering: a message sent while a turn is already running rides the
     // running turn's Inbox on the server. It must NOT reset the live UI —
     // the sub-agents panel and thinking buffer belong to the turn in flight.
