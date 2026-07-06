@@ -27,21 +27,54 @@ func (s *Session) BeginAsk(chatID, userID string) (<-chan string, func(), error)
 	ch := make(chan string, 1)
 	s.pendingAsk = ch
 	s.askChatID, s.askUserID = chatID, userID
+	s.askButtonsOnly = false
 	release := func() {
 		s.askMu.Lock()
 		if s.pendingAsk == ch {
 			s.pendingAsk = nil
+			s.askButtonsOnly = false
 		}
 		s.askMu.Unlock()
 	}
 	return ch, release, nil
 }
 
+// SetAskButtonsOnly marks the pending ask as button-only: DeliverAskReply will
+// NOT consume plain text messages — only DeliverAskButton can resolve. Must
+// be called after BeginAsk and before any reply arrives. Has no effect when no
+// ask is pending.
+func (s *Session) SetAskButtonsOnly() {
+	s.askMu.Lock()
+	s.askButtonsOnly = true
+	s.askMu.Unlock()
+}
+
 // DeliverAskReply routes text to a pending ask and reports whether it was
 // consumed. False means no ask is waiting (or the reply came from the wrong
 // chat or user) — the caller should treat the message as normal chat input.
+// When askButtonsOnly is true (button-based ask), returns false so plain text
+// messages stay as ordinary chat input instead of being swallowed (#1120).
 // Each ask consumes exactly one reply.
 func (s *Session) DeliverAskReply(chatID, userID, text string) bool {
+	s.askMu.Lock()
+	defer s.askMu.Unlock()
+	if s.pendingAsk == nil || s.askButtonsOnly {
+		return false
+	}
+	if chatID != s.askChatID || userID != s.askUserID {
+		return false
+	}
+	s.pendingAsk <- text // buffered (cap 1); never blocks
+	s.pendingAsk = nil
+	s.askButtonsOnly = false
+	return true
+}
+
+// DeliverAskButton routes a button press callback to a pending ask and reports
+// whether it was consumed. Works regardless of askButtonsOnly mode — this is
+// the intended resolution path for button-based asks. Each ask consumes
+// exactly one button press.
+func (s *Session) DeliverAskButton(chatID, userID, buttonID string) bool {
 	s.askMu.Lock()
 	defer s.askMu.Unlock()
 	if s.pendingAsk == nil {
@@ -50,7 +83,8 @@ func (s *Session) DeliverAskReply(chatID, userID, text string) bool {
 	if chatID != s.askChatID || userID != s.askUserID {
 		return false
 	}
-	s.pendingAsk <- text // buffered (cap 1); never blocks
+	s.pendingAsk <- buttonID // buffered (cap 1); never blocks
 	s.pendingAsk = nil
+	s.askButtonsOnly = false
 	return true
 }

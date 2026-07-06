@@ -42,7 +42,11 @@ func (a *fullFakeAdapter) SupportsMessageUpdates() bool                      { r
 func (a *fullFakeAdapter) SendTyping(chatID, contextToken string) error      { return nil }
 func (a *fullFakeAdapter) StopTyping(chatID, contextToken string) error      { return nil }
 func (a *fullFakeAdapter) Flush(chatID string)                               {}
-func (a *fullFakeAdapter) ValidateConfig(channel.PlatformConfig) []string    { return nil }
+func (a *fullFakeAdapter) SupportsButtons() bool                             { return false }
+func (a *fullFakeAdapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	return channel.SendResult{OK: true, MessageID: "f1"}
+}
+func (a *fullFakeAdapter) ValidateConfig(channel.PlatformConfig) []string { return nil }
 
 func (a *fullFakeAdapter) texts() []string {
 	a.mu.Lock()

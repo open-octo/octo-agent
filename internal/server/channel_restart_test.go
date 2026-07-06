@@ -90,7 +90,11 @@ func (a *crashingFakeAdapter) SupportsMessageUpdates() bool                     
 func (a *crashingFakeAdapter) SendTyping(chatID, contextToken string) error      { return nil }
 func (a *crashingFakeAdapter) StopTyping(chatID, contextToken string) error      { return nil }
 func (a *crashingFakeAdapter) Flush(chatID string)                               {}
-func (a *crashingFakeAdapter) ValidateConfig(channel.PlatformConfig) []string    { return nil }
+func (a *crashingFakeAdapter) SupportsButtons() bool                             { return false }
+func (a *crashingFakeAdapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	return channel.SendResult{OK: true}
+}
+func (a *crashingFakeAdapter) ValidateConfig(channel.PlatformConfig) []string { return nil }
 
 func writeChannelsYML(t *testing.T, yml string) {
 	t.Helper()
@@ -398,6 +402,10 @@ func (a *validatingFakeAdapter) SupportsMessageUpdates() bool                   
 func (a *validatingFakeAdapter) SendTyping(chatID, contextToken string) error      { return nil }
 func (a *validatingFakeAdapter) StopTyping(chatID, contextToken string) error      { return nil }
 func (a *validatingFakeAdapter) Flush(chatID string)                               {}
+func (a *validatingFakeAdapter) SupportsButtons() bool                             { return false }
+func (a *validatingFakeAdapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	return channel.SendResult{OK: true}
+}
 func (a *validatingFakeAdapter) ValidateConfig(channel.PlatformConfig) []string {
 	return []string{"missing required field: token"}
 }
