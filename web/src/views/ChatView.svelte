@@ -799,6 +799,11 @@
     scroller.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('pointerup', onPointerUp)
     window.addEventListener('pointercancel', onPointerUp)
+    // A drag released outside the window (e.g. the pointer is still down when
+    // focus is stolen by alt-tabbing) never fires 'pointerup' on this
+    // document, which would otherwise leave `interacting` stuck true and
+    // silently disable auto-scroll for the rest of the tab's life.
+    window.addEventListener('blur', onPointerUp)
 
     const ro = new ResizeObserver(() => {
       if (stick && !interacting) scroller.scrollTop = scroller.scrollHeight
@@ -814,6 +819,7 @@
       scroller.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('pointerup', onPointerUp)
       window.removeEventListener('pointercancel', onPointerUp)
+      window.removeEventListener('blur', onPointerUp)
       ro.disconnect()
     }
   })
