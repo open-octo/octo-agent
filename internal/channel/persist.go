@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/permission"
 )
 
 // IM sessions persist their conversation history to the same store web
@@ -54,6 +55,7 @@ func newChannelStore(id, model string) *agent.Session {
 	st.Source = "channel"
 	st.BoundEntry = agent.EntryChannel
 	st.BoundAt = time.Now()
+	_ = st.SetPermissionMode(string(permission.ResolveDefaultMode()))
 	return st
 }
 

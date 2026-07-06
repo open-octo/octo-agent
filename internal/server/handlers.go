@@ -147,7 +147,11 @@ func entryForSession(cfg config.Config, sess *agent.Session) config.ModelEntry {
 // fallback for sessions with none.
 func (srv *Server) sessionStatusFields(sess *agent.Session) (workingDir, permissionMode, reasoningEffort string, showReasoning *bool, contextUsage int) {
 	workingDir = srv.cwd
-	permissionMode = string(resolvePermissionMode())
+	if sess != nil && sess.PermissionMode != "" {
+		permissionMode = sess.PermissionMode
+	} else {
+		permissionMode = string(resolvePermissionMode())
+	}
 	if cfg, err := config.Load(); err == nil {
 		entry := entryForSession(cfg, sess)
 		reasoningEffort = entry.ReasoningEffort
@@ -216,6 +220,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	}
 	sess := agent.NewSession(model, s.system)
 	s.applyDefaultWorkspaceDir(sess)
+	_ = sess.SetPermissionMode(string(resolvePermissionMode()))
 	sess.Bind(agent.EntryWeb, false)
 	if req.Name != "" {
 		_ = sess.SetTitle(req.Name)
@@ -418,6 +423,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	s.applyDefaultWorkspaceDir(sess)
 	sess.Source = source
 	sess.ModelConfig = modelConfig
+	_ = sess.SetPermissionMode(string(resolvePermissionMode()))
 	sess.Bind(agent.EntryWeb, false)
 	if req.Name != "" {
 		sess.Title = req.Name
@@ -844,7 +850,11 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	// actually run — buildAgent sets a.CWD from sess.WorkingDir before every
 	// prepareToolTurn call, cron-scheduled sessions included (task.Directory
 	// only ever seeds sess.WorkingDir once, at session creation).
-	engine, err := permission.New(permissionConfigPath(), a.CWD, resolvePermissionMode(), s.memDir, s.homeMemDir)
+	mode := resolvePermissionMode()
+	if sess != nil && sess.PermissionMode != "" {
+		mode = permission.Mode(sess.PermissionMode)
+	}
+	engine, err := permission.New(permissionConfigPath(), a.CWD, mode, s.memDir, s.homeMemDir)
 	if err != nil {
 		return ctx, nil, nil, func() {}, fmt.Errorf("permission engine: %w", err)
 	}
@@ -969,15 +979,7 @@ func permissionConfigPath() string {
 // pick up mode changes written by the setup panel / onboard skill without
 // restarting.
 func resolvePermissionMode() permission.Mode {
-	cfg, _ := config.Load()
-	switch cfg.PermissionMode {
-	case string(permission.ModeAutoApprove):
-		return permission.ModeAutoApprove
-	case string(permission.ModeStrict):
-		return permission.ModeStrict
-	default:
-		return permission.ModeInteractive
-	}
+	return permission.ResolveDefaultMode()
 }
 
 // ─── POST /api/file-action ────────────────────────────────────────────────
@@ -1273,11 +1275,14 @@ type updateSessionPermissionModeRequest struct {
 	PermissionMode string `json:"permission_mode"`
 }
 
-// handleUpdateSessionPermissionMode updates the server-wide permission mode —
-// the Web equivalent of the TUI's shift+tab cycle. Valid values: "interactive",
-// "auto", "strict". The per-turn permission engine is rebuilt from this config
-// value (see resolvePermissionMode), so the change takes effect on the next
-// turn without a sender rebuild.
+// handleUpdateSessionPermissionMode updates THIS session's own permission
+// mode — the Web equivalent of the TUI's shift+tab cycle. Valid values:
+// "interactive", "auto", "strict". Per-session: it never touches the global
+// default (~/.octo/config.yml, edited instead via Settings → default model),
+// so it only affects this session, not other sessions and not what a
+// brand-new session inherits. The per-turn permission engine reads
+// sess.PermissionMode (see prepareToolTurn/runChannelTurns), so the change
+// takes effect on this session's next turn without a sender rebuild.
 func (s *Server) handleUpdateSessionPermissionMode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1299,45 +1304,36 @@ func (s *Server) handleUpdateSessionPermissionMode(w http.ResponseWriter, r *htt
 		return
 	}
 
-	cfg, _ := config.Load()
-	cfg.PermissionMode = mode
-	if err := cfg.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+	if _, err := agent.LoadSession(id); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if ok, _, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {
+		writeError(w, http.StatusConflict, berr.Error())
+		return
+	}
+	defer s.releaseSessionBinding(id, agent.EntryWeb)
+
+	// Reload after acquiring the binding in case another process saved.
+	sess, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err := sess.SetPermissionMode(mode); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save session: %v", err))
 		return
 	}
 
-	// Push the new mode to every known session so each composer status bar
-	// refreshes immediately. The engine reads cfg on its next turn, so no
-	// sender rebuild is needed here. permission_mode itself has no per-entry
-	// variance, but reasoning_effort/show_reasoning do — resolve each per its
-	// own session (see entryForSession) so this broadcast doesn't paint every
-	// session with whichever model's values happen to be looked up first.
+	// Push the new mode so this session's composer pill refreshes without
+	// waiting for the next turn's session_update. Only this session — it's
+	// the only one whose own mode changed.
 	if s.wsHub != nil {
-		// wsHub.broadcast(sessionID, ...) below only reaches connections
-		// subscribed to that particular session (ws.ts: the frontend only
-		// subscribes to the currently-open one), so a browser sitting on a
-		// DIFFERENT session never sees these targeted events and its sessions
-		// store — and thus that session's composer pill — goes stale on
-		// switch. permission_mode has no per-session variance, so fire it as
-		// one true global broadcast (empty session ID) too, reaching every
-		// connected tab regardless of subscription.
-		s.wsHub.broadcast("", map[string]any{
+		s.wsHub.broadcast(id, map[string]any{
 			"type":            "session_update",
-			"global":          true,
+			"session_id":      id,
 			"permission_mode": mode,
 		})
-		sessions, _ := agent.ListSessions(50)
-		for _, sess := range sessions {
-			_, pm, re, sr, _ := s.sessionStatusFields(sess)
-			s.wsHub.broadcast(sess.ID, map[string]any{
-				"type":             "session_update",
-				"session_id":       sess.ID,
-				"working_dir":      s.sessionCwd(sess),
-				"permission_mode":  pm,
-				"reasoning_effort": re,
-				"show_reasoning":   sr,
-			})
-		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

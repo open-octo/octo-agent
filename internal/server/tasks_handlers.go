@@ -84,6 +84,7 @@ func (s *Server) CreateSession(task scheduler.Task) (string, error) {
 		sess = agent.NewSession(model, s.system)
 		sess.Source = "cron"
 		sess.Title = task.Name
+		_ = sess.SetPermissionMode(string(resolvePermissionMode()))
 		// task.Directory only seeds the session's WorkingDir here, once, at
 		// creation. After that, sess.WorkingDir (editable any time via the
 		// web Composer's directory chip, PATCH /api/sessions/{id}/working_dir)

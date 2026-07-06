@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -128,6 +129,7 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 		sess := agent.NewSession(child.Model, child.System)
 		sess.ID = id
 		sess.Dir = req.SessionDir
+		_ = sess.SetPermissionMode(string(permission.ResolveDefaultMode()))
 		lc.session = sess
 	}
 

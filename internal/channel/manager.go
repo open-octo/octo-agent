@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tasks"
 )
 
@@ -444,6 +445,7 @@ func (m *Manager) cmdNew(ev InboundEvent) string {
 	st := agent.NewSession(m.agentModel(), "")
 	st.Source = "channel"
 	st.Bind(agent.EntryChannel, false)
+	_ = st.SetPermissionMode(string(permission.ResolveDefaultMode()))
 	if err := st.Save(); err != nil {
 		return fmt.Sprintf("Could not create new session: %v", err)
 	}

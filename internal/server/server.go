@@ -2563,11 +2563,16 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	}
 
 	// Per-turn permission gate, the same shape prepareToolTurn gives web
-	// turns: configured mode + an interactive ask that prompts in the chat
-	// and consumes the next message as the answer. Built after BeginRun so
-	// it can't race the previous turn's gate. An engine failure aborts the
-	// turn — running ungated is never an acceptable fallback.
-	engine, err := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(), s.memDir, s.homeMemDir)
+	// turns: the session's own mode (falling back to the global default for
+	// sessions predating per-session modes) + an interactive ask that prompts
+	// in the chat and consumes the next message as the answer. Built after
+	// BeginRun so it can't race the previous turn's gate. An engine failure
+	// aborts the turn — running ungated is never an acceptable fallback.
+	mode := resolvePermissionMode()
+	if st := sess.Store; st != nil && st.PermissionMode != "" {
+		mode = permission.Mode(st.PermissionMode)
+	}
+	engine, err := permission.New(permissionConfigPath(), cwd, mode, s.memDir, s.homeMemDir)
 	if err != nil {
 		// Generic chat reply — err.Error() can leak local paths into a
 		// group chat; the operator gets the detail on the server console.

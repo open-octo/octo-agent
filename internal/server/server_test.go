@@ -1293,39 +1293,60 @@ func TestHandleUpdateSessionPermissionMode(t *testing.T) {
 	if err := sess.Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
+	// A second, unrelated session to prove a change to sess doesn't leak.
+	other := agent.NewSession("stub-model", "")
+	if err := other.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	patch := func(mode string) *httptest.ResponseRecorder {
+	patch := func(id, mode string) *httptest.ResponseRecorder {
 		payload, _ := json.Marshal(updateSessionPermissionModeRequest{PermissionMode: mode})
-		req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/permission_mode", bytes.NewReader(payload))
+		req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+id+"/permission_mode", bytes.NewReader(payload))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		serveLoopback(srv.mux, w, req)
 		return w
 	}
 
-	if w := patch("auto"); w.Code != http.StatusOK {
+	if w := patch(sess.ID, "auto"); w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
+	// The change is per-session: sess's own PermissionMode is persisted...
+	got, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PermissionMode != "auto" {
+		t.Fatalf("session PermissionMode = %q, want auto", got.PermissionMode)
+	}
+	// ...the unrelated session is untouched...
+	if gotOther, err := agent.LoadSession(other.ID); err != nil {
+		t.Fatal(err)
+	} else if gotOther.PermissionMode != "" {
+		t.Fatalf("other session PermissionMode = %q, want unset", gotOther.PermissionMode)
+	}
+	// ...and the global default is left alone, so a brand-new session still
+	// inherits whatever it was before, not sess's now-independent mode.
 	if cfg, err := config.Load(); err != nil {
 		t.Fatal(err)
-	} else if cfg.PermissionMode != "auto" {
-		t.Fatalf("permission_mode = %q, want auto", cfg.PermissionMode)
+	} else if cfg.PermissionMode != "" {
+		t.Fatalf("global cfg.PermissionMode = %q, want unset", cfg.PermissionMode)
 	}
 
 	// Cycling back to interactive persists too.
-	if w := patch("interactive"); w.Code != http.StatusOK {
+	if w := patch(sess.ID, "interactive"); w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
-	if cfg, err := config.Load(); err != nil {
+	if got, err := agent.LoadSession(sess.ID); err != nil {
 		t.Fatal(err)
-	} else if cfg.PermissionMode != "interactive" {
-		t.Fatalf("permission_mode = %q, want interactive", cfg.PermissionMode)
+	} else if got.PermissionMode != "interactive" {
+		t.Fatalf("session PermissionMode = %q, want interactive", got.PermissionMode)
 	}
 
 	// An unknown mode is rejected.
-	if w := patch("bogus"); w.Code != http.StatusBadRequest {
+	if w := patch(sess.ID, "bogus"); w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
 	}
 }

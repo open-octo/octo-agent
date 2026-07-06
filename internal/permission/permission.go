@@ -31,6 +31,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/open-octo/octo-agent/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -57,6 +58,23 @@ const (
 	ModeAutoApprove Mode = "auto"
 	ModeStrict      Mode = "strict"
 )
+
+// ResolveDefaultMode reads the global default permission mode from
+// ~/.octo/config.yml. This is the value a brand-new session snapshots at
+// creation time (see agent.Session.PermissionMode) — once a session has its
+// own mode, it never calls back into this. An unset or unrecognized value
+// falls back to ModeInteractive, matching New's own zero-value default.
+func ResolveDefaultMode() Mode {
+	cfg, _ := config.Load()
+	switch cfg.PermissionMode {
+	case string(ModeAutoApprove):
+		return ModeAutoApprove
+	case string(ModeStrict):
+		return ModeStrict
+	default:
+		return ModeInteractive
+	}
+}
 
 // Rule is one entry in the rule list for a tool. Exactly one of Pattern /
 // Hostname / Path is populated, depending on the tool's natural axis.

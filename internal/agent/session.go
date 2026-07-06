@@ -44,8 +44,18 @@ type Session struct {
 	// turn time" — also the value for every session predating per-session
 	// working dirs. Set via the Web UI's PATCH …/working_dir and persisted so a
 	// resumed session lands back in the same place.
-	WorkingDir string    `json:"working_dir,omitempty"`
-	Messages   []Message `json:"messages"`
+	WorkingDir string `json:"working_dir,omitempty"`
+	// PermissionMode is this session's own permission mode ("interactive" |
+	// "auto" | "strict"), snapshotted from the global default at creation
+	// time and independent of it afterward — changing the global default
+	// (Settings → default model) only seeds NEW sessions; changing a
+	// session's own mode (the Web UI's composer toggle) never touches the
+	// global default or other sessions. Empty means "the global default at
+	// turn time" — also the value for every session predating per-session
+	// modes. Set via the Web UI's PATCH …/permission_mode and persisted so a
+	// resumed session keeps the mode it was left in.
+	PermissionMode string    `json:"permission_mode,omitempty"`
+	Messages       []Message `json:"messages"`
 
 	// Dir overrides the default ~/.octo/sessions location. Empty means use the
 	// default. Not serialized — it's a runtime override.
@@ -437,22 +447,23 @@ func (s *Session) ChunkDir() (string, error) {
 // type as authoritative; rewriteAll folds them back into the meta header when
 // compacting.
 type sessionRecord struct {
-	Type         string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "working_dir" | "lease" | "goal"
-	ID           string    `json:"id,omitempty"`
-	CreatedAt    time.Time `json:"created_at,omitempty"`
-	Model        string    `json:"model,omitempty"`
-	System       string    `json:"system,omitempty"`
-	Title        string    `json:"title,omitempty"`
-	Source       string    `json:"source,omitempty"`
-	ModelConfig  string    `json:"model_config,omitempty"`
-	WorkingDir   string    `json:"working_dir,omitempty"`
-	BoundEntry   string    `json:"bound_entry,omitempty"`
-	BoundAt      time.Time `json:"bound_at,omitempty"`
-	LeaseEntry   string    `json:"lease_entry,omitempty"`
-	LeaseExpires time.Time `json:"lease_expires,omitempty"`
-	HookStarted  bool      `json:"hook_started,omitempty"`
-	Message      *Message  `json:"message,omitempty"`
-	Goal         *Goal     `json:"goal,omitempty"`
+	Type           string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "working_dir" | "permission_mode" | "lease" | "goal"
+	ID             string    `json:"id,omitempty"`
+	CreatedAt      time.Time `json:"created_at,omitempty"`
+	Model          string    `json:"model,omitempty"`
+	System         string    `json:"system,omitempty"`
+	Title          string    `json:"title,omitempty"`
+	Source         string    `json:"source,omitempty"`
+	ModelConfig    string    `json:"model_config,omitempty"`
+	WorkingDir     string    `json:"working_dir,omitempty"`
+	PermissionMode string    `json:"permission_mode,omitempty"`
+	BoundEntry     string    `json:"bound_entry,omitempty"`
+	BoundAt        time.Time `json:"bound_at,omitempty"`
+	LeaseEntry     string    `json:"lease_entry,omitempty"`
+	LeaseExpires   time.Time `json:"lease_expires,omitempty"`
+	HookStarted    bool      `json:"hook_started,omitempty"`
+	Message        *Message  `json:"message,omitempty"`
+	Goal           *Goal     `json:"goal,omitempty"`
 }
 
 func (s *Session) metaRecord() sessionRecord {
@@ -467,7 +478,7 @@ func (s *Session) metaRecord() sessionRecord {
 		goal = &g
 	}
 	s.mu.Unlock()
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, Goal: goal}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -710,6 +721,47 @@ func (s *Session) SetWorkingDir(dir string) error {
 	return nil
 }
 
+// SetPermissionMode records the session's own permission mode. Same
+// persistence mechanics as SetWorkingDir: append a record when the
+// transcript is already on disk so the change survives without rewriting
+// the file, rewrite when the on-disk prefix is stale, and carry the value
+// in memory for a not-yet-saved session until its first Save folds it into
+// the meta header. Setting the mode already in place is a no-op.
+func (s *Session) SetPermissionMode(mode string) error {
+	if mode == s.PermissionMode {
+		return nil
+	}
+	s.PermissionMode = mode
+	if s.persisted == 0 {
+		// See SetWorkingDir: a meta-only transcript must be rewritten now, since
+		// the load-modify-discard handler won't get a "next Save"; a session with
+		// no file yet just carries the value until its first Save.
+		if path, perr := s.SavePath(); perr == nil {
+			if _, statErr := os.Stat(path); statErr == nil {
+				return s.rewriteAll()
+			}
+		}
+		return nil
+	}
+	if s.forceRewrite {
+		return s.rewriteAll()
+	}
+	path, err := s.SavePath()
+	if err != nil {
+		return err
+	}
+	// No O_CREATE — see SetTitle: never materialise an orphan transcript.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("session: open %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "permission_mode", PermissionMode: mode}); err != nil {
+		return fmt.Errorf("session: append permission_mode: %w", err)
+	}
+	return nil
+}
+
 // DisplayTitle returns the label shown for the session in list views: the
 // generated Title when present, otherwise a snippet of the first user message
 // (so pre-title sessions and not-yet-titled ones are still recognisable), and
@@ -854,6 +906,7 @@ func LoadSession(id string) (*Session, error) {
 			s.Source = rec.Source
 			s.ModelConfig = rec.ModelConfig
 			s.WorkingDir = rec.WorkingDir
+			s.PermissionMode = rec.PermissionMode
 			s.BoundEntry = rec.BoundEntry
 			s.BoundAt = rec.BoundAt
 			s.HookStarted = rec.HookStarted
@@ -868,6 +921,8 @@ func LoadSession(id string) (*Session, error) {
 			}
 		case "working_dir":
 			s.WorkingDir = rec.WorkingDir // last one wins, like title
+		case "permission_mode":
+			s.PermissionMode = rec.PermissionMode // last one wins, like title
 		case "message":
 			if rec.Message != nil {
 				s.Messages = append(s.Messages, *rec.Message)
