@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unsafe"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	rw "github.com/mattn/go-runewidth"
@@ -258,12 +259,17 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyShiftTab:
-		// Cycle permission mode: interactive → auto → interactive.
+		// Cycle permission mode: interactive → auto → strict → interactive.
+		// Previously only interactive/auto were reachable from the keyboard,
+		// leaving strict mode unreachable without a restart (#1097).
 		if m.cfg.permEngine != nil {
 			var next permission.Mode
-			if m.cfg.permEngine.GetMode() == permission.ModeInteractive {
+			switch m.cfg.permEngine.GetMode() {
+			case permission.ModeInteractive:
 				next = permission.ModeAutoApprove
-			} else {
+			case permission.ModeAutoApprove:
+				next = permission.ModeStrict
+			default:
 				next = permission.ModeInteractive
 			}
 			m.cfg.permEngine.SetMode(next)
@@ -344,14 +350,11 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Everything else (typing, left/right, backspace, word movement, etc.)
-	// is handled by bubbles/textarea.
-	var cmd tea.Cmd
-	m.ta, cmd = m.ta.Update(msg)
-
 	// Folded state toggle: Tab expands/collapses when there's multi-line content.
-	// This check runs before the image-path detection so it works even when
-	// folded. Tab is only captured when the completion menu is not open.
+	// Checked before the textarea ever sees the keypress — handing Tab to the
+	// textarea first inserts a literal tab into its value, which then leaked
+	// into foldedFullText on collapse (#1097). Tab is only captured when the
+	// completion menu is not open (a non-empty menu already returned above).
 	if msg.Type == tea.KeyTab && len(m.complItems) == 0 {
 		if m.inputFolded {
 			// Expand: restore the full text
@@ -368,6 +371,11 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+
+	// Everything else (typing, left/right, backspace, word movement, etc.)
+	// is handled by bubbles/textarea.
+	var cmd tea.Cmd
+	m.ta, cmd = m.ta.Update(msg)
 
 	// Detect a dropped image file path (some terminals paste the path as text
 	// when a file is dragged in). If the input box now holds a single image
@@ -982,7 +990,8 @@ func (m *tuiModel) openModal(msg askMsg) {
 	}
 	st.cursor = 0
 	st.otherActive = false
-	st.otherInput = ""
+	st.otherInput = textinput.New()
+	st.otherInput.Prompt = ""
 	m.modal = st
 }
 
@@ -1012,27 +1021,30 @@ func (m *tuiModel) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Inline free-text input for the "Other" option.
+	// Inline free-text input for the "Other" option, backed by a real
+	// textinput.Model so it gets cursor movement, word-jump, and
+	// delete-forward for free — the same editing quality as the main input
+	// box, instead of a hand-rolled append/backspace-only buffer (#1097).
+	// Esc/Enter are intercepted before reaching the widget: Esc always
+	// cancels the modal (textinput has no cancel key of its own), and Enter
+	// confirms rather than inserting (textinput is single-line and ignores
+	// Enter anyway, but intercepting keeps the intent explicit).
 	if st.otherActive {
 		switch msg.Type {
 		case tea.KeyEsc:
 			m.answerModal(UserResponse{Cancelled: true})
+			return m, nil
 		case tea.KeyEnter:
-			if trimmed := strings.TrimSpace(st.otherInput); trimmed != "" {
+			if trimmed := strings.TrimSpace(st.otherInput.Value()); trimmed != "" {
 				m.answerModal(UserResponse{Custom: trimmed})
 			} else {
 				m.answerModal(UserResponse{Cancelled: true})
 			}
-		case tea.KeyBackspace:
-			if len(st.otherInput) > 0 {
-				// Remove the last UTF-8 rune.
-				r := []rune(st.otherInput)
-				st.otherInput = string(r[:len(r)-1])
-			}
-		case tea.KeyRunes:
-			st.otherInput += string(msg.Runes)
+			return m, nil
 		}
-		return m, nil
+		var cmd tea.Cmd
+		st.otherInput, cmd = st.otherInput.Update(msg)
+		return m, cmd
 	}
 
 	// Question modal: arrow/j-k to move, space to toggle (multi), enter to
@@ -1079,6 +1091,7 @@ func (m *tuiModel) confirmQuestion(st *modalState) {
 		wantOther := st.selected[otherIdx]
 		if wantOther {
 			st.otherActive = true
+			st.otherInput.Focus()
 			return
 		}
 		var picks []string
@@ -1100,6 +1113,7 @@ func (m *tuiModel) confirmQuestion(st *modalState) {
 
 	if st.cursor == otherIdx {
 		st.otherActive = true
+		st.otherInput.Focus()
 		return
 	}
 	m.answerModal(UserResponse{Choices: []string{st.prompt.Options[st.cursor]}})
@@ -1189,7 +1203,7 @@ func (m *tuiModel) View() string {
 		b.WriteString(m.spinnerLine(m.running.verb+"("+m.running.target+")", m.running.start))
 		b.WriteByte('\n')
 		if tools.HasActiveSync() || tools.HasActiveSubAgentSync() {
-			b.WriteString(hintStyle.Render("  [Ctrl+B] background  [Esc] kill"))
+			b.WriteString(hintStyle.Render("  [Ctrl+B] background  [Esc] interrupt"))
 			b.WriteByte('\n')
 		}
 	} else if m.turnRunning && m.toolStreamName != "" {
@@ -1544,8 +1558,8 @@ func (m *tuiModel) modalView() string {
 		b.WriteString(fmt.Sprintf("  %s%s%s\n", cursor, mark, opt))
 	}
 	if st.otherActive {
-		b.WriteString("  Other: " + st.otherInput + "▋" + "\n")
-		b.WriteString(hintStyle.Render("Enter confirm · Esc cancel · Backspace delete"))
+		b.WriteString("  Other: " + st.otherInput.View() + "\n")
+		b.WriteString(hintStyle.Render("Enter confirm · Esc cancel"))
 		return tui.Box(b.String())
 	}
 	hint := "↑/↓ move · Enter select · Esc cancel"

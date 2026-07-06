@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tui"
 )
 
@@ -476,6 +477,37 @@ func TestTUI_ReplayHistoryLines_FreshSessionEmpty(t *testing.T) {
 	}
 }
 
+// A resumed session with more than replayMaxTurns turns only replays the
+// most recent ones, plus a single omission line for the rest — otherwise a
+// few-hundred-turn session floods the terminal on resume (#1097).
+func TestTUI_ReplayHistoryLines_CapsOldTurns(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	h := m.a.History
+	total := replayMaxTurns + 5
+	for i := 0; i < total; i++ {
+		h.Append(agent.NewUserMessage(fmt.Sprintf("turn %d", i)))
+		h.Append(agent.NewAssistantMessage(fmt.Sprintf("reply %d", i)))
+	}
+
+	joined := stripANSI(strings.Join(m.replayHistoryLines(), "\n"))
+
+	if !strings.Contains(joined, "earlier history omitted (5 turns)") {
+		t.Errorf("missing omission line for the 5 dropped turns; got:\n%s", joined)
+	}
+	// The oldest turns are gone...
+	if strings.Contains(joined, "turn 0") {
+		t.Errorf("oldest turn should have been dropped; got:\n%s", joined)
+	}
+	// ...but the most recent replayMaxTurns are kept.
+	if !strings.Contains(joined, fmt.Sprintf("turn %d", total-1)) {
+		t.Errorf("newest turn should be replayed; got:\n%s", joined)
+	}
+	if !strings.Contains(joined, fmt.Sprintf("turn %d", total-replayMaxTurns)) {
+		t.Errorf("first kept turn should be replayed; got:\n%s", joined)
+	}
+}
+
 // A failed tool call replays as its live error card, carrying the real error
 // message (the regression: the old collapsed line dropped it).
 func TestTUI_ReplayHistoryLines_ToolError(t *testing.T) {
@@ -657,6 +689,37 @@ func TestTUI_QuestionModalOtherFreeText(t *testing.T) {
 	}
 }
 
+// The "Other" free-text field is a real textinput.Model, not an
+// append/backspace-only buffer — it must support moving the cursor and
+// inserting/deleting in the middle of the text (#1097).
+func TestTUI_QuestionModalOtherCursorMovement(t *testing.T) {
+	m := newTestModel()
+	resp := make(chan UserResponse, 1)
+	m.openModal(askMsg{prompt: UserPrompt{
+		Kind:     KindQuestion,
+		Question: "pick",
+		Options:  []string{"alpha"},
+	}, resp: resp})
+
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.modal.otherActive {
+		t.Fatal("selecting Other should activate free-text input")
+	}
+
+	// Type "acd", move left twice (cursor between 'a' and 'c'), insert 'b'.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a', 'c', 'd'}})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	got := <-resp
+	if got.Custom != "abcd" {
+		t.Errorf("custom = %q, want abcd (cursor movement should allow mid-string insert)", got.Custom)
+	}
+}
+
 func TestTUI_QuestionModalOtherEmptyCancels(t *testing.T) {
 	m := newTestModel()
 	resp := make(chan UserResponse, 1)
@@ -829,6 +892,31 @@ func TestTUI_ThinkingNeverShownInTerminal(t *testing.T) {
 	}
 }
 
+// Shift+Tab must cycle through all three permission modes, including strict —
+// previously it only toggled interactive/auto, leaving strict unreachable
+// from the keyboard (#1097).
+func TestTUI_ShiftTabCyclesAllPermissionModes(t *testing.T) {
+	eng, err := permission.New("", t.TempDir(), permission.ModeInteractive)
+	if err != nil {
+		t.Fatalf("permission.New: %v", err)
+	}
+	m := newTestModel()
+	m.cfg.permEngine = eng
+
+	want := []permission.Mode{
+		permission.ModeAutoApprove,
+		permission.ModeStrict,
+		permission.ModeInteractive,
+	}
+	for _, w := range want {
+		m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+		m = m2.(*tuiModel)
+		if got := eng.GetMode(); got != w {
+			t.Errorf("mode = %q, want %q", got, w)
+		}
+	}
+}
+
 // TestTUI_InputFold_TabToggles tests that Tab toggles the folded state
 // when there are >= 5 lines of input.
 func TestTUI_InputFold_TabToggles(t *testing.T) {
@@ -866,6 +954,27 @@ func TestTUI_InputFold_TabToggles(t *testing.T) {
 	}
 	if m.foldedFullText != "" {
 		t.Error("foldedFullText should be cleared after expand")
+	}
+}
+
+// TestTUI_InputFold_NoStrayTab guards against Tab leaking a literal tab
+// character into foldedFullText: the fold check must run before the
+// keypress reaches the textarea, not after (#1097).
+func TestTUI_InputFold_NoStrayTab(t *testing.T) {
+	m := newTestModel()
+	multiLine := "line1\nline2\nline3\nline4\nline5"
+	setInput(m, multiLine)
+
+	m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+	if !m.inputFolded {
+		t.Fatal("Tab should fold multi-line input")
+	}
+	if strings.Contains(m.foldedFullText, "\t") {
+		t.Errorf("foldedFullText contains a stray tab: %q", m.foldedFullText)
+	}
+	if m.foldedFullText != multiLine {
+		t.Errorf("foldedFullText = %q, want %q", m.foldedFullText, multiLine)
 	}
 }
 

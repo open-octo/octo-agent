@@ -148,6 +148,24 @@ func renderCardHeader(verb, target, meta string, width int) string {
 	return h
 }
 
+// RenderReadFileStatus renders a completed read_file call as a one-line
+// status — "● Read(path) — 234 lines" — instead of a multi-line content
+// preview (#1097). lineCount is the number of lines the call returned; link,
+// when non-empty, hyperlinks the count to the full content (from
+// WriteCardSpill) so it stays reachable on demand, matching the fold-link
+// pattern RenderOutputCard uses for folded card bodies (#1093).
+func RenderReadFileStatus(path string, lineCount int, meta, link string, width int) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%s %s", outBullet, renderCardHeader("Read", path, meta, width)))
+	text := "— " + pluralise(lineCount, "line")
+	if link != "" {
+		b.WriteString(" " + Hyperlink(link, outMore.Underline(true).Render(text+" ↗")))
+	} else {
+		b.WriteString(" " + outMore.Render(text))
+	}
+	return b.String()
+}
+
 // RenderToolStatus renders a tool call that has no body card as a single
 // header-style line — "● name(target)" — so card and non-card tools share one
 // visual language. isErr tints the bullet red and appends errText dimmed.

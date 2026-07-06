@@ -94,6 +94,18 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 		newS, _ := input["new_string"].(string)
 		return tui.RenderEditCard(path, oldS, newS, width)
 	}
+	if toolName == "read_file" && !isErr {
+		// A content preview here is usually the file's package/import
+		// boilerplate — near-zero information for the screen space it costs.
+		// A one-liner with the line count (and a click-to-open link to the
+		// full content, matching the #1093 fold-link pattern) is cheaper and
+		// no less useful (#1097).
+		link := ""
+		if path, err := tools.WriteCardSpill(toolName, output); err == nil {
+			link = tui.FileURI(path)
+		}
+		return tui.RenderReadFileStatus(cardTargetFor(toolName, input), readFileLineCount(output), formatElapsed(elapsed), link, width)
+	}
 	opts := tui.OutputCardOpts{
 		MaxLines: outputCardMaxLines,
 		Width:    width,
@@ -145,6 +157,22 @@ func nonBlankLineCount(s string) int {
 		if strings.TrimSpace(l) != "" {
 			n++
 		}
+	}
+	return n
+}
+
+// readFileLineCount counts the numbered content lines in a read_file result
+// ("%6d\t<line>", per internal/tools/read_file.go), excluding the bracketed
+// footer markers ("[end of file: …]", "[truncated: …]", "[empty file]") the
+// tool appends — those aren't file content and would otherwise inflate the
+// count by one.
+func readFileLineCount(output string) int {
+	n := 0
+	for _, l := range strings.Split(output, "\n") {
+		if l == "" || strings.HasPrefix(strings.TrimLeft(l, " "), "[") {
+			continue
+		}
+		n++
 	}
 	return n
 }

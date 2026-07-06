@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -194,7 +195,9 @@ const tickInterval = 120 * time.Millisecond
 
 // answerSprintDur is how long the wait-on-model line holds the first answer
 // deltas while the ↓ token counter sprints, before releasing the prose.
-const answerSprintDur = 280 * time.Millisecond
+// Halved from an original 280ms (#1097): the flourish is still visible but
+// adds noticeably less perceived latency to the first answer tokens.
+const answerSprintDur = 140 * time.Millisecond
 
 // answerSprintMinChars gates the sprint: only turns with a real reasoning /
 // uplink phase get the flourish, so a quick direct reply isn't delayed.
@@ -539,9 +542,12 @@ type modalState struct {
 	options  []string // rendered option labels (questions only)
 	selected map[int]bool
 	// otherActive is true when the user has selected "Other" and is now typing
-	// free text inline inside the modal.
+	// free text inline inside the modal. otherInput is a real textinput.Model
+	// (not a hand-rolled append/backspace buffer) so it gets cursor movement,
+	// word-jump, and delete-forward for free, matching the main input box's
+	// editing quality (#1097).
 	otherActive bool
-	otherInput  string
+	otherInput  textinput.Model
 	// detail caches the rendered permission body (detailWidth is the width it
 	// was rendered for; detailSet distinguishes "not rendered yet" from a
 	// legitimate width of 0). View() runs on every spinner tick while the
@@ -1550,13 +1556,19 @@ func pluraliseLineCount(n int) string {
 	return fmt.Sprintf("%d lines", n)
 }
 
+// replayMaxTurns caps how many of a resumed session's most recent turns are
+// replayed into scrollback; older turns collapse into a single omission line.
+// Without a cap a few-hundred-turn session floods the terminal on resume,
+// before the user can even type (#1097).
+const replayMaxTurns = 20
+
 // replayHistoryLines renders a resumed session's prior turns into scrollback
 // lines exactly as they appeared live: user prompts and assistant replies
 // verbatim (markdown unless --plain), tool calls through the same
 // renderToolOutcome path as the live done/error events (rich cards, status
 // lines, full error text). Returns nil for a fresh session (empty history).
 func (m *tuiModel) replayHistoryLines() []string {
-	msgs := m.a.History.Snapshot()
+	msgs, omitted := recentTurns(m.a.History.Snapshot(), replayMaxTurns)
 	if len(msgs) == 0 {
 		return nil
 	}
@@ -1572,6 +1584,13 @@ func (m *tuiModel) replayHistoryLines() []string {
 	}
 
 	var out []string
+	if omitted > 0 {
+		word := "turn"
+		if omitted != 1 {
+			word = "turns"
+		}
+		out = append(out, hintStyle.Render(fmt.Sprintf("… earlier history omitted (%d %s)", omitted, word)))
+	}
 	for _, msg := range msgs {
 		switch msg.Role {
 		case agent.RoleUser:
@@ -1602,6 +1621,28 @@ func (m *tuiModel) replayHistoryLines() []string {
 		}
 	}
 	return out
+}
+
+// recentTurns splits msgs into turns — a RoleUser message plus everything
+// up to (not including) the next one — and returns only the last max turns,
+// plus how many leading turns were dropped. Any messages before the first
+// RoleUser message (there shouldn't be any in practice) are kept attached to
+// the first turn rather than silently dropped. max <= 0 disables the cap.
+func recentTurns(msgs []agent.Message, max int) ([]agent.Message, int) {
+	if max <= 0 || len(msgs) == 0 {
+		return msgs, 0
+	}
+	var bounds []int
+	for i, msg := range msgs {
+		if msg.Role == agent.RoleUser {
+			bounds = append(bounds, i)
+		}
+	}
+	if len(bounds) <= max {
+		return msgs, 0
+	}
+	start := bounds[len(bounds)-max]
+	return msgs[start:], len(bounds) - max
 }
 
 // renderReplayText styles one block of restored assistant/user prose: markdown
