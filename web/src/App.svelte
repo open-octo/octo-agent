@@ -118,18 +118,28 @@
     })
 
     ws.on('session_update', (ev: any) => {
+      // permission_mode is server-wide: handleUpdateSessionPermissionMode
+      // fires one true global broadcast (ev.global, no session_id — the
+      // per-session broadcasts below only reach whichever session a tab
+      // happens to be subscribed to, i.e. the currently-open one) so every
+      // connected tab's sessions store — and thus every OTHER session's
+      // composer pill, via Composer's fallback to this store entry — updates
+      // too, not just the active session's chatPermMode.
+      const applyTo = ev.global ? () => true : (s: any) => s.id === ev.session_id
       sessions.update(list =>
-        list.map(s => s.id === ev.session_id
+        list.map(s => applyTo(s)
           ? {
               ...s,
               status: ev.status ?? s.status,
               context_usage: ev.context_usage ?? s.context_usage,
               show_reasoning: typeof ev.show_reasoning === 'boolean' ? ev.show_reasoning : s.show_reasoning,
+              permission_mode: typeof ev.permission_mode === 'string' ? ev.permission_mode : s.permission_mode,
+              reasoning_effort: typeof ev.reasoning_effort === 'string' ? ev.reasoning_effort : s.reasoning_effort,
             }
           : s
         )
       )
-      if (typeof ev.show_reasoning === 'boolean') {
+      if (!ev.global && typeof ev.show_reasoning === 'boolean') {
         chatShowReasoning.update(m => ({ ...m, [ev.session_id]: ev.show_reasoning }))
       }
     })
