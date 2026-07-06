@@ -119,6 +119,9 @@
   border-top: 1px solid var(--border-table); background: var(--bg-sidebar);
   padding: 8px 14px 8px 46px; display: flex; flex-direction: column; gap: 6px;
 }
-.step { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); word-break: break-word; }
+.step {
+  display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical;
+  font-size: 12px; color: var(--text-secondary); word-break: break-word; overflow: hidden;
+}
 .hint { font-size: 11px; color: var(--text-tertiary); }
 </style>

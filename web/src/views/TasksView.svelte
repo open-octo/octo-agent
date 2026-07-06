@@ -29,11 +29,6 @@
     }
   }
 
-  function nextRunLabel(t: api.TaskResponse): string {
-    // Server doesn't expose next_run yet; fall back to last_run
-    return fmtDate(t.last_run)
-  }
-
   // ── data loading ─────────────────────────────────────────────────────────────
 
   async function load() {
@@ -45,7 +40,7 @@
         name: t.name,
         target: t.agent || t.model || '',
         cron: t.cron,
-        nextRun: nextRunLabel(t),
+        nextRun: t.enabled ? fmtDate(t.next_run) : '—',
         tagStatus: t.enabled ? 'success' : 'default',
         tagLabel: t.enabled ? tr('status.active') : tr('status.disabled'),
       })))
@@ -162,8 +157,11 @@
             <!-- Cron expression -->
             <span class="mono cron">{task.cron || '—'}</span>
 
-            <!-- Next run (last_run fallback) -->
-            <span class="next-run">{nextRunLabel(task)}</span>
+            <!-- Last run / next scheduled run (truthfully distinct values) -->
+            <div class="run-times-cell">
+              <span class="run-line">{$t('tasks.last_run_label')} {fmtDate(task.last_run)}</span>
+              <span class="run-line">{$t('tasks.next_run_label')} {task.enabled ? fmtDate(task.next_run) : '—'}</span>
+            </div>
 
             <!-- Status tag -->
             <span>
@@ -225,7 +223,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 /* ── table ───────────────────────────────────────────────────────────────────── */
 .table-card {
   background: var(--bg-container); border-radius: 16px;
-  box-shadow: var(--card-shadow); overflow: hidden;
+  box-shadow: var(--card-shadow); overflow-x: auto;
 }
 .table-header, .table-row {
   display: grid;
@@ -251,7 +249,8 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .task-target { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .cron { font-size: 13px; color: var(--text-secondary); }
-.next-run { font-size: 13px; color: var(--text-secondary); }
+.run-times-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.run-line { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .act-btn {
   width: 28px; height: 28px; border: none; background: transparent;

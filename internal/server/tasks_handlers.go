@@ -41,6 +41,7 @@ type taskResponse struct {
 	Enabled   bool                    `json:"enabled"`
 	CreatedAt string                  `json:"created_at,omitempty"`
 	LastRun   string                  `json:"last_run,omitempty"`
+	NextRun   string                  `json:"next_run,omitempty"`
 	SessionID string                  `json:"session_id,omitempty"`
 }
 
@@ -381,7 +382,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	tasks := s.scheduler.List()
 	out := make([]taskResponse, 0, len(tasks))
 	for _, t := range tasks {
-		out = append(out, taskToResponse(t))
+		out = append(out, s.taskToResponse(t))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -519,10 +520,10 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, taskToResponse(*task))
+	writeJSON(w, http.StatusOK, s.taskToResponse(*task))
 }
 
-func taskToResponse(t scheduler.Task) taskResponse {
+func (s *Server) taskToResponse(t scheduler.Task) taskResponse {
 	r := taskResponse{
 		ID:        t.ID,
 		Name:      t.Name,
@@ -539,6 +540,11 @@ func taskToResponse(t scheduler.Task) taskResponse {
 	}
 	if !t.LastRun.IsZero() {
 		r.LastRun = t.LastRun.Format("2006-01-02T15:04:05Z")
+	}
+	if s.scheduler != nil {
+		if next := s.scheduler.NextRun(t.ID); !next.IsZero() {
+			r.NextRun = next.Format("2006-01-02T15:04:05Z")
+		}
 	}
 	r.SessionID = t.SessionID
 	return r

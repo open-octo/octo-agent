@@ -12,6 +12,7 @@ export interface TaskResponse {
   enabled: boolean
   created_at: string
   last_run: string
+  next_run: string
   session_id: string
 }
 

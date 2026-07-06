@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cmdkOpen, view, sessions, activeSessionId, activeSession, skills } from '../../lib/stores'
+  import { cmdkOpen, view, sessions, activeSessionId, activeSession, skills, openAgentSession } from '../../lib/stores'
   import { t } from '../../lib/i18n'
 
   let query = $state('')
@@ -81,10 +81,19 @@
     }
   })
 
+  // Running a skill result opens a fresh chat that invokes it, matching
+  // SkillsView's per-card "Use" — previously this just navigated to the
+  // Skills list, which looked like "run this skill" but acted like "open a
+  // list" (#1114).
+  function runSkill(name: string) {
+    openAgentSession(`/${name}`, name)
+    close()
+  }
+
   function runItem(item: any) {
     if (!item) return
     if (item.kind === 'session') openSession(item.data.id)
-    else if (item.kind === 'skill') { view.set('skills'); close() }
+    else if (item.kind === 'skill') runSkill(item.data.name)
     else if (item.kind === 'action') item.data.run()
   }
 
@@ -144,11 +153,14 @@
           <div
             class="result-row"
             class:active={activeIdx === gi}
-            onclick={() => { view.set('skills'); close() }}
+            onclick={() => runSkill(s.name)}
             onmouseenter={() => activeIdx = gi}
           >
             <iconify-icon icon="ant-design:thunderbolt-outlined" width="14" style="color:{activeIdx === gi ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
             <span class="result-title mono" class:dim={activeIdx !== gi}>{s.name}</span>
+            {#if activeIdx === gi}
+              <iconify-icon icon="lucide:corner-down-left" width="13" style="color:var(--text-tertiary)"></iconify-icon>
+            {/if}
           </div>
         {/each}
       {/if}

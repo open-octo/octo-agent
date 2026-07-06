@@ -160,5 +160,9 @@
 .step { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
 .step.err { color: var(--error-dark); }
 .tool-name { font-weight: 500; }
-.tool-input { font-size: 11px; color: var(--text-tertiary); opacity: 0.8; }
+.tool-input {
+  font-size: 11px; color: var(--text-tertiary); opacity: 0.8;
+  display: inline-block; max-width: 420px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+}
 </style>

@@ -14,7 +14,8 @@ export const cmdkOpen = writable(false)
 export const mcpModalOpen = writable(false)
 // Drives the MCP modal: add a new server, edit an existing one, or paste JSON.
 export const mcpModalState = writable<{ mode: 'add' | 'edit' | 'import'; server?: any }>({ mode: 'add' })
-export const toast = writable<{ msg: string; type: string } | null>(null)
+export interface ToastEntry { id: number; msg: string; type: string }
+export const toasts = writable<ToastEntry[]>([])
 
 // Runtime / WS state
 export const running = writable(false)
@@ -111,9 +112,20 @@ export function uid(prefix = 'm'): string {
 }
 
 // Helper functions
+//
+// Toasts stack (a second one no longer overwrites the first) and each carries
+// its own id + timer, so one toast's timeout can never clear a different,
+// newer toast early (#1114). dismissToast lets Toast.svelte offer a manual
+// close button.
+let _toastSeq = 0
 export function showToast(msg: string, type = 'success') {
-  toast.set({ msg, type })
-  setTimeout(() => toast.set(null), 3200)
+  const id = ++_toastSeq
+  toasts.update(list => [...list, { id, msg, type }])
+  setTimeout(() => dismissToast(id), 3200)
+}
+
+export function dismissToast(id: number) {
+  toasts.update(list => list.filter(t => t.id !== id))
 }
 
 export function setActiveSession(id: string) {
@@ -257,6 +269,28 @@ export function updateToolResult(sessionId: string, toolId: string | undefined, 
         const started = tools[idx].startedAt
         const elapsed = started ? (Date.now() - started) / 1000 : tools[idx].elapsed
         tools[idx] = { ...tools[idx], result, ui_payload: uiPayload, done: true, elapsed }
+      }
+      msgs[lastGroup] = { ...msgs[lastGroup], tools }
+    }
+    return { ...m, [sessionId]: msgs }
+  })
+}
+
+// Append streamed stdout lines to the tool they belong to, using the same
+// exact-toolId-first lookup as updateToolResult/setToolError. Attributing by
+// "last tool in the group" (the previous behavior) mis-routes output for
+// parallel/interleaved tool calls, same class of bug pickToolIndex already
+// fixes for results and errors (#1114).
+export function appendToolStdout(sessionId: string, toolId: string | undefined, lines: string[]) {
+  if (!lines || lines.length === 0) return
+  chatMessages.update(m => {
+    const msgs = [...(m[sessionId] || [])]
+    const lastGroup = msgs.findLastIndex((x: any) => x.type === 'tool_group')
+    if (lastGroup >= 0) {
+      const tools = [...msgs[lastGroup].tools]
+      const idx = pickToolIndex(tools, toolId)
+      if (idx >= 0) {
+        tools[idx] = { ...tools[idx], stdout: [...(tools[idx].stdout ?? []), ...lines] }
       }
       msgs[lastGroup] = { ...msgs[lastGroup], tools }
     }

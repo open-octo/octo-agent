@@ -210,20 +210,28 @@
   // For terminal/bash (tail=true) show the LAST FOLD_LINES instead — errors
   // and summaries land at the bottom of shell output, not the top, so a
   // head-fold buries exactly the lines the user needs to see (#1106).
+  // `foldable`/`expanded` ride along so the caller can always offer a way back
+  // to collapsed, even once `hidden` drops to 0 because the user expanded it
+  // (#1114 — expand used to be a one-way trip).
   const FOLD_LINES = 14
+  const DIFF_FOLD_LINES = 12
   let expanded = $state<Record<string, boolean>>({})
-  function foldInfo(id: string, text: string, tail = false) {
+  function foldInfo(id: string, text: string, tail = false, foldLines = FOLD_LINES) {
     const lines = text.split('\n')
-    if (lines.length <= FOLD_LINES || expanded[id]) {
-      return { shown: text, hidden: 0 }
+    const foldable = lines.length > foldLines
+    const isExpanded = !!expanded[id]
+    if (!foldable || isExpanded) {
+      return { shown: text, hidden: 0, foldable, expanded: isExpanded }
     }
     if (tail) {
-      return { shown: lines.slice(-FOLD_LINES).join('\n'), hidden: lines.length - FOLD_LINES }
+      return { shown: lines.slice(-foldLines).join('\n'), hidden: lines.length - foldLines, foldable, expanded: false }
     }
-    return { shown: lines.slice(0, FOLD_LINES).join('\n'), hidden: lines.length - FOLD_LINES }
+    return { shown: lines.slice(0, foldLines).join('\n'), hidden: lines.length - foldLines, foldable, expanded: false }
   }
 
-
+  function toggleFold(id: string) {
+    expanded[id] = !expanded[id]
+  }
 </script>
 
 {#if tools !== null && tools.length > 0}
@@ -318,8 +326,9 @@
             {/each}
           </div>
         {:else if tool.ui_payload?.diff}
+          {@const fold = foldInfo(tool.id, tool.ui_payload.diff, false, DIFF_FOLD_LINES)}
           <div class="diff-block">
-            {#each tool.ui_payload.diff.split('\n') as line}
+            {#each fold.shown.split('\n') as line}
               {#if line.startsWith('@@')}
                 <div class="diff-hdr mono">{line}</div>
               {:else if line.startsWith('-')}
@@ -331,23 +340,34 @@
               {/if}
             {/each}
           </div>
+          {#if fold.hidden > 0}
+            <button class="fold-btn" onclick={() => toggleFold(tool.id)}>
+              <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
+              {$t('tools.show_more').replace('{n}', String(fold.hidden))}
+            </button>
+          {:else if fold.foldable && fold.expanded}
+            <button class="fold-btn" onclick={() => toggleFold(tool.id)}>
+              <iconify-icon icon="lucide:chevron-up" width="13"></iconify-icon>
+              {$t('tools.show_less')}
+            </button>
+          {/if}
         {:else if tool.stdout && tool.stdout.length > 0}
           {@const full = tool.stdout.join('\n')}
           {@const isTerm = isTerminalTool(tool)}
           {@const fold = foldInfo(tool.id, full, isTerm)}
           <div class="term-wrap">
-            {#if isTerm && fold.hidden > 0}
-              <button class="fold-btn" onclick={() => expanded[tool.id] = true}>
-                <iconify-icon icon="lucide:chevron-up" width="13"></iconify-icon>
-                {$t('tools.show_earlier').replace('{n}', String(fold.hidden))}
+            {#if isTerm && (fold.hidden > 0 || fold.expanded)}
+              <button class="fold-btn" onclick={() => toggleFold(tool.id)}>
+                <iconify-icon icon={fold.hidden > 0 ? 'lucide:chevron-up' : 'lucide:chevron-down'} width="13"></iconify-icon>
+                {fold.hidden > 0 ? $t('tools.show_earlier').replace('{n}', String(fold.hidden)) : $t('tools.show_less')}
               </button>
             {/if}
-            <pre class="terminal-output">{#each fold.shown.split('\n') as line}{#if line.startsWith('$ ') || line === '$'}<span class="term-prompt">$</span>{line.slice(1)}{:else}{line}{/if}
+            <pre class="terminal-output">{#each fold.shown.split('\n') as line, i}{#if i === 0 && fold.hidden === 0 && (line.startsWith('$ ') || line === '$')}<span class="term-prompt">$</span>{line.slice(1)}{:else}{line}{/if}
 {/each}{#if !tool.done}<span class="blink-caret"></span>{/if}</pre>
-            {#if !isTerm && fold.hidden > 0}
-              <button class="fold-btn" onclick={() => expanded[tool.id] = true}>
-                <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
-                {$t('tools.show_more').replace('{n}', String(fold.hidden))}
+            {#if !isTerm && (fold.hidden > 0 || fold.expanded)}
+              <button class="fold-btn" onclick={() => toggleFold(tool.id)}>
+                <iconify-icon icon={fold.hidden > 0 ? 'lucide:chevron-down' : 'lucide:chevron-up'} width="13"></iconify-icon>
+                {fold.hidden > 0 ? $t('tools.show_more').replace('{n}', String(fold.hidden)) : $t('tools.show_less')}
               </button>
             {/if}
           </div>
@@ -380,17 +400,17 @@
           {@const isTerm = isTerminalTool(tool)}
           {@const fold = foldInfo(tool.id, pretty, isTerm)}
           <div>
-            {#if isTerm && fold.hidden > 0}
-              <button class="fold-btn light" onclick={() => expanded[tool.id] = true}>
-                <iconify-icon icon="lucide:chevron-up" width="13"></iconify-icon>
-                {$t('tools.show_earlier').replace('{n}', String(fold.hidden))}
+            {#if isTerm && (fold.hidden > 0 || fold.expanded)}
+              <button class="fold-btn light" onclick={() => toggleFold(tool.id)}>
+                <iconify-icon icon={fold.hidden > 0 ? 'lucide:chevron-up' : 'lucide:chevron-down'} width="13"></iconify-icon>
+                {fold.hidden > 0 ? $t('tools.show_earlier').replace('{n}', String(fold.hidden)) : $t('tools.show_less')}
               </button>
             {/if}
             <pre class="tool-output">{fold.shown}</pre>
-            {#if !isTerm && fold.hidden > 0}
-              <button class="fold-btn light" onclick={() => expanded[tool.id] = true}>
-                <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
-                {$t('tools.show_more').replace('{n}', String(fold.hidden))}
+            {#if !isTerm && (fold.hidden > 0 || fold.expanded)}
+              <button class="fold-btn light" onclick={() => toggleFold(tool.id)}>
+                <iconify-icon icon={fold.hidden > 0 ? 'lucide:chevron-down' : 'lucide:chevron-up'} width="13"></iconify-icon>
+                {fold.hidden > 0 ? $t('tools.show_more').replace('{n}', String(fold.hidden)) : $t('tools.show_less')}
               </button>
             {/if}
           </div>
@@ -467,6 +487,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
   margin: 0; padding: 12px 14px; border-top: 1px solid var(--border-table);
   background: var(--terminal-bg); color: var(--terminal-text); font-size: 12px; line-height: 1.6;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto;
+  max-height: 420px; overflow-y: auto;
 }
 .blink-caret {
   display: inline-block; width: 7px; height: 13px;
