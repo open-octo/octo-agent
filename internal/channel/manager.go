@@ -582,10 +582,7 @@ func (m *Manager) cmdUnbind(ev InboundEvent) string {
 
 	released := false
 	if val, ok := m.sessions.Load(key); ok {
-		if ch := val.(*Session); ch.Store != nil {
-			released = ch.Store.Unbind(agent.EntryChannel)
-			_ = ch.Store.Save()
-		}
+		released = val.(*Session).UnbindStore(agent.EntryChannel)
 	}
 
 	hadOverride, err := m.bindings.remove(key)

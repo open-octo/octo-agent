@@ -283,7 +283,23 @@ func truncate(s string, maxLen int) string {
 	return string(r[:maxLen]) + "…"
 }
 
-// RunAgent executes the agent run loop for a session and bridges events to the IM adapter.
+// RunAgent executes the agent run loop for a session and bridges events to the
+// IM adapter. It also persists the turn's progress incrementally: after any
+// event that grows or rewrites history, history is flushed to disk right
+// away, so a process crash mid-turn loses at most the round in flight, not
+// the whole turn — parity with the web WS handler's persistTurnProgress. The
+// length/dirty gate keeps the per-event calls free when nothing changed.
 func RunAgent(ctx context.Context, sess *Session, tools []agent.ToolDefinition, executor agent.ToolExecutor, ctrl *UIController, userInput string) (agent.Reply, error) {
-	return sess.Agent.RunStream(ctx, userInput, tools, executor, ctrl.Handler())
+	a := sess.Agent
+	forward := ctrl.Handler()
+	lastSavedLen := -1
+	handler := func(ev agent.AgentEvent) {
+		forward(ev)
+		if n := a.History.Len(); n != lastSavedLen || a.History.RewriteDirty() {
+			if sess.Persist() == nil {
+				lastSavedLen = n
+			}
+		}
+	}
+	return a.RunStream(ctx, userInput, tools, executor, handler)
 }

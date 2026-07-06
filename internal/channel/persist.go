@@ -132,6 +132,23 @@ func (s *Session) Persist() error {
 	return s.Store.Save()
 }
 
+// UnbindStore releases the store's entry binding and persists the change.
+// Guarded by storeMu like Persist/deleteStore: /unbind runs on the adapter
+// callback goroutine while a turn may still be in flight, and that turn's
+// Persist (now called per event, not just once at turn end) mutates the same
+// *agent.Session fields (Messages, persisted) with no locking of its own —
+// storeMu is what serializes the two callers.
+func (s *Session) UnbindStore(entry string) bool {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	if s.Store == nil {
+		return false
+	}
+	released := s.Store.Unbind(entry)
+	_ = s.Store.Save()
+	return released
+}
+
 // GoalStore returns the persisted backing session, which carries the
 // conversation's goal, or nil when a concurrent /unbind tombstoned it.
 // Accessor because Store mutates under storeMu.
