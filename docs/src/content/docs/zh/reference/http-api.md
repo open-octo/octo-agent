@@ -76,7 +76,7 @@ description: octo serve 背后的 REST 接口面——和内置 Web UI 用的是
 | `POST /api/restart` | 请求一次[重启](/docs/zh/guides/self-host/#重启)；立即返回 `202`，排空正在进行的轮次的过程在后台跑 |
 
 这套 API 属于 **Best-effort**（见[兼容性](/docs/zh/reference/compatibility/)）：用 `curl`
-调用是文档化、受支持的行为，但路由和字段可能在某个小版本里变化，并在 CHANGELOG 里说明——
+调用是文档化、受支持的行为，但路由和字段可能在某个小版本里变化，并在发布说明里说明——
 目前还没有带版本号的 `/api/v1`。
 
 下一步：[安全模型](/docs/zh/reference/security/)详细说明了访问密钥到底防住了什么、

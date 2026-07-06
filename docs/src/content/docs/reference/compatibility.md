@@ -5,7 +5,7 @@ description: What you can build on, what's best-effort, and what's internal.
 
 octo follows [Semantic Versioning](https://semver.org). As of v1.0.0 these tiers are a hard
 commitment: breaking a Stable surface requires a major version, always with a **Breaking** callout
-in the [CHANGELOG](https://github.com/open-octo/octo-agent/blob/main/CHANGELOG.md).
+in the [release notes](https://github.com/open-octo/octo-agent/releases).
 
 - **Major** — a Stable surface changed incompatibly, after the deprecation window below.
 - **Minor** — new features; additive changes to Stable surfaces; any change to Best-effort surfaces.
@@ -32,7 +32,7 @@ Not covered even under Stable: human-readable stdout/TUI text — don't parse it
 
 ## Best-effort
 
-Documented and real, but changes land in minors with a CHANGELOG callout rather than requiring a
+Documented and real, but changes land in minors with a release-notes callout rather than requiring a
 major:
 
 - **The HTTP API (`/api/*`) and WebSocket events** — see the [full reference](/docs/reference/http-api/).
@@ -64,8 +64,8 @@ Linux and macOS are first-class. Two Windows gaps are stated here rather than pr
 
 Old formats migrate automatically on read — the way legacy `config.yaml` upgrades into `config.yml`
 today, with the original kept as `.bak`. A deprecated format or flag spelling keeps working for at
-least one minor release after the CHANGELOG announces it; removing read support entirely is a
+least one minor release after the release notes announce it; removing read support entirely is a
 breaking change reserved for a major release.
 
-A Stable surface that broke without a major version, or without a CHANGELOG **Breaking** callout, is
-a bug — [open an issue](https://github.com/open-octo/octo-agent/issues).
+A Stable surface that broke without a major version, or without a **Breaking** callout in the
+release notes, is a bug — [open an issue](https://github.com/open-octo/octo-agent/issues).
