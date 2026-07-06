@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store'
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import {
     running, activeSessionId, chatStreaming, sessions,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
@@ -16,10 +16,12 @@
 
   let text = $state('')
   // Per-session composer draft: keyed by session id so switching sessions
-  // doesn't carry a half-typed message into (or send it to) the wrong
-  // conversation. Plain object, not $state — nothing renders it directly, it
-  // is only read/written from the session-switch effect below.
+  // doesn't carry a half-typed message (or its staged attachments) into — or
+  // send them to — the wrong conversation. Plain objects, not $state —
+  // nothing renders them directly, they are only read/written from the
+  // session-switch effect below.
   let draftsBySession: Record<string, string> = {}
+  let attachmentsBySession: Record<string, { name: string; data_url: string; mime_type: string }[]> = {}
   let draftSid = ''
   let textareaEl = $state<HTMLTextAreaElement | null>(null)
   let fileInputEl = $state<HTMLInputElement | null>(null)
@@ -288,17 +290,26 @@
   // $store autosubscription is reactive inside $derived (get() is not).
   let sid = $derived($activeSessionId ?? '')
 
-  // Swap the composer's live text for the session's own draft on every
-  // session switch: save the departing session's in-progress text, restore
-  // the incoming session's (or start blank). Also resets input-history
-  // navigation, which is likewise per-session (see recallOlder/recallNewer).
+  // Swap the composer's live text + staged attachments for the session's own
+  // draft on every session switch: save the departing session's in-progress
+  // state, restore the incoming session's (or start blank). Also resets
+  // input-history navigation, which is likewise per-session (see
+  // recallOlder/recallNewer). `sid` is the only tracked dependency — reading
+  // text/attachments inside untrack() keeps this from re-running on every
+  // keystroke or attachment change.
   $effect(() => {
     const nextSid = sid
     if (nextSid === draftSid) return
-    if (draftSid) draftsBySession[draftSid] = text
-    text = draftsBySession[nextSid] ?? ''
-    draftSid = nextSid
-    historyIndex = null
+    untrack(() => {
+      if (draftSid) {
+        draftsBySession[draftSid] = text
+        attachmentsBySession[draftSid] = attachments
+      }
+      text = draftsBySession[nextSid] ?? ''
+      attachments = attachmentsBySession[nextSid] ?? []
+      draftSid = nextSid
+      historyIndex = null
+    })
   })
 
   let isStreaming = $derived($chatStreaming[sid] ?? false)
