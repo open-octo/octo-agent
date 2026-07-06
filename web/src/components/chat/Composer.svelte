@@ -4,6 +4,7 @@
   import {
     running, activeSessionId, chatStreaming, sessions,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
+    globalPermissionMode,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -320,7 +321,7 @@
   let modelName = $derived($chatModel[sid] || currentSession?.model || currentSession?.model_id || '—')
   let reasoning = $derived($chatReasoningEffort[sid] || currentSession?.reasoning_effort || 'medium')
   let workingDir = $derived($chatWorkingDir[sid] || currentSession?.working_dir || '')
-  let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || 'ask')
+  let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || $globalPermissionMode)
   // Effective show-reasoning for this session: live store > session record > default true.
   let showReasoning = $derived($chatShowReasoning[sid] ?? currentSession?.show_reasoning ?? true)
   let ctxUsage = $derived(Number($chatContextUsage[sid] ?? currentSession?.context_usage ?? 0))

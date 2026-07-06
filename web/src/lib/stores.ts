@@ -30,6 +30,11 @@ export const artifactView = writable<ArtifactView>('preview')
 // Sessions
 export const sessions = writable<Session[]>([])
 export const activeSessionId = writable<string | null>(null)
+// The configured default permission mode (~/.octo/config.yml), seeded once
+// from GET /api/config on app start. Used as the Composer's last-resort
+// fallback when no session is active (e.g. right after deleting one) —
+// 'ask' alone would ignore whatever the user actually configured.
+export const globalPermissionMode = writable<string>('ask')
 // Sidebar session UI state
 export const activeSession = writable<string | null>(null)
 export const selMode = writable(false)

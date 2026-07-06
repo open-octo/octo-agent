@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning } from './lib/stores'
+  import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode } from './lib/stores'
   import { ws, wsState } from './lib/ws'
   import { locale, t, setLocale } from './lib/i18n'
   import { checkAuth } from './lib/auth'
@@ -97,9 +97,13 @@
     ws.connect()
 
     // Restore the persisted UI language from server config so a refresh
-    // keeps the user's locale choice.
+    // keeps the user's locale choice. Also seed globalPermissionMode from the
+    // default model entry, so the Composer's no-active-session fallback
+    // shows the real configured default instead of a hardcoded guess.
     api.getConfig().then(cfg => {
       if (cfg.language) setLocale(cfg.language)
+      const def = cfg.models?.find(m => m.type === 'default')
+      if (def?.permission_mode) globalPermissionMode.set(def.permission_mode)
     }).catch(() => { /* non-critical */ })
 
     ws.on('session_list', (ev: any) => {
