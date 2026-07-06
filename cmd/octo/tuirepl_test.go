@@ -524,6 +524,31 @@ func TestTUI_DispatchTranscript(t *testing.T) {
 	}
 }
 
+// /transcript on a NON-CARD tool's error must also show the full text, not
+// the same one-line-truncated errText the live status row already showed —
+// otherwise "uncapped" is a lie for exactly the case (a long multi-line
+// error) it exists to fix.
+func TestTUI_DispatchTranscript_NonCardToolErrorUncapped(t *testing.T) {
+	m := newTestModel()
+	h := m.a.History
+	long := strings.Repeat("stack frame\n", 10) + "fatal error"
+	h.Append(agent.NewToolUseMessage([]agent.ContentBlock{
+		agent.NewToolUseBlock("c1", "mcp_thing", map[string]any{"q": "x"}),
+	}))
+	h.Append(agent.NewToolResultMessage([]agent.ContentBlock{
+		agent.NewToolResultBlock("c1", long, true),
+	}))
+
+	_, _ = m.dispatchTranscript("")
+	got := stripANSI(strings.Join(m.printlnBuf, "\n"))
+	if n := strings.Count(got, "stack frame"); n != 10 {
+		t.Errorf("/transcript should show every line of a non-card tool's error, got %d occurrences:\n%s", n, got)
+	}
+	if !strings.Contains(got, "fatal error") {
+		t.Errorf("/transcript should include the error's last line too:\n%s", got)
+	}
+}
+
 // No completed tool calls yet — /transcript reports that instead of a
 // misleading empty print.
 func TestTUI_DispatchTranscript_NoCalls(t *testing.T) {

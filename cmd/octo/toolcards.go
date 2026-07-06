@@ -88,11 +88,8 @@ func renderToolCard(toolName string, input map[string]any, output string, isErr 
 	if verb == "" {
 		return ""
 	}
-	if toolName == "edit_file" && !isErr {
-		path, _ := input["path"].(string)
-		oldS, _ := input["old_string"].(string)
-		newS, _ := input["new_string"].(string)
-		return tui.RenderEditCard(path, oldS, newS, width)
+	if card, ok := renderEditFileCard(toolName, input, isErr, width); ok {
+		return card
 	}
 	output, opts := toolCardOpts(toolName, input, output, isErr, width, elapsed)
 	// When the card will fold ("… +N lines"), persist the full output and
@@ -157,15 +154,27 @@ func renderToolFull(toolName string, input map[string]any, output string, isErr 
 	if verb == "" {
 		return ""
 	}
-	if toolName == "edit_file" && !isErr {
-		path, _ := input["path"].(string)
-		oldS, _ := input["old_string"].(string)
-		newS, _ := input["new_string"].(string)
-		return tui.RenderEditCard(path, oldS, newS, width)
+	if card, ok := renderEditFileCard(toolName, input, isErr, width); ok {
+		return card
 	}
 	output, opts := toolCardOpts(toolName, input, output, isErr, width, 0)
 	opts.MaxLines = 0
 	return tui.RenderOutputCard(verb, cardTargetFor(toolName, input), output, opts)
+}
+
+// renderEditFileCard returns edit_file's diff card when applicable (success
+// only — an edit_file error falls through to the ordinary output-preview
+// path like every other tool), or ok=false otherwise. Shared by
+// renderToolCard and renderToolFull so the two can never diverge on this
+// special case.
+func renderEditFileCard(toolName string, input map[string]any, isErr bool, width int) (string, bool) {
+	if toolName != "edit_file" || isErr {
+		return "", false
+	}
+	path, _ := input["path"].(string)
+	oldS, _ := input["old_string"].(string)
+	newS, _ := input["new_string"].(string)
+	return tui.RenderEditCard(path, oldS, newS, width), true
 }
 
 // nonBlankLineCount mirrors RenderOutputCard's blank-line filtering so the

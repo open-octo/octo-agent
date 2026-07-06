@@ -1560,6 +1560,18 @@ func (m *tuiModel) renderToolOutcomeFull(toolName string, input map[string]any, 
 			return full
 		}
 	}
+	if isErr {
+		// renderToolOutcome truncates a non-card tool's error to one 100-rune
+		// line for the status row (errText) — fine live, but it would defeat
+		// /transcript's whole point of showing the full text uncapped.
+		status := tui.RenderToolStatus(toolName, summariseInput(input), true, "")
+		if trimmed := strings.TrimSpace(sanitizeForPrompt(resultText)); trimmed != "" {
+			for _, line := range strings.Split(trimmed, "\n") {
+				status += "\n" + hintStyle.Render("  "+line)
+			}
+		}
+		return status
+	}
 	return m.renderToolOutcome(toolName, input, resultText, isErr, 0)
 }
 
