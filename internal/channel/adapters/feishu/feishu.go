@@ -284,6 +284,48 @@ func (a *Adapter) StopTyping(chatID, contextToken string) error { return nil }
 // Flush — Feishu has no outgoing buffer.
 func (a *Adapter) Flush(chatID string) {}
 
+func (a *Adapter) SupportsButtons() bool { return true }
+
+// SendButtons sends an interactive card with button elements. Uses the
+// interactive card schema (same as SendText for code/table content) but
+// appends button elements to the card body.
+func (a *Adapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	// Build button elements.
+	var btnElements []any
+	for _, b := range buttons {
+		btnElements = append(btnElements, map[string]any{
+			"tag":  "button",
+			"text": map[string]any{"tag": "plain_text", "content": b.Label},
+			"type": "primary",
+			"value": map[string]string{
+				"button_id": b.ID,
+			},
+		})
+	}
+
+	// Build the card with text content + button group.
+	card := map[string]any{
+		"schema": "2.0",
+		"config": map[string]any{"wide_screen_mode": true},
+		"body": map[string]any{
+			"elements": []any{
+				map[string]any{"tag": "markdown", "content": text},
+				map[string]any{
+					"tag":     "action",
+					"actions": btnElements,
+				},
+			},
+		},
+	}
+	content, _ := json.Marshal(card)
+
+	msgID, err := a.sendRaw(chatID, "interactive", string(content), replyTo)
+	if err != nil {
+		return channel.SendResult{OK: false, Error: err.Error()}
+	}
+	return channel.SendResult{OK: true, MessageID: msgID}
+}
+
 // ValidateConfig checks required fields.
 func (a *Adapter) ValidateConfig(cfg channel.PlatformConfig) []string {
 	var errs []string
@@ -482,14 +524,33 @@ type msgContent struct {
 // feishuDocURLRe matches Feishu document URLs (docx, docs, wiki).
 var feishuDocURLRe = regexp.MustCompile(`https://[^/]+\.feishu\.cn/(docx|docs|wiki)/([A-Za-z0-9]+)`)
 
+// fsEventHeader is the common header parsed from every Feishu event to
+// determine its type before dispatching to the specific handler.
+type fsEventHeader struct {
+	Header struct {
+		EventType string `json:"event_type"`
+	} `json:"header"`
+}
+
 func (a *Adapter) handleEvent(raw json.RawMessage, onMessage func(channel.InboundEvent)) {
-	var ev fsEvent
-	if err := json.Unmarshal(raw, &ev); err != nil {
-		log.Printf("[feishu] unmarshal event: %v", err)
+	var hdr fsEventHeader
+	if err := json.Unmarshal(raw, &hdr); err != nil {
+		log.Printf("[feishu] unmarshal event header: %v", err)
 		return
 	}
 
-	if ev.Header.EventType != "im.message.receive_v1" {
+	switch hdr.Header.EventType {
+	case "im.message.receive_v1":
+		a.handleMessageEvent(raw, onMessage)
+	case "card.action.trigger":
+		a.handleCardAction(raw, onMessage)
+	}
+}
+
+func (a *Adapter) handleMessageEvent(raw json.RawMessage, onMessage func(channel.InboundEvent)) {
+	var ev fsEvent
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		log.Printf("[feishu] unmarshal message event: %v", err)
 		return
 	}
 
@@ -590,6 +651,65 @@ func (a *Adapter) handleEvent(raw json.RawMessage, onMessage func(channel.Inboun
 		Files:     files,
 		MessageID: msg.MessageID,
 		ChatType:  chatType,
+		Raw:       ev,
+	})
+}
+
+// handleCardAction processes a Feishu card button press event. The event
+// payload carries the button's value (which includes button_id) and the
+// operator's identity. Routes the press as an InboundEvent with ButtonID set.
+func (a *Adapter) handleCardAction(raw json.RawMessage, onMessage func(channel.InboundEvent)) {
+	var ev struct {
+		Event struct {
+			Action struct {
+				Value map[string]string `json:"value"`
+				Tag   string            `json:"tag"`
+			} `json:"action"`
+			Operator struct {
+				OpenID string `json:"open_id"`
+			} `json:"operator"`
+			Message struct {
+				MessageID string `json:"message_id"`
+				ChatID    string `json:"chat_id"`
+			} `json:"message"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		log.Printf("[feishu] unmarshal card action event: %v", err)
+		return
+	}
+
+	if ev.Event.Action.Tag != "button" {
+		return
+	}
+
+	senderID := ev.Event.Operator.OpenID
+	if senderID == "" {
+		return
+	}
+	if len(a.allowedUsers) > 0 && !a.allowedUsers[senderID] {
+		return
+	}
+
+	chatID := ev.Event.Message.ChatID
+	if chatID == "" {
+		return
+	}
+
+	buttonID := ev.Event.Action.Value["button_id"]
+	if buttonID == "" {
+		return
+	}
+
+	log.Printf("[feishu] card action from user %s: %s", senderID, buttonID)
+	onMessage(channel.InboundEvent{
+		Type:      "message",
+		Platform:  platformName,
+		ChatID:    chatID,
+		UserID:    senderID,
+		MessageID: ev.Event.Message.MessageID,
+		ButtonID:  buttonID,
+		ChatType:  "direct",
 		Raw:       ev,
 	})
 }

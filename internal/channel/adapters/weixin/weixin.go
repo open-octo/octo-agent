@@ -641,6 +641,13 @@ func (a *Adapter) Flush(chatID string) {
 	}
 }
 
+func (a *Adapter) SupportsButtons() bool { return false }
+
+func (a *Adapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	// Fall back to plain text — Weixin doesn't support interactive buttons.
+	return a.SendText(chatID, text, replyTo)
+}
+
 // SendTyping triggers a typing indicator and starts keepalive.
 func (a *Adapter) SendTyping(chatID, contextToken string) error {
 	if a.bot == nil || a.bot.creds == nil {

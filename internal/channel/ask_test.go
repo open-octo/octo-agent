@@ -109,3 +109,118 @@ func TestSession_WrongUserOrChatNotConsumed(t *testing.T) {
 		t.Fatal("reply not delivered")
 	}
 }
+
+func TestSession_SetAskButtonsOnly_BlocksDeliverAskReply(t *testing.T) {
+	sess := &Session{}
+	replyCh, release, err := sess.BeginAsk("c1", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	sess.SetAskButtonsOnly()
+
+	// DeliverAskReply must return false when askButtonsOnly is set.
+	if sess.DeliverAskReply("c1", "u1", "yes") {
+		t.Error("DeliverAskReply must return false when askButtonsOnly is true")
+	}
+
+	// DeliverAskButton must still work.
+	if !sess.DeliverAskButton("c1", "u1", "allow") {
+		t.Fatal("DeliverAskButton must consume when askButtonsOnly is set")
+	}
+	select {
+	case got := <-replyCh:
+		if got != "allow" {
+			t.Errorf("button reply = %q, want %q", got, "allow")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("button reply not delivered to the ask channel")
+	}
+}
+
+func TestSession_DeliverAskButton_Consumed(t *testing.T) {
+	sess := &Session{}
+	replyCh, release, err := sess.BeginAsk("c1", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	if !sess.DeliverAskButton("c1", "u1", "allow") {
+		t.Fatal("DeliverAskButton should consume when ask is pending")
+	}
+	select {
+	case got := <-replyCh:
+		if got != "allow" {
+			t.Errorf("button reply = %q, want %q", got, "allow")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("button reply not delivered")
+	}
+}
+
+func TestSession_DeliverAskButton_WithoutPendingAsk(t *testing.T) {
+	sess := &Session{}
+	if sess.DeliverAskButton("c1", "u1", "allow") {
+		t.Error("DeliverAskButton must return false with no pending ask")
+	}
+}
+
+func TestSession_DeliverAskButton_WrongUserOrChat(t *testing.T) {
+	sess := &Session{}
+	replyCh, release, err := sess.BeginAsk("c1", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	if sess.DeliverAskButton("c1", "u2", "allow") {
+		t.Error("another user's button press must not consume")
+	}
+	if sess.DeliverAskButton("c2", "u1", "allow") {
+		t.Error("a button press from another chat must not consume")
+	}
+	// The rightful answer still lands.
+	if !sess.DeliverAskButton("c1", "u1", "allow") {
+		t.Fatal("the requester's button press should be consumed")
+	}
+	select {
+	case got := <-replyCh:
+		if got != "allow" {
+			t.Errorf("button reply = %q, want allow", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("button reply not delivered")
+	}
+}
+
+func TestSession_AskButtonsOnlyReleased_BeforeNextAsk(t *testing.T) {
+	sess := &Session{}
+	_, release, err := sess.BeginAsk("c1", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.SetAskButtonsOnly()
+	release()
+
+	// Next ask (text mode) must work normally — askButtonsOnly should be false
+	// because the previous ask was released.
+	replyCh, release2, err := sess.BeginAsk("c1", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release2()
+
+	if !sess.DeliverAskReply("c1", "u1", "yes") {
+		t.Error("DeliverAskReply must work after a released buttons-only ask")
+	}
+	select {
+	case got := <-replyCh:
+		if got != "yes" {
+			t.Errorf("reply = %q, want yes", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reply not delivered")
+	}
+}

@@ -101,7 +101,11 @@ func (m *mockAdapter) SupportsMessageUpdates() bool                 { return !m.
 func (m *mockAdapter) SendTyping(chatID, contextToken string) error { return nil }
 func (m *mockAdapter) StopTyping(chatID, contextToken string) error { return nil }
 func (m *mockAdapter) Flush(chatID string)                          {}
-func (m *mockAdapter) ValidateConfig(cfg PlatformConfig) []string   { return m.validateErrs }
+func (m *mockAdapter) SupportsButtons() bool                        { return false }
+func (m *mockAdapter) SendButtons(chatID, text string, buttons []Button, replyTo string) SendResult {
+	return m.SendText(chatID, text, replyTo)
+}
+func (m *mockAdapter) ValidateConfig(cfg PlatformConfig) []string { return m.validateErrs }
 
 func (m *mockAdapter) sentTextCount() int {
 	m.mu.Lock()

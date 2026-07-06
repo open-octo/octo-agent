@@ -43,7 +43,11 @@ func (a *typingCountAdapter) StopTyping(chatID, contextToken string) error {
 	a.stopTyping++
 	return nil
 }
-func (a *typingCountAdapter) Flush(chatID string)                            {}
+func (a *typingCountAdapter) Flush(chatID string)   {}
+func (a *typingCountAdapter) SupportsButtons() bool { return false }
+func (a *typingCountAdapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	return channel.SendResult{OK: true}
+}
 func (a *typingCountAdapter) ValidateConfig(channel.PlatformConfig) []string { return nil }
 
 func (a *typingCountAdapter) counts() (sendTyping, stopTyping int) {

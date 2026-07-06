@@ -76,14 +76,18 @@ type Session struct {
 	cancelMu  sync.Mutex
 	runCancel context.CancelFunc
 
-	// pendingAsk, while non-nil, claims the session's next plain message as
+	// pendingAsk, while non-nil, claims the session's next message as
 	// the answer to an interactive permission prompt (see ask.go). Guarded by
 	// askMu, not runMu — the reply arrives while the asking turn holds runMu.
 	// askChatID/askUserID pin which chat+user may answer.
-	askMu      sync.Mutex
-	pendingAsk chan string
-	askChatID  string
-	askUserID  string
+	// askButtonsOnly, when true, prevents DeliverAskReply from consuming plain
+	// text messages — only button callbacks (via DeliverAskButton) resolve the
+	// ask (#1120).
+	askMu          sync.Mutex
+	pendingAsk     chan string
+	askChatID      string
+	askUserID      string
+	askButtonsOnly bool
 }
 
 // BeginRun prepares one agent turn: it blocks until any previous turn in this

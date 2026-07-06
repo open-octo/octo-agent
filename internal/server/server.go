@@ -2186,6 +2186,17 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 	if s.handleChannelCommand(ad, ev) {
 		return
 	}
+	// Button events (e.g. inline keyboard presses on Telegram, component
+	// clicks on Discord, card actions on Feishu) answer a pending ask directly,
+	// bypassing the text-based DeliverAskReply path. Button events are routed
+	// before plain text so they work even when askButtonsOnly is set.
+	if ev.ButtonID != "" {
+		if sess := s.channelMgr.GetSession(ev); sess != nil {
+			if sess.DeliverAskButton(ev.ChatID, ev.UserID, ev.ButtonID) {
+				return
+			}
+		}
+	}
 	// Text-less events (stickers, images, voice) never answer an ask or
 	// steer — an empty reply would consume the ask slot and deny for
 	// nothing, and an empty steer adds noise.

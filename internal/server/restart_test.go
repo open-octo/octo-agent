@@ -258,6 +258,25 @@ func (a *drainTestAdapter) texts() []string {
 	return append([]string(nil), a.sent...)
 }
 
+func (a *drainTestAdapter) Platform() string { return "drain" }
+func (a *drainTestAdapter) Start(context.Context, func(channel.InboundEvent)) error {
+	select {}
+}
+func (a *drainTestAdapter) Stop() error { return nil }
+func (a *drainTestAdapter) SendFile(chatID, path, name, replyTo string) channel.SendResult {
+	return channel.SendResult{}
+}
+func (a *drainTestAdapter) UpdateMessage(chatID, messageID, text string) bool { return false }
+func (a *drainTestAdapter) SupportsMessageUpdates() bool                      { return false }
+func (a *drainTestAdapter) SupportsButtons() bool                             { return false }
+func (a *drainTestAdapter) SendButtons(chatID, text string, buttons []channel.Button, replyTo string) channel.SendResult {
+	return channel.SendResult{}
+}
+func (a *drainTestAdapter) SendTyping(chatID, contextToken string) error       { return nil }
+func (a *drainTestAdapter) StopTyping(chatID, contextToken string) error       { return nil }
+func (a *drainTestAdapter) Flush(chatID string)                                {}
+func (a *drainTestAdapter) ValidateConfig(cfg channel.PlatformConfig) []string { return nil }
+
 // TestHandleChannelMessage_DrainingRepliesPolitely pins the design deviation:
 // IM adapters stay up through the drain, and a message arriving mid-drain
 // gets an explicit "try again" reply instead of being dropped silently.
