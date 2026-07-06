@@ -199,6 +199,96 @@ func TestRunAgent(t *testing.T) {
 	}
 }
 
+// queuedToolSender returns a scripted Reply sequence, repeating the last one
+// once exhausted.
+type queuedToolSender struct {
+	i       int
+	replies []agent.Reply
+}
+
+func (q *queuedToolSender) SendMessages(ctx context.Context, model, system string, messages []agent.Message, maxTokens int) (agent.Reply, error) {
+	return q.next(), nil
+}
+
+func (q *queuedToolSender) SendMessagesWithTools(ctx context.Context, model, system string, messages []agent.Message, maxTokens int, tools []agent.ToolDefinition) (agent.Reply, error) {
+	return q.next(), nil
+}
+
+func (q *queuedToolSender) next() agent.Reply {
+	r := q.replies[q.i]
+	if q.i < len(q.replies)-1 {
+		q.i++
+	}
+	return r
+}
+
+// recordingExecutor asserts, at the moment a tool call actually runs, that
+// its triggering tool_use block is already durably saved to disk — the
+// crash-safety guarantee RunAgent's incremental persistence exists for.
+type recordingExecutor struct {
+	t       *testing.T
+	storeID string
+	ran     bool
+}
+
+func (e *recordingExecutor) Execute(ctx context.Context, name string, input map[string]any) (agent.ToolResult, error) {
+	e.ran = true
+	reloaded, err := agent.LoadSession(e.storeID)
+	if err != nil {
+		e.t.Fatalf("LoadSession before tool executed: %v", err)
+	}
+	for _, m := range reloaded.Messages {
+		for _, b := range m.Blocks {
+			if b.Type == "tool_use" && b.Name == name {
+				return agent.ToolResult{Text: "done"}, nil
+			}
+		}
+	}
+	e.t.Fatalf("tool_use for %q not found on disk before the tool executed", name)
+	return agent.ToolResult{}, nil
+}
+
+// TestRunAgent_PersistsToolUseBeforeToolExecutes verifies the incremental
+// persistence RunAgent now does: a tool_use block must be flushed to disk
+// before the tool it names actually runs, so a process crash mid-turn loses
+// at most the round in flight, not evidence of tool calls whose side effects
+// already happened.
+func TestRunAgent_PersistsToolUseBeforeToolExecutes(t *testing.T) {
+	tempHome(t)
+	mock := &mockAdapter{platform: "mock"}
+	ctrl := NewUIController(mock, "chat1", "", nil)
+
+	store := agent.NewSession("test-model", "")
+	if err := store.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	sess := &Session{
+		Key: "test",
+		Agent: agent.New(&queuedToolSender{replies: []agent.Reply{
+			{StopReason: "tool_use", Blocks: []agent.ContentBlock{
+				{Type: "tool_use", ID: "call1", Name: "test_tool", Input: map[string]any{}},
+			}},
+			{Content: "done", StopReason: "end_turn"},
+		}}, "test-model"),
+		Store:  store,
+		ChatID: "chat1",
+	}
+	exec := &recordingExecutor{t: t, storeID: store.ID}
+	tools := []agent.ToolDefinition{{Name: "test_tool", Description: "test", Parameters: map[string]any{"type": "object"}}}
+
+	reply, err := RunAgent(context.Background(), sess, tools, exec, ctrl, "hello")
+	if err != nil {
+		t.Fatalf("RunAgent error: %v", err)
+	}
+	if reply.Content != "done" {
+		t.Fatalf("unexpected reply: %q", reply.Content)
+	}
+	if !exec.ran {
+		t.Fatal("tool executor never ran")
+	}
+}
+
 // A multi-flush reply on an update-capable platform (Telegram/Discord/Feishu)
 // must edit the message with the FULL text streamed so far — an edit carrying
 // only the newest chunk would erase what the user already read (#1115).
