@@ -2,14 +2,18 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tui"
 )
 
@@ -25,7 +29,30 @@ func (f *fakeProg) Send(m tea.Msg) {
 	f.mu.Unlock()
 }
 
+var (
+	testHistoryDirOnce sync.Once
+	testHistoryDir     string
+	testHistorySeq     atomic.Int64
+)
+
+// isolateTestInputHistory points OCTO_INPUT_HISTORY_FILE at a fresh,
+// nonexistent path per call, so newTestModel never reads or writes the
+// developer's real ~/.octo/input_history, and successive tests in this
+// package don't leak history entries into each other.
+func isolateTestInputHistory() {
+	testHistoryDirOnce.Do(func() {
+		if d, err := os.MkdirTemp("", "octo-tui-test-history"); err == nil {
+			testHistoryDir = d
+		}
+	})
+	if testHistoryDir == "" {
+		return
+	}
+	os.Setenv("OCTO_INPUT_HISTORY_FILE", filepath.Join(testHistoryDir, fmt.Sprintf("h%d", testHistorySeq.Add(1))))
+}
+
 func newTestModel() *tuiModel {
+	isolateTestInputHistory()
 	a := agent.New(&stubSender{reply: "ok"}, "m")
 	m := newTUIModel(replConfig{a: a, noSave: true})
 	m.sink = &tuiSink{prog: &fakeProg{}}
@@ -263,6 +290,93 @@ func TestTUI_ToolInputStreamProgress(t *testing.T) {
 	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "write_file", Input: map[string]any{"path": "x.html"}})
 	if m.toolStreamName != "" || m.toolStreamBytes != 0 {
 		t.Errorf("EventToolStarted should clear the stream readout; name=%q bytes=%d", m.toolStreamName, m.toolStreamBytes)
+	}
+}
+
+// A running terminal command's live output shows as a dimmed tail under the
+// spinner (issue #1094) instead of vanishing until the done card commits.
+func TestTUI_RunningToolShowsLiveTail(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+
+	m.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal",
+		Input: map[string]any{"command": "make test"},
+	})
+	if m.running == nil {
+		t.Fatal("EventToolStarted should set m.running")
+	}
+
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: "compiling..."})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: "running tests"})
+
+	out := stripANSI(m.View())
+	if !strings.Contains(out, "compiling...") || !strings.Contains(out, "running tests") {
+		t.Errorf("view should show the streamed tail; got:\n%s", out)
+	}
+	if len(m.printlnBuf) != 0 {
+		t.Errorf("rich TUI must not commit progress to the scrollback, got %v", m.printlnBuf)
+	}
+
+	// The tail is capped — older lines fall off once it exceeds the cap.
+	for i := 0; i < runningTailMaxLines+2; i++ {
+		m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: fmt.Sprintf("line-%d", i)})
+	}
+	if len(m.running.tail) != runningTailMaxLines {
+		t.Fatalf("tail length = %d, want %d", len(m.running.tail), runningTailMaxLines)
+	}
+	if m.running.tail[len(m.running.tail)-1] != fmt.Sprintf("line-%d", runningTailMaxLines+1) {
+		t.Errorf("tail should keep the most recent lines, got %v", m.running.tail)
+	}
+
+	// The done card clears the live indicator, and with it the tail.
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "c1", Output: "ok"})
+	if m.running != nil {
+		t.Error("EventToolDone should clear m.running (and its tail)")
+	}
+}
+
+// A command's streamed chunk is raw stdout/stderr — a stray \r or ESC must
+// not reach the terminal unsanitized (the same control-byte injection
+// surface #1101/#1104 closed for tool results/inputs), or it could overwrite
+// the spinner line or spoof displayed text.
+func TestTUI_RunningToolTailSanitizesControlBytes(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+
+	m.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal",
+		Input: map[string]any{"command": "malicious"},
+	})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: "ok\rSPOOFED"})
+
+	if m.running == nil || len(m.running.tail) != 1 {
+		t.Fatalf("expected one tail line, got %+v", m.running)
+	}
+	if strings.ContainsRune(m.running.tail[0], '\r') {
+		t.Errorf("raw \\r reached the live tail: %q", m.running.tail[0])
+	}
+	if !strings.Contains(m.running.tail[0], "SPOOFED") || !strings.Contains(m.running.tail[0], "ok") {
+		t.Errorf("sanitized content should keep both halves visible: %q", m.running.tail[0])
+	}
+}
+
+// --plain keeps its existing dense one-line-per-chunk behavior; progress
+// commits straight to the scrollback instead of a live tail (design decision
+// #8: the plain path never renders live/animated state).
+func TestTUI_PlainModeProgressUnchanged(t *testing.T) {
+	m := newTestModel()
+	m.cfg.plain = true
+	m.turnRunning = true
+
+	m.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal",
+		Input: map[string]any{"command": "make test"},
+	})
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: "compiling..."})
+
+	if len(m.printlnBuf) == 0 || !strings.Contains(m.printlnBuf[len(m.printlnBuf)-1], "compiling...") {
+		t.Fatalf("plain mode should commit progress to the scrollback, got %v", m.printlnBuf)
 	}
 }
 
@@ -587,6 +701,58 @@ func TestTUI_ReplayHistoryLines_FreshSessionEmpty(t *testing.T) {
 	}
 }
 
+// A resumed session with more than replayMaxTurns turns only replays the
+// most recent ones, plus a single omission line for the rest — otherwise a
+// few-hundred-turn session floods the terminal on resume (#1097).
+func TestTUI_ReplayHistoryLines_CapsOldTurns(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	h := m.a.History
+	total := replayMaxTurns + 5
+	for i := 0; i < total; i++ {
+		h.Append(agent.NewUserMessage(fmt.Sprintf("turn %d", i)))
+		h.Append(agent.NewAssistantMessage(fmt.Sprintf("reply %d", i)))
+	}
+
+	joined := stripANSI(strings.Join(m.replayHistoryLines(), "\n"))
+
+	if !strings.Contains(joined, "earlier history omitted (5 turns)") {
+		t.Errorf("missing omission line for the 5 dropped turns; got:\n%s", joined)
+	}
+	// The oldest turns are gone...
+	if strings.Contains(joined, "turn 0") {
+		t.Errorf("oldest turn should have been dropped; got:\n%s", joined)
+	}
+	// ...but the most recent replayMaxTurns are kept.
+	if !strings.Contains(joined, fmt.Sprintf("turn %d", total-1)) {
+		t.Errorf("newest turn should be replayed; got:\n%s", joined)
+	}
+	if !strings.Contains(joined, fmt.Sprintf("turn %d", total-replayMaxTurns)) {
+		t.Errorf("first kept turn should be replayed; got:\n%s", joined)
+	}
+}
+
+// TestTUI_ReplayHistoryLines_SingularOmission checks the omission line's
+// singular/plural wording at the exact cap+1 boundary ("1 turn", not "1 turns").
+func TestTUI_ReplayHistoryLines_SingularOmission(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	h := m.a.History
+	total := replayMaxTurns + 1
+	for i := 0; i < total; i++ {
+		h.Append(agent.NewUserMessage(fmt.Sprintf("turn %d", i)))
+		h.Append(agent.NewAssistantMessage(fmt.Sprintf("reply %d", i)))
+	}
+
+	joined := stripANSI(strings.Join(m.replayHistoryLines(), "\n"))
+	if !strings.Contains(joined, "earlier history omitted (1 turn)") {
+		t.Errorf("want singular '1 turn' in omission line; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "1 turns") {
+		t.Errorf("wrong plural for a single omitted turn; got:\n%s", joined)
+	}
+}
+
 // A failed tool call replays as its live error card, carrying the real error
 // message (the regression: the old collapsed line dropped it).
 func TestTUI_ReplayHistoryLines_ToolError(t *testing.T) {
@@ -768,6 +934,37 @@ func TestTUI_QuestionModalOtherFreeText(t *testing.T) {
 	}
 }
 
+// The "Other" free-text field is a real textinput.Model, not an
+// append/backspace-only buffer — it must support moving the cursor and
+// inserting/deleting in the middle of the text (#1097).
+func TestTUI_QuestionModalOtherCursorMovement(t *testing.T) {
+	m := newTestModel()
+	resp := make(chan UserResponse, 1)
+	m.openModal(askMsg{prompt: UserPrompt{
+		Kind:     KindQuestion,
+		Question: "pick",
+		Options:  []string{"alpha"},
+	}, resp: resp})
+
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.modal.otherActive {
+		t.Fatal("selecting Other should activate free-text input")
+	}
+
+	// Type "acd", move left twice (cursor between 'a' and 'c'), insert 'b'.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a', 'c', 'd'}})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	got := <-resp
+	if got.Custom != "abcd" {
+		t.Errorf("custom = %q, want abcd (cursor movement should allow mid-string insert)", got.Custom)
+	}
+}
+
 func TestTUI_QuestionModalOtherEmptyCancels(t *testing.T) {
 	m := newTestModel()
 	resp := make(chan UserResponse, 1)
@@ -940,6 +1137,31 @@ func TestTUI_ThinkingNeverShownInTerminal(t *testing.T) {
 	}
 }
 
+// Shift+Tab must cycle through all three permission modes, including strict —
+// previously it only toggled interactive/auto, leaving strict unreachable
+// from the keyboard (#1097).
+func TestTUI_ShiftTabCyclesAllPermissionModes(t *testing.T) {
+	eng, err := permission.New("", t.TempDir(), permission.ModeInteractive)
+	if err != nil {
+		t.Fatalf("permission.New: %v", err)
+	}
+	m := newTestModel()
+	m.cfg.permEngine = eng
+
+	want := []permission.Mode{
+		permission.ModeAutoApprove,
+		permission.ModeStrict,
+		permission.ModeInteractive,
+	}
+	for _, w := range want {
+		m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+		m = m2.(*tuiModel)
+		if got := eng.GetMode(); got != w {
+			t.Errorf("mode = %q, want %q", got, w)
+		}
+	}
+}
+
 // TestTUI_InputFold_TabToggles tests that Tab toggles the folded state
 // when there are >= 5 lines of input.
 func TestTUI_InputFold_TabToggles(t *testing.T) {
@@ -977,6 +1199,27 @@ func TestTUI_InputFold_TabToggles(t *testing.T) {
 	}
 	if m.foldedFullText != "" {
 		t.Error("foldedFullText should be cleared after expand")
+	}
+}
+
+// TestTUI_InputFold_NoStrayTab guards against Tab leaking a literal tab
+// character into foldedFullText: the fold check must run before the
+// keypress reaches the textarea, not after (#1097).
+func TestTUI_InputFold_NoStrayTab(t *testing.T) {
+	m := newTestModel()
+	multiLine := "line1\nline2\nline3\nline4\nline5"
+	setInput(m, multiLine)
+
+	m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+	if !m.inputFolded {
+		t.Fatal("Tab should fold multi-line input")
+	}
+	if strings.Contains(m.foldedFullText, "\t") {
+		t.Errorf("foldedFullText contains a stray tab: %q", m.foldedFullText)
+	}
+	if m.foldedFullText != multiLine {
+		t.Errorf("foldedFullText = %q, want %q", m.foldedFullText, multiLine)
 	}
 }
 
@@ -1090,6 +1333,26 @@ func TestTUI_InputFold_FourLinesNoFold(t *testing.T) {
 	m = m2.(*tuiModel)
 	if m.inputFolded {
 		t.Error("4-line input should not fold (threshold is 5)")
+	}
+}
+
+// TestTUI_InputFold_ShortTextTabFallsThroughToTextarea guards the non-fold
+// path after the #1097 reorder: Tab on short (<5 line) input must still
+// reach the textarea's own Update instead of being swallowed entirely by
+// the fold-check, leaving the value unchanged and unfolded.
+func TestTUI_InputFold_ShortTextTabFallsThroughToTextarea(t *testing.T) {
+	m := newTestModel()
+	setInput(m, "short")
+	before := m.ta.Value()
+
+	m2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = m2.(*tuiModel)
+
+	if m.inputFolded {
+		t.Error("short input should not fold")
+	}
+	if m.ta.Value() != before {
+		t.Errorf("textarea value = %q, want unchanged %q", m.ta.Value(), before)
 	}
 }
 

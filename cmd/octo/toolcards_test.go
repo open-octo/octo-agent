@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -79,6 +80,72 @@ func TestRenderToolCard_Dispatch(t *testing.T) {
 	// non-card tool → "".
 	if got := renderToolCard("sub_agent", map[string]any{}, "x", false, 0, 0); got != "" {
 		t.Errorf("non-card tool should return \"\"; got %q", got)
+	}
+}
+
+func TestRenderToolCard_ReadFileIsOneLiner(t *testing.T) {
+	// A content preview is near-zero information (usually package/imports);
+	// a successful read_file renders a one-line status with the line count
+	// instead (#1097).
+	output := "     1\tpackage main\n     2\t\n     3\tfunc main() {}\n\n[end of file: 3 lines total]\n"
+	got := renderToolCard("read_file", map[string]any{"path": "main.go"}, output, false, 0, 0)
+	if !strings.Contains(got, "Read(main.go)") {
+		t.Errorf("missing header; got:\n%s", got)
+	}
+	if !strings.Contains(got, "3 lines") {
+		t.Errorf("missing line count; got:\n%s", got)
+	}
+	if strings.Contains(got, "package main") {
+		t.Errorf("should not preview file content anymore; got:\n%s", got)
+	}
+	// A read this small has nothing folded/hidden behind a link — spilling it
+	// to disk anyway would needlessly widen every file read into a plaintext
+	// copy under ~/.octo/tmp for no reason (#1097 review feedback).
+	if strings.Contains(got, "\x1b]8;;") {
+		t.Errorf("a short read should not spill to disk or link; got:\n%s", got)
+	}
+
+	// read_file errors keep the generic short-preview card (the output is an
+	// error message, not file content worth folding). Chroma highlights each
+	// word separately, so check a single token rather than the full phrase.
+	errGot := renderToolCard("read_file", map[string]any{"path": "main.go"}, "no such file", true, 0, 0)
+	if !strings.Contains(errGot, "file") {
+		t.Errorf("error card should still show the error text; got:\n%s", errGot)
+	}
+}
+
+// TestRenderToolCard_ReadFileLargeGetsLink checks the flip side of the
+// gating above: a read past the fold threshold DOES get a click-to-open
+// link, since its content genuinely isn't visible in the one-liner.
+func TestRenderToolCard_ReadFileLargeGetsLink(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 20; i++ {
+		lines = append(lines, fmt.Sprintf("%6d\tline %d", i, i))
+	}
+	output := strings.Join(lines, "\n") + "\n\n[end of file: 20 lines total]\n"
+	got := renderToolCard("read_file", map[string]any{"path": "big.go"}, output, false, 0, 0)
+	if !strings.Contains(got, "20 lines") {
+		t.Errorf("missing line count; got:\n%s", got)
+	}
+	if !strings.Contains(got, "\x1b]8;;") {
+		t.Errorf("a large read should link to the spilled full content; got:\n%s", got)
+	}
+}
+
+func TestReadFileLineCount(t *testing.T) {
+	cases := []struct {
+		name, output string
+		want         int
+	}{
+		{"normal", "     1\ta\n     2\tb\n\n[end of file: 2 lines total]\n", 2},
+		{"truncated", "     1\ta\n\n[truncated: shown lines 1-1. Next unread line is 2. Continue with offset=2 if needed.]\n", 1},
+		{"empty file", "[empty file]", 0},
+		{"past end", "[end of file: 5 lines total. Offset 9 is past the end — no more content to read.]", 0},
+	}
+	for _, c := range cases {
+		if got := readFileLineCount(c.output); got != c.want {
+			t.Errorf("%s: readFileLineCount = %d, want %d", c.name, got, c.want)
+		}
 	}
 }
 

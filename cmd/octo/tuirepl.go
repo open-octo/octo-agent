@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -194,7 +195,9 @@ const tickInterval = 120 * time.Millisecond
 
 // answerSprintDur is how long the wait-on-model line holds the first answer
 // deltas while the ↓ token counter sprints, before releasing the prose.
-const answerSprintDur = 280 * time.Millisecond
+// Halved from an original 280ms (#1097): the flourish is still visible but
+// adds noticeably less perceived latency to the first answer tokens.
+const answerSprintDur = 140 * time.Millisecond
 
 // answerSprintMinChars gates the sprint: only turns with a real reasoning /
 // uplink phase get the flourish, so a quick direct reply isn't delayed.
@@ -295,9 +298,11 @@ type tuiModel struct {
 	// ta is the multi-line text input (bubbles/textarea).
 	ta textarea.Model
 
-	// inputHistory stores submitted lines for ↑/↓ recall.
+	// inputHistory stores submitted lines for ↑/↓ recall, seeded from and
+	// appended to historyFile so it survives restart.
 	inputHistory    []string
-	inputHistoryIdx int // -1 = not browsing, 0..len-1 = browsing
+	inputHistoryIdx int    // -1 = not browsing, 0..len-1 = browsing
+	historyFile     string // path from defaultInputHistoryFile(); "" disables persistence
 	// inputDraft holds the text that was in the input box before the user
 	// started browsing history with ↑, so ↓ can restore it.
 	inputDraft string
@@ -527,7 +532,16 @@ type runningTool struct {
 	verb   string
 	target string
 	start  time.Time
+	// tail holds the last few lines of streamed output (StreamingToolExecutor
+	// tools only — currently just terminal) so the live spinner can show a
+	// dimmed preview of what's happening during a long-running command
+	// instead of going dark (issue #1094). Capped at runningTailMaxLines.
+	tail []string
 }
+
+// runningTailMaxLines bounds the live preview under the spinner to a few
+// lines — enough to show the command is progressing, not a full replay.
+const runningTailMaxLines = 3
 
 // modalState renders a permission / question prompt and collects the answer.
 type modalState struct {
@@ -539,9 +553,12 @@ type modalState struct {
 	options  []string // rendered option labels (questions only)
 	selected map[int]bool
 	// otherActive is true when the user has selected "Other" and is now typing
-	// free text inline inside the modal.
+	// free text inline inside the modal. otherInput is a real textinput.Model
+	// (not a hand-rolled append/backspace buffer) so it gets cursor movement,
+	// word-jump, and delete-forward for free, matching the main input box's
+	// editing quality (#1097).
 	otherActive bool
-	otherInput  string
+	otherInput  textinput.Model
 	// detail caches the rendered permission body (detailWidth is the width it
 	// was rendered for; detailSet distinguishes "not rendered yet" from a
 	// legitimate width of 0). View() runs on every spinner tick while the
@@ -575,7 +592,8 @@ func newTUIModel(cfg replConfig) *tuiModel {
 	if !tui.IsDark() {
 		style = "light"
 	}
-	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistoryIdx: -1, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, workflows: map[string]*workflowUI{}}
+	historyFile := defaultInputHistoryFile()
+	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistory: loadInputHistory(historyFile), inputHistoryIdx: -1, historyFile: historyFile, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, workflows: map[string]*workflowUI{}}
 	// Seed the last-seen goal status so a resumed session's first transition
 	// (e.g. the budget crossing) prints its notice instead of being treated
 	// as the baseline.
@@ -1385,10 +1403,23 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		return
 
 	case agent.EventToolProgress:
-		// Rich TUI: progress is deferred to the done card / status line so the
-		// transcript stays quiet; the live spinner already shows activity.
+		// Rich TUI: keep a dimmed tail under the live spinner (see View) instead
+		// of committing to the transcript — the done card/status line still
+		// carries the full output once the call finishes. The chunk is raw
+		// command stdout/stderr — sanitize before it ever reaches the terminal,
+		// the same control-byte injection surface #1101/#1104 closed for tool
+		// results and inputs (a stray ESC could move the cursor or erase the
+		// "[Ctrl+B] background" hint on the next line).
+		chunk := boundProgressChunk(sanitizeForPrompt(ev.Chunk))
 		if m.cfg.plain {
-			m.commitToolLine("│ " + boundProgressChunk(ev.Chunk))
+			m.commitToolLine("│ " + chunk)
+			return
+		}
+		if m.running != nil && chunk != "" {
+			m.running.tail = append(m.running.tail, chunk)
+			if n := len(m.running.tail) - runningTailMaxLines; n > 0 {
+				m.running.tail = m.running.tail[n:]
+			}
 		}
 		return
 
@@ -1625,13 +1656,19 @@ func (m *tuiModel) recentToolCalls(n int) []toolCallRecord {
 	return all
 }
 
+// replayMaxTurns caps how many of a resumed session's most recent turns are
+// replayed into scrollback; older turns collapse into a single omission line.
+// Without a cap a few-hundred-turn session floods the terminal on resume,
+// before the user can even type (#1097).
+const replayMaxTurns = 20
+
 // replayHistoryLines renders a resumed session's prior turns into scrollback
 // lines exactly as they appeared live: user prompts and assistant replies
 // verbatim (markdown unless --plain), tool calls through the same
 // renderToolOutcome path as the live done/error events (rich cards, status
 // lines, full error text). Returns nil for a fresh session (empty history).
 func (m *tuiModel) replayHistoryLines() []string {
-	msgs := m.a.History.Snapshot()
+	msgs, omitted := recentTurns(m.a.History.Snapshot(), replayMaxTurns)
 	if len(msgs) == 0 {
 		return nil
 	}
@@ -1647,6 +1684,13 @@ func (m *tuiModel) replayHistoryLines() []string {
 	}
 
 	var out []string
+	if omitted > 0 {
+		word := "turn"
+		if omitted != 1 {
+			word = "turns"
+		}
+		out = append(out, hintStyle.Render(fmt.Sprintf("… earlier history omitted (%d %s)", omitted, word)))
+	}
 	for _, msg := range msgs {
 		switch msg.Role {
 		case agent.RoleUser:
@@ -1677,6 +1721,28 @@ func (m *tuiModel) replayHistoryLines() []string {
 		}
 	}
 	return out
+}
+
+// recentTurns splits msgs into turns — a RoleUser message plus everything
+// up to (not including) the next one — and returns only the last max turns,
+// plus how many leading turns were dropped. Any messages before the first
+// RoleUser message (there shouldn't be any in practice) are kept attached to
+// the first turn rather than silently dropped. max <= 0 disables the cap.
+func recentTurns(msgs []agent.Message, max int) ([]agent.Message, int) {
+	if max <= 0 || len(msgs) == 0 {
+		return msgs, 0
+	}
+	var bounds []int
+	for i, msg := range msgs {
+		if msg.Role == agent.RoleUser {
+			bounds = append(bounds, i)
+		}
+	}
+	if len(bounds) <= max {
+		return msgs, 0
+	}
+	start := bounds[len(bounds)-max]
+	return msgs[start:], len(bounds) - max
 }
 
 // renderReplayText styles one block of restored assistant/user prose: markdown

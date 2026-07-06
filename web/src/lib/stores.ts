@@ -281,6 +281,12 @@ export function updateToolResult(sessionId: string, toolId: string | undefined, 
 // "last tool in the group" (the previous behavior) mis-routes output for
 // parallel/interleaved tool calls, same class of bug pickToolIndex already
 // fixes for results and errors (#1114).
+// MAX_LIVE_STDOUT_LINES bounds a running tool card's accumulated live output —
+// mirrors the backend's maxLiveStdoutLines (internal/server/ws_handlers.go).
+// Without it a long, high-frequency command (a noisy build loop, a runaway
+// `yes`) would grow this array for as long as the command keeps streaming.
+const MAX_LIVE_STDOUT_LINES = 200
+
 export function appendToolStdout(sessionId: string, toolId: string | undefined, lines: string[]) {
   if (!lines || lines.length === 0) return
   chatMessages.update(m => {
@@ -290,7 +296,9 @@ export function appendToolStdout(sessionId: string, toolId: string | undefined, 
       const tools = [...msgs[lastGroup].tools]
       const idx = pickToolIndex(tools, toolId)
       if (idx >= 0) {
-        tools[idx] = { ...tools[idx], stdout: [...(tools[idx].stdout ?? []), ...lines] }
+        const merged = [...(tools[idx].stdout ?? []), ...lines]
+        const capped = merged.length > MAX_LIVE_STDOUT_LINES ? merged.slice(merged.length - MAX_LIVE_STDOUT_LINES) : merged
+        tools[idx] = { ...tools[idx], stdout: capped }
       }
       msgs[lastGroup] = { ...msgs[lastGroup], tools }
     }
