@@ -76,6 +76,29 @@ func TestLoadManaged_MergesAndAnnotates(t *testing.T) {
 	}
 }
 
+// When `octo serve` is launched from the home directory itself, the
+// project-config path (projectDir/.octo/mcp.json) resolves to the exact same
+// file as the user config. Every entry must stay labeled "user", not get
+// silently relabeled "project" (which would make normal user config
+// read-only in the management UI) by re-reading the same file a second time.
+func TestLoadManaged_ProjectDirIsHome(t *testing.T) {
+	home := setupManageHome(t)
+	writeMCPFile(t, home, `{"mcpServers": {
+		"codegraph": {"command": "codegraph"}
+	}}`)
+
+	managed, err := LoadManaged(home)
+	if err != nil {
+		t.Fatalf("LoadManaged: %v", err)
+	}
+	if len(managed) != 1 {
+		t.Fatalf("got %d entries, want 1: %+v", len(managed), managed)
+	}
+	if managed[0].Source != "user" {
+		t.Errorf("source = %q, want user (cwd == home must not double-count as project)", managed[0].Source)
+	}
+}
+
 func TestLoadManaged_NoFiles(t *testing.T) {
 	setupManageHome(t)
 	managed, err := LoadManaged(t.TempDir())
