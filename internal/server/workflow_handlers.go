@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,12 +38,12 @@ func (s *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing workflow name")
 		return
 	}
-	if _, ok := tools.GetNamedWorkflow(name); !ok {
-		writeError(w, http.StatusNotFound, "workflow not found")
-		return
-	}
 	if err := tools.DeleteWorkflow(name); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		status := http.StatusBadRequest
+		if errors.Is(err, tools.ErrWorkflowNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": name})

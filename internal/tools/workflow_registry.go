@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,14 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/memory"
 	"github.com/open-octo/octo-agent/internal/trash"
+)
+
+// ErrWorkflowNotFound and ErrBuiltinWorkflow let callers (e.g. the HTTP
+// handlers) distinguish DeleteWorkflow failure modes with errors.Is, rather
+// than pre-checking existence with a separate lookup before calling it.
+var (
+	ErrWorkflowNotFound = errors.New("workflow not found")
+	ErrBuiltinWorkflow  = errors.New("cannot delete a built-in workflow")
 )
 
 // defaultWorkflowsFS holds the workflows shipped with the binary — the curated
@@ -252,10 +261,10 @@ func GetNamedWorkflow(name string) (WorkflowDetail, bool) {
 func DeleteWorkflow(name string) error {
 	w, ok := lookupWorkflow(WithWorkingDir(context.Background(), ActiveWorkflowDiscoveryCWD()), name)
 	if !ok {
-		return fmt.Errorf("workflow %q not found", name)
+		return fmt.Errorf("workflow %q: %w", name, ErrWorkflowNotFound)
 	}
 	if w.source == "default" {
-		return fmt.Errorf("cannot delete built-in workflow %q", name)
+		return fmt.Errorf("workflow %q: %w", name, ErrBuiltinWorkflow)
 	}
 	if w.path == "" {
 		return fmt.Errorf("workflow %q has no on-disk file", name)

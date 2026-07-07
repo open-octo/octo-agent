@@ -2,10 +2,13 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/trash"
 )
 
 // useWorkflowRoots points the user/project registries at temp dirs for the test.
@@ -205,4 +208,93 @@ func TestLookupWorkflow_UsesContextWorkingDir(t *testing.T) {
 	assertProjectWorkflowsRootSeesCWDFallback(t, func(ctx context.Context) {
 		lookupWorkflow(ctx, "whatever")
 	})
+}
+
+func TestGetNamedWorkflow_FoundAndNotFound(t *testing.T) {
+	user := t.TempDir()
+	useWorkflowRoots(t, user, "")
+	writeWorkflowFile(t, user, "release-notes.rb", "# @description Draft release notes\n\"ok\"\n")
+
+	detail, ok := GetNamedWorkflow("release-notes")
+	if !ok {
+		t.Fatal("GetNamedWorkflow: not found")
+	}
+	if detail.Name != "release-notes" || detail.Description != "Draft release notes" || detail.Source != "user" || detail.Script == "" {
+		t.Errorf("detail = %+v", detail)
+	}
+
+	if _, ok := GetNamedWorkflow("does-not-exist"); ok {
+		t.Error("GetNamedWorkflow returned ok for an unknown name")
+	}
+}
+
+func TestDeleteWorkflow_RefusesBuiltin(t *testing.T) {
+	useWorkflowRoots(t, "", "")
+	err := DeleteWorkflow("adversarial-review")
+	if err == nil {
+		t.Fatal("DeleteWorkflow: want error deleting a built-in workflow, got nil")
+	}
+	if !errors.Is(err, ErrBuiltinWorkflow) {
+		t.Errorf("err = %v, want errors.Is(err, ErrBuiltinWorkflow)", err)
+	}
+}
+
+func TestDeleteWorkflow_UnknownName(t *testing.T) {
+	useWorkflowRoots(t, t.TempDir(), t.TempDir())
+	err := DeleteWorkflow("does-not-exist")
+	if err == nil {
+		t.Fatal("DeleteWorkflow: want error for an unknown name, got nil")
+	}
+	if !errors.Is(err, ErrWorkflowNotFound) {
+		t.Errorf("err = %v, want errors.Is(err, ErrWorkflowNotFound)", err)
+	}
+}
+
+func TestDeleteWorkflow_RemovesUserFileAndTrashesIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	user := t.TempDir()
+	useWorkflowRoots(t, user, "")
+	writeWorkflowFile(t, user, "scratch.rb", "# @description Throwaway\n\"ok\"\n")
+	path := filepath.Join(user, "scratch.rb")
+
+	if err := DeleteWorkflow("scratch"); err != nil {
+		t.Fatalf("DeleteWorkflow: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("workflow file still exists on disk after delete: err = %v", err)
+	}
+	if _, ok := GetNamedWorkflow("scratch"); ok {
+		t.Error("deleted workflow still resolves via GetNamedWorkflow")
+	}
+
+	// Trashed, not permanently destroyed — mirrors skills.Registry.Delete.
+	trashed, err := trash.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range trashed {
+		if e.Original == path {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("deleted workflow file not found in trash: entries = %+v", trashed)
+	}
+}
+
+func TestUserAndProjectWorkflowsRoot_ExportPrivateResolvers(t *testing.T) {
+	user, project := t.TempDir(), t.TempDir()
+	useWorkflowRoots(t, user, project)
+
+	if got := UserWorkflowsRoot(); got != user {
+		t.Errorf("UserWorkflowsRoot() = %q, want %q", got, user)
+	}
+	if got := ProjectWorkflowsRoot("/whatever/cwd"); got != project {
+		t.Errorf("ProjectWorkflowsRoot() = %q, want %q", got, project)
+	}
 }
