@@ -138,7 +138,6 @@ export const en: Record<string, string> = {
   "mcp.badge_project": "project",
   "mcp.tool_count": "{n} tool(s)",
   "mcp.btn.edit_with_agent": "Edit with Agent",
-  "mcp.edit_with_agent_prompt": "Edit the MCP server \"{name}\" — find its entry in ~/.octo/mcp.json or this project's .octo/mcp.json (whichever it's defined in), show me the current config, ask what I want changed, update the file, then tell me to click Reload in the MCP panel (or run `octo mcp reload`) to pick it up.",
   // Skills view
   "skills.confirm_delete": "Delete skill \"{name}\"?",
   "skills.toast_deleted": "Skill \"{name}\" deleted",
@@ -644,7 +643,6 @@ export const zh: Record<string, string> = {
   "mcp.badge_project": "项目",
   "mcp.tool_count": "{n} 个工具",
   "mcp.btn.edit_with_agent": "请 Agent 修改",
-  "mcp.edit_with_agent_prompt": "编辑 MCP server \"{name}\" —— 找到它在 ~/.octo/mcp.json 或本项目 .octo/mcp.json 里的配置（不管定义在哪个文件），把现在的配置给我看，问我要改成什么，改完文件后提醒我去 MCP 面板点 Reload（或者告诉我可以运行 `octo mcp reload`）让改动生效。",
   // 技能视图
   "skills.confirm_delete": "删除技能 \"{name}\"?",
   "skills.toast_deleted": "技能 \"{name}\" 已删除",

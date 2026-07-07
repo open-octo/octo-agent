@@ -51,7 +51,32 @@ Server names must have no whitespace and must not contain `__` (reserved as
 the tool-name separator). Prefer short kebab-case names — they prefix every
 tool the server exposes.
 
+## Editing an existing server
+
+The web UI's per-row "Edit with Agent" button routes here too — for any
+existing server, user- or project-scoped alike. This skips most of the
+Workflow below; there's no new package to find or transport to choose:
+
+1. **Locate the entry** — check `~/.octo/mcp.json` first, then the current
+   project's `.octo/mcp.json` if it's not in the user config.
+2. **Show the user the current entry** before changing anything.
+3. **Ask what they want changed.** Apply the smallest edit that satisfies
+   the request — preserve every other field and every other server entry
+   verbatim.
+4. **Write the file back**, then do step 6 of the Workflow below (verify,
+   tell them to Reload).
+
+If the entry lives in a project's `.octo/mcp.json`: that file is normally
+checked into the project's git repo and shared by the whole team. Editing
+it through this skill is expected — it's the supported way to change a
+project-scoped server (the web UI never writes there directly, by design).
+After writing, remind the user the file is version-controlled: they should
+review the diff and commit + push (or open a PR) themselves. Don't run git
+commands on their behalf unless they ask you to.
+
 ## Workflow
+
+Use this for adding a brand-new server. (Editing one? See above.)
 
 1. **Understand the goal.** What service or capability does the user want?
    If they name a concrete server/package, skip ahead; if they describe a need

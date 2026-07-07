@@ -96,11 +96,13 @@
   // ─── add / edit / import / AI setup ───────────────────────────────────────────
 
   // Adding and editing a server — whether it lives in ~/.octo/mcp.json or a
-  // project's .octo/mcp.json — both go through the agent instead of a
-  // structured form. That works identically regardless of which file it's
-  // defined in, so there's no need for a separate "Add Server" form.
+  // project's .octo/mcp.json — both go through the mcp-creator skill instead
+  // of a structured form. That works identically regardless of which file
+  // the entry is defined in, so there's no need for a separate "Add Server"
+  // form, and it keeps edit behavior in one place (the skill) instead of a
+  // second hand-written prompt that could drift from it.
   function askAgentToEdit(name: string) {
-    openAgentSession(tr('mcp.edit_with_agent_prompt').replace('{name}', name), `Edit MCP: ${name}`)
+    openAgentSession(`/mcp-creator Edit the existing MCP server "${name}" — find its entry, show me the current config, then ask what I want changed.`, `Edit MCP: ${name}`)
   }
 
   function openImport() {
