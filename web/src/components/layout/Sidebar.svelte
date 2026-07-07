@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sidebar, sessions, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers } from '../../lib/stores'
+  import { view, sidebar, sessions, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import VersionBadge from './VersionBadge.svelte'
@@ -95,11 +95,7 @@
 
   async function newSession() {
     try {
-      const sess = await api.createSession({ source: 'manual' }) as any
-      sessions.update(ss => [sess.session ?? sess, ...ss])
-      activeSessionId.set((sess.session ?? sess).id)
-      activeSession.set((sess.session ?? sess).id)
-      view.set('chat')
+      await createNewSession()
     } catch (e: any) { showToast(e.message, 'error') }
   }
 

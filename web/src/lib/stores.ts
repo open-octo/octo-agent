@@ -146,6 +146,16 @@ export function setActiveSession(id: string) {
 // noise here, so ChatView skips it for these ids.
 export const agenticSessions = new Set<string>()
 
+// Plain "new session" entry point shared by the sidebar button and the
+// command palette — creates an empty chat session with no queued prompt.
+export async function createNewSession(): Promise<void> {
+  const sess = await api.createSession({ source: 'manual' })
+  sessions.update(ss => [sess, ...ss])
+  activeSessionId.set(sess.id)
+  activeSession.set(sess.id)
+  view.set('chat')
+}
+
 // Agentic-first entry point shared by the Skills / Tasks / MCP / Channels /
 // Profile panels: open a fresh chat session and queue a slash-command to
 // auto-send once the WS subscription is confirmed (see pendingPrompt). The
