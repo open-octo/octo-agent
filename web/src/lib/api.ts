@@ -327,6 +327,16 @@ export async function listMcpServers(): Promise<McpServersResponse> {
   return { servers: serversData.servers, tool_search: tsData }
 }
 
+// Full reload from disk: picks up hand-edited config files and retries every
+// failed connection, unlike listMcpServers() which just re-reads cached state.
+export async function reloadMcpServers(): Promise<McpServersResponse> {
+  const [serversData, tsData] = await Promise.all([
+    request<{ servers: McpServer[] }>('/api/mcp/reload', { method: 'POST' }),
+    request<ToolSearchInfo>('/api/config/toolsearch'),
+  ])
+  return { servers: serversData.servers, tool_search: tsData }
+}
+
 export async function getMcpServer(name: string): Promise<McpServerDetail> {
   return request<McpServerDetail>(`/api/mcp/servers/${encodeURIComponent(name)}`)
 }

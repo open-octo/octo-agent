@@ -137,6 +137,7 @@ export const en: Record<string, string> = {
   "mcp.toast_reconnecting": "Reconnecting {name}…",
   "mcp.badge_project": "project",
   "mcp.tool_count": "{n} tool(s)",
+  "mcp.readonly_project": "Project-level MCP servers are read-only here — edit .octo/mcp.json in the project",
   // Skills view
   "skills.confirm_delete": "Delete skill \"{name}\"?",
   "skills.toast_deleted": "Skill \"{name}\" deleted",
@@ -649,6 +650,7 @@ export const zh: Record<string, string> = {
   "mcp.toast_reconnecting": "正在重新连接 {name}…",
   "mcp.badge_project": "项目",
   "mcp.tool_count": "{n} 个工具",
+  "mcp.readonly_project": "项目级 MCP 服务器在此只读 — 请编辑项目中的 .octo/mcp.json",
   // 技能视图
   "skills.confirm_delete": "删除技能 \"{name}\"?",
   "skills.toast_deleted": "技能 \"{name}\" 已删除",

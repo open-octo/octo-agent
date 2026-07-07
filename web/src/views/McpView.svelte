@@ -78,6 +78,21 @@
 
   onMount(reload)
 
+  // Full reload from disk: picks up hand-edited config files and retries
+  // every failed connection, unlike reload() which just re-reads cached state.
+  async function fullReload() {
+    loading = true
+    try {
+      const data = await api.reloadMcpServers()
+      mcpServers.set(data.servers as any)
+      toolSearchMode.set(data.tool_search.enabled)
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to reload MCP servers', 'error')
+    } finally {
+      loading = false
+    }
+  }
+
   // ─── add / edit / import / AI setup ───────────────────────────────────────────
 
   function openAdd() {
@@ -254,7 +269,7 @@
         <p>{$t('mcp.desc')}</p>
       </div>
       <div class="header-actions">
-        <button class="btn-secondary" onclick={reload} disabled={loading}>
+        <button class="btn-secondary" onclick={fullReload} disabled={loading}>
           <iconify-icon icon="ant-design:reload-outlined" width="14"></iconify-icon>
           {$t('mcp.reload')}
         </button>
@@ -339,7 +354,7 @@
               {/if}
               <button
                 class="srv-btn"
-                title={$t('common.edit')}
+                title={srv.source === 'project' ? $t('mcp.readonly_project') : $t('common.edit')}
                 disabled={srv.source === 'project'}
                 onclick={() => openEdit(srv)}
               >
@@ -355,7 +370,7 @@
               </button>
               <button
                 class="srv-btn del"
-                title={$t('common.delete')}
+                title={srv.source === 'project' ? $t('mcp.readonly_project') : $t('common.delete')}
                 disabled={srv.source === 'project'}
                 onclick={() => deleteServer(srv.name)}
               >
@@ -364,6 +379,8 @@
               <span style="width:8px"></span>
               <Switch
                 checked={enabled}
+                disabled={srv.source === 'project'}
+                title={srv.source === 'project' ? $t('mcp.readonly_project') : undefined}
                 onchange={() => toggleServer(srv.name, enabled)}
               />
             </div>

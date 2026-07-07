@@ -1,5 +1,5 @@
 <script lang="ts">
-  let { checked = $bindable(false), onchange }: { checked?: boolean, onchange?: (v: boolean) => void } = $props()
+  let { checked = $bindable(false), disabled = false, title, onchange }: { checked?: boolean, disabled?: boolean, title?: string, onchange?: (v: boolean) => void } = $props()
 </script>
 
 <button
@@ -7,7 +7,9 @@
   aria-checked={checked}
   class="switch"
   class:on={checked}
-  onclick={() => { checked = !checked; onchange?.(checked) }}
+  {disabled}
+  {title}
+  onclick={() => { if (disabled) return; checked = !checked; onchange?.(checked) }}
 >
   <span class="thumb"></span>
 </button>
@@ -27,6 +29,7 @@
   position: relative;
 }
 .switch.on { background: var(--blue-6); }
+.switch:disabled { opacity: 0.45; cursor: not-allowed; }
 .thumb {
   position: absolute;
   left: 2px;
