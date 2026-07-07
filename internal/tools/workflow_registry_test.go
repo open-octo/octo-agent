@@ -68,6 +68,24 @@ func TestLookupWorkflow_ProjectOverridesUser(t *testing.T) {
 	}
 }
 
+// When cwd is the home directory itself, projectWorkflowsRoot falls back to
+// cwd and resolves to the exact same path as userWorkflowsRoot. Workflows
+// there must stay labeled "user", not get relabeled "project" by scanning
+// the same directory a second time.
+func TestLookupWorkflow_SameUserAndProjectRootStaysUser(t *testing.T) {
+	home := t.TempDir()
+	useWorkflowRoots(t, home, home)
+	writeWorkflowFile(t, home, "solo.rb", "# @description only copy\n\"x\"\n")
+
+	w, ok := lookupWorkflow(context.Background(), "solo")
+	if !ok {
+		t.Fatal("lookupWorkflow: not found")
+	}
+	if w.source != "user" {
+		t.Errorf("source = %q, want user (cwd == home must not double-count as project)", w.source)
+	}
+}
+
 func TestLookupWorkflow_UnknownName(t *testing.T) {
 	useWorkflowRoots(t, t.TempDir(), t.TempDir())
 	if _, ok := lookupWorkflow(context.Background(), "nope"); ok {

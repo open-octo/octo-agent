@@ -88,8 +88,14 @@ var projectWorkflowsRoot = func(cwd string) string {
 func discoverWorkflows(cwd string) map[string]savedWorkflow {
 	fresh := make(map[string]savedWorkflow)
 	scanEmbeddedWorkflows(fresh)
-	scanWorkflowsRoot(userWorkflowsRoot(), "user", fresh)
-	scanWorkflowsRoot(projectWorkflowsRoot(cwd), "project", fresh)
+	userRoot := userWorkflowsRoot()
+	scanWorkflowsRoot(userRoot, "user", fresh)
+	// projectWorkflowsRoot falls back to cwd itself when cwd isn't inside a
+	// git repo, which resolves to the same path as userRoot when cwd is the
+	// home directory — re-scanning it would relabel every workflow "project".
+	if projectRoot := projectWorkflowsRoot(cwd); projectRoot != userRoot {
+		scanWorkflowsRoot(projectRoot, "project", fresh)
+	}
 	return fresh
 }
 
