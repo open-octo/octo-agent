@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -1278,12 +1279,18 @@ func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Re
 
 	dir := expandDir(req.WorkingDir)
 	info, err := os.Stat(dir)
-	if os.IsNotExist(err) {
+	switch {
+	case os.IsNotExist(err):
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("working_dir does not exist: %s (create it first)", dir))
 		return
-	}
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid working_dir: %v", err))
+	case os.IsPermission(err):
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("working_dir is not accessible: %s (permission denied)", dir))
+		return
+	case err != nil:
+		// Neither IsNotExist nor IsPermission — e.g. a path component that
+		// exists but isn't a directory (ENOTDIR). Report the reason without
+		// the raw "stat <path>:" prefix, which just repeats dir.
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid working_dir: %s (%v)", dir, unwrapPathError(err)))
 		return
 	}
 	if !info.IsDir() {
@@ -1326,6 +1333,16 @@ func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Re
 		"ok":          true,
 		"working_dir": dir,
 	})
+}
+
+// unwrapPathError strips the "stat <path>:" wrapper os.Stat adds so the
+// error message doesn't repeat the path the caller already reports.
+func unwrapPathError(err error) error {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err
+	}
+	return err
 }
 
 // expandDir resolves a user-entered path to an absolute one: a leading ~ (or

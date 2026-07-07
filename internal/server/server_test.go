@@ -1436,6 +1436,47 @@ func TestHandleUpdateSessionWorkingDir_NotExist(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateSessionWorkingDir_NotADirectory(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// A regular file sitting where a directory component is expected trips
+	// ENOTDIR, which os.IsNotExist does not recognize (#1237) — the handler
+	// must still report a clean message instead of a raw "stat ...: not a
+	// directory" dump.
+	filePath := filepath.Join(tmp, "not-a-dir")
+	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(filePath, "child")
+
+	payload, _ := json.Marshal(updateSessionWorkingDirRequest{WorkingDir: nested})
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	errMsg, _ := body["error"].(string)
+	if !strings.Contains(errMsg, nested) || strings.Contains(errMsg, "stat "+nested) {
+		t.Fatalf("error = %q, want it to name %q without echoing the raw stat prefix", errMsg, nested)
+	}
+}
+
 func TestHandleUpdateSessionModel_RawStringIsPerSession(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
