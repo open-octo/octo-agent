@@ -125,7 +125,7 @@ func chatCandidates(words []string, prev string) []string {
 	case "--permission-mode":
 		return []string{"interactive", "strict", "auto"}
 	case "--reasoning-effort":
-		return []string{"low", "medium", "high", "xhigh", "max"}
+		return []string{"off", "low", "medium", "high", "xhigh", "max"}
 	case "--model", "--system", "--max-tokens", "--max-tokens-escalate", "--max-turns",
 		"--compact-threshold", "--compact-auto-pct", "--compact-batch-threshold",
 		"--sandbox-write", "--sandbox-read":

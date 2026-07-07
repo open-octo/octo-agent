@@ -276,12 +276,28 @@ func toolSearchConfigFrom(c config.ToolSearchConfig) tools.ToolSearchConfig {
 }
 
 // resolveReasoningEffort picks the reasoning intensity: --reasoning-effort flag
-// > config file > "" (off).
-func resolveReasoningEffort(flagVal string, entry config.ModelEntry) string {
-	if flagVal != "" {
-		return flagVal
+// > config file > "" (off). "off" is accepted as an explicit flag value (case
+// insensitive) so a config-persisted level can be turned off for one run,
+// mirroring `/thinking off` in the TUI and the server's reasoning_effort API.
+func resolveReasoningEffort(flagSet bool, flagVal string, entry config.ModelEntry) string {
+	if flagSet {
+		return normalizeOffEffort(flagVal)
 	}
-	return entry.ReasoningEffort
+	// The config entry can itself hold the literal "off" sentinel — the
+	// server's session reasoning_effort API historically persisted it
+	// verbatim instead of normalizing to "" (see internal/server/handlers.go
+	// handleUpdateSessionReasoningEffort) — so normalize on read too.
+	return normalizeOffEffort(entry.ReasoningEffort)
+}
+
+// normalizeOffEffort maps the case-insensitive "off" sentinel to "", the
+// internal representation of "no reasoning effort configured". Any other
+// value passes through unchanged for validReasoningEffort to judge.
+func normalizeOffEffort(e string) string {
+	if strings.EqualFold(e, "off") {
+		return ""
+	}
+	return e
 }
 
 // validReasoningEffort reports whether e is an accepted reasoning intensity.
@@ -347,7 +363,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	compactThreshold := fs.Int("compact-threshold", 0, "Compact older history once a turn's input crosses this many tokens; 0 = auto (percentage of the model's context window, settable via --compact-auto-pct or config), <0 = disabled")
 	compactAutoPct := fs.Int("compact-auto-pct", 0, "Auto-compaction threshold as a percentage of the model's context window (0 = use `octo config` or built-in default 75). Only used when --compact-threshold=0.")
 	compactBatchThreshold := fs.Int("compact-batch-threshold", 0, "Batch-level compaction: compact after a tool batch when context exceeds this many tokens; 0 = auto (~85% of the model's context window), <0 = disabled between batches")
-	reasoningEffort := fs.String("reasoning-effort", "", "Reasoning intensity: low | medium | high | xhigh | max (empty = off). OpenAI → reasoning_effort; Anthropic → adaptive thinking + effort. Also from `octo config`.")
+	reasoningEffort := fs.String("reasoning-effort", "", "Reasoning intensity: off | low | medium | high | xhigh | max (empty = use `octo config`/default; 'off' forces it off for this run). OpenAI → reasoning_effort; Anthropic → adaptive thinking + effort.")
 	showReasoning := fs.Bool("show-reasoning", false, "Surface the reasoning/thinking trace for the Web UI (octo serve) to display. The terminal never renders it. Default off; also from `octo config`.")
 	useSandbox := fs.Bool("sandbox", false, "Confine terminal commands to the project dir + tmp with no network (OS-enforced; macOS/Linux). Fails closed if unavailable.")
 	sandboxAllowNet := fs.Bool("sandbox-allow-net", false, "Under --sandbox, permit network access (default: denied)")
@@ -427,17 +443,21 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// reasoning_effort / mapped Anthropic budget); --show-reasoning gates whether
 	// the trace is streamed to the terminal. Both fall back to the resolved
 	// config entry.
-	resolvedEffort := resolveReasoningEffort(*reasoningEffort, entry)
-	if !validReasoningEffort(resolvedEffort) {
-		fmt.Fprintf(stderr, "octo: invalid --reasoning-effort %q (want 'low', 'medium', 'high', 'xhigh', or 'max')\n", resolvedEffort)
-		return 2
-	}
 	showReasoningFlagSet := false
+	reasoningEffortFlagSet := false
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "show-reasoning" {
+		switch f.Name {
+		case "show-reasoning":
 			showReasoningFlagSet = true
+		case "reasoning-effort":
+			reasoningEffortFlagSet = true
 		}
 	})
+	resolvedEffort := resolveReasoningEffort(reasoningEffortFlagSet, *reasoningEffort, entry)
+	if !validReasoningEffort(resolvedEffort) {
+		fmt.Fprintf(stderr, "octo: invalid --reasoning-effort %q (want 'off', 'low', 'medium', 'high', 'xhigh', or 'max')\n", *reasoningEffort)
+		return 2
+	}
 	resolvedShowReasoning := resolveShowReasoning(showReasoningFlagSet, *showReasoning, entry)
 
 	// Single-turn mode requires a message.

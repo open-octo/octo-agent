@@ -1227,7 +1227,21 @@ func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *ht
 	// instead of silently editing an unrelated model's config.
 	cfg, _ := config.Load()
 	entry := entryForSession(cfg, sess)
-	entry.ReasoningEffort = level
+	// "off" is only ever a wire/UI sentinel — the persisted and forwarded
+	// representation of "no reasoning effort" is "" everywhere else in the
+	// codebase (CLI, TUI, provider layer). Storing "off" verbatim used to
+	// reach provider requests as a literal, invalid reasoning_effort value.
+	if level == "off" {
+		entry.ReasoningEffort = ""
+	} else {
+		entry.ReasoningEffort = level
+	}
+	// Reasoning off has nothing to show a trace of; keep show_reasoning from
+	// staying on in a way that looks toggled on but does nothing.
+	if level == "off" {
+		off := false
+		entry.ShowReasoning = &off
+	}
 	if !cfg.SetEntry(entry) {
 		cfg.SetDefaultEntry(entry)
 	}
