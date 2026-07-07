@@ -134,6 +134,7 @@ export const en: Record<string, string> = {
   // MCP view (McpView.svelte)
   "mcp.toast_removed": "Server removed",
   "mcp.confirm_delete": "Delete MCP server \"{name}\"?",
+  "mcp.confirm_import_overwrite": "This will overwrite the existing server config for: {names}. Continue?",
   "mcp.toast_reconnecting": "Reconnecting {name}…",
   "mcp.badge_project": "project",
   "mcp.tool_count": "{n} tool(s)",
@@ -639,6 +640,7 @@ export const zh: Record<string, string> = {
   // MCP 视图 (McpView.svelte)
   "mcp.toast_removed": "服务器已移除",
   "mcp.confirm_delete": "确认删除 MCP 服务器 \"{name}\"？",
+  "mcp.confirm_import_overwrite": "这会覆盖已有的服务器配置：{names}。是否继续？",
   "mcp.toast_reconnecting": "正在重新连接 {name}…",
   "mcp.badge_project": "项目",
   "mcp.tool_count": "{n} 个工具",

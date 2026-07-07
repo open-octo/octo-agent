@@ -102,10 +102,10 @@ Use this for adding a brand-new server. (Editing one? See above.)
    stdio servers run locally, so the command must exist on this machine —
    check (`npx --version`, `uvx --version`, `docker --version`, or the
    binary's own `--version`/`--help`) and help install if missing. The web
-   UI's own add/edit API endpoints restrict `command` to a short allowlist
-   (npx/npm/node/uvx/uv/python/python3/cargo/go/ruby) unless the caller opts
-   in — that restriction doesn't apply here, since you write the config file
-   directly rather than calling those endpoints.
+   UI's own import API restricts `command` to a short allowlist
+   (npx/npm/node/uvx/uv/python/python3/cargo/go/ruby) with no opt-in — that
+   restriction doesn't apply here, since you write the config file directly
+   rather than calling that endpoint.
 
    **A bare binary is not always the launch command.** Many tools ship a
    single executable with several subcommands (e.g. `init`, `index`, `serve`)

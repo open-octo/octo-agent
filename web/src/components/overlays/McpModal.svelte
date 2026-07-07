@@ -1,6 +1,6 @@
 <script lang="ts">
   import { mcpModalOpen, mcpServers, showToast } from '../../lib/stores'
-  import { t } from '../../lib/i18n'
+  import { t, tr } from '../../lib/i18n'
   import * as api from '../../lib/api'
 
   let jsonText = $state('')
@@ -25,6 +25,19 @@
       let parsed: any
       try { parsed = JSON.parse(jsonText) } catch { showToast('Invalid JSON', 'error'); submitting = false; return }
       const servers = parsed.mcpServers ?? parsed
+      // Import silently overwrites a same-named entry in ~/.octo/mcp.json —
+      // fine for a genuine re-paste, but this is now the only structured UI
+      // path for adding even a single server, so warn before clobbering one
+      // that already exists (project-scoped names don't collide: they live
+      // in a different file this never touches).
+      const existingUserNames = new Set(
+        ($mcpServers as any[]).filter(s => s.source === 'user').map(s => s.name)
+      )
+      const collisions = Object.keys(servers).filter(name => existingUserNames.has(name))
+      if (collisions.length > 0 && !confirm(tr('mcp.confirm_import_overwrite').replace('{names}', collisions.join(', ')))) {
+        submitting = false
+        return
+      }
       await api.importMcpServers(servers)
       await refresh()
       showToast('Servers imported')
