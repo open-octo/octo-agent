@@ -59,6 +59,18 @@ func (c *Connection) MarkReauthRequired(err error) {
 	c.reauthMu.Unlock()
 }
 
+// ClearReauthRequired forgets a previously recorded reauth failure. Callers
+// invoke this after a call through the connection succeeds, so a
+// transient failure (a momentary refresh hiccup, not a genuinely revoked
+// grant) doesn't leave the panel reporting "error" forever once the
+// connection is actually working again — the token is either still good
+// or a later real failure will re-flag it.
+func (c *Connection) ClearReauthRequired() {
+	c.reauthMu.Lock()
+	c.reauthErr = nil
+	c.reauthMu.Unlock()
+}
+
 // ReauthRequired reports the last error recorded by MarkReauthRequired, if
 // any. ok is false when no reauth failure has been observed on this
 // connection.

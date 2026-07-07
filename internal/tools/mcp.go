@@ -150,6 +150,7 @@ func executeMCP(ctx context.Context, name string, input map[string]any) (out str
 			markIfReauthRequired(conn, err)
 			return "", true, err
 		}
+		conn.ClearReauthRequired()
 		return formatResourceContents(contents), true, nil
 
 	case "prompt_get":
@@ -163,6 +164,7 @@ func executeMCP(ctx context.Context, name string, input map[string]any) (out str
 			markIfReauthRequired(conn, err)
 			return "", true, err
 		}
+		conn.ClearReauthRequired()
 		return formatPromptResult(result), true, nil
 
 	default:
@@ -171,6 +173,7 @@ func executeMCP(ctx context.Context, name string, input map[string]any) (out str
 			markIfReauthRequired(conn, err)
 			return "", true, err
 		}
+		conn.ClearReauthRequired()
 		out := formatToolResult(result)
 		if result.IsError {
 			// The tool ran but reported an error in-band. Surface it as a

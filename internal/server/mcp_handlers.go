@@ -105,13 +105,16 @@ func (s *Server) mcpServerList() ([]mcpServerInfo, error) {
 			Headers:   m.Entry.Headers,
 			Auth:      m.Entry.Auth,
 		}
+		var conn *mcp.Connection
+		if reg != nil {
+			conn = reg.Get(m.Name)
+		}
 		switch {
 		case m.Invalid != "":
 			info.Status = "invalid"
 		case m.Entry.Disabled:
 			info.Status = "disabled"
-		case reg != nil && reg.Get(m.Name) != nil:
-			conn := reg.Get(m.Name)
+		case conn != nil:
 			if msg, ok := conn.ReauthRequired(); ok {
 				// Connection is still registered but a call through it hit
 				// an OAuth failure nobody was present to fix — report it as
@@ -210,8 +213,11 @@ func (s *Server) handleGetMCPServer(w http.ResponseWriter, r *http.Request) {
 		info.Status = "disabled"
 	default:
 		reg := tools.ActiveMCPRegistry()
-		if reg != nil && reg.Get(name) != nil {
-			conn := reg.Get(name)
+		var conn *mcp.Connection
+		if reg != nil {
+			conn = reg.Get(name)
+		}
+		if conn != nil {
 			if msg, ok := conn.ReauthRequired(); ok {
 				info.Status = "error"
 				info.Error = msg
