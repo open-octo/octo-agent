@@ -2,6 +2,8 @@ package hooks
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -140,6 +142,59 @@ func TestPreToolUse_InProcBlockWinsOverShellApprove(t *testing.T) {
 	dec := e.PreToolUse(context.Background(), Payload{Event: EventPreToolUse, ToolName: "terminal"})
 	if !dec.Block || dec.Reason != "in-proc says no" {
 		t.Errorf("in-process block (evaluated first) must win over a later shell approve, got %+v", dec)
+	}
+}
+
+func TestPreToolUse_InProcBlockShortCircuitsShell(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "shell-ran")
+
+	e := NewEngine(nil)
+	e.RegisterInProc(EventPreToolUse, func(_ context.Context, p Payload) string {
+		return `{"decision":"block","reason":"in-proc says no"}`
+	})
+	if err := e.RegisterShellMatched(EventPreToolUse, makeScript(t, "touch "+marker), "", false, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	dec := e.PreToolUse(context.Background(), Payload{Event: EventPreToolUse, ToolName: "terminal"})
+	if !dec.Block {
+		t.Fatalf("expected block, got %+v", dec)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Error("shell hook ran despite an earlier in-process block — PreToolUse should short-circuit")
+	}
+}
+
+func TestPreToolUse_InProcPanicIsNoOpinionNotCrash(t *testing.T) {
+	var notices []string
+	e := NewEngine(nil)
+	e.Notify = func(msg string) { notices = append(notices, msg) }
+	e.RegisterInProc(EventPreToolUse, func(_ context.Context, p Payload) string {
+		panic("boom")
+	})
+
+	dec := e.PreToolUse(context.Background(), Payload{Event: EventPreToolUse, ToolName: "terminal"})
+	if dec.Block || dec.Allow {
+		t.Errorf("a panicking hook should be no-opinion (tool allowed to proceed), got %+v", dec)
+	}
+	if len(notices) == 0 {
+		t.Error("a panicking in-process hook should surface via Notify")
+	}
+}
+
+func TestPreToolUse_InProcPanicDoesNotSkipLaterHooks(t *testing.T) {
+	e := NewEngine(nil)
+	e.RegisterInProc(EventPreToolUse, func(_ context.Context, p Payload) string {
+		panic("boom")
+	})
+	e.RegisterInProc(EventPreToolUse, func(_ context.Context, p Payload) string {
+		return `{"decision":"block","reason":"second hook still runs"}`
+	})
+
+	dec := e.PreToolUse(context.Background(), Payload{Event: EventPreToolUse, ToolName: "terminal"})
+	if !dec.Block || dec.Reason != "second hook still runs" {
+		t.Errorf("a panic in one hook must not prevent later hooks from running, got %+v", dec)
 	}
 }
 

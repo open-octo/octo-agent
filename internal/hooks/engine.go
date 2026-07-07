@@ -363,7 +363,7 @@ func (e *Engine) PreToolUse(ctx context.Context, p Payload) ToolDecision {
 
 	allow := false
 	for _, fn := range ip {
-		d, ok := parseToolDecision([]byte(fn(ctx, p)))
+		d, ok := parseToolDecision([]byte(e.runInProcHookSafely(fn, ctx, p)))
 		if !ok {
 			continue
 		}
@@ -407,6 +407,23 @@ func (e *Engine) PreToolUse(ctx context.Context, p Payload) ToolDecision {
 		}
 	}
 	return ToolDecision{Allow: allow}
+}
+
+// runInProcHookSafely calls an in-process PreToolUse hook with a recover, so a
+// panicking callback can't take the whole agent turn down with it. A shell
+// hook's failure mode is a subprocess crash, which the parent Go process
+// never sees; an in-process hook runs in the same goroutine, so without this
+// its panic would propagate straight out of PreToolUse. Treated the same as
+// any other non-blocking hook failure: notify and return "" (no opinion, tool
+// allowed to proceed).
+func (e *Engine) runInProcHookSafely(fn InProcHook, ctx context.Context, p Payload) (out string) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.notify(fmt.Sprintf("hooks: PreToolUse in-process hook panicked: %v (tool allowed to proceed)", r))
+			out = ""
+		}
+	}()
+	return fn(ctx, p)
 }
 
 // blockReason picks the denial text for an exit-2 (or decision:block) hook:

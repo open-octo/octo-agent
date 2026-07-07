@@ -289,6 +289,13 @@ in-process hook 也能通过返回同样的 `{"decision":"block"/"approve",...}`
 求值顺序是 in-process 先、shell 后,block 全局优先于 allow(`internal/hooks/engine.go`
 的 `PreToolUse` 方法 + `pretooluse_test.go` 的对应测试)。
 
+这条改动让 `EventPreToolUse` 的 in-process 回调第一次变得真正可达——之前注册了也不会被调用,
+所以回调 panic 从来没有实际后果。shell hook 崩溃只会杀掉子进程,不影响宿主 Go 进程;in-process
+回调跟 agent 循环跑在同一个 goroutine 里,panic 会直接冒泡打断整个 turn。`PreToolUse`
+调用每个 in-process 回调时都包了一层 `recover`(`runInProcHookSafely`),panic 按"非阻塞失败"
+处理(notify + 视为无意见,后续回调正常继续跑,不会被跳过)。`Inject`/`Dispatch` 里调用
+in-process 回调的地方还没有同样的 recover——那是既有代码,本轮不动,留作后续。
+
 **`Session`/`History` 内嵌 `sync.Mutex`/`sync.RWMutex`(`internal/agent/session.go:77`、
 `internal/agent/history.go:14`),不可按值复制**——`type Session = agent.Session` 这个别名本身没
 问题,但要在这个类型定义旁边补一行 doc comment 提醒外部调用者"始终用指针,不要按值传递/复制",否则
