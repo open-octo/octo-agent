@@ -965,7 +965,6 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	if m.cfg.tools != nil {
 		m.cfg.tools = tools.DefaultToolsFor(name)
 	}
-	m.println(noticeStyle.Render(fmt.Sprintf("Model: %s", name)))
 	return m, nil
 }
 
