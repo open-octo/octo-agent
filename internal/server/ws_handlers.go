@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
@@ -1245,7 +1246,19 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			t, terr := a.GenerateTitle(ctx, toolDefs)
-			if terr != nil || strings.TrimSpace(t) == "" {
+			if terr != nil {
+				// Silent by design (retried after the next completed turn,
+				// per the comment above) — but silent must not mean
+				// invisible: without this, a persistently misconfigured
+				// model/provider on a given install never generates a
+				// title, and nothing anywhere records why, making the
+				// exact symptom "sidebar title never updates" unexplainable
+				// from the server side.
+				slog.Warn("session title generation failed", "session_id", sid, "err", terr)
+				return
+			}
+			if strings.TrimSpace(t) == "" {
+				slog.Warn("session title generation returned an empty title", "session_id", sid)
 				return
 			}
 			// Apply the title to a freshly loaded Session, not the live one —
@@ -1253,10 +1266,17 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// goroutine, and Session isn't goroutine-safe. A load that races
 			// a concurrent append just errors out and a later turn retries.
 			fresh, lerr := agent.LoadSession(sid)
-			if lerr != nil || !isAutoNamePlaceholder(fresh.Title) {
+			if lerr != nil {
+				slog.Warn("session title generation: reload session failed", "session_id", sid, "err", lerr)
 				return
 			}
-			if fresh.SetTitle(t) != nil {
+			if !isAutoNamePlaceholder(fresh.Title) {
+				// Not an error: something else (the user, or an earlier
+				// retry) already gave the session a real title.
+				return
+			}
+			if err := fresh.SetTitle(t); err != nil {
+				slog.Warn("session title generation: save failed", "session_id", sid, "err", err)
 				return
 			}
 			// Global broadcast: the sidebar lists every session, so every
