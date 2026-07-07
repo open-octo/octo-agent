@@ -7,11 +7,32 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 )
+
+// syncBuffer wraps bytes.Buffer with a mutex: the title-generation goroutine
+// writes to it (via slog) on its own goroutine while the test polls it by
+// reading, and bytes.Buffer itself has no concurrency guarantees.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 func TestIsAutoNamePlaceholder(t *testing.T) {
 	cases := []struct {
@@ -214,9 +235,9 @@ func TestDoAgentTurn_TitleGenerationFailureIsLogged(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
-	var logBuf bytes.Buffer
+	logBuf := &syncBuffer{}
 	prevLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prevLogger) })
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
