@@ -110,7 +110,7 @@ func containsName(names []string, want string) bool {
 func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {
 	// No user/project roots: every built-in preset must still resolve.
 	useWorkflowRoots(t, "", "")
-	for _, name := range []string{"adversarial-review", "parallel-understand", "batch-migrate", "daily-triage"} {
+	for _, name := range []string{"parallel-understand", "batch-migrate", "daily-triage"} {
 		w, ok := lookupWorkflow(context.Background(), name)
 		if !ok {
 			t.Errorf("embedded default %q not found", name)
@@ -139,9 +139,9 @@ func TestLookupWorkflow_ReferenceTemplatesNotEmbedded(t *testing.T) {
 func TestLookupWorkflow_UserOverridesEmbeddedDefault(t *testing.T) {
 	user := t.TempDir()
 	useWorkflowRoots(t, user, "")
-	writeWorkflowFile(t, user, "adversarial-review.rb", "# @description my override\n\"x\"\n")
+	writeWorkflowFile(t, user, "batch-migrate.rb", "# @description my override\n\"x\"\n")
 
-	w, ok := lookupWorkflow(context.Background(), "adversarial-review")
+	w, ok := lookupWorkflow(context.Background(), "batch-migrate")
 	if !ok || w.description != "my override" {
 		t.Errorf("workflow = %+v, ok = %v; want the user file to override the embedded default", w, ok)
 	}
@@ -230,7 +230,7 @@ func TestGetNamedWorkflow_FoundAndNotFound(t *testing.T) {
 
 func TestDeleteWorkflow_RefusesBuiltin(t *testing.T) {
 	useWorkflowRoots(t, "", "")
-	err := DeleteWorkflow("adversarial-review")
+	err := DeleteWorkflow("batch-migrate")
 	if err == nil {
 		t.Fatal("DeleteWorkflow: want error deleting a built-in workflow, got nil")
 	}

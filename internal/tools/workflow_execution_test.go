@@ -82,7 +82,6 @@ func TestEmbeddedDefaultWorkflows_Execute(t *testing.T) {
 		args string // JSON; "" means the script's `args` primitive returns nil
 	}
 	runs := []run{
-		{"adversarial-review", ""},
 		{"parallel-understand", ""},
 		{"batch-migrate", `{"change": "test"}`},
 		{"daily-triage", ""},

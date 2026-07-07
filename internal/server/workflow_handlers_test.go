@@ -68,7 +68,7 @@ func TestHandleDeleteWorkflow_RefusesBuiltin(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	req := httptest.NewRequest(http.MethodDelete, "/api/workflows/adversarial-review", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workflows/batch-migrate", nil)
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusBadRequest {

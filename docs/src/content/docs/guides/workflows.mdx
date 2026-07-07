@@ -97,11 +97,10 @@ workflow(name: "my-check", args: { target: "src/" })
 - `args` (any JSON value) is threaded through to the script's `args` call; omit it and `args`
   returns `nil`.
 
-Three presets ship in the binary and are always available, even with nothing saved yet:
+Two presets ship in the binary and are always available, even with nothing saved yet:
 
 | Name | What it does |
 |---|---|
-| `adversarial-review` | Fans out review findings across dimensions, then kills false positives with independent skeptic votes (default: 3 votes) |
 | `parallel-understand` | Maps a codebase in parallel — one reader per subsystem, synthesized into one architecture map |
 | `batch-migrate` | Applies one mechanical change across many files, each in its own git worktree so parallel edits never collide |
 
