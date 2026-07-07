@@ -54,7 +54,11 @@ The logic lives in one package used by both the CLI and the server.
 - **`Check(ctx) (latest string, err error)`** — issues a no-redirect GET to
   `releases/latest` and parses the version out of the `Location` header.
   No GitHub API, no JSON, no rate-limit coupling. The base URL is a
-  package var so tests point it at `httptest`.
+  package var so tests point it at `httptest`. Falls back through
+  `MirrorBaseURLs` in order when `BaseURL` is unreachable — GitHub being
+  blocked outright, not just slow, has to be handled here too, or a
+  download-stage mirror fallback never gets a chance to run since
+  `Prepare` calls `Check` first.
 
 - **`Prepare(ctx, Options) (*Prepared, error)`** /
   **`Prepared.Install() error`** with
