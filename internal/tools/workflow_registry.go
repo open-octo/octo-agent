@@ -3,19 +3,23 @@ package tools
 import (
 	"context"
 	"embed"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/memory"
+	"github.com/open-octo/octo-agent/internal/trash"
 )
 
 // defaultWorkflowsFS holds the workflows shipped with the binary — the curated
 // set every install gets out of the box. Unlike default skills they are not
-// materialized to disk (there is no on-disk workflows CLI to list/edit them):
-// discoverWorkflows merges them in-memory as the lowest priority, so a
-// same-named user- or project-level file transparently overrides one.
+// materialized to disk: discoverWorkflows merges them in-memory as the lowest
+// priority on every read, so a same-named user- or project-level file
+// transparently overrides one. `octo workflows` and the web panel read this
+// same in-memory merge (via ListNamedWorkflows/GetNamedWorkflow) rather than
+// scanning a materialized directory, so there's nothing to keep in sync.
 //
 //go:embed workflow_defaults
 var defaultWorkflowsFS embed.FS
@@ -27,6 +31,8 @@ type savedWorkflow struct {
 	name        string
 	description string
 	script      string
+	source      string // "default" | "user" | "project"
+	path        string // on-disk file path; "" for embedded defaults
 }
 
 // userWorkflowsRoot returns ~/.octo/workflows, or "" when the home dir can't be
@@ -73,9 +79,8 @@ var projectWorkflowsRoot = func(cwd string) string {
 func discoverWorkflows(cwd string) map[string]savedWorkflow {
 	fresh := make(map[string]savedWorkflow)
 	scanEmbeddedWorkflows(fresh)
-	for _, root := range []string{userWorkflowsRoot(), projectWorkflowsRoot(cwd)} {
-		scanWorkflowsRoot(root, fresh)
-	}
+	scanWorkflowsRoot(userWorkflowsRoot(), "user", fresh)
+	scanWorkflowsRoot(projectWorkflowsRoot(cwd), "project", fresh)
 	return fresh
 }
 
@@ -101,13 +106,15 @@ func scanEmbeddedWorkflows(dst map[string]savedWorkflow) {
 			name:        name,
 			description: workflowDescription(content),
 			script:      content,
+			source:      "default",
 		}
 	}
 }
 
 // scanWorkflowsRoot reads *.rb workflow scripts from root into dst (existing
-// keys are overwritten). A missing or unreadable root is a no-op.
-func scanWorkflowsRoot(root string, dst map[string]savedWorkflow) {
+// keys are overwritten), tagging each with source ("user" or "project"). A
+// missing or unreadable root is a no-op.
+func scanWorkflowsRoot(root, source string, dst map[string]savedWorkflow) {
 	if root == "" {
 		return
 	}
@@ -123,12 +130,15 @@ func scanWorkflowsRoot(root string, dst map[string]savedWorkflow) {
 		if !strings.HasSuffix(name, ".rb") {
 			continue
 		}
-		w, ok := parseWorkflowFile(filepath.Join(root, name))
+		path := filepath.Join(root, name)
+		w, ok := parseWorkflowFile(path)
 		if !ok {
 			continue
 		}
 		// The file name (without .rb) is the authoritative workflow name.
 		w.name = strings.TrimSuffix(name, ".rb")
+		w.source = source
+		w.path = path
 		dst[w.name] = w
 	}
 }
@@ -201,6 +211,7 @@ func listWorkflows(ctx context.Context) []savedWorkflow {
 type NamedWorkflow struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Source      string `json:"source"` // "default" | "user" | "project"
 }
 
 // ListNamedWorkflows returns every registered workflow (embedded defaults +
@@ -211,7 +222,54 @@ func ListNamedWorkflows() []NamedWorkflow {
 	saved := listWorkflows(WithWorkingDir(context.Background(), ActiveWorkflowDiscoveryCWD()))
 	out := make([]NamedWorkflow, 0, len(saved))
 	for _, w := range saved {
-		out = append(out, NamedWorkflow{Name: w.name, Description: w.description})
+		out = append(out, NamedWorkflow{Name: w.name, Description: w.description, Source: w.source})
 	}
 	return out
 }
+
+// WorkflowDetail is the full view of one workflow, including its script, for
+// the web management panel's view-source and export actions.
+type WorkflowDetail struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+	Script      string `json:"script"`
+}
+
+// GetNamedWorkflow returns the full detail (including script) of one
+// registered workflow, resolved the same way ListNamedWorkflows is.
+func GetNamedWorkflow(name string) (WorkflowDetail, bool) {
+	w, ok := lookupWorkflow(WithWorkingDir(context.Background(), ActiveWorkflowDiscoveryCWD()), name)
+	if !ok {
+		return WorkflowDetail{}, false
+	}
+	return WorkflowDetail{Name: w.name, Description: w.description, Source: w.source, Script: w.script}, true
+}
+
+// DeleteWorkflow removes a user- or project-level workflow's on-disk file,
+// resolved the same way ListNamedWorkflows is. Embedded default workflows
+// cannot be deleted. The file is moved to trash, not permanently removed.
+func DeleteWorkflow(name string) error {
+	w, ok := lookupWorkflow(WithWorkingDir(context.Background(), ActiveWorkflowDiscoveryCWD()), name)
+	if !ok {
+		return fmt.Errorf("workflow %q not found", name)
+	}
+	if w.source == "default" {
+		return fmt.Errorf("cannot delete built-in workflow %q", name)
+	}
+	if w.path == "" {
+		return fmt.Errorf("workflow %q has no on-disk file", name)
+	}
+	if err := trash.Move(w.path, filepath.Dir(w.path)); err != nil {
+		return fmt.Errorf("trash workflow file %s: %w", w.path, err)
+	}
+	return nil
+}
+
+// UserWorkflowsRoot exports the on-disk root of user-level saved workflows,
+// for `octo workflows path`.
+func UserWorkflowsRoot() string { return userWorkflowsRoot() }
+
+// ProjectWorkflowsRoot exports the on-disk root of project-level saved
+// workflows for the given working directory, for `octo workflows path`.
+func ProjectWorkflowsRoot(cwd string) string { return projectWorkflowsRoot(cwd) }
