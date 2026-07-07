@@ -32,7 +32,7 @@
 
 只有三处差异是入口固有的:
 
-1. **传输层** —— 输入怎么来、输出/事件怎么渲染:stdin+TUI / HTTP+SSE / IM adapter。
+1. **传输层** —— 输入怎么来、输出/事件怎么渲染:stdin+TUI / HTTP+WebSocket / IM adapter。
 2. **交互性** —— CLI 能向用户弹窗(`ask` → 提示;asker 可用);server/IM 非交互(`ask` → deny;无 asker)。一个 `Interactive bool` 旋钮即可表达。
 3. **会话生命周期** —— CLI 持久化、可 resume;server 按连接;IM 按 chat。会话存储是入口各自的事,但 agent 的构造是共享的。
 
@@ -137,7 +137,7 @@ server 与 IM 经 `internal/app` 装配后,自动获得与 CLI 相同的 MCP、T
 
 - 不统一会话存储 / resume 语义(各入口生命周期不同,属合理差异)。
 - 不改 Tool Search 本身的机制(本重构只是让三入口都能用上)。
-- 不改传输层(TUI 渲染、SSE 帧、IM adapter 各自保留)。
+- 不改传输层(TUI 渲染、WebSocket 帧、IM adapter 各自保留)。
 - 不在装配层按入口裁剪能力(对齐优先;能力是否使用由入口的 loop 决定)。
 
 ## 测试

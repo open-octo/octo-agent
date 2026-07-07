@@ -7,7 +7,7 @@ page (`landing/index.html`) stays a separate, hand-rolled page and links into th
 ## Why a separate site
 
 octo's real surface area — CLI, config, tools, MCP, skills, sandboxing, sub-agents, workflows,
-hooks, memory, six IM adapters, a REST/SSE API, browser automation, goals — is far larger than one
+hooks, memory, six IM adapters, a REST/WebSocket API, browser automation, goals — is far larger than one
 README can hold without becoming unreadable. A single flat page also can't be searched, deep-linked
 per topic, or read task-first ("how do I connect an MCP server") instead of top-to-bottom.
 
@@ -65,7 +65,7 @@ Reference                           dense, table-driven, searchable
   CLI                               every command and flag
   Config file                       config.yaml schema
   Tools                             terminal, file tools, glob/grep, web, skill, sub_agent, workflow, mcp_*
-  HTTP & SSE API                    octo serve's REST surface
+  HTTP API                          octo serve's REST surface
   Compatibility & exit codes        from COMPATIBILITY.md
   Security model                    from SECURITY.md
 

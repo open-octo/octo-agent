@@ -9,7 +9,7 @@ octo 当前有两套互不相干的 hook 机制:
 
 两套机制叠加暴露出 11 个缺陷(见附录「缺陷映射」)。本设计把它们合并为**一个下沉到 agent core 的 hook 引擎**,统一分发,一次性关闭全部缺陷,并把能力面对齐 Claude Code 的 hook 模型(7 事件 + matcher + 阻断)作为 octo 原生特性。
 
-核心判断:agent 循环本身已经具备所有需要的插桩点。只要把 hook 执行从 CLI 层挪进 agent core,并在构造每个 Agent 时挂上一个 Engine(各 Engine 共享进程级 `SeenSet`),三端(CLI/TUI、serve web/SSE/WS、IM)与子 agent 就全部自动继承 hook,无需在每个入口各自实现分发逻辑。
+核心判断:agent 循环本身已经具备所有需要的插桩点。只要把 hook 执行从 CLI 层挪进 agent core,并在构造每个 Agent 时挂上一个 Engine(各 Engine 共享进程级 `SeenSet`),三端(CLI/TUI、serve web/WS、IM)与子 agent 就全部自动继承 hook,无需在每个入口各自实现分发逻辑。
 
 ### 运行时事实(设计前提)
 

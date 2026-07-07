@@ -114,12 +114,14 @@ func (AskUserQuestionTool) Definition() agent.ToolDefinition {
 			"or readability?\"), or scope (\"include the migration too?\"). Don't use it for " +
 			"information you could find in the repo or for questions you should have an opinion " +
 			"on yourself. Pass exactly one question in the `questions` array; fire another call if " +
-			"you need to ask more. Prefer giving 2-4 mutually exclusive options; set " +
-			"multiSelect=true when the choices are NOT mutually exclusive and the user may pick " +
-			"several. When there are no natural choices to offer (e.g. \"what should we name it?\"), " +
-			"omit options for an open-ended free-text question. An \"Other\" free-text tail is " +
-			"always added either way. Result text is shaped like 'User chose: <label>' or, for a " +
-			"free-text answer, 'User chose: Other — <free text>'.",
+			"you need to ask more. Populate `options` with 2-4 mutually exclusive choices whenever " +
+			"the question has ANY plausible discrete answers — leaving `options` empty means the " +
+			"user sees a bare free-text box instead of choices, which is a worse experience, so " +
+			"don't skip it by default. Set multiSelect=true when the choices are NOT mutually " +
+			"exclusive and the user may pick several. Only omit `options` for genuinely open-ended " +
+			"questions with no natural choices (e.g. \"what should we name it?\"). An \"Other\" " +
+			"free-text tail is always added either way. Result text is shaped like 'User chose: " +
+			"<label>' or, for a free-text answer, 'User chose: Other — <free text>'.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

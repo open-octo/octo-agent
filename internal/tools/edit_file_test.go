@@ -541,3 +541,141 @@ func TestPreserveIndentStyle_LeavesTabLinesAlone(t *testing.T) {
 		t.Errorf("preserveIndentStyle = %q, want unchanged %q", got, in)
 	}
 }
+
+func TestEditFile_MixedLineEndings_UntouchedLinesPreserved(t *testing.T) {
+	// A file with some CRLF lines and some LF lines must not have its
+	// untouched lines' endings flipped by an edit elsewhere in the file —
+	// only the line(s) actually being replaced may change convention.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mixed.txt")
+	writeTestFile(t, path, "line one\r\nline two\nline three\r\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "line one",
+		"new_string": "LINE ONE",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	want := "LINE ONE\r\nline two\nline three\r\n"
+	if got != want {
+		t.Errorf("file = %q, want %q (an untouched line's ending was flipped)", got, want)
+	}
+}
+
+func TestEditFile_MixedLineEndings_EditingLFLineStaysLF(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mixed.txt")
+	writeTestFile(t, path, "line one\r\nline two\nline three\r\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "line two",
+		"new_string": "LINE TWO",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	want := "line one\r\nLINE TWO\nline three\r\n"
+	if got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFile_TrailingWhitespace_OldStringFallbackMatch(t *testing.T) {
+	// The file has a real trailing space the model wouldn't have seen when
+	// copying the line by eye; old_string omits it. Must still match.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "code.go")
+	writeTestFile(t, path, "func main() { \n\tprintln(\"hi\")\n}\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "func main() {\n\tprintln(\"hi\")\n}",
+		"new_string": "func main() {\n\tprintln(\"bye\")\n}",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	// The matched line (including its trailing space) is entirely replaced —
+	// new_string doesn't have a trailing space, so the result doesn't either.
+	// What matters here is that the match succeeded at all.
+	want := "func main() {\n\tprintln(\"bye\")\n}\n"
+	if got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFile_LineNumberPrefix_StrippedAndMatched(t *testing.T) {
+	// A model that pasted read_file's cat-n output straight into old_string
+	// (line-number + tab prefix on every line) must still succeed.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "code.go")
+	writeTestFile(t, path, "package main\n\nfunc main() {}\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "     3\tfunc main() {}",
+		"new_string": "func main() { println(\"hi\") }",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := readTestFile(t, path)
+	want := "package main\n\nfunc main() { println(\"hi\") }\n"
+	if got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFile_LineNumberPrefix_NotFoundHintsAtCause(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "code.go")
+	writeTestFile(t, path, "package main\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "     1\tnonexistent line",
+		"new_string": "x",
+	})
+	if err == nil || !strings.Contains(err.Error(), "line-number prefix") {
+		t.Errorf("expected error hinting at line-number prefix, got %v", err)
+	}
+}
+
+func TestLooksLikeLineNumberPrefixed(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"     3\tfunc main() {}", true},
+		{"1\tfoo\n2\tbar", true},
+		{"foo\tbar", false},            // non-digit before tab
+		{"func main() {}", false},      // no tab at all
+		{"1\tfoo\nno tab here", false}, // mixed: one line lacks the prefix
+	}
+	for _, tc := range tests {
+		if got := looksLikeLineNumberPrefixed(tc.in); got != tc.want {
+			t.Errorf("looksLikeLineNumberPrefixed(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestEditFile_NonUnique_ErrorIncludesLineNumbers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "many.txt")
+	writeTestFile(t, path, "foo\nfoo\nbar\n")
+
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       path,
+		"old_string": "foo",
+		"new_string": "baz",
+	})
+	if err == nil || !strings.Contains(err.Error(), "lines 1, 2") {
+		t.Errorf("expected error to include matched line numbers, got %v", err)
+	}
+}

@@ -1,9 +1,9 @@
 ---
-title: HTTP 与 SSE API
+title: HTTP API
 description: octo serve 背后的 REST 接口面——和内置 Web UI 用的是同一套。
 ---
 
-`octo serve` 暴露一套统一的 REST + SSE + WebSocket API；内置的 Web UI 只是它的第一个客户端。
+`octo serve` 暴露一套统一的 REST + WebSocket API；内置的 Web UI 只是它的第一个客户端。
 下面所有路由都以 `/api` 开头，任何非回环绑定下都需要[访问密钥](/docs/zh/reference/security/)。
 `GET /api/health` 和 `GET /api/version` 是仅有的两个不需要认证的路由。
 
@@ -12,7 +12,7 @@ description: octo serve 背后的 REST 接口面——和内置 Web UI 用的是
 | 路由 | 作用 |
 |---|---|
 | `POST /api/chat` | 创建一个对话 |
-| `POST /api/chat/{id}/turn` | 发送一轮；加上 `Accept: text/event-stream` 会得到流式回复 |
+| `POST /api/chat/{id}/turn` | 发送一轮 |
 | `GET /ws` | WebSocket —— Web UI 用的实时会话/任务/工作流事件 |
 
 ## 会话

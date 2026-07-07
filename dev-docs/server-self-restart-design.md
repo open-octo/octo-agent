@@ -27,7 +27,7 @@ mechanism behind two scenarios:
 
 - **Zero-downtime restart** (nginx-style listener handoff, tableflip). octo
   serve is a personal agent server; a few seconds of port downtime is
-  acceptable, web clients already reconnect SSE/WS and replay. tableflip also
+  acceptable, web clients already reconnect WS and replay. tableflip also
   has no Windows support.
 - **Crash supervision.** The parent does not health-check or auto-restart a
   crashed worker; restart is always a deliberate request. A non-restart exit
@@ -100,7 +100,7 @@ A restart request flips the server into draining state (`drainGate` in
 registers with it):
 
 1. **Gate intake.** New turns are refused at every entry point, each in its
-   transport's retryable shape: HTTP turn endpoints and SSE return `503`, the
+   transport's retryable shape: HTTP turn endpoints return `503`, the
    WS path broadcasts an error event, scheduled task runs return an error,
    and an IM message gets a polite "send that again in a moment" reply. IM
    adapters deliberately stay up through the drain — the turn that triggered
@@ -115,7 +115,7 @@ registers with it):
    code `42`. (A plain shutdown — Ctrl-C — surfaces as `nil` and exit 0.)
 
 The timeout is a hard bound, not a negotiation: a turn still running at 30s is
-abandoned. Round-granularity session persistence plus the SSE replay buffer
+abandoned. Round-granularity session persistence plus the WS replay buffer
 already cap the damage at one round, and clients reconnect to the new worker —
 restart inherits the crash-durability guarantees rather than building its own.
 

@@ -24,7 +24,7 @@ const shutdownTimeout = 10 * time.Second
 
 // defaultDrainTimeout is the hard bound on waiting for in-flight turns
 // before a restart proceeds anyway. Round-granularity session persistence
-// plus the SSE replay buffer cap the damage of a forced cut at one round.
+// plus the WS replay buffer cap the damage of a forced cut at one round.
 const defaultDrainTimeout = 30 * time.Second
 
 // Restart requests a graceful restart. It is idempotent — only the first

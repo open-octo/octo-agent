@@ -58,7 +58,7 @@ func isProcessAlive(pid int) bool {
 // back to killing just the supervisor if taskkill is somehow unavailable.
 //
 // Windows still has no graceful-stop API here; the round-granularity session
-// persistence and SSE replay buffer cap the loss of a hard cut at one round.
+// persistence and WS replay buffer cap the loss of a hard cut at one round.
 func terminateProcess(proc *os.Process) error {
 	if proc == nil {
 		return nil

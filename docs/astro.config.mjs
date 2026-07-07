@@ -85,7 +85,7 @@ export default defineConfig({
 						{ label: 'Config file', slug: 'reference/config-file', translations: { 'zh-CN': '配置文件' } },
 						{ label: 'Tools', slug: 'reference/tools', translations: { 'zh-CN': '工具参考' } },
 						{ label: 'Permissions', slug: 'reference/permissions', translations: { 'zh-CN': '权限系统' } },
-						{ label: 'HTTP & SSE API', slug: 'reference/http-api', translations: { 'zh-CN': 'HTTP 与 SSE API' } },
+						{ label: 'HTTP API', slug: 'reference/http-api', translations: { 'zh-CN': 'HTTP API' } },
 						{ label: 'Compatibility & exit codes', slug: 'reference/compatibility', translations: { 'zh-CN': '兼容性与退出码' } },
 						{ label: 'Security model', slug: 'reference/security', translations: { 'zh-CN': '安全模型' } },
 					],

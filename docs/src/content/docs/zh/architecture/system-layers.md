@@ -18,7 +18,7 @@ internal/tools/    ToolExecutor 实现——terminal（含后台）、
 internal/skills/   SKILL.md 发现 + 系统提示清单
 internal/permission/  给每次工具调用做门控的 allow/deny/ask 规则引擎
 internal/mcp/      MCP 客户端（stdio + HTTP，OAuth）
-internal/server/   octo serve —— HTTP REST + SSE + 内置控制台
+internal/server/   octo serve —— HTTP REST + WebSocket + 内置控制台
 internal/channel/  IM 桥接——适配器接口 + 微信 iLink / 飞书 /
                    钉钉 / 企微 / Discord / Telegram 各适配器
 ```

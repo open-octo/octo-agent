@@ -35,4 +35,4 @@ a **Send test message** action per platform before you rely on it.
   approval channel to check.
 
 Next: pair channels with [goals](/docs/guides/goals/) for tasks that keep running between messages,
-or read the full surface in the [HTTP & SSE API reference](/docs/reference/http-api/).
+or read the full surface in the [HTTP API reference](/docs/reference/http-api/).

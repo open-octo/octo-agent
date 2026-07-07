@@ -252,15 +252,6 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleTurnOrSSE routes turn requests to either JSON or SSE handler.
-func (s *Server) handleTurnOrSSE(w http.ResponseWriter, r *http.Request) {
-	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
-		s.handleTurnSSE(w, r)
-		return
-	}
-	s.handleTurn(w, r)
-}
-
 // ─── POST /api/chat/:id/turn ────────────────────────────────────────────────
 
 func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {

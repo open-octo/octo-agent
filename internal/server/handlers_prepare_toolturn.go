@@ -32,7 +32,7 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	executor := tools.NewDefaultRegistry()
 
 	// Goal tools dispatch to the turn's session on every tool-enabled path
-	// (WS, SSE, REST, scheduled) — advertising them (SetGoalsEnabled) while
+	// (WS, REST, scheduled) — advertising them (SetGoalsEnabled) while
 	// wiring only one path would leave the others erroring on a tool the
 	// schema promised (the #597 class).
 	if s.goalsEnabled.Load() && sess != nil {

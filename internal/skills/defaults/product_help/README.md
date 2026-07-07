@@ -183,7 +183,7 @@ octo --sandbox --sandbox-read /opt/data     # extra readable dir (repeatable)
 | MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, device-flow OAuth |
 | Memory | done | Persistent cross-session memory under `~/.octo/memories/`, auto extract/consolidate |
 | Sub-agents | done | `launch_agent` fan-out, async + resumable (`send_message`, `agent_status`, `kill_agent`) |
-| Web server | done | `octo serve` — REST + SSE, embedded dashboard UI (bind localhost) |
+| Web server | done | `octo serve` — REST + WebSocket, embedded dashboard UI (bind localhost) |
 | IM bridge | done | runs inside `octo serve` — WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram adapters (web QR login, per-user sessions, slash commands) |
 
 ## Architecture
@@ -204,7 +204,7 @@ internal/tools/    ToolExecutor implementations — terminal (+ background),
 internal/skills/   SKILL.md discovery + system-prompt manifest
 internal/permission/  allow/deny/ask rule engine gating every tool call
 internal/mcp/      MCP client (stdio + HTTP, OAuth)
-internal/server/   octo serve — HTTP REST + SSE + embedded dashboard
+internal/server/   octo serve — HTTP REST + WebSocket + embedded dashboard
 internal/channel/  IM bridge — adapter interface + WeChat iLink adapter
 ```
 
