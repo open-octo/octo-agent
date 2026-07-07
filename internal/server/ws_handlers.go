@@ -1243,7 +1243,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		sid := sess.ID
 		go func() {
 			defer s.releaseTitleGeneration(sid)
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
 			defer cancel()
 			t, terr := a.GenerateTitle(ctx, toolDefs)
 			if terr != nil {
@@ -1294,7 +1294,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// Fire-and-forget: the frontend shows it as ghost text; failures are silent.
 	if err == nil {
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
 			defer cancel()
 			text, serr := a.Suggest(ctx, toolDefs)
 			if serr != nil || strings.TrimSpace(text) == "" {
@@ -1308,6 +1308,19 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		}()
 	}
 }
+
+// throwawayGenerationTimeout bounds the title- and suggestion-generation
+// calls above. Both reuse the turn's own Agent/Sender, which means they
+// inherit that session's reasoning_effort — a session running at "high" or
+// "max" pays the model's full reasoning budget even for a 6-word title, and
+// with a slower provider that reliably blows past a short deadline: a
+// confirmed field failure hit exactly this ("anthropic: send: ... context
+// deadline exceeded") at the previous 20s timeout under reasoning_effort
+// "max". Both calls are fire-and-forget and non-blocking for the user, so a
+// generous timeout costs nothing but a longer wait for a background
+// goroutine — better than the call being silently doomed to always miss a
+// too-short deadline on some installs.
+const throwawayGenerationTimeout = 60 * time.Second
 
 // sessionPlaceholderRe matches the frontend's auto-assigned "Session N"
 // default name on freshly created web sessions.
