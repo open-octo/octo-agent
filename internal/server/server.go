@@ -507,7 +507,7 @@ func New(cfg Config) (*Server, error) {
 		Addr:         cfg.Addr,
 		Handler:      s.corsMiddleware(s.mux),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0, // SSE streams are long-lived
+		WriteTimeout: 0, // WS connections are long-lived
 		IdleTimeout:  120 * time.Second,
 	}
 
@@ -687,7 +687,7 @@ func (s *Server) api(pattern string, h http.HandlerFunc) {
 // registerRoutes wires all handlers. API and WS routes require auth.
 func (s *Server) registerRoutes() {
 	s.api("POST /api/chat", s.handleCreateChat)
-	s.api("POST /api/chat/{id}/turn", s.handleTurnOrSSE)
+	s.api("POST /api/chat/{id}/turn", s.handleTurn)
 	s.api("GET /api/sessions", s.handleListSessions)
 	s.api("POST /api/sessions", s.handleCreateSession)
 	s.api("POST /api/sessions/delete", s.handleDeleteSessions)
@@ -1093,7 +1093,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	a.MaxTokens = s.cfg.MaxTokens
 	if s.goalsEnabled.Load() {
 		// The session is the goal accountant on EVERY turn path built from
-		// it (WS, SSE, REST, scheduled) — a goal created over one transport
+		// it (WS, REST, scheduled) — a goal created over one transport
 		// must keep accounting when later turns arrive over another.
 		a.GoalAcct = sess
 	}

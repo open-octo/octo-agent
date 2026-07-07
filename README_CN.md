@@ -289,7 +289,7 @@ octo --sandbox --sandbox-read /opt/data     # 额外可读目录（可重复）
 | 记忆 | 完成 | `~/.octo/memories/` 下的跨会话持久化记忆，自动抽取/整合 |
 | 子代理 | 完成 | `sub_agent` 并行扇出，异步 + 可恢复（`sub_agent_send`、`sub_agent_status`、`sub_agent_kill`） |
 | 工作流 | 完成 | `workflow` 工具 —— 确定性多代理编排（parallel/pipeline）、后台运行带 liveness + `workflow_kill`、git worktree 隔离、结构化输出 schema；使用Ruby DSL |
-| Web 服务 | 完成 | `octo serve` —— REST + SSE，内嵌 Octo Workbench UI（session、工具输出、artifacts、子代理、任务、记忆、MCP、skills；默认绑定 localhost） |
+| Web 服务 | 完成 | `octo serve` —— REST + WebSocket，内嵌 Octo Workbench UI（session、工具输出、artifacts、子代理、任务、记忆、MCP、skills；默认绑定 localhost） |
 | IM 桥接 | 完成 | 随 `octo serve` 运行 —— 微信 iLink/飞书/钉钉/企微/Discord/Telegram 适配器（web 扫码登录、按用户隔离 session、斜杠命令） |
 
 ## 架构
@@ -311,7 +311,7 @@ internal/tools/    ToolExecutor 实现 —— terminal（含后台）、
 internal/skills/   SKILL.md 发现 + 系统提示清单
 internal/permission/  门控每次工具调用的 allow/deny/ask 规则引擎
 internal/mcp/      MCP 客户端（stdio + HTTP，OAuth）
-internal/server/   octo serve —— HTTP REST + SSE + 内嵌仪表盘
+internal/server/   octo serve —— HTTP REST + WebSocket + 内嵌仪表盘
 internal/channel/  IM 桥接 —— 适配器接口 + 微信 iLink / 飞书 /
                    钉钉 / 企微 / Discord / Telegram 适配器
 ```

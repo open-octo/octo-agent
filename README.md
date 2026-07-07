@@ -343,7 +343,7 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 | Memory | done | Persistent cross-session memory under `~/.octo/memories/`, auto extract/consolidate |
 | Sub-agents | done | `sub_agent` fan-out, async + resumable (`sub_agent_send`, `sub_agent_status`, `sub_agent_kill`) |
 | Workflows | done | `workflow` tool — deterministic multi-agent orchestration (parallel/pipeline), background runs with liveness + `workflow_kill`, git worktree isolation, structured-output schema; JS or an embedded-Ruby DSL |
-| Web server | done | `octo serve` — REST + SSE, the embedded Octo Workbench UI (sessions, tool output, artifacts, sub-agents, tasks, memories, MCP, skills; loopback bind by default; access-key auth for exposed binds, see SECURITY.md) |
+| Web server | done | `octo serve` — REST + WebSocket, the embedded Octo Workbench UI (sessions, tool output, artifacts, sub-agents, tasks, memories, MCP, skills; loopback bind by default; access-key auth for exposed binds, see SECURITY.md) |
 | IM bridge | done | runs inside `octo serve` — WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram adapters (web QR login, per-user sessions, slash commands) |
 
 ## Architecture
@@ -365,7 +365,7 @@ internal/tools/    ToolExecutor implementations — terminal (+ background),
 internal/skills/   SKILL.md discovery + system-prompt manifest
 internal/permission/  allow/deny/ask rule engine gating every tool call
 internal/mcp/      MCP client (stdio + HTTP, OAuth)
-internal/server/   octo serve — HTTP REST + SSE + embedded dashboard
+internal/server/   octo serve — HTTP REST + WebSocket + embedded dashboard
 internal/channel/  IM bridge — adapter interface + WeChat iLink / Feishu /
                    DingTalk / WeCom / Discord / Telegram adapters
 ```

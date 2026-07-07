@@ -190,7 +190,7 @@ the durable record, so the tools dispatch to it directly, following the task
 tools' registration pattern: a process-global `SetGoalStore` (CLI/TUI, one
 session per process) or `SetGoalsEnabled` for catalog visibility plus a
 per-turn `WithGoalStore` ctx stamp (the server, in `prepareToolTurn`, so every
-tool-enabled turn path — WS, SSE, REST, scheduled — is wired identically; the
+tool-enabled turn path — WS, REST, scheduled — is wired identically; the
 IM bridge filters the goal tools out via `WithoutGoalTools` until its sessions
 carry goals). Rule from #597/#600: every `input["…"]` read is declared in
 `Definition()` — and a path that advertises a tool must wire its store.

@@ -1,9 +1,9 @@
 ---
-title: HTTP & SSE API
+title: HTTP API
 description: The REST surface behind octo serve — the same API the embedded Web UI uses.
 ---
 
-`octo serve` exposes one REST + SSE + WebSocket API; the embedded Web UI is just its first client.
+`octo serve` exposes one REST + WebSocket API; the embedded Web UI is just its first client.
 All routes below are prefixed `/api` and require the [access key](/docs/reference/security/) on
 any non-loopback bind. `GET /api/health` and `GET /api/version` are the two unauthenticated routes.
 
@@ -16,7 +16,7 @@ called out in the release notes — there's no versioned `/api/v1` yet.
 | Route | Purpose |
 |---|---|
 | `POST /api/chat` | create a chat |
-| `POST /api/chat/{id}/turn` | send a turn; add `Accept: text/event-stream` for a streamed reply |
+| `POST /api/chat/{id}/turn` | send a turn |
 | `GET /ws` | WebSocket — live session/task/workflow events for the Web UI |
 
 ## Sessions

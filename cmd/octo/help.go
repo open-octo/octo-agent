@@ -134,7 +134,7 @@ Environment:
 }
 
 func serveHelp(w io.Writer) {
-	fmt.Fprintln(w, `octo serve — start the HTTP server (REST API + SSE + Web UI).
+	fmt.Fprintln(w, `octo serve — start the HTTP server (REST API + WebSocket + Web UI).
 
 The server binds to localhost:8088 by default.
 

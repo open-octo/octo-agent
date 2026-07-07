@@ -71,7 +71,7 @@ when the file is compacted.
    - the current owner's lease has expired (or there is no lease); and
    - the current owner is not this process (checked via the in-memory cache).
 5. **Exit / unbind** — TUI unbinds on exit; IM `/unbind` releases the binding;
-   Web SSE/WebSocket release after the turn.
+   the Web WebSocket path releases after the turn.
 
 ## Server implementation
 
@@ -89,7 +89,6 @@ The binding is acquired at:
 
 - `POST /api/chat` (create + bind)
 - `POST /api/chat/:id/turn`
-- SSE turn
 - WebSocket user message
 - Cron task execution
 - IM `/compact`

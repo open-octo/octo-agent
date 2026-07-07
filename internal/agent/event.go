@@ -131,8 +131,8 @@ const EventToolOutputCap = 8 * 1024
 //   - EventCompactDone:     Compact (BeforeTokens, AfterTokens, FoldedMsgs)
 //   - EventGoalUpdated:     Goal
 //
-// JSON tags are included so HTTP/SSE transports (M8 web server) can
-// marshal events directly without an intermediate type.
+// JSON tags are included so the WS transport (M8 web server) can marshal
+// events directly without an intermediate type.
 type AgentEvent struct {
 	Kind       EventKind      `json:"kind"`
 	Text       string         `json:"text,omitempty"`
@@ -186,7 +186,7 @@ type CompactStats struct {
 
 // EventHandler is the callback type passed into Agent.RunStream. The handler
 // is invoked synchronously from the agent loop — if it blocks, the loop
-// blocks. Implementations that need async fan-out (e.g. SSE to multiple
+// blocks. Implementations that need async fan-out (e.g. WS to multiple
 // clients) should buffer into a channel and return immediately.
 type EventHandler func(AgentEvent)
 

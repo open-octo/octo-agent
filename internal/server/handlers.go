@@ -254,15 +254,6 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleTurnOrSSE routes turn requests to either JSON or SSE handler.
-func (s *Server) handleTurnOrSSE(w http.ResponseWriter, r *http.Request) {
-	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
-		s.handleTurnSSE(w, r)
-		return
-	}
-	s.handleTurn(w, r)
-}
-
 // ─── POST /api/chat/:id/turn ────────────────────────────────────────────────
 
 func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
@@ -807,7 +798,7 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	executor := tools.NewDefaultRegistry()
 
 	// Goal tools dispatch to the turn's session on every tool-enabled path
-	// (WS, SSE, REST, scheduled) — advertising them (SetGoalsEnabled) while
+	// (WS, REST, scheduled) — advertising them (SetGoalsEnabled) while
 	// wiring only one path would leave the others erroring on a tool the
 	// schema promised (the #597 class).
 	if s.goalsEnabled.Load() && sess != nil {

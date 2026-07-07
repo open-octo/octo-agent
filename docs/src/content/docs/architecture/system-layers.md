@@ -18,7 +18,7 @@ internal/tools/    ToolExecutor implementations — terminal (+ background),
 internal/skills/   SKILL.md discovery + system-prompt manifest
 internal/permission/  allow/deny/ask rule engine gating every tool call
 internal/mcp/      MCP client (stdio + HTTP, OAuth)
-internal/server/   octo serve — HTTP REST + SSE + embedded dashboard
+internal/server/   octo serve — HTTP REST + WebSocket + embedded dashboard
 internal/channel/  IM bridge — adapter interface + WeChat iLink / Feishu /
                    DingTalk / WeCom / Discord / Telegram adapters
 ```
