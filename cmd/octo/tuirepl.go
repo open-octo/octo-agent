@@ -242,6 +242,24 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(tickInterval, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
+// startTicker begins the tickMsg->tickCmd animation chain if one isn't
+// already alive, else it's a no-op. Callers that might fire while a chain
+// from an earlier event is still running (subagent/workflow events arriving
+// between turns) must go through this rather than calling tickCmd() directly
+// — tea.Tick always starts a brand-new independent timer, so an unconditional
+// tickCmd() call would spawn a second, parallel chain alongside the existing
+// one, doubling spinnerFrame's effective advance rate (and tripling, etc. with
+// more redundant calls). The tickMsg handler in Update is the one place that
+// legitimately continues the already-active chain and calls tickCmd()
+// directly for that reason.
+func (m *tuiModel) startTicker() tea.Cmd {
+	if m.tickerActive {
+		return nil
+	}
+	m.tickerActive = true
+	return tickCmd()
+}
+
 // tuiSink implements ViewSink by sending each call onto the bubbletea program.
 // Ask blocks the calling (agent) goroutine until the modal is answered or the
 // turn's context is cancelled.
@@ -430,6 +448,16 @@ type tuiModel struct {
 	// spinnerFrame advances on every tickMsg while a turn runs, animating the
 	// thinking placeholder, the running-tool indicator, and the elapsed clock.
 	spinnerFrame int
+	// tickerActive is true while a tickMsg->tickCmd chain is alive. Every event
+	// that might need the ticker running (turn start, subagent/workflow events
+	// arriving between turns) used to unconditionally call tickCmd(), which — since
+	// tea.Tick always starts a brand-new independent timer — spawned a whole
+	// separate self-perpetuating chain each time. A busy background workflow
+	// firing many workflowEventMsg/subAgentEventMsg while idle between turns could
+	// accumulate dozens of parallel chains, each incrementing spinnerFrame every
+	// tickInterval, so the spinner visibly spun many times faster than intended.
+	// This flag ensures at most one chain is alive at a time.
+	tickerActive bool
 	// running, when non-nil, is a card tool executing right now — shown as a
 	// live spinner line until its done event commits the finished card. (Card
 	// tools suppress their started line, so without this they'd show nothing
@@ -814,7 +842,7 @@ func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
 		m.echoPending = userEchoStyle.Render("> ") + echo
 		m.echoRestore = restore
 	}
-	return tickCmd()
+	return m.startTicker()
 }
 
 // startCompact launches an explicit /compact in a background goroutine. It
@@ -844,7 +872,7 @@ func (m *tuiModel) startCompact() tea.Cmd {
 		}
 		prog.Send(turnFinishedMsg{err: err})
 	}()
-	return tickCmd()
+	return m.startTicker()
 }
 
 // commitEcho promotes the deferred user-message echo from the live View() area
@@ -896,6 +924,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// still going (so the live bottom panels keep ticking even between turns);
 		// let the ticker die once everything is quiet.
 		if !m.turnRunning && len(tools.RunningBackground()) == 0 && len(m.subAgents) == 0 && len(m.workflows) == 0 {
+			m.tickerActive = false
 			return m, m.flushPrints()
 		}
 		m.spinnerFrame++
@@ -969,17 +998,22 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case subAgentEventMsg:
 		m.handleSubAgentEvent(msg.ev)
 		// Ensure the animation ticker is running so the panel's spinner/elapsed
-		// updates even between turns.
+		// updates even between turns. startTicker is a no-op if a chain from an
+		// earlier event is already alive — a busy background subagent firing many
+		// of these while idle must not spawn a parallel tickMsg chain each time
+		// (that used to make the spinner spin several times faster than intended).
 		if !m.turnRunning {
-			return m, tea.Batch(tickCmd(), m.flushPrints())
+			return m, tea.Batch(m.startTicker(), m.flushPrints())
 		}
 		return m, m.flushPrints()
 
 	case workflowEventMsg:
 		m.handleWorkflowEvent(msg.ev)
-		// Keep the ticker alive for the workflow panel's spinner/elapsed clock.
+		// Keep the ticker alive for the workflow panel's spinner/elapsed clock —
+		// see the subAgentEventMsg case above for why this goes through
+		// startTicker rather than tickCmd() directly.
 		if !m.turnRunning {
-			return m, tea.Batch(tickCmd(), m.flushPrints())
+			return m, tea.Batch(m.startTicker(), m.flushPrints())
 		}
 		return m, m.flushPrints()
 
