@@ -139,9 +139,14 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 		})
 	} else {
 		// No session identity (one-shot runTurn paths): keep the old
-		// request/response semantics — block on every sub-agent.
+		// request/response semantics — block on every sub-agent. Deliberately
+		// leave ctx without a background manager, same as before this
+		// function was split: resolveBackgroundManager's fallback to
+		// defaultBg is exactly the "no ctx-scoped manager" case it documents,
+		// and stamping tools.SessionBackgroundManager("") here would silently
+		// swap that documented fallback for an undocumented synthetic
+		// "" session cached forever in sessionMgrs.
 		ctx = tools.WithWorkingDir(ctx, a.CWD)
-		ctx = tools.WithBackgroundManager(ctx, tools.SessionBackgroundManager(""))
 		ctx = tools.WithTaskStore(ctx, tasks.New())
 		mgr = tools.NewSubAgentManager(mkSpawner())
 		mgr.SetSynchronous(true)
