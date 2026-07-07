@@ -79,9 +79,25 @@ func (o Options) log(format string, args ...any) {
 // header. No GitHub API, so no rate-limit coupling.
 //
 // It honors the standard proxy environment variables (HTTP_PROXY,
-// HTTPS_PROXY, NO_PROXY) via http.ProxyFromEnvironment.
+// HTTPS_PROXY, NO_PROXY) via http.ProxyFromEnvironment. When BaseURL is
+// unreachable (e.g. GitHub is blocked outright, not merely slow, so no proxy
+// is configured), it falls back to MirrorBaseURLs in order — otherwise a
+// download-stage mirror fallback never gets a chance to run, because Prepare
+// calls Check first.
 func Check(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, BaseURL+"/releases/latest", nil)
+	var lastErr error
+	for _, base := range append([]string{BaseURL}, MirrorBaseURLs...) {
+		tag, err := checkAt(ctx, base)
+		if err == nil {
+			return tag, nil
+		}
+		lastErr = err
+	}
+	return "", lastErr
+}
+
+func checkAt(ctx context.Context, base string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/releases/latest", nil)
 	if err != nil {
 		return "", err
 	}

@@ -148,6 +148,58 @@ func TestCheck_NoRedirect(t *testing.T) {
 	}
 }
 
+func TestCheck_FallsBackToMirror(t *testing.T) {
+	// Primary server: releases/latest is unreachable (simulating GitHub
+	// being blocked outright, not just slow).
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "blocked", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(primary.Close)
+
+	mirror := fakeRelease(t, "0.19.0", "bin", "")
+
+	origBase := BaseURL
+	BaseURL = primary.URL
+	origMirrors := MirrorBaseURLs
+	MirrorBaseURLs = []string{mirror.URL}
+	t.Cleanup(func() {
+		BaseURL = origBase
+		MirrorBaseURLs = origMirrors
+	})
+
+	got, err := Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "0.19.0" {
+		t.Errorf("Check = %q, want 0.19.0", got)
+	}
+}
+
+func TestCheck_AllUnreachableReturnsLastError(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "primary down", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(primary.Close)
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "mirror down", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(mirror.Close)
+
+	origBase := BaseURL
+	BaseURL = primary.URL
+	origMirrors := MirrorBaseURLs
+	MirrorBaseURLs = []string{mirror.URL}
+	t.Cleanup(func() {
+		BaseURL = origBase
+		MirrorBaseURLs = origMirrors
+	})
+
+	if _, err := Check(context.Background()); err == nil {
+		t.Fatal("expected error when base and all mirrors are unreachable")
+	}
+}
+
 func TestRun_FallsBackToMirror(t *testing.T) {
 	asRelease(t, "0.18.0", "abc1234")
 	ver := "0.19.0"
