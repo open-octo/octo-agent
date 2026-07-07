@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -74,9 +75,18 @@ func (o Options) log(format string, args ...any) {
 	}
 }
 
-// Check resolves the latest released version (no leading "v") by following
-// none of the releases/latest redirect: the target tag is in the Location
-// header. No GitHub API, so no rate-limit coupling.
+// checkBodyCap limits how much of a 200 (non-redirect) response body gets
+// read when hunting for the release tag in HTML — a real release page is
+// ~200 KB.
+const checkBodyCap = 2 << 20 // 2 MiB
+
+// ogURLPattern extracts the path GitHub embeds in the release page's
+// og:url meta tag, e.g. `/open-octo/octo-agent/releases/tag/v1.8.3`.
+var ogURLPattern = regexp.MustCompile(`<meta\s+property="og:url"\s+content="([^"]+)"`)
+
+// Check resolves the latest released version (no leading "v") from the
+// releases/latest redirect: the target tag is in the Location header. No
+// GitHub API, so no rate-limit coupling.
 //
 // It honors the standard proxy environment variables (HTTP_PROXY,
 // HTTPS_PROXY, NO_PROXY) via http.ProxyFromEnvironment. When BaseURL is
@@ -96,6 +106,11 @@ func Check(ctx context.Context) (string, error) {
 	return "", lastErr
 }
 
+// checkAt resolves the latest tag from a single base URL. Most mirrors
+// forward GitHub's redirect as-is, so the tag comes from the Location
+// header; a few (e.g. gh.ddlc.top) instead follow the redirect themselves
+// and hand back the release page, so a 200 response is scanned for the
+// og:url meta tag GitHub embeds in that page.
 func checkAt(ctx context.Context, base string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/releases/latest", nil)
 	if err != nil {
@@ -111,13 +126,32 @@ func checkAt(ctx context.Context, base string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
+
+	switch {
+	case resp.StatusCode >= 300 && resp.StatusCode < 400:
+		return tagFromPath(resp.Header.Get("Location"))
+	case resp.StatusCode == http.StatusOK:
+		body, err := io.ReadAll(io.LimitReader(resp.Body, checkBodyCap))
+		if err != nil {
+			return "", fmt.Errorf("releases/latest: read body: %w", err)
+		}
+		m := ogURLPattern.FindSubmatch(body)
+		if m == nil {
+			return "", fmt.Errorf("releases/latest: got 200 with no recognizable release tag")
+		}
+		return tagFromPath(string(m[1]))
+	default:
 		return "", fmt.Errorf("releases/latest: expected redirect, got %s", resp.Status)
 	}
-	loc := resp.Header.Get("Location")
+}
+
+// tagFromPath pulls the "v1.2.3" (returned without the leading "v") out of
+// a path or URL ending in "/tag/v1.2.3", as found in both a redirect's
+// Location header and a release page's og:url meta tag.
+func tagFromPath(loc string) (string, error) {
 	i := strings.LastIndex(loc, "/tag/")
 	if i < 0 {
-		return "", fmt.Errorf("releases/latest: unexpected redirect target %q", loc)
+		return "", fmt.Errorf("releases/latest: unrecognized release location %q", loc)
 	}
 	tag := strings.TrimPrefix(loc[i+len("/tag/"):], "v")
 	if tag == "" {

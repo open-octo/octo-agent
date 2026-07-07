@@ -176,6 +176,36 @@ func TestCheck_FallsBackToMirror(t *testing.T) {
 	}
 }
 
+func TestCheck_MirrorFollowsRedirectItself(t *testing.T) {
+	// Some mirrors (e.g. gh.ddlc.top) don't forward GitHub's 302 as-is —
+	// they follow it server-side and hand back the release page instead,
+	// with GitHub's own og:url meta tag intact.
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<!DOCTYPE html><html><head>`+
+			`<title>Release v0.19.0 · open-octo/octo-agent · GitHub</title>`+
+			`<meta property="og:url" content="/open-octo/octo-agent/releases/tag/v0.19.0" />`+
+			`</head><body></body></html>`)
+	}))
+	t.Cleanup(mirror.Close)
+
+	origBase := BaseURL
+	BaseURL = mirror.URL
+	origMirrors := MirrorBaseURLs
+	MirrorBaseURLs = nil
+	t.Cleanup(func() {
+		BaseURL = origBase
+		MirrorBaseURLs = origMirrors
+	})
+
+	got, err := Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "0.19.0" {
+		t.Errorf("Check = %q, want 0.19.0", got)
+	}
+}
+
 func TestCheck_AllUnreachableReturnsLastError(t *testing.T) {
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "primary down", http.StatusServiceUnavailable)
