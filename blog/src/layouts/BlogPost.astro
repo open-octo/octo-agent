@@ -125,12 +125,15 @@ const siteName = locale === 'zh' ? 'octo 博客' : 'octo blog';
 			blocks.forEach((pre) => {
 				const code = pre.querySelector('code');
 				const source = code ? (code.textContent || '') : '';
-				const id = 'mermaid-' + Math.random().toString(36).slice(2, 9);
+				const suffix = Math.random().toString(36).slice(2, 9);
 				const container = document.createElement('div');
 				container.className = 'mermaid-diagram';
-				container.id = id;
+				container.id = 'mermaid-container-' + suffix;
 				pre.replaceWith(container);
-				mermaid.render(id, source).then(({ svg }) => {
+				// mermaid.render() creates and then removes a temporary DOM node
+				// with this id internally, so it must differ from container.id
+				// or mermaid ends up deleting our own container instead.
+				mermaid.render('mermaid-render-' + suffix, source).then(({ svg }) => {
 					container.innerHTML = svg;
 				}).catch((err) => {
 					container.innerHTML = '<pre class="mermaid-error">' + (err?.message || 'Mermaid render failed') + '</pre>';
