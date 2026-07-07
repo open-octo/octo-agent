@@ -44,12 +44,15 @@ type fakeAuthServer struct {
 	srv            *httptest.Server
 	authorizeAfter int
 
-	mu            sync.Mutex
-	pollAttempts  int
-	registrations int
-	tokenIssued   string
-	refreshIssued string
-	deviceCode    string
+	mu              sync.Mutex
+	pollAttempts    int
+	registrations   int
+	tokenIssued     string
+	refreshIssued   string
+	deviceCode      string
+	lastDeviceForm  url.Values
+	lastTokenForm   url.Values
+	lastRefreshForm url.Values
 }
 
 func newFakeAuthServer(t *testing.T, authorizeAfter int) *fakeAuthServer {
@@ -95,6 +98,7 @@ func (f *fakeAuthServer) wire() {
 		_ = json.NewEncoder(w).Encode(prMetadata{
 			Resource:             f.URL("/mcp_server/v1"),
 			AuthorizationServers: []string{f.URL("/auth")},
+			ScopesSupported:      []string{"mcp:read", "mcp:write"},
 		})
 	})
 
@@ -127,7 +131,11 @@ func (f *fakeAuthServer) wire() {
 	// 5. Device authorization (RFC 8628). Interval=1 keeps the test
 	// runtime in milliseconds; the production default (5s when the
 	// server omits Interval) is exercised in a dedicated test.
-	f.mux.HandleFunc("/device", func(w http.ResponseWriter, _ *http.Request) {
+	f.mux.HandleFunc("/device", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		f.mu.Lock()
+		f.lastDeviceForm = r.Form
+		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(deviceCodeResponse{
 			DeviceCode:              f.deviceCode,
@@ -150,6 +158,7 @@ func (f *fakeAuthServer) wire() {
 			f.mu.Lock()
 			f.pollAttempts++
 			attempt := f.pollAttempts
+			f.lastTokenForm = r.Form
 			f.mu.Unlock()
 			if attempt <= f.authorizeAfter {
 				w.WriteHeader(http.StatusBadRequest)
@@ -167,6 +176,7 @@ func (f *fakeAuthServer) wire() {
 			// happened.
 			f.mu.Lock()
 			f.tokenIssued = "access-rotated-67890"
+			f.lastRefreshForm = r.Form
 			tok := f.tokenIssued
 			f.mu.Unlock()
 			_ = json.NewEncoder(w).Encode(tokenResponse{
@@ -272,6 +282,54 @@ func TestOAuth_RefreshOnExpiry(t *testing.T) {
 	}
 	if prompt.authorizations != 1 {
 		t.Errorf("refresh path should not re-prompt user; got %d prompts", prompt.authorizations)
+	}
+}
+
+// TestOAuth_SendsResourceAndScope guards against the audience-binding gap
+// that caused a fresh, otherwise-valid device-flow token to be rejected as
+// "401 unauthorized" by an audience-checking authorization server (RFC
+// 8707): the client must echo the protected-resource metadata's
+// "resource" and "scopes_supported" back to the AS on every device
+// authorization, token exchange, and refresh request — not just parse
+// them and discard them.
+func TestOAuth_SendsResourceAndScope(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	fs := newFakeAuthServer(t, 0)
+	defer fs.close()
+	fastPolling(t)
+
+	wantResource := fs.URL("/mcp_server/v1")
+	wantScope := "mcp:read mcp:write"
+
+	oc, _ := NewOAuthClient(wantResource, "fake", "octo-test", &stubPrompt{})
+	if _, err := oc.Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := fs.lastDeviceForm.Get("resource"); got != wantResource {
+		t.Errorf("device authorization resource = %q, want %q", got, wantResource)
+	}
+	if got := fs.lastDeviceForm.Get("scope"); got != wantScope {
+		t.Errorf("device authorization scope = %q, want %q", got, wantScope)
+	}
+	if got := fs.lastTokenForm.Get("resource"); got != wantResource {
+		t.Errorf("token exchange resource = %q, want %q", got, wantResource)
+	}
+	if got := fs.lastTokenForm.Get("scope"); got != wantScope {
+		t.Errorf("token exchange scope = %q, want %q", got, wantScope)
+	}
+
+	// Force a refresh and check the same params are re-sent.
+	oc.state.ExpiresAt = time.Now().Add(-1 * time.Hour)
+	if _, err := oc.Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := fs.lastRefreshForm.Get("resource"); got != wantResource {
+		t.Errorf("refresh resource = %q, want %q", got, wantResource)
+	}
+	if got := fs.lastRefreshForm.Get("scope"); got != wantScope {
+		t.Errorf("refresh scope = %q, want %q", got, wantScope)
 	}
 }
 

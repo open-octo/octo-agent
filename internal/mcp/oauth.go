@@ -90,6 +90,18 @@ type oauthState struct {
 	RefreshToken string    `json:"refresh_token,omitempty"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	TokenURL     string    `json:"token_url"`
+	// Resource is the RFC 8707 audience value echoed back on every token
+	// request (device authorization, token exchange, refresh) so an
+	// audience-checking authorization server issues a token scoped to this
+	// MCP endpoint rather than a generic one. Comes from the protected-
+	// resource metadata's "resource" field, falling back to ResourceURL if
+	// the server omits it.
+	Resource string `json:"resource,omitempty"`
+	// Scope is the space-separated scope string requested alongside the
+	// token, derived from the protected-resource metadata's
+	// "scopes_supported". Re-sent on refresh so a rotated token keeps the
+	// same grant.
+	Scope string `json:"scope,omitempty"`
 }
 
 // NewOAuthClient builds a provider for the given MCP resource URL.
@@ -163,10 +175,21 @@ func (o *OAuthClient) Invalidate() {
 // authorize runs the full discovery + (maybe register) + device flow.
 // Caller holds o.mu.
 func (o *OAuthClient) authorize(ctx context.Context) error {
-	asMeta, err := o.discover(ctx)
+	asMeta, prMeta, err := o.discover(ctx)
 	if err != nil {
 		return err
 	}
+	// RFC 8707 audience binding: bind the token to the resource the
+	// protected-resource metadata names, falling back to the configured
+	// URL if the server omits "resource" (non-compliant but seen in the
+	// wild). Without this, an audience-checking authorization server
+	// issues a token that authenticates fine but isn't authorized for this
+	// specific MCP endpoint, and every request 401s.
+	resource := prMeta.Resource
+	if resource == "" {
+		resource = o.resourceURL
+	}
+	scope := strings.Join(prMeta.ScopesSupported, " ")
 
 	clientID := ""
 	clientSecret := ""
@@ -175,7 +198,7 @@ func (o *OAuthClient) authorize(ctx context.Context) error {
 		clientSecret = o.state.ClientSecret
 	} else if asMeta.RegistrationEndpoint != "" {
 		// Public client + PKCE-friendly: no secret expected back.
-		id, secret, err := o.register(ctx, asMeta.RegistrationEndpoint)
+		id, secret, err := o.register(ctx, asMeta.RegistrationEndpoint, scope)
 		if err != nil {
 			return fmt.Errorf("oauth: dynamic client registration: %w", err)
 		}
@@ -185,7 +208,7 @@ func (o *OAuthClient) authorize(ctx context.Context) error {
 		return errors.New("oauth: server has no registration_endpoint and no cached client_id")
 	}
 
-	tok, err := o.deviceFlow(ctx, asMeta, clientID, clientSecret)
+	tok, err := o.deviceFlow(ctx, asMeta, clientID, clientSecret, resource, scope)
 	if err != nil {
 		return fmt.Errorf("oauth: device flow: %w", err)
 	}
@@ -197,6 +220,8 @@ func (o *OAuthClient) authorize(ctx context.Context) error {
 		RefreshToken: tok.RefreshToken,
 		ExpiresAt:    expiryFromSeconds(tok.ExpiresIn),
 		TokenURL:     asMeta.TokenEndpoint,
+		Resource:     resource,
+		Scope:        scope,
 	}
 	if err := saveOAuthState(o.storePath, o.state); err != nil {
 		// Persist failure is non-fatal — we still have the token in
@@ -219,6 +244,12 @@ func (o *OAuthClient) refresh(ctx context.Context) error {
 	form.Set("client_id", o.state.ClientID)
 	if o.state.ClientSecret != "" {
 		form.Set("client_secret", o.state.ClientSecret)
+	}
+	if o.state.Resource != "" {
+		form.Set("resource", o.state.Resource)
+	}
+	if o.state.Scope != "" {
+		form.Set("scope", o.state.Scope)
 	}
 	tok, err := o.postTokenEndpoint(ctx, o.state.TokenURL, form)
 	if err != nil {
@@ -251,39 +282,43 @@ type asMetadata struct {
 type prMetadata struct {
 	Resource             string   `json:"resource"`
 	AuthorizationServers []string `json:"authorization_servers"`
+	ScopesSupported      []string `json:"scopes_supported"`
 }
 
 // discover does the two-step RFC 9728 → 8414 hop. The 9728 metadata lives
 // at the protected resource's well-known path; it points at one or more
-// authorization servers. We pick the first.
-func (o *OAuthClient) discover(ctx context.Context) (*asMetadata, error) {
+// authorization servers. We pick the first. The protected-resource
+// metadata is also returned since its "resource"/"scopes_supported"
+// fields feed the RFC 8707 audience binding on every subsequent token
+// request.
+func (o *OAuthClient) discover(ctx context.Context) (*asMetadata, *prMetadata, error) {
 	prURL, err := buildPRMetadataURL(o.resourceURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var pr prMetadata
 	if err := o.getJSON(ctx, prURL, &pr); err != nil {
-		return nil, fmt.Errorf("protected-resource metadata: %w", err)
+		return nil, nil, fmt.Errorf("protected-resource metadata: %w", err)
 	}
 	if len(pr.AuthorizationServers) == 0 {
-		return nil, errors.New("oauth: no authorization_servers in protected-resource metadata")
+		return nil, nil, errors.New("oauth: no authorization_servers in protected-resource metadata")
 	}
 
 	asURL, err := buildASMetadataURL(pr.AuthorizationServers[0])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var as asMetadata
 	if err := o.getJSON(ctx, asURL, &as); err != nil {
-		return nil, fmt.Errorf("authorization-server metadata: %w", err)
+		return nil, nil, fmt.Errorf("authorization-server metadata: %w", err)
 	}
 	if as.DeviceAuthorizationEndpoint == "" {
-		return nil, errors.New("oauth: server does not support device authorization grant")
+		return nil, nil, errors.New("oauth: server does not support device authorization grant")
 	}
 	if as.TokenEndpoint == "" {
-		return nil, errors.New("oauth: server has no token endpoint")
+		return nil, nil, errors.New("oauth: server has no token endpoint")
 	}
-	return &as, nil
+	return &as, &pr, nil
 }
 
 // buildPRMetadataURL constructs the RFC 9728 well-known URL by inserting
@@ -330,12 +365,15 @@ type registrationResponse struct {
 	ClientSecret string `json:"client_secret"`
 }
 
-func (o *OAuthClient) register(ctx context.Context, endpoint string) (clientID, clientSecret string, err error) {
+func (o *OAuthClient) register(ctx context.Context, endpoint, scope string) (clientID, clientSecret string, err error) {
 	body := map[string]any{
 		"client_name":                o.clientName,
 		"grant_types":                []string{"urn:ietf:params:oauth:grant-type:device_code", "refresh_token"},
 		"token_endpoint_auth_method": "none",
 		"application_type":           "native",
+	}
+	if scope != "" {
+		body["scope"] = scope
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -388,10 +426,16 @@ type tokenResponse struct {
 	ErrorDescription string `json:"error_description"`
 }
 
-func (o *OAuthClient) deviceFlow(ctx context.Context, as *asMetadata, clientID, clientSecret string) (*tokenResponse, error) {
+func (o *OAuthClient) deviceFlow(ctx context.Context, as *asMetadata, clientID, clientSecret, resource, scope string) (*tokenResponse, error) {
 	// 1. Kick off the device authorization.
 	form := url.Values{}
 	form.Set("client_id", clientID)
+	if resource != "" {
+		form.Set("resource", resource)
+	}
+	if scope != "" {
+		form.Set("scope", scope)
+	}
 	dcResp, err := o.startDevice(ctx, as.DeviceAuthorizationEndpoint, form)
 	if err != nil {
 		return nil, err
@@ -432,6 +476,12 @@ func (o *OAuthClient) deviceFlow(ctx context.Context, as *asMetadata, clientID, 
 		tokForm.Set("client_id", clientID)
 		if clientSecret != "" {
 			tokForm.Set("client_secret", clientSecret)
+		}
+		if resource != "" {
+			tokForm.Set("resource", resource)
+		}
+		if scope != "" {
+			tokForm.Set("scope", scope)
 		}
 		tok, err := o.postTokenEndpoint(ctx, as.TokenEndpoint, tokForm)
 		if err == nil {
