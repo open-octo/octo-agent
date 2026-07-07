@@ -341,43 +341,13 @@ export async function getMcpServer(name: string): Promise<McpServerDetail> {
   return request<McpServerDetail>(`/api/mcp/servers/${encodeURIComponent(name)}`)
 }
 
-export interface CreateMcpServerOpts {
-  name: string
-  command?: string
-  args?: string[]
-  url?: string
-  transport?: string
-  allowArbitraryCommand?: boolean
-}
-
-export async function createMcpServer(opts: CreateMcpServerOpts): Promise<void> {
-  const { name, command, args, url, allowArbitraryCommand, ...rest } = opts
-  const server: Record<string, unknown> = {}
-  if (command) { server.command = command; if (args) server.args = args }
-  if (url) server.url = url
-  const body: Record<string, unknown> = { name, server }
-  if (allowArbitraryCommand) body.allow_arbitrary_command = true
-  await request<unknown>('/api/mcp/servers', { method: 'POST', ...json(body) })
-}
-
 // Bulk-import servers from a pasted JSON config: either a full
 // { mcpServers: { name: {...} } } document or a bare { name: {...} } map.
+// This is also the only way to add a server through the API — adding or
+// editing a single one by hand goes through the mcp-creator skill instead,
+// which edits the config file directly (see McpView's askAgentToEdit).
 export async function importMcpServers(servers: Record<string, unknown>): Promise<void> {
   await request<unknown>('/api/mcp/servers', { method: 'POST', ...json({ mcpServers: servers }) })
-}
-
-export interface UpdateMcpServerOpts {
-  server: Record<string, unknown>
-  allowArbitraryCommand?: boolean
-}
-
-export async function updateMcpServer(name: string, req: UpdateMcpServerOpts): Promise<McpServer> {
-  const body: Record<string, unknown> = { server: req.server }
-  if (req.allowArbitraryCommand) body.allow_arbitrary_command = true
-  return request<McpServer>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
-    method: 'PATCH',
-    ...json(body),
-  })
 }
 
 export async function deleteMcpServer(name: string): Promise<void> {
