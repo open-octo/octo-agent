@@ -1243,7 +1243,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		sid := sess.ID
 		go func() {
 			defer s.releaseTitleGeneration(sid)
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
 			defer cancel()
 			t, terr := a.GenerateTitle(ctx, toolDefs)
 			if terr != nil {
@@ -1294,7 +1294,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// Fire-and-forget: the frontend shows it as ghost text; failures are silent.
 	if err == nil {
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
 			defer cancel()
 			text, serr := a.Suggest(ctx, toolDefs)
 			if serr != nil || strings.TrimSpace(text) == "" {
@@ -1308,6 +1308,19 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		}()
 	}
 }
+
+// throwawayGenerationTimeout bounds the title- and suggestion-generation
+// calls above. A confirmed field failure hit "anthropic: send: ... context
+// deadline exceeded" on every attempt at the previous 20s timeout: both
+// calls reuse the turn's own Agent/Sender and inherited that session's
+// reasoning_effort ("max"), paying the model's full reasoning budget even
+// for a 6-word title. The real fix is agent.LowEffortSender (both calls now
+// cap effort to "low" instead of inheriting the session's), which removes
+// most of that latency at the source — this timeout is only the remaining
+// safety margin for normal network/provider variance, not a substitute for
+// the effort cap, so it stays modest rather than papering over a slow call
+// with a long wait.
+const throwawayGenerationTimeout = 30 * time.Second
 
 // sessionPlaceholderRe matches the frontend's auto-assigned "Session N"
 // default name on freshly created web sessions.

@@ -70,6 +70,48 @@ func TestNewSender_DerivesThinkingBudgetFromEffort(t *testing.T) {
 	}
 }
 
+// TestSender_LowEffort_CapsReasoningRegardlessOfOriginal guards the fix for a
+// confirmed production failure: a session running reasoning_effort "max" paid
+// the model's full reasoning budget for GenerateTitle/Suggest's throwaway
+// calls, reliably exceeding their timeout. sender.LowEffort() must always cap
+// to "low" — never inherit whatever the session was actually configured
+// with — and must leave the original sender (and its caller-visible
+// reasoningEffort/thinkingBudget) untouched, since it's a value receiver
+// returning a modified copy, not a mutation.
+func TestSender_LowEffort_CapsReasoningRegardlessOfOriginal(t *testing.T) {
+	for _, original := range []string{"", "low", "medium", "high", "xhigh", "max"} {
+		t.Run("from "+original, func(t *testing.T) {
+			fake := &mockProvider{reply: provider.Response{Content: "ok"}}
+			s := sender{p: fake, reasoningEffort: original, thinkingBudget: AnthropicThinkingBudget(original)}
+
+			low := s.LowEffort()
+			if _, err := low.SendMessages(context.Background(), "m", "", []agent.Message{agent.NewUserMessage("hi")}, 0); err != nil {
+				t.Fatalf("SendMessages: %v", err)
+			}
+			if fake.gotReq.ReasoningEffort != "low" {
+				t.Errorf("ReasoningEffort sent = %q, want %q", fake.gotReq.ReasoningEffort, "low")
+			}
+			if want := AnthropicThinkingBudget("low"); fake.gotReq.ThinkingBudget != want {
+				t.Errorf("ThinkingBudget sent = %d, want %d", fake.gotReq.ThinkingBudget, want)
+			}
+
+			// The original sender must be unaffected (value receiver).
+			if s.reasoningEffort != original {
+				t.Errorf("original sender's reasoningEffort mutated: got %q, want %q", s.reasoningEffort, original)
+			}
+		})
+	}
+}
+
+// TestSender_ImplementsLowEffortSender is a compile-time-adjacent guard: if
+// sender's method set ever drifts (e.g. LowEffort renamed or given a pointer
+// receiver that breaks the value-type assertion agent.go relies on),
+// GenerateTitle/Suggest would silently stop capping effort with no test
+// failure elsewhere to catch it.
+func TestSender_ImplementsLowEffortSender(t *testing.T) {
+	var _ agent.LowEffortSender = sender{}
+}
+
 func TestSender_NilProvider(t *testing.T) {
 	s := sender{p: nil}
 	if _, err := s.SendMessages(context.Background(), "m", "", nil, 0); err == nil {
