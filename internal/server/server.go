@@ -771,6 +771,11 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/skills/import", s.handleImportSkill)
 	s.api("GET /api/skills/{name}/export", s.handleExportSkill)
 
+	// Workflow detail, delete & export (list is registered above)
+	s.api("GET /api/workflows/{name}", s.handleGetWorkflow)
+	s.api("DELETE /api/workflows/{name}", s.handleDeleteWorkflow)
+	s.api("GET /api/workflows/{name}/export", s.handleExportWorkflow)
+
 	// MCP server management
 	s.api("GET /api/mcp/servers", s.handleListMCPServers)
 	s.api("GET /api/mcp/servers/{name}", s.handleGetMCPServer)

@@ -39,6 +39,7 @@
   const actions = [
     { id: 'new', icon: 'ant-design:plus-outlined', label: () => $t('nav.new_session'), shortcut: '⌘N', run: () => goTo('chat') },
     { id: 'skills', icon: 'ant-design:thunderbolt-outlined', label: () => $t('nav.skills'), shortcut: '', run: () => goTo('skills') },
+    { id: 'workflows', icon: 'ant-design:partition-outlined', label: () => $t('nav.workflows'), shortcut: '', run: () => goTo('workflows') },
     { id: 'tasks', icon: 'ant-design:clock-circle-outlined', label: () => $t('nav.tasks'), shortcut: '', run: () => goTo('tasks') },
     { id: 'mcp', icon: 'ant-design:api-outlined', label: () => $t('nav.mcp'), shortcut: '', run: () => goTo('mcp') },
     { id: 'channels', icon: 'ant-design:mobile-outlined', label: () => $t('nav.channels'), shortcut: '', run: () => goTo('channels') },

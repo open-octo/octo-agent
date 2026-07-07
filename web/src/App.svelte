@@ -12,6 +12,7 @@
   import Sidebar from './components/layout/Sidebar.svelte'
   import ChatView from './views/ChatView.svelte'
   import SkillsView from './views/SkillsView.svelte'
+  import WorkflowsView from './views/WorkflowsView.svelte'
   import BrowserView from './views/BrowserView.svelte'
   import TasksView from './views/TasksView.svelte'
   import McpView from './views/McpView.svelte'
@@ -35,7 +36,7 @@
   // Reflect the current view (and active chat session) in the hash so a refresh
   // lands back where the user was instead of the default chat view.
   let routeReady = false
-  const VALID_VIEWS = ['chat', 'skills', 'browser', 'tasks', 'mcp', 'channels', 'settings', 'profile', 'files']
+  const VALID_VIEWS = ['chat', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'settings', 'profile', 'files']
 
   function applyHash() {
     const h = location.hash.replace(/^#\/?/, '')
@@ -232,6 +233,8 @@
         <ChatView />
       {:else if $view === 'skills'}
         <SkillsView />
+      {:else if $view === 'workflows'}
+        <WorkflowsView />
       {:else if $view === 'browser'}
         <BrowserView />
       {:else if $view === 'tasks'}

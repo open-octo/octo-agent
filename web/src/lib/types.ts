@@ -1,4 +1,4 @@
-export type View = 'chat' | 'skills' | 'tasks' | 'mcp' | 'channels' | 'settings' | 'profile' | 'files'
+export type View = 'chat' | 'skills' | 'workflows' | 'tasks' | 'mcp' | 'channels' | 'settings' | 'profile' | 'files'
 export type SidebarMode = 'full' | 'rail' | 'hidden'
 export type MemTab = 'soul' | 'user' | 'memories'
 export type ArtifactView = 'preview' | 'code'
@@ -38,6 +38,15 @@ export interface Skill {
   tagStatus: TagStatus
   tagLabel: string
   enabled: boolean
+  source: string
+}
+
+export interface Workflow {
+  name: string
+  desc: string
+  icon: string
+  tagStatus: TagStatus
+  tagLabel: string
   source: string
 }
 

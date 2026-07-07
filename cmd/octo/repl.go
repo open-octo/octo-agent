@@ -357,7 +357,7 @@ func printSkills(w io.Writer, reg *skills.Registry) {
 
 // printWorkflows lists the available named workflows (embedded presets + user +
 // project). They aren't slash-triggered — you run one by asking the agent, e.g.
-// "run adversarial-review" — so this is purely for discovery.
+// "run daily-triage" — so this is purely for discovery.
 func printWorkflows(w io.Writer) {
 	wfs := tools.ListNamedWorkflows()
 	if len(wfs) == 0 {

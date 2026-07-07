@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store'
-import type { Session, Skill, ScheduledTask, McpServer, Channel, Memory, Artifact, ArtifactView } from './types'
+import type { Session, Skill, Workflow, ScheduledTask, McpServer, Channel, Memory, Artifact, ArtifactView } from './types'
 import * as api from './api'
 
 // First-run gate. 'unknown' until /api/onboard/status resolves (render a splash,
@@ -96,6 +96,7 @@ export const feedbackModal = writable<any | null>(null)
 
 // Admin data (loaded by views)
 export const skills = writable<Skill[]>([])
+export const workflows = writable<Workflow[]>([])
 export const tasks = writable<ScheduledTask[]>([])
 export const mcpServers = writable<McpServer[]>([])
 export const toolSearchMode = writable('auto')

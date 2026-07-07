@@ -75,6 +75,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runSessions(args[1:], stdout, stderr)
 	case "skills":
 		return runSkills(args[1:], stdout, stderr)
+	case "workflows":
+		return runWorkflows(args[1:], stdout, stderr)
 	case "hooks":
 		return runHooks(args[1:], stdout, stderr)
 	case "serve":
@@ -132,6 +134,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  memory     Manage cross-session memory (e.g. `octo memory list`)")
 	fmt.Fprintln(w, "  sessions   List recent saved sessions (resume with `octo -c <id>`)")
 	fmt.Fprintln(w, "  skills     Manage skills (`octo skills list | add | update | path`)")
+	fmt.Fprintln(w, "  workflows  List saved workflows (`octo workflows list | path`)")
 	fmt.Fprintln(w, "  browser    Set up browser automation (attach to your logged-in Chrome)")
 	fmt.Fprintln(w, "  upgrade    Download and install the latest release (--check to only compare)")
 	fmt.Fprintln(w, "  completion Print shell-completion snippet (bash | zsh | fish)")

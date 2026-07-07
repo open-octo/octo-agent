@@ -1,4 +1,4 @@
-import type { Session, Skill, ScheduledTask, McpServer, McpServerDetail, Channel, Memory, RecallFile, TagStatus } from './types'
+import type { Session, Skill, Workflow, ScheduledTask, McpServer, McpServerDetail, Channel, Memory, RecallFile, TagStatus } from './types'
 
 // TaskResponse matches the Go server task struct.
 export interface TaskResponse {
@@ -180,16 +180,55 @@ export async function toggleSkill(name: string, enabled: boolean): Promise<void>
   })
 }
 
-// Workflows (read-only discovery of named/preset workflows)
+// Workflows
 
 export interface NamedWorkflow {
   name: string
   description: string
+  source: string
 }
 
+// Raw list, used by the Composer's /wf autocomplete (name + description only).
 export async function listWorkflows(): Promise<NamedWorkflow[]> {
   const d = await request<{ workflows: NamedWorkflow[] }>('/api/workflows')
   return d.workflows ?? []
+}
+
+// Display-mapped list for the management panel — mirrors listSkills's
+// source→tag mapping so the two panels read as one system.
+export async function listWorkflowsView(): Promise<Workflow[]> {
+  const named = await listWorkflows()
+  return named.map((w): Workflow => {
+    const src = w.source || 'user'
+    const tag: { tagStatus: TagStatus; tagLabel: string } = src === 'project'
+      ? { tagStatus: 'info', tagLabel: 'Project' }
+      : src === 'default'
+        ? { tagStatus: 'default', tagLabel: 'System' }
+        : { tagStatus: 'success', tagLabel: 'User' }
+    return {
+      name: w.name,
+      desc: w.description ?? '',
+      icon: 'ant-design:partition-outlined',
+      tagStatus: tag.tagStatus,
+      tagLabel: tag.tagLabel,
+      source: src,
+    }
+  })
+}
+
+export interface WorkflowDetail {
+  name: string
+  description: string
+  source: string
+  script: string
+}
+
+export async function getWorkflow(name: string): Promise<WorkflowDetail> {
+  return request<WorkflowDetail>(`/api/workflows/${encodeURIComponent(name)}`)
+}
+
+export async function deleteWorkflow(name: string): Promise<void> {
+  await request<unknown>(`/api/workflows/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
 
 export async function deleteSkill(name: string): Promise<void> {

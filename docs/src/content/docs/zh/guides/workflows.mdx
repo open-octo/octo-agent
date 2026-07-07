@@ -91,9 +91,9 @@ workflow(name: "my-check", args: { target: "src/" })
 
 | 名字 | 作用 |
 |---|---|
-| `adversarial-review` | 按维度扇出 review 发现，再用独立的"找茬者"投票（默认 3 票）杀掉假阳性 |
 | `parallel-understand` | 并行梳理一个代码库——每个子系统配一个 reader，最后合成一张架构图 |
 | `batch-migrate` | 在很多文件上应用同一个机械式改动，每个文件各自跑在独立的 git worktree 里，并发编辑不会冲突 |
+| `daily-triage` | 跑一次每日巡检循环——发现未处理的 issue 和 CI 失败，在隔离的 worktree 里起草安全修复，用第二个 agent 验证，最后写出状态报告 |
 
 ## 续跑一次运行
 
