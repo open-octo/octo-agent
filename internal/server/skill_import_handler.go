@@ -42,7 +42,7 @@ func (s *Server) handleImportSkill(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, skills.ErrExists):
 			writeError(w, http.StatusConflict, err.Error())
-		case errors.Is(err, errBadImportSource):
+		case errors.Is(err, errBadImportSource), errors.Is(err, skills.ErrInvalidSkill):
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
 			writeError(w, http.StatusInternalServerError, err.Error())

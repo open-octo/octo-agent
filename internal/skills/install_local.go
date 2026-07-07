@@ -19,7 +19,7 @@ import (
 func InstallZip(zipPath, destRoot string, force bool) (name, desc string, err error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return "", "", fmt.Errorf("open %s: %w", zipPath, err)
+		return "", "", fmt.Errorf("%w: open %s: %v", ErrInvalidSkill, zipPath, err)
 	}
 	defer zr.Close()
 
@@ -78,7 +78,7 @@ func zipSkillPrefix(zr *zip.Reader) (string, error) {
 			return dir, nil
 		}
 	}
-	return "", fmt.Errorf("no %s at the archive root or in a single top-level folder", SkillFile)
+	return "", fmt.Errorf("%w: no %s at the archive root or in a single top-level folder", ErrInvalidSkill, SkillFile)
 }
 
 func writeZipEntry(f *zip.File, target string) error {

@@ -143,6 +143,12 @@ func Install(src Source, destRoot string, force bool) (name, desc string, err er
 // --force hint, the web API maps it to HTTP 409.
 var ErrExists = fmt.Errorf("skill already exists")
 
+// ErrInvalidSkill reports that the source content itself isn't a valid
+// skill (no SKILL.md, missing frontmatter, malformed archive) as opposed to
+// an install-time I/O failure. Callers branch on it: the web API maps it to
+// HTTP 400 rather than 500, since the fix is a different source, not a retry.
+var ErrInvalidSkill = fmt.Errorf("invalid skill")
+
 // placeStaged validates a fully-staged skill directory (tmp must contain
 // SKILL.md) and renames it to destRoot/<name>. The name comes from the
 // SKILL.md frontmatter, falling back to fallbackName. Shared by the GitHub,
@@ -150,18 +156,18 @@ var ErrExists = fmt.Errorf("skill already exists")
 func placeStaged(tmp, destRoot, fallbackName string, force bool) (name, desc string, err error) {
 	b, err := os.ReadFile(filepath.Join(tmp, SkillFile))
 	if err != nil {
-		return "", "", fmt.Errorf("no readable %s — not a skill directory", SkillFile)
+		return "", "", fmt.Errorf("%w: no readable %s — not a skill directory", ErrInvalidSkill, SkillFile)
 	}
 	fmName, fmDesc, ok := parseNamed(b)
 	if !ok || fmDesc == "" {
-		return "", "", fmt.Errorf("%s is missing frontmatter name/description", SkillFile)
+		return "", "", fmt.Errorf("%w: %s is missing frontmatter name/description", ErrInvalidSkill, SkillFile)
 	}
 	name = fmName
 	if name == "" {
 		name = fallbackName
 	}
 	if name == "" || name == "." || name == "/" {
-		return "", "", fmt.Errorf("cannot determine a skill name")
+		return "", "", fmt.Errorf("%w: cannot determine a skill name", ErrInvalidSkill)
 	}
 
 	dest := filepath.Join(destRoot, name)
@@ -258,7 +264,7 @@ func extractSubdir(r io.Reader, subpath, dest string) error {
 		found = true
 	}
 	if !found {
-		return fmt.Errorf("no files found under %q in the repository tarball", subpath)
+		return fmt.Errorf("%w: no files found under %q in the repository tarball", ErrInvalidSkill, subpath)
 	}
 	return nil
 }

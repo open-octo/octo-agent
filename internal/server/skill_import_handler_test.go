@@ -120,6 +120,42 @@ func TestHandleImportSkill_LocalDir(t *testing.T) {
 	}
 }
 
+// TestHandleImportSkill_InvalidZipContent covers #1236: an uploaded zip that
+// isn't a skill (no SKILL.md) is a client mistake, not a server failure, so
+// it must map to 400 rather than 500.
+func TestHandleImportSkill_InvalidZipContent(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	uploadsDir := filepath.Join(tmp, ".octo", "uploads")
+	if err := os.MkdirAll(uploadsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("readme.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("not a skill")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	base := "not_a_skill.zip"
+	if err := os.WriteFile(filepath.Join(uploadsDir, base), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	w2 := postImport(t, srv, `{"source":"/api/uploads/`+base+`"}`)
+	if w2.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w2.Code, w2.Body.String())
+	}
+}
+
 func TestHandleImportSkill_BadSources(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
