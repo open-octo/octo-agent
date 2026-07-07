@@ -150,7 +150,11 @@ pkg/octoagent/
 ├── provider/
 │   └── provider.go  // alias app.SenderOptions / app.NewSender
 ├── toolenv/
-│   └── toolenv.go   // 包一层从 internal/server 抽出来的并发安全 wiring 函数
+│   └── toolenv.go   // 包一层从 internal/server 抽出来的并发安全 wiring 函数,
+│                    // 以及 DefaultToolsForCtx/NewDefaultRegistry 的转发
+├── hooks/
+│   └── hooks.go     // alias internal/hooks 的 Engine/Meta/Payload/InProcHook/
+│                    // ToolDecision/SeenSet + 构造函数 + Event 常量
 └── approval/
     └── approval.go  // 可选的 GateFunc 便捷适配器(见下)
 ```
@@ -272,9 +276,25 @@ Director 想在自己代码里声明一个 `h *agent.History` 字段或函数签
 一并 alias 出去。
 
 `Agent.Hooks`/`Agent.HookMeta` 字段的类型来自 `internal/hooks` 包(`hooks.Engine`/`hooks.Meta`),
-不在 `internal/agent` 下——如果 Director 需要按类型引用它们,还要再给 `internal/hooks` 开一层
-alias(`pkg/octoagent/hooks`)。Sinew Director 目前的设计不需要直接操作 hook 引擎,这里先记为
-"用到再加",不在本轮改动范围内。
+不在 `internal/agent` 下——`pkg/octoagent/hooks` alias 了这一层(`Engine`/`Meta`/`Payload`/
+`InProcHook`/`ToolDecision`/`SeenSet` + `NewEngine`/`NewSeenSet` + 全部 7 个 Event 常量),外部可以
+用纯 Go 代码注册 hook(`RegisterInProc`/`RegisterShell`/`RegisterShellMatched`),不需要
+`~/.octo/hooks.yml`。CLI/server 专属的 `EngineFromEnvAndFiles`(读本地文件)不在 alias 范围内。
+
+导出这一层时发现 `internal/hooks.Engine.PreToolUse` 原本只认 shell hook 的退出码/结构化 stdout
+协议,`RegisterInProc` 注册的 PreToolUse 回调会被 `Configured()` 认为"已配置"但从不参与
+block/allow 判断——这是刻意的设计(注释原话:"PreToolUse is a shell-configured guard"),但会让
+"用纯 Go 回调做工具拦截"这个最直接的外部消费场景表现得像"配置了但不生效"。已改成
+in-process hook 也能通过返回同样的 `{"decision":"block"/"approve",...}` JSON 字符串参与判断,
+求值顺序是 in-process 先、shell 后,block 全局优先于 allow(`internal/hooks/engine.go`
+的 `PreToolUse` 方法 + `pretooluse_test.go` 的对应测试)。
+
+这条改动让 `EventPreToolUse` 的 in-process 回调第一次变得真正可达——之前注册了也不会被调用,
+所以回调 panic 从来没有实际后果。shell hook 崩溃只会杀掉子进程,不影响宿主 Go 进程;in-process
+回调跟 agent 循环跑在同一个 goroutine 里,panic 会直接冒泡打断整个 turn。`PreToolUse`
+调用每个 in-process 回调时都包了一层 `recover`(`runInProcHookSafely`),panic 按"非阻塞失败"
+处理(notify + 视为无意见,后续回调正常继续跑,不会被跳过)。`Inject`/`Dispatch` 里调用
+in-process 回调的地方还没有同样的 recover——那是既有代码,本轮不动,留作后续。
 
 **`Session`/`History` 内嵌 `sync.Mutex`/`sync.RWMutex`(`internal/agent/session.go:77`、
 `internal/agent/history.go:14`),不可按值复制**——`type Session = agent.Session` 这个别名本身没
@@ -526,11 +546,12 @@ Director 侧用法：`agent.Gate = approval.GateFunc(func(ctx, name, input) (boo
 
 ## 非目标
 
-- 不导出 `internal/hooks.Engine`/`hooks.Meta` 等 hook 机制相关类型——`Agent.Hooks`/`Agent.HookMeta` 是
-  导出字段,但它们的类型来自 `internal/hooks`,本轮不为其开 `pkg/octoagent/hooks`。Sinew Director 当前
-  设计不需要直接操作 hook 引擎,外部调用者应留空这两个字段;如需 hook 机制,单独立项设计。
-- 不导出 `internal/app.Spawner`/`internal/tools.SubAgentManager`——Director 用
-  `disallowed_tools: [sub_agent]` 从工具列表里过滤掉，不需要 octo 的原生 sub-agent 机制。
+- 不导出 `internal/app.Spawner`/`internal/tools.SubAgentManager` 类型本身(外部还不能直接
+  `Start`/`Kill`/`ListRunning` 某个 sub-agent)——`pkg/octoagent/toolenv.WireForSession` 已经把
+  `SubAgentManager` wire 进 ctx,`toolenv.DefaultToolsForCtx` 也已导出,模型可以正常调用
+  `sub_agent`/`sub_agent_send` 等工具;Director 目前只需要"模型自己调用 sub-agent 工具"这一层,
+  不需要在自己代码里直接操纵生命周期,不想要的话用 `disallowed_tools: [sub_agent]` 从工具列表里
+  过滤掉即可。
 - 不给 `internal/permission.Engine` 加新构造函数——`PermissionGate` 是单方法接口，外部实现即可
   （见"现状盘点"第 4 点，这是本次规划过程中修正掉的一项高估）。
 - 不做 browser 工具、workflow-discovery-cwd 的并发安全改造——记在"已知限制"，留给真正需要它们的

@@ -95,6 +95,46 @@ func TestHookGate_NoOpinionNoInnerAllows(t *testing.T) {
 	}
 }
 
+func preToolAgentInProc(t *testing.T, fn hooks.InProcHook, inner PermissionGate) *Agent {
+	t.Helper()
+	a := New(&fakeSender{}, "m")
+	a.Gate = inner
+	a.Hooks = hooks.NewEngine(nil)
+	a.Hooks.RegisterInProc(hooks.EventPreToolUse, fn)
+	return a
+}
+
+func TestHookGate_InProcBlockDeniesWithoutInner(t *testing.T) {
+	inner := &recordingGate{allow: true}
+	a := preToolAgentInProc(t, func(_ context.Context, _ hooks.Payload) string {
+		return `{"decision":"block","reason":"in-proc policy denies"}`
+	}, inner)
+	allowed, reason := a.effectiveGate().Check(context.Background(), "terminal", nil)
+	if allowed {
+		t.Error("in-process PreToolUse block must deny")
+	}
+	if reason != "in-proc policy denies" {
+		t.Errorf("reason = %q, want %q", reason, "in-proc policy denies")
+	}
+	if inner.called {
+		t.Error("a blocked call must not reach the inner gate")
+	}
+}
+
+func TestHookGate_InProcApproveBypassesInner(t *testing.T) {
+	inner := &recordingGate{allow: false, reason: "gate would deny"}
+	a := preToolAgentInProc(t, func(_ context.Context, _ hooks.Payload) string {
+		return `{"decision":"approve"}`
+	}, inner)
+	allowed, _ := a.effectiveGate().Check(context.Background(), "terminal", nil)
+	if !allowed {
+		t.Error("in-process PreToolUse approve must allow, bypassing a denying inner gate")
+	}
+	if inner.called {
+		t.Error("approve must bypass the inner gate entirely")
+	}
+}
+
 func TestEffectiveGate_NoHookReturnsBareGate(t *testing.T) {
 	inner := &recordingGate{allow: true}
 	a := New(&fakeSender{}, "m")
