@@ -2601,7 +2601,12 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	var toolDefs []agent.ToolDefinition
 	var executor agent.ToolExecutor
 	if s.cfg.Tools {
-		executor = tools.NewDefaultRegistry()
+		// Session-scoped tracker (same "im:"+sess.Key identity used for the
+		// background/workflow managers below) so a file read_file'd in one chat
+		// message is still "read" when a later message in the same conversation
+		// writes it — a fresh-per-message tracker would forget every read as
+		// soon as the message finished, same bug prepareToolTurn had for web.
+		executor = tools.NewDefaultRegistryWithTracker(tools.SessionReadTracker("im:" + string(sess.Key)))
 
 		// Per-message sub-agent manager bound to THIS chat's agent —
 		// synchronous, since a chat message is request/response with no

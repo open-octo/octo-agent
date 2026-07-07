@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -289,6 +291,77 @@ func TestPrepareToolTurn_SessionScopedAsyncManager(t *testing.T) {
 	}
 	if anon == m1 {
 		t.Error("sid-less manager must not be the session-scoped one")
+	}
+}
+
+// prepareToolTurn used to build a fresh DefaultRegistry (and so a fresh
+// ReadTracker) on every call, so a file read_file'd in one turn looked
+// unread to write_file/edit_file in the next turn of the SAME session. The
+// executor must now share a session-scoped tracker across turns, while a
+// different session id must not see another session's reads.
+func TestPrepareToolTurn_ReadTrackerPersistsAcrossTurns(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Tools: true})
+	a := agent.New(&stubSender{}, "stub-model")
+
+	sid := "sess-read-tracker-turn-test"
+	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, sid)
+	t.Cleanup(func() {
+		tools.CloseSessionSubAgentManager(sid)
+		tools.CloseSessionReadTracker(sid)
+	})
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(p, []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Turn 1: fresh executor from prepareToolTurn reads the file.
+	_, exec1, _, _, err := srv.prepareToolTurn(ctx, a, nil)
+	if err != nil {
+		t.Fatalf("prepareToolTurn: %v", err)
+	}
+	if _, err := exec1.Execute(ctx, "read_file", map[string]any{"path": p}); err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+
+	// Turn 2: a NEW executor (as prepareToolTurn builds every turn) must
+	// still honor the read recorded in turn 1.
+	_, exec2, _, _, err := srv.prepareToolTurn(ctx, a, nil)
+	if err != nil {
+		t.Fatalf("prepareToolTurn: %v", err)
+	}
+	if _, err := exec2.Execute(ctx, "edit_file", map[string]any{
+		"path": p, "old_string": "package x", "new_string": "package y",
+	}); err != nil {
+		t.Errorf("edit in a later turn of the same session should see the earlier turn's read: %v", err)
+	}
+
+	// A different session must not inherit that read — reuse the SAME path p
+	// (already read by session sid above) rather than an untouched file, so
+	// this actually exercises isolation instead of trivially failing because
+	// nobody ever read the path. CheckWritable runs before the tool body, so
+	// this fails on "not been read" before old_string matching is even
+	// reached, regardless of p's content having changed in turn 2.
+	otherSid := "sess-read-tracker-other"
+	otherCtx := context.WithValue(context.Background(), ctxKeySessionID{}, otherSid)
+	t.Cleanup(func() {
+		tools.CloseSessionSubAgentManager(otherSid)
+		tools.CloseSessionReadTracker(otherSid)
+	})
+	_, exec3, _, _, err := srv.prepareToolTurn(otherCtx, a, nil)
+	if err != nil {
+		t.Fatalf("prepareToolTurn: %v", err)
+	}
+	_, err = exec3.Execute(otherCtx, "edit_file", map[string]any{
+		"path": p, "old_string": "package y", "new_string": "package z",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not been read") {
+		t.Errorf("a different session should not inherit another session's read, got %v", err)
 	}
 }
 

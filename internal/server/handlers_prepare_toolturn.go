@@ -29,7 +29,20 @@ import (
 // (see its doc comment — a different concern, since WorkflowTool.Definition()
 // has no ctx to read a.CWD from).
 func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agent.Session) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, func(), error) {
-	executor := tools.NewDefaultRegistry()
+	sid, hasSession := ctx.Value(ctxKeySessionID{}).(string)
+
+	// A session-scoped tracker (keyed by sid, cached across turns like the
+	// background/sub-agent/workflow managers below) so a file read_file'd in
+	// one turn is still "read" when a later turn in the same conversation
+	// writes it — a per-turn tracker would forget every read as soon as the
+	// turn ended. One-shot paths with no session identity keep a fresh
+	// per-call tracker (nothing to persist it against).
+	var executor tools.DefaultRegistry
+	if hasSession && sid != "" {
+		executor = tools.NewDefaultRegistryWithTracker(tools.SessionReadTracker(sid))
+	} else {
+		executor = tools.NewDefaultRegistry()
+	}
 
 	// Goal tools dispatch to the turn's session on every tool-enabled path
 	// (WS, REST, scheduled) — advertising them (SetGoalsEnabled) while
@@ -70,7 +83,6 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	}
 
 	var ask app.PermissionAsk
-	sid, hasSession := ctx.Value(ctxKeySessionID{}).(string)
 	if hasSession && sid != "" {
 		ask = s.permissionAskFrom(sid)
 		engine.AttachRemembered(s.rememberedFor(sid))

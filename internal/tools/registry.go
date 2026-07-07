@@ -65,15 +65,28 @@ var allTools = []tool{
 // edit_file calls to an existing file are refused unless the file was read
 // (and is unchanged) this session. The zero value (DefaultRegistry{}) has a
 // nil tracker and so enforces nothing — preserved for tests and callers that
-// don't want the discipline. Use NewDefaultRegistry for the enforced variant.
+// don't want the discipline. Use NewDefaultRegistry (fresh tracker) or
+// NewDefaultRegistryWithTracker (caller-supplied, e.g. session-scoped) for
+// the enforced variant.
 type DefaultRegistry struct {
 	tracker *ReadTracker
 }
 
 // NewDefaultRegistry returns a registry with read-before-write enforcement
-// backed by a fresh per-session ReadTracker.
+// backed by a fresh ReadTracker. Callers that need the tracker to survive
+// across turns (web/IM, keyed by session id) should use
+// NewDefaultRegistryWithTracker(tools.SessionReadTracker(id)) instead.
 func NewDefaultRegistry() DefaultRegistry {
 	return DefaultRegistry{tracker: NewReadTracker()}
+}
+
+// NewDefaultRegistryWithTracker returns a registry with read-before-write
+// enforcement backed by the given tracker, e.g. a session-scoped tracker
+// obtained from SessionReadTracker so reads recorded in one turn are still
+// honored in a later turn of the same conversation. A nil tracker behaves
+// like the zero value DefaultRegistry{} — enforcement disabled.
+func NewDefaultRegistryWithTracker(tracker *ReadTracker) DefaultRegistry {
+	return DefaultRegistry{tracker: tracker}
 }
 
 // Execute implements agent.ToolExecutor.

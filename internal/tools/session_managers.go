@@ -202,6 +202,42 @@ func CloseSessionWorkflowManager(id string) {
 	}
 }
 
+// ─── Read trackers ──────────────────────────────────────────────────────
+
+// Per-session read-before-write trackers, keyed like the background/sub-agent
+// managers. A tracker built fresh per turn (as prepareToolTurn used to do)
+// forgets every read the moment the turn ends, so a file read_file'd in one
+// web/IM turn still looks unread to write_file/edit_file in the next turn of
+// the same conversation — unlike the CLI, where app.WireTools builds one
+// registry (and tracker) for the whole process session. Keying by session id
+// here gives web/IM the same across-turn memory. Reaped on session delete
+// (CloseSessionReadTracker).
+var (
+	sessionReadTrackersMu sync.Mutex
+	sessionReadTrackers   = map[string]*ReadTracker{}
+)
+
+// SessionReadTracker returns the per-session ReadTracker for id, creating it
+// on first use.
+func SessionReadTracker(id string) *ReadTracker {
+	sessionReadTrackersMu.Lock()
+	defer sessionReadTrackersMu.Unlock()
+	t := sessionReadTrackers[id]
+	if t == nil {
+		t = NewReadTracker()
+		sessionReadTrackers[id] = t
+	}
+	return t
+}
+
+// CloseSessionReadTracker drops the per-session tracker for id. No-op for an
+// unknown id.
+func CloseSessionReadTracker(id string) {
+	sessionReadTrackersMu.Lock()
+	delete(sessionReadTrackers, id)
+	sessionReadTrackersMu.Unlock()
+}
+
 // allBackgroundManagers returns defaultBg plus every live per-session manager,
 // so process-wide operations (shutdown reap) cover every tracked process.
 func allBackgroundManagers() []*BackgroundManager {
