@@ -87,12 +87,13 @@ workflow(name: "my-check", args: { target: "src/" })
 - 一个工作流的描述来自脚本开头 `# @description ...` 这一行注释。
 - `args`（任意 JSON 值）会一路传给脚本里的 `args` 调用；不传的话 `args` 返回 `nil`。
 
-二进制里内置了两个预置工作流，就算你一个都没保存过也始终可用：
+二进制里内置了三个预置工作流，就算你一个都没保存过也始终可用：
 
 | 名字 | 作用 |
 |---|---|
 | `parallel-understand` | 并行梳理一个代码库——每个子系统配一个 reader，最后合成一张架构图 |
 | `batch-migrate` | 在很多文件上应用同一个机械式改动，每个文件各自跑在独立的 git worktree 里，并发编辑不会冲突 |
+| `daily-triage` | 跑一次每日巡检循环——发现未处理的 issue 和 CI 失败，在隔离的 worktree 里起草安全修复，用第二个 agent 验证，最后写出状态报告 |
 
 ## 续跑一次运行
 
