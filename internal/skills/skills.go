@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/open-octo/octo-agent/internal/pathutil"
 	"github.com/open-octo/octo-agent/internal/trash"
 	"gopkg.in/yaml.v3"
 )
@@ -80,10 +81,10 @@ func Discover(cwd string) *Registry {
 		r.scanRoot(userRoot, "user")
 	}
 	// If cwd is the home directory itself, this resolves to the exact same
-	// directory as userRoot — re-scanning it would relabel every skill
-	// "project" for no reason.
+	// directory as userRoot (even reached through a symlinked $HOME) —
+	// re-scanning it would relabel every skill "project" for no reason.
 	if cwd != "" {
-		if projectRoot := filepath.Join(cwd, ".octo", "skills"); projectRoot != userRoot {
+		if projectRoot := filepath.Join(cwd, ".octo", "skills"); !pathutil.SameDir(projectRoot, userRoot) {
 			r.scanRoot(projectRoot, "project")
 		}
 	}

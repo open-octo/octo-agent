@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/memory"
+	"github.com/open-octo/octo-agent/internal/pathutil"
 	"github.com/open-octo/octo-agent/internal/trash"
 )
 
@@ -91,9 +92,10 @@ func discoverWorkflows(cwd string) map[string]savedWorkflow {
 	userRoot := userWorkflowsRoot()
 	scanWorkflowsRoot(userRoot, "user", fresh)
 	// projectWorkflowsRoot falls back to cwd itself when cwd isn't inside a
-	// git repo, which resolves to the same path as userRoot when cwd is the
-	// home directory — re-scanning it would relabel every workflow "project".
-	if projectRoot := projectWorkflowsRoot(cwd); projectRoot != userRoot {
+	// git repo, which resolves to the same directory as userRoot when cwd is
+	// the home directory (even through a symlinked $HOME or a git-resolved
+	// worktree path) — re-scanning it would relabel every workflow "project".
+	if projectRoot := projectWorkflowsRoot(cwd); !pathutil.SameDir(projectRoot, userRoot) {
 		scanWorkflowsRoot(projectRoot, "project", fresh)
 	}
 	return fresh

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -96,6 +97,38 @@ func TestLoadManaged_ProjectDirIsHome(t *testing.T) {
 	}
 	if managed[0].Source != "user" {
 		t.Errorf("source = %q, want user (cwd == home must not double-count as project)", managed[0].Source)
+	}
+}
+
+// Same collision as TestLoadManaged_ProjectDirIsHome, but $HOME is reached
+// through a symlink (e.g. a network home mount) while projectDir is passed as
+// the resolved real path — the raw string comparison this guards against
+// would see two different strings for the same directory.
+func TestLoadManaged_ProjectDirIsHome_ThroughSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on windows")
+	}
+	real := t.TempDir()
+	root := t.TempDir()
+	link := filepath.Join(root, "home-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	t.Setenv("HOME", link)
+	t.Setenv("USERPROFILE", link)
+	writeMCPFile(t, link, `{"mcpServers": {
+		"codegraph": {"command": "codegraph"}
+	}}`)
+
+	managed, err := LoadManaged(real)
+	if err != nil {
+		t.Fatalf("LoadManaged: %v", err)
+	}
+	if len(managed) != 1 {
+		t.Fatalf("got %d entries, want 1: %+v", len(managed), managed)
+	}
+	if managed[0].Source != "user" {
+		t.Errorf("source = %q, want user (symlinked home == cwd must not double-count as project)", managed[0].Source)
 	}
 }
 
