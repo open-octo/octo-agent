@@ -46,11 +46,18 @@ func main() {
 	ctx, executor, cleanup := toolenv.WireForSession(ctx, a, sessionID)
 	defer cleanup()
 
-	// 5. Decide which tools to advertise. For this minimal example we pass nil,
-	//    which makes RunStream equivalent to a single-turn chat. A real program
-	//    would call tools.DefaultToolsForCtx(ctx, a.Model) and filter out tools
-	//    it does not want (e.g. sub_agent).
-	var tools []octoagent.ToolDefinition
+	// 5. Decide which tools to advertise. DefaultToolsForCtx reads the
+	//    ctx-scoped managers WireForSession just stamped in — pass the ctx it
+	//    returned, not the original. A caller that doesn't want octo's native
+	//    sub-agent orchestration (e.g. it filters via its own
+	//    disallowed_tools: [sub_agent] convention) drops that one entry here.
+	toolDefs := make([]octoagent.ToolDefinition, 0)
+	for _, td := range toolenv.DefaultToolsForCtx(ctx, a.Model) {
+		if td.Name == "sub_agent" {
+			continue
+		}
+		toolDefs = append(toolDefs, td)
+	}
 
 	// 6. Run a streaming turn.
 	handler := func(ev octoagent.AgentEvent) {
@@ -62,7 +69,7 @@ func main() {
 		}
 	}
 
-	reply, err := a.RunStream(ctx, "Hello!", tools, executor, handler)
+	reply, err := a.RunStream(ctx, "Hello!", toolDefs, executor, handler)
 	if err != nil {
 		panic(err)
 	}

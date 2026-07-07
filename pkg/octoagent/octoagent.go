@@ -12,10 +12,10 @@
 //
 // # What's not exported here
 //
-// Hook engine types (Agent.Hooks, Agent.HookMeta) live in internal/hooks and are
-// intentionally not aliased in this iteration. Leave them zero if you don't
-// need custom hooks. The MCP client registry is also not exported yet; using
-// MCP tools from a library consumer requires a separate design pass.
+// Hook engine types (Agent.Hooks, Agent.HookMeta) live in internal/hooks; see
+// pkg/octoagent/hooks for their aliases. Leave both fields zero if you don't
+// need custom hooks. The MCP client registry is not exported yet; using MCP
+// tools from a library consumer requires a separate design pass.
 package octoagent
 
 import "github.com/open-octo/octo-agent/internal/agent"

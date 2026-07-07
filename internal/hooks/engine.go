@@ -335,31 +335,54 @@ type toolDecisionOut struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-// PreToolUse runs the PreToolUse shell hooks for a tool call and returns the
-// aggregated verdict. Protocol per hook, matching Claude Code's:
+// PreToolUse runs the PreToolUse hooks for a tool call and returns the
+// aggregated verdict. In-process hooks run first (registration order), then
+// shell hooks (registration order) — same ordering as Inject. Protocol per
+// shell hook, matching Claude Code's:
 //   - exit 2                     → block (reason = structured reason, else stderr)
 //   - exit 0 + {"decision":...}  → that decision (block / approve)
 //   - exit 0, no decision        → no opinion (defer to the gate)
 //   - timeout / other exit       → non-blocking error (notify, tool proceeds)
 //
+// An in-process hook has no exit code, so it opts into a decision the same
+// way a shell hook's stdout does: return `{"decision":"block","reason":"..."}`
+// or `{"decision":"approve"}` as its string result. Any other return value
+// (including "") is no opinion for that hook.
+//
 // Block wins over Allow: the first hook that blocks short-circuits, and an
 // Allow never overrides a later Block. A tool the caller then runs unless
-// blocked; an Allow tells the caller to bypass the interactive gate. In-process
-// hooks are not consulted here — PreToolUse is a shell-configured guard.
+// blocked; an Allow tells the caller to bypass the interactive gate.
 func (e *Engine) PreToolUse(ctx context.Context, p Payload) ToolDecision {
 	if e == nil {
 		return ToolDecision{}
 	}
-	sh, _ := e.hooksFor(EventPreToolUse)
-	if len(sh) == 0 {
+	sh, ip := e.hooksFor(EventPreToolUse)
+	if len(sh) == 0 && len(ip) == 0 {
 		return ToolDecision{}
 	}
+
+	allow := false
+	for _, fn := range ip {
+		d, ok := parseToolDecision([]byte(fn(ctx, p)))
+		if !ok {
+			continue
+		}
+		switch d.Decision {
+		case "block":
+			return ToolDecision{Block: true, Reason: firstNonEmpty(strings.TrimSpace(d.Reason), "blocked by PreToolUse hook")}
+		case "approve":
+			allow = true
+		}
+	}
+	if len(sh) == 0 {
+		return ToolDecision{Allow: allow}
+	}
+
 	stdin, err := json.Marshal(p)
 	if err != nil {
 		e.notify("hooks: marshal PreToolUse payload: " + err.Error())
-		return ToolDecision{}
+		return ToolDecision{Allow: allow}
 	}
-	allow := false
 	for _, h := range sh {
 		if !h.matches(EventPreToolUse, p.ToolName) {
 			continue

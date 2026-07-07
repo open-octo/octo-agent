@@ -144,3 +144,34 @@ func TestWireForSession_DoesNotImportConfigOrPermission(t *testing.T) {
 		t.Error("internal/app/toolenv.go calls permission.New")
 	}
 }
+
+func TestDefaultToolsForCtx_AdvertisesSubAgentAfterWireForSession(t *testing.T) {
+	a := octoagent.New(stubSender{}, "stub-model")
+	ctx, _, cleanup := WireForSession(context.Background(), a, "session-tools-test")
+	defer cleanup()
+
+	defs := DefaultToolsForCtx(ctx, a.Model)
+	found := false
+	for _, d := range defs {
+		if d.Name == "sub_agent" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected sub_agent in DefaultToolsForCtx(ctx, ...) after WireForSession stamped a SubAgentManager into ctx")
+	}
+}
+
+func TestDefaultToolsForCtx_NoSubAgentWithoutWireForSession(t *testing.T) {
+	defs := DefaultToolsForCtx(context.Background(), "stub-model")
+	for _, d := range defs {
+		if d.Name == "sub_agent" {
+			t.Error("expected no sub_agent without a ctx-scoped SubAgentManager")
+		}
+	}
+}
+
+func TestNewDefaultRegistry_ImplementsToolExecutor(t *testing.T) {
+	var _ octoagent.ToolExecutor = NewDefaultRegistry()
+}

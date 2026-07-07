@@ -95,3 +95,64 @@ func TestPreToolUse_NoHooksNoOpinion(t *testing.T) {
 		t.Errorf("unconfigured PreToolUse must be no-opinion, got %+v", dec)
 	}
 }
+
+func TestPreToolUse_InProcBlocks(t *testing.T) {
+	e := NewEngine(nil)
+	e.RegisterInProc(EventPreToolUse, func(_ context.Context, p Payload) string {
+		return `{"decision":"block","reason":"policy X"}`
+	})
+	dec := e.PreToolUse(context.Background(), Payload{Event: EventPreToolUse, ToolName: "terminal"})
+	if !dec.Block || dec.Reason != "policy X" {
+		t.Errorf("in-process block decision should carry reason, got %+v", dec)
+	}
+}
+
+func TestPreToolUse_InProcApprove(t *testing.T) {
+	e := NewEngine(nil)
+	e.RegisterInProc(EventPreToolUse, func(_ context.Context, p Payload) string {
+		return `{"decision":"approve"}`
+	})
+	dec := e.PreToolUse(context.Background(), Payload{Event: EventPreToolUse, ToolName: "terminal"})
+	if !dec.Allow || dec.Block {
+		t.Errorf("in-process approve decision should allow, got %+v", dec)
+	}
+}
+
+func TestPreToolUse_InProcNonDecisionIsNoOpinion(t *testing.T) {
+	e := NewEngine(nil)
+	e.RegisterInProc(EventPreToolUse, func(_ context.Context, p Payload) string {
+		return "not a decision"
+	})
+	dec := e.PreToolUse(context.Background(), Payload{Event: EventPreToolUse, ToolName: "terminal"})
+	if dec.Block || dec.Allow {
+		t.Errorf("a plain string return should be no-opinion, got %+v", dec)
+	}
+}
+
+func TestPreToolUse_InProcBlockWinsOverShellApprove(t *testing.T) {
+	e := NewEngine(nil)
+	e.RegisterInProc(EventPreToolUse, func(_ context.Context, p Payload) string {
+		return `{"decision":"block","reason":"in-proc says no"}`
+	})
+	if err := e.RegisterShellMatched(EventPreToolUse, makeScript(t, `echo '{"decision":"approve"}'`), "", false, 0); err != nil {
+		t.Fatal(err)
+	}
+	dec := e.PreToolUse(context.Background(), Payload{Event: EventPreToolUse, ToolName: "terminal"})
+	if !dec.Block || dec.Reason != "in-proc says no" {
+		t.Errorf("in-process block (evaluated first) must win over a later shell approve, got %+v", dec)
+	}
+}
+
+func TestPreToolUse_ShellBlockWinsOverInProcApprove(t *testing.T) {
+	e := NewEngine(nil)
+	e.RegisterInProc(EventPreToolUse, func(_ context.Context, p Payload) string {
+		return `{"decision":"approve"}`
+	})
+	if err := e.RegisterShellMatched(EventPreToolUse, makeScript(t, "exit 2"), "", false, 0); err != nil {
+		t.Fatal(err)
+	}
+	dec := e.PreToolUse(context.Background(), Payload{Event: EventPreToolUse, ToolName: "terminal"})
+	if !dec.Block {
+		t.Errorf("a later shell block must override an earlier in-process approve, got %+v", dec)
+	}
+}

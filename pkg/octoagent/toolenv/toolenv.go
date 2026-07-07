@@ -99,3 +99,19 @@ func WireForSession(
 	})
 	return ctx, executor, cleanup
 }
+
+// DefaultToolsForCtx returns the tool definitions to advertise to the model
+// for one turn. Pass the ctx WireForSession returned (not the original ctx) —
+// sub_agent* and workflow* tools are only advertised when ctx carries the
+// SubAgentManager / WorkflowManager WireForSession stamped in.
+func DefaultToolsForCtx(ctx context.Context, model string) []octoagent.ToolDefinition {
+	return tools.DefaultToolsForCtx(ctx, model)
+}
+
+// NewDefaultRegistry returns a fresh ToolExecutor implementing every built-in
+// tool (file/terminal/web/skill/sub_agent/workflow/mcp_*), independent of any
+// WireForSession call. WireForSession already builds and returns one bound to
+// its own ctx; use this only when a second, independent executor is needed.
+func NewDefaultRegistry() octoagent.ToolExecutor {
+	return tools.NewDefaultRegistry()
+}
