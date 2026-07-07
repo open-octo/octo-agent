@@ -38,8 +38,10 @@ type ManagedServer struct {
 func LoadManaged(projectDir string) ([]ManagedServer, error) {
 	byName := map[string]ManagedServer{}
 
+	userPath := ""
 	if home, err := os.UserHomeDir(); err == nil {
-		cfg, err := readConfigFile(filepath.Join(home, ".octo", "mcp.json"))
+		userPath = filepath.Join(home, ".octo", "mcp.json")
+		cfg, err := readConfigFile(userPath)
 		if err != nil {
 			return nil, err
 		}
@@ -50,14 +52,21 @@ func LoadManaged(projectDir string) ([]ManagedServer, error) {
 		}
 	}
 
+	// If the server's cwd is the home directory itself (e.g. `octo serve`
+	// launched from ~), this resolves to the exact same file as userPath —
+	// re-reading it here would relabel every entry "project" and make a
+	// perfectly normal user config look read-only in the management UI.
 	if projectDir != "" {
-		cfg, err := readConfigFile(filepath.Join(projectDir, ".octo", "mcp.json"))
-		if err != nil {
-			return nil, err
-		}
-		if cfg != nil {
-			for name, e := range cfg.Servers {
-				byName[name] = managedEntry(name, e, "project")
+		projectPath := filepath.Join(projectDir, ".octo", "mcp.json")
+		if projectPath != userPath {
+			cfg, err := readConfigFile(projectPath)
+			if err != nil {
+				return nil, err
+			}
+			if cfg != nil {
+				for name, e := range cfg.Servers {
+					byName[name] = managedEntry(name, e, "project")
+				}
 			}
 		}
 	}

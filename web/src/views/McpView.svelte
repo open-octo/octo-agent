@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { mcpServers, toolSearchMode, mcpModalOpen, mcpModalState, showToast, openAgentSession } from '../lib/stores'
+  import { mcpServers, toolSearchMode, mcpModalOpen, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
@@ -78,20 +78,34 @@
 
   onMount(reload)
 
-  // ─── add / edit / import / AI setup ───────────────────────────────────────────
-
-  function openAdd() {
-    mcpModalState.set({ mode: 'add' })
-    mcpModalOpen.set(true)
+  // Full reload from disk: picks up hand-edited config files and retries
+  // every failed connection, unlike reload() which just re-reads cached state.
+  async function fullReload() {
+    loading = true
+    try {
+      const data = await api.reloadMcpServers()
+      mcpServers.set(data.servers as any)
+      toolSearchMode.set(data.tool_search.enabled)
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to reload MCP servers', 'error')
+    } finally {
+      loading = false
+    }
   }
 
-  function openEdit(srv: any) {
-    mcpModalState.set({ mode: 'edit', server: srv })
-    mcpModalOpen.set(true)
+  // ─── add / edit / import / AI setup ───────────────────────────────────────────
+
+  // Adding and editing a server — whether it lives in ~/.octo/mcp.json or a
+  // project's .octo/mcp.json — both go through the mcp-creator skill instead
+  // of a structured form. That works identically regardless of which file
+  // the entry is defined in, so there's no need for a separate "Add Server"
+  // form, and it keeps edit behavior in one place (the skill) instead of a
+  // second hand-written prompt that could drift from it.
+  function askAgentToEdit(name: string) {
+    openAgentSession(`/mcp-creator Edit the existing MCP server "${name}" — find its entry, show me the current config, then ask what I want changed.`, `Edit MCP: ${name}`)
   }
 
   function openImport() {
-    mcpModalState.set({ mode: 'import' })
     mcpModalOpen.set(true)
   }
 
@@ -127,6 +141,10 @@
       )
     } catch (e: any) {
       showToast(e.message ?? 'Failed to toggle server', 'error')
+      // The Switch already flipped optimistically on click; a rejected
+      // toggle (e.g. a project-scoped server) needs a real reload to snap
+      // its visual state back to what the server actually has.
+      reload()
     }
   }
 
@@ -254,17 +272,13 @@
         <p>{$t('mcp.desc')}</p>
       </div>
       <div class="header-actions">
-        <button class="btn-secondary" onclick={reload} disabled={loading}>
+        <button class="btn-secondary" onclick={fullReload} disabled={loading}>
           <iconify-icon icon="ant-design:reload-outlined" width="14"></iconify-icon>
           {$t('mcp.reload')}
         </button>
         <button class="btn-secondary" onclick={openImport}>
           <iconify-icon icon="ant-design:code-outlined" width="14"></iconify-icon>
           {$t('mcp.import_json')}
-        </button>
-        <button class="btn-primary" onclick={openAdd}>
-          <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
-          {$t('mcp.add')}
         </button>
         <button class="btn-primary" onclick={aiSetup}>
           <iconify-icon icon="ant-design:thunderbolt-outlined" width="14"></iconify-icon>
@@ -297,7 +311,7 @@
       <div class="empty-state">
         <iconify-icon icon="ant-design:api-outlined" width="32"></iconify-icon>
         <span>{$t('mcp.empty')}</span>
-        <button class="btn-primary" onclick={openAdd}>{$t('mcp.add_first')}</button>
+        <button class="btn-primary" onclick={aiSetup}>{$t('mcp.add_first')}</button>
       </div>
     {:else}
       <div class="server-list">
@@ -339,11 +353,10 @@
               {/if}
               <button
                 class="srv-btn"
-                title={$t('common.edit')}
-                disabled={srv.source === 'project'}
-                onclick={() => openEdit(srv)}
+                title={$t('mcp.btn.edit_with_agent')}
+                onclick={() => askAgentToEdit(srv.name)}
               >
-                <iconify-icon icon="ant-design:edit-outlined" width="14"></iconify-icon>
+                <iconify-icon icon="ant-design:message-outlined" width="14"></iconify-icon>
               </button>
               <button
                 class="srv-btn"
@@ -356,7 +369,6 @@
               <button
                 class="srv-btn del"
                 title={$t('common.delete')}
-                disabled={srv.source === 'project'}
                 onclick={() => deleteServer(srv.name)}
               >
                 <iconify-icon icon="ant-design:delete-outlined" width="14"></iconify-icon>

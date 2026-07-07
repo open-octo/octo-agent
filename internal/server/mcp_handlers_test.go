@@ -124,41 +124,6 @@ func TestHandleListMCPServers(t *testing.T) {
 	}
 }
 
-func TestHandleCreateMCPServer_SingleAndConflict(t *testing.T) {
-	home := mcpTestHome(t, "")
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-
-	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"name": "fs", "server": {"command": "npx", "args": ["-y", "server-fs"]}}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("create: status = %d: %s", w.Code, w.Body.String())
-	}
-	servers := decodeServers(t, w)
-	if len(servers) != 1 || servers[0].Name != "fs" || servers[0].Source != "user" {
-		t.Fatalf("servers = %+v", servers)
-	}
-
-	// File written to user config.
-	raw, err := os.ReadFile(filepath.Join(home, ".octo", "mcp.json"))
-	if err != nil || !strings.Contains(string(raw), "server-fs") {
-		t.Fatalf("user config not written: %v %s", err, raw)
-	}
-
-	// Same name again → 409.
-	w = doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"name": "fs", "server": {"command": "other"}}`)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("duplicate create: status = %d, want 409", w.Code)
-	}
-
-	// Invalid entry → 400.
-	w = doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"name": "both", "server": {"command": "x", "url": "https://y"}}`)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("invalid create: status = %d, want 400", w.Code)
-	}
-}
-
 func TestHandleCreateMCPServer_BulkImport(t *testing.T) {
 	mcpTestHome(t, "")
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
@@ -186,52 +151,27 @@ func TestHandleCreateMCPServer_BulkImport(t *testing.T) {
 	}
 }
 
-func TestHandleCreateMCPServer_ArbitraryCommandRequiresConsent(t *testing.T) {
+// Bulk import never accepts a non-allowlisted command — there's no per-call
+// opt-in for it (unlike the removed single-add endpoint). Adding a server
+// with an arbitrary command now only happens through the mcp-creator skill
+// editing the config file directly.
+func TestHandleCreateMCPServer_ArbitraryCommandRejected(t *testing.T) {
 	mcpTestHome(t, "")
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	// Non-allowlisted command without consent → 400.
 	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"name": "custom", "server": {"command": "echo"}}`)
+		`{"mcpServers": {"custom": {"command": "echo"}}}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// With explicit consent → 200.
-	w = doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"name": "custom", "server": {"command": "echo"}, "allow_arbitrary_command": true}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Dangerous paths are always rejected, even with consent.
+	// Dangerous paths are always rejected too.
 	for _, cmd := range []string{"/bin/echo", "../../bin/echo", "echo; rm -rf /"} {
 		w = doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-			`{"name": "bad", "server": {"command": "`+cmd+`"}, "allow_arbitrary_command": true}`)
+			`{"mcpServers": {"bad": {"command": "`+cmd+`"}}}`)
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("command %q: expected 400, got %d", cmd, w.Code)
 		}
-	}
-}
-
-func TestHandleUpdateMCPServer(t *testing.T) {
-	mcpTestHome(t, `{"mcpServers": {"a": {"command": "echo"}}}`)
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-
-	w := doJSON(t, srv, http.MethodPatch, "/api/mcp/servers/a",
-		`{"server": {"url": "https://new.example"}}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("update: status = %d: %s", w.Code, w.Body.String())
-	}
-	servers := decodeServers(t, w)
-	if servers[0].URL != "https://new.example" || servers[0].Transport != "http" {
-		t.Fatalf("servers = %+v", servers)
-	}
-
-	w = doJSON(t, srv, http.MethodPatch, "/api/mcp/servers/missing",
-		`{"server": {"command": "x"}}`)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("update missing: status = %d, want 404", w.Code)
 	}
 }
 
@@ -285,7 +225,6 @@ func TestMCPHandlers_ProjectEntriesReadOnly(t *testing.T) {
 	srv.cwd = proj
 
 	for _, c := range []struct{ method, path, body string }{
-		{http.MethodPatch, "/api/mcp/servers/proj", `{"server": {"command": "x"}}`},
 		{http.MethodDelete, "/api/mcp/servers/proj", ""},
 		{http.MethodPatch, "/api/mcp/servers/proj/toggle", ""},
 	} {
@@ -308,7 +247,7 @@ func TestMCPLifecycle_LiveConnect(t *testing.T) {
 
 	// Create with tools on → connects immediately.
 	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"name": "live", "server": {"url": "`+fake.URL+`"}}`)
+		`{"mcpServers": {"live": {"url": "`+fake.URL+`"}}}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("create: status = %d: %s", w.Code, w.Body.String())
 	}
@@ -367,7 +306,7 @@ func TestMCPLiveConnect_FailureSurfacesAsStatus(t *testing.T) {
 	// Nothing listens on this port — the entry is saved, the status says why
 	// it isn't connected, and the HTTP call still succeeds.
 	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"name": "dead", "server": {"url": "http://127.0.0.1:1"}}`)
+		`{"mcpServers": {"dead": {"url": "http://127.0.0.1:1"}}}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("create: status = %d: %s", w.Code, w.Body.String())
 	}

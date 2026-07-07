@@ -75,11 +75,17 @@ func Discover(cwd string) *Registry {
 	if root := defaultSkillsRoot(); root != "" {
 		r.scanRoot(root, "default")
 	}
-	if root := userSkillsRoot(); root != "" {
-		r.scanRoot(root, "user")
+	userRoot := userSkillsRoot()
+	if userRoot != "" {
+		r.scanRoot(userRoot, "user")
 	}
+	// If cwd is the home directory itself, this resolves to the exact same
+	// directory as userRoot — re-scanning it would relabel every skill
+	// "project" for no reason.
 	if cwd != "" {
-		r.scanRoot(filepath.Join(cwd, ".octo", "skills"), "project")
+		if projectRoot := filepath.Join(cwd, ".octo", "skills"); projectRoot != userRoot {
+			r.scanRoot(projectRoot, "project")
+		}
 	}
 	return r
 }

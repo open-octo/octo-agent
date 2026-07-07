@@ -109,6 +109,25 @@ func TestDiscover_ProjectOverridesUser(t *testing.T) {
 	}
 }
 
+// When cwd is the home directory itself, filepath.Join(cwd, ".octo/skills")
+// resolves to the exact same directory as userSkillsRoot(). Skills there must
+// stay labeled "user", not get relabeled "project" by scanning the same
+// directory a second time.
+func TestDiscover_CwdIsHomeDoesNotRelabelAsProject(t *testing.T) {
+	home := t.TempDir()
+	useUserRoot(t, filepath.Join(home, ".octo", "skills"))
+	writeSkill(t, filepath.Join(home, ".octo", "skills"), "greet", "---\ndescription: hi\n---\nbody")
+
+	r := Discover(home)
+	if r.Len() != 1 {
+		t.Fatalf("Len = %d, want 1", r.Len())
+	}
+	s, _ := r.Get("greet")
+	if s.Source != "user" {
+		t.Errorf("Source = %q, want user (cwd == home must not double-count as project)", s.Source)
+	}
+}
+
 func TestDiscover_SkipsMalformed(t *testing.T) {
 	userRoot := t.TempDir()
 	useUserRoot(t, userRoot)

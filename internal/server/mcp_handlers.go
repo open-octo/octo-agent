@@ -238,92 +238,59 @@ func (s *Server) handleGetMCPServer(w http.ResponseWriter, r *http.Request) {
 
 // ─── POST /api/mcp/servers ──────────────────────────────────────────────────
 
-// Accepts either a single server:
-//
-//	{"name": "fs", "server": {"command": "npx", ...}}
-//
-// or a Claude Code-style bulk import (paste of an mcp.json):
+// Accepts a Claude Code-style bulk import (paste of an mcp.json):
 //
 //	{"mcpServers": {"fs": {...}, "api": {...}}}
 //
-// Single create rejects an existing name with 409 (edit goes through PATCH);
-// bulk import upserts.
+// This is the only way to add a server through the API — the structured
+// single-server "Add Server" form was removed from the web UI in favor of
+// the mcp-creator skill, which edits ~/.octo/mcp.json (or a project's)
+// directly and isn't subject to this endpoint's command allowlist.
 func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name                  string                     `json:"name"`
-		Server                *mcp.ServerEntry           `json:"server"`
-		AllowArbitraryCommand bool                       `json:"allow_arbitrary_command"`
-		Servers               map[string]mcp.ServerEntry `json:"mcpServers"`
+		Servers map[string]mcp.ServerEntry `json:"mcpServers"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if len(req.Servers) == 0 {
+		writeError(w, http.StatusBadRequest, "expected {mcpServers: {...}}")
 		return
 	}
 
 	s.mcpMu.Lock()
 	defer s.mcpMu.Unlock()
 
-	switch {
-	case len(req.Servers) > 0:
-		// Bulk import: validate everything first so a half-bad paste doesn't
-		// land half the servers. For bulk import we do not require per-server
-		// opt-in; instead we parse and normalize stdio commands and reject any
-		// command that is not a simple allowlisted basename.
-		for name, e := range req.Servers {
-			if err := mcp.ValidateServerName(name); err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			if e.Command != "" {
-				cmd, args, err := parseStdioCommand(name, e.Command, false)
-				if err != nil {
-					writeError(w, http.StatusBadRequest, err.Error())
-					return
-				}
-				e.Command = cmd
-				e.Args = append(args, e.Args...)
-			}
-			if err := e.Validate(name); err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-		}
-		for name, e := range req.Servers {
-			if err := mcp.UpsertUserServer(name, e); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			s.connectIfLive(r, name, e)
-		}
-	case req.Name != "" && req.Server != nil:
-		managed, err := mcp.LoadManaged(s.curCwd())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+	// Validate everything first so a half-bad paste doesn't land half the
+	// servers. We do not require per-server opt-in; instead we parse and
+	// normalize stdio commands and reject any command that is not a simple
+	// allowlisted basename.
+	for name, e := range req.Servers {
+		if err := mcp.ValidateServerName(name); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		for _, m := range managed {
-			if m.Name == req.Name {
-				writeError(w, http.StatusConflict, "an MCP server with this name already exists")
-				return
-			}
-		}
-		if req.Server.Command != "" {
-			cmd, args, err := parseStdioCommand(req.Name, req.Server.Command, req.AllowArbitraryCommand)
+		if e.Command != "" {
+			cmd, args, err := parseStdioCommand(name, e.Command, false)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			req.Server.Command = cmd
-			req.Server.Args = append(args, req.Server.Args...)
+			e.Command = cmd
+			e.Args = append(args, e.Args...)
 		}
-		if err := mcp.UpsertUserServer(req.Name, *req.Server); err != nil {
+		if err := e.Validate(name); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		s.connectIfLive(r, req.Name, *req.Server)
-	default:
-		writeError(w, http.StatusBadRequest, "expected {name, server} or {mcpServers}")
-		return
+	}
+	for name, e := range req.Servers {
+		if err := mcp.UpsertUserServer(name, e); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		s.connectIfLive(r, name, e)
 	}
 
 	s.writeMCPServerList(w)
@@ -350,43 +317,6 @@ func (s *Server) userManagedServer(w http.ResponseWriter, name string) (mcp.Mana
 	}
 	writeError(w, http.StatusNotFound, "mcp server not found")
 	return mcp.ManagedServer{}, false
-}
-
-// ─── PATCH /api/mcp/servers/{name} ──────────────────────────────────────────
-
-func (s *Server) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	var req struct {
-		Server                *mcp.ServerEntry `json:"server"`
-		AllowArbitraryCommand bool             `json:"allow_arbitrary_command"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Server == nil {
-		writeError(w, http.StatusBadRequest, "expected {server: {...}}")
-		return
-	}
-
-	s.mcpMu.Lock()
-	defer s.mcpMu.Unlock()
-
-	if _, ok := s.userManagedServer(w, name); !ok {
-		return
-	}
-	if req.Server.Command != "" {
-		cmd, args, err := parseStdioCommand(name, req.Server.Command, req.AllowArbitraryCommand)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		req.Server.Command = cmd
-		req.Server.Args = append(args, req.Server.Args...)
-	}
-	if err := mcp.UpsertUserServer(name, *req.Server); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	app.DisconnectMCPServer(name)
-	s.connectIfLive(r, name, *req.Server)
-	s.writeMCPServerList(w)
 }
 
 // ─── DELETE /api/mcp/servers/{name} ─────────────────────────────────────────

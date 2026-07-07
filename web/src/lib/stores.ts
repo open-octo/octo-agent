@@ -11,9 +11,11 @@ export const onboardPhase = writable<'unknown' | 'key_setup' | 'soul_setup' | ''
 export const view = writable('chat')
 export const sidebar = writable('full')
 export const cmdkOpen = writable(false)
+// Drives the MCP import-JSON modal. Adding a single server and editing an
+// existing one both go through the agent instead of a structured form (see
+// McpView's aiSetup/askAgentToEdit) — it works uniformly whether the entry
+// lives in the user or project config.
 export const mcpModalOpen = writable(false)
-// Drives the MCP modal: add a new server, edit an existing one, or paste JSON.
-export const mcpModalState = writable<{ mode: 'add' | 'edit' | 'import'; server?: any }>({ mode: 'add' })
 export interface ToastEntry { id: number; msg: string; type: string }
 export const toasts = writable<ToastEntry[]>([])
 
