@@ -39,6 +39,36 @@ type Connection struct {
 	Tools     []Tool
 	Resources []Resource
 	Prompts   []Prompt
+
+	// reauthMu guards reauthErr, set by MarkReauthRequired when a call made
+	// through this (otherwise still "live") connection surfaces
+	// ErrReauthRequired — the OAuth token died and nobody was present to
+	// complete an interactive device flow. The connection object itself
+	// stays usable/registered; this flag is how a caller with visibility
+	// into Registry (e.g. the status endpoint) learns the connection is no
+	// longer actually authenticated without waiting for it to be torn down.
+	reauthMu  sync.Mutex
+	reauthErr error
+}
+
+// MarkReauthRequired records that a call through this connection hit
+// ErrReauthRequired. Safe for concurrent callers.
+func (c *Connection) MarkReauthRequired(err error) {
+	c.reauthMu.Lock()
+	c.reauthErr = err
+	c.reauthMu.Unlock()
+}
+
+// ReauthRequired reports the last error recorded by MarkReauthRequired, if
+// any. ok is false when no reauth failure has been observed on this
+// connection.
+func (c *Connection) ReauthRequired() (msg string, ok bool) {
+	c.reauthMu.Lock()
+	defer c.reauthMu.Unlock()
+	if c.reauthErr == nil {
+		return "", false
+	}
+	return c.reauthErr.Error(), true
 }
 
 // ConnectAll spins up one client per configured server, runs the

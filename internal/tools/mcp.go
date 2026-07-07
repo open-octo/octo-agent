@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -146,6 +147,7 @@ func executeMCP(ctx context.Context, name string, input map[string]any) (out str
 		}
 		contents, err := conn.Client.ReadResource(ctx, uri)
 		if err != nil {
+			markIfReauthRequired(conn, err)
 			return "", true, err
 		}
 		return formatResourceContents(contents), true, nil
@@ -158,6 +160,7 @@ func executeMCP(ctx context.Context, name string, input map[string]any) (out str
 		argMap := convertStringMap(input["arguments"])
 		result, err := conn.Client.GetPrompt(ctx, promptName, argMap)
 		if err != nil {
+			markIfReauthRequired(conn, err)
 			return "", true, err
 		}
 		return formatPromptResult(result), true, nil
@@ -165,6 +168,7 @@ func executeMCP(ctx context.Context, name string, input map[string]any) (out str
 	default:
 		result, err := conn.Client.CallTool(ctx, tool, input)
 		if err != nil {
+			markIfReauthRequired(conn, err)
 			return "", true, err
 		}
 		out := formatToolResult(result)
@@ -175,6 +179,18 @@ func executeMCP(ctx context.Context, name string, input map[string]any) (out str
 			return out, true, fmt.Errorf("mcp tool error: %s", out)
 		}
 		return out, true, nil
+	}
+}
+
+// markIfReauthRequired flags conn when a call through it failed because its
+// OAuth token died and no interactive prompt was available to fix it (see
+// mcp.ErrReauthRequired). This is the only place that failure becomes
+// visible outside the tool call itself — the connection stays registered
+// and "live" otherwise, so without this the Web panel and CLI would keep
+// reporting it as connected indefinitely.
+func markIfReauthRequired(conn *mcp.Connection, err error) {
+	if errors.Is(err, mcp.ErrReauthRequired) {
+		conn.MarkReauthRequired(err)
 	}
 }
 

@@ -188,9 +188,23 @@ func (o *OAuthClient) Invalidate() {
 	}
 }
 
+// ErrReauthRequired is returned by authorize (and therefore Token) when the
+// cached/refreshed token is unusable and completing the device flow needs a
+// human — but no OAuthPrompt was supplied. Background connections (startup,
+// reload, panel-triggered reconnect) all construct their OAuthClient with a
+// nil prompt, since nobody is present to see a verification code. Without
+// this check, authorize would still run the full device flow and poll
+// silently for up to 5 minutes before timing out with a generic error;
+// callers can check for this sentinel via errors.Is to detect "this
+// connection needs an interactive re-authorization" without waiting.
+var ErrReauthRequired = errors.New("oauth: interactive re-authorization required")
+
 // authorize runs the full discovery + (maybe register) + device flow.
 // Caller holds o.mu.
 func (o *OAuthClient) authorize(ctx context.Context) error {
+	if o.prompt == nil {
+		return ErrReauthRequired
+	}
 	asMeta, prMeta, err := o.discover(ctx)
 	if err != nil {
 		return err

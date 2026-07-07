@@ -130,6 +130,39 @@ func TestRegistryRemove(t *testing.T) {
 	r.Remove("fake") // unknown name: no-op, no panic
 }
 
+func TestConnection_ReauthRequired_RoundTrip(t *testing.T) {
+	srv := fakeMCPServer(t, "ping")
+	defer srv.Close()
+
+	r := NewRegistry()
+	defer r.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := r.Connect(ctx, "fake", ServerEntry{URL: srv.URL}, Implementation{Name: "test"}, nil, nil); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	conn := r.Get("fake")
+	if _, ok := conn.ReauthRequired(); ok {
+		t.Fatal("freshly connected connection must not report reauth required")
+	}
+
+	conn.MarkReauthRequired(ErrReauthRequired)
+	msg, ok := conn.ReauthRequired()
+	if !ok || msg == "" {
+		t.Fatalf("ReauthRequired = (%q, %v), want recorded error", msg, ok)
+	}
+
+	// A brand-new connection (as installed by a successful re-authorize)
+	// starts clean regardless of what the old one recorded.
+	if err := r.Connect(ctx, "fake", ServerEntry{URL: srv.URL}, Implementation{Name: "test"}, nil, nil); err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	if _, ok := r.Get("fake").ReauthRequired(); ok {
+		t.Error("a fresh connection replacing a flagged one must not inherit the flag")
+	}
+}
+
 func TestRegistryConnect_AfterCloseRejected(t *testing.T) {
 	srv := fakeMCPServer(t)
 	defer srv.Close()

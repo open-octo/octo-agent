@@ -316,6 +316,61 @@ func TestMCPLiveConnect_FailureSurfacesAsStatus(t *testing.T) {
 	}
 }
 
+// TestMCPLifecycle_ReauthRequiredSurfacesAsError guards the panel-visible
+// side of the reauth fix: a connection that's still registered as "live"
+// but got flagged by MarkReauthRequired (because a tool call through it hit
+// mcp.ErrReauthRequired — the OAuth token died and nobody was present to
+// fix it interactively) must report as "error", not a falsely healthy
+// "connected", on both the list and single-server endpoints. Without this,
+// the panel's Authorize/Reconnect controls (gated on status != "connected")
+// would stay hidden/disabled forever.
+func TestMCPLifecycle_ReauthRequiredSurfacesAsError(t *testing.T) {
+	mcpTestHome(t, "")
+	t.Cleanup(app.ShutdownMCP)
+	tools.SetMCPRegistry(nil)
+
+	fake := fakeMCPServerForHandlers(t)
+	defer fake.Close()
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
+		`{"name": "live", "server": {"url": "`+fake.URL+`"}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create: status = %d: %s", w.Code, w.Body.String())
+	}
+	if servers := decodeServers(t, w); servers[0].Status != "connected" {
+		t.Fatalf("after create: %+v", servers[0])
+	}
+
+	conn := tools.ActiveMCPRegistry().Get("live")
+	if conn == nil {
+		t.Fatal("expected a live connection")
+	}
+	conn.MarkReauthRequired(mcp.ErrReauthRequired)
+
+	w = doJSON(t, srv, http.MethodGet, "/api/mcp/servers", "")
+	servers := decodeServers(t, w)
+	if servers[0].Status != "error" || servers[0].Error == "" {
+		t.Fatalf("list after MarkReauthRequired: %+v", servers[0])
+	}
+
+	w = doJSON(t, srv, http.MethodGet, "/api/mcp/servers/live", "")
+	var detail mcpServerDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v (body: %s)", err, w.Body.String())
+	}
+	if detail.Status != "error" || detail.Error == "" {
+		t.Fatalf("single-server get after MarkReauthRequired: %+v", detail)
+	}
+	// The connection itself must still be registered — this is a "live but
+	// unauthenticated" state, not a torn-down one; the Authorize button's
+	// re-auth flow needs the still-live registry entry to replace.
+	if tools.ActiveMCPRegistry().Get("live") == nil {
+		t.Error("MarkReauthRequired must not remove the connection from the registry")
+	}
+}
+
 func TestHandleGetMCPServer(t *testing.T) {
 	mcpTestHome(t, `{"mcpServers": {
 		"alpha": {"command": "echo"},

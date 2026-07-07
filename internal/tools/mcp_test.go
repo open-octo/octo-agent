@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -93,5 +95,38 @@ func TestMCPToolDefs_NilRegistryYieldsNone(t *testing.T) {
 	defer SetMCPRegistry(nil)
 	if defs := mcpToolDefs(); len(defs) != 0 {
 		t.Errorf("expected empty defs with no registry, got %d", len(defs))
+	}
+}
+
+func TestMarkIfReauthRequired_FlagsOnlyReauthErrors(t *testing.T) {
+	conn := &mcp.Connection{Name: "fake"}
+
+	markIfReauthRequired(conn, errors.New("some unrelated tool error"))
+	if _, ok := conn.ReauthRequired(); ok {
+		t.Error("a plain error must not flag the connection")
+	}
+
+	markIfReauthRequired(conn, mcp.ErrReauthRequired)
+	msg, ok := conn.ReauthRequired()
+	if !ok || msg == "" {
+		t.Fatalf("ReauthRequired = (%q, %v), want recorded error", msg, ok)
+	}
+
+	// A properly %w-wrapped error (matching how http.go's doRequest reports
+	// it: "mcp: oauth token: %w") must still be detected via errors.Is.
+	conn2 := &mcp.Connection{Name: "fake2"}
+	wrapped := fmt.Errorf("mcp: oauth token: %w", mcp.ErrReauthRequired)
+	markIfReauthRequired(conn2, wrapped)
+	if _, ok := conn2.ReauthRequired(); !ok {
+		t.Error("a %w-wrapped ErrReauthRequired must flag the connection")
+	}
+
+	// A merely string-matching but non-wrapped error must NOT match —
+	// guards against a naive strings.Contains-based implementation.
+	conn3 := &mcp.Connection{Name: "fake3"}
+	stringMatch := errors.New("mcp: oauth token: " + mcp.ErrReauthRequired.Error())
+	markIfReauthRequired(conn3, stringMatch)
+	if _, ok := conn3.ReauthRequired(); ok {
+		t.Error("a string-matching but non-wrapped error must not flag the connection")
 	}
 }

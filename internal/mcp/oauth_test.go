@@ -478,6 +478,40 @@ func TestOAuth_MissingResourceInMetadata_FallsBackToConfiguredURL(t *testing.T) 
 	}
 }
 
+// TestOAuth_NilPrompt_FailsFastWithoutPolling guards the fast-fail path for
+// a connection that needs interactive re-authorization but has no
+// OAuthPrompt — every background connect path (startup, reload, panel
+// enable-toggle) constructs its OAuthClient this way, since nobody is
+// present to see a verification code. Before this check, authorize() would
+// still run discovery/registration and poll the device-flow endpoint
+// silently for up to 5 minutes before timing out with a generic error.
+func TestOAuth_NilPrompt_FailsFastWithoutPolling(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	fs := newFakeAuthServer(t, 0)
+	defer fs.close()
+
+	oc, err := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake-noprompt", "octo-test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	_, err = oc.Token(context.Background())
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, ErrReauthRequired) {
+		t.Fatalf("Token error = %v, want ErrReauthRequired", err)
+	}
+	if elapsed > time.Second {
+		t.Errorf("Token took %v, want a near-instant fast-fail (no device-flow polling)", elapsed)
+	}
+	if fs.registrations != 0 {
+		t.Errorf("registrations = %d, want 0 — no prompt means no point attempting discovery/registration", fs.registrations)
+	}
+}
+
 func TestOAuth_InvalidateForces_FreshAuth(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

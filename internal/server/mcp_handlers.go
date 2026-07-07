@@ -111,8 +111,18 @@ func (s *Server) mcpServerList() ([]mcpServerInfo, error) {
 		case m.Entry.Disabled:
 			info.Status = "disabled"
 		case reg != nil && reg.Get(m.Name) != nil:
-			info.Status = "connected"
-			info.Tools = len(reg.Get(m.Name).Tools)
+			conn := reg.Get(m.Name)
+			if msg, ok := conn.ReauthRequired(); ok {
+				// Connection is still registered but a call through it hit
+				// an OAuth failure nobody was present to fix — report it as
+				// an error so the panel's Authorize/Reconnect controls
+				// unlock instead of showing a falsely healthy "connected".
+				info.Status = "error"
+				info.Error = msg
+			} else {
+				info.Status = "connected"
+				info.Tools = len(conn.Tools)
+			}
 		default:
 			info.Status = "disconnected"
 			if reg != nil {
@@ -201,9 +211,14 @@ func (s *Server) handleGetMCPServer(w http.ResponseWriter, r *http.Request) {
 	default:
 		reg := tools.ActiveMCPRegistry()
 		if reg != nil && reg.Get(name) != nil {
-			info.Status = "connected"
 			conn := reg.Get(name)
-			info.Tools = len(conn.Tools)
+			if msg, ok := conn.ReauthRequired(); ok {
+				info.Status = "error"
+				info.Error = msg
+			} else {
+				info.Status = "connected"
+				info.Tools = len(conn.Tools)
+			}
 		} else {
 			info.Status = "disconnected"
 			if reg != nil {
