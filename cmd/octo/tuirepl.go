@@ -926,7 +926,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cfg.executor != nil {
 				m.cfg.tools = tools.DefaultToolsFor(m.cfg.a.Model)
 			}
-			if !m.cfg.verbosity.quiet() {
+			if m.cfg.verbosity.verbose() {
 				m.printlnBlock(noticeStyle.Render(fmt.Sprintf("● MCP ready — %d server(s) connected", msg.reg.Len())))
 			}
 		}
