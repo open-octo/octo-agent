@@ -149,8 +149,7 @@ export const agenticSessions = new Set<string>()
 // Plain "new session" entry point shared by the sidebar button and the
 // command palette — creates an empty chat session with no queued prompt.
 export async function createNewSession(): Promise<void> {
-  const res = await api.createSession({ source: 'manual' }) as any
-  const sess = res.session ?? res
+  const sess = await api.createSession({ source: 'manual' })
   sessions.update(ss => [sess, ...ss])
   activeSessionId.set(sess.id)
   activeSession.set(sess.id)
