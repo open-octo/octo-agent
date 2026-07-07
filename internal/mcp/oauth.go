@@ -26,6 +26,13 @@ import (
 //     PKCE-friendly).
 //   - RFC 8628: device authorization grant. Right pick for a CLI — no
 //     local listener, just "open <uri> and enter <code>".
+//   - RFC 8707: bind the token to the resource named in the protected-
+//     resource metadata (falling back to the configured URL if the server
+//     omits it) via a "resource" form param on every device-authorization,
+//     token-exchange, and refresh request. Without this, an audience-
+//     checking authorization server issues a token that authenticates but
+//     isn't authorized for this specific MCP endpoint — every request
+//     401s even with a brand-new token.
 //   - Refresh-token flow on near-expiry + cached token persistence.
 //
 // What this skips
@@ -141,13 +148,22 @@ func (o *OAuthClient) Token(ctx context.Context) (string, error) {
 		}
 	})
 
+	// A cache written before RFC 8707 resource-binding was added has no
+	// Resource recorded. Its access token (and any token a refresh of it
+	// would yield) was never bound to this specific resource, so it's the
+	// same non-audience-bound token that caused the original 401 — reusing
+	// or refreshing it just reproduces the bug. Skip straight to a full
+	// re-authorize, which records Resource going forward.
+	stale := o.state != nil && o.state.Resource == "" &&
+		(o.state.AccessToken != "" || o.state.RefreshToken != "")
+
 	// 1. Cached + still valid (with a 60s slack for clock skew + round-trip).
-	if o.state != nil && o.state.AccessToken != "" &&
+	if !stale && o.state != nil && o.state.AccessToken != "" &&
 		o.state.ExpiresAt.After(time.Now().Add(60*time.Second)) {
 		return o.state.AccessToken, nil
 	}
 	// 2. Cached refresh token + token URL — try to refresh without bothering the user.
-	if o.state != nil && o.state.RefreshToken != "" && o.state.TokenURL != "" {
+	if !stale && o.state != nil && o.state.RefreshToken != "" && o.state.TokenURL != "" {
 		if err := o.refresh(ctx); err == nil {
 			return o.state.AccessToken, nil
 		}
