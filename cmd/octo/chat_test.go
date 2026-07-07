@@ -297,14 +297,20 @@ func TestResolveCoauthor(t *testing.T) {
 }
 
 func TestResolveReasoningEffort(t *testing.T) {
-	if got := resolveReasoningEffort("high", config.ModelEntry{ReasoningEffort: "low"}); got != "high" {
+	if got := resolveReasoningEffort(true, "high", config.ModelEntry{ReasoningEffort: "low"}); got != "high" {
 		t.Errorf("flag should win: got %q", got)
 	}
-	if got := resolveReasoningEffort("", config.ModelEntry{ReasoningEffort: "medium"}); got != "medium" {
+	if got := resolveReasoningEffort(false, "", config.ModelEntry{ReasoningEffort: "medium"}); got != "medium" {
 		t.Errorf("config fallback: got %q", got)
 	}
-	if got := resolveReasoningEffort("", config.ModelEntry{}); got != "" {
+	if got := resolveReasoningEffort(false, "", config.ModelEntry{}); got != "" {
 		t.Errorf("default off: got %q", got)
+	}
+	if got := resolveReasoningEffort(true, "off", config.ModelEntry{ReasoningEffort: "high"}); got != "" {
+		t.Errorf("explicit --reasoning-effort off should override config: got %q", got)
+	}
+	if got := resolveReasoningEffort(true, "OFF", config.ModelEntry{ReasoningEffort: "high"}); got != "" {
+		t.Errorf("--reasoning-effort off should be case-insensitive: got %q", got)
 	}
 }
 

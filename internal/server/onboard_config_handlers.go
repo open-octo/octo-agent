@@ -558,7 +558,15 @@ func applyModelRequestToEntry(req saveModelRequest, e *config.ModelEntry) {
 		e.Protocol = ""
 	}
 	if req.ReasoningEffort != "" {
-		e.ReasoningEffort = req.ReasoningEffort
+		// "off" is the form's UI sentinel for "no reasoning effort"; the
+		// persisted/forwarded representation is "" everywhere else in the
+		// codebase (CLI, TUI, provider layer) — normalize here so it isn't
+		// later sent to a provider as a literal, invalid reasoning_effort.
+		if strings.EqualFold(req.ReasoningEffort, "off") {
+			e.ReasoningEffort = ""
+		} else {
+			e.ReasoningEffort = req.ReasoningEffort
+		}
 	}
 	if req.ShowReasoning != nil {
 		e.ShowReasoning = req.ShowReasoning

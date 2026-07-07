@@ -319,7 +319,13 @@
   // Session meta chips — pull live values from per-session stores, fall back
   // to the session record, then to sensible defaults.
   let modelName = $derived($chatModel[sid] || currentSession?.model || currentSession?.model_id || '—')
-  let reasoning = $derived($chatReasoningEffort[sid] || currentSession?.reasoning_effort || 'medium')
+  // "" (off) is a legitimate resolved value, not "no data yet" — only fall
+  // back to the 'medium' bootstrap default when neither source has reported
+  // anything at all (?? only skips null/undefined, not "").
+  let reasoning = $derived.by(() => {
+    const v = $chatReasoningEffort[sid] ?? currentSession?.reasoning_effort
+    return v === undefined ? 'medium' : (v || 'off')
+  })
   let workingDir = $derived($chatWorkingDir[sid] || currentSession?.working_dir || '')
   let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || $globalPermissionMode)
   // Effective show-reasoning for this session: live store > session record > default true.
@@ -353,7 +359,7 @@
   let dirMenu = $state(false)
   let dirDraft = $state('')
   let dirSaving = $state(false)
-  const reasoningLevels = ['low', 'medium', 'high', 'xhigh', 'max']
+  const reasoningLevels = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
   const showReasoningIcon = $derived(showReasoning ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined')
 
   onMount(async () => {
@@ -385,13 +391,19 @@
     try {
       await api.updateSessionReasoningEffort(sid, level)
       chatReasoningEffort.update(r => ({ ...r, [sid]: level }))
+      // Off has no trace to show — the server forces show_reasoning off too
+      // (see handleUpdateSessionReasoningEffort); mirror it locally so the
+      // toggle doesn't flash "on" until the session_update broadcast lands.
+      if (level === 'off') {
+        chatShowReasoning.update(r => ({ ...r, [sid]: false }))
+      }
     } catch (e: any) {
       showToast(e.message ?? 'Failed to set reasoning', 'error')
     }
   }
 
   async function toggleShowReasoning() {
-    if (!sid) return
+    if (!sid || reasoning === 'off') return
     const next = !showReasoning
     try {
       await api.updateSessionShowReasoning(sid, next)
@@ -617,9 +629,13 @@
             </button>
           {/each}
           <div class="menu-divider"></div>
-          <button class="menu-item toggle-item" onclick={() => toggleShowReasoning()}>
+          <button
+            class="menu-item toggle-item"
+            disabled={reasoning === 'off'}
+            onclick={() => toggleShowReasoning()}
+          >
             <span class="mi-name">{$t('chat.show_reasoning')}</span>
-            <span class="toggle" class:on={showReasoning}>
+            <span class="toggle" class:on={showReasoning && reasoning !== 'off'}>
               <span class="toggle-knob"></span>
             </span>
           </button>
@@ -803,6 +819,8 @@
 .menu-item.active { background: var(--active-blue-bg); }
 .menu-divider { height: 1px; background: var(--border-secondary); margin: 4px 0; }
 .menu-item.toggle-item { flex-direction: row; justify-content: space-between; align-items: center; }
+.menu-item.toggle-item:disabled { cursor: default; opacity: 0.5; }
+.menu-item.toggle-item:disabled:hover { background: none; }
 .toggle {
   width: 30px; height: 16px; border-radius: 9999px; background: var(--border);
   position: relative; cursor: pointer; transition: background 0.15s ease;
