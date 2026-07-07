@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 func TestTUI_TickAdvancesOnlyWhileRunning(t *testing.T) {
@@ -29,6 +30,78 @@ func TestTUI_TickAdvancesOnlyWhileRunning(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Error("tick should stop rescheduling once the turn ends")
+	}
+}
+
+// startTicker is the single choke point that prevents a busy background
+// workflow/subagent — which fires many events between turns — from spawning
+// a parallel tickMsg->tickCmd chain per event. Before this guard existed,
+// every such event unconditionally called tickCmd(), and since tea.Tick
+// always starts a brand-new independent timer, N events produced N live
+// chains all incrementing spinnerFrame every tickInterval — the spinner
+// visibly spun several times faster than intended the busier a workflow was.
+func TestTUI_StartTicker_NoDoubleChain(t *testing.T) {
+	m := newTestModel()
+
+	cmd1 := m.startTicker()
+	if cmd1 == nil {
+		t.Fatal("first startTicker call should start the chain")
+	}
+	if !m.tickerActive {
+		t.Fatal("tickerActive should be true once a chain has started")
+	}
+
+	// A second event arriving while the chain from the first is still alive
+	// (e.g. another workflowEventMsg before the next tickMsg fires) must not
+	// spawn a parallel chain.
+	if cmd2 := m.startTicker(); cmd2 != nil {
+		t.Error("startTicker should be a no-op while a chain is already active")
+	}
+
+	// Once the chain has actually stopped (tickMsg's idle branch clears
+	// tickerActive), a later event can start a fresh one again.
+	m.tickerActive = false
+	if cmd3 := m.startTicker(); cmd3 == nil {
+		t.Error("startTicker should restart the chain once the previous one has stopped")
+	}
+}
+
+// TestTUI_WorkflowEventsWhileIdleStartTickerOnce is the integration-level
+// counterpart to TestTUI_StartTicker_NoDoubleChain: it drives the real
+// workflowEventMsg/subAgentEventMsg branches of Update (not startTicker
+// directly) to confirm they're actually wired through the guard, matching a
+// real busy background workflow flooding the TUI with progress events while
+// no foreground turn is running.
+func TestTUI_WorkflowEventsWhileIdleStartTickerOnce(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = false
+
+	ev := tools.WorkflowEvent{RunID: "wf_1", Kind: "progress", Line: "step 1"}
+	if _, cmd := m.Update(workflowEventMsg{ev: ev}); cmd == nil {
+		t.Fatal("first workflow event while idle should start the ticker")
+	}
+	if !m.tickerActive {
+		t.Fatal("tickerActive should be true after the first workflow event")
+	}
+
+	// Flood more progress events, as a busy workflow would, without letting a
+	// tickMsg run in between (turnRunning stays false throughout, mirroring
+	// idle time between turns). None of these may restart the chain.
+	for i := 0; i < 10; i++ {
+		m.Update(workflowEventMsg{ev: tools.WorkflowEvent{RunID: "wf_1", Kind: "progress", Line: "step"}})
+	}
+	if got := m.startTicker(); got != nil {
+		t.Error("flooding workflow events while idle spawned more than one live tick chain")
+	}
+
+	// A subagent event is guarded the same way and shares the same flag.
+	m.tickerActive = false
+	sub := tools.SubAgentEvent{AgentID: "agent_1", Kind: "started"}
+	if _, cmd := m.Update(subAgentEventMsg{ev: sub}); cmd == nil {
+		t.Fatal("first subagent event while idle should start the ticker")
+	}
+	if got := m.startTicker(); got != nil {
+		t.Error("a subagent event while the ticker is already active should not restart it")
 	}
 }
 
