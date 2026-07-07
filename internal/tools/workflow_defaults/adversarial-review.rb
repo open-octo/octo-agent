@@ -1,134 +1,61 @@
-# @description Adversarial code review — fan out findings across dimensions, then kill false positives with independent skeptic votes. args (all optional): target (what to review, default = uncommitted diff), dimensions (array), votes (int, default 3).
+# @description Multi-dimensional code review — reads the latest git diff and reviews it across correctness, security, performance, readability, and testing, then produces a structured report. args (all optional): pr_branch (compare origin/main...branch), revision (custom git diff range), output (markdown file path), max_lines (default 800), dimensions (hash of dimension -> prompt).
 
-# ---- inputs -----------------------------------------------------------------
-a      = args || {}
-target = a["target"] || "the uncommitted changes (run `git diff HEAD`) in this repository"
-dims   = a["dimensions"] || ["correctness", "security", "performance", "tests"]
-votes  = (a["votes"] || 3).to_i
-votes  = 3 if votes < 1
+repo = (args || {})["repo"] || "the current directory"
+pr_branch = (args || {})["pr_branch"]
+revision = (args || {})["revision"]
 
-# Per-dimension focus. A dimension not listed here (passed via args) falls back
-# to reviewing for its own name.
-DIM_FOCUS = {
-  "correctness" => "logic errors, wrong conditionals, off-by-one, unhandled nil/error paths, broken edge cases",
-  "security"    => "injection, missing authorization, leaked secrets, unsafe deserialization, unvalidated input",
-  "performance" => "N+1 queries, needless allocation in hot paths, blocking calls, accidental O(n^2)",
-  "tests"       => "missing coverage for the change, assertions that can't fail, wrong expected values",
+if pr_branch && !pr_branch.empty?
+  revision = "origin/main...#{pr_branch}"
+  log("PR branch mode: #{pr_branch}")
+elsif revision && !revision.empty?
+  log("revision: #{revision}")
+else
+  revision = "HEAD~1 HEAD"
+  log("default revision: #{revision}")
+end
+
+max_lines = (args || {})["max_lines"] || 800
+output = (args || {})["output"]
+
+dimensions = (args || {})["dimensions"] || {
+  "correctness" => "correctness: logic errors, wrong conditionals, off-by-one, unhandled nil/error paths, broken edge cases, concurrency issues",
+  "security" => "security: injection, missing authorization, leaked secrets, unsafe deserialization, unvalidated input, path traversal, SSRF",
+  "performance" => "performance: N+1 queries, needless allocation in hot paths, blocking calls, accidental O(n^2), repeated IO",
+  "readability" => "readability: naming, function length, comments, code organization, Go style, duplicated code, complexity",
+  "testing" => "testing: missing coverage for the change, assertions that can't fail, wrong expected values, missing boundary tests"
 }
 
-FINDINGS_SCHEMA = JSON.generate({
-  "type" => "object",
-  "properties" => {
-    "findings" => {
-      "type" => "array",
-      "items" => {
-        "type" => "object",
-        "properties" => {
-          "file"     => { "type" => "string" },
-          "line"     => { "type" => "integer" },
-          "severity" => { "type" => "string", "enum" => ["high", "medium", "low"] },
-          "title"    => { "type" => "string" },
-          "detail"   => { "type" => "string" },
-        },
-        "required" => ["file", "title", "detail"],
-      },
-    },
-  },
-  "required" => ["findings"],
-})
+phase("Read diff")
+log("repo: #{repo}, revision: #{revision}")
 
-VERDICT_SCHEMA = JSON.generate({
-  "type" => "object",
-  "properties" => {
-    "refuted" => { "type" => "boolean" },
-    "reason"  => { "type" => "string" },
-  },
-  "required" => ["refuted", "reason"],
-})
+diff = agent("In #{repo}, run `git fetch origin` (continue if it fails), then run `git diff #{revision} --stat` and `git diff #{revision}`. Return the full diff text. If it exceeds #{max_lines} lines, truncate to #{max_lines} lines and note that truncation.")
+log("diff length: #{diff.length} chars")
 
-# ---- helpers ----------------------------------------------------------------
-
-# find_stage runs one dimension's reviewer and returns its findings array.
-def find_stage(dim, focus, target)
-  prompt = [
-    "You are reviewing #{target}.",
-    "Inspect the diff yourself and read the surrounding code for context.",
-    "Report ONLY real defects in the *#{dim}* dimension: #{focus}.",
-    "Be conservative — do not invent issues to fill a quota; an empty list is a valid answer.",
-    "For each defect give: file, line (best estimate), severity, a one-line title, and a concrete failure scenario in detail.",
-  ].join("\n")
-  raw = agent(prompt, { "read_only" => true, "schema" => FINDINGS_SCHEMA })
-  (JSON.parse(raw)["findings"] || []) rescue []
-end
-
-# dedup collapses findings that point at the same file + title.
-def dedup(all)
-  seen = {}
-  out  = []
-  all.each do |f|
-    next unless f.is_a?(Hash)
-    key = "#{f["file"].to_s.downcase}::#{f["title"].to_s.downcase.strip}"
-    next if seen[key]
-    seen[key] = true
-    out << f
-  end
-  out
-end
-
-# survives? runs `votes` independent skeptics, each told to REFUTE the finding,
-# and keeps it only if a strict majority fail to refute it.
-def survives?(f, votes)
-  loc = f["line"] ? "#{f["file"]}:#{f["line"]}" : f["file"].to_s
-  claim = "#{loc} — #{f["title"]}: #{f["detail"]}"
-  verdicts = parallel((1..votes).to_a) do |_i|
-    prompt = [
-      "A reviewer claims this is a real defect:",
-      claim,
-      "Your job is to REFUTE it. Read the actual code to check.",
-      "It is refuted if it is wrong, already handled elsewhere, unreachable, or not actually a defect.",
-      "Default to refuted:true when uncertain — the bar to keep a finding is that it clearly survives scrutiny.",
-      "Return refuted (bool) and a one-line reason.",
-    ].join("\n")
-    raw = agent(prompt, { "read_only" => true, "schema" => VERDICT_SCHEMA })
-    (JSON.parse(raw)["refuted"] ? 1 : 0) rescue 1   # treat a broken verdict as "refuted"
-  end
-  kept = verdicts.select { |v| v == 0 }.size
-  kept > (votes / 2)
-end
-
-def sev_rank(s)
-  ({ "high" => 0, "medium" => 1, "low" => 2 }[s.to_s.downcase]) || 3
-end
-
-# ---- run --------------------------------------------------------------------
-
-phase "Review"
-per_dim = parallel(dims) { |d| find_stage(d, DIM_FOCUS[d] || d, target) }
-unique  = dedup(per_dim.flatten.compact)
-log "#{unique.size} candidate finding(s) after dedup across #{dims.size} dimension(s)"
-
-phase "Verify"
-survivors = []
-if unique.empty?
-  log "No candidates to verify."
+if diff.strip.empty?
+  log("diff is empty")
+  "No diff to review."
 else
-  judged    = parallel(unique) { |f| { "f" => f, "keep" => survives?(f, votes) } }
-  survivors = judged.select { |r| r["keep"] }.map { |r| r["f"] }
-  log "#{survivors.size} of #{unique.size} finding(s) survived #{votes}-vote scrutiny."
-end
-
-phase "Report"
-if survivors.empty?
-  "No defects survived adversarial review (#{unique.size} candidate(s) raised, all refuted)."
-else
-  out = ["## Adversarial review — #{survivors.size} confirmed finding(s)", ""]
-  survivors.sort_by { |f| sev_rank(f["severity"]) }.each do |f|
-    loc = f["line"] ? "#{f["file"]}:#{f["line"]}" : f["file"].to_s
-    out << "### [#{(f["severity"] || "?").to_s.upcase}] #{f["title"]}"
-    out << "`#{loc}`"
-    out << ""
-    out << f["detail"].to_s
-    out << ""
+  phase("Multi-dimensional review")
+  reviews = parallel(dimensions.to_a) do |dim|
+    name = dim[0]
+    prompt = dim[1]
+    log("start #{name} review")
+    result = agent("You are a senior code reviewer. Review the following diff only for #{prompt}.\n\nRules:\n- List only concrete problems you found (include line number / function name and a short explanation)\n- If no problems, say 'No issues'\n- Do not speak in generalities\n\n```diff\n" + diff + "\n```")
+    log("finish #{name} review")
+    "## " + name + "\n" + result
   end
-  out.join("\n")
+
+  phase("Summarize report")
+  report = agent("Summarize the following multi-dimensional code review into a structured report with:\n1. Overall risk level (low/medium/high)\n2. Issues found per dimension, sorted by severity\n3. Top 3 priority fixes\n\n" + reviews.join("\n\n---\n\n"))
+
+  phase("Output report")
+  if output && !output.empty?
+    log("write report to: #{output}")
+    agent("Use write_file to write the following review report to #{output} as a markdown file.\n\n#{report}")
+    log("report written")
+    "Review complete. Report written to #{output}\n\n" + report
+  else
+    log("no output path, return report directly")
+    report
+  end
 end
