@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { mcpServers, toolSearchMode, mcpModalOpen, mcpModalState, showToast, openAgentSession } from '../lib/stores'
+  import { mcpServers, toolSearchMode, mcpModalOpen, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
@@ -95,18 +95,15 @@
 
   // ─── add / edit / import / AI setup ───────────────────────────────────────────
 
-  function openAdd() {
-    mcpModalState.set({ mode: 'add' })
-    mcpModalOpen.set(true)
-  }
-
-  function openEdit(srv: any) {
-    mcpModalState.set({ mode: 'edit', server: srv })
-    mcpModalOpen.set(true)
+  // Adding and editing a server — whether it lives in ~/.octo/mcp.json or a
+  // project's .octo/mcp.json — both go through the agent instead of a
+  // structured form. That works identically regardless of which file it's
+  // defined in, so there's no need for a separate "Add Server" form.
+  function askAgentToEdit(name: string) {
+    openAgentSession(tr('mcp.edit_with_agent_prompt').replace('{name}', name), `Edit MCP: ${name}`)
   }
 
   function openImport() {
-    mcpModalState.set({ mode: 'import' })
     mcpModalOpen.set(true)
   }
 
@@ -142,6 +139,10 @@
       )
     } catch (e: any) {
       showToast(e.message ?? 'Failed to toggle server', 'error')
+      // The Switch already flipped optimistically on click; a rejected
+      // toggle (e.g. a project-scoped server) needs a real reload to snap
+      // its visual state back to what the server actually has.
+      reload()
     }
   }
 
@@ -277,10 +278,6 @@
           <iconify-icon icon="ant-design:code-outlined" width="14"></iconify-icon>
           {$t('mcp.import_json')}
         </button>
-        <button class="btn-primary" onclick={openAdd}>
-          <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
-          {$t('mcp.add')}
-        </button>
         <button class="btn-primary" onclick={aiSetup}>
           <iconify-icon icon="ant-design:thunderbolt-outlined" width="14"></iconify-icon>
           {$t('mcp.ai_setup')}
@@ -312,7 +309,7 @@
       <div class="empty-state">
         <iconify-icon icon="ant-design:api-outlined" width="32"></iconify-icon>
         <span>{$t('mcp.empty')}</span>
-        <button class="btn-primary" onclick={openAdd}>{$t('mcp.add_first')}</button>
+        <button class="btn-primary" onclick={aiSetup}>{$t('mcp.add_first')}</button>
       </div>
     {:else}
       <div class="server-list">
@@ -354,11 +351,10 @@
               {/if}
               <button
                 class="srv-btn"
-                title={srv.source === 'project' ? $t('mcp.readonly_project') : $t('common.edit')}
-                disabled={srv.source === 'project'}
-                onclick={() => openEdit(srv)}
+                title={$t('mcp.btn.edit_with_agent')}
+                onclick={() => askAgentToEdit(srv.name)}
               >
-                <iconify-icon icon="ant-design:edit-outlined" width="14"></iconify-icon>
+                <iconify-icon icon="ant-design:message-outlined" width="14"></iconify-icon>
               </button>
               <button
                 class="srv-btn"
@@ -370,8 +366,7 @@
               </button>
               <button
                 class="srv-btn del"
-                title={srv.source === 'project' ? $t('mcp.readonly_project') : $t('common.delete')}
-                disabled={srv.source === 'project'}
+                title={$t('common.delete')}
                 onclick={() => deleteServer(srv.name)}
               >
                 <iconify-icon icon="ant-design:delete-outlined" width="14"></iconify-icon>
@@ -379,8 +374,6 @@
               <span style="width:8px"></span>
               <Switch
                 checked={enabled}
-                disabled={srv.source === 'project'}
-                title={srv.source === 'project' ? $t('mcp.readonly_project') : undefined}
                 onchange={() => toggleServer(srv.name, enabled)}
               />
             </div>
