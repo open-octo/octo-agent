@@ -33,6 +33,7 @@ func withIsolatedPath(t *testing.T) string {
 
 func TestDetectToolchain_PresentAndMissing(t *testing.T) {
 	dir := withIsolatedPath(t)
+	withFakeHome(t) // isolate ~/.octo/bin bundled fallback from the host
 	fakeExe(t, dir, "git")
 	fakeExe(t, dir, "node")
 	fakeExe(t, dir, "python3") // satisfies the "python" probe via its variant
