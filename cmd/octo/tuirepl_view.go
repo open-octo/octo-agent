@@ -275,7 +275,6 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				next = permission.ModeInteractive
 			}
 			m.cfg.permEngine.SetMode(next)
-			m.println(noticeStyle.Render("Permission mode: " + string(next)))
 		}
 		return m, nil
 
@@ -1002,10 +1001,6 @@ func (m *tuiModel) dispatchThinking(level string) (tea.Model, tea.Cmd) {
 
 	m.a.Sender = newSender
 	m.cfg.reasoningEffort = level
-	if level == "off" {
-		level = "off"
-	}
-	m.println(noticeStyle.Render(fmt.Sprintf("Thinking: %s", level)))
 	return m, nil
 }
 
