@@ -335,7 +335,7 @@ func TestMCPLifecycle_ReauthRequiredSurfacesAsError(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
 
 	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"name": "live", "server": {"url": "`+fake.URL+`"}}`)
+		`{"mcpServers": {"live": {"url": "`+fake.URL+`"}}}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("create: status = %d: %s", w.Code, w.Body.String())
 	}
