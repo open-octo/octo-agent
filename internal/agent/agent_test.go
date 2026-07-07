@@ -31,6 +31,16 @@ func (f *fakeSender) SendMessages(_ context.Context, model, system string, messa
 	return f.reply, nil
 }
 
+// fakeLowEffortSender additionally implements LowEffortSender: LowEffort()
+// hands back a distinct sender (low) so a test can assert GenerateTitle/
+// Suggest actually swap to it instead of using the main sender directly.
+type fakeLowEffortSender struct {
+	fakeSender
+	low *fakeSender
+}
+
+func (f *fakeLowEffortSender) LowEffort() Sender { return f.low }
+
 func TestAgent_Turn_HappyPath(t *testing.T) {
 	send := &fakeSender{reply: Reply{Content: "hi from agent", Model: "m", StopReason: "end_turn"}}
 	a := New(send, "claude-test")
@@ -1761,6 +1771,34 @@ func TestAgent_Suggest_NotConfigured(t *testing.T) {
 	}
 }
 
+// TestAgent_Suggest_UsesLowEffortSenderWhenAvailable mirrors the GenerateTitle
+// guard: Suggest is the same kind of throwaway call and must not pay the
+// session's full reasoning budget either.
+func TestAgent_Suggest_UsesLowEffortSenderWhenAvailable(t *testing.T) {
+	low := &fakeSender{reply: Reply{Content: "low effort suggestion"}}
+	main := &fakeLowEffortSender{
+		fakeSender: fakeSender{reply: Reply{Content: "should not be used"}},
+		low:        low,
+	}
+	a := New(main, "m")
+	a.History.Append(NewUserMessage("do X"))
+	a.History.Append(NewAssistantMessage("did X"))
+
+	s, err := a.Suggest(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Suggest: %v", err)
+	}
+	if s != "low effort suggestion" {
+		t.Errorf("suggestion = %q, want the low-effort sender's reply", s)
+	}
+	if len(main.gotMessages) != 0 {
+		t.Errorf("main sender should not have been called; got %d messages", len(main.gotMessages))
+	}
+	if len(low.gotMessages) == 0 {
+		t.Error("low-effort sender was never called")
+	}
+}
+
 func TestAgent_GenerateTitle(t *testing.T) {
 	send := &fakeSender{reply: Reply{Content: "\"Fix the login redirect bug\"."}}
 	a := New(send, "m")
@@ -1799,6 +1837,37 @@ func TestAgent_GenerateTitle_NotConfigured(t *testing.T) {
 	a := New(nil, "")
 	if _, err := a.GenerateTitle(context.Background(), nil); err == nil {
 		t.Error("GenerateTitle with no sender/model should error")
+	}
+}
+
+// TestAgent_GenerateTitle_UsesLowEffortSenderWhenAvailable guards the actual
+// fix for a confirmed production failure: a session running reasoning_effort
+// "max" paid the model's full reasoning budget just to produce a 6-word
+// title, reliably exceeding the throwaway call's timeout. When the Sender
+// implements LowEffortSender, GenerateTitle must route through the
+// low-effort variant instead of the session's main sender.
+func TestAgent_GenerateTitle_UsesLowEffortSenderWhenAvailable(t *testing.T) {
+	low := &fakeSender{reply: Reply{Content: "Low effort title"}}
+	main := &fakeLowEffortSender{
+		fakeSender: fakeSender{reply: Reply{Content: "should not be used"}},
+		low:        low,
+	}
+	a := New(main, "m")
+	a.History.Append(NewUserMessage("do X"))
+	a.History.Append(NewAssistantMessage("did X"))
+
+	title, err := a.GenerateTitle(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GenerateTitle: %v", err)
+	}
+	if title != "Low effort title" {
+		t.Errorf("title = %q, want the low-effort sender's reply", title)
+	}
+	if len(main.gotMessages) != 0 {
+		t.Errorf("main sender should not have been called; got %d messages", len(main.gotMessages))
+	}
+	if len(low.gotMessages) == 0 {
+		t.Error("low-effort sender was never called")
 	}
 }
 

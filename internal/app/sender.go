@@ -180,6 +180,21 @@ type sender struct {
 	showReasoning   bool
 }
 
+// LowEffort implements agent.LowEffortSender: it returns a copy of s with
+// reasoning effort capped to "low" — the cheapest non-zero budget — rather
+// than disabled outright. Effort is lowered, not removed, so the request
+// shape stays consistent with earlier turns in the same conversation that
+// may already carry thinking blocks in history (a live check against
+// kimi-for-coding confirmed mixing enabled-thinking history with a
+// disabled-thinking request doesn't actually error there, but "low" is the
+// safer choice across every Anthropic-protocol-compatible backend, tested
+// or not, and it fully solves the latency/cost problem this exists for).
+func (s sender) LowEffort() agent.Sender {
+	s.reasoningEffort = "low"
+	s.thinkingBudget = AnthropicThinkingBudget("low")
+	return s
+}
+
 // reasoningSink returns the OnThinking callback to hand the provider: the
 // agent's onThinking when reasoning display is enabled, else nil so the
 // provider skips surfacing reasoning entirely.

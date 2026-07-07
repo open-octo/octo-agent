@@ -61,6 +61,26 @@ type ToolSender interface {
 	) (Reply, error)
 }
 
+// LowEffortSender is implemented by a Sender that can produce a cheaper
+// variant of itself with reasoning effort capped to a small, fast budget.
+// GenerateTitle and Suggest use this: both deliberately reuse the turn's own
+// Sender (so the request shares the main conversation's prompt-cache
+// prefix — see their doc comments), but that Sender carries whatever
+// reasoning_effort the session happens to be configured with. A session
+// running "high"/"max" would otherwise pay the model's full reasoning
+// budget just to produce a 6-word title or a one-line suggestion, for no
+// benefit — and on a slower provider this reliably exceeds the throwaway
+// call's timeout every single time (a session stays on that effort level
+// across turns, so title generation would retry into the same failure on
+// every turn, never succeeding). LowEffort caps effort down rather than
+// disabling it outright — thinking stays nominally enabled, just with a
+// small budget, keeping the request shape consistent with earlier turns in
+// the same conversation that may already carry thinking blocks in history.
+type LowEffortSender interface {
+	Sender
+	LowEffort() Sender
+}
+
 // ToolInputDeltaFunc receives raw JSON fragments of a tool_use block's
 // arguments as they stream in. Fragments concatenate to form the final
 // JSON object. May be nil; implementations should treat nil as "don't
@@ -1215,12 +1235,17 @@ func (a *Agent) Suggest(ctx context.Context, tools []ToolDefinition) (string, er
 	msgs = append(msgs, snap...)
 	msgs = append(msgs, NewUserMessage(suggestInstruction))
 
+	sender := a.Sender
+	if le, ok := sender.(LowEffortSender); ok {
+		sender = le.LowEffort()
+	}
+
 	var reply Reply
 	var err error
-	if ts, ok := a.Sender.(ToolSender); ok && len(tools) > 0 {
+	if ts, ok := sender.(ToolSender); ok && len(tools) > 0 {
 		reply, err = ts.SendMessagesWithTools(ctx, a.Model, a.System, msgs, suggestMaxTokens, tools)
 	} else {
-		reply, err = a.Sender.SendMessages(ctx, a.Model, a.System, msgs, suggestMaxTokens)
+		reply, err = sender.SendMessages(ctx, a.Model, a.System, msgs, suggestMaxTokens)
 	}
 	if err != nil {
 		return "", err
@@ -1256,12 +1281,17 @@ func (a *Agent) GenerateTitle(ctx context.Context, tools []ToolDefinition) (stri
 	msgs = append(msgs, snap...)
 	msgs = append(msgs, NewUserMessage(titleInstruction))
 
+	sender := a.Sender
+	if le, ok := sender.(LowEffortSender); ok {
+		sender = le.LowEffort()
+	}
+
 	var reply Reply
 	var err error
-	if ts, ok := a.Sender.(ToolSender); ok && len(tools) > 0 {
+	if ts, ok := sender.(ToolSender); ok && len(tools) > 0 {
 		reply, err = ts.SendMessagesWithTools(ctx, a.Model, a.System, msgs, titleMaxTokens, tools)
 	} else {
-		reply, err = a.Sender.SendMessages(ctx, a.Model, a.System, msgs, titleMaxTokens)
+		reply, err = sender.SendMessages(ctx, a.Model, a.System, msgs, titleMaxTokens)
 	}
 	if err != nil {
 		return "", err
