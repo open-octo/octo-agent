@@ -50,6 +50,8 @@ func (ReadFileTool) Definition() agent.ToolDefinition {
 		Name: "read_file",
 		Description: "Read a UTF-8 text file and return its content with cat-n-style " +
 			"line numbers. Up to 2000 lines per call — use offset/limit to paginate. " +
+			"The line-number column is for your reference only — it is not part of the " +
+			"file, so never copy it into edit_file's old_string. " +
 			"When the response includes '[end of file: N lines total]' the entire file " +
 			"has been read; do not call read_file again for the same path. " +
 			"Absolute paths are preferred; relative paths resolve against the current " +
