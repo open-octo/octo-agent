@@ -96,7 +96,7 @@ func NewHTTPTransport(cfg HTTPConfig) (*HTTPTransport, error) {
 //
 // When an OAuth provider is configured: every request injects the cached
 // access token; a 401 response invalidates the cache and triggers exactly
-// one retry (so the user doesn't see two device-flow prompts in a row).
+// one retry (so the user doesn't see two authorization prompts in a row).
 func (t *HTTPTransport) Send(ctx context.Context, msg *Message) error {
 	if t.closed.Load() {
 		return errors.New("mcp: http transport: closed")

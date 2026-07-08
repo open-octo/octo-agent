@@ -13,9 +13,9 @@ import (
 
 // mcpConnectTimeout bounds the whole non-interactive connect pass. It caps the
 // per-server windows in mcp.connectOne (notably the 5-minute OAuth budget),
-// since a non-interactive transport can't complete a device flow anyway — an
-// OAuth server without a cached/refreshable token is skipped within this bound
-// rather than hanging startup.
+// since a non-interactive transport can't complete an interactive OAuth flow
+// anyway — an OAuth server without a cached/refreshable token is skipped
+// within this bound rather than hanging startup.
 const mcpConnectTimeout = 60 * time.Second
 
 // mcpChildStderr is the sink for stdio MCP subprocess stderr (their diagnostic
@@ -34,8 +34,9 @@ func SetMCPChildStderr(w io.Writer) { mcpChildStderr = w }
 // non-interactively, and registers the resulting surface so DefaultToolsFor /
 // the tool executor pick it up. It is the server/IM counterpart to the CLI's
 // own (interactive, OAuth-prompting) connect path — here authPromptFor is nil,
-// so servers needing a fresh device flow are skipped (mcp.deviceFlow nil-guards
-// the prompt) while stdio, header-auth, and cached-OAuth servers connect.
+// so servers needing fresh authorization are skipped (a nil prompt makes
+// authorize() fail fast with ErrReauthRequired) while stdio, header-auth, and
+// cached-OAuth servers connect.
 //
 // Returns a cleanup that unregisters and closes the registry; it is always
 // non-nil (a no-op when no servers connected), so callers can defer it
@@ -100,10 +101,10 @@ func SwapMCP(ctx context.Context, cwd string, warn io.Writer) error {
 	return nil
 }
 
-// mcpOAuthConnectTimeout bounds a connect that runs an interactive device
-// flow: the user has to visit a URL and approve, so it gets minutes, not
-// seconds. Slightly above connectOne's internal 5-minute OAuth window so
-// that window — and its clearer error — wins.
+// mcpOAuthConnectTimeout bounds a connect that runs an interactive browser
+// authorization: the user has to visit a URL and approve, so it gets
+// minutes, not seconds. Slightly above connectOne's internal 5-minute OAuth
+// window so that window — and its clearer error — wins.
 const mcpOAuthConnectTimeout = 6 * time.Minute
 
 // ConnectMCPServer connects (or reconnects) a single named server into the
@@ -116,8 +117,8 @@ func ConnectMCPServer(ctx context.Context, name string, entry mcp.ServerEntry, c
 }
 
 // ConnectMCPServerAuth is ConnectMCPServer with an interactive OAuth prompt.
-// A non-nil prompt on an oauth entry widens the connect window to fit a
-// device flow.
+// A non-nil prompt on an oauth entry widens the connect window to fit an
+// interactive browser authorization.
 func ConnectMCPServerAuth(ctx context.Context, name string, entry mcp.ServerEntry, prompt mcp.OAuthPrompt, childStderr io.Writer) error {
 	reg := tools.ActiveMCPRegistry()
 	if reg == nil {

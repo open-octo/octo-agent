@@ -680,7 +680,7 @@ func (m *tuiModel) Init() tea.Cmd {
 // connectMCPCmd returns a tea.Cmd that runs the (slow) MCP handshake off the
 // event loop and reports the live registry back as mcpReadyMsg. Bubbletea runs
 // each Cmd in its own goroutine, so this overlaps the rest of startup. The
-// OAuth device-flow prompt and connect-failure warnings are routed to the TUI
+// OAuth authorization prompt and connect-failure warnings are routed to the TUI
 // sink — never the raw terminal, which bubbletea owns.
 func (m *tuiModel) connectMCPCmd() tea.Cmd {
 	boot := m.cfg.mcpBoot

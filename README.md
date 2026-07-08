@@ -336,7 +336,7 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 | Memory & config | done | `~/.octo/octorules.md`, `.octorules`, `octo init`, `@include` |
 | Skills | done | Claude Code-compatible SKILL.md loader (`octo skills`, `/skills`, `/<name>`) |
 | Sandbox | done | OS-enforced `--sandbox` (macOS / Linux) |
-| MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, device-flow OAuth; Tool Search defers large MCP schemas until needed |
+| MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, OAuth (Authorization Code + PKCE); Tool Search defers large MCP schemas until needed |
 | Memory | done | Persistent cross-session memory under `~/.octo/memories/`, auto extract/consolidate |
 | Sub-agents | done | `sub_agent` fan-out, async + resumable (`sub_agent_send`, `sub_agent_status`, `sub_agent_kill`) |
 | Workflows | done | `workflow` tool — deterministic multi-agent orchestration (parallel/pipeline), background runs with liveness + `workflow_kill`, git worktree isolation, structured-output schema; JS or an embedded-Ruby DSL |

@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,56 +17,77 @@ import (
 	"time"
 )
 
-// stubPrompt captures device-flow callbacks without printing anything.
+// stubPrompt fakes the browser-redirect side of the Authorization Code flow:
+// AwaitAuthorizationCode records the authorize URL/state it was given and
+// immediately returns a canned code, as if the user had completed the
+// browser flow instantly.
 type stubPrompt struct {
-	mu             sync.Mutex
-	authorizations int
-	progresses     int
-	done           int
-	lastCode       string
-	lastURI        string
+	mu               sync.Mutex
+	authorizations   int
+	done             int
+	lastAuthorizeURL string
+	lastState        string
+
+	redirectURI   string // defaults to a fixed fake loopback URL unless noRedirectURI
+	noRedirectURI bool   // simulates a prompt that couldn't prepare a callback (RedirectURI() == "")
+	fakeCode      string // defaults to "fake-code-12345" if empty
+	awaitErr      error  // if set, AwaitAuthorizationCode returns this instead of a code
 }
 
-func (p *stubPrompt) ShowAuthorization(code, uri, _ string) {
+func (p *stubPrompt) RedirectURI() string {
+	if p.noRedirectURI {
+		return ""
+	}
+	if p.redirectURI != "" {
+		return p.redirectURI
+	}
+	return "http://127.0.0.1:0/callback"
+}
+
+func (p *stubPrompt) AwaitAuthorizationCode(_ context.Context, authorizeURL, state string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.authorizations++
-	p.lastCode = code
-	p.lastURI = uri
+	p.lastAuthorizeURL = authorizeURL
+	p.lastState = state
+	if p.awaitErr != nil {
+		return "", p.awaitErr
+	}
+	if p.fakeCode != "" {
+		return p.fakeCode, nil
+	}
+	return "fake-code-12345", nil
 }
-func (p *stubPrompt) Progress() { p.mu.Lock(); p.progresses++; p.mu.Unlock() }
-func (p *stubPrompt) Done()     { p.mu.Lock(); p.done++; p.mu.Unlock() }
 
-// fakeAuthServer wires up the RFC 9728 / 8414 / 7591 / 8628 endpoints
-// against an httptest.Server. authorizeAfter controls when the token
-// endpoint flips from "authorization_pending" to a successful response —
-// 0 means succeed on the first poll, 2 means wait for the third.
+func (p *stubPrompt) Done() { p.mu.Lock(); p.done++; p.mu.Unlock() }
+
+// fakeAuthServer wires up the RFC 9728 / 8414 / 7591 endpoints plus a token
+// endpoint against an httptest.Server. There's no /authorize handler: the
+// stub prompt fakes the browser round trip instead of actually hitting it,
+// so tests assert against the authorize URL string (captured by stubPrompt)
+// rather than a real HTTP request to it.
 type fakeAuthServer struct {
-	t              *testing.T
-	mux            *http.ServeMux
-	srv            *httptest.Server
-	authorizeAfter int
+	t   *testing.T
+	mux *http.ServeMux
+	srv *httptest.Server
 
-	mu                sync.Mutex
-	pollAttempts      int
-	registrations     int
-	tokenIssued       string
-	refreshIssued     string
-	deviceCode        string
-	lastDeviceForm    url.Values
-	lastTokenForm     url.Values
-	lastRefreshForm   url.Values
-	lastRegisterScope string
+	mu                   sync.Mutex
+	registrations        int
+	tokenIssued          string
+	refreshIssued        string
+	lastTokenForm        url.Values
+	lastRefreshForm      url.Values
+	lastRegisterScope    string
+	lastRegisterRedirect string
+	lastRegisterGrants   []string
 }
 
-func newFakeAuthServer(t *testing.T, authorizeAfter int) *fakeAuthServer {
+func newFakeAuthServer(t *testing.T) *fakeAuthServer {
 	f := &fakeAuthServer{
-		t:              t,
-		mux:            http.NewServeMux(),
-		authorizeAfter: authorizeAfter,
-		tokenIssued:    "access-12345",
-		refreshIssued:  "refresh-12345",
-		deviceCode:     "device-AAAA",
+		t:             t,
+		mux:           http.NewServeMux(),
+		tokenIssued:   "access-12345",
+		refreshIssued: "refresh-12345",
 	}
 	f.srv = httptest.NewServer(f.mux)
 	f.wire()
@@ -108,12 +131,10 @@ func (f *fakeAuthServer) wire() {
 	f.mux.HandleFunc("/.well-known/oauth-authorization-server/auth", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(asMetadata{
-			Issuer:                      f.srv.URL,
-			AuthorizationEndpoint:       f.URL("/auth"),
-			TokenEndpoint:               f.URL("/token"),
-			RegistrationEndpoint:        f.URL("/register"),
-			DeviceAuthorizationEndpoint: f.URL("/device"),
-			GrantTypesSupported:         []string{"urn:ietf:params:oauth:grant-type:device_code", "refresh_token"},
+			Issuer:                f.srv.URL,
+			AuthorizationEndpoint: f.URL("/authorize"),
+			TokenEndpoint:         f.URL("/token"),
+			RegistrationEndpoint:  f.URL("/register"),
 		})
 	})
 
@@ -122,9 +143,23 @@ func (f *fakeAuthServer) wire() {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		scope, _ := body["scope"].(string)
+		var redirect string
+		if uris, ok := body["redirect_uris"].([]any); ok && len(uris) > 0 {
+			redirect, _ = uris[0].(string)
+		}
+		var grants []string
+		if gs, ok := body["grant_types"].([]any); ok {
+			for _, g := range gs {
+				if s, ok := g.(string); ok {
+					grants = append(grants, s)
+				}
+			}
+		}
 		f.mu.Lock()
 		f.registrations++
 		f.lastRegisterScope = scope
+		f.lastRegisterRedirect = redirect
+		f.lastRegisterGrants = grants
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -134,43 +169,17 @@ func (f *fakeAuthServer) wire() {
 		})
 	})
 
-	// 5. Device authorization (RFC 8628). Interval=1 keeps the test
-	// runtime in milliseconds; the production default (5s when the
-	// server omits Interval) is exercised in a dedicated test.
-	f.mux.HandleFunc("/device", func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		f.mu.Lock()
-		f.lastDeviceForm = r.Form
-		f.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(deviceCodeResponse{
-			DeviceCode:              f.deviceCode,
-			UserCode:                "WXYZ-9999",
-			VerificationURI:         f.URL("/auth"),
-			VerificationURIComplete: f.URL("/auth?code=WXYZ-9999"),
-			ExpiresIn:               60,
-			Interval:                1,
-		})
-	})
-
-	// 6. Token endpoint (device-flow + refresh).
+	// 5. Token endpoint (authorization_code exchange + refresh).
 	f.mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		grant := r.Form.Get("grant_type")
 		w.Header().Set("Content-Type", "application/json")
 
 		switch grant {
-		case "urn:ietf:params:oauth:grant-type:device_code":
+		case "authorization_code":
 			f.mu.Lock()
-			f.pollAttempts++
-			attempt := f.pollAttempts
 			f.lastTokenForm = r.Form
 			f.mu.Unlock()
-			if attempt <= f.authorizeAfter {
-				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(tokenResponse{Error: "authorization_pending"})
-				return
-			}
 			_ = json.NewEncoder(w).Encode(tokenResponse{
 				AccessToken:  f.tokenIssued,
 				RefreshToken: f.refreshIssued,
@@ -199,16 +208,13 @@ func (f *fakeAuthServer) wire() {
 
 func (f *fakeAuthServer) close() { f.srv.Close() }
 
-func TestOAuth_EndToEnd_DeviceFlow(t *testing.T) {
+func TestOAuth_EndToEnd_AuthCodeFlow(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
-	fs := newFakeAuthServer(t, 1) // succeed on the 2nd poll
+	fs := newFakeAuthServer(t)
 	defer fs.close()
-
-	// Speed the test up: short polling interval.
-	fastPolling(t)
 
 	prompt := &stubPrompt{}
 	oc, err := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake", "octo-test", prompt)
@@ -225,7 +231,7 @@ func TestOAuth_EndToEnd_DeviceFlow(t *testing.T) {
 		t.Errorf("token = %q", tok)
 	}
 	if prompt.authorizations != 1 {
-		t.Errorf("ShowAuthorization called %d times", prompt.authorizations)
+		t.Errorf("AwaitAuthorizationCode called %d times", prompt.authorizations)
 	}
 	if prompt.done != 1 {
 		t.Errorf("Done called %d times", prompt.done)
@@ -233,15 +239,17 @@ func TestOAuth_EndToEnd_DeviceFlow(t *testing.T) {
 	if fs.registrations != 1 {
 		t.Errorf("registration calls = %d, want 1", fs.registrations)
 	}
+	if prompt.lastState == "" {
+		t.Error("authorize URL flow should have generated a non-empty state")
+	}
 }
 
 func TestOAuth_TokenCacheReused(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	fs := newFakeAuthServer(t, 0)
+	fs := newFakeAuthServer(t)
 	defer fs.close()
-	fastPolling(t)
 
 	prompt := &stubPrompt{}
 	oc, _ := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake", "octo-test", prompt)
@@ -257,7 +265,7 @@ func TestOAuth_TokenCacheReused(t *testing.T) {
 	}
 	// Prompt was only used for the first one.
 	if prompt.authorizations != 1 {
-		t.Errorf("expected exactly one device-flow prompt, got %d", prompt.authorizations)
+		t.Errorf("expected exactly one authorization prompt, got %d", prompt.authorizations)
 	}
 }
 
@@ -265,9 +273,8 @@ func TestOAuth_RefreshOnExpiry(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	fs := newFakeAuthServer(t, 0)
+	fs := newFakeAuthServer(t)
 	defer fs.close()
-	fastPolling(t)
 
 	prompt := &stubPrompt{}
 	oc, _ := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake", "octo-test", prompt)
@@ -282,7 +289,7 @@ func TestOAuth_RefreshOnExpiry(t *testing.T) {
 		t.Fatalf("Token: %v", err)
 	}
 	// The fake rotates the token on refresh; verify we got the rotated one
-	// and no second device-flow prompt happened.
+	// and no second authorization prompt happened.
 	if tok != "access-rotated-67890" {
 		t.Errorf("expected refreshed access token, got %q", tok)
 	}
@@ -292,32 +299,37 @@ func TestOAuth_RefreshOnExpiry(t *testing.T) {
 }
 
 // TestOAuth_SendsResourceAndScope guards against the audience-binding gap
-// that caused a fresh, otherwise-valid device-flow token to be rejected as
-// "401 unauthorized" by an audience-checking authorization server (RFC
-// 8707): the client must echo the protected-resource metadata's
-// "resource" and "scopes_supported" back to the AS on every device
-// authorization, token exchange, and refresh request — not just parse
-// them and discard them.
+// that caused a fresh, otherwise-valid token to be rejected as "401
+// unauthorized" by an audience-checking authorization server (RFC 8707):
+// the client must echo the protected-resource metadata's "resource" and
+// "scopes_supported" back to the AS on the authorization request, the token
+// exchange, and every refresh — not just parse them and discard them.
 func TestOAuth_SendsResourceAndScope(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	fs := newFakeAuthServer(t, 0)
+	fs := newFakeAuthServer(t)
 	defer fs.close()
-	fastPolling(t)
 
 	wantResource := fs.URL("/mcp_server/v1")
 	wantScope := "mcp:read mcp:write"
 
-	oc, _ := NewOAuthClient(wantResource, "fake", "octo-test", &stubPrompt{})
+	prompt := &stubPrompt{}
+	oc, _ := NewOAuthClient(wantResource, "fake", "octo-test", prompt)
 	if _, err := oc.Token(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := fs.lastDeviceForm.Get("resource"); got != wantResource {
-		t.Errorf("device authorization resource = %q, want %q", got, wantResource)
+
+	authorizeQuery, err := url.Parse(prompt.lastAuthorizeURL)
+	if err != nil {
+		t.Fatalf("authorize URL %q: %v", prompt.lastAuthorizeURL, err)
 	}
-	if got := fs.lastDeviceForm.Get("scope"); got != wantScope {
-		t.Errorf("device authorization scope = %q, want %q", got, wantScope)
+	q := authorizeQuery.Query()
+	if got := q.Get("resource"); got != wantResource {
+		t.Errorf("authorize URL resource = %q, want %q", got, wantResource)
+	}
+	if got := q.Get("scope"); got != wantScope {
+		t.Errorf("authorize URL scope = %q, want %q", got, wantScope)
 	}
 	if got := fs.lastTokenForm.Get("resource"); got != wantResource {
 		t.Errorf("token exchange resource = %q, want %q", got, wantResource)
@@ -342,20 +354,98 @@ func TestOAuth_SendsResourceAndScope(t *testing.T) {
 	}
 }
 
+// TestOAuth_PKCE_ChallengeMatchesVerifier makes sure the code_challenge sent
+// in the authorize URL is the RFC 7636 S256 hash of the code_verifier later
+// sent in the token exchange — the two are generated together but travel
+// through completely separate requests, so a copy/paste slip between them
+// would silently defeat PKCE without failing the fake server (which doesn't
+// validate it) or any other assertion.
+func TestOAuth_PKCE_ChallengeMatchesVerifier(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	fs := newFakeAuthServer(t)
+	defer fs.close()
+
+	prompt := &stubPrompt{}
+	oc, _ := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake", "octo-test", prompt)
+	if _, err := oc.Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	authorizeQuery, err := url.Parse(prompt.lastAuthorizeURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := authorizeQuery.Query()
+	if got := q.Get("code_challenge_method"); got != "S256" {
+		t.Errorf("code_challenge_method = %q, want S256", got)
+	}
+	challenge := q.Get("code_challenge")
+	verifier := fs.lastTokenForm.Get("code_verifier")
+	if challenge == "" || verifier == "" {
+		t.Fatalf("challenge=%q verifier=%q, want both non-empty", challenge, verifier)
+	}
+	sum := sha256.Sum256([]byte(verifier))
+	want := base64.RawURLEncoding.EncodeToString(sum[:])
+	if challenge != want {
+		t.Errorf("code_challenge = %q, want S256(code_verifier) = %q", challenge, want)
+	}
+}
+
+// TestOAuth_RedirectURIMismatch_ForcesReregistration covers a CLI session's
+// loopback listener binding a fresh random port on every run: a cached
+// ClientID registered against last run's redirect_uri can't be reused this
+// run (the authorization server would reject the mismatch), so authorize()
+// must detect the change and register a fresh client instead of reusing the
+// stale one.
+func TestOAuth_RedirectURIMismatch_ForcesReregistration(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	fs := newFakeAuthServer(t)
+	defer fs.close()
+
+	promptA := &stubPrompt{redirectURI: "http://127.0.0.1:11111/callback"}
+	oc, _ := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake", "octo-test", promptA)
+	if _, err := oc.Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fs.registrations != 1 {
+		t.Fatalf("registrations = %d, want 1 after first authorize", fs.registrations)
+	}
+
+	// Simulate a fresh CLI run: no refresh token available (as if the store
+	// only kept the access token), a different loopback port this time.
+	oc.state.RefreshToken = ""
+	oc.state.ExpiresAt = time.Now().Add(-1 * time.Hour)
+	promptB := &stubPrompt{redirectURI: "http://127.0.0.1:22222/callback"}
+	oc.prompt = promptB
+
+	if _, err := oc.Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fs.registrations != 2 {
+		t.Errorf("registrations = %d, want 2 (redirect_uri mismatch must force re-registration)", fs.registrations)
+	}
+	if fs.lastRegisterRedirect != promptB.redirectURI {
+		t.Errorf("last registered redirect_uri = %q, want %q", fs.lastRegisterRedirect, promptB.redirectURI)
+	}
+}
+
 // TestOAuth_StaleCacheWithoutResource_ForcesFreshAuth guards the upgrade
 // path: a cache written before RFC 8707 resource-binding was added has no
 // "resource" field, so its cached/refreshed access token was never bound
 // to this resource — exactly the token that produced the original 401.
 // Reusing or refreshing it after the fix ships would just reproduce the
 // bug for anyone who already hit it; the client must instead treat a
-// resource-less cache as stale and re-run the full device flow.
+// resource-less cache as stale and re-run the full authorization flow.
 func TestOAuth_StaleCacheWithoutResource_ForcesFreshAuth(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	fs := newFakeAuthServer(t, 0)
+	fs := newFakeAuthServer(t)
 	defer fs.close()
-	fastPolling(t)
 
 	prompt := &stubPrompt{}
 	oc, err := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake", "octo-test", prompt)
@@ -383,7 +473,7 @@ func TestOAuth_StaleCacheWithoutResource_ForcesFreshAuth(t *testing.T) {
 		t.Errorf("token = %q, want fresh token %q (legacy cache should not be reused)", tok, fs.tokenIssued)
 	}
 	if prompt.authorizations != 1 {
-		t.Errorf("expected a fresh device-flow prompt for stale legacy cache, got %d", prompt.authorizations)
+		t.Errorf("expected a fresh authorization prompt for stale legacy cache, got %d", prompt.authorizations)
 	}
 	if oc.state.Resource == "" {
 		t.Error("expected Resource to be populated after re-authorize")
@@ -401,7 +491,7 @@ func TestOAuth_MissingResourceInMetadata_FallsBackToConfiguredURL(t *testing.T) 
 	t.Setenv("USERPROFILE", tmp)
 
 	var mu sync.Mutex
-	var deviceForm, tokenForm url.Values
+	var tokenForm url.Values
 
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
@@ -417,29 +507,15 @@ func TestOAuth_MissingResourceInMetadata_FallsBackToConfiguredURL(t *testing.T) 
 	mux.HandleFunc("/.well-known/oauth-authorization-server/auth", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(asMetadata{
-			TokenEndpoint:               srv.URL + "/token",
-			RegistrationEndpoint:        srv.URL + "/register",
-			DeviceAuthorizationEndpoint: srv.URL + "/device",
+			AuthorizationEndpoint: srv.URL + "/authorize",
+			TokenEndpoint:         srv.URL + "/token",
+			RegistrationEndpoint:  srv.URL + "/register",
 		})
 	})
 	mux.HandleFunc("/register", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{"client_id": "client-1"})
-	})
-	mux.HandleFunc("/device", func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		mu.Lock()
-		deviceForm = r.Form
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(deviceCodeResponse{
-			DeviceCode:      "dc-1",
-			UserCode:        "UC-1",
-			VerificationURI: srv.URL + "/auth",
-			ExpiresIn:       30,
-			Interval:        1,
-		})
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
@@ -455,7 +531,8 @@ func TestOAuth_MissingResourceInMetadata_FallsBackToConfiguredURL(t *testing.T) 
 	})
 
 	resourceURL := srv.URL + "/mcp_server/v1"
-	oc, err := NewOAuthClient(resourceURL, "fake-noresource", "octo-test", &stubPrompt{})
+	prompt := &stubPrompt{}
+	oc, err := NewOAuthClient(resourceURL, "fake-noresource", "octo-test", prompt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,11 +542,16 @@ func TestOAuth_MissingResourceInMetadata_FallsBackToConfiguredURL(t *testing.T) 
 		t.Fatalf("Token: %v", err)
 	}
 
+	authorizeQuery, err := url.Parse(prompt.lastAuthorizeURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := authorizeQuery.Query().Get("resource"); got != resourceURL {
+		t.Errorf("authorize URL resource = %q, want fallback %q", got, resourceURL)
+	}
+
 	mu.Lock()
 	defer mu.Unlock()
-	if got := deviceForm.Get("resource"); got != resourceURL {
-		t.Errorf("device authorization resource = %q, want fallback %q", got, resourceURL)
-	}
 	if got := tokenForm.Get("resource"); got != resourceURL {
 		t.Errorf("token exchange resource = %q, want fallback %q", got, resourceURL)
 	}
@@ -478,18 +560,45 @@ func TestOAuth_MissingResourceInMetadata_FallsBackToConfiguredURL(t *testing.T) 
 	}
 }
 
-// TestOAuth_NilPrompt_FailsFastWithoutPolling guards the fast-fail path for
-// a connection that needs interactive re-authorization but has no
-// OAuthPrompt — every background connect path (startup, reload, panel
-// enable-toggle) constructs its OAuthClient this way, since nobody is
-// present to see a verification code. Before this check, authorize() would
-// still run discovery/registration and poll the device-flow endpoint
-// silently for up to 5 minutes before timing out with a generic error.
-func TestOAuth_NilPrompt_FailsFastWithoutPolling(t *testing.T) {
+// TestOAuth_EmptyRedirectURI_FailsFast guards against a prompt whose
+// RedirectURI() couldn't prepare a callback (e.g. a CLI session's loopback
+// listener failed to bind — see cmd/octo/mcp_prompt.go). Proceeding anyway
+// would send a malformed empty redirect_uri to the real registration and
+// authorize endpoints before failing, instead of failing immediately with a
+// clear local error.
+func TestOAuth_EmptyRedirectURI_FailsFast(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	fs := newFakeAuthServer(t, 0)
+	fs := newFakeAuthServer(t)
+	defer fs.close()
+
+	prompt := &stubPrompt{noRedirectURI: true}
+	oc, err := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake-noredirect", "octo-test", prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = oc.Token(context.Background())
+	if err == nil {
+		t.Fatal("expected an error for an empty redirect_uri")
+	}
+	if fs.registrations != 0 {
+		t.Errorf("registrations = %d, want 0 — must fail before attempting registration", fs.registrations)
+	}
+}
+
+// TestOAuth_NilPrompt_FailsFast guards the fast-fail path for a connection
+// that needs interactive re-authorization but has no OAuthPrompt — every
+// background connect path (startup, reload, panel enable-toggle) constructs
+// its OAuthClient this way, since nobody is present to complete a browser
+// redirect. Before this check, authorize() would still run
+// discovery/registration and then hang waiting on a prompt that can never
+// resolve.
+func TestOAuth_NilPrompt_FailsFast(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	fs := newFakeAuthServer(t)
 	defer fs.close()
 
 	oc, err := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake-noprompt", "octo-test", nil)
@@ -505,7 +614,7 @@ func TestOAuth_NilPrompt_FailsFastWithoutPolling(t *testing.T) {
 		t.Fatalf("Token error = %v, want ErrReauthRequired", err)
 	}
 	if elapsed > time.Second {
-		t.Errorf("Token took %v, want a near-instant fast-fail (no device-flow polling)", elapsed)
+		t.Errorf("Token took %v, want a near-instant fast-fail", elapsed)
 	}
 	if fs.registrations != 0 {
 		t.Errorf("registrations = %d, want 0 — no prompt means no point attempting discovery/registration", fs.registrations)
@@ -516,9 +625,8 @@ func TestOAuth_InvalidateForces_FreshAuth(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	fs := newFakeAuthServer(t, 0)
+	fs := newFakeAuthServer(t)
 	defer fs.close()
-	fastPolling(t)
 
 	prompt := &stubPrompt{}
 	oc, _ := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake", "octo-test", prompt)
@@ -540,9 +648,8 @@ func TestHTTPTransport_OAuthRetryOn401(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	fs := newFakeAuthServer(t, 0)
+	fs := newFakeAuthServer(t)
 	defer fs.close()
-	fastPolling(t)
 
 	oc, _ := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake", "octo-test", &stubPrompt{})
 	tx, _ := NewHTTPTransport(HTTPConfig{
@@ -567,22 +674,6 @@ func TestHTTPTransport_OAuthRetryOn401(t *testing.T) {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
-
-// fastPolling shortens the device-flow polling interval inside the test so
-// the suite runs in milliseconds instead of seconds. Done by monkey-
-// patching at the test boundary — restored on cleanup.
-func fastPolling(t *testing.T) {
-	t.Helper()
-	// We can't easily intercept the time.After in deviceFlow without
-	// adding a hook field. Approach: the fake server returns Interval=0,
-	// which makes the client default to 5s — too slow. Instead we sleep
-	// most of the way out via context: cap each test with a short
-	// timeout, and rely on the server returning authorization_pending
-	// quickly so the loop's time.After is the only meaningful wait.
-	//
-	// Net effect: tests use the standard 5s default-interval path BUT
-	// with authorizeAfter=0 or 1, so the total wait is ~0-5s per test.
-}
 
 func TestParseWWWAuthenticate(t *testing.T) {
 	cases := map[string]string{
@@ -633,68 +724,12 @@ func TestBuildASMetadataURL_RFC8414(t *testing.T) {
 	}
 }
 
-func TestOAuth_DeviceFlow_PendingThenSuccess(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-	fs := newFakeAuthServer(t, 2) // succeed on 3rd poll
-	defer fs.close()
-	// Speed up the poll loop by overriding the device endpoint to return
-	// Interval=1 (defaulting to 5s would slow the test by 15s).
-	fs.mux.HandleFunc("/device-fast", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(deviceCodeResponse{
-			DeviceCode:      fs.deviceCode,
-			UserCode:        "FAST",
-			VerificationURI: fs.URL("/auth"),
-			ExpiresIn:       30,
-			Interval:        1,
-		})
-	})
-	// Reroute the AS metadata to point at the fast device endpoint.
-	fs.mux.HandleFunc("/.well-known/oauth-authorization-server/auth2", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(asMetadata{
-			Issuer:                      fs.srv.URL,
-			TokenEndpoint:               fs.URL("/token"),
-			RegistrationEndpoint:        fs.URL("/register"),
-			DeviceAuthorizationEndpoint: fs.URL("/device-fast"),
-		})
-	})
-	// And the protected-resource metadata to point at the rerouted AS.
-	fs.mux.HandleFunc("/mcp_server/v2", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("WWW-Authenticate",
-			`Bearer resource_metadata="`+fs.URL("/.well-known/oauth-protected-resource-2")+`"`)
-		w.WriteHeader(http.StatusUnauthorized)
-	})
-	fs.mux.HandleFunc("/.well-known/oauth-protected-resource-2", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(prMetadata{
-			Resource:             fs.URL("/mcp_server/v2"),
-			AuthorizationServers: []string{fs.URL("/auth2")},
-		})
-	})
-
-	prompt := &stubPrompt{}
-	oc, _ := NewOAuthClient(fs.URL("/mcp_server/v2"), "fake2", "octo-test", prompt)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_, err := oc.Token(ctx)
-	if err != nil {
-		t.Fatalf("Token: %v", err)
-	}
-	// Verify the poll loop actually iterated.
-	if got := prompt.progresses; got < 3 {
-		t.Errorf("expected ≥3 Progress calls (3 polls), got %d", got)
-	}
-}
-
 func TestOAuth_NoRegistrationEndpointFails(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	// Server WITHOUT registration_endpoint — must error out before
-	// touching the device flow, since we have no client_id.
+	// touching the authorization flow, since we have no client_id.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/oauth-protected-resource":
@@ -706,8 +741,8 @@ func TestOAuth_NoRegistrationEndpointFails(t *testing.T) {
 		case "/.well-known/oauth-authorization-server/auth":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(asMetadata{
-				TokenEndpoint:               "http://" + r.Host + "/token",
-				DeviceAuthorizationEndpoint: "http://" + r.Host + "/device",
+				AuthorizationEndpoint: "http://" + r.Host + "/authorize",
+				TokenEndpoint:         "http://" + r.Host + "/token",
 			})
 		}
 	}))

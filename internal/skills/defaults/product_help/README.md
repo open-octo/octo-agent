@@ -180,7 +180,7 @@ octo --sandbox --sandbox-read /opt/data     # extra readable dir (repeatable)
 | Memory & config | done | `~/.octo/octorules.md`, `.octorules`, `octo init`, `@include` |
 | Skills | done | Claude Code-compatible SKILL.md loader (`octo skills`, `/skills`, `/<name>`) |
 | Sandbox | done | OS-enforced `--sandbox` (macOS / Linux) |
-| MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, device-flow OAuth |
+| MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, OAuth (Authorization Code + PKCE) |
 | Memory | done | Persistent cross-session memory under `~/.octo/memories/`, auto extract/consolidate |
 | Sub-agents | done | `launch_agent` fan-out, async + resumable (`send_message`, `agent_status`, `kill_agent`) |
 | Web server | done | `octo serve` — REST + WebSocket, embedded dashboard UI (bind localhost) |

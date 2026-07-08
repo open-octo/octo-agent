@@ -148,17 +148,18 @@
     }
   }
 
-  // ─── OAuth device flow ────────────────────────────────────────────────────
-  // The serve process can't block on a device flow, so authorizing is split:
-  // start kicks it off, then we poll status until it settles. See
+  // ─── OAuth Authorization Code + PKCE flow ────────────────────────────────
+  // The serve process can't block the request that starts the flow on the
+  // user completing a browser redirect, so authorizing is split: start kicks
+  // it off, then we poll status until it settles. See
   // internal/server/mcp_oauth_handlers.go.
 
-  let oauth = $state<{ name: string; state: string; userCode: string; link: string; error: string } | null>(null)
+  let oauth = $state<{ name: string; state: string; link: string; error: string } | null>(null)
   let oauthTimer: ReturnType<typeof setInterval> | null = null
-  // #1109: the poll had no upper bound — a device flow that never completes
-  // (user never visits the link, or abandons it) polled forever. 2 minutes
-  // matches typical device-code TTLs; past that we stop and show a timeout
-  // instead of leaving the modal spinning silently.
+  // #1109: the poll had no upper bound — an authorization that never
+  // completes (user never opens the link, or abandons it) polled forever.
+  // 2 minutes is a generous window for a browser redirect; past that we stop
+  // and show a timeout instead of leaving the modal spinning silently.
   const OAUTH_TIMEOUT_MS = 120_000
   let oauthDeadline: ReturnType<typeof setTimeout> | null = null
 
@@ -167,12 +168,18 @@
   }
 
   function applyOAuth(name: string, d: api.McpOAuthState) {
+    const isNewLink = !!d.authorize_url && d.authorize_url !== oauth?.link
     oauth = {
       name,
       state: d.state,
-      userCode: d.user_code ?? '',
-      link: d.verification_uri_complete || d.verification_uri || '',
+      link: d.authorize_url ?? '',
       error: d.error ?? '',
+    }
+    if (isNewLink) {
+      // Best-effort: this fires from inside a poll tick, not synchronously
+      // from the user's click, so popup blockers may silently swallow it —
+      // the link rendered below is the reliable fallback.
+      window.open(d.authorize_url, '_blank', 'noopener')
     }
   }
 
@@ -217,7 +224,7 @@
     if (state === 'connected') setTimeout(() => { oauth = null }, 1200)
   }
 
-  // #1109: closing only stopped watching — the device flow continues
+  // #1109: closing only stopped watching — the authorization flow continues
   // server-side and a token cached right after close never refreshed the
   // list, so a server the user just authorized could still show
   // "disconnected" until the next full reload. One extra reload on close
@@ -403,7 +410,6 @@
         <div class="oauth-wait"><div class="oauth-spinner"></div><span>{$t('mcp.oauth.starting')}</span></div>
       {:else if oauth.state === 'authorizing'}
         <p class="oauth-instruction">{$t('mcp.oauth.instruction')}</p>
-        <div class="oauth-code">{oauth.userCode}</div>
         {#if oauth.link}
           <a class="oauth-link" href={oauth.link} target="_blank" rel="noopener noreferrer">{$t('mcp.oauth.openLink')}</a>
         {/if}
@@ -542,11 +548,6 @@ p  { margin: 0; font-size: 14px; color: var(--text-secondary); }
   padding: 20px 18px; display: flex; flex-direction: column; align-items: center; gap: 12px;
 }
 .oauth-instruction { margin: 0; font-size: 13px; color: var(--text-secondary); text-align: center; }
-.oauth-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 22px; font-weight: 600; letter-spacing: 3px; color: var(--text-heading);
-  padding: 8px 16px; background: var(--hover-neutral); border-radius: 8px;
-}
 .oauth-link { font-size: 13px; color: var(--blue-6); text-decoration: none; }
 .oauth-link:hover { text-decoration: underline; }
 .oauth-wait { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-tertiary); }

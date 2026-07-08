@@ -282,7 +282,7 @@ octo --sandbox --sandbox-read /opt/data     # 额外可读目录（可重复）
 | 记忆与配置 | 完成 | `~/.octo/octorules.md`、`.octorules`、`octo init`、`@include` |
 | Skills | 完成 | 兼容 Claude Code 的 SKILL.md 加载器（`octo skills`、`/skills`、`/<name>`） |
 | 沙箱 | 完成 | 操作系统强制的 `--sandbox`（macOS / Linux） |
-| MCP 客户端 | 完成 | `mcp.json` 的 stdio + Streamable HTTP 服务，tools/resources/prompts，device-flow OAuth；Tool Search 按需延迟加载大量 MCP 工具 schema |
+| MCP 客户端 | 完成 | `mcp.json` 的 stdio + Streamable HTTP 服务，tools/resources/prompts，OAuth（Authorization Code + PKCE）；Tool Search 按需延迟加载大量 MCP 工具 schema |
 | 记忆 | 完成 | `~/.octo/memories/` 下的跨会话持久化记忆，自动抽取/整合 |
 | 子代理 | 完成 | `sub_agent` 并行扇出，异步 + 可恢复（`sub_agent_send`、`sub_agent_status`、`sub_agent_kill`） |
 | 工作流 | 完成 | `workflow` 工具 —— 确定性多代理编排（parallel/pipeline）、后台运行带 liveness + `workflow_kill`、git worktree 隔离、结构化输出 schema；使用Ruby DSL |
