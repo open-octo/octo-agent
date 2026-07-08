@@ -186,7 +186,7 @@ export function updateLastMsg(sessionId: string, updater: (msg: any) => any) {
 // streaming bubble, since by then any reasoning for the segment has already
 // finished (see the text_delta handler in ChatView.svelte, which passes the
 // live chatThinking buffer here and clears it in the same tick so the pinned
-// live-thinking block never outlives the reply it belongs to, #1257).
+// live-thinking block never outlives the reply it belongs to.
 export function appendToLastAssistant(sessionId: string, content: string, pendingThinking = '') {
   if (!content) return
   chatMessages.update(m => {

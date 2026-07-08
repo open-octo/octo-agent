@@ -414,7 +414,7 @@
       // the list until the whole turn ends (assistant_message/complete). That
       // gap is what let a stale "still typing" thinking block linger below an
       // already-visible reply, then jump/disappear once the turn finally
-      // finished (#1257).
+      // finished.
       const pendingThinking = get(chatThinking)[sid] ?? ''
       appendToLastAssistant(sid, txt, pendingThinking)
       if (pendingThinking) chatThinking.update(tt => ({ ...tt, [sid]: '' }))
