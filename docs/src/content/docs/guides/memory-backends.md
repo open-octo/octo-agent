@@ -16,7 +16,8 @@ Three backends are supported; pick at most one:
   [Hindsight Cloud](https://docs.hindsight.vectorize.io/) option also exists if you'd rather not run
   the container yourself (see below).
 - [mem0](https://github.com/mem0ai/mem0) — self-hosted (`server/` in the mem0ai/mem0 repo), auth on
-  by default.
+  by default; a managed [mem0 Platform](https://docs.mem0.ai/platform/quickstart) (cloud) option
+  also exists (see below).
 - [MemTensor/MemOS](https://github.com/MemTensor/MemOS) — self-hosted, no auth by default. (Not
   `usememos/memos`, which is an unrelated note-taking app, and not `agiresearch/MemOS`.)
 
@@ -129,6 +130,25 @@ curl -X POST http://localhost:8888/configure \
 drop it, run `make bootstrap` as-is, and it prints an admin email/password/API key on first start —
 use that generated API key as `api_key` in octo's config instead of leaving it blank.
 
+#### mem0 Cloud (no Postgres/Docker required)
+
+mem0 also runs a managed version — the [mem0 Platform](https://docs.mem0.ai/platform/quickstart) —
+for anyone who'd rather not self-host the `server/` stack. Unlike Hindsight Cloud, this **isn't**
+a drop-in swap: the Platform API uses different endpoint paths and a different auth header than the
+self-hosted server, so octo needs `mode: cloud` to talk to it correctly:
+
+```yaml
+memory_backend:
+  type: mem0
+  mode: cloud
+  api_key: "<your mem0 Platform API key>"
+  namespace: octo-agent
+```
+
+`base_url` can be omitted — it defaults to `https://api.mem0.ai` when `mode: cloud` and no
+`base_url` is set. `api_key` is required (the Platform has no unauthenticated mode); octo sends it
+as `Authorization: Token <api_key>`, matching what the Platform API expects.
+
 ### MemOS (MemTensor)
 
 The heaviest of the three — bundles Neo4j (graph store) and Qdrant (vector store) alongside the API.
@@ -197,6 +217,7 @@ Add a `memory_backend` block to `~/.octo/config.yml`:
 ```yaml
 memory_backend:
   type: hindsight        # hindsight | mem0 | memos
+  mode: ""               # only meaningful for mem0: "cloud" or "" (self-hosted, default)
   base_url: http://localhost:8888
   api_key: ""            # optional — see per-backend notes below
   namespace: my-project  # scopes stored/recalled memories; defaults to "default"
@@ -205,14 +226,19 @@ memory_backend:
 
 - **`type`** selects the backend. Leaving it unset (or omitting the whole block) disables the
   feature entirely — no tool is advertised, nothing is sent anywhere.
+- **`mode`** only matters for `type: mem0`: set it to `cloud` to talk to the hosted mem0 Platform
+  instead of a self-hosted server (see "mem0 Cloud" above) — the two use different endpoint paths
+  and auth headers, so this isn't inferred from `base_url`. Ignored by hindsight and memos.
 - **`base_url`** is the backend's REST endpoint — wherever you're running its server (`http://localhost:8888`
-  for hindsight/mem0 as set up above, `http://localhost:8000` for MemOS).
+  for hindsight/mem0 as set up above, `http://localhost:8000` for MemOS). Can be omitted for
+  `mem0` with `mode: cloud`, which defaults it to `https://api.mem0.ai`.
 - **`api_key`** is optional and backend-dependent:
   - self-hosted hindsight has no auth by default; set an API key only if you've enabled
     `HINDSIGHT_API_TENANT_API_KEY` on the server. Hindsight Cloud is the exception — it always
     requires the API key from its dashboard.
-  - mem0 requires auth by default — set the server's `X-API-Key`-compatible key here, or run the
-    server with `AUTH_DISABLED=true` for local development and leave this blank.
+  - self-hosted mem0 requires auth by default — set the server's `X-API-Key`-compatible key here,
+    or run the server with `AUTH_DISABLED=true` for local development and leave this blank. mem0
+    Cloud (`mode: cloud`) always requires the API key from its dashboard.
   - memos (MemTensor/MemOS) has no auth by default; leaving this blank sends your `namespace` as an
     `X-User-Name` header instead.
 - **`namespace`** scopes what gets stored/recalled — hindsight's `bank_id`, mem0's `user_id`, or

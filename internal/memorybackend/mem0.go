@@ -9,9 +9,19 @@ import (
 	"strings"
 )
 
-// mem0Backend talks to a self-hosted github.com/mem0ai/mem0 server (the
-// server/ FastAPI stack, no version prefix in its routes — verified against
-// server/main.py and server/auth.py in the mem0ai/mem0 repo).
+// mem0CloudBaseURL is the fixed hosted-Platform endpoint, used when Mode is
+// "cloud" and BaseURL is left blank — there's only one, unlike self-hosted
+// deployments which need an explicit address.
+const mem0CloudBaseURL = "https://api.mem0.ai"
+
+// mem0Backend talks to either a self-hosted github.com/mem0ai/mem0 server
+// (the server/ FastAPI stack, no version prefix in its routes — verified
+// against server/main.py and server/auth.py in the mem0ai/mem0 repo) or,
+// when cfg.Mode == "cloud", the hosted mem0 Platform API (api.mem0.ai) —
+// verified against docs.mem0.ai/platform/quickstart. The two differ in
+// endpoint path, auth header, and part of the search request body; the
+// response shape for search is close enough (both return flat {id, memory,
+// score} objects) that decoding is shared.
 type mem0Backend struct {
 	cfg    Config
 	client *http.Client
@@ -22,6 +32,22 @@ func newMem0(cfg Config) *mem0Backend {
 }
 
 func (b *mem0Backend) Name() string { return "mem0" }
+
+func (b *mem0Backend) cloud() bool { return b.cfg.Mode == "cloud" }
+
+func (b *mem0Backend) addPath() string {
+	if b.cloud() {
+		return "/v3/memories/add/"
+	}
+	return "/memories"
+}
+
+func (b *mem0Backend) searchPath() string {
+	if b.cloud() {
+		return "/v3/memories/search/"
+	}
+	return "/search"
+}
 
 func (b *mem0Backend) url(path string) string {
 	return strings.TrimRight(b.cfg.BaseURL, "/") + path
@@ -38,7 +64,11 @@ func (b *mem0Backend) do(ctx context.Context, url string, body any, out any) err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if b.cfg.APIKey != "" {
-		req.Header.Set("X-API-Key", b.cfg.APIKey)
+		if b.cloud() {
+			req.Header.Set("Authorization", "Token "+b.cfg.APIKey)
+		} else {
+			req.Header.Set("X-API-Key", b.cfg.APIKey)
+		}
 	}
 	resp, err := b.client.Do(req)
 	if err != nil {
@@ -62,7 +92,7 @@ func (b *mem0Backend) Store(ctx context.Context, content string) error {
 		"messages": []map[string]any{{"role": "user", "content": content}},
 		"user_id":  b.cfg.namespace(),
 	}
-	return b.do(ctx, b.url("/memories"), body, nil)
+	return b.do(ctx, b.url(b.addPath()), body, nil)
 }
 
 // mem0SearchResponse is decoded tolerantly. The self-hosted server's /search
@@ -112,13 +142,17 @@ func mem0ResultScore(item map[string]json.RawMessage) float64 {
 }
 
 func (b *mem0Backend) Recall(ctx context.Context, query string) ([]Result, error) {
-	body := map[string]any{
-		"query":   query,
-		"user_id": b.cfg.namespace(),
-		"top_k":   5,
+	body := map[string]any{"query": query}
+	if b.cloud() {
+		// Platform API scopes by a top-level "filters" object rather than a
+		// bare user_id, and doesn't document a top_k equivalent.
+		body["filters"] = map[string]any{"user_id": b.cfg.namespace()}
+	} else {
+		body["user_id"] = b.cfg.namespace()
+		body["top_k"] = 5
 	}
 	var resp mem0SearchResponse
-	if err := b.do(ctx, b.url("/search"), body, &resp); err != nil {
+	if err := b.do(ctx, b.url(b.searchPath()), body, &resp); err != nil {
 		return nil, err
 	}
 	results := make([]Result, 0, len(resp.Results))

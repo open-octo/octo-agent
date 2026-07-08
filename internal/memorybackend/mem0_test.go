@@ -77,6 +77,69 @@ func TestMem0RecallTolerantFieldNames(t *testing.T) {
 	}
 }
 
+func TestMem0CloudStore(t *testing.T) {
+	var gotPath, gotAuth string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	b := newMem0(Config{BaseURL: srv.URL, Mode: "cloud", Namespace: "proj", APIKey: "m0sk_secret"})
+	if err := b.Store(context.Background(), "hello world"); err != nil {
+		t.Fatalf("Store: unexpected error: %v", err)
+	}
+
+	if gotPath != "/v3/memories/add/" {
+		t.Errorf("path = %q, want the Platform API's versioned add path", gotPath)
+	}
+	if gotAuth != "Token m0sk_secret" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "Token m0sk_secret")
+	}
+	if gotBody["user_id"] != "proj" {
+		t.Errorf("user_id = %v, want %q", gotBody["user_id"], "proj")
+	}
+}
+
+func TestMem0CloudRecall(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]any{
+				{"id": "14e1b28a", "memory": "Allergic to nuts", "score": 0.30},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	b := newMem0(Config{BaseURL: srv.URL, Mode: "cloud", Namespace: "proj"})
+	results, err := b.Recall(context.Background(), "dietary restrictions")
+	if err != nil {
+		t.Fatalf("Recall: unexpected error: %v", err)
+	}
+
+	if gotPath != "/v3/memories/search/" {
+		t.Errorf("path = %q, want the Platform API's versioned search path", gotPath)
+	}
+	if _, hasTopLevelUserID := gotBody["user_id"]; hasTopLevelUserID {
+		t.Error("cloud search body should scope by filters.user_id, not a top-level user_id")
+	}
+	filters, ok := gotBody["filters"].(map[string]any)
+	if !ok || filters["user_id"] != "proj" {
+		t.Errorf("filters = %v, want {user_id: proj}", gotBody["filters"])
+	}
+	if len(results) != 1 || results[0].Content != "Allergic to nuts" || results[0].Score != 0.30 {
+		t.Errorf("results = %+v, want one result {14e1b28a, Allergic to nuts, 0.30}", results)
+	}
+}
+
 func TestMem0NoAPIKeyOmitsHeader(t *testing.T) {
 	sawKey := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

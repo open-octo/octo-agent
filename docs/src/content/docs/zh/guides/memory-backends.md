@@ -14,7 +14,8 @@ octo 可以选择性地接入一个自托管的外部记忆服务，让它给你
 - [hindsight](https://github.com/vectorize-io/hindsight)——自托管，默认不需要鉴权；如果不想自己
   跑容器，也有一个托管的 [Hindsight Cloud](https://docs.hindsight.vectorize.io/) 选项（见下文）。
 - [mem0](https://github.com/mem0ai/mem0)——自托管（用的是 mem0ai/mem0 仓库里的 `server/`），
-  默认开启鉴权。
+  默认开启鉴权；也有一个托管的 [mem0 Platform](https://docs.mem0.ai/platform/quickstart)（云端）
+  选项（见下文）。
 - [MemTensor/MemOS](https://github.com/MemTensor/MemOS)——自托管，默认不需要鉴权。（注意不是
   `usememos/memos`，那是一个不相关的笔记应用，也不是 `agiresearch/MemOS`。）
 
@@ -124,6 +125,25 @@ curl -X POST http://localhost:8888/configure \
 去掉这个变量，照常跑 `make bootstrap`，它首次启动时会打印一个管理员邮箱/密码/API key——
 把这个生成出来的 API key 填进 octo 配置的 `api_key` 里，别留空。
 
+#### mem0 Cloud（不用 Postgres/Docker）
+
+mem0 也有一个托管版本——[mem0 Platform](https://docs.mem0.ai/platform/quickstart)——给不想
+自己搭 `server/` 那套栈的人用。跟 Hindsight Cloud 不一样，这**不是**配个 URL 就能切换的——
+Platform API 用的端点路径和鉴权 header 都跟自托管 server 不一样，所以 octo 需要显式设置
+`mode: cloud` 才能对上：
+
+```yaml
+memory_backend:
+  type: mem0
+  mode: cloud
+  api_key: "<你的 mem0 Platform API key>"
+  namespace: octo-agent
+```
+
+`base_url` 可以不填——`mode: cloud` 且没设 `base_url` 时会自动用
+`https://api.mem0.ai`。`api_key` 是必填的（Platform 没有免鉴权模式）；octo 会把它当作
+`Authorization: Token <api_key>` 发出去，正好是 Platform API 要求的格式。
+
 ### MemOS（MemTensor）
 
 三者里最重的一个——除了 API 本身，还打包了 Neo4j（图数据库）和 Qdrant（向量数据库）。
@@ -190,6 +210,7 @@ docker compose up --build
 ```yaml
 memory_backend:
   type: hindsight        # hindsight | mem0 | memos
+  mode: ""               # 只对 mem0 有意义："cloud" 或 ""（自托管，默认）
   base_url: http://localhost:8888
   api_key: ""            # 可选——具体看下面每个后端的说明
   namespace: my-project  # 限定存储/召回的记忆范围；不填默认是 "default"
@@ -198,13 +219,18 @@ memory_backend:
 
 - **`type`** 选择用哪个后端。不填（或者整段都不写）就是彻底关掉这个功能——不会向模型
   暴露任何工具，也不会往外发任何东西。
+- **`mode`** 只对 `type: mem0` 有意义：设成 `cloud` 就会走托管的 mem0 Platform，而不是自托管
+  server（见上文「mem0 Cloud」）——两者端点路径和鉴权 header 都不一样，不会根据 `base_url`
+  自动判断。hindsight 和 memos 不看这个字段。
 - **`base_url`** 是后端的 REST 端点——也就是你把它的 server 跑在哪（照上面的方式搭的话，
-  hindsight/mem0 是 `http://localhost:8888`，MemOS 是 `http://localhost:8000`）。
+  hindsight/mem0 是 `http://localhost:8888`，MemOS 是 `http://localhost:8000`）。`mem0` 配合
+  `mode: cloud` 时可以不填，会自动用 `https://api.mem0.ai`。
 - **`api_key`** 是可选的，具体看后端：
   - 自托管 hindsight 默认不需要鉴权；只有在 server 上开了 `HINDSIGHT_API_TENANT_API_KEY` 时才
     需要填一个 API key。Hindsight Cloud 是例外——它始终要求填控制台生成的 API key。
-  - mem0 默认要求鉴权——把 server 那个兼容 `X-API-Key` 的 key 填在这里，或者本地开发时
-    直接用 `AUTH_DISABLED=true` 跑 server，把这里留空。
+  - 自托管 mem0 默认要求鉴权——把 server 那个兼容 `X-API-Key` 的 key 填在这里，或者本地开发时
+    直接用 `AUTH_DISABLED=true` 跑 server，把这里留空。mem0 Cloud（`mode: cloud`）始终要求填
+    控制台生成的 API key。
   - memos（MemTensor/MemOS）默认不需要鉴权；留空的话会把你的 `namespace` 当作
     `X-User-Name` header 发过去。
 - **`namespace`** 限定存储/召回的范围——对应 hindsight 的 `bank_id`、mem0 的 `user_id`，
