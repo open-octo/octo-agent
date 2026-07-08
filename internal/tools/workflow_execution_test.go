@@ -94,8 +94,9 @@ func TestEmbeddedDefaultWorkflows_Execute(t *testing.T) {
 				t.Fatalf("lookupWorkflow(%q): not found", r.name)
 			}
 			got, err := workflow.Run(context.Background(), w.script, workflow.Options{
-				Agent: schemaFakeAgent,
-				Args:  r.args,
+				Agent:      schemaFakeAgent,
+				Args:       r.args,
+				JournalDir: ActiveWorkflowJournalDir(),
 			})
 			if err != nil {
 				t.Fatalf("workflow.Run(%q, args=%s): %v", r.name, r.args, err)
@@ -139,8 +140,9 @@ func TestLoopEngineeringTemplates_Execute(t *testing.T) {
 				t.Fatalf("reading template %q: %v", path, err)
 			}
 			got, err := workflow.Run(context.Background(), string(script), workflow.Options{
-				Agent: schemaFakeAgent,
-				Args:  r.args,
+				Agent:      schemaFakeAgent,
+				Args:       r.args,
+				JournalDir: ActiveWorkflowJournalDir(),
 			})
 			if err != nil {
 				t.Fatalf("workflow.Run(%q, args=%s): %v", r.name, r.args, err)

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -57,6 +58,49 @@ func journalsDir() (string, error) {
 		return "", fmt.Errorf("workflow: mkdir %s: %w", dir, err)
 	}
 	return dir, nil
+}
+
+// journalMaxAge is how long a journal file is kept before PruneJournals
+// removes it. A journal exists to resume a run that was interrupted
+// mid-flight; in practice a resume happens within minutes of the interruption,
+// not days later, so a generous week-long window comfortably covers real
+// usage while keeping the directory from growing unbounded — nothing else
+// ever deletes these files.
+const journalMaxAge = 7 * 24 * time.Hour
+
+// PruneJournals removes ~/.octo/workflow-journals files last modified more
+// than journalMaxAge ago. Best-effort: the caller should ignore the error so
+// a read-only or missing HOME never blocks a session.
+func PruneJournals() error {
+	dir, err := journalsDir()
+	if err != nil {
+		return err
+	}
+	return pruneJournalsDir(dir, time.Now())
+}
+
+// pruneJournalsDir removes *.jsonl files in dir last modified before
+// now.Add(-journalMaxAge). now is a parameter so tests can pin it instead of
+// depending on file mtimes lining up with wall-clock sleeps. A per-file
+// stat/remove error is skipped rather than aborting the whole pass, since one
+// bad file shouldn't block cleanup of the rest.
+func pruneJournalsDir(dir string, now time.Time) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	cutoff := now.Add(-journalMaxAge)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, e.Name()))
+	}
+	return nil
 }
 
 // JournalEntry records one completed agent() call.

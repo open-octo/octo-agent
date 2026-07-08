@@ -2,9 +2,12 @@ package workflow
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // newTestCtx returns a background context (a no-op helper that keeps test
@@ -68,6 +71,52 @@ func TestLoadJournal_NotFound(t *testing.T) {
 	_, _, err := LoadJournal(t.TempDir(), "wf-nonexistent")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("err = %v, want not-found", err)
+	}
+}
+
+func TestPruneJournalsDir_RemovesOnlyStaleFiles(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	writeJournalFile(t, dir, "wf-old.jsonl", now.Add(-8*24*time.Hour))
+	writeJournalFile(t, dir, "wf-fresh.jsonl", now.Add(-1*time.Hour))
+	// A non-journal file in the same dir must never be touched.
+	writeJournalFile(t, dir, "not-a-journal.txt", now.Add(-8*24*time.Hour))
+
+	if err := pruneJournalsDir(dir, now); err != nil {
+		t.Fatalf("pruneJournalsDir: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "wf-old.jsonl")); !os.IsNotExist(err) {
+		t.Errorf("stale journal should have been removed, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wf-fresh.jsonl")); err != nil {
+		t.Errorf("fresh journal should survive: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "not-a-journal.txt")); err != nil {
+		t.Errorf("non-.jsonl file should be left alone: %v", err)
+	}
+}
+
+// TestPruneJournalsDir_MissingDirReturnsError pins that pruneJournalsDir
+// itself propagates os.ReadDir's error rather than swallowing it — it's
+// PruneJournals' caller (and, ultimately, cmd/octo/main.go's `_ =`) that
+// treats a missing/unreadable journal dir as best-effort, not this function.
+func TestPruneJournalsDir_MissingDirReturnsError(t *testing.T) {
+	if err := pruneJournalsDir(filepath.Join(t.TempDir(), "nonexistent"), time.Now()); err == nil {
+		t.Error("want an error for a missing dir (the caller is what treats this as best-effort)")
+	}
+}
+
+// writeJournalFile creates a file at dir/name and backdates its mtime to at,
+// so age-based pruning can be tested without sleeping.
+func writeJournalFile(t *testing.T, dir, name string, at time.Time) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
 	}
 }
 

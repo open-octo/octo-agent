@@ -7,12 +7,14 @@ import (
 	"sort"
 
 	"github.com/open-octo/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/version"
 )
 
-// runWorkflows handles `octo workflows [list|path]`. Bare `octo workflows`
-// defaults to list. Read-only, unlike `octo skills`: a saved workflow is
-// created/edited conversationally (the workflow_save tool, guided by the
-// workflow-creator skill), so there's no CLI writer to mirror.
+// runWorkflows handles `octo workflows [list|path|update]`. Bare
+// `octo workflows` defaults to list. Aside from refreshing the default set,
+// it's read-only unlike `octo skills`: a saved workflow is created/edited
+// conversationally (the workflow_save tool, guided by the workflow-creator
+// skill), so there's no CLI writer to mirror.
 func runWorkflows(args []string, stdout, stderr io.Writer) int {
 	sub := "list"
 	if len(args) > 0 {
@@ -23,8 +25,10 @@ func runWorkflows(args []string, stdout, stderr io.Writer) int {
 		return workflowsList(stdout)
 	case "path":
 		return workflowsPath(stdout)
+	case "update":
+		return workflowsUpdate(stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "octo workflows: unknown subcommand %q (want list | path)\n", sub)
+		fmt.Fprintf(stderr, "octo workflows: unknown subcommand %q (want list | path | update)\n", sub)
 		return 2
 	}
 }
@@ -54,8 +58,17 @@ func workflowsList(stdout io.Writer) int {
 func workflowsPath(stdout io.Writer) int {
 	cwd, _ := os.Getwd()
 	fmt.Fprintln(stdout, "Workflow roots (lowest → highest precedence):")
-	fmt.Fprintln(stdout, "  default  (embedded in the binary, not on disk)")
+	fmt.Fprintf(stdout, "  default  %s\n", tools.DefaultWorkflowsRoot())
 	fmt.Fprintf(stdout, "  user     %s\n", tools.UserWorkflowsRoot())
 	fmt.Fprintf(stdout, "  project  %s\n", tools.ProjectWorkflowsRoot(cwd))
+	return 0
+}
+
+func workflowsUpdate(stdout, stderr io.Writer) int {
+	if err := tools.UpdateDefaultWorkflows(version.Version); err != nil {
+		fmt.Fprintf(stderr, "octo workflows update: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Default workflows refreshed → %s\n", tools.DefaultWorkflowsRoot())
 	return 0
 }
