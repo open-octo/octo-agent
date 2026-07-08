@@ -1,6 +1,6 @@
 ---
 name: loop-engineering
-description: Design a self-running coding-agent loop using octo-agent's built-in primitives. Use when the user wants "loop engineering", "design a loop", "build an agent loop", "写一个循环", "设计一个自动循环" — or when they want a recurring task that discovers work, hands it to isolated agents, verifies results, and persists state. Trailing text is the loop they want to build.
+description: Design a self-running coding-agent loop using octo-agent's built-in primitives. Use when the user wants "loop engineering", "design a loop", "build an agent loop", "写一个循环", "设计一个自动循环" — or when they want a recurring task that discovers work, hands it to isolated agents, verifies results, and persists state. Trailing text is the loop they want to build. Do NOT use for a one-shot deterministic multi-agent script with no recurring cadence, trigger, or state file — that's workflow-creator; a `workflow` is just one component a loop calls.
 ---
 
 # Loop Engineering with octo-agent
