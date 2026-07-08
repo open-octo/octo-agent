@@ -59,7 +59,7 @@ first; there's no cap on how many background processes can run at once, and all 
 | `workflow_status` / `workflow_kill` | check on or stop a background workflow run (completion is pushed automatically — no polling) |
 | `workflow_save` | persist a script as a named, reusable workflow |
 | `task_create` / `task_update` / `task_list` | track discrete steps of a larger piece of work |
-| `schedule_wakeup` | ask to be resumed after a delay (used by `/loop`-style recurring work) |
+| `schedule_wakeup` | ask to be resumed after a delay (used by [`/loop`](/docs/guides/loop/)-style recurring work) |
 
 ## Goals
 
@@ -82,8 +82,8 @@ Search is off (or hasn't activated).
 | Tool | Purpose |
 |---|---|
 | `ask_user_question` | ask the user a clarifying question mid-turn |
-| `send_message` | send a message on the current channel without ending the turn |
-| `send_file` | send a file back (IM channels) |
+| `send_message` | proactively push text to an IM chat that is **not** the current conversation (a normal reply already covers the current one) |
+| `send_file` | send a local file over IM — defaults to the current chat; pass `platform`+`chat_id` to target a different one |
 | `show_artifact` | display a built HTML/Markdown/image file in the Web UI's artifact panel |
 | `restart_server` | request a server [restart](/docs/guides/self-host/#restarting) (e.g. after a config change); always `ask`-class, never allow-listable |
 
