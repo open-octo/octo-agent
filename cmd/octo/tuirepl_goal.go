@@ -154,7 +154,7 @@ func (m *tuiModel) submitGoalEdit(text string) (tea.Model, tea.Cmd) {
 // no-op rather than a real production path.
 func (m *tuiModel) startGoalNow() (tea.Model, tea.Cmd) {
 	if !m.turnRunning {
-		if prompt, kick := m.goalContinuationKick(); kick {
+		if prompt, kick := m.goalContinuationKick(true); kick {
 			return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(prompt, ""))
 		}
 	}
@@ -163,8 +163,10 @@ func (m *tuiModel) startGoalNow() (tea.Model, tea.Cmd) {
 
 // goalContinuationKick asks the session whether an idle continuation turn
 // should start. Split from the call sites (turn end, /goal resume) so both
-// share the notice.
-func (m *tuiModel) goalContinuationKick() (string, bool) {
+// share the notice. initial distinguishes the very first turn of a
+// create/replace/resume (from startGoalNow — "starts") from a follow-up turn
+// after one already ran (from handleTurnFinished — "continues").
+func (m *tuiModel) goalContinuationKick(initial bool) (string, bool) {
 	if !m.goalsWired() {
 		return "", false
 	}
@@ -172,7 +174,11 @@ func (m *tuiModel) goalContinuationKick() (string, bool) {
 	if !ok {
 		return "", false
 	}
-	m.printlnBlock(noticeStyle.Render("● Goal continues — /goal pause to stop"))
+	verb := "continues"
+	if initial {
+		verb = "starts"
+	}
+	m.printlnBlock(noticeStyle.Render("● Goal " + verb + " — /goal pause to stop"))
 	return prompt, true
 }
 
