@@ -26,6 +26,11 @@ type Config struct {
 	// Namespace scopes stored/recalled memories (hindsight bank_id, mem0
 	// user_id, memos user_id). Defaults to "default" when empty.
 	Namespace string
+	// Mode selects between deployment variants of the same Type. Currently
+	// only meaningful for "mem0": "cloud" talks to the hosted Platform API
+	// (api.mem0.ai); "" or "self_hosted" (the default) talks to the
+	// self-hosted server/ OSS stack. Ignored by other backend types.
+	Mode string
 }
 
 func (c Config) namespace() string {
@@ -59,6 +64,9 @@ type Backend interface {
 // unreachable or misconfigured backend surface on the first Store/Recall
 // call.
 func New(cfg Config) (Backend, error) {
+	if cfg.Type == "mem0" && cfg.Mode == "cloud" && cfg.BaseURL == "" {
+		cfg.BaseURL = mem0CloudBaseURL
+	}
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("memorybackend: base_url is required")
 	}

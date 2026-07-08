@@ -81,6 +81,7 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 			BaseURL:   cfg.MemoryBackend.BaseURL,
 			APIKey:    cfg.MemoryBackend.APIKey,
 			Namespace: cfg.MemoryBackend.Namespace,
+			Mode:      cfg.MemoryBackend.Mode,
 		}); err == nil {
 			tools.SetMemoryBackend(b)
 			tools.SetMemoryBackendAutoRecall(cfg.MemoryBackend.AutoRecall)

@@ -65,6 +65,7 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 			BaseURL:   cfg.MemoryBackend.BaseURL,
 			APIKey:    cfg.MemoryBackend.APIKey,
 			Namespace: cfg.MemoryBackend.Namespace,
+			Mode:      cfg.MemoryBackend.Mode,
 		}); err == nil {
 			tools.SetMemoryBackend(b)
 			tools.SetMemoryBackendAutoRecall(cfg.MemoryBackend.AutoRecall)
