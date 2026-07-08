@@ -9,26 +9,27 @@ You have access to octo's product documentation. Use it to answer user questions
 
 ## Documentation sources
 
-1. **Bundled docs** — check the skill directory for reference files:
+1. **Bundled docs** — check the skill directory for reference files. Each is a concise, offline-readable summary; most end with a link to the fuller online guide for depth (exact schemas, edge cases, worked examples) — follow that link with `web_fetch` when the summary doesn't fully answer the question, rather than guessing at the missing detail.
    - `README.md` — quick start, installation, basic usage, feature overview
    - `CLI.md` — command reference (`octo`, `octo config`, `octo skills`, `octo workflows`, `octo browser`, etc.)
-   - `CONFIG.md` — configuration file format and all supported fields
+   - `CONFIG.md` — configuration file format and top-level fields
    - `SKILLS.md` — the default-skill mechanism (embedding, precedence, `octo skills`) and how to write your own
-   - `WORKFLOW.md` — contributor development workflow, git conventions, PR process (NOT the `octo workflows` product feature — see CLI.md/TUI.md for that)
+   - `WORKFLOW.md` — contributor development workflow for octo-agent's own codebase, git conventions, PR process (NOT the `octo workflows` product feature — see CLI.md for that)
    - `MCP.md` — MCP server configuration (`mcp.json`, OAuth, Tool Search)
-   - `MEMORY.md` — cross-session memory (file layout, injection, attention-rule tiers)
+   - `MEMORY.md` — cross-session memory (file layout, injection) and the optional external memory-backend feature
    - `PERMISSIONS.md` — the permission engine (modes, rule format, per-session overrides)
-   - `HOOKS.md` — the hooks engine (`hooks.yml`, event types, blocking, trust-on-first-use)
+   - `HOOKS.md` — the hooks engine (`hooks.yml`, event types, blocking)
    - `IM.md` — the IM/chat bridge (`channels.yml`, supported platforms, `send_message`/`send_file`)
    - `TUI.md` — terminal UI reference (slash commands, keyboard shortcuts, status bar)
    - `TROUBLESHOOTING.md` — common issues and fixes
 
    Read the relevant file(s) with `read_file` before answering.
 
-2. **Online docs** (fallback) — if the bundled docs don't cover the question, fetch from the official documentation:
-   - Base URL: `https://github.com/open-octo/octo-agent/blob/main/`
-   - Append the relevant doc filename (e.g. `README.md`, `dev-docs/go-rewrite-roadmap.md`)
-   - Use `web_fetch` to retrieve the raw markdown content
+2. **Online docs** (fallback, and the source of truth for anything the bundled summaries don't cover) — the public docs site at `https://octo-agent.dev/docs/`, fetched with `web_fetch`:
+   - `guides/<topic>/` for narrative how-tos — e.g. `guides/goals/`, `guides/workflows/`, `guides/browser-automation/`, `guides/sub-agents/`, `guides/sandbox-the-agent/`, `guides/self-host/`, `guides/channels/`, `guides/hooks/`, `guides/use-skills/`, `guides/connect-mcp-servers/`, `guides/memory/`, `guides/memory-backends/`
+   - `reference/<topic>/` for exhaustive lookups — `reference/cli/`, `reference/config-file/`, `reference/permissions/`, `reference/slash-commands/`, `reference/tools/`, `reference/http-api/`, `reference/security/`, `reference/compatibility/`
+   - Some topics (`sub-agents`, `sandbox-the-agent`, `self-host`) have a full guide online but no bundled summary file at all — go straight to `web_fetch` for those.
+   - For anything neither the bundled docs nor the docs site cover (e.g. an internal design doc under `dev-docs/`), fall back to `https://github.com/open-octo/octo-agent/blob/main/<path>` via `web_fetch`.
 
 ## How to answer
 

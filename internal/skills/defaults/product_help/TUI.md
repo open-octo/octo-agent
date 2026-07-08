@@ -4,25 +4,11 @@ octo's TUI is a bubbletea-based interactive interface launched by `octo` with no
 
 ## Slash commands
 
-Type `/` to open the completion menu (↑/↓ to navigate, Enter to run, Tab to fill in for arguments). Available commands:
+Type `/` to open the completion menu (↑/↓ to navigate, Enter to run, Tab to fill in for arguments). Commands: `/help`, `/model`, `/thinking`, `/compact`, `/transcript`, `/goal` (create/edit/pause/resume/clear/replace a standing session objective — see below), `/clear`, `/skills` (trigger one directly with `/<name>`), `/mcp`, `/workflows`, `/memory`, `/init`, `/save`, `/sessions`, `/exit`/`/quit`.
 
-| Command | Description |
-|---------|-------------|
-| `/help` | List commands and tools |
-| `/model` | Switch to another model |
-| `/thinking` | Set reasoning effort (off/low/medium/high/xhigh/max) |
-| `/compact` | Summarize older history to free up context |
-| `/transcript` | Re-print the last (or last N) tool call(s) with full, uncapped output |
-| `/goal` | Bare `/goal` shows the current goal (if any); `/goal <objective>` sets one. Manage it with `/goal pause`, `/goal resume`, `/goal clear`, `/goal edit` (prefills the input to change the objective), or `/goal replace <objective>` (replace an unfinished goal). Once set, octo auto-continues turns on its own until the goal completes, is paused, or hits its token/turn budget |
-| `/clear` | Wipe the conversation and start fresh |
-| `/skills` | List discovered skills (trigger one directly with `/<name>`) |
-| `/mcp` | Show connected MCP servers and their surfaces |
-| `/workflows` | List available named workflows (run by the model via the `workflow` tool) |
-| `/memory` | List what's remembered across sessions |
-| `/init` | Analyze repo and generate/update `.octorules` |
-| `/save` | Save the session now (also auto-saves after each turn) |
-| `/sessions` | List recent sessions |
-| `/exit` or `/quit` | Save and exit |
+`/goal <objective>` sets a goal; once set, octo auto-continues turns on its own until it completes, is paused, or hits its token/turn budget. `/goal edit` here is **prefill-only** (fills the input box with the current objective to revise) — unlike the web UI/IM where `/goal edit <text>` edits inline in one step.
+
+The Web UI and IM channels each recognize a **different** command set than the TUI (e.g. IM has `/bind`/`/unbind`/`/new` for re-binding a chat to a session; the TUI's `/skills`/`/mcp`/`/init`/etc. don't exist there). Full per-surface command tables and an availability matrix: **https://octo-agent.dev/docs/reference/slash-commands/** (`web_fetch`). The `/goal` feature in depth: **https://octo-agent.dev/docs/guides/goals/**.
 
 ## Keyboard shortcuts
 
