@@ -1,6 +1,6 @@
 # @description Run a daily triage loop: discover open issues and recent CI failures, categorize them, draft safe fixes in isolated git worktrees, verify them with a second agent, and write a state report. args: repo (optional path to git repo, defaults to current directory), since (optional "Nh" or "Nd" lookback, e.g. "24h" or "1d", default "1d").
-# @param repo Path to the git repo (optional — defaults to the current directory).
-# @param since Lookback window, e.g. "24h" or "1d" (optional — defaults to "1d").
+# @param repo: Path to the git repo (optional — defaults to the current directory).
+# @param since: Lookback window, e.g. "24h" or "1d" (optional — defaults to "1d").
 
 # ---- inputs -----------------------------------------------------------------
 a          = args || {}

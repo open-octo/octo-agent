@@ -97,9 +97,13 @@ func TestPruneJournalsDir_RemovesOnlyStaleFiles(t *testing.T) {
 	}
 }
 
-func TestPruneJournalsDir_MissingDirIsNotAnError(t *testing.T) {
+// TestPruneJournalsDir_MissingDirReturnsError pins that pruneJournalsDir
+// itself propagates os.ReadDir's error rather than swallowing it — it's
+// PruneJournals' caller (and, ultimately, cmd/octo/main.go's `_ =`) that
+// treats a missing/unreadable journal dir as best-effort, not this function.
+func TestPruneJournalsDir_MissingDirReturnsError(t *testing.T) {
 	if err := pruneJournalsDir(filepath.Join(t.TempDir(), "nonexistent"), time.Now()); err == nil {
-		t.Error("want an error for a missing dir (caller treats it as best-effort)")
+		t.Error("want an error for a missing dir (the caller is what treats this as best-effort)")
 	}
 }
 

@@ -94,7 +94,7 @@ func (WorkflowSaveTool) Execute(ctx context.Context, _ string, input map[string]
 	if script == "" {
 		return agent.ToolResult{}, fmt.Errorf("workflow_save: script is required")
 	}
-	description := strings.TrimSpace(stringArg(input, "description"))
+	description := sanitizeCommentText(stringArg(input, "description"))
 	params, err := parseWorkflowSaveParams(input["params"])
 	if err != nil {
 		return agent.ToolResult{}, fmt.Errorf("workflow_save: %w", err)
@@ -179,22 +179,38 @@ func parseWorkflowSaveParams(raw any) ([]workflowParam, error) {
 		out = append(out, workflowParam{
 			name:        name,
 			required:    askBool(m, "required"),
-			description: strings.TrimSpace(stringArg(m, "description")),
+			description: sanitizeCommentText(stringArg(m, "description")),
 		})
 	}
 	return out, nil
 }
 
+// sanitizeCommentText collapses embedded newlines into spaces so a
+// multi-line description can never break out of its single-line `#` comment
+// when written to a saved workflow file. An unsanitized embedded newline
+// would land as a bare, non-`#`-prefixed line in the file's leading-comment
+// block, corrupting leadingComments' parse (workflowDescription/workflowParams
+// would stop scanning right there) and, worse, could inject a line that mruby
+// executes as real script code.
+func sanitizeCommentText(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return strings.TrimSpace(s)
+}
+
 // formatWorkflowParamComment renders a workflowParam as the text following
 // `# @param ` in a saved workflow file — the exact shape workflowParams (in
-// workflow_registry.go) parses back.
+// workflow_registry.go) parses back. The colon before the description is
+// load-bearing: it's what lets workflowParams tell "required" the keyword
+// apart from a description that merely starts with that word.
 func formatWorkflowParamComment(p workflowParam) string {
 	s := p.name
 	if p.required {
 		s += " required"
 	}
 	if p.description != "" {
-		s += " " + p.description
+		s += ": " + p.description
 	}
 	return s
 }

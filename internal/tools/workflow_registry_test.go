@@ -68,8 +68,8 @@ func TestWorkflowDescription_FallsBackToFirstComment(t *testing.T) {
 
 func TestWorkflowParams_ParsesRequiredAndOptional(t *testing.T) {
 	script := "# @description does a thing\n" +
-		"# @param target required the file to migrate\n" +
-		"# @param dry_run skip to preview, off by default\n" +
+		"# @param target required: the file to migrate\n" +
+		"# @param dry_run: skip to preview, off by default\n" +
 		"agent(args[\"target\"])\n"
 	got := workflowParams(script)
 	if len(got) != 2 {
@@ -80,6 +80,34 @@ func TestWorkflowParams_ParsesRequiredAndOptional(t *testing.T) {
 	}
 	if got[1].name != "dry_run" || got[1].required || got[1].description != "skip to preview, off by default" {
 		t.Errorf("params[1] = %+v, want not required", got[1])
+	}
+}
+
+// TestWorkflowParams_DescriptionStartingWithRequiredWordIsNotMisparsed guards
+// the exact collision a review caught: the colon is what lets a description
+// that happens to start with the literal word "required" stay a plain
+// optional param, instead of the bare "required" keyword-prefix check
+// mistaking it for the required flag and eating the word out of the text.
+func TestWorkflowParams_DescriptionStartingWithRequiredWordIsNotMisparsed(t *testing.T) {
+	script := "# @param verify: required command to double check\n" + "agent(1)\n"
+	got := workflowParams(script)
+	if len(got) != 1 {
+		t.Fatalf("workflowParams = %+v, want 1 entry", got)
+	}
+	if got[0].required {
+		t.Errorf("params[0].required = true, want false — the word came from the description, not the flag")
+	}
+	if got[0].description != "required command to double check" {
+		t.Errorf("params[0].description = %q, want the full text preserved", got[0].description)
+	}
+}
+
+// TestWorkflowParams_AtParamPrefixRequiresWordBoundary guards against a
+// leading comment like "@parameterized ..." being misread as an @param
+// declaration merely because it shares the same leading runes.
+func TestWorkflowParams_AtParamPrefixRequiresWordBoundary(t *testing.T) {
+	if got := workflowParams("# @parameterized foo bar\nagent(1)\n"); len(got) != 0 {
+		t.Errorf("workflowParams = %+v, want none (not a real @param line)", got)
 	}
 }
 
@@ -151,7 +179,7 @@ func TestLookupWorkflow_ParsesParams(t *testing.T) {
 	user := t.TempDir()
 	useWorkflowRoots(t, user, "")
 	writeWorkflowFile(t, user, "migrate.rb",
-		"# @description Migrate\n# @param target required Path to migrate\nagent(args[\"target\"])\n")
+		"# @description Migrate\n# @param target required: Path to migrate\nagent(args[\"target\"])\n")
 
 	w, ok := lookupWorkflow(context.Background(), "migrate")
 	if !ok {

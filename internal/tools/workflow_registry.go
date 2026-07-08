@@ -231,30 +231,40 @@ func workflowDescription(script string) string {
 	return first
 }
 
-// workflowParams extracts `# @param <name> [required] [description]`
-// declarations from a script's leading comment block. The name is the first
-// whitespace-delimited token; an optional literal "required" keyword marks it
-// mandatory; anything after that is the description shown when the workflow
-// tool prompts the user for a missing value.
+// workflowParams extracts `# @param <name> [required][: <description>]`
+// declarations from a script's leading comment block, written by
+// formatWorkflowParamComment (workflow_save.go). The colon is load-bearing:
+// everything before it is pure grammar (name, then an optional literal
+// "required" token), everything after is free-text description, so a
+// description that itself starts with the word "required" (e.g. "required
+// command to double check") can never be misparsed as the required flag —
+// unlike a naive token-stream split, which would (and would also eat that
+// word out of the description).
 func workflowParams(script string) []workflowParam {
 	var out []workflowParam
 	for _, body := range leadingComments(script) {
-		rest := strings.TrimSpace(strings.TrimPrefix(body, "@param"))
-		if rest == body {
-			continue // not an @param line
+		// Word-boundary check: "@param" must be the whole line or followed by
+		// whitespace, so a line like "@parameterized ..." (which merely starts
+		// with the same runes) isn't misread as a parameter declaration.
+		if body != "@param" && !strings.HasPrefix(body, "@param ") {
+			continue
 		}
-		fields := strings.Fields(rest)
+		rest := strings.TrimSpace(strings.TrimPrefix(body, "@param"))
+		if rest == "" {
+			continue
+		}
+		head, description := rest, ""
+		if idx := strings.Index(rest, ":"); idx >= 0 {
+			head = strings.TrimSpace(rest[:idx])
+			description = strings.TrimSpace(rest[idx+1:])
+		}
+		fields := strings.Fields(head)
 		if len(fields) == 0 {
 			continue
 		}
 		name := fields[0]
-		rest = strings.TrimSpace(strings.TrimPrefix(rest, name))
-		required := false
-		if rest == "required" || strings.HasPrefix(rest, "required ") {
-			required = true
-			rest = strings.TrimSpace(strings.TrimPrefix(rest, "required"))
-		}
-		out = append(out, workflowParam{name: name, required: required, description: rest})
+		required := len(fields) > 1 && fields[1] == "required"
+		out = append(out, workflowParam{name: name, required: required, description: description})
 	}
 	return out
 }

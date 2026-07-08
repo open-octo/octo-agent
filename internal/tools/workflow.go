@@ -265,11 +265,10 @@ func ensureRequiredWorkflowParams(ctx context.Context, workflowName string, para
 		if res.Cancelled {
 			return nil, fmt.Errorf("workflow %q: user cancelled while providing required arg %q", workflowName, p.name)
 		}
-		value := res.Custom
-		if value == "" && len(res.Choices) > 0 {
-			value = res.Choices[0]
-		}
-		filled[p.name] = value
+		// AskRequest carries no Options, so this is always a free-text prompt —
+		// res.Choices is documented to stay empty in that case (AskResponse),
+		// leaving res.Custom as the only place the answer can land.
+		filled[p.name] = res.Custom
 	}
 	return filled, nil
 }

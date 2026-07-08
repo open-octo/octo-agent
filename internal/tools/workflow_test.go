@@ -530,7 +530,7 @@ func TestWorkflowTool_RunsSavedByName_PromptsForMissingRequiredArg(t *testing.T)
 	user := t.TempDir()
 	useWorkflowRoots(t, user, "")
 	writeWorkflowFile(t, user, "echo.rb",
-		"# @description echo the arg\n# @param q required the text to echo\nagent(args[\"q\"])\n")
+		"# @description echo the arg\n# @param q required: the text to echo\nagent(args[\"q\"])\n")
 
 	stub := &stubAsker{resp: AskResponse{Custom: "hi there"}}
 	useAsker(t, stub)
@@ -555,7 +555,7 @@ func TestWorkflowTool_RunsSavedByName_ArgsAlreadySatisfyRequired(t *testing.T) {
 	user := t.TempDir()
 	useWorkflowRoots(t, user, "")
 	writeWorkflowFile(t, user, "echo.rb",
-		"# @description echo the arg\n# @param q required the text to echo\nagent(args[\"q\"])\n")
+		"# @description echo the arg\n# @param q required: the text to echo\nagent(args[\"q\"])\n")
 
 	stub := &stubAsker{}
 	useAsker(t, stub)
@@ -579,7 +579,7 @@ func TestWorkflowTool_RunsSavedByName_MissingRequiredArgNoAsker(t *testing.T) {
 	user := t.TempDir()
 	useWorkflowRoots(t, user, "")
 	writeWorkflowFile(t, user, "echo.rb",
-		"# @description echo the arg\n# @param q required the text to echo\nagent(args[\"q\"])\n")
+		"# @description echo the arg\n# @param q required: the text to echo\nagent(args[\"q\"])\n")
 
 	_, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"name": "echo"})
 	if err == nil || !strings.Contains(err.Error(), "missing required arg") {
@@ -595,7 +595,7 @@ func TestWorkflowTool_RunsSavedByName_CancelledPromptErrors(t *testing.T) {
 	user := t.TempDir()
 	useWorkflowRoots(t, user, "")
 	writeWorkflowFile(t, user, "echo.rb",
-		"# @description echo the arg\n# @param q required the text to echo\nagent(args[\"q\"])\n")
+		"# @description echo the arg\n# @param q required: the text to echo\nagent(args[\"q\"])\n")
 	useAsker(t, &stubAsker{resp: AskResponse{Cancelled: true}})
 
 	_, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"name": "echo"})
@@ -612,7 +612,7 @@ func TestSavedWorkflowsParamDesc_ListsRequiredParams(t *testing.T) {
 	user := t.TempDir()
 	useWorkflowRoots(t, user, "")
 	writeWorkflowFile(t, user, "migrate.rb",
-		"# @description Migrate files\n# @param target required Path to migrate\nagent(args[\"target\"])\n")
+		"# @description Migrate files\n# @param target required: Path to migrate\nagent(args[\"target\"])\n")
 
 	d := savedWorkflowsParamDesc()
 	if !strings.Contains(d, "requires: target") {

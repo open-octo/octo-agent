@@ -1,7 +1,7 @@
 # @description Apply one mechanical change across many files — discover every site, then transform + verify each in its OWN git worktree so parallel edits never collide. args: change (required, what to apply), target (optional scope/paths to search), verify (optional shell command to run in each worktree, e.g. "go build ./...").
-# @param change required What to apply, e.g. "rename foo() to bar()".
-# @param target Scope/paths to search (optional — defaults to the whole repo).
-# @param verify Shell command to run in each worktree to check the change, e.g. "go build ./..." (optional).
+# @param change required: What to apply, e.g. "rename foo() to bar()".
+# @param target: Scope/paths to search (optional — defaults to the whole repo).
+# @param verify: Shell command to run in each worktree to check the change, e.g. "go build ./..." (optional).
 
 # ---- inputs -----------------------------------------------------------------
 a       = args || {}
