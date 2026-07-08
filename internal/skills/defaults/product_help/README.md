@@ -196,6 +196,7 @@ octo --sandbox --sandbox-read /opt/data     # extra readable dir (repeatable)
 | Sandbox | done | OS-enforced `--sandbox` (macOS / Linux) |
 | MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, OAuth (Authorization Code + PKCE) |
 | Memory | done | Persistent cross-session memory under `~/.octo/memories/<repo-slug>/` — plain markdown files the agent manages directly with its own file tools (no typed store, no background consolidation) |
+| Memory backends | done | Optional self-hosted external semantic recall (hindsight / mem0 / MemTensor-MemOS) — automatic background storage, `memory_recall` tool. Separate from and off by default; doesn't touch `MEMORY.md` |
 | Sub-agents | done | `sub_agent` fan-out, async + resumable (`sub_agent_send` follow-up, `sub_agent_status`, `sub_agent_kill`) |
 | Session goals | done | `/goal` (create/edit/pause/resume/clear/replace) — status machine, token/turn budget, auto-continuation across turns; surfaced in the TUI status bar, a web chip, and IM |
 | Workflows | done | Named, multi-step scripts the model runs by name via the `workflow` tool — embedded presets (`batch-migrate`, `daily-triage`, `parallel-understand`) plus your own, saved with `workflow_save`; `octo workflows list/path/update`, `/workflows` in the TUI, a web management panel |
@@ -228,6 +229,10 @@ internal/channel/  IM bridge — adapter interface + WeChat iLink adapter
 
 Each provider implements both **buffered** (`Send`) and **streaming** (`SendStream`) variants. The agent layer mirrors with `Sender` / `StreamingSender` / `ToolSender` / `ToolStreamingSender` — interfaces are added incrementally so non-streaming providers still work.
 
+## Full documentation
+
+This file and the other bundled docs in this skill directory are concise summaries. The full docs site — narrative guides and exhaustive references for every feature above — is at **https://octo-agent.dev/docs/** (fetch with `web_fetch`).
+
 ## Development
 
 ```bash
@@ -237,7 +242,7 @@ make vet           # go vet ./...
 make fmt-check     # gofmt -l . must be empty
 ```
 
-Project conventions live in [`.octorules`](.octorules) (the human-facing rules); [`CLAUDE.md`](CLAUDE.md) expands them with the operational detail AI coding agents need in this repo. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the human PR workflow.
+Project conventions live in `.octorules` (the human-facing rules); `CLAUDE.md` expands them with the operational detail AI coding agents need in this repo. See **https://octo-agent.dev/docs/community/contributing/** for the PR workflow (also summarized in `WORKFLOW.md`).
 
 ## License
 

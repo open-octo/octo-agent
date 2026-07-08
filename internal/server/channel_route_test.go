@@ -387,6 +387,31 @@ func TestHandleChannelMessage_WiresMemoryHooks(t *testing.T) {
 	}
 }
 
+// TestHandleChannelMessage_WiresArchiveDir: IM turns get compaction chunk
+// archiving like web turns do via buildAgent — without this, folded history
+// is discarded instead of being recallable with the read tool.
+func TestHandleChannelMessage_WiresArchiveDir(t *testing.T) {
+	tmp := t.TempDir() // isolated HOME: deterministic store IDs cross-pollinate otherwise
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+
+	sess := srv.channelMgr.GetSession(evFor("x"))
+	if sess.Agent.ArchiveDir == "" {
+		t.Fatal("IM agent missing ArchiveDir — compaction would fold history without archiving it")
+	}
+	want, err := sess.Store.ChunkDir()
+	if err != nil {
+		t.Fatalf("sess.Store.ChunkDir(): %v", err)
+	}
+	if sess.Agent.ArchiveDir != want {
+		t.Errorf("ArchiveDir = %q, want %q (session's own chunk dir)", sess.Agent.ArchiveDir, want)
+	}
+}
+
 // TestHandleChannelMessage_RejectsTurnWhenBoundToOtherEntry: when the session
 // is owned by another entry, the channel turn is rejected and the reply hints
 // at /new and /bind --force.
