@@ -3,6 +3,7 @@ package skills
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -125,6 +126,36 @@ func TestDiscover_CwdIsHomeDoesNotRelabelAsProject(t *testing.T) {
 	s, _ := r.Get("greet")
 	if s.Source != "user" {
 		t.Errorf("Source = %q, want user (cwd == home must not double-count as project)", s.Source)
+	}
+}
+
+// Same collision as TestDiscover_CwdIsHomeDoesNotRelabelAsProject, but the
+// home directory is reached through a symlink while cwd is passed as the
+// resolved real path — e.g. a network home mount, where os.Getwd()'s
+// syscall fallback (taken when $PWD is unset, as under a process
+// supervisor) returns the resolved path but userSkillsRoot's
+// os.UserHomeDir() returns $HOME verbatim. A raw string comparison would see
+// two different strings for the same directory.
+func TestDiscover_CwdIsHomeDoesNotRelabelAsProject_ThroughSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on windows")
+	}
+	real := t.TempDir()
+	root := t.TempDir()
+	link := filepath.Join(root, "home-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	useUserRoot(t, filepath.Join(link, ".octo", "skills"))
+	writeSkill(t, filepath.Join(link, ".octo", "skills"), "greet", "---\ndescription: hi\n---\nbody")
+
+	r := Discover(real)
+	if r.Len() != 1 {
+		t.Fatalf("Len = %d, want 1", r.Len())
+	}
+	s, _ := r.Get("greet")
+	if s.Source != "user" {
+		t.Errorf("Source = %q, want user (symlinked home == cwd must not double-count as project)", s.Source)
 	}
 }
 

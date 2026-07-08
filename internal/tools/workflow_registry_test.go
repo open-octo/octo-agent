@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"testing"
 
@@ -83,6 +84,34 @@ func TestLookupWorkflow_SameUserAndProjectRootStaysUser(t *testing.T) {
 	}
 	if w.source != "user" {
 		t.Errorf("source = %q, want user (cwd == home must not double-count as project)", w.source)
+	}
+}
+
+// Same collision as TestLookupWorkflow_SameUserAndProjectRootStaysUser, but
+// the two roots are reached through a symlink on one side only — e.g. a
+// network home mount, where os.Getwd()'s syscall fallback (taken when $PWD
+// is unset, as under a process supervisor) returns the resolved path while
+// userWorkflowsRoot's os.UserHomeDir() returns $HOME verbatim. A raw string
+// comparison would see two different strings for the same directory.
+func TestLookupWorkflow_SameUserAndProjectRootStaysUser_ThroughSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on windows")
+	}
+	real := t.TempDir()
+	root := t.TempDir()
+	link := filepath.Join(root, "home-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	useWorkflowRoots(t, link, real)
+	writeWorkflowFile(t, real, "solo.rb", "# @description only copy\n\"x\"\n")
+
+	w, ok := lookupWorkflow(context.Background(), "solo")
+	if !ok {
+		t.Fatal("lookupWorkflow: not found")
+	}
+	if w.source != "user" {
+		t.Errorf("source = %q, want user (symlinked home == cwd must not double-count as project)", w.source)
 	}
 }
 

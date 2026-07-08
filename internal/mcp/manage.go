@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/open-octo/octo-agent/internal/pathutil"
 )
 
 // This file is the management view of the MCP config — what a settings UI
@@ -53,12 +55,13 @@ func LoadManaged(projectDir string) ([]ManagedServer, error) {
 	}
 
 	// If the server's cwd is the home directory itself (e.g. `octo serve`
-	// launched from ~), this resolves to the exact same file as userPath —
-	// re-reading it here would relabel every entry "project" and make a
-	// perfectly normal user config look read-only in the management UI.
+	// launched from ~, even through a symlinked $HOME), this resolves to the
+	// exact same file as userPath — re-reading it here would relabel every
+	// entry "project" and make a perfectly normal user config look read-only
+	// in the management UI.
 	if projectDir != "" {
 		projectPath := filepath.Join(projectDir, ".octo", "mcp.json")
-		if projectPath != userPath {
+		if !pathutil.SameDir(projectPath, userPath) {
 			cfg, err := readConfigFile(projectPath)
 			if err != nil {
 				return nil, err
