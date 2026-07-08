@@ -64,6 +64,8 @@ export default defineConfig({
 						{ label: 'Bridge to chat apps', slug: 'guides/channels', translations: { 'zh-CN': '接入聊天应用' } },
 						{ label: 'Automate with browser control', slug: 'guides/browser-automation', translations: { 'zh-CN': '浏览器自动化' } },
 						{ label: 'Run long-horizon goals', slug: 'guides/goals', translations: { 'zh-CN': '运行长周期目标' } },
+						{ label: 'Repeat a task with /loop', slug: 'guides/loop', translations: { 'zh-CN': '用 /loop 重复任务' } },
+						{ label: 'Schedule cron tasks', slug: 'guides/cron-tasks', translations: { 'zh-CN': '定时任务' } },
 						{ label: 'Self-host octo serve', slug: 'guides/self-host', translations: { 'zh-CN': '自托管 octo serve' } },
 					],
 				},

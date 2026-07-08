@@ -20,9 +20,10 @@ stopping once the current message is answered.
 ```
 
 When a session goes idle with an active goal, octo continues working toward it on its own —
-the same machinery behind `/loop`, applied to a single durable objective instead of a recurring
-prompt. The underlying tools (`get_goal`, `create_goal`, `update_goal`) are also available to the
-model directly, so a goal can be created or refined mid-conversation, not just via the slash command.
+the same machinery behind [`/loop`](/docs/guides/loop/), applied to a single durable objective
+instead of a recurring prompt. The underlying tools (`get_goal`, `create_goal`, `update_goal`) are
+also available to the model directly, so a goal can be created or refined mid-conversation, not
+just via the slash command.
 
 :::note[`/goal edit` differs by transport]
 In the TUI, `/goal edit` with no text prefills the input box with the current objective for you to

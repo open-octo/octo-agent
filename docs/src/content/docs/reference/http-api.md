@@ -47,11 +47,13 @@ called out in the release notes — there's no versioned `/api/v1` yet.
 | `POST /api/channels/{platform}/send`, `/send-file` | send from the API |
 | `POST/GET/DELETE /api/channels/weixin/login` | WeChat QR login flow |
 
-## Tasks, profile, memory, trash
+## Cron tasks, profile, memory, trash
 
 | Route | Purpose |
 |---|---|
-| `GET/POST/PATCH/DELETE /api/tasks` | the task graph (`task_create`/`task_update`/`task_list` mirrored over HTTP) |
+| `GET/POST /api/tasks` | list / create a [scheduled cron task](/docs/guides/cron-tasks/) |
+| `DELETE`, `PATCH /api/tasks/{id}` | delete, or edit any subset of fields (this is also how you enable/disable) |
+| `POST /api/tasks/{id}/run` | trigger an out-of-schedule run now |
 | `GET /api/profile/soul`, `/api/profile/user` | read `soul.md` / `user.md` |
 | `GET /api/memories` | read the memory index |
 | `GET /api/trash`, `POST .../empty`, `POST .../{id}/restore`, `DELETE /api/trash/{id}` | the recoverable-delete trash panel |
