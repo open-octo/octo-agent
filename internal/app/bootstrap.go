@@ -67,6 +67,7 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 			Namespace: cfg.MemoryBackend.Namespace,
 		}); err == nil {
 			tools.SetMemoryBackend(b)
+			tools.SetMemoryBackendAutoRecall(cfg.MemoryBackend.AutoRecall)
 		}
 	}
 
@@ -78,6 +79,7 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 		tools.SetBrowserVision(true)
 		tools.ResetBrowserSession()
 		tools.SetMemoryBackend(nil)
+		tools.SetMemoryBackendAutoRecall(false)
 	}
 	if enableTasks {
 		tools.SetTaskStore(tasks.New())

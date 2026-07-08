@@ -169,6 +169,12 @@ type MemoryBackendConfig struct {
 	// Namespace scopes stored/recalled memories (hindsight bank_id, mem0/memos
 	// user_id). Defaults to "default" when empty.
 	Namespace string `yaml:"namespace,omitempty"`
+	// AutoRecall, when true, automatically calls Recall with the user's
+	// message before every turn and injects the result as context —
+	// independent of the memory_recall tool, which stays available either
+	// way. Off by default: it adds a bounded synchronous delay to every turn
+	// once a backend is configured.
+	AutoRecall bool `yaml:"auto_recall,omitempty"`
 }
 
 // MemoryBackendEnabled reports whether an external memory backend is

@@ -183,9 +183,12 @@ comes from an `X-User-Name` header instead, which octo sends automatically when 
   these backends are designed to be used: you feed them raw text and they do their own
   extraction/dedup. It's fire-and-forget — a failed store doesn't surface anywhere and doesn't slow
   down your turn.
-- **Recall is a tool.** The agent calls `memory_recall` when it suspects something relevant was
-  discussed in a prior session or conversation. This one *does* block on the network round trip and
-  its errors do surface, since it's an explicit, visible action rather than a background side effect.
+- **Recall is a tool by default.** The agent calls `memory_recall` when it suspects something
+  relevant was discussed in a prior session or conversation. This one *does* block on the network
+  round trip and its errors do surface, since it's an explicit, visible action rather than a
+  background side effect. Whether to call it is a model judgment call — it can miss an isolated
+  factual question that doesn't read as "resume a prior conversation" (see `auto_recall` below if
+  you'd rather not rely on that).
 
 ## Configuring
 
@@ -197,6 +200,7 @@ memory_backend:
   base_url: http://localhost:8888
   api_key: ""            # optional — see per-backend notes below
   namespace: my-project  # scopes stored/recalled memories; defaults to "default"
+  auto_recall: false     # optional — see "Automatic recall" below
 ```
 
 - **`type`** selects the backend. Leaving it unset (or omitting the whole block) disables the
@@ -213,6 +217,7 @@ memory_backend:
     `X-User-Name` header instead.
 - **`namespace`** scopes what gets stored/recalled — hindsight's `bank_id`, mem0's `user_id`, or
   memos's `user_id`. Use something stable per project (or leave it as the default single bucket).
+- **`auto_recall`** — see below. Defaults to `false`.
 
 Restart `octo` (or `octo serve`) after changing this — it's read once at session start, the same as
 every other config-file setting.
@@ -220,6 +225,19 @@ every other config-file setting.
 Sanity-check the wiring: start `octo`, have a short exchange, then ask something that requires
 recalling it (in a fresh session, or after `octo` restarts) — you should see it call `memory_recall`
 and get the earlier fact back.
+
+### Automatic recall
+
+Set `auto_recall: true` to call `Recall` with the user's message on **every turn** and fold the
+result into that turn's context automatically — instead of waiting on the model to decide to call
+`memory_recall`. The tool stays available either way, for a deeper or differently-worded search;
+the injected context tells the model not to bother re-calling it for the same question.
+
+This trades a small, bounded amount of latency (recall is synchronous, capped at a 3s timeout, and
+silently skipped on error or timeout) for not depending on the model's judgment about when to
+check memory — useful if you've noticed it answering "I don't know" to something that's actually in
+the backend, rather than trying `memory_recall` first. Leave it off if you'd rather keep every turn
+free of the extra round trip and rely on the tool alone.
 
 ## Troubleshooting
 
