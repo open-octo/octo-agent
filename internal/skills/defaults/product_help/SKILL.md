@@ -10,11 +10,18 @@ You have access to octo's product documentation. Use it to answer user questions
 ## Documentation sources
 
 1. **Bundled docs** — check the skill directory for reference files:
-   - `README.md` — quick start, installation, basic usage
-   - `CLI.md` — command reference (`octo`, `octo config`, `octo skills`, etc.)
+   - `README.md` — quick start, installation, basic usage, feature overview
+   - `CLI.md` — command reference (`octo`, `octo config`, `octo skills`, `octo workflows`, `octo browser`, etc.)
    - `CONFIG.md` — configuration file format and all supported fields
-   - `SKILLS.md` — how to write custom skills
-   - `WORKFLOW.md` — development workflow, git conventions, PR process
+   - `SKILLS.md` — the default-skill mechanism (embedding, precedence, `octo skills`) and how to write your own
+   - `WORKFLOW.md` — contributor development workflow, git conventions, PR process (NOT the `octo workflows` product feature — see CLI.md/TUI.md for that)
+   - `MCP.md` — MCP server configuration (`mcp.json`, OAuth, Tool Search)
+   - `MEMORY.md` — cross-session memory (file layout, injection, attention-rule tiers)
+   - `PERMISSIONS.md` — the permission engine (modes, rule format, per-session overrides)
+   - `HOOKS.md` — the hooks engine (`hooks.yml`, event types, blocking, trust-on-first-use)
+   - `IM.md` — the IM/chat bridge (`channels.yml`, supported platforms, `send_message`/`send_file`)
+   - `TUI.md` — terminal UI reference (slash commands, keyboard shortcuts, status bar)
+   - `TROUBLESHOOTING.md` — common issues and fixes
 
    Read the relevant file(s) with `read_file` before answering.
 
@@ -43,4 +50,4 @@ User: "what does permission_mode do?"
 
 User: "how do I switch to OpenAI?"
 → Read `CONFIG.md` and `CLI.md`
-→ Explain `octo config` wizard vs. editing `~/.octo/config.yaml` directly
+→ Explain `octo config` wizard vs. editing `~/.octo/config.yml` directly

@@ -29,7 +29,11 @@ octo version
 ```
 
 Archives ship for linux / darwin / windows on amd64 + arm64; `checksums.txt`
-in each release verifies the download.
+in each release verifies the download. macOS also has a double-click
+`octo-setup.pkg` installer; Windows installs PowerShell 7 automatically if
+missing. `uv` (for the `office-xlsx` skill) is bundled with both. Already
+installed? `octo upgrade` fetches and installs the latest release in place
+(`octo upgrade --check` only compares versions).
 
 **From Go:**
 
@@ -102,7 +106,17 @@ octo serve --addr 127.0.0.1:8088
 # IM bridge (WeChat iLink): scan-to-login; channels run inside `octo serve`
 octo serve   # WeChat login: Channels panel in the web UI (scan QR)
 
-# Autonomous long-horizon goal: plan into a subtask DAG and run it to completion
+# Session goal: set an objective and let octo auto-continue turns until it's
+# done (or paused/budget-limited). /goal in the TUI, a chip in the web UI.
+octo
+> /goal migrate all callers of the old logger to the new one
+
+# Workflows: named, multi-step scripts (embedded presets or your own, saved
+# via the workflow tool) the model runs by name. /workflows lists what's available.
+octo workflows list
+
+# Browser automation: drive your own logged-in Chrome (record/replay, self-heal)
+octo browser setup
 ```
 
 ## Configuration
@@ -122,13 +136,13 @@ The identity and rule files support `@include path/to/fragment.md` to pull in sh
 Reasoning models can deliberate before answering. Two knobs control it, both available as CLI flags and as `octo config` defaults:
 
 - `--reasoning-effort low|medium|high` — the intensity. OpenAI-protocol backends receive it as `reasoning_effort`; Anthropic-protocol backends map it to an extended-thinking token budget. Empty (the default) means off.
-- `--show-reasoning` (default on) — stream the thinking trace to the terminal, dimmed. `--show-reasoning=false` keeps reasoning enabled but hides the trace.
+- `--show-reasoning` (default off) — surface the reasoning/thinking trace for the web UI to display. The terminal itself never renders it regardless of this flag.
 
 This unifies Anthropic `thinking` blocks and OpenAI `reasoning_content` behind one pair of controls.
 
 ### Defaults (`octo config`)
 
-`octo config` saves your default provider, model, (optionally) base URL, and reasoning settings to `~/.octo/config.yaml`, so a bare `octo` works without re-typing `--provider`/`--model` every time:
+`octo config` saves your default provider, model, (optionally) base URL, and reasoning settings to `~/.octo/config.yml`, so a bare `octo` works without re-typing `--provider`/`--model` every time:
 
 ```bash
 octo config        # interactive wizard
@@ -136,7 +150,7 @@ octo config show   # print the effective settings + where each comes from
 octo config path   # print the file location
 ```
 
-Precedence is **CLI flag > env var > `~/.octo/config.yaml` > built-in default**. API keys are read from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` first; the wizard can store one in the file (mode `0600`), but the env var is recommended.
+Precedence is **CLI flag > env var > `~/.octo/config.yml` > built-in default**. API keys are read from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` first; the wizard can store one in the file (mode `0600`), but the env var is recommended.
 
 ## Skills
 
@@ -173,7 +187,7 @@ octo --sandbox --sandbox-read /opt/data     # extra readable dir (repeatable)
 | Area | Status | Description |
 |------|--------|-------------|
 | Core CLI | done | Headless agentic one-shot (`claude -p` style) + interactive TUI, streaming, session persistence (`~/.octo/sessions/`), `/cost` `/save` `/sessions` |
-| Providers | done | Anthropic Messages + OpenAI Chat Completions, plus any compatible third party |
+| Providers | done | Anthropic Messages + OpenAI Chat Completions, plus `custom` for any compatible third party (`CUSTOM_API_KEY`/`CUSTOM_BASE_URL`, protocol picked in `octo config`) |
 | Reasoning | done | Unified extended thinking (Anthropic) / `reasoning_content` (OpenAI), `--reasoning-effort`, `--show-reasoning` |
 | Tools | done | `terminal` (+ background), file read/write/edit, glob, grep, web fetch/search |
 | Agentic loop | done | Multi-step tool calling, permission gating, history compaction, graceful Ctrl-C |
@@ -181,10 +195,14 @@ octo --sandbox --sandbox-read /opt/data     # extra readable dir (repeatable)
 | Skills | done | Claude Code-compatible SKILL.md loader (`octo skills`, `/skills`, `/<name>`) |
 | Sandbox | done | OS-enforced `--sandbox` (macOS / Linux) |
 | MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, OAuth (Authorization Code + PKCE) |
-| Memory | done | Persistent cross-session memory under `~/.octo/memories/`, auto extract/consolidate |
-| Sub-agents | done | `launch_agent` fan-out, async + resumable (`send_message`, `agent_status`, `kill_agent`) |
+| Memory | done | Persistent cross-session memory under `~/.octo/memories/<repo-slug>/` — plain markdown files the agent manages directly with its own file tools (no typed store, no background consolidation) |
+| Sub-agents | done | `sub_agent` fan-out, async + resumable (`sub_agent_send` follow-up, `sub_agent_status`, `sub_agent_kill`) |
+| Session goals | done | `/goal` (create/edit/pause/resume/clear/replace) — status machine, token/turn budget, auto-continuation across turns; surfaced in the TUI status bar, a web chip, and IM |
+| Workflows | done | Named, multi-step scripts the model runs by name via the `workflow` tool — embedded presets (`batch-migrate`, `daily-triage`, `parallel-understand`) plus your own, saved with `workflow_save`; `octo workflows list/path/update`, `/workflows` in the TUI, a web management panel |
+| Hooks | done | `hooks.yml` (user- and project-level) — 7 lifecycle events incl. `PreToolUse`/`PreCompact`, blocking hooks, `async` side-effect hooks, trust-on-first-use; `octo hooks list` |
+| Browser automation | done | Owned Go-native CDP backend — attaches to your logged-in Chrome (`octo browser setup`), record/replay/self-heal, vision screenshots; a web Browser view for managing recordings |
 | Web server | done | `octo serve` — REST + WebSocket, embedded dashboard UI (bind localhost) |
-| IM bridge | done | runs inside `octo serve` — WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram adapters (web QR login, per-user sessions, slash commands) |
+| IM bridge | done | runs inside `octo serve` — WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram adapters (web QR login, per-user sessions, slash commands, proactive `send_message`/`send_file` to any known chat) |
 
 ## Architecture
 

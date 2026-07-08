@@ -14,6 +14,10 @@ The engine runs in one of three modes, selectable at startup or cycled at runtim
 
 Cycle modes in the TUI with **Shift+Tab**.
 
+### Per-session override (web)
+
+A web session's permission mode can also be changed from its own composer status bar, or via `PATCH /api/sessions/{id}/permission_mode`. This only affects that one session — it never touches the global default in `~/.octo/config.yml` (edited instead via `octo config` or Settings → default model), so other sessions and any brand-new session are unaffected. The change is saved to the session and takes effect on its next turn.
+
 ## Rule format
 
 Rules are defined in `~/.octo/permissions.yml` (user overrides) and an embedded `defaults.yml` (base layer). The YAML schema:

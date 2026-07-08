@@ -8,13 +8,20 @@ Type `/` to open the completion menu (↑/↓ to navigate, Enter to run, Tab to 
 
 | Command | Description |
 |---------|-------------|
-| `/help` | Show this help message |
-| `/init` | Analyze repo and generate/update `.octorules` (needs `--tools`) |
-| `/save` | Save the session now (also auto-saves after each turn) |
-| `/sessions` | List the 10 most recent sessions |
-| `/skills` | List available skills (trigger with `/<name>`) |
-| `/memory` | List what's remembered across sessions |
+| `/help` | List commands and tools |
+| `/model` | Switch to another model |
+| `/thinking` | Set reasoning effort (off/low/medium/high/xhigh/max) |
+| `/compact` | Summarize older history to free up context |
+| `/transcript` | Re-print the last (or last N) tool call(s) with full, uncapped output |
+| `/goal` | Bare `/goal` shows the current goal (if any); `/goal <objective>` sets one. Manage it with `/goal pause`, `/goal resume`, `/goal clear`, `/goal edit` (prefills the input to change the objective), or `/goal replace <objective>` (replace an unfinished goal). Once set, octo auto-continues turns on its own until the goal completes, is paused, or hits its token/turn budget |
+| `/clear` | Wipe the conversation and start fresh |
+| `/skills` | List discovered skills (trigger one directly with `/<name>`) |
 | `/mcp` | Show connected MCP servers and their surfaces |
+| `/workflows` | List available named workflows (run by the model via the `workflow` tool) |
+| `/memory` | List what's remembered across sessions |
+| `/init` | Analyze repo and generate/update `.octorules` |
+| `/save` | Save the session now (also auto-saves after each turn) |
+| `/sessions` | List recent sessions |
 | `/exit` or `/quit` | Save and exit |
 
 ## Keyboard shortcuts
@@ -91,5 +98,12 @@ The bottom status bar shows:
 - **ctx** — context window usage percentage
 - **perm** — current permission mode (interactive / strict / auto)
 - **elapsed** — turn duration (while running)
+- **goal** — a segment appears here when a session goal is active (see `/goal` above), refreshing as it accounts tokens/turns
 
 Contextual hints appear below the status bar depending on state (e.g. "Enter steer · Ctrl+Q queue · Esc interrupt").
+
+After each turn finishes, an always-on footer line prints the elapsed time and tokens spent on that turn (suppressed in `--quiet` mode).
+
+## Artifacts
+
+When the model calls `show_artifact` to present a previewable file (HTML, Markdown, or an image), the TUI renders it as a click-to-open `file://` hyperlink instead of dumping raw content inline.

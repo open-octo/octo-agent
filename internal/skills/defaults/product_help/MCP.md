@@ -109,7 +109,7 @@ If a server fails to connect, the error is printed to stderr and that server is 
 
 MCP servers with many tools can push a lot of schema tokens into every request. Tool Search defers those *schemas*: built-in tools stay visible, and every connected MCP tool's name + one-line description stays listed in the system prompt the whole time — only the full parameter schema is loaded on demand, via `mcp_describe` → `mcp_call`.
 
-Control it under `tools.tool_search` in `~/.octo/config.yaml`:
+Control it under `tools.tool_search` in `~/.octo/config.yml`:
 
 ```yaml
 tools:

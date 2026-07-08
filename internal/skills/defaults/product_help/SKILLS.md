@@ -1,71 +1,56 @@
-# Default Skills (embed + materialize)
+# Skills — defaults, installing, and writing your own
 
-> A curated set of skills ships with the binary and lands on disk on first run,
-> so a fresh `octo` install has useful skills without the user authoring any.
+Skills are reusable instruction sets in Claude Code's SKILL.md format: YAML frontmatter (`name` + `description`) plus a markdown body. At session start octo lists each discovered skill's name and description in the system prompt; the model loads a skill's full instructions on demand (via the `skill` tool) when a task matches, or a user triggers one explicitly with `/<name>` in the TUI.
 
-## 1. Goal
-
-After install, a curated skill set (today: `worktree-isolate`) is discoverable,
-listable, and overridable — **offline, version-locked to the binary, and never
-clobbering a user's own skills.**
-
-## 2. Decision: embed, don't download
-
-The default set is embedded in the binary via `//go:embed` and materialized to
-disk on startup — **not** fetched from a remote. Embedding keeps a fresh install
-offline-capable (works for `go install`, air-gapped, CI) and immune to
-supply-chain / network-failure modes. A real download path is reserved for a
-future *optional* community catalog (`octo skills add <name>`), which is a
-separate concern from the built-in defaults.
-
-## 3. Mechanism
-
-- **Source of truth:** `internal/skills/defaults/<name>/SKILL.md`, embedded as
-  `defaultsFS` (`internal/skills/defaults.go`).
-- **Materialize:** `MaterializeDefaults(version)` writes the embedded tree to
-  `~/.octo/skills-default/`, stamped with the binary version in `.octo-version`.
-  It's a fast no-op once the stamp matches; a version bump wipes-and-rewrites the
-  whole dir (stale/renamed skills handled). Called best-effort at startup in
-  `cmd/octo` `run()` (skipped for the `__complete` / `__sandboxed-exec` fast
-  paths); a read-only HOME degrades to "no defaults", never an error.
-- **Dedicated dir:** `~/.octo/skills-default/` is exclusively octo-managed and
-  kept **separate** from `~/.octo/skills/`, so refreshing defaults never touches
-  a user's own skills and needs no per-file provenance tracking.
-
-## 4. Precedence
-
-`Discover` scans lowest-first; `scanRoot` overwrites by name:
+## 1. Where skills come from
 
 ```
-default  ~/.octo/skills-default/   (shipped, materialized)
+default  ~/.octo/skills-default/   (shipped, materialized from the binary)
    ↓ overridden by
-user     ~/.octo/skills/
+user     ~/.octo/skills/           (yours, or `octo skills add`)
    ↓ overridden by
-project  ./.octo/skills/
+project  ./.octo/skills/           (committed with the repo)
 ```
 
-A user overrides a default skill by dropping a same-named skill in
-`~/.octo/skills/`. `octo skills list` tags each with its
-source.
+`Discover` scans lowest-first and `scanRoot` overwrites by name, so a user- or project-level skill with the same name as a default silently wins. `octo skills list` tags each with its source (default/user/project).
 
-## 5. CLI
+## 2. Default skills (embedded, not downloaded)
+
+A curated set ships **embedded in the binary** via `//go:embed` and is materialized to `~/.octo/skills-default/` on first run of each version — offline-capable (works for `go install`, air-gapped, CI), immune to supply-chain/network failure, and never touches `~/.octo/skills/` (your own skills). A version bump wipes-and-rewrites the default dir; a read-only `$HOME` degrades to "no defaults" rather than erroring.
+
+Today's default set (`internal/skills/defaults/`, 20 skills): `channel-manager`, `code-review`, `cron-task-creator`, `deep-research`, `find-skills`, `grill-me`, `implement`, `loop`, `loop-engineering`, `mcp-creator`, `office-xlsx`, `onboard`, `product_help` (this skill), `skill-creator`, `tdd`, `tech-design`, `web-access`, `workflow-creator`, `worktree-isolate`, `zoom-out`. Keep the set small and high-value — every default costs system-prompt manifest space for every user.
 
 ```
 octo skills list      # all skills, grouped default → user → project
-octo skills update    # force re-materialize the defaults (ignores the stamp)
+octo skills update    # force re-materialize the defaults (ignores the version stamp)
 octo skills path      # print the three roots
 ```
 
-## 6. Adding a default skill
+## 3. Installing a skill from GitHub
 
-Drop `internal/skills/defaults/<name>/SKILL.md` (standard SKILL.md frontmatter:
-`name` + `description`). It ships on the next release and materializes on the
-user's next run after upgrade. Keep the set small and high-value — every default
-costs system-prompt manifest space for every user.
+`octo skills add <owner/repo[/sub/path] | github.com tree URL> [--force]` fetches a skill's directory straight into `~/.octo/skills/<name>/`:
 
-## 7. Out of scope
+```
+octo skills add anthropics/skills/skills/docx
+octo skills add https://github.com/anthropics/skills/tree/main/skills/pdf
+```
 
-- **Remote / community skills** (`octo skills add`, a catalog) — a separate
-  optional feature; defaults stay embedded.
-- **Per-file user-edit preservation in the default dir** — unnecessary, because
-  users edit in `~/.octo/skills/`, not the octo-managed default dir.
+Fails if a skill with that name already exists there — pass `--force` to replace it. The skill is copied for local use; check the source repository's license before redistributing it.
+
+## 4. Writing your own skill
+
+Drop a directory under `~/.octo/skills/<name>/` (user-level, all projects) or `./.octo/skills/<name>/` (project-level, committed with the repo) containing a `SKILL.md`:
+
+```markdown
+---
+name: review
+description: Review the current diff for correctness and style
+---
+Walk the diff hunk by hunk and flag correctness bugs first, then style.
+```
+
+`name` and `description` are the only required frontmatter fields — the description is what the model sees in the manifest to decide when the skill applies, so make it specific about triggers ("use when...") rather than just naming the topic. The body is whatever instructions/context the skill needs; it can reference sibling files in the same directory (e.g. templates, reference docs) that the model reads on demand. The format is identical to Claude Code's, so `~/.claude/skills` can be symlinked to `~/.octo/skills` to reuse skills you already have. The `skill-creator` default skill can also build one interactively.
+
+## 5. Adding a *default* skill (contributing to octo itself)
+
+Drop `internal/skills/defaults/<name>/SKILL.md` in the octo-agent repo (standard SKILL.md frontmatter). It ships on the next release and materializes on the user's next run after upgrading.

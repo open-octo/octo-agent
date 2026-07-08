@@ -4,16 +4,26 @@ The canonical project guidance for contributors and AI coding agents. Keep this 
 
 ## Project
 
-`octo-agent` is a Go AI agent CLI (Go 1.22+, single binary). Module path `github.com/open-octo/octo-agent`. CLI today; Web UI and IM bridges land in M8/M9 — see `dev-docs/go-rewrite-roadmap.md`.
+`octo-agent` is a Go AI agent CLI (Go 1.22+, single binary). Module path `github.com/open-octo/octo-agent`. All three surfaces are live — CLI/TUI, `octo serve` (web REST + WebSocket + dashboard), and the IM bridge (runs inside `octo serve`).
 
 ## Layering
 
 ```
-cmd/octo/          CLI entry, flag parsing, REPL, sessions
-internal/agent/    Agent loop, history, content blocks, Sender interfaces
-internal/provider/ Provider interface + per-vendor implementations
-internal/tools/    Concrete ToolExecutor implementations
-internal/version/  Version constants overridable via -ldflags
+cmd/octo/           CLI entry, flag parsing, REPL/TUI, sessions
+internal/agent/     Agent loop, history, content blocks, Sender interfaces
+internal/provider/  Provider interface + per-vendor implementations
+internal/tools/     Concrete ToolExecutor implementations
+internal/skills/    SKILL.md discovery + system-prompt manifest
+internal/permission/ allow/deny/ask rule engine gating every tool call
+internal/hooks/     Lifecycle-event hook engine (hooks.yml)
+internal/mcp/       MCP client (stdio + HTTP, OAuth)
+internal/server/    octo serve — HTTP REST + WebSocket + embedded dashboard
+internal/channel/   IM bridge — adapter interface + platform adapters
+internal/workflow/  Named multi-step workflow execution
+internal/browser/   Browser automation (CDP) backend
+internal/memory/    Cross-session memory
+internal/version/   Version constants overridable via -ldflags
+pkg/octoagent/      Public Go SDK re-exporting core agent types for embedding octo in other programs
 ```
 
 Dependency direction is one-way: `provider → agent`, `tools → agent`, never the other way. `cmd/octo` is the only package allowed to import `provider` directly; everything else talks through `agent.Sender` / `StreamingSender` / `ToolSender` / `ToolStreamingSender`.
@@ -22,7 +32,7 @@ Dependency direction is one-way: `provider → agent`, `tools → agent`, never 
 
 - **New provider** — implement `provider.Provider` (required) and optionally `provider.StreamingProvider`, `provider.ToolProvider`, `provider.ToolStreamingProvider`. Put it under `internal/provider/<name>/`. Each protocol's wire-format quirks are isolated inside the package; the agent layer must not learn about them.
 - **New tool** — implement `agent.ToolExecutor` and `Definition() agent.ToolDefinition` returning the JSON Schema the LLM sees. Place it under `internal/tools/<name>.go`. Register it in `tools.DefaultRegistry` and add it to `tools.DefaultTools()` if it belongs in the default set.
-- **New skill** (M7+) — `~/.octo/skills/<name>/SKILL.md` with the same frontmatter format Claude Code uses. The skill loader composes existing tools — adding a skill should not require new tool code.
+- **New skill** — `~/.octo/skills/<name>/SKILL.md` with the same frontmatter format Claude Code uses, or `internal/skills/defaults/<name>/SKILL.md` to ship it as a default. The skill loader composes existing tools — adding a skill should not require new tool code.
 
 ## Code style
 
