@@ -7,6 +7,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/memorybackend"
 	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tasks"
 	"github.com/open-octo/octo-agent/internal/tools"
@@ -57,7 +58,8 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	// this is the only place serve learns whether the model can take images — a
 	// text-only model would otherwise be handed a screenshot it rejects (HTTP
 	// 400). Re-evaluated per turn so a mid-session model switch takes effect.
-	if cfg, err := config.Load(); err == nil {
+	cfg, cfgErr := config.Load()
+	if cfgErr == nil {
 		tools.SetBrowserVision(cfg.ModelVision(a.Model))
 	}
 
@@ -67,6 +69,22 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	// back to deterministic compilation and no self-heal.
 	tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.Sender, a.Model))
 	tools.SetBrowserHealer(app.MakeBrowserHealer(a.Sender, a.Model))
+
+	// Same omission for the external memory backend: WireTools installs it for
+	// the CLI, but serve never calls WireTools, so without this the feature
+	// silently doesn't exist under `octo serve` even when configured. Cheap to
+	// re-evaluate per turn (a lightweight REST client, not a persistent
+	// connection); a bad Type/BaseURL just leaves it unconfigured.
+	if cfgErr == nil && cfg.MemoryBackendEnabled() {
+		if b, err := memorybackend.New(memorybackend.Config{
+			Type:      cfg.MemoryBackend.Type,
+			BaseURL:   cfg.MemoryBackend.BaseURL,
+			APIKey:    cfg.MemoryBackend.APIKey,
+			Namespace: cfg.MemoryBackend.Namespace,
+		}); err == nil {
+			tools.SetMemoryBackend(b)
+		}
+	}
 
 	// Anchor the gate at the agent's per-session cwd (not the server default) so
 	// $CWD path rules and relative-path resolution match where the tools

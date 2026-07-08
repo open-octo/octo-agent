@@ -65,11 +65,14 @@ func (b *mem0Backend) Store(ctx context.Context, content string) error {
 	return b.do(ctx, b.url("/memories"), body, nil)
 }
 
-// mem0SearchResponse is decoded tolerantly: the self-hosted server's /search
-// response delegates serialization to the core mem0 library rather than
-// defining its own schema in server/main.py, so the exact per-result field
-// name for the memory text isn't verified from source. Each result is kept
-// as a raw map and resolved by resultText/resultScore below.
+// mem0SearchResponse is decoded tolerantly. The self-hosted server's /search
+// delegates serialization to the core mem0 library, which (per
+// mem0/memory/main.py's _search_vector_store) returns flat {id, memory,
+// score} objects — "memory" is the field this code expects to hit. The
+// content/text fallbacks in mem0ResultText are a hedge against future/
+// self-hosted-fork field-name drift, not because the current shape is
+// unverified. Each result is kept as a raw map and resolved by
+// mem0ResultText/mem0ResultID/mem0ResultScore below.
 type mem0SearchResponse struct {
 	Results []map[string]json.RawMessage `json:"results"`
 }

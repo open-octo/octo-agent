@@ -51,14 +51,15 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 
 	// Gate image content (browser screenshots) on the active model's vision
 	// capability so a text-only model isn't handed images its endpoint rejects.
-	if cfg, err := config.Load(); err == nil {
+	cfg, cfgErr := config.Load()
+	if cfgErr == nil {
 		tools.SetBrowserVision(cfg.ModelVision(a.Model))
 	}
 
 	// Optional external semantic memory backend (hindsight/mem0/memos). A
 	// bad Type/BaseURL just leaves it unconfigured rather than failing
 	// session start — the user finds out on the first memory_recall call.
-	if cfg, err := config.Load(); err == nil && cfg.MemoryBackendEnabled() {
+	if cfgErr == nil && cfg.MemoryBackendEnabled() {
 		if b, err := memorybackend.New(memorybackend.Config{
 			Type:      cfg.MemoryBackend.Type,
 			BaseURL:   cfg.MemoryBackend.BaseURL,

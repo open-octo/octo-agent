@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -72,5 +73,46 @@ func TestWireTools_TasksDisabled(t *testing.T) {
 	}
 	if tools.ActiveSpawner() == nil {
 		t.Error("spawner should still be registered when tasks are disabled")
+	}
+}
+
+func TestWireTools_WiresMemoryBackendFromConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Cleanup(func() { tools.SetSpawner(nil); tools.SetTaskStore(nil); tools.SetMemoryBackend(nil) })
+
+	cfg := config.Config{
+		MemoryBackend: config.MemoryBackendConfig{Type: "hindsight", BaseURL: "http://localhost:8888"},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	a := agent.New(sender{p: &mockProvider{}}, "claude-haiku-4-5")
+	_, cleanup := WireTools(a, false)
+
+	if g := tools.MemoryBackendGuidance(); g == "" {
+		t.Error("WireTools should register the configured memory backend")
+	}
+
+	cleanup()
+	if g := tools.MemoryBackendGuidance(); g != "" {
+		t.Errorf("cleanup should reset the memory backend, guidance = %q", g)
+	}
+}
+
+func TestWireTools_NoMemoryBackendConfigured(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Cleanup(func() { tools.SetSpawner(nil); tools.SetTaskStore(nil); tools.SetMemoryBackend(nil) })
+
+	a := agent.New(sender{p: &mockProvider{}}, "claude-haiku-4-5")
+	_, cleanup := WireTools(a, false)
+	defer cleanup()
+
+	if g := tools.MemoryBackendGuidance(); g != "" {
+		t.Errorf("guidance = %q, want empty with no memory_backend configured", g)
 	}
 }
