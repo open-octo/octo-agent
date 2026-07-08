@@ -778,8 +778,26 @@
     const content = innerEl
     if (!scroller || !content) return
 
+    // A gentle upward gesture only moves scrollTop a few px, which usually
+    // still lands within the 80px "near bottom" band below — recomputing
+    // stick from distance-to-bottom alone on every 'scroll' event re-engaged
+    // it immediately after 'wheel' had just disengaged it, so the very next
+    // ResizeObserver tick (fired constantly while streaming) yanked the view
+    // back to the bottom before the gesture could carry it out of the band.
+    // That race is what made small scroll-ups jitter in place and never
+    // escape (recurring case of #1069/#1187). Only let 'scroll' events moving
+    // *toward* the bottom re-engage stick; ones moving away can disengage it
+    // but never re-arm it purely from still being within the band.
+    let lastScrollTop = scroller.scrollTop
     const onScroll = () => {
-      stick = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80
+      const top = scroller.scrollTop
+      const nearBottom = scroller.scrollHeight - top - scroller.clientHeight < 80
+      if (top < lastScrollTop) {
+        if (!nearBottom) stick = false
+      } else {
+        stick = nearBottom
+      }
+      lastScrollTop = top
     }
     scroller.addEventListener('scroll', onScroll, { passive: true })
 
