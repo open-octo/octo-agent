@@ -312,8 +312,8 @@ type Server struct {
 	// with itself or with incremental connects. Also guards mcpOAuthFlows.
 	mcpMu sync.Mutex
 
-	// mcpOAuthFlows tracks in-flight web device-flow authorizations by
-	// server name. Lazily initialised by the oauth/start handler.
+	// mcpOAuthFlows tracks in-flight web Authorization Code authorizations
+	// by server name. Lazily initialised by the oauth/start handler.
 	mcpOAuthFlows map[string]*mcpOAuthFlow
 
 	// accessKey is the shared secret for Web UI / API authentication.
@@ -676,9 +676,10 @@ func (s *Server) doShutdown(ctx context.Context) error {
 }
 
 // api registers an authenticated route. The requireAuth wrapper is applied
-// here, in one place, so a new route cannot forget it; /api/health,
-// /api/version, and static files are the only handlers registered directly
-// on the mux.
+// here, in one place, so a new route cannot forget it. /api/health,
+// /api/version, the MCP OAuth callback, and static files are the only
+// handlers registered directly on the mux — the OAuth callback bypasses
+// auth deliberately (see handleMCPOAuthCallback's doc comment).
 func (s *Server) api(pattern string, h http.HandlerFunc) {
 	s.apiRoutes = append(s.apiRoutes, pattern)
 	s.mux.HandleFunc(pattern, s.requireAuth(h))
@@ -785,6 +786,7 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/mcp/servers/{name}/reconnect", s.handleReconnectMCPServer)
 	s.api("POST /api/mcp/servers/{name}/oauth/start", s.handleStartMCPOAuth)
 	s.api("GET /api/mcp/servers/{name}/oauth/status", s.handleMCPOAuthStatus)
+	s.mux.HandleFunc("GET /api/mcp/servers/{name}/oauth/callback", s.handleMCPOAuthCallback)
 	s.api("POST /api/mcp/reload", s.handleReloadMCP)
 	s.api("GET /api/config/toolsearch", s.handleGetToolSearch)
 	s.api("PUT /api/config/toolsearch", s.handlePutToolSearch)

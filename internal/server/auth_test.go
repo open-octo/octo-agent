@@ -211,8 +211,8 @@ func TestRequireAuth_RouteCoverage(t *testing.T) {
 // TestRegisterRoutes_OnlyKnownUnauthenticated scans the registration source
 // for direct mux registrations: the apiRoutes loop above can't catch a route
 // that bypasses api() entirely, because bypassing api() is exactly what
-// keeps a route out of apiRoutes. Only health, version, and the static
-// handler may register directly.
+// keeps a route out of apiRoutes. Only health, version, the MCP OAuth
+// callback, and the static handler may register directly.
 func TestRegisterRoutes_OnlyKnownUnauthenticated(t *testing.T) {
 	src, err := os.ReadFile("server.go")
 	if err != nil {
@@ -222,7 +222,8 @@ func TestRegisterRoutes_OnlyKnownUnauthenticated(t *testing.T) {
 	allowed := map[string]bool{
 		"GET /api/health":  true,
 		"GET /api/version": true,
-		"/":                true,
+		"GET /api/mcp/servers/{name}/oauth/callback": true,
+		"/": true,
 	}
 	if len(direct) != len(allowed) {
 		t.Errorf("expected exactly %d direct mux registrations, got %d", len(allowed), len(direct))

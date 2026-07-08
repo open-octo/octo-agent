@@ -43,7 +43,7 @@ type Connection struct {
 	// reauthMu guards reauthErr, set by MarkReauthRequired when a call made
 	// through this (otherwise still "live") connection surfaces
 	// ErrReauthRequired — the OAuth token died and nobody was present to
-	// complete an interactive device flow. The connection object itself
+	// complete an interactive browser authorization. The connection object itself
 	// stays usable/registered; this flag is how a caller with visibility
 	// into Registry (e.g. the status endpoint) learns the connection is no
 	// longer actually authenticated without waiting for it to be torn down.
@@ -95,7 +95,7 @@ func (c *Connection) ReauthRequired() (msg string, ok bool) {
 //
 // authPromptFor produces the OAuthPrompt for one server. The factory
 // shape (rather than a single shared prompt) lets the CLI label each
-// device-flow card with the server name it's authorising. May be nil
+// authorization card with the server name it's authorising. May be nil
 // when no entry uses OAuth — a nil factory triggers the same "auth
 // required but not wired" error as a missing config.
 //
@@ -130,7 +130,7 @@ func ConnectAll(ctx context.Context, cfg *Config, info Implementation, authPromp
 
 func connectOne(ctx context.Context, name string, entry ServerEntry, info Implementation, authPrompt OAuthPrompt, childStderr io.Writer) (*Connection, error) {
 	// Per-server timeout. OAuth-protected servers get a longer window
-	// because the user has to do the device-flow dance interactively;
+	// because the user has to complete an interactive browser authorization;
 	// stdio + static-auth servers should still snap up in ~10s.
 	timeout := 10 * time.Second
 	if entry.Auth == "oauth" {

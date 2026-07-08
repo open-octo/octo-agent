@@ -2,6 +2,9 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,38 +26,49 @@ import (
 //   - RFC 8414: discover authorization-server metadata (endpoints + grant
 //     types) via /.well-known/oauth-authorization-server/<path>.
 //   - RFC 7591: dynamic client registration (public client, no secret,
-//     PKCE-friendly).
-//   - RFC 8628: device authorization grant. Right pick for a CLI — no
-//     local listener, just "open <uri> and enter <code>".
+//     PKCE-friendly), registering the redirect_uri the current OAuthPrompt
+//     will receive the callback on.
+//   - RFC 6749 Authorization Code grant + RFC 7636 PKCE (S256). The
+//     redirect target differs by context: octo serve's web panel reuses its
+//     already-running HTTP server (so the callback works through whatever
+//     port/tunnel the user is already using to reach the panel); a bare CLI
+//     session has no listener of its own, so it spins up a one-shot
+//     loopback HTTP server for the duration of the flow (see
+//     cmd/octo/mcp_prompt.go). Device Code (RFC 8628) was tried first for
+//     the CLI case specifically to avoid that local listener, but real
+//     authorization servers vary in how well they support it (e.g. an
+//     audience-checking Lark/meegle app rejected the device-authorization
+//     request outright) — Authorization Code is the flow every OAuth
+//     server is expected to support, so it's used everywhere instead.
 //   - RFC 8707: bind the token to the resource named in the protected-
 //     resource metadata (falling back to the configured URL if the server
-//     omits it) via a "resource" form param on every device-authorization,
-//     token-exchange, and refresh request. Without this, an audience-
-//     checking authorization server issues a token that authenticates but
-//     isn't authorized for this specific MCP endpoint — every request
-//     401s even with a brand-new token.
+//     omits it) via a "resource" param on the authorization request, token
+//     exchange, and refresh request. Without this, an audience-checking
+//     authorization server issues a token that authenticates but isn't
+//     authorized for this specific MCP endpoint — every request 401s even
+//     with a brand-new token.
 //   - Refresh-token flow on near-expiry + cached token persistence.
 //
 // What this skips
-//   - Authorization Code + PKCE (would need a local listener; Device Code
-//     gives an equally good UX in a terminal without the extra surface).
 //   - Discovery via /.well-known/openid-configuration (we only do the
 //     OAuth variant).
 //   - Mutual TLS / client_secret_post / etc. — public client, no secret.
 
-// OAuthPrompt is the user-facing side of the device flow. The CLI prints
-// the verification URI + user code; tests can stub it.
+// OAuthPrompt drives the transport side of the Authorization Code + PKCE
+// flow: getting the user's browser to the authorize URL and receiving the
+// resulting code back. Implementations differ by context — see the package
+// doc comment above.
 type OAuthPrompt interface {
-	// ShowAuthorization is called when the device flow needs the user to
-	// hit a URL and enter a code. verificationURIComplete (if non-empty)
-	// is the pre-filled link the user can paste into a browser directly;
-	// servers that don't supply it leave it empty and the caller falls
-	// back to verificationURI + manual code entry.
-	ShowAuthorization(userCode, verificationURI, verificationURIComplete string)
-	// Progress is called once per poll cycle so the CLI can keep the user
-	// informed ("waiting for authorization…"). Optional — implementations
-	// may no-op.
-	Progress()
+	// RedirectURI returns the redirect_uri to register and to use in the
+	// authorization request. Called once per authorize() attempt, before
+	// the authorization URL is built.
+	RedirectURI() string
+	// AwaitAuthorizationCode is called once the authorize URL is ready. The
+	// implementation is responsible for getting the user to open it
+	// (auto-launching a browser for CLI/TUI, surfacing it for the web panel
+	// to window.open) and for blocking until the resulting code arrives via
+	// whatever channel backs RedirectURI, or ctx is done.
+	AwaitAuthorizationCode(ctx context.Context, authorizeURL, state string) (code string, err error)
 	// Done is called once after a successful authorization.
 	Done()
 }
@@ -109,11 +123,18 @@ type oauthState struct {
 	// "scopes_supported". Re-sent on refresh so a rotated token keeps the
 	// same grant.
 	Scope string `json:"scope,omitempty"`
+	// RedirectURI is the redirect_uri ClientID was registered with. A CLI
+	// session's loopback listener binds a fresh random port on every run,
+	// so a cached ClientID is only reusable when the current OAuthPrompt
+	// reports the same RedirectURI it was registered with — otherwise the
+	// authorization server will reject the mismatch, so authorize()
+	// re-registers instead of reusing it.
+	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
 // NewOAuthClient builds a provider for the given MCP resource URL.
 // serverName names the cache file (and feeds RFC 7591's client_name).
-// prompt drives the user-visible parts of the device flow.
+// prompt drives the user-visible parts of the OAuth flow.
 func NewOAuthClient(resourceURL, serverName, clientName string, prompt OAuthPrompt) (*OAuthClient, error) {
 	if resourceURL == "" {
 		return nil, errors.New("oauth: empty resourceURL")
@@ -189,18 +210,16 @@ func (o *OAuthClient) Invalidate() {
 }
 
 // ErrReauthRequired is returned by authorize (and therefore Token) when the
-// cached/refreshed token is unusable and completing the device flow needs a
+// cached/refreshed token is unusable and completing the OAuth flow needs a
 // human — but no OAuthPrompt was supplied. Background connections (startup,
 // reload, panel-triggered reconnect) all construct their OAuthClient with a
-// nil prompt, since nobody is present to see a verification code. Without
-// this check, authorize would still run the full device flow and poll
-// silently for up to 5 minutes before timing out with a generic error;
-// callers can check for this sentinel via errors.Is to detect "this
+// nil prompt, since nobody is present to complete a browser redirect.
+// Callers can check for this sentinel via errors.Is to detect "this
 // connection needs an interactive re-authorization" without waiting.
 var ErrReauthRequired = errors.New("oauth: interactive re-authorization required")
 
-// authorize runs the full discovery + (maybe register) + device flow.
-// Caller holds o.mu.
+// authorize runs the full discovery + (maybe register) + Authorization Code
+// + PKCE flow. Caller holds o.mu.
 func (o *OAuthClient) authorize(ctx context.Context) error {
 	if o.prompt == nil {
 		return ErrReauthRequired
@@ -220,15 +239,16 @@ func (o *OAuthClient) authorize(ctx context.Context) error {
 		resource = o.resourceURL
 	}
 	scope := strings.Join(prMeta.ScopesSupported, " ")
+	redirectURI := o.prompt.RedirectURI()
 
 	clientID := ""
 	clientSecret := ""
-	if o.state != nil && o.state.ClientID != "" {
+	if o.state != nil && o.state.ClientID != "" && o.state.RedirectURI == redirectURI {
 		clientID = o.state.ClientID
 		clientSecret = o.state.ClientSecret
 	} else if asMeta.RegistrationEndpoint != "" {
 		// Public client + PKCE-friendly: no secret expected back.
-		id, secret, err := o.register(ctx, asMeta.RegistrationEndpoint, scope)
+		id, secret, err := o.register(ctx, asMeta.RegistrationEndpoint, scope, redirectURI)
 		if err != nil {
 			return fmt.Errorf("oauth: dynamic client registration: %w", err)
 		}
@@ -238,9 +258,9 @@ func (o *OAuthClient) authorize(ctx context.Context) error {
 		return errors.New("oauth: server has no registration_endpoint and no cached client_id")
 	}
 
-	tok, err := o.deviceFlow(ctx, asMeta, clientID, clientSecret, resource, scope)
+	tok, err := o.authCodeFlow(ctx, asMeta, clientID, clientSecret, resource, scope, redirectURI)
 	if err != nil {
-		return fmt.Errorf("oauth: device flow: %w", err)
+		return fmt.Errorf("oauth: authorization code flow: %w", err)
 	}
 	o.state = &oauthState{
 		ResourceURL:  o.resourceURL,
@@ -252,15 +272,14 @@ func (o *OAuthClient) authorize(ctx context.Context) error {
 		TokenURL:     asMeta.TokenEndpoint,
 		Resource:     resource,
 		Scope:        scope,
+		RedirectURI:  redirectURI,
 	}
 	if err := saveOAuthState(o.storePath, o.state); err != nil {
 		// Persist failure is non-fatal — we still have the token in
 		// memory for this session.
 		fmt.Fprintf(os.Stderr, "oauth: cache write failed: %v\n", err)
 	}
-	if o.prompt != nil {
-		o.prompt.Done()
-	}
+	o.prompt.Done()
 	return nil
 }
 
@@ -304,7 +323,6 @@ type asMetadata struct {
 	AuthorizationEndpoint         string   `json:"authorization_endpoint"`
 	TokenEndpoint                 string   `json:"token_endpoint"`
 	RegistrationEndpoint          string   `json:"registration_endpoint"`
-	DeviceAuthorizationEndpoint   string   `json:"device_authorization_endpoint"`
 	GrantTypesSupported           []string `json:"grant_types_supported"`
 	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
 }
@@ -342,8 +360,8 @@ func (o *OAuthClient) discover(ctx context.Context) (*asMetadata, *prMetadata, e
 	if err := o.getJSON(ctx, asURL, &as); err != nil {
 		return nil, nil, fmt.Errorf("authorization-server metadata: %w", err)
 	}
-	if as.DeviceAuthorizationEndpoint == "" {
-		return nil, nil, errors.New("oauth: server does not support device authorization grant")
+	if as.AuthorizationEndpoint == "" {
+		return nil, nil, errors.New("oauth: server does not support the authorization code grant")
 	}
 	if as.TokenEndpoint == "" {
 		return nil, nil, errors.New("oauth: server has no token endpoint")
@@ -395,10 +413,11 @@ type registrationResponse struct {
 	ClientSecret string `json:"client_secret"`
 }
 
-func (o *OAuthClient) register(ctx context.Context, endpoint, scope string) (clientID, clientSecret string, err error) {
+func (o *OAuthClient) register(ctx context.Context, endpoint, scope, redirectURI string) (clientID, clientSecret string, err error) {
 	body := map[string]any{
 		"client_name":                o.clientName,
-		"grant_types":                []string{"urn:ietf:params:oauth:grant-type:device_code", "refresh_token"},
+		"grant_types":                []string{"authorization_code", "refresh_token"},
+		"redirect_uris":              []string{redirectURI},
 		"token_endpoint_auth_method": "none",
 		"application_type":           "native",
 	}
@@ -434,16 +453,7 @@ func (o *OAuthClient) register(ctx context.Context, endpoint, scope string) (cli
 	return out.ClientID, out.ClientSecret, nil
 }
 
-// ── device flow (RFC 8628) ───────────────────────────────────────────────
-
-type deviceCodeResponse struct {
-	DeviceCode              string `json:"device_code"`
-	UserCode                string `json:"user_code"`
-	VerificationURI         string `json:"verification_uri"`
-	VerificationURIComplete string `json:"verification_uri_complete"`
-	ExpiresIn               int    `json:"expires_in"`
-	Interval                int    `json:"interval"`
-}
+// ── authorization code + PKCE (RFC 6749 + RFC 7636) ─────────────────────
 
 type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
@@ -451,121 +461,102 @@ type tokenResponse struct {
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
 	Scope        string `json:"scope"`
-	// Polling-error fields:
+	// Error fields: some servers (e.g. Lark) return these with a 200
+	// instead of a 4xx status; postTokenEndpoint checks Error regardless of
+	// HTTP status.
 	Error            string `json:"error"`
 	ErrorDescription string `json:"error_description"`
 }
 
-func (o *OAuthClient) deviceFlow(ctx context.Context, as *asMetadata, clientID, clientSecret, resource, scope string) (*tokenResponse, error) {
-	// 1. Kick off the device authorization.
+// authCodeFlow runs the browser-redirect Authorization Code grant with PKCE:
+// build the authorize URL, hand it to the prompt (which gets the user's
+// browser there and blocks until the resulting code arrives via its own
+// redirect handling — a local callback route for octo serve, a one-shot
+// loopback listener for a bare CLI session), then exchange the code for a
+// token.
+func (o *OAuthClient) authCodeFlow(ctx context.Context, as *asMetadata, clientID, clientSecret, resource, scope, redirectURI string) (*tokenResponse, error) {
+	state, err := randomURLSafe(32)
+	if err != nil {
+		return nil, fmt.Errorf("generate state: %w", err)
+	}
+	verifier, err := randomURLSafe(64)
+	if err != nil {
+		return nil, fmt.Errorf("generate code_verifier: %w", err)
+	}
+
+	authorizeURL, err := buildAuthorizeURL(as.AuthorizationEndpoint, clientID, redirectURI, state, codeChallengeS256(verifier), resource, scope)
+	if err != nil {
+		return nil, err
+	}
+
+	code, err := o.prompt.AwaitAuthorizationCode(ctx, authorizeURL, state)
+	if err != nil {
+		return nil, err
+	}
+
 	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", redirectURI)
 	form.Set("client_id", clientID)
+	if clientSecret != "" {
+		form.Set("client_secret", clientSecret)
+	}
+	form.Set("code_verifier", verifier)
 	if resource != "" {
 		form.Set("resource", resource)
 	}
 	if scope != "" {
 		form.Set("scope", scope)
 	}
-	dcResp, err := o.startDevice(ctx, as.DeviceAuthorizationEndpoint, form)
-	if err != nil {
-		return nil, err
-	}
-
-	// 2. Show the user where to go.
-	if o.prompt != nil {
-		o.prompt.ShowAuthorization(dcResp.UserCode, dcResp.VerificationURI, dcResp.VerificationURIComplete)
-	}
-
-	// 3. Poll the token endpoint. Interval defaults to 5s per spec when
-	//    the server doesn't specify; the server can ask us to back off
-	//    via slow_down.
-	interval := time.Duration(dcResp.Interval) * time.Second
-	if interval <= 0 {
-		interval = 5 * time.Second
-	}
-	deadline := time.Now().Add(time.Duration(dcResp.ExpiresIn) * time.Second)
-	if dcResp.ExpiresIn == 0 {
-		deadline = time.Now().Add(5 * time.Minute) // server didn't say; pick a sensible bound
-	}
-
-	for {
-		if time.Now().After(deadline) {
-			return nil, errors.New("device flow timed out (user did not authorize)")
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(interval):
-		}
-		if o.prompt != nil {
-			o.prompt.Progress()
-		}
-		tokForm := url.Values{}
-		tokForm.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-		tokForm.Set("device_code", dcResp.DeviceCode)
-		tokForm.Set("client_id", clientID)
-		if clientSecret != "" {
-			tokForm.Set("client_secret", clientSecret)
-		}
-		if resource != "" {
-			tokForm.Set("resource", resource)
-		}
-		if scope != "" {
-			tokForm.Set("scope", scope)
-		}
-		tok, err := o.postTokenEndpoint(ctx, as.TokenEndpoint, tokForm)
-		if err == nil {
-			return tok, nil
-		}
-		var oerr *oauthError
-		if !errors.As(err, &oerr) {
-			return nil, err
-		}
-		switch oerr.code {
-		case "authorization_pending":
-			continue
-		case "slow_down":
-			interval += 5 * time.Second
-			continue
-		case "expired_token", "access_denied":
-			return nil, err
-		default:
-			// Unknown error code: surface immediately rather than spin.
-			return nil, err
-		}
-	}
+	return o.postTokenEndpoint(ctx, as.TokenEndpoint, form)
 }
 
-func (o *OAuthClient) startDevice(ctx context.Context, endpoint string, form url.Values) (*deviceCodeResponse, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+// buildAuthorizeURL appends the RFC 6749 + RFC 7636 (+ RFC 8707) query
+// params to the authorization-server's authorization_endpoint.
+func buildAuthorizeURL(endpoint, clientID, redirectURI, state, codeChallenge, resource, scope string) (string, error) {
+	u, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	resp, err := o.hc.Do(req)
-	if err != nil {
-		return nil, err
+	q := u.Query()
+	q.Set("response_type", "code")
+	q.Set("client_id", clientID)
+	q.Set("redirect_uri", redirectURI)
+	q.Set("state", state)
+	q.Set("code_challenge", codeChallenge)
+	q.Set("code_challenge_method", "S256")
+	if resource != "" {
+		q.Set("resource", resource)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("device authorization HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	if scope != "" {
+		q.Set("scope", scope)
 	}
-	var out deviceCodeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// randomURLSafe returns n cryptographically random bytes, base64url-encoded
+// (no padding) — used for both the PKCE code_verifier and the CSRF state
+// param.
+func randomURLSafe(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
-	if out.DeviceCode == "" || out.UserCode == "" || out.VerificationURI == "" {
-		return nil, errors.New("device authorization response missing required fields")
-	}
-	return &out, nil
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// codeChallengeS256 derives the RFC 7636 S256 code_challenge from a
+// code_verifier.
+func codeChallengeS256(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // postTokenEndpoint POSTs to the token endpoint and decodes either a
-// successful tokenResponse or an *oauthError. Common error codes (RFC
-// 6749 + 8628) are reported as oauthError so the caller can branch on
-// authorization_pending / slow_down without parsing strings.
+// successful tokenResponse or an *oauthError, so callers can branch on the
+// RFC 6749 error code without parsing strings.
 //
 // Tolerance: per RFC 6749 OAuth errors should come back as 4xx, but
 // servers in the wild (Lark, GitHub Apps, …) routinely return 200 with

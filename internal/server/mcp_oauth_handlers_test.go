@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,10 +15,14 @@ import (
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
-// fakeOAuthMCPServer is an MCP endpoint behind a device-flow OAuth gate:
-// unauthenticated JSON-RPC posts get 401 + resource metadata, the OAuth
-// discovery/registration/device/token endpoints all live on the same mux,
-// and an authorized post gets real initialize/tools-list responses.
+// fakeOAuthMCPServer is an MCP endpoint behind an Authorization Code + PKCE
+// OAuth gate: unauthenticated JSON-RPC posts get 401 + resource metadata,
+// the OAuth discovery/registration/token endpoints all live on the same
+// mux, and an authorized post gets real initialize/tools-list responses.
+// There's no /authorize handler: the test plays the browser's role itself,
+// extracting state/redirect_uri from the authorize_url the panel would
+// otherwise open, and hitting the callback directly — see
+// TestMCPOAuth_WebAuthCodeFlow_EndToEnd.
 type fakeOAuthMCPServer struct {
 	srv   *httptest.Server
 	token string
@@ -76,12 +81,10 @@ func newFakeOAuthMCPServer(t *testing.T) *fakeOAuthMCPServer {
 	})
 	mux.HandleFunc("/.well-known/oauth-authorization-server/auth", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSONBody(w, map[string]any{
-			"issuer":                        f.srv.URL,
-			"authorization_endpoint":        f.srv.URL + "/auth",
-			"token_endpoint":                f.srv.URL + "/token",
-			"registration_endpoint":         f.srv.URL + "/register",
-			"device_authorization_endpoint": f.srv.URL + "/device",
-			"grant_types_supported":         []string{"urn:ietf:params:oauth:grant-type:device_code"},
+			"issuer":                 f.srv.URL,
+			"authorization_endpoint": f.srv.URL + "/authorize",
+			"token_endpoint":         f.srv.URL + "/token",
+			"registration_endpoint":  f.srv.URL + "/register",
 		})
 	})
 	mux.HandleFunc("/register", func(w http.ResponseWriter, _ *http.Request) {
@@ -89,19 +92,7 @@ func newFakeOAuthMCPServer(t *testing.T) *fakeOAuthMCPServer {
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{"client_id": "client-1"})
 	})
-	mux.HandleFunc("/device", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSONBody(w, map[string]any{
-			"device_code":               "device-1",
-			"user_code":                 "ABCD-1234",
-			"verification_uri":          f.srv.URL + "/auth",
-			"verification_uri_complete": f.srv.URL + "/auth?code=ABCD-1234",
-			"expires_in":                60,
-			"interval":                  1,
-		})
-	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
-		// Authorize on the first poll — the web flow's states are still
-		// observable because ShowAuthorization runs before polling starts.
 		writeJSONBody(w, map[string]any{
 			"access_token": f.token,
 			"token_type":   "Bearer",
@@ -113,7 +104,7 @@ func newFakeOAuthMCPServer(t *testing.T) *fakeOAuthMCPServer {
 	return f
 }
 
-func TestMCPOAuth_WebDeviceFlow_EndToEnd(t *testing.T) {
+func TestMCPOAuth_WebAuthCodeFlow_EndToEnd(t *testing.T) {
 	fake := newFakeOAuthMCPServer(t)
 	defer fake.srv.Close()
 
@@ -127,18 +118,58 @@ func TestMCPOAuth_WebDeviceFlow_EndToEnd(t *testing.T) {
 		t.Fatalf("start: status = %d: %s", w.Code, w.Body.String())
 	}
 
-	// Poll until the flow settles (the fake authorizes on the first token
-	// poll, ~1s after the device code is issued).
-	deadline := time.Now().Add(15 * time.Second)
+	// Poll until the flow surfaces an authorize_url — the panel would open
+	// this in a new tab; the test plays the browser's role instead.
+	var authorizeURL string
+	deadline := time.Now().Add(5 * time.Second)
+	for authorizeURL == "" {
+		if time.Now().After(deadline) {
+			t.Fatal("flow never reached authorizing with an authorize_url")
+		}
+		w = doJSON(t, srv, http.MethodGet, "/api/mcp/servers/secure/oauth/status", "")
+		var status map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status["state"] == "failed" {
+			t.Fatalf("flow failed before authorizing: %+v", status)
+		}
+		if u, _ := status["authorize_url"].(string); u != "" {
+			authorizeURL = u
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Simulate the browser completing the AS's consent screen and being
+	// redirected back with the code + state.
+	parsed, err := url.Parse(authorizeURL)
+	if err != nil {
+		t.Fatalf("authorize_url %q: %v", authorizeURL, err)
+	}
+	q := parsed.Query()
+	state, redirectURI := q.Get("state"), q.Get("redirect_uri")
+	if state == "" || redirectURI == "" {
+		t.Fatalf("authorize_url missing state/redirect_uri: %q", authorizeURL)
+	}
+	callback, err := url.Parse(redirectURI)
+	if err != nil {
+		t.Fatalf("redirect_uri %q: %v", redirectURI, err)
+	}
+	callback.RawQuery = url.Values{"state": {state}, "code": {"fake-code-1"}}.Encode()
+
+	w = doJSON(t, srv, http.MethodGet, callback.RequestURI(), "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("callback: status = %d: %s", w.Code, w.Body.String())
+	}
+
+	// Poll until the flow settles.
+	deadline = time.Now().Add(5 * time.Second)
 	var last map[string]any
 	for {
 		if time.Now().After(deadline) {
 			t.Fatalf("flow did not settle; last status: %+v", last)
 		}
 		w = doJSON(t, srv, http.MethodGet, "/api/mcp/servers/secure/oauth/status", "")
-		if w.Code != http.StatusOK {
-			t.Fatalf("status: %d: %s", w.Code, w.Body.String())
-		}
 		last = map[string]any{}
 		if err := json.Unmarshal(w.Body.Bytes(), &last); err != nil {
 			t.Fatal(err)
@@ -150,11 +181,7 @@ func TestMCPOAuth_WebDeviceFlow_EndToEnd(t *testing.T) {
 		if state == "failed" {
 			t.Fatalf("flow failed: %+v", last)
 		}
-		// While authorizing, the device code must be exposed to the UI.
-		if state == "authorizing" && last["user_code"] != "ABCD-1234" {
-			t.Fatalf("authorizing without user_code: %+v", last)
-		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// The connection must be live in the registry with its tools listed.
@@ -176,6 +203,62 @@ func TestMCPOAuth_WebDeviceFlow_EndToEnd(t *testing.T) {
 	servers := decodeServers(t, w)
 	if len(servers) != 1 || servers[0].Status != "connected" {
 		t.Fatalf("panel list after oauth: %+v", servers)
+	}
+}
+
+// TestMCPOAuth_Callback_RejectsBadState covers the callback's only defense
+// against a forged or stale hit: a state that doesn't match the in-flight
+// attempt must not resolve it (a real attempt could still be waiting).
+func TestMCPOAuth_Callback_RejectsBadState(t *testing.T) {
+	fake := newFakeOAuthMCPServer(t)
+	defer fake.srv.Close()
+
+	mcpTestHome(t, `{"mcpServers": {"secure": {"url": "`+fake.srv.URL+`/mcp", "auth": "oauth"}}}`)
+	t.Cleanup(app.ShutdownMCP)
+	tools.SetMCPRegistry(nil)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers/secure/oauth/start", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("start: status = %d: %s", w.Code, w.Body.String())
+	}
+
+	w = doJSON(t, srv, http.MethodGet, "/api/mcp/servers/secure/oauth/callback?state=bogus&code=x", "")
+	if w.Code != http.StatusConflict {
+		t.Errorf("callback with bad state: status = %d, want 409", w.Code)
+	}
+
+	// The real flow must still be waiting, unaffected by the bogus hit.
+	w = doJSON(t, srv, http.MethodGet, "/api/mcp/servers/secure/oauth/status", "")
+	var status map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status["state"] == "failed" {
+		t.Fatalf("bogus callback must not fail the real attempt: %+v", status)
+	}
+}
+
+// TestMCPOAuth_Callback_BypassesAuth confirms the callback route is reachable
+// without an access key — required since the browser's top-level navigation
+// back from the authorization server carries none. A non-loopback caller
+// with no key would be rejected by requireAuth on every other route.
+func TestMCPOAuth_Callback_BypassesAuth(t *testing.T) {
+	fake := newFakeOAuthMCPServer(t)
+	defer fake.srv.Close()
+
+	mcpTestHome(t, `{"mcpServers": {"secure": {"url": "`+fake.srv.URL+`/mcp", "auth": "oauth"}}}`)
+	t.Cleanup(app.ShutdownMCP)
+	tools.SetMCPRegistry(nil)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/mcp/servers/secure/oauth/callback?state=x&code=y", nil)
+	req.RemoteAddr = "203.0.113.5:1234" // non-loopback, no access key
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code == http.StatusUnauthorized || w.Code == http.StatusForbidden {
+		t.Fatalf("callback must bypass requireAuth, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

@@ -44,7 +44,7 @@ Each entry is **exactly one** of two transports — setting both `command` and
 | `env` | stdio | Extra environment variables for the child process |
 | `url` | http | Streamable-HTTP endpoint URL |
 | `headers` | http | Static headers, e.g. an API-key `Authorization` |
-| `auth` | http | `"oauth"` to run the device-flow OAuth on connect; omit otherwise |
+| `auth` | http | `"oauth"` to run OAuth (Authorization Code + PKCE) on connect; omit otherwise |
 | `disabled` | both | `true` keeps the entry but skips connecting |
 
 Server names must have no whitespace and must not contain `__` (reserved as
@@ -137,7 +137,8 @@ Use this for adding a brand-new server. (Editing one? See above.)
    the **MCP Servers** panel and click **Reload** (CLI: `/mcp reload`) — it
    re-reads the config and connects every server, and the card shows connected
    status plus the tool count. OAuth servers additionally show an **Authorize**
-   button for the device flow. If the card still errors, read the error off it
+   button that opens a browser tab to complete the authorization code + PKCE
+   flow. If the card still errors, read the error off it
    (or ask the user to paste it) and iterate.
 
 ## Troubleshooting

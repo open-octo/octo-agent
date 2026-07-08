@@ -60,7 +60,7 @@ Example: filesystem server via npx
 |-------|----------|-------------|
 | `url` | yes | MCP endpoint URL |
 | `headers` | no | Extra HTTP headers |
-| `auth` | no | `"oauth"` for device-flow OAuth, or omit |
+| `auth` | no | `"oauth"` for OAuth (Authorization Code + PKCE), or omit |
 
 Example: remote API with OAuth
 ```json
@@ -77,7 +77,7 @@ Example: remote API with OAuth
 ## Auth strategies
 
 - `""` (default) — No automatic auth. Pass tokens manually via `headers`.
-- `"oauth"` — Runs RFC-compliant device-flow OAuth on first connect and on every 401. Tokens are cached at `~/.octo/mcp-tokens/<server>.json`.
+- `"oauth"` — Runs RFC-compliant OAuth (Authorization Code + PKCE) on first connect and on every 401. Tokens are cached at `~/.octo/mcp-tokens/<server>.json`.
 
 ## Disabling a server
 

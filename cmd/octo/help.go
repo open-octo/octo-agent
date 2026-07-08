@@ -67,11 +67,10 @@ removing it.
 Auth (HTTP only):
   ""       — no auth beyond what's in headers (default)
   "oauth"  — discover the server's auth-server metadata on first 401,
-             run RFC 8628 Device Authorization Grant (open a URL,
-             enter a code), cache the token at
-             ~/.octo/mcp-tokens/<server>.json. Refresh tokens are
-             used automatically; expired refresh tokens trigger a
-             fresh device-flow prompt.
+             run Authorization Code + PKCE (open a browser tab, redirect
+             back), cache the token at ~/.octo/mcp-tokens/<server>.json.
+             Refresh tokens are used automatically; expired refresh
+             tokens trigger a fresh authorization prompt.
 
 Tool naming in the agent's tool list:
   mcp__<server>__<tool>            one entry per advertised tool

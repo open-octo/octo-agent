@@ -56,8 +56,8 @@ type ServerEntry struct {
 	// Auth strategy. HTTP-only field; ignored for stdio servers.
 	//
 	//	""        — no auth beyond what's in Headers (default)
-	//	"oauth"   — run the spec-compliant device-flow OAuth on first
-	//	            connect and on every 401 response; cached at
+	//	"oauth"   — run Authorization Code + PKCE OAuth on first connect
+	//	            and on every 401 response; cached at
 	//	            ~/.octo/mcp-tokens/<server>.json
 	//
 	// Future values may add bearer or client_credentials; the strict

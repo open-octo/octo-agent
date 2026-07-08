@@ -49,9 +49,10 @@ Servers are declared in `~/.octo/mcp.json` (user-global, always loaded) or `./.o
 
 <Aside type="note" title="OAuth is automatic">
 Set `"auth": "oauth"` on a Streamable HTTP entry and octo discovers the server's auth metadata on
-the first `401`, then runs a device-flow login (RFC 8628) — open a URL, enter a code. The token is
-cached at `~/.octo/mcp-tokens/<server>.json` and refreshed automatically; an expired refresh token
-just triggers the prompt again.
+the first `401`, then runs an Authorization Code + PKCE login — a browser tab opens to the server's
+consent page and redirects back once you approve it. The token is cached at
+`~/.octo/mcp-tokens/<server>.json` and refreshed automatically; an expired refresh token just
+triggers the prompt again.
 </Aside>
 
 Check what's connected with `/mcp` in the TUI, or `octo mcp --help` for the full config reference.

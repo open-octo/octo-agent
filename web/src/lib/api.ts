@@ -365,13 +365,14 @@ export async function reconnectMcpServer(name: string): Promise<void> {
   })
 }
 
-// MCP OAuth device flow. start launches it in the background and returns the
-// initial snapshot; poll status until the state settles (connected | failed).
+// MCP OAuth Authorization Code + PKCE flow. start launches it in the
+// background and returns the initial snapshot; poll status until the state
+// settles (connected | failed). While authorizing, authorize_url is the page
+// to open (a new tab) — the server's callback route resolves the flow once
+// the browser redirects back.
 export interface McpOAuthState {
   state: 'starting' | 'authorizing' | 'connected' | 'failed'
-  user_code?: string
-  verification_uri?: string
-  verification_uri_complete?: string
+  authorize_url?: string
   error?: string
 }
 
