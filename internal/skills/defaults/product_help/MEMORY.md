@@ -107,6 +107,28 @@ secret-path rules still apply everywhere else.
 These are viewers/locators only; the files are the source of truth and the
 agent owns them.
 
+## Optional: an external memory backend (separate feature)
+
+Everything above is `MEMORY.md` — the agent's own curated standing guidance, frozen into the system prompt every session. octo can *additionally* connect to a self-hosted external semantic-memory service that indexes raw conversation text and lets the agent search it later. This is a completely separate, optional layer: octo doesn't touch or duplicate `MEMORY.md` to support it, and it's off by default.
+
+Three backends are supported, pick at most one — [hindsight](https://github.com/vectorize-io/hindsight), [mem0](https://github.com/mem0ai/mem0), or [MemTensor/MemOS](https://github.com/MemTensor/MemOS) (not the unrelated `usememos/memos` note-taking app). Each is self-hosted; octo only talks to its REST API once you've got the server running.
+
+- **Storing is automatic and silent.** After every turn, octo sends that turn's content to the backend in the background — there's no `memory_store` tool, nothing for the agent to decide, and a failed store doesn't surface anywhere or slow down the turn.
+- **Recall is a tool.** The agent calls `memory_recall` when it suspects something relevant was discussed before. Unlike storing, this blocks on the network round trip and its errors do surface, since it's an explicit, visible action.
+- **Configure** via a `memory_backend` block in `~/.octo/config.yml`:
+
+  ```yaml
+  memory_backend:
+    type: hindsight        # hindsight | mem0 | memos
+    base_url: http://localhost:8888
+    api_key: ""            # optional, backend-dependent — see below
+    namespace: my-project  # scopes stored/recalled memories; defaults to "default"
+  ```
+
+  Leaving `type` unset (or omitting the block) disables the feature entirely — no tool advertised, nothing sent anywhere. `api_key`: hindsight has no auth by default (only needed if you've enabled `HINDSIGHT_API_TENANT_API_KEY` server-side); mem0 requires auth by default (set it, or run the server with `AUTH_DISABLED=true` for local dev); memos has no auth by default and sends `namespace` as an `X-User-Name` header when the key is blank. `namespace` maps to hindsight's `bank_id`, mem0's `user_id`, or memos's `user_id`. Config is read once at session start — restart after changing it.
+
+See the full guide at `docs/src/content/docs/guides/memory-backends.md` for backend-specific setup notes.
+
 ## Why this shape
 
 The earlier design was a typed one-file-per-fact store written through a

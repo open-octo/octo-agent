@@ -24,6 +24,7 @@ Created interactively via `octo config` or edited directly. (A pre-rename `~/.oc
 | `browser.attach_running` | bool | Attach to your already-running Chrome via its default profile, reusing the logged-in session |
 | `language` | string | UI language preference: `"en"` (default) or `"zh"` |
 | `tools.tool_search` | object | MCP Tool Search settings — `enabled: auto\|on\|off`, `threshold_pct: <int>`. See `MCP.md` |
+| `memory_backend` | object | Optional external semantic memory (hindsight/mem0/memos) — `type`, `base_url`, `api_key`, `namespace`. Unset disables it entirely. See `MEMORY.md` |
 
 ## Precedence
 
