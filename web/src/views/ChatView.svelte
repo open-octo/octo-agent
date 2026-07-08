@@ -408,7 +408,16 @@
     cleanups.push(ws.on('text_delta', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       const txt = (ev as any).text ?? ''
-      appendToLastAssistant(sid, txt)
+      // Reasoning for this segment is done the moment its reply starts
+      // streaming — hand off whatever is sitting in the live thinking buffer to
+      // the new bubble right away instead of leaving it pinned at the bottom of
+      // the list until the whole turn ends (assistant_message/complete). That
+      // gap is what let a stale "still typing" thinking block linger below an
+      // already-visible reply, then jump/disappear once the turn finally
+      // finished (#1257).
+      const pendingThinking = get(chatThinking)[sid] ?? ''
+      appendToLastAssistant(sid, txt, pendingThinking)
+      if (pendingThinking) chatThinking.update(tt => ({ ...tt, [sid]: '' }))
     }))
 
     cleanups.push(ws.on('thinking_delta', (ev) => {

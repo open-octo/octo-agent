@@ -181,7 +181,13 @@ export function updateLastMsg(sessionId: string, updater: (msg: any) => any) {
   })
 }
 
-export function appendToLastAssistant(sessionId: string, content: string) {
+// pendingThinking seeds the bubble's collapsible Thoughts section when this
+// delta opens a NEW segment — it has no effect while continuing an existing
+// streaming bubble, since by then any reasoning for the segment has already
+// finished (see the text_delta handler in ChatView.svelte, which passes the
+// live chatThinking buffer here and clears it in the same tick so the pinned
+// live-thinking block never outlives the reply it belongs to, #1257).
+export function appendToLastAssistant(sessionId: string, content: string, pendingThinking = '') {
   if (!content) return
   chatMessages.update(m => {
     const msgs = [...(m[sessionId] || [])]
@@ -203,7 +209,7 @@ export function appendToLastAssistant(sessionId: string, content: string) {
     }
     msgs.push({
       id: uid('a'), type: 'assistant', content,
-      thinking: '', createdAt: Date.now(), streaming: true, tools: [], todos: [],
+      thinking: pendingThinking.trim(), createdAt: Date.now(), streaming: true, tools: [], todos: [],
     })
     return { ...m, [sessionId]: msgs }
   })
