@@ -24,8 +24,9 @@ import (
 // without re-authorizing.
 
 // authCodeTimeout bounds how long a flow waits for the callback before
-// giving up — the user closed the tab, or the AS never redirected back.
-const authCodeTimeout = 5 * time.Minute
+// giving up — the user closed the tab, or the AS never redirected back. A
+// var so tests can shrink it rather than waiting out the real 5 minutes.
+var authCodeTimeout = 5 * time.Minute
 
 // mcpOAuthFlow tracks one in-flight Authorization Code flow. It doubles as
 // the mcp.OAuthPrompt handed to the connect path.
@@ -66,12 +67,31 @@ func (f *mcpOAuthFlow) AwaitAuthorizationCode(ctx context.Context, authorizeURL,
 	ch := f.codeCh
 	f.mu.Unlock()
 
+	// clearIfCurrent drops the wait state on a give-up path (timeout/cancel)
+	// so a callback that arrives after we've stopped waiting is correctly
+	// rejected by deliver() as stale, rather than silently succeeding into a
+	// channel nobody reads and showing the browser a misleading "received"
+	// page for a flow the panel already reports as failed.
+	clearIfCurrent := func() {
+		f.mu.Lock()
+		if f.codeCh == ch {
+			f.codeCh = nil
+			f.expectedState = ""
+		}
+		f.mu.Unlock()
+	}
+
+	timer := time.NewTimer(authCodeTimeout)
+	defer timer.Stop()
+
 	select {
 	case res := <-ch:
 		return res.code, res.err
-	case <-time.After(authCodeTimeout):
+	case <-timer.C:
+		clearIfCurrent()
 		return "", errors.New("timed out waiting for browser authorization")
 	case <-ctx.Done():
+		clearIfCurrent()
 		return "", ctx.Err()
 	}
 }
@@ -182,7 +202,13 @@ func (s *Server) handleStartMCPOAuth(w http.ResponseWriter, r *http.Request) {
 	// The callback's redirect_uri targets whatever host:port the caller's
 	// browser is already using to reach this server (loopback, LAN IP, or
 	// an SSH-tunneled port) — the one address guaranteed to route back here.
-	flow := &mcpOAuthFlow{state: "starting", redirectBase: "http://" + r.Host, name: name}
+	// The scheme has to match what the browser actually used, not just
+	// assume http: octo serve itself never terminates TLS, but a reverse
+	// proxy or tunnel (Cloudflare Tunnel, nginx, etc.) in front of it often
+	// does, forwarding plain HTTP to us — registering an http:// redirect_uri
+	// in that case would send the browser back to a scheme the AS never
+	// agreed to, or one the browser itself refuses to downgrade to.
+	flow := &mcpOAuthFlow{state: "starting", redirectBase: requestScheme(r) + "://" + r.Host, name: name}
 	s.mcpOAuthFlows[name] = flow
 	serverEntry := entry.Entry
 	go func() {
@@ -249,4 +275,20 @@ func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request) 
 
 func oauthCallbackPage(message string) string {
 	return "<!doctype html><html><head><title>octo</title></head><body style=\"font: 14px system-ui; padding: 2rem;\">" + message + "</body></html>"
+}
+
+// requestScheme reports the scheme the browser actually used to reach this
+// server. r.TLS is set when octo serve terminates TLS itself; otherwise a
+// reverse proxy or tunnel in front of it is expected to set the standard
+// X-Forwarded-Proto header when it forwards plain HTTP for an HTTPS client
+// connection. Defaults to "http", matching every other place this codebase
+// assumes plain HTTP for octo serve's own listener.
+func requestScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		return proto
+	}
+	return "http"
 }

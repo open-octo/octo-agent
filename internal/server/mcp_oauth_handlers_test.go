@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -290,5 +291,101 @@ func TestMCPOAuth_StartValidation(t *testing.T) {
 	w := doJSON(t, srv, http.MethodGet, "/api/mcp/servers/plain/oauth/status", "")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status without flow: %d, want 404", w.Code)
+	}
+}
+
+func TestRequestScheme(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(*http.Request)
+		want  string
+	}{
+		{"plain http", func(r *http.Request) {}, "http"},
+		{"terminates TLS itself", func(r *http.Request) { r.TLS = &tls.ConnectionState{} }, "https"},
+		{"forwarded by a TLS-terminating proxy", func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") }, "https"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8088/x", nil)
+			c.setup(r)
+			if got := requestScheme(r); got != c.want {
+				t.Errorf("requestScheme = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestMCPOAuth_LateCallbackAfterTimeout_Rejected covers a browser completing
+// the redirect after the server already gave up waiting: the flow must stay
+// "failed" and the late callback must be rejected as stale (409), not
+// silently accepted into an abandoned channel and shown a misleading
+// "authorization received" page.
+func TestMCPOAuth_LateCallbackAfterTimeout_Rejected(t *testing.T) {
+	orig := authCodeTimeout
+	authCodeTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { authCodeTimeout = orig })
+
+	fake := newFakeOAuthMCPServer(t)
+	defer fake.srv.Close()
+
+	mcpTestHome(t, `{"mcpServers": {"secure": {"url": "`+fake.srv.URL+`/mcp", "auth": "oauth"}}}`)
+	t.Cleanup(app.ShutdownMCP)
+	tools.SetMCPRegistry(nil)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers/secure/oauth/start", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("start: status = %d: %s", w.Code, w.Body.String())
+	}
+
+	// Capture the state/redirect_uri before the flow times out.
+	var state, redirectURI string
+	deadline := time.Now().Add(2 * time.Second)
+	for state == "" {
+		if time.Now().After(deadline) {
+			t.Fatal("flow never reached authorizing with an authorize_url")
+		}
+		w = doJSON(t, srv, http.MethodGet, "/api/mcp/servers/secure/oauth/status", "")
+		var status map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ := status["authorize_url"].(string); u != "" {
+			parsed, err := url.Parse(u)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state = parsed.Query().Get("state")
+			redirectURI = parsed.Query().Get("redirect_uri")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Wait for the (shrunk) timeout to elapse and the flow to fail.
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("flow never timed out")
+		}
+		w = doJSON(t, srv, http.MethodGet, "/api/mcp/servers/secure/oauth/status", "")
+		var status map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status["state"] == "failed" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// The late callback must now be rejected, not accepted.
+	callback, err := url.Parse(redirectURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callback.RawQuery = url.Values{"state": {state}, "code": {"too-late"}}.Encode()
+	w = doJSON(t, srv, http.MethodGet, callback.RequestURI(), "")
+	if w.Code != http.StatusConflict {
+		t.Errorf("late callback: status = %d, want 409 (stale)", w.Code)
 	}
 }

@@ -101,10 +101,10 @@ func SwapMCP(ctx context.Context, cwd string, warn io.Writer) error {
 	return nil
 }
 
-// mcpOAuthConnectTimeout bounds a connect that runs an interactive device
-// flow: the user has to visit a URL and approve, so it gets minutes, not
-// seconds. Slightly above connectOne's internal 5-minute OAuth window so
-// that window — and its clearer error — wins.
+// mcpOAuthConnectTimeout bounds a connect that runs an interactive browser
+// authorization: the user has to visit a URL and approve, so it gets
+// minutes, not seconds. Slightly above connectOne's internal 5-minute OAuth
+// window so that window — and its clearer error — wins.
 const mcpOAuthConnectTimeout = 6 * time.Minute
 
 // ConnectMCPServer connects (or reconnects) a single named server into the

@@ -28,12 +28,16 @@ type stubPrompt struct {
 	lastAuthorizeURL string
 	lastState        string
 
-	redirectURI string // defaults to a fixed fake loopback URL if empty
-	fakeCode    string // defaults to "fake-code-12345" if empty
-	awaitErr    error  // if set, AwaitAuthorizationCode returns this instead of a code
+	redirectURI   string // defaults to a fixed fake loopback URL unless noRedirectURI
+	noRedirectURI bool   // simulates a prompt that couldn't prepare a callback (RedirectURI() == "")
+	fakeCode      string // defaults to "fake-code-12345" if empty
+	awaitErr      error  // if set, AwaitAuthorizationCode returns this instead of a code
 }
 
 func (p *stubPrompt) RedirectURI() string {
+	if p.noRedirectURI {
+		return ""
+	}
 	if p.redirectURI != "" {
 		return p.redirectURI
 	}
@@ -553,6 +557,33 @@ func TestOAuth_MissingResourceInMetadata_FallsBackToConfiguredURL(t *testing.T) 
 	}
 	if oc.state.Resource != resourceURL {
 		t.Errorf("cached Resource = %q, want fallback %q", oc.state.Resource, resourceURL)
+	}
+}
+
+// TestOAuth_EmptyRedirectURI_FailsFast guards against a prompt whose
+// RedirectURI() couldn't prepare a callback (e.g. a CLI session's loopback
+// listener failed to bind — see cmd/octo/mcp_prompt.go). Proceeding anyway
+// would send a malformed empty redirect_uri to the real registration and
+// authorize endpoints before failing, instead of failing immediately with a
+// clear local error.
+func TestOAuth_EmptyRedirectURI_FailsFast(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	fs := newFakeAuthServer(t)
+	defer fs.close()
+
+	prompt := &stubPrompt{noRedirectURI: true}
+	oc, err := NewOAuthClient(fs.URL("/mcp_server/v1"), "fake-noredirect", "octo-test", prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = oc.Token(context.Background())
+	if err == nil {
+		t.Fatal("expected an error for an empty redirect_uri")
+	}
+	if fs.registrations != 0 {
+		t.Errorf("registrations = %d, want 0 — must fail before attempting registration", fs.registrations)
 	}
 }
 

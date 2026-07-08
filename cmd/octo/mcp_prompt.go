@@ -19,6 +19,29 @@ import (
 // callback before giving up — the user closed the tab, or never got there.
 const authCodeTimeout = 5 * time.Minute
 
+// oauthCallbackPort is the loopback port cliOAuthPrompt/tuiOAuthPrompt try
+// first for the one-shot callback listener. A stable port (rather than :0's
+// random one every run) lets authorize() recognize a previously registered
+// dynamic client as still valid and reuse it (RFC 7591 registrations are
+// redirect_uri-bound — see oauth.go's authorize()), instead of registering a
+// fresh throwaway client with the authorization server on every CLI
+// invocation. Picked high in the ephemeral range to avoid colliding with
+// common dev-server defaults.
+const oauthCallbackPort = 51823
+
+// listenForCallback binds the stable oauthCallbackPort, falling back to a
+// random port (net.Listen's ":0") if it's taken — e.g. two octo processes
+// authorizing concurrently, or another program already holding it. The
+// fallback still works correctly; it just means authorize() can't recognize
+// a previously cached client_id (different redirect_uri) and registers a
+// new one for that run.
+func listenForCallback() (net.Listener, error) {
+	if ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", oauthCallbackPort)); err == nil {
+		return ln, nil
+	}
+	return net.Listen("tcp", "127.0.0.1:0")
+}
+
 // openBrowser best-effort launches the OS's default browser at url. Errors
 // are non-fatal — the caller still prints the URL for the user to open by
 // hand.
@@ -70,10 +93,13 @@ func awaitLocalCallback(ctx context.Context, ln net.Listener, state string) (str
 	go srv.Serve(ln)
 	defer srv.Close()
 
+	timer := time.NewTimer(authCodeTimeout)
+	defer timer.Stop()
+
 	select {
 	case res := <-resCh:
 		return res.code, res.err
-	case <-time.After(authCodeTimeout):
+	case <-timer.C:
 		return "", errors.New("timed out waiting for browser authorization")
 	case <-ctx.Done():
 		return "", ctx.Err()
@@ -107,7 +133,7 @@ func newCLIOAuthPrompt(out io.Writer, serverName string) *cliOAuthPrompt {
 // attempt and returns its callback URL. AwaitAuthorizationCode serves
 // exactly one request on it.
 func (p *cliOAuthPrompt) RedirectURI() string {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := listenForCallback()
 	if err != nil {
 		fmt.Fprintf(p.out, "oauth: failed to open a local callback listener: %v\n", err)
 		return ""
@@ -130,7 +156,14 @@ func (p *cliOAuthPrompt) AwaitAuthorizationCode(ctx context.Context, authorizeUR
 	}
 	fmt.Fprint(p.out, "│ Waiting for authorization…\n")
 
-	return awaitLocalCallback(ctx, p.listener, state)
+	code, err := awaitLocalCallback(ctx, p.listener, state)
+	if err != nil {
+		// Done() only fires on overall success (see its doc comment), so a
+		// timeout/denied/cancelled authorization would otherwise leave this
+		// card's border open forever. Close it here instead.
+		fmt.Fprintf(p.out, "│ Authorization failed: %v\n└%s\n\n", err, strings.Repeat("─", 64))
+	}
+	return code, err
 }
 
 func (p *cliOAuthPrompt) Done() {
@@ -157,7 +190,7 @@ func newTUIOAuthPrompt(sink *tuiSink, serverName string) *tuiOAuthPrompt {
 }
 
 func (p *tuiOAuthPrompt) RedirectURI() string {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := listenForCallback()
 	if err != nil {
 		if p.sink != nil {
 			p.sink.Notice(fmt.Sprintf("oauth: failed to open a local callback listener: %v", err))
@@ -182,7 +215,14 @@ func (p *tuiOAuthPrompt) AwaitAuthorizationCode(ctx context.Context, authorizeUR
 		}
 	}
 
-	return awaitLocalCallback(ctx, p.listener, state)
+	code, err := awaitLocalCallback(ctx, p.listener, state)
+	if err != nil && p.sink != nil {
+		// Done() only fires on overall success, so a timeout/denied/
+		// cancelled authorization would otherwise leave no scrollback trace
+		// of the outcome at all.
+		p.sink.Notice(fmt.Sprintf("MCP %q authorization failed: %v", p.serverName, err))
+	}
+	return code, err
 }
 
 func (p *tuiOAuthPrompt) Done() {

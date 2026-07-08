@@ -240,6 +240,9 @@ func (o *OAuthClient) authorize(ctx context.Context) error {
 	}
 	scope := strings.Join(prMeta.ScopesSupported, " ")
 	redirectURI := o.prompt.RedirectURI()
+	if redirectURI == "" {
+		return errors.New("oauth: prompt could not provide a callback redirect_uri")
+	}
 
 	clientID := ""
 	clientSecret := ""
@@ -477,11 +480,11 @@ type tokenResponse struct {
 func (o *OAuthClient) authCodeFlow(ctx context.Context, as *asMetadata, clientID, clientSecret, resource, scope, redirectURI string) (*tokenResponse, error) {
 	state, err := randomURLSafe(32)
 	if err != nil {
-		return nil, fmt.Errorf("generate state: %w", err)
+		return nil, fmt.Errorf("oauth: generate state: %w", err)
 	}
 	verifier, err := randomURLSafe(64)
 	if err != nil {
-		return nil, fmt.Errorf("generate code_verifier: %w", err)
+		return nil, fmt.Errorf("oauth: generate code_verifier: %w", err)
 	}
 
 	authorizeURL, err := buildAuthorizeURL(as.AuthorizationEndpoint, clientID, redirectURI, state, codeChallengeS256(verifier), resource, scope)
