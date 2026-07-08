@@ -331,3 +331,37 @@ func TestEffectiveCoauthor(t *testing.T) {
 		})
 	}
 }
+
+func TestMemoryBackendEnabled(t *testing.T) {
+	if (&Config{}).MemoryBackendEnabled() {
+		t.Error("zero-value Config: MemoryBackendEnabled() = true, want false")
+	}
+	cfg := Config{MemoryBackend: MemoryBackendConfig{Type: "hindsight"}}
+	if !cfg.MemoryBackendEnabled() {
+		t.Error("Type set: MemoryBackendEnabled() = false, want true")
+	}
+}
+
+func TestMemoryBackendConfig_RoundTrip(t *testing.T) {
+	setHome(t)
+
+	want := Config{
+		MemoryBackend: MemoryBackendConfig{
+			Type:      "mem0",
+			BaseURL:   "http://localhost:8888",
+			APIKey:    "secret",
+			Namespace: "octo-agent",
+		},
+	}
+	if err := want.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.MemoryBackend != want.MemoryBackend {
+		t.Errorf("round-trip MemoryBackend = %+v, want %+v", got.MemoryBackend, want.MemoryBackend)
+	}
+}

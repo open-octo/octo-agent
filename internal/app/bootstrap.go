@@ -5,6 +5,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/memorybackend"
 	"github.com/open-octo/octo-agent/internal/tasks"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
@@ -54,6 +55,20 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 		tools.SetBrowserVision(cfg.ModelVision(a.Model))
 	}
 
+	// Optional external semantic memory backend (hindsight/mem0/memos). A
+	// bad Type/BaseURL just leaves it unconfigured rather than failing
+	// session start — the user finds out on the first memory_recall call.
+	if cfg, err := config.Load(); err == nil && cfg.MemoryBackendEnabled() {
+		if b, err := memorybackend.New(memorybackend.Config{
+			Type:      cfg.MemoryBackend.Type,
+			BaseURL:   cfg.MemoryBackend.BaseURL,
+			APIKey:    cfg.MemoryBackend.APIKey,
+			Namespace: cfg.MemoryBackend.Namespace,
+		}); err == nil {
+			tools.SetMemoryBackend(b)
+		}
+	}
+
 	cleanup := func() {
 		tools.SetDefaultSubAgentManager(nil)
 		tools.SetSpawner(nil)
@@ -61,6 +76,7 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 		tools.SetBrowserHealer(nil)
 		tools.SetBrowserVision(true)
 		tools.ResetBrowserSession()
+		tools.SetMemoryBackend(nil)
 	}
 	if enableTasks {
 		tools.SetTaskStore(tasks.New())

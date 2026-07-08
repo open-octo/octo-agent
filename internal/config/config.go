@@ -125,6 +125,10 @@ type Config struct {
 	Browser BrowserConfig `yaml:"browser,omitempty"`
 	// Goal configures the session-goal feature (/goal and the goal tools).
 	Goal GoalConfig `yaml:"goal,omitempty"`
+	// MemoryBackend optionally configures an external semantic memory
+	// service (hindsight, mem0, or memos). Empty Type means disabled — this
+	// is separate from and does not affect the built-in MEMORY.md layer.
+	MemoryBackend MemoryBackendConfig `yaml:"memory_backend,omitempty"`
 	// WorkspaceDir sets the default working directory new web sessions are
 	// created with. Empty (default) changes nothing: a session still falls
 	// back to the server's own launch directory. "auto" resolves to
@@ -149,6 +153,28 @@ type GoalConfig struct {
 // GoalEnabled reports whether the session-goal feature is on (default true).
 func (c *Config) GoalEnabled() bool {
 	return c.Goal.Enabled == nil || *c.Goal.Enabled
+}
+
+// MemoryBackendConfig configures an optional external semantic memory
+// backend. Exactly one of hindsight/mem0/memos can be active at a time.
+type MemoryBackendConfig struct {
+	// Type selects the backend: "hindsight", "mem0", or "memos". Empty
+	// disables the feature.
+	Type string `yaml:"type,omitempty"`
+	// BaseURL is the backend's REST endpoint, e.g. http://localhost:8888.
+	BaseURL string `yaml:"base_url,omitempty"`
+	// APIKey is optional; required by some backends (mem0 by default),
+	// optional for others (hindsight, memos default to no auth).
+	APIKey string `yaml:"api_key,omitempty"`
+	// Namespace scopes stored/recalled memories (hindsight bank_id, mem0/memos
+	// user_id). Defaults to "default" when empty.
+	Namespace string `yaml:"namespace,omitempty"`
+}
+
+// MemoryBackendEnabled reports whether an external memory backend is
+// configured.
+func (c *Config) MemoryBackendEnabled() bool {
+	return c.MemoryBackend.Type != ""
 }
 
 // BrowserConfig configures how the browser tool connects to Chrome.

@@ -846,6 +846,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if memDir != "" {
 		memInjection = memory.RenderInjection(memDir, homeMemDir)
 	}
+	if g := tools.MemoryBackendGuidance(); g != "" {
+		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
+	}
 	a.System, a.LeanSystem = prompt.ComposePair(*system, cwd, env, skillsManifest, mcpManifest, memInjection, coauthor)
 
 	// Attention layer: re-surface MEMORY.md's structured rules (## 必须遵守 /
@@ -873,6 +876,10 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Suggest saving a workflow once the model chains >=2 skills by hand in a
 	// turn — independent of memory, so wired unconditionally.
 	tools.NewWorkflowNudger().RegisterHooks(hookEngine)
+	// Auto-store into the external memory backend (if configured) after each
+	// turn — independent of memDir/MEMORY.md, so wired unconditionally; a
+	// no-op when no backend is set.
+	tools.RegisterMemoryBackendHooks(hookEngine)
 	a.Hooks = hookEngine
 	a.HookMeta = hooks.Meta{Cwd: cwd}
 

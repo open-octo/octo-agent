@@ -531,6 +531,9 @@ func (s *Server) enableSubAgentTools() {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
+	if g := tools.MemoryBackendGuidance(); g != "" {
+		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
+	}
 	cwd, envCtx := s.curCwdEnv()
 	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
 	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
@@ -1134,6 +1137,9 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
+	if g := tools.MemoryBackendGuidance(); g != "" {
+		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
+	}
 	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2: attention-layer rules (triggered keywords) + save-nudge on milestone
@@ -1147,6 +1153,9 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	}
 	// Workflow save-nudge — memory-independent, wired for every session.
 	tools.NewWorkflowNudger().RegisterHooks(hookEngine)
+	// Auto-store into the external memory backend (if configured) — a no-op
+	// when none is set.
+	tools.RegisterMemoryBackendHooks(hookEngine)
 	a.Hooks = hookEngine
 	a.HookMeta = hooks.Meta{SessionID: sess.ID, Transport: sess.BoundEntry, Cwd: cwd}
 	if p, err := sess.SavePath(); err == nil {
@@ -1920,6 +1929,9 @@ func (s *Server) buildChannelFactory() func() *agent.Agent {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
+	if g := tools.MemoryBackendGuidance(); g != "" {
+		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
+	}
 	return func() *agent.Agent {
 		defaultSender, model := s.defaultSenderAndModel()
 		a := agent.New(defaultSender, model)
@@ -2539,6 +2551,9 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
+	if g := tools.MemoryBackendGuidance(); g != "" {
+		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
+	}
 	cwd, envCtx := s.sessionCwdEnv(sess.Store)
 	sess.Agent.CWD = cwd    // keep tool cwd aligned with the per-session dir the prompt/hooks use
 	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
@@ -2554,6 +2569,9 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	}
 	// Workflow save-nudge — memory-independent, wired for every IM session.
 	tools.NewWorkflowNudger().RegisterHooks(imEngine)
+	// Auto-store into the external memory backend (if configured) — a no-op
+	// when none is set.
+	tools.RegisterMemoryBackendHooks(imEngine)
 	sess.Agent.Hooks = imEngine
 	sess.Agent.HookMeta = hooks.Meta{SessionID: string(sess.Key), Transport: agent.EntryChannel, Cwd: cwd}
 	// The persisted backing session (Store) carries the durable SessionStart

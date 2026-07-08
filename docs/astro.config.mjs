@@ -57,6 +57,7 @@ export default defineConfig({
 						{ label: 'Connect MCP servers', slug: 'guides/connect-mcp-servers', translations: { 'zh-CN': '接入 MCP 服务' } },
 						{ label: 'Sandbox the agent', slug: 'guides/sandbox-the-agent', translations: { 'zh-CN': '沙箱化运行' } },
 						{ label: 'Give it memory', slug: 'guides/memory', translations: { 'zh-CN': '让它拥有记忆' } },
+						{ label: 'Connect a memory backend', slug: 'guides/memory-backends', translations: { 'zh-CN': '接入记忆后端' } },
 						{ label: 'Sub-agents', slug: 'guides/sub-agents', translations: { 'zh-CN': '子代理' } },
 						{ label: 'Workflows', slug: 'guides/workflows', translations: { 'zh-CN': '工作流' } },
 						{ label: 'Automate with hooks', slug: 'guides/hooks', translations: { 'zh-CN': '用 Hooks 自动化' } },

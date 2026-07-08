@@ -55,6 +55,7 @@ var allTools = []tool{
 	RestartServerTool{},
 	ScheduleWakeupTool{},
 	BrowserTool{},
+	MemoryRecallTool{},
 }
 
 // DefaultRegistry is the agent.ToolExecutor used when `octo --tools` is
@@ -314,6 +315,7 @@ func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 	wakerOn := wakerEnabled()
 	browserOn := browserEnabled()
 	spawnerOn := spawnerEnabled()
+	memoryBackendOn := memoryBackendEnabled()
 	// A ctx-scoped manager (per-turn, server/IM — see WithSubAgentManager)
 	// makes both gates true for this turn even when the process-global
 	// spawner/manager slots are untouched.
@@ -371,6 +373,9 @@ func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 			continue
 		}
 		if _, isBrowser := t.(BrowserTool); isBrowser && !browserOn {
+			continue
+		}
+		if _, isMemoryRecall := t.(MemoryRecallTool); isMemoryRecall && !memoryBackendOn {
 			continue
 		}
 		if _, isTaskCreate := t.(TaskCreateTool); isTaskCreate && !tasksOn {
