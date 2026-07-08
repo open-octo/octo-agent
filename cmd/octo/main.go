@@ -16,7 +16,9 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/sandbox"
 	"github.com/open-octo/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/tools"
 	"github.com/open-octo/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/workflow"
 )
 
 func main() {
@@ -30,11 +32,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runChat(args, stdin, stdout, stderr)
 	}
 
-	// Materialize the binary's default skills to ~/.octo/skills-default so
-	// they're discoverable like any user skill. Best-effort and a fast no-op
-	// once current; skipped for the internal fast-path commands.
+	// Materialize the binary's default skills/workflows to ~/.octo/skills-default
+	// and ~/.octo/workflows-default so they're discoverable like any user
+	// skill/workflow, and prune stale workflow run journals. Best-effort and a
+	// fast no-op/pass once current; skipped for the internal fast-path commands.
 	if args[0] != "__sandboxed-exec" && args[0] != "__complete" {
 		_ = skills.MaterializeDefaults(version.Version)
+		_ = tools.MaterializeDefaultWorkflows(version.Version)
+		_ = workflow.PruneJournals()
 	}
 
 	switch args[0] {
@@ -134,7 +139,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  memory     Manage cross-session memory (e.g. `octo memory list`)")
 	fmt.Fprintln(w, "  sessions   List recent saved sessions (resume with `octo -c <id>`)")
 	fmt.Fprintln(w, "  skills     Manage skills (`octo skills list | add | update | path`)")
-	fmt.Fprintln(w, "  workflows  List saved workflows (`octo workflows list | path`)")
+	fmt.Fprintln(w, "  workflows  List saved workflows (`octo workflows list | path | update`)")
 	fmt.Fprintln(w, "  browser    Set up browser automation (attach to your logged-in Chrome)")
 	fmt.Fprintln(w, "  upgrade    Download and install the latest release (--check to only compare)")
 	fmt.Fprintln(w, "  completion Print shell-completion snippet (bash | zsh | fish)")

@@ -23,26 +23,42 @@ var (
 	ErrBuiltinWorkflow  = errors.New("cannot delete a built-in workflow")
 )
 
-// defaultWorkflowsFS holds the workflows shipped with the binary — the curated
-// set every install gets out of the box. Unlike default skills they are not
-// materialized to disk: discoverWorkflows merges them in-memory as the lowest
-// priority on every read, so a same-named user- or project-level file
-// transparently overrides one. `octo workflows` and the web panel read this
-// same in-memory merge (via ListNamedWorkflows/GetNamedWorkflow) rather than
-// scanning a materialized directory, so there's nothing to keep in sync.
+// defaultWorkflowsFS holds the workflows shipped with the binary — the
+// curated set every install gets out of the box. discoverWorkflows seeds the
+// "default" tier from this embed.FS directly, so the built-in set is always
+// available even in a process that never calls MaterializeDefaultWorkflows
+// (a library consumer of this package, or a test). MaterializeDefaultWorkflows
+// (workflow_defaults.go) additionally writes them to ~/.octo/workflows-default
+// so they're discoverable, listable and editable on disk exactly like a user-
+// or project-level workflow (mirrors internal/skills/defaults.go); when
+// present, that materialized copy overlays the embedded one of the same name,
+// so a local edit takes effect immediately rather than waiting for a version
+// bump to re-materialize.
 //
 //go:embed workflow_defaults
 var defaultWorkflowsFS embed.FS
 
 // savedWorkflow is one named workflow script loaded from a registry directory.
-// The script is the full file content (the @description comment is valid Ruby
-// and harmless to re-run).
+// The script is the full file content (the @description/@param comments are
+// valid Ruby and harmless to re-run).
 type savedWorkflow struct {
 	name        string
 	description string
+	params      []workflowParam
 	script      string
 	source      string // "default" | "user" | "project"
 	path        string // on-disk file path; "" for embedded defaults
+}
+
+// workflowParam is one declared input a saved workflow expects, parsed from a
+// leading `# @param <name> [required] [description]` comment line. Required
+// params are checked before the workflow tool runs the script (see
+// ensureRequiredWorkflowParams in workflow.go) — without this, a missing arg
+// would only surface as a Ruby NoMethodError deep inside the mruby sandbox.
+type workflowParam struct {
+	name        string
+	required    bool
+	description string
 }
 
 // userWorkflowsRoot returns ~/.octo/workflows, or "" when the home dir can't be
@@ -80,15 +96,17 @@ var projectWorkflowsRoot = func(cwd string) string {
 	return filepath.Join(root, ".octo", "workflows")
 }
 
-// discoverWorkflows seeds the embedded default workflows, then scans the user-
-// and project-level registries, and returns a fresh map. Precedence is
-// embedded < user < project: a same-named file at a higher level overrides the
-// one below. cwd is the working directory used to resolve the project-level
-// registry; when empty it falls back to the process CWD. Safe to call
-// concurrently; each call returns an independent snapshot.
+// discoverWorkflows seeds the embedded default workflows, overlays the
+// materialized default root (if present), then scans the user- and
+// project-level registries, and returns a fresh map. Precedence is embedded <
+// materialized-default < user < project: a same-named file at a higher level
+// overrides the one below. cwd is the working directory used to resolve the
+// project-level registry; when empty it falls back to the process CWD. Safe
+// to call concurrently; each call returns an independent snapshot.
 func discoverWorkflows(cwd string) map[string]savedWorkflow {
 	fresh := make(map[string]savedWorkflow)
 	scanEmbeddedWorkflows(fresh)
+	scanWorkflowsRoot(defaultWorkflowsRoot(), "default", fresh)
 	userRoot := userWorkflowsRoot()
 	scanWorkflowsRoot(userRoot, "user", fresh)
 	// projectWorkflowsRoot falls back to cwd itself when cwd isn't inside a
@@ -103,7 +121,8 @@ func discoverWorkflows(cwd string) map[string]savedWorkflow {
 
 // scanEmbeddedWorkflows loads the binary's built-in *.rb workflows into dst.
 // Their file name (without .rb) is the authoritative name, matching on-disk
-// discovery so a user/project file of the same name overrides the default.
+// discovery so a materialized-default/user/project file of the same name
+// overrides it.
 func scanEmbeddedWorkflows(dst map[string]savedWorkflow) {
 	entries, err := defaultWorkflowsFS.ReadDir("workflow_defaults")
 	if err != nil {
@@ -122,6 +141,7 @@ func scanEmbeddedWorkflows(dst map[string]savedWorkflow) {
 		dst[name] = savedWorkflow{
 			name:        name,
 			description: workflowDescription(content),
+			params:      workflowParams(content),
 			script:      content,
 			source:      "default",
 		}
@@ -162,8 +182,8 @@ func scanWorkflowsRoot(root, source string, dst map[string]savedWorkflow) {
 
 // parseWorkflowFile reads one .rb workflow script. The whole file is the script;
 // the description comes from a leading `# @description ...` line, falling back to
-// the first non-empty `#` comment line. ok is false only when the file can't be
-// read.
+// the first non-empty `#` comment line, and declared params come from leading
+// `# @param ...` lines. ok is false only when the file can't be read.
 func parseWorkflowFile(path string) (savedWorkflow, bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -172,15 +192,16 @@ func parseWorkflowFile(path string) (savedWorkflow, bool) {
 	content := string(b)
 	return savedWorkflow{
 		description: workflowDescription(content),
+		params:      workflowParams(content),
 		script:      content,
 	}, true
 }
 
-// workflowDescription extracts a one-line description from a script's leading
-// comments: the `# @description ...` line if present, else the first non-empty
-// `#` comment line. Empty when neither exists.
-func workflowDescription(script string) string {
-	first := ""
+// leadingComments returns the body text of each leading `#` comment line in
+// script (its header block), stopping at the first blank-trimmed line that
+// isn't a comment.
+func leadingComments(script string) []string {
+	var out []string
 	for _, ln := range strings.Split(script, "\n") {
 		t := strings.TrimSpace(ln)
 		if t == "" {
@@ -189,7 +210,17 @@ func workflowDescription(script string) string {
 		if !strings.HasPrefix(t, "#") {
 			break // first line of real code: no more leading comments
 		}
-		body := strings.TrimSpace(strings.TrimPrefix(t, "#"))
+		out = append(out, strings.TrimSpace(strings.TrimPrefix(t, "#")))
+	}
+	return out
+}
+
+// workflowDescription extracts a one-line description from a script's leading
+// comments: the `# @description ...` line if present, else the first non-empty
+// `#` comment line. Empty when neither exists.
+func workflowDescription(script string) string {
+	first := ""
+	for _, body := range leadingComments(script) {
 		if d := strings.TrimSpace(strings.TrimPrefix(body, "@description")); d != body {
 			return d
 		}
@@ -198,6 +229,34 @@ func workflowDescription(script string) string {
 		}
 	}
 	return first
+}
+
+// workflowParams extracts `# @param <name> [required] [description]`
+// declarations from a script's leading comment block. The name is the first
+// whitespace-delimited token; an optional literal "required" keyword marks it
+// mandatory; anything after that is the description shown when the workflow
+// tool prompts the user for a missing value.
+func workflowParams(script string) []workflowParam {
+	var out []workflowParam
+	for _, body := range leadingComments(script) {
+		rest := strings.TrimSpace(strings.TrimPrefix(body, "@param"))
+		if rest == body {
+			continue // not an @param line
+		}
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			continue
+		}
+		name := fields[0]
+		rest = strings.TrimSpace(strings.TrimPrefix(rest, name))
+		required := false
+		if rest == "required" || strings.HasPrefix(rest, "required ") {
+			required = true
+			rest = strings.TrimSpace(strings.TrimPrefix(rest, "required"))
+		}
+		out = append(out, workflowParam{name: name, required: required, description: rest})
+	}
+	return out
 }
 
 // lookupWorkflow returns the named workflow, scanning the registries fresh so a

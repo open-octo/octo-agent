@@ -58,6 +58,25 @@ func ActiveWorkflowDiscoveryCWD() string {
 	return v
 }
 
+// workflowJournalDir overrides the workflow runtime's journal directory
+// (~/.octo/workflow-journals by default, resolved by internal/workflow).
+// Empty (the zero value) leaves the runtime default in place — every real
+// entry point (CLI, server, IM) never sets this. Tests point it at a temp dir
+// so running the suite doesn't write into a developer's real journal
+// directory.
+var workflowJournalDir atomic.Value // string
+
+// SetWorkflowJournalDir overrides the workflow runtime's journal directory for
+// this process. Pass "" to restore the default.
+func SetWorkflowJournalDir(dir string) { workflowJournalDir.Store(dir) }
+
+// ActiveWorkflowJournalDir returns the dir set by SetWorkflowJournalDir, or ""
+// (the runtime default) if never set.
+func ActiveWorkflowJournalDir() string {
+	v, _ := workflowJournalDir.Load().(string)
+	return v
+}
+
 // WorkflowTool runs a Ruby (mruby) orchestration script in an embedded wasm
 // interpreter. The script drives sub-agents through the agent() / parallel() /
 // pipeline() primitives; each agent() call delegates to the same Spawner that
@@ -173,13 +192,86 @@ func savedWorkflowsParamDesc() string {
 	}
 	b.WriteString(" Available:")
 	for _, w := range saved {
+		line := "\n- " + w.name
 		if w.description != "" {
-			fmt.Fprintf(&b, "\n- %s — %s", w.name, w.description)
-		} else {
-			fmt.Fprintf(&b, "\n- %s", w.name)
+			line += " — " + w.description
 		}
+		if req := requiredParamNames(w.params); len(req) > 0 {
+			line += " (requires: " + strings.Join(req, ", ") + ")"
+		}
+		b.WriteString(line)
 	}
 	return b.String()
+}
+
+// requiredParamNames returns the names of params marked required, in
+// declaration order.
+func requiredParamNames(params []workflowParam) []string {
+	var out []string
+	for _, p := range params {
+		if p.required {
+			out = append(out, p.name)
+		}
+	}
+	return out
+}
+
+// ensureRequiredWorkflowParams checks a saved workflow's declared `# @param
+// name required ...` inputs against the tool's `args` input. Any that are
+// missing are filled by prompting the user (via the same Asker the
+// ask_user_question tool uses) rather than letting the script hit a nil
+// args[...] lookup at runtime. Returns the args map to use when at least one
+// value was filled in (nil, nil when nothing was missing), or an error if a
+// required value couldn't be obtained (no asker available, or the user
+// cancelled).
+func ensureRequiredWorkflowParams(ctx context.Context, workflowName string, params []workflowParam, args map[string]any) (map[string]any, error) {
+	var missing []workflowParam
+	for _, p := range params {
+		if !p.required {
+			continue
+		}
+		if v, ok := args[p.name]; ok && v != nil && v != "" {
+			continue
+		}
+		missing = append(missing, p)
+	}
+	if len(missing) == 0 {
+		return nil, nil
+	}
+
+	asker := askerFrom(ctx)
+	if asker == nil {
+		names := make([]string, len(missing))
+		for i, p := range missing {
+			names[i] = p.name
+		}
+		return nil, fmt.Errorf("workflow %q is missing required arg(s) %s and no user is available to "+
+			"ask for them in this mode — pass them in `args` instead", workflowName, strings.Join(names, ", "))
+	}
+
+	filled := make(map[string]any, len(args)+len(missing))
+	for k, v := range args {
+		filled[k] = v
+	}
+	for _, p := range missing {
+		question := fmt.Sprintf("Workflow %q needs a value for %q", workflowName, p.name)
+		if p.description != "" {
+			question += ": " + p.description
+		}
+		res, err := asker.Ask(ctx, AskRequest{Question: question, Header: p.name})
+		if err != nil {
+			return nil, fmt.Errorf("workflow: %w", err)
+		}
+		if res.Cancelled {
+			return nil, fmt.Errorf("workflow %q: user cancelled while providing required arg %q", workflowName, p.name)
+		}
+		value := res.Custom
+		if value == "" && len(res.Choices) > 0 {
+			value = res.Choices[0]
+		}
+		filled[p.name] = value
+	}
+	return filled, nil
 }
 
 // Execute runs the workflow: detached with a run handle in background mode,
@@ -205,6 +297,16 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		script = w.script
 		if description == "" {
 			description = w.description
+		}
+		if len(w.params) > 0 {
+			argsMap, _ := input["args"].(map[string]any)
+			filled, err := ensureRequiredWorkflowParams(ctx, name, w.params, argsMap)
+			if err != nil {
+				return agent.ToolResult{}, err
+			}
+			if filled != nil {
+				input["args"] = filled
+			}
 		}
 	}
 

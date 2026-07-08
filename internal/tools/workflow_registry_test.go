@@ -12,13 +12,22 @@ import (
 	"github.com/open-octo/octo-agent/internal/trash"
 )
 
-// useWorkflowRoots points the user/project registries at temp dirs for the test.
+// useWorkflowRoots points the default/user/project registries at temp dirs
+// for the test. The default root is materialized from the real embedded
+// workflow scripts (not left empty), so tests exercise the same disk-backed
+// "default" tier production uses — deterministically, rather than depending
+// on whatever might already be materialized on the machine running the test.
 func useWorkflowRoots(t *testing.T, userDir, projectDir string) {
 	t.Helper()
-	ou, op := userWorkflowsRoot, projectWorkflowsRoot
+	ou, op, od := userWorkflowsRoot, projectWorkflowsRoot, defaultWorkflowsRoot
+	dflt := t.TempDir()
+	if err := materializeDefaultWorkflows(dflt, "test", true); err != nil {
+		t.Fatalf("materialize default workflows: %v", err)
+	}
 	userWorkflowsRoot = func() string { return userDir }
 	projectWorkflowsRoot = func(_ string) string { return projectDir }
-	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot = ou, op })
+	defaultWorkflowsRoot = func() string { return dflt }
+	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot, defaultWorkflowsRoot = ou, op, od })
 }
 
 func writeWorkflowFile(t *testing.T, root, name, content string) {
@@ -54,6 +63,29 @@ func TestWorkflowDescription_FallsBackToFirstComment(t *testing.T) {
 	}
 	if got := workflowDescription("agent(\"x\")"); got != "" {
 		t.Errorf("description = %q, want empty when no leading comment", got)
+	}
+}
+
+func TestWorkflowParams_ParsesRequiredAndOptional(t *testing.T) {
+	script := "# @description does a thing\n" +
+		"# @param target required the file to migrate\n" +
+		"# @param dry_run skip to preview, off by default\n" +
+		"agent(args[\"target\"])\n"
+	got := workflowParams(script)
+	if len(got) != 2 {
+		t.Fatalf("workflowParams = %+v, want 2 entries", got)
+	}
+	if got[0].name != "target" || !got[0].required || got[0].description != "the file to migrate" {
+		t.Errorf("params[0] = %+v", got[0])
+	}
+	if got[1].name != "dry_run" || got[1].required || got[1].description != "skip to preview, off by default" {
+		t.Errorf("params[1] = %+v, want not required", got[1])
+	}
+}
+
+func TestWorkflowParams_NoneWhenNoParamComments(t *testing.T) {
+	if got := workflowParams("# @description just a note\nagent(\"x\")"); len(got) != 0 {
+		t.Errorf("workflowParams = %+v, want none", got)
 	}
 }
 
@@ -115,6 +147,21 @@ func TestLookupWorkflow_SameUserAndProjectRootStaysUser_ThroughSymlink(t *testin
 	}
 }
 
+func TestLookupWorkflow_ParsesParams(t *testing.T) {
+	user := t.TempDir()
+	useWorkflowRoots(t, user, "")
+	writeWorkflowFile(t, user, "migrate.rb",
+		"# @description Migrate\n# @param target required Path to migrate\nagent(args[\"target\"])\n")
+
+	w, ok := lookupWorkflow(context.Background(), "migrate")
+	if !ok {
+		t.Fatal("lookupWorkflow: not found")
+	}
+	if len(w.params) != 1 || w.params[0].name != "target" || !w.params[0].required {
+		t.Errorf("params = %+v", w.params)
+	}
+}
+
 func TestLookupWorkflow_UnknownName(t *testing.T) {
 	useWorkflowRoots(t, t.TempDir(), t.TempDir())
 	if _, ok := lookupWorkflow(context.Background(), "nope"); ok {
@@ -152,6 +199,21 @@ func containsName(names []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestLookupWorkflow_BatchMigrateDeclaresRequiredChange pins that the
+// embedded batch-migrate preset declares its required "change" arg via
+// `# @param`, so the workflow tool prompts for it up front instead of
+// batch-migrate's own defensive empty-string check firing after a wasted run.
+func TestLookupWorkflow_BatchMigrateDeclaresRequiredChange(t *testing.T) {
+	useWorkflowRoots(t, "", "")
+	w, ok := lookupWorkflow(context.Background(), "batch-migrate")
+	if !ok {
+		t.Fatal("batch-migrate not found")
+	}
+	if req := requiredParamNames(w.params); len(req) != 1 || req[0] != "change" {
+		t.Errorf("batch-migrate required params = %v, want [change]", req)
+	}
 }
 
 func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {

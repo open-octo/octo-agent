@@ -520,6 +520,106 @@ func TestWorkflowTool_RunsSavedByName(t *testing.T) {
 	}
 }
 
+// TestWorkflowTool_RunsSavedByName_PromptsForMissingRequiredArg verifies a
+// saved workflow that declares a required param has the tool ask the user for
+// it (via the same Asker ask_user_question uses) rather than letting the
+// script hit a nil args[...] lookup at runtime.
+func TestWorkflowTool_RunsSavedByName_PromptsForMissingRequiredArg(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	user := t.TempDir()
+	useWorkflowRoots(t, user, "")
+	writeWorkflowFile(t, user, "echo.rb",
+		"# @description echo the arg\n# @param q required the text to echo\nagent(args[\"q\"])\n")
+
+	stub := &stubAsker{resp: AskResponse{Custom: "hi there"}}
+	useAsker(t, stub)
+
+	got := startWorkflowAndWait(t, map[string]any{"name": "echo"})
+	if !stub.called {
+		t.Fatal("expected the tool to prompt for the missing required arg")
+	}
+	if !strings.Contains(stub.lastReq.Question, "q") {
+		t.Errorf("question = %q, want it to mention the missing param name", stub.lastReq.Question)
+	}
+	if !strings.Contains(got, "R[hi there]") {
+		t.Errorf("output = %q, want the prompted value to reach the script", got)
+	}
+}
+
+// TestWorkflowTool_RunsSavedByName_ArgsAlreadySatisfyRequired verifies no
+// prompt fires when the caller already supplied the required arg.
+func TestWorkflowTool_RunsSavedByName_ArgsAlreadySatisfyRequired(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	user := t.TempDir()
+	useWorkflowRoots(t, user, "")
+	writeWorkflowFile(t, user, "echo.rb",
+		"# @description echo the arg\n# @param q required the text to echo\nagent(args[\"q\"])\n")
+
+	stub := &stubAsker{}
+	useAsker(t, stub)
+
+	got := startWorkflowAndWait(t, map[string]any{"name": "echo", "args": map[string]any{"q": "hello"}})
+	if stub.called {
+		t.Error("should not prompt when the required arg is already provided")
+	}
+	if !strings.Contains(got, "R[hello]") {
+		t.Errorf("output = %q, want the provided arg to reach the script", got)
+	}
+}
+
+// TestWorkflowTool_RunsSavedByName_MissingRequiredArgNoAsker verifies a clear
+// error (not a hang, not a Ruby crash deep in mruby) when there's no user to
+// ask — the non-interactive/headless case.
+func TestWorkflowTool_RunsSavedByName_MissingRequiredArgNoAsker(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	SetAsker(nil)
+	user := t.TempDir()
+	useWorkflowRoots(t, user, "")
+	writeWorkflowFile(t, user, "echo.rb",
+		"# @description echo the arg\n# @param q required the text to echo\nagent(args[\"q\"])\n")
+
+	_, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"name": "echo"})
+	if err == nil || !strings.Contains(err.Error(), "missing required arg") {
+		t.Errorf("err = %v, want a missing-required-arg error", err)
+	}
+}
+
+// TestWorkflowTool_RunsSavedByName_CancelledPromptErrors verifies a cancelled
+// prompt aborts the run with an error instead of running with a blank value.
+func TestWorkflowTool_RunsSavedByName_CancelledPromptErrors(t *testing.T) {
+	SetSpawner(replySpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	user := t.TempDir()
+	useWorkflowRoots(t, user, "")
+	writeWorkflowFile(t, user, "echo.rb",
+		"# @description echo the arg\n# @param q required the text to echo\nagent(args[\"q\"])\n")
+	useAsker(t, &stubAsker{resp: AskResponse{Cancelled: true}})
+
+	_, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"name": "echo"})
+	if err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("err = %v, want a cancellation error", err)
+	}
+}
+
+// TestSavedWorkflowsParamDesc_ListsRequiredParams verifies the `name`
+// parameter's "Available: ..." listing surfaces required params up front, so
+// the model can supply them directly instead of round-tripping through a
+// prompt.
+func TestSavedWorkflowsParamDesc_ListsRequiredParams(t *testing.T) {
+	user := t.TempDir()
+	useWorkflowRoots(t, user, "")
+	writeWorkflowFile(t, user, "migrate.rb",
+		"# @description Migrate files\n# @param target required Path to migrate\nagent(args[\"target\"])\n")
+
+	d := savedWorkflowsParamDesc()
+	if !strings.Contains(d, "requires: target") {
+		t.Errorf("description = %q, want it to list required params", d)
+	}
+}
+
 func TestWorkflowTool_UnknownName(t *testing.T) {
 	SetSpawner(replySpawner{})
 	t.Cleanup(func() { SetSpawner(nil) })

@@ -71,6 +71,12 @@ type WorkflowRunRequest struct {
 	// was fixed to honor the caller's cwd, but a script's own internal calls
 	// were still losing it here).
 	WorkingDir string
+	// JournalDir overrides the workflow runtime's journal directory
+	// (~/.octo/workflow-journals by default). Empty leaves the runtime
+	// default in place — real entry points never set this; tests point it at
+	// a temp dir so running the suite doesn't write into a developer's real
+	// journal directory (see ActiveWorkflowJournalDir).
+	JournalDir string
 }
 
 // WorkflowRunSnapshot is a point-in-time view of a background run for listing
@@ -256,6 +262,17 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 
 	m.emit(WorkflowEvent{RunID: id, Description: req.Description, Kind: "started"})
 
+	// req.JournalDir is an explicit per-request override; ActiveWorkflowJournalDir
+	// is the process-wide one (empty outside tests). Resolving the fallback here,
+	// not in every caller that builds a WorkflowRunRequest, means a caller that
+	// forgets to set it (or builds the request directly, bypassing WorkflowTool)
+	// still respects the override — the tools package's tests rely on this to
+	// avoid writing into a developer's real ~/.octo/workflow-journals.
+	journalDir := req.JournalDir
+	if journalDir == "" {
+		journalDir = ActiveWorkflowJournalDir()
+	}
+
 	go func() {
 		defer func() {
 			m.mu.Lock()
@@ -278,6 +295,7 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 			MaxConcurrent: req.MaxConcurrent,
 			ResumeFrom:    req.ResumeFrom,
 			Args:          req.Args,
+			JournalDir:    journalDir,
 		})
 
 		errMsg := ""

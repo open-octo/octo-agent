@@ -57,6 +57,56 @@ func TestWorkflowSave_ProjectScopeUsesContextWorkingDir(t *testing.T) {
 	})
 }
 
+func TestWorkflowSave_WritesParamComments(t *testing.T) {
+	user, project := t.TempDir(), t.TempDir()
+	useWorkflowRoots(t, user, project)
+
+	_, err := WorkflowSaveTool{}.Execute(context.Background(), "c", map[string]any{
+		"name":        "migrate",
+		"script":      `agent(args["target"])`,
+		"description": "Migrate files",
+		"params": []any{
+			map[string]any{"name": "target", "required": true, "description": "Path to migrate"},
+			map[string]any{"name": "dry_run"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	b, err := os.ReadFile(filepath.Join(project, "migrate.rb"))
+	if err != nil {
+		t.Fatalf("read saved file: %v", err)
+	}
+	content := string(b)
+	if !strings.Contains(content, "# @param target required Path to migrate\n") {
+		t.Errorf("file = %q, want a required @param line", content)
+	}
+	if !strings.Contains(content, "# @param dry_run\n") {
+		t.Errorf("file = %q, want an optional @param line", content)
+	}
+
+	w, ok := lookupWorkflow(context.Background(), "migrate")
+	if !ok {
+		t.Fatal("lookupWorkflow: not found")
+	}
+	if len(w.params) != 2 || w.params[0].name != "target" || !w.params[0].required || w.params[1].required {
+		t.Errorf("params = %+v", w.params)
+	}
+}
+
+func TestWorkflowSave_RejectsBadParamName(t *testing.T) {
+	useWorkflowRoots(t, t.TempDir(), t.TempDir())
+	_, err := WorkflowSaveTool{}.Execute(context.Background(), "c", map[string]any{
+		"name":   "bad-param",
+		"script": `"x"`,
+		"params": []any{map[string]any{"name": "has space"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid param name") {
+		t.Errorf("err = %v, want invalid-param-name error", err)
+	}
+}
+
 func TestWorkflowSave_UserScope(t *testing.T) {
 	user, project := t.TempDir(), t.TempDir()
 	useWorkflowRoots(t, user, project)
