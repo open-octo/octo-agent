@@ -11,7 +11,8 @@ octo 可以选择性地接入一个自托管的外部记忆服务，让它给你
 
 支持三种后端，最多选一个：
 
-- [hindsight](https://github.com/vectorize-io/hindsight)——自托管，默认不需要鉴权。
+- [hindsight](https://github.com/vectorize-io/hindsight)——自托管，默认不需要鉴权；如果不想自己
+  跑容器，也有一个托管的 [Hindsight Cloud](https://docs.hindsight.vectorize.io/) 选项（见下文）。
 - [mem0](https://github.com/mem0ai/mem0)——自托管（用的是 mem0ai/mem0 仓库里的 `server/`），
   默认开启鉴权。
 - [MemTensor/MemOS](https://github.com/MemTensor/MemOS)——自托管，默认不需要鉴权。（注意不是
@@ -57,6 +58,23 @@ curl http://localhost:8888/v1/default/banks
 ```
 
 除非你在容器上显式设置了 `HINDSIGHT_API_TENANT_API_KEY`，否则不需要任何鉴权。
+
+#### Hindsight Cloud（不用跑 Docker）
+
+Vectorize 还提供一个托管版本——[Hindsight Cloud](https://docs.hindsight.vectorize.io/)——给不想
+自己跑容器的人用。它用的是同一套 REST API，端点是 `https://api.hindsight.vectorize.io`，路径
+结构（`/v1/default/banks/...`）也跟自托管容器一模一样，所以把 octo 指过去只是改配置，不用改代码：
+
+```yaml
+memory_backend:
+  type: hindsight
+  base_url: https://api.hindsight.vectorize.io
+  api_key: "<你的 Hindsight Cloud API key>"
+  namespace: octo-agent
+```
+
+跟自托管默认情况不同，Hindsight Cloud 是强制要求 API key 的——去它的控制台生成一个填在这里。
+octo 会把它当作 `Authorization: Bearer <api_key>` 发出去，正好是云端 API 要求的格式。
 
 ### mem0
 
@@ -181,8 +199,8 @@ memory_backend:
 - **`base_url`** 是后端的 REST 端点——也就是你把它的 server 跑在哪（照上面的方式搭的话，
   hindsight/mem0 是 `http://localhost:8888`，MemOS 是 `http://localhost:8000`）。
 - **`api_key`** 是可选的，具体看后端：
-  - hindsight 默认不需要鉴权；只有在 server 上开了 `HINDSIGHT_API_TENANT_API_KEY` 时才需要
-    填一个 API key。
+  - 自托管 hindsight 默认不需要鉴权；只有在 server 上开了 `HINDSIGHT_API_TENANT_API_KEY` 时才
+    需要填一个 API key。Hindsight Cloud 是例外——它始终要求填控制台生成的 API key。
   - mem0 默认要求鉴权——把 server 那个兼容 `X-API-Key` 的 key 填在这里，或者本地开发时
     直接用 `AUTH_DISABLED=true` 跑 server，把这里留空。
   - memos（MemTensor/MemOS）默认不需要鉴权；留空的话会把你的 `namespace` 当作

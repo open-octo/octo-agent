@@ -12,7 +12,9 @@ extraction and indexing, and octo doesn't touch or duplicate the `MEMORY.md` lay
 
 Three backends are supported; pick at most one:
 
-- [hindsight](https://github.com/vectorize-io/hindsight) — self-hosted, no auth by default.
+- [hindsight](https://github.com/vectorize-io/hindsight) — self-hosted, no auth by default; a managed
+  [Hindsight Cloud](https://docs.hindsight.vectorize.io/) option also exists if you'd rather not run
+  the container yourself (see below).
 - [mem0](https://github.com/mem0ai/mem0) — self-hosted (`server/` in the mem0ai/mem0 repo), auth on
   by default.
 - [MemTensor/MemOS](https://github.com/MemTensor/MemOS) — self-hosted, no auth by default. (Not
@@ -59,6 +61,25 @@ curl http://localhost:8888/v1/default/banks
 ```
 
 No auth is required unless you explicitly set `HINDSIGHT_API_TENANT_API_KEY` on the container.
+
+#### Hindsight Cloud (no Docker required)
+
+Vectorize also runs a managed version — [Hindsight Cloud](https://docs.hindsight.vectorize.io/) — for
+anyone who'd rather not run the container themselves. It speaks the same REST API at
+`https://api.hindsight.vectorize.io` with the same `/v1/default/banks/...` paths as the self-hosted
+container, so pointing octo at it is a config change, not a code change:
+
+```yaml
+memory_backend:
+  type: hindsight
+  base_url: https://api.hindsight.vectorize.io
+  api_key: "<your Hindsight Cloud API key>"
+  namespace: octo-agent
+```
+
+Unlike the self-hosted default, Hindsight Cloud requires the API key — generate one from its
+dashboard and set it here. octo sends it as `Authorization: Bearer <api_key>`, matching what the
+cloud API expects.
 
 ### mem0
 
@@ -183,8 +204,9 @@ memory_backend:
 - **`base_url`** is the backend's REST endpoint — wherever you're running its server (`http://localhost:8888`
   for hindsight/mem0 as set up above, `http://localhost:8000` for MemOS).
 - **`api_key`** is optional and backend-dependent:
-  - hindsight has no auth by default; set an API key only if you've enabled
-    `HINDSIGHT_API_TENANT_API_KEY` on the server.
+  - self-hosted hindsight has no auth by default; set an API key only if you've enabled
+    `HINDSIGHT_API_TENANT_API_KEY` on the server. Hindsight Cloud is the exception — it always
+    requires the API key from its dashboard.
   - mem0 requires auth by default — set the server's `X-API-Key`-compatible key here, or run the
     server with `AUTH_DISABLED=true` for local development and leave this blank.
   - memos (MemTensor/MemOS) has no auth by default; leaving this blank sends your `namespace` as an
