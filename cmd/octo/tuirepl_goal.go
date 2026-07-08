@@ -41,15 +41,10 @@ func (m *tuiModel) dispatchGoal(args string) (tea.Model, tea.Cmd) {
 		return m.applyGoalStatus(agent.GoalPaused)
 
 	case sub == "resume":
-		model, cmd := m.applyGoalStatus(agent.GoalActive)
+		m.applyGoalStatus(agent.GoalActive)
 		// Resuming re-enters the continuation loop right away when idle —
 		// the user just asked for the goal to keep going.
-		if g, ok := sess.GoalSnapshot(); ok && g.Status == agent.GoalActive {
-			if prompt, kick := m.goalContinuationKick(); kick {
-				return model, tea.Sequence(m.flushPrints(), m.startTurnEcho(prompt, ""))
-			}
-		}
-		return model, cmd
+		return m.startGoalNow()
 
 	case sub == "clear":
 		if sess.ClearGoal() {
@@ -90,7 +85,7 @@ func (m *tuiModel) dispatchGoal(args string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.println(noticeStyle.Render("Goal replaced — " + goalOneLine(g)))
-		return m, nil
+		return m.startGoalNow()
 
 	default:
 		// "/goal <objective>": start a goal. A finished (complete) goal is
@@ -104,10 +99,11 @@ func (m *tuiModel) dispatchGoal(args string) (tea.Model, tea.Cmd) {
 			}
 			if ng, err := sess.ReplaceGoal(args, 0); err != nil {
 				m.println(errorStyle.Render("/goal: " + err.Error()))
+				return m, nil
 			} else {
 				m.println(noticeStyle.Render("Goal set — " + goalOneLine(ng)))
 			}
-			return m, nil
+			return m.startGoalNow()
 		}
 		g, err := sess.CreateGoal(args, 0)
 		if err != nil {
@@ -115,7 +111,7 @@ func (m *tuiModel) dispatchGoal(args string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.println(noticeStyle.Render("Goal set — " + goalOneLine(g)))
-		return m, nil
+		return m.startGoalNow()
 	}
 }
 
@@ -126,10 +122,10 @@ func (m *tuiModel) applyGoalStatus(status agent.GoalStatus) (tea.Model, tea.Cmd)
 	g, err := m.cfg.session.SetGoalStatus(status)
 	if err != nil {
 		m.println(errorStyle.Render("/goal: " + err.Error()))
-		return m, nil
+		return m, m.flushPrints()
 	}
 	m.println(noticeStyle.Render("Goal " + goalStatusLabel(g.Status) + " — " + goalOneLine(g)))
-	return m, nil
+	return m, m.flushPrints()
 }
 
 // submitGoalEdit consumes the next submitted line as the edited objective.
@@ -146,6 +142,23 @@ func (m *tuiModel) submitGoalEdit(text string) (tea.Model, tea.Cmd) {
 	}
 	m.println(noticeStyle.Render("Goal updated — " + goalOneLine(g)))
 	return m, nil
+}
+
+// startGoalNow flushes any queued notices and, if the goal is active and
+// idle, immediately kicks off the continuation turn instead of waiting for
+// handleTurnFinished to pick it up after some unrelated turn completes.
+// Shared by create/replace/resume so a fresh or resumed goal starts right
+// away rather than on the user's next message. A turn already running is
+// left alone — dispatchGoal is only ever reached while idle in practice
+// (submit() queues slash commands mid-turn instead), so this is a defensive
+// no-op rather than a real production path.
+func (m *tuiModel) startGoalNow() (tea.Model, tea.Cmd) {
+	if !m.turnRunning {
+		if prompt, kick := m.goalContinuationKick(); kick {
+			return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(prompt, ""))
+		}
+	}
+	return m, m.flushPrints()
 }
 
 // goalContinuationKick asks the session whether an idle continuation turn
