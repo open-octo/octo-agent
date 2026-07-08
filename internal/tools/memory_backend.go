@@ -18,9 +18,17 @@ import (
 // time — mirroring activeSkills/SetSkills in skill.go.
 var activeMemoryBackend memorybackend.Backend
 
+// activeMemoryBackendAutoRecall toggles whether RegisterMemoryBackendHooks
+// also installs the automatic pre-turn recall hook (see SetMemoryBackendAutoRecall).
+var activeMemoryBackendAutoRecall bool
+
 // SetMemoryBackend registers the memory backend that `memory_recall` and the
 // automatic store hook use. Pass nil to disable.
 func SetMemoryBackend(b memorybackend.Backend) { activeMemoryBackend = b }
+
+// SetMemoryBackendAutoRecall toggles automatic pre-turn recall — call
+// alongside SetMemoryBackend, reading MemoryBackendConfig.AutoRecall.
+func SetMemoryBackendAutoRecall(on bool) { activeMemoryBackendAutoRecall = on }
 
 // memoryBackendEnabled reports whether an external memory backend is
 // configured — the gate for both advertising memory_recall and registering
@@ -113,6 +121,15 @@ func (MemoryRecallTool) Execute(ctx context.Context, _ string, input map[string]
 // No-op when no backend is configured. Call this alongside
 // memory.Injector.RegisterHooks wherever a session builds a fresh
 // hooks.Engine — there is no shared hook-registration chokepoint today.
+//
+// When SetMemoryBackendAutoRecall(true) is active, this also registers an
+// EventUserPromptSubmit hook that calls Recall with the user's message and
+// folds the result into that same turn's outgoing message — the same
+// mechanism memory.Injector uses for MEMORY.md reminders (see
+// internal/memory/injector.go), so no new agent-core plumbing is needed.
+// This runs synchronously on the turn's critical path (unlike the
+// fire-and-forget Store hook above), so it's wrapped in its own short
+// timeout and swallows errors/empty results the same way Store does.
 func RegisterMemoryBackendHooks(e *hooks.Engine) {
 	if e == nil || !memoryBackendEnabled() {
 		return
@@ -130,4 +147,28 @@ func RegisterMemoryBackendHooks(e *hooks.Engine) {
 		}()
 		return ""
 	})
+
+	if activeMemoryBackendAutoRecall {
+		e.RegisterInProc(hooks.EventUserPromptSubmit, func(ctx context.Context, p hooks.Payload) string {
+			if p.UserInput == "" {
+				return ""
+			}
+			ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			results, err := b.Recall(ctx, p.UserInput)
+			if err != nil || len(results) == 0 {
+				return ""
+			}
+			var sb strings.Builder
+			sb.WriteString("<system-reminder>\n")
+			sb.WriteString("Relevant memories retrieved automatically for this message — no need to call " +
+				"`memory_recall` again for this same question; only call it if you need to dig further " +
+				"(a different angle, more results, or something this list doesn't cover):\n")
+			for _, r := range results {
+				sb.WriteString("- " + r.Content + "\n")
+			}
+			sb.WriteString("</system-reminder>")
+			return sb.String()
+		})
+	}
 }

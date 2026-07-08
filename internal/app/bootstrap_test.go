@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/hooks"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -99,6 +100,35 @@ func TestWireTools_WiresMemoryBackendFromConfig(t *testing.T) {
 	cleanup()
 	if g := tools.MemoryBackendGuidance(); g != "" {
 		t.Errorf("cleanup should reset the memory backend, guidance = %q", g)
+	}
+}
+
+func TestWireTools_WiresAutoRecallFromConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Cleanup(func() {
+		tools.SetSpawner(nil)
+		tools.SetTaskStore(nil)
+		tools.SetMemoryBackend(nil)
+		tools.SetMemoryBackendAutoRecall(false)
+	})
+
+	cfg := config.Config{
+		MemoryBackend: config.MemoryBackendConfig{Type: "hindsight", BaseURL: "http://localhost:8888", AutoRecall: true},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	a := agent.New(sender{p: &mockProvider{}}, "claude-haiku-4-5")
+	_, cleanup := WireTools(a, false)
+	defer cleanup()
+
+	e := hooks.NewEngine(nil)
+	tools.RegisterMemoryBackendHooks(e)
+	if !e.Configured(hooks.EventUserPromptSubmit) {
+		t.Error("WireTools should propagate auto_recall: true into an UserPromptSubmit hook")
 	}
 }
 

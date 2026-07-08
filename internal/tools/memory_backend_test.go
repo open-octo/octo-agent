@@ -15,11 +15,12 @@ import (
 // channel (so tests can synchronize on the async hook without sleeping),
 // Recall returns canned results or an error.
 type fakeMemoryBackend struct {
-	name      string
-	stored    chan string
-	recallOut []memorybackend.Result
-	recallErr error
-	storeErr  error
+	name        string
+	stored      chan string
+	recallOut   []memorybackend.Result
+	recallErr   error
+	storeErr    error
+	recallQuery string
 }
 
 func (f *fakeMemoryBackend) Name() string { return f.name }
@@ -31,7 +32,8 @@ func (f *fakeMemoryBackend) Store(_ context.Context, content string) error {
 	return f.storeErr
 }
 
-func (f *fakeMemoryBackend) Recall(_ context.Context, _ string) ([]memorybackend.Result, error) {
+func (f *fakeMemoryBackend) Recall(_ context.Context, query string) ([]memorybackend.Result, error) {
+	f.recallQuery = query
 	return f.recallOut, f.recallErr
 }
 
@@ -152,5 +154,75 @@ func TestRegisterMemoryBackendHooks_SkipsEmptyTurn(t *testing.T) {
 		t.Fatalf("Store called for an empty turn: %q", got)
 	case <-time.After(200 * time.Millisecond):
 		// expected: nothing stored
+	}
+}
+
+func TestRegisterMemoryBackendHooks_AutoRecallDisabledByDefault(t *testing.T) {
+	setMemoryBackendFor(t, &fakeMemoryBackend{name: "hindsight"})
+	t.Cleanup(func() { SetMemoryBackendAutoRecall(false) })
+
+	e := hooks.NewEngine(nil)
+	RegisterMemoryBackendHooks(e)
+	if e.Configured(hooks.EventUserPromptSubmit) {
+		t.Error("expected no UserPromptSubmit hook when auto_recall is off")
+	}
+}
+
+func TestRegisterMemoryBackendHooks_AutoRecallInjectsContext(t *testing.T) {
+	fake := &fakeMemoryBackend{
+		name:      "hindsight",
+		recallOut: []memorybackend.Result{{ID: "m1", Content: "lucky number is 47"}},
+	}
+	setMemoryBackendFor(t, fake)
+	SetMemoryBackendAutoRecall(true)
+	t.Cleanup(func() { SetMemoryBackendAutoRecall(false) })
+
+	e := hooks.NewEngine(nil)
+	RegisterMemoryBackendHooks(e)
+	got := e.Inject(context.Background(), hooks.Payload{
+		Event:     hooks.EventUserPromptSubmit,
+		UserInput: "what's my lucky number?",
+	})
+
+	if fake.recallQuery != "what's my lucky number?" {
+		t.Errorf("Recall query = %q, want the user's message", fake.recallQuery)
+	}
+	if !strings.Contains(got, "lucky number is 47") {
+		t.Errorf("injected text = %q, want it to contain the recalled memory", got)
+	}
+	if !strings.Contains(got, "no need to call") || !strings.Contains(got, "memory_recall") {
+		t.Errorf("injected text = %q, want it to discourage a redundant memory_recall call", got)
+	}
+}
+
+func TestRegisterMemoryBackendHooks_AutoRecallSwallowsErrorsAndEmptyResults(t *testing.T) {
+	fake := &fakeMemoryBackend{name: "hindsight", recallErr: errors.New("boom")}
+	setMemoryBackendFor(t, fake)
+	SetMemoryBackendAutoRecall(true)
+	t.Cleanup(func() { SetMemoryBackendAutoRecall(false) })
+
+	e := hooks.NewEngine(nil)
+	RegisterMemoryBackendHooks(e)
+	if got := e.Inject(context.Background(), hooks.Payload{Event: hooks.EventUserPromptSubmit, UserInput: "x"}); got != "" {
+		t.Errorf("expected empty injection on Recall error, got %q", got)
+	}
+
+	fake.recallErr = nil
+	fake.recallOut = nil
+	if got := e.Inject(context.Background(), hooks.Payload{Event: hooks.EventUserPromptSubmit, UserInput: "x"}); got != "" {
+		t.Errorf("expected empty injection on empty Recall results, got %q", got)
+	}
+}
+
+func TestRegisterMemoryBackendHooks_AutoRecallSkipsEmptyInput(t *testing.T) {
+	fake := &fakeMemoryBackend{name: "hindsight", recallOut: []memorybackend.Result{{Content: "should not appear"}}}
+	setMemoryBackendFor(t, fake)
+	SetMemoryBackendAutoRecall(true)
+	t.Cleanup(func() { SetMemoryBackendAutoRecall(false) })
+
+	e := hooks.NewEngine(nil)
+	RegisterMemoryBackendHooks(e)
+	if got := e.Inject(context.Background(), hooks.Payload{Event: hooks.EventUserPromptSubmit}); got != "" {
+		t.Errorf("expected empty injection for empty UserInput, got %q", got)
 	}
 }
