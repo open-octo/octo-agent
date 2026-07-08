@@ -66,6 +66,47 @@ func TestDispatchGoal_CreateSummaryAndGuardedReplace(t *testing.T) {
 	}
 }
 
+func TestGoalContinuationKick_InitialAnnouncesStart(t *testing.T) {
+	// Regression: the very first turn of a freshly created/replaced/resumed
+	// goal (startGoalNow's caller) must read "Goal starts", not "Goal
+	// continues" — "continues" implies a prior turn already ran.
+	m, sess := newGoalTestModel()
+	if _, err := sess.CreateGoal("keep going", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := m.goalContinuationKick(true); !ok {
+		t.Fatal("expected a continuation to be available")
+	}
+	out := printed(m)
+	if !strings.Contains(out, "Goal starts") {
+		t.Errorf("expected the initial kick to say \"Goal starts\":\n%s", out)
+	}
+	if strings.Contains(out, "Goal continues") {
+		t.Errorf("initial kick must not say \"Goal continues\":\n%s", out)
+	}
+}
+
+func TestGoalContinuationKick_FollowupAnnouncesContinues(t *testing.T) {
+	// The handleTurnFinished caller fires after a turn already ran, so it
+	// should keep saying "Goal continues".
+	m, sess := newGoalTestModel()
+	if _, err := sess.CreateGoal("keep going", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := m.goalContinuationKick(false); !ok {
+		t.Fatal("expected a continuation to be available")
+	}
+	out := printed(m)
+	if !strings.Contains(out, "Goal continues") {
+		t.Errorf("expected the follow-up kick to say \"Goal continues\":\n%s", out)
+	}
+	if strings.Contains(out, "Goal starts") {
+		t.Errorf("follow-up kick must not say \"Goal starts\":\n%s", out)
+	}
+}
+
 func TestDispatchGoal_PauseResumeClear(t *testing.T) {
 	m, sess := newGoalTestModel()
 	// Seeded directly on the session so the fixture itself doesn't consume

@@ -2039,7 +2039,7 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 	// the policy (status, zero-progress suppression); user input always won
 	// above by reaching the queue/inbox branches first.
 	if err == nil {
-		if prompt, ok := m.goalContinuationKick(); ok {
+		if prompt, ok := m.goalContinuationKick(false); ok {
 			return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(prompt, ""))
 		}
 	}
