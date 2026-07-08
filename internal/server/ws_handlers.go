@@ -213,6 +213,69 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 		conn.send <- b
 	}
 
+	// Replay still-running workflow runs the same way: the live panel is
+	// built entirely from workflow_event pushes with no initial fetch, so a
+	// tab that (re)subscribes after a run already started never sees it
+	// otherwise — the started/progress events already went to whichever
+	// connection was live at the time, and broadcast() is fire-and-forget
+	// with no queueing. Finished runs need no replay: the panel already
+	// removes them on "done", so if that event was missed there is nothing
+	// left to reconstruct.
+	for _, run := range tools.SessionWorkflowManager(sessionID).List() {
+		if run.Status != "running" {
+			continue
+		}
+		if b, err := json.Marshal(map[string]any{
+			"type":        "workflow_event",
+			"session_id":  sessionID,
+			"run_id":      run.ID,
+			"description": run.Description,
+			"kind":        "started",
+			"line":        "",
+			"status":      run.Status,
+		}); err == nil {
+			conn.send <- b
+		}
+		for _, line := range run.Logs {
+			if b, err := json.Marshal(map[string]any{
+				"type":        "workflow_event",
+				"session_id":  sessionID,
+				"run_id":      run.ID,
+				"description": run.Description,
+				"kind":        "progress",
+				"line":        line,
+				"status":      run.Status,
+			}); err == nil {
+				conn.send <- b
+			}
+		}
+	}
+
+	// Sub-agents have the identical gap: SubAgentOnEvent (see
+	// handlers_prepare_toolturn.go) also broadcasts directly to the hub with
+	// no buffering, so a late-subscribing tab misses a still-running
+	// sub-agent entirely. mkSpawner is nil: this must never create a
+	// session's sub-agent manager just to discover it's empty — nil back
+	// means no sub-agent has run in this session yet. SubAgentInfo doesn't
+	// retain agent_type or per-tool history, so the replay is coarser than
+	// the live stream (the panel will show the agent as running without its
+	// tool trail), but that beats not showing it at all.
+	if sam := tools.SessionSubAgentManager(sessionID, nil); sam != nil {
+		for _, sa := range sam.ListRunning() {
+			if b, err := json.Marshal(map[string]any{
+				"type":        "sub_agent_event",
+				"session_id":  sessionID,
+				"agent_id":    sa.ID,
+				"description": sa.Description,
+				"agent_type":  "",
+				"kind":        "started",
+				"tool_name":   "",
+			}); err == nil {
+				conn.send <- b
+			}
+		}
+	}
+
 	// Snapshot the in-progress turn under the read lock: the event buffer,
 	// any unflushed streaming deltas, the current progress, and buffered
 	// stdout. Marshaling happens inside the lock because the builders and the

@@ -115,6 +115,7 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 					"agent_type":  ev.AgentType,
 					"kind":        ev.Kind,
 					"tool_name":   ev.ToolName,
+					"tool_input":  ev.ToolInput,
 				})
 			},
 			SubAgentOnExit: func(ev tools.SubAgentNotification) {

@@ -1,12 +1,15 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/workflow"
 )
 
 // drainConn unmarshals everything buffered on the connection's send channel.
@@ -363,5 +366,125 @@ func TestReplayLiveState_StdoutClearsAfterToolDone(t *testing.T) {
 		if ev["type"] == "tool_stdout" {
 			t.Errorf("stale tool_stdout replayed after the tool finished: %v", ev)
 		}
+	}
+}
+
+// TestReplayLiveState_ReplaysRunningWorkflow is the regression guard for the
+// web workflow panel never appearing (or never clearing) when a tab
+// (re)subscribes after a background workflow already started: the panel is
+// built entirely from workflow_event pushes with no initial fetch, and
+// broadcast() is fire-and-forget, so a tab that wasn't connected when
+// "started"/"progress" fired used to never learn the run exists.
+func TestReplayLiveState_ReplaysRunningWorkflow(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "replay-workflow-session"
+	defer tools.CloseSessionWorkflowManager(sid)
+
+	block := make(chan struct{})
+	blockingAgent := func(ctx context.Context, _ string, _ workflow.AgentOptions) workflow.AgentResult {
+		<-block
+		return workflow.AgentResult{Reply: "done"}
+	}
+	mgr := tools.SessionWorkflowManager(sid)
+	id, err := mgr.Start(tools.WorkflowRunRequest{
+		Description: "test workflow",
+		Script:      `log("step one"); agent("x")`,
+		Agent:       blockingAgent,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer close(block)
+
+	// Wait for the script to emit its progress line and reach the blocking
+	// agent call, so the run is still "running" when we replay. Generous
+	// deadline: under `go test -race` the mruby interpreter runs several
+	// times slower (see waitForDone in workflow_manager_test.go).
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		if snap, ok := mgr.Read(id); ok && len(snap.Logs) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	var sawStarted bool
+	var progressLines []any
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] != "workflow_event" || ev["run_id"] != id {
+			continue
+		}
+		switch ev["kind"] {
+		case "started":
+			sawStarted = true
+		case "progress":
+			progressLines = append(progressLines, ev["line"])
+		}
+	}
+	if !sawStarted {
+		t.Error("replay did not include the workflow's started event")
+	}
+	found := false
+	for _, l := range progressLines {
+		if l == "step one" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("replay progress lines = %v, want one of them to be %q", progressLines, "step one")
+	}
+}
+
+// blockingSpawner's Spawn hangs until unblocked, so a Start()ed sub-agent
+// stays "running" long enough for a test to replay it.
+type blockingSpawner struct{ block <-chan struct{} }
+
+func (s *blockingSpawner) Spawn(ctx context.Context, _ tools.SpawnRequest) (tools.SpawnResult, error) {
+	select {
+	case <-s.block:
+	case <-ctx.Done():
+	}
+	return tools.SpawnResult{Reply: "done"}, nil
+}
+
+func (s *blockingSpawner) Continue(ctx context.Context, _, _ string) (tools.SpawnResult, error) {
+	return tools.SpawnResult{}, nil
+}
+
+// TestReplayLiveState_ReplaysRunningSubAgent is the regression guard for the
+// same gap in the sub-agent panel: SubAgentOnEvent also broadcasts directly
+// with no buffering, so a tab that (re)subscribes after a sub-agent already
+// started never learned it existed.
+func TestReplayLiveState_ReplaysRunningSubAgent(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "replay-subagent-session"
+	defer tools.CloseSessionSubAgentManager(sid)
+
+	block := make(chan struct{})
+	defer close(block)
+	mgr := tools.SessionSubAgentManager(sid, func() tools.Spawner { return &blockingSpawner{block: block} })
+	id, err := mgr.Start(tools.SpawnRequest{Description: "test sub-agent", Prompt: "do it"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	var sawStarted bool
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] == "sub_agent_event" && ev["agent_id"] == id && ev["kind"] == "started" {
+			sawStarted = true
+		}
+	}
+	if !sawStarted {
+		t.Error("replay did not include the sub-agent's started event")
 	}
 }

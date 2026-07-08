@@ -474,3 +474,79 @@ func toolNames(defs []agent.ToolDefinition) []string {
 	}
 	return names
 }
+
+// toolInputSpawner emits a "tool" SubAgentEvent carrying ToolInput, the way
+// internal/app/spawner.go's real spawner does when a sub-agent dispatches a
+// tool call.
+type toolInputSpawner struct{}
+
+func (toolInputSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.SpawnResult, error) {
+	if sink := tools.SubAgentEventSink(ctx); sink != nil {
+		sink(tools.SubAgentEvent{Kind: "tool", ToolName: "read_file", ToolInput: map[string]any{"path": "go.mod"}})
+	}
+	return tools.SpawnResult{Reply: "ok"}, nil
+}
+
+func (toolInputSpawner) Continue(_ context.Context, _, _ string) (tools.SpawnResult, error) {
+	return tools.SpawnResult{}, nil
+}
+
+// TestPrepareToolTurn_SubAgentToolEventCarriesToolInput guards the web
+// sub-agent panel's tool-arguments display: the frontend (ChatView.svelte's
+// sub_agent_event handler, stores.ts's applySubAgentEvent, SubAgentsCard's
+// tool-input rendering) has supported showing a tool's input all along, and
+// tools.SubAgentEvent has carried ToolInput since it was added — but the
+// server's WS broadcast in prepareToolTurn's SubAgentOnEvent hook dropped
+// the field, so the argument list never had anything to render.
+func TestPrepareToolTurn_SubAgentToolEventCarriesToolInput(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
+	srv.initWS()
+
+	const sid = "subagent-tool-input-test"
+	// Pre-seed the session's manager with a fake spawner; prepareToolTurn's
+	// SessionSubAgentManager call reuses this cached instance and only wires
+	// the real broadcast callback onto it (mkSpawner runs once per session).
+	tools.SessionSubAgentManager(sid, func() tools.Spawner { return toolInputSpawner{} })
+	t.Cleanup(func() { tools.CloseSessionSubAgentManager(sid) })
+
+	a := agent.New(&stubSender{}, "stub-model")
+	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, sid)
+	_, _, mgr, cleanup, err := srv.prepareToolTurn(ctx, a, nil)
+	if err != nil {
+		t.Fatalf("prepareToolTurn: %v", err)
+	}
+	defer cleanup()
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.wsHub.register <- conn
+	srv.wsHub.subscribe(conn, sid)
+
+	if _, err := mgr.Start(tools.SpawnRequest{Description: "d", Prompt: "p"}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case b := <-conn.send:
+			var ev map[string]any
+			if err := json.Unmarshal(b, &ev); err != nil {
+				continue
+			}
+			if ev["type"] != "sub_agent_event" || ev["kind"] != "tool" {
+				continue
+			}
+			input, ok := ev["tool_input"].(map[string]any)
+			if !ok || input["path"] != "go.mod" {
+				t.Fatalf("tool_input = %v, want {path: go.mod}", ev["tool_input"])
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for the tool sub_agent_event")
+		}
+	}
+}
