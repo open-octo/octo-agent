@@ -164,8 +164,6 @@ export interface McpServerDetail {
 export interface ToolSearchSettings {
   enabled: 'auto' | 'on' | 'off'
   threshold_pct: number
-  search_default_limit: number
-  max_search_limit: number
 }
 
 // WsSessionInfo matches the Go server WebSocket session info struct

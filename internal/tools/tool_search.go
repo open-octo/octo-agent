@@ -4,29 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
-	"sort"
 	"strings"
 	"sync"
-	"unicode"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 )
 
-// Tool Search defers MCP tool schemas behind three bridge tools instead of
-// uploading every schema on every turn. The model discovers tools with
-// mcp_search, loads one schema with mcp_describe, and invokes it with
-// mcp_call — which routes straight into executeMCP, so all the existing
-// mcp__-prefix dispatch, permission, and hook machinery runs against the real
-// tool name. See dev-docs/tool-search-mcp.md.
+// Tool Search defers MCP tool schemas behind two bridge tools instead of
+// uploading every schema on every turn. The tool's name and a one-line
+// description are always visible to the model (rendered into the system
+// prompt via MCPManifestFor, the same way skills.RenderManifest surfaces
+// "# Available skills") so the model never needs a round trip just to learn
+// whether a tool exists. mcp_describe loads one schema on demand, and
+// mcp_call invokes it — which routes straight into executeMCP, so all the
+// existing mcp__-prefix dispatch, permission, and hook machinery runs against
+// the real tool name. See dev-docs/tool-search-mcp.md.
 
 // Bridge tool names. The mcp_ prefix is deliberate: it tells the model these
-// three tools are the MCP-only discover/describe/invoke path, so it doesn't
-// mistake mcp_call for a generic dispatcher and route built-in tools (sub_agent,
+// two tools are the MCP-only describe/invoke path, so it doesn't mistake
+// mcp_call for a generic dispatcher and route built-in tools (sub_agent,
 // read_file, …) through it. mcp_call is the only path by which a deferred MCP
 // tool is actually invoked when Tool Search is active.
 const (
-	toolSearchName   = "mcp_search"
 	toolDescribeName = "mcp_describe"
 	toolCallName     = "mcp_call"
 )
@@ -55,15 +54,13 @@ const (
 // cmd/octo maps the ~/.octo/config.yml block onto this and installs it via
 // SetToolSearchConfig, mirroring SetSandbox / SetMCPRegistry.
 type ToolSearchConfig struct {
-	Mode           ToolSearchMode
-	ThresholdPct   int // auto-mode activation threshold, percent of context window
-	SearchLimit    int // default number of hits tool_search returns
-	MaxSearchLimit int // upper bound on the caller-supplied limit
+	Mode         ToolSearchMode
+	ThresholdPct int // auto-mode activation threshold, percent of context window
 }
 
-// defaultToolSearchConfig matches the documented defaults (auto / 10% / 5 / 20).
+// defaultToolSearchConfig matches the documented defaults (auto / 10%).
 func defaultToolSearchConfig() ToolSearchConfig {
-	return ToolSearchConfig{Mode: ToolSearchAuto, ThresholdPct: 10, SearchLimit: 5, MaxSearchLimit: 20}
+	return ToolSearchConfig{Mode: ToolSearchAuto, ThresholdPct: 10}
 }
 
 var (
@@ -78,12 +75,6 @@ func SetToolSearchConfig(c ToolSearchConfig) {
 	d := defaultToolSearchConfig()
 	if c.ThresholdPct <= 0 {
 		c.ThresholdPct = d.ThresholdPct
-	}
-	if c.SearchLimit <= 0 {
-		c.SearchLimit = d.SearchLimit
-	}
-	if c.MaxSearchLimit <= 0 {
-		c.MaxSearchLimit = d.MaxSearchLimit
 	}
 	toolSearchCfgMu.Lock()
 	toolSearchCfg = c
@@ -135,45 +126,21 @@ func estimateSchemaTokens(defs []agent.ToolDefinition) int {
 
 // ── bridge tool definitions ────────────────────────────────────────────────
 
-// toolSearchBridgeDefs returns the three bridge tools advertised in place of
+// toolSearchBridgeDefs returns the two bridge tools advertised in place of
 // the full MCP catalog when Tool Search is active.
 func toolSearchBridgeDefs() []agent.ToolDefinition {
-	cfg := toolSearchConfig()
 	return []agent.ToolDefinition{
 		{
-			Name: toolSearchName,
-			Description: fmt.Sprintf("Search the catalog of available MCP tools by keyword and "+
-				"return matching tool names with a one-line description (NOT their full schema). "+
-				"MCP tools are not loaded up front — discover them here first. Workflow: "+
-				"mcp_search to find a tool, mcp_describe to load its parameters, mcp_call to "+
-				"invoke it. This catalog holds ONLY MCP (mcp__-prefixed) tools — built-in tools "+
-				"like sub_agent or read_file are not here; call those directly by name. Returns "+
-				"up to %d hits by default.", cfg.SearchLimit),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query": map[string]any{
-						"type":        "string",
-						"description": "Keywords describing the tool you need, e.g. 'create github issue'.",
-					},
-					"limit": map[string]any{
-						"type":        "integer",
-						"description": fmt.Sprintf("Max hits to return (default %d, capped at %d).", cfg.SearchLimit, cfg.MaxSearchLimit),
-					},
-				},
-				"required": []string{"query"},
-			},
-		},
-		{
 			Name: toolDescribeName,
-			Description: "Load the full JSON Schema (parameters) for one MCP tool discovered via " +
-				"mcp_search. Call this before mcp_call so you know the tool's exact arguments.",
+			Description: "Load the full JSON Schema (parameters) for one MCP tool listed under " +
+				"\"# Available MCP tools\" in the system prompt. Call this before mcp_call so you " +
+				"know the tool's exact arguments.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"name": map[string]any{
 						"type":        "string",
-						"description": "The exact tool name from mcp_search (e.g. 'mcp__github__create_issue').",
+						"description": "The exact tool name from the \"# Available MCP tools\" list (e.g. 'mcp__github__create_issue').",
 					},
 				},
 				"required": []string{"name"},
@@ -182,10 +149,10 @@ func toolSearchBridgeDefs() []agent.ToolDefinition {
 		{
 			Name: toolCallName,
 			Description: "Invoke an MCP tool (and ONLY an MCP tool — its name starts with mcp__) " +
-				"discovered via mcp_search. Pass the tool name and its arguments (matching the schema " +
-				"from mcp_describe). This is the only way to call a deferred MCP tool while Tool Search " +
-				"is active. Do NOT route built-in tools (sub_agent, read_file, terminal, …) through " +
-				"here — call those directly by their own name.",
+				"listed under \"# Available MCP tools\" in the system prompt. Pass the tool name and " +
+				"its arguments (matching the schema from mcp_describe). This is the only way to call " +
+				"a deferred MCP tool while Tool Search is active. Do NOT route built-in tools " +
+				"(sub_agent, read_file, terminal, …) through here — call those directly by their own name.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -204,44 +171,51 @@ func toolSearchBridgeDefs() []agent.ToolDefinition {
 	}
 }
 
-// ── dispatch (called from DefaultRegistry.Execute) ─────────────────────────
+// ── system-prompt manifest ──────────────────────────────────────────────────
 
-// execToolSearch runs a BM25 search over the live MCP catalog and returns the
-// matching tool names with their one-line descriptions — never their schemas.
-func execToolSearch(input map[string]any) (agent.ToolResult, error) {
-	query := strings.TrimSpace(stringArg(input, "query"))
-	if query == "" {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("mcp_search: query is required")
-	}
-	cfg := toolSearchConfig()
-	limit := intArg(input, "limit", cfg.SearchLimit)
-	if limit < 1 {
-		limit = cfg.SearchLimit
-	}
-	if limit > cfg.MaxSearchLimit {
-		limit = cfg.MaxSearchLimit
-	}
-
+// MCPManifestFor renders the "# Available MCP tools" catalog injected into
+// the system prompt when Tool Search is active for model: a name + one-line
+// description for every deferred MCP tool, with no cap or pagination (this
+// list is name+description only, never schema, so its size is negligible
+// next to the schema budget that triggers the bridge in the first place). The
+// model reads this once from the prompt and picks a tool directly — no
+// discovery round trip.
+//
+// Returns "" when the bridge isn't active for model (the full per-tool
+// definitions, schema included, are already inline in the tools array, so
+// repeating the names in the prompt would just duplicate them) or when there
+// are no MCP tools connected.
+func MCPManifestFor(model string) string {
 	catalog := mcpCatalog()
-	if len(catalog) == 0 {
-		return agent.ToolResult{Text: "(no MCP tools available)"}, nil
+	if !toolSearchActive(model, catalog) {
+		return ""
 	}
-	hits := bm25Search(catalog, query, limit)
-	if len(hits) == 0 {
-		return agent.ToolResult{Text: fmt.Sprintf("(no tools match %q)", query)}, nil
-	}
+	return renderMCPManifest(catalog)
+}
 
+// renderMCPManifest builds the manifest text for a given catalog. Split out
+// from MCPManifestFor so tests can exercise the rendering independently of
+// the activation gate.
+func renderMCPManifest(catalog []agent.ToolDefinition) string {
+	if len(catalog) == 0 {
+		return ""
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d match(es) for %q — use mcp_describe to load a tool's parameters:\n", len(hits), query)
-	for _, d := range hits {
+	b.WriteString("# Available MCP tools\n\n")
+	b.WriteString("These MCP tools are connected but their full parameter schemas are not " +
+		"loaded up front. Call mcp_describe with a tool's exact name to load its schema, then " +
+		"mcp_call to invoke it.\n\n")
+	for _, d := range catalog {
 		desc := firstLine(d.Description)
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Fprintf(&b, "- %s — %s\n", d.Name, desc)
+		fmt.Fprintf(&b, "- %s: %s\n", d.Name, desc)
 	}
-	return agent.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
+	return strings.TrimRight(b.String(), "\n")
 }
+
+// ── dispatch (called from DefaultRegistry.Execute) ─────────────────────────
 
 // execToolDescribe returns the full JSON Schema of one catalog tool.
 func execToolDescribe(input map[string]any) (agent.ToolResult, error) {
@@ -258,7 +232,7 @@ func execToolDescribe(input map[string]any) (agent.ToolResult, error) {
 			return agent.ToolResult{Text: fmt.Sprintf("%s\n\n%s\n\n%s", d.Name, firstLine(d.Description), string(schema))}, nil
 		}
 	}
-	return agent.ToolResult{Text: ""}, fmt.Errorf("mcp_describe: no tool named %q (use mcp_search to find the exact name)", name)
+	return agent.ToolResult{Text: ""}, fmt.Errorf("mcp_describe: no tool named %q (check the \"# Available MCP tools\" list in the system prompt for the exact name)", name)
 }
 
 // execToolCall unwraps {name, arguments} and forwards to executeMCP, so the
@@ -299,198 +273,4 @@ func ToolCallTarget(name string, input map[string]any) (realName string, realInp
 		realInput = map[string]any{}
 	}
 	return realName, realInput, true
-}
-
-// ── BM25 ────────────────────────────────────────────────────────────────────
-
-// bm25Search ranks catalog entries against query using BM25 over each tool's
-// name + description + parameter-property names, and returns the top n. When no
-// term has any document frequency (zero IDF — e.g. a brand-new term), it falls
-// back to a substring match on name + description so a reasonable query never
-// comes back empty just because the corpus is tiny.
-func bm25Search(catalog []agent.ToolDefinition, query string, n int) []agent.ToolDefinition {
-	const k1, b = 1.5, 0.75
-
-	docs := make([][]string, len(catalog))
-	var totalLen int
-	for i, d := range catalog {
-		docs[i] = tokenizeForSearch(catalogText(d))
-		totalLen += len(docs[i])
-	}
-	avgLen := 0.0
-	if len(docs) > 0 {
-		avgLen = float64(totalLen) / float64(len(docs))
-	}
-
-	// Document frequency per term.
-	df := map[string]int{}
-	for _, toks := range docs {
-		for t := range uniqueTokens(toks) {
-			df[t]++
-		}
-	}
-
-	qTerms := tokenizeForSearch(query)
-	N := float64(len(docs))
-
-	type scored struct {
-		idx   int
-		score float64
-	}
-	var ranked []scored
-	for i, toks := range docs {
-		tf := termFreq(toks)
-		var score float64
-		for _, qt := range qTerms {
-			f := float64(tf[qt])
-			if f == 0 {
-				continue
-			}
-			idf := math.Log(1 + (N-float64(df[qt])+0.5)/(float64(df[qt])+0.5))
-			denom := f + k1*(1-b+b*float64(len(toks))/maxF(avgLen, 1))
-			score += idf * (f * (k1 + 1)) / denom
-		}
-		if score > 0 {
-			ranked = append(ranked, scored{i, score})
-		}
-	}
-
-	if len(ranked) == 0 {
-		return substringFallback(catalog, query, n)
-	}
-	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score > ranked[j].score })
-	if len(ranked) > n {
-		ranked = ranked[:n]
-	}
-	out := make([]agent.ToolDefinition, 0, len(ranked))
-	for _, r := range ranked {
-		out = append(out, catalog[r.idx])
-	}
-	return out
-}
-
-// substringFallback returns catalog entries whose name or description contains
-// the query (case-insensitive), capped at n. Used when BM25 finds nothing.
-func substringFallback(catalog []agent.ToolDefinition, query string, n int) []agent.ToolDefinition {
-	q := strings.ToLower(strings.TrimSpace(query))
-	var out []agent.ToolDefinition
-	for _, d := range catalog {
-		if strings.Contains(strings.ToLower(d.Name+" "+d.Description), q) {
-			out = append(out, d)
-			if len(out) >= n {
-				break
-			}
-		}
-	}
-	return out
-}
-
-// catalogText is the searchable text for one tool: its name, description, and
-// the names of its top-level parameter properties.
-func catalogText(d agent.ToolDefinition) string {
-	var b strings.Builder
-	b.WriteString(d.Name)
-	b.WriteByte(' ')
-	b.WriteString(d.Description)
-	if props, ok := d.Parameters["properties"].(map[string]any); ok {
-		for k := range props {
-			b.WriteByte(' ')
-			b.WriteString(k)
-		}
-	}
-	return b.String()
-}
-
-// tokenizeForSearch splits s into search terms: it breaks on non-alphanumeric
-// runes (covering snake_case and the mcp__ separator) AND on camelCase
-// boundaries, then lower-cases. Each raw token contributes its whole lowercased
-// form plus its sub-words, so a query "table record" matches a tool named
-// "appTableRecord" (common in MCP servers like Lark/Feishu that mix snake_case
-// and camelCase, e.g. bitable_v1_appTableRecord_search). Splitting happens
-// before lower-casing — camelCase boundaries are invisible once everything is
-// lowercase.
-func tokenizeForSearch(s string) []string {
-	// Split on non-alphanumeric, preserving case so splitCamel can see the
-	// lower→upper boundaries.
-	var raw []string
-	cur := strings.Builder{}
-	flush := func() {
-		if cur.Len() > 0 {
-			raw = append(raw, cur.String())
-			cur.Reset()
-		}
-	}
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			cur.WriteRune(r)
-		} else {
-			flush()
-		}
-	}
-	flush()
-
-	var out []string
-	for _, tok := range raw {
-		whole := strings.ToLower(tok)
-		out = append(out, whole)
-		for _, part := range splitCamel(tok) {
-			if p := strings.ToLower(part); p != whole {
-				out = append(out, p)
-			}
-		}
-	}
-	return out
-}
-
-// splitCamel breaks a mixed-case token into its word parts on lower→upper
-// boundaries, treating an acronym run followed by a word as its own part
-// ("XMLParser" → "XML", "Parser"; "appTableRecord" → "app", "Table", "Record").
-// Parts are returned in their original case; the caller lower-cases them. A
-// token with no internal boundary returns a single element (itself), so callers
-// can dedupe against the whole-token form.
-func splitCamel(tok string) []string {
-	rs := []rune(tok)
-	if len(rs) < 2 {
-		return []string{tok}
-	}
-	var parts []string
-	start := 0
-	for i := 1; i < len(rs); i++ {
-		prev, curr := rs[i-1], rs[i]
-		// lower→upper (or digit→upper): "appTable" → app|Table.
-		lowerToUpper := !unicode.IsUpper(prev) && unicode.IsUpper(curr)
-		// acronym→word: the last upper of a run that's followed by a lower
-		// starts a new word, e.g. "XMLParser" → XML|Parser.
-		acronymBoundary := unicode.IsUpper(prev) && unicode.IsUpper(curr) &&
-			i+1 < len(rs) && unicode.IsLower(rs[i+1])
-		if lowerToUpper || acronymBoundary {
-			parts = append(parts, string(rs[start:i]))
-			start = i
-		}
-	}
-	parts = append(parts, string(rs[start:]))
-	return parts
-}
-
-func termFreq(toks []string) map[string]int {
-	m := make(map[string]int, len(toks))
-	for _, t := range toks {
-		m[t]++
-	}
-	return m
-}
-
-func uniqueTokens(toks []string) map[string]struct{} {
-	m := make(map[string]struct{}, len(toks))
-	for _, t := range toks {
-		m[t] = struct{}{}
-	}
-	return m
-}
-
-func maxF(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }

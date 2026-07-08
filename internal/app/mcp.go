@@ -170,9 +170,7 @@ func ToolSearchConfigFrom(c config.ToolSearchConfig) tools.ToolSearchConfig {
 		mode = tools.ToolSearchOff
 	}
 	return tools.ToolSearchConfig{
-		Mode:           mode,
-		ThresholdPct:   c.ThresholdPct,
-		SearchLimit:    c.SearchDefaultLimit,
-		MaxSearchLimit: c.MaxSearchLimit,
+		Mode:         mode,
+		ThresholdPct: c.ThresholdPct,
 	}
 }

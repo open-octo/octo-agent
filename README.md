@@ -267,21 +267,18 @@ Precedence is **CLI flag > env var > `~/.octo/config.yml` > built-in default**. 
 
 ### MCP Tool Search
 
-When MCP servers expose many tools, uploading every tool schema on every turn wastes context and hurts accuracy. Tool Search keeps built-in tools visible but defers MCP schemas behind a small bridge:
+When MCP servers expose many tools, uploading every tool schema on every turn wastes context and hurts accuracy. Tool Search keeps built-in tools visible but defers MCP *schemas* behind a small bridge — every connected tool's name and one-line description stay listed in the system prompt the whole time, so the model never has to guess whether a tool exists:
 
-- `mcp_search` — find MCP tools by keyword (returns names + one-line descriptions).
-- `mcp_describe` — load the full JSON Schema for one discovered tool.
+- `mcp_describe` — load the full JSON Schema for one listed tool.
 - `mcp_call` — invoke the tool with arguments matching that schema.
 
-The model uses the same three-step flow automatically. Configure when the bridge activates in `~/.octo/config.yml`:
+The model uses the same two-step flow automatically. Configure when the bridge activates in `~/.octo/config.yml`:
 
 ```yaml
 tools:
   tool_search:
     enabled: auto          # auto (default) | on | off
     threshold_pct: 10      # auto: activate when deferred schemas ≥ N% of context window
-    search_default_limit: 5
-    max_search_limit: 20
 ```
 
 - `auto` (default) — only enable when the deferred MCP schemas would occupy at least `threshold_pct` of the model's context window.

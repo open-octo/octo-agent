@@ -55,29 +55,32 @@ var userRulesPath = func() string {
 	return filepath.Join(home, ".octo", "octorules.md")
 }
 
-// Compose assembles the session system prompt from up to nine layers, in
+// Compose assembles the session system prompt from up to ten layers, in
 // order of increasing specificity:
 //
-//  1. base    — embedded octo foundation (always present)
-//  2. soul    — ~/.octo/soul.md, if present (agent identity & behavior)
-//  3. env     — environment snapshot (cwd, git, date, OS) the caller renders
-//  4. skills  — the available-skills manifest the caller renders, if any
-//  5. memory  — cross-session memory the caller renders, if any (C9; includes inherited home-dir memories)
-//  6. profile — ~/.octo/user.md, if present (who the user is)
-//  7. user    — ~/.octo/octorules.md, if present (cross-project user rules)
-//  8. project — ProjectContextFile in cwd, if present (repo conventions)
-//  9. system  — the --system value, if any (highest-priority override, last)
+//  1. base     — embedded octo foundation (always present)
+//  2. soul     — ~/.octo/soul.md, if present (agent identity & behavior)
+//  3. env      — environment snapshot (cwd, git, date, OS) the caller renders
+//  4. skills   — the available-skills manifest the caller renders, if any
+//  5. mcpTools — the available-MCP-tools manifest the caller renders, if any (see tools.MCPManifestFor)
+//  6. memory   — cross-session memory the caller renders, if any (C9; includes inherited home-dir memories)
+//  7. profile  — ~/.octo/user.md, if present (who the user is)
+//  8. user     — ~/.octo/octorules.md, if present (cross-project user rules)
+//  9. project  — ProjectContextFile in cwd, if present (repo conventions)
+//
+// 10. system   — the --system value, if any (highest-priority override, last)
 //
 // Empty layers are skipped. Later layers appear later in the text, which is
 // the conventional way to let more specific instructions take precedence —
 // project rules override the user's global rules, and --system overrides all.
 //
 // soul sits right after base: it reshapes persona/behavior, but base's tool
-// and safety norms still precede it. skills is the already-rendered manifest
-// (see skills.RenderManifest), passed in rather than discovered here so this
-// package keeps a one-directional dep (prompt does not import skills) and the
-// prefix stays stable across turns. soul/profile/user/project are read here
-// (single files), like octorules.
+// and safety norms still precede it. skills and mcpTools are already-rendered
+// manifests (see skills.RenderManifest and tools.MCPManifestFor), passed in
+// rather than discovered here so this package keeps a one-directional dep
+// (prompt does not import skills or tools) and the prefix stays stable across
+// turns. soul/profile/user/project are read here (single files), like
+// octorules.
 //
 // The user and project files may pull in other files with @include directives
 // (see expandIncludes). env is passed in rather than computed here so this
@@ -86,7 +89,7 @@ var userRulesPath = func() string {
 //
 // coauthor, when true, injects a rule into the system prompt instructing the
 // agent to append a Co-authored-by trailer to every git commit message it writes.
-func Compose(userSystem, cwd, env, skills, memory string, coauthor bool) string {
+func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor bool) string {
 	layers := []string{strings.TrimSpace(base)}
 
 	if coauthor {
@@ -101,6 +104,9 @@ func Compose(userSystem, cwd, env, skills, memory string, coauthor bool) string 
 	}
 	if s := strings.TrimSpace(skills); s != "" {
 		layers = append(layers, s)
+	}
+	if mt := strings.TrimSpace(mcpTools); mt != "" {
+		layers = append(layers, mt)
 	}
 	if m := strings.TrimSpace(memory); m != "" {
 		layers = append(layers, m)
@@ -122,13 +128,13 @@ func Compose(userSystem, cwd, env, skills, memory string, coauthor bool) string 
 }
 
 // ComposePair returns both the full system prompt and a "lean" variant that
-// drops the skills manifest and memory injection (the two heaviest, most
-// optional layers). The lean variant seeds cheap read-only sub-agents
-// (explore/plan) that don't need the full harness context. Other layers —
-// soul, env, user/project conventions — are kept in both.
-func ComposePair(userSystem, cwd, env, skills, memory string, coauthor bool) (full, lean string) {
-	full = Compose(userSystem, cwd, env, skills, memory, coauthor)
-	lean = Compose(userSystem, cwd, env, "", "", coauthor)
+// drops the skills manifest, MCP tools manifest, and memory injection (the
+// heaviest, most optional layers). The lean variant seeds cheap read-only
+// sub-agents (explore/plan) that don't need the full harness context. Other
+// layers — soul, env, user/project conventions — are kept in both.
+func ComposePair(userSystem, cwd, env, skills, mcpTools, memory string, coauthor bool) (full, lean string) {
+	full = Compose(userSystem, cwd, env, skills, mcpTools, memory, coauthor)
+	lean = Compose(userSystem, cwd, env, "", "", "", coauthor)
 	return full, lean
 }
 

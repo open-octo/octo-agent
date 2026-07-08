@@ -310,8 +310,6 @@ export async function toggleTask(id: string, enabled: boolean): Promise<void> {
 export interface ToolSearchInfo {
   enabled: 'auto' | 'on' | 'off'
   threshold_pct: number
-  search_default_limit: number
-  max_search_limit: number
 }
 
 export interface McpServersResponse {

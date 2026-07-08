@@ -954,6 +954,13 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tools.SetMCPRegistry(msg.reg)
 			if m.cfg.executor != nil {
 				m.cfg.tools = tools.DefaultToolsFor(m.cfg.a.Model)
+				// The tool array just picked up the bridge tools (or full MCP
+				// schemas); redo the system prompt's "# Available MCP tools"
+				// layer to match — it was necessarily empty at startup compose
+				// time (see cfg.recomposeMCPManifest's doc comment).
+				if m.cfg.recomposeMCPManifest != nil {
+					m.cfg.recomposeMCPManifest()
+				}
 			}
 			if m.cfg.verbosity.verbose() {
 				m.printlnBlock(noticeStyle.Render(fmt.Sprintf("● MCP ready — %d server(s) connected", msg.reg.Len())))

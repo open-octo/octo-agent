@@ -222,21 +222,18 @@ octo config path   # 打印配置文件路径
 
 ### MCP Tool Search
 
-当 MCP 服务暴露大量工具时，每轮请求都上传全部工具 schema 会浪费上下文并降低准确率。Tool Search 保留内置工具直接可见，但把 MCP 工具 schema 延迟到一个小型桥工具之后：
+当 MCP 服务暴露大量工具时，每轮请求都上传全部工具 schema 会浪费上下文并降低准确率。Tool Search 保留内置工具直接可见，只把 MCP 工具的 *schema* 延迟到一个小型桥工具之后——每个已连接工具的名字 + 一行描述始终留在 system prompt 里，模型不会误判某个工具不存在：
 
-- `mcp_search` —— 按关键词搜索 MCP 工具（返回名称 + 一行描述）。
-- `mcp_describe` —— 加载某个发现工具的完整 JSON Schema。
+- `mcp_describe` —— 加载某个已列出工具的完整 JSON Schema。
 - `mcp_call` —— 用匹配该 schema 的参数调用工具。
 
-模型会自动走这套三步协议。在 `~/.octo/config.yml` 里配置桥工具的激活时机：
+模型会自动走这套两步协议。在 `~/.octo/config.yml` 里配置桥工具的激活时机：
 
 ```yaml
 tools:
   tool_search:
     enabled: auto          # auto（默认）| on | off
     threshold_pct: 10      # auto：延迟 schema 占上下文窗口 N% 时启用
-    search_default_limit: 5
-    max_search_limit: 20
 ```
 
 - `auto`（默认）—— 仅当延迟加载的 MCP schema 达到模型上下文窗口的 `threshold_pct` 时才启用。

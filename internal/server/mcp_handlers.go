@@ -450,32 +450,22 @@ func (s *Server) handleReloadMCP(w http.ResponseWriter, r *http.Request) {
 // ─── GET /api/config/toolsearch ─────────────────────────────────────────────
 
 type toolSearchSettings struct {
-	Enabled            string `json:"enabled"` // "auto" | "on" | "off"
-	ThresholdPct       int    `json:"threshold_pct"`
-	SearchDefaultLimit int    `json:"search_default_limit"`
-	MaxSearchLimit     int    `json:"max_search_limit"`
+	Enabled      string `json:"enabled"` // "auto" | "on" | "off"
+	ThresholdPct int    `json:"threshold_pct"`
 }
 
 // toolSearchDefaults mirrors the documented tools.tool_search defaults
-// (auto / 10% / 5 / 20) so the UI shows effective values, not zeros.
+// (auto / 10%) so the UI shows effective values, not zeros.
 func toolSearchDefaults(c config.ToolSearchConfig) toolSearchSettings {
 	out := toolSearchSettings{
-		Enabled:            c.Enabled,
-		ThresholdPct:       c.ThresholdPct,
-		SearchDefaultLimit: c.SearchDefaultLimit,
-		MaxSearchLimit:     c.MaxSearchLimit,
+		Enabled:      c.Enabled,
+		ThresholdPct: c.ThresholdPct,
 	}
 	if out.Enabled == "" {
 		out.Enabled = "auto"
 	}
 	if out.ThresholdPct == 0 {
 		out.ThresholdPct = 10
-	}
-	if out.SearchDefaultLimit == 0 {
-		out.SearchDefaultLimit = 5
-	}
-	if out.MaxSearchLimit == 0 {
-		out.MaxSearchLimit = 20
 	}
 	return out
 }

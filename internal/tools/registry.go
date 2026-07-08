@@ -113,12 +113,12 @@ func (r DefaultRegistry) ExecuteStream(ctx context.Context, name string, input m
 		return agent.ToolResult{Text: out}, err
 	}
 
-	// Tool Search bridge: search/describe the deferred MCP catalog, or invoke
-	// a tool through mcp_call (which routes back into executeMCP on the real
-	// name). Handled here because the bridge tools aren't in allTools.
+	// Tool Search bridge: describe the deferred MCP catalog, or invoke a tool
+	// through mcp_call (which routes back into executeMCP on the real name).
+	// Handled here because the bridge tools aren't in allTools. Tool names +
+	// one-line descriptions are always visible in the system prompt (see
+	// MCPManifestFor) so there's no separate search step.
 	switch name {
-	case toolSearchName:
-		return execToolSearch(input)
 	case toolDescribeName:
 		return execToolDescribe(input)
 	case toolCallName:
@@ -282,8 +282,10 @@ func DefaultTools() []agent.ToolDefinition { return DefaultToolsFor("") }
 //
 // MCP surfaces ride alongside the built-ins. When Tool Search is active for
 // this model (see toolSearchActive) the full per-tool catalog is replaced by
-// the three search/describe/call bridge tools, so the model's tools array
-// carries three small schemas instead of every MCP tool's schema every turn.
+// the two describe/call bridge tools, so the model's tools array carries two
+// small schemas instead of every MCP tool's schema every turn. The tool
+// names + one-line descriptions aren't lost — MCPManifestFor renders them
+// into the system prompt separately (see dev-docs/tool-search-mcp.md).
 func DefaultToolsFor(model string) []agent.ToolDefinition {
 	return defaultToolsFor(context.Background(), model)
 }
@@ -392,7 +394,7 @@ func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 		defs = append(defs, t.Definition())
 	}
 	// MCP-advertised surfaces. Synthesised per-connection (one def per
-	// tool/resource/prompt) when uploaded in full; collapsed to the three
+	// tool/resource/prompt) when uploaded in full; collapsed to the two
 	// bridge tools when Tool Search is active for this model.
 	mcpDefs := mcpCatalog()
 	if toolSearchActive(model, mcpDefs) {

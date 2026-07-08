@@ -21,16 +21,14 @@ func TestToolSearchConfigFrom(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := ToolSearchConfigFrom(config.ToolSearchConfig{
-			Enabled:            c.enabled,
-			ThresholdPct:       42,
-			SearchDefaultLimit: 7,
-			MaxSearchLimit:     99,
+			Enabled:      c.enabled,
+			ThresholdPct: 42,
 		})
 		if got.Mode != c.want {
 			t.Errorf("enabled=%q: mode = %v, want %v", c.enabled, got.Mode, c.want)
 		}
-		if got.ThresholdPct != 42 || got.SearchLimit != 7 || got.MaxSearchLimit != 99 {
-			t.Errorf("enabled=%q: numeric fields not passed through: %+v", c.enabled, got)
+		if got.ThresholdPct != 42 {
+			t.Errorf("enabled=%q: numeric field not passed through: %+v", c.enabled, got)
 		}
 	}
 }

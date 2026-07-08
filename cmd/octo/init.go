@@ -81,7 +81,7 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	a := agent.New(llmSender, resolvedModel)
-	a.System = prompt.Compose("", cwd, env, "", "", true) // init is a one-shot task; no skills/memory
+	a.System = prompt.Compose("", cwd, env, "", "", "", true) // init is a one-shot task; no skills/mcp/memory
 
 	engine, err := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(*permMode))
 	if err != nil {

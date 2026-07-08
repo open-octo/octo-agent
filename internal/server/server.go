@@ -533,7 +533,7 @@ func (s *Server) enableSubAgentTools() {
 	}
 	cwd, envCtx := s.curCwdEnv()
 	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
-	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
+	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
 	executor := tools.NewDefaultRegistry()
 	spawner := app.NewSpawner(template, executor, func(ctx context.Context) []agent.ToolDefinition {
 		return tools.DefaultToolsForCtx(ctx, s.model)
@@ -1132,7 +1132,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
 	}
-	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
+	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2: attention-layer rules (triggered keywords) + save-nudge on milestone
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
@@ -1928,7 +1928,7 @@ func (s *Server) buildChannelFactory() func() *agent.Agent {
 		// matching comment on effectiveCoauthor's doc for why a second
 		// config.Load() here would be wasted work.
 		cfg, cfgErr := config.Load()
-		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
+		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
 		if cfgErr == nil {
 			a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 			if a.LiteSender == nil {
@@ -2540,7 +2540,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	cwd, envCtx := s.sessionCwdEnv(sess.Store)
 	sess.Agent.CWD = cwd    // keep tool cwd aligned with the per-session dir the prompt/hooks use
 	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
-	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), memInjection, s.effectiveCoauthor(cfg))
+	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(sess.Agent.Model), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and

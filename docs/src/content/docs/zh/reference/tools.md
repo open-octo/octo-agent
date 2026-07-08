@@ -67,7 +67,7 @@ description: octo 给模型的每一个内置工具。
 | 工具 | 作用 |
 |---|---|
 | `skill` | 按需加载某个 skill 的完整指令 |
-| `mcp_search` / `mcp_describe` / `mcp_call` | 为延迟加载的 MCP schema 提供的 Tool Search 桥接——见[接入 MCP 服务](/docs/zh/guides/connect-mcp-servers/) |
+| `mcp_describe` / `mcp_call` | 为延迟加载的 MCP schema 提供的 Tool Search 桥接——见[接入 MCP 服务](/docs/zh/guides/connect-mcp-servers/) |
 
 当 Tool Search 关闭（或还没激活）时，每个已连接 MCP 服务自己的工具也会直接以
 `mcp__<server>__<tool>` 的形式出现。
