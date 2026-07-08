@@ -64,13 +64,13 @@ func TestStartTypingKeepalive_RepeatsUntilStopped(t *testing.T) {
 		t.Fatalf("SendTyping should fire immediately, count = %d", send)
 	}
 
-	// Wait long enough for at least two more ticks.
-	time.Sleep(70 * time.Millisecond)
-	sendBefore, stopBefore := ad.counts()
-	if sendBefore < 3 {
-		t.Fatalf("expected SendTyping to repeat on the ticker, count = %d", sendBefore)
-	}
-	if stopBefore != 0 {
+	// Wait for at least two more ticks. Polled rather than a fixed sleep so a
+	// slow CI scheduler (esp. Windows) can't turn this into a flaky failure.
+	waitFor(t, func() bool {
+		send, _ := ad.counts()
+		return send >= 3
+	})
+	if _, stopBefore := ad.counts(); stopBefore != 0 {
 		t.Fatalf("StopTyping should not fire before stop() is called, count = %d", stopBefore)
 	}
 
