@@ -241,7 +241,13 @@ func TestGoalEdit_AsyncTurnStartCancelsPendingEdit(t *testing.T) {
 	// starting while /goal edit is armed must cancel the edit — otherwise the
 	// user's next unrelated message is silently consumed as the objective.
 	m, sess := newGoalTestModel()
-	m.dispatchGoal("keep me")
+	// Seeded directly on the session so dispatchGoal's immediate continuation
+	// kick doesn't spawn its own turn goroutine racing the one started below
+	// by startTurnEcho — see TestHandleTurnFinished_QueuedInputBeatsContinuation
+	// for the same hazard. This test only cares about /goal edit + turn-start.
+	if _, err := sess.CreateGoal("keep me", 0); err != nil {
+		t.Fatal(err)
+	}
 	m.dispatchGoal("edit")
 
 	m.startTurnEcho("background note turn", "")
