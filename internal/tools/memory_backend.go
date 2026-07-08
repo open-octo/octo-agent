@@ -40,9 +40,11 @@ func MemoryBackendGuidance() string {
 		"A long-term semantic memory backend (" + activeMemoryBackend.Name() + ") is connected. " +
 		"Every turn is automatically saved to it after you respond — you don't need to do anything to store it. " +
 		"Use `memory_recall` when you suspect something relevant was discussed in a prior session or conversation " +
-		"and you need that context. This is separate from MEMORY.md: MEMORY.md is your curated standing guidance " +
-		"(preferences, rules, project decisions); this backend is free-form semantic recall, not something you " +
-		"maintain by hand."
+		"and you need that context — including a personal fact, preference, or detail the user asks about that " +
+		"isn't in MEMORY.md. Try `memory_recall` once before telling the user you don't know: MEMORY.md only " +
+		"holds what's been explicitly curated there, not everything ever said. This is separate from MEMORY.md: " +
+		"MEMORY.md is your curated standing guidance (preferences, rules, project decisions); this backend is " +
+		"free-form semantic recall, not something you maintain by hand."
 }
 
 // MemoryRecallTool searches the configured external memory backend for
@@ -54,7 +56,8 @@ func (MemoryRecallTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "memory_recall",
 		Description: "Search the connected external memory backend for content relevant to a query. Use this " +
-			"when you suspect something was discussed in a prior session or conversation and need that context.",
+			"when you suspect something was discussed in a prior session or conversation and need that context, " +
+			"or before telling the user you don't know a personal fact or preference that isn't in MEMORY.md.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
