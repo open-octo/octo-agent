@@ -68,7 +68,12 @@ func TestDispatchGoal_CreateSummaryAndGuardedReplace(t *testing.T) {
 
 func TestDispatchGoal_PauseResumeClear(t *testing.T) {
 	m, sess := newGoalTestModel()
-	m.dispatchGoal("g")
+	// Seeded directly on the session so the fixture itself doesn't consume
+	// the continuation hand-out or leave a real turn goroutine running before
+	// the resume assertion below.
+	if _, err := sess.CreateGoal("g", 0); err != nil {
+		t.Fatal(err)
+	}
 
 	m.dispatchGoal("pause")
 	if g, _ := sess.GoalSnapshot(); g.Status != agent.GoalPaused {
@@ -103,7 +108,12 @@ func TestDispatchGoal_UnwiredIsDisabled(t *testing.T) {
 
 func TestGoalEditFlow(t *testing.T) {
 	m, sess := newGoalTestModel()
-	m.dispatchGoal("first objective")
+	// Seeded directly on the session (not via dispatchGoal) so creation's
+	// immediate continuation kick doesn't run a real turn concurrently with
+	// the deterministic AccountGoalUsage calls below.
+	if _, err := sess.CreateGoal("first objective", 0); err != nil {
+		t.Fatal(err)
+	}
 	sess.AccountGoalUsage(0) // consume the mid-turn-creation skip deterministically
 	sess.ResetGoalWallClock()
 	sess.AccountGoalUsage(42)
@@ -141,7 +151,12 @@ func TestGoalEdit_EmptySubmitCancels(t *testing.T) {
 
 func TestGoalEdit_EscCancelsViaKeyHandler(t *testing.T) {
 	m, sess := newGoalTestModel()
-	m.dispatchGoal("keep me")
+	// Seeded directly on the session (not via dispatchGoal) so creation's
+	// immediate continuation kick doesn't leave turnRunning true — this test
+	// exercises the idle Esc-cancel path, not goal creation.
+	if _, err := sess.CreateGoal("keep me", 0); err != nil {
+		t.Fatal(err)
+	}
 	m.dispatchGoal("edit")
 
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
@@ -158,7 +173,12 @@ func TestGoalEdit_EscCancelsViaKeyHandler(t *testing.T) {
 
 func TestGoalEdit_SlashCommandCancelsAndDispatches(t *testing.T) {
 	m, sess := newGoalTestModel()
-	m.dispatchGoal("keep me")
+	// Seeded directly on the session (not via dispatchGoal) so creation's
+	// immediate continuation kick doesn't leave turnRunning true — that would
+	// make the "/goal" resubmit below queue instead of dispatch immediately.
+	if _, err := sess.CreateGoal("keep me", 0); err != nil {
+		t.Fatal(err)
+	}
 	m.dispatchGoal("edit")
 
 	// The user changed their mind mid-edit and typed a command instead.
@@ -201,8 +221,13 @@ func TestGoalEdit_AsyncTurnStartCancelsPendingEdit(t *testing.T) {
 }
 
 func TestHandleTurnFinished_KicksGoalContinuation(t *testing.T) {
-	m, _ := newGoalTestModel()
-	m.dispatchGoal("keep going")
+	m, sess := newGoalTestModel()
+	// Seeded directly on the session so this is the first GoalContinuation
+	// hand-out — going through dispatchGoal would consume it during creation
+	// and trip the zero-progress guard before handleTurnFinished gets a turn.
+	if _, err := sess.CreateGoal("keep going", 0); err != nil {
+		t.Fatal(err)
+	}
 	m.turnRunning = false
 
 	m.handleTurnFinished(nil)
@@ -215,8 +240,13 @@ func TestHandleTurnFinished_KicksGoalContinuation(t *testing.T) {
 }
 
 func TestHandleTurnFinished_QueuedInputBeatsContinuation(t *testing.T) {
-	m, _ := newGoalTestModel()
-	m.dispatchGoal("keep going")
+	m, sess := newGoalTestModel()
+	// Seeded directly on the session — dispatchGoal's immediate continuation
+	// kick would otherwise start a second, unawaited turn goroutine racing
+	// against the queued one started below.
+	if _, err := sess.CreateGoal("keep going", 0); err != nil {
+		t.Fatal(err)
+	}
 	m.turnRunning = false
 	m.queue = append(m.queue, pendingItem{text: "user question"})
 
@@ -228,7 +258,11 @@ func TestHandleTurnFinished_QueuedInputBeatsContinuation(t *testing.T) {
 
 func TestHandleTurnFinished_ErrorParksContinuation(t *testing.T) {
 	m, sess := newGoalTestModel()
-	m.dispatchGoal("keep going")
+	// Seeded directly on the session, matching the other handleTurnFinished
+	// fixtures — see TestHandleTurnFinished_KicksGoalContinuation.
+	if _, err := sess.CreateGoal("keep going", 0); err != nil {
+		t.Fatal(err)
+	}
 	m.turnRunning = false
 
 	m.handleTurnFinished(errors.New("anthropic: HTTP 500: overloaded"))
@@ -245,7 +279,11 @@ func TestHandleTurnFinished_ErrorParksContinuation(t *testing.T) {
 
 func TestHandleTurnFinished_RateLimitedContinuationParks(t *testing.T) {
 	m, sess := newGoalTestModel()
-	m.dispatchGoal("keep going")
+	// Seeded directly on the session so the precondition below is the first
+	// GoalContinuation hand-out — see TestHandleTurnFinished_KicksGoalContinuation.
+	if _, err := sess.CreateGoal("keep going", 0); err != nil {
+		t.Fatal(err)
+	}
 	m.turnRunning = false
 
 	// Hand out a continuation (pending), then its turn fails on a rate limit.
