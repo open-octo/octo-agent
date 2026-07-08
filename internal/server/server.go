@@ -2584,6 +2584,12 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		}
 		sess.Agent.SessionStarted = st.HookStarted || len(st.Messages) > 0
 		sess.Agent.OnSessionStart = func() { st.MarkHookStarted() }
+		// Same as buildAgent gives web turns: without this, compaction still
+		// folds history but never archives the originals, so IM loses the
+		// "read the chunk back" recall web/CLI sessions get for free.
+		if dir, err := st.ChunkDir(); err == nil {
+			sess.Agent.ArchiveDir = dir
+		}
 	}
 
 	// Per-turn permission gate, the same shape prepareToolTurn gives web
