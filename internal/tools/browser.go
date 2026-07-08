@@ -298,7 +298,7 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 					"description": "The browser action to perform. observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page for a vision-capable model to actually see (use when content is visual). ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable skill — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop. Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. run_skill replays a recording (deterministic, self-healing).",
 				},
 				"name":         map[string]any{"type": "string", "description": "Skill name (record_stop / run_skill)."},
-				"params":       map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill)."},
+				"params":       map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill). Omit a value the skill requires (no recorded default, e.g. a secret) and, in interactive modes, the user is prompted for it instead of the call failing."},
 				"url":          map[string]any{"type": "string", "description": "Target URL (navigate)."},
 				"selector":     map[string]any{"type": "string", "description": "Target element selector (click/hover/type/select/scroll/wait/upload/download). Plain CSS, or a Playwright-style form: :has-text(\"…\")/:text(\"…\")/:contains(\"…\"), text=…, :visible, xpath=…, css=…. Use observe to see real selectors."},
 				"network_idle": map[string]any{"type": "boolean", "description": "wait with no selector: settle until fetch/XHR activity stops (bounded by timeout_ms) instead of a fixed delay — the robust way to wait for an SPA's data to finish loading."},
@@ -650,6 +650,9 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 				params[k] = fmt.Sprintf("%v", v)
 			}
 		}
+		if err := resolveMissingSkillParams(ctx, &skill, name, params); err != nil {
+			return agent.ToolResult{}, err
+		}
 		recorderMu.Lock()
 		healer := browserHealer
 		recorderMu.Unlock()
@@ -684,6 +687,47 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 	default:
 		return agent.ToolResult{}, fmt.Errorf("browser: unknown action %q", action)
 	}
+}
+
+// resolveMissingSkillParams checks skill's {{...}} placeholders against the
+// caller-supplied params and, for any ReplaySkill would otherwise reject as
+// unresolved, prompts the user for a value via the same Asker
+// ask_user_question uses — mirroring ensureRequiredWorkflowParams in
+// workflow.go — rather than letting ReplaySkill fail with a bare "missing
+// required param(s)" error the model has no way to act on. params is mutated
+// in place. When no asker is available (headless/unattended modes),
+// ReplaySkill's own error still fires, so behavior there is unchanged.
+func resolveMissingSkillParams(ctx context.Context, skill *browser.Skill, skillName string, params map[string]string) error {
+	missing := browser.MissingRequiredParams(skill, params)
+	if len(missing) == 0 {
+		return nil
+	}
+	asker := askerFrom(ctx)
+	if asker == nil {
+		return nil
+	}
+	descByName := make(map[string]string, len(skill.Params))
+	for _, p := range skill.Params {
+		descByName[p.Name] = p.Description
+	}
+	for _, pname := range missing {
+		question := fmt.Sprintf("Skill %q needs a value for %q", skillName, pname)
+		if d := descByName[pname]; d != "" {
+			question += ": " + d
+		}
+		res, err := asker.Ask(ctx, AskRequest{Question: question, Header: pname})
+		if err != nil {
+			return fmt.Errorf("browser: %w", err)
+		}
+		if res.Cancelled {
+			return fmt.Errorf("browser: run_skill %q: user cancelled while providing param %q", skillName, pname)
+		}
+		// AskRequest carries no Options, so this is always a free-text prompt —
+		// res.Choices is documented to stay empty in that case (AskResponse),
+		// leaving res.Custom as the only place the answer can land.
+		params[pname] = res.Custom
+	}
+	return nil
 }
 
 func getStr(input map[string]any, key string) string {

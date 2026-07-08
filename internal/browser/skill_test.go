@@ -284,6 +284,24 @@ func TestReplaySkill_DefaultAndSuppliedParamsResolve(t *testing.T) {
 	}
 }
 
+// TestMissingRequiredParams exposes the same check ReplaySkill performs
+// internally, so a caller (the tools package's run_skill) can prompt for a
+// value instead of letting ReplaySkill fail outright.
+func TestMissingRequiredParams(t *testing.T) {
+	skill := &Skill{Name: "checkout", Params: []Param{
+		{Name: "city", Default: "sfo"},
+		{Name: "item"},
+	}, Steps: []Step{
+		{Action: "navigate", URL: "https://example.com/{{city}}/{{item}}"},
+	}}
+	if missing := MissingRequiredParams(skill, nil); len(missing) != 1 || missing[0] != "item" {
+		t.Fatalf("MissingRequiredParams = %v, want [item] (city has a default)", missing)
+	}
+	if missing := MissingRequiredParams(skill, map[string]string{"item": "widget"}); len(missing) != 0 {
+		t.Fatalf("MissingRequiredParams = %v, want none once item is supplied", missing)
+	}
+}
+
 // TestCompileUploadMerge: a click on the upload button followed by a file
 // selection compiles to a single upload step on the button, auto-parameterized.
 func TestCompileUploadMerge(t *testing.T) {

@@ -174,6 +174,90 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	}
 }
 
+// TestResolveMissingSkillParams_PromptsForMissingRequired verifies a param
+// with no default and no caller-supplied value triggers a user prompt (via
+// the same Asker ask_user_question uses) instead of silently proceeding or
+// only failing once ReplaySkill runs.
+func TestResolveMissingSkillParams_PromptsForMissingRequired(t *testing.T) {
+	skill := browser.Skill{
+		Name:   "demo",
+		Params: []browser.Param{{Name: "username", Description: "login name"}},
+		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
+	}
+	stub := &stubAsker{resp: AskResponse{Custom: "alice"}}
+	useAsker(t, stub)
+
+	params := map[string]string{}
+	if err := resolveMissingSkillParams(context.Background(), &skill, "demo", params); err != nil {
+		t.Fatalf("resolveMissingSkillParams: %v", err)
+	}
+	if !stub.called {
+		t.Fatal("expected a prompt for the missing param")
+	}
+	if !strings.Contains(stub.lastReq.Question, "username") || !strings.Contains(stub.lastReq.Question, "login name") {
+		t.Errorf("question = %q, want it to mention the param name and description", stub.lastReq.Question)
+	}
+	if params["username"] != "alice" {
+		t.Errorf("params[username] = %q, want alice", params["username"])
+	}
+}
+
+// TestResolveMissingSkillParams_NoPromptWhenProvided verifies an
+// already-supplied value skips the prompt entirely.
+func TestResolveMissingSkillParams_NoPromptWhenProvided(t *testing.T) {
+	skill := browser.Skill{
+		Name:   "demo",
+		Params: []browser.Param{{Name: "username"}},
+		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
+	}
+	stub := &stubAsker{}
+	useAsker(t, stub)
+
+	params := map[string]string{"username": "bob"}
+	if err := resolveMissingSkillParams(context.Background(), &skill, "demo", params); err != nil {
+		t.Fatalf("resolveMissingSkillParams: %v", err)
+	}
+	if stub.called {
+		t.Error("should not prompt when the param is already provided")
+	}
+}
+
+// TestResolveMissingSkillParams_NoAskerLeavesGapForReplaySkillToReject
+// verifies headless/unattended modes are left unchanged: with no asker
+// registered, resolveMissingSkillParams is a no-op so ReplaySkill's own
+// "missing required param(s)" error still fires downstream.
+func TestResolveMissingSkillParams_NoAskerLeavesGapForReplaySkillToReject(t *testing.T) {
+	SetAsker(nil)
+	skill := browser.Skill{
+		Name:   "demo",
+		Params: []browser.Param{{Name: "username"}},
+		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
+	}
+	params := map[string]string{}
+	if err := resolveMissingSkillParams(context.Background(), &skill, "demo", params); err != nil {
+		t.Fatalf("resolveMissingSkillParams: %v", err)
+	}
+	if _, ok := params["username"]; ok {
+		t.Error("params should be untouched when no asker is available")
+	}
+}
+
+// TestResolveMissingSkillParams_CancelledPromptErrors verifies a cancelled
+// prompt aborts with an error instead of proceeding with a blank value.
+func TestResolveMissingSkillParams_CancelledPromptErrors(t *testing.T) {
+	skill := browser.Skill{
+		Name:   "demo",
+		Params: []browser.Param{{Name: "username"}},
+		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
+	}
+	useAsker(t, &stubAsker{resp: AskResponse{Cancelled: true}})
+	params := map[string]string{}
+	err := resolveMissingSkillParams(context.Background(), &skill, "demo", params)
+	if err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("err = %v, want a cancellation error", err)
+	}
+}
+
 // TestBrowserTool_RequiresAction surfaces a clean error for a missing action.
 func TestBrowserTool_RequiresAction(t *testing.T) {
 	_, err := BrowserTool{}.Execute(context.Background(), "browser", map[string]any{})
