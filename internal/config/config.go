@@ -250,17 +250,13 @@ type ToolsConfig struct {
 }
 
 // ToolSearchConfig mirrors the documented tools.tool_search block. Empty fields
-// fall back to the tools-package defaults (auto / 10% / 5 / 20).
+// fall back to the tools-package defaults (auto / 10%).
 type ToolSearchConfig struct {
 	// Enabled is "auto" (default), "on", or "off".
 	Enabled string `yaml:"enabled,omitempty"`
 	// ThresholdPct is the auto-mode activation threshold as a percent of the
 	// model's context window.
 	ThresholdPct int `yaml:"threshold_pct,omitempty"`
-	// SearchDefaultLimit is how many hits tool_search returns by default.
-	SearchDefaultLimit int `yaml:"search_default_limit,omitempty"`
-	// MaxSearchLimit caps the caller-supplied limit.
-	MaxSearchLimit int `yaml:"max_search_limit,omitempty"`
 }
 
 // DefaultEntry returns the entry whose model matches DefaultModel, falling

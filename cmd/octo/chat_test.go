@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/mcp"
 )
 
 // TestRunChat_NoArgs_NoStdin_Errors verifies the headless routing: with no
@@ -376,6 +377,110 @@ func TestRunChat_OpenAI_EndToEnd(t *testing.T) {
 	}
 	if gotAuthHeader != "Bearer test-key" {
 		t.Errorf("Authorization = %q, want 'Bearer test-key'", gotAuthHeader)
+	}
+}
+
+// fakeMCPHTTPServer speaks the minimal JSON-RPC-over-HTTP surface octo's MCP
+// client needs (initialize, tools/list, empty resources/prompts) and
+// advertises a single "ping" tool. Mirrors internal/app/mcp_manage_test.go's
+// helper of the same name (unexported, so duplicated rather than shared
+// across packages).
+func fakeMCPHTTPServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var in mcp.Message
+		_ = json.Unmarshal(body, &in)
+		if in.ID == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var result any
+		switch in.Method {
+		case "initialize":
+			result = mcp.InitializeResult{
+				ProtocolVersion: mcp.ProtocolVersion,
+				Capabilities:    mcp.ServerCapabilities{Tools: &mcp.ToolsCapability{}},
+				ServerInfo:      mcp.Implementation{Name: "fake", Version: "0"},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []mcp.Tool{{Name: "ping", Description: "ping", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+		case "resources/list":
+			result = map[string]any{"resources": []mcp.Resource{}}
+		case "prompts/list":
+			result = map[string]any{"prompts": []mcp.Prompt{}}
+		default:
+			result = map[string]any{}
+		}
+		raw, _ := json.Marshal(result)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mcp.Message{JSONRPC: "2.0", ID: in.ID, Result: raw})
+	}))
+}
+
+// TestRunChat_Headless_MCPManifestReflectsLiveRegistry is the regression
+// guard for the Tool Search v2 ordering bug: tools.MCPManifestFor was
+// originally called (in runChat) before the MCP registry connects, so the
+// "# Available MCP tools" layer silently stayed empty in the system prompt
+// even once the bridge activated — reproducing, in the CLI's primary
+// headless path, the exact #1243 problem (the model can't see a connected
+// tool's name) this redesign exists to fix. This drives the real headless
+// one-shot path end to end — fake MCP server (one tool) + Tool Search forced
+// "on" + a fake OpenAI-compatible endpoint capturing the literal request body
+// sent to the model — rather than injecting a fake catalog directly.
+func TestRunChat_Headless_MCPManifestReflectsLiveRegistry(t *testing.T) {
+	mcpSrv := fakeMCPHTTPServer(t)
+	defer mcpSrv.Close()
+
+	var gotBody string
+	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-x","object":"chat.completion","model":"gpt-4o-mini",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer llmSrv.Close()
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_BASE_URL", llmSrv.URL)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	if err := os.MkdirAll(filepath.Join(tmp, ".octo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mcpJSON := `{"mcpServers": {"fake": {"url": "` + mcpSrv.URL + `"}}}`
+	if err := os.WriteFile(filepath.Join(tmp, ".octo", "mcp.json"), []byte(mcpJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Force the bridge on regardless of catalog size — a single-tool catalog
+	// would otherwise sit well under the auto activation threshold, and this
+	// test needs the bridge (and its manifest layer) to activate deterministically.
+	cfgYAML := "tools:\n  tool_search:\n    enabled: on\n"
+	if err := os.WriteFile(filepath.Join(tmp, ".octo", "config.yml"), []byte(cfgYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runChat([]string{"--provider", "openai", "--stream=false", "hello"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(gotBody, "# Available MCP tools") {
+		t.Errorf("request sent to the model is missing the MCP tools manifest; body:\n%s", gotBody)
+	}
+	if !strings.Contains(gotBody, "mcp__fake__ping") {
+		t.Errorf("request sent to the model is missing the connected tool's name; body:\n%s", gotBody)
+	}
+	// The bridge tool itself must also be present — this is a Tool Search
+	// scenario, not the legacy full-schema-upload path.
+	if !strings.Contains(gotBody, "mcp_describe") {
+		t.Errorf("request sent to the model is missing the mcp_describe bridge tool; body:\n%s", gotBody)
 	}
 }
 

@@ -107,7 +107,7 @@ If a server fails to connect, the error is printed to stderr and that server is 
 
 ## Tool Search
 
-MCP servers with many tools can push a lot of schema tokens into every request. Tool Search defers those schemas: built-in tools stay visible, but MCP tools are discovered through a small bridge (`mcp_search` → `mcp_describe` → `mcp_call`) and only loaded when the model needs them.
+MCP servers with many tools can push a lot of schema tokens into every request. Tool Search defers those *schemas*: built-in tools stay visible, and every connected MCP tool's name + one-line description stays listed in the system prompt the whole time — only the full parameter schema is loaded on demand, via `mcp_describe` → `mcp_call`.
 
 Control it under `tools.tool_search` in `~/.octo/config.yaml`:
 
@@ -116,8 +116,6 @@ tools:
   tool_search:
     enabled: auto          # auto | on | off
     threshold_pct: 10      # auto: activate when deferred schemas >= N% of context window
-    search_default_limit: 5
-    max_search_limit: 20
 ```
 
 - `auto` (default) — enable only when deferred MCP schemas would occupy at least `threshold_pct` of the model's context window.

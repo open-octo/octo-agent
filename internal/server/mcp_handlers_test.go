@@ -412,7 +412,7 @@ func TestToolSearchSettings(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Enabled != "auto" || got.ThresholdPct != 10 || got.SearchDefaultLimit != 5 || got.MaxSearchLimit != 20 {
+	if got.Enabled != "auto" || got.ThresholdPct != 10 {
 		t.Fatalf("defaults = %+v", got)
 	}
 

@@ -61,13 +61,14 @@ session continues with the others.
 ## Tool Search
 
 When MCP servers expose many tools, uploading every schema on every turn wastes context and hurts
-accuracy. Tool Search keeps built-in tools visible but defers MCP schemas behind a small bridge —
-the model finds and loads schemas on demand:
+accuracy. Tool Search keeps built-in tools visible but defers MCP *schemas* behind a small bridge —
+every connected tool's name and one-line description stay listed in the system prompt the whole
+time, so the model never has to guess whether a tool exists; only the full schema is loaded on
+demand:
 
 | Tool | Purpose |
 |---|---|
-| `mcp_search` | find MCP tools by keyword (returns names + one-line descriptions) |
-| `mcp_describe` | load the full JSON Schema for one discovered tool |
+| `mcp_describe` | load the full JSON Schema for one listed tool |
 | `mcp_call` | invoke the tool with arguments matching that schema |
 
 <Aside type="tip" title="Tuning when it activates">
@@ -81,8 +82,6 @@ tools:
   tool_search:
     enabled: auto          # auto (default) | on | off
     threshold_pct: 10      # activate when deferred schemas ≥ N% of the context window
-    search_default_limit: 5
-    max_search_limit: 20
 ```
 
 - `auto` (default) — only enable when the deferred MCP schemas would occupy at least

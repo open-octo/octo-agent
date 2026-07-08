@@ -828,6 +828,17 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// MCP tools manifest: name + one-line description for every deferred MCP
+	// tool, rendered into the system prompt when Tool Search is active for
+	// this model (empty string otherwise — see tools.MCPManifestFor). Computed
+	// here, after the block above, so the headless one-shot (which connects
+	// MCP synchronously just before this point) sees a populated registry.
+	// The interactive TUI defers MCP connection to a background tea.Cmd
+	// (mcpBoot below), so this still evaluates to "" at first paint for TUI —
+	// cfg.recomposeMCPManifest (wired below) redoes this once mcpReadyMsg
+	// fires and the registry is actually live.
+	mcpManifest := tools.MCPManifestFor(resolvedModel)
+
 	// Inject the project's MEMORY.md (plus the manage-it-yourself instruction)
 	// into the system prompt. The agent reads/writes the rest of the memory
 	// directory on demand with its file tools — no consolidation pass.
@@ -835,7 +846,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if memDir != "" {
 		memInjection = memory.RenderInjection(memDir, homeMemDir)
 	}
-	a.System, a.LeanSystem = prompt.ComposePair(*system, cwd, env, skillsManifest, memInjection, coauthor)
+	a.System, a.LeanSystem = prompt.ComposePair(*system, cwd, env, skillsManifest, mcpManifest, memInjection, coauthor)
 
 	// Attention layer: re-surface MEMORY.md's structured rules (## 必须遵守 /
 	// ## 触发提醒) on the message stream at the point of action. This rides each
@@ -899,8 +910,11 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				a.Model = sess.Model
 			}
 			// Recompose from the session's raw user layer so base/project/env
-			// pick up any changes since the session was created.
-			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, memInjection, coauthor)
+			// pick up any changes since the session was created. Rerender the
+			// MCP manifest against a.Model (may differ from resolvedModel — a
+			// saved session can override it above) so the Tool Search
+			// activation gate matches the model actually in use.
+			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model), memInjection, coauthor)
 		} else {
 			sess = agent.NewSession(resolvedModel, *system)
 			sess.Bind(agent.EntryTUI, false)
@@ -945,6 +959,17 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			providerName:    provName,
 			configEntry:     entry,
 			showReasoning:   resolvedShowReasoning,
+		}
+		// Redo the "# Available MCP tools" system-prompt layer once the
+		// background MCP connect (mcpBoot, see mcpReadyMsg in tuirepl.go)
+		// completes — at the compose calls above, no server has connected yet
+		// so tools.MCPManifestFor always returned "". a.Model is read at call
+		// time (not resolvedModel) so a mid-session model switch still gets
+		// the right activation threshold. sess.System is the raw user layer
+		// for both a fresh session (NewSession stores *system into it) and a
+		// resumed one (loaded from disk), so it's correct in either case.
+		cfg.recomposeMCPManifest = func() {
+			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model), memInjection, coauthor)
 		}
 		if toolsOn {
 			// Built-ins only at first paint — the MCP registry is still nil

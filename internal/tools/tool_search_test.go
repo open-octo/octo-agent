@@ -34,95 +34,6 @@ func sampleCatalog() []agent.ToolDefinition {
 	}
 }
 
-func TestBM25Search_RanksRelevantFirst(t *testing.T) {
-	hits := bm25Search(sampleCatalog(), "create github issue", 5)
-	if len(hits) == 0 {
-		t.Fatal("expected at least one hit")
-	}
-	if hits[0].Name != "mcp__github__create_issue" {
-		t.Errorf("top hit = %q, want mcp__github__create_issue", hits[0].Name)
-	}
-}
-
-func TestBM25Search_RespectsLimit(t *testing.T) {
-	hits := bm25Search(sampleCatalog(), "github", 1)
-	if len(hits) != 1 {
-		t.Fatalf("len(hits) = %d, want 1", len(hits))
-	}
-}
-
-func TestBM25Search_SubstringFallback(t *testing.T) {
-	// "slack" appears only in a tool name, not as a free-standing English term
-	// the BM25 query would otherwise weight — but more importantly this exercises
-	// that a query matching nothing by token still finds via substring.
-	hits := bm25Search(sampleCatalog(), "post_message", 5)
-	if len(hits) == 0 || hits[0].Name != "mcp__slack__post_message" {
-		t.Errorf("expected slack post_message hit, got %+v", hits)
-	}
-}
-
-func TestSplitCamel(t *testing.T) {
-	cases := []struct {
-		in   string
-		want []string
-	}{
-		{"appTableRecord", []string{"app", "Table", "Record"}},
-		{"createIssue", []string{"create", "Issue"}},
-		{"XMLParser", []string{"XML", "Parser"}},
-		{"lowercase", []string{"lowercase"}},
-		{"v1", []string{"v1"}}, // digit boundaries are left alone
-		{"", []string{""}},
-	}
-	for _, tc := range cases {
-		got := splitCamel(tc.in)
-		if strings.Join(got, "|") != strings.Join(tc.want, "|") {
-			t.Errorf("splitCamel(%q) = %v, want %v", tc.in, got, tc.want)
-		}
-	}
-}
-
-// TestBM25Search_CamelCaseRecall is the regression guard for the camelCase
-// tokenization fix: a sub-word query must match a tool whose name embeds the
-// word in camelCase (as Lark/Feishu MCP tools do), not just snake_case.
-func TestBM25Search_CamelCaseRecall(t *testing.T) {
-	catalog := []agent.ToolDefinition{
-		{Name: "mcp__lark__bitable_v1_appTableRecord_search", Description: "Search records in a Bitable table",
-			Parameters: map[string]any{"type": "object", "properties": map[string]any{"app_token": map[string]any{"type": "string"}}}},
-		{Name: "mcp__slack__post_message", Description: "Post a message to a Slack channel",
-			Parameters: map[string]any{"type": "object", "properties": map[string]any{"channel": map[string]any{"type": "string"}}}},
-	}
-	hits := bm25Search(catalog, "table record", 5)
-	if len(hits) == 0 || hits[0].Name != "mcp__lark__bitable_v1_appTableRecord_search" {
-		t.Errorf("camelCase sub-word query should match appTableRecord; got %+v", hits)
-	}
-}
-
-func TestExecToolSearch_NoSchemaLeaked(t *testing.T) {
-	fakeCatalog(t, sampleCatalog())
-	res, err := execToolSearch(map[string]any{"query": "github issue"})
-	if err != nil {
-		t.Fatalf("execToolSearch: %v", err)
-	}
-	if !strings.Contains(res.Text, "mcp__github__create_issue") {
-		t.Errorf("expected the issue tool in results:\n%s", res.Text)
-	}
-	// The search result must NOT include schema details like property names.
-	if strings.Contains(res.Text, "properties") || strings.Contains(res.Text, "\"title\"") {
-		t.Errorf("search result leaked schema:\n%s", res.Text)
-	}
-}
-
-func TestExecToolSearch_EmptyCatalog(t *testing.T) {
-	fakeCatalog(t, nil)
-	res, err := execToolSearch(map[string]any{"query": "anything"})
-	if err != nil {
-		t.Fatalf("execToolSearch: %v", err)
-	}
-	if !strings.Contains(res.Text, "no MCP tools") {
-		t.Errorf("want no-tools notice, got %q", res.Text)
-	}
-}
-
 func TestExecToolDescribe_ReturnsSchema(t *testing.T) {
 	fakeCatalog(t, sampleCatalog())
 	res, err := execToolDescribe(map[string]any{"name": "mcp__github__create_issue"})
@@ -223,7 +134,7 @@ func TestDefaultToolsFor_BridgeReplacesCatalog(t *testing.T) {
 	for _, d := range defs {
 		names[d.Name] = true
 	}
-	for _, want := range []string{toolSearchName, toolDescribeName, toolCallName} {
+	for _, want := range []string{toolDescribeName, toolCallName} {
 		if !names[want] {
 			t.Errorf("expected bridge tool %q in the list", want)
 		}
@@ -247,7 +158,67 @@ func TestDefaultToolsFor_OffUploadsFullCatalog(t *testing.T) {
 	if !names["mcp__github__create_issue"] {
 		t.Error("off mode must advertise the raw MCP tools")
 	}
-	if names[toolSearchName] {
+	if names[toolDescribeName] {
 		t.Error("off mode must not advertise the bridge")
+	}
+}
+
+func TestMCPManifestFor_ActiveListsNamesNotSchema(t *testing.T) {
+	resetToolSearchConfig(t)
+	fakeCatalog(t, sampleCatalog())
+	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
+
+	manifest := MCPManifestFor("claude-opus-4-8")
+	for _, want := range []string{"mcp__github__create_issue", "mcp__github__list_pulls", "mcp__slack__post_message", "# Available MCP tools"} {
+		if !strings.Contains(manifest, want) {
+			t.Errorf("manifest missing %q:\n%s", want, manifest)
+		}
+	}
+	// The manifest is name + one-line description only — no schema, no cap.
+	if strings.Contains(manifest, "properties") || strings.Contains(manifest, "\"title\"") {
+		t.Errorf("manifest leaked schema:\n%s", manifest)
+	}
+}
+
+func TestMCPManifestFor_InactiveReturnsEmpty(t *testing.T) {
+	resetToolSearchConfig(t)
+	fakeCatalog(t, sampleCatalog())
+	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOff})
+
+	if got := MCPManifestFor("claude-opus-4-8"); got != "" {
+		t.Errorf("bridge inactive should yield no manifest, got:\n%s", got)
+	}
+}
+
+func TestMCPManifestFor_EmptyCatalogReturnsEmpty(t *testing.T) {
+	resetToolSearchConfig(t)
+	fakeCatalog(t, nil)
+	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
+
+	if got := MCPManifestFor("claude-opus-4-8"); got != "" {
+		t.Errorf("empty catalog should yield no manifest, got:\n%s", got)
+	}
+}
+
+// TestMCPManifestFor_NoCap is the regression guard for the "no truncation"
+// decision (#1243 v2): a catalog far larger than would ever realistically
+// occur must still list every tool.
+func TestMCPManifestFor_NoCap(t *testing.T) {
+	resetToolSearchConfig(t)
+	big := make([]agent.ToolDefinition, 0, 200)
+	for i := 0; i < 200; i++ {
+		big = append(big, agent.ToolDefinition{
+			Name:        "mcp__srv__tool_" + string(rune('a'+i%26)) + string(rune('0'+i/26)),
+			Description: "does a thing",
+			Parameters:  map[string]any{"type": "object"},
+		})
+	}
+	fakeCatalog(t, big)
+	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
+
+	manifest := MCPManifestFor("claude-opus-4-8")
+	got := strings.Count(manifest, "\n- mcp__srv__tool_")
+	if got != len(big) {
+		t.Errorf("manifest listed %d of %d tools, want all of them uncapped", got, len(big))
 	}
 }

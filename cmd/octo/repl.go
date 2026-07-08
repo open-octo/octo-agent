@@ -54,6 +54,16 @@ type replConfig struct {
 	// the TUI path sets it; the headless one-shot connects synchronously
 	// (its single turn needs the full tool surface up front). nil → no MCP.
 	mcpBoot *mcpBootstrap
+	// recomposeMCPManifest, when non-nil, re-renders the "# Available MCP
+	// tools" system-prompt layer (see tools.MCPManifestFor) against the
+	// now-live MCP registry and writes the result into a.System/a.LeanSystem.
+	// mcpBoot means the manifest is necessarily empty at first paint (no
+	// registry yet); mcpReadyMsg calls this once the background connect in
+	// runTUI's mcpConnectCmd finishes, mirroring how it already refreshes
+	// cfg.tools via tools.DefaultToolsFor. nil for the headless one-shot,
+	// which connects synchronously before its system prompt is composed and
+	// so never needs a second pass.
+	recomposeMCPManifest func()
 	// modelName is the resolved model displayed in the TUI status bar.
 	modelName string
 	// reasoningEffort is the resolved reasoning level ("low" | "medium" | "high" | "xhigh" | "max" | "")
