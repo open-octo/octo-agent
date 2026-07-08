@@ -229,6 +229,10 @@ internal/channel/  IM bridge — adapter interface + WeChat iLink adapter
 
 Each provider implements both **buffered** (`Send`) and **streaming** (`SendStream`) variants. The agent layer mirrors with `Sender` / `StreamingSender` / `ToolSender` / `ToolStreamingSender` — interfaces are added incrementally so non-streaming providers still work.
 
+## Full documentation
+
+This file and the other bundled docs in this skill directory are concise summaries. The full docs site — narrative guides and exhaustive references for every feature above — is at **https://octo-agent.dev/docs/** (fetch with `web_fetch`).
+
 ## Development
 
 ```bash
@@ -238,7 +242,7 @@ make vet           # go vet ./...
 make fmt-check     # gofmt -l . must be empty
 ```
 
-Project conventions live in [`.octorules`](.octorules) (the human-facing rules); [`CLAUDE.md`](CLAUDE.md) expands them with the operational detail AI coding agents need in this repo. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the human PR workflow.
+Project conventions live in `.octorules` (the human-facing rules); `CLAUDE.md` expands them with the operational detail AI coding agents need in this repo. See **https://octo-agent.dev/docs/community/contributing/** for the PR workflow (also summarized in `WORKFLOW.md`).
 
 ## License
 
