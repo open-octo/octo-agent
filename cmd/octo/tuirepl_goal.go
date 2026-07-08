@@ -44,7 +44,7 @@ func (m *tuiModel) dispatchGoal(args string) (tea.Model, tea.Cmd) {
 		m.applyGoalStatus(agent.GoalActive)
 		// Resuming re-enters the continuation loop right away when idle —
 		// the user just asked for the goal to keep going.
-		return m.startGoalNow()
+		return m.startGoalNow(false)
 
 	case sub == "clear":
 		if sess.ClearGoal() {
@@ -85,7 +85,7 @@ func (m *tuiModel) dispatchGoal(args string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.println(noticeStyle.Render("Goal replaced — " + goalOneLine(g)))
-		return m.startGoalNow()
+		return m.startGoalNow(true)
 
 	default:
 		// "/goal <objective>": start a goal. A finished (complete) goal is
@@ -103,7 +103,7 @@ func (m *tuiModel) dispatchGoal(args string) (tea.Model, tea.Cmd) {
 			} else {
 				m.println(noticeStyle.Render("Goal set — " + goalOneLine(ng)))
 			}
-			return m.startGoalNow()
+			return m.startGoalNow(true)
 		}
 		g, err := sess.CreateGoal(args, 0)
 		if err != nil {
@@ -111,7 +111,7 @@ func (m *tuiModel) dispatchGoal(args string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.println(noticeStyle.Render("Goal set — " + goalOneLine(g)))
-		return m.startGoalNow()
+		return m.startGoalNow(true)
 	}
 }
 
@@ -152,9 +152,14 @@ func (m *tuiModel) submitGoalEdit(text string) (tea.Model, tea.Cmd) {
 // left alone — dispatchGoal is only ever reached while idle in practice
 // (submit() queues slash commands mid-turn instead), so this is a defensive
 // no-op rather than a real production path.
-func (m *tuiModel) startGoalNow() (tea.Model, tea.Cmd) {
+//
+// fresh is true for create/replace (a brand-new goal that has never run a
+// turn — the notice should say "starts") and false for resume (the same
+// goal picking back up after a pause — "continues" still applies, matching
+// the "Goal active — ..." line applyGoalStatus already printed for it).
+func (m *tuiModel) startGoalNow(fresh bool) (tea.Model, tea.Cmd) {
 	if !m.turnRunning {
-		if prompt, kick := m.goalContinuationKick(true); kick {
+		if prompt, kick := m.goalContinuationKick(fresh); kick {
 			return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(prompt, ""))
 		}
 	}
@@ -163,9 +168,11 @@ func (m *tuiModel) startGoalNow() (tea.Model, tea.Cmd) {
 
 // goalContinuationKick asks the session whether an idle continuation turn
 // should start. Split from the call sites (turn end, /goal resume) so both
-// share the notice. initial distinguishes the very first turn of a
-// create/replace/resume (from startGoalNow — "starts") from a follow-up turn
-// after one already ran (from handleTurnFinished — "continues").
+// share the notice. initial distinguishes a brand-new goal's very first turn
+// (from startGoalNow's create/replace callers — "starts") from a turn on a
+// goal that has already run before, whether picking back up after a pause or
+// auto-continuing after a prior turn (from startGoalNow's resume caller and
+// from handleTurnFinished — "continues").
 func (m *tuiModel) goalContinuationKick(initial bool) (string, bool) {
 	if !m.goalsWired() {
 		return "", false
