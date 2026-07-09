@@ -1939,26 +1939,19 @@ func (s *Server) initChannels() {
 // builds a fresh per-turn gate (configured mode + chat-interactive ask), the
 // same shape prepareToolTurn gives web turns. A factory-time gate would freeze
 // one policy snapshot for the session's whole life.
+// System/LeanSystem and CWD are deliberately NOT set here (unlike buildAgent):
+// runChannelTurns unconditionally recomposes both on every IM turn before the
+// first LLM call ever happens, so baking them here once at session-creation
+// time only produced a value nothing would ever read. MaxTokens and the
+// LiteSender/LiteModel resolved below have no such per-turn refresh anywhere
+// in the IM path, so they stay — this is genuinely the only place they're set
+// for the session's whole lifetime.
 func (s *Server) buildChannelFactory() func() *agent.Agent {
-	var memInjection string
-	if s.memDir != "" {
-		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
-	}
-	if g := tools.MemoryBackendGuidance(); g != "" {
-		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
-	}
 	return func() *agent.Agent {
 		defaultSender, model := s.defaultSenderAndModel()
 		a := agent.New(defaultSender, model)
-		cwd, envCtx := s.curCwdEnv()
-		a.CWD = cwd
 		a.MaxTokens = s.cfg.MaxTokens
-		// Loaded once and reused below for LiteSender resolution — see the
-		// matching comment on effectiveCoauthor's doc for why a second
-		// config.Load() here would be wasted work.
-		cfg, cfgErr := config.Load()
-		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
-		if cfgErr == nil {
+		if cfg, err := config.Load(); err == nil {
 			a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 			if a.LiteSender == nil {
 				if lm := app.ImplicitLiteModel(s.getProvider(), model, resolveBaseURL(s.getProvider(), cfg)); lm != "" {
