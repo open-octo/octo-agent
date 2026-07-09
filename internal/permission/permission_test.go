@@ -192,6 +192,30 @@ func TestExtraWriteRoots_AllowedOutsideCWD(t *testing.T) {
 	}
 }
 
+// TestExtraWriteRoots_OctoInitWritesOwnOutputUnderStrict pins the exact
+// combination cmd/octo/init.go relies on: `octo init` defaults to
+// ModeStrict (nobody is watching a one-shot analysis run) and passes its
+// own cwd as an allowWriteRoot so it can still write `.octorules` without
+// prompting. Losing this would silently break `octo init`'s one job.
+func TestExtraWriteRoots_OctoInitWritesOwnOutputUnderStrict(t *testing.T) {
+	e, err := New("", "/repo", ModeStrict, "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Check("write_file", map[string]any{"path": "/repo/.octorules"}); got != Allow {
+		t.Errorf("octo init writing its own output under strict: got %s, want Allow", got)
+	}
+	// A plain strict session with no cwd allowWriteRoot must NOT get the
+	// same free pass — this is init's special case, not a general relaxation.
+	plain, err := New("", "/repo", ModeStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plain.Check("write_file", map[string]any{"path": "/repo/.octorules"}); got != Deny {
+		t.Errorf("plain strict session (no allowWriteRoot): got %s, want Deny", got)
+	}
+}
+
 func TestDefaultRules_ReadFile(t *testing.T) {
 	e := newDefaultEngine(t)
 	cases := map[string]Decision{
@@ -363,6 +387,27 @@ func TestRemember_WriteFileKeyedOnPathOnly(t *testing.T) {
 	other := map[string]any{"path": "/work/b.go", "content": "v1"}
 	if got := e.Check("write_file", other); got != Ask {
 		t.Errorf("different path: got %s, want Ask", got)
+	}
+}
+
+// TestRemember_DenyBeatsPathKeyedWriteFileAllow guards the core safety
+// invariant the path-keyed remember cache must preserve: approving one edit
+// to a path must never let a LATER, more dangerous write to that same path
+// slip through once a deny rule matches it (e.g. the path turns out to be
+// under .env/.ssh, or the user tightens permissions.yml mid-session).
+func TestRemember_DenyBeatsPathKeyedWriteFileAllow(t *testing.T) {
+	e := newDefaultEngine(t)
+	first := map[string]any{"path": "/work/.env", "content": "v1"}
+	// .env is denied from the start — Remember must not be reachable, but
+	// call it anyway to prove a stray "always allow" can't override a deny.
+	if got := e.Check("write_file", first); got != Deny {
+		t.Fatalf("baseline expected Deny for .env, got %s", got)
+	}
+	e.Remember("write_file", first, Allow)
+
+	second := map[string]any{"path": "/work/.env", "content": "v2"}
+	if got := e.Check("write_file", second); got != Deny {
+		t.Errorf("deny must beat a remembered allow for the same path: got %s, want Deny", got)
 	}
 }
 
@@ -609,10 +654,22 @@ func TestExpandCWD(t *testing.T) {
 }
 
 func TestSignature_StableAcrossMapOrder(t *testing.T) {
-	a := signature("t", map[string]any{"x": 1, "y": 2})
-	b := signature("t", map[string]any{"y": 2, "x": 1})
+	a := signature("t", "/work", map[string]any{"x": 1, "y": 2})
+	b := signature("t", "/work", map[string]any{"y": 2, "x": 1})
 	if a != b {
 		t.Errorf("signature not stable: %q vs %q", a, b)
+	}
+}
+
+// TestSignature_WriteFileNormalizesPathSpelling guards the write_file/
+// edit_file remember key against two spellings of the same file producing
+// different cache slots — the model might refer to the same path relatively
+// in one call and absolutely in another within the same session.
+func TestSignature_WriteFileNormalizesPathSpelling(t *testing.T) {
+	rel := signature("write_file", "/work", map[string]any{"path": "src/main.go", "content": "v1"})
+	abs := signature("write_file", "/work", map[string]any{"path": "/work/src/main.go", "content": "v2"})
+	if rel != abs {
+		t.Errorf("relative vs absolute spelling of the same file should share a cache slot: %q vs %q", rel, abs)
 	}
 }
 
