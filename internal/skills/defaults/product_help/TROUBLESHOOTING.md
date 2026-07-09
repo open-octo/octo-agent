@@ -74,7 +74,7 @@ Precedence (highest first): CLI flag > env var > config file > built-in default.
 
 ### "daemon already running" but nothing responds
 
-- A stale pid pointing at a dead process clears itself on the next `--status`/start
+- A stale pid pointing at a dead process clears itself on the next `--status`/`--stop`/start
 - If the pid is alive but the port doesn't answer, the worker is likely stuck mid-startup — check the tail of `~/.octo/serve.log` for the last line logged before it stalled
 
 ### Port already in use

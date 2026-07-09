@@ -68,11 +68,18 @@ stdin, runs a headless one-shot: full agentic tool loop, then exit.
 |---|---|---|
 | `-addr` | `127.0.0.1:8088` | Bind address; `:8088` exposes on all interfaces |
 | `--access-key` | auto-generated | Required for non-loopback clients — also `OCTO_ACCESS_KEY` / config |
+| `--provider` | from config | `anthropic` \| `openai` |
+| `--model` | from config | Model name |
+| `--system` | from config | System prompt |
+| `--max-tokens` | from config | `max_tokens` for responses |
+| `--tools` | `true` | Enable the agentic tool loop |
+| `--no-channel` | `false` | Skip IM platform bridges |
+| `--no-memory` | `false` | Disable cross-session memory injection |
+| `--no-supervisor` | `false` | Run the worker directly, without the self-restart supervisor |
+| `--cors` | — | Comma-separated allowed origins (`*` for any) |
 | `-d`, `--daemon` | `false` | Run in the background; pid in `~/.octo/serve.pid`, logs in `~/.octo/serve.log` |
 | `--status` | — | Show whether the background daemon is running |
 | `--stop` | — | Stop a background daemon (started with `-d`) |
-| `--no-channel` | `false` | Skip IM platform bridges |
-| `--cors` | — | Comma-separated allowed origins (`*` for any) |
 
 See [Self-host octo serve](/docs/guides/self-host/) for the full picture, including running it as a
 service.

@@ -80,7 +80,7 @@ octo serve --stop
 
 The daemon's pid is tracked in `~/.octo/serve.pid`; `--status`/`--stop` read it directly rather than
 scanning the process table. A stale pid (pointing at a process that's already dead) is cleared
-automatically on the next `--status` or start.
+automatically on the next `--status`, `--stop`, or start.
 
 Next: put a reverse proxy in front for TLS/a real domain, then [bridge chat apps](/docs/guides/channels/)
 to the same running instance.
