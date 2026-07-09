@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/hooks"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
@@ -384,6 +385,50 @@ func TestHandleChannelMessage_WiresMemoryHooks(t *testing.T) {
 	}
 	if !sess.Agent.Hooks.Configured(hooks.EventPostToolUse) {
 		t.Error("IM agent missing PostToolUse hook (save-nudge)")
+	}
+}
+
+// TestHandleChannelMessage_RefreshesAutoRecallBeforeRegisteringHooks: IM turns
+// never go through prepareToolTurn (only WS/REST/cron do), so runChannelTurns
+// must refresh the memory-backend globals itself before registering hooks —
+// mirrors TestBuildAgent_RefreshesAutoRecallBeforeRegisteringHooks for the web
+// path. Deliberately leaves the global auto-recall flag stale before the
+// turn, with no prepareToolTurn call anywhere in this path, to prove
+// runChannelTurns's own refresh (not some other turn type having run first)
+// is what makes this work.
+func TestHandleChannelMessage_RefreshesAutoRecallBeforeRegisteringHooks(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models:       []config.ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
+		DefaultModel: "gpt-4o",
+		MemoryBackend: config.MemoryBackendConfig{
+			Type:       "hindsight",
+			BaseURL:    "http://localhost:8888",
+			AutoRecall: true,
+		},
+	})
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	tools.SetMemoryBackend(nil)
+	tools.SetMemoryBackendAutoRecall(false) // simulate a prior turn's stale state
+	t.Cleanup(func() {
+		tools.SetMemoryBackend(nil)
+		tools.SetMemoryBackendAutoRecall(false)
+	})
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+
+	// Don't inspect sess.Agent.Hooks directly — the MEMORY.md injector (when
+	// memDir is set) registers its own UserPromptSubmit hook, which would
+	// pass this check even if the auto-recall refresh never ran. Build a
+	// fresh, unrelated engine instead: RegisterMemoryBackendHooks reads the
+	// package-global auto-recall flag at registration time, so this proves
+	// runChannelTurns left that global set to true this turn.
+	e := hooks.NewEngine(nil)
+	tools.RegisterMemoryBackendHooks(e)
+	if !e.Configured(hooks.EventUserPromptSubmit) {
+		t.Error("runChannelTurns should have refreshed the auto-recall global from this turn's config, not left the stale previous value")
 	}
 }
 
