@@ -142,6 +142,49 @@ func TestHandleDeleteSession(t *testing.T) {
 	}
 }
 
+// TestHandleDeleteSession_InterruptsActiveTurn is the regression guard for
+// the zombie-modal-resurrects-the-deleted-file bug: deleting a session must
+// cancel its registered turn (e.g. one blocked in ask_user_question) before
+// removing the file, otherwise the turn can keep running — and resave — a
+// session the delete already removed.
+func TestHandleDeleteSession_InterruptsActiveTurn(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.interrupts = map[string]context.CancelFunc{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	srv.registerInterrupt(sess.ID, cancel)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+sess.ID, nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("delete must cancel the session's registered interrupt")
+	}
+
+	srv.interruptMu.Lock()
+	_, still := srv.interrupts[sess.ID]
+	srv.interruptMu.Unlock()
+	if still {
+		t.Error("interrupt entry must be removed after delete")
+	}
+}
+
 func TestHandleDeleteSessions_Batch(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

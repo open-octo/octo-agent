@@ -179,3 +179,135 @@ func TestAcquireAskSlot_CtxCancel(t *testing.T) {
 		t.Fatal("cancelled ctx should not acquire a held slot")
 	}
 }
+
+// drainForEvent polls conn.send (non-blocking) until an event matching pred
+// arrives, skipping unrelated events instead of failing on the first
+// mismatch — broadcasts unrelated to the assertion (e.g. other session_update
+// pings) may interleave.
+func drainForEvent(t *testing.T, conn *wsConn, pred func(map[string]any) bool) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case b := <-conn.send:
+			var ev map[string]any
+			if json.Unmarshal(b, &ev) != nil {
+				continue
+			}
+			if pred(ev) {
+				return ev
+			}
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	t.Fatal("timed out waiting for matching event")
+	return nil
+}
+
+// waitForPendingQuestionID polls until sid has a registered pending question
+// and returns its question_id, so tests can answer it without racing wsAsker
+// registering it after Ask() starts running in its own goroutine.
+func waitForPendingQuestionID(t *testing.T, srv *Server, sid string) string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		srv.pendingPromptMu.Lock()
+		q, ok := srv.pendingQuestions[sid]
+		srv.pendingPromptMu.Unlock()
+		if ok {
+			return q.QuestionID
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("pending question never registered")
+	return ""
+}
+
+// TestWSAsker_SessionActivityReachesUnsubscribedConn is the regression guard
+// for the sidebar badge / desktop notification (item 3/6): a tab that never
+// subscribed to the asking session has no other way to learn a question
+// opened or resolved there — request_user_question / dismiss_user_question
+// are session-subscriber-only broadcasts, so session_activity must be a
+// global one reaching every connection regardless of subscription.
+func TestWSAsker_SessionActivityReachesUnsubscribedConn(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.questionChans = map[string]chan tools.AskResponse{}
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "activity-session"
+	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, sid)
+
+	// Registered but never subscribed to sid — only a global broadcast can
+	// reach it.
+	other := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.wsHub.register <- other
+
+	done := make(chan tools.AskResponse, 1)
+	go func() {
+		res, _ := srv.wsAsker().Ask(ctx, tools.AskRequest{Question: "pick", Options: []string{"a", "b"}})
+		done <- res
+	}()
+
+	ev := drainForEvent(t, other, func(ev map[string]any) bool {
+		return ev["type"] == "session_activity" && ev["kind"] == "question_pending"
+	})
+	if ev["session_id"] != sid {
+		t.Fatalf("session_id = %v, want %v", ev["session_id"], sid)
+	}
+
+	qid := waitForPendingQuestionID(t, srv, sid)
+	srv.handleWSUserQuestionAnswer(qid, []string{"a"}, "", false)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ask never returned after answer")
+	}
+
+	drainForEvent(t, other, func(ev map[string]any) bool {
+		return ev["type"] == "session_activity" && ev["kind"] == "question_resolved"
+	})
+}
+
+// TestWSAsker_SuccessDismissesOtherSubscribedTabs is the regression guard for
+// the multi-tab dead-modal bug (item 2): when one tab answers, every other
+// tab subscribed to the same session must get dismiss_user_question too —
+// previously that only fired on cancellation/timeout, so a tab that didn't
+// answer kept showing a modal that silently no-ops if submitted.
+func TestWSAsker_SuccessDismissesOtherSubscribedTabs(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.questionChans = map[string]chan tools.AskResponse{}
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "dismiss-session"
+	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, sid)
+
+	watcher := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.wsHub.register <- watcher
+	srv.wsHub.subscribe(watcher, sid)
+
+	done := make(chan tools.AskResponse, 1)
+	go func() {
+		res, _ := srv.wsAsker().Ask(ctx, tools.AskRequest{Question: "pick", Options: []string{"a", "b"}})
+		done <- res
+	}()
+
+	drainForEvent(t, watcher, func(ev map[string]any) bool { return ev["type"] == "request_user_question" })
+
+	qid := waitForPendingQuestionID(t, srv, sid)
+	// A different tab answers — watcher never does.
+	srv.handleWSUserQuestionAnswer(qid, []string{"a"}, "", false)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ask never returned after answer")
+	}
+
+	drainForEvent(t, watcher, func(ev map[string]any) bool { return ev["type"] == "dismiss_user_question" })
+}

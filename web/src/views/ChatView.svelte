@@ -734,7 +734,12 @@
 
     cleanups.push(ws.on('request_user_question', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      const qsid = (ev as any).session_id
+      // Falls back to sid like the dismiss_user_question handler below —
+      // the current emitter always sets session_id, but without this
+      // fallback a hypothetical session_id-less event would key the entry
+      // by "" instead of the active session, making it unreachable from
+      // QuestionModal's $questionModals[$activeSessionId] lookup.
+      const qsid = (ev as any).session_id || sid
       questionModals.update(m => ({
         ...m,
         [qsid]: {

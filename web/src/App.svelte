@@ -237,7 +237,12 @@
     const name = sess?.title || sess?.name || sid
     const titleKey = kind === 'question_pending' ? 'header.notif_question_title' : 'header.notif_turn_complete_title'
     const bodyKey = kind === 'question_pending' ? 'header.notif_question_body' : 'header.notif_turn_complete_body'
-    const n = new Notification(tr(titleKey), { body: tr(bodyKey).replace('{name}', name) })
+    // String.replace() treats $&, $`, $', $$ specially in the REPLACEMENT
+    // argument even for a plain-string search — and name is a user-editable
+    // session title, so escape its literal $ first or a title like "A&B $$
+    // Corp" mangles the notification body.
+    const escapedName = name.replace(/\$/g, '$$$$')
+    const n = new Notification(tr(titleKey), { body: tr(bodyKey).replace('{name}', escapedName) })
     n.onclick = () => {
       window.focus()
       activeSessionId.set(sid)
