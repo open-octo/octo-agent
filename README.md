@@ -9,12 +9,13 @@
   <a href="README.md">English</a> · <a href="README_CN.md">简体中文</a>
 </p>
 
-> An **MIT-licensed, single Go binary, zero-runtime** AI agent. It does what the big coding agents do —
-> skills, CLI / Web / phone-IM, browser control, an OS-level sandbox — but as an **open, self-contained
-> binary you fully own**, on **any model** (DeepSeek, Kimi, Anthropic, OpenAI, or anything compatible),
-> with the server and your data staying on your own machine. Reuse the skills already in `~/.claude/skills`.
-> It's both a **coding agent** (vs Claude Code) and a **general-purpose agent** (vs Hermes) — one binary for
-> both your coding and your everyday automation, instead of running two separate tools.
+> An **MIT-licensed, single Go binary, zero-runtime** AI agent that combines the two things people usually
+> reach for two separate tools to get: a **coding agent on par with Claude Code**, and a **personal
+> assistant that's lighter and more stable than OpenClaw** — skills, CLI / Web / phone-IM, browser control,
+> an OS-level sandbox, all as an **open, self-contained binary you fully own**, on **any model** (DeepSeek,
+> Kimi, Anthropic, OpenAI, or anything compatible), with the server and your data staying on your own
+> machine. Reuse the skills already in `~/.claude/skills`. One binary for both your coding and your everyday
+> automation, instead of running two separate tools.
 
 <!-- TODO(demo): record a 15–30s hero GIF (one-line install → octo on DeepSeek → solve a real
      coding task), drop it at landing/assets/demo.gif, and uncomment the block below. -->
@@ -50,6 +51,29 @@ self-hosting, and model freedom, not a feature checklist.</sub>
 
 **In one line:** you want the Claude Code experience, but open-source, self-hostable, and not locked to a
 subscription or a single vendor — that's octo.
+
+## Why octo — vs OpenClaw
+
+On the personal-assistant side, [OpenClaw](https://github.com/openclaw/openclaw) is the closest kin —
+self-hosted, MIT-licensed, chat-driven, reaches you on the apps you already use. octo covers the same
+ground, but stays a single static binary instead of a Node.js app with its own dependency tree, and carries
+a full coding-agent core (the same tool/permission/sandbox stack from the Claude Code comparison above)
+rather than being assistant-only.
+
+|  | **octo-agent** | OpenClaw |
+|---|---|---|
+| Runtime | **single static Go binary — no Node runtime, no `npm install`, no dependency tree to patch or rebuild** | Node.js (Node 24 recommended) + its npm dependency tree |
+| Coding ability | **full agentic coding loop built in** — file read/edit, terminal, permission gating, OS sandbox | assistant/automation-focused; not built around a coding-agent core |
+| IM channels | WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram | WhatsApp / Telegram / Discord / Slack / Signal / Matrix / WeChat / QQ and 15+ more |
+| License / deploy | MIT, self-hosted | MIT, self-hosted |
+
+<sub>OpenClaw details per its public repo/docs (2026-07). Both are self-hosted, MIT-licensed, chat-driven
+personal assistants — octo's edge here is running as one static binary (nothing to patch or rebuild) with
+a coding-agent core built in, not a channel-coverage checklist; OpenClaw currently covers more IM channels
+out of the box.</sub>
+
+**In one line:** for coding, octo aims to match Claude Code; for everyday assistant use, it aims to be the
+lighter, more stable alternative to OpenClaw — one binary instead of two separate tools.
 
 ## Status
 
