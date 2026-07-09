@@ -1815,7 +1815,16 @@ func (a *Agent) resetContextTrigger() {
 // the TUI status bar and the web UI render a "ctx N%" gauge. window is always
 // > 0.
 func (a *Agent) ContextUsage() (used, window int) {
-	return a.historyTokens(a.History.Snapshot()), contextWindow(a.Model)
+	a.usageMu.Lock()
+	real := a.lastInputTokens
+	a.usageMu.Unlock()
+	if real > 0 {
+		return real, contextWindow(a.Model)
+	}
+	// Only pay for the History snapshot + heuristic estimate when there's no
+	// real count yet (cold start) — this is called at TUI render-tick rate,
+	// where a real count is the common case.
+	return estimateMessages(a.History.Snapshot()), contextWindow(a.Model)
 }
 
 // SessionCacheTokens returns the cumulative cache read/write token counts.

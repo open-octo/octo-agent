@@ -1407,11 +1407,42 @@ func TestContextUsage_EstimatesFromHistoryBeforeFirstTurn(t *testing.T) {
 	}
 
 	used, window := a.ContextUsage()
-	if used <= 0 {
-		t.Errorf("ContextUsage used = %d, want > 0 (heuristic estimate over restored history)", used)
+	want := estimateMessages(a.History.Snapshot())
+	if used != want {
+		t.Errorf("ContextUsage used = %d, want %d (estimateMessages over restored history)", used, want)
 	}
 	if window <= 0 {
 		t.Errorf("ContextUsage window = %d, want > 0", window)
+	}
+}
+
+// A brand new session with no history yet must report used == 0, not a
+// nonzero estimate, or the TUI status bar's used > 0 guard would show a
+// misleading "ctx N%" for a conversation that hasn't started.
+func TestContextUsage_ZeroForEmptyHistory(t *testing.T) {
+	a := New(nil, "m")
+
+	if used, _ := a.ContextUsage(); used != 0 {
+		t.Errorf("ContextUsage used = %d, want 0 for empty history", used)
+	}
+}
+
+// ClearHistory must reset ContextUsage back to 0, not leave a stale estimate
+// or real count from before the /clear.
+func TestContextUsage_ZeroAfterClearHistory(t *testing.T) {
+	send := &fakeSender{reply: Reply{Content: "ok", InputTokens: 500}}
+	a := New(send, "m")
+	if _, err := a.Turn(context.Background(), "hi"); err != nil {
+		t.Fatalf("Turn: %v", err)
+	}
+	if used, _ := a.ContextUsage(); used == 0 {
+		t.Fatalf("ContextUsage used = 0 after a real turn, want > 0 (test setup broken)")
+	}
+
+	a.ClearHistory()
+
+	if used, _ := a.ContextUsage(); used != 0 {
+		t.Errorf("ContextUsage used = %d after ClearHistory, want 0", used)
 	}
 }
 
