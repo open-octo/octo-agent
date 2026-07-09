@@ -1910,6 +1910,59 @@ func TestHandleGetSessionMessages_ThinkingBeforeTools(t *testing.T) {
 	}
 }
 
+// TestHandleGetSessionMessages_ShowReasoningField verifies the response
+// carries the session's effective show_reasoning setting directly, resolved
+// from its own model entry. The Web UI gates whether a replayed `thinking`
+// event is allowed to end a tool-call group on this value instead of the
+// reactive session-list state, which can still be empty (defaulting to true)
+// on a page load that lands straight on this session via URL hash — before
+// api.listSessions()/the WS session_list broadcast has resolved.
+func TestHandleGetSessionMessages_ShowReasoningField(t *testing.T) {
+	setTestHome(t)
+	off := false
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+			{Provider: "kimi-coding-plan", Model: "kimi-for-coding", ShowReasoning: &off},
+		},
+		DefaultModel: "claude-sonnet-4-6",
+	})
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	quiet := agent.NewSession("kimi-for-coding", "")
+	quiet.ModelConfig = "kimi-for-coding"
+	if err := quiet.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loud := agent.NewSession("claude-sonnet-4-6", "")
+	loud.ModelConfig = "claude-sonnet-4-6"
+	if err := loud.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	getShowReasoning := func(sessionID string) any {
+		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/messages", nil)
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body["show_reasoning"]
+	}
+
+	if got := getShowReasoning(quiet.ID); got != false {
+		t.Errorf("kimi-for-coding session show_reasoning = %v, want false", got)
+	}
+	if got := getShowReasoning(loud.ID); got != true {
+		t.Errorf("claude-sonnet-4-6 session show_reasoning = %v, want true (untouched default)", got)
+	}
+}
+
 // TestRunTurnForwardsTools is the regression guard for the web-UI bug where the
 // server's sender only implemented the base Sender, so the agent loop fell back
 // to a tool-less Turn and every tool (web_search included) vanished.

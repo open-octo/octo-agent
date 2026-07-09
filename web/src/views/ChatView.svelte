@@ -148,7 +148,7 @@
   }
 
   // ── history handler ────────────────────────────────────────────────────────
-  function handleHistoryEvent(ev: Record<string, any>) {
+  function handleHistoryEvent(ev: Record<string, any>, historyShowReasoning: boolean) {
     const sid = get(activeSessionId)   // get() is fine in imperative functions
     if (!sid) return
     if (ev.type === 'history_user_message') {
@@ -180,13 +180,21 @@
       // Standalone reasoning segment from an intermediate (tool) round — render
       // it before the tools it preceded. The server persists (and replays)
       // this regardless of the session's reasoning-display setting, but the
-      // live stream only ever delivers it when showReasoning is on (thinking_delta
-      // is gated server-side) — so live never breaks a tool group on reasoning
-      // it never received. Committing unconditionally here would insert an
-      // invisible boundary that fragments a group live rendered as one card.
-      // Skipping the commit when reasoning is hidden keeps replay consistent
-      // with what was actually shown live.
-      if (showReasoning) commitThinking(sid, ev.text ?? '')
+      // live stream only ever delivers it when reasoning display is on
+      // (thinking_delta is gated server-side) — so live never breaks a tool
+      // group on reasoning it never received. Committing unconditionally here
+      // would insert an invisible boundary that fragments a group live
+      // rendered as one card. Skipping the commit when reasoning is hidden
+      // keeps replay consistent with what was actually shown live.
+      //
+      // historyShowReasoning comes from this fetch's own response (not the
+      // reactive `showReasoning` derived from $sessions) because on a
+      // page-load landing directly on a session via URL hash, loadHistory's
+      // REST call races api.listSessions()/the WS session_list broadcast —
+      // $sessions can still be empty when this loop runs, which would make
+      // `showReasoning` fall back to its default (true) regardless of the
+      // session's real setting.
+      if (historyShowReasoning) commitThinking(sid, ev.text ?? '')
     } else if (ev.type === 'tool_call') {
       addToolCallToGroup(sid, {
         id: uid('t'),
@@ -219,12 +227,15 @@
       .catch(() => {})
     return api.getSessionMessages(sid).then((resp: any) => {
       const events: any[] = resp?.events ?? []
+      // Server-resolved, so it's correct even before $sessions has loaded —
+      // see the comment on the 'thinking' branch in handleHistoryEvent.
+      const historyShowReasoning = resp?.show_reasoning ?? true
       // Collect the tool_ids that came from history so we only close those,
       // leaving any concurrently-replayed live-turn tools untouched.
       const historyToolIds = new Set<string>()
       for (const ev of events) {
         if (ev.type === 'tool_call' && ev.tool_id) historyToolIds.add(ev.tool_id)
-        handleHistoryEvent(ev)
+        handleHistoryEvent(ev, historyShowReasoning)
       }
       // Finish only the history tools (not live-turn tools from WS replay).
       finishToolsById(sid, historyToolIds)

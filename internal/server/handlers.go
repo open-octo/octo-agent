@@ -443,6 +443,12 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Resolve once, up front: the frontend needs this to decide whether a
+	// reconstructed `thinking` event should be allowed to end a tool-call
+	// group (see the "show_reasoning" field on the response below).
+	_, _, _, showReasoning, _ := s.sessionStatusFields(sess)
+	effShowReasoning := showReasoning == nil || *showReasoning
+
 	// While a turn is in flight its progress is saved to disk incrementally,
 	// and the WS replay buffer delivers those same rounds to (re)subscribing
 	// tabs. Serve only the messages that predate the turn so the two sources
@@ -600,8 +606,9 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"has_more": false,
-		"events":   events,
+		"has_more":       false,
+		"events":         events,
+		"show_reasoning": effShowReasoning,
 	})
 }
 
