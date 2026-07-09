@@ -25,6 +25,34 @@ type ToolEnv struct {
 	ToolsFor    func(ctx context.Context) []agent.ToolDefinition
 }
 
+// RefreshMemoryBackend re-reads memory_backend from config and re-installs it
+// via tools.SetMemoryBackend/SetMemoryBackendAutoRecall. WireTools calls this
+// once for the CLI's whole process lifetime; internal/server calls it fresh
+// on every turn (serve never calls WireTools) since it has no equivalent
+// one-time startup hook — see its callers for why it must run before
+// tools.MemoryBackendGuidance()/tools.RegisterMemoryBackendHooks. A bad
+// Type/BaseURL just leaves the backend unconfigured rather than erroring;
+// cheap to call repeatedly (a lightweight REST client, not a persistent
+// connection).
+func RefreshMemoryBackend() {
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil || !cfg.MemoryBackendEnabled() {
+		return
+	}
+	b, err := memorybackend.New(memorybackend.Config{
+		Type:      cfg.MemoryBackend.Type,
+		BaseURL:   cfg.MemoryBackend.BaseURL,
+		APIKey:    cfg.MemoryBackend.APIKey,
+		Namespace: cfg.MemoryBackend.Namespace,
+		Mode:      cfg.MemoryBackend.Mode,
+	})
+	if err != nil {
+		return
+	}
+	tools.SetMemoryBackend(b)
+	tools.SetMemoryBackendAutoRecall(cfg.MemoryBackend.AutoRecall)
+}
+
 // WireTools sets up the tool environment every full-loop entry point shares —
 // the CLI today, the HTTP server and IM bridge as they migrate. It builds a
 // read-before-write executor, registers the sub-agent spawner globally (so
@@ -56,21 +84,9 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 		tools.SetBrowserVision(cfg.ModelVision(a.Model))
 	}
 
-	// Optional external semantic memory backend (hindsight/mem0/memos). A
-	// bad Type/BaseURL just leaves it unconfigured rather than failing
-	// session start — the user finds out on the first memory_recall call.
-	if cfgErr == nil && cfg.MemoryBackendEnabled() {
-		if b, err := memorybackend.New(memorybackend.Config{
-			Type:      cfg.MemoryBackend.Type,
-			BaseURL:   cfg.MemoryBackend.BaseURL,
-			APIKey:    cfg.MemoryBackend.APIKey,
-			Namespace: cfg.MemoryBackend.Namespace,
-			Mode:      cfg.MemoryBackend.Mode,
-		}); err == nil {
-			tools.SetMemoryBackend(b)
-			tools.SetMemoryBackendAutoRecall(cfg.MemoryBackend.AutoRecall)
-		}
-	}
+	// Optional external semantic memory backend (hindsight/mem0/memos) — the
+	// user finds out about a bad Type/BaseURL on the first memory_recall call.
+	RefreshMemoryBackend()
 
 	cleanup := func() {
 		tools.SetDefaultSubAgentManager(nil)

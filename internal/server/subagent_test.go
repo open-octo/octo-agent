@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -34,6 +35,50 @@ func TestEnableSubAgentToolsAdvertises(t *testing.T) {
 		if !names[want] {
 			t.Errorf("expected %q to be advertised after enableSubAgentTools", want)
 		}
+	}
+}
+
+// TestEnableSubAgentTools_RefreshesMemoryBackendBeforeBakingGuidance guards a
+// related staleness bug found while fixing #1274: enableSubAgentTools bakes
+// tools.MemoryBackendGuidance() into the sub-agent template's System prompt
+// ONCE — at server startup, and again after onboarding — and spawned
+// sub-agents reuse that baked template rather than recomposing per spawn
+// (unlike buildAgent/runChannelTurns, which do recompose every turn). Without
+// refreshing the memory-backend globals first, a server that starts with
+// memory_backend already configured would still bake an empty guidance
+// block, because nothing had ever called the refresh before this function's
+// first-ever invocation. Simulates that cold-start ordering directly: sets
+// the backend to nil (as it is before any turn or startup hook has touched
+// it) before calling enableSubAgentTools.
+func TestEnableSubAgentTools_RefreshesMemoryBackendBeforeBakingGuidance(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models:       []config.ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
+		DefaultModel: "gpt-4o",
+		MemoryBackend: config.MemoryBackendConfig{
+			Type:    "hindsight",
+			BaseURL: "http://localhost:8888",
+		},
+	})
+	srv := &Server{
+		cfg:       Config{Tools: true},
+		sender:    &stubSender{},
+		model:     "stub-model",
+		cwd:       t.TempDir(),
+		turnLocks: map[string]*sync.Mutex{},
+	}
+
+	tools.SetMemoryBackend(nil) // simulate cold start: nothing has refreshed this yet
+	t.Cleanup(func() {
+		tools.SetDefaultSubAgentManager(nil)
+		tools.SetTaskStore(nil)
+		tools.SetMemoryBackend(nil)
+	})
+
+	srv.enableSubAgentTools()
+
+	if g := tools.MemoryBackendGuidance(); g == "" {
+		t.Error("enableSubAgentTools should refresh the memory backend from config before reading MemoryBackendGuidance(), got empty guidance")
 	}
 }
 

@@ -527,6 +527,14 @@ func (s *Server) enableSubAgentTools() {
 	}
 	defaultSender, model := s.defaultSenderAndModel()
 	template := agent.New(defaultSender, model)
+	// Refresh before reading MemoryBackendGuidance() below — enableSubAgentTools
+	// runs at server startup (before any turn has ever called this) and once
+	// more after onboarding, so without this the sub-agent template's baked-in
+	// system prompt would never see the memory-backend guidance at all if it
+	// was configured before the first real turn, since spawned sub-agents
+	// reuse this template's System rather than recomposing it per spawn (see
+	// app.NewSpawner below).
+	app.RefreshMemoryBackend()
 	var memInjection string
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
@@ -1135,9 +1143,9 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// Refresh the external memory backend from config before reading
 	// MemoryBackendGuidance()/registering its hooks below — both need this
 	// turn's config, not whatever the last turn (of any kind) left set. See
-	// refreshMemoryBackend's doc comment for why prepareToolTurn alone (which
-	// runs after this function returns) is one turn too late.
-	refreshMemoryBackend()
+	// app.RefreshMemoryBackend's doc comment for why prepareToolTurn alone
+	// (which runs after this function returns) is one turn too late.
+	app.RefreshMemoryBackend()
 
 	// L1: project memory embedded in the system prompt (stable across turns).
 	var memInjection string
@@ -2553,8 +2561,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// through prepareToolTurn (only WS/REST/cron do), so this is the only
 	// place that keeps it live for IM at all, not just on-time. Must run
 	// before MemoryBackendGuidance()/RegisterMemoryBackendHooks below; see
-	// refreshMemoryBackend's doc comment.
-	refreshMemoryBackend()
+	// app.RefreshMemoryBackend's doc comment.
+	app.RefreshMemoryBackend()
 
 	// Recompose the system prompt every turn so memory written and skills
 	// imported/toggled since server start are visible — web turns get this
