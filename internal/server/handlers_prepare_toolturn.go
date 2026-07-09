@@ -13,6 +13,38 @@ import (
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
+// refreshMemoryBackend re-reads memory_backend from config and re-installs it
+// via tools.SetMemoryBackend/SetMemoryBackendAutoRecall. WireTools does this
+// once for the CLI; serve never calls WireTools, so every turn-building path
+// must call this itself — and must call it BEFORE reading
+// tools.MemoryBackendGuidance() (baked into the system prompt) or calling
+// tools.RegisterMemoryBackendHooks (which reads the auto-recall flag at
+// registration time, not per-hook-invocation): buildAgent and runChannelTurns
+// both do the former and call the latter before prepareToolTurn ever runs, so
+// calling this only from prepareToolTurn left a one-turn-stale window where a
+// just-changed auto_recall (or a first-time memory_backend config) wouldn't
+// take effect until the turn after next. A bad Type/BaseURL just leaves the
+// backend unconfigured rather than erroring; cheap to call every turn (a
+// lightweight REST client, not a persistent connection).
+func refreshMemoryBackend() {
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil || !cfg.MemoryBackendEnabled() {
+		return
+	}
+	b, err := memorybackend.New(memorybackend.Config{
+		Type:      cfg.MemoryBackend.Type,
+		BaseURL:   cfg.MemoryBackend.BaseURL,
+		APIKey:    cfg.MemoryBackend.APIKey,
+		Namespace: cfg.MemoryBackend.Namespace,
+		Mode:      cfg.MemoryBackend.Mode,
+	})
+	if err != nil {
+		return
+	}
+	tools.SetMemoryBackend(b)
+	tools.SetMemoryBackendAutoRecall(cfg.MemoryBackend.AutoRecall)
+}
+
 // prepareToolTurn wires the per-turn tool environment for agent a: the strict,
 // non-interactive permission gate, plus a sub-agent manager and task store
 // bound to THIS turn's agent and stamped into ctx so the sub-agent / task tools
@@ -71,22 +103,13 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	tools.SetBrowserHealer(app.MakeBrowserHealer(a.Sender, a.Model))
 
 	// Same omission for the external memory backend: WireTools installs it for
-	// the CLI, but serve never calls WireTools, so without this the feature
-	// silently doesn't exist under `octo serve` even when configured. Cheap to
-	// re-evaluate per turn (a lightweight REST client, not a persistent
-	// connection); a bad Type/BaseURL just leaves it unconfigured.
-	if cfgErr == nil && cfg.MemoryBackendEnabled() {
-		if b, err := memorybackend.New(memorybackend.Config{
-			Type:      cfg.MemoryBackend.Type,
-			BaseURL:   cfg.MemoryBackend.BaseURL,
-			APIKey:    cfg.MemoryBackend.APIKey,
-			Namespace: cfg.MemoryBackend.Namespace,
-			Mode:      cfg.MemoryBackend.Mode,
-		}); err == nil {
-			tools.SetMemoryBackend(b)
-			tools.SetMemoryBackendAutoRecall(cfg.MemoryBackend.AutoRecall)
-		}
-	}
+	// the CLI, but serve never calls WireTools. refreshMemoryBackend is also
+	// called earlier in the same turn by buildAgent/runChannelTurns (before
+	// they read tools.MemoryBackendGuidance()/call tools.RegisterMemoryBackendHooks,
+	// which need the refreshed globals) — calling it again here is redundant
+	// but harmless, and keeps this path correct standalone if ever called
+	// without one of those two upstream.
+	refreshMemoryBackend()
 
 	// Anchor the gate at the agent's per-session cwd (not the server default) so
 	// $CWD path rules and relative-path resolution match where the tools

@@ -1132,6 +1132,13 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		}
 	}
 
+	// Refresh the external memory backend from config before reading
+	// MemoryBackendGuidance()/registering its hooks below — both need this
+	// turn's config, not whatever the last turn (of any kind) left set. See
+	// refreshMemoryBackend's doc comment for why prepareToolTurn alone (which
+	// runs after this function returns) is one turn too late.
+	refreshMemoryBackend()
+
 	// L1: project memory embedded in the system prompt (stable across turns).
 	var memInjection string
 	if s.memDir != "" {
@@ -2542,6 +2549,13 @@ func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, 
 // typing-keepalive ticker the first time this chain's reply text reaches the
 // user (see channel.NewUIController).
 func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent, content string, stopTyping func()) {
+	// Refresh the external memory backend from config — IM turns never go
+	// through prepareToolTurn (only WS/REST/cron do), so this is the only
+	// place that keeps it live for IM at all, not just on-time. Must run
+	// before MemoryBackendGuidance()/RegisterMemoryBackendHooks below; see
+	// refreshMemoryBackend's doc comment.
+	refreshMemoryBackend()
+
 	// Recompose the system prompt every turn so memory written and skills
 	// imported/toggled since server start are visible — web turns get this
 	// for free from buildAgent; the IM factory's compose-once snapshot went
