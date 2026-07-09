@@ -1,6 +1,6 @@
 ---
 name: product-help
-description: Answer questions about how to use octo by reading the product documentation. Use when the user asks "how do I...", "what is...", "where is the docs for...", or any usage/help question about octo itself.
+description: Answer questions about how to use octo, or diagnose something that isn't working, by reading the product documentation. Use when the user asks "how do I...", "what is...", "where is the docs for...", any usage/help question about octo itself, or reports a problem — "not working", "won't start", "error", "connection refused", "daemon won't start" — by reading TROUBLESHOOTING.md.
 ---
 
 # Product Help — answer octo usage questions from documentation
@@ -26,7 +26,7 @@ You have access to octo's product documentation. Use it to answer user questions
    Read the relevant file(s) with `read_file` before answering.
 
 2. **Online docs** (fallback, and the source of truth for anything the bundled summaries don't cover) — the public docs site at `https://octo-agent.dev/docs/`, fetched with `web_fetch`:
-   - `guides/<topic>/` for narrative how-tos — e.g. `guides/goals/`, `guides/workflows/`, `guides/browser-automation/`, `guides/sub-agents/`, `guides/sandbox-the-agent/`, `guides/self-host/`, `guides/channels/`, `guides/hooks/`, `guides/use-skills/`, `guides/connect-mcp-servers/`, `guides/memory/`, `guides/memory-backends/`
+   - `guides/<topic>/` for narrative how-tos — e.g. `guides/goals/`, `guides/workflows/`, `guides/loop/`, `guides/cron-tasks/`, `guides/browser-automation/`, `guides/sub-agents/`, `guides/sandbox-the-agent/`, `guides/self-host/`, `guides/channels/`, `guides/hooks/`, `guides/use-skills/`, `guides/connect-mcp-servers/`, `guides/memory/`, `guides/memory-backends/`
    - `reference/<topic>/` for exhaustive lookups — `reference/cli/`, `reference/config-file/`, `reference/permissions/`, `reference/slash-commands/`, `reference/tools/`, `reference/http-api/`, `reference/security/`, `reference/compatibility/`
    - Some topics (`sub-agents`, `sandbox-the-agent`, `self-host`) have a full guide online but no bundled summary file at all — go straight to `web_fetch` for those.
    - For anything neither the bundled docs nor the docs site cover (e.g. an internal design doc under `dev-docs/`), fall back to `https://github.com/open-octo/octo-agent/blob/main/<path>` via `web_fetch`.
@@ -52,3 +52,12 @@ User: "what does permission_mode do?"
 User: "how do I switch to OpenAI?"
 → Read `CONFIG.md` and `CLI.md`
 → Explain `octo config` wizard vs. editing `~/.octo/config.yml` directly
+
+User: "my IM bot stopped responding" / "daemon won't start"
+→ Read `TROUBLESHOOTING.md` from the skill directory
+→ Point at `~/.octo/serve.log` / `~/.octo/serve.pid` and `octo serve --status` before guessing at a cause
+
+User: "how does the loop feature work?" / "what's the difference between /loop and cron?"
+→ No bundled summary covers this — `web_fetch` `guides/loop/` (and `guides/cron-tasks/` for the comparison)
+→ Explain the syntax and in-session-vs-persistent distinction; don't confuse this with actually
+  *invoking* the `loop` skill — that happens only when the user wants a task run repeatedly right now

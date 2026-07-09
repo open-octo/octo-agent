@@ -53,6 +53,35 @@ Precedence (highest first): CLI flag > env var > config file > built-in default.
 - History is saved to `~/.octo/history` (or `$OCTO_HISTORY_FILE`)
 - Ensure `~/.octo` is writable
 
+## Serve (Web UI / IM bridge)
+
+### Web UI or IM bot isn't responding
+
+- Web UI and IM bridge both run inside the same `octo serve` process — check it's actually up: `octo serve --status`
+- Foreground (no `-d`) prints errors straight to the terminal it was started in
+- Started with `-d`/`--daemon`? There's no terminal, so output goes to `~/.octo/serve.log` instead — tail it for the real error:
+  ```bash
+  tail -f ~/.octo/serve.log
+  ```
+- The daemon's pid is tracked in `~/.octo/serve.pid`; `octo serve --status`/`--stop` read it directly
+
+### IM channel (Feishu/WeChat/Telegram/DingTalk/WeCom/Discord) not connecting
+
+- The bridge has no log of its own — connection and credential errors land in the same `~/.octo/serve.log` as the rest of `octo serve`
+- Credentials live in `~/.octo/channels.yml`; edits made through the Web UI's Channels panel hot-reload immediately, but a direct edit to the file (no filesystem watcher) needs `octo serve --stop` + restart to take effect — see the `channel-manager` skill
+- For a precise per-platform status instead of grepping logs, use the `channel-manager` skill's `doctor` subcommand, which reads `/api/channels`
+- `octo serve --no-channel` disables the bridge entirely — useful to isolate whether an issue is the bridge or the API server
+
+### "daemon already running" but nothing responds
+
+- A stale pid pointing at a dead process clears itself on the next `--status`/`--stop`/start
+- If the pid is alive but the port doesn't answer, the worker is likely stuck mid-startup — check the tail of `~/.octo/serve.log` for the last line logged before it stalled
+
+### Port already in use
+
+- `octo serve --status` tells you whether the process holding the port is octo's own daemon
+- Use a different port (`-addr :<port>`) or stop the existing instance (`octo serve --stop`) first
+
 ## MCP
 
 ### "No MCP servers connected"

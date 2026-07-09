@@ -66,5 +66,21 @@ WantedBy=default.target
 duplicating that job. On macOS, a `launchd` plist with the equivalent `ProgramArguments` and
 `KeepAlive` works the same way — and is exactly what the `.pkg` installer registers automatically.
 
+## Logs and diagnostics
+
+Foreground (`octo serve`) writes straight to the terminal it was started in. Daemon mode (`-d`) has
+no terminal to write to, so output — including IM channel connection errors, since the bridge runs
+in the same process — goes to `~/.octo/serve.log` instead:
+
+```bash
+octo serve --status   # is the daemon running, and what's its pid
+tail -f ~/.octo/serve.log
+octo serve --stop
+```
+
+The daemon's pid is tracked in `~/.octo/serve.pid`; `--status`/`--stop` read it directly rather than
+scanning the process table. A stale pid (pointing at a process that's already dead) is cleared
+automatically on the next `--status`, `--stop`, or start.
+
 Next: put a reverse proxy in front for TLS/a real domain, then [bridge chat apps](/docs/guides/channels/)
 to the same running instance.

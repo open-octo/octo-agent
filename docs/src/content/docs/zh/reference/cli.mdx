@@ -68,9 +68,18 @@ headless 单发：完整的 agentic 工具循环，然后退出。
 |---|---|---|
 | `-addr` | `127.0.0.1:8088` | 绑定地址；`:8088` 会暴露到所有网卡 |
 | `--access-key` | 自动生成 | 非回环客户端必须提供——也可以来自 `OCTO_ACCESS_KEY` / 配置文件 |
-| `--stop` | — | 停止一个后台守护进程（用 `-d` 启动的那种） |
+| `--provider` | 来自配置文件 | `anthropic` \| `openai` |
+| `--model` | 来自配置文件 | 模型名 |
+| `--system` | 来自配置文件 | 系统提示词 |
+| `--max-tokens` | 来自配置文件 | 回复的 `max_tokens` |
+| `--tools` | `true` | 启用 agentic 工具循环 |
 | `--no-channel` | `false` | 跳过 IM 平台桥接 |
+| `--no-memory` | `false` | 关闭跨会话记忆注入 |
+| `--no-supervisor` | `false` | 直接跑 worker，不启用自重启 supervisor |
 | `--cors` | — | 逗号分隔的允许来源（`*` 表示任意） |
+| `-d`, `--daemon` | `false` | 后台运行；pid 写在 `~/.octo/serve.pid`，日志写在 `~/.octo/serve.log` |
+| `--status` | — | 查看后台守护进程是否在运行 |
+| `--stop` | — | 停止一个后台守护进程（用 `-d` 启动的那种） |
 
 完整内容见[自托管 octo serve](/docs/zh/guides/self-host/)，包括如何把它跑成系统服务。
 
