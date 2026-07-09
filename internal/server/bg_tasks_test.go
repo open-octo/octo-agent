@@ -529,11 +529,21 @@ func TestPrepareToolTurn_SubAgentToolEventCarriesToolInput(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// 3s intermittently timed out on loaded/slow CI runners (observed on
-	// windows-latest) even though the broadcast wiring itself is
-	// synchronous and this test passes reliably (100/100) in isolation —
-	// the flake is scheduling latency under CI load, not a logic race.
+	// Wait for both the "tool" event this test is actually about AND the
+	// "done" event that follows it. Returning right after "tool" isn't
+	// enough: Start()'s goroutine keeps running past it into the onExit
+	// hook (notifySubAgentExit -> deliverModelNote, which with no agent
+	// registered under sid falls through to kickIdleSteerTurn ->
+	// acquireSessionBinding/LoadSession — real filesystem work under
+	// $HOME/.octo). KillAll (via the sid cleanup below) only cancels the
+	// agent's context; it doesn't wait for that goroutine to actually
+	// return. Racing that write against t.TempDir()'s RemoveAll cleanup is
+	// what intermittently failed this test in CI with "directory not
+	// empty", not a slow broadcast. "done" is emitted from a defer that
+	// only runs after the onExit hook call returns (see Start()), so
+	// seeing it is a reliable signal the goroutine's side effects are over.
 	deadline := time.After(15 * time.Second)
+	gotToolEvent := false
 	for {
 		select {
 		case b := <-conn.send:
@@ -541,16 +551,24 @@ func TestPrepareToolTurn_SubAgentToolEventCarriesToolInput(t *testing.T) {
 			if err := json.Unmarshal(b, &ev); err != nil {
 				continue
 			}
-			if ev["type"] != "sub_agent_event" || ev["kind"] != "tool" {
+			if ev["type"] != "sub_agent_event" {
 				continue
 			}
-			input, ok := ev["tool_input"].(map[string]any)
-			if !ok || input["path"] != "go.mod" {
-				t.Fatalf("tool_input = %v, want {path: go.mod}", ev["tool_input"])
+			switch ev["kind"] {
+			case "tool":
+				input, ok := ev["tool_input"].(map[string]any)
+				if !ok || input["path"] != "go.mod" {
+					t.Fatalf("tool_input = %v, want {path: go.mod}", ev["tool_input"])
+				}
+				gotToolEvent = true
+			case "done":
+				if !gotToolEvent {
+					t.Fatal("got the done event before the tool event")
+				}
+				return
 			}
-			return
 		case <-deadline:
-			t.Fatal("timed out waiting for the tool sub_agent_event")
+			t.Fatal("timed out waiting for the tool/done sub_agent_events")
 		}
 	}
 }
