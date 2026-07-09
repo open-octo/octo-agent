@@ -321,41 +321,6 @@
       pre.demo-code .arg { color: #34d399; }
     }
 
-    /* Philosophy / not-list */
-    .philosophy {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2.5rem;
-      align-items: start;
-    }
-    @media (max-width: 720px) {
-      .philosophy { grid-template-columns: 1fr; }
-    }
-    .philosophy-block h3 {
-      font-size: 1.15rem;
-      font-weight: 600;
-      margin-bottom: 1rem;
-    }
-    .philosophy-block ul {
-      list-style: none;
-      padding: 0;
-    }
-    .philosophy-block li {
-      padding: 0.5rem 0;
-      color: var(--fg-secondary);
-      font-size: 0.95rem;
-      display: flex;
-      align-items: flex-start;
-      gap: 0.6rem;
-    }
-    .philosophy-block li::before {
-      content: '→';
-      color: var(--accent);
-      font-weight: 700;
-      flex-shrink: 0;
-    }
-    .philosophy-block.positive li::before { content: '✓'; }
-
     /* Footer */
     footer {
       padding: 3rem 1.5rem;
@@ -457,21 +422,39 @@
     <div class="container">
       <div class="section-header reveal">
         <h2 data-en="Built for people who ship" data-zh="为真正交付的人打造"></h2>
-        <p data-en="Octo is not a thin wrapper around an API. It is a full agent loop with tools, memory, and autonomy — packaged as one file you can drop anywhere."
-           data-zh="Octo 不是 API 的薄封装，而是带工具、记忆与自主能力的完整 agent 循环 —— 打包成一个可随处放置的文件。"></p>
+        <p data-en="A full agent loop with tools, memory, and autonomy — packaged as one fast, private, single Go binary you fully control."
+           data-zh="带工具、记忆与自主能力的完整 agent 循环 —— 打包成一个够快、够私密、完全由你掌控的单一 Go 二进制。"></p>
       </div>
       <div class="features">
         <div class="feature reveal">
           <span class="feature-icon">📦</span>
           <h3 data-en="Single binary, zero deps" data-zh="单一二进制，零依赖"></h3>
-          <p data-en="One Go executable. No Python, no Node, no Docker. Download a prebuilt for macOS, Linux, or Windows and run it immediately."
-             data-zh="一个 Go 可执行文件。无需 Python、Node、Docker。下载 macOS / Linux / Windows 预编译版即刻运行。"></p>
+          <p data-en="One Go executable. No Python, no Node, no Docker, no VM warm-up. Starts in milliseconds and stays fast under load — download a prebuilt for macOS, Linux, or Windows and run it immediately."
+             data-zh="一个 Go 可执行文件。无需 Python、Node、Docker，没有虚拟机预热。毫秒级启动，负载下依旧跑得快 —— 下载 macOS / Linux / Windows 预编译版即刻运行。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🔌</span>
-          <h3 data-en="Two protocols, every provider" data-zh="两种协议，对接一切"></h3>
-          <p data-en="Speaks Anthropic Messages and OpenAI Chat Completions natively. DeepSeek, Kimi, Bailian, OpenRouter, vLLM — if it exposes either shape, it just works."
-             data-zh="原生支持 Anthropic Messages 与 OpenAI Chat Completions。DeepSeek、Kimi、百炼、OpenRouter、vLLM —— 只要兼容其中一种，开箱即用。"></p>
+          <h3 data-en="Any provider, any model" data-zh="任意供应商，任意模型"></h3>
+          <p data-en="Speaks Anthropic Messages and OpenAI Chat Completions natively. DeepSeek, Kimi, Bailian, OpenRouter, vLLM, Ollama — including models running entirely on your own machine. Your model, your choice."
+             data-zh="原生支持 Anthropic Messages 与 OpenAI Chat Completions。DeepSeek、Kimi、百炼、OpenRouter、vLLM、Ollama —— 包括跑在你自己机器上的本地模型。你的模型，你说了算。"></p>
+        </div>
+        <div class="feature reveal">
+          <span class="feature-icon">🔒</span>
+          <h3 data-en="No telemetry, ever" data-zh="零遥测，无埋点"></h3>
+          <p data-en="No analytics SDKs, no crash reporters, no usage pings baked in. Nothing leaves your machine except the requests you explicitly send to the model provider you configured."
+             data-zh="没有埋点 SDK、没有崩溃上报、没有内置的用量回传。除了你主动配置、显式发出的模型请求，没有任何东西离开你的机器。"></p>
+        </div>
+        <div class="feature reveal">
+          <span class="feature-icon">🛡️</span>
+          <h3 data-en="Won't break on upgrade" data-zh="升级配置不会把 agent 搞挂"></h3>
+          <p data-en="Config and permission changes are validated before they take effect — a bad edit to config.yml or permissions.yml can't crash a running session; the last good config keeps serving until the new one passes."
+             data-zh="配置与权限变更先校验、后生效 —— config.yml 或 permissions.yml 改错了也不会把正在跑的 agent 搞挂，新配置没校验通过就继续用上一份好的。"></p>
+        </div>
+        <div class="feature reveal">
+          <span class="feature-icon">⚡</span>
+          <h3 data-en="Built for prompt caching" data-zh="为 prompt 缓存而设计"></h3>
+          <p data-en="Stable system prompts and message structure keep provider-side prompt caching effective across turns, and cache-read/cache-write tokens are tracked and reported per protocol — so the savings are real and visible, not just a marketing number."
+             data-zh="稳定的系统提示词与消息结构，让多轮对话持续吃到供应商侧的 prompt 缓存；缓存读写 token 按协议正确追踪并展示 —— 省下的钱看得见，不是营销话术。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🛠️</span>
@@ -576,34 +559,6 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
 ~/.octo/user.md      <span class="comment" data-en="# your profile" data-zh="# 你的个人画像"></span>
 ~/.octo/octorules.md <span class="comment" data-en="# global rules" data-zh="# 全局规则"></span>
 .octorules           <span class="comment" data-en="# project conventions" data-zh="# 项目约定"></span></pre>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Philosophy -->
-  <section>
-    <div class="container">
-      <div class="philosophy">
-        <div class="philosophy-block positive reveal">
-          <h3 data-en="What Octo is" data-zh="Octo 是什么"></h3>
-          <ul>
-            <li data-en="A tool that gets out of the way and lets you work" data-zh="一个不挡路、让你专心干活的工具"></li>
-            <li data-en="Functionality over token-counting minimalism" data-zh="功能优先，而非抠 token 的极简主义"></li>
-            <li data-en="Open, inspectable, and hackable — MIT licensed" data-zh="开放、可检视、可魔改 —— MIT 许可"></li>
-            <li data-en="Local-first: your data stays on your machine" data-zh="本地优先：你的数据留在你机器上"></li>
-            <li data-en="Composable: MCP, skills, hooks, sub-agents" data-zh="可组合：MCP、skills、hooks、子代理"></li>
-          </ul>
-        </div>
-        <div class="philosophy-block reveal">
-          <h3 data-en="What Octo is not" data-zh="Octo 不是什么"></h3>
-          <ul>
-            <li data-en="Not a web-only SaaS with a tacked-on CLI" data-zh="不是只有网页、CLI 是后贴的 SaaS"></li>
-            <li data-en="Not a closed marketplace for encrypted skills" data-zh="不是卖加密 skills 的封闭市场"></li>
-            <li data-en="Not obsessed with shaving tokens at the cost of capability" data-zh="不为省 token 而牺牲能力"></li>
-            <li data-en="Not a black box — every tool call is visible and gated" data-zh="不是黑盒 —— 每次工具调用都可见、可门控"></li>
-            <li data-en="Not trying to replace your IDE (it pairs beautifully with one)" data-zh="不打算取代你的 IDE（它和 IDE 配合得很好）"></li>
-          </ul>
         </div>
       </div>
     </div>
