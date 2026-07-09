@@ -83,9 +83,9 @@ goal:
 
 ---
 
-## 系列到这里
+## 下一篇：一整类完全不同的任务
 
-八篇下来，装机、Skills、MCP、Loop、Cron、实战合体、Workflow、Goal——覆盖了从"问一次答一次"到"持续自主推进"的几种主要形状。挑哪一种，取决于你手上的任务长什么样：一次性的用一句话直接问；要反复盯着用 `/loop`；要按时间表触发用 cron；能拆开并行跑用 workflow；说不清楚要几轮、需要跨会话持续推进的，交给 goal。
+八篇下来，装机、Skills、MCP、Loop、Cron、实战合体、Workflow、Goal，覆盖的都是"问一次答一次"到"持续自主推进"这条线上的几种主要形状——本质上还是文本、代码、工具调用能解决的任务。但还有一大类事完全没有接口：登录一个内部后台点几下、在只有网页表单的系统里填信息，不是"调用工具"能覆盖的，得真的有一双手去操作浏览器。接下来两篇转向这个方向。
 
 **系列上一篇**：[Octo 上手系列（七）：Workflow 实战——写一个脚本，让几个 agent 一起并行干活](/blog/posts/onboarding-workflow-parallel-review/)
-**系列开头**：[Octo 上手系列（一）：装好它，跟它说上第一句话](/blog/posts/onboarding-install-and-first-run/)
+**系列下一篇**：[Octo 上手系列（九）：Browser 实战——把你自己的浏览器接给 octo](/blog/posts/onboarding-browser-setup/)

@@ -83,9 +83,9 @@ With it disabled, `/goal` explicitly reports itself as unavailable rather than s
 
 ---
 
-## End of the series
+## Next: a whole different class of task
 
-Eight posts in, and install, Skills, MCP, Loop, Cron, the weekly-report capstone, Workflow, and Goal cover the main shapes work can take — from "ask once, get an answer" to "keep pushing on its own." Which one fits depends on the task in front of you: a one-off question just gets asked directly; something that needs repeated checking gets `/loop`; something that fires on its own schedule gets cron; something that splits into independent chunks gets workflow; and something you can't fully scope up front, that needs several passes spread across idle time, gets a goal.
+Eight posts in, and install, Skills, MCP, Loop, Cron, the weekly-report capstone, Workflow, and Goal cover the main shapes work can take on the "ask once, get an answer" to "keep pushing on its own" spectrum — but all of it is still text, code, and tool calls under the hood. There's a whole other class of work with no API at all: clicking through an internal admin panel, filling in a form on a site that's only a UI. That's not something a tool call covers — it takes an actual pair of hands driving a browser. The next two posts turn there.
 
 **Previous in the series**: [Octo Onboarding Series (7): Workflow in Practice — Get Several Agents Working in Parallel](/blog/posts/en/onboarding-workflow-parallel-review/)
-**Back to the start**: [Octo Onboarding Series (1): Install It, Say Your First Word to It](/blog/posts/en/onboarding-install-and-first-run/)
+**Next in the series**: [Octo Onboarding Series (9): Browser in Practice — Hand octo Your Own Browser](/blog/posts/en/onboarding-browser-setup/)
