@@ -120,9 +120,21 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 			ReasoningEffort: re,
 			ShowReasoning:   sr,
 			ContextUsage:    ctxUsage,
+			PendingQuestion: s.hasPendingQuestion(sess.ID),
 		})
 	}
 	return out
+}
+
+// hasPendingQuestion reports whether a session has an outstanding
+// ask_user_question awaiting an answer, so a freshly-loaded session list
+// (initial connect / page refresh) shows the sidebar badge immediately
+// instead of waiting for the next session_activity broadcast.
+func (s *Server) hasPendingQuestion(sessionID string) bool {
+	s.pendingPromptMu.Lock()
+	defer s.pendingPromptMu.Unlock()
+	_, ok := s.pendingQuestions[sessionID]
+	return ok
 }
 
 // SetSubscribed records the active session subscription for a connection.
@@ -660,7 +672,21 @@ func (s *Server) wsToast(sid, message, level string) {
 // handleWSInterrupt sends an interrupt signal for a session and broadcasts
 // the interrupted event so the frontend shows the cancellation to the user.
 func (s *Server) handleWSInterrupt(sessionID string) {
-	// An interrupt also stops any armed loop wakeup (TUI / CC parity).
+	s.interruptSession(sessionID)
+	s.wsHub.broadcast(sessionID, map[string]any{
+		"type":       "interrupted",
+		"session_id": sessionID,
+	})
+}
+
+// interruptSession cancels a session's in-flight turn, if any, including a
+// goroutine parked in ask_user_question — deleting a session must go through
+// this first, otherwise a blocked wsAsker.Ask (which no longer has a timeout
+// to fall back on) leaks forever and, if answered via a stale modal, resaves
+// the session file the delete just removed. Also stops any armed loop
+// wakeup (TUI / CC parity). Does not broadcast; callers that want the
+// frontend "interrupted" toast (handleWSInterrupt) add it themselves.
+func (s *Server) interruptSession(sessionID string) {
 	s.cancelWakeup(sessionID)
 	s.interruptMu.Lock()
 	if cancel, ok := s.interrupts[sessionID]; ok {
@@ -668,11 +694,6 @@ func (s *Server) handleWSInterrupt(sessionID string) {
 		delete(s.interrupts, sessionID)
 	}
 	s.interruptMu.Unlock()
-
-	s.wsHub.broadcast(sessionID, map[string]any{
-		"type":       "interrupted",
-		"session_id": sessionID,
-	})
 }
 
 // lastVisibleUserIdx returns the index of the most recent user message that
@@ -1278,6 +1299,14 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		completeEvent["tokens"] = inTok + outTok
 	}
 	s.wsHub.broadcast(sess.ID, completeEvent)
+	// completeEvent above only reaches tabs subscribed to this session; a tab
+	// looking at a different session needs this global companion to drive
+	// the "agent finished replying" desktop notification.
+	s.wsHub.broadcast("", wsEventSessionActivity{
+		Type:      "session_activity",
+		SessionID: sess.ID,
+		Kind:      "turn_complete",
+	})
 
 	used, window := a.ContextUsage()
 	ctxPct := 0

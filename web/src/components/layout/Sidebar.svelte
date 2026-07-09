@@ -177,6 +177,9 @@
           </span>
           {:else}
           <span class="session-title" style="color:{solid ? '#fff' : 'var(--text)'};">{(s as any).name || (s as any).title || s.id}</span>
+          {#if (s as any).pending_question}
+            <span class="pending-dot" title={$t('sidebar.pending_question')}></span>
+          {/if}
           {#if !menuOpen}
             <span class="session-time" style="color:{solid ? 'rgba(255,255,255,0.75)' : 'var(--text-quaternary)'};">
               {(s as any).source === 'cron' ? $t('sidebar.cron') : ''}
@@ -323,6 +326,10 @@
   white-space: nowrap; font-size: 13px;
 }
 .session-time { font-size: 11px; flex: 0 0 auto; padding-right: 4px; }
+.pending-dot {
+  width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%;
+  background: var(--blue-6); margin-right: 4px;
+}
 .row-action {
   width: 22px; height: 22px; flex: 0 0 22px; border-radius: 5px;
   display: flex; align-items: center; justify-content: center;

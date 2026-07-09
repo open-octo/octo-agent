@@ -26,6 +26,11 @@ export interface Session {
   reasoning_effort: 'low' | 'medium' | 'high' | string
   show_reasoning?: boolean
   context_usage: number
+  // Set when this session has an outstanding ask_user_question awaiting an
+  // answer — seeded by the initial session_list, kept live via the global
+  // session_activity broadcast (App.svelte), independent of whether this
+  // tab is currently subscribed to the session.
+  pending_question?: boolean
   // Optional UI-only fields carried by some broadcasts.
   time?: string
   icon?: string
@@ -179,6 +184,7 @@ export interface WsSessionInfo {
   reasoning_effort: 'low' | 'medium' | 'high'
   show_reasoning?: boolean
   context_usage: number
+  pending_question?: boolean
 }
 
 // WebSocket event interfaces
@@ -331,6 +337,16 @@ export interface WsEventNextMessageSuggestion {
   text: string
 }
 
+// Cross-session signal, broadcast globally regardless of subscription — see
+// wsEventSessionActivity in internal/server/ws_types.go for why this exists
+// (request_user_question/session_update/complete only reach subscribers of
+// that exact session).
+export interface WsEventSessionActivity {
+  type: 'session_activity'
+  session_id: string
+  kind: 'question_pending' | 'question_resolved' | 'turn_complete'
+}
+
 // Discriminated union of all WebSocket event types
 export type WsEvent =
   | WsEventSessionList
@@ -354,6 +370,7 @@ export type WsEvent =
   | WsEventFilePreview
   | WsEventShellPreview
   | WsEventNextMessageSuggestion
+  | WsEventSessionActivity
 
 // ChatMessage is the UI-layer chat message type
 export interface ChatMessage {

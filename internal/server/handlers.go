@@ -58,6 +58,7 @@ type sessionItem struct {
 	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
 	ShowReasoning   *bool     `json:"show_reasoning,omitempty"`
 	ContextUsage    int       `json:"context_usage,omitempty"`
+	PendingQuestion bool      `json:"pending_question,omitempty"`
 }
 
 type sessionDetail struct {
@@ -113,6 +114,7 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 		ReasoningEffort: re,
 		ShowReasoning:   sr,
 		ContextUsage:    ctxUsage,
+		PendingQuestion: srv.hasPendingQuestion(s.ID),
 	}
 }
 
@@ -634,6 +636,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing session id")
 		return
 	}
+	// Cancel any in-flight turn first — including one parked in
+	// ask_user_question, which (now that it has no timeout to fall back on)
+	// would otherwise leak forever and, if answered via a stale modal,
+	// resave the very file this handler is about to delete.
+	s.interruptSession(id)
 	if err := agent.DeleteSession(id); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -667,6 +674,7 @@ func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
 	deleted := make([]string, 0, len(req.IDs))
 	failed := map[string]string{}
 	for _, id := range req.IDs {
+		s.interruptSession(id)
 		if err := agent.DeleteSession(id); err != nil {
 			failed[id] = err.Error()
 			continue

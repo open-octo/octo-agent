@@ -207,21 +207,32 @@ func TestChannelAsker_NumberPicksOption(t *testing.T) {
 	}
 }
 
-func TestChannelAsker_TimeoutCancels(t *testing.T) {
-	old := channelAskTimeout
-	channelAskTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { channelAskTimeout = old })
-
+// ask_user_question waits forever for an attended reply — unlike
+// channelPermissionAsk (fail-closed safety default), a clarifying question
+// must not silently give up on a user who stepped away. Only an explicit
+// context cancellation (e.g. the turn was interrupted) ends the wait.
+func TestChannelAsker_ContextCancelReturnsCancelled(t *testing.T) {
 	srv, sess, ad, ev := askEnv(t)
 	_ = sess
 	_ = ad
 	asker := srv.channelAsker(sess, ad, ev)
-	res, err := asker.Ask(context.Background(), tools.AskRequest{Question: "q", Options: []string{"a", "b"}})
-	if err != nil {
-		t.Fatalf("timeout should cancel without error, got %v", err)
-	}
-	if !res.Cancelled {
-		t.Error("timeout must report Cancelled")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan tools.AskResponse, 1)
+	go func() {
+		res, _ := asker.Ask(ctx, tools.AskRequest{Question: "q", Options: []string{"a", "b"}})
+		done <- res
+	}()
+	waitFor(t, func() bool { return len(ad.texts()) == 1 })
+	cancel()
+
+	select {
+	case res := <-done:
+		if !res.Cancelled {
+			t.Error("context cancellation must report Cancelled")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ask did not return on context cancellation")
 	}
 }
 

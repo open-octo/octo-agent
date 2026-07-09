@@ -93,7 +93,21 @@ export const pendingPrompt = writable<{ sessionId: string; content: string } | n
 
 // Permission/question modals
 export const confirmModal = writable<any | null>(null)
-export const questionModal = writable<any | null>(null)
+export interface QuestionModalEntry {
+  questionId: string
+  sessionId: string
+  question: string
+  options?: string[]
+  multiSelect?: boolean
+  header?: string
+  dismissed: boolean
+}
+// Keyed by sessionId, unlike a single value — a second session's question
+// must not silently clobber a still-unanswered first one when the user
+// switches sessions. QuestionModal.svelte only ever renders the active
+// session's entry; other sessions' pending state surfaces via the sidebar
+// badge (Session.pending_question) instead.
+export const questionModals = writable<Record<string, QuestionModalEntry>>({})
 export const feedbackModal = writable<any | null>(null)
 
 // Admin data (loaded by views)

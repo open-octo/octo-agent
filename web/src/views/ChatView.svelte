@@ -22,7 +22,7 @@
     chatWorkflows,
     applyWorkflowEvent,
     confirmModal,
-    questionModal,
+    questionModals,
     feedbackModal,
     pendingPrompt,
     artifactsOpen,
@@ -734,19 +734,28 @@
 
     cleanups.push(ws.on('request_user_question', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      questionModal.set({
-        questionId: (ev as any).question_id,
-        sessionId: (ev as any).session_id,
-        question: (ev as any).question,
-        options: (ev as any).options,
-        multiSelect: (ev as any).multi_select,
-        header: (ev as any).header,
-      })
+      const qsid = (ev as any).session_id
+      questionModals.update(m => ({
+        ...m,
+        [qsid]: {
+          questionId: (ev as any).question_id,
+          sessionId: qsid,
+          question: (ev as any).question,
+          options: (ev as any).options,
+          multiSelect: (ev as any).multi_select,
+          header: (ev as any).header,
+          dismissed: false,
+        },
+      }))
     }))
 
     cleanups.push(ws.on('dismiss_user_question', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      questionModal.set(null)
+      questionModals.update(m => {
+        const n = { ...m }
+        delete n[sid]
+        return n
+      })
     }))
 
     cleanups.push(ws.on('request_feedback', (ev) => {

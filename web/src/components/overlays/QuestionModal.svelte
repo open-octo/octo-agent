@@ -1,32 +1,36 @@
 <script lang="ts">
-  import { questionModal } from '../../lib/stores'
+  import { questionModals, activeSessionId } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import { t } from '../../lib/i18n'
+
+  // Only the active session's own pending question renders here — a
+  // different session's question surfaces via the sidebar badge instead
+  // (Session.pending_question), not a second competing modal.
+  let current = $derived($activeSessionId ? $questionModals[$activeSessionId] : undefined)
 
   let selected = $state<string[]>([])
   let customText = $state('')
   let inputEl = $state<HTMLInputElement | null>(null)
   let modalEl = $state<HTMLDivElement | null>(null)
-  // Backdrop click / X / Esc no longer answer the agent (#1112) — they used to
-  // route through cancel(), so a stray click silently sent "cancelled" and
-  // discarded anything typed/selected. Hiding instead keeps the question
-  // pending; the reopen pill below gets the user back to it.
-  let dismissed = $state(false)
+  let lastQuestionId = $state<string | null>(null)
 
-  // Reset state whenever a new question arrives, and autofocus the free-text
+  // Reset the in-progress draft whenever a genuinely new question becomes
+  // active (a fresh question, or switching to a session with a different
+  // pending one) — not on every store update, which would wipe what the
+  // user already selected/typed on each re-render. Autofocus the free-text
   // input (was inconsistent with AuthGate/CommandPalette, which both do this).
   $effect(() => {
-    if ($questionModal) {
+    if (current && current.questionId !== lastQuestionId) {
+      lastQuestionId = current.questionId
       selected = []
       customText = ''
-      dismissed = false
       inputEl?.focus()
     }
   })
 
   function toggleOption(opt: string) {
     // ChatView stores the server field `multi_select` as `multiSelect`.
-    if ($questionModal?.multiSelect) {
+    if (current?.multiSelect) {
       selected = selected.includes(opt)
         ? selected.filter(o => o !== opt)
         : [...selected, opt]
@@ -35,33 +39,46 @@
     }
   }
 
+  function clearCurrent() {
+    const sid = current?.sessionId
+    if (!sid) return
+    questionModals.update(m => {
+      const n = { ...m }
+      delete n[sid]
+      return n
+    })
+  }
+
   function submit() {
-    if (!$questionModal) return
+    if (!current) return
     if (selected.length === 0 && !customText.trim()) return
-    const q = $questionModal
     // ChatView stores the server field `question_id` as `questionId`.
-    ws.answerQuestion(q.questionId, [...selected], customText)
-    questionModal.set(null)
+    ws.answerQuestion(current.questionId, [...selected], customText)
+    clearCurrent()
   }
 
   // The only path that actually answers "cancelled" to the agent — reached
   // solely via the explicit Cancel button, an unambiguous user decision.
   function cancel() {
-    if (!$questionModal) return
-    const q = $questionModal
-    ws.answerQuestion(q.questionId, [], '', true)
-    questionModal.set(null)
+    if (!current) return
+    ws.answerQuestion(current.questionId, [], '', true)
+    clearCurrent()
   }
 
   // Safe close: hides the modal without telling the agent anything. The
   // question is still pending — the reopen pill brings the modal back with
-  // whatever was selected/typed still intact.
+  // whatever was selected/typed still intact. Stored on the session's own
+  // entry so switching sessions and back preserves it correctly.
   function softClose() {
-    dismissed = true
+    const sid = current?.sessionId
+    if (!sid) return
+    questionModals.update(m => m[sid] ? { ...m, [sid]: { ...m[sid], dismissed: true } } : m)
   }
 
   function reopen() {
-    dismissed = false
+    const sid = current?.sessionId
+    if (!sid) return
+    questionModals.update(m => m[sid] ? { ...m, [sid]: { ...m[sid], dismissed: false } } : m)
     inputEl?.focus()
   }
 
@@ -74,7 +91,7 @@
   }
 </script>
 
-{#if $questionModal && !dismissed}
+{#if current && !current.dismissed}
 <!-- #1112: backdrop is inert (no onclick) — matches ConfirmModal (#1105).
      Dismissal without answering only happens via Esc/softClose. -->
 <div class="backdrop" role="presentation">
@@ -82,7 +99,7 @@
     <div class="modal-header">
       <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
       <span class="modal-title">
-        {$questionModal.header || $t('question.title')}
+        {current.header || $t('question.title')}
       </span>
       <button class="close-btn" onclick={softClose} aria-label={$t('common.close')}>
         <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
@@ -90,11 +107,11 @@
     </div>
 
     <div class="modal-body">
-      <p class="question-text">{$questionModal.question}</p>
+      <p class="question-text">{current.question}</p>
 
-      {#if $questionModal.options?.length}
+      {#if current.options?.length}
         <div class="options">
-          {#each $questionModal.options as opt}
+          {#each current.options as opt}
             <button
               class="option-pill"
               class:selected={selected.includes(opt)}
@@ -133,7 +150,7 @@
     </div>
   </div>
 </div>
-{:else if $questionModal && dismissed}
+{:else if current && current.dismissed}
 <button class="reopen-pill" onclick={reopen}>
   <iconify-icon icon="ant-design:form-outlined" width="14"></iconify-icon>
   {$t('question.reopen')}

@@ -100,6 +100,7 @@ type wsSessionInfo struct {
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
 	ContextUsage    int    `json:"context_usage,omitempty"`
+	PendingQuestion bool   `json:"pending_question,omitempty"`
 }
 
 type wsEventHistoryUserMessage struct {
@@ -234,6 +235,20 @@ type wsEventDismissUserQuestion struct {
 	Type       string `json:"type"`
 	SessionID  string `json:"session_id"`
 	QuestionID string `json:"question_id"`
+}
+
+// wsEventSessionActivity is a lightweight cross-session signal broadcast
+// globally (wsHub.broadcast("", ev)) rather than to a session's subscribers.
+// request_user_question / session_update / complete only reach tabs
+// currently subscribed to that exact session, so a tab looking at session B
+// never learns session A got a question or finished its turn. This event
+// carries no payload beyond "what happened, to which session" — the sidebar
+// badge and desktop-notification logic key off Kind, and don't need the full
+// question text or turn stats that already went out on the per-session path.
+type wsEventSessionActivity struct {
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+	Kind      string `json:"kind"` // "question_pending" | "question_resolved" | "turn_complete"
 }
 
 type wsEventBackgroundTaskUpdate struct {

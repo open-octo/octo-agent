@@ -198,15 +198,14 @@ func (c chatAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskRespon
 	}
 	c.ad.SendText(c.ev.ChatID, b.String(), c.ev.MessageID)
 
-	timer := time.NewTimer(channelAskTimeout)
-	defer timer.Stop()
+	// No timeout: this is a clarifying question in an attended chat, not the
+	// permission gate above — waiting forever for an actual reply is correct
+	// here (see channelPermissionAsk for why that one keeps channelAskTimeout).
 	select {
 	case text := <-replyCh:
 		return parseAskReply(text, q), nil
 	case <-ctx.Done():
 		return tools.AskResponse{Cancelled: true}, ctx.Err()
-	case <-timer.C:
-		return tools.AskResponse{Cancelled: true}, nil
 	}
 }
 

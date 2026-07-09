@@ -1687,11 +1687,21 @@ func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse
 	a.s.pendingQuestions[sessionID] = ev
 	a.s.pendingPromptMu.Unlock()
 
+	// dismiss both closes the modal on every tab (not just the one that
+	// answered — without this, a tab that didn't answer keeps showing a dead
+	// modal) and clears the cross-session "pending question" signal so the
+	// sidebar badge / notification logic knows this session is no longer
+	// waiting.
 	dismiss := func() {
 		a.s.wsHub.broadcast(sessionID, wsEventDismissUserQuestion{
 			Type:       "dismiss_user_question",
 			SessionID:  sessionID,
 			QuestionID: qid,
+		})
+		a.s.wsHub.broadcast("", wsEventSessionActivity{
+			Type:      "session_activity",
+			SessionID: sessionID,
+			Kind:      "question_resolved",
 		})
 	}
 
@@ -1705,19 +1715,25 @@ func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse
 	}
 
 	a.s.wsHub.broadcast(sessionID, ev)
+	a.s.wsHub.broadcast("", wsEventSessionActivity{
+		Type:      "session_activity",
+		SessionID: sessionID,
+		Kind:      "question_pending",
+	})
 
+	// No timeout branch: an attended surface (a tab is open on this session
+	// or could be) must wait for an actual answer, not silently give up on a
+	// user who stepped away. Unattended contexts never reach here at all —
+	// the tool isn't advertised when activeAsker is nil.
 	select {
 	case res := <-ch:
 		cleanup()
+		dismiss()
 		return res, nil
 	case <-ctx.Done():
 		cleanup()
 		dismiss()
 		return tools.AskResponse{Cancelled: true}, nil
-	case <-time.After(5 * time.Minute):
-		cleanup()
-		dismiss()
-		return tools.AskResponse{}, fmt.Errorf("ask_user_question: timed out waiting for user answer")
 	}
 }
 
