@@ -74,13 +74,11 @@ flowchart TD
 
 ![Octo 工作流面板：这个项目自己在用的几个 workflow](../_assets/onboarding/workflows-panel.png)
 
-workflow 是另一套更大的机制，值得单独展开——继续看[文档里的 Workflows 指南](/docs/guides/workflows/)。
+workflow 是另一套更大的机制，值得单独展开——下一篇就来实际写一个。
 
 ---
 
-## 系列到这里
-
-六篇下来，从装机到一个真正每周在跑的自动化——中间用到的东西不多：一次安装、一句自然语言、一份 JSON、一个斜杠命令、一个 cron 表达式。这大概也是 octo 想做成的样子：把复杂的部分（技能怎么写、协议怎么接、调度怎么管）都藏在背后，留给你的只是把需求说清楚。
+## 下一篇：让几个 agent 并行干活
 
 **系列上一篇**：[Octo 上手系列（五）：Cron 实战——定时任务，人不在也在跑](/blog/posts/onboarding-cron-daily-digest/)
-**系列开头**：[Octo 上手系列（一）：装好它，跟它说上第一句话](/blog/posts/onboarding-install-and-first-run/)
+**系列下一篇**：[Octo 上手系列（七）：Workflow 实战——写一个脚本，让几个 agent 一起并行干活](/blog/posts/onboarding-workflow-parallel-review/)

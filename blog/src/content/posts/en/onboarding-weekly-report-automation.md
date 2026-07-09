@@ -77,13 +77,11 @@ Everything in this post is "one prompt, start to finish," which is plenty for mo
 
 ![Octo's Workflows panel: a few workflows this project actually uses](../_assets/onboarding/workflows-panel.png)
 
-Workflows are a bigger mechanism worth their own deep dive — continue with the [Workflows guide in the docs](/docs/guides/workflows/).
+Workflows are a bigger mechanism worth their own deep dive — the next post actually writes one.
 
 ---
 
-## End of the series
-
-Six posts later, from a fresh install to an automation that genuinely runs every week — and the parts that got you there weren't many: one install, one plain-language sentence, one JSON file, one slash command, one cron expression. That's roughly the shape octo is trying to be: keep the hard parts (writing the skill, speaking the protocol, managing the schedule) out of your way, and leave you with nothing to do but describe what you want.
+## Next: getting several agents working in parallel
 
 **Previous in the series**: [Octo Onboarding Series (5): Cron in Practice — Scheduled Tasks That Run Whether You're There or Not](/blog/posts/en/onboarding-cron-daily-digest/)
-**Back to the start**: [Octo Onboarding Series (1): Install It, Say Your First Word to It](/blog/posts/en/onboarding-install-and-first-run/)
+**Next in the series**: [Octo Onboarding Series (7): Workflow in Practice — Get Several Agents Working in Parallel](/blog/posts/en/onboarding-workflow-parallel-review/)
