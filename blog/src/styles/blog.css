@@ -185,6 +185,15 @@ a:hover {
 	margin: 0.35rem 0;
 }
 
+.post-content img {
+	max-width: 100%;
+	height: auto;
+	display: block;
+	margin: 1.5rem 0;
+	border-radius: 0.5rem;
+	border: 1px solid var(--color-border);
+}
+
 .post-content blockquote {
 	margin: 1.5rem 0;
 	padding: 0.75rem 1.25rem;
