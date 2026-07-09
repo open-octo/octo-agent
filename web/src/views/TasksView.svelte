@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { tasks, showToast, sessions, activeSessionId, view, setActiveSession, openAgentSession } from '../lib/stores'
-  import { t, tr } from '../lib/i18n'
+  import { t, tr, locale } from '../lib/i18n'
+  import { get } from 'svelte/store'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import StatCard from '../components/ui/StatCard.svelte'
@@ -20,7 +21,7 @@
   function fmtDate(iso: string): string {
     if (!iso || iso === '0001-01-01T00:00:00Z') return '—'
     try {
-      return new Intl.DateTimeFormat(undefined, {
+      return new Intl.DateTimeFormat(get(locale) === 'zh' ? 'zh-CN' : 'en-US', {
         month: 'short', day: 'numeric',
         hour: '2-digit', minute: '2-digit',
       }).format(new Date(iso))

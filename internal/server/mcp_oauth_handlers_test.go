@@ -211,6 +211,18 @@ func TestMCPOAuth_WebAuthCodeFlow_EndToEnd(t *testing.T) {
 // against a forged or stale hit: a state that doesn't match the in-flight
 // attempt must not resolve it (a real attempt could still be waiting).
 func TestMCPOAuth_Callback_RejectsBadState(t *testing.T) {
+	// The real attempt in this test never receives a valid callback, so its
+	// background goroutine (started with context.Background() by design —
+	// see handleStartMCPOAuth) would otherwise sit blocked in
+	// AwaitAuthorizationCode for the real 5-minute default, racing with
+	// every later test in this package on the globals it touches
+	// (mcpTestHome's env, tools.SetMCPRegistry). Shrink it and wait for the
+	// flow to actually finish before returning, same as
+	// TestMCPOAuth_LateCallbackAfterTimeout_Rejected does.
+	orig := authCodeTimeout
+	authCodeTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { authCodeTimeout = orig })
+
 	fake := newFakeOAuthMCPServer(t)
 	defer fake.srv.Close()
 
@@ -237,6 +249,23 @@ func TestMCPOAuth_Callback_RejectsBadState(t *testing.T) {
 	}
 	if status["state"] == "failed" {
 		t.Fatalf("bogus callback must not fail the real attempt: %+v", status)
+	}
+
+	// Let the (shrunk) timeout elapse so the background goroutine finishes
+	// before this test returns, instead of leaking into later tests.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("flow never timed out")
+		}
+		w = doJSON(t, srv, http.MethodGet, "/api/mcp/servers/secure/oauth/status", "")
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status["state"] == "failed" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
