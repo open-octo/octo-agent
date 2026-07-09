@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -481,6 +482,50 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	return f.normalize(), nil
+}
+
+// lastGood caches the most recently successfully loaded Config for
+// LoadCached — see its doc comment.
+var lastGood struct {
+	mu  sync.Mutex
+	cfg Config
+	ok  bool
+}
+
+// LoadCached is Load with a validate-then-replace cache: octo serve re-reads
+// config.yml on every turn (so changes apply without a restart), but with no
+// cache a hand-edit that leaves invalid YAML mid-session would revert every
+// in-flight, config-derived feature (per-session model binding, the
+// compaction lite model, the coauthor flag, browser vision) to its hardcoded
+// default the instant the bad file is saved — a config typo turning into a
+// live behavior change across every session. LoadCached instead keeps
+// serving the last config that parsed cleanly until the file is fixed. Only
+// the very first call, before anything has loaded successfully, surfaces the
+// raw error, matching Load's own contract for that case.
+//
+// Callers that need the file's actual current state (validation UI, `octo
+// config show`) should call Load directly — LoadCached silently swallows a
+// load error into the cached value once one exists.
+func LoadCached() (Config, error) {
+	cfg, err := Load()
+	lastGood.mu.Lock()
+	defer lastGood.mu.Unlock()
+	if err == nil {
+		lastGood.cfg, lastGood.ok = cfg, true
+		return cfg, nil
+	}
+	if lastGood.ok {
+		return lastGood.cfg, nil
+	}
+	return Config{}, err
+}
+
+// resetLastGoodForTest clears LoadCached's cache so tests using different
+// HOME dirs in the same test binary don't leak state between each other.
+func resetLastGoodForTest() {
+	lastGood.mu.Lock()
+	defer lastGood.mu.Unlock()
+	lastGood.cfg, lastGood.ok = Config{}, false
 }
 
 // Save writes the config to ~/.octo/config.yml with mode 0600 (it may hold

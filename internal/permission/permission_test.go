@@ -354,6 +354,73 @@ func TestNew_InvalidYAMLErrors(t *testing.T) {
 	}
 }
 
+func TestNew_FallsBackToLastGoodRulesOnParseError(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "permissions.yml")
+	yml := `
+terminal:
+  - allow: { pattern: "" }   # blanket allow
+`
+	if err := os.WriteFile(cfg, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e, err := New(cfg, "/work", ModeInteractive)
+	if err != nil {
+		t.Fatalf("first New() = %v, want nil", err)
+	}
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Allow {
+		t.Fatalf("first New() should have the blanket allow, got %s", got)
+	}
+
+	// A hand-edit mid-session leaves the file momentarily invalid.
+	if err := os.WriteFile(cfg, []byte("not: valid: yaml: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e2, err := New(cfg, "/work", ModeInteractive)
+	if err != nil {
+		t.Fatalf("New() after parse error = %v, want nil (fall back to last known good)", err)
+	}
+	if got := e2.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Allow {
+		t.Errorf("New() after parse error should keep last good rules (blanket allow), got %s", got)
+	}
+}
+
+func TestNew_DeletedConfigDropsCachedRules(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "permissions.yml")
+	yml := `
+terminal:
+  - allow: { pattern: "" }   # blanket allow
+`
+	if err := os.WriteFile(cfg, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(cfg, "/work", ModeInteractive); err != nil {
+		t.Fatalf("first New() = %v, want nil", err)
+	}
+
+	if err := os.Remove(cfg); err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(cfg, "/work", ModeInteractive)
+	if err != nil {
+		t.Fatalf("New() after delete = %v, want nil", err)
+	}
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Deny {
+		t.Errorf("New() after delete should NOT resurrect the deleted blanket allow, want default rule (Deny), got %s", got)
+	}
+
+	// The cache stays cleared even if the file comes back malformed.
+	if err := os.WriteFile(cfg, []byte("not: valid: yaml: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(cfg, "/work", ModeInteractive); err == nil {
+		t.Error("New() with a malformed file and no live cache should error, not silently use the deleted config's rules")
+	}
+}
+
 func TestLoadRules_RejectsMultipleClausesPerRule(t *testing.T) {
 	yml := []byte(`
 terminal:

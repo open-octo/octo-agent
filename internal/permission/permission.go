@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path"
@@ -102,6 +103,36 @@ type Rule struct {
 // RuleSet maps tool name → ordered list of rules.
 type RuleSet map[string][]Rule
 
+// lastGoodRules caches, per configPath, the most recently successfully
+// parsed *user* rule overrides (never the merged-with-defaults RuleSet New
+// builds) — see New's fallback logic.
+var lastGoodRules struct {
+	mu    sync.Mutex
+	rules map[string]RuleSet
+}
+
+func cachedUserRules(configPath string) (RuleSet, bool) {
+	lastGoodRules.mu.Lock()
+	defer lastGoodRules.mu.Unlock()
+	rules, ok := lastGoodRules.rules[configPath]
+	return rules, ok
+}
+
+func setCachedUserRules(configPath string, rules RuleSet) {
+	lastGoodRules.mu.Lock()
+	defer lastGoodRules.mu.Unlock()
+	if lastGoodRules.rules == nil {
+		lastGoodRules.rules = make(map[string]RuleSet)
+	}
+	lastGoodRules.rules[configPath] = rules
+}
+
+func clearCachedUserRules(configPath string) {
+	lastGoodRules.mu.Lock()
+	defer lastGoodRules.mu.Unlock()
+	delete(lastGoodRules.rules, configPath)
+}
+
 // Engine evaluates rules against tool calls and remembers session-level
 // decisions for "always allow this" style answers.
 type Engine struct {
@@ -131,12 +162,28 @@ func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*
 	}
 
 	if configPath != "" {
-		raw, err := os.ReadFile(configPath)
+		raw, readErr := os.ReadFile(configPath)
 		switch {
-		case err == nil:
-			user, err := loadRules(raw)
-			if err != nil {
-				return nil, fmt.Errorf("permission: parse %s: %w", configPath, err)
+		case readErr == nil:
+			user, parseErr := loadRules(raw)
+			if parseErr != nil {
+				// New is called fresh on every turn (octo serve has no
+				// restart hook for a config change to take effect), so with
+				// no fallback a single typo saved mid-edit would deny/ask
+				// every tool call on every live session the instant the
+				// file hits disk — permission.New callers treat an error
+				// here as "abort the turn", never "run ungated" (see
+				// server.go's prepareToolTurn/runChannelTurns). Falling
+				// back to the last rules that DID parse keeps serve
+				// running on the previous good policy instead.
+				if cached, ok := cachedUserRules(configPath); ok {
+					slog.Warn("permission: permissions.yml has a parse error, using last known good rules until it's fixed", "path", configPath, "err", parseErr)
+					user = cached
+				} else {
+					return nil, fmt.Errorf("permission: parse %s: %w", configPath, parseErr)
+				}
+			} else {
+				setCachedUserRules(configPath, user)
 			}
 			// User rules override defaults per-tool. (Full-replace per
 			// tool, not append — keeps "I want to allow rm -rf in this
@@ -144,10 +191,20 @@ func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*
 			for tool, rs := range user {
 				rules[tool] = rs
 			}
-		case os.IsNotExist(err):
-			// Fall through with defaults only.
+		case os.IsNotExist(readErr):
+			// Deleted → no override is the correct state, not "temporarily
+			// broken"; drop any cached rules so a later parse error against
+			// a recreated file doesn't resurrect a deleted config.
+			clearCachedUserRules(configPath)
 		default:
-			return nil, fmt.Errorf("permission: read %s: %w", configPath, err)
+			if cached, ok := cachedUserRules(configPath); ok {
+				slog.Warn("permission: failed to read permissions.yml, using last known good rules until it's fixed", "path", configPath, "err", readErr)
+				for tool, rs := range cached {
+					rules[tool] = rs
+				}
+			} else {
+				return nil, fmt.Errorf("permission: read %s: %w", configPath, readErr)
+			}
 		}
 	}
 

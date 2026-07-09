@@ -33,9 +33,11 @@ type ToolEnv struct {
 // tools.MemoryBackendGuidance()/tools.RegisterMemoryBackendHooks. A bad
 // Type/BaseURL just leaves the backend unconfigured rather than erroring;
 // cheap to call repeatedly (a lightweight REST client, not a persistent
-// connection).
+// connection). Uses LoadCached so a config.yml that's mid-edit and
+// momentarily invalid doesn't tear down a live serve session's memory
+// backend on the next turn — it keeps the last config that parsed.
 func RefreshMemoryBackend() {
-	cfg, cfgErr := config.Load()
+	cfg, cfgErr := config.LoadCached()
 	if cfgErr != nil || !cfg.MemoryBackendEnabled() {
 		return
 	}

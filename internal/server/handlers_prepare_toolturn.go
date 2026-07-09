@@ -57,7 +57,9 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	// this is the only place serve learns whether the model can take images — a
 	// text-only model would otherwise be handed a screenshot it rejects (HTTP
 	// 400). Re-evaluated per turn so a mid-session model switch takes effect.
-	cfg, cfgErr := config.Load()
+	// LoadCached so a config.yml that's momentarily invalid mid-edit keeps
+	// the last vision setting that parsed instead of silently going stale.
+	cfg, cfgErr := config.LoadCached()
 	if cfgErr == nil {
 		tools.SetBrowserVision(cfg.ModelVision(a.Model))
 	}

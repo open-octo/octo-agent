@@ -1118,11 +1118,13 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		a.ArchiveDir = dir // recall folded turns via the read tool
 	}
 	// Loaded once and reused below for effectiveCoauthor — a second
-	// config.Load() there would re-read and re-parse the same file. A load
-	// error leaves cfg at its zero value, which EffectiveCoauthor still
-	// resolves correctly (OCTO_COAUTHOR checked before falling back to the
-	// built-in default), so callers don't need a separate error branch for it.
-	cfg, cfgErr := config.Load()
+	// config.Load() there would re-read and re-parse the same file.
+	// LoadCached (not Load): a config.yml that currently fails to parse
+	// falls back to the last one that did, so a hand-edit typo degrades the
+	// lite-model/coauthor resolution below to stale-but-correct settings
+	// instead of the hardcoded defaults every live session would otherwise
+	// revert to for as long as the file stays broken.
+	cfg, cfgErr := config.LoadCached()
 	if cfgErr == nil {
 		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 		if a.LiteSender == nil {
@@ -1371,7 +1373,7 @@ func (s *Server) senderForSession(sess *agent.Session) (agent.Sender, string) {
 		return defaultSender, model
 	}
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadCached()
 	if err != nil {
 		return defaultSender, model
 	}
@@ -1434,7 +1436,7 @@ func senderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("no API key for model %q (provider %q)", entry.Model, entry.Provider)
 	}
-	cfg, _ := config.Load()
+	cfg, _ := config.LoadCached()
 	return app.NewSender(app.SenderOptions{
 		Provider:        entry.Provider,
 		APIKey:          apiKey,
@@ -2586,8 +2588,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
 	}
 	cwd, envCtx := s.sessionCwdEnv(sess.Store)
-	sess.Agent.CWD = cwd    // keep tool cwd aligned with the per-session dir the prompt/hooks use
-	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
+	sess.Agent.CWD = cwd          // keep tool cwd aligned with the per-session dir the prompt/hooks use
+	cfg, _ := config.LoadCached() // zero value on error (no last-good yet) still resolves correctly via EffectiveCoauthor
 	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(sess.Agent.Model), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,

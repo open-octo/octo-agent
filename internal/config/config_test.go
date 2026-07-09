@@ -197,6 +197,42 @@ func TestLoad_MalformedIsError(t *testing.T) {
 	}
 }
 
+func TestLoadCached_FallsBackToLastGoodOnParseError(t *testing.T) {
+	t.Cleanup(resetLastGoodForTest)
+	resetLastGoodForTest()
+	home := setHome(t)
+	writeOcto(t, home, "config.yml", "default_model: good-model\n")
+
+	cfg, err := LoadCached()
+	if err != nil {
+		t.Fatalf("LoadCached() first load = %v, want nil", err)
+	}
+	if cfg.DefaultModel != "good-model" {
+		t.Fatalf("LoadCached() first load DefaultModel = %q, want %q", cfg.DefaultModel, "good-model")
+	}
+
+	writeOcto(t, home, "config.yml", "not: valid: yaml: [")
+
+	cfg, err = LoadCached()
+	if err != nil {
+		t.Fatalf("LoadCached() after malformed edit = %v, want nil (fall back to last good)", err)
+	}
+	if cfg.DefaultModel != "good-model" {
+		t.Errorf("LoadCached() after malformed edit DefaultModel = %q, want cached %q", cfg.DefaultModel, "good-model")
+	}
+}
+
+func TestLoadCached_ErrorsWhenNothingCachedYet(t *testing.T) {
+	t.Cleanup(resetLastGoodForTest)
+	resetLastGoodForTest()
+	home := setHome(t)
+	writeOcto(t, home, "config.yml", "not: valid: yaml: [")
+
+	if _, err := LoadCached(); err == nil {
+		t.Error("LoadCached() with no prior good load and a malformed file = nil, want error")
+	}
+}
+
 func TestSetDefaultEntry(t *testing.T) {
 	var c Config
 
