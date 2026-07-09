@@ -41,9 +41,7 @@ sequenceDiagram
 /goal Migrate the internal API client from v1 to v2 across all call sites
 ```
 
-Once it's set, a "Goal" chip appears above the message box in the web UI — hover it to see the full objective text, and the chip itself shows how much time or how many tokens the goal has burned so far (depending on whether a budget was set). It sits in the same row as the "Reasoning" and "Context" chips seen in earlier posts, so you always know at a glance that something is running toward a goal:
-
-![Octo's web UI: the session title becomes the goal's objective, and a "Goal" chip appears above the composer](../_assets/onboarding/goal-chip-en.png)
+Once it's set, a "Goal" chip appears above the message box in the web UI — hover it to see the full objective text, and the chip itself shows how much time or how many tokens the goal has burned so far (depending on whether a budget was set). It sits in the same row as the "Reasoning" and "Context" chips seen in earlier posts, so you always know at a glance that something is running toward a goal.
 
 You don't need to babysit it — that's the whole point. Go do something else, and check back on progress whenever.
 
