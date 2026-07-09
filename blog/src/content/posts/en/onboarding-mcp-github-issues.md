@@ -27,7 +27,7 @@ No MCP servers configured yet
 
 Once something is connected, the same panel shows each server's live status and how many tools it brought along:
 
-![Octo's MCP Servers panel: a connected server shows its status and tool count](../_assets/onboarding/mcp-panel-connected.png)
+![Octo's MCP Servers panel: a connected server shows its status and tool count](../_assets/onboarding/mcp-panel-connected-en.png)
 
 (The one pictured is a local filesystem server, used here just to show what "connected" looks like — GitHub or a database server looks identical in this panel, just with a different name and tool count.)
 

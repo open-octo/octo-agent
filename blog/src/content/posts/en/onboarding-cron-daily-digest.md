@@ -34,7 +34,7 @@ highlights by priority, and sends it to my Feishu.
 
 It walks through getting the cron expression, prompt, and notification target right. Once the task exists, the "Scheduled Tasks" panel in the web UI shows its status and next run time:
 
-![Octo's Scheduled Tasks panel: a task firing daily at 9am, with its next run time](../_assets/onboarding/cron-tasks-panel.png)
+![Octo's Scheduled Tasks panel: a task firing daily at 9am, with its next run time](../_assets/onboarding/cron-tasks-panel-en.png)
 
 The same data is also reachable through the API directly (handy for bulk-creating tasks or scripting):
 

@@ -53,11 +53,11 @@ The browser opens a setup wizard. Step one is picking a UI language:
 
 Continue, and step two connects an AI model — pick a provider (Anthropic, OpenAI, DeepSeek, Kimi, Bailian, and a handful more in the dropdown), fill in the model name and API key, and click "Test & continue":
 
-![Octo's first-run wizard: connecting an AI model](../_assets/onboarding/step2-connect-model.png)
+![Octo's first-run wizard: connecting an AI model](../_assets/onboarding/step2-connect-model-en.png)
 
 `127.0.0.1` is the loopback address, so this page needs no separate access key — it drops you straight into onboarding right after install. Step three is an optional browser-automation connection (skip it if you don't need Chrome remote-debugging), and finishing the three steps lands you on the main dashboard — the exact same place the terminal path eventually ends up:
 
-![Octo's main dashboard: Skills, MCP servers, scheduled tasks, and workflows all live in the left sidebar](../_assets/onboarding/dashboard-home.png)
+![Octo's main dashboard: Skills, MCP servers, scheduled tasks, and workflows all live in the left sidebar](../_assets/onboarding/dashboard-home-en.png)
 
 The sidebar entries — Scheduled Tasks, Skills, Workflows, MCP Servers — are exactly the things the rest of this series unpacks one by one.
 

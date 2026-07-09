@@ -75,7 +75,7 @@ The same "scheduled trigger → fetch data → produce an output → deliver it"
 
 Everything in this post is "one prompt, start to finish," which is plenty for most recurring tasks. If a step needs to fan out into parallel sub-tasks with an independent verification pass in the middle — say, splitting "build the weekly report" into a data-fetching sub-agent and a report-writing sub-agent, with a third agent whose only job is to check the numbers — that's the **workflow** tool's territory. This very repository has a few real examples in daily use (issue triage, PR review, auto-fixing issues), visible in the "Workflows" panel in the web UI:
 
-![Octo's Workflows panel: a few workflows this project actually uses](../_assets/onboarding/workflows-panel.png)
+![Octo's Workflows panel: a few workflows this project actually uses](../_assets/onboarding/workflows-panel-en.png)
 
 Workflows are a bigger mechanism worth their own deep dive — the next post actually writes one.
 

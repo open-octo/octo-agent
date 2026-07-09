@@ -20,7 +20,7 @@ octo ships with a Skills system — each skill is a written instruction set for 
 
 Which means **you don't need to know a skill exists, let alone invoke it by name**. Open the Skills panel in the web UI and you'll see the full installed list:
 
-![Octo's Skills panel: built-in skills like office-xlsx, cron-task-creator, mcp-creator](../_assets/onboarding/skills-panel.png)
+![Octo's Skills panel: built-in skills like office-xlsx, cron-task-creator, mcp-creator](../_assets/onboarding/skills-panel-en.png)
 
 `office-xlsx` in that list is today's subject — a skill for creating, reading, and editing Excel (`.xlsx`) files: formulas, styling, merged cells, multiple sheets, charts. You never click it, never say its name — the moment your request sounds like "make me a spreadsheet" or "edit this Excel file," octo picks it up on its own.
 

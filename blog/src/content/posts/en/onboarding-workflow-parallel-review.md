@@ -100,7 +100,7 @@ summary = agent("Merge the following analyses into one comparison, ending with a
 
 That `args["topics"]` line means it's parameterized for reuse — no argument falls back to the three defaults, or pass your own list. The Workflows panel in the web UI shows these actual scripts:
 
-![Octo's Workflows panel: a few workflows this project actually runs](../_assets/onboarding/workflows-panel.png)
+![Octo's Workflows panel: a few workflows this project actually runs](../_assets/onboarding/workflows-panel-en.png)
 
 ---
 
