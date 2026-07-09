@@ -529,7 +529,11 @@ func TestPrepareToolTurn_SubAgentToolEventCarriesToolInput(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	deadline := time.After(3 * time.Second)
+	// 3s intermittently timed out on loaded/slow CI runners (observed on
+	// windows-latest) even though the broadcast wiring itself is
+	// synchronous and this test passes reliably (100/100) in isolation —
+	// the flake is scheduling latency under CI load, not a logic race.
+	deadline := time.After(15 * time.Second)
 	for {
 		select {
 		case b := <-conn.send:
