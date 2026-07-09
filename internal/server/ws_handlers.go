@@ -189,29 +189,15 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 }
 
 // estimateContextPct approximates how full the model's context window a
-// persisted transcript occupies, using a coarse chars/4 token heuristic. Used
-// only when no live token count is available.
+// persisted transcript occupies, using the same heuristic Agent.ContextUsage
+// falls back to (agent.EstimateTokens). Used only when no live token count is
+// available (no Agent has run in this process for the session yet).
 func estimateContextPct(sess *agent.Session) int {
 	window := agent.ContextWindow(sess.Model)
 	if window <= 0 {
 		return 0
 	}
-	chars := 0
-	for _, m := range sess.Messages {
-		chars += len(m.Content)
-		for _, b := range m.Blocks {
-			chars += len(b.Text) + len(b.Result) + len(b.Thinking) + len(b.Reasoning) + len(b.Name)
-			for k, v := range b.Input {
-				chars += len(k)
-				if str, ok := v.(string); ok {
-					chars += len(str)
-				} else {
-					chars += 16
-				}
-			}
-		}
-	}
-	return (chars / 4) * 100 / window
+	return agent.EstimateTokens(sess.Messages) * 100 / window
 }
 
 // replayLiveState replays in-progress agent state (progress + stdout) to a

@@ -35,6 +35,12 @@ const defaultContextWindow = 128_000
 // Tool Search threshold) without duplicating the model→window table.
 func ContextWindow(model string) int { return contextWindow(model) }
 
+// EstimateTokens exposes estimateMessages to other packages (e.g. the web
+// server's cold-start context-percent estimate for a resumed session with no
+// live Agent yet) so they share the exact same heuristic as compaction and
+// ContextUsage instead of maintaining a second implementation.
+func EstimateTokens(msgs []Message) int { return estimateMessages(msgs) }
+
 // contextWindow returns the approximate context-window size (in tokens) for a
 // model. Values are deliberately conservative; matched case-insensitively by
 // substring so dated/aliased names ("claude-haiku-4-5-2025…") still resolve.
