@@ -178,8 +178,15 @@
       })
     } else if (ev.type === 'thinking') {
       // Standalone reasoning segment from an intermediate (tool) round — render
-      // it before the tools it preceded.
-      commitThinking(sid, ev.text ?? '')
+      // it before the tools it preceded. The server persists (and replays)
+      // this regardless of the session's reasoning-display setting, but the
+      // live stream only ever delivers it when showReasoning is on (thinking_delta
+      // is gated server-side) — so live never breaks a tool group on reasoning
+      // it never received. Committing unconditionally here would insert an
+      // invisible boundary that fragments a group live rendered as one card.
+      // Skipping the commit when reasoning is hidden keeps replay consistent
+      // with what was actually shown live.
+      if (showReasoning) commitThinking(sid, ev.text ?? '')
     } else if (ev.type === 'tool_call') {
       addToolCallToGroup(sid, {
         id: uid('t'),
