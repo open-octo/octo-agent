@@ -464,14 +464,32 @@
         <div class="feature reveal">
           <span class="feature-icon">📦</span>
           <h3 data-en="Single binary, zero deps" data-zh="单一二进制，零依赖"></h3>
-          <p data-en="One Go executable. No Python, no Node, no Docker. Download a prebuilt for macOS, Linux, or Windows and run it immediately."
-             data-zh="一个 Go 可执行文件。无需 Python、Node、Docker。下载 macOS / Linux / Windows 预编译版即刻运行。"></p>
+          <p data-en="One Go executable. No Python, no Node, no Docker, no VM warm-up. Starts in milliseconds and stays fast under load — download a prebuilt for macOS, Linux, or Windows and run it immediately."
+             data-zh="一个 Go 可执行文件。无需 Python、Node、Docker，没有虚拟机预热。毫秒级启动，负载下依旧跑得快 —— 下载 macOS / Linux / Windows 预编译版即刻运行。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🔌</span>
-          <h3 data-en="Two protocols, every provider" data-zh="两种协议，对接一切"></h3>
-          <p data-en="Speaks Anthropic Messages and OpenAI Chat Completions natively. DeepSeek, Kimi, Bailian, OpenRouter, vLLM — if it exposes either shape, it just works."
-             data-zh="原生支持 Anthropic Messages 与 OpenAI Chat Completions。DeepSeek、Kimi、百炼、OpenRouter、vLLM —— 只要兼容其中一种，开箱即用。"></p>
+          <h3 data-en="Any provider, any model" data-zh="任意供应商，任意模型"></h3>
+          <p data-en="Speaks Anthropic Messages and OpenAI Chat Completions natively. DeepSeek, Kimi, Bailian, OpenRouter, vLLM, Ollama — including models running entirely on your own machine. Your model, your choice."
+             data-zh="原生支持 Anthropic Messages 与 OpenAI Chat Completions。DeepSeek、Kimi、百炼、OpenRouter、vLLM、Ollama —— 包括跑在你自己机器上的本地模型。你的模型，你说了算。"></p>
+        </div>
+        <div class="feature reveal">
+          <span class="feature-icon">🔒</span>
+          <h3 data-en="No telemetry, ever" data-zh="零遥测，无埋点"></h3>
+          <p data-en="No analytics SDKs, no crash reporters, no usage pings baked in. Nothing leaves your machine except the requests you explicitly send to the model provider you configured."
+             data-zh="没有埋点 SDK、没有崩溃上报、没有内置的用量回传。除了你主动配置、显式发出的模型请求，没有任何东西离开你的机器。"></p>
+        </div>
+        <div class="feature reveal">
+          <span class="feature-icon">🛡️</span>
+          <h3 data-en="Won't break on upgrade" data-zh="升级配置不会把 agent 搞挂"></h3>
+          <p data-en="Config and permission changes are validated before they take effect — a bad edit to config.yml or permissions.yml can't crash a running session; the last good config keeps serving until the new one passes."
+             data-zh="配置与权限变更先校验、后生效 —— config.yml 或 permissions.yml 改错了也不会把正在跑的 agent 搞挂，新配置没校验通过就继续用上一份好的。"></p>
+        </div>
+        <div class="feature reveal">
+          <span class="feature-icon">⚡</span>
+          <h3 data-en="Built for prompt caching" data-zh="为 prompt 缓存而设计"></h3>
+          <p data-en="Stable system prompts and message structure keep provider-side prompt caching effective across turns, and cache-read/cache-write tokens are tracked and reported per protocol — so the savings are real and visible, not just a marketing number."
+             data-zh="稳定的系统提示词与消息结构，让多轮对话持续吃到供应商侧的 prompt 缓存；缓存读写 token 按协议正确追踪并展示 —— 省下的钱看得见，不是营销话术。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🛠️</span>
