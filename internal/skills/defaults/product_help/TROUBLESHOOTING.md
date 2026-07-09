@@ -68,7 +68,8 @@ Precedence (highest first): CLI flag > env var > config file > built-in default.
 ### IM channel (Feishu/WeChat/Telegram/DingTalk/WeCom/Discord) not connecting
 
 - The bridge has no log of its own — connection and credential errors land in the same `~/.octo/serve.log` as the rest of `octo serve`
-- Credentials live in `~/.octo/channels.yml` and hot-reload; a bad or expired credential shows up as an error line there, not a crash
+- Credentials live in `~/.octo/channels.yml`; edits made through the Web UI's Channels panel hot-reload immediately, but a direct edit to the file (no filesystem watcher) needs `octo serve --stop` + restart to take effect — see the `channel-manager` skill
+- For a precise per-platform status instead of grepping logs, use the `channel-manager` skill's `doctor` subcommand, which reads `/api/channels`
 - `octo serve --no-channel` disables the bridge entirely — useful to isolate whether an issue is the bridge or the API server
 
 ### "daemon already running" but nothing responds
