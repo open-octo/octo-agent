@@ -156,9 +156,9 @@ func TestDefaultRules_WriteFileSensitive(t *testing.T) {
 		"/etc/passwd":            Deny,
 		"/work/myapp/.env":       Deny,
 		"/work/myapp/.env.local": Deny,
-		"/work/src/main.go":      Allow,
-		"src/main.go":            Allow, // resolved against cwd=/work
-		"/tmp/outside-cwd.txt":   Ask,   // outside CWD allow → ask
+		"/work/src/main.go":      Ask, // cwd is not a blanket-allow zone for writes
+		"src/main.go":            Ask, // resolved against cwd=/work, still just ask
+		"/tmp/outside-cwd.txt":   Ask, // outside CWD too → ask
 	}
 	for p, want := range cases {
 		got := e.Check("write_file", map[string]any{"path": p})
@@ -177,9 +177,9 @@ func TestExtraWriteRoots_AllowedOutsideCWD(t *testing.T) {
 	cases := map[string]Decision{
 		memDir + "/MEMORY.md":       Allow, // whitelisted memory dir → allow
 		memDir + "/topics/debug.md": Allow,
-		"/work/src/main.go":         Allow, // CWD still allowed
-		"/home/user/other/file.txt": Ask,   // unrelated out-of-CWD path → ask
-		"/home/user/.ssh/id_rsa":    Deny,  // secret deny still wins elsewhere
+		"/work/src/main.go":         Ask,  // CWD is still not a blanket allow
+		"/home/user/other/file.txt": Ask,  // unrelated out-of-CWD path → ask
+		"/home/user/.ssh/id_rsa":    Deny, // secret deny still wins elsewhere
 	}
 	for p, want := range cases {
 		if got := e.Check("write_file", map[string]any{"path": p}); got != want {
@@ -279,6 +279,55 @@ func TestDefaultRules_ControlToolsAllowedEvenInStrict(t *testing.T) {
 	}
 }
 
+// ─── Tiered priority ───────────────────────────────────────────────────────
+
+// TestCheck_DenyBeatsAllowRegardlessOfOrder guards the deny > ask > allow
+// tiering: a deny rule must win even when a matching allow rule for the same
+// input was declared earlier in the list. Positional first-match-wins would
+// let the earlier allow slip through — the exact footgun a misordered
+// permissions.yml could otherwise hit.
+func TestCheck_DenyBeatsAllowRegardlessOfOrder(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "permissions.yml")
+	yml := `
+terminal:
+  - allow: { pattern: "danger" }
+  - deny:  { pattern: "danger" }
+`
+	if err := os.WriteFile(cfg, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(cfg, "/work", ModeInteractive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Check("terminal", map[string]any{"command": "danger"}); got != Deny {
+		t.Errorf("deny declared after allow should still win: got %s", got)
+	}
+}
+
+// TestCheck_AskBeatsAllowRegardlessOfOrder is the same guard one tier down:
+// an ask rule declared after a matching allow rule must still win.
+func TestCheck_AskBeatsAllowRegardlessOfOrder(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "permissions.yml")
+	yml := `
+terminal:
+  - allow: { pattern: "risky" }
+  - ask:   { pattern: "risky" }
+`
+	if err := os.WriteFile(cfg, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(cfg, "/work", ModeInteractive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Check("terminal", map[string]any{"command": "risky"}); got != Ask {
+		t.Errorf("ask declared after allow should still win: got %s", got)
+	}
+}
+
 // ─── Remember cache ────────────────────────────────────────────────────────
 
 func TestRemember_ShortCircuits(t *testing.T) {
@@ -290,6 +339,30 @@ func TestRemember_ShortCircuits(t *testing.T) {
 	e.Remember("terminal", input, Allow)
 	if got := e.Check("terminal", input); got != Allow {
 		t.Errorf("remember Allow: got %s", got)
+	}
+}
+
+// TestRemember_WriteFileKeyedOnPathOnly guards the write_file/edit_file
+// remember exception: content differs on every edit, so remembering the
+// full input would never hit the cache twice. Approving one edit to a path
+// must cover later edits to that same path with different content, while a
+// different path still asks.
+func TestRemember_WriteFileKeyedOnPathOnly(t *testing.T) {
+	e := newDefaultEngine(t)
+	first := map[string]any{"path": "/work/a.go", "content": "v1"}
+	if got := e.Check("write_file", first); got != Ask {
+		t.Fatalf("baseline expected Ask, got %s", got)
+	}
+	e.Remember("write_file", first, Allow)
+
+	second := map[string]any{"path": "/work/a.go", "content": "v2"}
+	if got := e.Check("write_file", second); got != Allow {
+		t.Errorf("same path, different content: got %s, want Allow (path-keyed remember)", got)
+	}
+
+	other := map[string]any{"path": "/work/b.go", "content": "v1"}
+	if got := e.Check("write_file", other); got != Ask {
+		t.Errorf("different path: got %s, want Ask", got)
 	}
 }
 
@@ -540,5 +613,46 @@ func TestSignature_StableAcrossMapOrder(t *testing.T) {
 	b := signature("t", map[string]any{"y": 2, "x": 1})
 	if a != b {
 		t.Errorf("signature not stable: %q vs %q", a, b)
+	}
+}
+
+// ─── Default mode resolution ───────────────────────────────────────────────
+
+func writeGlobalPermissionMode(t *testing.T, mode string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows
+	dir := filepath.Join(home, ".octo")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := ""
+	if mode != "" {
+		body = "permission_mode: " + mode + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveUnattendedDefaultMode_UnsetFallsBackToAuto(t *testing.T) {
+	writeGlobalPermissionMode(t, "")
+	if got := ResolveUnattendedDefaultMode(); got != ModeAutoApprove {
+		t.Errorf("unset global mode: got %s, want auto (cron has nobody to answer an ask)", got)
+	}
+	// The web/CLI/IM default differs deliberately: interactive, since a human
+	// is normally present there.
+	if got := ResolveDefaultMode(); got != ModeInteractive {
+		t.Errorf("ResolveDefaultMode should stay interactive on unset, got %s", got)
+	}
+}
+
+func TestResolveUnattendedDefaultMode_ExplicitConfigHonored(t *testing.T) {
+	for _, mode := range []Mode{ModeInteractive, ModeStrict, ModeAutoApprove} {
+		writeGlobalPermissionMode(t, string(mode))
+		if got := ResolveUnattendedDefaultMode(); got != mode {
+			t.Errorf("explicit %s should be honored, got %s", mode, got)
+		}
 	}
 }

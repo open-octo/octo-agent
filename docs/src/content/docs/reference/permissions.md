@@ -12,7 +12,9 @@ engine before it runs. This page is the rule-file reference; see
 Top-level keys are tool names; each holds an ordered list of rules. Each rule is exactly one of
 `allow:`, `deny:`, or `ask:`, and each clause is exactly one of `pattern` (a substring match, for
 `terminal`), `hostname` (a glob list, for `web_fetch`), or `path` (a glob list with `$CWD`
-expansion, for the file tools). **First match wins; no match falls through to `ask`.**
+expansion, for the file tools). Matches are resolved by **tier, not declaration order — `deny` beats
+`ask` beats `allow`** — and the first match within the winning tier is reported as the reason. No
+match in any tier falls through to `ask`.
 
 ```yaml
 terminal:
@@ -26,9 +28,14 @@ web_fetch:
   - allow: { hostname: ["github.com", "*.github.com"] }
 
 write_file:
-  - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env"] }
-  - allow: { path: ["$CWD/**"] }
+  - deny: { path: ["**/.ssh/**", "/etc/**", "**/.env"] }
+  # no allow rule for $CWD/** here — see the note below
 ```
+
+Being inside `$CWD` is **not** a free pass for `write_file`/`edit_file` — only `read_file` treats
+the whole filesystem (minus the credential-path denies) as safe to read without asking. A write or
+edit anywhere, cwd included, falls through to the implicit `ask` unless a rule says otherwise, so
+`--permission-mode` below is what actually decides whether it prompts, auto-allows, or denies.
 
 A tool key you write **fully replaces** the built-in default rule list for that tool — it doesn't
 merge with it. Add back anything from the defaults you still want.
@@ -61,7 +68,17 @@ matched rule is never overridden by the mode.
 
 :::note
 `octo init` defaults its own `--permission-mode` to `strict`, independent of the main CLI's
-`interactive` default — it's a one-shot analysis run, not an interactive session.
+`interactive` default — it's a one-shot analysis run, not an interactive session. It still writes
+`.octorules` without prompting under `strict`, but not because strict mode allows cwd writes: `octo
+init` passes its own working directory as an explicit write-allowed root (the same mechanism the
+memory directory uses), independent of `permissions.yml` and unaffected by mode.
+:::
+
+:::note
+Cron task sessions are the other place a write needs to happen with nobody present to answer an
+`ask`. A newly created task session defaults to `auto` rather than the global `interactive`
+default — an explicit `permission_mode` in `config.yml` (`interactive`, `strict`, or `auto`) is
+still honored as-is; only the unconfigured case differs from a web/CLI/IM session's default.
 :::
 
 ## Remembering a choice
@@ -70,6 +87,11 @@ Answering an interactive prompt with "always" allows that exact `(tool, input)` 
 of the **session only** — it's never written to `permissions.yml`; durable policy stays a deliberate
 file edit. This is available identically on all three transports (a TUI/Web modal's "always" option,
 or replying `always` / `always allow` / `总是允许` in a chat channel).
+
+`write_file`/`edit_file` are the one exception to "exact `(tool, input)`": their input also carries
+the new content, which differs on every call, so remembering the whole input would never hit the
+cache a second time. Those two tools remember by path alone — approve one edit and the rest of the
+session doesn't ask again for *that file*, but a different file still prompts once.
 
 A `deny` rule always beats a remembered allow — the rule scan runs first and only consults the
 remembered cache when the rule verdict isn't `deny`. So tightening `permissions.yml` after a user

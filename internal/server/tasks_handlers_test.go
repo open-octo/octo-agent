@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/scheduler"
 )
 
@@ -62,6 +63,50 @@ func TestCreateSession_SeedsWorkingDirFromTaskDirectory(t *testing.T) {
 	}
 	if sess.WorkingDir != dir {
 		t.Errorf("sess.WorkingDir = %q, want %q", sess.WorkingDir, dir)
+	}
+}
+
+// A cron tick has nobody present to answer an ask prompt, so a freshly
+// created task session must not inherit the web/CLI/IM interactive default —
+// write_file/edit_file no longer blanket-allow $CWD, and interactive's
+// implicit ask would time out to deny on every write.
+func TestCreateSession_DefaultsToAutoPermissionModeWhenUnconfigured(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess, err := agent.LoadSession(sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if sess.PermissionMode != "auto" {
+		t.Errorf("PermissionMode = %q, want %q", sess.PermissionMode, "auto")
+	}
+}
+
+// An operator who explicitly configured a global permission_mode is
+// respected as-is for new task sessions too — only the unconfigured case
+// defaults differently from a web/CLI/IM session.
+func TestCreateSession_HonorsExplicitGlobalPermissionMode(t *testing.T) {
+	setTestHome(t)
+	if err := (config.Config{PermissionMode: "strict"}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess, err := agent.LoadSession(sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if sess.PermissionMode != "strict" {
+		t.Errorf("PermissionMode = %q, want %q", sess.PermissionMode, "strict")
 	}
 }
 

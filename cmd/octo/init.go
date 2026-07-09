@@ -83,7 +83,11 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	a := agent.New(llmSender, resolvedModel)
 	a.System = prompt.Compose("", cwd, env, "", "", "", true) // init is a one-shot task; no skills/mcp/memory
 
-	engine, err := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(*permMode))
+	// init's whole job is writing/updating .octorules at cwd's root, and it
+	// defaults to strict (no one is watching an ask prompt for a one-shot
+	// analysis run) — so cwd must be an explicit allowWriteRoot rather than
+	// relying on an ask-turned-deny under strict mode.
+	engine, err := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(*permMode), cwd)
 	if err != nil {
 		fmt.Fprintf(stderr, "octo init: permission config: %v\n", err)
 		return 1
