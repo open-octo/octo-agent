@@ -104,9 +104,9 @@ That `args["topics"]` line means it's parameterized for reuse — no argument fa
 
 ---
 
-## End of the series
+## Next: a shape that fits tasks you can't fully scope up front
 
-Seven posts later — from a fresh install to a real weekly automation, to a script that fans several agents out in parallel — the ingredients never really changed: one install, one plain-language sentence, one JSON file, one slash command, one cron expression, and a dozen-odd lines of Ruby. The hard parts (writing the skill, speaking the protocol, managing the schedule, controlling concurrency) stay out of your way the whole time — all that's left for you is describing what you want.
+Workflow fits tasks whose structure you can lay out ahead of time. But some things — a migration that spans an entire codebase and can't be described in one message — aren't parallel chunks and aren't triggered on a schedule either. The next post covers what fits that case.
 
 **Previous in the series**: [Octo Onboarding Series (6): Putting It All Together — A Real, Running Weekly Report](/blog/posts/en/onboarding-weekly-report-automation/)
-**Back to the start**: [Octo Onboarding Series (1): Install It, Say Your First Word to It](/blog/posts/en/onboarding-install-and-first-run/)
+**Next in the series**: [Octo Onboarding Series (8): Goal in Practice — Set a Standing Objective and Let It Find Idle Time to Push On](/blog/posts/en/onboarding-goal-long-running-migration/)
