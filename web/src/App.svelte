@@ -225,6 +225,14 @@
     window.addEventListener('hashchange', applyHash)
   }
 
+  // Cooldown per (session, kind) — a session with a tight /loop interval
+  // completes turns every 60s+ with no new user input each time, which would
+  // otherwise fire a notification every single iteration. Keyed separately
+  // per kind so a burst of turn_complete pings can't suppress a genuinely
+  // distinct question_pending, or vice versa.
+  const NOTIFY_COOLDOWN_MS = 5 * 60 * 1000
+  const lastNotifiedAt: Record<string, number> = {}
+
   // Desktop notification for a session_activity the user isn't already
   // looking at in a focused tab — if they are, they'd see it happen live and
   // a notification would just be noise. Requires the bell in Header having
@@ -233,6 +241,10 @@
     if (!('Notification' in window) || Notification.permission !== 'granted') return
     const viewingThisSession = document.hasFocus() && get(view) === 'chat' && get(activeSessionId) === sid
     if (viewingThisSession) return
+    const cooldownKey = `${sid}:${kind}`
+    const now = Date.now()
+    if (now - (lastNotifiedAt[cooldownKey] ?? 0) < NOTIFY_COOLDOWN_MS) return
+    lastNotifiedAt[cooldownKey] = now
     const sess = get(sessions).find(s => s.id === sid)
     const name = sess?.title || sess?.name || sid
     const titleKey = kind === 'question_pending' ? 'header.notif_question_title' : 'header.notif_turn_complete_title'
