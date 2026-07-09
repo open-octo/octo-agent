@@ -387,6 +387,40 @@ terminal:
 	}
 }
 
+func TestNew_FallsBackToLastGoodRulesOnReadError(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "permissions.yml")
+	yml := `
+terminal:
+  - allow: { pattern: "" }   # blanket allow
+`
+	if err := os.WriteFile(cfg, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := New(cfg, "/work", ModeInteractive); err != nil {
+		t.Fatalf("first New() = %v, want nil", err)
+	}
+
+	// Replace the file with a directory of the same name: os.ReadFile now
+	// fails with something other than "not exist", exercising the `default:`
+	// branch (as opposed to the parse-error branch above).
+	if err := os.Remove(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(cfg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	e, err := New(cfg, "/work", ModeInteractive)
+	if err != nil {
+		t.Fatalf("New() after read error = %v, want nil (fall back to last known good)", err)
+	}
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Allow {
+		t.Errorf("New() after read error should keep last good rules (blanket allow), got %s", got)
+	}
+}
+
 func TestNew_DeletedConfigDropsCachedRules(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "permissions.yml")

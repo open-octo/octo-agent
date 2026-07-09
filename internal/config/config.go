@@ -19,6 +19,7 @@ package config
 import (
 	"errors"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -484,12 +485,14 @@ func Load() (Config, error) {
 	return f.normalize(), nil
 }
 
-// lastGood caches the most recently successfully loaded Config for
-// LoadCached — see its doc comment.
+// lastGood caches, per resolved config path, the most recently successfully
+// loaded Config for LoadCached — see its doc comment. Keyed by path (like
+// permission's cachedUserRules) rather than a single global value so tests
+// using different HOME dirs in the same binary can't leak cached state into
+// each other.
 var lastGood struct {
-	mu  sync.Mutex
-	cfg Config
-	ok  bool
+	mu     sync.Mutex
+	byPath map[string]Config
 }
 
 // LoadCached is Load with a validate-then-replace cache: octo serve re-reads
@@ -499,33 +502,44 @@ var lastGood struct {
 // compaction lite model, the coauthor flag, browser vision) to its hardcoded
 // default the instant the bad file is saved — a config typo turning into a
 // live behavior change across every session. LoadCached instead keeps
-// serving the last config that parsed cleanly until the file is fixed. Only
-// the very first call, before anything has loaded successfully, surfaces the
-// raw error, matching Load's own contract for that case.
+// serving the last config that parsed cleanly until the file is fixed,
+// logging a warning so the failure isn't entirely invisible. Only the very
+// first call, before anything has loaded successfully, surfaces the raw
+// error, matching Load's own contract for that case.
 //
 // Callers that need the file's actual current state (validation UI, `octo
 // config show`) should call Load directly — LoadCached silently swallows a
 // load error into the cached value once one exists.
 func LoadCached() (Config, error) {
 	cfg, err := Load()
+	path, pathErr := Path() // cache key; a Path() failure (no home dir) just skips caching
+
 	lastGood.mu.Lock()
 	defer lastGood.mu.Unlock()
+
 	if err == nil {
-		lastGood.cfg, lastGood.ok = cfg, true
+		if pathErr == nil {
+			if lastGood.byPath == nil {
+				lastGood.byPath = make(map[string]Config)
+			}
+			lastGood.byPath[path] = cfg
+		}
 		return cfg, nil
 	}
-	if lastGood.ok {
-		return lastGood.cfg, nil
+	if pathErr == nil {
+		if cached, ok := lastGood.byPath[path]; ok {
+			slog.Warn("config: config.yml failed to load, using last known good config until it's fixed", "path", path, "err", err)
+			return cached, nil
+		}
 	}
 	return Config{}, err
 }
 
-// resetLastGoodForTest clears LoadCached's cache so tests using different
-// HOME dirs in the same test binary don't leak state between each other.
+// resetLastGoodForTest clears LoadCached's cache (tests only).
 func resetLastGoodForTest() {
 	lastGood.mu.Lock()
 	defer lastGood.mu.Unlock()
-	lastGood.cfg, lastGood.ok = Config{}, false
+	lastGood.byPath = nil
 }
 
 // Save writes the config to ~/.octo/config.yml with mode 0600 (it may hold

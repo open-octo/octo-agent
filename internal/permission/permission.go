@@ -155,6 +155,12 @@ var defaultsYAML []byte
 // for tests. allowWriteRoots are extra directories (e.g. the per-repo memory
 // directory, which lives outside CWD) whose contents the agent may write/edit
 // without a prompt; each gets a prepended allow rule on write_file / edit_file.
+//
+// If configPath fails to read or parse but a previous call for the same path
+// already loaded successfully, New falls back to those last known good user
+// rules instead of erroring — see the fallback logic below. Only the very
+// first call for a given path, before anything has loaded successfully,
+// returns the raw error.
 func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*Engine, error) {
 	rules, err := loadRules(defaultsYAML)
 	if err != nil {
