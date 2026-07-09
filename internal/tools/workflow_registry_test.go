@@ -229,6 +229,21 @@ func containsName(names []string, want string) bool {
 	return false
 }
 
+// TestLookupWorkflow_ParallelUnderstandDeclaresRequiredTarget pins that the
+// embedded parallel-understand preset declares its required "target" arg via
+// `# @param`, so the workflow tool prompts for it up front instead of silently
+// mapping a non-git "this repository" default.
+func TestLookupWorkflow_ParallelUnderstandDeclaresRequiredTarget(t *testing.T) {
+	useWorkflowRoots(t, "", "")
+	w, ok := lookupWorkflow(context.Background(), "parallel-understand")
+	if !ok {
+		t.Fatal("parallel-understand not found")
+	}
+	if req := requiredParamNames(w.params); len(req) != 1 || req[0] != "target" {
+		t.Errorf("parallel-understand required params = %v, want [target]", req)
+	}
+}
+
 // TestLookupWorkflow_BatchMigrateDeclaresRequiredChange pins that the
 // embedded batch-migrate preset declares its required "change" arg via
 // `# @param`, so the workflow tool prompts for it up front instead of

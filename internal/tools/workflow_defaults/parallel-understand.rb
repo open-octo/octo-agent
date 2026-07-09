@@ -1,11 +1,11 @@
-# @description Map a codebase in parallel — fan out one reader per subsystem, then synthesize a single architecture map. args (all optional): target (what to map, default = this repo), subsystems (array to skip auto-detection), focus (a question to bias the map toward).
-# @param target: What to map (optional — defaults to this repository).
+# @description Map a codebase in parallel — fan out one reader per subsystem, then synthesize a single architecture map. args: target (required, what to map), subsystems (array to skip auto-detection), focus (a question to bias the map toward).
+# @param target required: Path or name of the repository / directory to map.
 # @param subsystems: Array of subsystem names, to skip auto-detection (optional).
 # @param focus: A question to bias the map toward (optional).
 
 # ---- inputs -----------------------------------------------------------------
 a      = args || {}
-target = a["target"] || "this repository"
+target = a["target"]
 focus  = a["focus"].to_s
 
 SUBSYS_SCHEMA = JSON.generate({
