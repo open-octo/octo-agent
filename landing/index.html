@@ -321,36 +321,6 @@
       pre.demo-code .arg { color: #34d399; }
     }
 
-    /* Philosophy */
-    .philosophy {
-      max-width: 480px;
-      margin: 0 auto;
-    }
-    .philosophy-block h3 {
-      font-size: 1.15rem;
-      font-weight: 600;
-      margin-bottom: 1rem;
-    }
-    .philosophy-block ul {
-      list-style: none;
-      padding: 0;
-    }
-    .philosophy-block li {
-      padding: 0.5rem 0;
-      color: var(--fg-secondary);
-      font-size: 0.95rem;
-      display: flex;
-      align-items: flex-start;
-      gap: 0.6rem;
-    }
-    .philosophy-block li::before {
-      content: '→';
-      color: var(--accent);
-      font-weight: 700;
-      flex-shrink: 0;
-    }
-    .philosophy-block.positive li::before { content: '✓'; }
-
     /* Footer */
     footer {
       padding: 3rem 1.5rem;
@@ -452,8 +422,8 @@
     <div class="container">
       <div class="section-header reveal">
         <h2 data-en="Built for people who ship" data-zh="为真正交付的人打造"></h2>
-        <p data-en="Octo is not a thin wrapper around an API. It is a full agent loop with tools, memory, and autonomy — packaged as one file you can drop anywhere."
-           data-zh="Octo 不是 API 的薄封装，而是带工具、记忆与自主能力的完整 agent 循环 —— 打包成一个可随处放置的文件。"></p>
+        <p data-en="A full agent loop with tools, memory, and autonomy — packaged as one fast, private, single Go binary you fully control."
+           data-zh="带工具、记忆与自主能力的完整 agent 循环 —— 打包成一个够快、够私密、完全由你掌控的单一 Go 二进制。"></p>
       </div>
       <div class="features">
         <div class="feature reveal">
@@ -589,24 +559,6 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
 ~/.octo/user.md      <span class="comment" data-en="# your profile" data-zh="# 你的个人画像"></span>
 ~/.octo/octorules.md <span class="comment" data-en="# global rules" data-zh="# 全局规则"></span>
 .octorules           <span class="comment" data-en="# project conventions" data-zh="# 项目约定"></span></pre>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Philosophy -->
-  <section>
-    <div class="container">
-      <div class="philosophy">
-        <div class="philosophy-block positive reveal">
-          <h3 data-en="What Octo is" data-zh="Octo 是什么"></h3>
-          <ul>
-            <li data-en="A tool that gets out of the way and lets you work" data-zh="一个不挡路、让你专心干活的工具"></li>
-            <li data-en="Functionality over token-counting minimalism" data-zh="功能优先，而非抠 token 的极简主义"></li>
-            <li data-en="Open, inspectable, and hackable — MIT licensed" data-zh="开放、可检视、可魔改 —— MIT 许可"></li>
-            <li data-en="Local-first: your data stays on your machine" data-zh="本地优先：你的数据留在你机器上"></li>
-            <li data-en="Composable: MCP, skills, hooks, sub-agents" data-zh="可组合：MCP、skills、hooks、子代理"></li>
-          </ul>
         </div>
       </div>
     </div>
