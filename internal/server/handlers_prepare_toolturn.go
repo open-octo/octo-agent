@@ -7,7 +7,6 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/config"
-	"github.com/open-octo/octo-agent/internal/memorybackend"
 	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tasks"
 	"github.com/open-octo/octo-agent/internal/tools"
@@ -71,22 +70,13 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	tools.SetBrowserHealer(app.MakeBrowserHealer(a.Sender, a.Model))
 
 	// Same omission for the external memory backend: WireTools installs it for
-	// the CLI, but serve never calls WireTools, so without this the feature
-	// silently doesn't exist under `octo serve` even when configured. Cheap to
-	// re-evaluate per turn (a lightweight REST client, not a persistent
-	// connection); a bad Type/BaseURL just leaves it unconfigured.
-	if cfgErr == nil && cfg.MemoryBackendEnabled() {
-		if b, err := memorybackend.New(memorybackend.Config{
-			Type:      cfg.MemoryBackend.Type,
-			BaseURL:   cfg.MemoryBackend.BaseURL,
-			APIKey:    cfg.MemoryBackend.APIKey,
-			Namespace: cfg.MemoryBackend.Namespace,
-			Mode:      cfg.MemoryBackend.Mode,
-		}); err == nil {
-			tools.SetMemoryBackend(b)
-			tools.SetMemoryBackendAutoRecall(cfg.MemoryBackend.AutoRecall)
-		}
-	}
+	// the CLI, but serve never calls WireTools. app.RefreshMemoryBackend is
+	// also called earlier in the same turn by buildAgent/runChannelTurns
+	// (before they read tools.MemoryBackendGuidance()/call
+	// tools.RegisterMemoryBackendHooks, which need the refreshed globals) —
+	// calling it again here is redundant but harmless, and keeps this path
+	// correct standalone if ever called without one of those two upstream.
+	app.RefreshMemoryBackend()
 
 	// Anchor the gate at the agent's per-session cwd (not the server default) so
 	// $CWD path rules and relative-path resolution match where the tools

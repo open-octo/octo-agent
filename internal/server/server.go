@@ -527,6 +527,14 @@ func (s *Server) enableSubAgentTools() {
 	}
 	defaultSender, model := s.defaultSenderAndModel()
 	template := agent.New(defaultSender, model)
+	// Refresh before reading MemoryBackendGuidance() below — enableSubAgentTools
+	// runs at server startup (before any turn has ever called this) and once
+	// more after onboarding, so without this the sub-agent template's baked-in
+	// system prompt would never see the memory-backend guidance at all if it
+	// was configured before the first real turn, since spawned sub-agents
+	// reuse this template's System rather than recomposing it per spawn (see
+	// app.NewSpawner below).
+	app.RefreshMemoryBackend()
 	var memInjection string
 	if s.memDir != "" {
 		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
@@ -1131,6 +1139,13 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			}
 		}
 	}
+
+	// Refresh the external memory backend from config before reading
+	// MemoryBackendGuidance()/registering its hooks below — both need this
+	// turn's config, not whatever the last turn (of any kind) left set. See
+	// app.RefreshMemoryBackend's doc comment for why prepareToolTurn alone
+	// (which runs after this function returns) is one turn too late.
+	app.RefreshMemoryBackend()
 
 	// L1: project memory embedded in the system prompt (stable across turns).
 	var memInjection string
@@ -1924,26 +1939,19 @@ func (s *Server) initChannels() {
 // builds a fresh per-turn gate (configured mode + chat-interactive ask), the
 // same shape prepareToolTurn gives web turns. A factory-time gate would freeze
 // one policy snapshot for the session's whole life.
+// System/LeanSystem and CWD are deliberately NOT set here (unlike buildAgent):
+// runChannelTurns unconditionally recomposes both on every IM turn before the
+// first LLM call ever happens, so baking them here once at session-creation
+// time only produced a value nothing would ever read. MaxTokens and the
+// LiteSender/LiteModel resolved below have no such per-turn refresh anywhere
+// in the IM path, so they stay — this is genuinely the only place they're set
+// for the session's whole lifetime.
 func (s *Server) buildChannelFactory() func() *agent.Agent {
-	var memInjection string
-	if s.memDir != "" {
-		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
-	}
-	if g := tools.MemoryBackendGuidance(); g != "" {
-		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
-	}
 	return func() *agent.Agent {
 		defaultSender, model := s.defaultSenderAndModel()
 		a := agent.New(defaultSender, model)
-		cwd, envCtx := s.curCwdEnv()
-		a.CWD = cwd
 		a.MaxTokens = s.cfg.MaxTokens
-		// Loaded once and reused below for LiteSender resolution — see the
-		// matching comment on effectiveCoauthor's doc for why a second
-		// config.Load() here would be wasted work.
-		cfg, cfgErr := config.Load()
-		a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
-		if cfgErr == nil {
+		if cfg, err := config.Load(); err == nil {
 			a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 			if a.LiteSender == nil {
 				if lm := app.ImplicitLiteModel(s.getProvider(), model, resolveBaseURL(s.getProvider(), cfg)); lm != "" {
@@ -2542,6 +2550,13 @@ func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, 
 // typing-keepalive ticker the first time this chain's reply text reaches the
 // user (see channel.NewUIController).
 func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent, content string, stopTyping func()) {
+	// Refresh the external memory backend from config — IM turns never go
+	// through prepareToolTurn (only WS/REST/cron do), so this is the only
+	// place that keeps it live for IM at all, not just on-time. Must run
+	// before MemoryBackendGuidance()/RegisterMemoryBackendHooks below; see
+	// app.RefreshMemoryBackend's doc comment.
+	app.RefreshMemoryBackend()
+
 	// Recompose the system prompt every turn so memory written and skills
 	// imported/toggled since server start are visible — web turns get this
 	// for free from buildAgent; the IM factory's compose-once snapshot went

@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/hooks"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
@@ -384,6 +385,61 @@ func TestHandleChannelMessage_WiresMemoryHooks(t *testing.T) {
 	}
 	if !sess.Agent.Hooks.Configured(hooks.EventPostToolUse) {
 		t.Error("IM agent missing PostToolUse hook (save-nudge)")
+	}
+}
+
+// TestHandleChannelMessage_RefreshesAutoRecallBeforeRegisteringHooks: IM turns
+// never go through prepareToolTurn (only WS/REST/cron do), so runChannelTurns
+// must refresh the memory-backend globals itself before registering hooks —
+// mirrors TestBuildAgent_RefreshesAutoRecallBeforeRegisteringHooks for the web
+// path. Deliberately leaves the global auto-recall flag stale before the
+// turn, with no prepareToolTurn call anywhere in this path, to prove
+// runChannelTurns's own refresh (not some other turn type having run first)
+// is what makes this work.
+func TestHandleChannelMessage_RefreshesAutoRecallBeforeRegisteringHooks(t *testing.T) {
+	setTestHome(t)
+	marker := "octo-agent lucky number is 47"
+	seedModels(t, config.Config{
+		Models:       []config.ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
+		DefaultModel: "gpt-4o",
+		MemoryBackend: config.MemoryBackendConfig{
+			Type:       "hindsight",
+			BaseURL:    hindsightRecallStub(t, marker),
+			AutoRecall: true,
+		},
+	})
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	tools.SetMemoryBackend(nil)
+	tools.SetMemoryBackendAutoRecall(false) // simulate a prior turn's stale state
+	t.Cleanup(func() {
+		tools.SetMemoryBackend(nil)
+		tools.SetMemoryBackendAutoRecall(false)
+	})
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+
+	// Drive a REAL Inject() call against this session's own engine and check
+	// for actual recalled content — not e.Configured(EventUserPromptSubmit)
+	// on sess.Agent.Hooks (the WorkflowNudger, wired unconditionally for
+	// every session, registers its own no-op-output hook on that same event,
+	// so "configured" is true regardless of whether the auto-recall hook is
+	// there) and not a fresh throwaway engine re-queried after the turn
+	// (proves only that the global ends up correct eventually, not that
+	// THIS turn's engine was built with the right value at registration
+	// time — see TestBuildAgent_RefreshesAutoRecallBeforeRegisteringHooks's
+	// doc comment for the experiment that found this).
+	sess := srv.channelMgr.GetSession(evFor("x"))
+	if sess == nil || sess.Agent == nil || sess.Agent.Hooks == nil {
+		t.Fatal("expected a bound IM session with hooks wired after handleChannelMessage")
+	}
+	got := sess.Agent.Hooks.Inject(context.Background(), hooks.Payload{
+		Event:     hooks.EventUserPromptSubmit,
+		UserInput: "what's my lucky number?",
+	})
+	if !strings.Contains(got, marker) {
+		t.Errorf("injected UserPromptSubmit text = %q, want it to contain the recalled marker %q — runChannelTurns must refresh the memory backend before registering hooks, not after", got, marker)
 	}
 }
 

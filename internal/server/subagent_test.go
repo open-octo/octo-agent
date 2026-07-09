@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -34,6 +36,137 @@ func TestEnableSubAgentToolsAdvertises(t *testing.T) {
 		if !names[want] {
 			t.Errorf("expected %q to be advertised after enableSubAgentTools", want)
 		}
+	}
+}
+
+// systemRecordingSender is scriptedSender plus capturing the `system` prompt
+// each call received, indexed by call order. Needed because
+// TestEnableSubAgentTools_RefreshesMemoryBackendBeforeBakingGuidance must
+// verify what actually got baked into the sub-agent template's System — not
+// re-read tools.MemoryBackendGuidance() after the fact, which would pass even
+// if enableSubAgentTools refreshed the backend too late (after baking), since
+// that global would still end up correct by the time the function returns.
+type systemRecordingSender struct {
+	mu      sync.Mutex
+	replies []agent.Reply
+	systems []string
+}
+
+func (s *systemRecordingSender) next(system string) agent.Reply {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.systems = append(s.systems, system)
+	var r agent.Reply
+	if len(s.systems)-1 < len(s.replies) {
+		r = s.replies[len(s.systems)-1]
+	} else {
+		r = agent.Reply{Content: "fallback"}
+	}
+	return r
+}
+
+func (s *systemRecordingSender) systemAt(i int) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if i < 0 || i >= len(s.systems) {
+		return ""
+	}
+	return s.systems[i]
+}
+
+func (s *systemRecordingSender) SendMessages(_ context.Context, _, system string, _ []agent.Message, _ int) (agent.Reply, error) {
+	return s.next(system), nil
+}
+
+func (s *systemRecordingSender) StreamMessages(_ context.Context, _, system string, _ []agent.Message, _ int, onChunk func(string), _ func(string)) (agent.Reply, error) {
+	r := s.next(system)
+	if onChunk != nil && r.Content != "" {
+		onChunk(r.Content)
+	}
+	return r, nil
+}
+
+func (s *systemRecordingSender) SendMessagesWithTools(_ context.Context, _, system string, _ []agent.Message, _ int, _ []agent.ToolDefinition) (agent.Reply, error) {
+	return s.next(system), nil
+}
+
+func (s *systemRecordingSender) StreamMessagesWithTools(_ context.Context, _, system string, _ []agent.Message, _ int, _ []agent.ToolDefinition, onChunk func(string), _ agent.ToolInputDeltaFunc, _ agent.ThinkingDeltaFunc) (agent.Reply, error) {
+	r := s.next(system)
+	if onChunk != nil && r.Content != "" {
+		onChunk(r.Content)
+	}
+	return r, nil
+}
+
+// TestEnableSubAgentTools_RefreshesMemoryBackendBeforeBakingGuidance guards a
+// related staleness bug found while fixing #1274: enableSubAgentTools bakes
+// tools.MemoryBackendGuidance() into the sub-agent template's System prompt
+// ONCE — at server startup, and again after onboarding — and spawned
+// sub-agents reuse that baked template rather than recomposing per spawn
+// (unlike buildAgent/runChannelTurns, which do recompose every turn). Without
+// refreshing the memory-backend globals first, a server that starts with
+// memory_backend already configured would still bake an empty guidance
+// block, because nothing had ever called the refresh before this function's
+// first-ever invocation. Simulates that cold-start ordering directly: sets
+// the backend to nil (as it is before any turn or startup hook has touched
+// it) before calling enableSubAgentTools.
+//
+// Drives the spawn via tools.DefaultSubAgentManager().RunSync directly
+// (rather than srv.runTurn) with a plain context.Background(): a runTurn-driven
+// spawn goes through prepareToolTurn's CTX-SCOPED sub-agent manager (built
+// fresh per turn from buildAgent's own, already-correct agent — see #1133 /
+// resolveSubAgentManager), which takes priority over and completely bypasses
+// enableSubAgentTools's process-global manager, so it can't observe this
+// function's bug at all. Also inspects the system prompt the sub-agent's own
+// LLM call actually received, rather than re-querying
+// tools.MemoryBackendGuidance() after enableSubAgentTools returns (which
+// would pass even if the refresh ran too late to affect the baked template —
+// see this function's sibling tests in memory_backend_wiring_test.go and
+// channel_route_test.go for the same fix applied to buildAgent/runChannelTurns).
+func TestEnableSubAgentTools_RefreshesMemoryBackendBeforeBakingGuidance(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models:       []config.ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
+		DefaultModel: "gpt-4o",
+		MemoryBackend: config.MemoryBackendConfig{
+			Type:    "hindsight",
+			BaseURL: "http://localhost:8888",
+		},
+	})
+
+	// The sub-agent's own reply (no tools) ends its loop after one call — the
+	// `system` param that call received (captured by systemRecordingSender)
+	// is what this test inspects.
+	sender := &systemRecordingSender{replies: []agent.Reply{{Content: "child result"}}}
+
+	srv := &Server{
+		cfg:       Config{Tools: true},
+		sender:    sender,
+		model:     "stub-model",
+		cwd:       t.TempDir(),
+		turnLocks: map[string]*sync.Mutex{},
+	}
+
+	tools.SetMemoryBackend(nil) // simulate cold start: nothing has refreshed this yet
+	t.Cleanup(func() {
+		tools.SetDefaultSubAgentManager(nil)
+		tools.SetTaskStore(nil)
+		tools.SetMemoryBackend(nil)
+	})
+
+	srv.enableSubAgentTools()
+
+	mgr := tools.DefaultSubAgentManager()
+	if mgr == nil {
+		t.Fatal("enableSubAgentTools should have registered a process-global SubAgentManager")
+	}
+	if _, err := mgr.RunSync(context.Background(), tools.SpawnRequest{Description: "d", Prompt: "do the sub task"}); err != nil {
+		t.Fatalf("RunSync: %v", err)
+	}
+
+	childSystem := sender.systemAt(0)
+	if !strings.Contains(childSystem, "Memory backend") {
+		t.Errorf("sub-agent's actual system prompt = %q, want it to contain the memory-backend guidance baked by enableSubAgentTools", childSystem)
 	}
 }
 
