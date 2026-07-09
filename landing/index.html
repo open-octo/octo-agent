@@ -321,15 +321,10 @@
       pre.demo-code .arg { color: #34d399; }
     }
 
-    /* Philosophy / not-list */
+    /* Philosophy */
     .philosophy {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2.5rem;
-      align-items: start;
-    }
-    @media (max-width: 720px) {
-      .philosophy { grid-template-columns: 1fr; }
+      max-width: 480px;
+      margin: 0 auto;
     }
     .philosophy-block h3 {
       font-size: 1.15rem;
@@ -611,16 +606,6 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
             <li data-en="Open, inspectable, and hackable — MIT licensed" data-zh="开放、可检视、可魔改 —— MIT 许可"></li>
             <li data-en="Local-first: your data stays on your machine" data-zh="本地优先：你的数据留在你机器上"></li>
             <li data-en="Composable: MCP, skills, hooks, sub-agents" data-zh="可组合：MCP、skills、hooks、子代理"></li>
-          </ul>
-        </div>
-        <div class="philosophy-block reveal">
-          <h3 data-en="What Octo is not" data-zh="Octo 不是什么"></h3>
-          <ul>
-            <li data-en="Not a web-only SaaS with a tacked-on CLI" data-zh="不是只有网页、CLI 是后贴的 SaaS"></li>
-            <li data-en="Not a closed marketplace for encrypted skills" data-zh="不是卖加密 skills 的封闭市场"></li>
-            <li data-en="Not obsessed with shaving tokens at the cost of capability" data-zh="不为省 token 而牺牲能力"></li>
-            <li data-en="Not a black box — every tool call is visible and gated" data-zh="不是黑盒 —— 每次工具调用都可见、可门控"></li>
-            <li data-en="Not trying to replace your IDE (it pairs beautifully with one)" data-zh="不打算取代你的 IDE（它和 IDE 配合得很好）"></li>
           </ul>
         </div>
       </div>
