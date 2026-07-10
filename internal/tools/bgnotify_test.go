@@ -90,6 +90,20 @@ func TestFormatBgNote_NoNudgeWithZeroDuration(t *testing.T) {
 	}
 }
 
+// TestFormatBgNote_NoNudgeForKilled verifies a process that was KILLED quickly
+// does not get the short-async nudge. Its Duration is time-until-kill, so a
+// `sleep 118` reaped at 4s would otherwise be mislabeled "finished in 4s —
+// didn't need run_in_background" when it never finished at all.
+func TestFormatBgNote_NoNudgeForKilled(t *testing.T) {
+	got := FormatBgNote(BgExit{
+		ID: "bg_1", Command: "sleep 118", Status: "exited: signal: killed",
+		Mode: BgModeAsync, Duration: 4 * time.Second,
+	})
+	if strings.Contains(got, "didn't need run_in_background") {
+		t.Errorf("a killed process must not get the short-async nudge; got:\n%s", got)
+	}
+}
+
 func TestFormatBgNoteWithSummary_SkipsFinishedAndSelf(t *testing.T) {
 	mgr := NewBackgroundManager()
 	// Launch three processes; we will simulate bg_1 finishing.
