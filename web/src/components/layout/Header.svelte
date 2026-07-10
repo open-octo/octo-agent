@@ -1,33 +1,18 @@
 <script lang="ts">
-  import { view, cmdkOpen, sidebar, showToast } from '../../lib/stores'
-  import { t, tr } from '../../lib/i18n'
+  import { view, cmdkOpen, sidebar } from '../../lib/stores'
+  import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
+  import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
   import OctoLogo from './OctoLogo.svelte'
 
   function cycleSidebar() {
     sidebar.update(s => s === 'full' ? 'rail' : s === 'rail' ? 'hidden' : 'full')
   }
 
-  // The bell toggles desktop notifications (browser permission) — the backing
-  // for the "Desktop Notifications" setting. There is no notification feed.
-  async function toggleNotifications() {
-    if (!('Notification' in window)) {
-      showToast(tr('header.notif_unsupported'), 'error')
-      return
-    }
-    if (Notification.permission === 'granted') {
-      showToast(tr('header.notif_enabled'))
-      return
-    }
-    if (Notification.permission === 'denied') {
-      showToast(tr('header.notif_blocked'), 'error')
-      return
-    }
-    const perm = await Notification.requestPermission()
-    showToast(
-      perm === 'granted' ? tr('header.notif_enabled') : tr('header.notif_not_enabled'),
-      perm === 'granted' ? 'success' : 'error',
-    )
+  // The bell toggles desktop notifications on/off — the same preference the
+  // "Desktop Notifications" switch in Settings drives. There is no feed.
+  function toggleNotifications() {
+    setNotificationsEnabled(!$notificationsEnabled)
   }
 </script>
 
@@ -59,8 +44,8 @@
       <span>{$t('header.search_sessions')}</span>
       <kbd>⌘K</kbd>
     </button>
-    <button class="icon-btn" title={$t('header.notifications')} onclick={toggleNotifications}>
-      <iconify-icon icon="ant-design:bell-outlined" width="16"></iconify-icon>
+    <button class="icon-btn" class:active={$notificationsEnabled} title={$t('header.notifications')} aria-pressed={$notificationsEnabled} onclick={toggleNotifications}>
+      <iconify-icon icon={$notificationsEnabled ? 'ant-design:bell-filled' : 'ant-design:bell-outlined'} width="16"></iconify-icon>
     </button>
     <button class="icon-btn" title={$t('nav.settings')} onclick={() => view.set('settings')}>
       <iconify-icon icon="ant-design:setting-outlined" width="16"></iconify-icon>
@@ -95,6 +80,7 @@ header {
   cursor: pointer; color: var(--text-secondary);
 }
 .icon-btn:hover { background: var(--hover-neutral); }
+.icon-btn.active { color: var(--blue-6); }
 .search-pill {
   display: flex; align-items: center; gap: 8px;
   height: 32px; padding: 0 6px 0 12px; width: 240px;

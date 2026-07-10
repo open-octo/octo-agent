@@ -7,6 +7,7 @@
   import { showToast } from '../lib/stores'
   import { setLocale, t, tr } from '../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
+  import { notificationsEnabled, setNotificationsEnabled } from '../lib/notifications'
   import * as api from '../lib/api'
   import type { ModelEntry, ProviderPreset, ModelConfigInput } from '../lib/api'
 
@@ -359,12 +360,23 @@
           </div>
           <Segment options={['Small', 'Medium', 'Large']} labels={{ Small: $t('settings.fs_small'), Medium: $t('settings.fs_medium'), Large: $t('settings.fs_large') }} bind:value={fontSize} />
         </div>
-        <div class="setting-row last">
+        <div class="setting-row">
           <div class="setting-info">
             <span class="setting-label">{$t('settings.theme')}</span>
             <span class="setting-desc">{$t('settings.theme_desc')}</span>
           </div>
           <Segment options={['Light', 'Dark', 'System']} labels={{ Light: $t('settings.theme_light'), Dark: $t('settings.theme_dark'), System: $t('settings.theme_system') }} bind:value={theme} />
+        </div>
+        <div class="setting-row last">
+          <div class="setting-info">
+            <span class="setting-label">{$t('settings.notifications')}</span>
+            <span class="setting-desc">{$t('settings.notifications_desc')}</span>
+          </div>
+          <!-- Client-only preference (localStorage), applied immediately — not
+               part of the Save batch. Enabling requests browser permission and
+               may snap back off if it's denied; setNotificationsEnabled owns
+               that, and $notificationsEnabled reflects the settled state. -->
+          <Switch checked={$notificationsEnabled} onchange={(v) => setNotificationsEnabled(v)} />
         </div>
       </div>
 
