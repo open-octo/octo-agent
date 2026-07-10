@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode } from './lib/stores'
   import { ws, wsState } from './lib/ws'
+  import { notificationsEnabled } from './lib/notifications'
   import { locale, t, tr, setLocale } from './lib/i18n'
   import { checkAuth } from './lib/auth'
   import { get } from 'svelte/store'
@@ -235,9 +236,10 @@
 
   // Desktop notification for a session_activity the user isn't already
   // looking at in a focused tab — if they are, they'd see it happen live and
-  // a notification would just be noise. Requires the bell in Header having
-  // already been granted browser permission; otherwise a no-op.
+  // a notification would just be noise. No-op unless the user has the
+  // Desktop Notifications preference on AND has granted browser permission.
   function notifyForSessionActivity(sid: string, kind: 'question_pending' | 'turn_complete') {
+    if (!get(notificationsEnabled)) return
     if (!('Notification' in window) || Notification.permission !== 'granted') return
     const viewingThisSession = document.hasFocus() && get(view) === 'chat' && get(activeSessionId) === sid
     if (viewingThisSession) return
