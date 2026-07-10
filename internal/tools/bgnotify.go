@@ -44,8 +44,10 @@ func FormatBgNote(e BgExit) string {
 	// process that was killed (session/turn-end reap, user Ctrl-C, an explicit
 	// kill_shell) didn't "finish fast": e.Duration is time-until-kill, so the
 	// nudge would mislead ("finished in 4s, didn't need background") about a
-	// `sleep 118` that was terminated at 4s. Killed exits carry a "signal:" status.
-	completedOnItsOwn := !strings.Contains(e.Status, "signal:")
+	// `sleep 118` terminated at 4s. e.Killed flags a deliberate kill on every
+	// platform; the "signal:" check additionally covers a POSIX signal death not
+	// routed through our killer (e.g. an OOM kill).
+	completedOnItsOwn := !e.Killed && !strings.Contains(e.Status, "signal:")
 	if e.Mode == BgModeAsync && completedOnItsOwn && e.Duration > 0 && e.Duration < shortAsyncDuration {
 		fmt.Fprintf(&b,
 			"\n\n[Note: this finished in %s — that's fast enough it didn't need run_in_background at all. "+

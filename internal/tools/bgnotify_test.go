@@ -93,14 +93,26 @@ func TestFormatBgNote_NoNudgeWithZeroDuration(t *testing.T) {
 // TestFormatBgNote_NoNudgeForKilled verifies a process that was KILLED quickly
 // does not get the short-async nudge. Its Duration is time-until-kill, so a
 // `sleep 118` reaped at 4s would otherwise be mislabeled "finished in 4s —
-// didn't need run_in_background" when it never finished at all.
+// didn't need run_in_background" when it never finished at all. Two flavors:
+// the POSIX signal status, and (Killed set, no signal in status) the Windows
+// taskkill shape — the Killed flag must suppress the nudge either way.
 func TestFormatBgNote_NoNudgeForKilled(t *testing.T) {
-	got := FormatBgNote(BgExit{
-		ID: "bg_1", Command: "sleep 118", Status: "exited: signal: killed",
-		Mode: BgModeAsync, Duration: 4 * time.Second,
-	})
-	if strings.Contains(got, "didn't need run_in_background") {
-		t.Errorf("a killed process must not get the short-async nudge; got:\n%s", got)
+	cases := []struct {
+		name   string
+		status string
+		killed bool
+	}{
+		{"posix signal", "exited: signal: killed", true},
+		{"windows taskkill", "exited: exit status 1", true}, // no "signal:" — relies on Killed
+	}
+	for _, tc := range cases {
+		got := FormatBgNote(BgExit{
+			ID: "bg_1", Command: "sleep 118", Status: tc.status,
+			Mode: BgModeAsync, Duration: 4 * time.Second, Killed: tc.killed,
+		})
+		if strings.Contains(got, "didn't need run_in_background") {
+			t.Errorf("%s: a killed process must not get the short-async nudge; got:\n%s", tc.name, got)
+		}
 	}
 }
 

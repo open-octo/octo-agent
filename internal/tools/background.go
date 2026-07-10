@@ -54,6 +54,7 @@ type bgProcess struct {
 	done     bool
 	end      time.Time // set when the process exits; used for accurate elapsed time in listings
 	exitErr  error
+	killed   bool // set by terminate(): the process was deliberately killed, not self-exited
 
 	// Anti-polling: time-window based. Within a 30-second window, 3 or more
 	// empty reads on a running process trigger a block. This allows occasional
@@ -221,6 +222,7 @@ type BgExit struct {
 	NewOutput string
 	Mode      BackgroundMode
 	Duration  time.Duration // wall-clock time from launch to exit
+	Killed    bool          // the process was deliberately killed, not self-exited
 }
 
 // SyncSession is the promote handle for one in-flight synchronous terminal
@@ -438,9 +440,12 @@ func (m *BackgroundManager) Start(command string, mode BackgroundMode, opts ...S
 			// its result was already returned synchronously — no notification.
 			if visible {
 				out, status, _ := p.readNew()
+				p.mu.Lock()
+				killed := p.killed
+				p.mu.Unlock()
 				hook(BgExit{
 					ID: p.id, Command: p.command, Status: status, NewOutput: out,
-					Mode: p.mode, Duration: p.end.Sub(p.start),
+					Mode: p.mode, Duration: p.end.Sub(p.start), Killed: killed,
 				})
 			}
 		}
@@ -596,6 +601,15 @@ func terminate(p *bgProcess, sigName string) {
 	if p == nil {
 		return
 	}
+	// Record that this exit is a deliberate kill, not a self-completion, so the
+	// completion notice doesn't tell the model the process "finished fast". This
+	// is the single choke point for every kill path (Kill / KillWithSignal /
+	// KillAll / the sync ctx-cancel), and it works cross-platform — including
+	// Windows, where a taskkill'd process reports a plain non-zero exit with no
+	// signal in its status string.
+	p.mu.Lock()
+	p.killed = true
+	p.mu.Unlock()
 	if sigName == "SIGKILL" {
 		p.cancel()
 	}
