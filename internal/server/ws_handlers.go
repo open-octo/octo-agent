@@ -870,13 +870,29 @@ func (s *Server) handleWSRunTask(conn *wsConn, sessionID string) {
 	})
 }
 
-// handleWSConfirmation delivers a confirmation answer from the browser.
+// handleWSConfirmation delivers a confirmation answer from one client and
+// broadcasts a completion event so every other subscribed client can close
+// its modal for the same confirmation.
 func (s *Server) handleWSConfirmation(confID, result string) {
 	s.confirmMu.Lock()
 	if ch, ok := s.confirmations[confID]; ok {
 		ch <- result
 	}
 	s.confirmMu.Unlock()
+
+	s.pendingPromptMu.Lock()
+	defer s.pendingPromptMu.Unlock()
+	for sessionID, pending := range s.pendingConfirms {
+		if pending.ConfID == confID {
+			s.wsHub.broadcast(sessionID, wsEventConfirmationComplete{
+				Type:      "confirmation_complete",
+				SessionID: sessionID,
+				ConfID:    confID,
+				Result:    result,
+			})
+			return
+		}
+	}
 }
 
 // extractTextContent extracts plain text from content which may be a string

@@ -295,6 +295,13 @@ export interface WsEventRequestConfirmation {
   input?: string // other tools
 }
 
+export interface WsEventConfirmationComplete {
+  type: 'confirmation_complete'
+  session_id: string
+  id: string
+  result: string
+}
+
 export interface WsEventRequestUserQuestion {
   type: 'request_user_question'
   session_id: string
@@ -364,6 +371,7 @@ export type WsEvent =
   | WsEventSessionDeleted
   | WsEventRequestFeedback
   | WsEventRequestConfirmation
+  | WsEventConfirmationComplete
   | WsEventRequestUserQuestion
   | WsEventBackgroundTaskUpdate
   | WsEventDiff

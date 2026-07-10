@@ -754,6 +754,19 @@
       })
     }))
 
+    cleanups.push(ws.on('confirmation_complete', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      confirmModal.update(current => {
+        if (!current) return current
+        // Only close if this completion is for the confirmation currently
+        // shown in this tab; otherwise leave any unrelated modal untouched.
+        if ((ev as any).id === current.id) {
+          return null
+        }
+        return current
+      })
+    }))
+
     cleanups.push(ws.on('request_user_question', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       // Falls back to sid like the dismiss_user_question handler below —
