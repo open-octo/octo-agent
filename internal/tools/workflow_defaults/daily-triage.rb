@@ -1,10 +1,10 @@
-# @description Run a daily triage loop: discover open issues and recent CI failures, categorize them, draft safe fixes in isolated git worktrees, verify them with a second agent, and write a state report. args: repo (optional path to git repo, defaults to current directory), since (optional "Nh" or "Nd" lookback, e.g. "24h" or "1d", default "1d").
-# @param repo: Path to the git repo (optional — defaults to the current directory).
+# @description Run a daily triage loop: discover open issues and recent CI failures, categorize them, draft safe fixes in isolated git worktrees, verify them with a second agent, and write a state report. args: repo (required, path to git repo), since (optional "Nh" or "Nd" lookback, e.g. "24h" or "1d", default "1d").
+# @param repo required: Path to the git repo to triage.
 # @param since: Lookback window, e.g. "24h" or "1d" (optional — defaults to "1d").
 
 # ---- inputs -----------------------------------------------------------------
 a          = args || {}
-repo       = a["repo"].to_s.empty? ? "./" : a["repo"]
+repo       = a["repo"]
 since      = a["since"].to_s.empty? ? "1d" : a["since"]
 STATE_REL  = ".octo/daily-triage-state.md"
 

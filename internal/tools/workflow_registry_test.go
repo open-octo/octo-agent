@@ -244,6 +244,21 @@ func TestLookupWorkflow_ParallelUnderstandDeclaresRequiredTarget(t *testing.T) {
 	}
 }
 
+// TestLookupWorkflow_DailyTriageDeclaresRequiredRepo pins that the
+// embedded daily-triage preset declares its required "repo" arg via
+// `# @param`, so the workflow tool prompts for it up front instead of
+// silently triaging the current directory.
+func TestLookupWorkflow_DailyTriageDeclaresRequiredRepo(t *testing.T) {
+	useWorkflowRoots(t, "", "")
+	w, ok := lookupWorkflow(context.Background(), "daily-triage")
+	if !ok {
+		t.Fatal("daily-triage not found")
+	}
+	if req := requiredParamNames(w.params); len(req) != 1 || req[0] != "repo" {
+		t.Errorf("daily-triage required params = %v, want [repo]", req)
+	}
+}
+
 // TestLookupWorkflow_BatchMigrateDeclaresRequiredChange pins that the
 // embedded batch-migrate preset declares its required "change" arg via
 // `# @param`, so the workflow tool prompts for it up front instead of
