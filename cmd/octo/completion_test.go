@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/app"
 )
 
 // containsAll is a tiny assertion helper for "every want is present in got".
@@ -92,8 +93,12 @@ func TestCompletionCandidates_DefaultChatMode_SessionIDs(t *testing.T) {
 
 func TestCompletionCandidates_ProviderValueAfterFlag(t *testing.T) {
 	got := completionCandidates([]string{"octo", "--provider", ""})
-	if !sliceEq(got, []string{"anthropic", "openai"}) {
-		t.Errorf("--provider value completion = %v, want [anthropic openai]", got)
+	want := make([]string, len(app.Registry))
+	for i, v := range app.Registry {
+		want[i] = v.ID
+	}
+	if !sliceEq(got, want) {
+		t.Errorf("--provider value completion = %v, want %v", got, want)
 	}
 }
 
@@ -227,8 +232,12 @@ func TestRunComplete_PrintsCandidatesOnePerLine(t *testing.T) {
 		t.Errorf("exit = %d, want 0", code)
 	}
 	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
-	if !sliceEq(lines, []string{"anthropic", "openai"}) {
-		t.Errorf("output = %v", lines)
+	want := make([]string, len(app.Registry))
+	for i, v := range app.Registry {
+		want[i] = v.ID
+	}
+	if !sliceEq(lines, want) {
+		t.Errorf("output = %v, want %v", lines, want)
 	}
 }
 

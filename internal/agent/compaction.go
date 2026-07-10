@@ -49,7 +49,11 @@ func contextWindow(model string) int {
 	m := strings.ToLower(model)
 	switch {
 	// ── Anthropic Claude ──
+	case strings.Contains(m, "claude-fable-5") || strings.Contains(m, "claude-mythos-5"):
+		return 1_000_000
 	case strings.Contains(m, "claude-opus-4.8") || strings.Contains(m, "claude-opus-4"):
+		return 1_000_000
+	case strings.Contains(m, "claude-sonnet-5"):
 		return 1_000_000
 	case strings.Contains(m, "claude-sonnet-4-5") || strings.Contains(m, "claude-sonnet-4"):
 		return 256_000
@@ -65,6 +69,8 @@ func contextWindow(model string) int {
 		return 256_000
 
 	// ── OpenAI GPT / O-series ──
+	case strings.Contains(m, "gpt-5.6") || strings.Contains(m, "gpt5.6"):
+		return 1_000_000
 	case strings.Contains(m, "gpt-5.5") || strings.Contains(m, "gpt5.5"):
 		return 1_000_000
 	case strings.Contains(m, "gpt-5") || strings.Contains(m, "gpt5"):
@@ -188,6 +194,10 @@ func contextWindow(model string) int {
 		return 256_000
 	case strings.Contains(m, "mimo"):
 		return 128_000
+
+	// ── LongCat (Meituan) ──
+	case strings.Contains(m, "longcat"):
+		return 1_000_000
 
 	// ── Cohere ──
 	case strings.Contains(m, "command-r-plus") || strings.Contains(m, "command-r"):

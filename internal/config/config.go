@@ -270,7 +270,7 @@ func ModelSupportsVision(model string) bool {
 			return true
 		}
 	}
-	for _, textOnly := range []string{"qwen", "deepseek", "kimi", "moonshot", "baichuan", "ernie", "glm-", "spark", "abab", "yi-"} {
+	for _, textOnly := range []string{"qwen", "deepseek", "kimi", "moonshot", "baichuan", "ernie", "glm-", "spark", "abab", "yi-", "longcat"} {
 		if strings.Contains(m, textOnly) {
 			return false
 		}

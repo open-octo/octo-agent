@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/app"
 )
 
 // `octo completion <shell>` and the hidden `octo __complete <words…>` work
@@ -121,7 +122,7 @@ func chatCandidates(words []string, prev string) []string {
 	case "-c", "--continue":
 		return sessionIDCandidates()
 	case "--provider":
-		return []string{"anthropic", "openai"}
+		return providerCandidates()
 	case "--permission-mode":
 		return []string{"interactive", "strict", "auto"}
 	case "--reasoning-effort":
@@ -137,6 +138,17 @@ func chatCandidates(words []string, prev string) []string {
 	return chatFlags
 }
 
+// providerCandidates lists every registered vendor ID for --provider
+// completion, derived from the single registry (app.Registry) so a newly
+// added vendor is picked up automatically instead of needing a second edit.
+func providerCandidates() []string {
+	ids := make([]string, len(app.Registry))
+	for i, v := range app.Registry {
+		ids[i] = v.ID
+	}
+	return ids
+}
+
 func memoryCandidates(words []string) []string {
 	if len(words) == 3 {
 		return []string{"list"}
@@ -150,7 +162,7 @@ func memoryCandidates(words []string) []string {
 func initCandidates(prev string) []string {
 	switch prev {
 	case "--provider":
-		return []string{"anthropic", "openai"}
+		return providerCandidates()
 	case "--permission-mode":
 		return []string{"interactive", "strict", "auto"}
 	}
@@ -191,8 +203,8 @@ What it completes:
   - Top-level subcommands (config, memory, init, …) and session flags.
   - Subcommands of memory / help / completion.
   - Session IDs after "octo -c " — full + short + "last".
-  - Fixed values for --provider (anthropic|openai) and --permission-mode
-    (interactive|strict|auto).
+  - Fixed values for --provider (every registered vendor) and
+    --permission-mode (interactive|strict|auto).
 
 The shell snippet just delegates to the hidden "octo __complete" subcommand;
 the routing logic lives in the binary, so the same snippet keeps working as

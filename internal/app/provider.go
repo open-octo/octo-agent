@@ -58,6 +58,9 @@ var Registry = []Vendor{
 		DefaultBaseURL: "https://api.openai.com",
 		DefaultModel:   "gpt-5.4",
 		Models: []VendorModel{
+			{ID: "gpt-5.6-sol", Vision: true},
+			{ID: "gpt-5.6-terra", Vision: true},
+			{ID: "gpt-5.6-luna", Vision: true},
 			{ID: "gpt-5.5", Vision: true},
 			{ID: "gpt-5.4", Vision: true},
 			{ID: "gpt-5.4-mini", Vision: true},
@@ -81,9 +84,11 @@ var Registry = []Vendor{
 		DefaultBaseURL: "https://api.anthropic.com",
 		DefaultModel:   "claude-sonnet-4-6",
 		Models: []VendorModel{
+			{ID: "claude-fable-5", Vision: true},
 			{ID: "claude-opus-4-8", Vision: true},
 			{ID: "claude-opus-4-7", Vision: true},
 			{ID: "claude-opus-4-6", Vision: true},
+			{ID: "claude-sonnet-5", Vision: true},
 			{ID: "claude-sonnet-4-6", Vision: true},
 			{ID: "claude-sonnet-4-5", Vision: true},
 			{ID: "claude-haiku-4-5", Vision: true},
@@ -245,6 +250,20 @@ var Registry = []Vendor{
 		},
 		APIKeyEnvVar: "MIMO_API_KEY",
 		WebsiteURL:   "https://platform.xiaomimimo.com/#/console/api-keys",
+	},
+	{
+		ID:             "longcat",
+		DisplayName:    "LongCat (Meituan)",
+		Protocol:       "openai",
+		API:            "openai-completions",
+		DefaultBaseURL: "https://api.longcat.chat/openai",
+		DefaultModel:   "LongCat-2.0",
+		// LongCat-2.0 accepts text input only (no image/vision support on the API).
+		Models: []VendorModel{
+			{ID: "LongCat-2.0", Vision: false},
+		},
+		APIKeyEnvVar: "LONGCAT_API_KEY",
+		WebsiteURL:   "https://longcat.chat/platform/api_keys",
 	},
 	{
 		ID:          ProviderCustom,

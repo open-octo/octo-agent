@@ -99,6 +99,18 @@ func TestContextWindow(t *testing.T) {
 	if got := contextWindow("gemini-3.5-flash"); got != 1_000_000 {
 		t.Errorf("gemini-3.5-flash window = %d, want 1000000", got)
 	}
+	if got := contextWindow("LongCat-2.0"); got != 1_000_000 {
+		t.Errorf("LongCat-2.0 window = %d, want 1000000", got)
+	}
+	if got := contextWindow("claude-sonnet-5"); got != 1_000_000 {
+		t.Errorf("claude-sonnet-5 window = %d, want 1000000", got)
+	}
+	if got := contextWindow("claude-fable-5"); got != 1_000_000 {
+		t.Errorf("claude-fable-5 window = %d, want 1000000", got)
+	}
+	if got := contextWindow("gpt-5.6-sol"); got != 1_000_000 {
+		t.Errorf("gpt-5.6-sol window = %d, want 1000000", got)
+	}
 	if got := contextWindow("unknown-model-xyz"); got != defaultContextWindow {
 		t.Errorf("unknown model window = %d, want %d (conservative default)", got, defaultContextWindow)
 	}

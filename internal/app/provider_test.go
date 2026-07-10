@@ -64,7 +64,7 @@ func TestVendor_KimiCodingPlan_BuildClient_CustomBaseURL(t *testing.T) {
 func TestIsKnownVendor(t *testing.T) {
 	for _, id := range []string{
 		"openrouter", "deepseek", "minimax", "kimi", "kimi-coding-plan",
-		"glm", "openai", "anthropic", "bailian", "mimo",
+		"glm", "openai", "anthropic", "bailian", "mimo", "longcat",
 		ProviderCustom,
 	} {
 		if !IsKnownVendor(id) {
@@ -179,6 +179,7 @@ func TestVendorEnvVars(t *testing.T) {
 		{"anthropic", "ANTHROPIC_API_KEY"},
 		{"bailian", "DASHSCOPE_API_KEY"},
 		{"mimo", "MIMO_API_KEY"},
+		{"longcat", "LONGCAT_API_KEY"},
 	}
 	for _, tc := range tests {
 		got := VendorAPIKeyEnvVar(tc.id)
