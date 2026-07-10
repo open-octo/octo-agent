@@ -17,6 +17,15 @@ hash `permission.Engine` always used — so "always allow `sudo make
 install`" does not allow `sudo rm`. It lives for the session and is never
 written to `permissions.yml`: durable policy stays an explicit user edit.
 
+**Exception: `write_file`/`edit_file` key on path alone.** Their input also
+carries the new content/diff, which is different on every call, so an
+exact-input signature would never hit the cache a second time — "always
+allow" would degrade into "ask again on the very next edit to this file."
+`signature()` special-cases these two tools to hash `input["path"]` only,
+so approving one edit remembers the *file* for the rest of the session,
+matching an editor's "don't ask again for this file" — not the specific
+edit.
+
 ## The store outlives the engine
 
 The CLI keeps one engine for the whole session, so remembering on the

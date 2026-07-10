@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/scheduler"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
@@ -84,7 +85,9 @@ func (s *Server) CreateSession(task scheduler.Task) (string, error) {
 		sess = agent.NewSession(model, s.system)
 		sess.Source = "cron"
 		sess.Title = task.Name
-		_ = sess.SetPermissionMode(string(resolvePermissionMode()))
+		// Cron ticks have no human to answer an ask prompt, unlike the web/IM
+		// default this mirrors — see ResolveUnattendedDefaultMode's doc comment.
+		_ = sess.SetPermissionMode(string(permission.ResolveUnattendedDefaultMode()))
 		// task.Directory only seeds the session's WorkingDir here, once, at
 		// creation. After that, sess.WorkingDir (editable any time via the
 		// web Composer's directory chip, PATCH /api/sessions/{id}/working_dir)

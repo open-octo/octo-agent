@@ -1,7 +1,8 @@
 // Package permission gates tool calls through a rule-driven decision
-// engine. Each tool invocation is evaluated against an ordered list of
-// rules; the first matching rule's decision (allow / deny / ask) wins.
-// If no rule matches, the implicit default is ask.
+// engine. Each tool invocation is evaluated against the tool's rule list;
+// matches are resolved by tier — deny beats ask beats allow, regardless of
+// declaration order. If no rule matches in any tier, the implicit default
+// is ask.
 //
 // The engine is the centerpiece of M6.5 — without it, any caller that
 // reaches the agent (CLI, future M8 HTTP server, future M9 IM bridge)
@@ -74,6 +75,29 @@ func ResolveDefaultMode() Mode {
 		return ModeStrict
 	default:
 		return ModeInteractive
+	}
+}
+
+// ResolveUnattendedDefaultMode is ResolveDefaultMode for sessions that run
+// with nobody present to answer an ask prompt — currently cron task
+// sessions (see tasks_handlers.go's CreateSession). An explicit
+// ~/.octo/config.yml `permission_mode` is honored exactly like
+// ResolveDefaultMode; only the "nothing configured" fallback differs. Since
+// write_file/edit_file no longer blanket-allow $CWD (see defaults.yml),
+// ModeInteractive's implicit ask has no one to answer it — every write
+// would time out to deny — so an unset global mode resolves to
+// ModeAutoApprove here instead.
+func ResolveUnattendedDefaultMode() Mode {
+	cfg, _ := config.Load()
+	switch cfg.PermissionMode {
+	case string(ModeAutoApprove):
+		return ModeAutoApprove
+	case string(ModeStrict):
+		return ModeStrict
+	case string(ModeInteractive):
+		return ModeInteractive
+	default:
+		return ModeAutoApprove
 	}
 }
 
@@ -223,10 +247,13 @@ func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*
 		mode = ModeInteractive
 	}
 
-	// Whitelist extra writable roots (e.g. the memory directory) by prepending
-	// an allow rule so it wins over the implicit ask-fallthrough for out-of-CWD
-	// paths. Prepending also means it precedes the secret-path denies, which is
-	// fine: these roots are octo-managed dirs, not places secrets live.
+	// Whitelist extra writable roots (e.g. the memory directory, or `octo
+	// init`'s own cwd) with an allow rule so it wins over the implicit
+	// ask-fallthrough. List position no longer matters — classify() resolves
+	// deny > ask > allow by tier — so a secret-path deny elsewhere in the
+	// list still wins over this even though it's prepended; these roots are
+	// octo-managed dirs (or, for init, the analyzed repo), not places
+	// secrets live, so that never comes up in practice.
 	for _, root := range allowWriteRoots {
 		if root == "" {
 			continue
@@ -263,20 +290,26 @@ func (e *Engine) SetMode(mode Mode) {
 // Deny, or Ask.
 //
 // Resolution order:
-//  1. Session-remembered decision (set by Remember) short-circuits.
-//  2. Rules for the tool are scanned in order; first match wins.
-//  3. No match → implicit Ask.
+//  1. Rules for the tool are scanned; matches are grouped into deny/ask/allow
+//     tiers and the tier wins regardless of declaration order — deny beats
+//     ask beats allow, matching what a rule author expects rather than
+//     depending on list position.
+//  2. No match in any tier → implicit Ask.
+//  3. Session-remembered decision (set by Remember) short-circuits an Ask.
 //  4. Mode adjustment: ModeAutoApprove turns Ask into Allow; ModeStrict
 //     turns Ask into Deny.
 func (e *Engine) Check(toolName string, input map[string]any) Decision {
-	sig := signature(toolName, input)
+	sig := signature(toolName, e.cwd, input)
 
+	deny, ask, allow := e.classify(toolName, input)
 	d := Ask // implicit default
-	for _, r := range e.rules[toolName] {
-		if e.matches(toolName, r, input) {
-			d = r.Decision
-			break
-		}
+	switch {
+	case deny != nil:
+		d = Deny
+	case ask != nil:
+		d = Ask
+	case allow != nil:
+		d = Allow
 	}
 	// A matched deny always wins. The remembered store only short-circuits
 	// Ask: engines are rebuilt per turn precisely so policy edits take
@@ -295,6 +328,35 @@ func (e *Engine) Check(toolName string, input map[string]any) Decision {
 	return e.applyMode(d)
 }
 
+// classify scans the tool's rule list once and returns the first matching
+// rule in each decision tier (deny/ask/allow) — nil where a tier had no
+// match. Callers resolve deny > ask > allow priority from the result,
+// independent of the order rules were declared in.
+func (e *Engine) classify(toolName string, input map[string]any) (deny, ask, allow *Rule) {
+	rules := e.rules[toolName]
+	for i := range rules {
+		r := &rules[i]
+		if !e.matches(toolName, *r, input) {
+			continue
+		}
+		switch r.Decision {
+		case Deny:
+			if deny == nil {
+				deny = r
+			}
+		case Ask:
+			if ask == nil {
+				ask = r
+			}
+		case Allow:
+			if allow == nil {
+				allow = r
+			}
+		}
+	}
+	return deny, ask, allow
+}
+
 // Remember stores a session-level decision so a subsequent Check for the
 // same (toolName, input-signature) pair short-circuits. Use this when the
 // user answers "always allow this turn / this session".
@@ -302,17 +364,19 @@ func (e *Engine) Remember(toolName string, input map[string]any, decision Decisi
 	e.mu.Lock()
 	store := e.remember
 	e.mu.Unlock()
-	store.set(signature(toolName, input), decision)
+	store.set(signature(toolName, e.cwd, input), decision)
 }
 
 // DenialReason returns a human-readable explanation for why a tool call
 // was denied. Useful for surfacing to the LLM so it knows the failure
 // was a policy denial, not a tool malfunction.
 func (e *Engine) DenialReason(toolName string, input map[string]any) string {
-	for _, r := range e.rules[toolName] {
-		if e.matches(toolName, r, input) {
-			return formatRuleReason(toolName, r)
-		}
+	deny, ask, _ := e.classify(toolName, input)
+	switch {
+	case deny != nil:
+		return formatRuleReason(toolName, *deny)
+	case ask != nil:
+		return formatRuleReason(toolName, *ask)
 	}
 	if e.mode == ModeStrict {
 		return fmt.Sprintf("permission_denied: %s — requires confirmation, and strict mode denies without prompting.", toolName)
@@ -486,8 +550,23 @@ func allowPatternMatches(cmd, pattern string) bool {
 // signature returns a stable hash of (tool, input) for the remember
 // cache. Two calls with the same logical input hit the same cache slot
 // regardless of map iteration order, since json.Marshal sorts keys.
-func signature(toolName string, input map[string]any) string {
-	b, _ := json.Marshal(input)
+//
+// write_file/edit_file are keyed on the path alone, not the full input:
+// their input also carries the new content/diff, which differs on every
+// call, so hashing it would mean "always allow" never hits the cache a
+// second time. Remembering per-path instead matches an editor's "don't ask
+// again for this file" — one confirmation per file per session, not one per
+// edit. The path is resolved against cwd the same way matches() does (via
+// absPath), so "src/main.go" and "/work/src/main.go" — two spellings of the
+// same file — share one cache slot instead of prompting twice.
+func signature(toolName string, cwd string, input map[string]any) string {
+	keyed := input
+	if toolName == "write_file" || toolName == "edit_file" {
+		if p, ok := input["path"].(string); ok && p != "" {
+			keyed = map[string]any{"path": absPath(p, cwd)}
+		}
+	}
+	b, _ := json.Marshal(keyed)
 	h := sha256.Sum256(append([]byte(toolName+"|"), b...))
 	return hex.EncodeToString(h[:16])
 }

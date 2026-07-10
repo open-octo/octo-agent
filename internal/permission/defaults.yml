@@ -1,8 +1,10 @@
 # Default permission rules. Used when ~/.octo/permissions.yml does not
 # exist or as the base layer that user rules extend.
 #
-# Decision priority within a tool's rule list is positional: the first rule
-# that matches wins. If no rule matches, the implicit default is `ask`.
+# Decision priority within a tool's rule list is tiered, not positional:
+# deny beats ask beats allow, regardless of declaration order — the first
+# match within the winning tier is reported as the reason. If nothing
+# matches in any tier, the implicit default is `ask`.
 #
 # Pattern rules (for `terminal`) are case-sensitive SUBSTRING matches
 # against the input command. Exception: a pattern ending in `/` or `~`
@@ -74,14 +76,21 @@ web_fetch:
   - allow: { hostname: ["github.com", "*.github.com", "stackoverflow.com", "*.stackoverflow.com", "go.dev", "*.go.dev", "pkg.go.dev"] }
   # Other hosts fall through to ask.
 
+# Writing/editing is never blanket-allowed just for being inside $CWD — that
+# would make `octo serve` launched from e.g. $HOME silently writable across
+# the whole home directory with zero prompt, in every mode including
+# interactive. Beyond the secret-path denies below, every path (in or out of
+# CWD) falls through to the implicit ask: interactive really prompts (and
+# remembers per-file for the session, see permission.signature), auto allows,
+# strict denies. Callers that legitimately need unattended or pre-approved
+# write access (cron task sessions, `octo init`'s own output file) get it
+# explicitly — via that session's permission_mode or via allowWriteRoots —
+# not through a rule here.
 write_file:
   - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*"] }
-  - allow: { path: ["$CWD/**"] }
-  # Outside-CWD paths fall through to ask.
 
 edit_file:
   - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*"] }
-  - allow: { path: ["$CWD/**"] }
 
 # read_file is generally safe; only block the obvious credential bombs.
 read_file:
