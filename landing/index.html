@@ -236,7 +236,7 @@
     /* Interfaces */
     .interfaces {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 1.25rem;
     }
     @media (max-width: 640px) {
@@ -484,11 +484,11 @@
     </div>
   </section>
 
-  <!-- Three interfaces -->
+  <!-- Five interfaces -->
   <section>
     <div class="container">
       <div class="section-header reveal">
-        <h2 data-en="Three faces, one agent" data-zh="三种界面，同一个 agent"></h2>
+        <h2 data-en="Five faces, one agent" data-zh="五种界面，同一个 agent"></h2>
         <p data-en="Each interface is a first-class citizen. Use the one that fits your workflow — the agent underneath is identical."
            data-zh="每个界面都是一等公民。挑最适合你工作流的那个 —— 底层的 agent 完全一致。"></p>
       </div>
@@ -510,6 +510,18 @@
           <h3 data-en="IM Bridge" data-zh="IM 桥接"></h3>
           <p data-en="WeChat iLink, Feishu, DingTalk, WeCom, Discord, and Telegram. Add Octo to a chat and delegate tasks from your phone without opening a terminal."
              data-zh="微信 iLink、飞书、钉钉、企微、Discord、Telegram。把 Octo 加进聊天，从手机派活，无需打开终端。"></p>
+        </div>
+        <div class="iface reveal">
+          <div class="iface-icon">🧩</div>
+          <h3 data-en="VS Code extension" data-zh="VS Code 插件"></h3>
+          <p data-en="Editor context — selection, open files, diagnostics — flows into the chat automatically, and agent edits render as native VS Code diffs. open-octo/octo-vscode."
+             data-zh="编辑器上下文（选区、打开的文件、诊断信息）自动进入对话，agent 的改动以原生 VS Code diff 呈现。open-octo/octo-vscode。"></p>
+        </div>
+        <div class="iface reveal">
+          <div class="iface-icon">💎</div>
+          <h3 data-en="Obsidian plugin" data-zh="Obsidian 插件"></h3>
+          <p data-en="Your vault becomes the agent's working directory — sidebar chat, inline edit with word-level diff, slash commands, @mentions. open-octo/octo-obsidian."
+             data-zh="你的 vault 变成 agent 的工作目录 —— 侧边栏对话、行内编辑（word-level diff）、slash 命令、@mention。open-octo/octo-obsidian。"></p>
         </div>
       </div>
     </div>

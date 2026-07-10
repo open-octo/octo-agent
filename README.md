@@ -11,7 +11,7 @@
 
 > An **MIT-licensed, single Go binary, zero-runtime** AI agent that combines the two things people usually
 > reach for two separate tools to get: a **coding agent on par with Claude Code**, and a **personal
-> assistant that's lighter and more stable than OpenClaw** — skills, CLI / Web / phone-IM, browser control,
+> assistant that's lighter and more stable than OpenClaw** — skills, CLI / Web / phone-IM / VS Code / Obsidian, browser control,
 > an OS-level sandbox, all as an **open, self-contained binary you fully own**, on **any model** (DeepSeek,
 > Kimi, Anthropic, OpenAI, or anything compatible), with the server and your data staying on your own
 > machine. Reuse the skills already in `~/.claude/skills`. One binary for both your coding and your everyday
@@ -77,7 +77,7 @@ lighter, more stable alternative to OpenClaw — one binary instead of two separ
 
 ## Status
 
-> **Stable (1.0).** All three interfaces are live: the CLI (an interactive TUI in a terminal, a headless agentic one-shot everywhere else), a local web server (`octo serve`), and an IM bridge (running inside `octo serve`; WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram). On top of the agent loop there are skills, MCP clients, OS-level sandboxing, persistent memory, sub-agents, background workflows, and a task graph for autonomous multi-step goals.
+> **Stable (1.0).** Five interfaces are live: the CLI (an interactive TUI in a terminal, a headless agentic one-shot everywhere else), a local web server (`octo serve`), an IM bridge (running inside `octo serve`; WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram), a VS Code extension ([`open-octo/octo-vscode`](https://github.com/open-octo/octo-vscode)), and an Obsidian plugin ([`open-octo/octo-obsidian`](https://github.com/open-octo/octo-obsidian)) — the last two connect to `octo serve` over the same HTTP/WebSocket API the Web UI uses. On top of the agent loop there are skills, MCP clients, OS-level sandboxing, persistent memory, sub-agents, background workflows, and a task graph for autonomous multi-step goals.
 >
 > What you can build on is declared in [COMPATIBILITY.md](COMPATIBILITY.md) (stable config formats, CLI, exit codes — and what isn't covered); the security boundary in [SECURITY.md](SECURITY.md).
 
