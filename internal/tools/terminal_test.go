@@ -375,6 +375,58 @@ func TestTerminalTool_SubAgent_SyncTimeoutKills(t *testing.T) {
 	}
 }
 
+// TestTerminalTool_SubAgent_NotPromotable verifies a sub-agent's synchronous
+// command registers NO promotable SyncSession, so the TUI Ctrl+B / web
+// "Background" button can't promote it into a process that outlives the
+// sub-agent. Without the guard, a manual promote signal would background the
+// command and fire its completion notice into the parent session.
+func TestTerminalTool_SubAgent_NotPromotable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell only")
+	}
+	mgr := NewBackgroundManager()
+	tool := TerminalTool{mgr: mgr}
+
+	// Sub-agent command: run ~1s in the background so we can observe the manager
+	// while it polls. It must never expose a promotable sync session.
+	subDone := make(chan struct{})
+	go func() {
+		_, _ = tool.Execute(WithSubAgentMarker(context.Background()), "terminal", map[string]any{"command": "sleep 1"})
+		close(subDone)
+	}()
+	deadline := time.Now().Add(600 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if mgr.HasSync() {
+			t.Fatal("a sub-agent's sync command must not register a promotable SyncSession")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mgr.PromoteSync() // no-op: nothing registered
+	<-subDone
+
+	// Control: a non-sub-agent command DOES register one (proves the guard, not a
+	// missing BeginSync, is what suppresses it).
+	ctlDone := make(chan struct{})
+	go func() {
+		_, _ = tool.Execute(context.Background(), "terminal", map[string]any{"command": "sleep 1"})
+		close(ctlDone)
+	}()
+	sawSync := false
+	deadline = time.Now().Add(700 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if mgr.HasSync() {
+			sawSync = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !sawSync {
+		t.Error("a non-sub-agent sync command should register a promotable SyncSession")
+	}
+	mgr.PromoteSync() // let the control return promptly instead of waiting out the sleep
+	<-ctlDone
+}
+
 func TestTerminalInputTool_Definition(t *testing.T) {
 	def := TerminalInputTool{}.Definition()
 	if def.Name != "terminal_input" {

@@ -103,7 +103,7 @@ func (TerminalTool) Definition() agent.ToolDefinition {
 				},
 				"detached": map[string]any{
 					"type":        "boolean",
-					"description": "Launch the command as a daemon that DELIBERATELY outlives octo: it runs in its own session, is NOT tracked, and is NOT killed when the session ends. Returns only the OS pid — terminal_output and kill_shell cannot see it, so the user manages it themselves (e.g. `kill <pid>`). Use ONLY when the user explicitly wants a process to survive the agent (e.g. exposing a port with ngrok, starting a standalone server). For tasks that should be cleaned up with the session, use run_in_background instead. No `nohup`/`&` needed — detachment is handled for you. stdout+stderr go to log_file.",
+					"description": "Launch the command as a daemon that DELIBERATELY outlives octo: it runs in its own session, is NOT tracked, and is NOT killed when the session ends. Returns only the OS pid — terminal_output and kill_shell cannot see it, so the user manages it themselves (e.g. `kill <pid>`). Use ONLY when the user explicitly wants a process to survive the agent (e.g. exposing a port with ngrok, starting a standalone server). For tasks that should be cleaned up with the session, use run_in_background instead. No `nohup`/`&` needed — detachment is handled for you. stdout+stderr go to log_file. NOT available inside a sub-agent — a sub-agent must finish within its turn and cannot leave a daemon behind, so detached is ignored and the command runs synchronously.",
 				},
 				"log_file": map[string]any{
 					"type":        "string",
@@ -266,10 +266,18 @@ func (t TerminalTool) ExecuteStream(
 		}
 	}
 
-	// Register a SyncSession so TUI (Ctrl+B) and Web ("Background" button)
-	// can promote this process before the timer fires.
-	sess := mgr.BeginSync()
-	defer mgr.EndSync()
+	// Register a SyncSession so TUI (Ctrl+B) and Web ("Background" button) can
+	// promote this process before the timer fires. A sub-agent's command is never
+	// promotable: promotion leaves the process running past the sub-agent's turn
+	// (see subAgent above), so we skip registration entirely — the process stays
+	// invisible to HasActiveSync, so Ctrl+B/the button can't target it — and leave
+	// promoteCh nil, so that select arm (a receive on a nil channel) never fires.
+	var promoteCh <-chan struct{}
+	if !subAgent {
+		sess := mgr.BeginSync()
+		defer mgr.EndSync()
+		promoteCh = sess.C()
+	}
 
 	// snapshot returns the collected output so far, tab-expanded and with the
 	// truncation marker prepended when the cap dropped earlier bytes. The
@@ -302,9 +310,10 @@ func (t TerminalTool) ExecuteStream(
 
 	for {
 		select {
-		case <-sess.C():
+		case <-promoteCh:
 			// User promoted (Ctrl+B in TUI / button in Web): make the process
-			// visible in the background panel and return. NOT reaped.
+			// visible in the background panel and return. NOT reaped. Never fires
+			// for a sub-agent (promoteCh is nil there).
 			mgr.Promote(id)
 			body := MaybeSpillOutput(id, snapshot())
 			return agent.ToolResult{
