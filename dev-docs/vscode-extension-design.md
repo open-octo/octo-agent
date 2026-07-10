@@ -89,9 +89,13 @@ Access key 只在插件将来支持"连接到绑定了非 loopback 地址的 ser
 
 **入站(插件 → serve)**:`user_message`(挂 `session_id`/`content`/`files`)、`interrupt`、`confirmation`、`user_question_answer`、`retry`、`rollback`。
 
-**出站(serve → 插件)**:`output`(流式文本)、`tool_call`/`tool_result`/`tool_error`/`tool_stdout`、`progress`、`complete`、`request_confirmation`、`confirmation_complete`(另一个客户端已经回答了同一个确认,本端据此关掉自己的弹窗,不重复应答)、`request_user_question`、`session_update`、`todo_update`。
+**出站(serve → 插件)**:`text_delta`/`thinking_delta`/`assistant_message`、`tool_call`/`tool_result`/`tool_error`/`tool_stdout`、`progress`、`complete`、`request_confirmation`、`confirmation_complete`(另一个客户端已经回答了同一个确认,本端据此关掉自己的弹窗,不重复应答)、`request_user_question`、`session_update`、`todo_update`。
 
-`tool_call`/`tool_result`/`tool_error`/`tool_stdout` 都带 `tool_id`——这是 `ws_handlers.go` 的 `handleEvent` 往 `map[string]any` 里额外加的字段,`ws_types.go` 里对应的具名 struct 并没有声明它,但它是把 `tool_result` 正确配对回它所属的 `tool_call` 的唯一可靠依据(事件之间没有顺序保证,一旦两个工具调用交叠,按"最近一个还没结果的调用"配对就会配错)。
+**流式文本走的不是 `output`**——`ws_types.go` 声明的 `wsEventOutput`(`type:"output"`)和前面那三个死事件一样,serve 从未构造过。真实的文字生命周期:`text_delta` 逐 token 流式推送正文,`thinking_delta` 流式推送推理过程(仅当 session 开了 `show_reasoning` 才发,默认关闭);turn 结束时 `assistant_message{content, thinking}` 带着完整聚合内容到达,**替换**而不是追加到 `text_delta` 流式拼出来的文本上——这是 serve 侧的既定设计(`ws_handlers.go` 原话:"Frontend expects a complete assistant_message event rather than streaming text_delta fragments"),Web UI 的 `ChatView.svelte` 就是这么处理的:`text_delta` 追加到当前流式气泡,`assistant_message` 到达后直接整段替换并标记流式结束。`history_user_message`(回显用户自己发的消息)和 `turn_done`(内容和 `assistant_message` 重复)也是真实事件,但插件不需要处理——用户消息已经在发送时本地乐观渲染,`turn_done` 纯冗余。
+
+`tool_call`/`tool_result`/`tool_error`/`tool_stdout` 都带 `tool_id`——这是 `ws_handlers.go` 的 `handleEvent` 往 `map[string]any` 里额外加的字段,`ws_types.go` 里对应的具名 struct 并没有声明它,但它是把 `tool_result` 正确配对回它所属的 `tool_call` 的唯一可靠依据(事件之间没有顺序保证,一旦两个工具调用交叠,按"最近一个还没结果的调用"配对就会配错)。`tool_call` 没有 `summary` 字段——那是 `ws_types.go` 里 `wsEventToolCall` 声明了但从未真正赋值的字段。
+
+`progress.message` 只在 REST 历史回放的快照里有值,live turn 的起始/续播广播(`doAgentTurn`/`reseedThinkingProgress`)只带 `progress_type`(比如 `"thinking"`),不带 `message`——想显示"思考中"之类的状态提示,要从 `progress_type` 推断,不能指望 `message`。
 
 `diff`/`file_preview`/`shell_preview` 三个 `ws_types.go` 里声明的事件类型是死代码,serve 侧从未构造过——**渲染 diff 走的是另一条路**:
 
@@ -141,6 +145,6 @@ REST 侧用到的既有路由:`POST /api/sessions`(创建)、`GET /api/sessions`
 ## 里程碑
 
 1. **连接层**:探活 → 没有则 `octo serve -d` → WS 握手成功。验收:状态栏显示 `octo: connected`。
-2. **对话闭环**:发消息 → 流式渲染 output/tool_call/tool_result → 权限确认与 AskUserQuestion 弹窗可用。验收:能跑完一个带工具调用和权限确认的完整 turn。
+2. **对话闭环**:发消息 → 流式渲染 text_delta/assistant_message/tool_call/tool_result → 权限确认与 AskUserQuestion 弹窗可用。验收:能跑完一个带工具调用和权限确认的完整 turn,agent 的文字回复真的显示出来(不是只有工具卡片)。
 3. **IDE → agent**:workspace 根绑定 working_dir;选区/`@`文件/诊断注入。验收:选中代码提问,agent 收到的正是那段代码。
 4. **agent → IDE**:`request_confirmation.diff`/`tool_result.ui_payload`(`type:"edit"`)渲染为原生 diff editor,点击跳转文件。验收:agent 改文件时在编辑器里看到原生 diff 而非纯文本。
