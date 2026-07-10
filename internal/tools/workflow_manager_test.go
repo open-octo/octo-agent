@@ -204,6 +204,59 @@ func TestWorkflowManager_Kill(t *testing.T) {
 	}
 }
 
+// TestWorkflowManager_ResolvesByJournalRunID verifies Read and Kill accept the
+// JournalRunID handle (the "wf-YYYYMMDD-..." id that failure notices print and
+// tell the model to pass to resume_from), not just the short "wf_N" alias. The
+// two identify the same run, so a lookup with either must succeed — otherwise
+// the model gets "no run named ..." for the very id the last message showed it.
+func TestWorkflowManager_ResolvesByJournalRunID(t *testing.T) {
+	m := NewWorkflowManager()
+	id, err := m.Start(WorkflowRunRequest{Script: `agent("x")`, Agent: echoAgentOpts})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	snap := waitForDone(t, m, id)
+	if snap.JournalRunID == "" {
+		t.Fatal("expected a non-empty JournalRunID after completion")
+	}
+	if snap.JournalRunID == id {
+		t.Fatalf("JournalRunID (%q) should differ from the short alias (%q)", snap.JournalRunID, id)
+	}
+
+	byJournal, ok := m.Read(snap.JournalRunID)
+	if !ok {
+		t.Fatalf("Read(%q) by JournalRunID should resolve", snap.JournalRunID)
+	}
+	if byJournal.ID != id {
+		t.Errorf("Read by JournalRunID resolved to %q, want the same run %q", byJournal.ID, id)
+	}
+	if _, ok := m.Read("wf-nonexistent-00000000"); ok {
+		t.Error("Read of an unknown JournalRunID should not resolve")
+	}
+	// Kill accepts the JournalRunID too (already-finished run → found, not running).
+	if found, _ := m.Kill(snap.JournalRunID); !found {
+		t.Error("Kill by JournalRunID should report found=true")
+	}
+}
+
+// TestWorkflowManager_EmptyIDMatchesNoRun guards the resolveLocked empty-id
+// short-circuit: a running run has an empty journalID, so without the guard an
+// empty id would match (and Kill) the first still-running run.
+func TestWorkflowManager_EmptyIDMatchesNoRun(t *testing.T) {
+	m := NewWorkflowManager()
+	id, err := m.Start(WorkflowRunRequest{Script: `agent("x")`, Agent: ctxBlockingAgent})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Kill(id) // clean up the blocked run
+	if _, ok := m.Read(""); ok {
+		t.Error(`Read("") must not resolve to a running run`)
+	}
+	if found, _ := m.Kill(""); found {
+		t.Error(`Kill("") must not find (and cancel) a running run`)
+	}
+}
+
 // TestWorkflowManager_KillUnknownAndFinished covers the non-running cases.
 func TestWorkflowManager_KillUnknownAndFinished(t *testing.T) {
 	m := NewWorkflowManager()
