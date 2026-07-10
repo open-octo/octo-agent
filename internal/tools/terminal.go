@@ -99,11 +99,11 @@ func (TerminalTool) Definition() agent.ToolDefinition {
 				"run_in_background": map[string]any{
 					"type":        "string",
 					"enum":        []string{"async", "interactive"},
-					"description": "Run detached in the background (no 120s timeout, non-blocking). Only use this if the next step does NOT need the command's output AND you already expect the command to run well past a few tens of seconds — omitting this runs synchronously and auto-promotes to background on its own if it turns out to be slow, so most builds/tests/installs (which finish in a few seconds) should just run synchronously instead of guessing async up front. \"async\" for one-shot tasks whose result can wait and that you expect to be genuinely long-running — the system auto-notifies on completion and terminal_output is not allowed. \"interactive\" for long-running services or REPLs — terminal_output and terminal_input are allowed. Either way the process is tracked by octo and KILLED when the session ends — including a tunnel/proxy meant to keep exposing a port (e.g. ngrok, cloudflared) or any daemon meant to outlive octo: use detached:true for those instead.",
+					"description": "Run detached in the background (no 120s timeout, non-blocking). Only use this if the next step does NOT need the command's output AND you already expect the command to run well past a few tens of seconds — omitting this runs synchronously and auto-promotes to background on its own if it turns out to be slow, so most builds/tests/installs (which finish in a few seconds) should just run synchronously instead of guessing async up front. \"async\" for one-shot tasks whose result can wait and that you expect to be genuinely long-running — the system auto-notifies on completion and terminal_output is not allowed. \"interactive\" for long-running services or REPLs — terminal_output and terminal_input are allowed. Either way the process is tracked by octo and KILLED when the session ends — including a tunnel/proxy meant to keep exposing a port (e.g. ngrok, cloudflared) or any daemon meant to outlive octo: use detached:true for those instead.\n\nNOT available inside a sub-agent: a sub-agent must return its result within the single turn that spawned it, so it has no later turn in which to collect a backgrounded process's output. When you are a sub-agent, do NOT pass run_in_background — async and interactive are both ignored and the command runs synchronously (and is killed if it exceeds the 120s timeout). detached is unavailable to a sub-agent for the same reason. A command that genuinely needs to run longer than 120s must be handed back to the parent to run.",
 				},
 				"detached": map[string]any{
 					"type":        "boolean",
-					"description": "Launch the command as a daemon that DELIBERATELY outlives octo: it runs in its own session, is NOT tracked, and is NOT killed when the session ends. Returns only the OS pid — terminal_output and kill_shell cannot see it, so the user manages it themselves (e.g. `kill <pid>`). Use ONLY when the user explicitly wants a process to survive the agent (e.g. exposing a port with ngrok, starting a standalone server). For tasks that should be cleaned up with the session, use run_in_background instead. No `nohup`/`&` needed — detachment is handled for you. stdout+stderr go to log_file.",
+					"description": "Launch the command as a daemon that DELIBERATELY outlives octo: it runs in its own session, is NOT tracked, and is NOT killed when the session ends. Returns only the OS pid — terminal_output and kill_shell cannot see it, so the user manages it themselves (e.g. `kill <pid>`). Use ONLY when the user explicitly wants a process to survive the agent (e.g. exposing a port with ngrok, starting a standalone server). For tasks that should be cleaned up with the session, use run_in_background instead. No `nohup`/`&` needed — detachment is handled for you. stdout+stderr go to log_file. NOT available inside a sub-agent — a sub-agent must finish within its turn and cannot leave a daemon behind, so detached is ignored and the command runs synchronously.",
 				},
 				"log_file": map[string]any{
 					"type":        "string",
@@ -156,10 +156,21 @@ func (t TerminalTool) ExecuteStream(
 	}
 	stdinText, _ := input["stdin"].(string)
 
+	// A sub-agent has no life beyond the turn that spawned it: it returns its
+	// result to the parent and stops, so there is no later turn in which it could
+	// collect a detached/backgrounded process's output. Letting it background a
+	// command therefore (a) leaks the process's completion notice into the PARENT
+	// conversation, unattributed, and (b) makes the sub-agent return a useless
+	// "started in background" mid-state instead of the result it was asked for.
+	// So every terminal call from inside a sub-agent runs synchronously: the
+	// detached and run_in_background branches below are skipped, and the sync
+	// timeout kills the command with an error rather than promoting it.
+	subAgent := IsSubAgent(ctx)
+
 	// Detached launch: a daemon that deliberately outlives octo. Not tracked, not
 	// killed on exit — fire-and-forget. Checked before run_in_background so
 	// detached wins if both are set.
-	if det, _ := input["detached"].(bool); det {
+	if det, _ := input["detached"].(bool); det && !subAgent {
 		logFile, _ := input["log_file"].(string)
 		pid, logPath, err := startDetached(ctx, command, logFile)
 		if err != nil {
@@ -180,7 +191,9 @@ func (t TerminalTool) ExecuteStream(
 
 	// Background launch: detach, no timeout, return the id immediately. The
 	// guard above still applies, so dangerous commands are blocked either way.
-	if useBg {
+	// Skipped for sub-agents (see subAgent above) — the requested async/
+	// interactive mode is ignored and the command runs synchronously instead.
+	if useBg && !subAgent {
 		id, err := t.managerFor(ctx).Start(command, bgMode)
 		if err != nil {
 			return agent.ToolResult{Text: ""}, err
@@ -199,6 +212,18 @@ func (t TerminalTool) ExecuteStream(
 			Text: fmt.Sprintf("Started %s background process %s.%s\n\n%s", bgMode, id, stdinWarn, notice),
 			UI:   terminalUI(command, "running", fmt.Sprintf("%s background process %s", bgMode, id)),
 		}, nil
+	}
+
+	// If a sub-agent asked to background/detach, we ignored that above and fall
+	// through to the synchronous path. Surface a note so the sub-agent learns the
+	// mode was dropped rather than silently getting different behavior than it
+	// requested. Wrapped in <system-reminder> so UIs keep it out of the card.
+	var bgIgnoredNote string
+	if subAgent {
+		detached, _ := input["detached"].(bool)
+		if useBg || detached {
+			bgIgnoredNote = "<system-reminder>run_in_background / detached is not available to a sub-agent — a sub-agent must finish within its turn, so the command was run synchronously instead. Do not request async, interactive, or detached from a sub-agent; hand any genuinely long-running command back to the parent.</system-reminder>\n\n"
+		}
 	}
 
 	// Synchronous path: start as a background process so that if we hit the
@@ -241,10 +266,18 @@ func (t TerminalTool) ExecuteStream(
 		}
 	}
 
-	// Register a SyncSession so TUI (Ctrl+B) and Web ("Background" button)
-	// can promote this process before the timer fires.
-	sess := mgr.BeginSync()
-	defer mgr.EndSync()
+	// Register a SyncSession so TUI (Ctrl+B) and Web ("Background" button) can
+	// promote this process before the timer fires. A sub-agent's command is never
+	// promotable: promotion leaves the process running past the sub-agent's turn
+	// (see subAgent above), so we skip registration entirely — the process stays
+	// invisible to HasActiveSync, so Ctrl+B/the button can't target it — and leave
+	// promoteCh nil, so that select arm (a receive on a nil channel) never fires.
+	var promoteCh <-chan struct{}
+	if !subAgent {
+		sess := mgr.BeginSync()
+		defer mgr.EndSync()
+		promoteCh = sess.C()
+	}
 
 	// snapshot returns the collected output so far, tab-expanded and with the
 	// truncation marker prepended when the cap dropped earlier bytes. The
@@ -277,9 +310,10 @@ func (t TerminalTool) ExecuteStream(
 
 	for {
 		select {
-		case <-sess.C():
+		case <-promoteCh:
 			// User promoted (Ctrl+B in TUI / button in Web): make the process
-			// visible in the background panel and return. NOT reaped.
+			// visible in the background panel and return. NOT reaped. Never fires
+			// for a sub-agent (promoteCh is nil there).
 			mgr.Promote(id)
 			body := MaybeSpillOutput(id, snapshot())
 			return agent.ToolResult{
@@ -287,6 +321,18 @@ func (t TerminalTool) ExecuteStream(
 				UI:   terminalUI(command, "running", body),
 			}, nil
 		case <-timer.C:
+			if subAgent {
+				// A sub-agent cannot background a process (see subAgent above), so
+				// there is no one to collect this command's output later. Kill and
+				// reap it here and return the partial output plus an error, rather
+				// than promoting it to a background process that would outlive the
+				// sub-agent and fire its completion notice into the parent session.
+				mgr.Kill(id)
+				body := snapshot()
+				mgr.Remove(id)
+				text := fmt.Sprintf("%s\n[timeout: command exceeded %s and was killed. A sub-agent runs every command synchronously and cannot background or detach a process, so a command that needs to run longer than %s can't complete here — return what you have, or hand the long-running work back to the parent.]", body, TerminalTimeout, TerminalTimeout)
+				return agent.ToolResult{Text: text, UI: terminalUI(command, "failed", text)}, nil
+			}
 			// Timer backstop: covers IM channels and forgotten browser tabs.
 			// Identical outcome to the manual promote path.
 			mgr.Promote(id)
@@ -316,10 +362,10 @@ func (t TerminalTool) ExecuteStream(
 			mgr.Remove(id)
 			hint := backtickSubstitutionHint(command, body)
 			if status != "exited: 0" {
-				text := hint + body + "\n[exit: " + strings.TrimPrefix(status, "exited: ") + "]"
+				text := bgIgnoredNote + hint + body + "\n[exit: " + strings.TrimPrefix(status, "exited: ") + "]"
 				return agent.ToolResult{Text: text, UI: terminalUI(command, "failed", text)}, nil
 			}
-			return agent.ToolResult{Text: hint + body, UI: terminalUI(command, "success", body)}, nil
+			return agent.ToolResult{Text: bgIgnoredNote + hint + body, UI: terminalUI(command, "success", body)}, nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

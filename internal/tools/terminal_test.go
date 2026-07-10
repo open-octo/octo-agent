@@ -45,6 +45,10 @@ func TestTerminalTool_Definition(t *testing.T) {
 	if got, ok := rib["enum"].([]string); !ok || len(got) != len(wantEnum) {
 		t.Errorf("run_in_background.enum = %v, want %v", rib["enum"], wantEnum)
 	}
+	// The description must tell a sub-agent that backgrounding is unavailable.
+	if desc, _ := rib["description"].(string); !strings.Contains(desc, "sub-agent") {
+		t.Errorf("run_in_background.description should explain the sub-agent restriction; got: %q", desc)
+	}
 	req, ok := def.Parameters["required"].([]string)
 	if !ok {
 		t.Fatal("Parameters.required is not []string")
@@ -267,6 +271,160 @@ func TestTerminalTool_RespectsContextDeadline(t *testing.T) {
 	if elapsed > 2*time.Second {
 		t.Errorf("elapsed %s — context deadline was not respected", elapsed)
 	}
+}
+
+// TestTerminalTool_SubAgent_BackgroundRunsSync verifies that a run_in_background
+// request from inside a sub-agent is ignored and the command runs synchronously,
+// returning its real output in-band rather than a "started in background" id.
+// Backgrounding from a sub-agent would leak the completion notice into the parent
+// session and return a useless mid-state to the sub-agent.
+func TestTerminalTool_SubAgent_BackgroundRunsSync(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell only")
+	}
+	ctx := WithSubAgentMarker(context.Background())
+	for _, mode := range []string{"async", "interactive"} {
+		result, err := TerminalTool{}.Execute(ctx, "terminal", map[string]any{
+			"command":           "echo sub-agent-hi",
+			"run_in_background": mode,
+		})
+		if err != nil {
+			t.Fatalf("mode %q: Execute: %v", mode, err)
+		}
+		if !strings.Contains(result.Text, "sub-agent-hi") {
+			t.Errorf("mode %q: want real output in-band, got: %q", mode, result.Text)
+		}
+		if strings.Contains(result.Text, "background process") {
+			t.Errorf("mode %q: sub-agent must not background; got: %q", mode, result.Text)
+		}
+		// The sub-agent must be told the mode was dropped, not silently downgraded.
+		if !strings.Contains(result.Text, "not available to a sub-agent") {
+			t.Errorf("mode %q: want an explanatory note, got: %q", mode, result.Text)
+		}
+	}
+}
+
+// TestTerminalTool_SubAgent_DetachedRunsSync verifies that detached:true from a
+// sub-agent is ignored and the command runs synchronously — a sub-agent must not
+// spawn a daemon that outlives it.
+func TestTerminalTool_SubAgent_DetachedRunsSync(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell only")
+	}
+	ctx := WithSubAgentMarker(context.Background())
+	result, err := TerminalTool{}.Execute(ctx, "terminal", map[string]any{
+		"command":  "echo sub-agent-detached",
+		"detached": true,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(result.Text, "sub-agent-detached") {
+		t.Errorf("want real output in-band, got: %q", result.Text)
+	}
+	if strings.Contains(result.Text, "detached process") {
+		t.Errorf("sub-agent must not detach; got: %q", result.Text)
+	}
+	if !strings.Contains(result.Text, "not available to a sub-agent") {
+		t.Errorf("want an explanatory note, got: %q", result.Text)
+	}
+}
+
+// TestTerminalTool_SubAgent_SyncTimeoutKills verifies that when a sub-agent's
+// synchronous command exceeds TerminalTimeout it is killed with an error, rather
+// than auto-promoted to a background process (which would outlive the sub-agent
+// and notify the parent). A non-sub-agent context still promotes.
+func TestTerminalTool_SubAgent_SyncTimeoutKills(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell only")
+	}
+	orig := TerminalTimeout
+	TerminalTimeout = 200 * time.Millisecond
+	defer func() { TerminalTimeout = orig }()
+	// The control case below promotes a sleep to the default manager; reap it (and
+	// any straggler) so it doesn't outlive the test.
+	defer DefaultBackgroundManager().KillAll()
+
+	// Sub-agent: timeout kills the command, no background promotion.
+	start := time.Now()
+	result, err := TerminalTool{}.Execute(WithSubAgentMarker(context.Background()), "terminal", map[string]any{
+		"command": "sleep 30",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("elapsed %s — sub-agent timeout did not kill promptly", elapsed)
+	}
+	if !strings.Contains(result.Text, "was killed") {
+		t.Errorf("want a kill/timeout error, got: %q", result.Text)
+	}
+	if strings.Contains(result.Text, "background process") {
+		t.Errorf("sub-agent timeout must not promote to background; got: %q", result.Text)
+	}
+
+	// Control: a normal (non-sub-agent) context still promotes to background.
+	result, err = TerminalTool{}.Execute(context.Background(), "terminal", map[string]any{
+		"command": "sleep 30",
+	})
+	if err != nil {
+		t.Fatalf("Execute (control): %v", err)
+	}
+	if !strings.Contains(result.Text, "background process") {
+		t.Errorf("non-sub-agent should promote to background; got: %q", result.Text)
+	}
+}
+
+// TestTerminalTool_SubAgent_NotPromotable verifies a sub-agent's synchronous
+// command registers NO promotable SyncSession, so the TUI Ctrl+B / web
+// "Background" button can't promote it into a process that outlives the
+// sub-agent. Without the guard, a manual promote signal would background the
+// command and fire its completion notice into the parent session.
+func TestTerminalTool_SubAgent_NotPromotable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell only")
+	}
+	mgr := NewBackgroundManager()
+	tool := TerminalTool{mgr: mgr}
+
+	// Sub-agent command: run ~1s in the background so we can observe the manager
+	// while it polls. It must never expose a promotable sync session.
+	subDone := make(chan struct{})
+	go func() {
+		_, _ = tool.Execute(WithSubAgentMarker(context.Background()), "terminal", map[string]any{"command": "sleep 1"})
+		close(subDone)
+	}()
+	deadline := time.Now().Add(600 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if mgr.HasSync() {
+			t.Fatal("a sub-agent's sync command must not register a promotable SyncSession")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mgr.PromoteSync() // no-op: nothing registered
+	<-subDone
+
+	// Control: a non-sub-agent command DOES register one (proves the guard, not a
+	// missing BeginSync, is what suppresses it).
+	ctlDone := make(chan struct{})
+	go func() {
+		_, _ = tool.Execute(context.Background(), "terminal", map[string]any{"command": "sleep 1"})
+		close(ctlDone)
+	}()
+	sawSync := false
+	deadline = time.Now().Add(700 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if mgr.HasSync() {
+			sawSync = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !sawSync {
+		t.Error("a non-sub-agent sync command should register a promotable SyncSession")
+	}
+	mgr.PromoteSync() // let the control return promptly instead of waiting out the sleep
+	<-ctlDone
 }
 
 func TestTerminalInputTool_Definition(t *testing.T) {

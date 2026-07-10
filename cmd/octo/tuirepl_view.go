@@ -51,6 +51,14 @@ var (
 )
 
 func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Ctrl+D and idle Ctrl+C quit only on a second consecutive press; any other
+	// key disarms the confirmation. Ctrl+C keeps the arm here so a second one can
+	// confirm — but when a turn is running its handler interrupts and clears it.
+	quitArmed := m.quitArmed
+	if msg.Type != tea.KeyCtrlD && msg.Type != tea.KeyCtrlC {
+		m.quitArmed = false
+	}
+
 	if m.modal != nil {
 		return m.handleModalKey(msg)
 	}
@@ -107,8 +115,13 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyCtrlD:
-		m.quit = true
-		return m, tea.Quit
+		// First press arms and shows a hint; a second consecutive press quits.
+		if quitArmed {
+			m.quit = true
+			return m, tea.Quit
+		}
+		m.quitArmed = true
+		return m, nil
 
 	case tea.KeyCtrlB:
 		// Background the current sync terminal or sub-agent, if one is running.
@@ -124,11 +137,19 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlC:
 		if m.turnRunning {
+			// Interrupt is a distinct action, not a quit — reset any pending
+			// quit confirmation so a later Ctrl+C starts the count fresh.
+			m.quitArmed = false
 			m.interrupt()
 			return m, nil
 		}
-		m.quit = true
-		return m, tea.Quit
+		// Idle: first press arms and shows a hint; a second consecutive press quits.
+		if quitArmed {
+			m.quit = true
+			return m, tea.Quit
+		}
+		m.quitArmed = true
+		return m, nil
 
 	case tea.KeyEsc:
 		if m.turnRunning {
@@ -1380,6 +1401,13 @@ func (m *tuiModel) View() string {
 	if m.modal != nil {
 		b.WriteString(m.modalView())
 		return b.String()
+	}
+
+	// Quit confirmation: a first Ctrl+D or idle Ctrl+C arms the quit and shows
+	// this hint, which clears as soon as any other key is pressed.
+	if m.quitArmed {
+		b.WriteString(hintStyle.Render("  Press Ctrl+C or Ctrl+D again to exit"))
+		b.WriteByte('\n')
 	}
 
 	// Slash-command completion menu, right above the input box (Claude Code style).

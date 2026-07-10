@@ -775,9 +775,123 @@ func TestTUI_ReplayHistoryLines_ToolError(t *testing.T) {
 
 func TestTUI_CtrlDQuits(t *testing.T) {
 	m := newTestModel()
+
+	// First press arms but must not quit.
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if m.quit || cmd != nil {
+		t.Fatal("first Ctrl+D should arm, not quit")
+	}
+	if !m.quitArmed {
+		t.Fatal("first Ctrl+D should arm the quit confirmation")
+	}
+
+	// Second consecutive press quits.
+	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if !m.quit || cmd == nil {
+		t.Error("second Ctrl+D should set quit and return a quit cmd")
+	}
+}
+
+func TestTUI_CtrlCQuitsWhenIdle(t *testing.T) {
+	m := newTestModel()
+
+	// First idle Ctrl+C arms but must not quit.
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if m.quit || cmd != nil {
+		t.Fatal("first idle Ctrl+C should arm, not quit")
+	}
+	if !m.quitArmed {
+		t.Fatal("first idle Ctrl+C should arm the quit confirmation")
+	}
+
+	// Second consecutive press quits.
+	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !m.quit || cmd == nil {
+		t.Error("second idle Ctrl+C should set quit and return a quit cmd")
+	}
+}
+
+func TestTUI_CtrlCInterruptsWithoutArmingQuit(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+
+	// While a turn runs, Ctrl+C interrupts and must never arm a quit.
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if m.quit || cmd != nil {
+		t.Fatal("running-turn Ctrl+C should interrupt, not quit")
+	}
+	if m.quitArmed {
+		t.Error("running-turn Ctrl+C must not arm the quit confirmation")
+	}
+}
+
+func TestTUI_CtrlDAndCShareQuitConfirmation(t *testing.T) {
+	m := newTestModel()
+
+	// Ctrl+D arms; a following idle Ctrl+C confirms the shared quit.
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !m.quit || cmd == nil {
+		t.Error("Ctrl+C after Ctrl+D should confirm the shared quit")
+	}
+}
+
+func TestTUI_CtrlCArmsThenCtrlDConfirms(t *testing.T) {
+	m := newTestModel()
+
+	// Reverse of the shared-confirmation test: idle Ctrl+C arms, Ctrl+D confirms.
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
 	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
 	if !m.quit || cmd == nil {
-		t.Error("Ctrl+D should set quit and return a quit cmd")
+		t.Error("Ctrl+D after idle Ctrl+C should confirm the shared quit")
+	}
+}
+
+func TestTUI_QuitDisarmedByOtherKey(t *testing.T) {
+	m := newTestModel()
+
+	// Arm with one Ctrl+D, then press another key — the confirmation resets.
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	if m.quitArmed {
+		t.Fatal("a non-quit key should disarm the quit confirmation")
+	}
+
+	// A lone Ctrl+D after the reset must arm again, not quit.
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if m.quit || cmd != nil {
+		t.Error("Ctrl+D after a disarm should re-arm, not quit")
+	}
+}
+
+func TestTUI_QuitDisarmedByEarlyReturnKey(t *testing.T) {
+	m := newTestModel()
+
+	// Arm, then press a key that the completion menu consumes with an early
+	// return (before the main key switch). The top-of-handleKey guard must still
+	// disarm, otherwise the confirmation would leak past menu navigation.
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	m.complItems = []complItem{{"/help", ""}, {"/model", ""}}
+	m.complIdx = 0
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	if m.quitArmed {
+		t.Error("an early-return completion key should still disarm the quit confirmation")
+	}
+}
+
+func TestTUI_CtrlDArmedThenRunningCtrlCInterrupts(t *testing.T) {
+	m := newTestModel()
+
+	// Ctrl+D arms while idle; then a turn starts and Ctrl+C arrives. It must
+	// interrupt and disarm, never confirming the pending quit.
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	m.turnRunning = true
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if m.quit || cmd != nil {
+		t.Fatal("running-turn Ctrl+C must interrupt, not confirm an armed quit")
+	}
+	if m.quitArmed {
+		t.Error("running-turn Ctrl+C must disarm the pending quit confirmation")
 	}
 }
 

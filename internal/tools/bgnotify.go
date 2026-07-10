@@ -39,7 +39,16 @@ func FormatBgNote(e BgExit) string {
 	} else {
 		b.WriteString("\n(no new output)")
 	}
-	if e.Mode == BgModeAsync && e.Duration > 0 && e.Duration < shortAsyncDuration {
+	// Only nudge for a process that exited ON ITS OWN quickly — that's the case
+	// where a synchronous call would have returned the same output in-band. A
+	// process that was killed (session/turn-end reap, user Ctrl-C, an explicit
+	// kill_shell) didn't "finish fast": e.Duration is time-until-kill, so the
+	// nudge would mislead ("finished in 4s, didn't need background") about a
+	// `sleep 118` terminated at 4s. e.Killed flags a deliberate kill on every
+	// platform; the "signal:" check additionally covers a POSIX signal death not
+	// routed through our killer (e.g. an OOM kill).
+	completedOnItsOwn := !e.Killed && !strings.Contains(e.Status, "signal:")
+	if e.Mode == BgModeAsync && completedOnItsOwn && e.Duration > 0 && e.Duration < shortAsyncDuration {
 		fmt.Fprintf(&b,
 			"\n\n[Note: this finished in %s — that's fast enough it didn't need run_in_background at all. "+
 				"A synchronous terminal call (no run_in_background) would have returned this same output "+

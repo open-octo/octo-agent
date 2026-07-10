@@ -143,6 +143,28 @@ def phase(title)
   nil
 end
 
+# __resume_branch resumes one branch's fiber and, if the block raises, re-raises
+# with the failing item's index and a short preview — so a parallel/pipeline
+# failure names WHICH item blew up ("item #3 ([\"strict\", \"gpt-4o\"]) failed:
+# ...") instead of surfacing a bare, contextless "script error: <msg>" that
+# forces the author to guess which of N branches produced it. Signals the
+# scheduler itself raises — cancellation, budget exhaustion, or an inner level's
+# already-localized item error — begin with "workflow: " and pass through
+# unwrapped, so cancellation stays clean and nesting doesn't double-prefix.
+def __resume_branch(fibers, i, items, *args)
+  fibers[i].resume(*args)
+rescue => e
+  # Re-raise `e` explicitly (not a bare `raise`): in this mruby build a bare
+  # re-raise inside a method-level rescue loses the exception message, leaving
+  # only the class name — which would swallow "workflow: token budget
+  # exhausted", "workflow: skill … failed", and an inner level's already-
+  # localized "workflow: item #…" message.
+  raise e if e.message.index("workflow: ") == 0
+  preview = (items[i].to_s rescue "?")
+  preview = preview[0, 200] + "..." if preview.length > 200
+  raise "workflow: item ##{i} (#{preview}) failed: #{e.message}"
+end
+
 # __run_fibers is the cooperative event loop: every item runs in its own fiber;
 # all branches are advanced to their first agent() call (so every job is in
 # flight) before any result is awaited; then completions are drained in finish
@@ -156,14 +178,14 @@ def __run_fibers(items)
     results = Array.new(fibers.size)
     pending = {}                                 # host token => fiber index
     fibers.each_with_index do |f, i|
-      r = f.resume
+      r = __resume_branch(fibers, i, items)
       f.alive? ? (pending[r] = i) : (results[i] = r)
     end
     until pending.empty?
       token, result = __take_for(pending)         # next completion this level owns
       i      = pending.delete(token)
       f      = fibers[i]
-      r      = f.resume(result)                    # agent() returns; fiber continues
+      r      = __resume_branch(fibers, i, items, result) # agent() returns; fiber continues
       f.alive? ? (pending[r] = i) : (results[i] = r)
     end
     results
