@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>octo-agent 架构地图</title>
+<style>
+:root {
+  --bg: #fafaf9;
+  --surface: #ffffff;
+  --ink: #1c1917;
+  --ink-muted: #78716c;
+  --line: #d6d3d1;
+  --accent: #2563eb;
+  --accent-soft: #dbeafe;
+  --serve: #059669;
+  --serve-soft: #d1fae5;
+  --agent: #7c3aed;
+  --agent-soft: #ede9fe;
+  --provider: #d97706;
+  --provider-soft: #fef3c7;
+  --tool: #dc2626;
+  --tool-soft: #fee2e2;
+  --server: #0891b2;
+  --server-soft: #cffafe;
+  --channel: #db2777;
+  --channel-soft: #fce7f3;
+  --cross: #64748b;
+  --cross-soft: #f1f5f9;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0a09;
+    --surface: #1c1917;
+    --ink: #f5f5f4;
+    --ink-muted: #a8a29e;
+    --line: #292524;
+    --accent: #60a5fa;
+    --accent-soft: #1e3a5f;
+    --serve: #34d399;
+    --serve-soft: #064e3b;
+    --agent: #a78bfa;
+    --agent-soft: #2e1065;
+    --provider: #fbbf24;
+    --provider-soft: #78350f;
+    --tool: #f87171;
+    --tool-soft: #7f1d1d;
+    --server: #22d3ee;
+    --server-soft: #164e63;
+    --channel: #f472b6;
+    --channel-soft: #831843;
+    --cross: #94a3b8;
+    --cross-soft: #1e293b;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { padding: 16px; max-width: 100%; }
+
+h1 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.01em;
+}
+.subtitle {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-bottom: 16px;
+}
+
+/* Legend */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Zones */
+.zone {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 4px;
+  background: var(--surface);
+}
+.zone-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.zone-title {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+.zone-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.zone-entry { border-color: var(--accent); }
+.zone-entry .zone-title { color: var(--accent); }
+.zone-entry .zone-badge { background: var(--accent-soft); color: var(--accent); }
+
+.zone-app { border-color: var(--serve); }
+.zone-app .zone-title { color: var(--serve); }
+.zone-app .zone-badge { background: var(--serve-soft); color: var(--serve); }
+
+.zone-agent { border-color: var(--agent); border-width: 2px; }
+.zone-agent .zone-title { color: var(--agent); }
+.zone-agent .zone-badge { background: var(--agent-soft); color: var(--agent); }
+
+.zone-provider { border-color: var(--provider); }
+.zone-provider .zone-title { color: var(--provider); }
+.zone-provider .zone-badge { background: var(--provider-soft); color: var(--provider); }
+
+.zone-tool { border-color: var(--tool); }
+.zone-tool .zone-title { color: var(--tool); }
+.zone-tool .zone-badge { background: var(--tool-soft); color: var(--tool); }
+
+.zone-server { border-color: var(--server); }
+.zone-server .zone-title { color: var(--server); }
+.zone-server .zone-badge { background: var(--server-soft); color: var(--server); }
+
+.zone-cross { border-color: var(--cross); }
+.zone-cross .zone-title { color: var(--cross); }
+.zone-cross .zone-badge { background: var(--cross-soft); color: var(--cross); }
+
+/* Cards */
+.cards { display: grid; gap: 8px; }
+.card {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s;
+}
+.card:hover { border-color: var(--accent); transform: translateX(2px); }
+.card-title {
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 2px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.card-desc {
+  font-size: 11px;
+  color: var(--ink-muted);
+  line-height: 1.4;
+}
+.card-detail {
+  display: none;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.card.expanded .card-detail { display: block; }
+.card .arrow { transition: transform 0.2s; }
+.card.expanded .arrow { transform: rotate(90deg); }
+
+.card.entry { border-left-color: var(--accent); }
+.card.app { border-left-color: var(--serve); }
+.card.agent { border-left-color: var(--agent); }
+.card.provider { border-left-color: var(--provider); }
+.card.tool { border-left-color: var(--tool); }
+.card.server { border-left-color: var(--server); }
+.card.channel { border-left-color: var(--channel); }
+.card.cross { border-left-color: var(--cross); }
+
+/* Connectors */
+.connector {
+  text-align: center;
+  color: var(--line);
+  font-size: 18px;
+  padding: 4px 0;
+  position: relative;
+}
+.connector-label {
+  font-size: 10px;
+  color: var(--ink-muted);
+  background: var(--bg);
+  padding: 0 6px;
+  position: relative;
+  top: -2px;
+}
+
+/* Flow section */
+.flow {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.flow-title {
+  font-weight: 700;
+  font-size: 12px;
+  margin-bottom: 10px;
+  color: var(--accent);
+}
+.flow-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.flow-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+}
+.step-num {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 10px;
+}
+.step-text { color: var(--ink-muted); padding-top: 2px; }
+.step-text b { color: var(--ink); }
+
+/* Key insight */
+.insight {
+  margin-top: 12px;
+  padding: 10px;
+  background: var(--accent-soft);
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.insight-title {
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+/* Responsive */
+@media (min-width: 640px) {
+  .cards.two { grid-template-columns: 1fr 1fr; }
+  .cards.three { grid-template-columns: 1fr 1fr 1fr; }
+  .flow-steps { flex-direction: row; flex-wrap: wrap; }
+  .flow-step { width: calc(50% - 4px); }
+}
+@media (min-width: 900px) {
+  .flow-step { width: calc(25% - 6px); }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>🐙 octo-agent 架构地图</h1>
+<p class="subtitle">Go 1.22+ 单二进制 · 五层单向依赖 · 协议无关 Agent 循环</p>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><span class="dot" style="background:var(--accent)"></span>入口层</div>
+  <div class="legend-item"><span class="dot" style="background:var(--serve)"></span>装配层</div>
+  <div class="legend-item"><span class="dot" style="background:var(--agent)"></span>Agent 核心</div>
+  <div class="legend-item"><span class="dot" style="background:var(--provider)"></span>Provider</div>
+  <div class="legend-item"><span class="dot" style="background:var(--tool)"></span>工具集</div>
+  <div class="legend-item"><span class="dot" style="background:var(--server)"></span>服务层</div>
+  <div class="legend-item"><span class="dot" style="background:var(--channel)"></span>IM 桥接</div>
+  <div class="legend-item"><span class="dot" style="background:var(--cross)"></span>跨切关注</div>
+</div>
+
+<!-- Entry Layer -->
+<div class="zone zone-entry">
+  <div class="zone-header">
+    <span class="zone-title">📥 入口层</span>
+    <span class="zone-badge">cmd/octo/</span>
+  </div>
+  <div class="cards two">
+    <div class="card entry" onclick="toggle(this)">
+      <div class="card-title"><span>CLI / TUI / Headless</span><span class="arrow">▶</span></div>
+      <div class="card-desc">Bubble Tea 交互界面 + claude -p 风格单次执行</div>
+      <div class="card-detail">
+        <b>关键文件：</b>main.go → chat.go / tuirepl.go / repl.go / turncore.go<br>
+        <b>职责：</b>解析命令行 → 装配 session → 分派到 runTurn()
+      </div>
+    </div>
+    <div class="card entry" onclick="toggle(this)">
+      <div class="card-title"><span>octo serve</span><span class="arrow">▶</span></div>
+      <div class="card-desc">启动内嵌 Web 服务 + WebSocket 网关</div>
+      <div class="card-detail">
+        <b>关键文件：</b>cmd/octo/serve.go<br>
+        <b>职责：</b>拉起 server 实例，监听 8088 端口，承载 Web + REST + WS
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="connector">↓ <span class="connector-label">装配 NewSessionToolEnv</span> ↓</div>
+
+<!-- App Assembly Layer -->
+<div class="zone zone-app">
+  <div class="zone-header">
+    <span class="zone-title">🔧 装配层</span>
+    <span class="zone-badge">internal/app/</span>
+  </div>
+  <div class="cards two">
+    <div class="card app" onclick="toggle(this)">
+      <div class="card-title"><span>Sender 适配</span><span class="arrow">▶</span></div>
+      <div class="card-desc">Provider → agent.Sender 统一接口</div>
+      <div class="card-detail">
+        <b>关键文件：</b>sender.go — NewSender()<br>
+        <b>解耦点：</b>agent 不知道 HTTP、JSON 字段、SSE 细节
+      </div>
+    </div>
+    <div class="card app" onclick="toggle(this)">
+      <div class="card-title"><span>工具环境装配</span><span class="arrow">▶</span></div>
+      <div class="card-desc">并发安全的工具运行时环境</div>
+      <div class="card-detail">
+        <b>关键文件：</b>toolenv.go — NewSessionToolEnv()<br>
+        <b>装配内容：</b>权限闸门、SubAgentManager、GoalStore、browser、memory
+      </div>
+    </div>
+    <div class="card app" onclick="toggle(this)">
+      <div class="card-title"><span>Permission Gate</span><span class="arrow">▶</span></div>
+      <div class="card-desc">每 turn 重建规则引擎</div>
+      <div class="card-detail">
+        <b>行为：</b>prepareToolTurn 中调用，即时生效 + 失败回退 lastGoodRules
+      </div>
+    </div>
+    <div class="card app" onclick="toggle(this)">
+      <div class="card-title"><span>MCP 连接</span><span class="arrow">▶</span></div>
+      <div class="card-desc">启动时连接所有配置中的 MCP server</div>
+      <div class="card-detail">
+        <b>关键文件：</b>mcp.go — ConnectAll()<br>
+        <b>装配时机：</b>session 启动时一次性建立
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="connector">↓ <span class="connector-label">Sender 协议无关抽象</span> ↓</div>
+
+<!-- Agent Core Layer -->
+<div class="zone zone-agent">
+  <div class="zone-header">
+    <span class="zone-title">🧠 Agent 核心</span>
+    <span class="zone-badge">internal/agent/ — 叶子包，不导入任何上层</span>
+  </div>
+  <div class="cards two">
+    <div class="card agent" onclick="toggle(this)">
+      <div class="card-title"><span>runLoop / RunStream</span><span class="arrow">▶</span></div>
+      <div class="card-desc">send → tool dispatch → reply 的 agentic 循环</div>
+      <div class="card-detail">
+        <b>关键文件：</b>agent.go — Turn() / Run() / RunStream()<br>
+        <b>核心：</b>持 senderMu，单 turn 全局互斥
+      </div>
+    </div>
+    <div class="card agent" onclick="toggle(this)">
+      <div class="card-title"><span>History + Session</span><span class="arrow">▶</span></div>
+      <div class="card-desc">消息历史 + JSONL 持久化</div>
+      <div class="card-detail">
+        <b>关键文件：</b>history.go / session.go<br>
+        <b>存储：</b>~/.octo/sessions/&lt;id&gt;.jsonl
+      </div>
+    </div>
+    <div class="card agent" onclick="toggle(this)">
+      <div class="card-title"><span>Overflow / Compaction</span><span class="arrow">▶</span></div>
+      <div class="card-desc">上下文溢出处理（分层状态机）</div>
+      <div class="card-detail">
+        <b>关键文件：</b>overflow.go / compaction.go / microcompact.go<br>
+        <b>策略：</b>microcompact → compact → overflow 降级
+      </div>
+    </div>
+    <div class="card agent" onclick="toggle(this)">
+      <div class="card-title"><span>EventHandler</span><span class="arrow">▶</span></div>
+      <div class="card-desc">抽象事件流（text_delta / tool_start / turn_done）</div>
+      <div class="card-detail">
+        <b>关键文件：</b>event.go — EventKind / EventHandler<br>
+        <b>下游适配：</b>TUI card ← ViewSink | WS broadcast | IM message
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="connector">
+  ↕ <span class="connector-label">agent 不导入这些包 — 通过接口反转</span> ↕
+</div>
+
+<!-- Provider + Tools (side by side on wide screens) -->
+<div class="zone zone-provider">
+  <div class="zone-header">
+    <span class="zone-title">🔌 LLM 后端适配</span>
+    <span class="zone-badge">internal/provider/</span>
+  </div>
+  <div class="cards two">
+    <div class="card provider" onclick="toggle(this)">
+      <div class="card-title"><span>Anthropic (Messages API)</span><span class="arrow">▶</span></div>
+      <div class="card-desc">claude-3-5-sonnet 等模型</div>
+      <div class="card-detail">
+        <b>关键文件：</b>anthropic/client.go / stream.go<br>
+        <b>Wire 归一化：</b>stop_reason → "tool_use"，cache_read_input_tokens 分桶
+      </div>
+    </div>
+    <div class="card provider" onclick="toggle(this)">
+      <div class="card-title"><span>OpenAI (Chat Completions)</span><span class="arrow">▶</span></div>
+      <div class="card-desc">GPT-4o / DeepSeek 等兼容端点</div>
+      <div class="card-detail">
+        <b>关键文件：</b>openai/client.go / stream.go<br>
+        <b>特殊处理：</b>tool_calls 流式片段拼接、cached_tokens 从 prompt_tokens 扣减
+      </div>
+    </div>
+    <div class="card provider" onclick="toggle(this)">
+      <div class="card-title"><span>DashScope / DeepSeek</span><span class="arrow">▶</span></div>
+      <div class="card-desc">百炼 / DeepSeek 兼容端点</div>
+      <div class="card-detail">
+        <b>注意：</b>Bailian 需要 stream_options.include_usage=true，DeepSeek 自带 usage
+      </div>
+    </div>
+    <div class="card provider" onclick="toggle(this)">
+      <div class="card-title"><span>Retry Layer</span><span class="arrow">▶</span></div>
+      <div class="card-desc">请求级恢复 + 流式 idle 超时</div>
+      <div class="card-detail">
+        <b>关键文件：</b>retry/retry.go<br>
+        <b>退避：</b>exponential backoff + jitter
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="zone zone-tool" style="margin-top:8px;">
+  <div class="zone-header">
+    <span class="zone-title">🛠️ 内置工具集</span>
+    <span class="zone-badge">internal/tools/ — 30+ ToolExecutor</span>
+  </div>
+  <div class="cards three">
+    <div class="card tool" onclick="toggle(this)">
+      <div class="card-title"><span>终端 + 沙盒</span><span class="arrow">▶</span></div>
+      <div class="card-desc">命令执行典范实现</div>
+      <div class="card-detail"><b>文件：</b>terminal.go / sandbox.go</div>
+    </div>
+    <div class="card tool" onclick="toggle(this)">
+      <div class="card-title"><span>文件读写</span><span class="arrow">▶</span></div>
+      <div class="card-desc">读写 + grep + glob</div>
+      <div class="card-detail"><b>文件：</b>read_file.go / write_file.go 等</div>
+    </div>
+    <div class="card tool" onclick="toggle(this)">
+      <div class="card-title"><span>Web + Browser</span><span class="arrow">▶</span></div>
+      <div class="card-desc">抓取 + CDP 浏览器自动化</div>
+      <div class="card-detail"><b>文件：</b>web_fetch.go / browser.go</div>
+    </div>
+    <div class="card tool" onclick="toggle(this)">
+      <div class="card-title"><span>Skill + MCP</span><span class="arrow">▶</span></div>
+      <div class="card-desc">技能按需加载 + MCP server 中转</div>
+      <div class="card-detail"><b>文件：</b>skill.go / mcp*.go</div>
+    </div>
+    <div class="card tool" onclick="toggle(this)">
+      <div class="card-title"><span>Sub-agent</span><span class="arrow">▶</span></div>
+      <div class="card-desc">派生子 agent 处理子任务</div>
+      <div class="card-detail"><b>文件：</b>subagent_manager/</div>
+    </div>
+    <div class="card tool" onclick="toggle(this)">
+      <div class="card-title"><span>Workflow / Memory</span><span class="arrow">▶</span></div>
+      <div class="card-desc">mruby 工作流 + 语义记忆 recall</div>
+      <div class="card-detail"><b>文件：</b>workflow.go / memory.go</div>
+    </div>
+  </div>
+</div>
+
+<div class="connector">↕ <span class="connector-label">HTTP · WebSocket · IM 调用</span> ↕</div>
+
+<!-- Server + Channel Layer -->
+<div class="zone zone-server">
+  <div class="zone-header">
+    <span class="zone-title">🌐 服务层</span>
+    <span class="zone-badge">internal/server/</span>
+  </div>
+  <div class="cards two">
+    <div class="card server" onclick="toggle(this)">
+      <div class="card-title"><span>REST + WebSocket</span><span class="arrow">▶</span></div>
+      <div class="card-desc">80+ 路由 + /ws 双向通信</div>
+      <div class="card-detail">
+        <b>关键文件：</b>server.go / ws_handlers.go / ws_hub.go<br>
+        <b>职责：</b>session binding、turn 锁、wake-up 调度、优雅 shutdown
+      </div>
+    </div>
+    <div class="card server" onclick="toggle(this)">
+      <div class="card-title"><span>prepareToolTurn</span><span class="arrow">▶</span></div>
+      <div class="card-desc">装配 turn 环境（server 路径入口）</div>
+      <div class="card-detail">
+        <b>关键文件：</b>handlers_prepare_toolturn.go<br>
+        <b>流程：</b>app.NewSessionToolEnv → 注入权限/agent/browser/memory
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="zone zone-channel" style="margin-top:8px;">
+  <div class="zone-header">
+    <span class="zone-title">📡 IM 桥接</span>
+    <span class="zone-badge">internal/channel/ — 6 大平台</span>
+  </div>
+  <div class="cards two">
+    <div class="card channel" onclick="toggle(this)">
+      <div class="card-title"><span>Telegram / Discord / Feishu</span><span class="arrow">▶</span></div>
+      <div class="card-desc">按钮支持（callback_query / interactive card）</div>
+      <div class="card-detail">
+        <b>接口：</b>SupportsButtons() + SendButtons()<br>
+        <b>数据映射：</b>按钮 → text，复用 isAffirmative/isAlways
+      </div>
+    </div>
+    <div class="card channel" onclick="toggle(this)">
+      <div class="card-title"><span>微信 / 企微 / 钉钉</span><span class="arrow">▶</span></div>
+      <div class="card-desc">纯文本 reply 契约</div>
+      <div class="card-detail">
+        <b>限制：</b>无按钮 SDK，走纯文本交互<br>
+        <b>chunking：</b>长消息自动分片
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Cross-cutting -->
+<div class="zone zone-cross" style="margin-top:8px;">
+  <div class="zone-header">
+    <span class="zone-title">⚙️ 跨切关注点</span>
+    <span class="zone-badge">internal/*</span>
+  </div>
+  <div class="cards three">
+    <div class="card cross" onclick="toggle(this)">
+      <div class="card-title"><span>Permission</span><span class="arrow">▶</span></div>
+      <div class="card-desc">deny > ask > allow 三级决策</div>
+      <div class="card-detail"><b>文件：</b>permission.go + defaults.yml</div>
+    </div>
+    <div class="card cross" onclick="toggle(this)">
+      <div class="card-title"><span>Skills</span><span class="arrow">▶</span></div>
+      <div class="card-desc">L1 name 注入 / L2 body 按需加载</div>
+      <div class="card-detail"><b>文件：</b>skills.go + defaults.go (go:embed)</div>
+    </div>
+    <div class="card cross" onclick="toggle(this)">
+      <div class="card-title"><span>Workflow</span><span class="arrow">▶</span></div>
+      <div class="card-desc">mruby (wazero) Ruby DSL</div>
+      <div class="card-detail"><b>文件：</b>runtime.go / prelude.rb / journal.go</div>
+    </div>
+    <div class="card cross" onclick="toggle(this)">
+      <div class="card-title"><span>Scheduler</span><span class="arrow">▶</span></div>
+      <div class="card-desc">cron 定时任务调度</div>
+      <div class="card-detail"><b>路径：</b>~/.octo/tasks/*.json</div>
+    </div>
+    <div class="card cross" onclick="toggle(this)">
+      <div class="card-title"><span>Hooks</span><span class="arrow">▶</span></div>
+      <div class="card-desc">pre/post-turn + TOFU 信任</div>
+      <div class="card-detail"><b>文件：</b>internal/hooks/</div>
+    </div>
+    <div class="card cross" onclick="toggle(this)">
+      <div class="card-title"><span>Memory Backend</span><span class="arrow">▶</span></div>
+      <div class="card-desc">hindsight / mem0 / MemTensor</div>
+      <div class="card-detail"><b>文件：</b>memorybackend/backend.go</div>
+    </div>
+  </div>
+</div>
+
+<!-- Key Insight -->
+<div class="insight">
+  <div class="insight-title">🎯 关键解耦设计</div>
+  <ul style="margin:0;padding-left:16px;">
+    <li><b>Sender 抽象</b> — agent 不知道 HTTP/SSE/JSON，一切协议细节止步于 app/sender.go</li>
+    <li><b>ToolExecutor 接口</b> — 新增工具 = 往 allTools 加一行，不动 agent/provider</li>
+    <li><b>UIController / ViewSink</b> — 同一套 Event 流被 TUI、Web、IM 三种后端解析渲染</li>
+    <li><b>agent 是叶子包</b> — 零上层依赖，依赖方向严格单向</li>
+  </ul>
+</div>
+
+<br>
+
+</div>
+
+<script>
+function toggle(card) {
+  card.classList.toggle('expanded');
+}
+</script>
+</body>
+</html>
