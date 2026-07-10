@@ -398,6 +398,13 @@ func (m *WorkflowManager) Wait(ctx context.Context, id string) (WorkflowRunSnaps
 // so a lookup tool must accept either — the model naturally retries with whatever
 // id the last message showed it. Caller holds m.mu.
 func (m *WorkflowManager) resolveLocked(id string) *workflowRun {
+	// A running run's journalID is "" until it finishes, so an empty id would
+	// otherwise match the first still-running run in the scan below — a lookup
+	// (or a Kill) of "" must find nothing. Callers already reject empty ids, but
+	// keep the invariant inside the resolver so a future caller can't trip it.
+	if id == "" {
+		return nil
+	}
 	if run := m.runs[id]; run != nil {
 		return run
 	}

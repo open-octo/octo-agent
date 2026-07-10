@@ -239,6 +239,24 @@ func TestWorkflowManager_ResolvesByJournalRunID(t *testing.T) {
 	}
 }
 
+// TestWorkflowManager_EmptyIDMatchesNoRun guards the resolveLocked empty-id
+// short-circuit: a running run has an empty journalID, so without the guard an
+// empty id would match (and Kill) the first still-running run.
+func TestWorkflowManager_EmptyIDMatchesNoRun(t *testing.T) {
+	m := NewWorkflowManager()
+	id, err := m.Start(WorkflowRunRequest{Script: `agent("x")`, Agent: ctxBlockingAgent})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Kill(id) // clean up the blocked run
+	if _, ok := m.Read(""); ok {
+		t.Error(`Read("") must not resolve to a running run`)
+	}
+	if found, _ := m.Kill(""); found {
+		t.Error(`Kill("") must not find (and cancel) a running run`)
+	}
+}
+
 // TestWorkflowManager_KillUnknownAndFinished covers the non-running cases.
 func TestWorkflowManager_KillUnknownAndFinished(t *testing.T) {
 	m := NewWorkflowManager()
