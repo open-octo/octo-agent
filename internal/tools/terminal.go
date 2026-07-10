@@ -13,9 +13,18 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 )
 
-// TerminalTimeout is the maximum time a single terminal command may run
-// synchronously before it is automatically promoted to a background process.
+// TerminalTimeout is the DEFAULT wait for a synchronous command when the call
+// doesn't pass an explicit `timeout`. On expiry the command is killed and an
+// error is returned — it is NOT auto-promoted to the background (a caller that
+// wants a long-running or detached process asks for one explicitly). A var so
+// tests can shorten it.
 var TerminalTimeout = 120 * time.Second
+
+// MaxTerminalTimeout caps the explicit `timeout` a call may request, so a model
+// can't block the turn for an unbounded stretch waiting on one command. A
+// request above this is rejected with a parameter error that points at
+// run_in_background instead of being silently clamped.
+const MaxTerminalTimeout = 10 * time.Minute
 
 // AsyncModeNotice is the model-facing instruction appended to an async
 // background-launch tool result. Wrapped in <system-reminder> so
@@ -78,13 +87,53 @@ func (t TerminalTool) managerFor(ctx context.Context) *BackgroundManager {
 	return resolveBackgroundManager(ctx, t.mgr)
 }
 
+// parseTimeout reads the optional synchronous "timeout" (whole seconds). Missing
+// → the default (TerminalTimeout). A non-number, a non-positive value, or a
+// value past MaxTerminalTimeout is a tool error so the model gets immediate
+// feedback rather than a silently clamped or ignored wait. Only meaningful on
+// the synchronous path — a backgrounded command has no timeout.
+func parseTimeout(input map[string]any) (time.Duration, error) {
+	raw, ok := input["timeout"]
+	if !ok {
+		return TerminalTimeout, nil
+	}
+	// JSON numbers arrive as float64; tolerate the integer types too.
+	var secs float64
+	switch v := raw.(type) {
+	case float64:
+		secs = v
+	case int:
+		secs = float64(v)
+	case int64:
+		secs = float64(v)
+	default:
+		return 0, fmt.Errorf(
+			"terminal: timeout must be a number of seconds (got %T). "+
+				"Omit it for the default %s, or pass e.g. {\"timeout\": 300}.", raw, TerminalTimeout)
+	}
+	if secs <= 0 {
+		return 0, fmt.Errorf(
+			"terminal: timeout must be a positive number of seconds (got %v). "+
+				"Omit it for the default %s.", secs, TerminalTimeout)
+	}
+	d := time.Duration(secs * float64(time.Second))
+	if d > MaxTerminalTimeout {
+		return 0, fmt.Errorf(
+			"terminal: timeout %gs exceeds the %s maximum for a synchronous command. "+
+				"For a command you expect to run longer, launch it with run_in_background:\"async\" "+
+				"(a one-shot task whose result can wait) or \"interactive\" (a long-running service) "+
+				"instead — those detach immediately and have no timeout.", secs, MaxTerminalTimeout)
+	}
+	return d, nil
+}
+
 // Definition returns the agent.ToolDefinition the LLM receives in the tools
 // list. The JSON Schema describes a required "command" string and an optional
 // "run_in_background" enum.
 func (TerminalTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name:        "terminal",
-		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, write_file, edit_file, glob, grep) over raw shell commands when they exist.\n\nChoosing sync vs background: first ask whether the process must survive this octo session (killed when the session/conversation ends? or does it need to keep running independently, e.g. exposed to the internet or to other people)? If it must survive, skip straight to detached below — async/interactive are both tracked and killed with the session regardless of how long-running they are.\n- Default (no run_in_background): runs synchronously, and auto-promotes itself to an async background process if it's still running after 120s — you never have to predict duration up front. This is the right choice for almost everything, INCLUDING compiling/testing/installing/building/linting: most of these finish in a few seconds, and sync returns that output immediately, in this same tool call, with no process id and no second turn spent waiting for a notification. Use sync unless you already have concrete reason to expect the command to run well past a few tens of seconds.\n- run_in_background:\"async\" — for a ONE-SHOT task you already expect to run long (well past a few tens of seconds — e.g. a full monorepo build, a large test suite, a slow install) AND whose result you do NOT need before continuing. Do NOT reach for this just because the command's category is \"a build\" or \"a test run\" — most builds and tests are fast; run those synchronously and let auto-promotion handle it if you're wrong about the duration. Detaches immediately, returns a process id; the system automatically notifies you on completion. DO NOT use terminal_output or terminal_input; wait for the completion notification. Do NOT use async for an install if you immediately need the installed package for the following command — run that install synchronously instead.\n- run_in_background:\"interactive\" — LONG-RUNNING services, REPLs, watchers, servers you will keep inspecting/feeding from THIS session (e.g. `rails c`, `octo serve`, `docker compose up` while you iterate against it): detaches immediately, returns a process id. You may use terminal_output to inspect logs and terminal_input to feed commands. Verify the service with an external check (e.g., `curl http://localhost:PORT`, `pgrep`) rather than polling terminal_output in a tight loop. Still killed when the session ends — NOT for a tunnel/daemon meant to outlive octo (that's detached, below), even though both look like \"a server you started\".\n\nThere is no terminal_list tool. The [BACKGROUND COMPLETED] notification for each finished task includes a summary of other async and interactive tasks still running, so you can track in-flight work without listing processes. Keep the id returned by the original terminal launch; if you lose it, the next completion notice will show other in-flight tasks.\n\nBuffering: the process is connected via pipes, not a terminal, so stdio block-buffers its output — a chatty program's logs can sit unflushed and invisible to terminal_output for a long time. On macOS/Linux, when you will want live logs, prefix the command with `stdbuf -oL` (e.g., `stdbuf -oL npm run dev`) to force line buffering.\n\nTo feed text to a command's stdin, pass it via the stdin parameter instead of embedding it in the command string — embedded text gets interpreted by the shell (backticks, quotes, $), stdin is delivered verbatim.\n\nNEVER put backticks (`) inside a quoted shell string: every shell mangles them — POSIX sh/bash run the backticked text as command substitution (you'll see 'command not found' / 'not found' noise), and PowerShell treats the backtick as an escape character and silently drops it or turns `n/`t into control chars (corrupting the text with no error). For PR/issue/commit bodies (or any text) that contain markdown code spans, ALWAYS pass the text through the stdin parameter with `--body-file -` / `-F -` rather than `--body \"...`...\"`",
+		Description: "Run a shell command in the system shell (POSIX sh on macOS/Linux, PowerShell on Windows — see the Shell line in the environment context) and return stdout+stderr. Use for file operations, running programs, etc. Prefer dedicated tools (read_file, write_file, edit_file, glob, grep) over raw shell commands when they exist.\n\nChoosing sync vs background: first ask whether the process must survive this octo session — keep running independently, e.g. exposed to the internet or to other people? If so, use detached below — async/interactive are both tracked and killed with the session regardless of how long they run.\n- Default (no run_in_background): runs SYNCHRONOUSLY and returns the output in this same tool call. It has a timeout — 120s by default, or set `timeout` (whole seconds, up to 600) when you expect the command to take longer. If it doesn't finish within the timeout it is KILLED and you get an error with whatever output it produced so far — it is NOT moved to the background. So use sync for anything you expect to finish within the timeout (most compiling/testing/installing/building/linting), and size `timeout` to the command rather than under-guessing and having it killed. (A human can promote a still-running sync command from the UI — TUI `Ctrl+B` / a Web button — to keep it instead of letting the timeout kill it, but that's a manual escape hatch, not something to plan around.)\n- run_in_background:\"async\" — for a ONE-SHOT task you already expect to run long (well past a minute or two — e.g. a full monorepo build, a large test suite, a slow install) AND whose result you do NOT need before continuing. Detaches immediately (no timeout), returns a process id; the system automatically notifies you on completion. DO NOT use terminal_output or terminal_input; wait for the completion notification. Do NOT use async for an install if you immediately need the installed package for the following command — run that synchronously (raise `timeout` if it's slow).\n- run_in_background:\"interactive\" — LONG-RUNNING services, REPLs, watchers, servers you will keep inspecting/feeding from THIS session (e.g. `rails c`, `octo serve`, `docker compose up` while you iterate against it): detaches immediately, returns a process id. You may use terminal_output to inspect logs and terminal_input to feed commands. Verify the service with an external check (e.g., `curl http://localhost:PORT`, `pgrep`) rather than polling terminal_output in a tight loop. Still killed when the session ends — NOT for a tunnel/daemon meant to outlive octo (that's detached, below), even though both look like \"a server you started\".\n\nThere is no terminal_list tool. The [BACKGROUND COMPLETED] notification for each finished task includes a summary of other async and interactive tasks still running, so you can track in-flight work without listing processes. Keep the id returned by the original terminal launch; if you lose it, the next completion notice will show other in-flight tasks.\n\nBuffering: the process is connected via pipes, not a terminal, so stdio block-buffers its output — a chatty program's logs can sit unflushed and invisible to terminal_output for a long time. On macOS/Linux, when you will want live logs, prefix the command with `stdbuf -oL` (e.g., `stdbuf -oL npm run dev`) to force line buffering.\n\nTo feed text to a command's stdin, pass it via the stdin parameter instead of embedding it in the command string — embedded text gets interpreted by the shell (backticks, quotes, $), stdin is delivered verbatim.\n\nNEVER put backticks (`) inside a quoted shell string: every shell mangles them — POSIX sh/bash run the backticked text as command substitution (you'll see 'command not found' / 'not found' noise), and PowerShell treats the backtick as an escape character and silently drops it or turns `n/`t into control chars (corrupting the text with no error). For PR/issue/commit bodies (or any text) that contain markdown code spans, ALWAYS pass the text through the stdin parameter with `--body-file -` / `-F -` rather than `--body \"...`...\"`",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -96,10 +145,14 @@ func (TerminalTool) Definition() agent.ToolDefinition {
 					"type":        "string",
 					"description": "Text piped verbatim to the command's stdin, which is then closed (EOF). Use this — not interpolation into the command string — to pass long or special-character text (quotes, backticks, $) to commands that read stdin, e.g. `gh pr create --body-file -`, `git apply -`, `python script.py`.",
 				},
+				"timeout": map[string]any{
+					"type":        "integer",
+					"description": "How long (whole seconds) to wait for a SYNCHRONOUS command before killing it and returning an error. Omit for the default (120s). Max 600 — a larger value is rejected; use run_in_background for anything you expect to run longer than that. Ignored when run_in_background or detached is set (those have no timeout). Size this to the command: a big test suite or slow install that you still want to wait for in-band might warrant 300–600; there's no benefit to over-setting it for a fast command.",
+				},
 				"run_in_background": map[string]any{
 					"type":        "string",
 					"enum":        []string{"async", "interactive"},
-					"description": "Run detached in the background (no 120s timeout, non-blocking). Only use this if the next step does NOT need the command's output AND you already expect the command to run well past a few tens of seconds — omitting this runs synchronously and auto-promotes to background on its own if it turns out to be slow, so most builds/tests/installs (which finish in a few seconds) should just run synchronously instead of guessing async up front. \"async\" for one-shot tasks whose result can wait and that you expect to be genuinely long-running — the system auto-notifies on completion and terminal_output is not allowed. \"interactive\" for long-running services or REPLs — terminal_output and terminal_input are allowed. Either way the process is tracked by octo and KILLED when the session ends — including a tunnel/proxy meant to keep exposing a port (e.g. ngrok, cloudflared) or any daemon meant to outlive octo: use detached:true for those instead.\n\nNOT available inside a sub-agent: a sub-agent must return its result within the single turn that spawned it, so it has no later turn in which to collect a backgrounded process's output. When you are a sub-agent, do NOT pass run_in_background — async and interactive are both ignored and the command runs synchronously (and is killed if it exceeds the 120s timeout). detached is unavailable to a sub-agent for the same reason. A command that genuinely needs to run longer than 120s must be handed back to the parent to run.",
+					"description": "Run detached in the background (no timeout, non-blocking). Only use this if the next step does NOT need the command's output AND you already expect the command to run genuinely long (well past a minute or two) — otherwise run synchronously and, if it's slow, raise `timeout`. \"async\" for one-shot tasks whose result can wait — the system auto-notifies on completion and terminal_output is not allowed. \"interactive\" for long-running services or REPLs — terminal_output and terminal_input are allowed. Either way the process is tracked by octo and KILLED when the session ends — including a tunnel/proxy meant to keep exposing a port (e.g. ngrok, cloudflared) or any daemon meant to outlive octo: use detached:true for those instead.\n\nNOT available inside a sub-agent: a sub-agent must return its result within the single turn that spawned it, so it has no later turn in which to collect a backgrounded process's output. When you are a sub-agent, do NOT pass run_in_background — async and interactive are both ignored and the command runs synchronously (and is killed if it exceeds its timeout). detached is unavailable to a sub-agent for the same reason. A command that genuinely needs to run longer must be handed back to the parent to run.",
 				},
 				"detached": map[string]any{
 					"type":        "boolean",
@@ -136,10 +189,11 @@ func (t TerminalTool) Execute(ctx context.Context, name string, input map[string
 // long line will get their final line truncated, but the more usual case of
 // many short lines is unaffected.
 //
-// Timeout promotion: if the command exceeds TerminalTimeout (120 s) the
-// original process continues running in the background (no restart). The
-// caller receives the output produced so far plus a background id and a
-// clear instruction to wait for the completion notification.
+// Timeout: a synchronous command runs under `timeout` seconds (default
+// TerminalTimeout, capped at MaxTerminalTimeout). On expiry it is killed and
+// reaped and an error is returned with the output produced so far — it is NOT
+// moved to the background. A human may still promote a running command from the
+// UI (Ctrl+B / button) before the timeout to keep it as a background process.
 func (t TerminalTool) ExecuteStream(
 	ctx context.Context,
 	_ string,
@@ -226,13 +280,20 @@ func (t TerminalTool) ExecuteStream(
 		}
 	}
 
-	// Synchronous path: start as a background process so that if we hit the
-	// timeout the original process simply keeps running — no kill, no restart.
-	// We attach an onLine callback to collect output and stream to progress in
-	// real time. The polling loop only checks status (exited/running).
+	// Resolve the synchronous timeout up front so a bad value errors before we
+	// start anything. Ignored on the background/detached paths (they returned above).
+	syncTimeout, terr := parseTimeout(input)
+	if terr != nil {
+		return agent.ToolResult{Text: ""}, terr
+	}
+
+	// Synchronous path: start as a hidden background process so its output can be
+	// collected as it streams; on timeout the process is killed and reaped (it is
+	// NOT left running / promoted). We attach an onLine callback to collect output
+	// and stream to progress in real time. The polling loop only checks status.
 	//
 	// The collector is capped at maxBgOutputBytes: a command that floods stdout
-	// faster than the 120s timeout (e.g. a runaway `yes`) would otherwise grow an
+	// faster than the timeout (e.g. a runaway `yes`) would otherwise grow an
 	// unbounded buffer and OOM the agent. Past the cap we keep the most recent
 	// bytes and flag that earlier output was dropped — the same tail-retention
 	// policy bgProcess.append uses for the background buffer.
@@ -295,8 +356,8 @@ func (t TerminalTool) ExecuteStream(
 	}
 
 	// Poll until the process exits, the user promotes it, or the timeout fires.
-	// Honour the caller's context deadline if it is sooner than TerminalTimeout.
-	timeout := TerminalTimeout
+	// Honour the caller's context deadline if it is sooner than the sync timeout.
+	timeout := syncTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if remaining := time.Until(deadline); remaining < timeout {
 			timeout = remaining
@@ -321,26 +382,21 @@ func (t TerminalTool) ExecuteStream(
 				UI:   terminalUI(command, "running", body),
 			}, nil
 		case <-timer.C:
+			// Timeout: kill and reap the process, return the partial output plus an
+			// error. The command is NOT moved to the background — a caller that wants
+			// a long-running process asks for one explicitly (run_in_background), and
+			// a human can still promote a slow one from the UI before this fires.
+			mgr.Kill(id)
+			body := snapshot()
+			mgr.Remove(id)
+			var advice string
 			if subAgent {
-				// A sub-agent cannot background a process (see subAgent above), so
-				// there is no one to collect this command's output later. Kill and
-				// reap it here and return the partial output plus an error, rather
-				// than promoting it to a background process that would outlive the
-				// sub-agent and fire its completion notice into the parent session.
-				mgr.Kill(id)
-				body := snapshot()
-				mgr.Remove(id)
-				text := fmt.Sprintf("%s\n[timeout: command exceeded %s and was killed. A sub-agent runs every command synchronously and cannot background or detach a process, so a command that needs to run longer than %s can't complete here — return what you have, or hand the long-running work back to the parent.]", body, TerminalTimeout, TerminalTimeout)
-				return agent.ToolResult{Text: text, UI: terminalUI(command, "failed", text)}, nil
+				advice = "hand the long-running work back to the parent (a sub-agent can't background a command)"
+			} else {
+				advice = "re-run with a larger `timeout`, or launch it with run_in_background:\"async\" if its result can wait"
 			}
-			// Timer backstop: covers IM channels and forgotten browser tabs.
-			// Identical outcome to the manual promote path.
-			mgr.Promote(id)
-			body := MaybeSpillOutput(id, snapshot())
-			return agent.ToolResult{
-				Text: fmt.Sprintf("%s\n\n[timeout: command exceeded %s and continues as async background process %s]\n\n%s", body, TerminalTimeout, id, AsyncModeNotice),
-				UI:   terminalUI(command, "running", body),
-			}, nil
+			text := fmt.Sprintf("%s\n[timeout: command exceeded %s and was killed — it was NOT moved to the background. If you expect it to run longer, %s.]", body, timeout, advice)
+			return agent.ToolResult{Text: text, UI: terminalUI(command, "failed", text)}, nil
 		case <-ctx.Done():
 			// User cancelled (Esc / Ctrl-C): kill the hidden process and reap
 			// it — the output is returned here and now, nothing will poll it.

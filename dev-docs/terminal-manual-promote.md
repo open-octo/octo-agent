@@ -5,13 +5,13 @@
 
 ## Problem
 
-The sync terminal path secretly starts every command as a hidden background process, then promotes it after a fixed 2-minute timer if it hasn't exited. The result: the model issues a synchronous call expecting a result, and 120 seconds later receives a background process ID it didn't ask for — a surprising state transition driven by a timer rather than user intent.
+A synchronous terminal command runs under a timeout (`TerminalTimeout` = 120 s by default, or the call's explicit `timeout`). On timeout it is **killed and an error returned** — deterministic, and the model never gets back a process id it didn't ask for. But a command is sometimes legitimately slow, and a human watching would rather keep it running than have it killed and re-run (which for an expensive build/test wastes the work already done). Manual promotion is that escape hatch: the user turns the still-running synchronous command into a tracked async background process **before** the timeout fires, so it keeps running instead of being killed.
 
-| Transport | Old behavior | New behavior |
-|---|---|---|
-| TUI | Promotes at 120 s regardless | `Ctrl+B` promotes immediately; timer stays as backstop |
-| Web | Promotes at 120 s regardless | "Background" button on tool card; timer backstop |
-| IM | Timer fires at 120 s | No change — timer is the only mechanism |
+| Transport | Behavior |
+|---|---|
+| TUI | `Ctrl+B` promotes the running sync command; otherwise it's killed at the timeout |
+| Web | "Background" button on the tool card; otherwise killed at the timeout |
+| IM | No promote UI — the timeout just kills |
 
 ## Signal Primitive — SyncSession
 
@@ -57,26 +57,27 @@ sess := mgr.BeginSync()
 defer mgr.EndSync()
 
 select {
-case <-sess.C():
-    // User promoted — identical outcome to timer, different result text.
+case <-promoteCh:
+    // User promoted (Ctrl+B / button) — the ONLY path that backgrounds a sync
+    // command. Keeps it running; NOT reaped.
     mgr.Promote(id)
     return ToolResult{Text: fmt.Sprintf("… [promoted to async background process %s]\n\n%s", id, AsyncModeNotice)}
 
 case <-timer.C:
-    // Timer backstop — covers IM and forgotten browser tabs.
-    mgr.Promote(id)
-    return ToolResult{Text: fmt.Sprintf("… [timeout: command exceeded %s …]\n\n%s", TerminalTimeout, AsyncModeNotice)}
+    // Timeout — kill and reap, return the partial output plus an error. NOT promoted.
+    mgr.Kill(id); mgr.Remove(id)
+    return ToolResult{Text: fmt.Sprintf("%s\n[timeout: command exceeded %s and was killed — it was NOT moved to the background. …]", body, timeout)}
 
 case <-ctx.Done():
-    // Kill on interrupt — unchanged.
+    // Kill on interrupt (Esc / turn cancel) — unchanged.
     mgr.Kill(id); mgr.Remove(id)
     return ToolResult{Text: body + "\n[exit: signal: killed]"}
 }
 ```
 
-The two promote paths return distinct result text so the model can tell whether the user triggered it or the timer did.
+Only the manual-promote arm backgrounds the command; the timer kills it. `timeout` is `parseTimeout(input)` (the explicit `timeout`, else `TerminalTimeout`), shortened to the caller's ctx deadline when that's sooner.
 
-A **sub-agent's** `terminal` call is the exception: guarded on `IsSubAgent(ctx)`, it skips `BeginSync` entirely, so it never occupies the manager's sync slot — `HasActiveSync` can't see it and `Ctrl+B` / the Web button can't target it — and its `select` runs the promote arm on a nil channel that never fires. On timeout it kills the command with an error instead of promoting. A sub-agent has no turn after the one that spawned it in which to read a promoted background process, and promoting one would leak its `[BACKGROUND COMPLETED]` notice into the parent session.
+A **sub-agent's** `terminal` call skips `BeginSync` entirely (guarded on `IsSubAgent(ctx)`), so it never occupies the manager's sync slot — `HasActiveSync` can't see it and `Ctrl+B` / the Web button can't target it — and `promoteCh` is a nil channel whose arm never fires. Its timeout still kills like any other; it just can't be rescued by a manual promote. Rationale: a sub-agent has no turn after the one that spawned it in which to read a promoted background process, and promoting one would leak its `[BACKGROUND COMPLETED]` notice into the parent session.
 
 ## TUI
 

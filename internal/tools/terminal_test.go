@@ -49,6 +49,12 @@ func TestTerminalTool_Definition(t *testing.T) {
 	if desc, _ := rib["description"].(string); !strings.Contains(desc, "sub-agent") {
 		t.Errorf("run_in_background.description should explain the sub-agent restriction; got: %q", desc)
 	}
+	// The explicit sync timeout must be advertised.
+	if to, ok := props["timeout"].(map[string]any); !ok {
+		t.Error("Parameters.properties.timeout should exist — the executor reads it, so the schema must declare it")
+	} else if to["type"] != "integer" {
+		t.Errorf("timeout.type = %v, want integer", to["type"])
+	}
 	req, ok := def.Parameters["required"].([]string)
 	if !ok {
 		t.Fatal("Parameters.required is not []string")
@@ -330,48 +336,114 @@ func TestTerminalTool_SubAgent_DetachedRunsSync(t *testing.T) {
 	}
 }
 
-// TestTerminalTool_SubAgent_SyncTimeoutKills verifies that when a sub-agent's
-// synchronous command exceeds TerminalTimeout it is killed with an error, rather
-// than auto-promoted to a background process (which would outlive the sub-agent
-// and notify the parent). A non-sub-agent context still promotes.
-func TestTerminalTool_SubAgent_SyncTimeoutKills(t *testing.T) {
+// TestTerminalTool_SyncTimeoutKills verifies a synchronous command that exceeds
+// its timeout is killed with an error and NOT moved to the background — for both
+// a sub-agent and the main agent (timeout kill is universal; auto-promotion is
+// gone). The default timeout applies when no `timeout` is passed.
+func TestTerminalTool_SyncTimeoutKills(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell only")
 	}
 	orig := TerminalTimeout
 	TerminalTimeout = 200 * time.Millisecond
 	defer func() { TerminalTimeout = orig }()
-	// The control case below promotes a sleep to the default manager; reap it (and
-	// any straggler) so it doesn't outlive the test.
+	// Nothing should be promoted anymore, but reap defensively in case of a straggler.
 	defer DefaultBackgroundManager().KillAll()
 
-	// Sub-agent: timeout kills the command, no background promotion.
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"sub-agent", WithSubAgentMarker(context.Background())},
+		{"main agent", context.Background()},
+	} {
+		start := time.Now()
+		result, err := TerminalTool{}.Execute(tc.ctx, "terminal", map[string]any{"command": "sleep 30"})
+		if err != nil {
+			t.Fatalf("%s: Execute: %v", tc.name, err)
+		}
+		if elapsed := time.Since(start); elapsed > 3*time.Second {
+			t.Errorf("%s: elapsed %s — timeout did not kill promptly", tc.name, elapsed)
+		}
+		if !strings.Contains(result.Text, "was killed") {
+			t.Errorf("%s: want a kill/timeout error, got: %q", tc.name, result.Text)
+		}
+		if strings.Contains(result.Text, "background process") {
+			t.Errorf("%s: timeout must not promote to background, got: %q", tc.name, result.Text)
+		}
+	}
+}
+
+// TestTerminalTool_ExplicitTimeout verifies the `timeout` parameter overrides the
+// default: a short explicit timeout kills the command near that mark.
+func TestTerminalTool_ExplicitTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell only")
+	}
+	// Default is long; the explicit 1s timeout is what must fire.
 	start := time.Now()
-	result, err := TerminalTool{}.Execute(WithSubAgentMarker(context.Background()), "terminal", map[string]any{
+	result, err := TerminalTool{}.Execute(context.Background(), "terminal", map[string]any{
 		"command": "sleep 30",
+		"timeout": float64(1), // JSON numbers arrive as float64
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 3*time.Second {
-		t.Errorf("elapsed %s — sub-agent timeout did not kill promptly", elapsed)
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Errorf("elapsed %s — explicit 1s timeout did not fire", elapsed)
 	}
 	if !strings.Contains(result.Text, "was killed") {
 		t.Errorf("want a kill/timeout error, got: %q", result.Text)
 	}
-	if strings.Contains(result.Text, "background process") {
-		t.Errorf("sub-agent timeout must not promote to background; got: %q", result.Text)
-	}
+}
 
-	// Control: a normal (non-sub-agent) context still promotes to background.
-	result, err = TerminalTool{}.Execute(context.Background(), "terminal", map[string]any{
-		"command": "sleep 30",
+// TestTerminalTool_TimeoutValidation verifies out-of-range / malformed timeouts
+// are rejected with a guiding error before the command runs.
+func TestTerminalTool_TimeoutValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		timeout any
+		wantIn  string
+	}{
+		{"over max", float64(99999), "run_in_background"},
+		{"zero", float64(0), "positive"},
+		{"negative", float64(-5), "positive"},
+		{"non-number", "abc", "number of seconds"},
+	}
+	for _, tc := range cases {
+		_, err := TerminalTool{}.Execute(context.Background(), "terminal", map[string]any{
+			"command": "echo hi",
+			"timeout": tc.timeout,
+		})
+		if err == nil {
+			t.Errorf("%s: expected an error", tc.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.wantIn) {
+			t.Errorf("%s: error should contain %q; got: %v", tc.name, tc.wantIn, err)
+		}
+	}
+}
+
+// TestTerminalTool_TimeoutIgnoredForBackground verifies `timeout` only governs
+// the synchronous path: an async launch has no timeout, so even an over-cap
+// timeout is ignored rather than rejected — the command backgrounds normally.
+func TestTerminalTool_TimeoutIgnoredForBackground(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell only")
+	}
+	mgr := NewBackgroundManager()
+	defer mgr.KillAll()
+	result, err := TerminalTool{mgr: mgr}.Execute(context.Background(), "terminal", map[string]any{
+		"command":           "sleep 30",
+		"run_in_background": "async",
+		"timeout":           float64(99999), // would be rejected on the sync path
 	})
 	if err != nil {
-		t.Fatalf("Execute (control): %v", err)
+		t.Fatalf("Execute: %v", err)
 	}
 	if !strings.Contains(result.Text, "background process") {
-		t.Errorf("non-sub-agent should promote to background; got: %q", result.Text)
+		t.Errorf("async launch should ignore timeout and background normally; got: %q", result.Text)
 	}
 }
 
