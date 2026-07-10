@@ -520,11 +520,12 @@ func TestWorkflowTool_RunsSavedByName(t *testing.T) {
 	}
 }
 
-// TestWorkflowTool_RunsSavedByName_PromptsForMissingRequiredArg verifies a
-// saved workflow that declares a required param has the tool ask the user for
-// it (via the same Asker ask_user_question uses) rather than letting the
-// script hit a nil args[...] lookup at runtime.
-func TestWorkflowTool_RunsSavedByName_PromptsForMissingRequiredArg(t *testing.T) {
+// TestWorkflowTool_RunsSavedByName_ErrorsOnMissingRequiredArg verifies a saved
+// workflow that declares a required param returns a clear error naming the
+// missing arg(s) rather than auto-prompting the user. The model then decides
+// whether it already knows the value (re-invoke with `args`) or needs to ask
+// the caller via ask_user_question.
+func TestWorkflowTool_RunsSavedByName_ErrorsOnMissingRequiredArg(t *testing.T) {
 	SetSpawner(replySpawner{})
 	t.Cleanup(func() { SetSpawner(nil) })
 	user := t.TempDir()
@@ -535,15 +536,15 @@ func TestWorkflowTool_RunsSavedByName_PromptsForMissingRequiredArg(t *testing.T)
 	stub := &stubAsker{resp: AskResponse{Custom: "hi there"}}
 	useAsker(t, stub)
 
-	got := startWorkflowAndWait(t, map[string]any{"name": "echo"})
-	if !stub.called {
-		t.Fatal("expected the tool to prompt for the missing required arg")
+	_, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"name": "echo"})
+	if err == nil || !strings.Contains(err.Error(), "missing required arg") {
+		t.Errorf("err = %v, want a missing-required-arg error listing q", err)
 	}
-	if !strings.Contains(stub.lastReq.Question, "q") {
-		t.Errorf("question = %q, want it to mention the missing param name", stub.lastReq.Question)
+	if !strings.Contains(err.Error(), "q") {
+		t.Errorf("err = %v, want it to name the missing param", err)
 	}
-	if !strings.Contains(got, "R[hi there]") {
-		t.Errorf("output = %q, want the prompted value to reach the script", got)
+	if stub.called {
+		t.Error("should not auto-prompt the user — the model owns that decision")
 	}
 }
 
@@ -587,9 +588,10 @@ func TestWorkflowTool_RunsSavedByName_MissingRequiredArgNoAsker(t *testing.T) {
 	}
 }
 
-// TestWorkflowTool_RunsSavedByName_CancelledPromptErrors verifies a cancelled
-// prompt aborts the run with an error instead of running with a blank value.
-func TestWorkflowTool_RunsSavedByName_CancelledPromptErrors(t *testing.T) {
+// TestWorkflowTool_RunsSavedByName_MissingRequiredArgWithAsker verifies that even
+// when an interactive asker IS available, the tool still returns a missing-arg
+// error rather than auto-prompting — decision ownership stays with the model.
+func TestWorkflowTool_RunsSavedByName_MissingRequiredArgWithAsker(t *testing.T) {
 	SetSpawner(replySpawner{})
 	t.Cleanup(func() { SetSpawner(nil) })
 	user := t.TempDir()
@@ -599,8 +601,8 @@ func TestWorkflowTool_RunsSavedByName_CancelledPromptErrors(t *testing.T) {
 	useAsker(t, &stubAsker{resp: AskResponse{Cancelled: true}})
 
 	_, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"name": "echo"})
-	if err == nil || !strings.Contains(err.Error(), "cancelled") {
-		t.Errorf("err = %v, want a cancellation error", err)
+	if err == nil || !strings.Contains(err.Error(), "missing required arg") {
+		t.Errorf("err = %v, want a missing-required-arg error", err)
 	}
 }
 

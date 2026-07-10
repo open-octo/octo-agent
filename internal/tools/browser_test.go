@@ -174,11 +174,12 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	}
 }
 
-// TestResolveMissingSkillParams_PromptsForMissingRequired verifies a param
-// with no default and no caller-supplied value triggers a user prompt (via
-// the same Asker ask_user_question uses) instead of silently proceeding or
-// only failing once ReplaySkill runs.
-func TestResolveMissingSkillParams_PromptsForMissingRequired(t *testing.T) {
+// TestResolveMissingSkillParams_ErrorsOnMissingRequired verifies a param
+// with no default and no caller-supplied value returns a clear error naming
+// the missing param(s), rather than auto-prompting the user. The model then
+// decides whether it already knows the value (re-invoke with `params`) or
+// needs to ask the caller via ask_user_question.
+func TestResolveMissingSkillParams_ErrorsOnMissingRequired(t *testing.T) {
 	skill := browser.Skill{
 		Name:   "demo",
 		Params: []browser.Param{{Name: "username", Description: "login name"}},
@@ -188,17 +189,18 @@ func TestResolveMissingSkillParams_PromptsForMissingRequired(t *testing.T) {
 	useAsker(t, stub)
 
 	params := map[string]string{}
-	if err := resolveMissingSkillParams(context.Background(), &skill, "demo", params); err != nil {
-		t.Fatalf("resolveMissingSkillParams: %v", err)
+	err := resolveMissingSkillParams(&skill, "demo", params)
+	if err == nil || !strings.Contains(err.Error(), "missing required param") {
+		t.Fatalf("err = %v, want a missing-required-param error", err)
 	}
-	if !stub.called {
-		t.Fatal("expected a prompt for the missing param")
+	if !strings.Contains(err.Error(), "username") {
+		t.Errorf("err = %v, want it to name the missing param", err)
 	}
-	if !strings.Contains(stub.lastReq.Question, "username") || !strings.Contains(stub.lastReq.Question, "login name") {
-		t.Errorf("question = %q, want it to mention the param name and description", stub.lastReq.Question)
+	if stub.called {
+		t.Error("should not auto-prompt the user — the model owns that decision")
 	}
-	if params["username"] != "alice" {
-		t.Errorf("params[username] = %q, want alice", params["username"])
+	if _, ok := params["username"]; ok {
+		t.Error("params should remain untouched on error")
 	}
 }
 
@@ -214,7 +216,7 @@ func TestResolveMissingSkillParams_NoPromptWhenProvided(t *testing.T) {
 	useAsker(t, stub)
 
 	params := map[string]string{"username": "bob"}
-	if err := resolveMissingSkillParams(context.Background(), &skill, "demo", params); err != nil {
+	if err := resolveMissingSkillParams(&skill, "demo", params); err != nil {
 		t.Fatalf("resolveMissingSkillParams: %v", err)
 	}
 	if stub.called {
@@ -222,11 +224,10 @@ func TestResolveMissingSkillParams_NoPromptWhenProvided(t *testing.T) {
 	}
 }
 
-// TestResolveMissingSkillParams_NoAskerLeavesGapForReplaySkillToReject
-// verifies headless/unattended modes are left unchanged: with no asker
-// registered, resolveMissingSkillParams is a no-op so ReplaySkill's own
-// "missing required param(s)" error still fires downstream.
-func TestResolveMissingSkillParams_NoAskerLeavesGapForReplaySkillToReject(t *testing.T) {
+// TestResolveMissingSkillParams_MissingReturnsError verifies that even when
+// there's no interactive asker, missing required params produce a clear error
+// (rather than the old silent no-op that left ReplaySkill to fail mid-replay).
+func TestResolveMissingSkillParams_MissingReturnsError(t *testing.T) {
 	SetAsker(nil)
 	skill := browser.Skill{
 		Name:   "demo",
@@ -234,27 +235,12 @@ func TestResolveMissingSkillParams_NoAskerLeavesGapForReplaySkillToReject(t *tes
 		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
 	}
 	params := map[string]string{}
-	if err := resolveMissingSkillParams(context.Background(), &skill, "demo", params); err != nil {
-		t.Fatalf("resolveMissingSkillParams: %v", err)
+	err := resolveMissingSkillParams(&skill, "demo", params)
+	if err == nil || !strings.Contains(err.Error(), "missing required param") {
+		t.Fatalf("err = %v, want a missing-required-param error", err)
 	}
 	if _, ok := params["username"]; ok {
-		t.Error("params should be untouched when no asker is available")
-	}
-}
-
-// TestResolveMissingSkillParams_CancelledPromptErrors verifies a cancelled
-// prompt aborts with an error instead of proceeding with a blank value.
-func TestResolveMissingSkillParams_CancelledPromptErrors(t *testing.T) {
-	skill := browser.Skill{
-		Name:   "demo",
-		Params: []browser.Param{{Name: "username"}},
-		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
-	}
-	useAsker(t, &stubAsker{resp: AskResponse{Cancelled: true}})
-	params := map[string]string{}
-	err := resolveMissingSkillParams(context.Background(), &skill, "demo", params)
-	if err == nil || !strings.Contains(err.Error(), "cancelled") {
-		t.Errorf("err = %v, want a cancellation error", err)
+		t.Error("params should be untouched on error")
 	}
 }
 

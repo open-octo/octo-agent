@@ -737,8 +737,9 @@ func unresolvedPlaceholders(skill *Skill, full map[string]string) []string {
 // MissingRequiredParams reports which {{name}} placeholders in skill's steps
 // remain unresolved after overlaying params on the skill's declared defaults
 // — the same check ReplaySkill performs internally before running any step,
-// exposed so a caller can prompt for the missing values (e.g. via a UI or an
-// interactive asker) instead of letting ReplaySkill fail outright.
+// exposed so a caller can surface a clear error to the model (which then
+// decides whether to re-invoke with values or ask the user) instead of
+// letting ReplaySkill fail outright.
 func MissingRequiredParams(skill *Skill, params map[string]string) []string {
 	return unresolvedPlaceholders(skill, mergedParams(skill, params))
 }
