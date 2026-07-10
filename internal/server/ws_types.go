@@ -216,6 +216,16 @@ type wsEventRequestConfirmation struct {
 	Input    string `json:"input,omitempty"`   // other tools: sorted "key: value" lines
 }
 
+// wsEventConfirmationComplete tells all connected clients that a permission
+// confirmation has been answered (by any client). It lets secondary tabs close
+// the modal so the user isn't asked again for the same action.
+type wsEventConfirmationComplete struct {
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+	ConfID    string `json:"id"`
+	Result    string `json:"result"`
+}
+
 type wsEventRequestUserQuestion struct {
 	Type string `json:"type"`
 	// SessionID is required by the dispatcher's session filter — without
