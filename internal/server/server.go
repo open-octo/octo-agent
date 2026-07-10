@@ -819,14 +819,18 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("/", s.staticHandler())
 }
 
-// corsMiddleware wraps the mux with CORS headers when configured.
+// corsMiddleware wraps the mux with CORS headers when configured, plus a
+// built-in allowance for VS Code webview origins (isVSCodeWebviewOrigin) so
+// the octo VS Code extension's REST calls work without a --cors flag. That
+// case can't reuse the CORSOrigins-driven fast path below, so the middleware
+// now always runs rather than short-circuiting to next when CORSOrigins is
+// empty; a bare OPTIONS request with no Origin header and no --cors
+// configured now gets 204 instead of falling through to the mux, which is
+// harmless (no client relies on that path 404ing/405ing).
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
-	if len(s.cfg.CORSOrigins) == 0 {
-		return next
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		allowed := false
+		allowed := isVSCodeWebviewOrigin(origin)
 		wildcard := false
 		for _, o := range s.cfg.CORSOrigins {
 			if o == "*" {

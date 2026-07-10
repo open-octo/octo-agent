@@ -131,6 +131,19 @@ func isLocalName(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// isVSCodeWebviewOrigin reports whether origin was sent by a VS Code webview
+// panel. Each webview gets a fresh vscode-webview://<uuid> origin per window
+// and reload, so — unlike a fixed app scheme origin — it can never be pinned
+// as a literal --cors allowlist entry; the scheme itself is the only stable
+// signal. A hostile web page cannot forge this: browsers control the Origin
+// header, and only an actual local VS Code webview process can send this
+// scheme, so treating it as always-allowed is no wider than the existing
+// loopback exemption.
+func isVSCodeWebviewOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && u.Scheme == "vscode-webview"
+}
+
 // hostAllowed is the DNS-rebinding gate for the loopback exemption: the
 // Host header must name the local machine or a --cors allowlisted host. A
 // rebound page's request reaches 127.0.0.1 but carries Host: attacker.com.
@@ -164,7 +177,7 @@ func (s *Server) originAllowed(origin string) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	if isLocalName(canonicalHost(u.Host)) {
+	if u.Scheme == "vscode-webview" || isLocalName(canonicalHost(u.Host)) {
 		return true
 	}
 	for _, o := range s.cfg.CORSOrigins {
