@@ -242,6 +242,10 @@ wasm 模块从宿主 `env` 模块导入以下函数（wazero `NewHostModuleBuild
 | `agent_take` | `(token i32, out_ptr i32, out_cap i32) -> len i32` | 否 | 把该 token 的结果 JSON 写入 out 缓冲，返回长度 | ✅ spike4 |
 | `log` | `(ptr i32, len i32)` | 否 | 发一条进度事件（`AgentEvent`，复用 `internal/agent/event.go` 事件面） | 待实现 <!--lint:new--> |
 | `budget_remaining` | `() -> i64` | 否 | 返回剩余 token 预算 | 待实现 <!--lint:new--> |
+| `regex_compile_check` | `(pat, pat_len, flags, flags_len, out, out_cap) -> len i32` | 否 | 用 Go `regexp`(RE2) 校验模式；回写错误消息（空=可编译），供 prelude 的 `Regexp.new` 抛 `RegexpError` |
+| `regex_scan` | `(pat, pat_len, flags, flags_len, text, text_len, out, out_cap) -> len i32` | 否 | 用 RE2 扫出全部匹配，回写 JSON（字节偏移 + 捕获子串）；无匹配或溢出缓冲则返回空 |
+
+**Regexp 走 host、不走 gem**：mruby 核心无 `Regexp`，而常用的 C 引擎 gem（`mruby-onig-regexp` 打包 Onigmo）用 autotools 编译，其 `config.sub` 早于 wasm、不认 `wasi` 目标，无法交叉编译进沙箱。因此 `Regexp` 由 `prelude.rb` 里的纯 Ruby 层实现，底层调用上面两个 host 原语打到 Go 的 `regexp`（RE2）。字面量 `/.../ ` 会被 mruby codegen 编成 `::Regexp.compile(src, opts)`，所以只要 prelude 定义了 `Regexp` 类字面量就能用。RE2 是线性时间（模型写的模式不会 ReDoS 卡死沙箱），代价是模式内不支持反向引用/lookaround；`gsub`/`sub` 替换串里的 `\1`/`\k<name>` 由 Ruby 侧展开。偏移用**字节**（mruby 未开 `MRB_UTF8_STRING`，字符串按字节索引），与 prelude 自身的切片保持一致。
 
 wasm 模块需导出：`malloc` / `free`（`-Wl,--export=malloc,--export=free`），供 `agent_take` 等回写时分配缓冲。运行时 `RuntimeConfig` 必须 `WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesExceptionHandling)`——否则 wazero 拒绝加载（实测报 `tag section not supported as feature "exception-handling" is disabled`）。
 
