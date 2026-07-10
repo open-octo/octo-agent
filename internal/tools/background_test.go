@@ -204,23 +204,18 @@ func TestKillShellTool(t *testing.T) {
 	}
 }
 
-// TestTerminalTool_TimeoutPromotesToBackground verifies that a synchronous
-// command which exceeds TerminalTimeout continues running as the original
-// background process — no kill, no restart. The agent receives partial output
-// plus the bg id.
-func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
-	// Use a short timeout so the test doesn't take 30 s. The window only needs to
-	// fire while the command is still running, so the process is promoted to
-	// background rather than completing synchronously. It does NOT need to be long
-	// enough to capture the "partial" line in the promotion snapshot — that output
-	// is asserted on the eventual background buffer below, which is deterministic.
-	// Windows PowerShell cold-start is slow on CI, so still give it a wide window
-	// and a proportionally longer sleep to stay running past it.
+// TestTerminalTool_TimeoutKillsAndReports verifies that a synchronous command
+// which exceeds its timeout is killed and reaped — NOT promoted to a background
+// process — and the agent gets the partial output plus a timeout error that
+// points at run_in_background. It also confirms the process is reaped (not left
+// running in the manager).
+func TestTerminalTool_TimeoutKillsAndReports(t *testing.T) {
+	// Short timeout so the test is fast; the command sleeps well past it.
 	timeout := 500 * time.Millisecond
-	cmd := "echo partial && sleep 2"
+	cmd := "echo partial && sleep 30"
 	if runtime.GOOS == "windows" {
 		timeout = 4 * time.Second
-		cmd = "Write-Output partial; Start-Sleep -Seconds 8"
+		cmd = "Write-Output partial; Start-Sleep -Seconds 60"
 	}
 	oldTimeout := TerminalTimeout
 	TerminalTimeout = timeout
@@ -228,49 +223,31 @@ func TestTerminalTool_TimeoutPromotesToBackground(t *testing.T) {
 
 	m := NewBackgroundManager()
 	term := TerminalTool{mgr: m}
+	start := time.Now()
 	res, err := term.Execute(context.Background(), "terminal", map[string]any{
 		"command": cmd,
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-
-	// The promotion markers below are added by the promotion logic itself, not by
-	// the shell, so they're deterministic regardless of CI timing.
-	if !strings.Contains(res.Text, "timeout") {
-		t.Errorf("result should mention timeout, got: %q", res.Text)
+	// Must return near the timeout, not run the full sleep.
+	if elapsed := time.Since(start); elapsed > timeout+10*time.Second {
+		t.Errorf("elapsed %s — timeout did not kill promptly", elapsed)
 	}
-	if !strings.Contains(res.Text, "bg_1") {
-		t.Errorf("result should mention bg id, got: %q", res.Text)
+	// Timeout markers are added by the tool, not the shell, so they're deterministic.
+	if !strings.Contains(res.Text, "was killed") || !strings.Contains(res.Text, "NOT moved to the background") {
+		t.Errorf("result should report a kill, not a promotion; got: %q", res.Text)
 	}
-	// Should contain the async notice warning against polling.
-	if !strings.Contains(res.Text, "ASYNC background process") {
-		t.Errorf("result should warn against polling, got: %q", res.Text)
+	if !strings.Contains(res.Text, "run_in_background") {
+		t.Errorf("result should point at run_in_background; got: %q", res.Text)
 	}
-
-	// The command's "partial" line must reach the agent, but whether it lands in
-	// the promotion snapshot above or only in the continuing background buffer
-	// depends on whether the shell flushed it before the exact timeout instant —
-	// which CI timing cannot guarantee (a loaded Windows runner may not emit
-	// within the window). What IS guaranteed is that the output is never lost: the
-	// promoted process keeps accumulating into its buffer. So wait for exit, then
-	// assert "partial" on the union of the snapshot and the (non-destructive)
-	// buffer. Tail is used rather than Read so polling doesn't consume the output.
-	//
-	// Generous deadline: it must exceed the shell cold-start plus the sleep above
-	// (up to ~8 s on Windows), and CI under -race can be very slow on top of that.
-	deadline := time.Now().Add(25 * time.Second)
-	for time.Now().Before(deadline) {
-		out, s, found, _, _ := m.Tail("bg_1", -1)
-		if found && strings.HasPrefix(s, "exited") {
-			if !strings.Contains(res.Text+out, "partial") {
-				t.Errorf("partial output was lost: snapshot=%q buffer=%q", res.Text, out)
-			}
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+	if strings.Contains(res.Text, "ASYNC background process") || strings.Contains(res.Text, "bg_") {
+		t.Errorf("result must not hand back a background process id; got: %q", res.Text)
 	}
-	t.Fatal("timed out waiting for background process to exit")
+	// The killed process must be reaped — nothing left running in the manager.
+	if running := m.ListRunning(); len(running) != 0 {
+		t.Errorf("timed-out process should be reaped, still running: %+v", running)
+	}
 }
 
 // TestTerminalOutputTool_SnapshotIdempotent verifies the snapshot semantics:
