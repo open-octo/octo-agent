@@ -278,8 +278,15 @@ func TestRun_BudgetExhaustedInParallelKeepsMessage(t *testing.T) {
 	costly := func(_ context.Context, _ string, _ AgentOptions) AgentResult {
 		return AgentResult{Reply: "ok", OutputTokens: 100}
 	}
+	// Spend the budget with a top-level agent() first — it blocks to completion,
+	// so b.outTok is settled at 100 (> Budget 50) before parallel runs. Every
+	// branch's pre-call budget check then raises deterministically. Without the
+	// warmup, __run_fibers advances all branches to their first agent() before
+	// any completion is delivered (which is what increments outTok), so whether a
+	// branch observes exhaustion is a scheduling race — the source of the flake.
 	_, err := Run(context.Background(),
-		`parallel([1, 2, 3]) { |i| agent("x") }`,
+		`agent("warmup")
+		 parallel([1, 2, 3]) { |i| agent("x") }`,
 		Options{Agent: costly, Budget: 50})
 	if err == nil {
 		t.Fatal("expected a budget-exhausted error")
