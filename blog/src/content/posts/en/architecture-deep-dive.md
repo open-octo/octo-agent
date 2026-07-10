@@ -1,7 +1,7 @@
 ---
 title: "octo-agent Architecture Deep Dive: Five-Layer Core Stack & Full-System Dependency Map"
 description: "An interactive panorama architecture diagram parsing octo-agent's five-layer unidirectional dependency from CLI/IM entry to LLM backends, the agent leaf package design, protocol-agnostic abstraction, and cross-cutting concerns like permission, workflow, and memory."
-pubDate: 2026-07-10
+pubDate: 2026-07-08
 updatedDate: 2026-07-10
 author: "octo-agent team"
 tags: ["architecture", "deep-dive", "engineering", "ai-agent"]

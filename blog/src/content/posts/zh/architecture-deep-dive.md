@@ -1,7 +1,7 @@
 ---
 title: "octo-agent 架构深度解析：五层核心栈与全系统依赖图"
 description: "一幅可交互的全景架构图，解析 octo-agent 从 CLI/IM 入口到 LLM 后端的五层单向依赖、agent 叶子包设计、协议无关抽象，以及 permission/workflow/memory 等跨切关注点。"
-pubDate: 2026-07-10
+pubDate: 2026-07-08
 updatedDate: 2026-07-10
 author: "octo-agent team"
 tags: ["architecture", "deep-dive", "engineering", "ai-agent"]
