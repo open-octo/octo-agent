@@ -233,6 +233,24 @@ export function clearMsgs(sessionId: string) {
   chatMessages.update(m => ({ ...m, [sessionId]: [] }))
 }
 
+// Finalize any streaming assistant message in a list — shared by every call
+// site that starts a new segment (reasoning, tool call) and needs the caret
+// on the prior in-flight reply to stop blinking behind it.
+function finalizeStreamingAssistant(msgs: any[]): any[] {
+  return msgs.map(msg => (msg.type === 'assistant' && msg.streaming) ? { ...msg, streaming: false } : msg)
+}
+
+// Stop the caret on any trailing streaming assistant message. Call this
+// whenever a new segment (reasoning, tool call) starts so the caret doesn't
+// keep blinking behind content that no longer belongs to the in-flight reply.
+export function stopTrailingCaret(sessionId: string) {
+  chatMessages.update(m => {
+    const msgs = m[sessionId]
+    if (!msgs || !msgs.some(msg => msg.type === 'assistant' && msg.streaming)) return m
+    return { ...m, [sessionId]: finalizeStreamingAssistant(msgs) }
+  })
+}
+
 // Commit a finished reasoning segment as a standalone Thoughts message. Used
 // both on history replay (a `thinking` event) and live (when a tool call ends
 // the current thinking step). Placing it in the message list — rather than the
@@ -242,14 +260,9 @@ export function commitThinking(sessionId: string, text: string) {
   const t = (text ?? '').trim()
   if (!t) return
   chatMessages.update(m => {
-    const msgs = [...(m[sessionId] || [])]
     // Finalize any trailing streaming assistant text so its caret stops blinking
     // once the reasoning segment is committed as a separate message.
-    for (let i = 0; i < msgs.length; i++) {
-      if (msgs[i].type === 'assistant' && msgs[i].streaming) {
-        msgs[i] = { ...msgs[i], streaming: false }
-      }
-    }
+    const msgs = finalizeStreamingAssistant(m[sessionId] || [])
     msgs.push({
       id: uid('th'), type: 'thinking', thinking: t,
       createdAt: Date.now(), streaming: false, tools: [], todos: [],
@@ -268,17 +281,13 @@ export function addToolCallToGroup(sessionId: string, toolCall: any) {
     const last = msgs[msgs.length - 1]
     if (last && last.type === 'tool_group' && last.streaming) {
       msgs[msgs.length - 1] = { ...last, tools: [...last.tools, toolCall] }
-    } else {
-      // A tool call starts a new action segment: stop the caret on any trailing
-      // streaming assistant text so it doesn't keep blinking behind the tool card.
-      for (let i = 0; i < msgs.length; i++) {
-        if (msgs[i].type === 'assistant' && msgs[i].streaming) {
-          msgs[i] = { ...msgs[i], streaming: false }
-        }
-      }
-      msgs.push({ id: uid('grp'), type: 'tool_group', content: '', streaming: true, tools: [toolCall], todos: [], createdAt: Date.now() })
+      return { ...m, [sessionId]: msgs }
     }
-    return { ...m, [sessionId]: msgs }
+    // A tool call starts a new action segment: stop the caret on any trailing
+    // streaming assistant text so it doesn't keep blinking behind the tool card.
+    const finalized = finalizeStreamingAssistant(msgs)
+    finalized.push({ id: uid('grp'), type: 'tool_group', content: '', streaming: true, tools: [toolCall], todos: [], createdAt: Date.now() })
+    return { ...m, [sessionId]: finalized }
   })
 }
 

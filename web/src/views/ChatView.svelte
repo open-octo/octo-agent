@@ -32,6 +32,7 @@
     appendToLastAssistant,
     addToolCallToGroup,
     commitThinking,
+    stopTrailingCaret,
     updateToolResult,
     setToolError,
     appendToolStdout,
@@ -448,6 +449,11 @@
       // session's sender (it's off by default and never surfaced to the
       // terminal), so any delta that reaches the Web UI is meant to be shown.
       const txt = (ev as any).text ?? ''
+      // An empty buffer means this delta opens a new reasoning segment (the
+      // previous turn's reply is done), so stop its caret the same way
+      // commitThinking/addToolCallToGroup do — otherwise it keeps blinking
+      // behind the new live-thinking block.
+      if (!(get(chatThinking)[sid] ?? '')) stopTrailingCaret(sid)
       chatThinking.update(tt => ({ ...tt, [sid]: (tt[sid] ?? '') + txt }))
     }))
 
