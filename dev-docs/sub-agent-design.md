@@ -211,7 +211,8 @@ TUI 底部一个 sub-agent 面板,实时呈现每个**活跃**子 agent 的 tool
   子 agent 的 token 流会淹没事件循环。
 - **异步层**:`SubAgentManager.onEvent`(与 `onExit` 并列)。`Start` / `runContinue` 调
   `Spawn` / `Continue` 前用 `WithSubAgentEventSink(ctx, sink)` 注入带 `agent_N` 标记的 sink,并先发
-  `started`。没有 `onEvent` 时不注入 sink、执行层不流式——headless 零开销、零行为变化。
+  `started`。即使未设置 `onEvent`,这个 sink 仍然存在并记录事件,供 Web UI 等 late-joining 订阅者重放。
+  没有 `onEvent` 时只是不向 live hook 转发,headless 行为不变。
 - **传递**:sink 走 context,`Spawner` 接口签名不变,`internal/tools` 与 `cmd/octo` 解耦。
 - **TUI**:`subAgentUI` 状态按 `agent_N` 聚合,渲染成 `tui.Panel`;子 agent 完成时移除,续话再
   `started` 重新加入。Web UI 有镜像同一事件流的 sub-agent 面板。

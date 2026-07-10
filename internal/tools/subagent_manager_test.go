@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -329,4 +330,52 @@ func TestSend_CancelsSpawnContext(t *testing.T) {
 	waitForStatus(t, m, id, "idle")
 
 	waitForCancel(t, ctx2, "Continue")
+}
+
+// TestRecordEventCaps verifies that retained sub-agent events are bounded in
+// FIFO order so a long-running agent can't grow memory without bound.
+func TestRecordEventCaps(t *testing.T) {
+	a := &asyncSubAgent{id: "agent_1"}
+	for i := 0; i < maxSubAgentEvents+10; i++ {
+		a.recordEvent(SubAgentEvent{Kind: "tool", ToolName: fmt.Sprintf("tool_%d", i)})
+	}
+
+	events := a.listEvents()
+	if len(events) != maxSubAgentEvents {
+		t.Fatalf("len(events) = %d, want %d", len(events), maxSubAgentEvents)
+	}
+
+	// The oldest 10 events should have been dropped.
+	if events[0].ToolName != "tool_10" {
+		t.Errorf("first retained event = %q, want tool_10", events[0].ToolName)
+	}
+	if events[len(events)-1].ToolName != fmt.Sprintf("tool_%d", maxSubAgentEvents+10-1) {
+		t.Errorf("last retained event = %q, want tool_%d", events[len(events)-1].ToolName, maxSubAgentEvents+10-1)
+	}
+}
+
+// TestEventSinkRecordsWithoutOnEvent verifies that the sink stamped into a
+// sub-agent context records events even when no live onEvent hook is set,
+// enabling late-joining subscribers to replay the tool trail.
+func TestEventSinkRecordsWithoutOnEvent(t *testing.T) {
+	m := NewSubAgentManager(&fakeSpawner{})
+
+	a := &asyncSubAgent{id: "agent_1"}
+	m.agents[a.id] = a
+
+	sink := m.eventSink(a.id, "test", "explore")
+	if sink == nil {
+		t.Fatal("eventSink returned nil for a tracked agent")
+	}
+
+	sink(SubAgentEvent{Kind: "started"})
+	sink(SubAgentEvent{Kind: "tool", ToolName: "read_file"})
+
+	events := a.listEvents()
+	if len(events) != 2 {
+		t.Fatalf("len(events) = %d, want 2", len(events))
+	}
+	if events[0].Kind != "started" || events[1].Kind != "tool" {
+		t.Errorf("events = %v, want [started tool]", events)
+	}
 }

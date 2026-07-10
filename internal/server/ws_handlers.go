@@ -256,7 +256,9 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 	// session's sub-agent manager just to discover it's empty — nil back
 	// means no sub-agent has run in this session yet. Replay the retained
 	// tool-level events (excluding the terminal "done") so the panel shows
-	// the current tool trail, not just a coarse "started" stub.
+	// the current tool trail, not just a coarse "started" stub. Use non-
+	// blocking sends to avoid stalling the subscribe handler if the client is
+	// a slow consumer.
 	if sam := tools.SessionSubAgentManager(sessionID, nil); sam != nil {
 		for _, sa := range sam.ListRunning() {
 			for _, ev := range sa.Events {
@@ -273,7 +275,10 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 					"tool_name":   ev.ToolName,
 					"tool_input":  ev.ToolInput,
 				}); err == nil {
-					conn.send <- b
+					select {
+					case conn.send <- b:
+					default:
+					}
 				}
 			}
 		}

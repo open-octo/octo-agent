@@ -11,6 +11,11 @@ import (
 // maxSubAgentResultBytes caps how much result text is retained per async sub-agent.
 const maxSubAgentResultBytes = 1 << 20 // 1 MiB
 
+// maxSubAgentEvents caps how many tool-level events are retained per sub-agent.
+// Old events are dropped in FIFO order so late-joining panels see the most
+// recent tool trail without unbounded memory growth.
+const maxSubAgentEvents = 200
+
 // SubAgentNotification is delivered to the onExit hook when a sub-agent
 // finishes a task (spawn) or replies to a message (continue).
 type SubAgentNotification struct {
@@ -59,6 +64,11 @@ type asyncSubAgent struct {
 func (a *asyncSubAgent) recordEvent(ev SubAgentEvent) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if len(a.events) >= maxSubAgentEvents {
+		// Drop oldest event to bound memory; panels care most about recent tools.
+		copy(a.events, a.events[1:])
+		a.events = a.events[:len(a.events)-1]
+	}
 	a.events = append(a.events, ev)
 }
 
@@ -549,8 +559,9 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 	m.agents[id] = agent
 	m.mu.Unlock()
 
-	// Stream runtime events (started + per-tool) for live display. nil sink =>
-	// no onEvent hook => the spawner runs without streaming.
+	// Stream runtime events (started + per-tool) for live display and replay.
+	// The sink is always non-nil while the agent is tracked, so events are
+	// retained even when no live onEvent hook is set.
 	sink := m.eventSink(id, req.Description, req.AgentType)
 	if sink != nil {
 		ctx = WithSubAgentEventSink(ctx, sink)

@@ -32,6 +32,10 @@ type subAgentSinkKey struct{}
 // SubAgentManager stamps this in before calling Spawn/Continue, so the Spawner
 // interface itself stays unchanged and the non-TUI path (no sink) emits
 // nothing.
+//
+// Note: the SubAgentManager always stamps a sink for a tracked agent, even if
+// no live onEvent hook is set, so events can be retained for late-joining
+// subscribers.
 func WithSubAgentEventSink(ctx context.Context, sink func(SubAgentEvent)) context.Context {
 	if sink == nil {
 		return ctx
@@ -40,7 +44,7 @@ func WithSubAgentEventSink(ctx context.Context, sink func(SubAgentEvent)) contex
 }
 
 // SubAgentEventSink returns the sink stamped by WithSubAgentEventSink, or nil
-// when none is set (headless, tests, or a manager with no onEvent hook).
+// when none is set (headless or tests where no manager is involved).
 func SubAgentEventSink(ctx context.Context) func(SubAgentEvent) {
 	sink, _ := ctx.Value(subAgentSinkKey{}).(func(SubAgentEvent))
 	return sink
