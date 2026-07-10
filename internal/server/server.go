@@ -66,7 +66,8 @@ type Config struct {
 	// Tools enables the agentic tool loop.
 	Tools bool
 
-	// CORSOrigins lists allowed origins for CORS. Empty disables CORS.
+	// CORSOrigins lists additional allowed origins for CORS. vscode-webview://
+	// origins are always allowed regardless — see isVSCodeWebviewOrigin.
 	CORSOrigins []string
 
 	// NoChannel disables IM channel (DingTalk, Feishu, etc.) startup.

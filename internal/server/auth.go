@@ -137,8 +137,19 @@ func isLocalName(host string) bool {
 // as a literal --cors allowlist entry; the scheme itself is the only stable
 // signal. A hostile web page cannot forge this: browsers control the Origin
 // header, and only an actual local VS Code webview process can send this
-// scheme, so treating it as always-allowed is no wider than the existing
-// loopback exemption.
+// scheme.
+//
+// The two call sites carry different guarantees, though. Here in
+// originAllowed(), this only ever gets consulted from behind requireAuth's
+// prior isLoopbackRemote check (and from wsCheckOrigin, reached only after
+// the same requireAuth gate on the /ws route) — so granting it is no wider
+// than the existing loopback exemption. corsMiddleware's use of this
+// predicate carries no such loopback guarantee: like every other configured
+// --cors entry (including the default app://obsidian.md), it reflects
+// Access-Control-Allow-Origin regardless of RemoteAddr. That's fine because
+// CORS headers only affect whether a browser lets JS read a response, never
+// whether requireAuth executes the request — but don't assume this predicate
+// implies loopback-only just because this call site does.
 func isVSCodeWebviewOrigin(origin string) bool {
 	u, err := url.Parse(origin)
 	return err == nil && u.Scheme == "vscode-webview"

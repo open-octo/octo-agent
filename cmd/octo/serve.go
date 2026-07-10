@@ -42,7 +42,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	system := fs.String("system", "", "System prompt")
 	maxTokens := fs.Int("max-tokens", 0, "max_tokens for responses")
 	tools := fs.Bool("tools", true, "Enable agentic tool loop")
-	cors := fs.String("cors", "", "Additional CORS allowed origins (comma-separated, * for any). app://obsidian.md is always allowed by default.")
+	cors := fs.String("cors", "", "Additional CORS allowed origins (comma-separated, * for any). app://obsidian.md and vscode-webview:// origins are always allowed by default.")
 	noChannel := fs.Bool("no-channel", false, "Disable IM channel (DingTalk, Feishu)")
 	noMemory := fs.Bool("no-memory", false, "Disable cross-session memory injection")
 	noSupervisor := fs.Bool("no-supervisor", false, "Run the server directly, without the self-restart supervisor (exit code 42 still signals a restart request to an external supervisor)")

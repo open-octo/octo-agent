@@ -53,6 +53,9 @@ func TestRequireAuth_LoopbackExemption(t *testing.T) {
 		// Non-loopback peers need the key, and spoofable headers don't help.
 		{"non-loopback no key", "http://192.168.1.5:8080/api/sessions", "192.168.1.9:50000", nil, http.StatusUnauthorized},
 		{"non-loopback XFF spoof", "http://192.168.1.5:8080/api/sessions", "192.168.1.9:50000", map[string]string{"X-Forwarded-For": "127.0.0.1"}, http.StatusUnauthorized},
+		// A vscode-webview Origin only grants the loopback exemption; it must
+		// not let a non-loopback caller skip the key, even genuinely presented.
+		{"non-loopback vscode-webview origin", "http://192.168.1.5:8080/api/sessions", "192.168.1.9:50000", map[string]string{"Origin": "vscode-webview://1a2b3c4d5e6f7890abcdef1234567890"}, http.StatusUnauthorized},
 	}
 
 	for _, tc := range cases {
