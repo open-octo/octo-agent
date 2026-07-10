@@ -112,7 +112,9 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"Integer/Regexp logic and JSON.parse/JSON.generate are available (Regexp includes " +
 			"literal /.../ patterns, =~, and String#match/scan/gsub/sub — the engine is RE2, so " +
 			"backreferences and lookaround inside the pattern are NOT supported, though \\1/\\k<name> " +
-			"in a gsub/sub replacement string are). There is NO File, Dir, " +
+			"in a gsub/sub replacement string are. Two RE2 gotchas: to make . cross newlines use the " +
+			"/m suffix, NOT an inline (?m) (inline (?m) means multiline, not dot-all, here); the /x " +
+			"extended/whitespace mode is unavailable; use \\z, not \\Z). There is NO File, Dir, " +
 			"Time, Process, or shell backticks (`cmd`) — referencing any of them raises a Ruby " +
 			"error before the script produces any result. The ONLY way to touch the filesystem, " +
 			"run a shell/git/gh command, or get the current date is through agent(prompt, opts) " +

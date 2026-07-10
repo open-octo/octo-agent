@@ -22,7 +22,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -679,7 +678,10 @@ func (b *backend) regexCompileCheck(_ context.Context, mod api.Module, pptr, ple
 // regexScan returns ALL matches of the pattern in text, as JSON. Scanning the
 // whole string in one call (rather than a from-offset find) keeps Ruby's
 // line-anchored ^/$ semantics correct; the prelude's match/=~/scan/gsub all
-// derive from this array. Offsets are CHARACTER offsets (Ruby semantics). JSON:
+// derive from this array. Offsets are BYTE offsets: mruby.wasm is built without
+// MRB_UTF8_STRING, so guest String#[]/length/slicing are byte-indexed — byte
+// offsets keep the prelude's own slicing (gsub/split/pre_match) consistent with
+// the substrings and with the rest of the sandbox's string model. JSON:
 // {"m":[ <match>, ... ], "names":{"n":idx}} where each <match> is
 // [[start,end,"str"], <group1>, ...] (g0 = whole match; non-participating group
 // = null). "" means no match.
@@ -699,16 +701,12 @@ func (b *backend) regexScan(_ context.Context, mod api.Module, pptr, plen, fptr,
 	for _, loc := range all {
 		groups := make([][]interface{}, len(loc)/2)
 		for i := range groups {
-			bs, be := loc[2*i], loc[2*i+1]
+			bs, be := loc[2*i], loc[2*i+1] // byte offsets into text, or -1 for a non-participating group
 			if bs < 0 {
-				groups[i] = nil // non-participating group -> JSON null
+				groups[i] = nil // -> JSON null
 				continue
 			}
-			groups[i] = []interface{}{
-				utf8.RuneCountInString(text[:bs]),
-				utf8.RuneCountInString(text[:be]),
-				text[bs:be],
-			}
+			groups[i] = []interface{}{bs, be, text[bs:be]}
 		}
 		matches = append(matches, groups)
 	}
@@ -723,7 +721,10 @@ func (b *backend) regexScan(_ context.Context, mod api.Module, pptr, plen, fptr,
 		Names map[string]int `json:"names"`
 	}{matches, names}
 	out, err := json.Marshal(payload)
-	if err != nil {
+	// If the match set is so large its JSON would overflow the guest buffer,
+	// degrade to "" (no match) rather than writing a truncated, unparseable blob
+	// that would make the prelude's JSON.parse raise deep inside a scan/gsub.
+	if err != nil || uint32(len(out)) > outCap {
 		return writeGuest(mod, outPtr, outCap, "")
 	}
 	return writeGuest(mod, outPtr, outCap, string(out))

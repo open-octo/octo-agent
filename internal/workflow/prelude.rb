@@ -219,8 +219,9 @@ end
 # sandbox) but with NO backreferences or lookaround in the PATTERN. Replacement
 # backrefs (\1, \&, \k<name>) in sub/gsub DO work — expanded here in Ruby, not by
 # the engine. Everything derives from one host call, __regex_scan, which returns
-# every match (character offsets + captured substrings) so Ruby's line-anchored
-# ^/$ stay correct.
+# every match (BYTE offsets + captured substrings; mruby strings are byte-indexed
+# without MRB_UTF8_STRING, so byte offsets keep slicing consistent) so Ruby's
+# line-anchored ^/$ stay correct.
 
 class RegexpError < StandardError; end
 
@@ -436,13 +437,17 @@ class String
   def split(pat = nil, lim = 0)
     return __orig_split(pat, lim) unless pat.is_a?(Regexp)
     result = []
+    fields = 0     # split fields only (limit counts these, not captures)
     last   = 0
     pat.__matches(self).each do |m|
       bs = m.begin(0); es = m.end(0)
       next if es == bs && bs == last # skip a zero-width match at the cursor
+      break if lim > 0 && fields == lim - 1
       result << self[last...bs]
+      fields += 1
+      # Ruby appends the separator's captured groups after each field.
+      (1...m.size).each { |gi| v = m[gi]; result << v unless v.nil? }
       last = es
-      break if lim > 0 && result.size == lim - 1
     end
     result << (self[last..-1] || "")
     result.pop while lim == 0 && !result.empty? && result[-1] == ""

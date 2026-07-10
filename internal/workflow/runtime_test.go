@@ -730,6 +730,13 @@ func TestRun_Regexp(t *testing.T) {
 		{"Regexp.escape", `Regexp.escape("1+1")`, `1\+1`},
 		{"plain string split still works", `"a,b,c".split(",").join("|")`, "a|b|c"},
 		{"default whitespace split still works", `"a  b c".split.join("|")`, "a|b|c"},
+		// Multibyte: offsets are byte offsets and mruby strings are byte-indexed,
+		// so slicing-based ops (gsub/split) must not corrupt UTF-8.
+		{"utf8 gsub", `"你好x好".gsub(/x/, "-")`, "你好-好"},
+		{"utf8 split", `"a→b→c".split(/→/).join("|")`, "a|b|c"},
+		{"utf8 sub before multibyte", `"café x".sub(/x/, "y")`, "café y"},
+		// Ruby includes the separator's capture groups in split output.
+		{"split keeps captures", `"a1b2c".split(/(\d)/).join("|")`, "a|1|b|2|c"},
 	}
 	for _, tc := range cases {
 		got, err := Run(context.Background(), tc.script, Options{Agent: echoAgent})
