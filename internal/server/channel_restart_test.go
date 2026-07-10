@@ -345,8 +345,18 @@ func TestChannelIssue_SurfacedViaListChannels(t *testing.T) {
 	})
 	srv.reloadChannel("crashfake-api")
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) && srv.channelIssue("crashfake-api") == "" {
+	// Wait for the terminal give-up state, not merely any recorded issue.
+	// While the restart loop is still cycling, the issue toggles: it's set on
+	// each crash (recordChannelIssue) and cleared again after a successful
+	// rebuild (clearChannelIssue). A poll that breaks on the first set issue
+	// can then land its follow-up read in that brief cleared window and see
+	// "". Once the adapter gives up it's removed from runningAdapters and the
+	// issue is recorded permanently — a stable state to assert against.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if srv.channelIssue("crashfake-api") != "" && !srv.isAdapterRunning("crashfake-api") {
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
