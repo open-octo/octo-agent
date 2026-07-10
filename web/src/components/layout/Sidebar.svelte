@@ -29,8 +29,8 @@
     { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
     { icon: 'ant-design:clock-circle-outlined', title: 'nav.tasks', v: 'tasks' },
     { icon: 'ant-design:thunderbolt-outlined', title: 'nav.skills', v: 'skills' },
-    { icon: 'ant-design:partition-outlined', title: 'nav.workflows', v: 'workflows' },
     { icon: 'ant-design:api-outlined', title: 'nav.mcp', v: 'mcp' },
+    { icon: 'ant-design:partition-outlined', title: 'nav.workflows', v: 'workflows' },
     { icon: 'ant-design:global-outlined', title: 'nav.browser', v: 'browser' },
     { icon: 'ant-design:mobile-outlined', title: 'nav.channels', v: 'channels' },
     { icon: 'ant-design:user-outlined', title: 'nav.memory', v: 'profile' },
@@ -209,8 +209,8 @@
         {#each [
           { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
           { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
-          { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
           { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
+          { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
           { icon: 'ant-design:global-outlined', label: 'nav.browser', v: 'browser' },
           { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
         ] as item}
