@@ -15,6 +15,20 @@
 
   let { onSend }: { onSend?: (text: string, files?: any[]) => void } = $props()
 
+  // A staged attachment. Images carry inline as a base64 data URL (the model
+  // gets an image block); every other type is uploaded to the server and
+  // referenced by `path` (an /api/uploads/<name> URL) so the agent opens it
+  // with read_file/terminal — mirroring how it works against the CLI's
+  // filesystem. Exactly one of data_url / path is set once ready. `uploading`
+  // marks a placeholder whose upload is still in flight; `id` keys that
+  // placeholder so its async result lands on the right entry (see addAttachment).
+  type Attachment = { id?: string; name: string; mime_type?: string; data_url?: string; path?: string; uploading?: boolean }
+
+  // Reject oversized attachments client-side with a clear message rather than
+  // letting the upload fail late (or bloating a WS message with a huge inline
+  // image). Keep in sync with maxUploadBytes in internal/server/upload_handler.go.
+  const MAX_ATTACHMENT_BYTES = 32 * 1024 * 1024
+
   let text = $state('')
   // Per-session composer draft: keyed by session id so switching sessions
   // doesn't carry a half-typed message (or its staged attachments) into — or
@@ -22,11 +36,11 @@
   // nothing renders them directly, they are only read/written from the
   // session-switch effect below.
   let draftsBySession: Record<string, string> = {}
-  let attachmentsBySession: Record<string, { name: string; data_url: string; mime_type: string }[]> = {}
+  let attachmentsBySession: Record<string, Attachment[]> = {}
   let draftSid = ''
   let textareaEl = $state<HTMLTextAreaElement | null>(null)
   let fileInputEl = $state<HTMLInputElement | null>(null)
-  let attachments = $state<{ name: string; data_url: string; mime_type: string }[]>([])
+  let attachments = $state<Attachment[]>([])
   let dragOver = $state(false)
 
   // Called by ChatView when the user clicks "edit" on a prior message — loads
@@ -55,12 +69,54 @@
     fileInputEl?.click()
   }
 
-  function addAttachment(file: File, fallbackName?: string) {
-    const reader = new FileReader()
-    reader.onload = () => {
-      attachments = [...attachments, { name: file.name || fallbackName || 'attachment', data_url: String(reader.result), mime_type: file.type }]
+  // Attachment reads (image FileReader, non-image upload) resolve asynchronously.
+  // These helpers land the result on the session that STARTED the read, not
+  // whatever session is active when it finishes — otherwise switching sessions
+  // (or sending) mid-upload leaks the file into the wrong conversation.
+  let uploadSeq = 0
+  function attachTo(originSid: string, att: Attachment) {
+    if (originSid === sid) attachments = [...attachments, att]
+    else attachmentsBySession[originSid] = [...(attachmentsBySession[originSid] ?? []), att]
+  }
+  function patchAttachment(originSid: string, id: string, patch: Partial<Attachment>) {
+    const apply = (list: Attachment[]) => list.map(a => a.id === id ? { ...a, ...patch } : a)
+    if (originSid === sid) attachments = apply(attachments)
+    else if (attachmentsBySession[originSid]) attachmentsBySession[originSid] = apply(attachmentsBySession[originSid])
+  }
+  function dropAttachment(originSid: string, id: string) {
+    const drop = (list: Attachment[]) => list.filter(a => a.id !== id)
+    if (originSid === sid) attachments = drop(attachments)
+    else if (attachmentsBySession[originSid]) attachmentsBySession[originSid] = drop(attachmentsBySession[originSid])
+  }
+
+  async function addAttachment(file: File, fallbackName?: string) {
+    const name = file.name || fallbackName || 'attachment'
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      showToast($t('chat.attach_too_large'), 'error')
+      return
     }
-    reader.readAsDataURL(file)
+    const originSid = sid
+    // Images ride inline as a data URL (decoded into an image block server-side).
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader()
+      reader.onload = () => attachTo(originSid, { name, data_url: String(reader.result), mime_type: file.type })
+      reader.readAsDataURL(file)
+      return
+    }
+    // Any other file (pdf, xlsx, zip, csv, …) uploads to ~/.octo/uploads and is
+    // sent by path; the agent reads it from disk with its own tools. Stage a
+    // visible placeholder immediately so the file is never silently lost while
+    // the upload is in flight (send() refuses until it clears), then fill in the
+    // path or drop the placeholder on failure.
+    const id = `up-${++uploadSeq}`
+    attachTo(originSid, { id, name, mime_type: file.type, uploading: true })
+    try {
+      const url = await api.uploadFile(file)
+      patchAttachment(originSid, id, { path: url, uploading: false })
+    } catch (e: any) {
+      dropAttachment(originSid, id)
+      showToast(e.message ?? `Failed to upload ${name}`, 'error')
+    }
   }
 
   function onFilesPicked(e: Event) {
@@ -70,16 +126,16 @@
     input.value = ''
   }
 
-  // Paste images from clipboard into the composer.
+  // Paste files from the clipboard into the composer (images or any other file).
   function onPaste(e: ClipboardEvent) {
     const items = Array.from(e.clipboardData?.items ?? [])
-    const imageItems = items.filter(it => it.kind === 'file' && it.type.startsWith('image/'))
-    if (imageItems.length === 0) return
+    const fileItems = items.filter(it => it.kind === 'file')
+    if (fileItems.length === 0) return
     e.preventDefault()
-    for (const it of imageItems) {
+    for (const it of fileItems) {
       const f = it.getAsFile()
       if (!f) continue
-      addAttachment(f, 'pasted-image')
+      addAttachment(f, f.type.startsWith('image/') ? 'pasted-image' : undefined)
     }
   }
 
@@ -98,9 +154,7 @@
     e.preventDefault()
     dragOver = false
     const files = Array.from(e.dataTransfer?.files ?? [])
-    for (const f of files) {
-      if (f.type.startsWith('image/')) addAttachment(f)
-    }
+    for (const f of files) addAttachment(f)
   }
 
   function removeAttachment(i: number) {
@@ -465,6 +519,12 @@
 
   function send() {
     if (!text.trim() && attachments.length === 0) return
+    // Don't send while an attachment upload is still in flight — the file
+    // would be dropped and re-appear on the next message.
+    if (attachments.some(a => a.uploading)) {
+      showToast($t('chat.upload_in_progress'), 'error')
+      return
+    }
     const v = text.trim()
     const files = attachments.length ? [...attachments] : undefined
     pushHistory(sid, v)
@@ -699,12 +759,14 @@
       {#if attachments.length > 0}
         <div class="attachments">
           {#each attachments as a, i}
-            <span class="attach-chip" title={a.name}>
-              <iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>
+            <span class="attach-chip" class:uploading={a.uploading} title={a.name}>
+              <iconify-icon icon={a.uploading ? 'ant-design:loading-outlined' : 'ant-design:paper-clip-outlined'} width="12"></iconify-icon>
               <span class="attach-name">{a.name}</span>
-              <button class="attach-x" title={$t('chat.remove')} onclick={() => removeAttachment(i)}>
-                <iconify-icon icon="ant-design:close-outlined" width="11"></iconify-icon>
-              </button>
+              {#if !a.uploading}
+                <button class="attach-x" title={$t('chat.remove')} onclick={() => removeAttachment(i)}>
+                  <iconify-icon icon="ant-design:close-outlined" width="11"></iconify-icon>
+                </button>
+              {/if}
             </span>
           {/each}
         </div>
@@ -756,13 +818,12 @@
       <input
         bind:this={fileInputEl}
         type="file"
-        accept="image/*"
         multiple
         style="display:none"
         onchange={onFilesPicked}
       />
       <div class="input-footer">
-        <button class="tool-btn" title={$t('chat.attach_image')} onclick={openAttach}>
+        <button class="tool-btn" title={$t('chat.attach_file')} onclick={openAttach}>
           <iconify-icon icon="ant-design:paper-clip-outlined" width="15"></iconify-icon>
         </button>
         <button class="tool-btn skill-btn" title={$t('chat.insert_slash')} onclick={insertSkill}>/</button>
@@ -882,6 +943,9 @@ textarea {
   height: 24px; padding: 0 6px 0 8px; background: var(--surface-info); border: 1px solid var(--blue-2);
   border-radius: 6px; font-size: 12px; color: var(--text-secondary);
 }
+.attach-chip.uploading { opacity: 0.7; }
+.attach-chip.uploading iconify-icon { animation: attach-spin 0.8s linear infinite; }
+@keyframes attach-spin { to { transform: rotate(360deg); } }
 .attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attach-x {
   border: none; background: transparent; cursor: pointer; padding: 0;

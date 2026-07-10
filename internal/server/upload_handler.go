@@ -15,8 +15,16 @@ import (
 // Upload destination under ~/.octo/uploads/.
 const uploadsDirName = "uploads"
 
+// maxUploadBytes is the hard cap on a single upload request body. Keep in sync
+// with MAX_ATTACHMENT_BYTES in web/src/components/chat/Composer.svelte.
+const maxUploadBytes = 32 << 20 // 32 MB
+
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(32 << 20); err != nil { // 32 MB max
+	// MaxBytesReader is the real ceiling: ParseMultipartForm's argument only
+	// bounds in-memory buffering (the overflow spills to temp files), so
+	// without this a client could stream an arbitrarily large body to disk.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("parse form: %v", err))
 		return
 	}
