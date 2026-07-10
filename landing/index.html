@@ -235,14 +235,16 @@
 
     /* Interfaces */
     .interfaces {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
       gap: 1.25rem;
     }
     @media (max-width: 640px) {
-      .interfaces { grid-template-columns: 1fr; }
+      .iface { flex: 1 1 100%; }
     }
     .iface {
+      flex: 0 1 260px;
       background: var(--card-bg);
       border: 1px solid var(--border);
       border-radius: var(--radius);
