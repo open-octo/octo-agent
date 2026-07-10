@@ -425,6 +425,28 @@ func TestTerminalTool_TimeoutValidation(t *testing.T) {
 	}
 }
 
+// TestTerminalTool_TimeoutIgnoredForBackground verifies `timeout` only governs
+// the synchronous path: an async launch has no timeout, so even an over-cap
+// timeout is ignored rather than rejected — the command backgrounds normally.
+func TestTerminalTool_TimeoutIgnoredForBackground(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell only")
+	}
+	mgr := NewBackgroundManager()
+	defer mgr.KillAll()
+	result, err := TerminalTool{mgr: mgr}.Execute(context.Background(), "terminal", map[string]any{
+		"command":           "sleep 30",
+		"run_in_background": "async",
+		"timeout":           float64(99999), // would be rejected on the sync path
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(result.Text, "background process") {
+		t.Errorf("async launch should ignore timeout and background normally; got: %q", result.Text)
+	}
+}
+
 // TestTerminalTool_SubAgent_NotPromotable verifies a sub-agent's synchronous
 // command registers NO promotable SyncSession, so the TUI Ctrl+B / web
 // "Background" button can't promote it into a process that outlives the

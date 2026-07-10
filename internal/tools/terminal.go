@@ -189,10 +189,11 @@ func (t TerminalTool) Execute(ctx context.Context, name string, input map[string
 // long line will get their final line truncated, but the more usual case of
 // many short lines is unaffected.
 //
-// Timeout promotion: if the command exceeds TerminalTimeout (120 s) the
-// original process continues running in the background (no restart). The
-// caller receives the output produced so far plus a background id and a
-// clear instruction to wait for the completion notification.
+// Timeout: a synchronous command runs under `timeout` seconds (default
+// TerminalTimeout, capped at MaxTerminalTimeout). On expiry it is killed and
+// reaped and an error is returned with the output produced so far — it is NOT
+// moved to the background. A human may still promote a running command from the
+// UI (Ctrl+B / button) before the timeout to keep it as a background process.
 func (t TerminalTool) ExecuteStream(
 	ctx context.Context,
 	_ string,
