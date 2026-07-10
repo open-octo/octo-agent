@@ -84,7 +84,7 @@ func TestEmbeddedDefaultWorkflows_Execute(t *testing.T) {
 	runs := []run{
 		{"parallel-understand", `{"target": "test"}`},
 		{"batch-migrate", `{"change": "test"}`},
-		{"daily-triage", ""},
+		{"daily-triage", `{"repo": "test"}`},
 	}
 
 	for _, r := range runs {
