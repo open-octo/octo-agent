@@ -2493,7 +2493,7 @@ func (s *Server) attachInboundFiles(sess *channel.Session, ev channel.InboundEve
 			}
 			blocks = append(blocks, block)
 		case f.Path != "":
-			notes = append(notes, fmt.Sprintf("[Attached file: %s]", f.Path))
+			notes = append(notes, agent.AttachmentNote(f.Path))
 		}
 	}
 	if len(blocks) > 0 {

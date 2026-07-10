@@ -1035,7 +1035,13 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// ghost (.msg-pending) bubble for the real one before streaming starts.
 	// <system-reminder> spans are stripped from the bubble: a turn kicked by a
 	// completion note (kickIdleSteerTurn) is pure reminder and renders nothing.
-	visible := strings.TrimSpace(agent.StripSystemReminders(content))
+	// Document attachments show as chips derived from their "[Attached file: …]"
+	// notes: strip the notes from the displayed text (they stay in the persisted,
+	// model-facing content) and add a chip ref per note. Deriving here rather
+	// than trusting a pre-filled images slice keeps every turn path — web, retry,
+	// background — consistent and stops a note-only message from vanishing.
+	visible, docRefs := docChipRefs(strings.TrimSpace(agent.StripSystemReminders(content)))
+	images = append(images, docRefs...)
 	if visible != "" || len(images) > 0 {
 		userEvent := map[string]any{
 			"type":       "history_user_message",

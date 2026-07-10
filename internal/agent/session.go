@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -849,6 +850,47 @@ func StripRemindersForDisplay(s string) string {
 		return s
 	}
 	return strings.TrimRight(stripped, " \t\n")
+}
+
+var (
+	// The path capture is greedy (`.` never crosses a newline, and notes are
+	// newline-separated) so an on-disk path containing a "]" isn't truncated.
+	attachmentNoteRe = regexp.MustCompile(`\[Attached file: (.+)\]`)
+	// uploadTSPrefix matches the "<unixnano>_" prefix the web upload handler
+	// adds to saved filenames, so the chip/label shows the original filename.
+	// Requiring 10+ digits avoids clipping a legitimate "2024_report.pdf".
+	uploadTSPrefix = regexp.MustCompile(`^\d{10,}_`)
+)
+
+// AttachmentNote formats the note appended to a user message's text to tell the
+// model where an uploaded file landed on disk (so it can read_file it). It is
+// model-facing and persisted; display surfaces strip it with
+// StripAttachmentNotes and render a chip from the filename instead.
+func AttachmentNote(path string) string {
+	return fmt.Sprintf("[Attached file: %s]", path)
+}
+
+// StripAttachmentNotes removes "[Attached file: <path>]" notes from display text
+// and returns the cleaned text plus the display filename of each note (in order)
+// so a UI can render an attachment chip. The name is the path basename with the
+// upload timestamp prefix removed, so every surface (web bubble, reloaded
+// transcript, TUI echo) shows the original filename. The notes stay in the
+// persisted, model-facing content — only rendering paths call this. Text with no
+// notes is returned byte-identical.
+func StripAttachmentNotes(s string) (cleaned string, names []string) {
+	for _, m := range attachmentNoteRe.FindAllStringSubmatch(s, -1) {
+		base := filepath.Base(strings.TrimSpace(m[1]))
+		names = append(names, uploadTSPrefix.ReplaceAllString(base, ""))
+	}
+	if names == nil {
+		return s, nil
+	}
+	// Notes are always appended after the user's text, so removing them leaves
+	// only trailing whitespace that TrimSpace handles — no interior collapse
+	// that would mangle the user's own blank lines (and break the live-vs-echo
+	// dedup, which compares exact content).
+	cleaned = strings.TrimSpace(attachmentNoteRe.ReplaceAllString(s, ""))
+	return cleaned, names
 }
 
 // LoadSession reads ~/.octo/sessions/<id>.jsonl. id may be a bare session id,

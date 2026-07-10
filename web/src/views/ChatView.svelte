@@ -161,6 +161,10 @@
         pending: false,
         tools: [],
         todos: [],
+        // Server-derived attachment refs (image thumbnails + "pdf:<name>" doc
+        // chips) so a reloaded transcript shows the same attachments the live
+        // turn did — this is the only place reload rehydrates them.
+        images: ev.images ?? [],
       })
     } else if (ev.type === 'assistant_message') {
       // Skip empty assistant turns (thinking-only / tool-only rounds) so they
@@ -1207,6 +1211,19 @@
                             <img src={f.data_url} alt={f.name} class="msg-image" />
                           {:else}
                             <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{f.name}</span>
+                          {/if}
+                        {/each}
+                      </div>
+                    {:else if msg.images && msg.images.length > 0}
+                      <!-- Server-derived refs (survive reload): a "/api/uploads/…"
+                           URL is an image thumbnail; a "pdf:<name>" sentinel is a
+                           document chip. -->
+                      <div class="msg-attachments">
+                        {#each msg.images as ref}
+                          {#if ref.startsWith('pdf:')}
+                            <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{ref.slice(4)}</span>
+                          {:else}
+                            <img src={ref} alt="attachment" class="msg-image" />
                           {/if}
                         {/each}
                       </div>

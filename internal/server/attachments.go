@@ -13,6 +13,20 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 )
 
+// docChipRefs strips "[Attached file: …]" notes from display text and returns
+// the cleaned text plus one "pdf:<name>" chip ref per note. The note in the
+// message text is the only persisted trace of a document attachment, so this is
+// the single source of doc chips for both the live broadcast and history
+// replay. ("pdf:" is the frontend's document-chip sentinel; the name is any
+// file type, not only PDFs.)
+func docChipRefs(text string) (cleaned string, refs []string) {
+	cleaned, names := agent.StripAttachmentNotes(text)
+	for _, n := range names {
+		refs = append(refs, "pdf:"+n)
+	}
+	return cleaned, refs
+}
+
 // User attachments sent over the WebSocket message payload. Images arrive as
 // data URLs (the composer compresses them client-side); documents were already
 // uploaded via POST /api/upload and arrive as an /api/uploads/ URL reference.
@@ -23,11 +37,13 @@ type userAttachments struct {
 	// path of the on-disk copy the session transcript will reference.
 	blocks []agent.ContentBlock
 	// images are frontend display refs for the user bubble: an /api/uploads/
-	// URL for an image thumbnail, or a "pdf:<name>" badge sentinel for a
-	// document (the convention the history renderer already understands).
+	// URL per image thumbnail. Document chips are NOT carried here — they are
+	// derived from the notes below (via docChipRefs) so the live bubble and a
+	// reloaded transcript share one source.
 	images []string
 	// notes are text lines folded into the message so the model learns the
-	// on-disk path of each document attachment (read_file can open them).
+	// on-disk path of each document attachment (read_file can open them). They
+	// are also what document attachment chips are rendered from.
 	notes []string
 }
 
@@ -72,8 +88,7 @@ func parseUserFiles(files []wsUserFile) userAttachments {
 				log.Printf("[ws] file attachment %q: %v", f.Name, err)
 				continue
 			}
-			att.images = append(att.images, "pdf:"+f.Name)
-			att.notes = append(att.notes, fmt.Sprintf("[Attached file: %s]", abs))
+			att.notes = append(att.notes, agent.AttachmentNote(abs))
 		}
 	}
 	return att

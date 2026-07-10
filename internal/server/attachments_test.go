@@ -77,16 +77,28 @@ func TestParseUserFiles_DocPath(t *testing.T) {
 		{Name: "report.pdf", MimeType: "application/pdf", Path: "/api/uploads/123_report.pdf"},
 	})
 
-	if len(att.blocks) != 0 || len(att.images) != 1 || len(att.notes) != 1 {
-		t.Fatalf("blocks/images/notes = %d/%d/%d, want 0/1/1",
+	// A document produces no block and no image ref — only a note. Its display
+	// chip is derived from that note (see docChipRefs / the replay test).
+	if len(att.blocks) != 0 || len(att.images) != 0 || len(att.notes) != 1 {
+		t.Fatalf("blocks/images/notes = %d/%d/%d, want 0/0/1",
 			len(att.blocks), len(att.images), len(att.notes))
-	}
-	if att.images[0] != "pdf:report.pdf" {
-		t.Errorf("badge sentinel = %q", att.images[0])
 	}
 	wantPath := filepath.Join(dir, "123_report.pdf")
 	if !strings.Contains(att.notes[0], wantPath) {
 		t.Errorf("note %q does not reference %q", att.notes[0], wantPath)
+	}
+}
+
+func TestDocChipRefs(t *testing.T) {
+	// The unixnano prefix handleUpload adds is stripped so the chip shows the
+	// original filename; the note is removed from the returned text.
+	in := "look at this\n\n" + agent.AttachmentNote("/home/u/.octo/uploads/1720000000000000000_report.pdf")
+	cleaned, refs := docChipRefs(in)
+	if cleaned != "look at this" {
+		t.Errorf("cleaned = %q, want %q", cleaned, "look at this")
+	}
+	if len(refs) != 1 || refs[0] != "pdf:report.pdf" {
+		t.Errorf("refs = %v, want [pdf:report.pdf]", refs)
 	}
 }
 
@@ -102,6 +114,59 @@ func TestParseUserFiles_SkipsBadEntries(t *testing.T) {
 	})
 	if len(att.blocks) != 0 || len(att.images) != 0 || len(att.notes) != 0 {
 		t.Errorf("bad entries not skipped: %+v", att)
+	}
+}
+
+// A persisted document attachment (only an "[Attached file: <abspath>]" note in
+// the text, no image block) must replay with the note stripped from the visible
+// content and re-derived into a "pdf:<name>" chip ref — so a reloaded transcript
+// matches what the live turn showed.
+func TestHandleGetSessionMessages_DocAttachmentReplay(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Title = "fixed"
+	sess.Messages = []agent.Message{{
+		Role:    agent.RoleUser,
+		Content: "analyze this\n\n" + agent.AttachmentNote("/home/u/.octo/uploads/9_data.csv"),
+	}}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	req.SetPathValue("id", sess.ID)
+	rec := httptest.NewRecorder()
+	srv.handleGetSessionMessages(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages endpoint = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var found bool
+	for _, ev := range body.Events {
+		if ev["type"] != "history_user_message" {
+			continue
+		}
+		found = true
+		if got := ev["content"]; got != "analyze this" {
+			t.Errorf("content = %q, want %q (note not stripped)", got, "analyze this")
+		}
+		imgs, _ := ev["images"].([]any)
+		if len(imgs) != 1 || imgs[0] != "pdf:9_data.csv" {
+			t.Errorf("images = %v, want [pdf:9_data.csv]", ev["images"])
+		}
+	}
+	if !found {
+		t.Fatalf("no history_user_message event: %+v", body.Events)
 	}
 }
 

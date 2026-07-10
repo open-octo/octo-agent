@@ -530,6 +530,13 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 			// user turns — strip them so replay matches the TUI, which never
 			// shows them.
 			text = strings.TrimSpace(agent.StripSystemReminders(text))
+			// Document attachments persist only as "[Attached file: <abspath>]"
+			// notes in the text (no image block). Strip them and re-derive the
+			// chip refs so a reloaded transcript shows the same chips the live
+			// turn did (docChipRefs is the shared source for both).
+			var docRefs []string
+			text, docRefs = docChipRefs(text)
+			images = append(images, docRefs...)
 			// Only emit history_user_message if there is user-visible content
 			// (tool_result-only messages are bookkeeping, not user-visible).
 			if text != "" || len(images) > 0 {

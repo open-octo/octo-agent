@@ -1837,7 +1837,15 @@ func userMessageText(msg agent.Message) string {
 		}
 		s = b.String()
 	}
-	return strings.TrimSpace(agent.StripSystemReminders(s))
+	s = strings.TrimSpace(agent.StripSystemReminders(s))
+	// A document attachment persists as an "[Attached file: <abspath>]" note in
+	// the text. Show it as a compact "📎 <name>" chip rather than the raw path,
+	// matching how locally-attached images echo (attachmentChips).
+	cleaned, names := agent.StripAttachmentNotes(s)
+	for _, n := range names {
+		cleaned = strings.TrimSpace(cleaned + "\n📎 " + n)
+	}
+	return cleaned
 }
 
 // flushSprint ends the answer hand-off sprint, if one is active, and releases
