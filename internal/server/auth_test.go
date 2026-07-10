@@ -53,6 +53,9 @@ func TestRequireAuth_LoopbackExemption(t *testing.T) {
 		// Non-loopback peers need the key, and spoofable headers don't help.
 		{"non-loopback no key", "http://192.168.1.5:8080/api/sessions", "192.168.1.9:50000", nil, http.StatusUnauthorized},
 		{"non-loopback XFF spoof", "http://192.168.1.5:8080/api/sessions", "192.168.1.9:50000", map[string]string{"X-Forwarded-For": "127.0.0.1"}, http.StatusUnauthorized},
+		// A vscode-webview Origin only grants the loopback exemption; it must
+		// not let a non-loopback caller skip the key, even genuinely presented.
+		{"non-loopback vscode-webview origin", "http://192.168.1.5:8080/api/sessions", "192.168.1.9:50000", map[string]string{"Origin": "vscode-webview://1a2b3c4d5e6f7890abcdef1234567890"}, http.StatusUnauthorized},
 	}
 
 	for _, tc := range cases {
@@ -160,6 +163,29 @@ func TestRequireAuth_CORSAllowlist(t *testing.T) {
 	srv.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("allowlisted host: got %d, want 200", rec.Code)
+	}
+}
+
+// TestRequireAuth_VSCodeWebviewOrigin covers the octo VS Code extension's
+// default local path: a loopback request carrying a vscode-webview:// Origin
+// passes the exemption with no access key and no --cors flag, while a
+// lookalike Origin using the string "vscode-webview" as a Host (not a
+// Scheme) is rejected like any other foreign origin.
+func TestRequireAuth_VSCodeWebviewOrigin(t *testing.T) {
+	srv := mustServer(t, Config{AccessKey: testAccessKey})
+
+	w := authRequest(t, srv, http.MethodGet,
+		"http://127.0.0.1:8080/api/sessions", "127.0.0.1:50000",
+		map[string]string{"Origin": "vscode-webview://1a2b3c4d5e6f7890abcdef1234567890"})
+	if w.Code != http.StatusOK {
+		t.Errorf("vscode-webview origin: got %d, want 200", w.Code)
+	}
+
+	w = authRequest(t, srv, http.MethodGet,
+		"http://127.0.0.1:8080/api/sessions", "127.0.0.1:50000",
+		map[string]string{"Origin": "http://vscode-webview.evil.com"})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("vscode-webview lookalike host: got %d, want 403", w.Code)
 	}
 }
 
@@ -357,6 +383,10 @@ func TestWSCheckOrigin(t *testing.T) {
 		{"same origin non-local keyless", mkReq("192.168.1.5:8080", "http://192.168.1.5:8080", ""), false},
 		{"foreign origin", mkReq("127.0.0.1:8080", "https://evil.example", ""), false},
 		{"foreign origin with key", mkReq("127.0.0.1:8080", "https://evil.example", testAccessKey), true},
+		{"vscode webview origin", mkReq("127.0.0.1:8080", "vscode-webview://1a2b3c4d5e6f7890abcdef1234567890", ""), true},
+		// A spoofed Host under the vscode-webview name (not the scheme) must
+		// not pass — only url.Parse's Scheme grants the exemption.
+		{"vscode webview lookalike host", mkReq("127.0.0.1:8080", "http://vscode-webview.evil.com", ""), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -392,6 +392,48 @@ func TestCORS_DisallowedOrigin(t *testing.T) {
 	}
 }
 
+// TestCORS_VSCodeWebview covers the octo VS Code extension's default local
+// path: its REST fetch()es carry a vscode-webview:// Origin and must get a
+// reflected Access-Control-Allow-Origin without any --cors flag configured.
+func TestCORS_VSCodeWebview(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/health", nil)
+	req.Header.Set("Origin", "vscode-webview://1a2b3c4d5e6f7890abcdef1234567890")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.http.Handler, w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "vscode-webview://1a2b3c4d5e6f7890abcdef1234567890" {
+		t.Fatalf("CORS origin = %q, want the vscode-webview origin reflected", got)
+	}
+}
+
+// TestCORS_VSCodeWebviewLookalikeRejected asserts the allowance is scoped to
+// the vscode-webview: URL scheme, not any origin containing that string.
+func TestCORS_VSCodeWebviewLookalikeRejected(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("Origin", "http://vscode-webview.evil.com")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.http.Handler, w, req)
+
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("expected no CORS header for lookalike origin, got %q", got)
+	}
+}
+
 func TestCORS_WildcardDoesNotReflectOrigin(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

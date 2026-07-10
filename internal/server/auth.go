@@ -131,6 +131,30 @@ func isLocalName(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// isVSCodeWebviewOrigin reports whether origin was sent by a VS Code webview
+// panel. Each webview gets a fresh vscode-webview://<uuid> origin per window
+// and reload, so — unlike a fixed app scheme origin — it can never be pinned
+// as a literal --cors allowlist entry; the scheme itself is the only stable
+// signal. A hostile web page cannot forge this: browsers control the Origin
+// header, and only an actual local VS Code webview process can send this
+// scheme.
+//
+// The two call sites carry different guarantees, though. Here in
+// originAllowed(), this only ever gets consulted from behind requireAuth's
+// prior isLoopbackRemote check (and from wsCheckOrigin, reached only after
+// the same requireAuth gate on the /ws route) — so granting it is no wider
+// than the existing loopback exemption. corsMiddleware's use of this
+// predicate carries no such loopback guarantee: like every other configured
+// --cors entry (including the default app://obsidian.md), it reflects
+// Access-Control-Allow-Origin regardless of RemoteAddr. That's fine because
+// CORS headers only affect whether a browser lets JS read a response, never
+// whether requireAuth executes the request — but don't assume this predicate
+// implies loopback-only just because this call site does.
+func isVSCodeWebviewOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && u.Scheme == "vscode-webview"
+}
+
 // hostAllowed is the DNS-rebinding gate for the loopback exemption: the
 // Host header must name the local machine or a --cors allowlisted host. A
 // rebound page's request reaches 127.0.0.1 but carries Host: attacker.com.
@@ -164,7 +188,7 @@ func (s *Server) originAllowed(origin string) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	if isLocalName(canonicalHost(u.Host)) {
+	if u.Scheme == "vscode-webview" || isLocalName(canonicalHost(u.Host)) {
 		return true
 	}
 	for _, o := range s.cfg.CORSOrigins {
