@@ -42,7 +42,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	system := fs.String("system", "", "System prompt")
 	maxTokens := fs.Int("max-tokens", 0, "max_tokens for responses")
 	tools := fs.Bool("tools", true, "Enable agentic tool loop")
-	cors := fs.String("cors", "", "CORS allowed origins (comma-separated, * for any)")
+	cors := fs.String("cors", "", "Additional CORS allowed origins (comma-separated, * for any). app://obsidian.md is always allowed by default.")
 	noChannel := fs.Bool("no-channel", false, "Disable IM channel (DingTalk, Feishu)")
 	noMemory := fs.Bool("no-memory", false, "Disable cross-session memory injection")
 	noSupervisor := fs.Bool("no-supervisor", false, "Run the server directly, without the self-restart supervisor (exit code 42 still signals a restart request to an external supervisor)")
@@ -77,10 +77,14 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	slog.SetDefault(slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: serveLogLevel()})))
 
 	var corsOrigins []string
+	// Always allow the Obsidian desktop app origin by default so that
+	// Obsidian plugins (e.g. Claudian) can connect without requiring users
+	// to pass --cors manually.
+	corsOrigins = append(corsOrigins, "app://obsidian.md")
 	if *cors != "" {
 		for _, o := range splitComma(*cors) {
 			o = strings.TrimSpace(o)
-			if o != "" {
+			if o != "" && o != "app://obsidian.md" {
 				corsOrigins = append(corsOrigins, o)
 			}
 		}
