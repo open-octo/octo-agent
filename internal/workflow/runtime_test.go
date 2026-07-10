@@ -707,3 +707,59 @@ func TestRun_ResumeArgsMismatch(t *testing.T) {
 		t.Errorf("err = %v, want different-script error on args mismatch", err)
 	}
 }
+
+// TestRun_Regexp exercises the RE2-backed Regexp layer (host __regex_* +
+// prelude Regexp/MatchData/String). Requires the rebuilt mruby.wasm that
+// imports regex_compile_check/regex_scan.
+func TestRun_Regexp(t *testing.T) {
+	cases := []struct{ name, script, want string }{
+		{"match index (=~)", `("order-1234" =~ /\d+/).to_s`, "6"},
+		{"capture group", `"order-1234".match(/(\d+)/)[1]`, "1234"},
+		{"scan flat", `"a1b2c3".scan(/\d/).join(",")`, "1,2,3"},
+		{"scan groups", `"k1=v1;k2=v2".scan(/(\w+)=(\w+)/).map { |a| a.join(":") }.join(",")`, "k1:v1,k2:v2"},
+		{"gsub backref", `"John Smith".gsub(/(\w+) (\w+)/, '\2 \1')`, "Smith John"},
+		{"gsub block", `"abc".gsub(/./) { |c| c + "!" }`, "a!b!c!"},
+		{"sub once", `"aaa".sub(/a/, "b")`, "baa"},
+		{"ignorecase flag", `("HELLO" =~ /hello/i).to_s`, "0"},
+		{"match? false", `"x".match?(/y/) ? "yes" : "no"`, "no"},
+		{"bracket regex", `"foo123"[/\d+/]`, "123"},
+		{"split regex", `"a, b,c".split(/,\s*/).join("|")`, "a|b|c"},
+		{"named capture", `"2026-07".match(/(?P<y>\d+)-(?P<m>\d+)/)["y"]`, "2026"},
+		{"gsub named backref", `"2026-07".gsub(/(?P<y>\d+)-(?P<m>\d+)/, '\k<m>/\k<y>')`, "07/2026"},
+		{"line-anchored ^ (Ruby default)", `"a\nb\nc".scan(/^\w/).join`, "abc"},
+		{"Regexp.escape", `Regexp.escape("1+1")`, `1\+1`},
+		{"plain string split still works", `"a,b,c".split(",").join("|")`, "a|b|c"},
+		{"default whitespace split still works", `"a  b c".split.join("|")`, "a|b|c"},
+		// Multibyte: offsets are byte offsets and mruby strings are byte-indexed,
+		// so slicing-based ops (gsub/split) must not corrupt UTF-8.
+		{"utf8 gsub", `"你好x好".gsub(/x/, "-")`, "你好-好"},
+		{"utf8 split", `"a→b→c".split(/→/).join("|")`, "a|b|c"},
+		{"utf8 sub before multibyte", `"café x".sub(/x/, "y")`, "café y"},
+		// Ruby includes the separator's capture groups in split output.
+		{"split keeps captures", `"a1b2c".split(/(\d)/).join("|")`, "a|1|b|2|c"},
+	}
+	for _, tc := range cases {
+		got, err := Run(context.Background(), tc.script, Options{Agent: echoAgent})
+		if err != nil {
+			t.Errorf("%s: Run: %v", tc.name, err)
+			continue
+		}
+		if got.Output != tc.want {
+			t.Errorf("%s: Output = %q, want %q", tc.name, got.Output, tc.want)
+		}
+	}
+}
+
+// TestRun_RegexpInvalidRaises verifies an un-compilable pattern raises
+// RegexpError (via the host compile check) rather than silently misbehaving.
+func TestRun_RegexpInvalidRaises(t *testing.T) {
+	got, err := Run(context.Background(),
+		`begin; Regexp.new("("); "no-raise"; rescue RegexpError; "raised"; end`,
+		Options{Agent: echoAgent})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Output != "raised" {
+		t.Errorf("Output = %q, want raised", got.Output)
+	}
+}

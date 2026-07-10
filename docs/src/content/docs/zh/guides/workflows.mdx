@@ -39,6 +39,26 @@ findings.each { |f| log(f) }
 `parallel`/`pipeline` 会真的让子代理调用重叠执行，但**每次运行里同时在飞的 `agent`/`skill` 调用
 最多 8 个**，不管你给 `parallel` 传了多少个 item。
 
+## 脚本能做什么、不能做什么
+
+解释器是 **IO-free** 的：没有 `File`、`Dir`、`Time`、`Process`，也没有 shell 反引号——碰到其中任何
+一个都会在脚本产出结果之前直接抛错。任何要接触外部世界的事情（读写文件、跑 git/gh 命令、取当前
+日期）都通过 `agent(...)` 调用去做，它会委派给一个带真实工具的子代理；要落地一份报告或状态文件，就
+让 agent 去写。
+
+纯进程内的 Ruby 是可用的：`Array`/`Hash`/`String`/`Integer`、`JSON.parse`/`JSON.generate`，以及
+**`Regexp`**——字面量 `/.../ `、`=~`，还有 `String#match`/`scan`/`gsub`/`sub`/`split`。正则引擎是
+RE2（线性时间，所以模型写的模式不会把整个运行卡死），因此和 Ruby 默认引擎有几处差异：
+
+- **模式内不支持反向引用和 lookaround**（用到不支持的构造会抛错，而不是静默匹配错）。但 `gsub`/`sub`
+  的**替换串**里的反向引用——`\1`、`\&`、`\k<name>`——是可以用的。
+- 命名分组用 `(?P<name>)`。
+- 要让 `.` 跨行，用 `/m` 后缀，**不要**用内联 `(?m)`（内联 `(?m)` 在这里是 multiline，不是 dot-all）；
+  `/x` 扩展模式不可用。
+
+要从子代理里取**结构化**数据，优先用 `agent(prompt, schema: ...)` + `JSON.parse`，别用正则去抠它的
+散文回复——schema 让回复天生就是合法 JSON，比在自由文本上做模式匹配既简单又可靠得多。
+
 ## 后台运行
 
 在交互式入口（TUI、Web、IM）里，每一次 `workflow(...)` 调用都是异步的——它立刻在后台启动，

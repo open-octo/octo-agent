@@ -41,6 +41,28 @@ happens on goroutines — `parallel`/`pipeline` genuinely overlap sub-agent call
 concurrent `agent`/`skill` calls in flight per run** regardless of how many items you hand to
 `parallel`.
 
+## What the script can and can't do
+
+The interpreter is **IO-free**: there is no `File`, `Dir`, `Time`, `Process`, or shell backticks —
+touching any of them raises before the script produces a result. Anything that reaches the outside
+world (files, a git/gh command, the current date) goes through an `agent(...)` call, which delegates
+to a real sub-agent with real tools; to write a report or state file, tell an agent to write it.
+
+Pure in-process Ruby is available: `Array`/`Hash`/`String`/`Integer`, `JSON.parse`/`JSON.generate`,
+and **`Regexp`** — literal `/.../ ` patterns, `=~`, and `String#match`/`scan`/`gsub`/`sub`/`split`.
+The regex engine is RE2 (linear-time, so a model-written pattern can't hang the run), which brings a
+few differences from Ruby's default engine:
+
+- **No backreferences or lookaround inside the pattern** (an unsupported construct raises rather than
+  matching wrongly). Replacement backreferences — `\1`, `\&`, `\k<name>` — in `gsub`/`sub` *do* work.
+- Named groups use `(?P<name>)`.
+- To make `.` cross newlines use the `/m` suffix, **not** an inline `(?m)` (inline `(?m)` means
+  multiline here, not dot-all); the `/x` extended mode is unavailable.
+
+To pull **structured** data out of a sub-agent, prefer `agent(prompt, schema: ...)` and `JSON.parse`
+over scraping its prose reply with a regex — the schema makes the reply valid JSON by construction,
+which is both simpler and far more reliable than pattern-matching free text.
+
 ## Running in the background
 
 In interactive transports (TUI, Web, IM) every `workflow(...)` call is asynchronous — it starts

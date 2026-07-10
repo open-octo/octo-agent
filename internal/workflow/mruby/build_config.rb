@@ -43,4 +43,11 @@ MRuby::CrossBuild.new('wasi') do |conf|
   # schema-constrained agent() returns and encode structured data back into a
   # prompt. Pure C (no IO), MRB_NO_STDIO-compatible; fetched by minirake at build.
   conf.gem github: 'mattn/mruby-json'
+
+  # NOTE: Regexp is NOT provided by a bundled C engine. mruby core has no
+  # Regexp, and the usual gem (mruby-onig-regexp) bundles Onigmo built via
+  # autotools whose config.sub predates wasm and rejects the wasi target. So
+  # Regexp is instead implemented against the host's Go regexp (RE2) engine —
+  # see the __regex_* host imports in runtime.c/runtime.go and the Regexp class
+  # in prelude.rb. RE2 is linear-time (no ReDoS) and needs no cross-compiled lib.
 end
