@@ -650,7 +650,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 				params[k] = fmt.Sprintf("%v", v)
 			}
 		}
-		if err := resolveMissingSkillParams(ctx, &skill, name, params); err != nil {
+		if err := resolveMissingSkillParams(&skill, name, params); err != nil {
 			return agent.ToolResult{}, err
 		}
 		recorderMu.Lock()
@@ -697,37 +697,20 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 // required param(s)" error the model has no way to act on. params is mutated
 // in place. When no asker is available (headless/unattended modes),
 // ReplaySkill's own error still fires, so behavior there is unchanged.
-func resolveMissingSkillParams(ctx context.Context, skill *browser.Skill, skillName string, params map[string]string) error {
+// resolveMissingSkillParams checks a browser skill's declared params against
+// the caller-supplied params. Any that are missing and have no default
+// produce an error listing them — the model then decides whether it already
+// knows the values (re-invoke with `params` filled in) or needs to surface an
+// `ask_user_question` to the caller. The old behaviour auto-promoted via the
+// ctx Asker, which stole that decision from the model and caused repeat prompts
+// when the model had already asked the user.
+func resolveMissingSkillParams(skill *browser.Skill, skillName string, params map[string]string) error {
 	missing := browser.MissingRequiredParams(skill, params)
 	if len(missing) == 0 {
 		return nil
 	}
-	asker := askerFrom(ctx)
-	if asker == nil {
-		return nil
-	}
-	descByName := make(map[string]string, len(skill.Params))
-	for _, p := range skill.Params {
-		descByName[p.Name] = p.Description
-	}
-	for _, pname := range missing {
-		question := fmt.Sprintf("Skill %q needs a value for %q", skillName, pname)
-		if d := descByName[pname]; d != "" {
-			question += ": " + d
-		}
-		res, err := asker.Ask(ctx, AskRequest{Question: question, Header: pname})
-		if err != nil {
-			return fmt.Errorf("browser: %w", err)
-		}
-		if res.Cancelled {
-			return fmt.Errorf("browser: run_skill %q: user cancelled while providing param %q", skillName, pname)
-		}
-		// AskRequest carries no Options, so this is always a free-text prompt —
-		// res.Choices is documented to stay empty in that case (AskResponse),
-		// leaving res.Custom as the only place the answer can land.
-		params[pname] = res.Custom
-	}
-	return nil
+	return fmt.Errorf("browser: run_skill %q is missing required param(s): %s — pass them in `params`",
+		skillName, strings.Join(missing, ", "))
 }
 
 func getStr(input map[string]any, key string) string {

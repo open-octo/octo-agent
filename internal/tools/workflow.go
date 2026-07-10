@@ -226,14 +226,13 @@ func requiredParamNames(params []workflowParam) []string {
 
 // ensureRequiredWorkflowParams checks a saved workflow's declared `# @param
 // name required ...` inputs against the tool's `args` input. Any that are
-// missing are filled by prompting the user (via the same Asker the
-// ask_user_question tool uses) rather than letting the script hit a nil
-// args[...] lookup at runtime. Returns the args map to use when at least one
-// value was filled in (nil, nil when nothing was missing), or an error if a
-// required value couldn't be obtained (no asker available, or the user
-// cancelled).
-func ensureRequiredWorkflowParams(ctx context.Context, workflowName string, params []workflowParam, args map[string]any) (map[string]any, error) {
-	var missing []workflowParam
+// missing produce an error listing them — the model then decides whether to
+// re-invoke with `args` filled in (it already knows the values) or surface an
+// `ask_user_question` to the caller (it genuinely doesn't know). The old
+// behaviour auto-prompted via the ctx Asker, which stole that decision from the
+// model and caused repeat prompts when the model had already asked the user.
+func ensureRequiredWorkflowParams(workflowName string, params []workflowParam, args map[string]any) error {
+	var missing []string
 	for _, p := range params {
 		if !p.required {
 			continue
@@ -241,44 +240,13 @@ func ensureRequiredWorkflowParams(ctx context.Context, workflowName string, para
 		if v, ok := args[p.name]; ok && v != nil && v != "" {
 			continue
 		}
-		missing = append(missing, p)
+		missing = append(missing, p.name)
 	}
 	if len(missing) == 0 {
-		return nil, nil
+		return nil
 	}
-
-	asker := askerFrom(ctx)
-	if asker == nil {
-		names := make([]string, len(missing))
-		for i, p := range missing {
-			names[i] = p.name
-		}
-		return nil, fmt.Errorf("workflow %q is missing required arg(s) %s and no user is available to "+
-			"ask for them in this mode — pass them in `args` instead", workflowName, strings.Join(names, ", "))
-	}
-
-	filled := make(map[string]any, len(args)+len(missing))
-	for k, v := range args {
-		filled[k] = v
-	}
-	for _, p := range missing {
-		question := fmt.Sprintf("Workflow %q needs a value for %q", workflowName, p.name)
-		if p.description != "" {
-			question += ": " + p.description
-		}
-		res, err := asker.Ask(ctx, AskRequest{Question: question, Header: p.name})
-		if err != nil {
-			return nil, fmt.Errorf("workflow: %w", err)
-		}
-		if res.Cancelled {
-			return nil, fmt.Errorf("workflow %q: user cancelled while providing required arg %q", workflowName, p.name)
-		}
-		// AskRequest carries no Options, so this is always a free-text prompt —
-		// res.Choices is documented to stay empty in that case (AskResponse),
-		// leaving res.Custom as the only place the answer can land.
-		filled[p.name] = res.Custom
-	}
-	return filled, nil
+	return fmt.Errorf("workflow %q is missing required arg(s): %s — pass them in `args`",
+		workflowName, strings.Join(missing, ", "))
 }
 
 // Execute runs the workflow: detached with a run handle in background mode,
@@ -307,12 +275,8 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		}
 		if len(w.params) > 0 {
 			argsMap, _ := input["args"].(map[string]any)
-			filled, err := ensureRequiredWorkflowParams(ctx, name, w.params, argsMap)
-			if err != nil {
+			if err := ensureRequiredWorkflowParams(name, w.params, argsMap); err != nil {
 				return agent.ToolResult{}, err
-			}
-			if filled != nil {
-				input["args"] = filled
 			}
 		}
 	}
