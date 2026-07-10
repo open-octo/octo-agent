@@ -249,6 +249,46 @@ func TestRun_ParallelBranchErrorAfterAgentNamesItem(t *testing.T) {
 	}
 }
 
+// TestRun_NestedParallelBranchErrorKeepsInnerLocus exercises the passthrough
+// branch of __resume_branch: an inner level localizes the failure ("item
+// #0 …"), and the OUTER level must re-raise that already-localized message
+// unchanged rather than swallowing it or double-prefixing. Guards the
+// `raise e` (not bare `raise`) fix — a bare re-raise drops the message in this
+// mruby build, collapsing the error to a bare class name.
+func TestRun_NestedParallelBranchErrorKeepsInnerLocus(t *testing.T) {
+	_, err := Run(context.Background(),
+		`parallel([1]) { |x| parallel([1]) { |y| raise "deep"; agent("z") } }`,
+		Options{Agent: echoAgent})
+	if err == nil {
+		t.Fatal("expected a script error from the nested raising branch")
+	}
+	// The inner locus + original message must survive the outer re-raise.
+	for _, want := range []string{"item #0", "deep"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("nested error should preserve inner locus/message (%q); got: %v", want, err)
+		}
+	}
+}
+
+// TestRun_BudgetExhaustedInParallelKeepsMessage guards that a scheduler signal
+// raised inside a branch ("workflow: token budget exhausted") passes through
+// __resume_branch with its message intact rather than being localized or
+// reduced to a bare class name.
+func TestRun_BudgetExhaustedInParallelKeepsMessage(t *testing.T) {
+	costly := func(_ context.Context, _ string, _ AgentOptions) AgentResult {
+		return AgentResult{Reply: "ok", OutputTokens: 100}
+	}
+	_, err := Run(context.Background(),
+		`parallel([1, 2, 3]) { |i| agent("x") }`,
+		Options{Agent: costly, Budget: 50})
+	if err == nil {
+		t.Fatal("expected a budget-exhausted error")
+	}
+	if !strings.Contains(err.Error(), "budget") {
+		t.Errorf("budget message should survive the branch re-raise; got: %v", err)
+	}
+}
+
 // TestRun_CancellationComputeOnly guards the close-on-context-done path: a
 // runaway script that never re-enters a host call (no agent() in flight) must
 // still observe ctx cancellation, or workflow_kill — and the foreground

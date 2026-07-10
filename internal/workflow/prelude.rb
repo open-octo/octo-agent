@@ -154,7 +154,12 @@ end
 def __resume_branch(fibers, i, items, *args)
   fibers[i].resume(*args)
 rescue => e
-  raise if e.message.index("workflow: ") == 0
+  # Re-raise `e` explicitly (not a bare `raise`): in this mruby build a bare
+  # re-raise inside a method-level rescue loses the exception message, leaving
+  # only the class name — which would swallow "workflow: token budget
+  # exhausted", "workflow: skill … failed", and an inner level's already-
+  # localized "workflow: item #…" message.
+  raise e if e.message.index("workflow: ") == 0
   preview = (items[i].to_s rescue "?")
   preview = preview[0, 200] + "..." if preview.length > 200
   raise "workflow: item ##{i} (#{preview}) failed: #{e.message}"
