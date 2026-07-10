@@ -89,7 +89,14 @@ Access key 只在插件将来支持"连接到绑定了非 loopback 地址的 ser
 
 **入站(插件 → serve)**:`user_message`(挂 `session_id`/`content`/`files`)、`interrupt`、`confirmation`、`user_question_answer`、`retry`、`rollback`。
 
-**出站(serve → 插件)**:`output`(流式文本)、`tool_call`/`tool_result`/`tool_error`/`tool_stdout`、`progress`、`complete`、`request_confirmation`、`request_user_question`、`diff`/`file_preview`/`shell_preview`(渲染为原生 diff/预览的关键事件)、`session_update`、`todo_update`。
+**出站(serve → 插件)**:`output`(流式文本)、`tool_call`/`tool_result`/`tool_error`/`tool_stdout`、`progress`、`complete`、`request_confirmation`、`confirmation_complete`(另一个客户端已经回答了同一个确认,本端据此关掉自己的弹窗,不重复应答)、`request_user_question`、`session_update`、`todo_update`。
+
+`tool_call`/`tool_result`/`tool_error`/`tool_stdout` 都带 `tool_id`——这是 `ws_handlers.go` 的 `handleEvent` 往 `map[string]any` 里额外加的字段,`ws_types.go` 里对应的具名 struct 并没有声明它,但它是把 `tool_result` 正确配对回它所属的 `tool_call` 的唯一可靠依据(事件之间没有顺序保证,一旦两个工具调用交叠,按"最近一个还没结果的调用"配对就会配错)。
+
+`diff`/`file_preview`/`shell_preview` 三个 `ws_types.go` 里声明的事件类型是死代码,serve 侧从未构造过——**渲染 diff 走的是另一条路**:
+
+- 执行后:`tool_result.ui_payload`,内容是各工具自己拼的 `map[string]any`(不是命名 struct),字段因工具而异——`edit_file` 给 `{type:"edit", path, occurrences, diff}`,`diff` 是"每行加 `- `/`+ ` 前缀"的删除/新增块,**不是** unified diff(没有 `@@` hunk header),来自 `tools.EditUIDiff`;`write_file` 给 `{type:"write", path, size_bytes, line_count, preview, preview_truncated}`,没有 diff(整篇覆写,给不出旧内容);`read_file` 给 `{type:"file_read", path, lines_read, truncated, content_preview, total_lines?}`,这里的 `path`是模型传入的原始路径,不一定是绝对路径;`terminal` 给 `{type:"terminal", command, status, output_preview}`。
+- 执行前(权限确认阶段):`request_confirmation.diff`(同样是 `EditUIDiff` 格式,`buildConfirmDetail` 复用的)和 `request_confirmation.command`(terminal),但这个事件不带路径字段。
 
 REST 侧用到的既有路由:`POST /api/sessions`(创建)、`GET /api/sessions`(列表)、`PATCH /api/sessions/{id}/working_dir`(绑定工作区)、`POST /api/upload`(附件)、`POST /api/file-action`。全部是现成路由,插件不新增任何 API。
 
@@ -106,10 +113,10 @@ REST 侧用到的既有路由:`POST /api/sessions`(创建)、`GET /api/sessions`
 
 ### agent → IDE(原生渲染)
 
-- `file_preview` / `diff` 事件渲染为 VS Code 原生 diff editor(`vscode.diff` 命令),而不是纯文本块。
-- diff 的 accept/reject 映射回 `wsMsgConfirmation`,复用现有的权限确认协议,不新增专属的"接受改动"通道。
-- 工具卡片里的文件路径可点击跳转到编辑器对应行。
-- `shell_preview` 在 terminal 权限确认弹窗里展示完整命令。
+- `request_confirmation.diff`(执行前)和 `tool_result.ui_payload.diff`(`type:"edit"`,执行后)都渲染成 VS Code 原生 diff editor(`vscode.diff` 命令),而不是纯文本块。`EditUIDiff` 的删除/新增块格式先解析回旧/新文本,再各开一个虚拟文档(`TextDocumentContentProvider`)喂给 diff editor;执行后的场景更进一步,"新"这一侧直接用磁盘上的真实文件(有语法高亮、可编辑),不用虚拟文档,因为改动已经落地了。
+- diff 的 accept/reject 走既有的权限确认协议(`wsMsgConfirmation`),不新增专属的"接受改动"通道——原生 diff editor 只负责"看清楚改了什么",批准/拒绝的按钮还是在确认弹窗里。
+- 工具卡片里的文件路径可点击跳转到编辑器对应行(`type:"write"`/`type:"file_read"` 的 `ui_payload.path`)。
+- terminal 的确认预览已经在 `request_confirmation.command` 里(对话闭环阶段就有),不需要额外事件。
 
 ## serve 侧改动
 
@@ -136,4 +143,4 @@ REST 侧用到的既有路由:`POST /api/sessions`(创建)、`GET /api/sessions`
 1. **连接层**:探活 → 没有则 `octo serve -d` → WS 握手成功。验收:状态栏显示 `octo: connected`。
 2. **对话闭环**:发消息 → 流式渲染 output/tool_call/tool_result → 权限确认与 AskUserQuestion 弹窗可用。验收:能跑完一个带工具调用和权限确认的完整 turn。
 3. **IDE → agent**:workspace 根绑定 working_dir;选区/`@`文件/诊断注入。验收:选中代码提问,agent 收到的正是那段代码。
-4. **agent → IDE**:`file_preview`/`diff` 渲染为原生 diff editor,点击跳转。验收:agent 改文件时在编辑器里看到原生 diff 而非纯文本。
+4. **agent → IDE**:`request_confirmation.diff`/`tool_result.ui_payload`(`type:"edit"`)渲染为原生 diff editor,点击跳转文件。验收:agent 改文件时在编辑器里看到原生 diff 而非纯文本。
