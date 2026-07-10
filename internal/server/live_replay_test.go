@@ -456,6 +456,25 @@ func (s *blockingSpawner) Continue(ctx context.Context, _, _ string) (tools.Spaw
 	return tools.SpawnResult{}, nil
 }
 
+// toolEmittingBlockingSpawner blocks like blockingSpawner, but emits a single
+// tool-level sub-agent event before blocking so the replay can be tested.
+type toolEmittingBlockingSpawner struct{ block <-chan struct{} }
+
+func (s *toolEmittingBlockingSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.SpawnResult, error) {
+	if sink := tools.SubAgentEventSink(ctx); sink != nil {
+		sink(tools.SubAgentEvent{Kind: "tool", ToolName: "read_file", ToolInput: map[string]any{"path": "go.mod"}})
+	}
+	select {
+	case <-s.block:
+	case <-ctx.Done():
+	}
+	return tools.SpawnResult{Reply: "done"}, nil
+}
+
+func (s *toolEmittingBlockingSpawner) Continue(ctx context.Context, _, _ string) (tools.SpawnResult, error) {
+	return tools.SpawnResult{}, nil
+}
+
 // TestReplayLiveState_ReplaysRunningSubAgent is the regression guard for the
 // same gap in the sub-agent panel: SubAgentOnEvent also broadcasts directly
 // with no buffering, so a tab that (re)subscribes after a sub-agent already
@@ -486,5 +505,78 @@ func TestReplayLiveState_ReplaysRunningSubAgent(t *testing.T) {
 	}
 	if !sawStarted {
 		t.Error("replay did not include the sub-agent's started event")
+	}
+}
+
+// TestReplayLiveState_ReplaysSubAgentToolHistory checks that switching back
+// to a session with a running sub-agent restores the tool trail, not just a
+// coarse "started" stub.
+func TestReplayLiveState_ReplaysSubAgentToolHistory(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "replay-subagent-tool-history-session"
+	defer tools.CloseSessionSubAgentManager(sid)
+
+	block := make(chan struct{})
+	defer close(block)
+	mgr := tools.SessionSubAgentManager(sid, func() tools.Spawner { return &toolEmittingBlockingSpawner{block: block} })
+
+	id, err := mgr.Start(tools.SpawnRequest{
+		Description: "test sub-agent",
+		Prompt:      "do it",
+		AgentType:   "explore",
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for the goroutine to emit the tool event and enter the block.
+	waitFor(t, func() bool {
+		infos := mgr.ListRunning()
+		for _, in := range infos {
+			if in.ID == id {
+				for _, ev := range in.Events {
+					if ev.Kind == "tool" {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	})
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	var sawStarted, sawTool bool
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] != "sub_agent_event" || ev["agent_id"] != id {
+			continue
+		}
+		switch ev["kind"] {
+		case "started":
+			if ev["agent_type"] != "explore" {
+				t.Errorf("replayed started agent_type = %v, want explore", ev["agent_type"])
+			}
+			sawStarted = true
+		case "tool":
+			if ev["tool_name"] != "read_file" {
+				t.Errorf("replayed tool tool_name = %v, want read_file", ev["tool_name"])
+			}
+			input, ok := ev["tool_input"].(map[string]any)
+			if !ok || input["path"] != "go.mod" {
+				t.Errorf("replayed tool tool_input = %v, want {path: go.mod}", ev["tool_input"])
+			}
+			sawTool = true
+		case "done":
+			t.Error("replay should not include done events for running agents")
+		}
+	}
+	if !sawStarted {
+		t.Error("replay did not include the sub-agent's started event")
+	}
+	if !sawTool {
+		t.Error("replay did not include the sub-agent's tool event")
 	}
 }

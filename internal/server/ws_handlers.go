@@ -254,22 +254,27 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 	// no buffering, so a late-subscribing tab misses a still-running
 	// sub-agent entirely. mkSpawner is nil: this must never create a
 	// session's sub-agent manager just to discover it's empty — nil back
-	// means no sub-agent has run in this session yet. SubAgentInfo doesn't
-	// retain agent_type or per-tool history, so the replay is coarser than
-	// the live stream (the panel will show the agent as running without its
-	// tool trail), but that beats not showing it at all.
+	// means no sub-agent has run in this session yet. Replay the retained
+	// tool-level events (excluding the terminal "done") so the panel shows
+	// the current tool trail, not just a coarse "started" stub.
 	if sam := tools.SessionSubAgentManager(sessionID, nil); sam != nil {
 		for _, sa := range sam.ListRunning() {
-			if b, err := json.Marshal(map[string]any{
-				"type":        "sub_agent_event",
-				"session_id":  sessionID,
-				"agent_id":    sa.ID,
-				"description": sa.Description,
-				"agent_type":  "",
-				"kind":        "started",
-				"tool_name":   "",
-			}); err == nil {
-				conn.send <- b
+			for _, ev := range sa.Events {
+				if ev.Kind == "done" {
+					continue
+				}
+				if b, err := json.Marshal(map[string]any{
+					"type":        "sub_agent_event",
+					"session_id":  sessionID,
+					"agent_id":    sa.ID,
+					"description": ev.Description,
+					"agent_type":  ev.AgentType,
+					"kind":        ev.Kind,
+					"tool_name":   ev.ToolName,
+					"tool_input":  ev.ToolInput,
+				}); err == nil {
+					conn.send <- b
+				}
 			}
 		}
 	}

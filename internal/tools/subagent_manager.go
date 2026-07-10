@@ -29,8 +29,10 @@ type SubAgentNotification struct {
 type SubAgentInfo struct {
 	ID          string
 	Description string
+	AgentType   string
 	Start       time.Time
 	Busy        bool
+	Events      []SubAgentEvent
 }
 
 // asyncSubAgent tracks one detached sub-agent launched via SubAgentManager.
@@ -51,6 +53,21 @@ type asyncSubAgent struct {
 	stopReason   string // "max_turns" when the loop budget was exhausted
 	inputTokens  int
 	outputTokens int
+	events       []SubAgentEvent // retained tool-level events for late-joining clients
+}
+
+func (a *asyncSubAgent) recordEvent(ev SubAgentEvent) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.events = append(a.events, ev)
+}
+
+func (a *asyncSubAgent) listEvents() []SubAgentEvent {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]SubAgentEvent, len(a.events))
+	copy(out, a.events)
+	return out
 }
 
 func (a *asyncSubAgent) setResult(result string, inputTokens, outputTokens int) {
@@ -475,13 +492,16 @@ func (m *SubAgentManager) SetOnEvent(fn func(SubAgentEvent)) {
 	m.mu.Unlock()
 }
 
-// eventSink builds the per-agent sink stamped into the spawn context. Returns
-// nil when no onEvent hook is set, so the spawner skips streaming entirely.
+// eventSink builds the per-agent sink stamped into the spawn context. The sink
+// always records events on the agent so late-joining subscribers can replay
+// the tool trail; it forwards them to the live onEvent hook when one is set.
+// Returns nil only when the agent no longer exists.
 func (m *SubAgentManager) eventSink(id, description, agentType string) func(SubAgentEvent) {
 	m.mu.Lock()
+	agent := m.agents[id]
 	onEvent := m.onEvent
 	m.mu.Unlock()
-	if onEvent == nil {
+	if agent == nil {
 		return nil
 	}
 	return func(ev SubAgentEvent) {
@@ -492,7 +512,10 @@ func (m *SubAgentManager) eventSink(id, description, agentType string) func(SubA
 		if ev.AgentType == "" {
 			ev.AgentType = agentType
 		}
-		onEvent(ev)
+		agent.recordEvent(ev)
+		if onEvent != nil {
+			onEvent(ev)
+		}
 	}
 }
 
@@ -752,8 +775,10 @@ func (m *SubAgentManager) ListRunning() []SubAgentInfo {
 			out = append(out, SubAgentInfo{
 				ID:          a.id,
 				Description: a.description,
+				AgentType:   a.agentType,
 				Start:       a.start,
 				Busy:        busy,
+				Events:      a.listEvents(),
 			})
 		}
 	}
