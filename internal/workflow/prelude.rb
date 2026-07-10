@@ -211,3 +211,251 @@ def pipeline(items, *stages)
     acc
   end
 end
+
+# ─── Regexp — backed by the host RE2 engine (__regex_* in runtime.c/.go) ─────
+# mruby core has no Regexp; a literal /.../ compiles to Regexp.compile(src, opts)
+# (mruby codegen, NODE_REGX), so defining Regexp here makes literals work. The
+# engine is Go's RE2: linear-time (a model-authored pattern can't ReDoS the
+# sandbox) but with NO backreferences or lookaround in the PATTERN. Replacement
+# backrefs (\1, \&, \k<name>) in sub/gsub DO work — expanded here in Ruby, not by
+# the engine. Everything derives from one host call, __regex_scan, which returns
+# every match (character offsets + captured substrings) so Ruby's line-anchored
+# ^/$ stay correct.
+
+class RegexpError < StandardError; end
+
+class Regexp
+  IGNORECASE = 1
+  EXTENDED   = 2
+  MULTILINE  = 4
+
+  def self.compile(source, opts = nil, enc = nil)
+    new(source, opts, enc)
+  end
+
+  # Escape RE2 metacharacters in a literal string (Regexp.escape / quote).
+  def self.escape(str)
+    str = str.to_s
+    meta = "\\^$.|?*+()[]{}"
+    out = ""
+    i = 0
+    while i < str.length
+      c = str[i, 1]
+      out << "\\" if meta.include?(c)
+      out << c
+      i += 1
+    end
+    out
+  end
+  class << self; alias quote escape; end
+
+  attr_reader :source
+
+  def initialize(source, opts = nil, _enc = nil)
+    @source = source.to_s
+    @flags  = __normalize_flags(opts)
+    err = __regex_compile_check(@source, @flags)
+    raise RegexpError, err unless err.empty?
+  end
+
+  # flags string actually sent to the host ("i"/"m"/… subset); internal.
+  def __flags; @flags; end
+
+  def match(str, pos = 0)
+    return nil if str.nil?
+    s = str.to_s
+    start = pos < 0 ? s.length + pos : pos
+    return nil if start < 0 || start > s.length
+    __matches(s).each { |md| return md if md.begin(0) >= start }
+    nil
+  end
+
+  def match?(str, pos = 0)
+    !match(str, pos).nil?
+  end
+
+  def =~(str)
+    m = match(str)
+    m && m.begin(0)
+  end
+
+  def ===(str)
+    str.is_a?(String) && match?(str)
+  end
+
+  def to_s;    "/#{@source}/#{@flags}"; end
+  def inspect; to_s; end
+
+  # __matches returns an Array<MatchData> for every match in s (possibly empty).
+  # The single point that crosses to the host engine.
+  def __matches(s)
+    json = __regex_scan(@source, @flags, s)
+    return [] if json.empty?
+    data  = JSON.parse(json)
+    names = data["names"] || {}
+    (data["m"] || []).map { |groups| MatchData.new(s, groups, names) }
+  end
+
+  def __normalize_flags(opts)
+    return "" if opts.nil? || opts == false
+    return opts if opts.is_a?(String) # a literal /.../im passes "im"
+    return "i"  if opts == true       # Regexp.new(str, true) => case-insensitive
+    if opts.is_a?(Integer)
+      f = ""
+      f += "i" if (opts & IGNORECASE) != 0
+      f += "m" if (opts & MULTILINE) != 0
+      f += "x" if (opts & EXTENDED) != 0
+      return f
+    end
+    ""
+  end
+end
+
+class MatchData
+  # groups: [[cstart,cend,"str"] | nil, …] (index 0 = whole match); names: {name=>idx}.
+  def initialize(str, groups, names)
+    @string = str
+    @groups = groups.map { |g| g && [g[0].to_i, g[1].to_i, g[2]] }
+    @names  = names
+  end
+
+  def [](key)
+    idx = (key.is_a?(String) || key.is_a?(Symbol)) ? @names[key.to_s] : key
+    return nil if idx.nil?
+    g = @groups[idx]
+    g && g[2]
+  end
+
+  def begin(i); g = @groups[i]; g && g[0]; end
+  def end(i);   g = @groups[i]; g && g[1]; end
+  def pre_match;  @string[0, @groups[0][0]]; end
+  def post_match; @string[@groups[0][1]..-1] || ""; end
+  def to_a;       @groups.map { |g| g && g[2] }; end
+  def captures;   a = to_a; a[1..-1] || []; end
+  def size;       @groups.size; end
+  def length;     @groups.size; end
+  def string;     @string; end
+  def to_s;       g = @groups[0]; g ? g[2] : ""; end
+
+  def named_captures
+    h = {}
+    @names.each { |name, idx| g = @groups[idx]; h[name] = g && g[2] }
+    h
+  end
+end
+
+class String
+  def =~(re)
+    re.is_a?(Regexp) ? (re =~ self) : nil
+  end
+
+  def match(re, pos = 0)
+    re = Regexp.new(re) unless re.is_a?(Regexp)
+    re.match(self, pos)
+  end
+
+  def match?(re, pos = 0)
+    re = Regexp.new(re) unless re.is_a?(Regexp)
+    re.match?(self, pos)
+  end
+
+  # scan(re) -> Array (no block) or self (with block). Each element is the whole
+  # match when the pattern has no groups, else an array of its captures.
+  def scan(re)
+    re = Regexp.new(re) unless re.is_a?(Regexp)
+    items = re.__matches(self).map do |m|
+      caps = m.captures
+      caps.empty? ? m[0] : caps
+    end
+    return items unless block_given?
+    items.each { |it| yield it }
+    self
+  end
+
+  def sub(re, repl = nil, &blk)
+    __gsub_common(re, repl, false, &blk)
+  end
+
+  def gsub(re, repl = nil, &blk)
+    __gsub_common(re, repl, true, &blk)
+  end
+
+  def __gsub_common(re, repl, global)
+    re = Regexp.new(re) unless re.is_a?(Regexp)
+    matches = re.__matches(self)
+    return self.dup if matches.empty?
+    out  = ""
+    last = 0
+    matches.each do |m|
+      bs = m.begin(0); es = m.end(0)
+      out << self[last...bs]
+      if block_given?
+        out << yield(m[0]).to_s
+      elsif repl.is_a?(Hash)
+        out << (repl[m[0]] || "").to_s
+      else
+        out << __expand_repl(repl.to_s, m)
+      end
+      last = es
+      break unless global
+    end
+    out << (self[last..-1] || "")
+    out
+  end
+
+  # __expand_repl handles replacement backreferences (\0-\9, \&, \k<name>, \\).
+  # RE2 has none in the pattern, but the replacement string is ours to expand.
+  def __expand_repl(repl, m)
+    out = ""
+    i = 0
+    n = repl.length
+    while i < n
+      c = repl[i, 1]
+      if c == "\\" && i + 1 < n
+        nx = repl[i + 1, 1]
+        if nx >= "0" && nx <= "9"
+          out << (m[nx.to_i] || ""); i += 2; next
+        elsif nx == "&"
+          out << (m[0] || ""); i += 2; next
+        elsif nx == "\\"
+          out << "\\"; i += 2; next
+        elsif nx == "k" && i + 2 < n && repl[i + 2, 1] == "<"
+          close = repl.index(">", i + 3)
+          if close
+            out << (m[repl[(i + 3)...close]] || ""); i = close + 1; next
+          end
+        end
+      end
+      out << c
+      i += 1
+    end
+    out
+  end
+
+  alias __orig_split split
+  def split(pat = nil, lim = 0)
+    return __orig_split(pat, lim) unless pat.is_a?(Regexp)
+    result = []
+    last   = 0
+    pat.__matches(self).each do |m|
+      bs = m.begin(0); es = m.end(0)
+      next if es == bs && bs == last # skip a zero-width match at the cursor
+      result << self[last...bs]
+      last = es
+      break if lim > 0 && result.size == lim - 1
+    end
+    result << (self[last..-1] || "")
+    result.pop while lim == 0 && !result.empty? && result[-1] == ""
+    result
+  end
+
+  alias __orig_aref []
+  def [](*args)
+    if args[0].is_a?(Regexp)
+      m = args[0].match(self)
+      return nil if m.nil?
+      return m[args[1] || 0]
+    end
+    __orig_aref(*args)
+  end
+end

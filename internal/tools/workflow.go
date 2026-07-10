@@ -108,14 +108,20 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"(fan-out, pipelines, loops, conditionals) that you want executed reliably rather " +
 			"than improvised across turns.\n\n" +
 			mode + "\n\n" +
-			"The script runs in a sandboxed, IO-free mruby interpreter: only Array/Hash/String/" +
-			"Integer logic and JSON.parse/JSON.generate are available. There is NO File, Dir, " +
+			"The script runs in a sandboxed, IO-free mruby interpreter: Array/Hash/String/" +
+			"Integer/Regexp logic and JSON.parse/JSON.generate are available (Regexp includes " +
+			"literal /.../ patterns, =~, and String#match/scan/gsub/sub — the engine is RE2, so " +
+			"backreferences and lookaround inside the pattern are NOT supported, though \\1/\\k<name> " +
+			"in a gsub/sub replacement string are). There is NO File, Dir, " +
 			"Time, Process, or shell backticks (`cmd`) — referencing any of them raises a Ruby " +
 			"error before the script produces any result. The ONLY way to touch the filesystem, " +
 			"run a shell/git/gh command, or get the current date is through agent(prompt, opts) " +
 			"below, which delegates to a real sub-agent with real tools. To persist a report or " +
 			"state file, tell an agent() call to write it (it has write_file) — never call " +
-			"File.write yourself. Primitives:\n" +
+			"File.write yourself. To get STRUCTURED data out of a sub-agent, pass " +
+			"agent(prompt, schema: ...) and JSON.parse its reply — do NOT regex-scrape fields out " +
+			"of a plain-prose agent() reply when you can have it returned as validated JSON. " +
+			"Primitives:\n" +
 			"- `agent(prompt, opts = {}) -> String`: run one sub-agent to completion, return " +
 			"its reply. Inside parallel/pipeline it runs concurrently with siblings. " +
 			"Optional opts: `model:` (override the model for this call, e.g. a cheaper model " +

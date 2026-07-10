@@ -16,11 +16,13 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -293,6 +295,11 @@ type backend struct {
 	// journal, when non-nil, receives a record for every fresh (non-replayed)
 	// agent() call as it completes.
 	journal *Journal
+
+	// reMu/reCache memoize compiled Go regexps across __regex_* host calls, keyed
+	// by flags+pattern, so a Regexp reused in a scan/gsub loop compiles once.
+	reMu    sync.Mutex
+	reCache map[string]*regexp.Regexp
 }
 
 func newBackend(ctx context.Context, opt Options, cached []JournalEntry, j *Journal) *backend {
@@ -332,6 +339,8 @@ func (b *backend) register(ctx context.Context, r wazero.Runtime) (api.Module, e
 		NewFunctionBuilder().WithFunc(b.log).Export("log").
 		NewFunctionBuilder().WithFunc(b.budgetRemaining).Export("budget_remaining").
 		NewFunctionBuilder().WithFunc(b.args_).Export("args").
+		NewFunctionBuilder().WithFunc(b.regexCompileCheck).Export("regex_compile_check").
+		NewFunctionBuilder().WithFunc(b.regexScan).Export("regex_scan").
 		Instantiate(ctx)
 }
 
@@ -608,6 +617,116 @@ func (b *backend) args_(_ context.Context, mod api.Module, outPtr, outCap uint32
 	}
 	mod.Memory().Write(outPtr, out)
 	return uint32(len(out))
+}
+
+// ─── Regexp host functions (Go RE2, backing the Regexp class in prelude.rb) ──
+//
+// mruby core has no Regexp and the usual C engine won't cross-compile to wasi
+// (see mruby/build_config.rb), so Regexp is implemented against Go's regexp.
+// RE2 is linear-time — a model-authored pattern can't ReDoS the sandbox — at
+// the cost of no backreferences or lookaround in the pattern itself.
+
+// compileRE compiles a pattern under Ruby-ish flag semantics, memoized. Ruby's
+// ^/$ are line-anchored by default (Go's match text start/end) so Go's "m" is
+// always on; Ruby's /m (dot matches newline) maps to Go's "s"; /i maps to "i".
+// Ruby's /x (extended) has no Go equivalent and is ignored.
+func (b *backend) compileRE(pattern, flags string) (*regexp.Regexp, error) {
+	goFlags := "m"
+	if strings.Contains(flags, "i") {
+		goFlags += "i"
+	}
+	if strings.Contains(flags, "m") {
+		goFlags += "s"
+	}
+	key := goFlags + "\x00" + pattern
+	b.reMu.Lock()
+	defer b.reMu.Unlock()
+	if b.reCache == nil {
+		b.reCache = map[string]*regexp.Regexp{}
+	}
+	if re, ok := b.reCache[key]; ok {
+		return re, nil
+	}
+	re, err := regexp.Compile("(?" + goFlags + ")" + pattern)
+	if err != nil {
+		return nil, err
+	}
+	b.reCache[key] = re
+	return re, nil
+}
+
+// writeGuest writes s into the guest buffer, truncated to cap, returning its len.
+func writeGuest(mod api.Module, outPtr, outCap uint32, s string) uint32 {
+	out := []byte(s)
+	if uint32(len(out)) > outCap {
+		out = out[:outCap]
+	}
+	mod.Memory().Write(outPtr, out)
+	return uint32(len(out))
+}
+
+// regexCompileCheck returns "" if the pattern compiles, else a cleaned error
+// message, so the prelude's Regexp.new can raise RegexpError with it.
+func (b *backend) regexCompileCheck(_ context.Context, mod api.Module, pptr, plen, fptr, flen, outPtr, outCap uint32) uint32 {
+	pattern := readGuestString(mod, pptr, plen)
+	flags := readGuestString(mod, fptr, flen)
+	if _, err := b.compileRE(pattern, flags); err != nil {
+		return writeGuest(mod, outPtr, outCap, strings.TrimPrefix(err.Error(), "error parsing regexp: "))
+	}
+	return writeGuest(mod, outPtr, outCap, "")
+}
+
+// regexScan returns ALL matches of the pattern in text, as JSON. Scanning the
+// whole string in one call (rather than a from-offset find) keeps Ruby's
+// line-anchored ^/$ semantics correct; the prelude's match/=~/scan/gsub all
+// derive from this array. Offsets are CHARACTER offsets (Ruby semantics). JSON:
+// {"m":[ <match>, ... ], "names":{"n":idx}} where each <match> is
+// [[start,end,"str"], <group1>, ...] (g0 = whole match; non-participating group
+// = null). "" means no match.
+func (b *backend) regexScan(_ context.Context, mod api.Module, pptr, plen, fptr, flen, tptr, tlen, outPtr, outCap uint32) uint32 {
+	pattern := readGuestString(mod, pptr, plen)
+	flags := readGuestString(mod, fptr, flen)
+	text := readGuestString(mod, tptr, tlen)
+	re, err := b.compileRE(pattern, flags)
+	if err != nil {
+		return writeGuest(mod, outPtr, outCap, "")
+	}
+	all := re.FindAllStringSubmatchIndex(text, -1)
+	if all == nil {
+		return writeGuest(mod, outPtr, outCap, "")
+	}
+	matches := make([]interface{}, 0, len(all))
+	for _, loc := range all {
+		groups := make([][]interface{}, len(loc)/2)
+		for i := range groups {
+			bs, be := loc[2*i], loc[2*i+1]
+			if bs < 0 {
+				groups[i] = nil // non-participating group -> JSON null
+				continue
+			}
+			groups[i] = []interface{}{
+				utf8.RuneCountInString(text[:bs]),
+				utf8.RuneCountInString(text[:be]),
+				text[bs:be],
+			}
+		}
+		matches = append(matches, groups)
+	}
+	names := map[string]int{}
+	for i, n := range re.SubexpNames() {
+		if n != "" {
+			names[n] = i
+		}
+	}
+	payload := struct {
+		M     []interface{}  `json:"m"`
+		Names map[string]int `json:"names"`
+	}{matches, names}
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return writeGuest(mod, outPtr, outCap, "")
+	}
+	return writeGuest(mod, outPtr, outCap, string(out))
 }
 
 func (b *backend) budgetRemaining(_ context.Context, _ api.Module) uint64 {
