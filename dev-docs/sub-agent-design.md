@@ -60,6 +60,14 @@ spawn 入口(`internal/tools/agent.go`),经 spawner 注册门控——未配置 
 `IsSubAgent(ctx)` / `WithSubAgentMarker(ctx)` 是第二层兜底(防模型幻觉出不在 schema 里的工具)。递归
 一层封顶。
 
+### 子 agent 内 terminal 不放后台
+
+同样由 `IsSubAgent(ctx)` 门控:子 agent 的 `terminal` 调用一律同步执行——`run_in_background` /
+`detached` 被忽略、命令走同步路径,同步命令超时则 kill + 报错而非转后台,且不注册可提升的 `SyncSession`
+(Ctrl+B / Web 按钮够不着)。子 agent 与父共用同一个 `BackgroundManager`,而它在启动它的那个回合之后
+没有后续回合来收割后台进程;若放任其起后台,`[BACKGROUND COMPLETED]` 完成通知会打进父会话、且无从
+归属。真正的长命令交给父 agent 跑。细节见 `terminal-tools.md` / `terminal-manual-promote.md`。
+
 ## Preset(subagent_type)
 
 内置四个(`internal/tools/agent_presets.go`),`readOnly` 的会从 child toolbelt 过滤掉

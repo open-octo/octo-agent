@@ -76,6 +76,8 @@ case <-ctx.Done():
 
 The two promote paths return distinct result text so the model can tell whether the user triggered it or the timer did.
 
+A **sub-agent's** `terminal` call is the exception: guarded on `IsSubAgent(ctx)`, it skips `BeginSync` entirely, so it never occupies the manager's sync slot — `HasActiveSync` can't see it and `Ctrl+B` / the Web button can't target it — and its `select` runs the promote arm on a nil channel that never fires. On timeout it kills the command with an error instead of promoting. A sub-agent has no turn after the one that spawned it in which to read a promoted background process, and promoting one would leak its `[BACKGROUND COMPLETED]` notice into the parent session.
+
 ## TUI
 
 `Ctrl+B` is a new binding, active only while a sync terminal is polling. `Esc` behavior is completely unchanged.

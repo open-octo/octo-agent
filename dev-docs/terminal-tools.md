@@ -52,6 +52,14 @@ listing processes.
    *promoted* to a visible **async** background task (no kill, no restart) and its
    id returned. On normal completion it is reaped (`Remove`).
 
+Inside a **sub-agent** these collapse to synchronous. `IsSubAgent(ctx)` makes the executor skip the
+`detached` and `run_in_background` branches (they fall through to the sync path) and, on timeout,
+kill the command with an error instead of promoting it. A sub-agent's command is also never
+registered as a `SyncSession`, so it stays invisible to `Ctrl+B` / the Web promote button. Rationale:
+a sub-agent returns within the turn that spawned it, so it has no later turn in which to collect a
+backgrounded process's output — and a stray one would fire `[BACKGROUND COMPLETED]` into the *parent*
+session's conversation, unattributed (the parent and sub-agent share one `BackgroundManager`).
+
 ## BackgroundManager and the process lifecycle
 
 `BackgroundManager` owns the tracked processes (`map[id]*bgProcess`). Each

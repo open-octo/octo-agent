@@ -33,9 +33,16 @@ tools). Anything not backgrounded runs synchronously with a 120-second timeout.
 
 Every synchronous command actually starts out as a hidden background process under the hood, so it
 can be promoted early instead of just timing out — in the TUI, `Ctrl+B` promotes whichever
-synchronous command is currently running (also works for a sub-agent's own terminal call) into a
-visible, trackable one; the Web UI has the equivalent as a button. There's no promote affordance in
-IM — only the timeout applies there.
+synchronous command is currently running into a visible, trackable one; the Web UI has the
+equivalent as a button. There's no promote affordance in IM — only the timeout applies there.
+
+Inside a **sub-agent**, backgrounding is off entirely: every `terminal` call runs synchronously (a
+`run_in_background` or `detached` request is ignored), and a command that hits the 120-second
+timeout is killed with an error rather than promoted (so `Ctrl+B` / the button don't target it
+either). A sub-agent returns within the single turn that spawned it, so it has no later turn in
+which to collect a backgrounded process's output — and letting it background one would leak the
+completion notice into the parent conversation, unattributed. A genuinely long-running command
+belongs in the parent, not a sub-agent.
 
 Output is capped at 1MiB of combined stdout+stderr per background process, oldest bytes trimmed
 first; there's no cap on how many background processes can run at once, and all tracked ones (not

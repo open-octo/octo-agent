@@ -74,5 +74,15 @@ stays addressable:
 | `sub_agent_status` | check progress without blocking |
 | `sub_agent_kill` | stop one early |
 
+## What a sub-agent can't do
+
+A sub-agent's `terminal` calls always run **synchronously**: a `run_in_background` or `detached`
+request is ignored, and a command that exceeds the 120-second timeout is killed with an error rather
+than promoted to a background process. A sub-agent returns within the turn that spawned it, so it has
+no later turn in which to collect a backgrounded command's output — and a stray background process
+would otherwise fire its completion notice into the parent conversation. Hand a genuinely
+long-running (or must-outlive-the-agent) command to the parent instead. A sub-agent also can't spawn
+its own sub-agent.
+
 Next: orchestrating a whole fleet of sub-agents deterministically, instead of one at a time, is what
 [Workflows](/docs/guides/workflows/) are for.
