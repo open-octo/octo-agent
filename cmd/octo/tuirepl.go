@@ -38,8 +38,8 @@ import (
 //   - Ctrl+J             → newline (LF — works on all terminals)
 //   - Ctrl+Q             → queue  (run as a fresh turn after this one finishes)
 //   - Esc                → take the turn back if no output yet (text returns to the input), else interrupt; queue survives
-//   - Ctrl+C             → interrupt if a turn runs, else save & quit
-//   - Ctrl+D             → save & quit
+//   - Ctrl+C             → interrupt if a turn runs, else save & quit (twice)
+//   - Ctrl+D (twice)     → save & quit (first press arms, second confirms)
 func runTUI(cfg replConfig) int {
 	defer tools.KillAllBackground()
 	defer tools.CleanSpillFiles()
@@ -438,6 +438,12 @@ type tuiModel struct {
 
 	width int
 	quit  bool
+
+	// quitArmed is set by a first Ctrl+D or idle Ctrl+C press and cleared by any
+	// other key, so a quit only lands when the shortcut is pressed twice in a row
+	// — a guard against an accidental single press dropping the session (Claude
+	// Code style). A running-turn Ctrl+C interrupts instead and clears this.
+	quitArmed bool
 
 	// cwd is the home-abbreviated working directory shown in the status bar
 	// (computed once — it doesn't change during a session).
