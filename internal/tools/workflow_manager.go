@@ -153,6 +153,13 @@ func (r *workflowRun) finish(output, journalRunID, errMsg string, end time.Time)
 	close(r.finished)
 }
 
+// journalID returns the run's resume_from handle (empty until finish records it).
+func (r *workflowRun) journalID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.journalRunID
+}
+
 func (r *workflowRun) snapshot() WorkflowRunSnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -385,10 +392,27 @@ func (m *WorkflowManager) Wait(ctx context.Context, id string) (WorkflowRunSnaps
 	}
 }
 
+// resolveLocked finds a run by its short alias (the map key, e.g. "wf_1") or by
+// its JournalRunID (the "wf-YYYYMMDD-HHMMSS-xxxxxxxx" handle that failure notices
+// print and tell the model to pass to resume_from). Both identify the same run,
+// so a lookup tool must accept either — the model naturally retries with whatever
+// id the last message showed it. Caller holds m.mu.
+func (m *WorkflowManager) resolveLocked(id string) *workflowRun {
+	if run := m.runs[id]; run != nil {
+		return run
+	}
+	for _, run := range m.runs {
+		if run.journalID() == id {
+			return run
+		}
+	}
+	return nil
+}
+
 // Read returns a snapshot of one run.
 func (m *WorkflowManager) Read(id string) (WorkflowRunSnapshot, bool) {
 	m.mu.Lock()
-	run := m.runs[id]
+	run := m.resolveLocked(id)
 	m.mu.Unlock()
 	if run == nil {
 		return WorkflowRunSnapshot{}, false
@@ -419,7 +443,7 @@ func (m *WorkflowManager) List() []WorkflowRunSnapshot {
 // propagates to its in-flight sub-agents and unwinds the script.
 func (m *WorkflowManager) Kill(id string) (found, wasRunning bool) {
 	m.mu.Lock()
-	run := m.runs[id]
+	run := m.resolveLocked(id)
 	m.mu.Unlock()
 	if run == nil {
 		return false, false
