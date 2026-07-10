@@ -178,7 +178,7 @@ func subAgentManagerEnabled() bool {
 // New spawns past the cap are rejected with a clear error so the model waits
 // for some to finish; it does not bound resumed (Send/Continue) rounds, which
 // are limited by the live-child cap.
-const maxConcurrentSubAgents = 8
+const maxConcurrentSubAgents = 16
 
 // SubAgentManager owns the set of async sub-agents for a session.
 // Methods are safe for concurrent use.
