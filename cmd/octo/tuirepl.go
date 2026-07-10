@@ -1086,14 +1086,19 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A sub-agent finished this round — drop it from the live panel (it's
 		// idle now; a later Continue re-adds it via a fresh "started").
 		m.removeSubAgent(msg.ev.AgentID)
-		// Async sub-agent completion: the full result rode into the conversation
-		// via Inbox; no scrollback notice needed.
+		// Print a concise scrollback notice so the user sees the completion even
+		// when the model-facing <system-reminder> is folded into a later turn.
+		status := "completed"
+		if msg.ev.StopReason != "" {
+			status = msg.ev.StopReason
+		}
+		m.printlnBlock(bgDoneStyle.Render(fmt.Sprintf("● Sub-agent %s (%s) %s", msg.ev.AgentID, msg.ev.Description, status)))
 		// Idle auto-turn: same logic as bgExitMsg — drain inbox and trigger a
 		// turn so the model sees the notification immediately.
 		if !m.turnRunning && len(m.queue) == 0 {
 			if items := m.a.Inbox.Drain(); len(items) > 0 {
 				s := strings.Join(agent.Texts(items), "\n\n")
-				return m, m.startTurnEcho(s, "")
+				return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(s, ""))
 			}
 		}
 		return m, m.flushPrints()

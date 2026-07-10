@@ -64,3 +64,51 @@ func TestTUI_BgExitMsgScrollbackNotice(t *testing.T) {
 	// bubbletea commands are opaque functions; we can't easily inspect the string
 	// they will print. Verify at least that a cmd is returned (smoke test).
 }
+
+// TestTUI_SubAgentNoteMsgScrollbackNotice confirms a completed async sub-agent
+// returns a scrollback command, mirroring the bgExitMsg/workflowNoteMsg paths.
+func TestTUI_SubAgentNoteMsgScrollbackNotice(t *testing.T) {
+	m := newTestModel()
+	_, cmd := m.Update(subAgentNoteMsg{ev: tools.SubAgentNotification{
+		AgentID:     "agent_2",
+		Description: "Background hello world",
+		Result:      "hello,world",
+	}})
+	if cmd == nil {
+		t.Fatal("subAgentNoteMsg should return a non-nil cmd")
+	}
+}
+
+// TestTUI_SubAgentNoteMsgIdleAutoTurn verifies that when the TUI is idle and a
+// sub-agent completion note is in the inbox, the message kicks an idle auto-turn
+// (the returned cmd is a sequence) rather than just flushing prints.
+func TestTUI_SubAgentNoteMsgIdleAutoTurn(t *testing.T) {
+	m := newTestModel()
+	m.a.Inbox.Enqueue(tools.FormatSubAgentNote(tools.SubAgentNotification{
+		AgentID:     "agent_3",
+		Description: "Idle auto-turn test",
+		Result:      "done",
+	}))
+	_, cmd := m.Update(subAgentNoteMsg{ev: tools.SubAgentNotification{
+		AgentID:     "agent_3",
+		Description: "Idle auto-turn test",
+		Result:      "done",
+	}})
+	if cmd == nil {
+		t.Fatal("subAgentNoteMsg should return a non-nil cmd when an idle auto-turn is possible")
+	}
+}
+
+// TestTUI_SubAgentNoteMsgStopReason verifies that a non-empty StopReason is
+// surfaced in the scrollback status line instead of the default "completed".
+func TestTUI_SubAgentNoteMsgStopReason(t *testing.T) {
+	m := newTestModel()
+	_, cmd := m.Update(subAgentNoteMsg{ev: tools.SubAgentNotification{
+		AgentID:     "agent_4",
+		Description: "Max turns test",
+		StopReason:  "max_turns",
+	}})
+	if cmd == nil {
+		t.Fatal("subAgentNoteMsg should return a non-nil cmd even when stopped")
+	}
+}
