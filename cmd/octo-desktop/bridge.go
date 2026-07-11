@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -19,8 +20,18 @@ type nativeBridge struct {
 	app      *application.App
 	window   *application.WebviewWindow
 	notifier *notifications.NotificationService // nil unless bundled
-	srv      *server.Server                     // the in-process hub; set once bound
-	url      string                             // http://127.0.0.1:8088, set once bound
+	// srv is the in-process hub, set once bound. Atomic because startHub (the
+	// ApplicationStarted goroutine) writes it while the tray-refresh loop reads it.
+	srv atomic.Pointer[server.Server]
+	url string // http://127.0.0.1:8088, set once bound
+
+	// allowQuit gates the app's ShouldQuit on Windows/Linux, where closing the
+	// last window would otherwise terminate the app (and the hub with it). It
+	// starts false when KeepRunningInBackground is on, so a window close hides
+	// to the tray; requestQuit flips it true for a real quit. Unused on macOS
+	// (its close behavior is the ApplicationShouldTerminateAfterLastWindowClosed
+	// option; ShouldQuit there always allows the quit).
+	allowQuit atomic.Bool
 
 	settingsMu sync.Mutex
 	settings   desktopSettings
@@ -109,10 +120,22 @@ func (b *nativeBridge) PersistChannelsEnabled(enabled bool) error {
 	return saveDesktopSettings(snapshot)
 }
 
-// showWindow brings the hub window to the foreground, re-creating it if it was
-// closed to the tray (KeepRunningInBackground). Used by the tray's "Show Octo"
-// item, a second-instance launch, and a notification click.
-func (b *nativeBridge) showWindow() {
+// showWindow brings the hub window to the foreground on the current view.
+func (b *nativeBridge) showWindow() { b.showWindowAt("") }
+
+// openSettings brings the window up on the Settings view (tray "Settings").
+func (b *nativeBridge) openSettings() { b.showWindowAt("settings") }
+
+// showWindowAt brings the hub window to the foreground, re-creating it if it was
+// closed to the tray (KeepRunningInBackground), and navigates to the given
+// frontend hash route (empty = leave it where it is). The frontend routes on
+// location.hash, so a fresh window loads straight into the view and an existing
+// one navigates via a hashchange — no full reload.
+func (b *nativeBridge) showWindowAt(hash string) {
+	target := b.url
+	if hash != "" {
+		target = b.url + "#" + hash
+	}
 	if b.window == nil {
 		if b.app == nil || b.url == "" {
 			return // not bound yet
@@ -121,7 +144,7 @@ func (b *nativeBridge) showWindow() {
 			Title:  "Octo",
 			Width:  1280,
 			Height: 860,
-			URL:    b.url,
+			URL:    target,
 			// Hidden-inset title bar: the traffic lights float over the page's
 			// top-left; the frontend insets its header past them (nativeShell).
 			Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
@@ -132,6 +155,12 @@ func (b *nativeBridge) showWindow() {
 			b.window = nil
 		})
 		b.window = w
+	} else if hash != "" {
+		// Already open — navigate to the route. ExecJS can't be used here: the
+		// page is served by octo's own server, not Wails' asset server, so the
+		// Wails runtime never loads and ExecJS stays queued forever. SetURL is a
+		// native navigation that doesn't depend on it.
+		b.window.SetURL(target)
 	}
 	b.window.Show()
 	b.window.Restore()
@@ -156,7 +185,7 @@ func (b *nativeBridge) confirm(title, message, okLabel, cancelLabel string) bool
 // showError shows a modal error dialog with a single OK button.
 func (b *nativeBridge) showError(title, message string) {
 	dlg := b.app.Dialog.Error().SetTitle(title).SetMessage(message)
-	dlg.AddButton("OK").SetAsDefault()
+	dlg.AddButton(L.dialogOKText).SetAsDefault()
 	dlg.Show()
 }
 
@@ -164,22 +193,20 @@ func (b *nativeBridge) showError(title, message string) {
 // the hub. Declining means the app will quit (it won't run windowed without
 // its own server to attach the native bridge to).
 func (b *nativeBridge) confirmTakeover(pid int) bool {
-	return b.confirm("Octo",
-		fmt.Sprintf("A background Octo backend is already running (pid %d).\n\n"+
-			"Stop it and run Octo as the hub for this machine?", pid),
-		"Stop and Continue", "Quit")
+	return b.confirm(L.takeoverTitle,
+		fmt.Sprintf(L.takeoverMsgFmt, pid),
+		L.takeoverOK, L.takeoverCancel)
 }
 
 // requestQuit is the tray "Quit Octo" action: it fully stops the backend, so it
 // confirms first when channels are running (other clients would disconnect).
 func (b *nativeBridge) requestQuit() {
-	if b.srv != nil && b.srv.ChannelsEnabled() {
-		if !b.confirm("Quit Octo",
-			"Quitting stops the Octo backend on this machine. Connected editors, "+
-				"browsers, and IM channels will disconnect.\n\nQuit anyway?",
-			"Quit", "Cancel") {
+	if srv := b.srv.Load(); srv != nil && srv.ChannelsEnabled() {
+		if !b.confirm(L.quitTitle, L.quitMsg, L.quitOK, L.quitCancel) {
 			return
 		}
 	}
+	// A real quit: let ShouldQuit (Windows/Linux) allow app termination.
+	b.allowQuit.Store(true)
 	b.app.Quit()
 }

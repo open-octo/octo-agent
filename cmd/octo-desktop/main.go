@@ -61,6 +61,9 @@ func isBundled() bool {
 }
 
 func main() {
+	// Pick the language for native dialogs/tray from the system UI language.
+	detectLang()
+
 	settings := loadDesktopSettings()
 
 	// Seed ~/.octo/bin/uv from the app's bundled copy on first run so skills
@@ -68,6 +71,9 @@ func main() {
 	ensureBundledUv()
 
 	bridge := &nativeBridge{settings: settings, url: "http://" + hubAddr}
+	// On Windows/Linux a window close would otherwise quit the app; start with
+	// quit allowed only when the user opted out of keep-running-in-background.
+	bridge.allowQuit.Store(!settings.KeepRunningInBackground)
 
 	// Native notifications only when bundled (see isBundled): the service needs
 	// a bundle identifier. Registered as a Wails service so its ServiceStartup
@@ -88,6 +94,18 @@ func main() {
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
 				bridge.showWindow()
 			},
+		},
+		// ShouldQuit is consulted on every termination attempt. On Windows/Linux
+		// that includes closing the last window, so returning allowQuit there
+		// keeps the hub alive in the tray (reopen via "Show Octo" or relaunch)
+		// until the user picks "Quit Octo". macOS never quits on window close
+		// thanks to the option below and handles real quits (Cmd-Q) itself, so
+		// it always allows the quit.
+		ShouldQuit: func() bool {
+			if runtime.GOOS == "darwin" {
+				return true
+			}
+			return bridge.allowQuit.Load()
 		},
 		Mac: application.MacOptions{
 			// Closing the window must not quit the hub when the user wants it to
@@ -115,12 +133,11 @@ func main() {
 	} else {
 		tray.SetIcon(trayColorIcon)
 	}
-	tray.SetTooltip("Octo")
-	trayMenu := app.NewMenu()
-	trayMenu.Add("Show Octo").OnClick(func(*application.Context) { bridge.showWindow() })
-	trayMenu.AddSeparator()
-	trayMenu.Add("Quit Octo").OnClick(func(*application.Context) { bridge.requestQuit() })
-	tray.SetMenu(trayMenu)
+	tray.SetTooltip(L.takeoverTitle)
+	tray.SetMenu(buildTrayMenu(app, bridge))
+	// Keep the tray's status lines (backend, channels, connected clients) fresh
+	// while the app runs — macOS doesn't refresh a status menu on open.
+	go refreshTrayLoop(app, tray, bridge)
 
 	// Bind + serve + open the window once the event loop is up, so the takeover
 	// prompt (a modal dialog) can run. Doing it here rather than before Run lets
@@ -141,9 +158,9 @@ func main() {
 	// a successor that took the port over must keep its own) and shut the
 	// server down cleanly.
 	serveproc.ReleaseOwned(os.Getpid())
-	if bridge.srv != nil {
+	if srv := bridge.srv.Load(); srv != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = bridge.srv.Shutdown(ctx)
+		_ = srv.Shutdown(ctx)
 		cancel()
 	}
 	if err != nil {
@@ -156,22 +173,30 @@ func main() {
 // the ApplicationStarted hook so its dialogs have a live event loop.
 func startHub(app *application.App, bridge *nativeBridge, settings desktopSettings) {
 	// If another backend already owns the port, ask before displacing it.
+	tookOver := false
 	if pid, ok := serveproc.Running(); ok {
 		if !bridge.confirmTakeover(pid) {
 			app.Quit()
 			return
 		}
 		if _, err := serveproc.Stop(); err != nil {
-			bridge.showError("Octo", fmt.Sprintf("Couldn't stop the running backend: %v", err))
+			bridge.showError(L.errTitle, fmt.Sprintf(L.errStopFmt, err))
 			app.Quit()
 			return
 		}
+		tookOver = true
 	}
 
-	ln, err := net.Listen("tcp", hubAddr)
+	// After a takeover, the stopped daemon needs a moment to release the port —
+	// serveproc.Stop only signals it. Retry the bind for a few seconds so the
+	// handoff is seamless; a cold start with a genuine conflict fails at once.
+	grace := time.Duration(0)
+	if tookOver {
+		grace = 8 * time.Second
+	}
+	ln, err := listenHub(hubAddr, grace)
 	if err != nil {
-		bridge.showError("Octo",
-			fmt.Sprintf("Couldn't bind %s — another program may be using it.\n\n%v", hubAddr, err))
+		bridge.showError(L.errTitle, fmt.Sprintf(L.errBindFmt, hubAddr, err))
 		app.Quit()
 		return
 	}
@@ -191,11 +216,11 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 		ChannelsEnabled: &channelsOn,
 	})
 	if err != nil {
-		bridge.showError("Octo", fmt.Sprintf("Couldn't start the backend: %v", err))
+		bridge.showError(L.errTitle, fmt.Sprintf(L.errStartFmt, err))
 		app.Quit()
 		return
 	}
-	bridge.srv = srv
+	bridge.srv.Store(srv)
 	go func() {
 		if err := srv.ServeOn(ln); err != nil {
 			log.Printf("octo-desktop: server stopped: %v", err)
@@ -203,4 +228,75 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	}()
 
 	bridge.showWindow()
+}
+
+// listenHub binds addr, retrying for up to grace so a just-stopped daemon has
+// time to release the port (SIGTERM only signals it; the listener closes a
+// beat later). grace of 0 means a single attempt.
+func listenHub(addr string, grace time.Duration) (net.Listener, error) {
+	deadline := time.Now().Add(grace)
+	for {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			return ln, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// trayStatusLines is the (info-only) top of the tray menu: what the hub is
+// doing right now — where it's serving, whether it's bridging IM channels
+// (and which), and how many clients are attached.
+func trayStatusLines(bridge *nativeBridge) []string {
+	srv := bridge.srv.Load()
+	if srv == nil {
+		return []string{L.trayStarting}
+	}
+	lines := []string{fmt.Sprintf(L.trayBackendFmt, hubAddr)}
+	if srv.ChannelsEnabled() {
+		if running := srv.RunningChannels(); len(running) > 0 {
+			lines = append(lines, fmt.Sprintf(L.trayChannelsOnFmt, len(running), strings.Join(running, ", ")))
+		} else {
+			lines = append(lines, L.trayChannelsOnNone)
+		}
+	} else {
+		lines = append(lines, L.trayChannelsOff)
+	}
+	lines = append(lines, fmt.Sprintf(L.trayClientsFmt, srv.ConnectedClients()))
+	return lines
+}
+
+// buildTrayMenu assembles the tray menu: disabled status lines on top, then the
+// Show/Quit actions. Rebuilt (not mutated in place) so a refresh is one
+// SetMenu call, which Wails marshals to the UI thread.
+func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu {
+	m := app.NewMenu()
+	for _, line := range trayStatusLines(bridge) {
+		m.Add(line).SetEnabled(false)
+	}
+	m.AddSeparator()
+	m.Add(L.trayShow).OnClick(func(*application.Context) { bridge.showWindow() })
+	m.Add(L.traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
+	m.AddSeparator()
+	m.Add(L.trayQuit).OnClick(func(*application.Context) { bridge.requestQuit() })
+	return m
+}
+
+// refreshTrayLoop re-publishes the tray menu whenever its status text changes,
+// so the counts stay live without rebuilding on every tick.
+func refreshTrayLoop(app *application.App, tray *application.SystemTray, bridge *nativeBridge) {
+	last := strings.Join(trayStatusLines(bridge), "|")
+	t := time.NewTicker(3 * time.Second)
+	defer t.Stop()
+	for range t.C {
+		sig := strings.Join(trayStatusLines(bridge), "|")
+		if sig == last {
+			continue
+		}
+		last = sig
+		tray.SetMenu(buildTrayMenu(app, bridge))
+	}
 }
