@@ -137,6 +137,15 @@ export interface NativePickResult {
   cancelled: boolean
 }
 
+// Desktop shell only: open the OS file dialog and return the chosen path. The
+// caller attaches it by real path (no upload); the agent reads it in place.
+export async function nativePickFile(startDir?: string): Promise<NativePickResult> {
+  return request<NativePickResult>('/api/native/pick-file', {
+    method: 'POST',
+    ...json({ start_dir: startDir ?? '' }),
+  })
+}
+
 // Desktop shell only: open the OS folder dialog and return the chosen path.
 // Available only when /api/version reports native:true (a NativeBridge is
 // wired); calling it under plain `octo serve` 404s. The caller then sets the

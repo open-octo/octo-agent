@@ -417,7 +417,7 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	}
 
 	content := extractTextContent(msg.Content)
-	att := parseUserFiles(msg.Files)
+	att := parseUserFiles(msg.Files, s.cfg.Native != nil)
 	if content == "" && len(att.blocks) == 0 && len(att.notes) == 0 {
 		return
 	}

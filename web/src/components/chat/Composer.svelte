@@ -23,7 +23,10 @@
   // filesystem. Exactly one of data_url / path is set once ready. `uploading`
   // marks a placeholder whose upload is still in flight; `id` keys that
   // placeholder so its async result lands on the right entry (see addAttachment).
-  type Attachment = { id?: string; name: string; mime_type?: string; data_url?: string; path?: string; uploading?: boolean }
+  // native_path is a real local path chosen via the desktop file dialog — the
+  // agent reads it in place, no upload (mirrors the folder picker). Set instead
+  // of data_url/path in the desktop shell.
+  type Attachment = { id?: string; name: string; mime_type?: string; data_url?: string; path?: string; native_path?: string; uploading?: boolean }
 
   // Reject oversized attachments client-side with a clear message rather than
   // letting the upload fail late (or bloating a WS message with a huge inline
@@ -66,7 +69,21 @@
     autoResize()
   })
 
-  function openAttach() {
+  async function openAttach() {
+    // Desktop shell: pick a real local file via the OS dialog and attach it by
+    // path (the agent reads it in place). Plain web: browser file upload.
+    if (get(nativeShell)) {
+      try {
+        const res = await api.nativePickFile(workingDir)
+        if (!res.cancelled && res.path) {
+          const name = res.path.split(/[/\\]/).pop() || res.path
+          attachTo(sid, { name, native_path: res.path })
+        }
+      } catch (e: any) {
+        showToast(e.message ?? 'Failed to open file dialog', 'error')
+      }
+      return
+    }
     fileInputEl?.click()
   }
 

@@ -34,8 +34,13 @@ type wsUserFile struct {
 	DataURL string `json:"data_url,omitempty"`
 	// Path references a document already uploaded via POST /api/upload
 	// (an /api/uploads/<name> URL).
-	Path     string `json:"path,omitempty"`
-	MimeType string `json:"mime_type,omitempty"`
+	Path string `json:"path,omitempty"`
+	// NativePath is a real absolute path on the local machine, chosen via the
+	// desktop shell's native file dialog — no upload. Honored only in the
+	// desktop build (a NativeBridge is present); ignored under `octo serve` so
+	// a remote client can't make the agent read arbitrary server files.
+	NativePath string `json:"native_path,omitempty"`
+	MimeType   string `json:"mime_type,omitempty"`
 }
 
 type wsMsgInterrupt struct {

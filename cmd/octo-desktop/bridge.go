@@ -38,6 +38,25 @@ func (b *nativeBridge) PickFolder(_ context.Context, startDir string) (string, b
 	return path, false, nil
 }
 
+// PickFile opens the OS file-choose dialog and returns the chosen path,
+// cancelled when dismissed.
+func (b *nativeBridge) PickFile(_ context.Context, startDir string) (string, bool, error) {
+	dlg := b.app.Dialog.OpenFile().
+		CanChooseFiles(true).
+		CanChooseDirectories(false)
+	if startDir != "" {
+		dlg.SetDirectory(startDir)
+	}
+	path, err := dlg.PromptForSingleSelection()
+	if err != nil {
+		return "", false, err
+	}
+	if path == "" {
+		return "", true, nil
+	}
+	return path, false, nil
+}
+
 // Notify raises an OS-native notification. No-op when the notifications service
 // isn't available (an unbundled dev binary — the service needs a bundle id).
 // Best-effort by contract: a delivery failure (e.g. permission not yet granted)

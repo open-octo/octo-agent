@@ -23,6 +23,10 @@ func (f *fakeNative) PickFolder(_ context.Context, startDir string) (string, boo
 	f.gotStartDir = startDir
 	return f.retPath, f.retCancel, nil
 }
+func (f *fakeNative) PickFile(_ context.Context, startDir string) (string, bool, error) {
+	f.gotStartDir = startDir
+	return f.retPath, f.retCancel, nil
+}
 func (f *fakeNative) Notify(title, body string) {
 	f.notifyCalls++
 	f.gotTitle, f.gotBody = title, body

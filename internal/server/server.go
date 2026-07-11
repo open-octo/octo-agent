@@ -735,6 +735,7 @@ func (s *Server) registerRoutes() {
 	if s.cfg.Native != nil {
 		// Desktop build only: OS-native capabilities. Absent under `octo serve`.
 		s.api("POST /api/native/pick-folder", s.handleNativePickFolder)
+		s.api("POST /api/native/pick-file", s.handleNativePickFile)
 		s.api("POST /api/native/notify", s.handleNativeNotify)
 		s.api("GET /api/native/autostart", s.handleNativeAutostartGet)
 		s.api("PUT /api/native/autostart", s.handleNativeAutostartSet)

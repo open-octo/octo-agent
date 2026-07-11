@@ -18,6 +18,10 @@ type NativeBridge interface {
 	// is empty.
 	PickFolder(ctx context.Context, startDir string) (path string, cancelled bool, err error)
 
+	// PickFile opens an OS file-choose dialog and returns the chosen absolute
+	// path. Same cancelled semantics as PickFolder.
+	PickFile(ctx context.Context, startDir string) (path string, cancelled bool, err error)
+
 	// Notify raises an OS-native notification. Best-effort: the host logs its
 	// own failures; callers don't handle an error.
 	Notify(title, body string)
@@ -57,6 +61,31 @@ func (s *Server) handleNativePickFolder(w http.ResponseWriter, r *http.Request) 
 	_ = readBodyJSON(r, &req)
 
 	path, cancelled, err := s.cfg.Native.PickFolder(r.Context(), req.StartDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":      path,
+		"cancelled": cancelled,
+	})
+}
+
+// POST /api/native/pick-file — open the OS file dialog (desktop only) and
+// return the chosen absolute path. The frontend attaches it by real path (no
+// upload) so the agent reads it in place. Registered only with a bridge.
+func (s *Server) handleNativePickFile(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "native dialogs are available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	var req nativePickFolderRequest
+	_ = readBodyJSON(r, &req)
+	path, cancelled, err := s.cfg.Native.PickFile(r.Context(), req.StartDir)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
