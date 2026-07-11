@@ -52,6 +52,23 @@ func (b *nativeBridge) Notify(title, body string) {
 	})
 }
 
+// AutostartEnabled reports whether the app is registered to launch at login.
+func (b *nativeBridge) AutostartEnabled() (bool, error) {
+	st, err := b.app.Autostart.Status()
+	if err != nil {
+		return false, err
+	}
+	return st.Enabled, nil
+}
+
+// SetAutostart registers or unregisters the app from launch-at-login.
+func (b *nativeBridge) SetAutostart(enable bool) error {
+	if enable {
+		return b.app.Autostart.Enable()
+	}
+	return b.app.Autostart.Disable()
+}
+
 // showWindow brings the window back to the foreground — used by the tray's
 // "Show Octo" item and when a second instance is launched.
 func (b *nativeBridge) showWindow() {

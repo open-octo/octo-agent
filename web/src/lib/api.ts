@@ -157,6 +157,18 @@ export async function nativeNotify(title: string, body: string): Promise<void> {
   })
 }
 
+// Desktop shell only: launch-at-login state.
+export async function getAutostart(): Promise<boolean> {
+  const r = await request<{ enabled: boolean }>('/api/native/autostart')
+  return r.enabled
+}
+export async function setAutostart(enabled: boolean): Promise<void> {
+  await request<{ enabled: boolean }>('/api/native/autostart', {
+    method: 'PUT',
+    ...json({ enabled }),
+  })
+}
+
 export interface FsEntry {
   name: string
   is_dir: boolean

@@ -4,7 +4,8 @@
   import Switch from '../components/ui/Switch.svelte'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import ModelConfigForm from '../components/settings/ModelConfigForm.svelte'
-  import { showToast } from '../lib/stores'
+  import { get } from 'svelte/store'
+  import { showToast, nativeShell } from '../lib/stores'
   import { setLocale, t, tr } from '../lib/i18n'
   import { confirmDialog } from '../lib/confirm'
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
@@ -21,6 +22,7 @@
   let workspaceDir  = $state('')
   let showReasoning = $state(true)
   let coauthor      = $state(true)
+  let autostart     = $state(false) // desktop shell only
   let versionStr    = $state('')
   let saving        = $state(false)
   let loading       = $state(true)
@@ -77,7 +79,20 @@
     // when the Add/Edit modal opens immediately.
     await api.listProviders().then(p => { providers = p; providersLoaded = true }).catch(() => { providersLoaded = true })
     await Promise.all([loadConfig(), loadVersion()])
+    if (get(nativeShell)) api.getAutostart().then(v => (autostart = v)).catch(() => {})
   })
+
+  // Desktop shell: toggle launch-at-login. Applied immediately (not part of the
+  // Save batch); snaps back if the native call fails.
+  async function toggleAutostart(v: boolean) {
+    try {
+      await api.setAutostart(v)
+      autostart = v
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to change autostart', 'error')
+      autostart = !v
+    }
+  }
 
   // ── model actions ───────────────────────────────────────────────────────────
   function openAddModel() {
@@ -368,6 +383,15 @@
           </div>
           <Segment options={['Light', 'Dark', 'System']} labels={{ Light: $t('settings.theme_light'), Dark: $t('settings.theme_dark'), System: $t('settings.theme_system') }} bind:value={theme} />
         </div>
+        {#if $nativeShell}
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">{$t('settings.autostart')}</span>
+              <span class="setting-desc">{$t('settings.autostart_desc')}</span>
+            </div>
+            <Switch checked={autostart} onchange={(v) => toggleAutostart(v)} />
+          </div>
+        {/if}
         <div class="setting-row last">
           <div class="setting-info">
             <span class="setting-label">{$t('settings.notifications')}</span>

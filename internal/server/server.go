@@ -736,6 +736,8 @@ func (s *Server) registerRoutes() {
 		// Desktop build only: OS-native capabilities. Absent under `octo serve`.
 		s.api("POST /api/native/pick-folder", s.handleNativePickFolder)
 		s.api("POST /api/native/notify", s.handleNativeNotify)
+		s.api("GET /api/native/autostart", s.handleNativeAutostartGet)
+		s.api("PUT /api/native/autostart", s.handleNativeAutostartSet)
 	}
 	s.api("GET /api/tools", s.handleListTools)
 	s.api("GET /api/skills", s.handleListSkills)

@@ -21,6 +21,11 @@ type NativeBridge interface {
 	// Notify raises an OS-native notification. Best-effort: the host logs its
 	// own failures; callers don't handle an error.
 	Notify(title, body string)
+
+	// AutostartEnabled reports whether the app is registered to launch at login.
+	AutostartEnabled() (bool, error)
+	// SetAutostart registers (enable) or unregisters the app from launch-at-login.
+	SetAutostart(enable bool) error
 }
 
 type nativePickFolderRequest struct {
@@ -87,4 +92,48 @@ func (s *Server) handleNativeNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	s.cfg.Native.Notify(req.Title, req.Body)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type nativeAutostartRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// GET /api/native/autostart — report launch-at-login state (desktop only).
+func (s *Server) handleNativeAutostartGet(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	enabled, err := s.cfg.Native.AutostartEnabled()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled})
+}
+
+// PUT /api/native/autostart — set launch-at-login (desktop only).
+func (s *Server) handleNativeAutostartSet(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	var req nativeAutostartRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if err := s.cfg.Native.SetAutostart(req.Enabled); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": req.Enabled})
 }
