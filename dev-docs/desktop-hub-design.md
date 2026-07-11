@@ -1,6 +1,6 @@
 # Desktop App as the Shared Serve Hub
 
-**Status: Draft / proposal.** Not implemented. This document fixes the design decisions for making the desktop app the single backend that every other octo interface shares, and flags the decisions still open. It builds on [wails-desktop-design.md](wails-desktop-design.md).
+**Status: Design agreed, not yet implemented.** This document fixes the design for making the desktop app the single backend that every other octo interface shares. All decisions below are settled; what remains is implementation. It builds on [wails-desktop-design.md](wails-desktop-design.md).
 
 ## Problem
 
@@ -60,7 +60,7 @@ The desktop app joins the existing `~/.octo/serve.pid` protocol so a headless da
 
 On launch the desktop app:
 
-1. Reads `~/.octo/serve.pid`. If a live daemon is there, it does **not** silently bind — it surfaces the conflict (see [Open decisions #1](#open-decisions) for takeover vs. attach).
+1. Reads `~/.octo/serve.pid`. If a **live** daemon is there (stale pids, from a crashed hub, are ignored via `isProcessAlive` and cleared), it does **not** silently bind — it **offers to take over**: a prompt "A background octo backend is already running. Stop it and run Octo as the hub?" On yes, it runs the equivalent of `octo serve --stop` and then binds; on no, the app exits (it will not run as a windowed client against a server it can't attach its native bridge to). One clear prompt, no silent port fight.
 2. Otherwise binds `127.0.0.1:8088`, writes its own pid to `serve.pid`, and becomes the hub.
 3. On full quit, removes the pid file (same as `octo serve --stop`).
 
@@ -72,9 +72,14 @@ Because the desktop still owns its server, the `/api/native/*` bridge stays byte
 
 The one new fact: those routes are now reachable by *any* local client of the hub (a browser tab, VS Code), not just the desktop's own window. They remain **loopback-gated**, so only same-machine clients can call them, but the semantics change from "the window's private bridge" to "the local machine's native bridge." That is acceptable and even useful (a browser tab on the same box can trigger a real folder dialog), but the gating must stay strict: the native endpoints are never exposed to a non-loopback peer even when the hub is bound to a LAN address.
 
-### 3. Channels run in the hub
+### 3. Channels run in the hub — opt-in per machine
 
-The desktop `Config` drops `NoChannel`. `initChannels` runs exactly as it does under `octo serve`, reading the same `~/.octo` config. The Channels view in the desktop window is now truthful: what you configure there actually starts. This directly resolves the configured-but-inert problem — not by hiding the UI, but by making the backend honor it.
+The hub *can* run channels (unlike today's hard `NoChannel: true`), but does not start them just because the GUI launched. A per-machine **"Run channels on this machine"** toggle (default **off**) gates `initChannels`:
+
+- **Off (default):** the Channels view shows the configured channels plus a clear banner — "Channels are not running on this machine. Turn on 'Run channels here' to start them, or run `octo serve -d` on an always-on machine." No silent inertness: the UI states *why* nothing is bridging.
+- **On:** `initChannels` runs exactly as it does under `octo serve`, reading the same `~/.octo` config; configured channels start. Turning it off stops them without quitting the app.
+
+This resolves the original configured-but-inert confusion the honest way: not by hiding the UI (the config is real and shared with `octo serve`), and not by silently starting an IM bridge every time someone opens the window (which the [laptop caveat](#laptop-caveat) makes actively bad). Launching the GUI never starts a bridge on its own; the user opts in with one visible toggle.
 
 ### 4. Fixed port, shared auth
 
@@ -82,12 +87,16 @@ The hub binds the same `127.0.0.1:8088` default and inherits `server.Server`'s f
 
 ### 5. Window lifecycle is decoupled from backend lifecycle — explicitly
 
-Closing the window does **not** stop the backend; it hides to the tray, because other clients (VS Code, a phone on the LAN, channels) may be actively using the hub. But this power is dangerous if it is invisible, so:
+Closing the window **hides to the tray** and keeps the backend running, because other clients (VS Code, a phone on the LAN, channels) may be actively using the hub. A **"Keep Octo running in the background when the window is closed"** setting (default **on**) governs this; turning it off makes close-window quit the app outright for users who don't want a background hub. This power is dangerous if it is invisible, so it is made explicit:
 
 - The tray icon **always reflects backend state**: e.g. "Octo — backend running · N channels · M clients." The user can see at a glance that closing the window left a server up.
-- **Quit** (the destructive action that stops the server, kills channels, and disconnects every client) is distinct from **close window**, and prompts for confirmation when channels are enabled or external clients are connected: "Quitting stops the octo backend. VS Code / Obsidian / channels will disconnect."
+- **Quit** (the destructive action that stops the server, kills channels, and disconnects every client) is distinct from **close window**, and prompts for confirmation when channels are running or external clients are connected: "Quitting stops the octo backend. VS Code / Obsidian / channels will disconnect."
 
 The intent is that "launching the GUI turns my machine into a hub" is a *visible, reversible* state, not a silent side effect — the opposite of the removed serve-on-login surrogate.
+
+### 6. LAN exposure stays a CLI concern
+
+The desktop app binds loopback (`127.0.0.1:8088`) only; it exposes no "bind wider" option in its settings. Serving on a LAN address (`-addr :8088`) with an access key remains an `octo serve` / CLI action, keeping the desktop app's surface loopback-simple. A user who wants the hub reachable from a phone runs the headless daemon, or launches the desktop app and separately understands that LAN exposure is a CLI knob.
 
 ## Why B over a headless-daemon hub
 
@@ -103,34 +112,16 @@ IM channels are inherently "always-on service" things, and the desktop-as-hub ti
 
 Guidance, not a code path: users who need channels reliably online should run `octo serve -d` on an always-on machine and treat the desktop app as a client of it. The docs should say this plainly. The desktop-as-hub is the right default for the common "one workstation, occasional channels" case, not for "24/7 IM gateway on a laptop."
 
-## Open decisions
+### 6. LAN exposure stays a CLI concern
 
-These are the choices this draft intentionally leaves for confirmation before implementation:
-
-1. **When a headless daemon already owns 8088, what does the desktop app do?**
-   - (a) *Attach as a client* — point the window at the existing `:8088`, but then the desktop has no native bridge on that server (folder dialog / notifications degrade). Simplest, but loses native features exactly when another backend is up.
-   - (b) *Offer to take over* — prompt "A background octo backend is running. Stop it and run Octo as the hub?" → on yes, `octo serve --stop` then bind. Preserves native features; one clear prompt.
-   - (c) *Refuse with guidance* — "Stop the running backend first (`octo serve --stop`), then reopen Octo." Most conservative, most friction.
-   - *Leaning (b).*
-
-2. **Default when the window is closed: hide-to-tray (keep serving) or quit (stop serving)?**
-   - Hide-to-tray matches the hub intent but risks the "I closed it but it's still running" surprise; mitigated by decision #5's tray state + quit confirmation.
-   - Quit-on-close is least surprising but defeats the point of a shared hub (VS Code loses its backend the moment you close the window).
-   - *Leaning hide-to-tray, gated on the visibility guarantees in decision #5.* Possibly a setting: "Keep Octo running in the background when the window is closed" (default on).
-
-3. **Should channels be on by default in the hub, or opt-in per machine?**
-   - On by default = the Channels view is fully live, but any configured channel starts whenever the app launches (the laptop caveat bites harder).
-   - Opt-in ("Run channels on this machine") = the app is a hub for the UI/sessions but only bridges IM when the user asks. Safer default, one more toggle.
-   - *Leaning opt-in*, so launching the GUI never silently starts an IM bridge.
-
-4. **LAN exposure from the desktop app.** Do we expose the `-addr :8088` (bind wider) option in desktop settings, or keep LAN binding strictly a CLI/`octo serve` concern? *Leaning CLI-only* to keep the desktop app's surface loopback-simple.
+The desktop app binds loopback (`127.0.0.1:8088`) only; it exposes no "bind wider" option in its settings. Serving on a LAN address (`-addr :8088`) with an access key remains an `octo serve` / CLI action, keeping the desktop app's surface loopback-simple. A user who wants the hub reachable from a phone runs the headless daemon, or launches the desktop app and separately understands that LAN exposure is a CLI knob.
 
 ## Impact / what changes
 
-- `cmd/octo-desktop/main.go`: bind `127.0.0.1:8088` (not `:0`) via the pid protocol; drop `NoChannel` (or gate it on decision #3); add takeover/attach handling; tray reflects backend state; quit confirmation.
-- `internal/server`: no API changes; possibly a small helper so the desktop and `octo serve` share the exact same pid-file acquire/release path.
-- Frontend: the Channels view needs no change once channels actually run; the "native" capability flag continues to gate native affordances. If channels are opt-in (decision #3), a single "run channels on this machine" toggle.
-- Docs: reconcile [wails-desktop-design.md](wails-desktop-design.md) (it currently states the desktop app is *not* a shared server and runs no channels — that becomes false) and the README's interface descriptions.
+- `cmd/octo-desktop/main.go`: bind `127.0.0.1:8088` (not `:0`) via the pid protocol; add the take-over prompt when a live daemon holds the pid; gate `initChannels` on the "run channels here" toggle (default off) instead of the hard `NoChannel`; hide-to-tray on window close (setting-gated) with the tray reflecting backend state; quit confirmation when channels/clients are active.
+- `internal/server`: no API changes; a small helper so the desktop and `octo serve` share the exact same pid-file acquire/release path; a way to start/stop channels at runtime (for the toggle) rather than only at construction.
+- Frontend: the Channels view gains a "Run channels on this machine" toggle and an off-state banner; the "native" capability flag continues to gate native affordances; a desktop-only "keep running in background" setting.
+- Docs: reconcile [wails-desktop-design.md](wails-desktop-design.md) (its "not a shared server / runs no channels" statements become false) and the README's interface descriptions.
 
 ## Security
 
