@@ -63,6 +63,20 @@ func TestMaterializeDefaults_WritesEmbeddedAndStamps(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "workflow-creator", "SKILL.md")); err != nil {
 		t.Fatalf("expected workflow-creator/SKILL.md materialized: %v", err)
 	}
+	// ppt-master ships with a bundled Python engine — SKILL.md and a nested
+	// script must both materialize.
+	for _, f := range []string{"SKILL.md", filepath.Join("scripts", "project_manager.py")} {
+		if _, err := os.Stat(filepath.Join(root, "ppt-master", f)); err != nil {
+			t.Fatalf("expected ppt-master/%s materialized: %v", f, err)
+		}
+	}
+	// image-gen (the image-acquisition capability split out of ppt-master)
+	// ships as its own default skill.
+	for _, f := range []string{"SKILL.md", filepath.Join("scripts", "image_gen.py")} {
+		if _, err := os.Stat(filepath.Join(root, "image-gen", f)); err != nil {
+			t.Fatalf("expected image-gen/%s materialized: %v", f, err)
+		}
+	}
 	// tdd bundles four companion references — all must materialize.
 	for _, f := range []string{"SKILL.md", "tests.md", "mocking.md", "deep-modules.md", "interface-design.md", "refactoring.md"} {
 		if _, err := os.Stat(filepath.Join(root, "tdd", f)); err != nil {
