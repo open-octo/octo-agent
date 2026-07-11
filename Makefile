@@ -52,7 +52,7 @@ RG_EMBED_BIN := $(RG_EMBED_DIR)/rg
         eval-build eval-list eval \
         rg-embed rg-embed-clean \
         bundle-tools-windows bundle-tools-macos \
-        web-build web-dev dev build-full desktop
+        web-build web-dev dev build-full desktop desktop-app
 
 all: test
 
@@ -88,6 +88,13 @@ build-full: build
 # packaged .app / installer.
 desktop: web-build
 	cd cmd/octo-desktop && CGO_ENABLED=1 go build -o ../../octo-desktop .
+
+# Package the desktop shell into a double-clickable macOS Octo.app bundle
+# (embeds the web UI, ad-hoc signed for local use). Real Developer ID
+# notarization is a release step. Windows packaging rides the Inno Setup
+# installer track.
+desktop-app: web-build
+	bash scripts/package-desktop-macos.sh
 
 install: web-build rg-embed
 	go install $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' ./cmd/octo

@@ -8,6 +8,7 @@
 /octo.exe
 /octo-desktop
 /octo-desktop.exe
+/Octo.app
 /octo-eval
 /dist/
 *.test
