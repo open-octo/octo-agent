@@ -75,6 +75,15 @@ type Config struct {
 	// alongside the HTTP server.
 	NoChannel bool
 
+	// ChannelsEnabled, when non-nil, sets the initial channel run-state and
+	// overrides the NoChannel-derived default (which is "on"). The desktop hub
+	// passes its per-machine "run channels on this machine" toggle here
+	// (default off) so launching the GUI never silently starts an IM bridge,
+	// and flips it at runtime via SetChannelsEnabled. `octo serve` leaves it
+	// nil, so channels start at boot exactly as before. Ignored when NoChannel
+	// is set (that hard-disables the channel subsystem entirely).
+	ChannelsEnabled *bool
+
 	// AccessKey is the shared secret used to authenticate Web UI and API
 	// requests. When empty, the server looks for OCTO_ACCESS_KEY env var.
 	// If still empty, a random key is generated and printed on startup.
@@ -262,6 +271,16 @@ type Server struct {
 	channelMgr      *channel.Manager
 	channelCancel   context.CancelFunc
 	runningAdapters sync.Map // string -> channel.Adapter
+
+	// channelsDisabled is the runtime "channels off on this machine" state.
+	// initChannels/startChannels/reloadChannel all no-op when it is true, so
+	// the desktop hub can boot with channels off and turn them on later without
+	// a restart. It is phrased as *disabled* so its zero value (false) keeps
+	// the historical "channels on" default for any Server built directly (tests)
+	// rather than through New. channelToggleMu serializes SetChannelsEnabled so
+	// a rapid on/off can't interleave an init with a stop.
+	channelsDisabled atomic.Bool
+	channelToggleMu  sync.Mutex
 
 	// channelMu guards channel (re)start bookkeeping — startChannels runs at
 	// boot, stopChannels at shutdown, and reloadChannel from an HTTP handler
@@ -509,6 +528,13 @@ func New(cfg Config) (*Server, error) {
 		s.enableSubAgentTools()
 	}
 	s.enableMCP()
+	// Initial channel run-state: on unless hard-disabled by NoChannel, but an
+	// explicit ChannelsEnabled (the desktop hub's per-machine toggle) wins.
+	channelsOn := !cfg.NoChannel
+	if cfg.ChannelsEnabled != nil {
+		channelsOn = *cfg.ChannelsEnabled
+	}
+	s.channelsDisabled.Store(!channelsOn)
 	s.initChannels()
 
 	s.http = &http.Server{
@@ -1951,7 +1977,7 @@ func (s *Server) rememberedFor(key string) *permission.Remembered {
 // initChannels loads channel config and creates a manager when channels are
 // configured and not disabled via --no-channel.
 func (s *Server) initChannels() {
-	if s.cfg.NoChannel {
+	if s.cfg.NoChannel || s.channelsDisabled.Load() {
 		return
 	}
 	if s.getSender() == nil {
@@ -2012,6 +2038,9 @@ func (s *Server) buildChannelFactory() func() *agent.Agent {
 
 // startChannels launches all enabled channel adapters in background goroutines.
 func (s *Server) startChannels() {
+	if s.channelsDisabled.Load() {
+		return
+	}
 	s.channelMu.Lock()
 	defer s.channelMu.Unlock()
 	if s.channelMgr == nil {
@@ -2240,7 +2269,7 @@ func (s *Server) stopOneChannelLocked(name string) {
 // a disable/delete (stop only). Called from the channels REST handlers after a
 // successful save.
 func (s *Server) reloadChannel(platform string) {
-	if s.cfg.NoChannel || s.getSender() == nil {
+	if s.cfg.NoChannel || s.channelsDisabled.Load() || s.getSender() == nil {
 		return
 	}
 	chCfg, err := channel.LoadConfig()
@@ -2881,4 +2910,34 @@ func (s *Server) stopChannels() {
 		s.runningAdapters.Delete(k)
 		return true
 	})
+}
+
+// SetChannelsEnabled turns the IM channel subsystem on or off at runtime — the
+// hook behind the desktop hub's "run channels on this machine" toggle. Turning
+// it on builds the manager from the current ~/.octo/channels.yml and starts the
+// enabled platforms; turning it off stops every adapter. A no-op when already
+// in the requested state, and when NoChannel hard-disabled the subsystem.
+// Serialized by channelToggleMu so a rapid on/off can't interleave.
+func (s *Server) SetChannelsEnabled(on bool) {
+	if s.cfg.NoChannel {
+		return
+	}
+	s.channelToggleMu.Lock()
+	defer s.channelToggleMu.Unlock()
+	if s.channelsDisabled.Load() == !on {
+		return // already in the requested state
+	}
+	s.channelsDisabled.Store(!on)
+	if on {
+		s.initChannels()
+		s.startChannels()
+	} else {
+		s.stopChannels()
+	}
+}
+
+// ChannelsEnabled reports whether the channel subsystem is currently on.
+// NoChannel always reports off, independent of the runtime flag.
+func (s *Server) ChannelsEnabled() bool {
+	return !s.cfg.NoChannel && !s.channelsDisabled.Load()
 }
