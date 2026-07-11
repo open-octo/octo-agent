@@ -20,7 +20,7 @@ This is the smallest change that unifies all five interfaces, because it keeps t
 ## Non-goals
 
 - Not removing the headless daemon. `octo serve -d` stays for GUI-less machines (servers, CI, SSH boxes). The desktop-as-hub and the headless daemon are two front-doors to the *same* `server.Server`, mutually exclusive per machine (one owns the port).
-- Not changing the frontend, the HTTP/WS API, or the plugins. They already speak to `127.0.0.1:8088`; the hub just changes *which process* answers.
+- Not changing the frontend or the HTTP/WS API. The plugins keep their existing client protocol too — but they must meet the coordination contract in [Multiple backend-starters](#multiple-backend-starters) (probe `8088` + reconnect on takeover), which they are expected to already satisfy.
 - Not a new remote/multi-user story. The hub is still loopback-by-default with the same auth model; exposing it on a LAN is the same opt-in (`-addr :8088` + access key) as `octo serve` today.
 
 ## Current state (recap)
@@ -98,6 +98,28 @@ The intent is that "launching the GUI turns my machine into a hub" is a *visible
 
 The desktop app binds loopback (`127.0.0.1:8088`) only; it exposes no "bind wider" option in its settings. Serving on a LAN address (`-addr :8088`) with an access key remains an `octo serve` / CLI action, keeping the desktop app's surface loopback-simple. A user who wants the hub reachable from a phone runs the headless daemon, or launches the desktop app and separately understands that LAN exposure is a CLI knob.
 
+## Multiple backend-starters
+
+The clients are not all passive. The VS Code extension and the Obsidian plugin, on startup, **probe for a running backend and start one themselves if none exists**. So there are several actors that can bring the hub into being — the desktop app, either plugin, and a manual `octo serve` — not one designated starter. The design does not try to make one of them "the" starter; it makes them all coordinate through a single contract:
+
+> **The contract: `127.0.0.1:8088` + `~/.octo/serve.pid`.** Every backend-starter probes that address and respects that pid file. The first to find nothing acquires the pid and becomes the hub; everyone else attaches as a client. Whoever starts it, it is the same `server.Server` over the same `~/.octo` config and sessions, so which actor won the race doesn't change what a client sees.
+
+Because a plugin-started backend is a *headless* daemon (no native bridge) while a desktop-started one is a full hub (with the bridge), the order of arrival matters:
+
+| Order | What happens | Plugin change needed |
+|---|---|---|
+| Desktop app first, then a plugin | Plugin probes, finds the hub on 8088, connects | None — the common case |
+| Plugin only (no desktop app) | Plugin self-starts a headless daemon and uses it | None — the correct no-GUI fallback |
+| Plugin starts a daemon first, then the desktop app launches | Desktop app finds a live daemon and offers to take over (decision #1); on yes it stops that daemon and binds as the hub | **Plugin must reconnect** when its backend is replaced |
+| Desktop app is the hub, plugin probes | Plugin finds it and connects; never self-starts | None |
+
+This keeps the plugins' self-bootstrap — it is exactly right hub-client behavior and the only way the no-desktop, headless, or server-side cases work. It must **not** be removed.
+
+Two requirements fall on the plugins for the coordination to hold. Both are expected to already be satisfied; they are called out here as the contract the plugin repos (`octo-vscode`, `octo-obsidian`) must meet, and are worth verifying there:
+
+1. **Same discovery contract.** A plugin must probe `127.0.0.1:8088` and, when self-starting, launch a standard `octo serve` that writes `~/.octo/serve.pid` — not a private port and not a pid-less process. Anything else produces two coexisting backends instead of one shared hub.
+2. **Reconnect on backend replacement.** When the desktop app takes over a plugin-started daemon, the plugin's WebSocket drops and must reconnect to the new hub. Ordinary drop-and-reconnect logic covers this; a plugin that treats its self-started daemon as permanent would lose its connection after a takeover.
+
 ## Why B over a headless-daemon hub
 
 The alternative — keep the desktop app a thin client and make a headless `octo serve -d` the permanent hub — is architecturally cleaner for always-on channels but pays a real cost the desktop-as-hub avoids:
@@ -118,6 +140,7 @@ Guidance, not a code path: users who need channels reliably online should run `o
 - `internal/server`: no API changes; a small helper so the desktop and `octo serve` share the exact same pid-file acquire/release path; a way to start/stop channels at runtime (for the toggle) rather than only at construction.
 - Frontend: the Channels view gains a "Run channels on this machine" toggle and an off-state banner; the "native" capability flag continues to gate native affordances; a desktop-only "keep running in background" setting.
 - Docs: reconcile [wails-desktop-design.md](wails-desktop-design.md) (its "not a shared server / runs no channels" statements become false) and the README's interface descriptions.
+- Cross-repo: verify `octo-vscode` and `octo-obsidian` meet the [Multiple backend-starters](#multiple-backend-starters) contract (probe `8088` + reconnect on takeover). No protocol change expected, but it must be confirmed, not assumed.
 
 ## Security
 
