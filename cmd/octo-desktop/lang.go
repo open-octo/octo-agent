@@ -13,6 +13,7 @@ import (
 // can fmt.Sprintf them.
 type uiStrings struct {
 	trayShow, trayQuit string
+	traySettings       string
 	trayStarting       string
 	trayBackendFmt     string // "Backend · %s"
 	trayChannelsOff    string
@@ -40,6 +41,7 @@ type uiStrings struct {
 var enStrings = uiStrings{
 	trayShow:           "Show Octo",
 	trayQuit:           "Quit Octo",
+	traySettings:       "Settings…",
 	trayStarting:       "Starting…",
 	trayBackendFmt:     "Backend · %s",
 	trayChannelsOff:    "Channels: off",
@@ -67,6 +69,7 @@ var enStrings = uiStrings{
 var zhStrings = uiStrings{
 	trayShow:           "显示 Octo",
 	trayQuit:           "退出 Octo",
+	traySettings:       "设置…",
 	trayStarting:       "启动中…",
 	trayBackendFmt:     "后端 · %s",
 	trayChannelsOff:    "Channel：未开启",

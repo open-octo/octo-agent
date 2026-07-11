@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -112,10 +113,22 @@ func (b *nativeBridge) PersistChannelsEnabled(enabled bool) error {
 	return saveDesktopSettings(snapshot)
 }
 
-// showWindow brings the hub window to the foreground, re-creating it if it was
-// closed to the tray (KeepRunningInBackground). Used by the tray's "Show Octo"
-// item, a second-instance launch, and a notification click.
-func (b *nativeBridge) showWindow() {
+// showWindow brings the hub window to the foreground on the current view.
+func (b *nativeBridge) showWindow() { b.showWindowAt("") }
+
+// openSettings brings the window up on the Settings view (tray "Settings").
+func (b *nativeBridge) openSettings() { b.showWindowAt("settings") }
+
+// showWindowAt brings the hub window to the foreground, re-creating it if it was
+// closed to the tray (KeepRunningInBackground), and navigates to the given
+// frontend hash route (empty = leave it where it is). The frontend routes on
+// location.hash, so a fresh window loads straight into the view and an existing
+// one navigates via a hashchange — no full reload.
+func (b *nativeBridge) showWindowAt(hash string) {
+	target := b.url
+	if hash != "" {
+		target = b.url + "#" + hash
+	}
 	if b.window == nil {
 		if b.app == nil || b.url == "" {
 			return // not bound yet
@@ -124,7 +137,7 @@ func (b *nativeBridge) showWindow() {
 			Title:  "Octo",
 			Width:  1280,
 			Height: 860,
-			URL:    b.url,
+			URL:    target,
 			// Hidden-inset title bar: the traffic lights float over the page's
 			// top-left; the frontend insets its header past them (nativeShell).
 			Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
@@ -135,6 +148,9 @@ func (b *nativeBridge) showWindow() {
 			b.window = nil
 		})
 		b.window = w
+	} else if hash != "" {
+		// Already loaded — switch the SPA route without reloading.
+		b.window.ExecJS("window.location.hash = " + strconv.Quote(hash))
 	}
 	b.window.Show()
 	b.window.Restore()

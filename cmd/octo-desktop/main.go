@@ -238,19 +238,19 @@ func listenHub(addr string, grace time.Duration) (net.Listener, error) {
 func trayStatusLines(bridge *nativeBridge) []string {
 	srv := bridge.srv.Load()
 	if srv == nil {
-		return []string{"Starting…"}
+		return []string{L.trayStarting}
 	}
-	lines := []string{"Backend · " + hubAddr}
+	lines := []string{fmt.Sprintf(L.trayBackendFmt, hubAddr)}
 	if srv.ChannelsEnabled() {
 		if running := srv.RunningChannels(); len(running) > 0 {
-			lines = append(lines, fmt.Sprintf("Channels: on · %d (%s)", len(running), strings.Join(running, ", ")))
+			lines = append(lines, fmt.Sprintf(L.trayChannelsOnFmt, len(running), strings.Join(running, ", ")))
 		} else {
-			lines = append(lines, "Channels: on · none connected")
+			lines = append(lines, L.trayChannelsOnNone)
 		}
 	} else {
-		lines = append(lines, "Channels: off")
+		lines = append(lines, L.trayChannelsOff)
 	}
-	lines = append(lines, fmt.Sprintf("Connected clients: %d", srv.ConnectedClients()))
+	lines = append(lines, fmt.Sprintf(L.trayClientsFmt, srv.ConnectedClients()))
 	return lines
 }
 
@@ -263,8 +263,10 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 		m.Add(line).SetEnabled(false)
 	}
 	m.AddSeparator()
-	m.Add("Show Octo").OnClick(func(*application.Context) { bridge.showWindow() })
-	m.Add("Quit Octo").OnClick(func(*application.Context) { bridge.requestQuit() })
+	m.Add(L.trayShow).OnClick(func(*application.Context) { bridge.showWindow() })
+	m.Add(L.traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
+	m.AddSeparator()
+	m.Add(L.trayQuit).OnClick(func(*application.Context) { bridge.requestQuit() })
 	return m
 }
 
