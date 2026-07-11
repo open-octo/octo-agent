@@ -43,6 +43,10 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"latest":       latest,
 		"needs_update": needs,
 		"cli_command":  "octo",
+		// native is true in the Wails desktop build (a NativeBridge is wired),
+		// telling the frontend it can use OS dialogs/notifications. False under
+		// `octo serve`, where the frontend keeps its in-app folder tree.
+		"native": s.cfg.Native != nil,
 	})
 }
 

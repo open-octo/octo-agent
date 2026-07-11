@@ -23,6 +23,11 @@ export const toasts = writable<ToastEntry[]>([])
 export const running = writable(false)
 export const wsDown = writable(false)
 
+// True when served by the Wails desktop shell (a NativeBridge is wired,
+// reported by /api/version's `native` flag). Lets the folder picker use the OS
+// dialog instead of the in-app directory tree. False under `octo serve`.
+export const nativeShell = writable(false)
+
 // Artifacts panel
 export const artifactsOpen = writable(false)
 export const artifacts = writable<Artifact[]>([])

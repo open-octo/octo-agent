@@ -4,7 +4,7 @@
   import {
     running, activeSessionId, chatStreaming, sessions,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
-    globalPermissionMode,
+    globalPermissionMode, nativeShell,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -519,8 +519,18 @@
     }
   }
 
-  function openPicker() {
+  async function openPicker() {
     dirMenu = false
+    // Desktop shell: use the OS folder dialog. Plain web: open the in-app tree.
+    if (get(nativeShell)) {
+      try {
+        const res = await api.nativePickFolder(workingDir)
+        if (!res.cancelled && res.path) await applyWorkingDir(res.path)
+      } catch (e: any) {
+        showToast(e.message ?? 'Failed to open folder dialog', 'error')
+      }
+      return
+    }
     pickerOpen = true
   }
 

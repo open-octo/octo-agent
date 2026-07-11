@@ -1,0 +1,63 @@
+package server
+
+import (
+	"context"
+	"net/http"
+)
+
+// NativeBridge is the desktop shell's hook into OS-native capabilities that a
+// browser can't provide. It is nil under `octo serve` and set only by the
+// Wails desktop build (cmd/octo-desktop), which supplies an implementation
+// backed by the Wails runtime. When nil, the /api/native/* routes are never
+// registered, so `octo serve` exposes no extra surface — the whole native
+// layer is opt-in at construction, not a runtime branch on every request.
+type NativeBridge interface {
+	// PickFolder opens an OS directory-choose dialog seeded at startDir (which
+	// may be empty) and returns the chosen absolute path. cancelled is true
+	// when the user dismissed the dialog without choosing, in which case path
+	// is empty.
+	PickFolder(ctx context.Context, startDir string) (path string, cancelled bool, err error)
+
+	// Notify raises an OS-native notification. Best-effort: the host logs its
+	// own failures; callers don't handle an error.
+	Notify(title, body string)
+}
+
+type nativePickFolderRequest struct {
+	StartDir string `json:"start_dir"`
+}
+
+// POST /api/native/pick-folder — open the OS folder dialog (desktop only) and
+// return the chosen directory. The frontend then sets it as the session
+// working dir through the existing PATCH /api/sessions/{id}/working_dir,
+// reusing that endpoint's validation and the cwd-chip refresh rather than
+// duplicating them here. Registered only when a NativeBridge is present.
+func (s *Server) handleNativePickFolder(w http.ResponseWriter, r *http.Request) {
+	// Same-machine only, matching /api/fs/list. In the desktop build every
+	// request is loopback anyway; the guard just refuses to drive a native
+	// dialog on behalf of some other peer if the port were ever reachable.
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "native dialogs are available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		// Unreachable via routing (the route isn't registered without a bridge),
+		// kept as defense so a future unconditional registration can't panic.
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+
+	// Body is optional; a missing or unparseable one just leaves StartDir empty.
+	var req nativePickFolderRequest
+	_ = readBodyJSON(r, &req)
+
+	path, cancelled, err := s.cfg.Native.PickFolder(r.Context(), req.StartDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":      path,
+		"cancelled": cancelled,
+	})
+}

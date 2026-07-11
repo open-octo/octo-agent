@@ -96,6 +96,13 @@ type Config struct {
 	// `octo serve` flag sets this; it exists mainly so tests can inject a
 	// literal path without touching the real config file.
 	WorkspaceDir string
+
+	// Native, when non-nil, is the desktop shell's hook into OS-native
+	// capabilities a browser can't provide (folder dialog, notifications).
+	// It is nil under `octo serve` and set only by the Wails desktop build.
+	// When nil, the /api/native/* routes are not registered, so serve exposes
+	// no extra surface. See NativeBridge.
+	Native NativeBridge
 }
 
 // Server is the HTTP server skeleton. It owns the mux, the agent factory,
@@ -718,6 +725,10 @@ func (s *Server) registerRoutes() {
 	s.api("PUT /api/sessions/{id}/goal", s.handleUpdateSessionGoal)
 	s.api("DELETE /api/sessions/{id}/goal", s.handleDeleteSessionGoal)
 	s.api("GET /api/fs/list", s.handleFsList)
+	if s.cfg.Native != nil {
+		// Desktop build only: OS-native capabilities. Absent under `octo serve`.
+		s.api("POST /api/native/pick-folder", s.handleNativePickFolder)
+	}
 	s.api("GET /api/tools", s.handleListTools)
 	s.api("GET /api/skills", s.handleListSkills)
 	s.api("GET /api/workflows", s.handleListWorkflows)

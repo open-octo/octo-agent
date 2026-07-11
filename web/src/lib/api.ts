@@ -132,6 +132,22 @@ export async function updateSessionPermissionMode(id: string, mode: string): Pro
   })
 }
 
+export interface NativePickResult {
+  path: string
+  cancelled: boolean
+}
+
+// Desktop shell only: open the OS folder dialog and return the chosen path.
+// Available only when /api/version reports native:true (a NativeBridge is
+// wired); calling it under plain `octo serve` 404s. The caller then sets the
+// path via updateSessionWorkingDir, same as the in-app picker.
+export async function nativePickFolder(startDir?: string): Promise<NativePickResult> {
+  return request<NativePickResult>('/api/native/pick-folder', {
+    method: 'POST',
+    ...json({ start_dir: startDir ?? '' }),
+  })
+}
+
 export interface FsEntry {
   name: string
   is_dir: boolean
