@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"sync"
 
+	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
@@ -15,6 +19,11 @@ type nativeBridge struct {
 	app      *application.App
 	window   *application.WebviewWindow
 	notifier *notifications.NotificationService // nil unless bundled
+	srv      *server.Server                     // the in-process hub; set once bound
+	url      string                             // http://127.0.0.1:8088, set once bound
+
+	settingsMu sync.Mutex
+	settings   desktopSettings
 }
 
 // PickFolder opens the OS directory-choose dialog and returns the chosen path.
@@ -88,13 +97,89 @@ func (b *nativeBridge) SetAutostart(enable bool) error {
 	return b.app.Autostart.Disable()
 }
 
-// showWindow brings the window back to the foreground — used by the tray's
-// "Show Octo" item and when a second instance is launched.
+// PersistChannelsEnabled records the "run channels on this machine" preference
+// so a relaunch honors it (the desktop reads it at startup to seed the server).
+// The live start/stop is the server's own SetChannelsEnabled, driven from the
+// same request; this only writes ~/.octo/desktop.json.
+func (b *nativeBridge) PersistChannelsEnabled(enabled bool) error {
+	b.settingsMu.Lock()
+	b.settings.ChannelsEnabled = enabled
+	snapshot := b.settings
+	b.settingsMu.Unlock()
+	return saveDesktopSettings(snapshot)
+}
+
+// showWindow brings the hub window to the foreground, re-creating it if it was
+// closed to the tray (KeepRunningInBackground). Used by the tray's "Show Octo"
+// item, a second-instance launch, and a notification click.
 func (b *nativeBridge) showWindow() {
 	if b.window == nil {
-		return
+		if b.app == nil || b.url == "" {
+			return // not bound yet
+		}
+		w := b.app.Window.NewWithOptions(application.WebviewWindowOptions{
+			Title:  "Octo",
+			Width:  1280,
+			Height: 860,
+			URL:    b.url,
+			// Hidden-inset title bar: the traffic lights float over the page's
+			// top-left; the frontend insets its header past them (nativeShell).
+			Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
+		})
+		// Forget the window when it closes so a later Show re-creates one; the
+		// app itself stays alive via ApplicationShouldTerminateAfterLastWindowClosed.
+		w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
+			b.window = nil
+		})
+		b.window = w
 	}
 	b.window.Show()
 	b.window.Restore()
 	b.window.Focus()
+}
+
+// confirm shows a modal question dialog and reports whether the user chose the
+// affirmative button. The cancel button is the safe default.
+func (b *nativeBridge) confirm(title, message, okLabel, cancelLabel string) bool {
+	var ok bool
+	dlg := b.app.Dialog.Question().SetTitle(title).SetMessage(message)
+	yes := dlg.AddButton(okLabel)
+	yes.OnClick(func() { ok = true })
+	no := dlg.AddButton(cancelLabel)
+	no.OnClick(func() { ok = false })
+	dlg.SetDefaultButton(no)
+	dlg.SetCancelButton(no)
+	dlg.Show()
+	return ok
+}
+
+// showError shows a modal error dialog with a single OK button.
+func (b *nativeBridge) showError(title, message string) {
+	dlg := b.app.Dialog.Error().SetTitle(title).SetMessage(message)
+	dlg.AddButton("OK").SetAsDefault()
+	dlg.Show()
+}
+
+// confirmTakeover asks whether to stop an already-running backend and become
+// the hub. Declining means the app will quit (it won't run windowed without
+// its own server to attach the native bridge to).
+func (b *nativeBridge) confirmTakeover(pid int) bool {
+	return b.confirm("Octo",
+		fmt.Sprintf("A background Octo backend is already running (pid %d).\n\n"+
+			"Stop it and run Octo as the hub for this machine?", pid),
+		"Stop and Continue", "Quit")
+}
+
+// requestQuit is the tray "Quit Octo" action: it fully stops the backend, so it
+// confirms first when channels are running (other clients would disconnect).
+func (b *nativeBridge) requestQuit() {
+	if b.srv != nil && b.srv.ChannelsEnabled() {
+		if !b.confirm("Quit Octo",
+			"Quitting stops the Octo backend on this machine. Connected editors, "+
+				"browsers, and IM channels will disconnect.\n\nQuit anyway?",
+			"Quit", "Cancel") {
+			return
+		}
+	}
+	b.app.Quit()
 }

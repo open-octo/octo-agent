@@ -85,6 +85,19 @@ func Running() (int, bool) {
 	return pid, true
 }
 
+// ReleaseOwned removes the pid file only if it still records pid — used by a
+// hub on quit so it clears its own entry but never deletes one a successor
+// (e.g. a process that took over the port) has since written.
+func ReleaseOwned(pid int) {
+	path, err := PidPath()
+	if err != nil {
+		return
+	}
+	if cur, err := ReadPid(path); err == nil && cur == pid {
+		_ = os.Remove(path)
+	}
+}
+
 // Stop terminates the backend recorded in the pid file and removes the file.
 // It returns the pid it stopped, or (0, nil) if nothing live was recorded.
 func Stop() (int, error) {
