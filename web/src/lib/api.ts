@@ -148,6 +148,15 @@ export async function nativePickFolder(startDir?: string): Promise<NativePickRes
   })
 }
 
+// Desktop shell only: raise an OS-native notification. Used in place of the
+// browser Notification API, which native webviews don't implement. Best-effort.
+export async function nativeNotify(title: string, body: string): Promise<void> {
+  await request<{ ok: boolean }>('/api/native/notify', {
+    method: 'POST',
+    ...json({ title, body }),
+  })
+}
+
 export interface FsEntry {
   name: string
   is_dir: boolean

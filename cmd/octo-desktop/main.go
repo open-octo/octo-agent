@@ -13,9 +13,25 @@ import (
 	"log"
 	"net"
 
+	"os"
+	"strings"
+
 	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
+
+// isBundled reports whether we're running inside a .app. The Wails
+// notifications service needs a bundle identifier and hard-fails startup
+// without one, so it's registered only when bundled — a bare `make desktop`
+// binary still runs, just without native notifications.
+func isBundled() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(exe, ".app/Contents/MacOS/")
+}
 
 func main() {
 	// Bind an ephemeral loopback port before anything else so the window URL is
@@ -28,6 +44,15 @@ func main() {
 	url := fmt.Sprintf("http://%s", ln.Addr().String())
 
 	bridge := &nativeBridge{}
+	// Native notifications only when bundled (see isBundled): the service needs
+	// a bundle identifier. Registered as a Wails service so its ServiceStartup
+	// runs; the bridge holds it to send notifications the frontend requests.
+	var services []application.Service
+	if isBundled() {
+		notifier := notifications.New()
+		bridge.notifier = notifier
+		services = append(services, application.NewService(notifier))
+	}
 
 	srv, err := server.New(server.Config{
 		Tools: true,
@@ -49,12 +74,7 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "Octo",
 		Description: "Octo Agent",
-		// Native notifications (v3/pkg/services/notifications) are intentionally
-		// not registered yet: the service requires a real .app bundle identifier
-		// and hard-fails app startup without one, so a bare `make desktop` binary
-		// couldn't run. Wiring it (inside a wails3-built bundle) and routing the
-		// server's notification triggers through NativeBridge.Notify is a
-		// follow-up — see dev-docs/wails-desktop-design.md.
+		Services:    services,
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "dev.octo-agent.desktop",
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {

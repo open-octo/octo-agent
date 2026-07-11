@@ -11,16 +11,21 @@ import (
 
 // fakeNative records what it was asked and returns canned results.
 type fakeNative struct {
-	gotStartDir string
-	retPath     string
-	retCancel   bool
+	gotStartDir       string
+	retPath           string
+	retCancel         bool
+	gotTitle, gotBody string
+	notifyCalls       int
 }
 
 func (f *fakeNative) PickFolder(_ context.Context, startDir string) (string, bool, error) {
 	f.gotStartDir = startDir
 	return f.retPath, f.retCancel, nil
 }
-func (f *fakeNative) Notify(string, string) {}
+func (f *fakeNative) Notify(title, body string) {
+	f.notifyCalls++
+	f.gotTitle, f.gotBody = title, body
+}
 
 func TestNativePickFolderNotRegisteredWithoutBridge(t *testing.T) {
 	tmp := t.TempDir()
@@ -81,6 +86,39 @@ func TestNativePickFolderRejectsNonLoopback(t *testing.T) {
 	srv.mux.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("non-loopback peer: got %d, want 403", w.Code)
+	}
+}
+
+func TestNativeNotifyDelegatesToBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/notify", strings.NewReader(`{"title":"Done","body":"turn complete"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.notifyCalls != 1 || fake.gotTitle != "Done" || fake.gotBody != "turn complete" {
+		t.Errorf("bridge.Notify got calls=%d title=%q body=%q, want 1/Done/turn complete", fake.notifyCalls, fake.gotTitle, fake.gotBody)
+	}
+}
+
+func TestNativeNotifyNotRegisteredWithoutBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/notify", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("without a bridge the route must not exist: got %d, want 404", w.Code)
 	}
 }
 

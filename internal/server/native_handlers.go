@@ -61,3 +61,30 @@ func (s *Server) handleNativePickFolder(w http.ResponseWriter, r *http.Request) 
 		"cancelled": cancelled,
 	})
 }
+
+type nativeNotifyRequest struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+// POST /api/native/notify — raise an OS-native notification (desktop only).
+// The frontend calls this in desktop mode instead of the browser Notification
+// API, which native webviews don't implement. Best-effort: it always returns
+// ok; the bridge swallows delivery failures. Registered only with a bridge.
+func (s *Server) handleNativeNotify(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "native notifications are available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	var req nativeNotifyRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	s.cfg.Native.Notify(req.Title, req.Body)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}

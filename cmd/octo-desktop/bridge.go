@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
 // nativeBridge implements server.NativeBridge on top of the Wails runtime. The
@@ -11,8 +12,9 @@ import (
 // browser can't provide; Wails' own APIs marshal to the UI thread internally,
 // so no manual main-thread dispatch is needed here.
 type nativeBridge struct {
-	app    *application.App
-	window *application.WebviewWindow
+	app      *application.App
+	window   *application.WebviewWindow
+	notifier *notifications.NotificationService // nil unless bundled
 }
 
 // PickFolder opens the OS directory-choose dialog and returns the chosen path.
@@ -36,11 +38,19 @@ func (b *nativeBridge) PickFolder(_ context.Context, startDir string) (string, b
 	return path, false, nil
 }
 
-// Notify will raise an OS-native notification. It is a no-op for now: the Wails
-// notifications service needs a bundled .app identifier, so wiring it (and
-// routing the server's notification triggers here) is a follow-up done inside a
-// wails3-built bundle. Best-effort by contract, so a stub is safe meanwhile.
-func (b *nativeBridge) Notify(title, body string) {}
+// Notify raises an OS-native notification. No-op when the notifications service
+// isn't available (an unbundled dev binary — the service needs a bundle id).
+// Best-effort by contract: a delivery failure (e.g. permission not yet granted)
+// is swallowed.
+func (b *nativeBridge) Notify(title, body string) {
+	if b.notifier == nil {
+		return
+	}
+	_ = b.notifier.SendNotification(notifications.NotificationOptions{
+		Title: title,
+		Body:  body,
+	})
+}
 
 // showWindow brings the window back to the foreground — used by the tray's
 // "Show Octo" item and when a second instance is launched.

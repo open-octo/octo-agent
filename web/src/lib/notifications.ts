@@ -3,8 +3,8 @@
 // programmatically revoke a granted permission, so "off" is expressed here:
 // notifyForSessionActivity() consults this store before firing. Both the
 // header bell and the Settings toggle flip it through setNotificationsEnabled.
-import { writable } from 'svelte/store'
-import { showToast } from './stores'
+import { get, writable } from 'svelte/store'
+import { showToast, nativeShell } from './stores'
 import { tr } from './i18n'
 
 const KEY = 'octo.notifications'
@@ -30,6 +30,14 @@ export async function setNotificationsEnabled(on: boolean): Promise<boolean> {
     notificationsEnabled.set(false)
     showToast(tr('header.notif_disabled'))
     return false
+  }
+  // Desktop shell: the OS owns notification permission (prompted natively on
+  // first send), and the browser Notification API doesn't work in the webview.
+  // Skip the browser permission dance and just enable.
+  if (get(nativeShell)) {
+    notificationsEnabled.set(true)
+    showToast(tr('header.notif_enabled'))
+    return true
   }
   if (!('Notification' in window)) {
     showToast(tr('header.notif_unsupported'), 'error')
