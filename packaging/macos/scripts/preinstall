@@ -1,14 +1,24 @@
 #!/bin/sh
-# Stop a running daemon before its binary is overwritten — an in-place
-# upgrade can't replace an in-use octo.exe-equivalent while `octo serve -d`
-# still holds it open. Runs as the installing user (the distribution's
-# currentUserHome domain executes scripts unprivileged), so $HOME resolves to
-# the real target account. No-op on a first install (no octo yet).
+# Upgrade + migration prep, run unprivileged (currentUserHome domain, $HOME is
+# the real account). Stop any running `octo serve -d` daemon and remove the
+# legacy login LaunchAgent that the pre-desktop installer registered (it
+# auto-started serve on login and opened the browser dashboard). The desktop
+# app is that UI now, so a leftover autostarting daemon would just be a zombie.
+# No-op on a clean first install.
 set -eu
 
-bin="$HOME/Library/Application Support/octo/bin/octo"
-if [ -x "$bin" ]; then
-  "$bin" serve --stop >/dev/null 2>&1 || true
+# Stop a running serve daemon — from an old CLI install or one started by hand.
+old_bin="$HOME/Library/Application Support/octo/bin/octo"
+[ -x "$old_bin" ] && "$old_bin" serve --stop >/dev/null 2>&1 || true
+if command -v octo >/dev/null 2>&1; then
+  octo serve --stop >/dev/null 2>&1 || true
+fi
+
+# Remove the legacy login autostart agent (pre-desktop installer).
+agent="$HOME/Library/LaunchAgents/dev.octo-agent.serve.plist"
+if [ -f "$agent" ]; then
+  launchctl unload "$agent" >/dev/null 2>&1 || true
+  rm -f "$agent"
 fi
 
 exit 0

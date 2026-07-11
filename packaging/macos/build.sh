@@ -1,18 +1,19 @@
 #!/bin/sh
-# octo-setup.pkg — per-user macOS installer for octo.
+# octo-setup.pkg — per-user macOS installer for the Octo desktop app.
 #
-# Installs octo to ~/Library/Application Support/octo/bin, adds that
-# directory to the user's PATH (shell rc files — no root, no admin password),
-# registers a login LaunchAgent, and opens the onboarding dashboard. Per-user
-# is deliberate, matching packaging/windows/octo.iss: the install directory
-# stays user-writable, so `octo upgrade` can overwrite the binary in place.
+# Installs Octo.app (a self-contained bundle: the desktop GUI + the octo CLI +
+# uv, see scripts/package-desktop-macos.sh) into ~/Applications, puts the octo
+# CLI on PATH, and opens the app. Per-user (no root/admin) is deliberate and
+# mirrors packaging/windows/octo.iss.
+#
+# This replaces the old "install the CLI + autostart `octo serve -d` + open the
+# browser dashboard" flow — the desktop app is that UI now, natively.
 #
 # Usage:
 #   AppVersion=1.6.0 SourceDir=path/to/bits OutDir=path/to/out packaging/macos/build.sh
 #
-# SourceDir must contain the `octo` binary (built universal — see the
-# universal_binaries entry in .goreleaser.yaml — so one .pkg runs on both
-# Intel and Apple Silicon) and LICENSE.txt.
+# SourceDir must contain the universal `octo` CLI binary, LICENSE.txt, and
+# (release builds) `uv`. The desktop GUI binary is built here from source.
 set -eu
 
 : "${AppVersion:?set AppVersion, e.g. 1.6.0}"
@@ -20,41 +21,28 @@ set -eu
 : "${OutDir:=$SourceDir}"
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
+repo_root=$(cd "$script_dir/../.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-payload="$work/payload"
-mkdir -p "$payload/bin"
-cp "$SourceDir/octo" "$payload/bin/octo"
-chmod +x "$payload/bin/octo"
-cp "$SourceDir/LICENSE.txt" "$payload/LICENSE.txt"
+# Build the self-contained Octo.app, embedding the released CLI + uv.
+uv_arg=""
+[ -f "$SourceDir/uv" ] && uv_arg="$SourceDir/uv"
+OCTO_CLI="$SourceDir/octo" UV_BINARY="$uv_arg" \
+  sh "$repo_root/scripts/package-desktop-macos.sh" "$AppVersion"
 
-# uv (universal binary), staged by `make bundle-tools-macos` into the same
-# SourceDir before this script runs — see the Makefile for where it's fetched
-# from. Optional: a local/CI-check build
-# only stages octo + LICENSE.txt (macos-installer-check.yml), so copy uv in
-# only when present. pkgbuild lands it under this payload's single
-# --install-location alongside octo itself; postinstall then moves it out to
-# ~/.octo/bin (the shared convention with the Windows installer and octo's own
-# rgembed cache) rather than leaving it in Application Support.
-for tool in uv; do
-  if [ -f "$SourceDir/$tool" ]; then
-    cp "$SourceDir/$tool" "$payload/bin/$tool"
-    chmod +x "$payload/bin/$tool"
-  fi
-done
+# Payload: Octo.app under the user's Applications (currentUserHome domain, so
+# --install-location is relative to the home dir).
+payload="$work/payload/Applications"
+mkdir -p "$payload"
+cp -R "$repo_root/Octo.app" "$payload/Octo.app"
 
-# The distribution is currentUserHome-only, so the target volume is the
-# installing user's home directory. --install-location must be a path relative
-# to that volume; pkgbuild does NOT expand '~', so a literal '~/Library...'
-# would create a directory named '~' instead of installing into the user's
-# real Library folder.
 pkgbuild \
-  --root "$payload" \
+  --root "$work/payload" \
   --scripts "$script_dir/scripts" \
   --identifier dev.octo-agent.octo \
   --version "$AppVersion" \
-  --install-location 'Library/Application Support/octo' \
+  --install-location 'Applications' \
   "$work/octo-component.pkg"
 
 distribution="$work/distribution.xml"
