@@ -154,6 +154,11 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 	usedTokens := 0
 	s.sessionAgentsMu.Lock()
 	a := s.sessionAgents[sessionID]
+	if a == nil && s.warmAgentID == sessionID {
+		// Idle session, but its just-finished agent is still warm: use its exact
+		// token count instead of the transcript estimate below.
+		a = s.warmAgent
+	}
 	s.sessionAgentsMu.Unlock()
 	sess, _ := agent.LoadSession(sessionID)
 	if a != nil {
@@ -1192,6 +1197,11 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		}
 		delete(s.sessionAgents, sess.ID)
 		delete(s.liveSessions, sess.ID)
+		// Retain this agent as the warm read-only instance so its exact context
+		// token count outlives the turn (see warmAgent). Bounded to one: a later
+		// finished turn — this session or another — replaces it.
+		s.warmAgentID = sess.ID
+		s.warmAgent = a
 		s.sessionAgentsMu.Unlock()
 	}()
 

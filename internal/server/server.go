@@ -194,6 +194,18 @@ type Server struct {
 	liveSessions    map[string]*agent.Session
 	sessionAgentsMu sync.Mutex
 
+	// warmAgent keeps the single most-recently-finished session's Agent alive
+	// after its turn ends, so its exact context-window token count survives for
+	// the composer's "Context" bar. It is READ-ONLY and used only for context
+	// usage — never for steer/Inbox delivery, which strictly require a running
+	// loop (a dead Inbox would swallow the message). Without it, an idle session
+	// has no live token count and sendContextUsage falls back to a transcript
+	// estimate that omits the system-prompt/tools overhead (so it disagrees with
+	// the live value) and rounds tiny conversations to 0. Bounded to one entry
+	// (a new finished turn evicts the previous), guarded by sessionAgentsMu.
+	warmAgentID string
+	warmAgent   *agent.Agent
+
 	// senderCache holds one sender per config entry name, built lazily for
 	// sessions bound to a non-default model entry. Invalidated wholesale on
 	// any /api/config/models mutation; the next turn rebuilds.
