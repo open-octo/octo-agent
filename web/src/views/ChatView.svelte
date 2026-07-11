@@ -95,7 +95,7 @@
   // Pending steer messages typed while a turn is running. They are shown above
   // the composer as ghost user bubbles until the server drains the inbox and
   // confirms them in the scrollback.
-  let pendingSteers = $state<{ pendingId: string; text: string; files?: any[] }[]>([])
+  let pendingSteers = $state<{ pendingId: string; text: string; files?: any[]; retracting?: boolean }[]>([])
 
   // Set when the server reports a recoverable binding conflict. The UI shows a
   // banner with a "Force bind" button; clicking it retries the pending send
@@ -400,6 +400,33 @@
       // Keep the pending bubble and streaming state; the user can confirm.
       bindRequiredFor = sid
       bindRequiredMessage = (ev as any).message ?? 'Session is bound to another entry.'
+    }))
+
+    // A pending steer was successfully pulled back out of the running turn's
+    // inbox: drop its ghost bubble, forget its rollback entry (it will never be
+    // confirmed now), and reload its text + attachments into the composer.
+    cleanups.push(ws.on('steer_retracted', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const pendingId = (ev as any).pending_id
+      const s = pendingSteers.find(x => x.pendingId === pendingId)
+      pendingSteers = pendingSteers.filter(x => x.pendingId !== pendingId)
+      const queue = pendingSends.get(sid)
+      if (queue) {
+        const next = queue.filter(m => m.pendingId !== pendingId)
+        if (next.length) pendingSends.set(sid, next)
+        else pendingSends.delete(sid)
+      }
+      if (s) composer?.restore(s.text, s.files)
+    }))
+
+    // The turn already consumed the steer before the retract landed, so it's
+    // committed and on its way. Un-mark the bubble and let the user know instead
+    // of stranding the text.
+    cleanups.push(ws.on('steer_retract_failed', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const pendingId = (ev as any).pending_id
+      pendingSteers = pendingSteers.map(x => x.pendingId === pendingId ? { ...x, retracting: false } : x)
+      showToast(tr('chat.steer_retract_failed'), 'info')
     }))
 
     // The turn was interrupted. `complete` still fires and handles cleanup, so
@@ -944,9 +971,23 @@
   }
 
   // ── edit a prior user message: load it back into the composer for resend ─────
-  let composer = $state<{ setText: (v: string) => void } | null>(null)
+  let composer = $state<{ setText: (v: string) => void; restore: (v: string, files?: any[]) => void } | null>(null)
   function editMessage(content: string) {
     composer?.setText(content)
+  }
+
+  // ── retract a pending steer message (web equivalent of the TUI's ↑ recall) ───
+  // Ask the server to pull it back out of the running turn's inbox; the bubble
+  // stays (marked "retracting") until the server answers. steer_retracted then
+  // reloads it into the composer; steer_retract_failed means the turn already
+  // consumed it — keep the bubble and tell the user it's on its way.
+  function retractSteer(pendingId: string) {
+    const sid = get(activeSessionId)
+    if (!sid) return
+    const s = pendingSteers.find(x => x.pendingId === pendingId)
+    if (!s || s.retracting) return
+    pendingSteers = pendingSteers.map(x => x.pendingId === pendingId ? { ...x, retracting: true } : x)
+    ws.retractSteer(sid, pendingId, s.text)
   }
 
   // ── suggestion chip: fill the composer, don't fire (mirrors the TUI's Tab) ──
@@ -1481,6 +1522,16 @@
                   {/if}
                   {#if s.text}{s.text}{/if}
                   <span class="pending-spinner" title={$t('status.running')}></span>
+                </div>
+                <div class="msg-actions">
+                  <button
+                    class="action-btn"
+                    title={$t('chat.steer_retract')}
+                    disabled={s.retracting}
+                    onclick={() => retractSteer(s.pendingId)}
+                  >
+                    <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+                  </button>
                 </div>
               </div>
             </div>

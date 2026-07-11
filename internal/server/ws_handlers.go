@@ -1018,6 +1018,53 @@ func (s *Server) drainSteer(sessionID string) []agent.InboxItem {
 	return items
 }
 
+// removeSteerFromQueue deletes the last queued steer item whose text matches,
+// mirroring Inbox.Remove for the queue path (used when no live Agent is
+// registered). Reports whether one was removed.
+func (s *Server) removeSteerFromQueue(sessionID, text string) bool {
+	s.steerMu.Lock()
+	defer s.steerMu.Unlock()
+	q := s.steerQueues[sessionID]
+	for i := len(q) - 1; i >= 0; i-- {
+		if q[i].Text == text {
+			s.steerQueues[sessionID] = append(q[:i], q[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// handleWSRetractSteer pulls a not-yet-consumed steer message back out of the
+// running turn's inbox (or the chained-turn steer queue) so the web UI can drop
+// its ghost bubble and reload the text into the composer — the web counterpart
+// of the TUI's ↑ recall. A steer already drained by the loop can't be retracted
+// (it's committed to the turn); the failure is reported so the UI keeps the
+// bubble instead of stranding its text.
+func (s *Server) handleWSRetractSteer(sessionID, pendingID, text string) {
+	removed := false
+	s.sessionAgentsMu.Lock()
+	a := s.sessionAgents[sessionID]
+	s.sessionAgentsMu.Unlock()
+	if a != nil {
+		removed = a.Inbox.Remove(text)
+	}
+	if !removed {
+		removed = s.removeSteerFromQueue(sessionID, text)
+	}
+	if s.wsHub == nil {
+		return
+	}
+	evType := "steer_retract_failed"
+	if removed {
+		evType = "steer_retracted"
+	}
+	s.wsHub.broadcast(sessionID, map[string]any{
+		"type":       evType,
+		"session_id": sessionID,
+		"pending_id": pendingID,
+	})
+}
+
 // crashRecoveryReminder is prepended (as model-facing context, stripped from
 // every UI surface by StripSystemReminders) to the first user message of a
 // turn whose session transcript still ends mid-turn — meaning the previous

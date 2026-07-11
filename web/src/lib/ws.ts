@@ -163,6 +163,18 @@ export class WsManager {
     this.send({ type: "interrupt", session_id: sessionId });
   }
 
+  // Retract a mid-turn steer message the running turn hasn't consumed yet. The
+  // server answers with steer_retracted (pulled back — reload it for editing) or
+  // steer_retract_failed (already drained — keep the bubble).
+  retractSteer(sessionId: string, pendingId: string, text: string): void {
+    this.send({
+      type: "retract_steer",
+      session_id: sessionId,
+      pending_id: pendingId,
+      text,
+    });
+  }
+
   answerConfirmation(confId: string, result: unknown): void {
     this.send({ type: "confirmation", id: confId, result });
   }

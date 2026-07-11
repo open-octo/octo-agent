@@ -323,6 +323,13 @@ func (c *wsConn) dispatch(msgType string, raw []byte) {
 		}
 		c.hub.s.handleWSRunTask(c, msg.SessionID)
 
+	case "retract_steer":
+		var msg wsMsgRetractSteer
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			return
+		}
+		c.hub.s.handleWSRetractSteer(msg.SessionID, msg.PendingID, msg.Text)
+
 	case "confirmation":
 		var msg wsMsgConfirmation
 		if err := json.Unmarshal(raw, &msg); err != nil {
@@ -376,6 +383,7 @@ type wsHubOwner interface {
 	handleWSRetry(conn *wsConn, sessionID string)
 	handleWSRollback(conn *wsConn, sessionID string)
 	handleWSRunTask(conn *wsConn, sessionID string)
+	handleWSRetractSteer(sessionID, pendingID, text string)
 	handleWSConfirmation(confID, result string)
 	handleWSUserQuestionAnswer(qid string, choices []string, custom string, cancelled bool)
 	replayLiveState(sessionID string, conn *wsConn)

@@ -75,6 +75,17 @@ type wsMsgRunTask struct {
 	SessionID string `json:"session_id"`
 }
 
+// wsMsgRetractSteer retracts a mid-turn steer message the user queued but the
+// running turn hasn't consumed yet (the web equivalent of the TUI's ↑ recall).
+// Text is the match key — it mirrors Inbox.Remove's by-value semantics; PendingID
+// is opaque to the server and echoed back so the originating tab can identify
+// which ghost bubble to drop.
+type wsMsgRetractSteer struct {
+	SessionID string `json:"session_id"`
+	PendingID string `json:"pending_id"`
+	Text      string `json:"text"`
+}
+
 type wsMsgUpdateSettings struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`

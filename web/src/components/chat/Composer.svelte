@@ -54,6 +54,16 @@
     queueMicrotask(() => textareaEl?.focus())
   }
 
+  // Called by ChatView when the user retracts a pending steer message: reload
+  // its text AND any attachments back into the composer for editing. The files
+  // are the same already-staged Attachment objects (data_url / path / local_path
+  // all resolved), so they can go straight back into the tray.
+  export function restore(v: string, files?: Attachment[]) {
+    text = v
+    if (files && files.length) attachments = [...files]
+    queueMicrotask(() => textareaEl?.focus())
+  }
+
   // Auto-grow the textarea with its content up to a max height, then scroll
   // inside (matches the max-height in CSS). The $effect re-runs on every text
   // change — typing, paste, send-clear, or programmatic setText.
