@@ -80,7 +80,7 @@ Several packages that don't get their own layer but are everywhere:
 
 - **`internal/permission/`** — deny > ask > allow, deny wins regardless of declaration order. Engine rebuilt per-turn; editing `permissions.yml` takes effect immediately. Parse failures silently fall back to `lastGoodRules` without crashing sessions.
 - **`internal/skills/`** — L1 is just name + description + frontmatter — the smallest system-prompt budget. L2 body is loaded on demand via the `skill` tool, preventing skills from blowing up the context window.
-- **`internal/memorybackend/`** — hindsight / mem0 / MemTensor semantic memory backends, swappable. The `eventSink` hook auto-writes conversations to memory on `EventStop`.
+- **`internal/memorybackend/`** — hindsight / mem0 / agentmemory semantic memory backends, swappable. The `eventSink` hook auto-writes conversations to memory on `EventStop`.
 - **`internal/workflow/`** — mruby (wazero-wasm Fiber) × Go goroutine collaboration; write `agent/parallel/pipeline` composable workflows in Ruby DSL.
 
 ### 7. Server + Channel: Dual Event Exits

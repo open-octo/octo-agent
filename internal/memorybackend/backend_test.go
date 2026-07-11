@@ -9,7 +9,7 @@ func TestNewDispatchesByType(t *testing.T) {
 	}{
 		{"hindsight", "hindsight"},
 		{"mem0", "mem0"},
-		{"memos", "memos"},
+		{"agentmemory", "agentmemory"},
 	}
 	for _, c := range cases {
 		b, err := New(Config{Type: c.typ, BaseURL: "http://localhost:8888"})

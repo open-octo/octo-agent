@@ -80,7 +80,7 @@ Anthropic 返回 `stop_reason: "tool_use"`，OpenAI 返回 `finish_reason: "tool
 
 - **`internal/permission/`** — deny > ask > allow，deny 优先级最高，无视声明顺序。每 turn 重建引擎，改 `permissions.yml` 立即生效。解析失败时安静回退到 `lastGoodRules`，不会绷掉 session。
 - **`internal/skills/`** — L1 只有 name + description + frontmatter，注入 system prompt 的 budget 最小；L2 的 body 通过 `skill` 工具按需加载，避免 skill 冲爆上下文窗口。
-- **`internal/memorybackend/`** — hindsight / mem0 / MemTensor 三种语义记忆后端可选。`eventSink` hook 在 `EventStop` 时自动将对话写入记忆。
+- **`internal/memorybackend/`** — hindsight / mem0 / agentmemory 三种语义记忆后端可选。`eventSink` hook 在 `EventStop` 时自动将对话写入记忆。
 - **`internal/workflow/`** — mruby（wazero-wasm Fiber）+ Go goroutine 协作，用 Ruby DSL 写 `agent/parallel/pipeline` 组合式工作流。
 
 ### 7. Server + Channel：事件双重出口

@@ -1,6 +1,6 @@
 ---
 title: 接入记忆后端
-description: 可选的语义召回能力，来自 hindsight、mem0 或 MemTensor/MemOS——和 MEMORY.md 是两回事。
+description: 可选的语义召回能力，来自 hindsight、mem0 或 agentmemory——和 MEMORY.md 是两回事。
 ---
 
 octo 可以选择性地接入一个自托管的外部记忆服务，让它给你的对话建索引，供 agent 之后搜索。这跟
@@ -16,12 +16,13 @@ octo 可以选择性地接入一个自托管的外部记忆服务，让它给你
 - [mem0](https://github.com/mem0ai/mem0)——自托管（用的是 mem0ai/mem0 仓库里的 `server/`），
   默认开启鉴权；也有一个托管的 [mem0 Platform](https://docs.mem0.ai/platform/quickstart)（云端）
   选项（见下文）。
-- [MemTensor/MemOS](https://github.com/MemTensor/MemOS)——自托管，默认不需要鉴权。（注意不是
-  `usememos/memos`，那是一个不相关的笔记应用，也不是 `agiresearch/MemOS`。）
+- [agentmemory](https://github.com/rohitg00/agentmemory)——自托管的 Node/TypeScript 服务，默认
+  不需要鉴权，也是最省事的一个：自带本地 embedding，上手不需要任何外部 LLM 或 API key。
 
-三者都需要一个 LLM（用于事实提取）和一个 embedding 模型（用于搜索）——可以用你自己的
-OpenAI 兼容端点（DashScope/百炼、DeepSeek 等），hindsight 还额外支持完全本地的搭法。下面的
-步骤是每一种都经过实测、可以直接照抄的快速上手——是对它们自己文档的补充，不是替代。
+hindsight 和 mem0 需要一个 LLM（用于事实提取）和一个 embedding 模型（用于搜索）——可以用你
+自己的 OpenAI 兼容端点（DashScope/百炼、DeepSeek 等），hindsight 还额外支持完全本地的搭法。
+agentmemory 则开箱即用、全程本地跑（本地 embedding，LLM 可选）。下面的步骤是每一种都经过实测、
+可以直接照抄的快速上手——是对它们自己文档的补充，不是替代。
 
 ## 本地跑一个后端
 
@@ -144,53 +145,33 @@ memory_backend:
 `https://api.mem0.ai`。`api_key` 是必填的（Platform 没有免鉴权模式）；octo 会把它当作
 `Authorization: Token <api_key>` 发出去，正好是 Platform API 要求的格式。
 
-### MemOS（MemTensor）
+### agentmemory
 
-三者里最重的一个——除了 API 本身，还打包了 Neo4j（图数据库）和 Qdrant（向量数据库）。
-他们的文档给了一个现成的
-[Bailian/DashScope 示例](https://github.com/MemTensor/MemOS/blob/main/docs/en/open_source/getting_started/rest_api_server.md)，
-embedding 维度已经配好了，所以如果你手上有 DashScope key，这个反而是三者里最省心的：
+三者里最轻的一个：不用 Docker，不用数据库，也不用 API key。它内置了 SQLite 存储，embedding 模型
+也是本地跑的（通过 `@xenova/transformers` 用 `all-MiniLM-L6-v2`），所以开箱即用。
 
 ```bash
-git clone https://github.com/MemTensor/MemOS
-cd MemOS
-cat > .env <<'EOF'
-OPENAI_API_KEY=<your-bailian-api-key>
-OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
-MOS_CHAT_MODEL=qwen3-max
-
-MEMRADER_MODEL=qwen3-max
-MEMRADER_API_KEY=<your-bailian-api-key>
-MEMRADER_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
-
-MOS_EMBEDDER_MODEL=text-embedding-v4
-MOS_EMBEDDER_BACKEND=universal_api
-MOS_EMBEDDER_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
-MOS_EMBEDDER_API_KEY=<your-bailian-api-key>
-EMBEDDING_DIMENSION=1024
-MOS_RERANKER_BACKEND=cosine_local
-
-NEO4J_BACKEND=neo4j-community
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=12345678
-NEO4J_DB_NAME=neo4j
-MOS_NEO4J_SHARED_DB=false
-
-DEFAULT_USE_REDIS_QUEUE=false
-ENABLE_CHAT_API=true
-CHAT_MODEL_LIST=[{"backend": "qwen", "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1", "api_key": "<your-bailian-api-key>", "model_name_or_path": "qwen3-max", "support_models": ["qwen3-max"]}]
-EOF
-cd docker
-docker compose up --build
+npm install -g @agentmemory/agentmemory
+agentmemory
 ```
 
-（如果用别的 OpenAI 兼容 provider：把 `OPENAI_API_BASE`/`MOS_EMBEDDER_API_BASE` 换掉，
-再把 `EMBEDDING_DIMENSION` 改成和你的 embedding 模型实际输出维度一致——跟上面 mem0 那条
-规则一样。）
+（或者不装直接跑：`npx @agentmemory/agentmemory`。）REST API 默认监听 `127.0.0.1:3111`，另有一个
+实时查看器跑在 `3113`。
 
-确认它起来了：`http://localhost:8000/docs` 能打开就行。默认不需要鉴权——身份是靠一个
-`X-User-Name` header 来识别的，`api_key` 留空时 octo 会自动带上这个 header。
+确认它起来了：
+
+```bash
+curl http://localhost:3111/agentmemory/health
+# {"status":"healthy",...}
+```
+
+默认不需要鉴权。如果要加固，启动时设置 `AGENTMEMORY_SECRET`，并把同样的值填进 octo 的 `api_key`
+——octo 会以 `Authorization: Bearer <api_key>` 发过去。
+
+外部 LLM 是可选的（用来自动做观测摘要）——想用的话在 `~/.agentmemory/.env` 里设置
+`OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 `GEMINI_API_KEY`。octo 只用两个端点：每轮对话通过
+`/agentmemory/remember` 存，召回走 `/agentmemory/search`（narrative 格式，会返回完整的原文）
+——两者都不要求配置 LLM。
 
 ## 工作原理
 
@@ -209,7 +190,7 @@ docker compose up --build
 
 ```yaml
 memory_backend:
-  type: hindsight        # hindsight | mem0 | memos
+  type: hindsight        # hindsight | mem0 | agentmemory
   mode: ""               # 只对 mem0 有意义："cloud" 或 ""（自托管，默认）
   base_url: http://localhost:8888
   api_key: ""            # 可选——具体看下面每个后端的说明
@@ -221,9 +202,9 @@ memory_backend:
   暴露任何工具，也不会往外发任何东西。
 - **`mode`** 只对 `type: mem0` 有意义：设成 `cloud` 就会走托管的 mem0 Platform，而不是自托管
   server（见上文「mem0 Cloud」）——两者端点路径和鉴权 header 都不一样，不会根据 `base_url`
-  自动判断。hindsight 和 memos 不看这个字段。
+  自动判断。hindsight 和 agentmemory 不看这个字段。
 - **`base_url`** 是后端的 REST 端点——也就是你把它的 server 跑在哪（照上面的方式搭的话，
-  hindsight/mem0 是 `http://localhost:8888`，MemOS 是 `http://localhost:8000`）。`mem0` 配合
+  hindsight/mem0 是 `http://localhost:8888`，agentmemory 是 `http://localhost:3111`）。`mem0` 配合
   `mode: cloud` 时可以不填，会自动用 `https://api.mem0.ai`。
 - **`api_key`** 是可选的，具体看后端：
   - 自托管 hindsight 默认不需要鉴权；只有在 server 上开了 `HINDSIGHT_API_TENANT_API_KEY` 时才
@@ -231,10 +212,10 @@ memory_backend:
   - 自托管 mem0 默认要求鉴权——把 server 那个兼容 `X-API-Key` 的 key 填在这里，或者本地开发时
     直接用 `AUTH_DISABLED=true` 跑 server，把这里留空。mem0 Cloud（`mode: cloud`）始终要求填
     控制台生成的 API key。
-  - memos（MemTensor/MemOS）默认不需要鉴权；留空的话会把你的 `namespace` 当作
-    `X-User-Name` header 发过去。
+  - agentmemory 默认不需要鉴权；留空即可，除非你启动 server 时设了 `AGENTMEMORY_SECRET`，
+    那就把同样的值填在这里（会以 `Authorization: Bearer` 发过去）。
 - **`namespace`** 限定存储/召回的范围——对应 hindsight 的 `bank_id`、mem0 的 `user_id`，
-  或者 memos 的 `user_id`。每个项目用一个稳定的值（或者干脆留默认，共用一个桶）。
+  或者 agentmemory 的 `project`。每个项目用一个稳定的值（或者干脆留默认，共用一个桶）。
 - **`auto_recall`** ——见下文。默认 `false`。
 
 改完这里之后要重启 `octo`（或者 `octo serve`）——这个配置和其他所有配置文件设置一样，
@@ -264,10 +245,11 @@ memory_backend:
   **之前**就通过 `/configure` 把 `embedding_dims` 设对。如果已经用错误的维度存过东西了，
   没法原地修——只能清空重来：`docker compose down -v && docker compose up -d`，然后立刻
   再调一次 `/configure`，在存任何东西之前完成。
-- **mem0/MemOS：`provider_auth_failed` / 来自 `api.openai.com` 的 401**——你的 LLM/embedder
-  配置还是指向真正的 OpenAI。mem0 的话，通过 `/configure` 设 base URL（光改 `.env` 不够）；
-  MemOS 的话，检查一下 `.env` 里的 `OPENAI_API_BASE`/`MOS_EMBEDDER_API_BASE`，然后重新构建
-  （`docker compose up -d --force-recreate`）。
+- **mem0：`provider_auth_failed` / 来自 `api.openai.com` 的 401**——你的 LLM/embedder
+  配置还是指向真正的 OpenAI。通过 `/configure` 设 base URL（光改 `.env` 不够）。
+- **agentmemory：刚存完召回却是空的**——确认 server 确实起着
+  （`curl http://localhost:3111/agentmemory/health`），并且 octo 的 `namespace` 在重启前后
+  保持一致；它对应 agentmemory 的 `project`，search 的返回范围就是靠它限定的。
 - **hindsight：`docker run` 之后马上连不上**——再等一两分钟，它还在下载/加载 embedding 和
   reranker 模型。`docker logs hindsight` 能看到进度。等它打印出启动横幅之后，后续重启就会
   快很多（模型缓存在 `hindsight-hf-cache` 这个 volume 里）。

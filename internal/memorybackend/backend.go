@@ -1,5 +1,5 @@
 // Package memorybackend adapts octo to optional, user-configured external
-// semantic memory services (hindsight, mem0, MemTensor/MemOS). It is separate
+// semantic memory services (hindsight, mem0, agentmemory). It is separate
 // from and does not touch internal/memory, which owns the markdown
 // MEMORY.md/topic-file layer — see dev-docs/memory-design.md for why that
 // layer is deliberately untyped. This package is the opposite: a typed
@@ -15,7 +15,7 @@ import (
 // Config selects and configures a single backend. Only one backend can be
 // active at a time.
 type Config struct {
-	// Type is "hindsight", "mem0", or "memos".
+	// Type is "hindsight", "mem0", or "agentmemory".
 	Type string
 	// BaseURL is the backend's REST endpoint, e.g. http://localhost:8888.
 	BaseURL string
@@ -24,7 +24,7 @@ type Config struct {
 	// does not).
 	APIKey string
 	// Namespace scopes stored/recalled memories (hindsight bank_id, mem0
-	// user_id, memos user_id). Defaults to "default" when empty.
+	// user_id, agentmemory project). Defaults to "default" when empty.
 	Namespace string
 	// Mode selects between deployment variants of the same Type. Currently
 	// only meaningful for "mem0": "cloud" talks to the hosted Platform API
@@ -52,8 +52,8 @@ type Backend interface {
 	// Name identifies the backend, e.g. "hindsight".
 	Name() string
 	// Store saves a piece of free-form text. Backends that do their own
-	// extraction (mem0, memos) are expected to receive raw conversational
-	// content and extract/dedupe it themselves.
+	// extraction (mem0, agentmemory) are expected to receive raw
+	// conversational content and extract/dedupe it themselves.
 	Store(ctx context.Context, content string) error
 	// Recall searches for memories relevant to query.
 	Recall(ctx context.Context, query string) ([]Result, error)
@@ -75,9 +75,9 @@ func New(cfg Config) (Backend, error) {
 		return newHindsight(cfg), nil
 	case "mem0":
 		return newMem0(cfg), nil
-	case "memos":
-		return newMemOS(cfg), nil
+	case "agentmemory":
+		return newAgentMemory(cfg), nil
 	default:
-		return nil, fmt.Errorf("memorybackend: unknown type %q (want hindsight, mem0, or memos)", cfg.Type)
+		return nil, fmt.Errorf("memorybackend: unknown type %q (want hindsight, mem0, or agentmemory)", cfg.Type)
 	}
 }
