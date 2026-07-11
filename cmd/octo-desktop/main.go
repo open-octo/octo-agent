@@ -16,10 +16,12 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -29,6 +31,17 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
+
+// Tray icons. macOS wants a monochrome template image (auto-tinted for the
+// light/dark menu bar); Windows/Linux want the regular color icon. A tray with
+// neither an icon nor a label is invisible on macOS, which is why one must be
+// set explicitly.
+//
+//go:embed build/darwin/tray-icon.png
+var trayTemplateIcon []byte
+
+//go:embed build/linux/icon.png
+var trayColorIcon []byte
 
 // hubAddr is the fixed loopback address the hub owns — the same default
 // `octo serve` binds, so every existing client (Web, VS Code, Obsidian, CLI)
@@ -94,8 +107,15 @@ func main() {
 
 	// System tray: reach the window or fully quit without hunting for the dock
 	// icon. Quit goes through requestQuit so it can warn when stopping the hub
-	// would disconnect other clients.
+	// would disconnect other clients. An icon is required — a status item with
+	// neither icon nor label doesn't render on macOS.
 	tray := app.SystemTray.New()
+	if runtime.GOOS == "darwin" {
+		tray.SetTemplateIcon(trayTemplateIcon)
+	} else {
+		tray.SetIcon(trayColorIcon)
+	}
+	tray.SetTooltip("Octo")
 	trayMenu := app.NewMenu()
 	trayMenu.Add("Show Octo").OnClick(func(*application.Context) { bridge.showWindow() })
 	trayMenu.AddSeparator()
@@ -107,6 +127,12 @@ func main() {
 	// us ask the user before stopping someone else's backend.
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		startHub(app, bridge, settings)
+	})
+
+	// macOS: clicking the dock icon after the window was closed (hidden to the
+	// tray) fires "reopen" — re-create/show the window instead of no-op'ing.
+	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) {
+		bridge.showWindow()
 	})
 
 	err := app.Run()
