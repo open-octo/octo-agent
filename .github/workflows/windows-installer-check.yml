@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - 'packaging/windows/**'
+      - 'cmd/octo-desktop/**'
       - '.github/workflows/windows-installer-check.yml'
   workflow_dispatch:
 
@@ -26,13 +27,19 @@ jobs:
         with:
           go-version: '1.25'
           cache: true
+          cache-dependency-path: cmd/octo-desktop/go.sum
 
-      - name: Build a binary to package
+      - name: Build the binaries to package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path staging | Out-Null
           go build -o staging\octo.exe ./cmd/octo # plain build; embedded rg is irrelevant to packaging
+          # The desktop app is a nested module (its own go.mod); Windows builds it
+          # pure-Go (WebView2, no CGO). -H windowsgui: no console window flashes.
+          go build -C cmd/octo-desktop -ldflags "-H windowsgui" -o "$PWD\staging\octo-desktop.exe" .
           Copy-Item LICENSE.txt staging\LICENSE.txt
+          # uv.exe is skipifsourcedoesntexist in the .iss, so a check compile that
+          # doesn't stage it still succeeds.
 
       - name: Install Inno Setup
         shell: pwsh
