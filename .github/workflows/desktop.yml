@@ -1,0 +1,81 @@
+name: Desktop
+
+# Builds the Wails desktop shell (cmd/octo-desktop, a nested module) on the two
+# launch platforms. Linux is intentionally excluded — it needs WebKitGTK 4.1 +
+# libsoup 3.0, deferred with the rest of Linux support. The main `Go` workflow's
+# matrix does not build this module (nested go.mod, excluded from ./...), so the
+# CLI's CGO-free, cross-platform matrix stays green independent of Wails.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/octo-desktop/**'
+      - 'internal/server/**'
+      - 'scripts/package-desktop-macos.sh'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+    paths:
+      - 'cmd/octo-desktop/**'
+      - 'internal/server/**'
+      - 'scripts/package-desktop-macos.sh'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # package-desktop-macos.sh derives the version from `git describe`;
+          # fetch tags so it isn't just the short SHA.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+          cache-dependency-path: cmd/octo-desktop/go.sum
+
+      # The desktop app embeds the committed web UI (internal/server/webdist via
+      # go:embed), so there's no frontend build step here.
+      - name: go vet
+        working-directory: cmd/octo-desktop
+        run: go vet ./...
+
+      - name: Build + package macOS Octo.app
+        if: runner.os == 'macOS'
+        run: bash scripts/package-desktop-macos.sh
+
+      - name: Upload macOS app
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Octo-macos
+          path: Octo.app
+
+      - name: Build Windows binary
+        if: runner.os == 'Windows'
+        working-directory: cmd/octo-desktop
+        run: go build -v -o octo-desktop.exe .
+
+      # Raw .exe for now; wrapping it in an installer rides the existing Inno
+      # Setup track (see windows-installer-check.yml), a separate change.
+      - name: Upload Windows binary
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: octo-desktop-windows
+          path: cmd/octo-desktop/octo-desktop.exe
