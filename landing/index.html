@@ -152,9 +152,66 @@
       border: 1.5px solid var(--accent);
     }
     .btn-secondary:hover { background: var(--accent-soft); }
-    .all-builds { margin-top: 0.85rem; font-size: 0.85rem; }
+    .all-builds { margin-top: 1rem; font-size: 0.85rem; }
     .all-builds a { color: var(--muted); text-decoration: none; }
     .all-builds a:hover { color: var(--accent); text-decoration: underline; }
+
+    /* Download buttons: one per platform, uniform width + a clean download
+       glyph, a small format subtitle under each platform name. */
+    .download-row {
+      display: flex;
+      gap: 0.85rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .dl-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.7rem;
+      min-width: 196px;
+      padding: 0.75rem 1.4rem;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #fff;
+      text-decoration: none;
+      box-shadow: 0 6px 18px -6px rgba(79, 70, 229, 0.55);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+    .dl-btn:hover {
+      background: var(--accent-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 10px 24px -6px rgba(79, 70, 229, 0.6);
+    }
+    .dl-ico { width: 20px; height: 20px; flex: 0 0 20px; }
+    .dl-label {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      line-height: 1.12;
+      font-size: 1.02rem;
+      font-weight: 650;
+    }
+    .dl-label small {
+      font-size: 0.72rem;
+      font-weight: 500;
+      opacity: 0.72;
+      margin-top: 2px;
+    }
+    .hero-links {
+      display: flex;
+      gap: 1.75rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 1.25rem;
+    }
+    .hero-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.92rem;
+      font-weight: 500;
+      transition: color 0.15s ease;
+    }
+    .hero-links a:hover { color: var(--accent); }
     .install-hint {
       margin-top: 2rem;
       display: block;
@@ -437,19 +494,28 @@
       <p class="hero-tagline"
          data-en="A functionality-first AI agent in a single Go binary. Bring it to your terminal, browser, or chat app — it speaks Anthropic and OpenAI natively, and actually gets things done."
          data-zh="以功能为先的 AI Agent，单一 Go 二进制。带它进终端、浏览器或聊天工具 —— 原生支持 Anthropic 与 OpenAI，真正把事情干完。"></p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest/download/octo-setup.pkg">⬇️ macOS (.pkg)</a>
-        <a class="btn btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest/download/octo-setup.exe">⬇️ Windows (.exe)</a>
-        <a class="btn btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest/download/Octo-x86_64.AppImage">⬇️ Linux (AppImage)</a>
-      </div>
-      <div class="hero-actions">
-        <a class="btn btn-secondary" href="https://github.com/open-octo/octo-agent" data-en="⭐ Star on GitHub" data-zh="⭐ 在 GitHub 上 Star"></a>
-        <a class="btn btn-secondary" href="/docs/" data-href-en="/docs/" data-href-zh="/docs/zh/" data-en="📖 Read the Docs" data-zh="📖 阅读文档"></a>
-        <a class="btn btn-secondary" href="/blog/" data-en="📝 Blog" data-zh="📝 博客"></a>
+      <div class="download-row">
+        <a class="dl-btn" href="https://github.com/open-octo/octo-agent/releases/latest/download/octo-setup.pkg">
+          <svg class="dl-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span class="dl-label">macOS<small>Universal .pkg</small></span>
+        </a>
+        <a class="dl-btn" href="https://github.com/open-octo/octo-agent/releases/latest/download/octo-setup.exe">
+          <svg class="dl-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span class="dl-label">Windows<small>Installer .exe</small></span>
+        </a>
+        <a class="dl-btn" href="https://github.com/open-octo/octo-agent/releases/latest/download/Octo-x86_64.AppImage">
+          <svg class="dl-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span class="dl-label">Linux<small>x86_64 AppImage</small></span>
+        </a>
       </div>
       <p class="all-builds">
         <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="Other platforms, arm64 &amp; checksums →" data-zh="其他平台、arm64 与校验和 →"></a>
       </p>
+      <div class="hero-links">
+        <a href="https://github.com/open-octo/octo-agent" data-en="Star on GitHub" data-zh="在 GitHub 上 Star"></a>
+        <a href="/docs/" data-href-en="/docs/" data-href-zh="/docs/zh/" data-en="Docs" data-zh="文档"></a>
+        <a href="/blog/" data-en="Blog" data-zh="博客"></a>
+      </div>
       <div class="install-hint" id="install-block">
         <p class="install-lead" data-en="Prefer the CLI? Install just the octo binary:" data-zh="想只用命令行？只装 octo 二进制："></p>
         <div class="install-grid">
