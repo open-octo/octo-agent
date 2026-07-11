@@ -120,6 +120,14 @@ func (b *nativeBridge) PersistChannelsEnabled(enabled bool) error {
 	return saveDesktopSettings(snapshot)
 }
 
+// ToggleMaximise maximises or restores the window (the double-click-titlebar
+// zoom the frontend can't trigger itself). No-op before the window exists.
+func (b *nativeBridge) ToggleMaximise() {
+	if b.window != nil {
+		b.window.ToggleMaximise()
+	}
+}
+
 // showWindow brings the hub window to the foreground on the current view.
 func (b *nativeBridge) showWindow() { b.showWindowAt("") }
 
@@ -185,7 +193,7 @@ func (b *nativeBridge) confirm(title, message, okLabel, cancelLabel string) bool
 // showError shows a modal error dialog with a single OK button.
 func (b *nativeBridge) showError(title, message string) {
 	dlg := b.app.Dialog.Error().SetTitle(title).SetMessage(message)
-	dlg.AddButton(L.dialogOKText).SetAsDefault()
+	dlg.AddButton(L().dialogOKText).SetAsDefault()
 	dlg.Show()
 }
 
@@ -193,16 +201,16 @@ func (b *nativeBridge) showError(title, message string) {
 // the hub. Declining means the app will quit (it won't run windowed without
 // its own server to attach the native bridge to).
 func (b *nativeBridge) confirmTakeover(pid int) bool {
-	return b.confirm(L.takeoverTitle,
-		fmt.Sprintf(L.takeoverMsgFmt, pid),
-		L.takeoverOK, L.takeoverCancel)
+	return b.confirm(L().takeoverTitle,
+		fmt.Sprintf(L().takeoverMsgFmt, pid),
+		L().takeoverOK, L().takeoverCancel)
 }
 
 // requestQuit is the tray "Quit Octo" action: it fully stops the backend, so it
 // confirms first when channels are running (other clients would disconnect).
 func (b *nativeBridge) requestQuit() {
 	if srv := b.srv.Load(); srv != nil && srv.ChannelsEnabled() {
-		if !b.confirm(L.quitTitle, L.quitMsg, L.quitOK, L.quitCancel) {
+		if !b.confirm(L().quitTitle, L().quitMsg, L().quitOK, L().quitCancel) {
 			return
 		}
 	}

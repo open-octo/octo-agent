@@ -3,6 +3,9 @@ package main
 import (
 	"os"
 	"strings"
+	"sync/atomic"
+
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // uiStrings holds every user-facing native string the desktop shell shows
@@ -92,15 +95,45 @@ var zhStrings = uiStrings{
 	dialogOKText: "好",
 }
 
-// L is the active string set, chosen at startup by detectLang.
-var L = enStrings
+// active holds the current string set. It's an atomic pointer because the tray
+// refresh loop re-applies the language on its own goroutine while dialog
+// callbacks read it on the UI thread.
+var active atomic.Pointer[uiStrings]
 
-// detectLang switches L to Chinese when the system's preferred UI language is
-// Chinese; everything else stays English.
-func detectLang() {
-	if preferredLang() == "zh" {
-		L = zhStrings
+// L returns the active string set (English until applyLang runs).
+func L() *uiStrings {
+	if s := active.Load(); s != nil {
+		return s
 	}
+	return &enStrings
+}
+
+// applyLang re-resolves the UI language and swaps the active string set. Called
+// at startup and on each tray tick, so switching language in onboarding or
+// Settings (which writes ~/.octo/config.yml) is reflected in the tray/dialogs
+// within a few seconds — the desktop shell follows the in-app language choice,
+// not the OS.
+func applyLang() {
+	if resolveLang() == "zh" {
+		active.Store(&zhStrings)
+	} else {
+		active.Store(&enStrings)
+	}
+}
+
+// resolveLang prefers the user's in-app language (config.yml `language`, set in
+// onboarding / Settings). Only before that's chosen does it fall back to the
+// OS's preferred UI language.
+func resolveLang() string {
+	if cfg, err := config.Load(); err == nil {
+		switch cfg.Language {
+		case "zh":
+			return "zh"
+		case "en":
+			return "en"
+		}
+	}
+	return preferredLang()
 }
 
 // preferredLang returns "zh" or "en" from the OS's preferred UI language. It

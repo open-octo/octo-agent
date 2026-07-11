@@ -3,6 +3,7 @@
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
+  import { nativeToggleMaximise } from '../../lib/api'
   import OctoLogo from './OctoLogo.svelte'
 
   function cycleSidebar() {
@@ -14,9 +15,19 @@
   function toggleNotifications() {
     setNotificationsEnabled(!$notificationsEnabled)
   }
+
+  // Desktop only: double-clicking the draggable header zooms the window, the way
+  // a native title bar does. Wails' custom drag region doesn't wire this up, and
+  // the octo-served page can't call Wails directly, so it goes through the native
+  // bridge over HTTP. Ignore double-clicks that land on a control.
+  function onHeaderDblClick(e: MouseEvent) {
+    if (!$nativeShell) return
+    if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return
+    nativeToggleMaximise().catch(() => {})
+  }
 </script>
 
-<header class:native-inset={$nativeShell} style="--wails-draggable:drag">
+<header class:native-inset={$nativeShell} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
   <div class="left">
     <button class="icon-btn" title={$t('header.toggle_sidebar')} onclick={cycleSidebar}>
       <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
