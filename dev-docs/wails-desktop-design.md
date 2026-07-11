@@ -24,7 +24,7 @@ octo's positioning rests on being open, self-hostable, and a single zero-runtime
 
 - **The CLI stays pure Go.** Wails needs CGO and a platform webview; that cost is confined to the desktop build target and never touches `go build ./cmd/octo`. `make build` still produces the same static binary.
 - **`octo serve` stays.** Remote and multi-user deployments are unaffected — they keep using the browser against a served instance.
-- **Zero-runtime holds where it can.** macOS ships WKWebView and Windows ships the evergreen WebView2 runtime, so on the two launch platforms the app carries no bundled runtime of its own. (Linux would require WebKit2GTK 4.1 + libsoup 3.0 to be installed — the reason it's deferred.)
+- **Zero-runtime holds where it can.** macOS ships WKWebView and Windows ships the evergreen WebView2 runtime, so on the two launch platforms the app carries no bundled runtime of its own. (Linux would require GTK4 + WebKitGTK 6.0 + libsoup 3.0 to be installed — a newer, less-ubiquitous stack, the reason it's deferred. The code itself compiles on Linux; a CI probe confirms it.)
 
 ## Architecture: in-process server + native bridge
 
