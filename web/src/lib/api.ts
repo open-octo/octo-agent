@@ -1,4 +1,4 @@
-import type { Session, Skill, Workflow, ScheduledTask, McpServer, McpServerDetail, Channel, Memory, RecallFile, TagStatus } from './types'
+import type { Session, SessionGroup, Skill, Workflow, ScheduledTask, McpServer, McpServerDetail, Channel, Memory, RecallFile, TagStatus } from './types'
 
 // TaskResponse matches the Go server task struct.
 export interface TaskResponse {
@@ -88,6 +88,32 @@ export async function deleteSessions(ids: string[]): Promise<void> {
 
 export async function updateSession(id: string, patch: { name?: string }): Promise<Session> {
   return request<Session>(`/api/sessions/${id}`, { method: 'PATCH', ...json(patch) })
+}
+
+// ─── Session groups (Web-UI sidebar organisation) ───────────────────────────
+
+export async function listSessionGroups(): Promise<SessionGroup[]> {
+  const d = await request<{ groups: SessionGroup[] }>('/api/session-groups')
+  return d.groups ?? []
+}
+
+export async function createSessionGroup(name: string): Promise<SessionGroup> {
+  const d = await request<{ group: SessionGroup }>('/api/session-groups', { method: 'POST', ...json({ name }) })
+  return d.group
+}
+
+export async function updateSessionGroup(id: string, patch: { name?: string; collapsed?: boolean }): Promise<SessionGroup> {
+  const d = await request<{ group: SessionGroup }>(`/api/session-groups/${id}`, { method: 'PATCH', ...json(patch) })
+  return d.group
+}
+
+export async function deleteSessionGroup(id: string): Promise<void> {
+  await request<unknown>(`/api/session-groups/${id}`, { method: 'DELETE' })
+}
+
+// Move a session into a group, or out of every group when groupId is ''.
+export async function setSessionGroup(sessionId: string, groupId: string): Promise<void> {
+  await request<unknown>(`/api/sessions/${sessionId}/group`, { method: 'PUT', ...json({ group_id: groupId }) })
 }
 
 // The server returns a session's full persisted transcript in one shot — it

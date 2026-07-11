@@ -1,19 +1,43 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sidebar, sessions, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, groupMenuFor, editGroupId, editGroupDraft, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
   import VersionBadge from './VersionBadge.svelte'
 
   // Seed the shared MCP-server store before the user ever opens the MCP panel;
-  // McpView keeps it in sync afterward.
+  // McpView keeps it in sync afterward. Also seed the sidebar session groups so
+  // the list can cluster on first paint.
   onMount(async () => {
     try {
       const d = await api.listMcpServers()
       mcpServers.set(d.servers as any)
     } catch { /* ignore — McpView will refetch */ }
+    try {
+      sessionGroups.set(await api.listSessionGroups())
+    } catch { /* ignore — sessions just render flat under Ungrouped */ }
   })
+
+  // The session list split into its groups (registry order) plus the leftover
+  // "ungrouped" ones. Membership lives in the group registry; member IDs that
+  // no longer resolve to a live session are dropped here, so a deleted session
+  // leaves no ghost row.
+  const groupedView = $derived.by(() => {
+    const byId = new Map($sessions.map(s => [s.id, s] as const))
+    const claimed = new Set<string>()
+    const groups = $sessionGroups.map(g => {
+      const items = g.session_ids.map(id => byId.get(id)).filter(Boolean) as typeof $sessions
+      items.forEach(s => claimed.add(s.id))
+      return { group: g, items }
+    })
+    const ungrouped = $sessions.filter(s => !claimed.has(s.id))
+    return { groups, ungrouped }
+  })
+
+  function groupIdOf(sessionId: string): string {
+    return $sessionGroups.find(g => g.session_ids.includes(sessionId))?.id ?? ''
+  }
 
   $effect(() => {
     function onResize() {
@@ -100,6 +124,80 @@
     } catch (e: any) { showToast(e.message, 'error') }
   }
 
+  // Create an empty group with a default name, then drop straight into inline
+  // rename so the user names it without a separate prompt dialog (native
+  // prompt() is unreliable in the desktop webview).
+  async function newGroup() {
+    try {
+      const g = await api.createSessionGroup(tr('sidebar.new_group'))
+      sessionGroups.update(gs => [...gs, g])
+      editGroupId.set(g.id)
+      editGroupDraft.set(g.name)
+    } catch (e: any) { showToast(e.message, 'error') }
+  }
+
+  async function commitGroupRename() {
+    const id = $editGroupId
+    if (!id) return
+    const draft = $editGroupDraft.trim()
+    if (draft) {
+      try {
+        await api.updateSessionGroup(id, { name: draft })
+        sessionGroups.update(gs => gs.map(g => g.id === id ? { ...g, name: draft } : g))
+      } catch (e: any) { showToast(e.message, 'error') }
+    }
+    editGroupId.set(null)
+  }
+
+  async function deleteGroup(id: string, name: string) {
+    if (!(await confirmDialog(tr('sidebar.confirm_delete_group').replace('{name}', name)))) return
+    try {
+      await api.deleteSessionGroup(id)
+      sessionGroups.update(gs => gs.filter(g => g.id !== id))
+    } catch (e: any) { showToast(e.message, 'error') }
+  }
+
+  async function toggleCollapse(id: string, collapsed: boolean) {
+    // Optimistic: flip locally, then persist. On failure, revert.
+    sessionGroups.update(gs => gs.map(g => g.id === id ? { ...g, collapsed } : g))
+    try {
+      await api.updateSessionGroup(id, { collapsed })
+    } catch (e: any) {
+      sessionGroups.update(gs => gs.map(g => g.id === id ? { ...g, collapsed: !collapsed } : g))
+      showToast(e.message, 'error')
+    }
+  }
+
+  // From a session's "move to group" popover: create a fresh group, drop the
+  // session into it, and open inline rename on the new group.
+  async function newGroupForSession(sessionId: string) {
+    groupMenuFor.set(null)
+    try {
+      const g = await api.createSessionGroup(tr('sidebar.new_group'))
+      await api.setSessionGroup(sessionId, g.id)
+      sessionGroups.update(gs => [
+        ...gs.map(x => ({ ...x, session_ids: x.session_ids.filter(id => id !== sessionId) })),
+        { ...g, session_ids: [sessionId] },
+      ])
+      editGroupId.set(g.id)
+      editGroupDraft.set(g.name)
+    } catch (e: any) { showToast(e.message, 'error') }
+  }
+
+  async function moveToGroup(sessionId: string, groupId: string) {
+    groupMenuFor.set(null)
+    try {
+      await api.setSessionGroup(sessionId, groupId)
+      // Update membership locally: drop from every group, then add to target.
+      sessionGroups.update(gs => gs.map(g => ({
+        ...g,
+        session_ids: g.id === groupId
+          ? [...g.session_ids.filter(id => id !== sessionId), sessionId]
+          : g.session_ids.filter(id => id !== sessionId),
+      })))
+    } catch (e: any) { showToast(e.message, 'error') }
+  }
+
   const selCount = $derived(Object.keys($sel).length)
 </script>
 
@@ -119,8 +217,15 @@
       <div class="nav-group">
         <div class="group-header">
           <span class="group-label">{$t('nav.sessions')}</span>
-          <span class="sel-toggle" onclick={() => { selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null) }}>
-            {$selMode ? $t('sidebar.done') : $t('sidebar.select')}
+          <span class="header-actions">
+            {#if !$selMode}
+            <span class="header-btn" title={$t('sidebar.new_group')} onclick={newGroup}>
+              <iconify-icon icon="ant-design:folder-add-outlined" width="14"></iconify-icon>
+            </span>
+            {/if}
+            <span class="sel-toggle" onclick={() => { selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null); groupMenuFor.set(null) }}>
+              {$selMode ? $t('sidebar.done') : $t('sidebar.select')}
+            </span>
           </span>
         </div>
 
@@ -134,18 +239,74 @@
         </div>
         {/if}
 
-        {#each $sessions as s}
+        <!-- Groups (registry order), each collapsible -->
+        {#each groupedView.groups as gv (gv.group.id)}
+        {@const g = gv.group}
+        {@const editingG = $editGroupId === g.id}
+        <div class="grp-header">
+          <span class="grp-caret" onclick={() => toggleCollapse(g.id, !g.collapsed)}>
+            <iconify-icon icon={g.collapsed ? 'ant-design:right-outlined' : 'ant-design:down-outlined'} width="10"></iconify-icon>
+          </span>
+          {#if editingG}
+          <input
+            class="rename-input"
+            value={$editGroupDraft}
+            oninput={(e) => editGroupDraft.set((e.target as HTMLInputElement).value)}
+            onkeydown={(e) => { if (e.key === 'Enter') commitGroupRename(); if (e.key === 'Escape') editGroupId.set(null) }}
+          />
+          <span class="row-action" onclick={commitGroupRename} style="color:var(--success)">
+            <iconify-icon icon="ant-design:check-outlined" width="13"></iconify-icon>
+          </span>
+          <span class="row-action" onclick={() => editGroupId.set(null)} style="color:var(--text-tertiary)">
+            <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
+          </span>
+          {:else}
+          <span class="grp-name" onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
+          <span class="grp-count">{gv.items.length}</span>
+          {#if !$selMode}
+          <span class="row-action" title={$t('sidebar.rename_group')} onclick={() => { editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
+            <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+          </span>
+          <span class="row-action del" title={$t('sidebar.delete_group')} onclick={() => deleteGroup(g.id, g.name)}>
+            <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
+          </span>
+          {/if}
+          {/if}
+        </div>
+        {#if !g.collapsed}
+          {#each gv.items as s (s.id)}
+            {@render sessionRow(s)}
+          {/each}
+        {/if}
+        {/each}
+
+        <!-- Ungrouped: header only shown when at least one group exists -->
+        {#if groupedView.ungrouped.length > 0}
+          {#if groupedView.groups.length > 0}
+          <div class="grp-header">
+            <span class="grp-name muted">{$t('sidebar.ungrouped')}</span>
+            <span class="grp-count">{groupedView.ungrouped.length}</span>
+          </div>
+          {/if}
+          {#each groupedView.ungrouped as s (s.id)}
+            {@render sessionRow(s)}
+          {/each}
+        {/if}
+      </div>
+
+      {#snippet sessionRow(s: any)}
         {@const active = s.id === $activeSession && $view === 'chat'}
         {@const selected = !!$sel[s.id]}
         {@const editing = $editId === s.id}
         {@const menuOpen = $menuFor === s.id && !$selMode}
+        {@const groupOpen = $groupMenuFor === s.id && !$selMode}
         {@const solid = active && !$selMode}
         {@const icon = sessionIcon(s)}
         <div
           class="nav-row"
           class:solid={solid}
           class:selected={selected && !solid}
-          onclick={() => { if ($selMode) toggleSel(s.id); else { view.set('chat'); activeSession.set(s.id); activeSessionId.set(s.id); menuFor.set(null) } }}
+          onclick={() => { if ($selMode) toggleSel(s.id); else { view.set('chat'); activeSession.set(s.id); activeSessionId.set(s.id); menuFor.set(null); groupMenuFor.set(null) } }}
         >
           {#if $selMode}
           <span
@@ -187,11 +348,14 @@
             </span>
           {/if}
           {#if !menuOpen && !$selMode}
-            <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id) }} style="color:{solid ? '#fff' : 'var(--text-tertiary)'}">
+            <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id); groupMenuFor.set(null) }} style="color:{solid ? '#fff' : 'var(--text-tertiary)'}">
               <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
             </span>
           {/if}
           {#if menuOpen}
+            <span class="row-action" onclick={(e) => { e.stopPropagation(); groupMenuFor.set(s.id); menuFor.set(null) }} title={$t('sidebar.move_to_group')}>
+              <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+            </span>
             <span class="row-action" onclick={(e) => { e.stopPropagation(); editId.set(s.id); editDraft.set((s as any).name || (s as any).title || s.id); menuFor.set(null) }} title={$t('sidebar.rename')}>
               <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
             </span>
@@ -200,9 +364,31 @@
             </span>
           {/if}
           {/if}
+
+          {#if groupOpen}
+          {@const curGid = groupIdOf(s.id)}
+          <div class="grp-popover" onclick={(e) => e.stopPropagation()}>
+            {#each $sessionGroups as pg (pg.id)}
+            <div class="grp-opt" class:cur={curGid === pg.id} onclick={() => moveToGroup(s.id, pg.id)}>
+              <iconify-icon icon="ant-design:check-outlined" width="12" style="opacity:{curGid === pg.id ? 1 : 0}"></iconify-icon>
+              <span class="grp-opt-name">{pg.name}</span>
+            </div>
+            {/each}
+            {#if curGid}
+            <div class="grp-opt" onclick={() => moveToGroup(s.id, '')}>
+              <iconify-icon icon="ant-design:close-outlined" width="12"></iconify-icon>
+              <span class="grp-opt-name">{$t('sidebar.remove_from_group')}</span>
+            </div>
+            {/if}
+            <div class="grp-sep"></div>
+            <div class="grp-opt" onclick={() => newGroupForSession(s.id)}>
+              <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
+              <span class="grp-opt-name">{$t('sidebar.new_group')}</span>
+            </div>
+          </div>
+          {/if}
         </div>
-        {/each}
-      </div>
+      {/snippet}
 
       <!-- Config -->
       <div class="nav-group">
@@ -289,7 +475,49 @@
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
 .group-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 6px; }
 .group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-quaternary); }
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.header-btn {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-tertiary); cursor: pointer;
+}
+.header-btn:hover { color: var(--blue-6); }
 .sel-toggle { font-size: 11px; font-weight: 600; color: var(--blue-6); cursor: pointer; }
+/* Group section header (folder row) */
+.grp-header {
+  display: flex; align-items: center; gap: 6px;
+  min-height: 28px; padding: 0 6px 0 6px; margin-top: 2px;
+  border-radius: 6px;
+}
+.grp-header:hover { background: var(--hover-neutral); }
+.grp-caret {
+  width: 16px; flex: 0 0 16px; display: flex; align-items: center; justify-content: center;
+  color: var(--text-tertiary); cursor: pointer;
+}
+.grp-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; font-weight: 600; color: var(--text-secondary); cursor: pointer;
+}
+.grp-name.muted { font-weight: 600; color: var(--text-quaternary); cursor: default; }
+.grp-count { font-size: 11px; color: var(--text-quaternary); flex: 0 0 auto; padding: 0 2px; }
+.grp-header .row-action { opacity: 0; }
+.grp-header:hover .row-action { opacity: 1; }
+/* Move-to-group popover */
+.grp-popover {
+  position: absolute; top: 100%; right: 8px; z-index: 30;
+  min-width: 160px; max-width: 220px; max-height: 260px; overflow-y: auto;
+  margin-top: 2px; padding: 4px;
+  background: var(--bg-elevated, #fff); border: 1px solid var(--border-secondary);
+  border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+}
+.grp-opt {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; color: var(--text);
+}
+.grp-opt:hover { background: var(--hover-neutral); }
+.grp-opt.cur { color: var(--blue-6); }
+.grp-opt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grp-sep { height: 1px; margin: 4px 6px; background: var(--border-secondary); }
 .batch-bar {
   display: flex; align-items: center; gap: 8px;
   margin: 0 4px 6px; padding: 6px 8px 6px 12px;
@@ -303,6 +531,7 @@
 }
 .batch-del:hover { background: #FF7875; }
 .nav-row {
+  position: relative;
   display: flex; align-items: center; gap: 10px;
   min-height: 36px; padding: 0 6px 0 10px;
   border-radius: 9999px; cursor: pointer;
