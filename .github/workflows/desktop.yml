@@ -90,11 +90,19 @@ jobs:
           name: Octo-linux-appimage
           path: Octo-x86_64.AppImage
 
+      # Bundle ripgrep so the desktop app's grep tool has an `rg` to shell out
+      # to (mirrors `make build`; the app can't rely on the user's PATH).
+      - name: Embed ripgrep
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh scripts/embed-rg-windows.ps1
+
       # -H windowsgui: a GUI app, so no console window flashes behind it.
+      # -tags embedrg go:embeds the rg fetched above.
       - name: Build Windows binary
         if: runner.os == 'Windows'
         working-directory: cmd/octo-desktop
-        run: go build -v -ldflags "-H windowsgui" -o octo-desktop.exe .
+        run: go build -v -tags embedrg -ldflags "-H windowsgui" -o octo-desktop.exe .
 
       # Raw .exe for now; wrapping it in an installer rides the existing Inno
       # Setup track (see windows-installer-check.yml), a separate change.
