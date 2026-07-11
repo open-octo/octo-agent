@@ -509,6 +509,7 @@
     try {
       const res = await api.updateSessionWorkingDir(sid, dir)
       chatWorkingDir.update(w => ({ ...w, [sid]: res.working_dir }))
+      showToast(`${$t('chat.dir_set_toast')} ${shortDir(res.working_dir)}`, 'success')
       return true
     } catch (e: any) {
       showToast(e.message ?? 'Failed to set working directory', 'error')
@@ -724,6 +725,7 @@
       <div class="picker">
         <button class="chip" title={workingDir} onclick={(e) => { e.stopPropagation(); openDirMenu() }}>
           <iconify-icon icon="ant-design:folder-outlined" width="12"></iconify-icon>
+          <span>{$t('chat.dir_label')}</span>
           <span class="mono">{shortDir(workingDir)}</span>
           <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
         </button>
