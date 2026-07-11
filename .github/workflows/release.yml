@@ -45,6 +45,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5 # for packaging/windows/octo.iss + LICENSE.txt
 
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache-dependency-path: cmd/octo-desktop/go.sum
+
       - name: Stage the released binary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,6 +63,13 @@ jobs:
           Copy-Item $exe.FullName staging\octo.exe
           Copy-Item LICENSE.txt staging\LICENSE.txt
           "version=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # Build the desktop GUI (nested module; embeds the committed web UI).
+      # -H windowsgui so no console window flashes behind the app.
+      - name: Build desktop app
+        shell: pwsh
+        working-directory: cmd/octo-desktop
+        run: go build -ldflags "-H windowsgui" -o ..\..\staging\octo-desktop.exe .
 
       # Fetches uv.exe from its upstream GitHub release so the installer can
       # bundle it — see octo.iss's [Files] section. Native PowerShell rather
@@ -139,6 +151,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5 # for packaging/macos/ + LICENSE.txt
 
+      - uses: actions/setup-go@v6 # build.sh builds the desktop app from source
+        with:
+          go-version: '1.25'
+          cache-dependency-path: cmd/octo-desktop/go.sum
+
       - name: Stage the released binary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -173,3 +190,37 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" staging/octo-setup.pkg --clobber
+
+  # Build the Linux desktop AppImage (Octo-x86_64.AppImage) and attach it. The
+  # AppImage is the GUI + bundled uv; GTK4/WebKitGTK 6.0 come from the host (the
+  # AppRun launcher preflights them). Linux CLI users keep using the tarball.
+  linux-appimage:
+    name: linux appimage
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache-dependency-path: cmd/octo-desktop/go.sum
+
+      - name: Install webview deps
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev
+
+      - name: Fetch bundled uv
+        run: |
+          uvVersion=0.11.26
+          mkdir -p dl
+          curl -fsSL -o dl/uv.tar.gz "https://github.com/astral-sh/uv/releases/download/$uvVersion/uv-x86_64-unknown-linux-gnu.tar.gz"
+          tar -xzf dl/uv.tar.gz -C dl
+          echo "UV_BINARY=$PWD/dl/uv-x86_64-unknown-linux-gnu/uv" >> "$GITHUB_ENV"
+
+      - name: Build AppImage
+        run: bash scripts/package-desktop-linux.sh
+
+      - name: Attach AppImage to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" Octo-x86_64.AppImage --clobber
