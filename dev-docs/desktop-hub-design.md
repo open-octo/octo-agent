@@ -1,6 +1,6 @@
 # Desktop App as the Shared Serve Hub
 
-**Status: Design agreed, not yet implemented.** This document fixes the design for making the desktop app the single backend that every other octo interface shares. All decisions below are settled; what remains is implementation. It builds on [wails-desktop-design.md](wails-desktop-design.md).
+**Status: Implemented.** The desktop app is the single backend that every other octo interface shares. This document describes that design and the decisions behind it. It builds on [wails-desktop-design.md](wails-desktop-design.md).
 
 ## Problem
 
