@@ -52,7 +52,7 @@ RG_EMBED_BIN := $(RG_EMBED_DIR)/rg
         eval-build eval-list eval \
         rg-embed rg-embed-clean \
         bundle-tools-windows bundle-tools-macos \
-        web-build web-dev dev build-full desktop desktop-app
+        web-build web-dev dev build-full desktop desktop-app desktop-appimage
 
 all: test
 
@@ -95,6 +95,12 @@ desktop: web-build
 # installer track.
 desktop-app: web-build
 	bash scripts/package-desktop-macos.sh
+
+# Package the desktop shell into a portable Linux AppImage (Linux only; needs
+# the GTK4/WebKitGTK 6.0 dev packages + downloads appimagetool). GTK4/WebKitGTK
+# are taken from the host — the AppRun launcher preflights them.
+desktop-appimage: web-build
+	bash scripts/package-desktop-linux.sh
 
 install: web-build rg-embed
 	go install $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' ./cmd/octo

@@ -1,10 +1,11 @@
 name: Desktop
 
 # Builds the Wails desktop shell (cmd/octo-desktop, a nested module). macOS and
-# Windows are the launch platforms (packaged artifacts); Linux is a compile
-# probe only — it builds (installing GTK4 + WebKitGTK 6.0 + libsoup 3.0),
-# proving the code is cross-platform, but Linux packaging/distribution stays
-# deferred (the runtime GTK4/webkitgtk-6.0 dependency is the open question). The main `Go` workflow's
+# Windows are the launch platforms; Linux builds an AppImage too (installing
+# GTK4 + WebKitGTK 6.0 + libsoup 3.0). All three artifacts are build-verified
+# in CI. The Linux AppImage relies on the host GTK4/WebKitGTK 6.0 (its AppRun
+# preflights and guides the user if absent) and is not yet run-tested on a
+# real desktop. The main `Go` workflow's
 # matrix does not build this module (nested go.mod, excluded from ./...), so the
 # CLI's CGO-free, cross-platform matrix stays green independent of Wails.
 on:
@@ -75,13 +76,19 @@ jobs:
           name: Octo-macos
           path: Octo.app
 
-      # Compile probe only — proves the code builds on Linux. No packaged
-      # artifact yet (AppImage/.deb and the runtime webkit dependency are the
-      # deferred parts of Linux support).
-      - name: Build Linux binary (compile probe)
+      # AppImage bundles the binary + AppRun launcher (which preflights the host
+      # GTK4/WebKitGTK 6.0 libs — not bundled). Build-verified in CI; running it
+      # still needs a real Linux desktop.
+      - name: Package Linux AppImage
         if: runner.os == 'Linux'
-        working-directory: cmd/octo-desktop
-        run: go build -v -o /dev/null .
+        run: bash scripts/package-desktop-linux.sh
+
+      - name: Upload Linux AppImage
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Octo-linux-appimage
+          path: Octo-x86_64.AppImage
 
       - name: Build Windows binary
         if: runner.os == 'Windows'

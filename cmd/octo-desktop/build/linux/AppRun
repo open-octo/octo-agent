@@ -1,0 +1,42 @@
+#!/bin/sh
+# AppImage entrypoint. The Wails webview links GTK4 + WebKitGTK 6.0, which the
+# AppImage does NOT bundle (they're large, version- and GPU-sensitive, and best
+# taken from the host). A missing lib would otherwise crash the binary at the
+# dynamic linker before any Go code runs, with a cryptic
+# "libwebkitgtk-6.0.so.N: cannot open shared object file". So preflight here and
+# show install guidance instead.
+HERE="$(dirname "$(readlink -f "$0")")"
+
+missing=""
+probe() {
+  # Loadable if the linker cache knows it OR it's under a standard lib dir.
+  ldconfig -p 2>/dev/null | grep -q "$1" && return 0
+  for d in /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu; do
+    [ -e "$d/$1".* ] 2>/dev/null && return 0
+  done
+  return 1
+}
+probe libwebkitgtk-6.0.so || missing="$missing WebKitGTK-6.0"
+probe libgtk-4.so         || missing="$missing GTK4"
+
+if [ -n "$missing" ]; then
+  msg="Octo needs these system libraries, which aren't installed:$missing
+
+Install them and relaunch:
+  Debian/Ubuntu:  sudo apt install libgtk-4-1 libwebkitgtk-6.0-4
+  Fedora:         sudo dnf install gtk4 webkitgtk6.0
+  Arch:           sudo pacman -S gtk4 webkitgtk-6.0
+
+(These ship with most current desktops; older distributions may not have
+WebKitGTK 6.0 packaged yet.)"
+  if command -v zenity >/dev/null 2>&1; then
+    zenity --error --no-wrap --title="Octo — missing dependencies" --text="$msg"
+  elif command -v kdialog >/dev/null 2>&1; then
+    kdialog --error "$msg"
+  else
+    printf '%s\n' "$msg" >&2
+  fi
+  exit 1
+fi
+
+exec "$HERE/usr/bin/octo-desktop" "$@"

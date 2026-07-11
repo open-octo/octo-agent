@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Octo
+Comment=Octo Agent desktop
+Exec=octo-desktop
+Icon=octo-desktop
+Categories=Development;Utility;
+Terminal=false
