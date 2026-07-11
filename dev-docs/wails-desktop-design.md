@@ -51,6 +51,16 @@ Why load a loopback URL instead of Wails' embedded asset server:
 - **WebSocket just works.** octo's live updates run over `/ws`. A real `http.Server` upgrades the connection normally; routing WS through Wails' asset-server pipeline is an unverified hijack risk we avoid entirely.
 - **Maximal reuse, minimal Wails surface.** The frontend loads exactly as it does under `octo serve` — same origin shape (`http://127.0.0.1:<port>`), same auth path (the loopback exemption already permits it), same everything. Wails contributes only the window, the tray, and the native bridge.
 
+### Not `octo serve`: a self-contained single-user instance
+
+Launching the desktop app does **not** start `octo serve -d`, and does not make a web endpoint or the IM bridges available. It is a private server for its own window, not a shared service:
+
+- **Its own in-process server, not the serve daemon.** `main` binds `127.0.0.1:0` — an *ephemeral* loopback port, freshly chosen each launch — and hands that listener to `server.New(...)` / `srv.ServeOn(ln)`. Nothing spawns the `octo serve` daemon; there is no fixed port and no `-d` process. (The double-click installers deliberately dropped the pre-desktop "autostart `octo serve -d` on login" behavior — the app replaces that surrogate.)
+- **Not reachable as a web endpoint.** Loopback-only on a random port means no other device or browser can find it, and the window is the sole intended client. This is not the "web interface" in the self-host/remote sense.
+- **No IM channels.** The desktop `Config` sets `NoChannel: true`, so `initChannels` returns early — no DingTalk/Feishu/etc. manager is created. Desktop is a single local user by definition.
+
+If you want the shared web UI (other devices, phone) or the IM bridges, run `octo serve` yourself — the installer puts the `octo` CLI on `PATH` for exactly that. The desktop app and a separate `octo serve` are fully independent and can run at the same time (different ports); they share the same code and the same `~/.octo` config/sessions, not a process.
+
 ### The native bridge
 
 Native calls do **not** rely on Wails' JS runtime being injected into the page (it isn't, since octo serves the page). Instead they travel the path the frontend already speaks — HTTP — and terminate in Go:
