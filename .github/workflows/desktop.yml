@@ -2,9 +2,9 @@ name: Desktop
 
 # Builds the Wails desktop shell (cmd/octo-desktop, a nested module). macOS and
 # Windows are the launch platforms (packaged artifacts); Linux is a compile
-# probe only — it builds (installing WebKitGTK 4.1 + libsoup 3.0), proving the
-# code is cross-platform, but Linux packaging/distribution stays deferred (the
-# runtime webkit dependency is the open question). The main `Go` workflow's
+# probe only — it builds (installing GTK4 + WebKitGTK 6.0 + libsoup 3.0),
+# proving the code is cross-platform, but Linux packaging/distribution stays
+# deferred (the runtime GTK4/webkitgtk-6.0 dependency is the open question). The main `Go` workflow's
 # matrix does not build this module (nested go.mod, excluded from ./...), so the
 # CLI's CGO-free, cross-platform matrix stays green independent of Wails.
 on:
@@ -54,7 +54,9 @@ jobs:
       # Linux webview toolchain (CGO): the build/vet steps below link against it.
       - name: Install Linux webview deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev
+        # Wails v3 on Linux links GTK4 + WebKitGTK 6.0 (a newer stack than the
+        # older webkit2gtk-4.1) plus libsoup 3.0.
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev
 
       # The desktop app embeds the committed web UI (internal/server/webdist via
       # go:embed), so there's no frontend build step here.
