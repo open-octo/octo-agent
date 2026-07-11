@@ -36,6 +36,11 @@ type NativeBridge interface {
 	// it at startup to seed the server). This only stores the choice; the live
 	// start/stop of the channel subsystem is the server's own SetChannelsEnabled.
 	PersistChannelsEnabled(enabled bool) error
+
+	// ToggleMaximise maximises the window if it isn't, or restores it if it is —
+	// the double-click-the-titlebar zoom the frontend's draggable header can't do
+	// itself (the page is octo-served, so it has no Wails runtime to call).
+	ToggleMaximise()
 }
 
 type nativePickFolderRequest struct {
@@ -217,4 +222,19 @@ func (s *Server) handleNativeChannelsSet(w http.ResponseWriter, r *http.Request)
 	}
 	s.SetChannelsEnabled(req.Enabled)
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": s.ChannelsEnabled()})
+}
+
+// POST /api/native/window/toggle-maximise — maximise/restore the desktop window
+// (the double-click-titlebar zoom). Desktop only, loopback-gated.
+func (s *Server) handleNativeToggleMaximise(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	s.cfg.Native.ToggleMaximise()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

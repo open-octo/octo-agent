@@ -775,6 +775,7 @@ func (s *Server) registerRoutes() {
 		s.api("PUT /api/native/autostart", s.handleNativeAutostartSet)
 		s.api("GET /api/native/channels", s.handleNativeChannelsGet)
 		s.api("PUT /api/native/channels", s.handleNativeChannelsSet)
+		s.api("POST /api/native/window/toggle-maximise", s.handleNativeToggleMaximise)
 	}
 	s.api("GET /api/tools", s.handleListTools)
 	s.api("GET /api/skills", s.handleListSkills)

@@ -62,7 +62,7 @@ func isBundled() bool {
 
 func main() {
 	// Pick the language for native dialogs/tray from the system UI language.
-	detectLang()
+	applyLang()
 
 	settings := loadDesktopSettings()
 
@@ -133,7 +133,7 @@ func main() {
 	} else {
 		tray.SetIcon(trayColorIcon)
 	}
-	tray.SetTooltip(L.takeoverTitle)
+	tray.SetTooltip(L().takeoverTitle)
 	tray.SetMenu(buildTrayMenu(app, bridge))
 	// Keep the tray's status lines (backend, channels, connected clients) fresh
 	// while the app runs — macOS doesn't refresh a status menu on open.
@@ -180,7 +180,7 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 			return
 		}
 		if _, err := serveproc.Stop(); err != nil {
-			bridge.showError(L.errTitle, fmt.Sprintf(L.errStopFmt, err))
+			bridge.showError(L().errTitle, fmt.Sprintf(L().errStopFmt, err))
 			app.Quit()
 			return
 		}
@@ -196,7 +196,7 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	}
 	ln, err := listenHub(hubAddr, grace)
 	if err != nil {
-		bridge.showError(L.errTitle, fmt.Sprintf(L.errBindFmt, hubAddr, err))
+		bridge.showError(L().errTitle, fmt.Sprintf(L().errBindFmt, hubAddr, err))
 		app.Quit()
 		return
 	}
@@ -216,7 +216,7 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 		ChannelsEnabled: &channelsOn,
 	})
 	if err != nil {
-		bridge.showError(L.errTitle, fmt.Sprintf(L.errStartFmt, err))
+		bridge.showError(L().errTitle, fmt.Sprintf(L().errStartFmt, err))
 		app.Quit()
 		return
 	}
@@ -253,19 +253,19 @@ func listenHub(addr string, grace time.Duration) (net.Listener, error) {
 func trayStatusLines(bridge *nativeBridge) []string {
 	srv := bridge.srv.Load()
 	if srv == nil {
-		return []string{L.trayStarting}
+		return []string{L().trayStarting}
 	}
-	lines := []string{fmt.Sprintf(L.trayBackendFmt, hubAddr)}
+	lines := []string{fmt.Sprintf(L().trayBackendFmt, hubAddr)}
 	if srv.ChannelsEnabled() {
 		if running := srv.RunningChannels(); len(running) > 0 {
-			lines = append(lines, fmt.Sprintf(L.trayChannelsOnFmt, len(running), strings.Join(running, ", ")))
+			lines = append(lines, fmt.Sprintf(L().trayChannelsOnFmt, len(running), strings.Join(running, ", ")))
 		} else {
-			lines = append(lines, L.trayChannelsOnNone)
+			lines = append(lines, L().trayChannelsOnNone)
 		}
 	} else {
-		lines = append(lines, L.trayChannelsOff)
+		lines = append(lines, L().trayChannelsOff)
 	}
-	lines = append(lines, fmt.Sprintf(L.trayClientsFmt, srv.ConnectedClients()))
+	lines = append(lines, fmt.Sprintf(L().trayClientsFmt, srv.ConnectedClients()))
 	return lines
 }
 
@@ -278,21 +278,27 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 		m.Add(line).SetEnabled(false)
 	}
 	m.AddSeparator()
-	m.Add(L.trayShow).OnClick(func(*application.Context) { bridge.showWindow() })
-	m.Add(L.traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
+	m.Add(L().trayShow).OnClick(func(*application.Context) { bridge.showWindow() })
+	m.Add(L().traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
 	m.AddSeparator()
-	m.Add(L.trayQuit).OnClick(func(*application.Context) { bridge.requestQuit() })
+	m.Add(L().trayQuit).OnClick(func(*application.Context) { bridge.requestQuit() })
 	return m
 }
 
 // refreshTrayLoop re-publishes the tray menu whenever its status text changes,
 // so the counts stay live without rebuilding on every tick.
 func refreshTrayLoop(app *application.App, tray *application.SystemTray, bridge *nativeBridge) {
-	last := strings.Join(trayStatusLines(bridge), "|")
+	sigOf := func() string {
+		applyLang() // follow a language switch made in onboarding / Settings
+		// The status lines are language-dependent, so a language switch changes
+		// this signature and triggers a rebuild (which re-reads L() for labels).
+		return strings.Join(trayStatusLines(bridge), "|")
+	}
+	last := sigOf()
 	t := time.NewTicker(3 * time.Second)
 	defer t.Stop()
 	for range t.C {
-		sig := strings.Join(trayStatusLines(bridge), "|")
+		sig := sigOf()
 		if sig == last {
 			continue
 		}

@@ -19,6 +19,7 @@ type fakeNative struct {
 	autostart         bool
 	channelsPersisted bool
 	channelsSaveCalls int
+	toggleMaxCalls    int
 }
 
 func (f *fakeNative) PickFolder(_ context.Context, startDir string) (string, bool, error) {
@@ -40,6 +41,7 @@ func (f *fakeNative) PersistChannelsEnabled(enabled bool) error {
 	f.channelsSaveCalls++
 	return nil
 }
+func (f *fakeNative) ToggleMaximise() { f.toggleMaxCalls++ }
 
 func TestNativePickFolderNotRegisteredWithoutBridge(t *testing.T) {
 	tmp := t.TempDir()
@@ -238,6 +240,24 @@ func TestNativeChannelsNotRegisteredWithoutBridge(t *testing.T) {
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("without a bridge the route must not exist: got %d, want 404", w.Code)
+	}
+}
+
+func TestNativeToggleMaximise(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/window/toggle-maximise", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.toggleMaxCalls != 1 {
+		t.Errorf("ToggleMaximise calls = %d, want 1", fake.toggleMaxCalls)
 	}
 }
 

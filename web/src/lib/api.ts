@@ -192,6 +192,13 @@ export async function nativeNotify(title: string, body: string): Promise<void> {
   })
 }
 
+// Desktop shell only: maximise/restore the window — the double-click-titlebar
+// zoom, which the draggable header can't do itself (no Wails runtime on the
+// octo-served page). Best-effort.
+export async function nativeToggleMaximise(): Promise<void> {
+  await request<{ ok: boolean }>('/api/native/window/toggle-maximise', { method: 'POST' })
+}
+
 // Desktop shell only: launch-at-login state.
 export async function getAutostart(): Promise<boolean> {
   const r = await request<{ enabled: boolean }>('/api/native/autostart')
