@@ -93,7 +93,8 @@ uv run <skill-dir>/scripts/image_search.py "diverse engineering team in a modern
 ```
 
 The positional-prompt form skips the manifest and leaves no audit trail — reserve
-it for quick fixups and standalone requests.
+it for quick fixups and standalone requests. **After it finishes, present the file
+to the user** — see [Show the result](#show-the-result-to-the-user).
 
 ### Batch — an `image_prompts.json` manifest (audit trail)
 
@@ -138,6 +139,27 @@ uv run <skill-dir>/scripts/slice_images.py /abs/images/spot_sheet.png \
 
 `--trim` tight-crops each cell to its content; `--alpha` knocks out the flat
 background to transparency. Geometry rules: `references/image-generator.md` §4.3.
+
+## Show the result to the user
+
+These files are produced by a **script**, so — unlike `write_file` output — they
+are **not surfaced automatically**. After producing an image the user wants to
+see, call the **`show_artifact`** tool with the file's **absolute path** (one call
+per file). It adapts to the interface: in the **web UI** the image previews inline
+in the Artifacts panel; in the **TUI** the path becomes a click-to-open link;
+headless / IM just reports the path. (`show_artifact` only accepts a path that
+already exists and a previewable type — `.png/.jpg/.jpeg/.gif/.webp/.svg` all
+qualify.)
+
+**When to show:**
+
+- **One-off / standalone requests** — "generate an image of …", "find a photo of
+  …", a single fixup: **show every file you produce.** Seeing it is the point.
+- **Batch manifest, or when invoked by another skill** (e.g. `ppt-master` building
+  a deck): **do not `show_artifact` each item.** Those images are consumed into
+  the deck and the calling skill presents the finished artifact; per-image
+  previews would just spam the panel. Show one only on an explicit request to
+  review a specific generated image.
 
 ## Prompt quality — consult the craft library before writing an AI prompt
 
