@@ -159,6 +159,14 @@
       margin-top: 2rem;
       display: inline-block;
     }
+    .install-note {
+      max-width: 36rem;
+      margin: 0.85rem auto 0;
+      font-size: 0.82rem;
+      line-height: 1.65;
+      color: var(--muted);
+      text-align: left;
+    }
     .install-hint code, .install-cmd {
       font-family: "SF Mono", Menlo, Consolas, monospace;
       font-size: 0.85rem;
@@ -415,6 +423,9 @@
       </p>
       <div class="install-hint" id="install-block">
         <pre class="install-cmd" id="install-cmd">curl -fsSL https://octo-agent.dev/install.sh | sh</pre>
+        <p class="install-note"
+           data-en="Desktop app vs. CLI — the desktop app (the Download button, or the AppImage on Linux) is a native window that, while it's open, is also the local backend your browser, VS Code, and Obsidian all connect to. The one-liner above installs just the octo CLI: the terminal agent plus headless `octo serve`. Same agent and the same ~/.octo — pick either, or run both."
+           data-zh="桌面应用 vs. 命令行 —— 桌面应用（下载按钮，Linux 为 AppImage）是原生窗口，打开时它同时是浏览器、VS Code、Obsidian 连接的本机后端。上面这行只装 octo 命令行：终端 agent 加无界面的 `octo serve`。同一个 agent、同一份 ~/.octo —— 任选其一，或两者兼用。"></p>
       </div>
     </div>
   </header>
