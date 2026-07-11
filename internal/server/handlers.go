@@ -159,7 +159,18 @@ func (srv *Server) sessionStatusFields(sess *agent.Session) (workingDir, permiss
 		eff := cfg.EffectiveShowReasoning(entry.ShowReasoning)
 		showReasoning = &eff
 	}
-	return workingDir, permissionMode, reasoningEffort, showReasoning, 0
+	// Report the session's persisted context usage (its real last-turn token
+	// count) so the list — and thus a page refresh — carries a correct value
+	// instead of 0. The live WS path still refines the active session per turn.
+	if sess != nil && sess.LastContextTokens > 0 {
+		if window := agent.ContextWindow(sess.Model); window > 0 {
+			contextUsage = sess.LastContextTokens * 100 / window
+			if contextUsage > 100 {
+				contextUsage = 100
+			}
+		}
+	}
+	return workingDir, permissionMode, reasoningEffort, showReasoning, contextUsage
 }
 
 type toolInfo struct {

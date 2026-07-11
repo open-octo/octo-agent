@@ -2,37 +2,34 @@ package server
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 )
 
-// After a turn ends the agent is dropped from sessionAgents, but its exact
-// context-token count must survive as the warmAgent so a fresh subscribe (a
-// page refresh / reconnect) reports the real value instead of nothing. Without
-// the warm agent, sendContextUsage falls back to a transcript estimate that can
-// round to 0 and then sends no frame at all — the composer's Context bar stays
-// stale until the next turn.
-func TestSendContextUsage_UsesWarmAgent(t *testing.T) {
+// An idle session (no live Agent) must report the real context-token count its
+// last turn persisted, so a fresh subscribe (page refresh / reconnect) shows
+// the same value the turn-end broadcast did — not a transcript estimate that
+// omits the system-prompt/tools overhead and can round to 0 (sending no frame
+// at all, leaving the composer's Context bar stale). This is what makes the bar
+// correct across switching between multiple idle sessions.
+func TestSendContextUsage_UsesPersistedTokens(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
-	// An idle agent (not in sessionAgents) with enough history that its context
-	// estimate clears 1% of the default 128k window.
-	a := agent.New(stubSender{}, "stub-model")
-	a.History.Append(agent.NewUserMessage(strings.Repeat("word ", 4000)))
-	const sid = "warm-session"
-	srv.sessionAgentsMu.Lock()
-	srv.warmAgentID = sid
-	srv.warmAgent = a
-	srv.sessionAgentsMu.Unlock()
+	// A persisted, idle session (no entry in sessionAgents) carrying a real
+	// last-turn token count. 6400 tokens is ~5% of the 128k default window.
+	sess := agent.NewSession("stub-model", "")
+	sess.LastContextTokens = 6400
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
 
 	conn := &wsConn{send: make(chan []byte, 4), subscribed: map[string]struct{}{}}
-	srv.sendContextUsage(sid, conn)
+	srv.sendContextUsage(sess.ID, conn)
 
 	select {
 	case b := <-conn.send:
@@ -43,21 +40,23 @@ func TestSendContextUsage_UsesWarmAgent(t *testing.T) {
 		if m["type"] != "session_update" {
 			t.Fatalf("type = %v, want session_update", m["type"])
 		}
-		if cu, _ := m["context_usage"].(float64); cu <= 0 {
-			t.Fatalf("context_usage = %v, want > 0 (warm agent's real count)", cu)
+		if cu, _ := m["context_usage"].(float64); cu != 5 {
+			t.Fatalf("context_usage = %v, want 5 (6400/128000)", cu)
+		}
+		if ct, _ := m["context_tokens"].(float64); ct != 6400 {
+			t.Fatalf("context_tokens = %v, want 6400", ct)
 		}
 	default:
-		t.Fatal("sendContextUsage sent no frame despite a warm agent")
+		t.Fatal("sendContextUsage sent no frame despite a persisted token count")
 	}
 
-	// A session with neither a running nor a warm agent, and nothing on disk,
-	// still sends nothing (no misleading 0% frame).
-	conn2 := &wsConn{send: make(chan []byte, 4), subscribed: map[string]struct{}{}}
-	srv.sendContextUsage("cold-unknown-session", conn2)
-	select {
-	case <-conn2.send:
-		t.Fatal("expected no frame for a cold unknown session")
-	default:
+	// The count must survive a reload from disk (it rides the transcript).
+	reloaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.LastContextTokens != 6400 {
+		t.Fatalf("reloaded LastContextTokens = %d, want 6400", reloaded.LastContextTokens)
 	}
 }
 
