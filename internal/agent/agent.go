@@ -203,13 +203,6 @@ type Agent struct {
 	// breaks a compaction. See dev-docs/compaction-redesign.md.
 	ArchiveDir string
 
-	// CompactBatchThreshold controls compaction after a tool batch, before the
-	// next LLM call. Semantics mirror CompactThreshold:
-	//   < 0  → disabled (never compact between batches)
-	//   == 0 → follow compactTriggerTokens (the default)
-	//   > 0  → that explicit token count
-	CompactBatchThreshold int
-
 	// overflow handles "context too long" 400 errors by compressing history
 	// and retrying. Aligned with Ruby's perform_context_overflow_compression.
 	overflow overflowRecovery

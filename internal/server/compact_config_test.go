@@ -7,17 +7,15 @@ import (
 	"github.com/open-octo/octo-agent/internal/config"
 )
 
-// The CLI honors compact_auto_pct / compact_batch_threshold from config.yml
-// (cmd/octo/chat.go); the server's buildAgent must too, or web/desktop/IM turns
-// silently ignore the configured threshold and always run the built-in 75%
-// default.
+// The CLI honors compact_auto_pct from config.yml (cmd/octo/chat.go); the
+// server's buildAgent must too, or web/desktop/IM turns silently ignore the
+// configured threshold and always run the built-in 75% default.
 func TestBuildAgent_HonorsCompactConfig(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
-		Models:                []config.ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
-		DefaultModel:          "gpt-4o",
-		CompactAutoPct:        70,
-		CompactBatchThreshold: 90000,
+		Models:         []config.ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
+		DefaultModel:   "gpt-4o",
+		CompactAutoPct: 70,
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
@@ -25,9 +23,6 @@ func TestBuildAgent_HonorsCompactConfig(t *testing.T) {
 
 	if want := float64(70) / 100.0; a.CompactAutoFraction != want {
 		t.Errorf("CompactAutoFraction = %v, want %v (from compact_auto_pct: 70)", a.CompactAutoFraction, want)
-	}
-	if a.CompactBatchThreshold != 90000 {
-		t.Errorf("CompactBatchThreshold = %d, want 90000 (from compact_batch_threshold)", a.CompactBatchThreshold)
 	}
 }
 

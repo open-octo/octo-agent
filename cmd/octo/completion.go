@@ -128,7 +128,7 @@ func chatCandidates(words []string, prev string) []string {
 	case "--reasoning-effort":
 		return []string{"off", "low", "medium", "high", "xhigh", "max"}
 	case "--model", "--system", "--max-tokens", "--max-tokens-escalate", "--max-turns",
-		"--compact-threshold", "--compact-auto-pct", "--compact-batch-threshold",
+		"--compact-threshold", "--compact-auto-pct",
 		"--sandbox-write", "--sandbox-read":
 		// These take freeform values; nothing useful to suggest.
 		return nil
@@ -229,7 +229,7 @@ var chatFlags = []string{
 	"--permission-mode",
 	"--quiet", "--verbose", "--plain", "--stream", "--system",
 	"--reasoning-effort", "--show-reasoning",
-	"--compact-auto-pct", "--compact-batch-threshold",
+	"--compact-auto-pct",
 	"--help",
 }
 

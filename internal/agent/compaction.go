@@ -656,36 +656,15 @@ func hasToolResult(m Message) bool {
 	return false
 }
 
-// compactBatchTriggerTokens resolves the batch-level compaction trigger:
-//
-//	< 0  → disabled (0)
-//	== 0 → auto: the SAME trigger as between-turns compaction
-//	       (compactTriggerTokens), so one threshold governs the whole session
-//	> 0  → that explicit token count
-//
-// Sharing the between-turns trigger keeps compaction to a single knob: growth
-// within a turn (tool batches) is folded at the same point between turns would,
-// so context can't quietly climb past the threshold mid-turn and sit there
-// until the next turn. An explicit CompactBatchThreshold still overrides it.
-func (a *Agent) compactBatchTriggerTokens() int {
-	switch {
-	case a.CompactBatchThreshold < 0:
-		return 0
-	case a.CompactBatchThreshold == 0:
-		return a.compactTriggerTokens()
-	default:
-		return a.CompactBatchThreshold
-	}
-}
-
 // shouldCompactBetweenBatches reports whether compaction should run after a
 // tool batch, before the next LLM call. This catches history growth within a
 // turn that lastInputTokens (from the previous provider call) doesn't reflect.
 //
-// By default it uses the same trigger as between-turns compaction (one
-// threshold for the whole session); set CompactBatchThreshold to override it.
+// It uses the one and only compaction trigger (compactTriggerTokens) — the same
+// point between-turns compaction fires — so a single threshold governs the whole
+// session and context can't quietly climb past it mid-turn and sit there.
 func (a *Agent) shouldCompactBetweenBatches() bool {
-	trigger := a.compactBatchTriggerTokens()
+	trigger := a.compactTriggerTokens()
 	if trigger <= 0 {
 		return false
 	}

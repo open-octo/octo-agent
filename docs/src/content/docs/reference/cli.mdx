@@ -37,8 +37,7 @@ stdin, runs a headless one-shot: full agentic tool loop, then exit.
 | `--no-coauthor` | `false` | Don't append `Co-authored-by` to git commit messages |
 | `--max-turns` | `0` (auto) | Max provider round-trips per message (`0` = 200 interactive, unlimited headless) |
 | `--compact-threshold` | `0` (auto) | Compact once a turn's input crosses this many tokens; `<0` disables |
-| `--compact-auto-pct` | `0` (→75) | Auto-compaction threshold as % of the context window, used when `--compact-threshold=0` |
-| `--compact-batch-threshold` | `0` (auto → 85%) | Same idea, checked after each tool-call batch within a turn; `<0` disables |
+| `--compact-auto-pct` | `0` (→75) | Auto-compaction threshold as % of the context window, used when `--compact-threshold=0`. The same threshold is checked both between turns and after each tool-call batch. |
 | `--reasoning-effort` | off | `low` \| `medium` \| `high` \| `xhigh` \| `max` |
 | `--show-reasoning` | `false` | Surface the reasoning trace for the **Web UI** to display (the terminal never renders it) |
 | `--sandbox` | `false` | OS-enforced confinement to the project dir + tmp, no network |

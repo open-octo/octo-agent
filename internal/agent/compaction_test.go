@@ -151,34 +151,32 @@ func TestCompactTriggerTokens(t *testing.T) {
 	}
 }
 
-// The batch-level trigger defaults to the SAME value as the between-turns
-// trigger (one threshold for the whole session), and honors CompactAutoFraction
-// through it — so growth within a turn is folded at the same point.
-func TestCompactBatchTriggerTokens_FollowsBetweenTurns(t *testing.T) {
+// Between-batches (mid-turn) compaction uses the one and only compaction
+// trigger — the same point between-turns fires — so a single threshold governs
+// the whole session and honors CompactAutoFraction.
+func TestShouldCompactBetweenBatches_UsesSingleTrigger(t *testing.T) {
 	a := New(&summarizeFake{}, "unknown-model-xyz") // unknown model → default window
 
-	// Unset batch threshold → identical to the between-turns auto trigger.
-	if got, want := a.compactBatchTriggerTokens(), a.compactTriggerTokens(); got != want {
-		t.Errorf("batch trigger = %d, want %d (same as between-turns)", got, want)
+	trigger := a.compactTriggerTokens() // auto: 75% of the default window
+	// Just under the trigger: no mid-turn compaction.
+	a.usageMu.Lock()
+	a.lastInputTokens = trigger - 1
+	a.usageMu.Unlock()
+	if a.shouldCompactBetweenBatches() {
+		t.Errorf("should not compact between batches below the trigger (%d)", trigger)
+	}
+	// Just over: it fires, at the very same threshold between-turns uses.
+	a.usageMu.Lock()
+	a.lastInputTokens = trigger + 1
+	a.usageMu.Unlock()
+	if !a.shouldCompactBetweenBatches() {
+		t.Errorf("should compact between batches above the trigger (%d)", trigger)
 	}
 
-	// A custom auto fraction flows through both.
-	a.CompactAutoFraction = 0.6
-	if got, want := a.compactBatchTriggerTokens(), a.compactTriggerTokens(); got != want {
-		t.Errorf("batch trigger with 60%% fraction = %d, want %d", got, want)
-	}
-	if got := a.compactBatchTriggerTokens(); got != int(float64(defaultContextWindow)*0.6) {
-		t.Errorf("batch trigger = %d, want 60%% of window", got)
-	}
-
-	// Explicit override still wins; disabling still returns 0.
-	a.CompactBatchThreshold = 7777
-	if got := a.compactBatchTriggerTokens(); got != 7777 {
-		t.Errorf("explicit batch trigger = %d, want 7777", got)
-	}
-	a.CompactBatchThreshold = -1
-	if got := a.compactBatchTriggerTokens(); got != 0 {
-		t.Errorf("disabled batch trigger = %d, want 0", got)
+	// Disabling compaction entirely (CompactThreshold < 0) disables it here too.
+	a.CompactThreshold = -1
+	if a.shouldCompactBetweenBatches() {
+		t.Error("should not compact between batches when compaction is disabled")
 	}
 }
 

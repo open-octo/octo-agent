@@ -1212,9 +1212,6 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		if cfg.CompactAutoPct > 0 {
 			a.CompactAutoFraction = float64(cfg.CompactAutoPct) / 100.0
 		}
-		if cfg.CompactBatchThreshold != 0 {
-			a.CompactBatchThreshold = cfg.CompactBatchThreshold
-		}
 	}
 
 	// Refresh the external memory backend from config before reading

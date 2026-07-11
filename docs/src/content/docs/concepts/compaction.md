@@ -6,16 +6,20 @@ description: How octo keeps a long session inside the context window without los
 Long sessions get compacted rather than truncated blindly. There are two triggers, a cheap tier
 that runs before any LLM call, and a reactive path for when a provider rejects a request outright.
 
-## Two triggers
+## When it triggers
 
-| Trigger | When it's checked | Auto default |
-|---|---|---|
-| Between-turn (`--compact-threshold`) | Before each message to the provider | 75% of the model's context window |
-| Batch-level (`--compact-batch-threshold`) | After each tool-call batch, before the next provider call within the same turn | 85% — deliberately higher, so it doesn't interrupt a tool loop as eagerly as the between-turn check |
+Auto-compaction uses a **single threshold** — 75% of the model's context window by
+default (`--compact-threshold`; set the percentage via `--compact-auto-pct` or
+`compact_auto_pct`, `<0` disables, `>0` is an explicit token count). That one
+threshold is checked at two safe boundaries:
 
-Both accept the same semantics: `0` = auto (the percentage above, via `--compact-auto-pct`),
-`<0` = disabled, `>0` = an explicit token count. Token counts prefer the provider's actual reported
-usage over octo's own estimate, so the trigger tracks reality once a real number is available.
+- **Before each message to the provider** (between turns).
+- **After each tool-call batch**, before the next provider call within the same
+  turn — so context growth inside a long agentic turn is folded at the same
+  threshold instead of quietly climbing past it until the next turn.
+
+Token counts prefer the provider's actual reported usage over octo's own
+estimate, so the trigger tracks reality once a real number is available.
 
 ## What gets compacted first
 
