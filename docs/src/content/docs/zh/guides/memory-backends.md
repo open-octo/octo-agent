@@ -158,6 +158,15 @@ agentmemory
 （或者不装直接跑：`npx @agentmemory/agentmemory`。）REST API 默认监听 `127.0.0.1:3111`，另有一个
 实时查看器跑在 `3113`。
 
+:::caution[必须从一个固定、可写的目录启动]
+agentmemory 的存储引擎把 state 存到 **相对当前工作目录（CWD）的 `./data/`**。如果每次从不同目录
+启动它——或者作为服务运行、工作目录默认成了 `/`（launchd、systemd）——它就写不进去：`state::set`
+会一直卡到 180 秒超时，**数据在重启后全部丢失**（每次启动都是空索引，上次运行以来存的东西悄无声息地
+没了）。务必从一个稳定、可写的目录启动它（比如 `~/.agentmemory`），在进程管理器里显式指定这个目录
+（launchd plist 的 `WorkingDirectory`、systemd unit 的 `WorkingDirectory=`）。验证是否生效：存一条
+东西后重启 server，同样的 query 应该还能查到，且 `~/.agentmemory/data/state_store.db` 应当存在。
+:::
+
 确认它起来了：
 
 ```bash
@@ -250,6 +259,14 @@ memory_backend:
 - **agentmemory：刚存完召回却是空的**——确认 server 确实起着
   （`curl http://localhost:3111/agentmemory/health`），并且 octo 的 `namespace` 在重启前后
   保持一致；它对应 agentmemory 的 `project`，search 的返回范围就是靠它限定的。
+- **agentmemory：重启后数据全没了，或日志刷 `Invocation timeout after 180000ms: state::set` /
+  `index persistence: failed`**——server 是从一个它写不进去的工作目录启动的（state 存储是相对 CWD
+  的 `./data/`，默认 CWD 为 `/` 的服务写不进根目录）。从一个固定、可写的目录重启它，并在进程管理器里
+  设 `WorkingDirectory`——见上面 agentmemory 安装小节的警示框。`~/.agentmemory/data/state_store.db`
+  出现（且能扛过一次重启）就说明修好了。
+- **agentmemory：受限网络下启动卡住 / 本地 embedding 模型下不下来**——它首次运行会从 HuggingFace 拉
+  `all-MiniLM-L6-v2`。如果你部署的环境里 `huggingface.co` 被墙或被限速，启动前用 `HF_ENDPOINT`
+  环境变量指向镜像（如 `HF_ENDPOINT=https://hf-mirror.com`）。
 - **hindsight：`docker run` 之后马上连不上**——再等一两分钟，它还在下载/加载 embedding 和
   reranker 模型。`docker logs hindsight` 能看到进度。等它打印出启动横幅之后，后续重启就会
   快很多（模型缓存在 `hindsight-hf-cache` 这个 volume 里）。

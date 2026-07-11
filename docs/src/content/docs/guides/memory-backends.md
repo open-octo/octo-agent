@@ -165,6 +165,18 @@ agentmemory
 (Or run it without installing: `npx @agentmemory/agentmemory`.) The REST API binds to
 `127.0.0.1:3111` by default; a live viewer runs on `3113`.
 
+:::caution[Start it from a fixed, writable directory]
+agentmemory's storage engine writes its state store to `./data/` **relative to the current
+working directory**. Launch it from a different directory each time — or as a service whose
+working directory defaults to `/` (launchd, systemd) — and it can't write there: `state::set`
+calls hang until a 180-second timeout, and **nothing persists across restarts** (every start
+comes up with an empty index, silently losing everything stored since the last run). Always
+run it from a stable, writable directory (e.g. `~/.agentmemory`), and set that directory
+explicitly under a process manager (`WorkingDirectory` in a launchd plist, `WorkingDirectory=`
+in a systemd unit). Confirm it took: after storing something and restarting the server, the
+same query should still return it, and `~/.agentmemory/data/state_store.db` should exist.
+:::
+
 Verify it's up:
 
 ```bash
@@ -262,6 +274,16 @@ free of the extra round trip and rely on the tool alone.
 - **agentmemory: recall returns nothing right after storing** — confirm the server is actually up
   (`curl http://localhost:3111/agentmemory/health`) and that octo's `namespace` matches across
   restarts; it maps to agentmemory's `project`, which scopes what search returns.
+- **agentmemory: everything is gone after a restart, or logs show `Invocation timeout after
+  180000ms: state::set` / `index persistence: failed`** — the server was started from a working
+  directory it can't persist into (its state store is `./data/` relative to the CWD; a service
+  defaulting to `/` can't write there). Restart it from a fixed, writable directory and set
+  `WorkingDirectory` under your process manager — see the caution in the agentmemory setup section.
+  `~/.agentmemory/data/state_store.db` appearing (and surviving a restart) is the signal it's fixed.
+- **agentmemory: startup hangs or the local embedding model won't download on a restricted network**
+  — it fetches `all-MiniLM-L6-v2` from HuggingFace on first run. If `huggingface.co` is blocked or
+  throttled where you're hosting, point it at a mirror via the `HF_ENDPOINT` environment variable
+  (e.g. `HF_ENDPOINT=https://hf-mirror.com`) before starting the server.
 - **hindsight: connection refused right after `docker run`** — give it a minute or two; it's still
   downloading/loading the embedding and reranker models. `docker logs hindsight` shows progress.
   Once it prints its startup banner, subsequent restarts are much faster (models are cached in the
