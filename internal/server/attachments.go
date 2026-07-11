@@ -63,15 +63,16 @@ func ensureUploadsDir() (string, error) {
 // parseUserFiles converts a WS files payload into model blocks, display refs,
 // and document path notes. Per-file failures are logged and skipped so one bad
 // attachment doesn't drop the rest of the message.
-func parseUserFiles(files []wsUserFile, allowNativePath bool) userAttachments {
+func parseUserFiles(files []wsUserFile, allowLocalPath bool) userAttachments {
 	var att userAttachments
 	for _, f := range files {
 		switch {
-		case f.NativePath != "" && allowNativePath:
-			// Desktop shell: a real local path the user chose via the native
-			// file dialog. No upload — the agent reads it in place, like a
+		case f.LocalPath != "" && allowLocalPath:
+			// Same-machine (loopback) client: a real local path the user chose
+			// via the native dialog (desktop) or the in-app file picker
+			// (localhost web). No upload — the agent reads it in place, like a
 			// working-dir file. Referenced by its true absolute path.
-			abs := f.NativePath
+			abs := f.LocalPath
 			if a, err := filepath.Abs(abs); err == nil {
 				abs = a
 			}

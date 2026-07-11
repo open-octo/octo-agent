@@ -28,6 +28,12 @@ export const wsDown = writable(false)
 // dialog instead of the in-app directory tree. False under `octo serve`.
 export const nativeShell = writable(false)
 
+// True when the browser is on the same machine as the server (loopback),
+// reported by /api/version's `local` flag — desktop shell OR localhost web.
+// When true, files/folders are chosen by real path (native dialog or the
+// in-app fs picker) instead of being uploaded. False for a remote browser.
+export const localAccess = writable(false)
+
 // Artifacts panel
 export const artifactsOpen = writable(false)
 export const artifacts = writable<Artifact[]>([])

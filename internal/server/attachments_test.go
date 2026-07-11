@@ -369,23 +369,23 @@ drain:
 	}
 }
 
-// TestParseUserFilesNativePath: a real local path is referenced in place only
-// when native is allowed (the desktop build); under `octo serve` it's ignored
-// so a remote client can't make the agent read arbitrary server files.
-func TestParseUserFilesNativePath(t *testing.T) {
+// TestParseUserFilesLocalPath: a real local path is referenced in place only
+// for a loopback (same-machine) client; for a remote client it's ignored so it
+// can't make the agent read arbitrary server files.
+func TestParseUserFilesLocalPath(t *testing.T) {
 	tmp := t.TempDir()
 	f := filepath.Join(tmp, "notes.md")
 	if err := os.WriteFile(f, []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	att := parseUserFiles([]wsUserFile{{Name: "notes.md", NativePath: f}}, true)
+	att := parseUserFiles([]wsUserFile{{Name: "notes.md", LocalPath: f}}, true)
 	if len(att.notes) != 1 || !strings.Contains(att.notes[0], f) {
-		t.Errorf("native path should be referenced in place, got notes=%+v", att.notes)
+		t.Errorf("local path should be referenced in place for loopback, got notes=%+v", att.notes)
 	}
 
-	att2 := parseUserFiles([]wsUserFile{{Name: "notes.md", NativePath: f}}, false)
+	att2 := parseUserFiles([]wsUserFile{{Name: "notes.md", LocalPath: f}}, false)
 	if len(att2.notes) != 0 {
-		t.Errorf("native path must be ignored without a bridge, got notes=%+v", att2.notes)
+		t.Errorf("local path must be ignored for a non-loopback client, got notes=%+v", att2.notes)
 	}
 }

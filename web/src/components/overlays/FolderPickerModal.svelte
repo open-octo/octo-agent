@@ -7,11 +7,20 @@
   // Controlled by the composer: initialPath seeds the first listing (the
   // session's current working dir, or '' to start at home). onSelect receives
   // the absolute directory the user confirms; onClose dismisses.
-  let { initialPath = '', onSelect, onClose }: {
+  // mode 'folder' (default): navigate dirs, confirm the current dir with "Use
+  // this folder"; files are shown greyed for context. mode 'file': click a file
+  // to select it (onSelect gets the file path); dirs still navigate.
+  let { initialPath = '', mode = 'folder', onSelect, onClose }: {
     initialPath?: string
-    onSelect: (dir: string) => void
+    mode?: 'folder' | 'file'
+    onSelect: (path: string) => void
     onClose: () => void
   } = $props()
+
+  function join(name: string): string {
+    const base = listing?.path ?? ''
+    return base + (base.endsWith('/') ? '' : '/') + name
+  }
 
   let listing = $state<FsListing | null>(null)
   let loading = $state(false)
@@ -57,8 +66,7 @@
 
   function enter(name: string) {
     if (!listing) return
-    const sep = listing.path.endsWith('/') ? '' : '/'
-    load(listing.path + sep + name)
+    load(join(name))
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -81,7 +89,7 @@
   >
     <div class="modal-header">
       <iconify-icon icon="ant-design:folder-open-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
-      <span class="modal-title">{$t('folder.title')}</span>
+      <span class="modal-title">{mode === 'file' ? $t('folder.title_file') : $t('folder.title')}</span>
       <label class="hidden-toggle">
         <input type="checkbox" bind:checked={showHidden} />
         {$t('folder.show_hidden')}
@@ -122,6 +130,13 @@
                   {/if}
                 </button>
               </li>
+            {:else if mode === 'file'}
+              <li>
+                <button class="entry dir" onclick={() => onSelect(join(e.name))}>
+                  <iconify-icon icon="ant-design:file-outlined" width="14" style="color:var(--text-secondary)"></iconify-icon>
+                  <span class="mono name">{e.name}</span>
+                </button>
+              </li>
             {:else}
               <li class="entry file" aria-disabled="true">
                 <iconify-icon icon="ant-design:file-outlined" width="14" style="color:var(--text-tertiary)"></iconify-icon>
@@ -139,14 +154,16 @@
     <div class="modal-footer">
       <button class="btn-secondary" onclick={onClose}>{$t('folder.cancel')}</button>
       <span class="spacer"></span>
-      <button
-        class="btn-primary"
-        disabled={!listing || loading}
-        onclick={() => listing && onSelect(listing.path)}
-      >
-        <iconify-icon icon="ant-design:check-outlined" width="12"></iconify-icon>
-        {$t('folder.select')}
-      </button>
+      {#if mode === 'folder'}
+        <button
+          class="btn-primary"
+          disabled={!listing || loading}
+          onclick={() => listing && onSelect(listing.path)}
+        >
+          <iconify-icon icon="ant-design:check-outlined" width="12"></iconify-icon>
+          {$t('folder.select')}
+        </button>
+      {/if}
     </div>
   </div>
 </div>

@@ -47,6 +47,11 @@ type wsConn struct {
 	conn       *websocket.Conn
 	send       chan []byte
 	subscribed map[string]struct{} // subscribed session IDs
+	// loopback is whether the peer is on this machine (127.0.0.0/8, ::1). Fixed
+	// at upgrade from RemoteAddr (never X-Forwarded-For). Gates referencing a
+	// file by its real local path — safe only when the browser and agent share
+	// a filesystem; a remote client falls back to upload.
+	loopback bool
 }
 
 const (
@@ -178,6 +183,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		conn:       conn,
 		send:       make(chan []byte, 256),
 		subscribed: make(map[string]struct{}),
+		loopback:   isLoopbackRemote(r.RemoteAddr),
 	}
 
 	s.wsHub.register <- c
