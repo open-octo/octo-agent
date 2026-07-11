@@ -22,7 +22,11 @@ import (
 // session listing is unaffected and no session field is added. A session
 // belongs to at most one group; a session ID that no longer resolves to a real
 // transcript is simply not rendered (the frontend cross-references the live
-// session list), so stale IDs left by a deleted session are harmless.
+// session list), so stale IDs left by a deleted session are harmless. There is
+// no GC pass for them — a stale ID is only dropped when its group is next
+// rewritten (a move touching that group, or the frontend re-render filtering
+// it out); the list grows at most by one dead entry per deleted session, which
+// is negligible.
 //
 // The desktop app (cmd/octo-desktop) runs this same server in-process against
 // the same ~/.octo, so groups and their collapsed state are shared between the
@@ -45,9 +49,14 @@ type groupFile struct {
 	Groups []sessionGroup `json:"groups"`
 }
 
-// groupMu serialises read-modify-write cycles on the registry. The path is
-// process-global (it derives from HOME, fixed for the process lifetime), so a
-// single package-level mutex is sufficient and correct.
+// groupMu serialises read-modify-write cycles on the registry within this
+// process — the common case, since a given ~/.octo is normally served by one
+// process. It does NOT coordinate across processes: if `octo serve` and the
+// desktop shell run against the same ~/.octo at once, the atomic temp-file +
+// rename in saveSessionGroups keeps the file from being corrupted, but two
+// interleaved read-modify-write cycles can still lose one side's update
+// (last writer wins). Acceptable for a single-user local tool; a cross-process
+// lock would be overkill here.
 var groupMu sync.Mutex
 
 // sessionGroupsPath returns ~/.octo/session-groups.json, creating ~/.octo.
