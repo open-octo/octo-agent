@@ -15,7 +15,7 @@ The desktop shell reuses the web stack wholesale: the same Svelte frontend (`int
 
 - Not a replacement for the web interface. `octo serve` stays the answer for self-hosting and remote/mobile access; the desktop app is the answer for a local workstation. The two share all their code.
 - Not a new UI. Zero Svelte views are rewritten for the desktop; the window renders the same app.
-- Linux is not in the first release (see Platforms). The architecture doesn't preclude it; the packaging and WebKitGTK dependency are deferred.
+- Linux ships as a build-verified AppImage, but is a step behind macOS/Windows in polish: it relies on the host's GTK4/WebKitGTK 6.0 (the AppRun launcher preflights and guides the user if absent) and hasn't been run-tested on a real desktop.
 - No offline/embedded model runtime, no bundled provider — the app talks to the same configured providers the CLI does.
 
 ## Why a shell, not a rewrite
@@ -24,7 +24,7 @@ octo's positioning rests on being open, self-hostable, and a single zero-runtime
 
 - **The CLI stays pure Go.** Wails needs CGO and a platform webview; that cost is confined to the desktop build target and never touches `go build ./cmd/octo`. `make build` still produces the same static binary.
 - **`octo serve` stays.** Remote and multi-user deployments are unaffected — they keep using the browser against a served instance.
-- **Zero-runtime holds where it can.** macOS ships WKWebView and Windows ships the evergreen WebView2 runtime, so on the two launch platforms the app carries no bundled runtime of its own. (Linux would require GTK4 + WebKitGTK 6.0 + libsoup 3.0 to be installed — a newer, less-ubiquitous stack, the reason it's deferred. The code itself compiles on Linux; a CI probe confirms it.)
+- **Zero-runtime holds where it can.** macOS ships WKWebView and Windows ships the evergreen WebView2 runtime, so on those two the app carries no bundled runtime of its own. Linux needs GTK4 + WebKitGTK 6.0 + libsoup 3.0 on the host — a newer, less-ubiquitous stack — so the AppImage takes them from the host and its launcher guides the user to install them if missing.
 
 ## Architecture: in-process server + native bridge
 
@@ -75,7 +75,7 @@ This is the whole bridge: a two-method Go interface and one conditional route gr
 - **System tray** — Wails v3 system-tray menu (`v3/pkg/services`): show/hide window, quick "new session", quit. Window can attach to the tray icon.
 - **Native notifications** — the server already decides when to notify (a session needs an answer / finished replying while the user is away; see the web notification path). In desktop mode that trigger calls `NativeBridge.Notify` → Wails `v3/pkg/services/notifications` (cross-platform, title/body, actions) instead of the browser Notification API. ⚠️ Wails has an open notifications bug on Windows/Linux ([#4449](https://github.com/wailsapp/wails/issues/4449)) — validate on Windows during implementation; fall back to a tray balloon if needed.
 - **Single-instance lock** — Wails v3 single-instance manager: a second launch focuses the running window instead of starting a second server on another port.
-- **Launch-at-login (autostart)** — **not** built into Wails v3. Implemented per-OS: a macOS `LaunchAgent` plist, a Windows registry `Run` key (or Startup shortcut). Small, isolated, behind a settings toggle. Confirm the exact mechanism at implementation.
+- **Launch-at-login (autostart)** — Wails v3's built-in `app.Autostart` (`Enable`/`Disable`/`Status`), exposed through `NativeBridge` + `GET`/`PUT /api/native/autostart` and a Settings toggle shown only in the desktop shell.
 
 ## Frontend changes
 
@@ -89,10 +89,10 @@ No new views, no restyle. The desktop window is the web app.
 
 ## Build & distribution
 
-- **Separate, build-tagged entry point.** The desktop main lives in `cmd/octo-desktop/` behind `//go:build desktop`. Default `go build ./...`, `go vet ./...`, and `go test ./...` ignore it, so they need no CGO and no webview headers — the existing Go 1.25 × {Linux, macOS, Windows} matrix stays green, and the Linux race runner never tries to pull WebKitGTK. The Wails v3 dependency (`github.com/wailsapp/wails/v3`) is thus only compiled under the `desktop` tag; it is the one justified new dependency for this feature.
-- **Built with the `wails3` CLI on native per-OS runners.** Wails' official guidance is to build (and sign) on native runners rather than cross-compile — which matches octo's existing CI shape. New CI jobs: `wails3 build` on `macos-latest` and `windows-latest`, producing a `.app`/`.pkg` and an `.exe`/installer respectively. Cross-compilation via the `wails-cross` Docker/Zig image exists but is not the chosen path.
-- **Windows** bootstraps the WebView2 runtime if absent (the installer does this); this dovetails with the existing Inno Setup installer work.
-- **macOS** signing/notarization reuses the pending Apple Developer ID track from the existing `.pkg` installer; unsigned until that lands.
+- **Separate nested module.** The desktop main lives in `cmd/octo-desktop/` as its own Go module (`cmd/octo-desktop/go.mod`, `replace` back to the parent). The parent's `go build ./...` / `go vet ./...` / `go test ./...` skip a nested module entirely, so the Wails v3 dependency (`github.com/wailsapp/wails/v3`) and its CGO/webview transitive deps never enter the CLI's `go.mod` — the CLI stays a pure static binary and the existing Go 1.25 × {Linux, macOS, Windows} matrix is unaffected. (Cleaner than a `//go:build desktop` tag, which would keep the deps in the main module and be fragile under `go mod tidy`.)
+- **Built on native per-OS runners** (Wails' guidance; matches octo's CI). A dedicated `Desktop` workflow builds all three: macOS (CGO), Windows (`-H windowsgui`, pure-Go), and Linux (CGO + GTK4/WebKitGTK 6.0). Packaging is our own scripts — `scripts/package-desktop-macos.sh` (`.app`), `scripts/package-desktop-linux.sh` (AppImage) — plus Inno Setup for the Windows installer; `wails3 build` is available but not required by this reuse-the-web-frontend design. Windows also cross-compiles from any host (`GOOS=windows`, no CGO).
+- **Windows** relies on the evergreen WebView2 runtime (present on current Windows); the Inno Setup installer ships the app + CLI + uv.
+- **macOS** bundle is ad-hoc signed for local use; Developer ID notarization is a later release step (tracked with the `.pkg` installer).
 - The desktop artifact is **separate** from the CLI binary — shipping it does not change `octo`'s single-binary story or its release assets.
 
 ## Security
@@ -105,9 +105,9 @@ No new views, no restyle. The desktop window is the web app.
 
 - **Wails v3 is alpha.** API is stable and used in production, but pre-beta churn is possible; pin a known-good alpha and bump deliberately.
 - **Windows notifications** — the open bug above; needs on-device validation, tray-balloon fallback ready.
-- **Autostart** is per-OS custom code, the least "free" capability here.
+- **Windows install flow + `install.ps1`** aren't run-verified from a macOS dev machine; validated on a real Windows box before release.
 - **macOS notarization** gates a friction-free install; tracked with the existing installer effort.
-- **Linux** deferred purely on the WebKitGTK/libsoup packaging dependency, not on architecture.
+- **Linux** AppImage isn't run-tested on a real desktop yet; the host GTK4/WebKitGTK 6.0 dependency is the main friction.
 
 ## References
 

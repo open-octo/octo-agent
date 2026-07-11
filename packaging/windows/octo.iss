@@ -52,11 +52,11 @@ Source: "{#SourceDir}\octo-desktop.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\octo.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 ; uv, staged by `make bundle-tools-windows` into SourceDir before ISCC runs.
-; Lands in ~/.octo/bin — the per-user, no-admin dir octo's toolchain lookup
-; checks (internal/tools/toolchain.go) — so skills find it via PATH injection.
-; skipifsourcedoesntexist lets a local/CI compile that only stages the exes
-; still succeed.
-Source: "{#SourceDir}\uv.exe"; DestDir: "{%USERPROFILE}\.octo\bin"; Flags: ignoreversion skipifsourcedoesntexist
+; Lands in {app} beside octo-desktop.exe so the app self-provisions it into
+; ~/.octo/bin on first launch (bundledUvPath, matching macOS/Linux); the
+; postinstall SeedUvToOctoBin also copies it there immediately for CLI-first
+; use. skipifsourcedoesntexist lets a compile that only stages the exes succeed.
+Source: "{#SourceDir}\uv.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 ; Launch the desktop app.
@@ -125,6 +125,19 @@ begin
     if not CreateDir(ConfigDir) then
       exit;
   SaveStringToFile(ConfigPath, 'workspace_dir: auto' + #13#10, False);
+end;
+
+// SeedUvToOctoBin copies the bundled uv into ~/.octo/bin so the CLI has Python
+// tooling immediately (the app also self-provisions this on first launch).
+procedure SeedUvToOctoBin;
+var
+  binDir: string;
+begin
+  if not FileExists(ExpandConstant('{app}\uv.exe')) then
+    exit;
+  binDir := ExpandConstant('{%USERPROFILE}') + '\.octo\bin';
+  ForceDirectories(binDir);
+  FileCopy(ExpandConstant('{app}\uv.exe'), binDir + '\uv.exe', False);
 end;
 
 // LaunchApp opens the desktop app after install (detached; installer returns).
@@ -208,6 +221,7 @@ begin
     AddToPath;
     EnsurePowerShell7;
     WriteDefaultConfigIfMissing;
+    SeedUvToOctoBin;
     LaunchApp;
   end;
 end;

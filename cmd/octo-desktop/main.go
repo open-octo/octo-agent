@@ -107,6 +107,14 @@ func main() {
 	})
 	bridge.window = window
 
+	// Clicking a notification (session needs an answer / finished while away)
+	// raises the window — the notification's whole point is to pull you back.
+	if bridge.notifier != nil {
+		bridge.notifier.OnNotificationResponse(func(notifications.NotificationResult) {
+			bridge.showWindow()
+		})
+	}
+
 	// System tray: quick access to show the window or quit without hunting for
 	// the dock icon.
 	tray := app.SystemTray.New()

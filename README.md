@@ -101,6 +101,11 @@ xdg-open http://127.0.0.1:8088 # opens the dashboard
 into first-run onboarding (pick a provider, paste a key). Stop the server later
 with `octo serve --stop`. Prefer the terminal? Just run `octo`.
 
+Prefer a GUI? Grab the **desktop app** — `Octo-x86_64.AppImage` from the
+[latest release](https://github.com/open-octo/octo-agent/releases/latest);
+`chmod +x` and run it. It needs GTK4 + WebKitGTK 6.0 on the host (most current
+desktops have them; the app tells you what to install if not).
+
 Prebuilt archives (linux / darwin / windows × amd64 + arm64) and `checksums.txt`
 are on the [latest release](https://github.com/open-octo/octo-agent/releases/latest)
 if you'd rather grab one by hand.
@@ -115,23 +120,20 @@ if you'd rather grab one by hand.
   open http://127.0.0.1:8088     # opens the dashboard
   ```
 
-- **Double-click installer.** Download `octo-setup.pkg` from the
+- **Double-click installer (desktop app).** Download `octo-setup.pkg` from the
   [latest release](https://github.com/open-octo/octo-agent/releases/latest)
   (one universal package covers both Apple Silicon and Intel) and
   double-click it. Installer.app offers only "Install for me only" — no
-  administrator password. It installs octo to
-  `~/Library/Application Support/octo`, adds it to your `PATH` (appends to
-  `~/.zprofile` / `~/.bash_profile` / `~/.profile`), and registers a
-  LaunchAgent that starts `octo serve -d` on every login. When it finishes it
-  starts the server and opens <http://127.0.0.1:8088> — a loopback address, so
-  no access key is needed — to walk you through first-run onboarding (pick a
-  provider, paste a key). For a terminal session, open a **new** terminal and
-  run `octo`. The installer isn't notarized, so Gatekeeper will warn it's from
-  an unidentified developer — right-click (Control-click) the file → **Open**,
-  or allow it via **System Settings → Privacy & Security → Open Anyway**.
-  There's no App Store-style uninstaller for `.pkg`; run
-  `~/Library/Application\ Support/octo/uninstall.sh` to remove everything it
-  installed.
+  administrator password. It installs the **Octo desktop app** to
+  `~/Applications/Octo.app` and puts the bundled `octo` CLI on your `PATH`
+  (appends to `~/.zprofile` / `~/.bash_profile` / `~/.profile`), then opens the
+  app — a native window, so no browser or background server to manage. For a
+  terminal session, open a **new** terminal and run `octo`. The app isn't
+  notarized yet, so Gatekeeper will warn it's from an unidentified developer —
+  right-click (Control-click) `Octo.app` → **Open**, or allow it via
+  **System Settings → Privacy & Security → Open Anyway**. There's no App
+  Store-style uninstaller for `.pkg`; run `~/.octo/uninstall.sh` to remove it
+  (your `~/.octo` data is left intact).
 
 **Windows — two ways to install:**
 
@@ -143,20 +145,16 @@ if you'd rather grab one by hand.
   irm https://octo-agent.dev/install.ps1 | iex
   ```
 
-- **Double-click installer.** Download `octo-setup.exe` from the
+- **Double-click installer (desktop app).** Download `octo-setup.exe` from the
 [latest release](https://github.com/open-octo/octo-agent/releases/latest) and
-double-click it. It installs per-user (no administrator prompt), puts `octo` on
-your `PATH`, and adds a Start-menu entry. When it finishes it starts the local
-server in the background (`octo serve -d`) and opens
-<http://127.0.0.1:8088> — a loopback address, so no access key is needed — to
-walk you through first-run onboarding (pick a provider, paste a key). The
-server is also registered to start on each login (a per-user `Run` entry, no
-window), so the dashboard is up after a reboot; uninstalling removes it and
-stops the daemon. For a terminal session, open a **new** terminal and run
-`octo`. The
-installer is not yet code-signed, so Windows SmartScreen shows "Windows
-protected your PC" on first launch — click **More info → Run anyway**.
-Uninstall from "Add or remove programs" like any other app.
+double-click it. It installs per-user (no administrator prompt) the **Octo
+desktop app** plus the `octo` CLI, puts the CLI on your `PATH`, and adds a
+Start-menu entry that launches the app. When it finishes it opens the app — a
+native window, nothing to manage in the background. For a terminal session,
+open a **new** terminal and run `octo`. The installer is not yet code-signed,
+so Windows SmartScreen shows "Windows protected your PC" on first launch —
+click **More info → Run anyway**. Uninstall from "Add or remove programs" like
+any other app.
 
 **Upgrading:** `octo upgrade` installs the latest release in place (SHA-256
 verified against `checksums.txt`); `octo upgrade --check` only compares
