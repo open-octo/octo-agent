@@ -1253,8 +1253,14 @@ func (a *Agent) Suggest(ctx context.Context, tools []ToolDefinition) (string, er
 	return cleanSuggestion(reply.Content), nil
 }
 
-// titleMaxTokens caps the title response — it's a handful of words.
-const titleMaxTokens = 32
+// titleMaxTokens caps the title response. The title itself is a handful of
+// words, but the cap has to cover the model's reasoning tokens too: on a
+// reasoning model (LowEffort only lowers effort, it doesn't disable thinking)
+// the hidden reasoning is billed against this same budget, so a tight cap gets
+// entirely consumed by reasoning and the model emits empty text — leaving the
+// session with no generated title and no live sidebar update. Give it room for
+// low-effort reasoning plus the title line.
+const titleMaxTokens = 1024
 
 const titleInstruction = "Summarize this conversation as a short title of at most 6 words. " +
 	"Reply with the title text only — no preamble, no quotes, no trailing punctuation, no markdown."
