@@ -717,6 +717,7 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/sessions/{id}/goal", s.handleGetSessionGoal)
 	s.api("PUT /api/sessions/{id}/goal", s.handleUpdateSessionGoal)
 	s.api("DELETE /api/sessions/{id}/goal", s.handleDeleteSessionGoal)
+	s.api("GET /api/fs/list", s.handleFsList)
 	s.api("GET /api/tools", s.handleListTools)
 	s.api("GET /api/skills", s.handleListSkills)
 	s.api("GET /api/workflows", s.handleListWorkflows)

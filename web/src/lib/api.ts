@@ -132,6 +132,28 @@ export async function updateSessionPermissionMode(id: string, mode: string): Pro
   })
 }
 
+export interface FsEntry {
+  name: string
+  is_dir: boolean
+  is_symlink: boolean
+}
+
+export interface FsListing {
+  path: string
+  parent: string
+  entries: FsEntry[]
+  truncated: boolean
+}
+
+// Read-only directory listing for the folder picker. Omit `path` to start at
+// the user's home directory. A 403 (thrown here as an Error with the server's
+// message) means the request didn't come from the local machine — the picker
+// surfaces that message and the user falls back to typing a path.
+export async function fsList(path?: string): Promise<FsListing> {
+  const q = path ? `?path=${encodeURIComponent(path)}` : ''
+  return request<FsListing>(`/api/fs/list${q}`)
+}
+
 export async function updateSessionWorkingDir(id: string, dir: string): Promise<{ working_dir: string }> {
   // The server expands ~ and returns the canonical absolute dir it stored.
   return request<{ working_dir: string }>(`/api/sessions/${id}/working_dir`, {

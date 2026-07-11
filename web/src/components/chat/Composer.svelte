@@ -10,6 +10,7 @@
   import * as api from '../../lib/api'
   import { t } from '../../lib/i18n'
   import StatusTag from '../ui/StatusTag.svelte'
+  import FolderPickerModal from '../overlays/FolderPickerModal.svelte'
   import type { McpServerDetail, McpTool } from '../../lib/types'
   import { getMcpServer } from '../../lib/api'
 
@@ -413,6 +414,7 @@
   let dirMenu = $state(false)
   let dirDraft = $state('')
   let dirSaving = $state(false)
+  let pickerOpen = $state(false)
   const reasoningLevels = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
   const showReasoningIcon = $derived(showReasoning ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined')
 
@@ -493,20 +495,36 @@
   }
 
   async function saveWorkingDir() {
-    if (!sid) return
     const dir = dirDraft.trim()
     if (!dir || dir === workingDir) { dirMenu = false; return }
+    if (await applyWorkingDir(dir)) dirMenu = false
+  }
+
+  // Shared by the typed input and the folder picker: PATCH the session working
+  // dir and store the canonical path the server resolved (~ expanded, absolute).
+  // Returns whether it succeeded so callers can close their own UI.
+  async function applyWorkingDir(dir: string): Promise<boolean> {
+    if (!sid) return false
     dirSaving = true
     try {
       const res = await api.updateSessionWorkingDir(sid, dir)
-      // Store the canonical path the server resolved (~ expanded, absolute).
       chatWorkingDir.update(w => ({ ...w, [sid]: res.working_dir }))
-      dirMenu = false
+      return true
     } catch (e: any) {
       showToast(e.message ?? 'Failed to set working directory', 'error')
+      return false
     } finally {
       dirSaving = false
     }
+  }
+
+  function openPicker() {
+    dirMenu = false
+    pickerOpen = true
+  }
+
+  async function onPickerSelect(dir: string) {
+    if (await applyWorkingDir(dir)) pickerOpen = false
   }
 
   // Show only the last two path segments so a long working dir doesn't push
@@ -721,6 +739,10 @@
             <button class="dir-save" disabled={dirSaving} onclick={() => saveWorkingDir()}>
               {dirSaving ? $t('chat.dir_saving') : $t('chat.dir_save')}
             </button>
+            <button class="dir-browse" onclick={() => openPicker()}>
+              <iconify-icon icon="ant-design:folder-open-outlined" width="12"></iconify-icon>
+              {$t('chat.dir_browse')}
+            </button>
           </div>
         {/if}
       </div>
@@ -843,6 +865,14 @@
   </div>
 </div>
 
+{#if pickerOpen}
+  <FolderPickerModal
+    initialPath={workingDir}
+    onSelect={onPickerSelect}
+    onClose={() => (pickerOpen = false)}
+  />
+{/if}
+
 <style>
 .composer {
   flex: 0 0 auto;
@@ -897,7 +927,7 @@
 .mi-name { font-size: 13px; color: var(--text); }
 .mi-model { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
 .menu-empty { padding: 8px 10px; font-size: 12px; color: var(--text-tertiary); }
-.dir-menu { min-width: 300px; display: flex; gap: 6px; padding: 8px; align-items: center; }
+.dir-menu { min-width: 300px; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; align-items: center; }
 .dir-input {
   flex: 1; min-width: 0; height: 28px; padding: 0 8px;
   border: 1px solid var(--border); border-radius: 6px; background: var(--bg-container);
@@ -911,6 +941,13 @@
 }
 .dir-save:hover { opacity: 0.9; }
 .dir-save:disabled { opacity: 0.6; cursor: default; }
+.dir-browse {
+  height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-container); color: var(--text-secondary); font-size: 12px; font-family: inherit;
+  cursor: pointer; white-space: nowrap;
+  display: flex; align-items: center; gap: 4px;
+}
+.dir-browse:hover { border-color: var(--blue-5); color: var(--blue-5); }
 .reasoning-chip { padding-right: 8px; }
 .reasoning-eye { color: var(--success); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
