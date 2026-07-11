@@ -64,7 +64,6 @@ matches its description — you rarely need to invoke them by name.
 |---|---|
 | `onboard` | First-run setup (name, personality, profile → `soul.md` + `user.md`); also handles narrower re-curation with `scope:soul`, `scope:user`, or a specific memory file path |
 | `product-help` | Answers "how do I…" / "what is…" questions about octo itself by reading its own product docs |
-| `find-skills` | Helps you discover an installable skill for something you want to do |
 | `skill-creator` | Turns a repeatable task into a new `SKILL.md`, or edits/improves an existing one |
 | `workflow-creator` | Chains **existing** skills and browser recordings into one runnable, saved [workflow](/docs/guides/workflows/) |
 
@@ -75,10 +74,8 @@ matches its description — you rarely need to invoke them by name.
 | `tech-design` | Produces a full backend technical design doc from a PRD or feature description |
 | `grill-me` | Interviews you about a plan until every open decision is resolved — pairs with `tech-design` |
 | `implement` | Decomposes a tech design into dependency-ordered slices, TDD-executes each, reviews each with a sub-agent, and checkpoints progress so it survives a restart |
-| `tdd` | The red-green-refactor loop on its own, for one feature or fix rather than a whole design |
 | `code-review` | Reviews the current diff with an isolated sub-agent for unbiased correctness/convention/security feedback |
 | `worktree-isolate` | Does a risky or experimental change in an isolated git worktree, then merge or discard |
-| `zoom-out` | Gives a higher-level map of an unfamiliar area of code — modules, callers, and the project's own domain vocabulary — before diving into details |
 
 **Automation & scheduling**
 

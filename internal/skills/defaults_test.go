@@ -51,10 +51,6 @@ func TestMaterializeDefaults_WritesEmbeddedAndStamps(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "implement", "SKILL.md")); err != nil {
 		t.Fatalf("expected implement/SKILL.md materialized: %v", err)
 	}
-	// The zoom-out skill ships in the default set.
-	if _, err := os.Stat(filepath.Join(root, "zoom-out", "SKILL.md")); err != nil {
-		t.Fatalf("expected zoom-out/SKILL.md materialized: %v", err)
-	}
 	// The workflow-creator skill ships in the default set.
 	// The office-xlsx skill ships in the default set.
 	if _, err := os.Stat(filepath.Join(root, "office-xlsx", "SKILL.md")); err != nil {
@@ -75,12 +71,6 @@ func TestMaterializeDefaults_WritesEmbeddedAndStamps(t *testing.T) {
 	for _, f := range []string{"SKILL.md", filepath.Join("scripts", "image_gen.py")} {
 		if _, err := os.Stat(filepath.Join(root, "image-gen", f)); err != nil {
 			t.Fatalf("expected image-gen/%s materialized: %v", f, err)
-		}
-	}
-	// tdd bundles four companion references — all must materialize.
-	for _, f := range []string{"SKILL.md", "tests.md", "mocking.md", "deep-modules.md", "interface-design.md", "refactoring.md"} {
-		if _, err := os.Stat(filepath.Join(root, "tdd", f)); err != nil {
-			t.Fatalf("expected tdd/%s materialized: %v", f, err)
 		}
 	}
 	// code-review bundles a companion template — both files must materialize.

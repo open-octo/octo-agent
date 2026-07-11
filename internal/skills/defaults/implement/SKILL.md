@@ -89,9 +89,9 @@ PR is created, the next slice batch gets a new branch.
 
 ### The TDD cadence (every slice, no exceptions)
 
-(Test-quality standards — behavior over implementation, what to mock,
-wire-contract tests for boundary structs — live in the `tdd` skill; this
-section is the rhythm, that skill is the craft.)
+(This section is the rhythm. Hold to the usual test-quality bar as you go:
+test behavior over implementation, mock only what you don't own, and add
+wire-contract tests for boundary structs.)
 
 For EACH behavior in the slice:
 
