@@ -197,21 +197,6 @@
       opacity: 0.72;
       margin-top: 2px;
     }
-    .hero-links {
-      display: flex;
-      gap: 1.75rem;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-top: 1.25rem;
-    }
-    .hero-links a {
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 0.92rem;
-      font-weight: 500;
-      transition: color 0.15s ease;
-    }
-    .hero-links a:hover { color: var(--accent); }
     .install-hint {
       margin-top: 2rem;
       display: block;
@@ -431,12 +416,30 @@
       flex-wrap: wrap;
     }
 
+    /* Top navigation */
+    .topnav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 1.5rem;
+      padding: 0.85rem 1.5rem;
+    }
+    .topnav > a {
+      color: var(--fg-secondary);
+      text-decoration: none;
+      font-size: 0.92rem;
+      font-weight: 500;
+      transition: color 0.15s ease;
+    }
+    .topnav > a:hover { color: var(--accent); }
+
     /* Language toggle */
     .lang-toggle {
-      position: fixed;
-      top: 1rem;
-      right: 1rem;
-      z-index: 50;
       display: inline-flex;
       background: var(--card-bg);
       border: 1px solid var(--border);
@@ -475,11 +478,16 @@
 </head>
 <body>
 
-  <!-- Language toggle -->
-  <div class="lang-toggle" role="group" aria-label="Language">
-    <button type="button" data-lang="en">EN</button>
-    <button type="button" data-lang="zh">中文</button>
-  </div>
+  <!-- Top navigation -->
+  <nav class="topnav">
+    <a href="https://github.com/open-octo/octo-agent" data-en="GitHub" data-zh="GitHub"></a>
+    <a href="/docs/" data-href-en="/docs/" data-href-zh="/docs/zh/" data-en="Docs" data-zh="文档"></a>
+    <a href="/blog/" data-en="Blog" data-zh="博客"></a>
+    <div class="lang-toggle" role="group" aria-label="Language">
+      <button type="button" data-lang="en">EN</button>
+      <button type="button" data-lang="zh">中文</button>
+    </div>
+  </nav>
 
   <!-- Hero -->
   <header class="hero">
@@ -509,13 +517,8 @@
         </a>
       </div>
       <p class="all-builds">
-        <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="Other platforms, arm64 &amp; checksums →" data-zh="其他平台、arm64 与校验和 →"></a>
+        <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="Other architectures &amp; checksums →" data-zh="其他架构与校验和 →"></a>
       </p>
-      <div class="hero-links">
-        <a href="https://github.com/open-octo/octo-agent" data-en="Star on GitHub" data-zh="在 GitHub 上 Star"></a>
-        <a href="/docs/" data-href-en="/docs/" data-href-zh="/docs/zh/" data-en="Docs" data-zh="文档"></a>
-        <a href="/blog/" data-en="Blog" data-zh="博客"></a>
-      </div>
       <div class="install-hint" id="install-block">
         <p class="install-lead" data-en="Prefer the CLI? Install just the octo binary:" data-zh="想只用命令行？只装 octo 二进制："></p>
         <div class="install-grid">
