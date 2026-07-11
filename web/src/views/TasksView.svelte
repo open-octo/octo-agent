@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { tasks, showToast, sessions, activeSessionId, view, setActiveSession, openAgentSession } from '../lib/stores'
   import { t, tr, locale } from '../lib/i18n'
+  import { confirmDialog } from '../lib/confirm'
   import { get } from 'svelte/store'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
@@ -86,7 +87,7 @@
   }
 
   async function handleDelete(t: api.TaskResponse) {
-    if (!confirm(tr('tasks.confirm_delete').replace('{name}', t.name))) return
+    if (!(await confirmDialog(tr('tasks.confirm_delete').replace('{name}', t.name)))) return
     try {
       await api.deleteTask(t.id)
       rawTasks = rawTasks.filter(r => r.id !== t.id)

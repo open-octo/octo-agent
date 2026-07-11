@@ -1,6 +1,7 @@
 <script lang="ts">
   import { skills, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
+  import { confirmDialog } from '../lib/confirm'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
@@ -31,7 +32,7 @@
   }
 
   async function handleDelete(name: string) {
-    if (!confirm(tr('skills.confirm_delete').replace('{name}', name))) return
+    if (!(await confirmDialog(tr('skills.confirm_delete').replace('{name}', name)))) return
     try {
       await api.deleteSkill(name)
       skills.update(list => list.filter(s => s.name !== name))
@@ -137,7 +138,7 @@
     try {
       const r = await api.importSkill(source, force)
       if (r.conflict && !force) {
-        if (confirm(tr('skills.import_confirm_replace'))) {
+        if (await confirmDialog(tr('skills.import_confirm_replace'))) {
           importing = false
           return doImport(true)
         }

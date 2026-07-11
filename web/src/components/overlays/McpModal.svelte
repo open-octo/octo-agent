@@ -1,6 +1,7 @@
 <script lang="ts">
   import { mcpModalOpen, mcpServers, showToast } from '../../lib/stores'
   import { t, tr } from '../../lib/i18n'
+  import { confirmDialog } from '../../lib/confirm'
   import * as api from '../../lib/api'
 
   let jsonText = $state('')
@@ -34,7 +35,7 @@
         ($mcpServers as any[]).filter(s => s.source === 'user').map(s => s.name)
       )
       const collisions = Object.keys(servers).filter(name => existingUserNames.has(name))
-      if (collisions.length > 0 && !confirm(tr('mcp.confirm_import_overwrite').replace('{names}', collisions.join(', ')))) {
+      if (collisions.length > 0 && !(await confirmDialog(tr('mcp.confirm_import_overwrite').replace('{names}', collisions.join(', '))))) {
         submitting = false
         return
       }

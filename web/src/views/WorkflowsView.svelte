@@ -1,6 +1,7 @@
 <script lang="ts">
   import { workflows, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
+  import { confirmDialog } from '../lib/confirm'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
@@ -42,7 +43,7 @@
   }
 
   async function handleDelete(name: string) {
-    if (!confirm(tr('workflows.confirm_delete').replace('{name}', name))) return
+    if (!(await confirmDialog(tr('workflows.confirm_delete').replace('{name}', name)))) return
     try {
       await api.deleteWorkflow(name)
       workflows.update(list => list.filter(w => w.name !== name))

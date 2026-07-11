@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { mcpServers, toolSearchMode, mcpModalOpen, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
+  import { confirmDialog } from '../lib/confirm'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
@@ -118,7 +119,7 @@
   // ─── delete server ──────────────────────────────────────────────────────────
 
   async function deleteServer(name: string) {
-    if (!confirm(tr('mcp.confirm_delete').replace('{name}', name))) return
+    if (!(await confirmDialog(tr('mcp.confirm_delete').replace('{name}', name)))) return
     try {
       await api.deleteMcpServer(name)
       mcpServers.update(list => (list as any[]).filter((s: any) => s.name !== name))

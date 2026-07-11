@@ -51,6 +51,7 @@
   import { observeArtifact, resetArtifacts } from '../lib/artifacts'
   import { renderMarkdown, setupCopyButtons } from '../lib/markdown'
   import { t, tr } from '../lib/i18n'
+  import { confirmDialog } from '../lib/confirm'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
@@ -1128,8 +1129,8 @@
         <iconify-icon icon="ant-design:compress-outlined" width="13"></iconify-icon>
         {$t('chat.compact')}
       </button>
-      <button class="hdr-btn" title={$t('chat.clear_tooltip')} disabled={!id || streaming} onclick={() => {
-        if (confirm($t('chat.clear_confirm'))) send('/clear')
+      <button class="hdr-btn" title={$t('chat.clear_tooltip')} disabled={!id || streaming} onclick={async () => {
+        if (await confirmDialog($t('chat.clear_confirm'))) send('/clear')
       }}>
         <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
         {$t('chat.clear')}

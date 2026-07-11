@@ -24,6 +24,7 @@
   import CommandPalette from './components/overlays/CommandPalette.svelte'
   import McpModal from './components/overlays/McpModal.svelte'
   import ConfirmModal from './components/overlays/ConfirmModal.svelte'
+  import ConfirmDialog from './components/overlays/ConfirmDialog.svelte'
   import QuestionModal from './components/overlays/QuestionModal.svelte'
   import FeedbackModal from './components/overlays/FeedbackModal.svelte'
   import Toast from './components/overlays/Toast.svelte'
@@ -317,6 +318,7 @@
 <CommandPalette />
 <McpModal />
 <ConfirmModal />
+<ConfirmDialog />
 <QuestionModal />
 <FeedbackModal />
 <Toast />

@@ -4,6 +4,7 @@
   import StatusTag from '../components/ui/StatusTag.svelte'
   import * as api from '../lib/api'
   import { t, tr } from '../lib/i18n'
+  import { confirmDialog } from '../lib/confirm'
 
   interface TrashEntry {
     id: string
@@ -60,7 +61,7 @@
     const entry = items.find(i => i.id === id)
     // Permanent delete — confirm first (the bulk actions already do), and name
     // the file so the user knows exactly what they're discarding.
-    if (!confirm(`${tr('files.confirm_delete_one')}${entry ? `\n\n${basename(entry.original)}` : ''}`)) return
+    if (!(await confirmDialog(`${tr('files.confirm_delete_one')}${entry ? `\n\n${basename(entry.original)}` : ''}`))) return
     busyId = id
     try {
       await api.deleteTrashItem(id)
@@ -76,7 +77,7 @@
   }
 
   async function handleEmptyAll() {
-    if (!confirm(tr('files.confirm_empty_all').replace('{n}', String(totalCount)))) return
+    if (!(await confirmDialog(tr('files.confirm_empty_all').replace('{n}', String(totalCount))))) return
     try {
       await api.emptyTrash({ mode: 'all' })
       items = []

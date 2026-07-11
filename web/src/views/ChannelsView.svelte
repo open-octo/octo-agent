@@ -5,6 +5,7 @@
   import Switch from '../components/ui/Switch.svelte'
   import * as api from '../lib/api'
   import { t, tr } from '../lib/i18n'
+  import { confirmDialog } from '../lib/confirm'
 
   // platform-to-icon mapping for well-known channels
   const platformIcons: Record<string, string> = {
@@ -90,7 +91,7 @@
   // The six platforms are fixed — "unconfigure" clears the saved credentials
   // and returns the card to the "Not configured" state rather than removing it.
   async function handleUnconfigure(platform: string) {
-    if (!confirm(tr('channels.confirm_unconfigure').replace('{platform}', labelFor(platform)))) return
+    if (!(await confirmDialog(tr('channels.confirm_unconfigure').replace('{platform}', labelFor(platform))))) return
     busyPlatform = platform
     try {
       await api.deleteChannel(platform)

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
+  import { confirmDialog } from '../lib/confirm'
   import * as api from '../lib/api'
   import type { BrowserRecording, BrowserStatus, BrowserVerifyResult } from '../lib/api'
   import BrowserSetupForm from '../components/settings/BrowserSetupForm.svelte'
@@ -53,7 +54,7 @@
   })
 
   async function del(name: string) {
-    if (!confirm(tr('browser.rec.delete_confirm').replace('{name}', name))) return
+    if (!(await confirmDialog(tr('browser.rec.delete_confirm').replace('{name}', name)))) return
     try {
       await api.deleteBrowserRecording(name)
       showToast(tr('browser.rec.deleted'), 'success')

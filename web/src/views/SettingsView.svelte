@@ -6,6 +6,7 @@
   import ModelConfigForm from '../components/settings/ModelConfigForm.svelte'
   import { showToast } from '../lib/stores'
   import { setLocale, t, tr } from '../lib/i18n'
+  import { confirmDialog } from '../lib/confirm'
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import { notificationsEnabled, setNotificationsEnabled } from '../lib/notifications'
   import * as api from '../lib/api'
@@ -103,7 +104,7 @@
     showToast(tr('settings.toast_saved'), 'success')
   }
   async function deleteModelRow(m: ModelEntry) {
-    if (!confirm(tr('settings.models.confirm_remove'))) return
+    if (!(await confirmDialog(tr('settings.models.confirm_remove')))) return
     busyModelId = m.id
     try {
       await api.deleteModel(m.id)
