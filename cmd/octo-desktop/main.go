@@ -61,6 +61,9 @@ func isBundled() bool {
 }
 
 func main() {
+	// Pick the language for native dialogs/tray from the system UI language.
+	detectLang()
+
 	settings := loadDesktopSettings()
 
 	// Seed ~/.octo/bin/uv from the app's bundled copy on first run so skills
@@ -115,7 +118,7 @@ func main() {
 	} else {
 		tray.SetIcon(trayColorIcon)
 	}
-	tray.SetTooltip("Octo")
+	tray.SetTooltip(L.takeoverTitle)
 	tray.SetMenu(buildTrayMenu(app, bridge))
 	// Keep the tray's status lines (backend, channels, connected clients) fresh
 	// while the app runs — macOS doesn't refresh a status menu on open.
@@ -155,22 +158,30 @@ func main() {
 // the ApplicationStarted hook so its dialogs have a live event loop.
 func startHub(app *application.App, bridge *nativeBridge, settings desktopSettings) {
 	// If another backend already owns the port, ask before displacing it.
+	tookOver := false
 	if pid, ok := serveproc.Running(); ok {
 		if !bridge.confirmTakeover(pid) {
 			app.Quit()
 			return
 		}
 		if _, err := serveproc.Stop(); err != nil {
-			bridge.showError("Octo", fmt.Sprintf("Couldn't stop the running backend: %v", err))
+			bridge.showError(L.errTitle, fmt.Sprintf(L.errStopFmt, err))
 			app.Quit()
 			return
 		}
+		tookOver = true
 	}
 
-	ln, err := net.Listen("tcp", hubAddr)
+	// After a takeover, the stopped daemon needs a moment to release the port —
+	// serveproc.Stop only signals it. Retry the bind for a few seconds so the
+	// handoff is seamless; a cold start with a genuine conflict fails at once.
+	grace := time.Duration(0)
+	if tookOver {
+		grace = 8 * time.Second
+	}
+	ln, err := listenHub(hubAddr, grace)
 	if err != nil {
-		bridge.showError("Octo",
-			fmt.Sprintf("Couldn't bind %s — another program may be using it.\n\n%v", hubAddr, err))
+		bridge.showError(L.errTitle, fmt.Sprintf(L.errBindFmt, hubAddr, err))
 		app.Quit()
 		return
 	}
@@ -190,7 +201,7 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 		ChannelsEnabled: &channelsOn,
 	})
 	if err != nil {
-		bridge.showError("Octo", fmt.Sprintf("Couldn't start the backend: %v", err))
+		bridge.showError(L.errTitle, fmt.Sprintf(L.errStartFmt, err))
 		app.Quit()
 		return
 	}
@@ -202,6 +213,23 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	}()
 
 	bridge.showWindow()
+}
+
+// listenHub binds addr, retrying for up to grace so a just-stopped daemon has
+// time to release the port (SIGTERM only signals it; the listener closes a
+// beat later). grace of 0 means a single attempt.
+func listenHub(addr string, grace time.Duration) (net.Listener, error) {
+	deadline := time.Now().Add(grace)
+	for {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			return ln, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 // trayStatusLines is the (info-only) top of the tray menu: what the hub is
