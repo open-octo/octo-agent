@@ -138,6 +138,8 @@ Write `project/images/image_prompts.json` per §6. Then follow §7 Path Selectio
 
 ## 4. Prompt Assembly Template
 
+> **Before assembling, consult the prompt-craft library** — [`prompt-craft/craft.md`](prompt-craft/craft.md) (the 18-point checklist: exact text in quotes, canvas/aspect/layout before subject, diagram grammar for data figures, UI-as-spec, multi-panel consistency, camera context, scene density over adjectives, dense Chinese/multilingual, etc.) and [`prompt-craft/gallery.md`](prompt-craft/gallery.md) to find and remix the closest exemplar `**Prompt**` entries. The template below is the deck-integration scaffold; the craft library is what makes each prompt actually render well.
+
 Every assembled prompt follows this paragraph structure. **Write prose, not tag soup**.
 
 ```

@@ -136,10 +136,36 @@ python3 <skill-dir>/scripts/slice_images.py /abs/images/spot_sheet.png \
 `--trim` tight-crops each cell to its content; `--alpha` knocks out the flat
 background to transparency. Geometry rules: `references/image-generator.md` §4.3.
 
+## Prompt quality — consult the craft library before writing an AI prompt
+
+The quality of an AI-generated image is set almost entirely by the prompt. Before
+authoring or repairing any `ai` prompt, **read the prompt-craft library** — a
+distilled checklist plus a 160-prompt exemplar atlas (adapted from the MIT-licensed
+[GPT-Image2-Skill](https://github.com/wuyoscar/GPT-Image2-Skill), tuned for
+`gpt-image-2` but the principles carry across backends):
+
+1. **`references/prompt-craft/craft.md`** — the 18-point checklist: put exact text in
+   quotes, declare canvas/aspect/layout before subject, JSON/config-style prompts,
+   fixed-region schemas for infographics, diagram grammar for data figures, UI-as-spec,
+   multi-panel consistency, camera context for photorealism, scene density over
+   adjectives, bounded style anchors, material/lighting/palette as separate controls,
+   edit-endpoint invariants, dense Chinese/multilingual layouts. Load it whenever a
+   prompt involves readable text, diagrams/data, UI, multi-panel layouts, or is weak.
+2. **`references/prompt-craft/gallery.md`** — routing index to per-category exemplar
+   prompts (`gallery-*.md`). Find the closest category, read 3–8 nearby `**Prompt**`
+   entries, and remix rather than writing from scratch. (Preview PNGs aren't bundled;
+   the prompt text is what matters.)
+3. **`references/prompt-craft/openai-cookbook.md`** — official `gpt-image` API/model
+   parameter semantics; load for capability or parameter questions.
+
+This lifts output quality across every backend; it is not gpt-image-only.
+
 ## References — load on demand
 
 | Need | Read |
 |---|---|
+| **Prompt-craft checklist (read before writing any AI prompt)** | `references/prompt-craft/craft.md` |
+| **Exemplar prompt atlas by category** | `references/prompt-craft/gallery.md` → `gallery-<category>.md` |
 | Common framework: resource-list format, path dispatch, status enum | `references/image-base.md` |
 | AI path: prompt assembly, page roles, sheet/slice geometry, manifest schema, path selection | `references/image-generator.md` |
 | Web path: license tiers, provider selection, attribution, `--strict-no-attribution` | `references/image-searcher.md` |

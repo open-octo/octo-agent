@@ -8,6 +8,10 @@
   and repackaged as a standalone, general-purpose skill.
 - **License:** MIT — "Copyright (c) 2025-2026 Hugo He" (reproduced as
   `LICENSE.txt`).
+- **`references/prompt-craft/` adapted from:** [`wuyoscar/GPT-Image2-Skill`](https://github.com/wuyoscar/GPT-Image2-Skill),
+  commit `e48b023f38769b6377fe38f1de97197d5e12e6d4`, MIT — "Copyright (c) 2026
+  Wuyoscar" (reproduced as `references/prompt-craft/LICENSE.txt`). See the
+  "Prompt-craft library" section below.
 
 ## What this skill is
 
@@ -48,3 +52,33 @@ Moved verbatim out of `skills/ppt-master/`:
   intact rather than rewritten, to preserve the upstream prompt engineering.
   Cosmetic `skills/ppt-master/...` path strings in script comments / user-agent
   were likewise left as upstream attribution.
+
+## Prompt-craft library (`references/prompt-craft/`)
+
+Vendored from [`wuyoscar/GPT-Image2-Skill`](https://github.com/wuyoscar/GPT-Image2-Skill)
+(MIT) to lift generated-image quality. It carries `craft.md` (an 18-point
+prompt-design checklist), `gallery.md` + ~30 `gallery-*.md` category files (a
+~160-prompt exemplar atlas), and `openai-cookbook.md` (gpt-image API/parameter
+semantics). Tuned for `gpt-image-2` but the principles apply across backends.
+
+- **Dropped:** the upstream `docs/*.png` preview gallery (hundreds of MB) — the
+  category `.md` files keep the prompt text + metadata, which is what matters
+  for authoring; a note in `gallery.md` points to the upstream repo for the
+  visual previews and flags the image links as unbundled.
+- **Not vendored:** the upstream `gpt-image` CLI / `scripts/generate.py` and its
+  standalone `SKILL.md` — this skill already generates through its own
+  multi-backend `image_gen.py`, so only the prompt-craft knowledge was taken.
+- **Wiring:** `SKILL.md` gains a "Prompt quality" section and reference-table
+  rows directing the model to read `craft.md` + the closest `gallery-*.md`
+  before authoring any AI prompt; `references/image-generator.md` §4 points at
+  the same library from its assembly template.
+
+## Default model change
+
+The `volcengine` (Seedream) backend default was moved from
+`doubao-seedream-4-5-251128` to `doubao-seedream-5-0-260128` (Seedream 5.0
+Lite — the verified Ark model id). Seedream 5.0 Pro (released 2026-07,
+positioned against gpt-image-2) is the intended flagship but its exact dated
+Ark model id was not verifiable from public sources at vendoring time, so it is
+documented in `.env.example` as a one-line `VOLCENGINE_MODEL` override to set
+once the id is confirmed, rather than hard-coded on a guess.
