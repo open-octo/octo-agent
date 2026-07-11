@@ -21,10 +21,10 @@ Full mechanics (rule-tier syntax, the save-nudge hook, why the CLI composes once
 
 Everything above is `MEMORY.md` — curated standing guidance, frozen into the system prompt. octo can *additionally* connect to a self-hosted external semantic-memory service that indexes raw conversation text for later search. Separate, optional layer — off by default, doesn't touch `MEMORY.md`.
 
-Three backends, pick at most one: [hindsight](https://github.com/vectorize-io/hindsight), [mem0](https://github.com/mem0ai/mem0), or [MemTensor/MemOS](https://github.com/MemTensor/MemOS) (not the unrelated `usememos/memos` app) — each self-hosted, octo just talks to its REST API.
+Three backends, pick at most one: [hindsight](https://github.com/vectorize-io/hindsight), [mem0](https://github.com/mem0ai/mem0), or [agentmemory](https://github.com/rohitg00/agentmemory) — each self-hosted, octo just talks to its REST API.
 
 - **Storing is automatic and silent** — after every turn, in the background, no tool involved.
 - **Recall is a tool** — the agent calls `memory_recall` when it suspects something relevant was discussed before; this one blocks and its errors surface.
-- **Configure** via `memory_backend` in `~/.octo/config.yml`: `type` (`hindsight`\|`mem0`\|`memos`; unset disables the feature entirely), `base_url`, `api_key` (backend-dependent — hindsight/memos default to no auth, mem0 requires it by default), `namespace` (scopes stored/recalled memories).
+- **Configure** via `memory_backend` in `~/.octo/config.yml`: `type` (`hindsight`\|`mem0`\|`agentmemory`; unset disables the feature entirely), `base_url`, `api_key` (backend-dependent — hindsight/agentmemory default to no auth, mem0 requires it by default), `namespace` (scopes stored/recalled memories).
 
 Full backend-specific auth/setup notes: **https://octo-agent.dev/docs/guides/memory-backends/** (`web_fetch`).

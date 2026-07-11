@@ -86,7 +86,7 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 		tools.SetBrowserVision(cfg.ModelVision(a.Model))
 	}
 
-	// Optional external semantic memory backend (hindsight/mem0/memos) — the
+	// Optional external semantic memory backend (hindsight/mem0/agentmemory) — the
 	// user finds out about a bad Type/BaseURL on the first memory_recall call.
 	RefreshMemoryBackend()
 

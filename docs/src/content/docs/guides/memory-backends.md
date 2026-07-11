@@ -1,6 +1,6 @@
 ---
 title: Connect a memory backend
-description: Optional semantic recall via hindsight, mem0, or MemTensor/MemOS — separate from MEMORY.md.
+description: Optional semantic recall via hindsight, mem0, or agentmemory — separate from MEMORY.md.
 ---
 
 octo can optionally connect to a self-hosted external memory service that indexes your
@@ -18,13 +18,15 @@ Three backends are supported; pick at most one:
 - [mem0](https://github.com/mem0ai/mem0) — self-hosted (`server/` in the mem0ai/mem0 repo), auth on
   by default; a managed [mem0 Platform](https://docs.mem0.ai/platform/quickstart) (cloud) option
   also exists (see below).
-- [MemTensor/MemOS](https://github.com/MemTensor/MemOS) — self-hosted, no auth by default. (Not
-  `usememos/memos`, which is an unrelated note-taking app, and not `agiresearch/MemOS`.)
+- [agentmemory](https://github.com/rohitg00/agentmemory) — self-hosted Node/TypeScript server, no
+  auth by default, and the lightest to run: it ships local embeddings and needs no external LLM or
+  API key to get started.
 
-All three need an LLM (for fact extraction) and an embedding model (for search) — either your own
-OpenAI-compatible endpoint (DashScope/Bailian, DeepSeek, etc.) or, for hindsight, a fully local
-setup. The steps below are a tested, copy-pasteable quick start for each — a supplement to their own
-docs, not a replacement.
+hindsight and mem0 need an LLM (for fact extraction) and an embedding model (for search) — either
+your own OpenAI-compatible endpoint (DashScope/Bailian, DeepSeek, etc.) or, for hindsight, a fully
+local setup. agentmemory runs entirely locally out of the box (local embeddings, LLM optional). The
+steps below are a tested, copy-pasteable quick start for each — a supplement to their own docs, not a
+replacement.
 
 ## Running a backend locally
 
@@ -149,52 +151,34 @@ memory_backend:
 `base_url` is set. `api_key` is required (the Platform has no unauthenticated mode); octo sends it
 as `Authorization: Token <api_key>`, matching what the Platform API expects.
 
-### MemOS (MemTensor)
+### agentmemory
 
-The heaviest of the three — bundles Neo4j (graph store) and Qdrant (vector store) alongside the API.
-Their docs give a ready-made [Bailian/DashScope example](https://github.com/MemTensor/MemOS/blob/main/docs/en/open_source/getting_started/rest_api_server.md)
-that already has the embedding dimension set correctly, so it's the least fiddly of the three if
-you have a DashScope key:
+The lightest of the three: no Docker, no database, no API key. It ships an embedded SQLite store and
+runs its embedding model locally (`all-MiniLM-L6-v2` via `@xenova/transformers`), so it works
+out of the box.
 
 ```bash
-git clone https://github.com/MemTensor/MemOS
-cd MemOS
-cat > .env <<'EOF'
-OPENAI_API_KEY=<your-bailian-api-key>
-OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
-MOS_CHAT_MODEL=qwen3-max
-
-MEMRADER_MODEL=qwen3-max
-MEMRADER_API_KEY=<your-bailian-api-key>
-MEMRADER_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
-
-MOS_EMBEDDER_MODEL=text-embedding-v4
-MOS_EMBEDDER_BACKEND=universal_api
-MOS_EMBEDDER_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
-MOS_EMBEDDER_API_KEY=<your-bailian-api-key>
-EMBEDDING_DIMENSION=1024
-MOS_RERANKER_BACKEND=cosine_local
-
-NEO4J_BACKEND=neo4j-community
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=12345678
-NEO4J_DB_NAME=neo4j
-MOS_NEO4J_SHARED_DB=false
-
-DEFAULT_USE_REDIS_QUEUE=false
-ENABLE_CHAT_API=true
-CHAT_MODEL_LIST=[{"backend": "qwen", "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1", "api_key": "<your-bailian-api-key>", "model_name_or_path": "qwen3-max", "support_models": ["qwen3-max"]}]
-EOF
-cd docker
-docker compose up --build
+npm install -g @agentmemory/agentmemory
+agentmemory
 ```
 
-(Using a different OpenAI-compatible provider: swap `OPENAI_API_BASE`/`MOS_EMBEDDER_API_BASE` and set
-`EMBEDDING_DIMENSION` to match your embedding model's actual output size — same rule as mem0 above.)
+(Or run it without installing: `npx @agentmemory/agentmemory`.) The REST API binds to
+`127.0.0.1:3111` by default; a live viewer runs on `3113`.
 
-Verify it's up: `http://localhost:8000/docs` should load. No auth is required by default — identity
-comes from an `X-User-Name` header instead, which octo sends automatically when `api_key` is blank.
+Verify it's up:
+
+```bash
+curl http://localhost:3111/agentmemory/health
+# {"status":"healthy",...}
+```
+
+No auth is required by default. To lock it down, start the server with `AGENTMEMORY_SECRET` set and
+put the same value in octo's `api_key` — octo sends it as `Authorization: Bearer <api_key>`.
+
+An external LLM is optional (it enables automatic observation summarization) — set `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, or `GEMINI_API_KEY` in `~/.agentmemory/.env` if you want it. octo only uses two
+endpoints: it stores each turn via `/agentmemory/remember` and recalls via `/agentmemory/search`
+(narrative format), which returns the full stored text — neither requires an LLM to be configured.
 
 ## How it works
 
@@ -216,7 +200,7 @@ Add a `memory_backend` block to `~/.octo/config.yml`:
 
 ```yaml
 memory_backend:
-  type: hindsight        # hindsight | mem0 | memos
+  type: hindsight        # hindsight | mem0 | agentmemory
   mode: ""               # only meaningful for mem0: "cloud" or "" (self-hosted, default)
   base_url: http://localhost:8888
   api_key: ""            # optional — see per-backend notes below
@@ -228,9 +212,9 @@ memory_backend:
   feature entirely — no tool is advertised, nothing is sent anywhere.
 - **`mode`** only matters for `type: mem0`: set it to `cloud` to talk to the hosted mem0 Platform
   instead of a self-hosted server (see "mem0 Cloud" above) — the two use different endpoint paths
-  and auth headers, so this isn't inferred from `base_url`. Ignored by hindsight and memos.
+  and auth headers, so this isn't inferred from `base_url`. Ignored by hindsight and agentmemory.
 - **`base_url`** is the backend's REST endpoint — wherever you're running its server (`http://localhost:8888`
-  for hindsight/mem0 as set up above, `http://localhost:8000` for MemOS). Can be omitted for
+  for hindsight/mem0 as set up above, `http://localhost:3111` for agentmemory). Can be omitted for
   `mem0` with `mode: cloud`, which defaults it to `https://api.mem0.ai`.
 - **`api_key`** is optional and backend-dependent:
   - self-hosted hindsight has no auth by default; set an API key only if you've enabled
@@ -239,10 +223,10 @@ memory_backend:
   - self-hosted mem0 requires auth by default — set the server's `X-API-Key`-compatible key here,
     or run the server with `AUTH_DISABLED=true` for local development and leave this blank. mem0
     Cloud (`mode: cloud`) always requires the API key from its dashboard.
-  - memos (MemTensor/MemOS) has no auth by default; leaving this blank sends your `namespace` as an
-    `X-User-Name` header instead.
+  - agentmemory has no auth by default; leave this blank unless you started the server with
+    `AGENTMEMORY_SECRET`, in which case set the same value here (sent as `Authorization: Bearer`).
 - **`namespace`** scopes what gets stored/recalled — hindsight's `bank_id`, mem0's `user_id`, or
-  memos's `user_id`. Use something stable per project (or leave it as the default single bucket).
+  agentmemory's `project`. Use something stable per project (or leave it as the default single bucket).
 - **`auto_recall`** — see below. Defaults to `false`.
 
 Restart `octo` (or `octo serve`) after changing this — it's read once at session start, the same as
@@ -273,10 +257,11 @@ free of the extra round trip and rely on the tool alone.
   **before** the first `/memories` call. If you already stored something with the wrong size, there's
   no in-place fix — wipe and start over: `docker compose down -v && docker compose up -d`, then
   `/configure` again immediately, before storing anything.
-- **mem0/MemOS: `provider_auth_failed` / 401 from `api.openai.com`** — your LLM/embedder config is
-  still pointing at real OpenAI. For mem0, set the base URL via `/configure` (not just `.env`); for
-  MemOS, double check `OPENAI_API_BASE`/`MOS_EMBEDDER_API_BASE` in `.env` and rebuild
-  (`docker compose up -d --force-recreate`).
+- **mem0: `provider_auth_failed` / 401 from `api.openai.com`** — your LLM/embedder config is
+  still pointing at real OpenAI. Set the base URL via `/configure` (not just `.env`).
+- **agentmemory: recall returns nothing right after storing** — confirm the server is actually up
+  (`curl http://localhost:3111/agentmemory/health`) and that octo's `namespace` matches across
+  restarts; it maps to agentmemory's `project`, which scopes what search returns.
 - **hindsight: connection refused right after `docker run`** — give it a minute or two; it's still
   downloading/loading the embedding and reranker models. `docker logs hindsight` shows progress.
   Once it prints its startup banner, subsequent restarts are much faster (models are cached in the

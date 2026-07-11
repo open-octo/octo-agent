@@ -128,7 +128,7 @@ type Config struct {
 	// Goal configures the session-goal feature (/goal and the goal tools).
 	Goal GoalConfig `yaml:"goal,omitempty"`
 	// MemoryBackend optionally configures an external semantic memory
-	// service (hindsight, mem0, or memos). Empty Type means disabled — this
+	// service (hindsight, mem0, or agentmemory). Empty Type means disabled — this
 	// is separate from and does not affect the built-in MEMORY.md layer.
 	MemoryBackend MemoryBackendConfig `yaml:"memory_backend,omitempty"`
 	// WorkspaceDir sets the default working directory new web sessions are
@@ -158,18 +158,18 @@ func (c *Config) GoalEnabled() bool {
 }
 
 // MemoryBackendConfig configures an optional external semantic memory
-// backend. Exactly one of hindsight/mem0/memos can be active at a time.
+// backend. Exactly one of hindsight/mem0/agentmemory can be active at a time.
 type MemoryBackendConfig struct {
-	// Type selects the backend: "hindsight", "mem0", or "memos". Empty
+	// Type selects the backend: "hindsight", "mem0", or "agentmemory". Empty
 	// disables the feature.
 	Type string `yaml:"type,omitempty"`
 	// BaseURL is the backend's REST endpoint, e.g. http://localhost:8888.
 	BaseURL string `yaml:"base_url,omitempty"`
 	// APIKey is optional; required by some backends (mem0 by default),
-	// optional for others (hindsight, memos default to no auth).
+	// optional for others (hindsight, agentmemory default to no auth).
 	APIKey string `yaml:"api_key,omitempty"`
-	// Namespace scopes stored/recalled memories (hindsight bank_id, mem0/memos
-	// user_id). Defaults to "default" when empty.
+	// Namespace scopes stored/recalled memories (hindsight bank_id, mem0
+	// user_id, agentmemory project). Defaults to "default" when empty.
 	Namespace string `yaml:"namespace,omitempty"`
 	// Mode selects between deployment variants of the same Type. Currently
 	// only meaningful for "mem0": "cloud" talks to the hosted mem0 Platform

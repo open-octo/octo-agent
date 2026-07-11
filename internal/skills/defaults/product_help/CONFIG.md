@@ -14,7 +14,7 @@ Path: `~/.octo/config.yml`. Every field is optional — a missing file or field 
 | `workspace_dir` | string | Default working dir for new **web** sessions only; `"auto"` → `~/Desktop/octo` |
 | `goal.enabled` | bool | Gates `/goal` and the goal tools (default true) |
 | `browser.connect_port` / `browser.attach_running` | int / bool | Chrome connection settings — see `octo browser setup` |
-| `memory_backend` | object | Optional external semantic memory (hindsight/mem0/memos) — see `MEMORY.md` |
+| `memory_backend` | object | Optional external semantic memory (hindsight/mem0/agentmemory) — see `MEMORY.md` |
 | `tools.tool_search` | object | MCP Tool Search settings — see `MCP.md` |
 
 ## Example
