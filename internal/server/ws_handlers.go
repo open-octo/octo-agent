@@ -417,7 +417,11 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	}
 
 	content := extractTextContent(msg.Content)
-	att := parseUserFiles(msg.Files, conn.loopback)
+	// conn is nil for server-injected messages (e.g. a mid-turn steer replayed
+	// through this handler): treat those as non-loopback so a real path is only
+	// ever honored for a message that genuinely arrived from a local peer.
+	loopback := conn != nil && conn.loopback
+	att := parseUserFiles(msg.Files, loopback)
 	if content == "" && len(att.blocks) == 0 && len(att.notes) == 0 {
 		return
 	}
