@@ -90,10 +90,11 @@ jobs:
           name: Octo-linux-appimage
           path: Octo-x86_64.AppImage
 
+      # -H windowsgui: a GUI app, so no console window flashes behind it.
       - name: Build Windows binary
         if: runner.os == 'Windows'
         working-directory: cmd/octo-desktop
-        run: go build -v -o octo-desktop.exe .
+        run: go build -v -ldflags "-H windowsgui" -o octo-desktop.exe .
 
       # Raw .exe for now; wrapping it in an installer rides the existing Inno
       # Setup track (see windows-installer-check.yml), a separate change.

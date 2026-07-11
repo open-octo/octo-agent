@@ -43,6 +43,10 @@ func main() {
 	}
 	url := fmt.Sprintf("http://%s", ln.Addr().String())
 
+	// Seed ~/.octo/bin/uv from the app's bundled copy on first run so skills
+	// that need Python work even for a standalone download (no installer).
+	ensureBundledUv()
+
 	bridge := &nativeBridge{}
 	// Native notifications only when bundled (see isBundled): the service needs
 	// a bundle identifier. Registered as a Wails service so its ServiceStartup
