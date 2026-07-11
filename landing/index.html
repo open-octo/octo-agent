@@ -157,7 +157,32 @@
     .all-builds a:hover { color: var(--accent); text-decoration: underline; }
     .install-hint {
       margin-top: 2rem;
-      display: inline-block;
+      display: block;
+    }
+    .install-lead {
+      margin: 0 0 0.75rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .install-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+      margin: 0;
+    }
+    .install-col {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      align-items: flex-start;
+    }
+    .install-os {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--muted);
     }
     .install-note {
       max-width: 36rem;
@@ -413,19 +438,37 @@
          data-en="A functionality-first AI agent in a single Go binary. Bring it to your terminal, browser, or chat app — it speaks Anthropic and OpenAI natively, and actually gets things done."
          data-zh="以功能为先的 AI Agent，单一 Go 二进制。带它进终端、浏览器或聊天工具 —— 原生支持 Anthropic 与 OpenAI，真正把事情干完。"></p>
       <div class="hero-actions">
-        <a class="btn btn-primary js-download" href="https://github.com/open-octo/octo-agent/releases/latest" data-en="⬇️ Download" data-zh="⬇️ 下载"></a>
+        <a class="btn btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest/download/octo-setup.pkg">⬇️ macOS (.pkg)</a>
+        <a class="btn btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest/download/octo-setup.exe">⬇️ Windows (.exe)</a>
+        <a class="btn btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest/download/Octo-x86_64.AppImage">⬇️ Linux (AppImage)</a>
+      </div>
+      <div class="hero-actions">
         <a class="btn btn-secondary" href="https://github.com/open-octo/octo-agent" data-en="⭐ Star on GitHub" data-zh="⭐ 在 GitHub 上 Star"></a>
         <a class="btn btn-secondary" href="/docs/" data-href-en="/docs/" data-href-zh="/docs/zh/" data-en="📖 Read the Docs" data-zh="📖 阅读文档"></a>
         <a class="btn btn-secondary" href="/blog/" data-en="📝 Blog" data-zh="📝 博客"></a>
       </div>
       <p class="all-builds">
-        <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="Other platforms &amp; checksums →" data-zh="其他平台与校验和 →"></a>
+        <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="Other platforms, arm64 &amp; checksums →" data-zh="其他平台、arm64 与校验和 →"></a>
       </p>
       <div class="install-hint" id="install-block">
-        <pre class="install-cmd" id="install-cmd">curl -fsSL https://octo-agent.dev/install.sh | sh</pre>
+        <p class="install-lead" data-en="Prefer the CLI? Install just the octo binary:" data-zh="想只用命令行？只装 octo 二进制："></p>
+        <div class="install-grid">
+          <div class="install-col">
+            <span class="install-os">macOS</span>
+            <pre class="install-cmd">curl -fsSL https://octo-agent.dev/install.sh | sh</pre>
+          </div>
+          <div class="install-col">
+            <span class="install-os">Linux</span>
+            <pre class="install-cmd">curl -fsSL https://octo-agent.dev/install.sh | sh</pre>
+          </div>
+          <div class="install-col">
+            <span class="install-os">Windows</span>
+            <pre class="install-cmd">irm https://octo-agent.dev/install.ps1 | iex</pre>
+          </div>
+        </div>
         <p class="install-note"
-           data-en="Desktop app vs. CLI — the desktop app (the Download button, or the AppImage on Linux) is a native window that, while it's open, is also the local backend your browser, VS Code, and Obsidian all connect to. The one-liner above installs just the octo CLI: the terminal agent plus headless `octo serve`. Same agent and the same ~/.octo — pick either, or run both."
-           data-zh="桌面应用 vs. 命令行 —— 桌面应用（下载按钮，Linux 为 AppImage）是原生窗口，打开时它同时是浏览器、VS Code、Obsidian 连接的本机后端。上面这行只装 octo 命令行：终端 agent 加无界面的 `octo serve`。同一个 agent、同一份 ~/.octo —— 任选其一，或两者兼用。"></p>
+           data-en="Desktop app vs. CLI — the desktop app (the downloads above) is a native window that, while it's open, is also the local backend your browser, VS Code, and Obsidian all connect to. The script installs just the octo CLI: the terminal agent plus headless `octo serve`. Same agent and the same ~/.octo — pick either, or run both."
+           data-zh="桌面应用 vs. 命令行 —— 桌面应用（上方下载）是原生窗口，打开时它同时是浏览器、VS Code、Obsidian 连接的本机后端。脚本只装 octo 命令行：终端 agent 加无界面的 `octo serve`。同一个 agent、同一份 ~/.octo —— 任选其一，或两者兼用。"></p>
       </div>
     </div>
   </header>
@@ -602,7 +645,7 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
         <h2 style="font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem;" data-en="Ready to try it?" data-zh="想试试吗？"></h2>
         <p style="color: var(--muted); margin-bottom: 1.5rem;" data-en="Install in seconds, configure in a minute, ship in an hour." data-zh="几秒安装，一分钟配置，一小时交付。"></p>
         <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
-          <a class="btn btn-primary js-download" href="https://github.com/open-octo/octo-agent/releases/latest" data-en="⬇️ Download" data-zh="⬇️ 下载"></a>
+          <a class="btn btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest" data-en="⬇️ Download" data-zh="⬇️ 下载"></a>
           <a class="btn btn-secondary" href="https://github.com/open-octo/octo-agent" style="display:inline-flex;align-items:center;gap:6px;"><svg width="16" height="16" viewBox="0 0 100 100" style="flex:0 0 16px;"><rect width="100" height="100" rx="22" fill="#2F54EB"/><path fill="#ffffff" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/><circle cx="40" cy="42" r="5" fill="#2F54EB"/><circle cx="60" cy="42" r="5" fill="#2F54EB"/></svg> GitHub</a>
           <a class="btn btn-secondary" href="https://github.com/open-octo/octo-agent/releases" data-en="📋 Changelog" data-zh="📋 更新日志"></a>
         </div>
@@ -654,81 +697,9 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
       b.addEventListener('click', () => setLang(b.dataset.lang));
     });
 
-    // Direct download: detect the visitor's OS and point the Download buttons
-    // straight at the matching release asset, so they skip the GitHub releases
-    // page. The version-stable installer aside, archive names carry the version,
-    // so the exact URL comes from the GitHub API (CORS-enabled, no auth). Any
-    // failure (offline, rate-limited, unknown OS) leaves the buttons on their
-    // fallback href — the releases page — so they always work.
-    (function initDownload() {
-      var btns = document.querySelectorAll('.js-download');
-      var block = document.getElementById('install-block');
-      var cmd = document.getElementById('install-cmd');
-
-      var ua = navigator.userAgent || '';
-      var plat = (navigator.platform || '') + ' ' + ua;
-      var arch = /arm64|aarch64/i.test(ua) ? 'arm64' : 'amd64';
-      var target = null;
-      if (/Win/i.test(plat)) target = { os: 'windows' };
-      else if (/Mac/i.test(plat)) target = { os: 'darwin' };
-      else if (/Linux|X11/i.test(plat) && !/Android/i.test(ua)) target = { os: 'linux', arch: arch };
-
-      // Linux: no double-click installer, so lead with the install script and
-      // the steps to start the server — the user runs `octo serve -d` and
-      // opens the dashboard themselves. Download buttons stay hidden.
-      if (target && target.os === 'linux') {
-        if (cmd) {
-          cmd.textContent =
-            'curl -fsSL https://octo-agent.dev/install.sh | sh\n' +
-            'octo serve -d                       # start the local server\n' +
-            'xdg-open http://127.0.0.1:8088      # open the dashboard, then onboard';
-        }
-        btns.forEach(function (b) { b.style.display = 'none'; });
-        return;
-      }
-
-      // macOS: two supported paths, both real — keep the curl one-liner
-      // visible AND point the Download buttons at the double-click .pkg
-      // installer (filled in by the asset fetch below).
-      if (target && target.os === 'darwin' && cmd) {
-        cmd.textContent =
-          'curl -fsSL https://octo-agent.dev/install.sh | sh\n' +
-          'octo serve -d                       # start the local server\n' +
-          'open     http://127.0.0.1:8088      # open the dashboard, then onboard';
-      }
-
-      // Windows: the Download button is the installer, which starts the server
-      // and opens the dashboard itself — but the CLI install script now has a
-      // Windows one-liner too, so show it alongside the Download button.
-      if (target && target.os === 'windows' && cmd) {
-        cmd.textContent = 'irm https://octo-agent.dev/install.ps1 | iex';
-      }
-
-      // Unknown OS: leave the releases-page button and the curl one-liner both
-      // visible so every visitor has a working path.
-      if (!btns.length || !target) return;
-      if (target.os !== 'windows' && target.os !== 'darwin') return;
-
-      // Windows / macOS: point the Download buttons straight at the installer asset.
-      var installerAsset = target.os === 'windows' ? 'octo-setup.exe' : 'octo-setup.pkg';
-      fetch('https://api.github.com/repos/open-octo/octo-agent/releases/latest', {
-        headers: { 'Accept': 'application/vnd.github+json' }
-      }).then(function (r) {
-        if (!r.ok) throw new Error('release lookup failed');
-        return r.json();
-      }).then(function (data) {
-        var asset = (data.assets || []).filter(function (a) { return a.name === installerAsset; })[0];
-        if (!asset) return;
-        var enLabel = target.os === 'windows' ? '⬇️ Download for Windows' : '⬇️ Download for macOS';
-        var zhLabel = target.os === 'windows' ? '⬇️ 下载 Windows 安装器' : '⬇️ 下载 macOS 安装器';
-        btns.forEach(function (b) {
-          b.setAttribute('href', asset.browser_download_url);
-          b.setAttribute('data-en', enLabel);
-          b.setAttribute('data-zh', zhLabel);
-        });
-        applyLang(currentLang);
-      }).catch(function () { /* keep the releases-page fallback */ });
-    })();
+    // Downloads point straight at the version-stable release assets
+    // (releases/latest/download/<name>), one button per platform — no OS
+    // detection, no hidden buttons, so every visitor sees every choice.
 
     // Simple scroll-reveal
     const observer = new IntersectionObserver((entries) => {
