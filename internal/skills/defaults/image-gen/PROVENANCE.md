@@ -76,9 +76,10 @@ semantics). Tuned for `gpt-image-2` but the principles apply across backends.
 ## Default model change
 
 The `volcengine` (Seedream) backend default was moved from
-`doubao-seedream-4-5-251128` to `doubao-seedream-5-0-260128` (Seedream 5.0
-Lite — the verified Ark model id). Seedream 5.0 Pro (released 2026-07,
-positioned against gpt-image-2) is the intended flagship but its exact dated
-Ark model id was not verifiable from public sources at vendoring time, so it is
-documented in `.env.example` as a one-line `VOLCENGINE_MODEL` override to set
-once the id is confirmed, rather than hard-coded on a guess.
+`doubao-seedream-4-5-251128` to `seedream-5-0-pro-260628` (Seedream 5.0 Pro —
+the flagship, positioned against gpt-image-2; released 2026-07). The exact
+dated Ark model id was not resolvable from public sources (third-party proxies
+expose `doubao/doubao-seedream-5.0-pro`; official docs are JS-rendered), so it
+was supplied by the maintainer. `.env.example` lists the cheaper 5.0 Lite
+(`doubao-seedream-5-0-260128`) and 4.5 as `VOLCENGINE_MODEL` overrides, and
+notes the `doubao-`-prefixed Pro variant to try if the endpoint 404s.

@@ -42,10 +42,10 @@ from image_backends.backend_common import (
 
 
 DEFAULT_ENDPOINT = "https://operator.las.cn-beijing.volces.com/api/v1/images/generations"
-# Seedream 5.0 Lite (verified Ark model ID). Override with VOLCENGINE_MODEL —
-# e.g. doubao-seedream-4-5-251128 (4.5) or the Seedream 5.0 Pro id once you have
-# the exact dated string from the Ark console. See .env.example.
-DEFAULT_MODEL = "doubao-seedream-5-0-260128"
+# Seedream 5.0 Pro (flagship, comparable to gpt-image-2). Override with
+# VOLCENGINE_MODEL — e.g. doubao-seedream-5-0-260128 (5.0 Lite, cheaper) or
+# doubao-seedream-4-5-251128 (4.5). See .env.example.
+DEFAULT_MODEL = "seedream-5-0-pro-260628"
 
 ASPECT_RATIO_SIZE_MAP = {
     "512px": {

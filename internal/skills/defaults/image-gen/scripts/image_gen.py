@@ -140,7 +140,7 @@ BACKEND_REGISTRY = {
         "module": "backend_volcengine",
         "tier": "core",
         "label": "Volcengine Seedream",
-        "default_model": "doubao-seedream-5-0-260128",
+        "default_model": "seedream-5-0-pro-260628",
         "key_hint": "VOLCENGINE_API_KEY / ARK_API_KEY",
         "aliases": ["ark", "doubao", "seedream"],
     },
