@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 SVG Icon Embedding Tool
 
@@ -33,8 +43,8 @@ Icon libraries (subdirectories of templates/icons/):
     <asset_id>.svg     - project-local extracted vector illustrations with data-icon-style="preserve-color"; preserve source colors and natural viewBox aspect ratio
 
 Usage:
-    python3 scripts/svg_finalize/embed_icons.py <svg_file> [svg_file2] ...
-    python3 scripts/svg_finalize/embed_icons.py svg_output/*.svg
+    uv run scripts/svg_finalize/embed_icons.py <svg_file> [svg_file2] ...
+    uv run scripts/svg_finalize/embed_icons.py svg_output/*.svg
 
 Options:
     --icons-dir <path>    Icon directory path (default: templates/icons/)
@@ -451,10 +461,10 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  python3 scripts/svg_finalize/embed_icons.py svg_output/01_cover.svg
-  python3 scripts/svg_finalize/embed_icons.py svg_output/*.svg
-  python3 scripts/svg_finalize/embed_icons.py --dry-run svg_output/*.svg
-  python3 scripts/svg_finalize/embed_icons.py --icons-dir my_icons/ output.svg
+  uv run scripts/svg_finalize/embed_icons.py svg_output/01_cover.svg
+  uv run scripts/svg_finalize/embed_icons.py svg_output/*.svg
+  uv run scripts/svg_finalize/embed_icons.py --dry-run svg_output/*.svg
+  uv run scripts/svg_finalize/embed_icons.py --icons-dir my_icons/ output.svg
         '''
     )
     

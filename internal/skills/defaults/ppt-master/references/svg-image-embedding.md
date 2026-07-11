@@ -133,8 +133,8 @@ python3 -m http.server -d <project_path> 8000
 Use the unified pipeline in [`SKILL.md` Step 7](../SKILL.md). `finalize_svg.py` remains mandatory and embeds image references into the self-contained `svg_final/` preview. The following PPTX command still reads `svg_output/` by default and converts it directly to native DrawingML; it does not consume `svg_final/` in the supported release route.
 
 ```bash
-python3 scripts/finalize_svg.py <project_path>
-python3 scripts/svg_to_pptx.py <project_path>
+uv run scripts/finalize_svg.py <project_path>
+uv run scripts/svg_to_pptx.py <project_path>
 ```
 
 ### Standalone: align_embed_images.py (advanced)
@@ -142,8 +142,8 @@ python3 scripts/svg_to_pptx.py <project_path>
 For processing specific SVGs without the full pipeline:
 
 ```bash
-python3 scripts/svg_finalize/align_embed_images.py <svg_file>
-python3 scripts/svg_finalize/align_embed_images.py --dry-run <svg_file>
+uv run scripts/svg_finalize/align_embed_images.py <svg_file>
+uv run scripts/svg_finalize/align_embed_images.py --dry-run <svg_file>
 ```
 
 Use `finalize_svg.py --only align-images` for project-level batches. The old

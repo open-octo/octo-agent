@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - PPTX Animation Module
 
@@ -35,8 +45,8 @@ Animation modes used by the builder:
 Dependencies: None (pure XML generation)
 
 Usage:
-    python3 scripts/pptx_animations.py --demo
-    python3 scripts/pptx_animations.py --list
+    uv run scripts/pptx_animations.py --demo
+    uv run scripts/pptx_animations.py --list
 """
 
 import argparse

@@ -63,3 +63,16 @@ Everything else — `SKILL.md` (with the image-delegation edits noted above),
 the remaining `references/`, `workflows/`, `scripts/`, and `templates/`
 (brands / charts / decks / layouts) — is upstream content, unmodified except for
 the pointer rewrites required by the drops and the split.
+
+## Runtime: `uv run` / PEP 723
+
+Upstream expects a manual `pip install -r requirements.txt`. Each entry script
+here was given a [PEP 723](https://peps.python.org/pep-0723/) inline dependency
+block (a uniform copy of `requirements.txt` minus `google-genai`, which the
+image-gen split removed) so `uv run` auto-installs into a cached ephemeral env —
+`uv` ships with the octo installer, so there is no manual setup step. All doc /
+reference invocations were switched from `python3 …` to `uv run …`. Guarded,
+system-library or optional deps (`cairosvg`, `reportlab`, `svglib`, `playwright`,
+`PyYAML`) are deliberately excluded from the inline blocks; those code paths are
+`try/except`-guarded and degrade gracefully, and `requirements.txt` remains as
+the pip fallback.

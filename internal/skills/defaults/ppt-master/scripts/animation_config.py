@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Animation Config Tool
 
 Create and validate optional per-object PPTX animation sidecar files.
 
 Usage:
-    python3 scripts/animation_config.py scaffold <project_path>
-    python3 scripts/animation_config.py list-groups <project_path>
-    python3 scripts/animation_config.py validate <project_path>
+    uv run scripts/animation_config.py scaffold <project_path>
+    uv run scripts/animation_config.py list-groups <project_path>
+    uv run scripts/animation_config.py validate <project_path>
 
 Examples:
-    python3 scripts/animation_config.py scaffold projects/demo --force
-    python3 scripts/animation_config.py list-groups projects/demo
-    python3 scripts/animation_config.py validate projects/demo
+    uv run scripts/animation_config.py scaffold projects/demo --force
+    uv run scripts/animation_config.py list-groups projects/demo
+    uv run scripts/animation_config.py validate projects/demo
 
 Dependencies:
     None (standard library only)

@@ -31,16 +31,19 @@ pass absolute paths for `--output` and inputs.
 
 ## Preflight
 
-1. **Install deps once** (no PEP 723 inline metadata here, so `uv run` will not
-   auto-install): `uv pip install -r <skill-dir>/requirements.txt` — or `pip
-   install -r <skill-dir>/requirements.txt`. Web search + most AI backends need
-   only `requests`; slicing/rotation need `Pillow`/`numpy`.
+1. **Run scripts with `uv run`** — every script carries [PEP 723](https://peps.python.org/pep-0723/)
+   inline dependency metadata, so `uv run <skill-dir>/scripts/<name>.py …`
+   auto-installs exactly what that script needs into an ephemeral, cached
+   environment. No `pip install`, no venv, nothing left behind. `uv` ships with
+   the octo installer; if it's somehow missing, the fallback is `pip install -r
+   <skill-dir>/requirements.txt` once, then run the scripts with `python3`.
 2. **Configure a backend** for AI generation. Set `IMAGE_BACKEND` and the
    provider's own key (e.g. `OPENAI_API_KEY`) in the process environment, or in a
    `.env` file — see `<skill-dir>/.env.example` for every provider's variables
-   and the `.env` lookup order. `scripts/image_gen.py --list-backends` prints
-   what's available. Web search (`image_search.py`) needs no key for CC0/public-
-   domain providers; Pexels/Pixabay use their own keys if you want those sources.
+   and the `.env` lookup order. `uv run <skill-dir>/scripts/image_gen.py
+   --list-backends` prints what's available. Web search (`image_search.py`) needs
+   no key for CC0/public-domain providers; Pexels/Pixabay use their own keys if
+   you want those sources.
 
 ### First AI-generation run — backend setup gate (do NOT skip)
 
@@ -81,11 +84,11 @@ Once a backend is configured this gate never fires again for the session.
 
 ```bash
 # AI generation
-python3 <skill-dir>/scripts/image_gen.py "a serene alpine lake at dawn, soft mist, painterly" \
+uv run <skill-dir>/scripts/image_gen.py "a serene alpine lake at dawn, soft mist, painterly" \
   --aspect_ratio 16:9 --image_size 2K --output /abs/out/dir --filename hero
 
 # Web search (openly-licensed, downloads one best match + records the source)
-python3 <skill-dir>/scripts/image_search.py "diverse engineering team in a modern office" \
+uv run <skill-dir>/scripts/image_search.py "diverse engineering team in a modern office" \
   --orientation landscape --output /abs/out/team.jpg
 ```
 
@@ -115,9 +118,9 @@ into the same file as each completes.
 
 ```bash
 # Render the read-only Markdown sidecar for review (no network):
-python3 <skill-dir>/scripts/image_gen.py --render-md /abs/images/image_prompts.json
+uv run <skill-dir>/scripts/image_gen.py --render-md /abs/images/image_prompts.json
 # Generate every Pending/Failed item in parallel, writing status back:
-python3 <skill-dir>/scripts/image_gen.py --manifest /abs/images/image_prompts.json
+uv run <skill-dir>/scripts/image_gen.py --manifest /abs/images/image_prompts.json
 ```
 
 Full field reference (`page_role`, `text_policy`, `type`, `slice_grid`/
@@ -129,7 +132,7 @@ When several small spot illustrations should share one coherent style, generate
 one grid sheet (a single AI item), then cut it:
 
 ```bash
-python3 <skill-dir>/scripts/slice_images.py /abs/images/spot_sheet.png \
+uv run <skill-dir>/scripts/slice_images.py /abs/images/spot_sheet.png \
   --grid 2x3 --names icon_a icon_b icon_c icon_d icon_e icon_f --trim --alpha
 ```
 

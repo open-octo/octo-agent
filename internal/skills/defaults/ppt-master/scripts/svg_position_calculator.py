@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - SVG Position Calculation and Validation Tool
 
@@ -10,19 +20,19 @@ Common Commands (can be copied and used directly)
 ======================================================================
 
 1. Analyze all coordinates in an SVG file:
-   python scripts/svg_position_calculator.py analyze <svg_file>
+   uv run scripts/svg_position_calculator.py analyze <svg_file>
 
 2. Interactive calculation mode:
-   python scripts/svg_position_calculator.py interactive
+   uv run scripts/svg_position_calculator.py interactive
 
 3. Calculate from JSON config file:
-   python scripts/svg_position_calculator.py from-json <config.json>
+   uv run scripts/svg_position_calculator.py from-json <config.json>
 
 4. Quick calculation:
-   python scripts/svg_position_calculator.py calc bar --data "East:185,South:142"
-   python scripts/svg_position_calculator.py calc pie --data "A:35,B:25,C:20"
-   python scripts/svg_position_calculator.py calc line --data "0:50,10:80,20:120"
-   python scripts/svg_position_calculator.py calc grid --rows 2 --cols 3
+   uv run scripts/svg_position_calculator.py calc bar --data "East:185,South:142"
+   uv run scripts/svg_position_calculator.py calc pie --data "A:35,B:25,C:20"
+   uv run scripts/svg_position_calculator.py calc line --data "0:50,10:80,20:120"
+   uv run scripts/svg_position_calculator.py calc grid --rows 2 --cols 3
 
 ======================================================================
 """

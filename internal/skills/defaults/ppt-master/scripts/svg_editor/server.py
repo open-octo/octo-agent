@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - SVG Editor Server
 
@@ -6,12 +16,12 @@ Flask backend for the SVG annotation editor.
 Serves the web UI and provides API endpoints for reading/writing SVG annotations.
 
 Usage:
-    python3 scripts/svg_editor/server.py <project_dir>
+    uv run scripts/svg_editor/server.py <project_dir>
 
 Examples:
-    python3 scripts/svg_editor/server.py projects/my-project
-    python3 scripts/svg_editor/server.py projects/my-project --port 8080
-    python3 scripts/svg_editor/server.py projects/my-project --live
+    uv run scripts/svg_editor/server.py projects/my-project
+    uv run scripts/svg_editor/server.py projects/my-project --port 8080
+    uv run scripts/svg_editor/server.py projects/my-project --live
 
 Dependencies:
     flask>=3.0.0

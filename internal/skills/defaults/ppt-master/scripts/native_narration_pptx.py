@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Native Existing PPTX Enhancer
 
@@ -9,14 +19,14 @@ V1 enhancement modules: speaker notes, narration audio, slide auto-advance
 timings, and optional page transitions.
 
 Usage:
-    python3 scripts/native_enhance_pptx.py init <source.pptx> [--name project_name]
-    python3 scripts/native_enhance_pptx.py apply <project_path> [--output output.pptx]
-    python3 scripts/native_enhance_pptx.py validate <project_path>
+    uv run scripts/native_enhance_pptx.py init <source.pptx> [--name project_name]
+    uv run scripts/native_enhance_pptx.py apply <project_path> [--output output.pptx]
+    uv run scripts/native_enhance_pptx.py validate <project_path>
 
 Examples:
-    python3 scripts/native_enhance_pptx.py init projects/source.pptx --name fire_station
-    python3 scripts/native_enhance_pptx.py apply projects/fire_station_native_enhance_20260626
-    python3 scripts/native_enhance_pptx.py validate projects/fire_station_native_enhance_20260626
+    uv run scripts/native_enhance_pptx.py init projects/source.pptx --name fire_station
+    uv run scripts/native_enhance_pptx.py apply projects/fire_station_native_enhance_20260626
+    uv run scripts/native_enhance_pptx.py validate projects/fire_station_native_enhance_20260626
 
 Dependencies:
     ffprobe for audio-duration-based auto-advance timings.

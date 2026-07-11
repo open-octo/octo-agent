@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Unified Markdown Converter
 
 Auto-detect source type and dispatch to the existing source_to_md converters.
 
 Usage:
-    python3 scripts/source_to_md.py <file_or_url_or_dir> [<file_or_url_or_dir> ...] [options]
+    uv run scripts/source_to_md.py <file_or_url_or_dir> [<file_or_url_or_dir> ...] [options]
 
 Examples:
-    python3 scripts/source_to_md.py paper.pdf
-    python3 scripts/source_to_md.py paper.pdf report.docx deck.pptx
-    python3 scripts/source_to_md.py ./sources -o ./markdown
-    python3 scripts/source_to_md.py report.docx -o report.md
-    python3 scripts/source_to_md.py deck.pptx --json
+    uv run scripts/source_to_md.py paper.pdf
+    uv run scripts/source_to_md.py paper.pdf report.docx deck.pptx
+    uv run scripts/source_to_md.py ./sources -o ./markdown
+    uv run scripts/source_to_md.py report.docx -o report.md
+    uv run scripts/source_to_md.py deck.pptx --json
 
 Dependencies:
     Same as the backend converter selected for the input.
@@ -329,12 +339,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python3 scripts/source_to_md.py paper.pdf
-  python3 scripts/source_to_md.py paper.pdf report.docx deck.pptx
-  python3 scripts/source_to_md.py ./sources -o ./markdown
-  python3 scripts/source_to_md.py report.docx -o output.md
-  python3 scripts/source_to_md.py deck.pptx --json
-  python3 scripts/source_to_md.py https://example.com/article -o article.md
+  uv run scripts/source_to_md.py paper.pdf
+  uv run scripts/source_to_md.py paper.pdf report.docx deck.pptx
+  uv run scripts/source_to_md.py ./sources -o ./markdown
+  uv run scripts/source_to_md.py report.docx -o output.md
+  uv run scripts/source_to_md.py deck.pptx --json
+  uv run scripts/source_to_md.py https://example.com/article -o article.md
 
 Backend-specific flags not listed here are passed through to the selected
 converter, so existing converter behavior remains the source of truth.

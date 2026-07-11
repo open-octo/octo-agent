@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - SVG Annotation Checker
 
@@ -6,12 +16,12 @@ Scans SVG files for edit annotations (data-edit-target / data-edit-annotation at
 and prints a human-readable summary. Used by AI agents to discover pending annotations.
 
 Usage:
-    python3 scripts/check_annotations.py <project_dir>
-    python3 scripts/check_annotations.py <svg_file>
+    uv run scripts/check_annotations.py <project_dir>
+    uv run scripts/check_annotations.py <svg_file>
 
 Examples:
-    python3 scripts/check_annotations.py projects/my-project
-    python3 scripts/check_annotations.py projects/my-project/svg_output/slide_01.svg
+    uv run scripts/check_annotations.py projects/my-project
+    uv run scripts/check_annotations.py projects/my-project/svg_output/slide_01.svg
 
 Dependencies:
     None (only uses standard library)

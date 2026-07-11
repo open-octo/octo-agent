@@ -220,7 +220,7 @@ Before drawing each page, look up its entry in `page_charts` to decide which cha
 - **Reference — image-led promotional pages (not a constraint)**: for travel, venue, product-introduction, hospitality, event, real-estate, and brochure-style decks, let images define the page skeleton before placing text. Consult [`image-layout-patterns.md`](image-layout-patterns.md) §Imported Deck Patterns and prefer patterns such as `#74` TOC image-navigation cards, `#75` asymmetric chapter banners, `#77` photo mosaic with a text cell, `#78` ambient banner + evidence photo + text panel, `#79` ribbon-header image cards, and `#80` side hero image + staggered evidence cards before falling back to plain left/right image-text splits.
 - **Phased batch generation** (recommended):
   1. **Visual Construction Phase**: generate all SVG pages sequentially for visual consistency. Use layout judgment for chart marks during the draft. **MUST embed plot-area markers** per §3.1 below on every chart page — coordinate calibration is a post-generation step (see [`workflows/verify-charts.md`](../workflows/verify-charts.md)) that depends on these markers — and **native object metadata** per §3.2 on every eligible data-chart page.
-  2. **Quality Check Gate**: run `python3 scripts/svg_quality_checker.py <project_path>` on `svg_output/`. Any `error` (banned features, viewBox mismatch, spec_lock drift, non-PPT-safe font, etc.) MUST be fixed on the offending page before proceeding — regenerate and re-check. Address `warning`s when straightforward. Do NOT defer to after `finalize_svg.py` — finalize rewrites SVG and masks some violations.
+  2. **Quality Check Gate**: run `uv run scripts/svg_quality_checker.py <project_path>` on `svg_output/`. Any `error` (banned features, viewBox mismatch, spec_lock drift, non-PPT-safe font, etc.) MUST be fixed on the offending page before proceeding — regenerate and re-check. Address `warning`s when straightforward. Do NOT defer to after `finalize_svg.py` — finalize rewrites SVG and masks some violations.
   3. **Logic Construction Phase**: after SVGs pass the quality check, batch-generate speaker notes for narrative continuity.
 
 ### 3.1 Chart Plot-Area Marker (MANDATORY on every chart page)
@@ -506,14 +506,14 @@ Auto-split `notes/total.md` into per-page files in `notes/`.
 
 ```bash
 # 1. Split speaker notes
-python3 scripts/total_md_split.py <project_path>
+uv run scripts/total_md_split.py <project_path>
 
 # 2. SVG post-processing (auto-embed icons/images and flatten positioned text)
-python3 scripts/finalize_svg.py <project_path>
+uv run scripts/finalize_svg.py <project_path>
 # Output: svg_final/ self-contained SVG visual previews
 
 # 3. Export PPTX
-python3 scripts/svg_to_pptx.py <project_path>
+uv run scripts/svg_to_pptx.py <project_path>
 # Output (default-flow mode):
 #   exports/<project_name>_<timestamp>.pptx           ← native pptx (canonical output)
 #   backup/<timestamp>/svg_output/                    ← Executor SVG source backup (always written)

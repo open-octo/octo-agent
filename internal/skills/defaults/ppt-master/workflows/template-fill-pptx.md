@@ -56,8 +56,8 @@ If the content material is only a topic with no supporting facts, gather or ask 
 Create a dedicated project directory under `projects/`. Do not write outputs directly into `projects/` root. Reuse the standard project manager so source import rules stay consistent with the rest of the repository:
 
 ```bash
-python3 skills/ppt-master/scripts/project_manager.py init "<project_name>" --format ppt169
-python3 skills/ppt-master/scripts/project_manager.py import-sources "<project_dir>" "<source.pptx>" "<material...>"
+uv run skills/ppt-master/scripts/project_manager.py init "<project_name>" --format ppt169
+uv run skills/ppt-master/scripts/project_manager.py import-sources "<project_dir>" "<source.pptx>" "<material...>"
 ```
 
 **Source import rule**: `project_manager.py import-sources` copies files from outside the repository and moves repo-local files by default, unless `--copy` / `--move` is explicitly supplied. Keep this shared behavior; do not create a separate template-fill import path.
@@ -80,7 +80,7 @@ Use this fixed layout:
 `project_manager.py import-sources` automatically runs the standard PPTX intake for imported PowerPoint files and writes `<stem>.slide_library.json` into `<project_dir>/analysis/`. If you are working from a manually assembled project that does not have the intake artifact, run the template-fill analyzer directly:
 
 ```bash
-python3 skills/ppt-master/scripts/template_fill_pptx.py analyze "<project_dir>/sources/<source.pptx>" -o "<project_dir>/analysis/<stem>.slide_library.json"
+uv run skills/ppt-master/scripts/template_fill_pptx.py analyze "<project_dir>/sources/<source.pptx>" -o "<project_dir>/analysis/<stem>.slide_library.json"
 ```
 
 Read `<project_dir>/analysis/<stem>.slide_library.json` (intake prefixes per-deck artifacts by the template deck's file stem) and identify:
@@ -119,7 +119,7 @@ A page's layout already encodes a rhetorical shape — a single hero statement, 
 Create a scaffold:
 
 ```bash
-python3 skills/ppt-master/scripts/template_fill_pptx.py scaffold "<project_dir>/analysis/<stem>.slide_library.json" -o "<project_dir>/analysis/fill_plan.json" --slides "1,3,4"
+uv run skills/ppt-master/scripts/template_fill_pptx.py scaffold "<project_dir>/analysis/<stem>.slide_library.json" -o "<project_dir>/analysis/fill_plan.json" --slides "1,3,4"
 ```
 
 Then edit `<project_dir>/analysis/fill_plan.json` by hand from the source material. The plan is the single execution contract.
@@ -239,7 +239,7 @@ Example `notes` value for a Chinese content slide:
 Run the data-based capacity check before applying the plan:
 
 ```bash
-python3 skills/ppt-master/scripts/template_fill_pptx.py check-plan "<project_dir>/analysis/<stem>.slide_library.json" "<project_dir>/analysis/fill_plan.json" -o "<project_dir>/analysis/check_report.json"
+uv run skills/ppt-master/scripts/template_fill_pptx.py check-plan "<project_dir>/analysis/<stem>.slide_library.json" "<project_dir>/analysis/fill_plan.json" -o "<project_dir>/analysis/check_report.json"
 ```
 
 Interpret the report:
@@ -264,7 +264,7 @@ Interpret the report:
 Run:
 
 ```bash
-python3 skills/ppt-master/scripts/template_fill_pptx.py apply "<project_dir>/sources/<source.pptx>" "<project_dir>/analysis/fill_plan.json" -o "<project_dir>/exports/<output.pptx>"
+uv run skills/ppt-master/scripts/template_fill_pptx.py apply "<project_dir>/sources/<source.pptx>" "<project_dir>/analysis/fill_plan.json" -o "<project_dir>/exports/<output.pptx>"
 ```
 
 By default `apply` gives every cloned slide a `fade` transition (`0.5s`), because most native templates ship an empty `<p:transition/>` that renders as *no* motion. Override the default with `--transition <effect>` (`fade` / `push` / `wipe` / `split` / `strips` / `cover` / `random`) and `--transition-duration <seconds>`; pass `--transition none` for no motion, or `--transition keep` to preserve each source slide's existing transition unchanged. A per-slide `transition` field in the plan overrides whatever the CLI selects for that slide.
@@ -292,7 +292,7 @@ The script:
 Run a lightweight readability check:
 
 ```bash
-python3 skills/ppt-master/scripts/template_fill_pptx.py validate "<project_dir>"
+uv run skills/ppt-master/scripts/template_fill_pptx.py validate "<project_dir>"
 ```
 
 The validator finds the latest PPTX in `<project_dir>/exports/`, runs `ppt_to_md.py` into `<project_dir>/validation/readback.md`, and writes `<project_dir>/validation/validate_report.json`. `exports/` must contain only final deliverables.

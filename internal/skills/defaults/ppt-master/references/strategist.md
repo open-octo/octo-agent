@@ -173,7 +173,7 @@ See [`../templates/icons/README.md`](../templates/icons/README.md) for the curre
 > 3. Enumerate the concepts the deck actually needs (home, chart, users, …) based on the confirmed outline.
 > 4. Search for each concept's filename in the chosen library: `ls skills/ppt-master/templates/icons/<chosen-library>/ | grep <keyword>`
 > 5. Use the verified filename (without `.svg`) as the icon name; always include the library prefix (e.g., `chunk-filled/home`).
-> 6. **Copy each chosen icon into the project as you confirm it** — `python3 skills/ppt-master/scripts/icon_sync.py <project_path> <lib/name> [<lib/name> …]`. This populates `<project>/icons/<lib>/` (the set the Executor embeds from) and, more importantly, **validates existence on the spot**.
+> 6. **Copy each chosen icon into the project as you confirm it** — `uv run skills/ppt-master/scripts/icon_sync.py <project_path> <lib/name> [<lib/name> …]`. This populates `<project>/icons/<lib>/` (the set the Executor embeds from) and, more importantly, **validates existence on the spot**.
 > 7. List the final icon inventory and chosen library in `design_spec.md` §VI; record the same in `spec_lock.md icons` (including `stroke_width` for stroke-style libraries). Executor may only use icons from this list.
 >
 > 🚧 **GATE — missing icon = re-pick now**: if `icon_sync.py` reports any name as missing (non-zero exit), that icon is not in the library — re-pick a real filename via `ls … | grep`, fix `§VI` / `spec_lock.md`, and re-run until it exits clean. Never carry a missing icon forward to generation. Over-copying candidates is harmless — finalize embeds only the icons actually referenced by `<use data-icon>`.
@@ -321,7 +321,7 @@ Formula rendering is part of Typography confirmation. Recommend one policy and l
 
 ```bash
 mkdir -p <project_path>/images
-python3 skills/ppt-master/scripts/latex_render.py <project_path>
+uv run skills/ppt-master/scripts/latex_render.py <project_path>
 ```
 
 Write the manifest first at `<project_path>/images/formula_manifest.json`. Use this shape:
@@ -359,7 +359,7 @@ The script renders PNGs into `images/`, trying `codecogs`, `quicklatex`, `mathpa
 > 🚧 **GATE — know your resources before recommending.** `images/` is a live working folder (source-extracted pictures, user drops, later replacements), so its facts are **re-derived on use, never trusted from a stale store**. Before recommending image usage, if `images/` is non-empty, regenerate the inventory from whatever is currently in it, then read it back:
 >
 > ```bash
-> python3 scripts/analyze_images.py <project_path>/images
+> uv run scripts/analyze_images.py <project_path>/images
 > ```
 >
 > Read `<project_path>/analysis/image_analysis.csv` (size / ratio / category of every in-hand picture). The A–E choice is still your judgment, but it MUST be made with the current inventory in full view — never in ignorance of what is already on hand. `image_analysis.csv` is a regenerated view of the live folder, not a durable fact: re-run this whenever `images/` changes.
@@ -585,7 +585,7 @@ After the user picks a candidate, scan the outline and surface any pages where t
 
 **Per hero_page title**: lock where it lives — `embedded` (fused into the image: neon, carved, smoke, 3D-lit lettering) or `none` (editable SVG title over an atmospheric backdrop, Primitive D). Default `none`; flip to `embedded` only when the words must be *part of the visual*, not merely a display font. Per page — may bake only the keyword while subtitle / date / chrome stay SVG. Surface it with the hero_page list for the same confirm / edit / skip.
 
-**When selection includes B**, you must run `python3 scripts/analyze_images.py <project_path>/images` before outputting the spec, and integrate scan results into the image resource list.
+**When selection includes B**, you must run `uv run scripts/analyze_images.py <project_path>/images` before outputting the spec, and integrate scan results into the image resource list.
 
 **When B / C / D / E is selected**, add an image resource list to the spec:
 
@@ -864,7 +864,7 @@ This is what makes the axis meaningful: a `presentation` deck and a `text` deck 
 Project folder must exist before Strategist runs. If not, execute:
 
 ```bash
-python3 scripts/project_manager.py init <project_name> --format <canvas_format>
+uv run scripts/project_manager.py init <project_name> --format <canvas_format>
 ```
 
 Save outputs to `projects/<project_name>_<format>_<YYYYMMDD>/design_spec.md`.

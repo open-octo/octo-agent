@@ -22,7 +22,7 @@ configure_utf8_stdio()
 
 if __name__ == "__main__":
     print(__doc__)
-    print("Use via: python3 skills/ppt-master/scripts/image_search.py ...")
+    print("Use via: uv run scripts/image_search.py ...")
     raise SystemExit(0 if any(arg in {"-h", "--help", "help"} for arg in sys.argv[1:]) else 1)
 
 import os

@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Legacy SVG Rounded Rectangle Diagnostic
 
@@ -7,13 +17,13 @@ Historical diagnostic that converts <rect> elements with rx/ry to equivalent
 workflow; PowerPoint's manual "Convert to Shape" behavior is not supported.
 
 Usage:
-    python3 scripts/svg_finalize/svg_rect_to_path.py <SVG file or directory>
-    python3 scripts/svg_finalize/svg_rect_to_path.py <project_path> -s output
-    python3 scripts/svg_finalize/svg_rect_to_path.py <project_path> -s final -o svg_rounded
+    uv run scripts/svg_finalize/svg_rect_to_path.py <SVG file or directory>
+    uv run scripts/svg_finalize/svg_rect_to_path.py <project_path> -s output
+    uv run scripts/svg_finalize/svg_rect_to_path.py <project_path> -s final -o svg_rounded
 
 Examples:
-    python3 scripts/svg_finalize/svg_rect_to_path.py examples/ppt169_demo
-    python3 scripts/svg_finalize/svg_rect_to_path.py examples/ppt169_demo/svg_output/01_cover.svg
+    uv run scripts/svg_finalize/svg_rect_to_path.py examples/ppt169_demo
+    uv run scripts/svg_finalize/svg_rect_to_path.py examples/ppt169_demo/svg_output/01_cover.svg
 
 Output:
     - Directory mode: outputs to svg_rounded/ subdirectory

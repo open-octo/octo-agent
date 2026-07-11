@@ -21,14 +21,14 @@
 ## `confirm_ui/server.py`
 
 ```bash
-python3 scripts/confirm_ui/server.py <project_path> --daemon --wait   # launch + wait for Stage 1
-python3 scripts/confirm_ui/server.py <project_path> --wait-only --wait-stage stage2  # Stage 2: wait for the design-system handoff
-python3 scripts/confirm_ui/server.py <project_path> --wait-only       # Stage 3: wait for the final result
-python3 scripts/confirm_ui/server.py <project_path> --daemon
-python3 scripts/confirm_ui/server.py <project_path> --daemon --port 5051
-python3 scripts/confirm_ui/server.py <project_path> --no-browser
-python3 scripts/confirm_ui/server.py <project_path> --timeout 0   # disable idle auto-shutdown
-python3 scripts/confirm_ui/server.py <project_path> --shutdown    # Step 4 cleanup (idempotent)
+uv run scripts/confirm_ui/server.py <project_path> --daemon --wait   # launch + wait for Stage 1
+uv run scripts/confirm_ui/server.py <project_path> --wait-only --wait-stage stage2  # Stage 2: wait for the design-system handoff
+uv run scripts/confirm_ui/server.py <project_path> --wait-only       # Stage 3: wait for the final result
+uv run scripts/confirm_ui/server.py <project_path> --daemon
+uv run scripts/confirm_ui/server.py <project_path> --daemon --port 5051
+uv run scripts/confirm_ui/server.py <project_path> --no-browser
+uv run scripts/confirm_ui/server.py <project_path> --timeout 0   # disable idle auto-shutdown
+uv run scripts/confirm_ui/server.py <project_path> --shutdown    # Step 4 cleanup (idempotent)
 ```
 
 - Binds `127.0.0.1:5050` by default — or the next free port if another project already holds it (the launch log prints the actual URL) — and auto-opens the browser (suppress with `--no-browser`). `--port <other>` forces a specific port.

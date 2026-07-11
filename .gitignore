@@ -21,3 +21,7 @@ coverage.html
 .codegraph/
 /.worktrees/
 /.octo/
+
+# Python bytecode from bundled skill scripts (run via uv/python)
+__pycache__/
+*.pyc

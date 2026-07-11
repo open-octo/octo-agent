@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Strategist confirmation stage UI Server (Step 4)
 
@@ -16,13 +26,13 @@ same Strategist confirmation stage in chat.
 See scripts/docs/confirm_ui.md for the round-trip data contract and schema.
 
 Usage:
-    python3 scripts/confirm_ui/server.py <project_dir>
+    uv run scripts/confirm_ui/server.py <project_dir>
 
 Examples:
-    python3 scripts/confirm_ui/server.py projects/my-project
-    python3 scripts/confirm_ui/server.py projects/my-project --port 5051
-    python3 scripts/confirm_ui/server.py projects/my-project --no-browser
-    python3 scripts/confirm_ui/server.py projects/my-project --daemon --wait
+    uv run scripts/confirm_ui/server.py projects/my-project
+    uv run scripts/confirm_ui/server.py projects/my-project --port 5051
+    uv run scripts/confirm_ui/server.py projects/my-project --no-browser
+    uv run scripts/confirm_ui/server.py projects/my-project --daemon --wait
 
 Dependencies:
     flask>=3.0.0

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["Pillow>=9.0.0"]
+# ///
 """
 PPT Master - Illustration Sheet Slicer
 
@@ -18,13 +22,13 @@ Both need a background color; it is auto-sampled from each cell's border unless
 you pass --bg.
 
 Usage:
-    python3 scripts/slice_images.py <sheet_image> --grid RxC [options]
+    uv run scripts/slice_images.py <sheet_image> --grid RxC [options]
 
 Examples:
-    python3 scripts/slice_images.py projects/demo/images/illus_sheet.png --grid 2x3
-    python3 scripts/slice_images.py projects/demo/images/illus_sheet.png --grid 2x3 \
+    uv run scripts/slice_images.py projects/demo/images/illus_sheet.png --grid 2x3
+    uv run scripts/slice_images.py projects/demo/images/illus_sheet.png --grid 2x3 \
         --names team,product,customer,growth,risk,vision --trim --alpha
-    python3 scripts/slice_images.py projects/demo/images/illus_sheet.png --grid 1x4 \
+    uv run scripts/slice_images.py projects/demo/images/illus_sheet.png --grid 1x4 \
         --prefix spot_ --bg "#F8F9FA" --alpha
 
 Dependencies:
@@ -241,8 +245,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Slice an AI illustration sheet into individual element images.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python3 scripts/slice_images.py projects/demo/images/illus_sheet.png --grid 2x3
-  python3 scripts/slice_images.py projects/demo/images/illus_sheet.png --grid 2x3 \\
+  uv run scripts/slice_images.py projects/demo/images/illus_sheet.png --grid 2x3
+  uv run scripts/slice_images.py projects/demo/images/illus_sheet.png --grid 2x3 \\
       --names team,product,customer,growth,risk,vision --trim --alpha
 """,
     )

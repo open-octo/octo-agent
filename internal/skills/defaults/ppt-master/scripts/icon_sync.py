@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Icon Sync
 
@@ -13,11 +23,11 @@ Custom icons you place in `<project>/icons/<lib>/` yourself are honored too — 
 name already present in the project is treated as satisfied, not missing.
 
 Usage:
-    python3 scripts/icon_sync.py <project_path> <lib/name> [<lib/name> ...]
+    uv run scripts/icon_sync.py <project_path> <lib/name> [<lib/name> ...]
 
 Examples:
-    python3 scripts/icon_sync.py projects/deck chunk-filled/home tabler-outline/chart
-    python3 scripts/icon_sync.py projects/deck simple-icons/github
+    uv run scripts/icon_sync.py projects/deck chunk-filled/home tabler-outline/chart
+    uv run scripts/icon_sync.py projects/deck simple-icons/github
 
 Dependencies:
     None (standard library only).

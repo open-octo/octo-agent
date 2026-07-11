@@ -18,24 +18,24 @@ This directory contains user-facing scripts for conversion, project setup, direc
 Typical end-to-end workflow:
 
 ```bash
-python3 scripts/source_to_md.py <file-or-url-or-dir> [<file-or-url-or-dir> ...]
+uv run scripts/source_to_md.py <file-or-url-or-dir> [<file-or-url-or-dir> ...]
 # or direct backend calls:
-python3 scripts/source_to_md/pdf_to_md.py <file.pdf>
+uv run scripts/source_to_md/pdf_to_md.py <file.pdf>
 # or
-python3 scripts/source_to_md/ppt_to_md.py <deck.pptx>
-python3 scripts/source_to_md/excel_to_md.py <workbook.xlsx>
-python3 scripts/project_manager.py init <project_name> --format ppt169
-python3 scripts/project_manager.py import-sources <project_path> <source_files_or_dirs...> --move
-python3 scripts/total_md_split.py <project_path>
-python3 scripts/finalize_svg.py <project_path>
-python3 scripts/animation_config.py scaffold <project_path>  # optional object-level animation overrides
-python3 scripts/svg_to_pptx.py <project_path>
+uv run scripts/source_to_md/ppt_to_md.py <deck.pptx>
+uv run scripts/source_to_md/excel_to_md.py <workbook.xlsx>
+uv run scripts/project_manager.py init <project_name> --format ppt169
+uv run scripts/project_manager.py import-sources <project_path> <source_files_or_dirs...> --move
+uv run scripts/total_md_split.py <project_path>
+uv run scripts/finalize_svg.py <project_path>
+uv run scripts/animation_config.py scaffold <project_path>  # optional object-level animation overrides
+uv run scripts/svg_to_pptx.py <project_path>
 ```
 
 Repository update:
 
 ```bash
-python3 scripts/update_repo.py
+uv run scripts/update_repo.py
 ```
 
 ## Script Index
@@ -56,42 +56,42 @@ python3 scripts/update_repo.py
 Conversion:
 
 ```bash
-python3 scripts/source_to_md.py <file-or-url-or-dir> [<file-or-url-or-dir> ...]
-python3 scripts/source_to_md/pdf_to_md.py <file.pdf>
-python3 scripts/source_to_md/ppt_to_md.py <deck.pptx>
-python3 scripts/source_to_md/doc_to_md.py <file.docx>
-python3 scripts/source_to_md/excel_to_md.py <workbook.xlsx>
-python3 scripts/source_to_md/web_to_md.py <url>
-python3 scripts/pptx_to_svg.py <deck.pptx> -o <output_dir>  # reconstruction/reference SVG import
+uv run scripts/source_to_md.py <file-or-url-or-dir> [<file-or-url-or-dir> ...]
+uv run scripts/source_to_md/pdf_to_md.py <file.pdf>
+uv run scripts/source_to_md/ppt_to_md.py <deck.pptx>
+uv run scripts/source_to_md/doc_to_md.py <file.docx>
+uv run scripts/source_to_md/excel_to_md.py <workbook.xlsx>
+uv run scripts/source_to_md/web_to_md.py <url>
+uv run scripts/pptx_to_svg.py <deck.pptx> -o <output_dir>  # reconstruction/reference SVG import
 ```
 
 Project setup:
 
 ```bash
-python3 scripts/project_manager.py init <project_name> --format ppt169
-python3 scripts/project_manager.py import-sources <project_path> <source_files_or_dirs...> --move
-python3 scripts/project_manager.py validate <project_path>
+uv run scripts/project_manager.py init <project_name> --format ppt169
+uv run scripts/project_manager.py import-sources <project_path> <source_files_or_dirs...> --move
+uv run scripts/project_manager.py validate <project_path>
 ```
 
 Template source import:
 
 ```bash
-python3 scripts/pptx_template_import.py <template.pptx>
-python3 scripts/pptx_template_import.py <template.pptx> --manifest-only
-python3 scripts/pptx_template_import.py <template.pptx> --inheritance-mode both
+uv run scripts/pptx_template_import.py <template.pptx>
+uv run scripts/pptx_template_import.py <template.pptx> --manifest-only
+uv run scripts/pptx_template_import.py <template.pptx> --inheritance-mode both
 ```
 
 Template fill (direct PPTX, no SVG conversion):
 
 ```bash
-python3 scripts/project_manager.py init <project_name> --format ppt169
-python3 scripts/project_manager.py import-sources <project_path> <source.pptx> <material...>
+uv run scripts/project_manager.py init <project_name> --format ppt169
+uv run scripts/project_manager.py import-sources <project_path> <source.pptx> <material...>
 # Manual fallback when import-sources did not produce analysis/<stem>.slide_library.json:
-python3 scripts/template_fill_pptx.py analyze <project_path>/sources/<source.pptx> -o <project_path>/analysis/<stem>.slide_library.json
-python3 scripts/template_fill_pptx.py scaffold <project_path>/analysis/<stem>.slide_library.json -o <project_path>/analysis/fill_plan.json --slides "1,3,4"
-python3 scripts/template_fill_pptx.py check-plan <project_path>/analysis/<stem>.slide_library.json <project_path>/analysis/fill_plan.json -o <project_path>/analysis/check_report.json
-python3 scripts/template_fill_pptx.py apply <project_path>/sources/<source.pptx> <project_path>/analysis/fill_plan.json -o <project_path>/exports/filled.pptx
-python3 scripts/template_fill_pptx.py validate <project_path>
+uv run scripts/template_fill_pptx.py analyze <project_path>/sources/<source.pptx> -o <project_path>/analysis/<stem>.slide_library.json
+uv run scripts/template_fill_pptx.py scaffold <project_path>/analysis/<stem>.slide_library.json -o <project_path>/analysis/fill_plan.json --slides "1,3,4"
+uv run scripts/template_fill_pptx.py check-plan <project_path>/analysis/<stem>.slide_library.json <project_path>/analysis/fill_plan.json -o <project_path>/analysis/check_report.json
+uv run scripts/template_fill_pptx.py apply <project_path>/sources/<source.pptx> <project_path>/analysis/fill_plan.json -o <project_path>/exports/filled.pptx
+uv run scripts/template_fill_pptx.py validate <project_path>
 ```
 
 `apply` requires `fill_plan.json` to have top-level `"status": "confirmed"` unless `--force` is passed. It automatically writes `filled_YYYYMMDD_HHMMSS.pptx` unless the output stem already ends with a timestamp. It applies a `fade` page transition by default; `--transition <effect>` (fade/push/wipe/split/strips/cover/random, `--transition-duration` in seconds) changes it, `--transition none` removes it, `--transition keep` preserves the source transitions, and a per-slide `transition` field in the plan overrides whatever the CLI selects.
@@ -99,19 +99,19 @@ python3 scripts/template_fill_pptx.py validate <project_path>
 Native existing-PPTX enhancement (direct PPTX, no SVG conversion):
 
 ```bash
-python3 scripts/native_enhance_pptx.py init <source.pptx> --name <project_slug>
-python3 scripts/native_enhance_pptx.py plan <project_path>
-python3 scripts/native_enhance_pptx.py validate <project_path>
-python3 scripts/native_enhance_pptx.py apply <project_path>
+uv run scripts/native_enhance_pptx.py init <source.pptx> --name <project_slug>
+uv run scripts/native_enhance_pptx.py plan <project_path>
+uv run scripts/native_enhance_pptx.py validate <project_path>
+uv run scripts/native_enhance_pptx.py apply <project_path>
 ```
 
 Post-processing and export:
 
 ```bash
-python3 scripts/extract_svg_assets.py <svg_dir> --icons-dir <icons_dir> --inplace --id-prefix <prefix>  # optional: shrink imported/reference SVGs before AI review
-python3 scripts/total_md_split.py <project_path>
-python3 scripts/finalize_svg.py <project_path>
-python3 scripts/svg_to_pptx.py <project_path>
+uv run scripts/extract_svg_assets.py <svg_dir> --icons-dir <icons_dir> --inplace --id-prefix <prefix>  # optional: shrink imported/reference SVGs before AI review
+uv run scripts/total_md_split.py <project_path>
+uv run scripts/finalize_svg.py <project_path>
+uv run scripts/svg_to_pptx.py <project_path>
 ```
 
 `finalize_svg.py` optimizes raster images by default using `2x` display pixels and max `2560px`. Native `svg_to_pptx.py` defaults to `--image-sizing cap`: only oversized full source images are reduced to max `2560px`, so later PowerPoint resizing keeps more image detail. Use `svg_to_pptx.py --image-sizing display --image-scale 2` only for aggressive size reduction, or `--no-image-optimize` when the native PPTX must embed original image bytes.
@@ -137,16 +137,16 @@ literal field fallback because they are shared by multiple slides.
 Formulas & image facts (AI image generation / search / slicing is **delegated to the `image-gen` skill** — run `image_gen.py` / `image_search.py` / `slice_images.py` from there, not here):
 
 ```bash
-python3 scripts/latex_render.py <project_path>
-python3 scripts/latex_render.py <project_path> --providers codecogs,quicklatex,mathpad,wikimedia
-python3 scripts/analyze_images.py <project_path>/images
+uv run scripts/latex_render.py <project_path>
+uv run scripts/latex_render.py <project_path> --providers codecogs,quicklatex,mathpad,wikimedia
+uv run scripts/analyze_images.py <project_path>/images
 ```
 
 Repository update:
 
 ```bash
-python3 scripts/update_repo.py
-python3 scripts/update_repo.py --skip-pip
+uv run scripts/update_repo.py
+uv run scripts/update_repo.py --skip-pip
 ```
 
 ## Recommendations

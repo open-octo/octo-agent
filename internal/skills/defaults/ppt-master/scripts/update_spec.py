@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """Propagate a spec_lock.md value change to both the lock file and svg_output/*.svg.
 
 Examples:
-    python3 update_spec.py <project_path> primary=#0066AA
-    python3 update_spec.py <project_path> colors.text=#111111
-    python3 update_spec.py <project_path> typography.font_family='"PingFang SC", "Microsoft YaHei", sans-serif'
+    uv run update_spec.py <project_path> primary=#0066AA
+    uv run update_spec.py <project_path> colors.text=#111111
+    uv run update_spec.py <project_path> typography.font_family='"PingFang SC", "Microsoft YaHei", sans-serif'
 
 v2 scope:
 - `colors.*` — HEX value replacement across svg_output/*.svg (case-insensitive match).

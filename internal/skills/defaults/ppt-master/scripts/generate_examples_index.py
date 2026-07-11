@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Examples Index Generator
 
 Automatically scans the examples directory and generates a README.md index file.
 
 Usage:
-    python3 scripts/generate_examples_index.py
-    python3 scripts/generate_examples_index.py examples
+    uv run scripts/generate_examples_index.py
+    uv run scripts/generate_examples_index.py examples
 """
 
 import sys
@@ -169,7 +179,7 @@ def generate_examples_index(examples_dir: str = 'examples') -> str:
     content.append("Refer to existing project structures, or use the project management tool:\n")
     content.append("```bash")
     content.append(
-        "python3 scripts/project_manager.py init my_project --format ppt169")
+        "uv run scripts/project_manager.py init my_project --format ppt169")
     content.append("```\n")
 
     # Contribution guidelines
@@ -184,8 +194,8 @@ def generate_examples_index(examples_dir: str = 'examples') -> str:
     content.append("### Submission Process\n")
     content.append("1. Create a project under the `examples/` directory")
     content.append(
-        "2. Validate the project: `python3 scripts/project_manager.py validate examples/<project>`")
-    content.append("3. Update the index: `python3 scripts/generate_examples_index.py`")
+        "2. Validate the project: `uv run scripts/project_manager.py validate examples/<project>`")
+    content.append("3. Update the index: `uv run scripts/generate_examples_index.py`")
     content.append("4. Submit a Pull Request\n")
 
     # Related resources

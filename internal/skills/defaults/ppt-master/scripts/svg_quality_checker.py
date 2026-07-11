@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - SVG Quality Check Tool
 
 Checks whether SVG files comply with project technical specifications.
 
 Usage:
-    python3 scripts/svg_quality_checker.py <svg_file>
-    python3 scripts/svg_quality_checker.py <directory>
-    python3 scripts/svg_quality_checker.py --all examples
+    uv run scripts/svg_quality_checker.py <svg_file>
+    uv run scripts/svg_quality_checker.py <directory>
+    uv run scripts/svg_quality_checker.py --all examples
 """
 
 import copy
@@ -1834,7 +1844,7 @@ class SVGQualityChecker:
                 )
                 print(
                     f"[INFO] Validate brand specs via: "
-                    f"python3 scripts/register_template.py "
+                    f"uv run scripts/register_template.py "
                     f"--kind brand <brand_id> --dry-run"
                 )
                 return self.results
@@ -3012,16 +3022,16 @@ def print_usage() -> None:
     """Print CLI usage information."""
     print("PPT Master - SVG Quality Check Tool\n")
     print("Usage:")
-    print("  python3 scripts/svg_quality_checker.py <svg_file>")
-    print("  python3 scripts/svg_quality_checker.py <directory>")
-    print("  python3 scripts/svg_quality_checker.py <template_dir> --template-mode")
-    print("  python3 scripts/svg_quality_checker.py --all examples")
+    print("  uv run scripts/svg_quality_checker.py <svg_file>")
+    print("  uv run scripts/svg_quality_checker.py <directory>")
+    print("  uv run scripts/svg_quality_checker.py <template_dir> --template-mode")
+    print("  uv run scripts/svg_quality_checker.py --all examples")
     print("\nExamples:")
-    print("  python3 scripts/svg_quality_checker.py examples/project/svg_output/slide_01.svg")
-    print("  python3 scripts/svg_quality_checker.py examples/project/svg_output")
-    print("  python3 scripts/svg_quality_checker.py examples/project")
-    print("  python3 scripts/svg_quality_checker.py templates/layouts/academic_defense --template-mode")
-    print("  python3 scripts/svg_quality_checker.py templates/decks/招商银行 --template-mode")
+    print("  uv run scripts/svg_quality_checker.py examples/project/svg_output/slide_01.svg")
+    print("  uv run scripts/svg_quality_checker.py examples/project/svg_output")
+    print("  uv run scripts/svg_quality_checker.py examples/project")
+    print("  uv run scripts/svg_quality_checker.py templates/layouts/academic_defense --template-mode")
+    print("  uv run scripts/svg_quality_checker.py templates/decks/招商银行 --template-mode")
     print("\nOptions:")
     print("  --format <ppt169|ppt43|...>   Expected canvas format")
     print("  --template-mode               Validate a templates/{layouts,decks}/<id> directory:")

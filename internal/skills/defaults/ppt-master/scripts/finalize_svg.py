@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - SVG Post-processing Tool (Unified Entry Point)
 
@@ -17,14 +27,14 @@ See docs/technical-design.md "Post-Processing Pipeline" before modifying.
 
 Usage:
     # Execute all processing steps (recommended)
-    python3 scripts/finalize_svg.py <project_directory>
+    uv run scripts/finalize_svg.py <project_directory>
 
     # Execute only specific steps
-    python3 scripts/finalize_svg.py <project_directory> --only embed-icons align-images
+    uv run scripts/finalize_svg.py <project_directory> --only embed-icons align-images
 
 Examples:
-    python3 scripts/finalize_svg.py projects/my_project
-    python3 scripts/finalize_svg.py examples/ppt169_demo --only embed-icons
+    uv run scripts/finalize_svg.py projects/my_project
+    uv run scripts/finalize_svg.py examples/ppt169_demo --only embed-icons
 
 Processing options:
     embed-icons   - Expand project icons and static same-document <use>
@@ -275,7 +285,7 @@ def finalize_project(
         safe_print("[OK] Done!")
         print()
         print("Next steps:")
-        print(f"  python scripts/svg_to_pptx.py \"{project_dir}\"")
+        print(f"  uv run scripts/svg_to_pptx.py \"{project_dir}\"")
 
     return True
 

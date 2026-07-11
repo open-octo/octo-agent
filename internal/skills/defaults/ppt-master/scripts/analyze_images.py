@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 Image Size Analysis Tool
 ========================
@@ -12,9 +22,9 @@ that would apply *if* an image is placed side-by-side with body text. Those
 numbers are conditional on the Strategist picking the side-by-side intent.
 
 Usage:
-    python scripts/analyze_images.py <images_folder_path>
-    python scripts/analyze_images.py projects/xxx/images
-    python scripts/analyze_images.py projects/xxx/images --canvas ppt43
+    uv run scripts/analyze_images.py <images_folder_path>
+    uv run scripts/analyze_images.py projects/xxx/images
+    uv run scripts/analyze_images.py projects/xxx/images --canvas ppt43
 
 Output:
     - Analysis report displayed in console

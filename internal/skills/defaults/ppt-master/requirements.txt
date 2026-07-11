@@ -1,11 +1,16 @@
 # PPT Master Dependencies / PPT Master 依赖
 # =============================================
 #
-# Most tools use only the Python standard library. Below are optional dependencies.
-# 大部分工具仅使用 Python 标准库，以下为可选依赖。
-#
-# Install / 安装方式：
+# You normally do NOT install these by hand: every entry script declares its
+# dependencies inline (PEP 723), so `uv run scripts/<name>.py …` auto-installs
+# them into a cached ephemeral environment. This file is the pip fallback for
+# environments without uv:
 #   pip install -r requirements.txt
+# (Optional feature deps that need system libraries — cairosvg / reportlab /
+# svglib / playwright / PyYAML — are not listed; those code paths are guarded
+# and degrade gracefully when the package is absent.)
+# 通常无需手动安装：每个入口脚本用 PEP 723 内联声明依赖，`uv run` 会自动装。
+# 本文件仅作无 uv 环境下的 pip 兜底。
 
 # ─────────────────────────────────────────────────────────────
 # SVG to PPTX tool / SVG 转 PPTX 工具 (skills/ppt-master/scripts/svg_to_pptx.py)
@@ -87,7 +92,6 @@ curl_cffi>=0.7.0
 # AI image generation tool / AI 图片生成工具 (skills/ppt-master/scripts/image_gen.py)
 # ─────────────────────────────────────────────────────────────
 # Gemini backend / Gemini 后端 (IMAGE_BACKEND=gemini)
-google-genai>=1.0.0
 # OpenAI-compatible backend uses requests from the web tooling section above.
 # OpenAI 兼容后端复用上方网页工具所需的 requests。
 

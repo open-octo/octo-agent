@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """Register a brand / layout / deck template into the global template index.
 
 Three kinds, three physical directories, three index files (see
@@ -20,11 +30,11 @@ discovery happens exclusively against the index file):
 
 Usage::
 
-    python3 scripts/register_template.py <id> --kind deck     # default kind=deck
-    python3 scripts/register_template.py <id> --kind layout
-    python3 scripts/register_template.py <id> --kind brand
-    python3 scripts/register_template.py --rebuild-all --kind deck
-    python3 scripts/register_template.py <id> --dry-run
+    uv run scripts/register_template.py <id> --kind deck     # default kind=deck
+    uv run scripts/register_template.py <id> --kind layout
+    uv run scripts/register_template.py <id> --kind brand
+    uv run scripts/register_template.py --rebuild-all --kind deck
+    uv run scripts/register_template.py <id> --dry-run
 
 ``--rebuild-all`` rebuilds every entry from scratch within the chosen kind;
 recommended for repairing index drift across many templates at once.

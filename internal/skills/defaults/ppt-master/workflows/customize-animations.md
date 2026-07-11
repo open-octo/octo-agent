@@ -25,7 +25,7 @@ description: Customize default PPTX animations with per-slide and per-object tim
 **Default path — `list-groups`** (cheap, ~1KB of output even on a long deck):
 
 ```bash
-python3 skills/ppt-master/scripts/animation_config.py list-groups <project_path>
+uv run skills/ppt-master/scripts/animation_config.py list-groups <project_path>
 ```
 
 Output is one line per slide: `<slide_basename>: id1, id2, id3` — chrome
@@ -38,7 +38,7 @@ starting point**.
 If `animations.json` does not exist and you want a starting file to edit:
 
 ```bash
-python3 skills/ppt-master/scripts/animation_config.py scaffold <project_path>
+uv run skills/ppt-master/scripts/animation_config.py scaffold <project_path>
 ```
 
 Scaffold output also excludes chrome and includes a `defaults` stub.
@@ -46,7 +46,7 @@ Scaffold output also excludes chrome and includes a `defaults` stub.
 If it already exists:
 
 ```bash
-python3 skills/ppt-master/scripts/animation_config.py validate <project_path>
+uv run skills/ppt-master/scripts/animation_config.py validate <project_path>
 ```
 
 ---
@@ -244,11 +244,11 @@ Notes:
 Run sequentially:
 
 ```bash
-python3 skills/ppt-master/scripts/animation_config.py validate <project_path>
+uv run skills/ppt-master/scripts/animation_config.py validate <project_path>
 ```
 
 ```bash
-python3 skills/ppt-master/scripts/svg_to_pptx.py <project_path>
+uv run skills/ppt-master/scripts/svg_to_pptx.py <project_path>
 ```
 
 **Validation**: the exported native PPTX should reflect the object-level overrides. `--animation none` still disables all per-element animation and overrides `animations.json`.

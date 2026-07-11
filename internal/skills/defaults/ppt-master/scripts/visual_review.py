@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Visual Review Renderer
 
@@ -12,9 +22,9 @@ because cairo's text API has no font-fallback chain — CJK characters render as
 tofu boxes for any deck whose font-family list relies on system fallback.
 
 Usage:
-    python3 scripts/visual_review.py <project_path>
-    python3 scripts/visual_review.py <project_path> --pages 02 03
-    python3 scripts/visual_review.py <project_path> --server-url http://localhost:5050
+    uv run scripts/visual_review.py <project_path>
+    uv run scripts/visual_review.py <project_path> --pages 02 03
+    uv run scripts/visual_review.py <project_path> --server-url http://localhost:5050
 
 Exit codes (per references/visual-review.md §7):
     0 — all requested pages rendered
@@ -262,7 +272,7 @@ def main() -> int:
         _safe_print(str(e))
         _safe_print(
             'start it with:\n'
-            f'    python3 skills/ppt-master/scripts/svg_editor/server.py {project_path}'
+            f'    uv run skills/ppt-master/scripts/svg_editor/server.py {project_path}'
         )
         return 2
 

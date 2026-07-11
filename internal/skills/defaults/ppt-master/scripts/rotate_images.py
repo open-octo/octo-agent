@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Image Orientation Management Tool
 
@@ -6,9 +16,9 @@ Provides visual image orientation filtering, fix code generation,
 and batch image rotation functionality.
 
 Usage:
-    python3 scripts/rotate_images.py gen <images_directory>
-    python3 scripts/rotate_images.py fix <fixes.json>
-    python3 scripts/rotate_images.py auto <images_directory>
+    uv run scripts/rotate_images.py gen <images_directory>
+    uv run scripts/rotate_images.py fix <fixes.json>
+    uv run scripts/rotate_images.py auto <images_directory>
 """
 
 
@@ -532,9 +542,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Manage image orientation and manual rotation fixes.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python3 scripts/rotate_images.py gen projects/demo/images
-  python3 scripts/rotate_images.py fix fixes.json
-  python3 scripts/rotate_images.py auto projects/demo/images
+  uv run scripts/rotate_images.py gen projects/demo/images
+  uv run scripts/rotate_images.py fix fixes.json
+  uv run scripts/rotate_images.py auto projects/demo/images
 """,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

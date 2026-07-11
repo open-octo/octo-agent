@@ -1,8 +1,9 @@
 # image-gen dependencies
 # =======================
-# Install once before first use, e.g.:
-#   uv pip install -r <skill-dir>/requirements.txt
-#   (or) pip install -r <skill-dir>/requirements.txt
+# You normally do NOT install these by hand: each script declares its deps
+# inline (PEP 723), so `uv run <skill-dir>/scripts/<name>.py …` auto-installs
+# them. This file is the pip fallback for environments without uv:
+#   pip install -r <skill-dir>/requirements.txt
 
 # AI generation (image_gen.py) + web search (image_search.py) talk to most
 # providers over plain HTTP.

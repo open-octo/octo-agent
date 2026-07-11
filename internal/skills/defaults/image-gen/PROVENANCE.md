@@ -50,8 +50,13 @@ Moved verbatim out of `skills/ppt-master/`:
   palettes, `page_role`, spec_lock) and a few see-also links back to
   ppt-master-only files; these are harmless in standalone use and were left
   intact rather than rewritten, to preserve the upstream prompt engineering.
-  Cosmetic `skills/ppt-master/...` path strings in script comments / user-agent
-  were likewise left as upstream attribution.
+  The backend/provider `Use via: …` hints were corrected to this skill's own
+  `uv run scripts/image_gen.py …` form, and `scripts/docs/image.md` was trimmed
+  to the three image scripts it actually ships (the `latex_render.py` /
+  `analyze_images.py` sections belonged to ppt-master and were removed). The
+  remaining `skills/ppt-master` / `~/.ppt-master` strings are in the shared
+  `config.py` constants and the `.env` lookup-path examples — that shared
+  config heritage (both skills carry the same `config.py`) is left as-is.
 
 ## Prompt-craft library (`references/prompt-craft/`)
 
@@ -82,3 +87,12 @@ dated Ark model id was not resolvable from public sources (third-party proxies
 expose `doubao/doubao-seedream-5.0-pro`; official docs are JS-rendered), so it
 was supplied and confirmed by the maintainer. `.env.example` lists the cheaper
 5.0 Lite (`doubao-seedream-5-0-260128`) and 4.5 as `VOLCENGINE_MODEL` overrides.
+
+## Runtime: `uv run` / PEP 723
+
+Each script carries a [PEP 723](https://peps.python.org/pep-0723/) inline
+dependency block (scoped per script: `image_gen.py` → requests + google-genai;
+`image_search.py` → requests; `slice_images.py` → Pillow;
+`gemini_watermark_remover.py` → Pillow + numpy) so `uv run` auto-installs into a
+cached ephemeral environment — no manual `pip install`. Doc invocations use
+`uv run …`; `requirements.txt` is the pip fallback for environments without uv.

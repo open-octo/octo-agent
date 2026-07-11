@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - LaTeX Formula Renderer
 
@@ -7,13 +17,13 @@ The script reads an explicit manifest; it never scans spec_lock.md or source
 content for dollar-delimited math.
 
 Usage:
-    python3 scripts/latex_render.py <project_path>
-    python3 scripts/latex_render.py <project_path> --manifest images/formula_manifest.json
-    python3 scripts/latex_render.py <project_path> --dry-run
+    uv run scripts/latex_render.py <project_path>
+    uv run scripts/latex_render.py <project_path> --manifest images/formula_manifest.json
+    uv run scripts/latex_render.py <project_path> --dry-run
 
 Examples:
-    python3 scripts/latex_render.py projects/demo_ppt169_20260523
-    python3 scripts/latex_render.py projects/demo_ppt169_20260523 --providers codecogs,quicklatex,mathpad,wikimedia
+    uv run scripts/latex_render.py projects/demo_ppt169_20260523
+    uv run scripts/latex_render.py projects/demo_ppt169_20260523 --providers codecogs,quicklatex,mathpad,wikimedia
 
 Dependencies:
     Pillow (for measuring generated PNG dimensions)

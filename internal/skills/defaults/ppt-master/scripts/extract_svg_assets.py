@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Large Vector Asset Extractor
 
@@ -14,11 +24,11 @@ threshold is a readability convenience — it changes which blobs are factored
 out, not whether the export stays editable.
 
 Usage:
-    python3 scripts/extract_svg_assets.py <svg_dir> [--icons-dir <icons_dir>] [--min-drawables N] [--min-bytes N] [--min-decoration-bytes N] [--inplace] [--clean-stale]
+    uv run scripts/extract_svg_assets.py <svg_dir> [--icons-dir <icons_dir>] [--min-drawables N] [--min-bytes N] [--min-decoration-bytes N] [--inplace] [--clean-stale]
 
 Examples:
-    python3 scripts/extract_svg_assets.py import_ws/svg --icons-dir import_ws/icons --inplace --id-prefix layered --clean-stale
-    python3 scripts/extract_svg_assets.py project/svg_output --inplace --min-drawables 40
+    uv run scripts/extract_svg_assets.py import_ws/svg --icons-dir import_ws/icons --inplace --id-prefix layered --clean-stale
+    uv run scripts/extract_svg_assets.py project/svg_output --inplace --min-drawables 40
 
 Dependencies:
     None (standard library only).

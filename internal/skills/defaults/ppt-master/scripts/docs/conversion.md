@@ -34,16 +34,16 @@ Routing is centralized in `source_to_md/_dispatcher.py` and reused by
 `project_manager.py import-sources`; do not add a second type-to-backend table.
 
 ```bash
-python3 scripts/source_to_md.py paper.pdf
-python3 scripts/source_to_md.py paper.pdf report.docx deck.pptx
-python3 scripts/source_to_md.py ./sources
-python3 scripts/source_to_md.py ./pdfs/*.pdf
-python3 scripts/source_to_md.py ./decks/*.pptx
-python3 scripts/source_to_md.py report.docx -o report.md
-python3 scripts/source_to_md.py ./sources -o ./markdown  # explicit separate output directory
-python3 scripts/source_to_md.py workbook.xlsx --json
-python3 scripts/source_to_md.py deck.pptx
-python3 scripts/source_to_md.py https://example.com/article -o article.md
+uv run scripts/source_to_md.py paper.pdf
+uv run scripts/source_to_md.py paper.pdf report.docx deck.pptx
+uv run scripts/source_to_md.py ./sources
+uv run scripts/source_to_md.py ./pdfs/*.pdf
+uv run scripts/source_to_md.py ./decks/*.pptx
+uv run scripts/source_to_md.py report.docx -o report.md
+uv run scripts/source_to_md.py ./sources -o ./markdown  # explicit separate output directory
+uv run scripts/source_to_md.py workbook.xlsx --json
+uv run scripts/source_to_md.py deck.pptx
+uv run scripts/source_to_md.py https://example.com/article -o article.md
 ```
 
 Useful options:
@@ -70,16 +70,16 @@ non-recursive directory inputs.
 Recommended first choice for native PDFs.
 
 ```bash
-python3 scripts/source_to_md/pdf_to_md.py book.pdf
-python3 scripts/source_to_md/pdf_to_md.py book.pdf -o output.md
-python3 scripts/source_to_md/pdf_to_md.py book.pdf appendix.pdf
-python3 scripts/source_to_md/pdf_to_md.py ./pdfs
-python3 scripts/source_to_md/pdf_to_md.py ./pdfs -o ./markdown  # explicit separate output directory
+uv run scripts/source_to_md/pdf_to_md.py book.pdf
+uv run scripts/source_to_md/pdf_to_md.py book.pdf -o output.md
+uv run scripts/source_to_md/pdf_to_md.py book.pdf appendix.pdf
+uv run scripts/source_to_md/pdf_to_md.py ./pdfs
+uv run scripts/source_to_md/pdf_to_md.py ./pdfs -o ./markdown  # explicit separate output directory
 
 # Image extraction control (default: filtered)
-python3 scripts/source_to_md/pdf_to_md.py book.pdf --images filtered  # size/quality filters applied
-python3 scripts/source_to_md/pdf_to_md.py book.pdf --images all       # extract all images, no filtering
-python3 scripts/source_to_md/pdf_to_md.py book.pdf --images none      # skip all images (text only)
+uv run scripts/source_to_md/pdf_to_md.py book.pdf --images filtered  # size/quality filters applied
+uv run scripts/source_to_md/pdf_to_md.py book.pdf --images all       # extract all images, no filtering
+uv run scripts/source_to_md/pdf_to_md.py book.pdf --images none      # skip all images (text only)
 ```
 
 Use cases:
@@ -112,13 +112,13 @@ Pandoc fallback (only if you need these):
 - `.doc`, `.odt`, `.rtf`, `.tex`/`.latex`, `.rst`, `.org`, `.typ`
 
 ```bash
-python3 scripts/source_to_md/doc_to_md.py lecture.docx
-python3 scripts/source_to_md/doc_to_md.py lecture.docx -o output.md
-python3 scripts/source_to_md/doc_to_md.py lecture.docx notes.html
-python3 scripts/source_to_md/doc_to_md.py ./docs
-python3 scripts/source_to_md/doc_to_md.py ./docs -o ./markdown  # explicit separate output directory
-python3 scripts/source_to_md/doc_to_md.py notes.epub
-python3 scripts/source_to_md/doc_to_md.py paper.tex -o paper.md  # uses pandoc
+uv run scripts/source_to_md/doc_to_md.py lecture.docx
+uv run scripts/source_to_md/doc_to_md.py lecture.docx -o output.md
+uv run scripts/source_to_md/doc_to_md.py lecture.docx notes.html
+uv run scripts/source_to_md/doc_to_md.py ./docs
+uv run scripts/source_to_md/doc_to_md.py ./docs -o ./markdown  # explicit separate output directory
+uv run scripts/source_to_md/doc_to_md.py notes.epub
+uv run scripts/source_to_md/doc_to_md.py paper.tex -o paper.md  # uses pandoc
 ```
 
 Dependencies:
@@ -148,12 +148,12 @@ Unsupported by default:
 - `.xls` — resave as `.xlsx` first
 
 ```bash
-python3 scripts/source_to_md/excel_to_md.py report.xlsx
-python3 scripts/source_to_md/excel_to_md.py report.xlsx -o output.md
-python3 scripts/source_to_md/excel_to_md.py report.xlsx budget.xlsm
-python3 scripts/source_to_md/excel_to_md.py ./workbooks
-python3 scripts/source_to_md/excel_to_md.py ./workbooks -o ./markdown  # explicit separate output directory
-python3 scripts/source_to_md/excel_to_md.py report.xlsm --max-rows 200 --max-cols 40
+uv run scripts/source_to_md/excel_to_md.py report.xlsx
+uv run scripts/source_to_md/excel_to_md.py report.xlsx -o output.md
+uv run scripts/source_to_md/excel_to_md.py report.xlsx budget.xlsm
+uv run scripts/source_to_md/excel_to_md.py ./workbooks
+uv run scripts/source_to_md/excel_to_md.py ./workbooks -o ./markdown  # explicit separate output directory
+uv run scripts/source_to_md/excel_to_md.py report.xlsm --max-rows 200 --max-cols 40
 ```
 
 Behavior:
@@ -182,12 +182,12 @@ Supported formats include:
 - `.potx`, `.potm`
 
 ```bash
-python3 scripts/source_to_md/ppt_to_md.py sales_deck.pptx
-python3 scripts/source_to_md/ppt_to_md.py sales_deck.pptx -o output.md
-python3 scripts/source_to_md/ppt_to_md.py sales_deck.pptx appendix.pptx
-python3 scripts/source_to_md/ppt_to_md.py ./decks
-python3 scripts/source_to_md/ppt_to_md.py ./decks -o ./markdown  # explicit separate output directory
-python3 scripts/source_to_md/ppt_to_md.py template.ppsx -o notes/template.md
+uv run scripts/source_to_md/ppt_to_md.py sales_deck.pptx
+uv run scripts/source_to_md/ppt_to_md.py sales_deck.pptx -o output.md
+uv run scripts/source_to_md/ppt_to_md.py sales_deck.pptx appendix.pptx
+uv run scripts/source_to_md/ppt_to_md.py ./decks
+uv run scripts/source_to_md/ppt_to_md.py ./decks -o ./markdown  # explicit separate output directory
+uv run scripts/source_to_md/ppt_to_md.py template.ppsx -o notes/template.md
 ```
 
 Behavior:
@@ -213,7 +213,7 @@ than replacing it: Markdown remains the normalized content source, while intake
 artifacts provide source facts for Strategist and standalone PPTX workflows.
 
 ```bash
-python3 scripts/pptx_intake.py deck.pptx -o projects/demo/analysis
+uv run scripts/pptx_intake.py deck.pptx -o projects/demo/analysis
 ```
 
 Outputs (per source deck, prefixed by file stem):
@@ -233,9 +233,9 @@ Usage boundary:
 Reconstruct a PPTX package as editable SVG views by reading OOXML directly.
 
 ```bash
-python3 scripts/pptx_to_svg.py deck.pptx --inheritance-mode both
-python3 scripts/pptx_to_svg.py deck.pptx --inheritance-mode layered
-python3 scripts/pptx_to_svg.py deck.pptx --inheritance-mode flat
+uv run scripts/pptx_to_svg.py deck.pptx --inheritance-mode both
+uv run scripts/pptx_to_svg.py deck.pptx --inheritance-mode layered
+uv run scripts/pptx_to_svg.py deck.pptx --inheritance-mode flat
 ```
 
 | Mode | Output |
@@ -263,11 +263,11 @@ literal field fallback because one shared part can serve multiple slides.
 Convert web pages to Markdown and download images locally.
 
 ```bash
-python3 scripts/source_to_md/web_to_md.py https://example.com/article
-python3 scripts/source_to_md/web_to_md.py https://url1.com https://url2.com
-python3 scripts/source_to_md/web_to_md.py -f urls.txt
-python3 scripts/source_to_md/web_to_md.py https://example.com -o output.md
-python3 scripts/source_to_md/web_to_md.py https://example.com --emit-result /tmp/result.json
+uv run scripts/source_to_md/web_to_md.py https://example.com/article
+uv run scripts/source_to_md/web_to_md.py https://url1.com https://url2.com
+uv run scripts/source_to_md/web_to_md.py -f urls.txt
+uv run scripts/source_to_md/web_to_md.py https://example.com -o output.md
+uv run scripts/source_to_md/web_to_md.py https://example.com --emit-result /tmp/result.json
 ```
 
 When `curl_cffi` is installed (included in `requirements.txt`), this script
@@ -287,9 +287,9 @@ when the converter derives a title-based filename.
 Fix image EXIF orientation in downloaded or imported assets.
 
 ```bash
-python3 scripts/rotate_images.py auto projects/xxx_files
-python3 scripts/rotate_images.py gen projects/xxx_files
-python3 scripts/rotate_images.py fix fixes.json
+uv run scripts/rotate_images.py auto projects/xxx_files
+uv run scripts/rotate_images.py gen projects/xxx_files
+uv run scripts/rotate_images.py fix fixes.json
 ```
 
 Use this when extracted photos appear sideways after conversion or import.

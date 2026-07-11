@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """PPT Master project management helpers.
 
 Usage:
-    python3 scripts/project_manager.py init <project_name> [--format ppt169] [--dir <path>]
-    python3 scripts/project_manager.py import-sources <project_path> <source1> [<source2> ...] [--move | --copy]
-    python3 scripts/project_manager.py validate <project_path>
-    python3 scripts/project_manager.py info <project_path>
+    uv run scripts/project_manager.py init <project_name> [--format ppt169] [--dir <path>]
+    uv run scripts/project_manager.py import-sources <project_path> <source1> [<source2> ...] [--move | --copy]
+    uv run scripts/project_manager.py validate <project_path>
+    uv run scripts/project_manager.py info <project_path>
 """
 
 from __future__ import annotations
@@ -878,10 +888,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="PPT Master project management helpers.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python3 scripts/project_manager.py init demo --format ppt169
-  python3 scripts/project_manager.py import-sources projects/demo file.md --move
-  python3 scripts/project_manager.py validate projects/demo
-  python3 scripts/project_manager.py info projects/demo
+  uv run scripts/project_manager.py init demo --format ppt169
+  uv run scripts/project_manager.py import-sources projects/demo file.md --move
+  uv run scripts/project_manager.py validate projects/demo
+  uv run scripts/project_manager.py info projects/demo
 """,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

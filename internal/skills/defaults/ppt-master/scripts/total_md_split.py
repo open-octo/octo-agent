@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Speaker Notes Splitting Tool
 
@@ -6,12 +16,12 @@ Splits the total.md speaker notes file into multiple individual notes files,
 each corresponding to one SVG page.
 
 Usage:
-    python3 scripts/total_md_split.py <project_path>
-    python3 scripts/total_md_split.py <project_path> -o output_dir
+    uv run scripts/total_md_split.py <project_path>
+    uv run scripts/total_md_split.py <project_path> -o output_dir
 
 Examples:
-    python3 scripts/total_md_split.py projects/<svg_title>_ppt169_YYYYMMDD
-    python3 scripts/total_md_split.py projects/<svg_title>_ppt169_YYYYMMDD -o notes
+    uv run scripts/total_md_split.py projects/<svg_title>_ppt169_YYYYMMDD
+    uv run scripts/total_md_split.py projects/<svg_title>_ppt169_YYYYMMDD -o notes
 
 Dependencies:
     None (only uses standard library)

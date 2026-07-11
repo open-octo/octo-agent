@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 PPT Master - Batch Project Validation Tool
 
 Checks the structural integrity and compliance of multiple projects at once.
 
 Usage:
-    python3 scripts/batch_validate.py examples
-    python3 scripts/batch_validate.py projects
-    python3 scripts/batch_validate.py --all
-    python3 scripts/batch_validate.py examples projects
+    uv run scripts/batch_validate.py examples
+    uv run scripts/batch_validate.py projects
+    uv run scripts/batch_validate.py --all
+    uv run scripts/batch_validate.py examples projects
 """
 
 import argparse
@@ -265,10 +275,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Validate one or more PPT Master project directories.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python3 scripts/batch_validate.py examples
-  python3 scripts/batch_validate.py projects
-  python3 scripts/batch_validate.py examples projects
-  python3 scripts/batch_validate.py --all
+  uv run scripts/batch_validate.py examples
+  uv run scripts/batch_validate.py projects
+  uv run scripts/batch_validate.py examples projects
+  uv run scripts/batch_validate.py --all
 """,
     )
     parser.add_argument("directories", nargs="*", help="Directories to scan")

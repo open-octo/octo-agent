@@ -2,39 +2,7 @@
 
 > Architecture rationale (why provider-specific config keys instead of a generic `IMAGE_API_KEY`, why permissive license filter with strict-mode escape hatch, why external refs in dev but two divergent embedding strategies for delivery): see [docs/technical-design.md "Image Acquisition & Embedding"](../../../../docs/technical-design.md#image-acquisition--embedding).
 
-Image tools cover formula rendering, prompt-based AI generation, web image search, image inspection, and Gemini watermark removal.
-
-## `latex_render.py`
-
-Manifest-driven LaTeX formula renderer. Strategist writes `images/formula_manifest.json` after the Typography confirmation; this script renders only those declared formulas to transparent PNGs and writes dimensions back into the manifest.
-
-```bash
-python3 scripts/latex_render.py <project_path>
-python3 scripts/latex_render.py <project_path> --dry-run
-python3 scripts/latex_render.py <project_path> --providers codecogs,quicklatex,mathpad,wikimedia
-```
-
-Manifest shape:
-
-```json
-{
-  "providers": ["codecogs", "quicklatex", "mathpad", "wikimedia"],
-  "items": [
-    {
-      "id": "formula_001",
-      "latex": "E = mc^2",
-      "display": "block",
-      "color": "#1D1D1F",
-      "background": "#FFFFFF",
-      "transparent": true,
-      "dpi": 300,
-      "filename": "formula_001.png"
-    }
-  ]
-}
-```
-
-Output files land directly under `project/images/`. Formula filenames should use a shared `formula_` prefix, e.g. `formula_001.png`. The default provider chain is `codecogs,quicklatex,mathpad,wikimedia`; each provider is tried automatically until one succeeds, and the winning provider is recorded back into the manifest. `--providers` or manifest-level `providers` may override the order, but all four are available as no-key fallbacks. Formula PNGs are transparent by default. `background` is the temporary render matte and local background-removal reference; set `transparent: false` only when an opaque final formula asset is intentional. The script does not scan `spec_lock.md` or source documents for `$...$`; formula selection is a Strategist decision.
+Image tools cover prompt-based AI generation, web image search, and Gemini watermark removal. (LaTeX formula rendering and image inspection live in the `ppt-master` skill — `latex_render.py` / `analyze_images.py`.)
 
 ## `image_gen.py`
 
@@ -47,23 +15,23 @@ mode: `host-native` uses the host's image tool directly and must not run
 read-only Markdown sidecar.
 
 ```bash
-python3 scripts/image_gen.py "A modern futuristic workspace"
-python3 scripts/image_gen.py "Abstract tech background" --aspect_ratio 16:9 --image_size 4K
-python3 scripts/image_gen.py "Concept car" -o projects/demo/images
-python3 scripts/image_gen.py "Beautiful landscape" -n "low quality, blurry, watermark"
-python3 scripts/image_gen.py --list-backends
+uv run scripts/image_gen.py "A modern futuristic workspace"
+uv run scripts/image_gen.py "Abstract tech background" --aspect_ratio 16:9 --image_size 4K
+uv run scripts/image_gen.py "Concept car" -o projects/demo/images
+uv run scripts/image_gen.py "Beautiful landscape" -n "low quality, blurry, watermark"
+uv run scripts/image_gen.py --list-backends
 ```
 
-Backends are grouped into Core / Extended / Experimental tiers. Run `python3 scripts/image_gen.py --list-backends` for the current list.
+Backends are grouped into Core / Extended / Experimental tiers. Run `uv run scripts/image_gen.py --list-backends` for the current list.
 
 Backend selection:
 
 ```bash
-python3 scripts/image_gen.py "A cat" --backend openai
-python3 scripts/image_gen.py "A cinematic portrait" --backend minimax
-python3 scripts/image_gen.py "A product launch hero image" --backend qwen
-python3 scripts/image_gen.py "科技感背景图" --backend zhipu
-python3 scripts/image_gen.py "A product KV in cinematic style" --backend volcengine
+uv run scripts/image_gen.py "A cat" --backend openai
+uv run scripts/image_gen.py "A cinematic portrait" --backend minimax
+uv run scripts/image_gen.py "A product launch hero image" --backend qwen
+uv run scripts/image_gen.py "科技感背景图" --backend zhipu
+uv run scripts/image_gen.py "A product KV in cinematic style" --backend volcengine
 ```
 
 Configuration sources:
@@ -153,22 +121,12 @@ MINIMAX_API_KEY=your-api-key
 # MINIMAX_MODEL=image-01
 ```
 
-## `analyze_images.py`
-
-Analyze images in a project directory before writing the design spec or composing slide layouts.
-
-```bash
-python3 scripts/analyze_images.py <project_path>/images
-```
-
-Use this instead of opening image files directly when following the project workflow.
-
 ## `image_search.py`
 
 Zero-config web image search across openly-licensed providers. Sister tool to `image_gen.py` — used when the resource list row has `Acquire Via: web`.
 
 ```bash
-python3 scripts/image_search.py "offshore wind farm" \
+uv run scripts/image_search.py "offshore wind farm" \
   --filename cover_bg.jpg --slide 01_cover \
   --orientation landscape -o projects/demo/images
 ```
@@ -205,12 +163,12 @@ Pin a provider, refuse attribution, or override the manifest path:
 
 ```bash
 # Pin Wikimedia
-python3 scripts/image_search.py "Olympics opening ceremony" \
+uv run scripts/image_search.py "Olympics opening ceremony" \
   --filename event.jpg --provider wikimedia \
   --orientation landscape -o projects/demo/images
 
 # Strict mode — refuse CC BY / CC BY-SA
-python3 scripts/image_search.py "abstract gradient" \
+uv run scripts/image_search.py "abstract gradient" \
   --filename hero.jpg --strict-no-attribution \
   -o projects/demo/images
 ```
@@ -239,9 +197,9 @@ The full role-level reference (intent → query translation, on-slide attributio
 Remove Gemini watermark assets after manual download.
 
 ```bash
-python3 scripts/gemini_watermark_remover.py <image_path>
-python3 scripts/gemini_watermark_remover.py <image_path> -o output_path.png
-python3 scripts/gemini_watermark_remover.py <image_path> -q
+uv run scripts/gemini_watermark_remover.py <image_path>
+uv run scripts/gemini_watermark_remover.py <image_path> -o output_path.png
+uv run scripts/gemini_watermark_remover.py <image_path> -q
 ```
 
 Notes:

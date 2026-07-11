@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["Pillow>=9.0.0", "numpy>=1.20.0"]
+# ///
 """
 PPT Master - Gemini Watermark Remover
 
@@ -6,12 +10,12 @@ Removes the watermark logo from the bottom-right corner of Gemini-generated imag
 Uses a reverse blending algorithm to restore original pixels.
 
 Usage:
-    python3 scripts/gemini_watermark_remover.py <image_path>
-    python3 scripts/gemini_watermark_remover.py <image_path> -o output_path.png
+    uv run scripts/gemini_watermark_remover.py <image_path>
+    uv run scripts/gemini_watermark_remover.py <image_path> -o output_path.png
 
 Examples:
-    python3 scripts/gemini_watermark_remover.py projects/demo/images/bg_01.png
-    python3 scripts/gemini_watermark_remover.py image.jpg -o image_clean.jpg
+    uv run scripts/gemini_watermark_remover.py projects/demo/images/bg_01.png
+    uv run scripts/gemini_watermark_remover.py image.jpg -o image_clean.jpg
 
 Dependencies:
     pip install Pillow numpy

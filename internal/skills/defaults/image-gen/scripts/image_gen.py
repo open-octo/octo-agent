@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["requests>=2.31.0", "google-genai>=1.0.0"]
+# ///
 """
 Unified Image Generation Tool
 
@@ -38,9 +42,9 @@ Supported keys:
     ZHIPU_API_KEY / ZHIPU_MODEL / ZHIPU_BASE_URL
 
 Usage:
-  python3 image_gen.py "prompt" --aspect_ratio 16:9 --image_size 1K -o images/
-  python3 image_gen.py --manifest project/images/image_prompts.json -o project/images/
-  python3 image_gen.py --list-backends
+  uv run image_gen.py "prompt" --aspect_ratio 16:9 --image_size 1K -o images/
+  uv run image_gen.py --manifest project/images/image_prompts.json -o project/images/
+  uv run image_gen.py --list-backends
 """
 
 import concurrent.futures
@@ -374,7 +378,7 @@ def _guard_confirmed_non_api_path(manifest_path: str) -> None:
             "and may use the configured API/proxy backend. Use the host's native image\n"
             "generation tool with prompts from images/image_prompts.json, save outputs to\n"
             "images/<filename>, update each item status to Generated, then run:\n"
-            "  python3 scripts/image_gen.py --render-md images/image_prompts.json\n"
+            "  uv run scripts/image_gen.py --render-md images/image_prompts.json\n"
         )
     else:
         print(
@@ -382,7 +386,7 @@ def _guard_confirmed_non_api_path(manifest_path: str) -> None:
             "\n"
             "Do NOT run image_gen.py --manifest for this project. Render the Markdown\n"
             "sidecar and hand images/image_prompts.md to the user for external generation:\n"
-            "  python3 scripts/image_gen.py --render-md images/image_prompts.json\n"
+            "  uv run scripts/image_gen.py --render-md images/image_prompts.json\n"
         )
     sys.exit(1)
 

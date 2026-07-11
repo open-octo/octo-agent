@@ -29,7 +29,7 @@ description: Start the browser SVG editor when it is not running, and apply subm
 **Precondition**: no preview service running on this project.
 
 ```bash
-python3 ${SKILL_DIR}/scripts/svg_editor/server.py <project_path> --daemon
+uv run ${SKILL_DIR}/scripts/svg_editor/server.py <project_path> --daemon
 ```
 
 (Plain mode — no `--live`. The `--live` flag is reserved for Step 6's auto-startup.)
@@ -53,7 +53,7 @@ Triggered by the user signals listed in "When to Run".
 
 1. Discover annotations:
    ```bash
-   python3 ${SKILL_DIR}/scripts/check_annotations.py <project_path>
+   uv run ${SKILL_DIR}/scripts/check_annotations.py <project_path>
    ```
    The output already lists each pending change as `file → element_id → annotation text → content preview`. Use it directly as the to-do list; no need to re-parse SVG attributes yourself.
 2. If the output says no annotations: tell the user, stop.
@@ -63,8 +63,8 @@ Triggered by the user signals listed in "When to Run".
    - Append one `annotation_applied` JSONL record to `<project_path>/live_preview/annotations.jsonl` with `ts`, `file`, `element_id`, and the original annotation text.
 4. Re-export:
    ```bash
-   python3 ${SKILL_DIR}/scripts/finalize_svg.py <project_path>
-   python3 ${SKILL_DIR}/scripts/svg_to_pptx.py <project_path>
+   uv run ${SKILL_DIR}/scripts/finalize_svg.py <project_path>
+   uv run ${SKILL_DIR}/scripts/svg_to_pptx.py <project_path>
    ```
 5. Tell the user (in their language): annotations applied, new PPTX exported, preview is still running. If the browser still shows the old slide, refresh or reselect the page.
 6. Loop: more annotations submitted → repeat from step 1. User signals done or "stop preview" → end.
@@ -96,9 +96,9 @@ Triggered by the user signals listed in "When to Run".
 If the project lives on a remote Linux server, run with `--no-browser`:
 
 ```bash
-python3 ${SKILL_DIR}/scripts/svg_editor/server.py <project_path> --daemon --no-browser
+uv run ${SKILL_DIR}/scripts/svg_editor/server.py <project_path> --daemon --no-browser
 # or for Step 6's auto-startup on a remote host:
-python3 ${SKILL_DIR}/scripts/svg_editor/server.py <project_path> --live --daemon --no-browser
+uv run ${SKILL_DIR}/scripts/svg_editor/server.py <project_path> --live --daemon --no-browser
 ```
 
 - **VS Code / Cursor Remote-SSH**: open the **PORTS** panel (`Ctrl+Shift+P` → `Ports: Focus on Ports View`), click **Forward a Port**, enter `5050`. The workspace remembers it.

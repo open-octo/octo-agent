@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 """
 SVG Image Aspect Ratio Fix Tool
 
@@ -14,14 +24,14 @@ Principle:
     <image> elements so that images are centered and maintain their original aspect ratio.
 
 Usage:
-    python3 scripts/svg_finalize/fix_image_aspect.py <svg_file> [svg_file2] ...
-    python3 scripts/svg_finalize/fix_image_aspect.py projects/xxx/svg_output/*.svg
+    uv run scripts/svg_finalize/fix_image_aspect.py <svg_file> [svg_file2] ...
+    uv run scripts/svg_finalize/fix_image_aspect.py projects/xxx/svg_output/*.svg
 
     # Preview mode
-    python3 scripts/svg_finalize/fix_image_aspect.py --dry-run projects/xxx/svg_output/*.svg
+    uv run scripts/svg_finalize/fix_image_aspect.py --dry-run projects/xxx/svg_output/*.svg
 
 Examples:
-    python3 scripts/svg_finalize/fix_image_aspect.py projects/demo/svg_output/slide_06_current_overview.svg
+    uv run scripts/svg_finalize/fix_image_aspect.py projects/demo/svg_output/slide_06_current_overview.svg
 """
 
 import os

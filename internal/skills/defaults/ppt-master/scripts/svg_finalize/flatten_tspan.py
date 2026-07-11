@@ -1,3 +1,13 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "python-pptx>=0.6.21", "XlsxWriter>=3.0.0", "edge-tts>=7.2.8",
+#     "PyMuPDF>=1.23.0", "mammoth>=1.6.0", "markdownify>=0.11.6",
+#     "ebooklib>=0.18", "nbconvert>=7.0.0", "openpyxl>=3.1.0",
+#     "Pillow>=9.0.0", "numpy>=1.20.0", "requests>=2.31.0",
+#     "beautifulsoup4>=4.12.0", "curl_cffi>=0.7.0", "flask>=3.0.0",
+# ]
+# ///
 import os
 import sys
 import re
@@ -777,7 +787,7 @@ def main() -> None:
     if args.interactive or not args.input:
         inp, out_base = _interactive_get_paths()
         if not inp:
-            print("Cancelled. Usage: python3 scripts/svg_finalize/flatten_tspan.py <input_dir_or_svg> [output_dir]")
+            print("Cancelled. Usage: uv run scripts/svg_finalize/flatten_tspan.py <input_dir_or_svg> [output_dir]")
             sys.exit(0)
     else:
         inp = args.input
