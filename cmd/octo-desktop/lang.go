@@ -2,8 +2,6 @@ package main
 
 import (
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 )
 
@@ -105,24 +103,17 @@ func detectLang() {
 	}
 }
 
-// preferredLang returns "zh" or "en" from the OS's preferred UI language. On
-// macOS a Finder-launched app often has no LANG, so it reads AppleLanguages
-// (whose first element is the user's preferred UI language); elsewhere it falls
-// back to the LC_*/LANG environment.
+// preferredLang returns "zh" or "en" from the OS's preferred UI language. It
+// asks the platform (osLang: AppleLanguages on macOS, GetUserDefaultLocaleName
+// on Windows) first, since a Finder/Explorer-launched app usually has no LANG;
+// only when that yields nothing does it fall back to the LC_*/LANG environment
+// (which is how Linux exposes it).
 func preferredLang() string {
-	if runtime.GOOS == "darwin" {
-		if out, err := exec.Command("/usr/bin/defaults", "read", "-g", "AppleLanguages").Output(); err == nil {
-			// Output is a plist array; the first quoted token is the preferred one.
-			if i := strings.Index(string(out), "\""); i >= 0 {
-				rest := string(out)[i+1:]
-				if j := strings.Index(rest, "\""); j >= 0 {
-					if strings.HasPrefix(strings.ToLower(rest[:j]), "zh") {
-						return "zh"
-					}
-					return "en"
-				}
-			}
+	if lang := osLang(); lang != "" {
+		if strings.HasPrefix(strings.ToLower(lang), "zh") {
+			return "zh"
 		}
+		return "en"
 	}
 	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
 		if v := os.Getenv(k); v != "" {

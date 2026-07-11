@@ -71,6 +71,9 @@ func main() {
 	ensureBundledUv()
 
 	bridge := &nativeBridge{settings: settings, url: "http://" + hubAddr}
+	// On Windows/Linux a window close would otherwise quit the app; start with
+	// quit allowed only when the user opted out of keep-running-in-background.
+	bridge.allowQuit.Store(!settings.KeepRunningInBackground)
 
 	// Native notifications only when bundled (see isBundled): the service needs
 	// a bundle identifier. Registered as a Wails service so its ServiceStartup
@@ -91,6 +94,18 @@ func main() {
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
 				bridge.showWindow()
 			},
+		},
+		// ShouldQuit is consulted on every termination attempt. On Windows/Linux
+		// that includes closing the last window, so returning allowQuit there
+		// keeps the hub alive in the tray (reopen via "Show Octo" or relaunch)
+		// until the user picks "Quit Octo". macOS never quits on window close
+		// thanks to the option below and handles real quits (Cmd-Q) itself, so
+		// it always allows the quit.
+		ShouldQuit: func() bool {
+			if runtime.GOOS == "darwin" {
+				return true
+			}
+			return bridge.allowQuit.Load()
 		},
 		Mac: application.MacOptions{
 			// Closing the window must not quit the hub when the user wants it to
