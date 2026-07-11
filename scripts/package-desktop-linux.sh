@@ -15,8 +15,15 @@ LINUX="$MOD_DIR/build/linux"
 APPDIR="$ROOT/Octo.AppDir"
 OUT="$ROOT/Octo-x86_64.AppImage"
 
+# Bundle ripgrep so the desktop app's grep tool has an `rg` to shell out to
+# (the app can't rely on one being on the user's PATH). Mirrors `make build`:
+# download rg for the host platform, then build with -tags=embedrg to go:embed
+# it. Without this the grep tool fails at runtime with "no binary was embedded".
+echo "==> embedding ripgrep"
+make -C "$ROOT" rg-embed
+
 echo "==> building octo-desktop binary"
-( cd "$MOD_DIR" && CGO_ENABLED=1 go build -o "$ROOT/octo-desktop" . )
+( cd "$MOD_DIR" && CGO_ENABLED=1 go build -tags embedrg -o "$ROOT/octo-desktop" . )
 
 echo "==> assembling AppDir"
 rm -rf "$APPDIR"

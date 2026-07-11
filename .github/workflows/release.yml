@@ -64,12 +64,19 @@ jobs:
           Copy-Item LICENSE.txt staging\LICENSE.txt
           "version=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      # Bundle ripgrep so the desktop app's grep tool has an `rg` to shell out
+      # to (mirrors `make build`; the app can't rely on the user's PATH).
+      - name: Embed ripgrep
+        shell: pwsh
+        run: pwsh scripts/embed-rg-windows.ps1
+
       # Build the desktop GUI (nested module; embeds the committed web UI).
       # -H windowsgui so no console window flashes behind the app.
+      # -tags embedrg go:embeds the rg fetched above.
       - name: Build desktop app
         shell: pwsh
         working-directory: cmd/octo-desktop
-        run: go build -ldflags "-H windowsgui" -o ..\..\staging\octo-desktop.exe .
+        run: go build -tags embedrg -ldflags "-H windowsgui" -o ..\..\staging\octo-desktop.exe .
 
       # Fetches uv.exe from its upstream GitHub release so the installer can
       # bundle it — see octo.iss's [Files] section. Native PowerShell rather
