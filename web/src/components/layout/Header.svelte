@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { view, cmdkOpen, sidebar } from '../../lib/stores'
+  import { view, cmdkOpen, sidebar, nativeShell } from '../../lib/stores'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
@@ -16,7 +16,7 @@
   }
 </script>
 
-<header>
+<header class:native-inset={$nativeShell} style="--wails-draggable:drag">
   <div class="left">
     <button class="icon-btn" title={$t('header.toggle_sidebar')} onclick={cycleSidebar}>
       <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
@@ -65,6 +65,13 @@ header {
   padding: 0 16px;
   z-index: 100;
 }
+/* Desktop shell (macOS): the hidden-inset title bar floats the traffic-light
+   buttons over the top-left, so inset the header past them. The bar is a window
+   drag handle; interactive controls opt out below so they stay clickable. */
+header.native-inset { padding-left: 82px; }
+header.native-inset .icon-btn,
+header.native-inset .search-pill,
+header.native-inset .brand { --wails-draggable: no-drag; }
 .left, .right { display: flex; align-items: center; gap: 8px; }
 .brand { display: flex; align-items: center; gap: 10px; padding-left: 4px; }
 .brand :global(.logo) {
