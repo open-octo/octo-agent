@@ -112,10 +112,6 @@ IM channels are inherently "always-on service" things, and the desktop-as-hub ti
 
 Guidance, not a code path: users who need channels reliably online should run `octo serve -d` on an always-on machine and treat the desktop app as a client of it. The docs should say this plainly. The desktop-as-hub is the right default for the common "one workstation, occasional channels" case, not for "24/7 IM gateway on a laptop."
 
-### 6. LAN exposure stays a CLI concern
-
-The desktop app binds loopback (`127.0.0.1:8088`) only; it exposes no "bind wider" option in its settings. Serving on a LAN address (`-addr :8088`) with an access key remains an `octo serve` / CLI action, keeping the desktop app's surface loopback-simple. A user who wants the hub reachable from a phone runs the headless daemon, or launches the desktop app and separately understands that LAN exposure is a CLI knob.
-
 ## Impact / what changes
 
 - `cmd/octo-desktop/main.go`: bind `127.0.0.1:8088` (not `:0`) via the pid protocol; add the take-over prompt when a live daemon holds the pid; gate `initChannels` on the "run channels here" toggle (default off) instead of the hard `NoChannel`; hide-to-tray on window close (setting-gated) with the tray reflecting backend state; quit confirmation when channels/clients are active.
