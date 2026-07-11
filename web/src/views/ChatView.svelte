@@ -52,7 +52,6 @@
   import { renderMarkdown, setupCopyButtons } from '../lib/markdown'
   import { t, tr } from '../lib/i18n'
   import { confirmDialog } from '../lib/confirm'
-  import StatusTag from '../components/ui/StatusTag.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
   import WorkflowsCard from '../components/chat/WorkflowsCard.svelte'
@@ -84,6 +83,11 @@
   // Session-level plan panel: collapsed by default so it never occludes the
   // message stream; the user can expand it into a floating dropdown.
   let planExpanded = $state(false)
+
+  // Header overflow menu (compact / clear / artifacts / export). Kept collapsed
+  // behind a "⋯" trigger so the header stays a slim single line; clicking
+  // anywhere else closes it (see the svelte:window handler in the template).
+  let headerMenu = $state(false)
 
   // Tracks optimistic UI state for in-flight sends. A FIFO queue per session
   // supports multiple messages (e.g. consecutive steer messages mid-turn); if
@@ -1111,41 +1115,53 @@
   }
 </script>
 
+<svelte:window onclick={() => { headerMenu = false }} />
+
 <div class="chat-view">
-  <!-- Chat header -->
+  <!-- Chat header — slim single line: status dot + title on the left, all
+       low-frequency actions folded behind a "⋯" overflow menu on the right. -->
   <div class="chat-header">
     <div class="title-row">
+      <span class="status-dot" class:running={streaming} role="status" aria-label={streaming ? $t('status.running') : $t('status.idle')} title={streaming ? $t('status.running') : $t('status.idle')}></span>
       <span class="session-title">
         {currentSession?.title ?? currentSession?.name ?? 'Chat'}
       </span>
-      {#if streaming}
-        <StatusTag status="info">{$t('status.running')}</StatusTag>
-      {:else}
-        <StatusTag status="default">{$t('status.idle')}</StatusTag>
-      {/if}
     </div>
     <div class="header-actions">
-      <button class="hdr-btn" title={$t('chat.compact_tooltip')} disabled={!id || streaming} onclick={() => send('/compact')}>
-        <iconify-icon icon="ant-design:compress-outlined" width="13"></iconify-icon>
-        {$t('chat.compact')}
-      </button>
-      <button class="hdr-btn" title={$t('chat.clear_tooltip')} disabled={!id || streaming} onclick={async () => {
-        if (await confirmDialog($t('chat.clear_confirm'))) send('/clear')
-      }}>
-        <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
-        {$t('chat.clear')}
-      </button>
-      <button class="hdr-btn" class:active={$artifactsOpen} onclick={() => artifactsOpen.update(v => !v)}>
-        <iconify-icon icon="ant-design:file-text-outlined" width="13"></iconify-icon>
-        {$t('chat.artifacts')}
-        {#if artifactCount > 0}
-          <span class="count-badge">{artifactCount}</span>
+      <div class="hdr-menu-wrap">
+        <button class="hdr-icon-btn" class:active={headerMenu || $artifactsOpen} title={$t('chat.actions')} aria-label={$t('chat.actions')} onclick={(e) => { e.stopPropagation(); headerMenu = !headerMenu }}>
+          <iconify-icon icon="lucide:more-horizontal" width="18"></iconify-icon>
+          {#if artifactCount > 0}
+            <span class="count-badge">{artifactCount}</span>
+          {/if}
+        </button>
+        {#if headerMenu}
+          <div class="hdr-menu" onclick={(e) => e.stopPropagation()}>
+            <button class="hdr-menu-item" title={$t('chat.compact_tooltip')} disabled={!id || streaming} onclick={() => { headerMenu = false; send('/compact') }}>
+              <iconify-icon icon="ant-design:compress-outlined" width="14"></iconify-icon>
+              {$t('chat.compact')}
+            </button>
+            <button class="hdr-menu-item" title={$t('chat.clear_tooltip')} disabled={!id || streaming} onclick={async () => {
+              headerMenu = false
+              if (await confirmDialog($t('chat.clear_confirm'))) send('/clear')
+            }}>
+              <iconify-icon icon="ant-design:delete-outlined" width="14"></iconify-icon>
+              {$t('chat.clear')}
+            </button>
+            <button class="hdr-menu-item" class:active={$artifactsOpen} onclick={() => { headerMenu = false; artifactsOpen.update(v => !v) }}>
+              <iconify-icon icon="ant-design:file-text-outlined" width="14"></iconify-icon>
+              {$t('chat.artifacts')}
+              {#if artifactCount > 0}
+                <span class="count-badge">{artifactCount}</span>
+              {/if}
+            </button>
+            <button class="hdr-menu-item" onclick={() => { headerMenu = false; exportTranscript() }}>
+              <iconify-icon icon="ant-design:export-outlined" width="14"></iconify-icon>
+              {$t('chat.export')}
+            </button>
+          </div>
         {/if}
-      </button>
-      <button class="hdr-btn" onclick={exportTranscript}>
-        <iconify-icon icon="ant-design:export-outlined" width="13"></iconify-icon>
-        {$t('chat.export')}
-      </button>
+      </div>
     </div>
   </div>
 
@@ -1506,19 +1522,48 @@
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .chat-header {
   flex: 0 0 auto; background: var(--bg-container); border-bottom: 1px solid var(--border-secondary);
-  padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 24px; display: flex; align-items: center; justify-content: space-between;
 }
-.title-row { display: flex; align-items: center; gap: 10px; }
-.session-title { font-size: 16px; font-weight: 600; color: var(--text-heading); }
+.title-row { display: flex; align-items: center; gap: 8px; }
+.session-title { font-size: 15px; font-weight: 600; color: var(--text-heading); }
+/* Idle/running state compressed from a text tag to a single dot so the header
+   stays one slim line. */
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--text-quaternary);
+}
+.status-dot.running {
+  background: var(--blue-6);
+  box-shadow: 0 0 0 3px rgba(5,145,255,0.16);
+  animation: octo-pulse 1.4s ease-in-out infinite;
+}
+@keyframes octo-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
 .header-actions { display: flex; align-items: center; gap: 8px; }
-.hdr-btn {
-  height: 28px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
-  border-radius: 6px; display: flex; align-items: center; gap: 8px;
-  font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+.hdr-menu-wrap { position: relative; }
+.hdr-icon-btn {
+  position: relative;
+  height: 28px; min-width: 28px; padding: 0 6px; border: 1px solid transparent; background: transparent;
+  border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 4px;
+  color: var(--text-secondary); cursor: pointer; font-family: inherit;
 }
-.hdr-btn:hover { border-color: var(--blue-5); color: var(--blue-5); }
-.hdr-btn.active { border-color: var(--blue-6); color: var(--blue-6); background: var(--active-blue-bg); }
-.hdr-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: var(--border); color: var(--text-quaternary); }
+.hdr-icon-btn:hover { background: var(--hover-neutral); color: var(--text); }
+.hdr-icon-btn.active { border-color: var(--blue-6); color: var(--blue-6); background: var(--active-blue-bg); }
+.hdr-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
+  min-width: 180px;
+  background: var(--bg-container); border: 1px solid var(--border-secondary); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.14); padding: 4px;
+}
+.hdr-menu-item {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border: none; background: transparent; border-radius: 6px;
+  font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit; text-align: left;
+}
+.hdr-menu-item:hover { background: rgba(22,119,255,0.08); color: var(--text); }
+.hdr-menu-item.active { color: var(--blue-6); }
+.hdr-menu-item:disabled { opacity: 0.5; cursor: not-allowed; }
+.hdr-menu-item:disabled:hover { background: transparent; color: var(--text-secondary); }
+.hdr-menu-item .count-badge { margin-left: auto; }
 .count-badge {
   font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   background: var(--blue-1); color: var(--blue-6); border-radius: 9999px;

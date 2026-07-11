@@ -719,106 +719,6 @@
 <svelte:window onclick={onWindowClick} />
 
 <div class="composer">
-  <div class="chips">
-    <div class="picker">
-      <button class="chip" onclick={(e) => { e.stopPropagation(); reasonMenu = false; modelMenu = !modelMenu }}>
-        <iconify-icon icon="ant-design:robot-outlined" width="12"></iconify-icon>
-        <span>{modelName}</span>
-        <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
-      </button>
-      {#if modelMenu}
-        <div class="menu" onclick={(e) => e.stopPropagation()}>
-          {#if models.length === 0}
-            <div class="menu-empty">{$t('chat.no_models')}</div>
-          {:else}
-            {#each models as m (m.id)}
-              <button class="menu-item" onclick={() => pickModel(m)}>
-                <span class="mi-name">{m.id}</span>
-                <span class="mi-model mono">{m.model}</span>
-              </button>
-            {/each}
-          {/if}
-        </div>
-      {/if}
-    </div>
-    <div class="picker">
-      <button class="chip reasoning-chip" onclick={(e) => { e.stopPropagation(); modelMenu = false; reasonMenu = !reasonMenu }}>
-        <span>{$t('chat.reasoning')} {cap(reasoning)}</span>
-        <iconify-icon icon={showReasoningIcon} width="12" class="reasoning-eye"></iconify-icon>
-        <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
-      </button>
-      {#if reasonMenu}
-        <div class="menu" onclick={(e) => e.stopPropagation()}>
-          {#each reasoningLevels as lvl}
-            <button class="menu-item" class:active={lvl === reasoning} onclick={() => pickReasoning(lvl)}>
-              <span class="mi-name">{cap(lvl)}</span>
-            </button>
-          {/each}
-          <div class="menu-divider"></div>
-          <button
-            class="menu-item toggle-item"
-            disabled={reasoning === 'off'}
-            onclick={() => toggleShowReasoning()}
-          >
-            <span class="mi-name">{$t('chat.show_reasoning')}</span>
-            <span class="toggle" class:on={showReasoning && reasoning !== 'off'}>
-              <span class="toggle-knob"></span>
-            </span>
-          </button>
-        </div>
-      {/if}
-    </div>
-    {#if workingDir}
-      <div class="picker">
-        <button class="chip" title={workingDir} onclick={(e) => { e.stopPropagation(); openDirMenu() }}>
-          <iconify-icon icon="ant-design:folder-outlined" width="12"></iconify-icon>
-          <span>{$t('chat.dir_label')}</span>
-          <span class="mono">{shortDir(workingDir)}</span>
-          <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
-        </button>
-        {#if dirMenu}
-          <div class="menu dir-menu" onclick={(e) => e.stopPropagation()}>
-            <input
-              class="dir-input mono"
-              bind:value={dirDraft}
-              placeholder="~/code/my-project"
-              spellcheck="false"
-              onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveWorkingDir() } else if (e.key === 'Escape') { dirMenu = false } }}
-            />
-            <button class="dir-save" disabled={dirSaving} onclick={() => saveWorkingDir()}>
-              {dirSaving ? $t('chat.dir_saving') : $t('chat.dir_save')}
-            </button>
-            <button class="dir-browse" onclick={() => openPicker()}>
-              <iconify-icon icon="ant-design:folder-open-outlined" width="12"></iconify-icon>
-              {$t('chat.dir_browse')}
-            </button>
-          </div>
-        {/if}
-      </div>
-    {/if}
-    {#if goalChip}
-      <span class="chip static goal-chip" title={goal?.objective ?? ''}>
-        <span>{$t('chat.goal')}</span>
-        <span class="mono">{goalChip}</span>
-      </span>
-    {/if}
-    <span class="chip static context-chip">
-      <span>{$t('chat.context')}</span>
-      <span class="ctx-bar"><span class="ctx-fill" style="width:{Math.min(ctxUsage, 100)}%"></span></span>
-      <span class="mono">{ctxUsage}%</span>
-    </span>
-    <span style="margin-left:auto;"></span>
-    <button class="perm-toggle" onclick={(e) => { e.stopPropagation(); cyclePermMode() }} title={$t('chat.perm_toggle_hint')}>
-      {#if permMode === 'auto'}
-        <StatusTag status="success">{$t('chat.auto_mode')}</StatusTag>
-      {:else if permMode === 'strict'}
-        <StatusTag status="error">{$t('chat.strict_mode')}</StatusTag>
-      {:else}
-        <StatusTag status="warning">{$t('chat.ask_mode')}</StatusTag>
-      {/if}
-    </button>
-  </div>
-
   <div class="input-wrap">
     <div
       class="input-card"
@@ -894,11 +794,115 @@
         onchange={onFilesPicked}
       />
       <div class="input-footer">
+        <!-- Left group wraps when the row is tight (e.g. a long working dir);
+             the right group (send / stop / mode) stays pinned bottom-right. -->
+        <div class="footer-left">
         <button class="tool-btn" title={$t('chat.attach_file')} onclick={openAttach}>
           <iconify-icon icon="ant-design:paper-clip-outlined" width="15"></iconify-icon>
         </button>
         <button class="tool-btn skill-btn" title={$t('chat.insert_slash')} onclick={insertSkill}>/</button>
-        <span style="margin-left:auto;"></span>
+
+        <!-- Session meta chips, folded into the footer so the composer is a
+             single card (no separate chips row above it). -->
+        <div class="picker">
+          <button class="chip" onclick={(e) => { e.stopPropagation(); reasonMenu = false; modelMenu = !modelMenu }}>
+            <iconify-icon icon="ant-design:robot-outlined" width="12"></iconify-icon>
+            <span>{modelName}</span>
+            <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
+          </button>
+          {#if modelMenu}
+            <div class="menu" onclick={(e) => e.stopPropagation()}>
+              {#if models.length === 0}
+                <div class="menu-empty">{$t('chat.no_models')}</div>
+              {:else}
+                {#each models as m (m.id)}
+                  <button class="menu-item" onclick={() => pickModel(m)}>
+                    <span class="mi-name">{m.id}</span>
+                    <span class="mi-model mono">{m.model}</span>
+                  </button>
+                {/each}
+              {/if}
+            </div>
+          {/if}
+        </div>
+        <div class="picker">
+          <button class="chip reasoning-chip" onclick={(e) => { e.stopPropagation(); modelMenu = false; reasonMenu = !reasonMenu }}>
+            <span>{$t('chat.reasoning')} {cap(reasoning)}</span>
+            <iconify-icon icon={showReasoningIcon} width="12" class="reasoning-eye"></iconify-icon>
+            <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
+          </button>
+          {#if reasonMenu}
+            <div class="menu" onclick={(e) => e.stopPropagation()}>
+              {#each reasoningLevels as lvl}
+                <button class="menu-item" class:active={lvl === reasoning} onclick={() => pickReasoning(lvl)}>
+                  <span class="mi-name">{cap(lvl)}</span>
+                </button>
+              {/each}
+              <div class="menu-divider"></div>
+              <button
+                class="menu-item toggle-item"
+                disabled={reasoning === 'off'}
+                onclick={() => toggleShowReasoning()}
+              >
+                <span class="mi-name">{$t('chat.show_reasoning')}</span>
+                <span class="toggle" class:on={showReasoning && reasoning !== 'off'}>
+                  <span class="toggle-knob"></span>
+                </span>
+              </button>
+            </div>
+          {/if}
+        </div>
+        {#if workingDir}
+          <div class="picker">
+            <button class="chip" title={workingDir} onclick={(e) => { e.stopPropagation(); openDirMenu() }}>
+              <iconify-icon icon="ant-design:folder-outlined" width="12"></iconify-icon>
+              <span>{$t('chat.dir_label')}</span>
+              <span class="mono">{shortDir(workingDir)}</span>
+              <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
+            </button>
+            {#if dirMenu}
+              <div class="menu dir-menu" onclick={(e) => e.stopPropagation()}>
+                <input
+                  class="dir-input mono"
+                  bind:value={dirDraft}
+                  placeholder="~/code/my-project"
+                  spellcheck="false"
+                  onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveWorkingDir() } else if (e.key === 'Escape') { dirMenu = false } }}
+                />
+                <button class="dir-save" disabled={dirSaving} onclick={() => saveWorkingDir()}>
+                  {dirSaving ? $t('chat.dir_saving') : $t('chat.dir_save')}
+                </button>
+                <button class="dir-browse" onclick={() => openPicker()}>
+                  <iconify-icon icon="ant-design:folder-open-outlined" width="12"></iconify-icon>
+                  {$t('chat.dir_browse')}
+                </button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+        {#if goalChip}
+          <span class="chip static goal-chip" title={goal?.objective ?? ''}>
+            <span>{$t('chat.goal')}</span>
+            <span class="mono">{goalChip}</span>
+          </span>
+        {/if}
+        <span class="chip static context-chip">
+          <span>{$t('chat.context')}</span>
+          <span class="ctx-bar"><span class="ctx-fill" style="width:{Math.min(ctxUsage, 100)}%"></span></span>
+          <span class="mono">{ctxUsage}%</span>
+        </span>
+        </div>
+
+        <div class="footer-right">
+        <button class="perm-toggle" onclick={(e) => { e.stopPropagation(); cyclePermMode() }} title={$t('chat.perm_toggle_hint')}>
+          {#if permMode === 'auto'}
+            <StatusTag status="success">{$t('chat.auto_mode')}</StatusTag>
+          {:else if permMode === 'strict'}
+            <StatusTag status="error">{$t('chat.strict_mode')}</StatusTag>
+          {:else}
+            <StatusTag status="warning">{$t('chat.ask_mode')}</StatusTag>
+          {/if}
+        </button>
         {#if isStreaming || $running}
           <!-- Mid-turn: Stop interrupts the running turn; Send stays available
                so a follow-up message steers the turn in flight (rides the
@@ -909,6 +913,7 @@
           </button>
         {/if}
         <button class="send-btn" onclick={send}>{$t('chat.send')}</button>
+        </div>
       </div>
     </div>
   </div>
@@ -928,11 +933,6 @@
   flex: 0 0 auto;
   background: var(--bg-container);
   border-top: 1px solid var(--border-secondary);
-}
-.chips {
-  max-width: var(--chat-content-max-width, 1080px); margin: 0 auto;
-  padding: 12px 24px 0;
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .chip {
   height: 24px; padding: 0 10px; border: 1px solid var(--border); background: var(--bg-container);
@@ -1039,7 +1039,9 @@ textarea {
   display: flex; align-items: center; color: var(--text-tertiary);
 }
 .attach-x:hover { color: var(--error); }
-.input-footer { display: flex; align-items: center; gap: 4px; }
+.input-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.footer-left { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; row-gap: 8px; min-width: 0; flex: 1 1 auto; }
+.footer-right { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .tool-btn {
   width: 28px; height: 28px; border: none; background: transparent; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
