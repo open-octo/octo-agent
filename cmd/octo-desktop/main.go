@@ -73,10 +73,12 @@ func main() {
 		Width:  1280,
 		Height: 860,
 		URL:    url,
+		// Standard title bar: the embedded web UI has its own header, so a
+		// hidden/inset title bar let the page render up under the macOS
+		// traffic-light buttons (they overlapped the Octo logo). A normal title
+		// bar puts the content below the controls.
 		Mac: application.MacWindow{
-			TitleBar:                application.MacTitleBarHiddenInsetUnified,
-			InvisibleTitleBarHeight: 50,
-			Backdrop:                application.MacBackdropTranslucent,
+			TitleBar: application.MacTitleBarDefault,
 		},
 	})
 	bridge.window = window
