@@ -204,6 +204,20 @@ export async function setAutostart(enabled: boolean): Promise<void> {
   })
 }
 
+// Desktop hub only: whether this machine is running IM channels. GET reflects
+// the live subsystem state; PUT flips it (and the desktop persists the choice).
+export async function getChannelsEnabled(): Promise<boolean> {
+  const r = await request<{ enabled: boolean }>('/api/native/channels')
+  return r.enabled
+}
+export async function setChannelsEnabled(enabled: boolean): Promise<boolean> {
+  const r = await request<{ enabled: boolean }>('/api/native/channels', {
+    method: 'PUT',
+    ...json({ enabled }),
+  })
+  return r.enabled
+}
+
 export interface FsEntry {
   name: string
   is_dir: boolean

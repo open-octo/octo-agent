@@ -51,15 +51,15 @@ Why load a loopback URL instead of Wails' embedded asset server:
 - **WebSocket just works.** octo's live updates run over `/ws`. A real `http.Server` upgrades the connection normally; routing WS through Wails' asset-server pipeline is an unverified hijack risk we avoid entirely.
 - **Maximal reuse, minimal Wails surface.** The frontend loads exactly as it does under `octo serve` — same origin shape (`http://127.0.0.1:<port>`), same auth path (the loopback exemption already permits it), same everything. Wails contributes only the window, the tray, and the native bridge.
 
-### Not `octo serve`: a self-contained single-user instance
+### The shared hub: same backend as `octo serve`
 
-Launching the desktop app does **not** start `octo serve -d`, and does not make a web endpoint or the IM bridges available. It is a private server for its own window, not a shared service:
+While it runs, the desktop app **is** the one `octo serve` backend for the machine — not a private per-window server. It binds the fixed loopback port `127.0.0.1:8088` (the same default `octo serve` uses) and runs the server in-process, so the Web UI, VS Code, Obsidian, and the CLI all connect to this instance over the same HTTP/WebSocket API. See [desktop-hub-design.md](desktop-hub-design.md) for the full design and the decisions behind it; in brief:
 
-- **Its own in-process server, not the serve daemon.** `main` binds `127.0.0.1:0` — an *ephemeral* loopback port, freshly chosen each launch — and hands that listener to `server.New(...)` / `srv.ServeOn(ln)`. Nothing spawns the `octo serve` daemon; there is no fixed port and no `-d` process. (The double-click installers deliberately dropped the pre-desktop "autostart `octo serve -d` on login" behavior — the app replaces that surrogate.)
-- **Not reachable as a web endpoint.** Loopback-only on a random port means no other device or browser can find it, and the window is the sole intended client. This is not the "web interface" in the self-host/remote sense.
-- **No IM channels.** The desktop `Config` sets `NoChannel: true`, so `initChannels` returns early — no DingTalk/Feishu/etc. manager is created. Desktop is a single local user by definition.
+- **One backend owns the port at a time.** The app joins the `~/.octo/serve.pid` protocol (`internal/serveproc`) that `octo serve -d` uses: on launch it takes over a running daemon (after asking) or binds the port itself, writing its own pid. A headless `octo serve -d` remains the option for GUI-less machines.
+- **Channels are opt-in per machine.** The hub can run the IM bridges, but does not start them just because the GUI launched — a persisted "run channels on this machine" toggle (default off, `~/.octo/desktop.json`) gates `initChannels`, flipped at runtime through `PUT /api/native/channels` → the server's `SetChannelsEnabled`. Launching the GUI never silently starts a bridge.
+- **Window lifecycle ≠ backend lifecycle.** Closing the window hides to the tray and keeps the hub serving other clients (default; a per-machine setting can make close quit instead). "Quit Octo" fully stops the backend and confirms first when channels are running.
 
-If you want the shared web UI (other devices, phone) or the IM bridges, run `octo serve` yourself — the installer puts the `octo` CLI on `PATH` for exactly that. The desktop app and a separate `octo serve` are fully independent and can run at the same time (different ports); they share the same code and the same `~/.octo` config/sessions, not a process.
+LAN exposure stays a CLI concern (`octo serve -addr :8088`); the desktop app binds loopback only.
 
 ### The native bridge
 

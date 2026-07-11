@@ -6,58 +6,27 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/serveproc"
 )
 
 // daemonReadyTimeout bounds how long startDaemon waits for the spawned server
 // to begin accepting connections before it returns anyway.
 const daemonReadyTimeout = 15 * time.Second
 
-// daemonPidFile returns the path of the daemon PID file, creating ~/.octo if needed.
-func daemonPidFile() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(home, ".octo")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "serve.pid"), nil
-}
-
-// daemonLogFile returns the path of the daemon log file, creating ~/.octo if needed.
-func daemonLogFile() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(home, ".octo")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "serve.log"), nil
-}
-
-// readPidFile reads an integer PID from path.
-func readPidFile(path string) (int, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-	var pid int
-	if _, err := fmt.Sscan(strings.TrimSpace(string(data)), &pid); err != nil {
-		return 0, fmt.Errorf("invalid pid file: %w", err)
-	}
-	return pid, nil
-}
-
-// writePidFile writes pid to path.
-func writePidFile(path string, pid int) error {
-	return os.WriteFile(path, []byte(fmt.Sprintf("%d\n", pid)), 0o644)
-}
+// The pid-file, log-file, and process primitives live in internal/serveproc so
+// the desktop hub (cmd/octo-desktop) shares the exact same coordination. These
+// thin aliases keep the daemon code below reading as before.
+var (
+	daemonPidFile    = serveproc.PidPath
+	daemonLogFile    = serveproc.LogPath
+	readPidFile      = serveproc.ReadPid
+	writePidFile     = serveproc.WritePid
+	isProcessAlive   = serveproc.IsAlive
+	terminateProcess = serveproc.Terminate
+)
 
 // startDaemon re-execs the current binary as a detached background process,
 // writes its PID, and waits (up to daemonReadyTimeout) for it to start
