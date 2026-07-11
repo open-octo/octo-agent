@@ -81,7 +81,7 @@ The composer already shows a working-dir chip driven by `chatWorkingDir` and ref
 
 - Clicking the chip opens a **folder picker** modal: a single-pane directory browser (breadcrumb + "up", list of subdirectories, files shown greyed for context, hidden-file toggle) fed by `GET /api/fs/list`. Navigating into a folder re-fetches; "Select this folder" confirms the current `path`.
 - Confirm calls the existing `PATCH /api/sessions/{id}/working_dir` with the chosen path. The server validates, saves, and broadcasts `session_update`; the chip refreshes through the existing store path with no new wiring.
-- The picker is only offered when browsing is available. The frontend learns this from a `GET /api/fs/list` probe (a 403 means non-loopback): on 403 the chip stays editable-by-typing and the picker button is hidden, so a remotely-served UI degrades cleanly to typed paths + upload.
+- The Browse button is always present; it does not probe availability up front. When the server can't serve listings to this peer, the first `GET /api/fs/list` returns 403 and the modal shows the server's "available only from the local machine" message in place of a listing — so a remotely-served UI degrades cleanly to typed paths + upload, and tells the remote user *why* rather than silently hiding the affordance. The typed-path input stays available regardless.
 
 Upload stays exactly as it is, repositioned as the fallback: when there is no shared filesystem (remote server, or a file genuinely coming from the user's own machine into a remote box), upload is still the right primitive and remains one gesture away. The change is emphasis — the working-dir control is the prominent one — not removal.
 
