@@ -114,3 +114,21 @@ func TestAgentMemoryRecallFallsBackToTitle(t *testing.T) {
 		t.Errorf("results = %+v, want content to fall back to the title", results)
 	}
 }
+
+// TestAgentMemoryErrorsOnNon2xx confirms both Store and Recall surface an
+// error when the server answers with a non-2xx status, so a failing backend
+// never reads as a silent success.
+func TestAgentMemoryErrorsOnNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	b := newAgentMemory(Config{BaseURL: srv.URL})
+	if err := b.Store(context.Background(), "anything"); err == nil {
+		t.Error("Store: want error on 500, got nil")
+	}
+	if _, err := b.Recall(context.Background(), "anything"); err == nil {
+		t.Error("Recall: want error on 500, got nil")
+	}
+}
