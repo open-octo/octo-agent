@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store'
-import type { Session, Skill, Workflow, ScheduledTask, McpServer, Channel, Memory, Artifact, ArtifactView } from './types'
+import type { Session, SessionGroup, Skill, Workflow, ScheduledTask, McpServer, Channel, Memory, Artifact, ArtifactView } from './types'
 import * as api from './api'
 
 // First-run gate. 'unknown' until /api/onboard/status resolves (render a splash,
@@ -43,6 +43,14 @@ export const artifactView = writable<ArtifactView>('preview')
 // Sessions
 export const sessions = writable<Session[]>([])
 export const activeSessionId = writable<string | null>(null)
+// Web-UI sidebar groups. Membership lives here (server registry), not on the
+// session; the sidebar clusters the session list by these.
+export const sessionGroups = writable<SessionGroup[]>([])
+// Sidebar UI state for groups: the session whose "move to group" popover is
+// open, and the group being renamed inline.
+export const groupMenuFor = writable<string | null>(null)
+export const editGroupId = writable<string | null>(null)
+export const editGroupDraft = writable('')
 // The configured default permission mode (~/.octo/config.yml), seeded once
 // from GET /api/config on app start. Used as the Composer's last-resort
 // fallback when no session is active (e.g. right after deleting one) —
