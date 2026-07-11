@@ -1,0 +1,20 @@
+# image-gen dependencies
+# =======================
+# Install once before first use, e.g.:
+#   uv pip install -r <skill-dir>/requirements.txt
+#   (or) pip install -r <skill-dir>/requirements.txt
+
+# AI generation (image_gen.py) + web search (image_search.py) talk to most
+# providers over plain HTTP.
+requests>=2.31.0
+
+# Post-processing (slice_images.py needs Pillow; gemini_watermark_remover.py
+# needs Pillow + numpy).
+Pillow>=9.0.0
+numpy>=1.20.0
+
+# Per-provider SDKs are OPTIONAL — install only the backend you set as
+# IMAGE_BACKEND. Most backends (openai, minimax, stability, bfl, ideogram,
+# qwen, zhipu, volcengine, modelscope, siliconflow, fal, replicate,
+# openrouter) use raw HTTP and need nothing extra. The one exception:
+#   IMAGE_BACKEND=gemini  ->  google-genai>=1.0.0
