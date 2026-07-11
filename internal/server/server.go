@@ -2951,3 +2951,29 @@ func (s *Server) SetChannelsEnabled(on bool) {
 func (s *Server) ChannelsEnabled() bool {
 	return !s.cfg.NoChannel && !s.channelsDisabled.Load()
 }
+
+// RunningChannels returns the sorted names of the IM platforms with a live
+// adapter. Empty when channels are off or none have connected yet. Surfaced in
+// the desktop tray.
+func (s *Server) RunningChannels() []string {
+	var names []string
+	s.runningAdapters.Range(func(k, _ any) bool {
+		if name, ok := k.(string); ok {
+			names = append(names, name)
+		}
+		return true
+	})
+	sort.Strings(names)
+	return names
+}
+
+// ConnectedClients reports how many WebSocket clients (web tabs, editor
+// extensions) are currently connected. Surfaced in the desktop tray.
+func (s *Server) ConnectedClients() int {
+	if s.wsHub == nil {
+		return 0
+	}
+	s.wsHub.mu.Lock()
+	defer s.wsHub.mu.Unlock()
+	return len(s.wsHub.connections)
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -19,8 +20,10 @@ type nativeBridge struct {
 	app      *application.App
 	window   *application.WebviewWindow
 	notifier *notifications.NotificationService // nil unless bundled
-	srv      *server.Server                     // the in-process hub; set once bound
-	url      string                             // http://127.0.0.1:8088, set once bound
+	// srv is the in-process hub, set once bound. Atomic because startHub (the
+	// ApplicationStarted goroutine) writes it while the tray-refresh loop reads it.
+	srv atomic.Pointer[server.Server]
+	url string // http://127.0.0.1:8088, set once bound
 
 	settingsMu sync.Mutex
 	settings   desktopSettings
@@ -173,7 +176,7 @@ func (b *nativeBridge) confirmTakeover(pid int) bool {
 // requestQuit is the tray "Quit Octo" action: it fully stops the backend, so it
 // confirms first when channels are running (other clients would disconnect).
 func (b *nativeBridge) requestQuit() {
-	if b.srv != nil && b.srv.ChannelsEnabled() {
+	if srv := b.srv.Load(); srv != nil && srv.ChannelsEnabled() {
 		if !b.confirm("Quit Octo",
 			"Quitting stops the Octo backend on this machine. Connected editors, "+
 				"browsers, and IM channels will disconnect.\n\nQuit anyway?",
