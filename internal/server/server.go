@@ -619,6 +619,13 @@ func (s *Server) ListenAndServe() error {
 	return s.serveOn(ln)
 }
 
+// ServeOn runs the server on a listener the caller already bound. The desktop
+// shell (cmd/octo-desktop) uses it to grab an ephemeral loopback port, learn
+// the address to point its window at, then serve on that same socket — closing
+// the bind-after-probe race a fixed or re-derived port would open. Behaves like
+// ListenAndServe otherwise.
+func (s *Server) ServeOn(ln net.Listener) error { return s.serveOn(ln) }
+
 // serveOn runs the server on an already-bound listener (split from
 // ListenAndServe so tests can use an ephemeral port). A stop via Shutdown is
 // reported as nil — it is the expected end of a server's life, not an error —

@@ -52,7 +52,7 @@ RG_EMBED_BIN := $(RG_EMBED_DIR)/rg
         eval-build eval-list eval \
         rg-embed rg-embed-clean \
         bundle-tools-windows bundle-tools-macos \
-        web-build web-dev dev build-full
+        web-build web-dev dev build-full desktop
 
 all: test
 
@@ -79,6 +79,15 @@ build: web-build rg-embed
 	go build $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' -o octo ./cmd/octo
 
 build-full: build
+
+# Build the native desktop shell (Wails v3). cmd/octo-desktop is a nested
+# module, so its CGO + webview dependencies never touch the CLI's go.mod. Needs
+# a platform webview toolchain (macOS: Xcode command-line tools; Windows:
+# WebView2). Embeds the web UI first (the in-process server go:embeds webdist).
+# Produces a bare binary; use `wails3 build` inside cmd/octo-desktop for a
+# packaged .app / installer.
+desktop: web-build
+	cd cmd/octo-desktop && CGO_ENABLED=1 go build -o ../../octo-desktop .
 
 install: web-build rg-embed
 	go install $(GOFLAGS) -tags='$(GOTAGS) $(RG_TAGS)' -ldflags='$(LDFLAGS)' ./cmd/octo
