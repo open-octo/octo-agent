@@ -133,7 +133,17 @@ if you'd rather grab one by hand.
   `~/Library/Application\ Support/octo/uninstall.sh` to remove everything it
   installed.
 
-**Windows (double-click installer).** Download `octo-setup.exe` from the
+**Windows — two ways to install:**
+
+- **Install script (PowerShell).** The 3-platform counterpart to the
+  `curl … | sh` one-liner — detects your arch, verifies the SHA-256, installs
+  `octo.exe` per-user and puts it on your `PATH`:
+
+  ```powershell
+  irm https://octo-agent.dev/install.ps1 | iex
+  ```
+
+- **Double-click installer.** Download `octo-setup.exe` from the
 [latest release](https://github.com/open-octo/octo-agent/releases/latest) and
 double-click it. It installs per-user (no administrator prompt), puts `octo` on
 your `PATH`, and adds a Start-menu entry. When it finishes it starts the local

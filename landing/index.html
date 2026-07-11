@@ -687,8 +687,11 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
       }
 
       // Windows: the Download button is the installer, which starts the server
-      // and opens the dashboard itself — so hide the command box.
-      if (target && target.os === 'windows' && block) block.style.display = 'none';
+      // and opens the dashboard itself — but the CLI install script now has a
+      // Windows one-liner too, so show it alongside the Download button.
+      if (target && target.os === 'windows' && cmd) {
+        cmd.textContent = 'irm https://octo-agent.dev/install.ps1 | iex';
+      }
 
       // Unknown OS: leave the releases-page button and the curl one-liner both
       // visible so every visitor has a working path.

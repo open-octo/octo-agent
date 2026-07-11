@@ -11,8 +11,10 @@
 #   OCTO_INSTALL_DIR=/path   install here instead of the default
 #   OCTO_VERSION=1.2.3       install this version instead of the latest
 #
-# Windows users: download the double-click installer (octo-setup.exe) from
-# https://github.com/open-octo/octo-agent/releases/latest instead.
+# Windows users: run the PowerShell one-liner instead —
+#   irm https://octo-agent.dev/install.ps1 | iex
+# or download the double-click installer (octo-setup.exe, which also gives you
+# the desktop app) from https://github.com/open-octo/octo-agent/releases/latest
 
 set -eu
 
