@@ -15,7 +15,6 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
 func main() {
@@ -28,8 +27,7 @@ func main() {
 	}
 	url := fmt.Sprintf("http://%s", ln.Addr().String())
 
-	notifier := notifications.New()
-	bridge := &nativeBridge{notifier: notifier}
+	bridge := &nativeBridge{}
 
 	srv, err := server.New(server.Config{
 		Tools: true,
@@ -51,9 +49,12 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "Octo",
 		Description: "Octo Agent",
-		Services: []application.Service{
-			application.NewService(notifier),
-		},
+		// Native notifications (v3/pkg/services/notifications) are intentionally
+		// not registered yet: the service requires a real .app bundle identifier
+		// and hard-fails app startup without one, so a bare `make desktop` binary
+		// couldn't run. Wiring it (inside a wails3-built bundle) and routing the
+		// server's notification triggers through NativeBridge.Notify is a
+		// follow-up — see dev-docs/wails-desktop-design.md.
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "dev.octo-agent.desktop",
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
