@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -149,8 +148,11 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		})
 		b.window = w
 	} else if hash != "" {
-		// Already loaded — switch the SPA route without reloading.
-		b.window.ExecJS("window.location.hash = " + strconv.Quote(hash))
+		// Already open — navigate to the route. ExecJS can't be used here: the
+		// page is served by octo's own server, not Wails' asset server, so the
+		// Wails runtime never loads and ExecJS stays queued forever. SetURL is a
+		// native navigation that doesn't depend on it.
+		b.window.SetURL(target)
 	}
 	b.window.Show()
 	b.window.Restore()
