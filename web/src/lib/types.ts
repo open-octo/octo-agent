@@ -36,6 +36,17 @@ export interface Session {
   icon?: string
 }
 
+// SessionGroup is a Web-UI sidebar grouping. Membership lives here (session
+// IDs), not on the session, so the CLI/TUI listing is unaffected. Collapsed is
+// persisted server-side so the folded state is consistent across the Web UI
+// and the desktop webview.
+export interface SessionGroup {
+  id: string
+  name: string
+  session_ids: string[]
+  collapsed?: boolean
+}
+
 export interface Skill {
   name: string
   desc: string
