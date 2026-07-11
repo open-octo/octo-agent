@@ -46,6 +46,15 @@
     (listing?.entries ?? []).filter((e) => showHidden || !e.name.startsWith('.'))
   )
 
+  // Show the last few path segments so a long or non-ASCII path (e.g. a CJK
+  // folder name) stays readable without a `direction: rtl` hack, which can
+  // reorder bidirectional text. Full path is in the title tooltip.
+  function shortPath(p: string): string {
+    if (!p) return ''
+    const parts = p.split('/').filter(Boolean)
+    return parts.length <= 3 ? p : '…/' + parts.slice(-3).join('/')
+  }
+
   function enter(name: string) {
     if (!listing) return
     const sep = listing.path.endsWith('/') ? '' : '/'
@@ -88,7 +97,7 @@
       >
         <iconify-icon icon="lucide:corner-left-up" width="14"></iconify-icon>
       </button>
-      <span class="cur-path mono" title={listing?.path ?? ''}>{listing?.path ?? ''}</span>
+      <span class="cur-path mono" title={listing?.path ?? ''}>{shortPath(listing?.path ?? '')}</span>
     </div>
 
     <div class="modal-body">
@@ -188,7 +197,7 @@
 .up-btn:disabled { opacity: 0.4; cursor: default; }
 .cur-path {
   font-size: 12px; color: var(--text-secondary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .modal-body {
   padding: 8px 10px;
