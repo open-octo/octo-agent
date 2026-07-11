@@ -39,4 +39,41 @@ WebKitGTK 6.0 packaged yet.)"
   exit 1
 fi
 
+# First-run desktop integration. An AppImage runs from a single file and does
+# NOT register itself in the application menu — unlike the macOS/Windows
+# installers. Offer to do it once so Octo launches from the app grid like a
+# native install. Backgrounded so it never delays startup; the prompt (if the
+# user has one) appears alongside the window. Skipped when: not an AppImage
+# (extracted/dev run — no $APPIMAGE), already asked once, or no GUI dialog tool
+# to ask with (a double-clicked app has no terminal to prompt in).
+integrate_desktop() {
+  [ -n "${APPIMAGE:-}" ] || return 0
+  if command -v zenity >/dev/null 2>&1; then dlg=zenity
+  elif command -v kdialog >/dev/null 2>&1; then dlg=kdialog
+  else return 0; fi
+
+  data="${XDG_DATA_HOME:-$HOME/.local/share}"
+  marker="$data/octo/.desktop-prompted"
+  entry="$data/applications/octo-desktop.desktop"
+  { [ -e "$marker" ] || [ -e "$entry" ]; } && return 0
+  mkdir -p "$data/octo" && : > "$marker"
+
+  if [ "$dlg" = zenity ]; then
+    zenity --question --no-wrap --title="Octo" \
+      --text="Add Octo to your applications menu?" || return 0
+  else
+    kdialog --yesno "Add Octo to your applications menu?" || return 0
+  fi
+
+  icons="$data/icons/hicolor/256x256/apps"
+  mkdir -p "$data/applications" "$icons"
+  [ -f "$HERE/octo-desktop.png" ] && cp -f "$HERE/octo-desktop.png" "$icons/octo-desktop.png"
+  # Point Exec at the AppImage itself — $HERE is the FUSE mount and vanishes on
+  # exit. The icon is referenced by name, resolved from the hicolor theme above.
+  sed "s|^Exec=.*|Exec=\"$APPIMAGE\"|" "$HERE/octo-desktop.desktop" > "$entry"
+  command -v update-desktop-database >/dev/null 2>&1 && \
+    update-desktop-database "$data/applications" >/dev/null 2>&1 || true
+}
+integrate_desktop &
+
 exec "$HERE/usr/bin/octo-desktop" "$@"
