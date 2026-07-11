@@ -28,6 +28,13 @@ cp "$LINUX/octo-desktop.desktop" "$APPDIR/usr/share/applications/octo-desktop.de
 cp "$LINUX/icon.png" "$APPDIR/octo-desktop.png"
 cp "$LINUX/icon.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/octo-desktop.png"
 
+# Bundle uv so it's seeded into ~/.octo/bin on first launch (via $APPDIR/usr/bin
+# by bundledUvPath). Optional. Release sets UV_BINARY.
+if [ -n "${UV_BINARY:-}" ] && [ -f "$UV_BINARY" ]; then
+	install -m 0755 "$UV_BINARY" "$APPDIR/usr/bin/uv"
+	echo "    embedded uv"
+fi
+
 echo "==> fetching appimagetool"
 TOOL="$ROOT/appimagetool.AppImage"
 if [ ! -x "$TOOL" ]; then

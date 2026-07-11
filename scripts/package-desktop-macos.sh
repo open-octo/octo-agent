@@ -24,6 +24,19 @@ rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 mv "$ROOT/octo-desktop" "$CONTENTS/MacOS/octo-desktop"
 sed "s/__VERSION__/$VERSION/g" "$MOD_DIR/build/darwin/Info.plist" > "$CONTENTS/Info.plist"
+
+# Make the bundle self-contained: embed the octo CLI (put on PATH by the
+# installer) and uv (seeded into ~/.octo/bin on first launch by the app). Both
+# optional — a plain `make desktop-app` without them still produces a runnable
+# GUI. The release/installer sets OCTO_CLI and UV_BINARY.
+if [ -n "${OCTO_CLI:-}" ] && [ -f "$OCTO_CLI" ]; then
+	install -m 0755 "$OCTO_CLI" "$CONTENTS/Resources/octo"
+	echo "    embedded octo CLI"
+fi
+if [ -n "${UV_BINARY:-}" ] && [ -f "$UV_BINARY" ]; then
+	install -m 0755 "$UV_BINARY" "$CONTENTS/Resources/uv"
+	echo "    embedded uv"
+fi
 if [ -f "$MOD_DIR/build/darwin/icon.icns" ]; then
 	cp "$MOD_DIR/build/darwin/icon.icns" "$CONTENTS/Resources/icon.icns"
 else
