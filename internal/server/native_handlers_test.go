@@ -313,22 +313,45 @@ func TestNativeOpenExternalDelegatesToBridge(t *testing.T) {
 	}
 }
 
-func TestNativeOpenExternalRejectsNonHTTPScheme(t *testing.T) {
+func TestNativeOpenExternalAllowsMailtoAndTel(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
-	fake := &fakeNative{}
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
-	req := httptest.NewRequest(http.MethodPost, "/api/native/open-external", strings.NewReader(`{"url":"file:///etc/passwd"}`))
-	w := httptest.NewRecorder()
-	serveLoopback(srv.mux, w, req)
+	for _, link := range []string{"mailto:someone@example.com", "tel:+15551234567"} {
+		fake := &fakeNative{}
+		srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+		req := httptest.NewRequest(http.MethodPost, "/api/native/open-external", strings.NewReader(`{"url":"`+link+`"}`))
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("non-http scheme: got %d, want 400", w.Code)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: got %d, want 200 (%s)", link, w.Code, w.Body.String())
+		}
+		if fake.openCalls != 1 || fake.gotOpenURL != link {
+			t.Errorf("%s: bridge.OpenExternal calls=%d url=%q, want 1/%s", link, fake.openCalls, fake.gotOpenURL, link)
+		}
 	}
-	if fake.openCalls != 0 {
-		t.Errorf("bridge must not be called for a rejected scheme (calls=%d)", fake.openCalls)
+}
+
+func TestNativeOpenExternalRejectsDisallowedScheme(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	for _, link := range []string{"file:///etc/passwd", "javascript:alert(1)", "custom-app://open"} {
+		fake := &fakeNative{}
+		srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+		req := httptest.NewRequest(http.MethodPost, "/api/native/open-external", strings.NewReader(`{"url":"`+link+`"}`))
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s: got %d, want 400", link, w.Code)
+		}
+		if fake.openCalls != 0 {
+			t.Errorf("%s: bridge must not be called for a rejected scheme (calls=%d)", link, fake.openCalls)
+		}
 	}
 }
 

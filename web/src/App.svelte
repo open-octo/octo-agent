@@ -7,6 +7,7 @@
   import { checkAuth } from './lib/auth'
   import { get } from 'svelte/store'
   import * as api from './lib/api'
+  import { installExternalLinkInterceptor } from './lib/externalLinks'
   import AuthGate from './components/overlays/AuthGate.svelte'
   import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
   import Header from './components/layout/Header.svelte'
@@ -57,7 +58,10 @@
     // (the server exempts them); a networked server without a valid key prompts
     // via the AuthGate overlay. A denied result blocks boot with a message.
     let cancelled = false
-    const cleanup = () => { cancelled = true; ws.disconnect() }
+    // Desktop shell: send http(s) link clicks to the system browser (the
+    // webview can't open target="_blank" itself). Inert in a real browser.
+    const uninstallLinks = installExternalLinkInterceptor()
+    const cleanup = () => { cancelled = true; uninstallLinks(); ws.disconnect() }
     checkAuth().then(async ok => {
       if (cancelled) return
       if (!ok) {

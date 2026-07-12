@@ -3,6 +3,7 @@
   import { mcpServers, toolSearchMode, mcpModalOpen, showToast, openAgentSession } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
   import { confirmDialog } from '../lib/confirm'
+  import { openUrl } from '../lib/externalLinks'
   import * as api from '../lib/api'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
@@ -179,8 +180,10 @@
     if (isNewLink) {
       // Best-effort: this fires from inside a poll tick, not synchronously
       // from the user's click, so popup blockers may silently swallow it —
-      // the link rendered below is the reliable fallback.
-      window.open(d.authorize_url, '_blank', 'noopener')
+      // the link rendered below is the reliable fallback. openUrl routes
+      // through the native bridge in the desktop shell (window.open is dead
+      // in the webview).
+      openUrl(d.authorize_url)
     }
   }
 

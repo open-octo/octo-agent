@@ -211,11 +211,12 @@ export async function nativeToggleMaximise(): Promise<void> {
   await request<{ ok: boolean }>('/api/native/window/toggle-maximise', { method: 'POST' })
 }
 
-// Desktop shell only: open a URL in the system browser. The update badge calls
-// this in installer mode to reach the release download page (the desktop build
-// updates through its installer, not an in-place swap). http(s) only — the
-// server rejects other schemes. Available only when /api/version reports
-// native:true and the caller is loopback; remote peers fall back to window.open.
+// Desktop shell only: open a URL with the OS default handler. The update badge
+// calls this in installer mode to reach the release download page (the desktop
+// build updates through its installer, not an in-place swap); chat links use it
+// too. http(s)/mailto/tel only — the server rejects other schemes. Available
+// only when /api/version reports native:true and the caller is loopback; remote
+// peers fall back to window.open.
 export async function openExternal(url: string): Promise<void> {
   await request<{ ok: boolean }>('/api/native/open-external', {
     method: 'POST',

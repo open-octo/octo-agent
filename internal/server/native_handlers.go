@@ -250,10 +250,26 @@ type nativeOpenExternalRequest struct {
 	URL string `json:"url"`
 }
 
-// POST /api/native/open-external — open a URL in the system browser (desktop
-// only). The update badge calls this in installer mode to reach the release
-// download page. Loopback-gated like the other native routes, and restricted to
-// http/https so the endpoint can't be coerced into launching a local handler.
+// POST /api/native/open-external — open a URL with the system's default
+// handler (desktop only). The update badge calls this in installer mode to
+// reach the release download page; chat links route through it too. Loopback-
+// gated like the other native routes, and restricted to an allowlist of
+// user-facing schemes (http/https for the browser, mailto/tel for the mail and
+// dialer apps) so the endpoint can't be coerced into launching an arbitrary
+// local handler (file://, custom app schemes).
+// openExternalSchemeAllowed reports whether a URL scheme is safe to hand to the
+// system's default handler: the browser (http/https) and the mail/dialer apps
+// (mailto/tel). Everything else — file://, custom app schemes — is rejected so
+// the loopback endpoint can't be turned into a local-handler launcher.
+func openExternalSchemeAllowed(scheme string) bool {
+	switch scheme {
+	case "http", "https", "mailto", "tel":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRemote(r.RemoteAddr) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
@@ -269,8 +285,8 @@ func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request
 		return
 	}
 	u, err := url.Parse(req.URL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		writeError(w, http.StatusBadRequest, "only http(s) URLs may be opened")
+	if err != nil || !openExternalSchemeAllowed(u.Scheme) {
+		writeError(w, http.StatusBadRequest, "only http(s), mailto, and tel URLs may be opened")
 		return
 	}
 	if err := s.cfg.Native.OpenExternal(req.URL); err != nil {

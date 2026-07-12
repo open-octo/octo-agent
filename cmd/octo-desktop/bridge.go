@@ -353,10 +353,11 @@ func (b *nativeBridge) showError(title, message string) {
 	dlg.Show()
 }
 
-// OpenExternal opens url in the user's default browser — the release download
+// OpenExternal opens url with the OS default handler — the release download
 // page, reached from the web badge's "Download update" action (via
-// /api/native/open-external) and the tray "Check for updates…" flow. The server
-// has already validated the scheme is http/https. It shells out to the
+// /api/native/open-external), the tray "Check for updates…" flow, and chat
+// links. The server has already validated the scheme (http/https/mailto/tel).
+// It shells out to the
 // per-platform opener rather than pulling in a third-party helper; the Wails
 // runtime's own browser API isn't reachable here because the page is
 // octo-served, not served off Wails' asset server (same reason ExecJS is dead
