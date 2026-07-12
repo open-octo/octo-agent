@@ -24,6 +24,10 @@ xdg-open http://127.0.0.1:8088 # 打开控制台
 `127.0.0.1` 是回环地址，不需要访问密钥——页面会直接进入首次运行引导（选 provider、填 key）。之后可以用
 `octo serve --stop` 停止服务。更喜欢用终端？直接运行 `octo` 即可。
 
+想要 GUI？取**桌面应用**——从[最新 release](https://github.com/open-octo/octo-agent/releases/latest)
+下载 `Octo-x86_64.AppImage`，`chmod +x` 后运行。它需要主机上有 GTK4 + WebKitGTK 6.0（多数较新的桌面
+环境都自带；缺了的话应用会提示你装什么）。
+
 预编译包（linux / darwin / windows × amd64 + arm64）和 `checksums.txt` 都在
 [最新 release](https://github.com/open-octo/octo-agent/releases/latest) 里，你也可以手动下载。
 
@@ -43,30 +47,36 @@ open http://127.0.0.1:8088     # 打开控制台
 
 <Steps>
 1. Installer.app 只提供"仅为我安装"——不需要管理员密码。
-2. 它会把 octo 装进 `~/Library/Application Support/octo`，加进 `PATH`（追加到
-   `~/.zprofile` / `~/.bash_profile` / `~/.profile`），并注册一个 LaunchAgent，
-   每次登录时自动启动 `octo serve -d`。
-3. 安装完成后会自动启动服务并打开 `http://127.0.0.1:8088`，带你完成首次运行引导。
+2. 它会把 **Octo 桌面应用**装到 `~/Applications/Octo.app`，并把随附的 `octo` CLI 加进 `PATH`
+   （追加到 `~/.zprofile` / `~/.bash_profile` / `~/.profile`）。
+3. 安装完成后会打开这个应用——一个原生窗口，无需管理浏览器或后台服务。
 4. 要在终端里用，打开一个**新**终端窗口运行 `octo`。
 </Steps>
 
 <Aside type="caution" title="Gatekeeper 会报警，这是预期的">
-安装器还没有经过公证，Gatekeeper 会提示"来自身份不明的开发者"——右键（Control 点击）文件 → **打开**，
+应用还没有经过公证，Gatekeeper 会提示"来自身份不明的开发者"——右键（Control 点击）`Octo.app` → **打开**，
 或者去**系统设置 → 隐私与安全性 → 仍要打开**。`.pkg` 没有 App Store 那种卸载器；运行
-`~/Library/Application\ Support/octo/uninstall.sh` 可以清除它装的所有东西。
+`~/.octo/uninstall.sh` 即可移除（你的 `~/.octo` 数据会保留）。
 </Aside>
 
 </TabItem>
 <TabItem label="Windows">
 
-从[最新 release](https://github.com/open-octo/octo-agent/releases/latest) 下载 `octo-setup.exe`，双击运行。
+**安装脚本（PowerShell）**——对应 `curl … | sh` 一行命令的 Windows 版：自动识别架构、校验 SHA-256、
+按用户级安装 `octo.exe` 并加进 `PATH`：
+
+```powershell
+irm https://octo-agent.dev/install.ps1 | iex
+```
+
+**双击安装器**——从[最新 release](https://github.com/open-octo/octo-agent/releases/latest) 下载
+`octo-setup.exe`，双击运行。
 
 <Steps>
-1. 按用户级别安装（不需要管理员权限弹窗），把 `octo` 加进 `PATH`，并添加开始菜单项。
-2. 安装完成后会在后台启动本地服务（`octo serve -d`）并打开
-   `http://127.0.0.1:8088`，带你完成首次运行引导。
-3. 服务也会注册为每次登录自动启动（用户级 `Run` 项，无窗口），所以重启后控制台依然可用。
-4. 要在终端里用，打开一个**新**终端窗口运行 `octo`。
+1. 按用户级别安装（不弹管理员提示）**Octo 桌面应用**加 `octo` CLI，把 CLI 加进 `PATH`，并添加一个
+   启动该应用的开始菜单项。
+2. 安装完成后会打开这个应用——一个原生窗口，没有需要在后台管理的东西。
+3. 要在终端里用，打开一个**新**终端窗口运行 `octo`。
 </Steps>
 
 安装器通过 [SignPath Foundation](https://signpath.org/) 的免费开源项目签名；在某个 release 完成签名之前，
