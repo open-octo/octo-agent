@@ -330,6 +330,64 @@ func Empty(mode string) (int, int64, error) {
 	return count, freed, nil
 }
 
+// Enforce bounds the trash: it first removes entries older than retention, then
+// — if the remaining total still exceeds maxBytes — evicts oldest-first until
+// it's under the cap. A zero (or negative) bound disables that half.
+//
+// Orphans (entries whose original project is gone) are skipped by the age-out
+// pass — they're often exactly what a user wants back after a checkout moved a
+// repo — but remain eligible for hard-cap eviction, since the size cap is a
+// firm limit. Returns (entries removed, bytes freed).
+func Enforce(maxBytes int64, retention time.Duration) (int, int64, error) {
+	entries, err := List()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	removed := 0
+	var freed int64
+	remove := func(e Entry) {
+		removePath(e.TrashPath)
+		os.Remove(e.TrashPath + ".meta.json")
+		removed++
+		freed += e.Size
+	}
+
+	// Age-out (non-orphans only).
+	kept := entries[:0]
+	if retention > 0 {
+		cutoff := time.Now().Add(-retention)
+		for _, e := range entries {
+			if !e.Orphan {
+				if t, perr := time.Parse(time.RFC3339, e.DeletedAt); perr == nil && t.Before(cutoff) {
+					remove(e)
+					continue
+				}
+			}
+			kept = append(kept, e)
+		}
+	} else {
+		kept = entries
+	}
+
+	// Size cap: evict oldest-first over the remaining set.
+	if maxBytes > 0 {
+		var total int64
+		for _, e := range kept {
+			total += e.Size
+		}
+		if total > maxBytes {
+			// kept is newest-first (List order); walk from the oldest end.
+			for i := len(kept) - 1; i >= 0 && total > maxBytes; i-- {
+				total -= kept[i].Size
+				remove(kept[i])
+			}
+		}
+	}
+
+	return removed, freed, nil
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 func hashProject(dir string) string {

@@ -10,6 +10,10 @@ import (
 	"github.com/open-octo/octo-agent/internal/trash"
 )
 
+// Never let the startup housekeeping (wired into runChat/runServe) evict the
+// developer's real trash while the cmd/octo tests run.
+func init() { housekeepingDisabled = true }
+
 func trashTestHome(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()

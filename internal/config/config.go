@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -151,12 +152,45 @@ type TrashConfig struct {
 	// regardless — git already holds a recoverable copy. nil means the default
 	// (enabled).
 	OverwriteBackup *bool `yaml:"overwrite_backup,omitempty"`
+	// RetentionDays ages out trash entries older than this at startup. 0 means
+	// the default (14); a negative value disables the age-out.
+	RetentionDays int `yaml:"retention_days,omitempty"`
+	// MaxSizeMB caps the trash: once it exceeds this, the oldest entries are
+	// evicted at startup until it's back under. 0 means the default (10240 =
+	// 10 GiB); a negative value disables the cap.
+	MaxSizeMB int `yaml:"max_size_mb,omitempty"`
 }
 
 // OverwriteBackupEnabled reports whether write/edit overwrites are staged into
 // the trash first (default true).
 func (c *Config) OverwriteBackupEnabled() bool {
 	return c.Trash.OverwriteBackup == nil || *c.Trash.OverwriteBackup
+}
+
+// TrashRetention returns how long entries are kept before age-out (default 14
+// days; a negative config value disables it, returning 0).
+func (c *Config) TrashRetention() time.Duration {
+	switch {
+	case c.Trash.RetentionDays == 0:
+		return 14 * 24 * time.Hour
+	case c.Trash.RetentionDays < 0:
+		return 0
+	default:
+		return time.Duration(c.Trash.RetentionDays) * 24 * time.Hour
+	}
+}
+
+// TrashMaxBytes returns the trash size cap in bytes (default 10 GiB; a negative
+// config value disables it, returning 0).
+func (c *Config) TrashMaxBytes() int64 {
+	switch {
+	case c.Trash.MaxSizeMB == 0:
+		return 10240 * 1024 * 1024
+	case c.Trash.MaxSizeMB < 0:
+		return 0
+	default:
+		return int64(c.Trash.MaxSizeMB) * 1024 * 1024
+	}
 }
 
 // GoalConfig configures session goals (persistent objectives the agent keeps
