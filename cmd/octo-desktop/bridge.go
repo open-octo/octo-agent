@@ -44,9 +44,9 @@ type nativeBridge struct {
 
 	settingsMu sync.Mutex
 	settings   desktopSettings
-	// geomTimer debounces window-geometry persistence: WindowDidResize fires
-	// once per pixel during a drag, so we coalesce to a single write after the
-	// gesture settles. Guarded by settingsMu.
+	// geomTimer debounces persistence of the window geometry to disk: a drag
+	// fires WindowDidResize once per pixel, so we coalesce to a single write
+	// ~400ms after the gesture settles. Guarded by settingsMu.
 	geomTimer *time.Timer
 }
 
@@ -56,39 +56,40 @@ const (
 	defaultWindowHeight = 860
 )
 
-// scheduleWindowGeometrySave coalesces the flood of WindowDidResize events from
-// a single drag/zoom into one persisted write ~400ms after it settles.
-func (b *nativeBridge) scheduleWindowGeometrySave() {
-	b.settingsMu.Lock()
-	defer b.settingsMu.Unlock()
-	if b.geomTimer != nil {
-		b.geomTimer.Stop()
-	}
-	b.geomTimer = time.AfterFunc(400*time.Millisecond, b.saveWindowGeometry)
-}
-
-// saveWindowGeometry records the window's current maximised state and, while it
-// is NOT maximised, its size. Skipping the size write while maximised keeps the
-// persisted W×H as the restore size, so a relaunch that reopens maximised still
-// un-maximises back to the size the user last chose. Wails window methods are
-// read outside the lock — they marshal to the UI thread internally, and holding
-// settingsMu across that could deadlock the main thread.
-func (b *nativeBridge) saveWindowGeometry() {
-	b.settingsMu.Lock()
-	w := b.window
-	b.settingsMu.Unlock()
-	if w == nil {
-		return
-	}
+// rememberWindowGeometry captures the window's size and maximised state into
+// settings and debounces the disk write. The window is read HERE, from the
+// WindowDidResize handler where it is guaranteed alive — never from the debounce
+// timer or the close path. Those paths run on their own goroutines and would
+// race the window's destruction: Wails' built-in WindowClosing listener marks
+// the window destroyed, after which IsMaximised()/Size() short-circuit to
+// false/0×0 and would clobber the freshly-saved state. The window methods are
+// read before taking the lock (they marshal to the UI thread; holding
+// settingsMu across that could deadlock the main thread). Size is recorded only
+// while neither maximised nor fullscreen — both report a size that isn't the
+// windowed size, so persisting it would corrupt the restore size a relaunch
+// un-maximises back to.
+func (b *nativeBridge) rememberWindowGeometry(w *application.WebviewWindow) {
 	maximised := w.IsMaximised()
+	fullscreen := w.IsFullscreen()
 	width, height := w.Size()
 
 	b.settingsMu.Lock()
+	defer b.settingsMu.Unlock()
 	b.settings.WindowMaximised = maximised
-	if !maximised && width > 0 && height > 0 {
+	if !maximised && !fullscreen && width > 0 && height > 0 {
 		b.settings.WindowWidth = width
 		b.settings.WindowHeight = height
 	}
+	if b.geomTimer != nil {
+		b.geomTimer.Stop()
+	}
+	b.geomTimer = time.AfterFunc(400*time.Millisecond, b.persistSettings)
+}
+
+// persistSettings writes the current settings to disk. It touches no window
+// state, so it is safe to call from the debounce timer or the closing window.
+func (b *nativeBridge) persistSettings() {
+	b.settingsMu.Lock()
 	snapshot := b.settings
 	b.settingsMu.Unlock()
 	_ = saveDesktopSettings(snapshot)
@@ -228,15 +229,21 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		})
 		// Forget the window when it closes so a later Show re-creates one; the
 		// app itself stays alive via ApplicationShouldTerminateAfterLastWindowClosed.
-		// Flush the latest geometry first, in case a resize is still pending in
-		// the debounce timer when the window (or the app) goes away.
+		// Cancel any pending debounce and flush the last captured geometry — this
+		// only persists already-captured settings, so unlike reading the window
+		// here it can't race the window's destruction.
 		w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
-			b.saveWindowGeometry()
+			b.settingsMu.Lock()
+			if b.geomTimer != nil {
+				b.geomTimer.Stop()
+			}
+			b.settingsMu.Unlock()
+			b.persistSettings()
 			b.window = nil
 		})
-		// Persist size/maximised changes as the user drags or zooms the window.
+		// Capture size/maximised changes as the user drags or zooms the window.
 		w.OnWindowEvent(events.Common.WindowDidResize, func(*application.WindowEvent) {
-			b.scheduleWindowGeometrySave()
+			b.rememberWindowGeometry(w)
 		})
 		b.window = w
 	} else if hash != "" {
