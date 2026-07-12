@@ -1293,7 +1293,7 @@ func DeleteSession(id string) error {
 	}
 	path := filepath.Join(dir, stem+".jsonl")
 	if _, err := os.Stat(path); err == nil {
-		if err := trash.Move(path, dir); err != nil {
+		if err := trash.Move(path, dir, trash.Options{DeletedBy: "session", Kind: "delete"}); err != nil {
 			return fmt.Errorf("session: trash %s: %w", path, err)
 		}
 	} else if !os.IsNotExist(err) {

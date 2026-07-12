@@ -228,6 +228,7 @@ func printTuiHelp(w io.Writer) {
 	fmt.Fprintln(w, "  /memory      List what's remembered across sessions")
 	fmt.Fprintln(w, "  /mcp         Show connected MCP servers and their surfaces")
 	fmt.Fprintln(w, "  /workflows   List available workflows (run one by asking, e.g. \"run <name>\")")
+	fmt.Fprintln(w, "  /trash       Recover deleted/overwritten files (/trash restore <id> to undo)")
 	fmt.Fprintln(w, "  /exit        Save and exit  (also: /quit, Ctrl-C, Ctrl-D)")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Keys:")

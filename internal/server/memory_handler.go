@@ -65,7 +65,7 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := trash.Move(p, filepath.Dir(p)); err != nil {
+	if err := trash.Move(p, filepath.Dir(p), trash.Options{DeletedBy: "memory", Kind: "delete"}); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -314,7 +314,7 @@ func (r *Registry) Delete(name string) error {
 	// Move to trash before permanently deleting.
 	if s.Dir != "" {
 		projDir := filepath.Dir(s.Dir)
-		if err := trash.Move(s.Dir, projDir); err != nil {
+		if err := trash.Move(s.Dir, projDir, trash.Options{DeletedBy: "skill", Kind: "delete"}); err != nil {
 			return fmt.Errorf("trash skill directory %s: %w", s.Dir, err)
 		}
 	}

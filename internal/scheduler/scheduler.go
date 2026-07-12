@@ -195,7 +195,7 @@ func (s *Scheduler) Delete(id string) error {
 	s.unschedule(id)
 	p := filepath.Join(s.dir, id+".json")
 	if _, err := os.Stat(p); err == nil {
-		if err := trash.Move(p, s.dir); err != nil {
+		if err := trash.Move(p, s.dir, trash.Options{DeletedBy: "scheduler", Kind: "delete"}); err != nil {
 			return fmt.Errorf("trash task %s: %w", p, err)
 		}
 	} else if !os.IsNotExist(err) {

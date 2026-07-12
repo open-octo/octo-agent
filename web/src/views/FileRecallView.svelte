@@ -13,6 +13,9 @@
     deleted_at: string
     project: string
     size: number
+    label?: string
+    deleted_by?: string
+    kind?: string
     orphan: boolean
   }
 
@@ -46,15 +49,34 @@
   async function handleRestore(id: string) {
     busyId = id
     try {
-      await api.restoreTrash(id)
-      items = items.filter(i => i.id !== id)
-      totalCount = Math.max(0, totalCount - 1)
-      showToast(tr('files.toast_restored'), 'success')
+      let res = await api.restoreTrash(id)
+      if (!res.ok && res.conflict) {
+        // Something already sits at the original path. Offer the lossless
+        // resolution: move the current file into the trash, then restore.
+        const entry = items.find(i => i.id === id)
+        const name = entry ? entry.original : ''
+        if (!(await confirmDialog(tr('files.confirm_restore_conflict').replace('{name}', name)))) return
+        res = await api.restoreTrash(id, 'backup')
+      }
+      if (res.ok) {
+        items = items.filter(i => i.id !== id)
+        totalCount = Math.max(0, totalCount - 1)
+        showToast(tr('files.toast_restored'), 'success')
+        // The backed-up current file is now itself a new entry — refresh.
+        if (res.backedUpExisting) await reload()
+      }
     } catch (e: any) {
       showToast(`Restore failed: ${e.message}`, 'error')
     } finally {
       busyId = null
     }
+  }
+
+  function provenance(f: TrashEntry): string {
+    if (!f.deleted_by) return ''
+    const kind = f.kind === 'overwrite' ? tr('files.kind_overwrite')
+      : f.kind === 'delete' ? tr('files.kind_delete') : ''
+    return kind ? `${kind} · ${f.deleted_by}` : f.deleted_by
   }
 
   async function handleDelete(id: string) {
@@ -195,7 +217,7 @@
             </span>
             <div class="file-info">
               <div class="file-name-row">
-                <span class="file-name mono">{basename(f.original)}</span>
+                <span class="file-name" class:mono={!f.label}>{f.label || basename(f.original)}</span>
                 {#if f.orphan}
                   <StatusTag status="error">{$t('files.orphan')}</StatusTag>
                 {:else if isOld(f.deleted_at)}
@@ -208,6 +230,10 @@
                 <span>{fmtSize(f.size)}</span>
                 <span class="sep"></span>
                 <span>{fmtAge(f.deleted_at)}</span>
+                {#if provenance(f)}
+                  <span class="sep"></span>
+                  <span class="mono">{provenance(f)}</span>
+                {/if}
                 {#if f.project}
                   <span class="sep"></span>
                   <span>{f.project}</span>

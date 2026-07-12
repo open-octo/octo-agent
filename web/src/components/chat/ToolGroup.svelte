@@ -1,7 +1,25 @@
 <script lang="ts">
-  import { t } from '../../lib/i18n'
-  import { activeSessionId } from '../../lib/stores'
+  import { t, tr } from '../../lib/i18n'
+  import { activeSessionId, showToast } from '../../lib/stores'
   import { ws } from '../../lib/ws'
+  import * as api from '../../lib/api'
+
+  // Tracks which overwrite-undo buttons have already fired, keyed by tool id.
+  let undone = $state<Record<string, boolean>>({})
+
+  // Undo an overwrite: restore the pre-write version from the trash, moving the
+  // just-written file into the trash first so the undo itself is reversible.
+  async function undoOverwrite(undoId: string, toolId: string) {
+    try {
+      const res = await api.restoreTrash(undoId, 'backup')
+      if (res.ok) {
+        undone = { ...undone, [toolId]: true }
+        showToast(tr('tools.undo_done'), 'success')
+      }
+    } catch (e: any) {
+      showToast(`Undo failed: ${e.message}`, 'error')
+    }
+  }
   // A collapsible group of tool calls for one agent turn.
   // Accepts optional `tools` + `streaming` props for real data;
   // falls back to static prototype content when called without props.
@@ -351,6 +369,12 @@
               {$t('tools.show_less')}
             </button>
           {/if}
+          {#if tool.ui_payload?.undo_id}
+            <button class="undo-btn" disabled={undone[tool.id]} onclick={() => undoOverwrite(tool.ui_payload.undo_id, tool.id)}>
+              <iconify-icon icon="ant-design:undo-outlined" width="12"></iconify-icon>
+              {undone[tool.id] ? $t('tools.undo_done') : $t('tools.undo_overwrite')}
+            </button>
+          {/if}
         {:else if tool.stdout && tool.stdout.length > 0}
           {@const full = tool.stdout.join('\n')}
           {@const isTerm = isTerminalTool(tool)}
@@ -395,6 +419,12 @@
               </div>
             {/if}
           </div>
+          {#if tool.ui_payload?.undo_id}
+            <button class="undo-btn" disabled={undone[tool.id]} onclick={() => undoOverwrite(tool.ui_payload.undo_id, tool.id)}>
+              <iconify-icon icon="ant-design:undo-outlined" width="12"></iconify-icon>
+              {undone[tool.id] ? $t('tools.undo_done') : $t('tools.undo_overwrite')}
+            </button>
+          {/if}
         {:else if tool.result}
           {@const pretty = prettyResult(tool.result)}
           {@const isTerm = isTerminalTool(tool)}
@@ -463,6 +493,13 @@ details[open] > summary .chev { transform: rotate(90deg); }
   gap: 6px; font-size: 12px; color: var(--blue-6); cursor: pointer; font-family: inherit;
 }
 .fold-btn:hover { background: var(--active-blue-bg); }
+.undo-btn {
+  width: 100%; padding: 7px 12px; border: none; border-top: 1px solid var(--border-table);
+  background: var(--bg-table-header); display: flex; align-items: center; justify-content: center;
+  gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+}
+.undo-btn:hover:not(:disabled) { background: var(--active-blue-bg); color: var(--blue-6); }
+.undo-btn:disabled { color: var(--text-quaternary); cursor: default; }
 .fold-info {
   width: 100%; padding: 8px 12px; border-top: 1px solid var(--border-table);
   background: var(--bg-table-header); display: flex; align-items: center; justify-content: center;

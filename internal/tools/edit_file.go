@@ -560,6 +560,9 @@ func (EditFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 	out.WriteString(body[prevOrigEnd:])
 	updated := out.String()
 
+	// Stage the pre-edit version into the trash so an edit that destroys
+	// uncommitted work is recoverable (skipped for git-tracked-clean files).
+	undoID := backupBeforeOverwrite(ctx, abs, "edit_file")
 	if err := os.WriteFile(abs, []byte(updated), 0o644); err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("edit_file: write %q: %w", path, err)
 	}
@@ -573,6 +576,9 @@ func (EditFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 		"path":        abs,
 		"occurrences": occurrences,
 		"diff":        EditUIDiff(actualOldStr, actualNewStr),
+	}
+	if undoID != "" {
+		ui["undo_id"] = undoID
 	}
 	if replaceAll {
 		return agent.ToolResult{Text: fmt.Sprintf("Replaced %d occurrence(s) in %s", count, abs), UI: ui}, nil

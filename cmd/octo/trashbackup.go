@@ -25,7 +25,7 @@ func runTrashBackup(paths []string) int {
 		if p == "" || p == "--" {
 			continue
 		}
-		_ = trash.Backup(p, project)
+		_, _ = trash.Backup(p, project, trash.Options{DeletedBy: "rm", Kind: "delete"})
 	}
 	return 0
 }

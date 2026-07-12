@@ -32,6 +32,7 @@ var builtinSlashCommands = []complItem{
 	{"/init", "Generate a .octorules guide for this repo"},
 	{"/save", "Save the current session"},
 	{"/sessions", "List recent sessions"},
+	{"/trash", "Recover files the agent deleted or overwrote"},
 	{"/exit", "Quit octo"},
 }
 

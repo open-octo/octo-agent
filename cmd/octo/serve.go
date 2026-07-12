@@ -33,6 +33,7 @@ func serveLogLevel() slog.Level {
 
 // runServe handles `octo serve`.
 func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	startTrashHousekeeping()
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "127.0.0.1:8088", "Bind address (e.g. 127.0.0.1:8088; :8088 to expose on all interfaces)")

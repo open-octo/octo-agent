@@ -62,6 +62,9 @@ func (WriteFileTool) Execute(ctx context.Context, _ string, input map[string]any
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("write_file: mkdir parent: %w", err)
 	}
+	// Stage the version being overwritten into the trash so a clobber that
+	// destroys uncommitted work is recoverable (no-op for a new file).
+	undoID := backupBeforeOverwrite(ctx, abs, "write_file")
 	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("write_file: write %q: %w", path, err)
 	}
@@ -87,6 +90,11 @@ func (WriteFileTool) Execute(ctx context.Context, _ string, input map[string]any
 		"line_count":        lineCount,
 		"preview":           preview,
 		"preview_truncated": previewTruncated,
+	}
+	// When an existing file was staged into the trash, surface its id so the UI
+	// can offer a one-click undo of the overwrite.
+	if undoID != "" {
+		ui["undo_id"] = undoID
 	}
 	if memory.IsMemoryPath(abs) {
 		memCount := memory.CountMemories(content)

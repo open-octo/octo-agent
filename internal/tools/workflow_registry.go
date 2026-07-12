@@ -346,7 +346,7 @@ func DeleteWorkflow(name string) error {
 	if w.path == "" {
 		return fmt.Errorf("workflow %q has no on-disk file", name)
 	}
-	if err := trash.Move(w.path, filepath.Dir(w.path)); err != nil {
+	if err := trash.Move(w.path, filepath.Dir(w.path), trash.Options{DeletedBy: "workflow", Kind: "delete"}); err != nil {
 		return fmt.Errorf("trash workflow file %s: %w", w.path, err)
 	}
 	return nil

@@ -27,12 +27,28 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "__sandboxed-exec" {
 		os.Exit(sandbox.ShimMain())
 	}
+	// Point HOME at a throwaway dir for the whole package so nothing touches
+	// the developer's real ~/.octo — in particular the overwrite-protection
+	// path (backupBeforeOverwrite) would otherwise stage every edit_file /
+	// write_file overwrite into the real ~/.octo/trash. A per-test
+	// t.Setenv("HOME", …) still overrides this default for its own duration.
+	//
+	// The throwaway HOME is created UNDER the real home dir, not under TMPDIR:
+	// the sandbox integration tests write a probe to $HOME and rely on it being
+	// a location the OS sandbox denies, and macOS's default policy allows
+	// TMPDIR — so a temp HOME there would let the probe through and break them.
+	realHome, _ := os.UserHomeDir()
+	homeTmp, _ := os.MkdirTemp(realHome, ".octo-tools-test-home")
+	if homeTmp != "" {
+		os.Setenv("HOME", homeTmp)
+		os.Setenv("USERPROFILE", homeTmp)
+	}
 	defaultsTmp, _ := os.MkdirTemp("", "octo-workflows-default-empty")
 	defaultWorkflowsRoot = func() string { return defaultsTmp }
 	journalsTmp, _ := os.MkdirTemp("", "octo-workflow-journals-test")
 	SetWorkflowJournalDir(journalsTmp)
 	code := m.Run()
-	for _, tmp := range []string{defaultsTmp, journalsTmp} {
+	for _, tmp := range []string{homeTmp, defaultsTmp, journalsTmp} {
 		if tmp != "" {
 			_ = os.RemoveAll(tmp)
 		}

@@ -38,7 +38,7 @@ func TestBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Backup(f, project); err != nil {
+	if _, err := Backup(f, project); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 	if _, err := os.Stat(f); err != nil {
@@ -73,7 +73,7 @@ func TestMove(t *testing.T) {
 func TestBackup_MissingFile(t *testing.T) {
 	isolateHome(t)
 	project := t.TempDir()
-	if err := Backup(filepath.Join(project, "nope"), project); err == nil {
+	if _, err := Backup(filepath.Join(project, "nope"), project); err == nil {
 		t.Error("Backup of a missing path should error")
 	}
 }

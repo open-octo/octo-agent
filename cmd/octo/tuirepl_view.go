@@ -889,6 +889,8 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		return m, m.startCompact()
 	case "/transcript":
 		return m.dispatchTranscript(strings.TrimSpace(strings.TrimPrefix(text, first)))
+	case "/trash":
+		return m.dispatchTrash(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/help", "/save", "/sessions", "/skills", "/memory", "/mcp", "/workflows":
 		var b bytes.Buffer
 		switch cmd {
@@ -923,6 +925,17 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 // dispatchClear handles "/clear" — wipe the conversation history for a fresh
 // start, keeping the system prompt, model, and tools. The cleared history is
 // persisted immediately so a resume doesn't bring it back. Already-printed
+// dispatchTrash handles "/trash [restore|rm|empty …]" by reusing the exact
+// `octo trash` CLI logic, capturing its output into the scrollback. So the
+// in-REPL command and the standalone command behave identically — list,
+// restore (with --overwrite/--as-copy), rm, and empty all work here.
+func (m *tuiModel) dispatchTrash(rest string) (tea.Model, tea.Cmd) {
+	var b bytes.Buffer
+	runTrash(strings.Fields(rest), &b, &b)
+	m.println(strings.TrimRight(b.String(), "\n"))
+	return m, nil
+}
+
 // scrollback stays on screen (the terminal owns it); only the model's context
 // is reset.
 func (m *tuiModel) dispatchClear() (tea.Model, tea.Cmd) {
