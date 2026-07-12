@@ -112,13 +112,12 @@ case ":$PATH:" in
     shell_name=$(basename "${SHELL:-}" 2>/dev/null || echo "")
     case "$shell_name" in
       zsh)
-        # macOS Terminal opens zsh as a login shell → .zprofile takes effect
-        # Linux interactive zsh → .zshrc
-        if [ "$os" = "darwin" ]; then
-          rc="$HOME/.zprofile"
-        else
-          rc="$HOME/.zshrc"
-        fi
+        # .zshrc is read by every interactive zsh — login or not. macOS Terminal
+        # opens a login shell (which also reads .zshrc), while VS Code's terminal
+        # and other non-login shells read only .zshrc, never .zprofile. So .zshrc
+        # is the reliable target on both platforms; picking .zprofile on macOS
+        # would leave octo off PATH in non-login shells.
+        rc="$HOME/.zshrc"
         ;;
       bash)
         # macOS bash as login → .bash_profile; Linux → .bashrc
