@@ -7,11 +7,11 @@ Configuration keys:
   QWEN_BASE_URL                      (optional)
   QWEN_MODEL                         (optional)
 
-Note: the default endpoint is the China host (dashscope.aliyuncs.com).
-If your API key was issued by DashScope's international console and
-returns 401, override the base URL to the international endpoint:
-
-  QWEN_BASE_URL=https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+The default endpoint is the China host (dashscope.aliyuncs.com). If the
+initial request returns 401/403/404, the backend automatically retries on
+the international host (dashscope-intl.aliyuncs.com) — no manual config
+needed. Set QWEN_BASE_URL to pin a specific host (this disables the
+auto-fallback).
 """
 
 import sys
@@ -126,8 +126,15 @@ def _resolve_size(aspect_ratio: str, image_size: str) -> str:
 def _generate_image(api_key: str, prompt: str,
                     aspect_ratio: str = "1:1", image_size: str = "1K",
                     output_dir: str = None, filename: str = None,
-                    model: str = DEFAULT_MODEL, base_url: str = DEFAULT_ENDPOINT) -> str:
-    """Generate one image with the Qwen backend."""
+                    model: str = DEFAULT_MODEL, base_url: str = DEFAULT_ENDPOINT,
+                    fallback: bool = True) -> str:
+    """Generate one image with the Qwen backend.
+
+    When ``fallback`` is True (default) and the endpoint is one of the two
+    known DashScope hosts, a 401/403/404 response triggers one automatic
+    retry against the other region's endpoint — so a CN-issued key on the
+    intl host (or vice versa) works without user intervention.
+    """
     size = _resolve_size(aspect_ratio, image_size)
     url = _resolve_url(base_url)
     headers = {
@@ -163,6 +170,18 @@ def _generate_image(api_key: str, prompt: str,
     elapsed = time.time() - start
     print(f"\n  [DONE] Response received ({elapsed:.1f}s)")
 
+    # Auto-fallback: CN key on intl host (or vice versa) → try the other region.
+    if response.status_code in (401, 403, 404) and fallback:
+        other = _fallback_endpoint(url)
+        if other != url:
+            print(f"  [FALLBACK] {response.status_code} on primary endpoint, retrying {other}...")
+            url = other
+            print("  [..] Generating...", end="", flush=True)
+            start = time.time()
+            response = requests.post(url, headers=headers, json=payload, timeout=300)
+            elapsed = time.time() - start
+            print(f"\n  [DONE] Response received ({elapsed:.1f}s)")
+
     if response.status_code != 200:
         raise http_error(response, "Qwen image generation")
 
@@ -177,6 +196,15 @@ def _generate_image(api_key: str, prompt: str,
     return download_image(image_url, path)
 
 
+def _fallback_endpoint(url: str) -> str:
+    """Return the alternate DashScope endpoint for CN/intl fallback."""
+    if "dashscope.aliyuncs.com" in url and "dashscope-intl" not in url:
+        return url.replace("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com")
+    if "dashscope-intl.aliyuncs.com" in url:
+        return url.replace("dashscope-intl.aliyuncs.com", "dashscope.aliyuncs.com")
+    return url
+
+
 def generate(prompt: str,
              aspect_ratio: str = "1:1", image_size: str = "1K",
              output_dir: str = None, filename: str = None,
@@ -187,7 +215,8 @@ def generate(prompt: str,
         "DASHSCOPE_API_KEY",
         message="No API key found. Set QWEN_API_KEY or DASHSCOPE_API_KEY in the current environment or a .env file.",
     )
-    base_url = os.environ.get("QWEN_BASE_URL") or DEFAULT_ENDPOINT
+    explicit_base_url = os.environ.get("QWEN_BASE_URL")
+    base_url = explicit_base_url or DEFAULT_ENDPOINT
     resolved_model = model or os.environ.get("QWEN_MODEL") or DEFAULT_MODEL
 
     last_error = None
@@ -202,6 +231,7 @@ def generate(prompt: str,
                 filename=filename,
                 model=resolved_model,
                 base_url=base_url,
+                fallback=(explicit_base_url is None),
             )
         except Exception as exc:
             last_error = exc
