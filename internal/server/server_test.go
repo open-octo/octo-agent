@@ -415,6 +415,48 @@ func TestCORS_VSCodeWebview(t *testing.T) {
 	}
 }
 
+// TestCORS_ObsidianDesktop covers the Obsidian desktop plugin's default local
+// path: its REST calls carry Origin app://obsidian.md and must get a reflected
+// Access-Control-Allow-Origin without any --cors flag configured.
+func TestCORS_ObsidianDesktop(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/health", nil)
+	req.Header.Set("Origin", "app://obsidian.md")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.http.Handler, w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "app://obsidian.md" {
+		t.Fatalf("CORS origin = %q, want the obsidian desktop origin reflected", got)
+	}
+}
+
+// TestCORS_ObsidianLookalikeRejected asserts the allowance is scoped to the
+// exact app://obsidian.md literal, not any origin that merely prefixes it.
+func TestCORS_ObsidianLookalikeRejected(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("Origin", "app://obsidian.md.evil.com")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.http.Handler, w, req)
+
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("expected no CORS header for lookalike origin, got %q", got)
+	}
+}
+
 // TestCORS_VSCodeWebviewLookalikeRejected asserts the allowance is scoped to
 // the vscode-webview: URL scheme, not any origin containing that string.
 func TestCORS_VSCodeWebviewLookalikeRejected(t *testing.T) {
