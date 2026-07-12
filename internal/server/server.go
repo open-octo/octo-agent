@@ -758,11 +758,13 @@ func (s *Server) registerRoutes() {
 	s.api("PUT /api/sessions/{id}/goal", s.handleUpdateSessionGoal)
 	s.api("DELETE /api/sessions/{id}/goal", s.handleDeleteSessionGoal)
 	s.api("PUT /api/sessions/{id}/group", s.handleSetSessionGroup)
+	s.api("PUT /api/sessions/{id}/pin", s.handleSetSessionPin)
 	// Session groups: a Web-UI-only sidebar organisation layer (see
 	// session_groups.go). Registered unconditionally so both `octo serve` and
 	// the desktop shell expose them.
 	s.api("GET /api/session-groups", s.handleListSessionGroups)
 	s.api("POST /api/session-groups", s.handleCreateSessionGroup)
+	s.api("PUT /api/session-groups/order", s.handleReorderSessionGroups)
 	s.api("PATCH /api/session-groups/{id}", s.handleUpdateSessionGroup)
 	s.api("DELETE /api/session-groups/{id}", s.handleDeleteSessionGroup)
 	s.api("GET /api/fs/list", s.handleFsList)
