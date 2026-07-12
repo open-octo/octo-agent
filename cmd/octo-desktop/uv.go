@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -69,7 +70,9 @@ func copyExecutable(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	tmp := dst + ".tmp"
+	// PID in the temp name so two instances launched before the single-instance
+	// lock is taken don't write the same .tmp and rename a half-written binary.
+	tmp := fmt.Sprintf("%s.tmp.%d", dst, os.Getpid())
 	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		return err
