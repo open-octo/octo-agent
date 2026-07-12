@@ -1244,6 +1244,8 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	}
 	// Workflow save-nudge — memory-independent, wired for every session.
 	tools.NewWorkflowNudger().RegisterHooks(hookEngine)
+	// Validate ~/.octo/config.yml right after the agent edits it.
+	tools.NewConfigGuard().RegisterHooks(hookEngine)
 	// Auto-store into the external memory backend (if configured) — a no-op
 	// when none is set.
 	tools.RegisterMemoryBackendHooks(hookEngine)
@@ -2699,6 +2701,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	}
 	// Workflow save-nudge — memory-independent, wired for every IM session.
 	tools.NewWorkflowNudger().RegisterHooks(imEngine)
+	// Validate ~/.octo/config.yml right after the agent edits it.
+	tools.NewConfigGuard().RegisterHooks(imEngine)
 	// Auto-store into the external memory backend (if configured) — a no-op
 	// when none is set.
 	tools.RegisterMemoryBackendHooks(imEngine)

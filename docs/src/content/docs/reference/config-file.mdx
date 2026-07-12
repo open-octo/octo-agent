@@ -33,6 +33,11 @@ file as `config.yaml.bak`.
 | `browser` | [browser block](#browser-block) | Chrome connection settings |
 | `goal` | `{ enabled: bool }` | Gates `/goal` and the goal tools (default enabled) |
 
+When the agent edits this file, octo validates it right after the write and warns
+in the turn if it no longer parses or has a semantic problem (a mistyped
+`default_model`, a duplicate or half-filled entry) — a broken edit otherwise
+degrades silently, since octo keeps using the last config that parsed cleanly.
+
 ## Model entry
 
 Each item in `models:` is a complete, independently-selectable configuration. `--model <name>`
