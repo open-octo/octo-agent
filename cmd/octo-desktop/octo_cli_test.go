@@ -37,11 +37,16 @@ func TestShouldSeedOcto(t *testing.T) {
 // it pointed at) rather than accumulate, and never touch the user's own lines.
 func TestEnsureDirOnPath_SelfHealsAndPreservesUserLines(t *testing.T) {
 	home := t.TempDir()
-	// A pre-existing rc with the user's own PATH line and a STALE octo line
+	// A pre-existing .zshrc with the user's own PATH line and a STALE octo line
 	// pointing at a long-gone location (mirrors the real bug on upgrade).
 	stale := `export PATH="/opt/homebrew/bin:$PATH"
 export PATH="` + home + `/Library/Application Support/octo/bin:$PATH"  ` + octoInstallerMarker + "\n"
 	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-create .bash_profile so it's a write target (it's only touched when it
+	// already exists — see the no-create case below).
+	if err := os.WriteFile(filepath.Join(home, ".bash_profile"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -50,7 +55,9 @@ export PATH="` + home + `/Library/Application Support/octo/bin:$PATH"  ` + octoI
 	ensureDirOnPath(home, dir) // idempotent: a second launch must not duplicate
 
 	want := `export PATH="` + dir + `:$PATH"  ` + octoInstallerMarker
-	for _, name := range []string{".zshrc", ".zprofile", ".bash_profile", ".profile"} {
+	// .zshrc/.zprofile/.profile are always written; .bash_profile because it
+	// existed here.
+	for _, name := range []string{".zshrc", ".zprofile", ".profile", ".bash_profile"} {
 		data, err := os.ReadFile(filepath.Join(home, name))
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
@@ -70,5 +77,22 @@ export PATH="` + home + `/Library/Application Support/octo/bin:$PATH"  ` + octoI
 	zshrc, _ := os.ReadFile(filepath.Join(home, ".zshrc"))
 	if !strings.Contains(string(zshrc), `/opt/homebrew/bin`) {
 		t.Errorf(".zshrc: user's own PATH line was dropped:\n%s", zshrc)
+	}
+}
+
+// TestEnsureDirOnPath_DoesNotCreateBashProfile guards the footgun: creating
+// ~/.bash_profile when it's absent makes bash login shells stop reading
+// ~/.profile, silently shadowing the user's setup. When the user has no
+// .bash_profile, we must not create one — .profile covers bash login instead.
+func TestEnsureDirOnPath_DoesNotCreateBashProfile(t *testing.T) {
+	home := t.TempDir()
+	ensureDirOnPath(home, filepath.Join(home, ".local", "bin"))
+
+	if _, err := os.Stat(filepath.Join(home, ".bash_profile")); !os.IsNotExist(err) {
+		t.Errorf(".bash_profile should not be created when absent (err=%v)", err)
+	}
+	// .profile is still written, so bash login shells reach octo through it.
+	if _, err := os.Stat(filepath.Join(home, ".profile")); err != nil {
+		t.Errorf(".profile should have been written: %v", err)
 	}
 }

@@ -19,8 +19,8 @@ type desktopSettings struct {
 	// closing the window shouldn't drop a VS Code / phone client's backend.
 	KeepRunningInBackground bool `json:"keep_running_in_background"`
 	// SeededOctoVersion records the version of the octo CLI this app last seeded
-	// to ~/.local/bin (Linux only — mac/win ship the CLI through their
-	// installers). It scopes the refresh-on-upgrade: an octo on ~/.local/bin
+	// to ~/.local/bin (macOS + Linux; Windows ships the CLI through its
+	// installer). It scopes the refresh-on-upgrade: an octo on ~/.local/bin
 	// with no matching record here is the user's own and is never overwritten.
 	SeededOctoVersion string `json:"seeded_octo_version,omitempty"`
 }

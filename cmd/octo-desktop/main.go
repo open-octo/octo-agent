@@ -74,8 +74,8 @@ func main() {
 	// that need Python work even for a standalone download (no installer).
 	ensureBundledUv()
 
-	// Seed the octo CLI to ~/.local/bin on Linux so a terminal has `octo` like
-	// the mac/win installers provide. May update settings.SeededOctoVersion, so
+	// Seed the octo CLI to ~/.local/bin (macOS + Linux) so a terminal has `octo`,
+	// and on macOS put that dir on PATH. May update settings.SeededOctoVersion, so
 	// it runs before the bridge takes its copy of settings below.
 	ensureBundledOcto(&settings)
 
