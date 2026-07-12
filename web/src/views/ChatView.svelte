@@ -1088,9 +1088,13 @@
     const wasStreaming = get(chatStreaming)[sid] ?? false
     const steering = wasStreaming
     if (!steering) {
-      // A fresh turn starts: clear the previous turn's sub-agents panel and
-      // thinking buffer, and flip the session into streaming.
-      resetSubAgents(sid)
+      // A fresh turn starts: clear the previous turn's finished sub-agents and
+      // thinking buffer, and flip the session into streaming. Use
+      // clearDoneSubAgents (not resetSubAgents) so a background sub-agent still
+      // running from an earlier turn survives — it belongs to no turn and must
+      // stay in the panel; wiping it here made it flicker out and back in as its
+      // next event re-added it.
+      clearDoneSubAgents(sid)
       chatThinking.update(tt => ({ ...tt, [sid]: '' }))
       chatStreaming.update(s => ({ ...s, [sid]: true }))
     }
