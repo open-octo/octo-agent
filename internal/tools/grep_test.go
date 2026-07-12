@@ -249,3 +249,31 @@ func TestGrep_IncludesStderrOnError(t *testing.T) {
 		t.Errorf("error should include rg's stderr message, got: %v", err)
 	}
 }
+
+// TestGrep_NoPathUsesWorkingDir guards the regression where a grep with no
+// explicit `path` ran in the octo process CWD instead of the session's
+// stamped working directory — so on a long-lived serve/desktop hub it scanned
+// the daemon's launch dir (often $HOME) and hung. The sentinel pattern can
+// only match the file we planted under the stamped dir, never the process CWD
+// (the package source tree), so a match proves rg was rooted correctly.
+func TestGrep_NoPathUsesWorkingDir(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	// Assemble the sentinel from fragments so the full string never appears
+	// verbatim in any source file. `go test` runs with the package dir as its
+	// process CWD, so a literal sentinel would also live in this test file and
+	// rg would match it there even with the bug present — masking the regression.
+	sentinel := "grepWorkingDir" + "Sentinel" + "42"
+	writeTestFile(t, filepath.Join(dir, "a.go"), "package main\n\n// "+sentinel+"\n")
+
+	ctx := WithWorkingDir(context.Background(), dir)
+	out, err := GrepTool{}.Execute(ctx, "grep", map[string]any{
+		"pattern": sentinel,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, sentinel) {
+		t.Errorf("grep without path should search the stamped working dir; got:\n%s", out.Text)
+	}
+}

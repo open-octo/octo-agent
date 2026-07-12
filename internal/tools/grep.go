@@ -153,6 +153,11 @@ func (GrepTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, rgPath, args...)
+	// Root rg in the session's working directory. Without this, a grep with no
+	// explicit `path` runs in the octo process CWD — which for a long-lived
+	// `octo serve`/desktop hub is wherever the daemon launched (often $HOME),
+	// not this session's working_dir — so it scans a huge tree and hangs.
+	applyWorkingDir(ctx, cmd)
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
