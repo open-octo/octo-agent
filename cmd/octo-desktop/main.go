@@ -19,12 +19,14 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/logfile"
 	"github.com/open-octo/octo-agent/internal/serveproc"
 	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -163,8 +165,44 @@ func main() {
 		_ = srv.Shutdown(ctx)
 		cancel()
 	}
+	if closeLog := bridge.closeLog.Load(); closeLog != nil {
+		(*closeLog)()
+	}
 	if err != nil {
 		log.Fatalf("octo-desktop: %v", err)
+	}
+}
+
+// setupHubLog routes slog and the stdlib logger to a self-rotating
+// ~/.octo/serve.log and returns a close func (nil if setup failed, leaving the
+// default stderr in place). The stdlib logger is redirected too so the channel
+// adapters' error/retry lines — still on `log` — land in the same file.
+func setupHubLog() func() {
+	logPath, err := serveproc.LogPath()
+	if err != nil {
+		return nil
+	}
+	lw, err := logfile.Open(logPath, logfile.DefaultMaxBytes, logfile.DefaultBackups)
+	if err != nil {
+		return nil
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(lw, &slog.HandlerOptions{Level: hubLogLevel()})))
+	log.SetOutput(lw)
+	return func() { _ = lw.Close() }
+}
+
+// hubLogLevel reads OCTO_LOG_LEVEL (debug|info|warn|error), defaulting to info —
+// matching `octo serve`'s level handling so the two backends behave alike.
+func hubLogLevel() slog.Level {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OCTO_LOG_LEVEL"))) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }
 
@@ -202,6 +240,18 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	}
 	if path, perr := serveproc.PidPath(); perr == nil {
 		_ = serveproc.WritePid(path, os.Getpid())
+	}
+
+	// Only now, having taken over any prior daemon and bound the port, are we the
+	// sole backend — so it's safe to open the shared ~/.octo/serve.log. A prior
+	// `octo serve -d` that was stopped above has since exited (listenHub only
+	// succeeds once the port is free), releasing the fd it held on the file;
+	// opening/rotating earlier (e.g. in main, before the takeover) could rotate a
+	// file a live daemon still holds open — on Windows the rename would fail
+	// outright and drop us to a console for the whole session. Set up before
+	// server.New so the hub's own startup logs are captured too.
+	if closeLog := setupHubLog(); closeLog != nil {
+		bridge.closeLog.Store(&closeLog)
 	}
 
 	// Channels start only when the per-machine toggle is on (default off): the

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/logfile"
 	"github.com/open-octo/octo-agent/internal/serveproc"
 )
 
@@ -52,6 +53,13 @@ func startDaemon(serveArgs []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "octo serve: daemon: %v\n", err)
 		return 1
 	}
+	// Cap the log across daemon restarts: rotate the existing file if it has
+	// already grown past the size bound before we append to it again. `-d`
+	// hands this file's fd to the worker child as its stderr, so it can't be
+	// wrapped in a rotating writer the way the in-process desktop hub is;
+	// open-time rotation is the fd-compatible equivalent and bounds growth per
+	// daemon generation. Best-effort — a rotation failure must not stop serve.
+	_ = logfile.RotateIfLarger(logPath, logfile.DefaultMaxBytes, logfile.DefaultBackups)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		fmt.Fprintf(stderr, "octo serve: daemon: open log: %v\n", err)
