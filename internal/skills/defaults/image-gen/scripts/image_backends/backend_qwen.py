@@ -41,7 +41,7 @@ from image_backends.backend_common import (
 )
 
 
-DEFAULT_ENDPOINT = "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
 DEFAULT_MODEL = "qwen-image-2.0-pro"
 
 ASPECT_RATIO_SIZE_MAP = {
