@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -146,11 +147,25 @@ func (s *Server) handleRestoreTrash(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing file id")
 		return
 	}
-	if err := trash.Restore(id); err != nil {
+	// Default to the safe policy: never silently overwrite a file already at
+	// the original path. On a conflict, reply 409 with the details so the UI
+	// can ask the user how to resolve it.
+	res, err := trash.Restore(id, trash.ConflictAbort)
+	if err != nil {
+		if errors.Is(err, trash.ErrRestoreConflict) {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"conflict": true,
+				"error":    err.Error(),
+			})
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":      "restored",
+		"restored_to": res.RestoredTo,
+	})
 }
 
 func (s *Server) handleDeleteTrash(w http.ResponseWriter, r *http.Request) {
@@ -159,27 +174,15 @@ func (s *Server) handleDeleteTrash(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing file id")
 		return
 	}
-	entries, err := trash.List()
+	freed, err := trash.Delete(id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	for _, e := range entries {
-		if e.ID == id {
-			var freed int64
-			if info, err := os.Stat(e.TrashPath); err == nil {
-				freed = info.Size()
-			}
-			os.Remove(e.TrashPath)
-			os.Remove(e.TrashPath + ".meta.json")
-			writeJSON(w, http.StatusOK, map[string]any{
-				"ok":         true,
-				"freed_size": freed,
-			})
-			return
-		}
-	}
-	writeError(w, http.StatusNotFound, "trash entry not found")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"freed_size": freed,
+	})
 }
 
 func octoDir() string {

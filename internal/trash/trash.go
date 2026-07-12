@@ -1,19 +1,43 @@
-// Package trash provides a simple file-level trash (recycle bin) for octo.
+// Package trash provides a file-level trash (recycle bin) for octo.
 //
 // When the agent deletes or overwrites a file, the old copy is moved to
-// ~/.octo/trash/<project_hash>/<filename>, with a sidecar .meta.json
-// recording the original path and deletion timestamp.
+// ~/.octo/trash/<project_hash>/<trash_name>, with a sidecar .meta.json
+// recording the original path and deletion timestamp. Entries can be listed,
+// restored (never silently overwriting a file that now sits at the original
+// path), or permanently removed.
 package trash
 
 import (
+	"bufio"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+)
+
+// ErrRestoreConflict is returned by Restore under ConflictAbort when a file
+// already exists at the entry's original path.
+var ErrRestoreConflict = errors.New("a file already exists at the original path")
+
+// ConflictPolicy selects how Restore behaves when the destination exists.
+type ConflictPolicy int
+
+const (
+	// ConflictAbort refuses to restore and returns ErrRestoreConflict so the
+	// caller can ask the user what to do. This is the safe default.
+	ConflictAbort ConflictPolicy = iota
+	// ConflictBackupExisting moves the current file into the trash first, then
+	// restores. Lossless and symmetric.
+	ConflictBackupExisting
+	// ConflictRename restores alongside as <name>.restored-<timestamp>.
+	ConflictRename
 )
 
 // Entry describes a single trashed file.
@@ -24,9 +48,23 @@ type Entry struct {
 	DeletedAt string `json:"deleted_at"`
 	Project   string `json:"project"`
 	Size      int64  `json:"size"`
+	// Label is a human-readable name for the entry, when one can be derived
+	// (e.g. a session transcript's title). Empty means the UI should fall back
+	// to the basename.
+	Label string `json:"label,omitempty"`
 	// Orphan is true when the original project directory no longer exists
 	// (e.g. a test temp dir) — such entries are safe to permanently delete.
 	Orphan bool `json:"orphan"`
+}
+
+// RestoreResult reports what Restore did.
+type RestoreResult struct {
+	// RestoredTo is the path the trashed bytes were written to. Equal to the
+	// original path unless ConflictRename diverted it.
+	RestoredTo string
+	// BackedUpExisting is true when ConflictBackupExisting moved a pre-existing
+	// file into the trash before restoring.
+	BackedUpExisting bool
 }
 
 type meta struct {
@@ -49,9 +87,8 @@ func ProjectDir(projectDir string) string {
 // Backup copies a file or directory into the trash with a .meta.json sidecar,
 // preserving its original path for later restoration, WITHOUT removing the
 // original. It's the copy-only half of Move: the Windows safe-delete wrapper
-// uses it to make a delete recoverable while letting the real Remove-Item
-// perform the delete (mirroring the POSIX rm wrapper — copy to trash, then
-// delete).
+// and the overwrite-protection path use it to make a delete/overwrite
+// recoverable while the caller performs the actual removal.
 func Backup(originalPath, projectDir string) error {
 	fi, err := os.Stat(originalPath)
 	if err != nil {
@@ -61,20 +98,11 @@ func Backup(originalPath, projectDir string) error {
 		return err
 	}
 
-	trashRoot := Dir()
-	projHash := hashProject(projectDir)
-	targetDir := filepath.Join(trashRoot, projHash)
-	if err := os.MkdirAll(targetDir, 0700); err != nil {
+	trashPath, err := stageName(originalPath, projectDir)
+	if err != nil {
 		return err
 	}
 
-	// Use a timestamped name to avoid collisions.
-	ts := time.Now().Format("20060102-150405")
-	base := filepath.Base(originalPath)
-	trashName := fmt.Sprintf("%s_%s", ts, base)
-	trashPath := filepath.Join(targetDir, trashName)
-
-	// Copy.
 	if fi.IsDir() {
 		if err := copyDir(originalPath, trashPath); err != nil {
 			return err
@@ -85,19 +113,8 @@ func Backup(originalPath, projectDir string) error {
 		}
 	}
 
-	// Write meta.
-	m := meta{
-		Original:  originalPath,
-		DeletedAt: time.Now().UTC().Format(time.RFC3339),
-		Project:   projectDir,
-	}
-	metaData, _ := json.MarshalIndent(m, "", "  ")
-	if err := os.WriteFile(trashPath+".meta.json", metaData, 0600); err != nil {
-		if fi.IsDir() {
-			os.RemoveAll(trashPath)
-		} else {
-			os.Remove(trashPath)
-		}
+	if err := writeMeta(trashPath, originalPath, projectDir); err != nil {
+		removePath(trashPath)
 		return err
 	}
 	return nil
@@ -105,36 +122,109 @@ func Backup(originalPath, projectDir string) error {
 
 // Move backs a file or directory up to the trash and then removes the original.
 // On success the original is gone but recoverable from the trash.
+//
+// When the original and the trash share a filesystem (the common case: both
+// live under ~/.octo, or a project on the same volume as $HOME) the move is a
+// single atomic rename — instant, and space-free even for large trees. Across
+// filesystems it falls back to copy-then-remove.
 func Move(originalPath, projectDir string) error {
-	if err := Backup(originalPath, projectDir); err != nil {
+	if _, err := os.Stat(originalPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("file not found: %s", originalPath)
+		}
 		return err
 	}
-	// os.RemoveAll handles both files and directories.
-	return os.RemoveAll(originalPath)
-}
 
-// Restore moves a trashed file back to its original location.
-func Restore(id string) error {
-	entries, err := List()
+	trashPath, err := stageName(originalPath, projectDir)
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
-		if e.ID == id {
-			// Ensure parent directory exists.
-			parent := filepath.Dir(e.Original)
-			if err := os.MkdirAll(parent, 0755); err != nil {
-				return err
-			}
-			if err := os.Rename(e.TrashPath, e.Original); err != nil {
-				return err
-			}
-			// Clean up meta file.
-			os.Remove(e.TrashPath + ".meta.json")
-			return nil
+
+	if err := os.Rename(originalPath, trashPath); err == nil {
+		// Renamed in; record meta. If meta can't be written, put the file back
+		// so nothing is lost in a metadata-less limbo (List skips meta-less
+		// entries, so they'd be invisible and unrecoverable).
+		if err := writeMeta(trashPath, originalPath, projectDir); err != nil {
+			_ = os.Rename(trashPath, originalPath)
+			return err
+		}
+		return nil
+	}
+
+	// Cross-device (or any rename failure): copy, then remove. Backup writes
+	// meta before returning, so the original is only removed once a recoverable
+	// copy exists.
+	if err := Backup(originalPath, projectDir); err != nil {
+		return err
+	}
+	return os.RemoveAll(originalPath)
+}
+
+// Restore moves a trashed entry back to its original location under the given
+// conflict policy. It never silently overwrites a file already at the original
+// path — see ConflictPolicy.
+func Restore(id string, policy ConflictPolicy) (RestoreResult, error) {
+	entries, err := List()
+	if err != nil {
+		return RestoreResult{}, err
+	}
+	var e *Entry
+	for i := range entries {
+		if entries[i].ID == id {
+			e = &entries[i]
+			break
 		}
 	}
-	return fmt.Errorf("trash entry not found: %s", id)
+	if e == nil {
+		return RestoreResult{}, fmt.Errorf("trash entry not found: %s", id)
+	}
+
+	dest := e.Original
+	var res RestoreResult
+
+	if _, err := os.Stat(dest); err == nil {
+		// Something is already at the original path.
+		switch policy {
+		case ConflictAbort:
+			return RestoreResult{}, ErrRestoreConflict
+		case ConflictBackupExisting:
+			if err := Move(dest, e.Project); err != nil {
+				return RestoreResult{}, fmt.Errorf("back up existing file: %w", err)
+			}
+			res.BackedUpExisting = true
+		case ConflictRename:
+			dest = dest + ".restored-" + time.Now().Format("20060102-150405")
+		}
+	} else if !os.IsNotExist(err) {
+		return RestoreResult{}, err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return RestoreResult{}, err
+	}
+	if err := moveAcross(e.TrashPath, dest); err != nil {
+		return RestoreResult{}, err
+	}
+	os.Remove(e.TrashPath + ".meta.json")
+	res.RestoredTo = dest
+	return res, nil
+}
+
+// Delete permanently removes one entry by ID and returns the bytes freed.
+func Delete(id string) (int64, error) {
+	entries, err := List()
+	if err != nil {
+		return 0, err
+	}
+	for _, e := range entries {
+		if e.ID == id {
+			freed := e.Size
+			removePath(e.TrashPath)
+			os.Remove(e.TrashPath + ".meta.json")
+			return freed, nil
+		}
+	}
+	return 0, fmt.Errorf("trash entry not found: %s", id)
 }
 
 // List returns all trashed files sorted by deletion time (newest first).
@@ -154,7 +244,8 @@ func List() ([]Entry, error) {
 		if !d.IsDir() {
 			continue
 		}
-		projDir := filepath.Join(root, d.Name())
+		projHash := d.Name()
+		projDir := filepath.Join(root, projHash)
 		files, err := os.ReadDir(projDir)
 		if err != nil {
 			continue
@@ -184,18 +275,21 @@ func List() ([]Entry, error) {
 				}
 			}
 			entries = append(entries, Entry{
-				ID:        filepath.Base(trashPath),
+				// <project_hash>.<trash_name> — a single URL-safe segment that
+				// pins the exact file, so restore/delete never cross-project
+				// first-match the wrong entry.
+				ID:        projHash + "." + f.Name(),
 				Original:  m.Original,
 				TrashPath: trashPath,
 				DeletedAt: m.DeletedAt,
 				Project:   m.Project,
 				Size:      size,
+				Label:     deriveLabel(m.Original, trashPath),
 				Orphan:    orphan,
 			})
 		}
 	}
 
-	// Sort newest first.
 	sortEntries(entries)
 	return entries, nil
 }
@@ -227,11 +321,7 @@ func Empty(mode string) (int, int64, error) {
 			}
 		}
 		if remove {
-			if info, err := os.Stat(e.TrashPath); err == nil && info.IsDir() {
-				os.RemoveAll(e.TrashPath)
-			} else {
-				os.Remove(e.TrashPath)
-			}
+			removePath(e.TrashPath)
 			os.Remove(e.TrashPath + ".meta.json")
 			count++
 			freed += e.Size
@@ -245,6 +335,71 @@ func Empty(mode string) (int, int64, error) {
 func hashProject(dir string) string {
 	h := sha256.Sum256([]byte(dir))
 	return fmt.Sprintf("%x", h[:8])
+}
+
+// stageName creates the per-project trash directory and returns a collision-free
+// destination path for originalPath. The name is
+// <timestamp>_<rand>_<basename>: the random token keeps two same-basename files
+// deleted in the same second from colliding.
+func stageName(originalPath, projectDir string) (string, error) {
+	targetDir := ProjectDir(projectDir)
+	if err := os.MkdirAll(targetDir, 0700); err != nil {
+		return "", err
+	}
+	ts := time.Now().Format("20060102-150405")
+	name := fmt.Sprintf("%s_%s_%s", ts, randToken(), filepath.Base(originalPath))
+	return filepath.Join(targetDir, name), nil
+}
+
+func writeMeta(trashPath, originalPath, projectDir string) error {
+	m := meta{
+		Original:  originalPath,
+		DeletedAt: time.Now().UTC().Format(time.RFC3339),
+		Project:   projectDir,
+	}
+	data, _ := json.MarshalIndent(m, "", "  ")
+	return os.WriteFile(trashPath+".meta.json", data, 0600)
+}
+
+// randToken returns 4 hex chars of entropy.
+func randToken() string {
+	var b [2]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Vanishingly unlikely; a fixed token still leaves the timestamp +
+		// basename, and MkdirAll/Rename would surface any real collision.
+		return "0000"
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// moveAcross renames src to dst, falling back to copy+remove across
+// filesystems (os.Rename fails with EXDEV).
+func moveAcross(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	fi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if fi.IsDir() {
+		if err := copyDir(src, dst); err != nil {
+			return err
+		}
+	} else {
+		if err := copyFile(src, dst); err != nil {
+			return err
+		}
+	}
+	return os.RemoveAll(src)
+}
+
+func removePath(p string) {
+	if info, err := os.Stat(p); err == nil && info.IsDir() {
+		os.RemoveAll(p)
+	} else {
+		os.Remove(p)
+	}
 }
 
 func copyFile(src, dst string) error {
@@ -302,6 +457,58 @@ func readMeta(path string) (meta, error) {
 		return meta{}, err
 	}
 	return m, nil
+}
+
+// deriveLabel returns a human-readable name for a trashed entry, or "" to let
+// the caller fall back to the basename. Session transcripts get their title.
+func deriveLabel(original, trashPath string) string {
+	if isSessionTranscript(original) {
+		return sessionTitle(trashPath)
+	}
+	return ""
+}
+
+// isSessionTranscript reports whether original is an octo session JSONL, i.e.
+// ~/.octo/sessions/<id>.jsonl.
+func isSessionTranscript(original string) bool {
+	return strings.HasSuffix(original, ".jsonl") &&
+		filepath.Base(filepath.Dir(original)) == "sessions"
+}
+
+// sessionTitle parses the session title out of a trashed transcript. The first
+// line is the meta record (authoritative title after a rewrite); a later
+// type:"title" record overrides it. Bounded so listing stays cheap: reads at
+// most sessionScanLimit bytes and returns the last title seen.
+func sessionTitle(path string) string {
+	// The first line is the meta record, which embeds the (possibly large)
+	// system prompt; the limit must comfortably clear it so the meta title
+	// isn't truncated, while still bounding the scan for a later title record.
+	const sessionScanLimit = 2 * 1024 * 1024
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	r := bufio.NewReader(io.LimitReader(f, sessionScanLimit))
+	var title string
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 {
+			var rec struct {
+				Type  string `json:"type"`
+				Title string `json:"title"`
+			}
+			if json.Unmarshal(line, &rec) == nil && rec.Title != "" &&
+				(rec.Type == "meta" || rec.Type == "title") {
+				title = rec.Title
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return title
 }
 
 func sortEntries(entries []Entry) {

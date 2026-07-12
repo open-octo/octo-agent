@@ -36,21 +36,37 @@ func NetworkAllowed() bool {
 // `rm` invocations move files to the project-scoped trash instead of
 // permanently deleting them.  It reads $OCTO_TRASH_DIR (set by shellCommand)
 // and writes .meta.json sidecars compatible with the trash package.
+//
+// Each existing target is hard-linked into the trash when possible (instant and
+// space-free even for large trees like node_modules), falling back to a real
+// copy across filesystems, and only then does the real `rm` delete it — so the
+// wrapper preserves rm's own exit code and output (staging by *moving* would
+// leave rm operating on a missing file).
 const safeRmWrapper = `__octo_safe_rm() {
   local _trash_dir="$OCTO_TRASH_DIR"
   [ -z "$_trash_dir" ] && return
-  local _arg
+  local _arg _n=0
   for _arg in "$@"; do
     case "$_arg" in -*) continue ;; esac
     if [ -e "$_arg" ] || [ -L "$_arg" ]; then
       local _ts _base _dest _orig
+      _n=$((_n+1))
       _ts=$(date +%%Y%%m%%d-%%H%%M%%S)
       _base=$(basename "$_arg")
-      _dest="$_trash_dir/${_ts}_${_base}"
-      _orig="$_arg"
-      case "$_orig" in /*) ;; *) _orig="$PWD/$_orig" ;; esac
+      # Absolute-qualify the argument once and use it as BOTH the meta
+      # "original" and the copy source. (A prior version prefixed $PWD onto the
+      # copy source unconditionally, so an absolute-path argument copied from a
+      # non-existent $PWD/abs/path, silently staged nothing, and the real rm
+      # still deleted it — absolute-path deletes were unprotected.)
+      case "$_arg" in
+        /*) _orig="$_arg" ;;
+        *)  _orig="$PWD/$_arg" ;;
+      esac
+      # $$ + a per-invocation counter keep same-second same-basename deletes
+      # from colliding on one name.
+      _dest="$_trash_dir/${_ts}_$$_${_n}_${_base}"
       mkdir -p "$_trash_dir"
-      cp -r "$PWD/$_arg" "$_dest" 2>/dev/null || continue
+      cp -al "$_orig" "$_dest" 2>/dev/null || cp -R "$_orig" "$_dest" 2>/dev/null || continue
       printf '{"original":"%%s","deleted_at":"%%s","project":"%%s"}\n' \
         "$(printf '%%s' "$_orig" | sed 's/\\/\\\\/g; s/"/\\"/g')" \
         "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" \

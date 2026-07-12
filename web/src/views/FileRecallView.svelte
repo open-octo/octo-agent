@@ -13,6 +13,7 @@
     deleted_at: string
     project: string
     size: number
+    label?: string
     orphan: boolean
   }
 
@@ -195,7 +196,7 @@
             </span>
             <div class="file-info">
               <div class="file-name-row">
-                <span class="file-name mono">{basename(f.original)}</span>
+                <span class="file-name" class:mono={!f.label}>{f.label || basename(f.original)}</span>
                 {#if f.orphan}
                   <StatusTag status="error">{$t('files.orphan')}</StatusTag>
                 {:else if isOld(f.deleted_at)}
