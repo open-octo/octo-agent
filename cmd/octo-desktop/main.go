@@ -64,6 +64,18 @@ func isBundled() bool {
 	return strings.Contains(exe, ".app/Contents/MacOS/")
 }
 
+// notificationsAvailable reports whether the OS-native notification service can
+// be created on this platform. macOS's UNUserNotificationCenter needs a bundle
+// identifier, so it only works from a .app bundle; Windows (a registered COM
+// toast activator) and Linux (D-Bus) work for any running executable, so the
+// tray update toast reaches all three platforms uniformly.
+func notificationsAvailable() bool {
+	if runtime.GOOS == "darwin" {
+		return isBundled()
+	}
+	return true
+}
+
 func main() {
 	// Pick the language for native dialogs/tray from the system UI language.
 	applyLang()
@@ -84,11 +96,12 @@ func main() {
 	// quit allowed only when the user opted out of keep-running-in-background.
 	bridge.allowQuit.Store(!settings.KeepRunningInBackground)
 
-	// Native notifications only when bundled (see isBundled): the service needs
-	// a bundle identifier. Registered as a Wails service so its ServiceStartup
-	// runs; the bridge holds it to send notifications the frontend requests.
+	// Native notifications where the platform supports them (see
+	// notificationsAvailable — macOS requires a bundle, Windows/Linux don't).
+	// Registered as a Wails service so its ServiceStartup runs; the bridge holds
+	// it to send notifications the frontend and the tray update check request.
 	var services []application.Service
-	if isBundled() {
+	if notificationsAvailable() {
 		notifier := notifications.New()
 		bridge.notifier = notifier
 		services = append(services, application.NewService(notifier))
@@ -125,9 +138,20 @@ func main() {
 	})
 	bridge.app = app
 
-	// Clicking a notification raises the window — that's its whole point.
+	// Interacting with the "update available" toast opens the download page;
+	// every other notification raises the window. Match the category (which all
+	// three platform notifiers echo back) and then only the "Open" action or a
+	// tap on the body — so dismissing the toast, whatever identifier a platform
+	// reports for that, never opens a browser.
 	if bridge.notifier != nil {
-		bridge.notifier.OnNotificationResponse(func(notifications.NotificationResult) {
+		bridge.notifier.OnNotificationResponse(func(res notifications.NotificationResult) {
+			if res.Response.CategoryID == updateNotifyCategoryID {
+				switch res.Response.ActionIdentifier {
+				case updateNotifyOpenActionID, notifications.DefaultActionIdentifier:
+					_ = bridge.OpenExternal(upgrade.DownloadPageURL)
+				}
+				return
+			}
 			bridge.showWindow()
 		})
 	}
@@ -152,6 +176,10 @@ func main() {
 	// prompt (a modal dialog) can run. Doing it here rather than before Run lets
 	// us ask the user before stopping someone else's backend.
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		// Register the update-toast action category once the notification
+		// service has started (Windows/Linux drop the action buttons if a
+		// notification is sent before its category is registered).
+		bridge.registerUpdateNotifyCategory()
 		startHub(app, bridge, settings)
 	})
 
@@ -292,31 +320,28 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 
 // checkForUpdates is the tray "Check for updates…" action. It runs on a
 // background goroutine (never the UI thread) so the network round-trip can't
-// freeze the menu, then reports via a native dialog: a newer release offers to
-// open the download page; already-current shows an info dialog; a failed lookup
-// shows an error. Pure native path — it works with the window closed to the
-// tray, and uses modal dialogs (not Notify) so an unbundled build without the
-// notifications service still surfaces the result.
+// freeze the menu, then reports via a non-intrusive OS toast rather than a
+// modal dialog: a failed lookup and the already-current case are plain toasts;
+// a newer release raises the actionable "update available" toast whose button
+// (and body tap) opens the download page. Toasts are best-effort — on a
+// platform/build without the notification service (an unbundled macOS binary)
+// they no-op, matching the version badge's own silence there.
 func checkForUpdates(bridge *nativeBridge) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	latest, err := upgrade.Check(ctx)
 	if err != nil {
-		bridge.showError(L().updTitle, L().updFailed)
+		bridge.Notify(L().updTitle, L().updFailed)
 		return
 	}
 	current := strings.TrimPrefix(version.Version, "v")
 	// Eligible() != nil means a dev/unbundled build that never claims to be
 	// behind (matching the badge); report status without offering a download.
 	if upgrade.Eligible() != nil || upgrade.CompareVersions(current, latest) >= 0 {
-		bridge.showInfo(L().updTitle, fmt.Sprintf(L().updLatestFmt, current))
+		bridge.Notify(L().updTitle, fmt.Sprintf(L().updLatestFmt, current))
 		return
 	}
-	if bridge.confirm(L().updTitle, fmt.Sprintf(L().updAvailableFmt, latest), L().updOpen, L().updLater) {
-		if err := bridge.OpenExternal(upgrade.DownloadPageURL); err != nil {
-			bridge.showError(L().updTitle, err.Error())
-		}
-	}
+	bridge.NotifyUpdateAvailable(L().updTitle, fmt.Sprintf(L().updAvailableFmt, latest))
 }
 
 // listenHub binds addr, retrying for up to grace so a just-stopped daemon has
