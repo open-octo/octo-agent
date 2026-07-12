@@ -155,6 +155,39 @@ func TestRouteChannelEvent_NormalMessageRunsTurn(t *testing.T) {
 	})
 }
 
+// panicSender panics on every send path, simulating a turn that blows up
+// mid-flight (a provider adapter bug, a nil deref, etc.).
+type panicSender struct{}
+
+func (panicSender) SendMessages(_ context.Context, _, _ string, _ []agent.Message, _ int) (agent.Reply, error) {
+	panic("boom in SendMessages")
+}
+func (panicSender) StreamMessages(_ context.Context, _, _ string, _ []agent.Message, _ int, _ func(string), _ func(string)) (agent.Reply, error) {
+	panic("boom in StreamMessages")
+}
+func (panicSender) SendMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition) (agent.Reply, error) {
+	panic("boom in SendMessagesWithTools")
+}
+func (panicSender) StreamMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition, _ func(string), _ agent.ToolInputDeltaFunc, _ agent.ThinkingDeltaFunc) (agent.Reply, error) {
+	panic("boom in StreamMessagesWithTools")
+}
+
+// A panic inside an IM turn must not crash the serve process — handleChannelMessage
+// runs the whole turn in the goroutine routeChannelEvent spawns for it, outside
+// any caller's recover, so it must recover itself. If the guard is missing this
+// test panics the test binary instead of failing cleanly.
+func TestHandleChannelMessage_RecoversTurnPanic(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+		return agent.New(panicSender{}, "stub-model")
+	}, channel.BindByChat)
+	ad := &fullFakeAdapter{}
+
+	// Runs the turn synchronously here; a recovered panic returns normally.
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+	// Reaching this line proves the turn panic was recovered, not propagated.
+}
+
 // TestHandleChannelMessage_SetsPerTurnGate: every IM turn gets a fresh
 // permission gate (configured mode + chat-interactive ask) on the session
 // agent — the factory-time strict gate is gone.

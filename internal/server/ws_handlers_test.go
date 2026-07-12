@@ -3,9 +3,55 @@ package server
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 )
+
+// A turn runs in a bare goroutine outside net/http's per-request recover; an
+// unrecovered panic there would crash the whole serve process (and, in the
+// in-process desktop app, take every session down with it). recoverTurn must
+// catch it and push the end-of-turn frames the panic skipped, so the composer
+// leaves its "thinking" state instead of hanging.
+func TestRecoverTurn_RecoversPanicAndUnsticksUI(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	const sid = "sess-panic"
+	conn := &wsConn{send: make(chan []byte, 16), subscribed: map[string]struct{}{}}
+	srv.wsHub.subscribe(conn, sid)
+
+	// A panicking turn body must not propagate — if recoverTurn didn't recover,
+	// this goroutine's panic would crash the test process.
+	func() {
+		defer srv.recoverTurn(sid)
+		panic("boom in a turn")
+	}()
+	// Reaching here proves the panic was recovered.
+
+	got := map[string]bool{}
+	deadline := time.After(2 * time.Second)
+	for len(got) < 3 {
+		select {
+		case b := <-conn.send:
+			var m map[string]any
+			if json.Unmarshal(b, &m) == nil {
+				if typ, _ := m["type"].(string); typ != "" {
+					got[typ] = true
+				}
+			}
+		case <-deadline:
+			t.Fatalf("did not receive the unstick frames after a recovered turn panic; got %v", got)
+		}
+	}
+	for _, want := range []string{"error", "complete", "session_update"} {
+		if !got[want] {
+			t.Errorf("missing %q frame after a recovered turn panic (UI would stay stuck)", want)
+		}
+	}
+}
 
 // An idle session (no live Agent) must report the real context-token count its
 // last turn persisted, so a fresh subscribe (page refresh / reconnect) shows

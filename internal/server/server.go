@@ -2323,6 +2323,9 @@ func (s *Server) reloadChannel(platform string) {
 // off the adapter's read loop (Session.BeginRun serialises turns per
 // session, so concurrent messages in one chat can't interleave).
 func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev channel.InboundEvent) {
+	// The adapter invokes this from its own inbound goroutine (not net/http), so
+	// a panic anywhere in the IM turn path would crash the whole serve process.
+	defer s.recoverBg("channel event (" + ev.Platform + ")")
 	if s.handleChannelCommand(ad, ev) {
 		return
 	}
@@ -2445,6 +2448,7 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 	}
 
 	go func() {
+		defer s.recoverBg("channel compaction")
 		defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 		ctx, done := sess.BeginRun(context.Background())
 		defer done()
@@ -2468,6 +2472,11 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 // wires completion hooks so background processes / workflows can trigger
 // follow-up turns when the session goes idle (web kickIdleSteerTurn parity).
 func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, ev channel.InboundEvent) {
+	// routeChannelEvent dispatches this in its own goroutine (go
+	// s.handleChannelMessage), so the whole IM turn runs outside any caller's
+	// recover — guard it here, at the goroutine's actual entry, or a panic mid
+	// turn crashes the serve process.
+	defer s.recoverBg("channel turn (" + ev.Platform + ")")
 	if err := s.drain.begin(); err != nil {
 		// Restart drain in progress. The adapter is still up (it stops only
 		// after the drain, so in-flight replies get delivered) — tell the
@@ -2609,6 +2618,9 @@ func (s *Server) wireChannelCompletionHooks(sess *channel.Session, ad channel.Ad
 // arrived while the session was idle. It competes with the synchronous turn
 // path for the session's runMu; BeginRun serialises them, so only one wins.
 func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent) {
+	// Spawned via bare `go` (loop.go + the async-completion paths), so it runs a
+	// full turn outside any recover — guard it here or a panic crashes the process.
+	defer s.recoverBg("channel idle turn")
 	// Acquire the persistent binding before locking the turn: this matches the
 	// user-initiated IM path and prevents idle follow-up turns from
 	// interleaving with another entry (web/cli/tui) that has taken over the
