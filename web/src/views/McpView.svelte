@@ -177,7 +177,7 @@
       link: d.authorize_url ?? '',
       error: d.error ?? '',
     }
-    if (isNewLink) {
+    if (isNewLink && d.authorize_url) {
       // Best-effort: this fires from inside a poll tick, not synchronously
       // from the user's click, so popup blockers may silently swallow it —
       // the link rendered below is the reliable fallback. openUrl routes
