@@ -11,10 +11,10 @@
 
 > An **MIT-licensed, single Go binary, zero-runtime** AI agent that combines the two things people usually
 > reach for two separate tools to get: a **coding agent on par with Claude Code**, and a **personal
-> assistant that's lighter and more stable than OpenClaw** — skills, CLI / Web / phone-IM / VS Code / Obsidian, browser control,
+> assistant that's lighter and more stable than OpenClaw** — skills, CLI / Web / desktop / phone-IM / VS Code / Obsidian, browser control,
 > an OS-level sandbox, all as an **open, self-contained binary you fully own**, on **any model** (DeepSeek,
 > Kimi, Anthropic, OpenAI, or anything compatible), with the server and your data staying on your own
-> machine. Reuse the skills already in `~/.claude/skills`. One binary for both your coding and your everyday
+> machine. Reuse your existing Claude Code skills. One binary for both your coding and your everyday
 > automation, instead of running two separate tools.
 
 <!-- TODO(demo): record a 15–30s hero GIF (one-line install → octo on DeepSeek → solve a real
@@ -43,7 +43,7 @@ rather own the whole thing and run it on your own models.
 | Runtime | **one self-contained Go binary — no Node / Python / Ruby, no dependency tree** | native install tied to an Anthropic account |
 | Models | **both protocols + any compatible endpoint** (DeepSeek/Kimi/Bailian/OpenRouter/vLLM) | Anthropic-first (third-party providers on Terminal / VS Code) |
 | Deployment / data | **fully self-hosted — server and data stay yours** | Anthropic-managed for most surfaces |
-| Skills | reuse `~/.claude/skills` directly | native (the format's origin) |
+| Skills | same SKILL.md format — reuse your Claude Code skills | native (the format's origin) |
 
 <sub>Claude Code details per its public docs (2026-07). It also has skills, MCP, sub-agents, an OS sandbox,
 browser / computer-use, and IM channels — octo covers the same ground. The difference above is openness,
@@ -77,7 +77,7 @@ lighter, more stable alternative to OpenClaw — one binary instead of two separ
 
 ## Status
 
-> **Stable (1.0).** Five interfaces are live: the CLI (an interactive TUI in a terminal, a headless agentic one-shot everywhere else), a local web server (`octo serve`), an IM bridge (running inside `octo serve`; WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram), a VS Code extension ([`open-octo/octo-vscode`](https://github.com/open-octo/octo-vscode)), and an Obsidian plugin ([`open-octo/octo-obsidian`](https://github.com/open-octo/octo-obsidian)) — the last two connect to `octo serve` over the same HTTP/WebSocket API the Web UI uses. On top of the agent loop there are skills, MCP clients, OS-level sandboxing, persistent memory, sub-agents, background workflows, and a task graph for autonomous multi-step goals.
+> **Stable (1.0).** Six interfaces are live: the CLI (an interactive TUI in a terminal, a headless agentic one-shot everywhere else), a local web server (`octo serve`), a native desktop app (`cmd/octo-desktop` — a Wails window wrapping the same UI, with a system tray, running the hub in-process; no browser or background server to manage), an IM bridge (running inside `octo serve`; WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram), a VS Code extension ([`open-octo/octo-vscode`](https://github.com/open-octo/octo-vscode)), and an Obsidian plugin ([`open-octo/octo-obsidian`](https://github.com/open-octo/octo-obsidian)) — the VS Code and Obsidian clients connect to `octo serve` over the same HTTP/WebSocket API the Web UI uses. On top of the agent loop there are skills, MCP clients, OS-level sandboxing, persistent memory, sub-agents, background workflows, and a task graph for autonomous multi-step goals.
 >
 > What you can build on is declared in [COMPATIBILITY.md](COMPATIBILITY.md) (stable config formats, CLI, exit codes — and what isn't covered); the security boundary in [SECURITY.md](SECURITY.md).
 
@@ -373,6 +373,7 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 | Sub-agents | done | `sub_agent` fan-out, async + resumable (`sub_agent_send`, `sub_agent_status`, `sub_agent_kill`) |
 | Workflows | done | `workflow` tool — deterministic multi-agent orchestration (parallel/pipeline), background runs with liveness + `workflow_kill`, git worktree isolation, structured-output schema; JS or an embedded-Ruby DSL |
 | Web server | done | `octo serve` — REST + WebSocket, the embedded Octo Workbench UI (sessions, tool output, artifacts, sub-agents, tasks, memories, MCP, skills; loopback bind by default; access-key auth for exposed binds, see SECURITY.md) |
+| Desktop app | done | `cmd/octo-desktop` — native Wails GUI running the hub in-process (same Web UI in a window + system tray, no browser/background server to manage); macOS `.pkg`, Windows `.exe`, Linux AppImage |
 | IM bridge | done | runs inside `octo serve` — WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram adapters (web QR login, per-user sessions, slash commands) |
 
 ## Architecture

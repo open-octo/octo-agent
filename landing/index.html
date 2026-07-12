@@ -3,26 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Octo — A functionality-first AI agent</title>
-  <meta name="description" content="A single Go binary that brings AI agents to your terminal, browser, and chat apps. Built-in tools, MCP, skills, and persistent memory.">
+  <title>Octo — private, self-hosted AI agent · one brain, many arms</title>
+  <meta name="description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with many arms reaching your terminal, web, desktop, IM, and editor. Any model, zero telemetry; your data never leaves your machine.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232F54EB'/%3E%3Cpath fill='%23ffffff' d='M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z'/%3E%3Ccircle cx='40' cy='42' r='5' fill='%232F54EB'/%3E%3Ccircle cx='60' cy='42' r='5' fill='%232F54EB'/%3E%3C/svg%3E">
   <link rel="canonical" href="https://octo-agent.dev/">
-  <meta property="og:title" content="Octo — A functionality-first AI agent">
-  <meta property="og:description" content="A single Go binary that brings AI agents to your terminal, browser, and chat apps. Anthropic + OpenAI native. Built-in tools, MCP, skills, sandboxing, and persistent memory.">
+  <meta property="og:title" content="Octo — private, self-hosted AI agent · one brain, many arms">
+  <meta property="og:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with many arms reaching your terminal, web, desktop, IM, and editor. Any model, zero telemetry; your data never leaves your machine.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://octo-agent.dev/">
   <meta property="og:image" content="https://octo-agent.dev/og-image.svg">
   <meta property="og:site_name" content="Octo">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Octo — A functionality-first AI agent">
-  <meta name="twitter:description" content="A single Go binary that brings AI agents to your terminal, browser, and chat apps. Built-in tools, MCP, skills, and persistent memory.">
+  <meta name="twitter:title" content="Octo — private, self-hosted AI agent · one brain, many arms">
+  <meta name="twitter:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with many arms reaching your terminal, web, desktop, IM, and editor. Any model, zero telemetry; your data never leaves your machine.">
   <meta name="twitter:image" content="https://octo-agent.dev/og-image.svg">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Octo",
-    "description": "A functionality-first AI agent in a single Go binary. Bring it to your terminal, browser, or chat app.",
+    "description": "A private, self-hosted AI agent: one brain — a single fast Go binary — with many arms reaching your terminal, web, desktop, IM, and editor. Any model; your data never leaves your machine.",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "macOS, Linux, Windows",
     "license": "https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt",
@@ -120,12 +120,37 @@
       margin-bottom: 1rem;
     }
     .hero h1 .accent { color: var(--accent); }
+    .hero-kicker {
+      display: inline-block;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 0.32rem 0.85rem;
+      border-radius: 999px;
+      margin-bottom: 1.1rem;
+    }
     .hero-tagline {
       font-size: clamp(1.05rem, 2.5vw, 1.25rem);
       color: var(--fg-secondary);
-      max-width: 560px;
-      margin: 0 auto 2rem;
+      max-width: 600px;
+      margin: 0 auto 1.4rem;
       line-height: 1.6;
+    }
+    .hero-proof {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.45rem;
+      max-width: 620px;
+      margin: 0 auto 2rem;
+    }
+    .hero-proof span {
+      font-size: 0.92rem;
+      color: var(--fg-secondary);
+      line-height: 1.5;
     }
     .hero-actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
     .btn {
@@ -498,10 +523,17 @@
         <circle cx="40" cy="42" r="5" fill="#2F54EB"/>
         <circle cx="60" cy="42" r="5" fill="#2F54EB"/>
       </svg>
-      <h1><span data-en="Meet " data-zh="认识 "></span><span class="accent">Octo</span></h1>
+      <p class="hero-kicker" data-en="One brain, many arms" data-zh="一个脑，多条腕"></p>
+      <h1><span class="accent">Octo</span></h1>
       <p class="hero-tagline"
-         data-en="A functionality-first AI agent in a single Go binary. Reach it from your terminal, browser, editor, or chat — it speaks Anthropic and OpenAI natively, and actually gets things done."
-         data-zh="以功能为先的 AI Agent，单一 Go 二进制。终端、浏览器、编辑器、聊天工具都能用它 —— 原生支持 Anthropic 与 OpenAI，真正把事情干完。"></p>
+         data-en="A private, self-hosted AI agent that reaches your terminal, web, desktop, IM, and editor. One fast Go binary, any model, your data."
+         data-zh="一个私密、自托管的 AI Agent，伸进你的终端、网页、桌面、IM 和编辑器。一个够快的 Go 二进制，任意模型，你的数据。"></p>
+      <div class="hero-proof">
+        <span data-en="🔒 No telemetry, ever — nothing leaves your machine except the requests you send"
+              data-zh="🔒 没有埋点 —— 除了你主动发出的请求，没有任何东西离开你的机器"></span>
+        <span data-en="⚡ Starts in milliseconds — and stays fast under load"
+              data-zh="⚡ 毫秒级启动 —— 负载下依旧够快"></span>
+      </div>
       <div class="download-row">
         <a class="dl-btn" href="https://github.com/open-octo/octo-agent/releases/latest/download/octo-setup.pkg">
           <svg class="dl-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -613,9 +645,9 @@
   <section>
     <div class="container">
       <div class="section-header reveal">
-        <h2 data-en="Six faces, one agent" data-zh="六种界面，同一个 agent"></h2>
-        <p data-en="Each interface is a first-class citizen. Use the one that fits your workflow — the agent underneath is identical."
-           data-zh="每个界面都是一等公民。挑最适合你工作流的那个 —— 底层的 agent 完全一致。"></p>
+        <h2 data-en="One brain, many arms" data-zh="一个脑，多条腕"></h2>
+        <p data-en="Each interface is a first-class arm — same brain, same memory, same ~/.octo. Reach the agent from wherever you work."
+           data-zh="每个界面都是一条一等公民的腕 —— 同一个大脑、同一份记忆、同一个 ~/.octo。你在哪干活，就从哪够到它。"></p>
       </div>
       <div class="interfaces">
         <div class="iface reveal">

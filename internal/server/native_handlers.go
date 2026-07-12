@@ -48,6 +48,13 @@ type NativeBridge interface {
 	// desktop build updates through its installer, not an in-place swap. The
 	// server validates url is http/https before calling.
 	OpenExternal(url string) error
+
+	// SaveFile shows an OS save dialog seeded with defaultName, writes content
+	// to the chosen path, and returns it. cancelled is true when the user
+	// dismissed the dialog (path empty). Backs the artifact "Download" action:
+	// the octo-served webview can't trigger an in-page blob download, so the
+	// desktop shell writes the file through a native dialog instead.
+	SaveFile(ctx context.Context, defaultName, content string) (path string, cancelled bool, err error)
 }
 
 type nativePickFolderRequest struct {
@@ -294,4 +301,40 @@ func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type nativeSaveFileRequest struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
+// POST /api/native/save-file — show the OS save dialog (desktop only), write
+// the posted content to the chosen path, and return it. The artifact panel
+// calls this instead of an in-page blob download: the page is octo-served, so
+// the webview has no download delegate and a blob <a download> click does
+// nothing. Loopback-gated like the other native routes; registered only with a
+// bridge.
+func (s *Server) handleNativeSaveFile(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "native dialogs are available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	var req nativeSaveFileRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	path, cancelled, err := s.cfg.Native.SaveFile(r.Context(), req.Name, req.Content)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":      path,
+		"cancelled": cancelled,
+	})
 }

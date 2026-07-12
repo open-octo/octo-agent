@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { artifacts, artifactsOpen, artifactSel, artifactView, showToast } from '../lib/stores'
+  import { get } from 'svelte/store'
+  import { artifacts, artifactsOpen, artifactSel, artifactView, showToast, nativeShell } from '../lib/stores'
   import { t, tr } from '../lib/i18n'
+  import * as api from '../lib/api'
 
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
 
@@ -15,12 +17,25 @@
       .catch(() => showToast(tr('artifacts.copy_failed'), 'error'))
   }
 
-  function downloadArtifact() {
-    const blob = new Blob([cur?.code ?? ''], { type: 'text/plain' })
+  async function downloadArtifact() {
+    const name = cur?.name || 'artifact.txt'
+    const content = cur?.code ?? ''
+    // Desktop shell: the octo-served webview has no download delegate, so an
+    // in-page blob download does nothing. Write through the native save dialog.
+    if (get(nativeShell)) {
+      try {
+        const r = await api.nativeSaveFile(name, content)
+        if (!r.cancelled) showToast(tr('artifacts.saved'))
+      } catch {
+        showToast(tr('artifacts.save_failed'), 'error')
+      }
+      return
+    }
+    const blob = new Blob([content], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = cur?.name || 'artifact.txt'
+    a.download = name
     a.click()
     URL.revokeObjectURL(url)
   }
