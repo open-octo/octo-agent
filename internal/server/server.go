@@ -884,9 +884,10 @@ func (s *Server) registerRoutes() {
 }
 
 // corsMiddleware wraps the mux with CORS headers when configured, plus a
-// built-in allowance for VS Code webview origins (isVSCodeWebviewOrigin) so
-// the octo VS Code extension's REST calls work without a --cors flag. That
-// case can't reuse the CORSOrigins-driven fast path below, so the middleware
+// built-in allowance for VS Code webview origins (isVSCodeWebviewOrigin) and
+// the Obsidian desktop origin (isObsidianDesktopOrigin) so the octo VS Code
+// extension's and Obsidian plugin's REST calls work without a --cors flag.
+// That case can't reuse the CORSOrigins-driven fast path below, so the middleware
 // now always runs rather than short-circuiting to next when CORSOrigins is
 // empty; a bare OPTIONS request with no Origin header and no --cors
 // configured now gets 204 instead of falling through to the mux, which is
@@ -894,7 +895,7 @@ func (s *Server) registerRoutes() {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		allowed := isVSCodeWebviewOrigin(origin)
+		allowed := isVSCodeWebviewOrigin(origin) || isObsidianDesktopOrigin(origin)
 		wildcard := false
 		for _, o := range s.cfg.CORSOrigins {
 			if o == "*" {

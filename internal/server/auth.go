@@ -155,6 +155,25 @@ func isVSCodeWebviewOrigin(origin string) bool {
 	return err == nil && u.Scheme == "vscode-webview"
 }
 
+// obsidianDesktopOrigin is the fixed Origin the Obsidian desktop app's
+// renderer sends (app://obsidian.md). Unlike vscode-webview — a per-window
+// scheme with a rotating uuid host — it is a single stable literal, so it is
+// matched exactly rather than by scheme.
+const obsidianDesktopOrigin = "app://obsidian.md"
+
+// isObsidianDesktopOrigin reports whether origin was sent by the Obsidian
+// desktop app. Baking this allowance into the server predicate — rather than
+// relying on a --cors default that only cmd/octo applies — keeps every server
+// entry point accepting the Obsidian plugin. cmd/octo-desktop builds a Config
+// without CORSOrigins, so without this the desktop hub rejected app://
+// obsidian.md with "forbidden origin" while octo serve accepted it. Same
+// hardening as isVSCodeWebviewOrigin: browsers control the Origin header, so a
+// hostile web page cannot forge this scheme, and both auth call sites sit
+// behind requireAuth's loopback gate.
+func isObsidianDesktopOrigin(origin string) bool {
+	return origin == obsidianDesktopOrigin
+}
+
 // hostAllowed is the DNS-rebinding gate for the loopback exemption: the
 // Host header must name the local machine or a --cors allowlisted host. A
 // rebound page's request reaches 127.0.0.1 but carries Host: attacker.com.
@@ -188,7 +207,7 @@ func (s *Server) originAllowed(origin string) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	if u.Scheme == "vscode-webview" || isLocalName(canonicalHost(u.Host)) {
+	if u.Scheme == "vscode-webview" || isObsidianDesktopOrigin(origin) || isLocalName(canonicalHost(u.Host)) {
 		return true
 	}
 	for _, o := range s.cfg.CORSOrigins {
