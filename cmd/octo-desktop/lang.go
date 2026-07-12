@@ -44,7 +44,6 @@ type uiStrings struct {
 	updLatestFmt    string // "...(v%s)."
 	updAvailableFmt string // "...%s..."
 	updOpen         string
-	updLater        string
 }
 
 var enStrings = uiStrings{
@@ -78,9 +77,8 @@ var enStrings = uiStrings{
 	updTitle:        "Octo",
 	updFailed:       "Couldn't check for updates. Please try again later.",
 	updLatestFmt:    "You're on the latest version (v%s).",
-	updAvailableFmt: "Octo %s is available. Open the download page?",
+	updAvailableFmt: "Octo %s is available.",
 	updOpen:         "Open Download Page",
-	updLater:        "Later",
 }
 
 var zhStrings = uiStrings{
@@ -114,9 +112,8 @@ var zhStrings = uiStrings{
 	updTitle:        "Octo",
 	updFailed:       "检查更新失败,请稍后重试。",
 	updLatestFmt:    "已是最新版本(v%s)。",
-	updAvailableFmt: "Octo %s 已发布,是否打开下载页?",
+	updAvailableFmt: "Octo %s 已发布。",
 	updOpen:         "打开下载页",
-	updLater:        "稍后",
 }
 
 // active holds the current string set. It's an atomic pointer because the tray

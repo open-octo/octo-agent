@@ -149,6 +149,48 @@ func (b *nativeBridge) Notify(title, body string) {
 	})
 }
 
+// Update-check notifications: the tray "Check for Updates…" flow reports via a
+// toast rather than a modal dialog. The "update available" toast carries an
+// action button; both it and a tap on the body open the download page, routed
+// in main.go's OnNotificationResponse handler by matching updateNotifyCategoryID.
+const (
+	updateNotifyID           = "octo-update-available"
+	updateNotifyCategoryID   = "octo.update-available"
+	updateNotifyOpenActionID = "octo.update-open"
+)
+
+// registerUpdateNotifyCategory registers the category that gives the "update
+// available" toast its "Open Download Page" action button. No-op when the
+// notifier is unavailable (an unbundled dev binary). Register once at startup,
+// after the notification service has started.
+func (b *nativeBridge) registerUpdateNotifyCategory() {
+	if b.notifier == nil {
+		return
+	}
+	_ = b.notifier.RegisterNotificationCategory(notifications.NotificationCategory{
+		ID: updateNotifyCategoryID,
+		Actions: []notifications.NotificationAction{
+			{ID: updateNotifyOpenActionID, Title: L().updOpen},
+		},
+	})
+}
+
+// NotifyUpdateAvailable raises the actionable "update available" toast. Its
+// action button (and a tap on the body) open the download page via the
+// OnNotificationResponse handler. Same best-effort contract as Notify: no-op
+// when the notifier is unavailable.
+func (b *nativeBridge) NotifyUpdateAvailable(title, body string) {
+	if b.notifier == nil {
+		return
+	}
+	_ = b.notifier.SendNotificationWithActions(notifications.NotificationOptions{
+		ID:         updateNotifyID,
+		Title:      title,
+		Body:       body,
+		CategoryID: updateNotifyCategoryID,
+	})
+}
+
 // AutostartEnabled reports whether the app is registered to launch at login.
 func (b *nativeBridge) AutostartEnabled() (bool, error) {
 	st, err := b.app.Autostart.Status()
@@ -283,14 +325,6 @@ func (b *nativeBridge) confirm(title, message, okLabel, cancelLabel string) bool
 // showError shows a modal error dialog with a single OK button.
 func (b *nativeBridge) showError(title, message string) {
 	dlg := b.app.Dialog.Error().SetTitle(title).SetMessage(message)
-	dlg.AddButton(L().dialogOKText).SetAsDefault()
-	dlg.Show()
-}
-
-// showInfo shows a modal informational dialog with a single OK button (the
-// "you're on the latest version" outcome of the tray update check).
-func (b *nativeBridge) showInfo(title, message string) {
-	dlg := b.app.Dialog.Info().SetTitle(title).SetMessage(message)
 	dlg.AddButton(L().dialogOKText).SetAsDefault()
 	dlg.Show()
 }
