@@ -2007,6 +2007,9 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 	if !m.cfg.noSave {
 		m.cfg.session.SyncFrom(m.a.History)
 		_ = m.cfg.session.Save()
+		// Record the real context-token count so this session shows accurate
+		// usage when later opened in the Web UI (parity with web/desktop turns).
+		_ = m.a.PersistContextUsage(m.cfg.session)
 	}
 
 	// An aborted or errored turn parks the goal-continuation loop: an

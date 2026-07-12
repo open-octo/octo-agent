@@ -2827,6 +2827,11 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		if err := sess.Persist(); err != nil {
 			slog.Error("channel persist session", "channel", ev.Platform, "err", err)
 		}
+		// Record the real context-token count so this session shows accurate
+		// usage when opened in the Web UI (parity with web/desktop turns).
+		if err := sess.Agent.PersistContextUsage(sess.Store); err != nil {
+			slog.Warn("channel persist context tokens", "channel", ev.Platform, "err", err)
+		}
 	}
 
 	// Goal status before the turn, for the terminal-transition notice below —

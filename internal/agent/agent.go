@@ -1826,6 +1826,24 @@ func (a *Agent) ContextUsage() (used, window int) {
 	return estimateMessages(a.History.Snapshot()), contextWindow(a.Model)
 }
 
+// PersistContextUsage records this agent's current context-window token count on
+// the session (Session.LastContextTokens) so an idle or resumed session — one
+// with no live Agent in memory — reports its true context usage instead of a
+// transcript estimate that omits the system-prompt/tools overhead. Every
+// transport (web, IM, CLI, scheduled) calls it at turn end, so a session opened
+// in the Web UI shows the right number regardless of where it last ran. No-op
+// when no count is available yet; best-effort — callers log any save error.
+func (a *Agent) PersistContextUsage(sess *Session) error {
+	if sess == nil {
+		return nil
+	}
+	used, _ := a.ContextUsage()
+	if used <= 0 {
+		return nil
+	}
+	return sess.SetLastContextTokens(used)
+}
+
 // SessionCacheTokens returns the cumulative cache read/write token counts.
 // Read is input served from cache (cheap); write is input written into the
 // cache (Anthropic only). Both zero when the backend reports no cache info.

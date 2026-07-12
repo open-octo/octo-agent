@@ -1439,12 +1439,10 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		}
 	}
 	// Persist the real token count on the session so an idle or resumed session
-	// (no live Agent) reports its true context usage — see SetLastContextTokens.
+	// (no live Agent) reports its true context usage — see PersistContextUsage.
 	// Best-effort: a save failure just leaves the estimate fallback in place.
-	if used > 0 {
-		if err := sess.SetLastContextTokens(used); err != nil {
-			slog.Warn("session: persist context tokens", "session_id", sess.ID, "err", err)
-		}
+	if err := a.PersistContextUsage(sess); err != nil {
+		slog.Warn("session: persist context tokens", "session_id", sess.ID, "err", err)
 	}
 	_, pm, re, _, _ := s.sessionStatusFields(sess)
 	s.wsHub.broadcast(sess.ID, map[string]any{
