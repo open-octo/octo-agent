@@ -19,12 +19,14 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/logfile"
 	"github.com/open-octo/octo-agent/internal/serveproc"
 	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -63,6 +65,17 @@ func isBundled() bool {
 func main() {
 	// Pick the language for native dialogs/tray from the system UI language.
 	applyLang()
+
+	// Persist the hub's logs to ~/.octo/serve.log — the same file `octo serve -d`
+	// writes. The serve.pid protocol guarantees only one backend owns the port at
+	// a time, so the two never write it concurrently. Without this a Finder-/dock-
+	// launched .app drops its stderr into the OS console with nothing greppable on
+	// disk; the desktop hub reused serve.pid but never the log half of the daemon
+	// contract. The file self-rotates so an always-on hub can't grow it unbounded.
+	// On any failure we leave the process's default stderr in place.
+	if closeLog := setupHubLog(); closeLog != nil {
+		defer closeLog()
+	}
 
 	settings := loadDesktopSettings()
 
@@ -165,6 +178,39 @@ func main() {
 	}
 	if err != nil {
 		log.Fatalf("octo-desktop: %v", err)
+	}
+}
+
+// setupHubLog routes slog and the stdlib logger to a self-rotating
+// ~/.octo/serve.log and returns a close func (nil if setup failed, leaving the
+// default stderr in place). The stdlib logger is redirected too so the channel
+// adapters' error/retry lines — still on `log` — land in the same file.
+func setupHubLog() func() {
+	logPath, err := serveproc.LogPath()
+	if err != nil {
+		return nil
+	}
+	lw, err := logfile.Open(logPath, logfile.DefaultMaxBytes, logfile.DefaultBackups)
+	if err != nil {
+		return nil
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(lw, &slog.HandlerOptions{Level: hubLogLevel()})))
+	log.SetOutput(lw)
+	return func() { _ = lw.Close() }
+}
+
+// hubLogLevel reads OCTO_LOG_LEVEL (debug|info|warn|error), defaulting to info —
+// matching `octo serve`'s level handling so the two backends behave alike.
+func hubLogLevel() slog.Level {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OCTO_LOG_LEVEL"))) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }
 
