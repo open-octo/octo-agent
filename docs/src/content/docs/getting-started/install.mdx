@@ -26,6 +26,11 @@ xdg-open http://127.0.0.1:8088 # opens the dashboard
 onboarding (pick a provider, paste a key). Stop the server later with `octo serve --stop`. Prefer
 the terminal? Just run `octo`.
 
+Prefer a GUI? Grab the **desktop app** — `Octo-x86_64.AppImage` from the
+[latest release](https://github.com/open-octo/octo-agent/releases/latest); `chmod +x` and run it.
+It needs GTK4 + WebKitGTK 6.0 on the host (most current desktops have them; the app tells you what
+to install if not).
+
 Prebuilt archives (linux / darwin / windows × amd64 + arm64) and `checksums.txt` are on the
 [latest release](https://github.com/open-octo/octo-agent/releases/latest) if you'd rather grab one
 by hand.
@@ -47,35 +52,38 @@ covers both Apple Silicon and Intel) and double-click it.
 
 <Steps>
 1. Installer.app offers only "Install for me only" — no administrator password.
-2. It installs octo to `~/Library/Application Support/octo`, adds it to your `PATH` (appends to
-   `~/.zprofile` / `~/.bash_profile` / `~/.profile`), and registers a LaunchAgent that starts
-   `octo serve -d` on every login.
-3. When it finishes it starts the server and opens `http://127.0.0.1:8088` to walk you through
-   first-run onboarding.
+2. It installs the **Octo desktop app** to `~/Applications/Octo.app` and puts the bundled `octo`
+   CLI on your `PATH` (appends to `~/.zprofile` / `~/.bash_profile` / `~/.profile`).
+3. When it finishes it opens the app — a native window, so there's no browser or background server
+   to manage.
 4. For a terminal session, open a **new** terminal and run `octo`.
 </Steps>
 
 <Aside type="caution" title="Gatekeeper warning expected">
-The installer isn't notarized, so Gatekeeper will warn it's from an unidentified developer —
-right-click (Control-click) the file → **Open**, or allow it via **System Settings → Privacy &
+The app isn't notarized, so Gatekeeper will warn it's from an unidentified developer —
+right-click (Control-click) `Octo.app` → **Open**, or allow it via **System Settings → Privacy &
 Security → Open Anyway**. There's no App Store-style uninstaller for `.pkg`; run
-`~/Library/Application\ Support/octo/uninstall.sh` to remove everything it installed.
+`~/.octo/uninstall.sh` to remove it (your `~/.octo` data is left intact).
 </Aside>
 
 </TabItem>
 <TabItem label="Windows">
 
-Download `octo-setup.exe` from the
+**Install script (PowerShell)** — the 3-platform counterpart to the `curl … | sh` one-liner. It
+detects your arch, verifies the SHA-256, installs `octo.exe` per-user, and puts it on your `PATH`:
+
+```powershell
+irm https://octo-agent.dev/install.ps1 | iex
+```
+
+**Double-click installer** — download `octo-setup.exe` from the
 [latest release](https://github.com/open-octo/octo-agent/releases/latest) and double-click it.
 
 <Steps>
-1. It installs per-user (no administrator prompt), puts `octo` on your `PATH`, and adds a
-   Start-menu entry.
-2. When it finishes it starts the local server in the background (`octo serve -d`) and opens
-   `http://127.0.0.1:8088` to walk you through first-run onboarding.
-3. The server also registers to start on each login (a per-user `Run` entry, no window), so the
-   dashboard is up after a reboot.
-4. For a terminal session, open a **new** terminal and run `octo`.
+1. It installs per-user (no administrator prompt) the **Octo desktop app** plus the `octo` CLI,
+   puts the CLI on your `PATH`, and adds a Start-menu entry that launches the app.
+2. When it finishes it opens the app — a native window, nothing to manage in the background.
+3. For a terminal session, open a **new** terminal and run `octo`.
 </Steps>
 
 The installer is signed through the [SignPath Foundation](https://signpath.org/)'s free open-source
