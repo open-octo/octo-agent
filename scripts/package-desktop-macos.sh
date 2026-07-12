@@ -13,6 +13,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MOD_DIR="$ROOT/cmd/octo-desktop"
 VERSION="${1:-$(git -C "$ROOT" describe --tags --always 2>/dev/null || echo 0.1.0)}"
 VERSION="${VERSION#v}"
+COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 APP="$ROOT/Octo.app"
 CONTENTS="$APP/Contents"
 
@@ -24,7 +25,11 @@ echo "==> embedding ripgrep"
 make -C "$ROOT" rg-embed
 
 echo "==> building octo-desktop binary"
-( cd "$MOD_DIR" && CGO_ENABLED=1 go build -tags embedrg -o "$ROOT/octo-desktop" . )
+# Inject Version/Commit so the in-app update check recognizes a real release
+# build — without them internal/upgrade.Eligible sees an empty Commit and the
+# app reports "up to date" forever.
+LDFLAGS="-X github.com/open-octo/octo-agent/internal/version.Version=$VERSION -X github.com/open-octo/octo-agent/internal/version.Commit=$COMMIT"
+( cd "$MOD_DIR" && CGO_ENABLED=1 go build -tags embedrg -ldflags "$LDFLAGS" -o "$ROOT/octo-desktop" . )
 
 echo "==> assembling $APP (version $VERSION)"
 rm -rf "$APP"

@@ -43,6 +43,14 @@ LDFLAGS := -X github.com/open-octo/octo-agent/internal/version.Version=$(VERSION
            -X github.com/open-octo/octo-agent/internal/version.Commit=$(COMMIT) \
            -X github.com/open-octo/octo-agent/internal/tools/rgembed.version=$(RG_VERSION)
 
+# Desktop builds must inject the same Version/Commit as the CLI: the in-app
+# update check (internal/upgrade.Eligible) treats an empty Commit as "no release
+# metadata" and reports "up to date" forever, so a desktop binary built without
+# these never sees a new release. rgembed.version is omitted — the bare
+# `desktop` target builds without -tags embedrg.
+DESKTOP_LDFLAGS := -X github.com/open-octo/octo-agent/internal/version.Version=$(VERSION) \
+                   -X github.com/open-octo/octo-agent/internal/version.Commit=$(COMMIT)
+
 GOFILES := $(shell find . -name '*.go' -not -path './vendor/*' -not -path '*/_vendor/*')
 
 RG_EMBED_DIR := internal/tools/rgembed/binaries
@@ -87,7 +95,7 @@ build-full: build
 # Produces a bare binary; use `wails3 build` inside cmd/octo-desktop for a
 # packaged .app / installer.
 desktop: web-build
-	cd cmd/octo-desktop && CGO_ENABLED=1 go build -o ../../octo-desktop .
+	cd cmd/octo-desktop && CGO_ENABLED=1 go build -ldflags='$(DESKTOP_LDFLAGS)' -o ../../octo-desktop .
 
 # Package the desktop shell into a double-clickable macOS Octo.app bundle
 # (embeds the web UI, ad-hoc signed for local use). Real Developer ID

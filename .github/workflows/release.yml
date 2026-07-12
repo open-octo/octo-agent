@@ -76,7 +76,14 @@ jobs:
       - name: Build desktop app
         shell: pwsh
         working-directory: cmd/octo-desktop
-        run: go build -tags embedrg -ldflags "-H windowsgui" -o ..\..\staging\octo-desktop.exe .
+        # Inject Version/Commit alongside -H windowsgui so the in-app update
+        # check recognizes a real release build — without them
+        # internal/upgrade.Eligible sees an empty Commit and the app reports
+        # "up to date" forever. $env:version is set by the staging step above.
+        run: |
+          $commit = git rev-parse --short HEAD
+          $pkg = "github.com/open-octo/octo-agent/internal/version"
+          go build -tags embedrg -ldflags "-H windowsgui -X $pkg.Version=$env:version -X $pkg.Commit=$commit" -o ..\..\staging\octo-desktop.exe .
 
       # Fetches uv.exe from its upstream GitHub release so the installer can
       # bundle it — see octo.iss's [Files] section. Native PowerShell rather
@@ -238,7 +245,9 @@ jobs:
           echo "UV_BINARY=$PWD/dl/uv-x86_64-unknown-linux-gnu/uv" >> "$GITHUB_ENV"
 
       - name: Build AppImage
-        run: bash scripts/package-desktop-linux.sh
+        # Pass the release version so the packaged binary carries clean release
+        # metadata (see the script) and the in-app update check works.
+        run: bash scripts/package-desktop-linux.sh "${GITHUB_REF_NAME#v}"
 
       - name: Attach AppImage to the release
         env:
