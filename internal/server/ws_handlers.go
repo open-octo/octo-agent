@@ -158,15 +158,28 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 	s.sessionAgentsMu.Unlock()
 	sess, _ := agent.LoadSession(sessionID)
 	if a != nil {
+		// Turn in flight: the live Agent has the exact current count.
 		if used, window := a.ContextUsage(); window > 0 && used > 0 {
 			pct = used * 100 / window
 			usedTokens = used
 		}
 	}
+	if pct == 0 && sess != nil && sess.LastContextTokens > 0 {
+		// Idle/resumed session — or a turn whose first provider call hasn't
+		// reported usage yet (live agent returns 0). Report the real count
+		// persisted from its last turn (matches what the turn-end broadcast sent).
+		if window := agent.ContextWindow(sess.Model); window > 0 {
+			pct = sess.LastContextTokens * 100 / window
+			usedTokens = sess.LastContextTokens
+		}
+	}
 	if pct == 0 && sess != nil {
+		// No real count anywhere (a session predating the field, one that never
+		// completed a turn with a real count, or a count too small to reach 1% of
+		// the window): fall back to a transcript estimate. It carries no exact
+		// token count, so clear usedTokens — the UI shows a bare arrow.
 		pct = estimateContextPct(sess)
-		// Cold/resumed session: only a % estimate is available, no exact
-		// token count — leave usedTokens 0 so the UI shows a bare arrow.
+		usedTokens = 0
 	}
 	if pct <= 0 {
 		return
@@ -1423,6 +1436,14 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		ctxPct = used * 100 / window
 		if ctxPct > 100 {
 			ctxPct = 100
+		}
+	}
+	// Persist the real token count on the session so an idle or resumed session
+	// (no live Agent) reports its true context usage — see SetLastContextTokens.
+	// Best-effort: a save failure just leaves the estimate fallback in place.
+	if used > 0 {
+		if err := sess.SetLastContextTokens(used); err != nil {
+			slog.Warn("session: persist context tokens", "session_id", sess.ID, "err", err)
 		}
 	}
 	_, pm, re, _, _ := s.sessionStatusFields(sess)

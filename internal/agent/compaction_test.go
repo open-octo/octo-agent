@@ -151,6 +151,35 @@ func TestCompactTriggerTokens(t *testing.T) {
 	}
 }
 
+// Between-batches (mid-turn) compaction uses the one and only compaction
+// trigger — the same point between-turns fires — so a single threshold governs
+// the whole session and honors CompactAutoFraction.
+func TestShouldCompactBetweenBatches_UsesSingleTrigger(t *testing.T) {
+	a := New(&summarizeFake{}, "unknown-model-xyz") // unknown model → default window
+
+	trigger := a.compactTriggerTokens() // auto: 75% of the default window
+	// Just under the trigger: no mid-turn compaction.
+	a.usageMu.Lock()
+	a.lastInputTokens = trigger - 1
+	a.usageMu.Unlock()
+	if a.shouldCompactBetweenBatches() {
+		t.Errorf("should not compact between batches below the trigger (%d)", trigger)
+	}
+	// Just over: it fires, at the very same threshold between-turns uses.
+	a.usageMu.Lock()
+	a.lastInputTokens = trigger + 1
+	a.usageMu.Unlock()
+	if !a.shouldCompactBetweenBatches() {
+		t.Errorf("should compact between batches above the trigger (%d)", trigger)
+	}
+
+	// Disabling compaction entirely (CompactThreshold < 0) disables it here too.
+	a.CompactThreshold = -1
+	if a.shouldCompactBetweenBatches() {
+		t.Error("should not compact between batches when compaction is disabled")
+	}
+}
+
 // TestMaybeCompact_AutoDefaultTriggers proves the C6 flip: with CompactThreshold
 // left at 0, a context past the window-relative trigger compacts automatically.
 func TestMaybeCompact_AutoDefaultTriggers(t *testing.T) {

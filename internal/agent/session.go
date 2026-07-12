@@ -55,8 +55,16 @@ type Session struct {
 	// turn time" — also the value for every session predating per-session
 	// modes. Set via the Web UI's PATCH …/permission_mode and persisted so a
 	// resumed session keeps the mode it was left in.
-	PermissionMode string    `json:"permission_mode,omitempty"`
-	Messages       []Message `json:"messages"`
+	PermissionMode string `json:"permission_mode,omitempty"`
+	// LastContextTokens is the real input-token count of the most recent model
+	// request in this session — how full the context window was as of the last
+	// turn. Persisted so an idle or resumed session (no live Agent in memory)
+	// reports its true context usage instead of a transcript estimate that omits
+	// the system-prompt/tools overhead. 0 for sessions predating this field or
+	// that never completed a turn with a real token count. Updated once per turn
+	// via SetLastContextTokens.
+	LastContextTokens int       `json:"last_context_tokens,omitempty"`
+	Messages          []Message `json:"messages"`
 
 	// Dir overrides the default ~/.octo/sessions location. Empty means use the
 	// default. Not serialized — it's a runtime override.
@@ -448,23 +456,24 @@ func (s *Session) ChunkDir() (string, error) {
 // type as authoritative; rewriteAll folds them back into the meta header when
 // compacting.
 type sessionRecord struct {
-	Type           string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "working_dir" | "permission_mode" | "lease" | "goal"
-	ID             string    `json:"id,omitempty"`
-	CreatedAt      time.Time `json:"created_at,omitempty"`
-	Model          string    `json:"model,omitempty"`
-	System         string    `json:"system,omitempty"`
-	Title          string    `json:"title,omitempty"`
-	Source         string    `json:"source,omitempty"`
-	ModelConfig    string    `json:"model_config,omitempty"`
-	WorkingDir     string    `json:"working_dir,omitempty"`
-	PermissionMode string    `json:"permission_mode,omitempty"`
-	BoundEntry     string    `json:"bound_entry,omitempty"`
-	BoundAt        time.Time `json:"bound_at,omitempty"`
-	LeaseEntry     string    `json:"lease_entry,omitempty"`
-	LeaseExpires   time.Time `json:"lease_expires,omitempty"`
-	HookStarted    bool      `json:"hook_started,omitempty"`
-	Message        *Message  `json:"message,omitempty"`
-	Goal           *Goal     `json:"goal,omitempty"`
+	Type              string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "working_dir" | "permission_mode" | "context_tokens" | "lease" | "goal"
+	ID                string    `json:"id,omitempty"`
+	CreatedAt         time.Time `json:"created_at,omitempty"`
+	Model             string    `json:"model,omitempty"`
+	System            string    `json:"system,omitempty"`
+	Title             string    `json:"title,omitempty"`
+	Source            string    `json:"source,omitempty"`
+	ModelConfig       string    `json:"model_config,omitempty"`
+	WorkingDir        string    `json:"working_dir,omitempty"`
+	PermissionMode    string    `json:"permission_mode,omitempty"`
+	BoundEntry        string    `json:"bound_entry,omitempty"`
+	BoundAt           time.Time `json:"bound_at,omitempty"`
+	LeaseEntry        string    `json:"lease_entry,omitempty"`
+	LeaseExpires      time.Time `json:"lease_expires,omitempty"`
+	HookStarted       bool      `json:"hook_started,omitempty"`
+	LastContextTokens int       `json:"last_context_tokens,omitempty"`
+	Message           *Message  `json:"message,omitempty"`
+	Goal              *Goal     `json:"goal,omitempty"`
 }
 
 func (s *Session) metaRecord() sessionRecord {
@@ -479,7 +488,7 @@ func (s *Session) metaRecord() sessionRecord {
 		goal = &g
 	}
 	s.mu.Unlock()
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, Goal: goal}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -763,6 +772,45 @@ func (s *Session) SetPermissionMode(mode string) error {
 	return nil
 }
 
+// SetLastContextTokens records the context-window fill (real input-token count)
+// as of the just-finished turn, so an idle/resumed session reports its true
+// usage without a live Agent. Same append-or-rewrite persistence mechanics as
+// SetPermissionMode; called once per turn, so an unchanged count is a no-op
+// (avoids a redundant append when the context didn't grow).
+func (s *Session) SetLastContextTokens(n int) error {
+	if n <= 0 || n == s.LastContextTokens {
+		return nil
+	}
+	s.LastContextTokens = n
+	if s.persisted == 0 {
+		// See SetPermissionMode: a meta-only transcript must be rewritten now; a
+		// session with no file yet just carries the value until its first Save.
+		if path, perr := s.SavePath(); perr == nil {
+			if _, statErr := os.Stat(path); statErr == nil {
+				return s.rewriteAll()
+			}
+		}
+		return nil
+	}
+	if s.forceRewrite {
+		return s.rewriteAll()
+	}
+	path, err := s.SavePath()
+	if err != nil {
+		return err
+	}
+	// No O_CREATE — see SetTitle: never materialise an orphan transcript.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("session: open %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "context_tokens", LastContextTokens: n}); err != nil {
+		return fmt.Errorf("session: append context_tokens: %w", err)
+	}
+	return nil
+}
+
 // DisplayTitle returns the label shown for the session in list views: the
 // generated Title when present, otherwise a snippet of the first user message
 // (so pre-title sessions and not-yet-titled ones are still recognisable), and
@@ -949,6 +997,7 @@ func LoadSession(id string) (*Session, error) {
 			s.ModelConfig = rec.ModelConfig
 			s.WorkingDir = rec.WorkingDir
 			s.PermissionMode = rec.PermissionMode
+			s.LastContextTokens = rec.LastContextTokens // a rewritten file carries it in its meta header
 			s.BoundEntry = rec.BoundEntry
 			s.BoundAt = rec.BoundAt
 			s.HookStarted = rec.HookStarted
@@ -965,6 +1014,8 @@ func LoadSession(id string) (*Session, error) {
 			s.WorkingDir = rec.WorkingDir // last one wins, like title
 		case "permission_mode":
 			s.PermissionMode = rec.PermissionMode // last one wins, like title
+		case "context_tokens":
+			s.LastContextTokens = rec.LastContextTokens // last one wins, like title
 		case "message":
 			if rec.Message != nil {
 				s.Messages = append(s.Messages, *rec.Message)

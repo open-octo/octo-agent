@@ -51,7 +51,6 @@ permission_mode: interactive
 access_key: ...
 coauthor: true
 compact_auto_pct: 75
-compact_batch_threshold: 0
 tools:
   ...
 ```
