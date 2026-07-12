@@ -194,3 +194,131 @@ func TestSessionGroups_RenameUnknown(t *testing.T) {
 		t.Fatalf("rename missing: expected 404, got %d", rec.Code)
 	}
 }
+
+func TestSessionGroups_Reorder(t *testing.T) {
+	srv := groupTestServer(t)
+	ids := make([]string, 3)
+	for i, name := range []string{"A", "B", "C"} {
+		_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": name})
+		ids[i] = o["group"].(map[string]any)["id"].(string)
+	}
+
+	// Reverse the order: C, B, A.
+	rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/session-groups/order",
+		map[string]any{"ids": []string{ids[2], ids[1], ids[0]}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reorder: status %d", rec.Code)
+	}
+	groups, _ := loadSessionGroups()
+	got := []string{groups[0].Name, groups[1].Name, groups[2].Name}
+	if got[0] != "C" || got[1] != "B" || got[2] != "A" {
+		t.Fatalf("expected [C B A], got %v", got)
+	}
+
+	// A partial/stale request (only one known id, one bogus) keeps the omitted
+	// groups, appended in their current order after the named one.
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/session-groups/order",
+		map[string]any{"ids": []string{ids[0], "g-bogus"}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("partial reorder: status %d", rec.Code)
+	}
+	groups, _ = loadSessionGroups()
+	if len(groups) != 3 || groups[0].Name != "A" {
+		t.Fatalf("expected A first and all 3 kept, got %+v", groups)
+	}
+
+	// Duplicate IDs in the request are deduped (each group appears once).
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/session-groups/order",
+		map[string]any{"ids": []string{ids[1], ids[1], ids[0], ids[2]}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dup reorder: status %d", rec.Code)
+	}
+	groups, _ = loadSessionGroups()
+	if len(groups) != 3 {
+		t.Fatalf("dedupe failed, got %d groups: %+v", len(groups), groups)
+	}
+	if groups[0].Name != "B" || groups[1].Name != "A" || groups[2].Name != "C" {
+		t.Fatalf("expected [B A C], got %v", []string{groups[0].Name, groups[1].Name, groups[2].Name})
+	}
+
+	// A pin set before reordering survives the reorder (same shared registry).
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/sess-1/pin", map[string]any{"pinned": true})
+	doGroupReq(t, srv, http.MethodPut, "/api/session-groups/order",
+		map[string]any{"ids": []string{ids[0], ids[1], ids[2]}})
+	if pins, _ := loadPinnedSessions(); len(pins) != 1 || pins[0] != "sess-1" {
+		t.Fatalf("pin lost across reorder, got %v", pins)
+	}
+}
+
+func TestSessionPin_PinListUnpin(t *testing.T) {
+	srv := groupTestServer(t)
+	const sid = "20260101-000000-deadbeef"
+
+	// Nothing pinned yet.
+	_, out := doGroupReq(t, srv, http.MethodGet, "/api/session-groups", nil)
+	if pins, ok := out["pinned_session_ids"].([]any); !ok || len(pins) != 0 {
+		t.Fatalf("expected empty pinned list, got %v", out["pinned_session_ids"])
+	}
+
+	// Pin it.
+	rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/pin", map[string]any{"pinned": true})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pin: status %d", rec.Code)
+	}
+	pins, err := loadPinnedSessions()
+	if err != nil || len(pins) != 1 || pins[0] != sid {
+		t.Fatalf("expected [%s], got %v (err %v)", sid, pins, err)
+	}
+
+	// GET reflects the pin.
+	_, out = doGroupReq(t, srv, http.MethodGet, "/api/session-groups", nil)
+	if got := out["pinned_session_ids"].([]any); len(got) != 1 || got[0].(string) != sid {
+		t.Fatalf("GET pinned list = %v", got)
+	}
+
+	// Pinning again is idempotent (no duplicate).
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/pin", map[string]any{"pinned": true})
+	if pins, _ = loadPinnedSessions(); len(pins) != 1 {
+		t.Fatalf("re-pin duplicated: %v", pins)
+	}
+
+	// Unpin.
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/pin", map[string]any{"pinned": false})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unpin: status %d", rec.Code)
+	}
+	if pins, _ = loadPinnedSessions(); len(pins) != 0 {
+		t.Fatalf("expected empty after unpin, got %v", pins)
+	}
+}
+
+// Pins and groups share one registry file; editing one must not clobber the
+// other.
+func TestSessionPin_CoexistsWithGroups(t *testing.T) {
+	srv := groupTestServer(t)
+	const sid = "20260101-000000-deadbeef"
+
+	// Pin a session, then create/rename a group.
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/pin", map[string]any{"pinned": true})
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work"})
+	gid := o["group"].(map[string]any)["id"].(string)
+	doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"name": "Work2"})
+
+	// The pin survived the group writes.
+	if pins, _ := loadPinnedSessions(); len(pins) != 1 || pins[0] != sid {
+		t.Fatalf("pin lost after group edits, got %v", pins)
+	}
+
+	// Moving a session into the group must not wipe the pin either.
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/other/group", map[string]any{"group_id": gid})
+	if pins, _ := loadPinnedSessions(); len(pins) != 1 || pins[0] != sid {
+		t.Fatalf("pin lost after group membership change, got %v", pins)
+	}
+
+	// Conversely, an unrelated unpin must not drop the group.
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/pin", map[string]any{"pinned": false})
+	groups, _ := loadSessionGroups()
+	if len(groups) != 1 || groups[0].Name != "Work2" {
+		t.Fatalf("group lost after unpin, got %+v", groups)
+	}
+}

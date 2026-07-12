@@ -46,6 +46,9 @@ export const activeSessionId = writable<string | null>(null)
 // Web-UI sidebar groups. Membership lives here (server registry), not on the
 // session; the sidebar clusters the session list by these.
 export const sessionGroups = writable<SessionGroup[]>([])
+// Pinned session IDs (server registry, web-only). Pinned sessions float into a
+// dedicated section at the top of the sidebar, above all groups.
+export const pinnedSessions = writable<string[]>([])
 // Sidebar UI state for groups: the session whose "move to group" popover is
 // open, and the group being renamed inline.
 export const groupMenuFor = writable<string | null>(null)

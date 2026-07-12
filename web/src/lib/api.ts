@@ -92,9 +92,11 @@ export async function updateSession(id: string, patch: { name?: string }): Promi
 
 // ─── Session groups (Web-UI sidebar organisation) ───────────────────────────
 
-export async function listSessionGroups(): Promise<SessionGroup[]> {
-  const d = await request<{ groups: SessionGroup[] }>('/api/session-groups')
-  return d.groups ?? []
+// listSessionGroups returns both the sidebar groups and the pinned-session IDs;
+// they share one registry file and one endpoint.
+export async function listSessionGroups(): Promise<{ groups: SessionGroup[]; pinned: string[] }> {
+  const d = await request<{ groups: SessionGroup[]; pinned_session_ids: string[] }>('/api/session-groups')
+  return { groups: d.groups ?? [], pinned: d.pinned_session_ids ?? [] }
 }
 
 export async function createSessionGroup(name: string): Promise<SessionGroup> {
@@ -111,9 +113,19 @@ export async function deleteSessionGroup(id: string): Promise<void> {
   await request<unknown>(`/api/session-groups/${id}`, { method: 'DELETE' })
 }
 
+// Persist a new group order. Pass the full group-ID list in the desired order.
+export async function reorderSessionGroups(ids: string[]): Promise<void> {
+  await request<unknown>('/api/session-groups/order', { method: 'PUT', ...json({ ids }) })
+}
+
 // Move a session into a group, or out of every group when groupId is ''.
 export async function setSessionGroup(sessionId: string, groupId: string): Promise<void> {
   await request<unknown>(`/api/sessions/${sessionId}/group`, { method: 'PUT', ...json({ group_id: groupId }) })
+}
+
+// Pin a session to the top of the sidebar, or unpin it.
+export async function setSessionPinned(sessionId: string, pinned: boolean): Promise<void> {
+  await request<unknown>(`/api/sessions/${sessionId}/pin`, { method: 'PUT', ...json({ pinned }) })
 }
 
 // The server returns a session's full persisted transcript in one shot — it

@@ -45,8 +45,14 @@ type sessionGroup struct {
 }
 
 // groupFile is the on-disk shape of the registry. Group order is array order.
+// PinnedSessionIDs is the Web-UI "pinned" set — sessions the user floated to a
+// dedicated section at the top of the sidebar. It lives in this same file (the
+// one web-only session-organisation layer) rather than on the session, so the
+// CLI/TUI listing is unaffected. Array order is pin order; a pinned ID that no
+// longer resolves to a live session is simply not rendered.
 type groupFile struct {
-	Groups []sessionGroup `json:"groups"`
+	Groups           []sessionGroup `json:"groups"`
+	PinnedSessionIDs []string       `json:"pinned_session_ids,omitempty"`
 }
 
 // groupMu serialises read-modify-write cycles on the registry within this
@@ -93,17 +99,17 @@ func loadSessionGroups() ([]sessionGroup, error) {
 	return gf.Groups, nil
 }
 
-// saveSessionGroups writes the registry atomically (temp file + rename), the
-// same pattern the scheduler uses. Caller must hold groupMu.
-func saveSessionGroups(groups []sessionGroup) error {
-	if groups == nil {
-		groups = []sessionGroup{}
+// saveRegistry writes the whole registry (groups + pins) atomically (temp file
+// + rename), the same pattern the scheduler uses. Caller must hold groupMu.
+func saveRegistry(gf groupFile) error {
+	if gf.Groups == nil {
+		gf.Groups = []sessionGroup{}
 	}
 	path, err := sessionGroupsPath()
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(groupFile{Groups: groups}, "", "  ")
+	data, err := json.MarshalIndent(gf, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -116,6 +122,49 @@ func saveSessionGroups(groups []sessionGroup) error {
 		return fmt.Errorf("session groups: write %s: %w", path, err)
 	}
 	return nil
+}
+
+// saveSessionGroups persists the group list while preserving the pinned-session
+// list, which shares the same file — a group edit must never clobber pins.
+// Caller must hold groupMu.
+func saveSessionGroups(groups []sessionGroup) error {
+	pins, err := loadPinnedSessions()
+	if err != nil {
+		return err
+	}
+	return saveRegistry(groupFile{Groups: groups, PinnedSessionIDs: pins})
+}
+
+// loadPinnedSessions reads the pinned-session list from the registry. A missing
+// file means nothing is pinned. Caller should hold groupMu for
+// read-modify-write cycles.
+func loadPinnedSessions() ([]string, error) {
+	path, err := sessionGroupsPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("session groups: read %s: %w", path, err)
+	}
+	var gf groupFile
+	if err := json.Unmarshal(data, &gf); err != nil {
+		return nil, fmt.Errorf("session groups: parse %s: %w", path, err)
+	}
+	return gf.PinnedSessionIDs, nil
+}
+
+// savePinnedSessions persists the pinned-session list while preserving the
+// group list, mirroring saveSessionGroups. Caller must hold groupMu.
+func savePinnedSessions(pins []string) error {
+	groups, err := loadSessionGroups()
+	if err != nil {
+		return err
+	}
+	return saveRegistry(groupFile{Groups: groups, PinnedSessionIDs: pins})
 }
 
 // newGroupID returns a short random group id ("g-" + 8 hex chars).
@@ -132,6 +181,10 @@ func newGroupID() string {
 func (s *Server) handleListSessionGroups(w http.ResponseWriter, r *http.Request) {
 	groupMu.Lock()
 	groups, err := loadSessionGroups()
+	var pins []string
+	if err == nil {
+		pins, err = loadPinnedSessions()
+	}
 	groupMu.Unlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -140,7 +193,10 @@ func (s *Server) handleListSessionGroups(w http.ResponseWriter, r *http.Request)
 	if groups == nil {
 		groups = []sessionGroup{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"groups": groups})
+	if pins == nil {
+		pins = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"groups": groups, "pinned_session_ids": pins})
 }
 
 // ─── POST /api/session-groups ───────────────────────────────────────────────
@@ -279,6 +335,60 @@ func (s *Server) handleDeleteSessionGroup(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// ─── PUT /api/session-groups/order ──────────────────────────────────────────
+
+type reorderSessionGroupsRequest struct {
+	// IDs is the full group list in the desired order. The frontend's up/down
+	// controls submit the whole reordered sequence rather than a single move,
+	// so the same endpoint also serves a future drag-to-reorder.
+	IDs []string `json:"ids"`
+}
+
+// handleReorderSessionGroups rewrites the group order to match the given ID
+// sequence. Unknown IDs are ignored; any existing group missing from the
+// request is appended in its original relative order, so a stale client view
+// can never drop a group.
+func (s *Server) handleReorderSessionGroups(w http.ResponseWriter, r *http.Request) {
+	var req reorderSessionGroupsRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	groups, err := loadSessionGroups()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	byID := make(map[string]sessionGroup, len(groups))
+	for _, g := range groups {
+		byID[g.ID] = g
+	}
+	ordered := make([]sessionGroup, 0, len(groups))
+	placed := make(map[string]bool, len(groups))
+	for _, id := range req.IDs {
+		if g, ok := byID[id]; ok && !placed[id] {
+			ordered = append(ordered, g)
+			placed[id] = true
+		}
+	}
+	// Preserve any group the request omitted (append in original order).
+	for _, g := range groups {
+		if !placed[g.ID] {
+			ordered = append(ordered, g)
+		}
+	}
+
+	if err := saveSessionGroups(ordered); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "groups": ordered})
+}
+
 // ─── PUT /api/sessions/{id}/group ───────────────────────────────────────────
 
 type setSessionGroupRequest struct {
@@ -342,4 +452,53 @@ func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "group_id": req.GroupID})
+}
+
+// ─── PUT /api/sessions/{id}/pin ─────────────────────────────────────────────
+
+type setSessionPinRequest struct {
+	Pinned bool `json:"pinned"`
+}
+
+// handleSetSessionPin pins or unpins a session. Pinning appends the ID to the
+// end of the list (most-recently pinned last); unpinning removes it. The
+// operation is idempotent — pinning an already-pinned session keeps its
+// position, unpinning an absent one is a no-op.
+func (s *Server) handleSetSessionPin(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("id")
+	if sid == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+	var req setSessionPinRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	pins, err := loadPinnedSessions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Drop any existing entry first, then re-add at the end when pinning. This
+	// keeps the list free of duplicates and gives a stable "unpin" path.
+	out := make([]string, 0, len(pins)+1)
+	for _, id := range pins {
+		if id != sid {
+			out = append(out, id)
+		}
+	}
+	if req.Pinned {
+		out = append(out, sid)
+	}
+
+	if err := savePinnedSessions(out); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pinned": req.Pinned})
 }
