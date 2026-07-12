@@ -146,9 +146,9 @@ func runConfigFix(stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "Run `octo config` to rebuild it from scratch.")
 			return 1
 		}
-		fmt.Fprintln(stdout, "Restored config.yml from its backup (config.yml.bak).")
+		fmt.Fprintln(stdout, "Restored config.yml from the last version octo saved (config.yml.bak).")
 		if broken != "" {
-			fmt.Fprintf(stdout, "Your unparseable file was kept as %s.\n", broken)
+			fmt.Fprintf(stdout, "Your edited (unparseable) file was kept as %s — copy any recent changes back from it.\n", broken)
 		}
 		return 0
 	}

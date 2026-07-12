@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/open-octo/octo-agent/internal/config"
 )
@@ -42,7 +43,11 @@ func runDoctor(_ []string, _ io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "\n%d problem(s) found.\n", problems)
 		return 1
 	}
-	note(true, "config.yml parses")
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		fmt.Fprintln(stdout, "  ! config.yml not created yet — octo uses env vars + built-in defaults")
+	} else {
+		note(true, "config.yml parses")
+	}
 	for _, p := range cfg.Validate() {
 		note(false, p)
 	}

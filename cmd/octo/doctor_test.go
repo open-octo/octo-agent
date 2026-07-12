@@ -181,6 +181,38 @@ func TestRunConfigFix_HealthyIsNoOp(t *testing.T) {
 	}
 }
 
+func TestRunConfigFix_FixesAndReportsUnfixable(t *testing.T) {
+	home := doctorHome(t)
+	dir := filepath.Join(home, ".octo")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Dangling default_model (fixable) AND a duplicate model (unfixable) in one
+	// file: --fix should Save the fix, report both, and still exit non-zero.
+	yml := "models:\n  - {provider: openai, model: gpt-4o}\n  - {provider: openai, model: gpt-4o}\ndefault_model: gone\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runConfig([]string{"fix"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("exit = 0, want non-zero while an unfixable problem remains")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Fixed:") || !strings.Contains(out, "manual attention") {
+		t.Errorf("output should show both the fix and the remaining problem:\n%s", out)
+	}
+	// The fixable part was persisted.
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load after fix: %v", err)
+	}
+	if got.DefaultModel != "gpt-4o" {
+		t.Errorf("default_model = %q, want reset to gpt-4o", got.DefaultModel)
+	}
+}
+
 func TestRunConfigFix_ReportsUnfixable(t *testing.T) {
 	home := doctorHome(t)
 	dir := filepath.Join(home, ".octo")

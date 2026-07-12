@@ -149,6 +149,45 @@ func TestRepair_ReportsUnfixable(t *testing.T) {
 	}
 }
 
+func TestRepair_DanglingDefaultWithNoNamedEntry(t *testing.T) {
+	// First (and only) entry has no model name, and default_model is dangling.
+	// There's no usable model to reset the default to, so Repair must NOT claim
+	// a fix or set default_model to "".
+	c := Config{
+		Models:       []ModelEntry{{Provider: "openai", Model: ""}},
+		DefaultModel: "gone",
+	}
+	repaired, fixed, unfixable := c.Repair()
+	if len(fixed) != 0 {
+		t.Errorf("fixed = %v, want none — no named entry to reset the default to", fixed)
+	}
+	if repaired.DefaultModel != "gone" {
+		t.Errorf("default_model = %q, want left unchanged (not blanked)", repaired.DefaultModel)
+	}
+	if len(unfixable) == 0 {
+		t.Error("the nameless entry should be reported as unfixable")
+	}
+}
+
+func TestRepair_PicksFirstNamedEntry(t *testing.T) {
+	// A nameless entry precedes a valid one; a dangling default must reset to the
+	// first *named* model, not to the empty first entry.
+	c := Config{
+		Models: []ModelEntry{
+			{Provider: "openai", Model: ""},
+			{Provider: "openai", Model: "gpt-4o"},
+		},
+		DefaultModel: "gone",
+	}
+	repaired, fixed, _ := c.Repair()
+	if repaired.DefaultModel != "gpt-4o" {
+		t.Errorf("default_model = %q, want gpt-4o (first named)", repaired.DefaultModel)
+	}
+	if len(fixed) != 1 {
+		t.Errorf("fixed = %v, want the default reset", fixed)
+	}
+}
+
 func TestRepair_HealthyIsNoOp(t *testing.T) {
 	c := Config{
 		Models:       []ModelEntry{{Provider: "openai", Model: "gpt-4o"}},

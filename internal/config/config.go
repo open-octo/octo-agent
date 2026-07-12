@@ -635,11 +635,16 @@ func RestoreFromBackup() (brokenSaved string, err error) {
 	if err := yaml.Unmarshal(data, &f); err != nil {
 		return "", fmt.Errorf("the backup %s is also invalid: %w", path+".bak", err)
 	}
+	// Preserve the current (broken) file as config.yml.broken BEFORE overwriting
+	// it — it holds the user's edits and is otherwise the only copy. If that
+	// preservation fails, abort rather than silently destroy it: a failed
+	// restore the user can retry beats one that loses their file.
 	if cur, rerr := os.ReadFile(path); rerr == nil {
 		broken := path + ".broken"
-		if werr := os.WriteFile(broken, cur, 0o600); werr == nil {
-			brokenSaved = broken
+		if werr := os.WriteFile(broken, cur, 0o600); werr != nil {
+			return "", fmt.Errorf("refusing to overwrite %s: could not preserve it as %s first: %w", path, broken, werr)
 		}
+		brokenSaved = broken
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", err
@@ -659,10 +664,14 @@ func (c Config) Repair() (repaired Config, fixed, unfixable []string) {
 		return repaired, nil, nil
 	}
 	seen := make(map[string]bool, len(repaired.Models))
+	var firstNamed string // first entry with a usable model name — the reset target
 	for i, m := range repaired.Models {
 		if strings.TrimSpace(m.Model) == "" {
 			unfixable = append(unfixable, fmt.Sprintf("models[%d] has no model name — add one or remove the entry", i))
 			continue
+		}
+		if firstNamed == "" {
+			firstNamed = m.Model
 		}
 		if strings.TrimSpace(m.Provider) == "" {
 			unfixable = append(unfixable, fmt.Sprintf("model %q has no provider — add one", m.Model))
@@ -672,10 +681,12 @@ func (c Config) Repair() (repaired Config, fixed, unfixable []string) {
 		}
 		seen[m.Model] = true
 	}
-	if repaired.DefaultModel != "" && !seen[repaired.DefaultModel] {
-		first := repaired.Models[0].Model
-		fixed = append(fixed, fmt.Sprintf("reset default_model %q → %q (first entry)", repaired.DefaultModel, first))
-		repaired.DefaultModel = first
+	// Reset a dangling default_model to the first usable entry. If no entry has a
+	// name there's nothing safe to point it at, so leave it for the user (the
+	// nameless entries are already reported as unfixable above).
+	if repaired.DefaultModel != "" && !seen[repaired.DefaultModel] && firstNamed != "" {
+		fixed = append(fixed, fmt.Sprintf("reset default_model %q → %q (first configured model)", repaired.DefaultModel, firstNamed))
+		repaired.DefaultModel = firstNamed
 	}
 	if repaired.LiteModel != "" && !seen[repaired.LiteModel] {
 		fixed = append(fixed, fmt.Sprintf("cleared lite_model %q (matched no entry)", repaired.LiteModel))
