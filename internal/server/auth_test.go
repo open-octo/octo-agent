@@ -189,6 +189,30 @@ func TestRequireAuth_VSCodeWebviewOrigin(t *testing.T) {
 	}
 }
 
+// TestRequireAuth_ObsidianDesktopOrigin covers the Obsidian desktop plugin's
+// default local path: a loopback request carrying the fixed app://obsidian.md
+// Origin passes the exemption with no access key and no --cors flag, so the
+// desktop hub — which builds a Config without CORSOrigins — accepts it just
+// like the CLI's octo serve does. A lookalike foreign origin that merely
+// prefixes the string is still rejected.
+func TestRequireAuth_ObsidianDesktopOrigin(t *testing.T) {
+	srv := mustServer(t, Config{AccessKey: testAccessKey})
+
+	w := authRequest(t, srv, http.MethodGet,
+		"http://127.0.0.1:8080/api/sessions", "127.0.0.1:50000",
+		map[string]string{"Origin": "app://obsidian.md"})
+	if w.Code != http.StatusOK {
+		t.Errorf("obsidian desktop origin: got %d, want 200", w.Code)
+	}
+
+	w = authRequest(t, srv, http.MethodGet,
+		"http://127.0.0.1:8080/api/sessions", "127.0.0.1:50000",
+		map[string]string{"Origin": "app://obsidian.md.evil.com"})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("obsidian lookalike origin: got %d, want 403", w.Code)
+	}
+}
+
 func TestRequireAuth_CORSWildcardNeverWidensGates(t *testing.T) {
 	srv := mustServer(t, Config{AccessKey: testAccessKey, CORSOrigins: []string{"*"}})
 
@@ -387,6 +411,10 @@ func TestWSCheckOrigin(t *testing.T) {
 		// A spoofed Host under the vscode-webview name (not the scheme) must
 		// not pass — only url.Parse's Scheme grants the exemption.
 		{"vscode webview lookalike host", mkReq("127.0.0.1:8080", "http://vscode-webview.evil.com", ""), false},
+		{"obsidian desktop origin", mkReq("127.0.0.1:8080", "app://obsidian.md", ""), true},
+		// A lookalike that only prefixes the fixed literal must not pass — the
+		// match is exact, not a substring/host check.
+		{"obsidian lookalike origin", mkReq("127.0.0.1:8080", "app://obsidian.md.evil.com", ""), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
