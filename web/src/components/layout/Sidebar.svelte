@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, groupMenuFor, editGroupId, editGroupDraft, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -15,7 +15,9 @@
       mcpServers.set(d.servers as any)
     } catch { /* ignore — McpView will refetch */ }
     try {
-      sessionGroups.set(await api.listSessionGroups())
+      const org = await api.listSessionGroups()
+      sessionGroups.set(org.groups)
+      pinnedSessions.set(org.pinned)
     } catch { /* ignore — sessions just render flat under Ungrouped */ }
   })
 
@@ -26,17 +28,40 @@
   const groupedView = $derived.by(() => {
     const byId = new Map($sessions.map(s => [s.id, s] as const))
     const claimed = new Set<string>()
+    // Pinned sessions float to a dedicated top section (registry order) and are
+    // claimed first, so they don't also appear under their group or Ungrouped.
+    const pinned = $pinnedSessions.map(id => byId.get(id)).filter(Boolean) as typeof $sessions
+    pinned.forEach(s => claimed.add(s.id))
     const groups = $sessionGroups.map(g => {
-      const items = g.session_ids.map(id => byId.get(id)).filter(Boolean) as typeof $sessions
+      const items = g.session_ids.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
       items.forEach(s => claimed.add(s.id))
       return { group: g, items }
     })
     const ungrouped = $sessions.filter(s => !claimed.has(s.id))
-    return { groups, ungrouped }
+    return { pinned, groups, ungrouped }
   })
 
   function groupIdOf(sessionId: string): string {
     return $sessionGroups.find(g => g.session_ids.includes(sessionId))?.id ?? ''
+  }
+
+  const isPinned = (sessionId: string): boolean => $pinnedSessions.includes(sessionId)
+
+  // Pin/unpin a session. Optimistic: the row jumps into (or out of) the Pinned
+  // section immediately, then the registry write follows; on failure, revert.
+  // Pinning appends to the end (most-recently pinned last).
+  async function togglePin(sessionId: string, pin: boolean) {
+    menuFor.set(null)
+    const before = $pinnedSessions
+    pinnedSessions.set(pin
+      ? [...before.filter(id => id !== sessionId), sessionId]
+      : before.filter(id => id !== sessionId))
+    try {
+      await api.setSessionPinned(sessionId, pin)
+    } catch {
+      pinnedSessions.set(before)
+      showToast(tr('sidebar.pin_failed'))
+    }
   }
 
   $effect(() => {
@@ -48,6 +73,27 @@
     window.addEventListener('resize', onResize)
     onResize()
     return () => window.removeEventListener('resize', onResize)
+  })
+
+  // Dismiss any open floating UI (kebab menu, move-to-group popover, inline
+  // rename) when the user clicks anywhere outside of it. Only clicks that land
+  // inside a popover or a rename input are ignored (those must swallow the
+  // click). Controls that OPEN a floating UI stop propagation themselves, so
+  // this listener never fires for them; every other control (a group's
+  // move-up/down, another row) correctly dismisses whatever was open. Inline
+  // renames commit (rather than discard) on outside click — the commit helpers
+  // no-op when no rename is active.
+  $effect(() => {
+    function onDocClick(e: MouseEvent) {
+      const el = e.target as HTMLElement | null
+      if (el?.closest('.grp-popover, .rename-input')) return
+      menuFor.set(null)
+      groupMenuFor.set(null)
+      commitRename()
+      commitGroupRename()
+    }
+    window.addEventListener('click', onDocClick)
+    return () => window.removeEventListener('click', onDocClick)
   })
 
   const railNav = [
@@ -124,12 +170,27 @@
     } catch (e: any) { showToast(e.message, 'error') }
   }
 
+  // A default name for a freshly created group: "Group N" / "分组N", where N is
+  // the smallest positive integer whose name isn't already taken. Naming groups
+  // distinctly (rather than every new group being "New group", which collides
+  // with the "New group" create action in the popover) keeps the list readable.
+  function nextDefaultGroupName(): string {
+    const taken = new Set($sessionGroups.map(g => g.name))
+    let n = 1
+    let name = tr('sidebar.default_group_name').replace('{n}', String(n))
+    while (taken.has(name)) {
+      n++
+      name = tr('sidebar.default_group_name').replace('{n}', String(n))
+    }
+    return name
+  }
+
   // Create an empty group with a default name, then drop straight into inline
   // rename so the user names it without a separate prompt dialog (native
   // prompt() is unreliable in the desktop webview).
   async function newGroup() {
     try {
-      const g = await api.createSessionGroup(tr('sidebar.new_group'))
+      const g = await api.createSessionGroup(nextDefaultGroupName())
       sessionGroups.update(gs => [...gs, g])
       editGroupId.set(g.id)
       editGroupDraft.set(g.name)
@@ -157,6 +218,24 @@
     } catch (e: any) { showToast(e.message, 'error') }
   }
 
+  // Move a group one slot up or down. Optimistic: swap locally, then persist
+  // the full new order. On failure, revert.
+  async function moveGroup(id: string, dir: -1 | 1) {
+    const before = $sessionGroups
+    const i = before.findIndex(g => g.id === id)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= before.length) return
+    const next = [...before]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    sessionGroups.set(next)
+    try {
+      await api.reorderSessionGroups(next.map(g => g.id))
+    } catch (e: any) {
+      sessionGroups.set(before)
+      showToast(e.message, 'error')
+    }
+  }
+
   async function toggleCollapse(id: string, collapsed: boolean) {
     // Optimistic: flip locally, then persist. On failure, revert.
     sessionGroups.update(gs => gs.map(g => g.id === id ? { ...g, collapsed } : g))
@@ -173,7 +252,7 @@
   async function newGroupForSession(sessionId: string) {
     groupMenuFor.set(null)
     try {
-      const g = await api.createSessionGroup(tr('sidebar.new_group'))
+      const g = await api.createSessionGroup(nextDefaultGroupName())
       await api.setSessionGroup(sessionId, g.id)
       sessionGroups.update(gs => [
         ...gs.map(x => ({ ...x, session_ids: x.session_ids.filter(id => id !== sessionId) })),
@@ -239,8 +318,20 @@
         </div>
         {/if}
 
+        <!-- Pinned: a dedicated top section, above all groups -->
+        {#if groupedView.pinned.length > 0}
+        <div class="grp-header">
+          <iconify-icon icon="ant-design:pushpin-filled" width="11" style="color:var(--text-quaternary)"></iconify-icon>
+          <span class="grp-name muted">{$t('sidebar.pinned')}</span>
+          <span class="grp-count">{groupedView.pinned.length}</span>
+        </div>
+        {#each groupedView.pinned as s (s.id)}
+          {@render sessionRow(s)}
+        {/each}
+        {/if}
+
         <!-- Groups (registry order), each collapsible -->
-        {#each groupedView.groups as gv (gv.group.id)}
+        {#each groupedView.groups as gv, gi (gv.group.id)}
         {@const g = gv.group}
         {@const editingG = $editGroupId === g.id}
         <div class="grp-header">
@@ -264,7 +355,17 @@
           <span class="grp-name" onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
           <span class="grp-count">{gv.items.length}</span>
           {#if !$selMode}
-          <span class="row-action" title={$t('sidebar.rename_group')} onclick={() => { editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
+          {#if gi > 0}
+          <span class="row-action" title={$t('sidebar.move_group_up')} onclick={() => moveGroup(g.id, -1)}>
+            <iconify-icon icon="ant-design:arrow-up-outlined" width="13"></iconify-icon>
+          </span>
+          {/if}
+          {#if gi < groupedView.groups.length - 1}
+          <span class="row-action" title={$t('sidebar.move_group_down')} onclick={() => moveGroup(g.id, 1)}>
+            <iconify-icon icon="ant-design:arrow-down-outlined" width="13"></iconify-icon>
+          </span>
+          {/if}
+          <span class="row-action" title={$t('sidebar.rename_group')} onclick={(e) => { e.stopPropagation(); editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
             <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
           </span>
           <span class="row-action del" title={$t('sidebar.delete_group')} onclick={() => deleteGroup(g.id, g.name)}>
@@ -339,6 +440,9 @@
           </span>
           {:else}
           <span class="session-title" style="color:{solid ? '#fff' : 'var(--text)'};">{(s as any).name || (s as any).title || s.id}</span>
+          {#if isPinned(s.id) && !menuOpen}
+            <iconify-icon icon="ant-design:pushpin-filled" width="11" title={$t('sidebar.pinned')} style="color:{solid ? 'rgba(255,255,255,0.75)' : 'var(--text-quaternary)'};flex:0 0 auto"></iconify-icon>
+          {/if}
           {#if (s as any).pending_question}
             <span class="pending-dot" title={$t('sidebar.pending_question')}></span>
           {/if}
@@ -353,6 +457,10 @@
             </span>
           {/if}
           {#if menuOpen}
+            {@const pinned = isPinned(s.id)}
+            <span class="row-action" onclick={(e) => { e.stopPropagation(); togglePin(s.id, !pinned) }} title={pinned ? $t('sidebar.unpin') : $t('sidebar.pin')}>
+              <iconify-icon icon={pinned ? 'ant-design:pushpin-filled' : 'ant-design:pushpin-outlined'} width="13"></iconify-icon>
+            </span>
             <span class="row-action" onclick={(e) => { e.stopPropagation(); groupMenuFor.set(s.id); menuFor.set(null) }} title={$t('sidebar.move_to_group')}>
               <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
             </span>
