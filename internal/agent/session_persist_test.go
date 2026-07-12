@@ -283,9 +283,11 @@ func TestPersistContextUsage(t *testing.T) {
 	setTempHome(t)
 
 	a := New(&summarizeFake{}, "m")
-	// No real provider count yet, so ContextUsage estimates from history; make
-	// it big enough to be > 0.
-	a.History.Append(NewUserMessage(strings.Repeat("word ", 2000)))
+	// The helper's purpose is persisting the real provider-reported count; set it
+	// directly (in-package) so the assertion pins the exact value, not an estimate.
+	a.usageMu.Lock()
+	a.lastInputTokens = 12345
+	a.usageMu.Unlock()
 
 	sess := NewSession("m", "")
 	sess.Messages = []Message{NewUserMessage("hi")}
@@ -296,15 +298,15 @@ func TestPersistContextUsage(t *testing.T) {
 	if err := a.PersistContextUsage(sess); err != nil {
 		t.Fatalf("PersistContextUsage: %v", err)
 	}
-	if sess.LastContextTokens <= 0 {
-		t.Fatalf("expected a persisted context-token count, got %d", sess.LastContextTokens)
+	if sess.LastContextTokens != 12345 {
+		t.Fatalf("LastContextTokens = %d, want 12345 (the real provider count)", sess.LastContextTokens)
 	}
 	reloaded, err := LoadSession(sess.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.LastContextTokens != sess.LastContextTokens {
-		t.Errorf("reloaded LastContextTokens = %d, want %d", reloaded.LastContextTokens, sess.LastContextTokens)
+	if reloaded.LastContextTokens != 12345 {
+		t.Errorf("reloaded LastContextTokens = %d, want 12345", reloaded.LastContextTokens)
 	}
 
 	// A nil session and an agent with no countable context are safe no-ops.
