@@ -317,20 +317,21 @@ func (c Config) Validate() []string {
 		return nil
 	}
 	var problems []string
+	// Keyed by the raw model string (EntryByModel matches exactly), so the
+	// default_model/lite_model checks below agree with runtime resolution.
 	seen := make(map[string]bool, len(c.Models))
 	for i, m := range c.Models {
-		name := strings.TrimSpace(m.Model)
-		if name == "" {
+		if strings.TrimSpace(m.Model) == "" {
 			problems = append(problems, fmt.Sprintf("models[%d] has no model name", i))
 			continue
 		}
 		if strings.TrimSpace(m.Provider) == "" {
-			problems = append(problems, fmt.Sprintf("model %q has no provider", name))
+			problems = append(problems, fmt.Sprintf("model %q has no provider", m.Model))
 		}
-		if seen[name] {
-			problems = append(problems, fmt.Sprintf("duplicate model %q (only the first entry is used)", name))
+		if seen[m.Model] {
+			problems = append(problems, fmt.Sprintf("duplicate model %q (only the first entry is used)", m.Model))
 		}
-		seen[name] = true
+		seen[m.Model] = true
 	}
 	if c.DefaultModel != "" && !seen[c.DefaultModel] {
 		problems = append(problems, fmt.Sprintf("default_model %q matches no entry (the first model is used instead)", c.DefaultModel))

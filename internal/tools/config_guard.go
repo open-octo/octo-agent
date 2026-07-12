@@ -38,21 +38,27 @@ func (g *ConfigGuard) RegisterHooks(e *hooks.Engine) {
 }
 
 // touchedConfigFile reports whether a just-run tool wrote ~/.octo/config.yml.
-// edit_file/write_file carry the target in "path"; terminal is best-effort —
-// arbitrary shell can't be parsed, so match the config file's base name in the
-// command (a false positive only costs one harmless re-validation).
+// The tool-name switch is first so the common non-writing tools short-circuit
+// before any filesystem/env lookup. edit_file/write_file carry the target in
+// "path"; terminal is best-effort — arbitrary shell can't be parsed, so it
+// requires BOTH ".octo" and "config.yml" in the command (a plain project
+// "config.yml" won't match, only the octo config's distinctive path does; a
+// rare false positive costs one harmless re-validation).
 func touchedConfigFile(tool string, input map[string]any) bool {
-	cfgPath, err := config.Path()
-	if err != nil {
-		return false
-	}
 	switch tool {
 	case "edit_file", "write_file":
 		p, _ := input["path"].(string)
+		if p == "" {
+			return false
+		}
+		cfgPath, err := config.Path()
+		if err != nil {
+			return false
+		}
 		return sameFile(p, cfgPath)
 	case "terminal":
 		cmd, _ := input["command"].(string)
-		return cmd != "" && strings.Contains(cmd, filepath.Base(cfgPath))
+		return cmd != "" && strings.Contains(cmd, "config.yml") && strings.Contains(cmd, ".octo")
 	}
 	return false
 }

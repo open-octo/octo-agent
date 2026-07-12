@@ -64,6 +64,7 @@ func TestConfigGuard_TouchedConfigFile(t *testing.T) {
 		{"edit_file other file", "edit_file", map[string]any{"path": "/tmp/other.yml"}, false},
 		{"terminal touches config", "terminal", map[string]any{"command": "sed -i '' s/x/y/ ~/.octo/config.yml"}, true},
 		{"terminal unrelated", "terminal", map[string]any{"command": "go test ./..."}, false},
+		{"terminal other project config.yml", "terminal", map[string]any{"command": "cat ./project/config.yml"}, false},
 		{"read_file is not a write", "read_file", map[string]any{"path": cfgPath}, false},
 	}
 	for _, c := range cases {
