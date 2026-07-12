@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -637,6 +638,9 @@ func (a *Adapter) handleInbound(raw json.RawMessage, onMessage func(channel.Inbo
 		ct = "group"
 	}
 
+	// Content-free reception line: message text is never logged (only metadata),
+	// so this stays a safe per-message signal in serve.log at the default level.
+	slog.Info("channel message received", "platform", platformName, "chat", chatID, "user", senderID, "chat_type", ct, "bytes", len(text))
 	onMessage(channel.InboundEvent{
 		Type:      "message",
 		Platform:  platformName,
