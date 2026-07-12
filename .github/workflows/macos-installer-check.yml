@@ -108,14 +108,21 @@ jobs:
 
           HOME="$fake" expanded/octo-component.pkg/Scripts/postinstall
 
+          # The bundled CLI must be present and runnable inside the installed app.
           bin="$fake/Applications/Octo.app/Contents/Resources/octo"
           test -x "$bin" || { echo "octo CLI missing at $bin"; exit 1; }
           HOME="$fake" "$bin" version
-          grep -qF 'added by the octo installer' "$fake/.zprofile" || { echo "PATH not updated in .zprofile"; exit 1; }
-          # zsh's non-login interactive shells (e.g. VS Code's terminal) read
-          # only .zshrc, so it must get the PATH line too.
-          grep -qF 'added by the octo installer' "$fake/.zshrc" || { echo "PATH not updated in .zshrc"; exit 1; }
           test -x "$fake/.octo/uninstall.sh" || { echo "uninstall.sh missing"; exit 1; }
+          # postinstall no longer touches PATH — the app seeds ~/.local/bin/octo
+          # and edits the shell rc on first launch (ensureBundledOcto), which is
+          # covered by the Go unit tests. A headless CI runner never launches the
+          # GUI, so there is nothing to assert about PATH here. Guard the split:
+          # postinstall must NOT write a PATH line itself.
+          for rc in .zshrc .zprofile .bash_profile .profile; do
+            if [ -f "$fake/$rc" ] && grep -qF 'added by the octo installer' "$fake/$rc"; then
+              echo "postinstall should not write PATH ($rc); the app does that on launch"; exit 1
+            fi
+          done
           # The desktop app replaces the old serve-on-login flow: no LaunchAgent.
           test ! -f "$fake/Library/LaunchAgents/dev.octo-agent.serve.plist" || { echo "unexpected leftover serve LaunchAgent"; exit 1; }
 

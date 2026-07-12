@@ -1,37 +1,21 @@
 #!/bin/sh
-# Runs as the installing user (currentUserHome domain — no root, no sudo). Puts
-# the octo CLI (bundled inside Octo.app/Contents/Resources) on PATH, seeds
-# ~/.octo/bin/uv + a fresh config, writes an uninstall helper, and opens the
-# app. The desktop app replaces the old "start `octo serve -d` on login + open
-# the browser dashboard" onboarding — that surrogate GUI is now a real app.
+# Runs as the installing user (currentUserHome domain — no root, no sudo). Seeds
+# ~/.octo/bin/uv + a fresh config, writes an uninstall helper, and opens the app.
+#
+# The octo CLI is put on PATH by the app itself on first launch, not here: its
+# ensureBundledOcto (cmd/octo-desktop/octo_cli.go) copies the bundled CLI to
+# ~/.local/bin/octo and adds that dir to PATH via the shell rc files — the same
+# path used on Linux. Keeping the CLI at a stable, writable location (rather than
+# inside the app) lets `octo upgrade` replace it without modifying the signed
+# .app bundle. The desktop app replaces the old "start `octo serve -d` on login +
+# open the browser dashboard" onboarding — that surrogate GUI is now a real app.
 set -eu
 
 app_bundle="$HOME/Applications/Octo.app"
 res="$app_bundle/Contents/Resources"
+# Kept byte-identical to octoInstallerMarker in cmd/octo-desktop/octo_cli.go: the
+# app writes the PATH line, this uninstaller strips it.
 marker="# added by the octo installer"
-
-# Put the bundled octo CLI on PATH. zsh (the macOS default) reads .zshrc for
-# every INTERACTIVE shell whether or not it's a login shell — VS Code's
-# integrated terminal and many others open non-login interactive shells that
-# read only .zshrc, never .zprofile — so .zshrc is the reliable target. We also
-# write .zprofile (login shells) and .bash_profile / .profile (bash, plain sh).
-# A login+interactive shell reads both zsh files and gets a harmless duplicate
-# PATH entry.
-add_to_path() {
-  rc="$1"
-  [ -f "$rc" ] || touch "$rc"
-  # Drop any previous octo-installer line before writing the current one. The
-  # CLI location can change between releases; an early "already present" bail
-  # would leave a stale entry pointing at a directory that no longer exists,
-  # silently keeping the CLI off PATH after an upgrade. Deleting first makes the
-  # upgrade self-heal. (sed -i '' matches the uninstall helper below.)
-  grep -qF "$marker" "$rc" 2>/dev/null && sed -i '' "/$marker/d" "$rc"
-  printf '\nexport PATH="%s:$PATH"  %s\n' "$res" "$marker" >> "$rc"
-}
-add_to_path "$HOME/.zshrc"
-add_to_path "$HOME/.zprofile"
-add_to_path "$HOME/.bash_profile"
-add_to_path "$HOME/.profile"
 
 # Seed ~/.octo/bin/uv from the bundle so the CLI has Python tooling immediately
 # (the app also self-provisions this on first launch). octo-managed binary, so
