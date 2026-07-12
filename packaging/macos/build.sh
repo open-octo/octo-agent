@@ -32,13 +32,17 @@ OCTO_CLI="$SourceDir/octo" UV_BINARY="$uv_arg" \
   sh "$repo_root/scripts/package-desktop-macos.sh" "$AppVersion"
 
 # Payload: Octo.app under the user's Applications (currentUserHome domain, so
-# --install-location is relative to the home dir).
+# --install-location is relative to the home dir). --root is the tree whose
+# CONTENTS land at --install-location, so it must be the directory that *holds*
+# Octo.app — not its parent. Rooting one level up ("$work/payload", which
+# contains Applications/Octo.app) plus --install-location 'Applications' would
+# nest it as ~/Applications/Applications/Octo.app.
 payload="$work/payload/Applications"
 mkdir -p "$payload"
 cp -R "$repo_root/Octo.app" "$payload/Octo.app"
 
 pkgbuild \
-  --root "$work/payload" \
+  --root "$payload" \
   --scripts "$script_dir/scripts" \
   --identifier dev.octo-agent.octo \
   --version "$AppVersion" \

@@ -15,7 +15,12 @@ marker="# added by the octo installer"
 add_to_path() {
   rc="$1"
   [ -f "$rc" ] || touch "$rc"
-  grep -qF "$marker" "$rc" 2>/dev/null && return
+  # Drop any previous octo-installer line before writing the current one. The
+  # CLI location can change between releases; an early "already present" bail
+  # would leave a stale entry pointing at a directory that no longer exists,
+  # silently keeping the CLI off PATH after an upgrade. Deleting first makes the
+  # upgrade self-heal. (sed -i '' matches the uninstall helper below.)
+  grep -qF "$marker" "$rc" 2>/dev/null && sed -i '' "/$marker/d" "$rc"
   printf '\nexport PATH="%s:$PATH"  %s\n' "$res" "$marker" >> "$rc"
 }
 add_to_path "$HOME/.zprofile"

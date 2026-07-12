@@ -69,10 +69,14 @@ jobs:
           test -x expanded/octo-component.pkg/Scripts/preinstall
           test -x expanded/octo-component.pkg/Scripts/postinstall
           # Payload is the self-contained app bundle: the GUI binary + the
-          # embedded CLI the installer puts on PATH.
-          test -d expanded/octo-component.pkg/Payload/Applications/Octo.app
-          test -x expanded/octo-component.pkg/Payload/Applications/Octo.app/Contents/MacOS/octo-desktop
-          test -x expanded/octo-component.pkg/Payload/Applications/Octo.app/Contents/Resources/octo
+          # embedded CLI the installer puts on PATH. The payload root is the
+          # directory that HOLDS Octo.app (install-location 'Applications'
+          # supplies the parent), so the bundle sits at Payload/Octo.app. If it
+          # were Payload/Applications/Octo.app it would install to
+          # ~/Applications/Applications/Octo.app — the double-nesting this guards.
+          test -d expanded/octo-component.pkg/Payload/Octo.app
+          test -x expanded/octo-component.pkg/Payload/Octo.app/Contents/MacOS/octo-desktop
+          test -x expanded/octo-component.pkg/Payload/Octo.app/Contents/Resources/octo
 
       - name: Verify the package installs under the user's real home directory
         run: |
@@ -93,10 +97,14 @@ jobs:
 
           HOME="$fake" expanded/octo-component.pkg/Scripts/preinstall
 
-          # Simulate Installer.app placing the payload under the home domain's
-          # install-location, then run postinstall exactly as it would.
+          # Simulate Installer.app placing the payload's CONTENTS under the home
+          # domain's install-location ('Applications'), then run postinstall
+          # exactly as it would. Copying the payload contents — not a hand-picked
+          # Octo.app — mirrors the real mapping: a payload that nested
+          # Applications/Octo.app would land at ~/Applications/Applications/Octo.app
+          # and the postinstall's $HOME/Applications/Octo.app lookup would fail here.
           mkdir -p "$fake/Applications"
-          cp -R expanded/octo-component.pkg/Payload/Applications/Octo.app "$fake/Applications/Octo.app"
+          cp -R expanded/octo-component.pkg/Payload/. "$fake/Applications/"
 
           HOME="$fake" expanded/octo-component.pkg/Scripts/postinstall
 
