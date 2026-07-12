@@ -10,8 +10,13 @@ app_bundle="$HOME/Applications/Octo.app"
 res="$app_bundle/Contents/Resources"
 marker="# added by the octo installer"
 
-# Put the bundled octo CLI on PATH. .zprofile covers the default zsh login
-# shell; the others cover bash / plain sh.
+# Put the bundled octo CLI on PATH. zsh (the macOS default) reads .zshrc for
+# every INTERACTIVE shell whether or not it's a login shell — VS Code's
+# integrated terminal and many others open non-login interactive shells that
+# read only .zshrc, never .zprofile — so .zshrc is the reliable target. We also
+# write .zprofile (login shells) and .bash_profile / .profile (bash, plain sh).
+# A login+interactive shell reads both zsh files and gets a harmless duplicate
+# PATH entry.
 add_to_path() {
   rc="$1"
   [ -f "$rc" ] || touch "$rc"
@@ -23,6 +28,7 @@ add_to_path() {
   grep -qF "$marker" "$rc" 2>/dev/null && sed -i '' "/$marker/d" "$rc"
   printf '\nexport PATH="%s:$PATH"  %s\n' "$res" "$marker" >> "$rc"
 }
+add_to_path "$HOME/.zshrc"
 add_to_path "$HOME/.zprofile"
 add_to_path "$HOME/.bash_profile"
 add_to_path "$HOME/.profile"
@@ -53,7 +59,7 @@ cat > "$config_dir/uninstall.sh" <<UNINSTALL
 #!/bin/sh
 set -eu
 rm -rf "$app_bundle"
-for rc in "\$HOME/.zprofile" "\$HOME/.bash_profile" "\$HOME/.profile"; do
+for rc in "\$HOME/.zshrc" "\$HOME/.zprofile" "\$HOME/.bash_profile" "\$HOME/.profile"; do
   [ -f "\$rc" ] && sed -i '' '/$marker/d' "\$rc"
 done
 echo "Octo uninstalled (your ~/.octo data was left intact)."
