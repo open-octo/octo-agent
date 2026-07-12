@@ -560,6 +560,9 @@ func (EditFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 	out.WriteString(body[prevOrigEnd:])
 	updated := out.String()
 
+	// Stage the pre-edit version into the trash so an edit that destroys
+	// uncommitted work is recoverable (skipped for git-tracked-clean files).
+	backupBeforeOverwrite(ctx, abs)
 	if err := os.WriteFile(abs, []byte(updated), 0o644); err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("edit_file: write %q: %w", path, err)
 	}
