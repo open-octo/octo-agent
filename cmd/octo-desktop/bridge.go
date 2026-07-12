@@ -129,6 +129,12 @@ func (b *nativeBridge) PickFolder(_ context.Context, startDir string) (string, b
 		CanChooseDirectories(true).
 		CanChooseFiles(false).
 		CanCreateDirectories(true)
+	// Attach to the window so it opens as a sheet. A detached panel (Wails'
+	// beginWithCompletionHandler path when no window is set) stops responding
+	// to its buttons after the user switches away from the app and back.
+	if b.window != nil {
+		dlg.AttachToWindow(b.window)
+	}
 	if startDir != "" {
 		dlg.SetDirectory(startDir)
 	}
@@ -148,6 +154,9 @@ func (b *nativeBridge) PickFile(_ context.Context, startDir string) (string, boo
 	dlg := b.app.Dialog.OpenFile().
 		CanChooseFiles(true).
 		CanChooseDirectories(false)
+	if b.window != nil { // sheet, not a detached panel — see PickFolder.
+		dlg.AttachToWindow(b.window)
+	}
 	if startDir != "" {
 		dlg.SetDirectory(startDir)
 	}
@@ -168,6 +177,9 @@ func (b *nativeBridge) PickFile(_ context.Context, startDir string) (string, boo
 // download does nothing.
 func (b *nativeBridge) SaveFile(_ context.Context, defaultName, content string) (string, bool, error) {
 	dlg := b.app.Dialog.SaveFile().CanCreateDirectories(true)
+	if b.window != nil { // sheet, not a detached panel — see PickFolder.
+		dlg.AttachToWindow(b.window)
+	}
 	if defaultName != "" {
 		dlg.SetFilename(defaultName)
 	}
