@@ -124,10 +124,58 @@ func runConfig(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintln(stdout, path)
 		return 0
+	case "fix", "--fix":
+		return runConfigFix(stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "octo config: unknown subcommand %q (use: setup | show | path)\n", sub)
+		fmt.Fprintf(stderr, "octo config: unknown subcommand %q (use: setup | show | path | fix)\n", sub)
 		return 2
 	}
+}
+
+// runConfigFix repairs ~/.octo/config.yml. If it no longer parses (the case that
+// stops octo from starting), it restores the last good backup. If it parses but
+// has semantic problems, it auto-fixes the safe ones (dangling default_model /
+// lite_model) and reports the rest for manual attention.
+func runConfigFix(stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		broken, rerr := config.RestoreFromBackup()
+		if rerr != nil {
+			fmt.Fprintf(stderr, "octo config --fix: config.yml doesn't parse: %v\n", err)
+			fmt.Fprintf(stderr, "Could not auto-restore: %v\n", rerr)
+			fmt.Fprintln(stderr, "Run `octo config` to rebuild it from scratch.")
+			return 1
+		}
+		fmt.Fprintln(stdout, "Restored config.yml from the last version octo saved (config.yml.bak).")
+		if broken != "" {
+			fmt.Fprintf(stdout, "Your edited (unparseable) file was kept as %s — copy any recent changes back from it.\n", broken)
+		}
+		return 0
+	}
+
+	repaired, fixed, unfixable := cfg.Repair()
+	if len(fixed) == 0 && len(unfixable) == 0 {
+		fmt.Fprintln(stdout, "config.yml is healthy — nothing to fix.")
+		return 0
+	}
+	if len(fixed) > 0 {
+		if serr := repaired.Save(); serr != nil {
+			fmt.Fprintf(stderr, "octo config --fix: save: %v\n", serr)
+			return 1
+		}
+		fmt.Fprintln(stdout, "Fixed:")
+		for _, f := range fixed {
+			fmt.Fprintf(stdout, "  • %s\n", f)
+		}
+	}
+	if len(unfixable) > 0 {
+		fmt.Fprintln(stdout, "Needs manual attention (edit ~/.octo/config.yml):")
+		for _, u := range unfixable {
+			fmt.Fprintf(stdout, "  • %s\n", u)
+		}
+		return 1
+	}
+	return 0
 }
 
 // runConfigShow prints the effective provider/model/base-URL and where each
@@ -214,6 +262,19 @@ func otherEntryModels(cfg config.Config, skip string) string {
 
 // apiKeyStatus reports where a key for the given provider would come from,
 // without revealing it. Env always wins over a config-stored key.
+// apiKeyReachable reports whether a usable API key exists for the entry —
+// either via the provider's env var or stored in the entry itself.
+func apiKeyReachable(provider string, entry config.ModelEntry) bool {
+	envVar := app.VendorAPIKeyEnvVar(provider)
+	if envVar == "" {
+		envVar = strings.ToUpper(provider) + "_API_KEY"
+	}
+	if os.Getenv(envVar) != "" {
+		return true
+	}
+	return entry.APIKey != "" && entry.Provider == provider
+}
+
 func apiKeyStatus(provider string, entry config.ModelEntry) string {
 	envVar := app.VendorAPIKeyEnvVar(provider)
 	if envVar == "" {

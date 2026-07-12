@@ -177,6 +177,9 @@ Usage:
   octo config show                 Print the effective provider/model and where each
                                    comes from (never prints the key itself)
   octo config path                 Print the config file path
+  octo config --fix                Repair the file: restore the last good backup
+                                   if it no longer parses, else fix dangling
+                                   default_model / lite_model references
 File (~/.octo/config.yml):
   provider: openai
   model: gpt-4o-mini

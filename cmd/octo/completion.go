@@ -98,7 +98,7 @@ func completionCandidates(words []string) []string {
 		return initCandidates(prev)
 	case "config":
 		if len(words) == 3 {
-			return []string{"show", "path"}
+			return []string{"show", "path", "fix"}
 		}
 	case "help":
 		// `octo help <TAB>` → list of help targets.
@@ -215,7 +215,7 @@ new flags / subcommands are added.`))
 // ── Static lists ─────────────────────────────────────────────────────────
 
 var topLevelCommands = []string{
-	"config", "init", "memory", "serve", "sessions", "skills", "upgrade",
+	"config", "doctor", "init", "memory", "serve", "sessions", "skills", "upgrade",
 	"version", "help", "completion",
 }
 

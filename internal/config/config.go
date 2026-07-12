@@ -593,10 +593,104 @@ func (c Config) Save() error {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return err
 	}
+	// Rolling backup of the last config we wrote (always valid, since it's a
+	// marshaled Config): `octo config --fix` restores from it when a later hand
+	// edit leaves config.yml unparseable. Best-effort — a backup failure must
+	// never fail the save itself.
+	_ = os.WriteFile(path+".bak", data, 0o600)
 	if legacy, lerr := legacyPath(); lerr == nil {
 		if _, statErr := os.Stat(legacy); statErr == nil {
 			_ = os.Rename(legacy, legacy+".bak")
 		}
 	}
 	return nil
+}
+
+// BackupPath returns the rolling-backup path (config.yml.bak) that Save writes
+// and `octo config --fix` restores from.
+func BackupPath() (string, error) {
+	p, err := Path()
+	if err != nil {
+		return "", err
+	}
+	return p + ".bak", nil
+}
+
+// RestoreFromBackup replaces config.yml with config.yml.bak, used by
+// `octo config --fix` when the current file no longer parses. It only proceeds
+// when the backup itself parses cleanly, and first preserves the current
+// (broken) file as config.yml.broken so the mangled edit isn't lost. It returns
+// the path the broken file was saved to (empty if there was nothing to save),
+// or an error when there is no usable backup.
+func RestoreFromBackup() (brokenSaved string, err error) {
+	path, err := Path()
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path + ".bak")
+	if err != nil {
+		return "", fmt.Errorf("no backup at %s: %w", path+".bak", err)
+	}
+	var f fileConfig
+	if err := yaml.Unmarshal(data, &f); err != nil {
+		return "", fmt.Errorf("the backup %s is also invalid: %w", path+".bak", err)
+	}
+	// Preserve the current (broken) file as config.yml.broken BEFORE overwriting
+	// it — it holds the user's edits and is otherwise the only copy. If that
+	// preservation fails, abort rather than silently destroy it: a failed
+	// restore the user can retry beats one that loses their file.
+	if cur, rerr := os.ReadFile(path); rerr == nil {
+		broken := path + ".broken"
+		if werr := os.WriteFile(broken, cur, 0o600); werr != nil {
+			return "", fmt.Errorf("refusing to overwrite %s: could not preserve it as %s first: %w", path, broken, werr)
+		}
+		brokenSaved = broken
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+	return brokenSaved, nil
+}
+
+// Repair auto-fixes the semantic problems Validate reports that have a safe,
+// unambiguous resolution, returning the repaired config plus a list of what it
+// changed and what still needs a human. Safe fixes: a dangling default_model is
+// reset to the first entry; a dangling lite_model is cleared. A duplicate model
+// or a half-filled entry is reported as unfixable — the intended value can't be
+// guessed, so it's left for the user.
+func (c Config) Repair() (repaired Config, fixed, unfixable []string) {
+	repaired = c
+	if len(repaired.Models) == 0 {
+		return repaired, nil, nil
+	}
+	seen := make(map[string]bool, len(repaired.Models))
+	var firstNamed string // first entry with a usable model name — the reset target
+	for i, m := range repaired.Models {
+		if strings.TrimSpace(m.Model) == "" {
+			unfixable = append(unfixable, fmt.Sprintf("models[%d] has no model name — add one or remove the entry", i))
+			continue
+		}
+		if firstNamed == "" {
+			firstNamed = m.Model
+		}
+		if strings.TrimSpace(m.Provider) == "" {
+			unfixable = append(unfixable, fmt.Sprintf("model %q has no provider — add one", m.Model))
+		}
+		if seen[m.Model] {
+			unfixable = append(unfixable, fmt.Sprintf("duplicate model %q — remove the extra entry", m.Model))
+		}
+		seen[m.Model] = true
+	}
+	// Reset a dangling default_model to the first usable entry. If no entry has a
+	// name there's nothing safe to point it at, so leave it for the user (the
+	// nameless entries are already reported as unfixable above).
+	if repaired.DefaultModel != "" && !seen[repaired.DefaultModel] && firstNamed != "" {
+		fixed = append(fixed, fmt.Sprintf("reset default_model %q → %q (first configured model)", repaired.DefaultModel, firstNamed))
+		repaired.DefaultModel = firstNamed
+	}
+	if repaired.LiteModel != "" && !seen[repaired.LiteModel] {
+		fixed = append(fixed, fmt.Sprintf("cleared lite_model %q (matched no entry)", repaired.LiteModel))
+		repaired.LiteModel = ""
+	}
+	return repaired, fixed, unfixable
 }
