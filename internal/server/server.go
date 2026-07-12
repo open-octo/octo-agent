@@ -2316,6 +2316,9 @@ func (s *Server) reloadChannel(platform string) {
 // off the adapter's read loop (Session.BeginRun serialises turns per
 // session, so concurrent messages in one chat can't interleave).
 func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev channel.InboundEvent) {
+	// The adapter invokes this from its own inbound goroutine (not net/http), so
+	// a panic anywhere in the IM turn path would crash the whole serve process.
+	defer s.recoverBg("channel event (" + ev.Platform + ")")
 	if s.handleChannelCommand(ad, ev) {
 		return
 	}
@@ -2438,6 +2441,7 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 	}
 
 	go func() {
+		defer s.recoverBg("channel compaction")
 		defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 		ctx, done := sess.BeginRun(context.Background())
 		defer done()

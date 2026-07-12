@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -601,6 +602,7 @@ func (s *Server) wsCompactSession(sid string) {
 	mu.Unlock()
 
 	go func() {
+		defer s.recoverBg("web compaction")
 		defer func() {
 			mu.Lock()
 			s.turnRunning[sid] = false
@@ -936,6 +938,43 @@ func joinNonEmpty(parts []string, sep string) string {
 	return result
 }
 
+// recoverTurn recovers a panic from an interactive turn so one bad turn fails
+// gracefully instead of crashing the whole serve process. Turns run in bare
+// goroutines (outside net/http's per-request recover), and because the desktop
+// app runs the server in-process, an unrecovered panic here would terminate the
+// process — taking every session and the app itself down, leaving the window
+// frozen. It logs the panic with a stack and pushes the end-of-turn frames the
+// panicking turn skipped, so the composer leaves its "thinking" state and shows
+// an error rather than spinning forever.
+func (s *Server) recoverTurn(sessionID string) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	slog.Error("recovered panic in agent turn", "session_id", sessionID, "panic", r, "stack", string(debug.Stack()))
+	if s.wsHub == nil {
+		return
+	}
+	s.wsHub.broadcast(sessionID, map[string]any{
+		"type":       "error",
+		"session_id": sessionID,
+		"message":    "The turn stopped unexpectedly (internal error). Your session is intact — send another message to continue.",
+	})
+	// Mirror the normal end-of-turn tail so the UI leaves its "thinking" state.
+	s.wsHub.broadcast(sessionID, map[string]any{"type": "complete", "session_id": sessionID})
+	s.wsHub.broadcast(sessionID, map[string]any{"type": "session_update", "session_id": sessionID, "status": "idle"})
+}
+
+// recoverBg recovers a panic from a background/throwaway goroutine (title and
+// suggestion generation, compaction, scheduled tasks). Same rationale as
+// recoverTurn — a panic in any goroutine crashes the process — but there is no
+// interactive turn to unstick, so it only logs.
+func (s *Server) recoverBg(what string) {
+	if r := recover(); r != nil {
+		slog.Error("recovered panic in background goroutine", "what", what, "panic", r, "stack", string(debug.Stack()))
+	}
+}
+
 // ─── runAgentTurnLoop / doAgentTurn ────────────────────────────────────────
 //
 // runAgentTurnLoop consumes steer messages queued mid-turn and chains turns
@@ -945,6 +984,7 @@ func joinNonEmpty(parts []string, sep string) string {
 // doAgentTurn is the single-turn body shared by the loop and retry paths.
 
 func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, blocks []agent.ContentBlock, images []string) {
+	defer s.recoverTurn(sess.ID)
 	if err := s.drain.begin(); err != nil {
 		// Restart drain in progress: surface a retryable error to the
 		// browser instead of starting a turn the shutdown would cut short.
@@ -1403,6 +1443,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	if err == nil && isAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
 		sid := sess.ID
 		go func() {
+			defer s.recoverBg("title generation")
 			defer s.releaseTitleGeneration(sid)
 			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
 			defer cancel()
@@ -1455,6 +1496,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// Fire-and-forget: the frontend shows it as ghost text; failures are silent.
 	if err == nil {
 		go func() {
+			defer s.recoverBg("suggestion generation")
 			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
 			defer cancel()
 			text, serr := a.Suggest(ctx, toolDefs)

@@ -137,6 +137,9 @@ func seedSessionDirectory(sess *agent.Session, dir string) error {
 // subscribed web UI tab sees the same live progress, tool cards, and completion
 // events as a normal chat turn.
 func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, error) {
+	// The scheduler fires this from a bare goroutine (go s.fire), so a panic in
+	// a scheduled turn would crash the whole serve process without this.
+	defer s.recoverBg("scheduled task (" + task.Name + ")")
 	if err := s.drain.begin(); err != nil {
 		return "", err
 	}
