@@ -62,6 +62,9 @@ func (WriteFileTool) Execute(ctx context.Context, _ string, input map[string]any
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("write_file: mkdir parent: %w", err)
 	}
+	// Stage the version being overwritten into the trash so a clobber that
+	// destroys uncommitted work is recoverable (no-op for a new file).
+	backupBeforeOverwrite(ctx, abs)
 	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("write_file: write %q: %w", path, err)
 	}

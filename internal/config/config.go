@@ -138,6 +138,25 @@ type Config struct {
 	// Language persists the user's UI language preference ("en" | "zh").
 	// Empty means the default (English).
 	Language string `yaml:"language,omitempty"`
+	// Trash configures the file recycle bin (agent-issued deletes and
+	// overwrites are staged there for recovery).
+	Trash TrashConfig `yaml:"trash,omitempty"`
+}
+
+// TrashConfig configures the file recycle bin.
+type TrashConfig struct {
+	// OverwriteBackup stages a copy of a file into the trash before write_file
+	// or edit_file overwrites it, so an overwrite that destroys uncommitted
+	// work is recoverable. Files that are tracked by git and clean are skipped
+	// regardless — git already holds a recoverable copy. nil means the default
+	// (enabled).
+	OverwriteBackup *bool `yaml:"overwrite_backup,omitempty"`
+}
+
+// OverwriteBackupEnabled reports whether write/edit overwrites are staged into
+// the trash first (default true).
+func (c *Config) OverwriteBackupEnabled() bool {
+	return c.Trash.OverwriteBackup == nil || *c.Trash.OverwriteBackup
 }
 
 // GoalConfig configures session goals (persistent objectives the agent keeps
