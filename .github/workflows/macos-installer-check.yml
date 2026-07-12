@@ -106,7 +106,16 @@ jobs:
           mkdir -p "$fake/Applications"
           cp -R expanded/octo-component.pkg/Payload/. "$fake/Applications/"
 
-          HOME="$fake" expanded/octo-component.pkg/Scripts/postinstall
+          # postinstall ends by `open`-ing the app. In CI we must not actually
+          # launch the GUI: it would run the app's ensureBundledOcto and write
+          # the very PATH line we assert postinstall itself does NOT write. Stub
+          # `open` to a no-op so postinstall is exercised in isolation.
+          stub="$RUNNER_TEMP/stub-bin"
+          mkdir -p "$stub"
+          printf '#!/bin/sh\nexit 0\n' > "$stub/open"
+          chmod +x "$stub/open"
+
+          HOME="$fake" PATH="$stub:$PATH" expanded/octo-component.pkg/Scripts/postinstall
 
           # The bundled CLI must be present and runnable inside the installed app.
           bin="$fake/Applications/Octo.app/Contents/Resources/octo"
