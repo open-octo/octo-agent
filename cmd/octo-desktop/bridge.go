@@ -179,7 +179,14 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		b.window.SetURL(target)
 	}
 	b.window.Show()
-	b.window.Restore()
+	// Only un-minimise here. Wails' Restore() also un-maximises (and exits
+	// fullscreen), so calling it unconditionally on every show/reopen — e.g.
+	// clicking the dock icon to return to a maximised window — would shrink the
+	// window back to its launch size. Guard on IsMinimised so a visible
+	// maximised/fullscreen window keeps its size.
+	if b.window.IsMinimised() {
+		b.window.Restore()
+	}
 	b.window.Focus()
 }
 
