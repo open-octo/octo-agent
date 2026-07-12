@@ -66,17 +66,6 @@ func main() {
 	// Pick the language for native dialogs/tray from the system UI language.
 	applyLang()
 
-	// Persist the hub's logs to ~/.octo/serve.log — the same file `octo serve -d`
-	// writes. The serve.pid protocol guarantees only one backend owns the port at
-	// a time, so the two never write it concurrently. Without this a Finder-/dock-
-	// launched .app drops its stderr into the OS console with nothing greppable on
-	// disk; the desktop hub reused serve.pid but never the log half of the daemon
-	// contract. The file self-rotates so an always-on hub can't grow it unbounded.
-	// On any failure we leave the process's default stderr in place.
-	if closeLog := setupHubLog(); closeLog != nil {
-		defer closeLog()
-	}
-
 	settings := loadDesktopSettings()
 
 	// Seed ~/.octo/bin/uv from the app's bundled copy on first run so skills
@@ -176,6 +165,9 @@ func main() {
 		_ = srv.Shutdown(ctx)
 		cancel()
 	}
+	if closeLog := bridge.closeLog.Load(); closeLog != nil {
+		(*closeLog)()
+	}
 	if err != nil {
 		log.Fatalf("octo-desktop: %v", err)
 	}
@@ -248,6 +240,18 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	}
 	if path, perr := serveproc.PidPath(); perr == nil {
 		_ = serveproc.WritePid(path, os.Getpid())
+	}
+
+	// Only now, having taken over any prior daemon and bound the port, are we the
+	// sole backend — so it's safe to open the shared ~/.octo/serve.log. A prior
+	// `octo serve -d` that was stopped above has since exited (listenHub only
+	// succeeds once the port is free), releasing the fd it held on the file;
+	// opening/rotating earlier (e.g. in main, before the takeover) could rotate a
+	// file a live daemon still holds open — on Windows the rename would fail
+	// outright and drop us to a console for the whole session. Set up before
+	// server.New so the hub's own startup logs are captured too.
+	if closeLog := setupHubLog(); closeLog != nil {
+		bridge.closeLog.Store(&closeLog)
 	}
 
 	// Channels start only when the per-machine toggle is on (default off): the

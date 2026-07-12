@@ -25,6 +25,12 @@ type nativeBridge struct {
 	srv atomic.Pointer[server.Server]
 	url string // http://127.0.0.1:8088, set once bound
 
+	// closeLog releases the rotating serve.log writer that startHub installs once
+	// this process owns the port. Written by startHub (the ApplicationStarted
+	// goroutine) and read by main's post-Run cleanup on another goroutine, so it's
+	// atomic like srv.
+	closeLog atomic.Pointer[func()]
+
 	// allowQuit gates the app's ShouldQuit on Windows/Linux, where closing the
 	// last window would otherwise terminate the app (and the hub with it). It
 	// starts false when KeepRunningInBackground is on, so a window close hides
