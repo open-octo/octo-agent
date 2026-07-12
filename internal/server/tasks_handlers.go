@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -136,16 +137,23 @@ func seedSessionDirectory(sess *agent.Session, dir string) error {
 // creating (or reusing) a session and running a single streamed turn, so any
 // subscribed web UI tab sees the same live progress, tool cards, and completion
 // events as a normal chat turn.
-func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (string, error) {
+func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID string, err error) {
 	// The scheduler fires this from a bare goroutine (go s.fire), so a panic in
-	// a scheduled turn would crash the whole serve process without this.
-	defer s.recoverBg("scheduled task (" + task.Name + ")")
-	if err := s.drain.begin(); err != nil {
-		return "", err
+	// a scheduled turn would crash the whole serve process without this. Named
+	// returns let the recover surface the panic as an error, so the scheduler
+	// records the run as failed rather than silently as a success.
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("recovered panic in scheduled task", "task", task.Name, "panic", r, "stack", string(debug.Stack()))
+			err = fmt.Errorf("scheduled task %q panicked: %v", task.Name, r)
+		}
+	}()
+	if derr := s.drain.begin(); derr != nil {
+		return "", derr
 	}
 	defer s.drain.end()
 
-	sessionID, err := s.CreateSession(task)
+	sessionID, err = s.CreateSession(task)
 	if err != nil {
 		return sessionID, err
 	}
