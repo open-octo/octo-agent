@@ -67,28 +67,37 @@ func TestWindowsSafeRm_EndToEnd(t *testing.T) {
 		}
 	}
 
-	// Both recoverable, stamped rm/delete; the ghost was never staged.
+	// Both recoverable, stamped rm/delete; the ghost was never staged. Match by
+	// basename: PowerShell's Resolve-Path canonicalizes to the long path form
+	// while Go's t.TempDir may hand back an 8.3 short path, so the full
+	// "original" strings won't be equal on Windows.
 	entries, err := trash.List()
 	if err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]trash.Entry{}
 	for _, e := range entries {
-		seen[e.Original] = e
+		seen[filepath.Base(e.Original)] = e
 	}
-	for _, p := range []string{rel, abs} {
-		e, ok := seen[p]
+	for _, base := range []string{"rel.txt", "abs.txt"} {
+		e, ok := seen[base]
 		if !ok {
-			t.Errorf("%s not backed up", p)
+			t.Errorf("%s not backed up (have %v)", base, entryBasenames(entries))
 			continue
 		}
 		if e.DeletedBy != "rm" || e.Kind != "delete" {
-			t.Errorf("%s provenance = %q/%q, want rm/delete", p, e.DeletedBy, e.Kind)
+			t.Errorf("%s provenance = %q/%q, want rm/delete", base, e.DeletedBy, e.Kind)
 		}
 	}
-	for _, e := range entries {
-		if strings.HasSuffix(e.Original, "ghost.txt") {
-			t.Error("a non-existent target must not be staged")
-		}
+	if _, ok := seen["ghost.txt"]; ok {
+		t.Error("a non-existent target must not be staged")
 	}
+}
+
+func entryBasenames(entries []trash.Entry) []string {
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = filepath.Base(e.Original)
+	}
+	return out
 }
