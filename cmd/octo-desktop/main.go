@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -76,7 +77,44 @@ func notificationsAvailable() bool {
 	return true
 }
 
+// homeIfRootLaunch returns the directory the hub should switch to given its
+// inherited working dir and the user's home, or "" to keep the inherited dir.
+// A GUI launcher drops a double-clicked app at a filesystem root — "/" for
+// Finder/LaunchServices on macOS and several Linux .desktop launchers, a drive
+// root like "C:\" on Windows — detected here as a path that is its own parent;
+// an os.Getwd error surfaces as an empty wd. In those cases home is the sane
+// default. A meaningful cwd (a terminal launch from a project dir) is left
+// untouched. Not covered: a Windows launch that inherits a system directory
+// such as C:\Windows\System32 — that is not a root, so this leaves it in place.
+func homeIfRootLaunch(wd, home string) string {
+	if home == "" {
+		return ""
+	}
+	if wd == "" || filepath.Dir(wd) == wd {
+		return home
+	}
+	return ""
+}
+
+// ensureWorkingDir moves the process out of a root/unknown launch directory
+// into the user's home. New sessions with no configured workspace_dir default
+// to the server's launch directory, so a Finder-launched app left at "/" would
+// run the agent's tools from the filesystem root — the reported bug. Best
+// effort: a chdir failure leaves the inherited dir in place.
+func ensureWorkingDir() {
+	wd, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	if dir := homeIfRootLaunch(wd, home); dir != "" {
+		_ = os.Chdir(dir)
+	}
+}
+
 func main() {
+	// A GUI launch inherits "/" as the working directory; move to the user's
+	// home before anything reads it (the in-process server records its launch
+	// dir as the default for sessions without a configured workspace_dir).
+	ensureWorkingDir()
+
 	// Pick the language for native dialogs/tray from the system UI language.
 	applyLang()
 
