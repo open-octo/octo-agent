@@ -27,6 +27,8 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/serveproc"
 	"github.com/open-octo/octo-agent/internal/server"
+	"github.com/open-octo/octo-agent/internal/upgrade"
+	"github.com/open-octo/octo-agent/internal/version"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -210,8 +212,11 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	// /api/native/channels.
 	channelsOn := settings.ChannelsEnabled
 	srv, err := server.New(server.Config{
-		Tools:           true,
-		UpdateCheck:     false,
+		Tools: true,
+		// On: the version badge needs the latest-release lookup to know an update
+		// exists. It reports upgrade_mode "installer" (Native is set), so the UI
+		// offers a download link, not the in-place swap this build can't do.
+		UpdateCheck:     true,
 		Native:          bridge,
 		ChannelsEnabled: &channelsOn,
 	})
@@ -228,6 +233,35 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	}()
 
 	bridge.showWindow()
+}
+
+// checkForUpdates is the tray "Check for updates…" action. It runs on a
+// background goroutine (never the UI thread) so the network round-trip can't
+// freeze the menu, then reports via a native dialog: a newer release offers to
+// open the download page; already-current shows an info dialog; a failed lookup
+// shows an error. Pure native path — it works with the window closed to the
+// tray, and uses modal dialogs (not Notify) so an unbundled build without the
+// notifications service still surfaces the result.
+func checkForUpdates(bridge *nativeBridge) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	latest, err := upgrade.Check(ctx)
+	if err != nil {
+		bridge.showError(L().updTitle, L().updFailed)
+		return
+	}
+	current := strings.TrimPrefix(version.Version, "v")
+	// Eligible() != nil means a dev/unbundled build that never claims to be
+	// behind (matching the badge); report status without offering a download.
+	if upgrade.Eligible() != nil || upgrade.CompareVersions(current, latest) >= 0 {
+		bridge.showInfo(L().updTitle, fmt.Sprintf(L().updLatestFmt, current))
+		return
+	}
+	if bridge.confirm(L().updTitle, fmt.Sprintf(L().updAvailableFmt, latest), L().updOpen, L().updLater) {
+		if err := bridge.OpenExternal(upgrade.DownloadPageURL); err != nil {
+			bridge.showError(L().updTitle, err.Error())
+		}
+	}
 }
 
 // listenHub binds addr, retrying for up to grace so a just-stopped daemon has
@@ -280,6 +314,7 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 	m.AddSeparator()
 	m.Add(L().trayShow).OnClick(func(*application.Context) { bridge.showWindow() })
 	m.Add(L().traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
+	m.Add(L().trayCheckUpdates).OnClick(func(*application.Context) { go checkForUpdates(bridge) })
 	m.AddSeparator()
 	m.Add(L().trayQuit).OnClick(func(*application.Context) { bridge.requestQuit() })
 	return m

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -195,6 +197,33 @@ func (b *nativeBridge) showError(title, message string) {
 	dlg := b.app.Dialog.Error().SetTitle(title).SetMessage(message)
 	dlg.AddButton(L().dialogOKText).SetAsDefault()
 	dlg.Show()
+}
+
+// showInfo shows a modal informational dialog with a single OK button (the
+// "you're on the latest version" outcome of the tray update check).
+func (b *nativeBridge) showInfo(title, message string) {
+	dlg := b.app.Dialog.Info().SetTitle(title).SetMessage(message)
+	dlg.AddButton(L().dialogOKText).SetAsDefault()
+	dlg.Show()
+}
+
+// OpenExternal opens url in the user's default browser — the release download
+// page, reached from the web badge's "Download update" action (via
+// /api/native/open-external) and the tray "Check for updates…" flow. The server
+// has already validated the scheme is http/https. It shells out to the
+// per-platform opener rather than pulling in a third-party helper; the Wails
+// runtime's own browser API isn't reachable here because the page is
+// octo-served, not served off Wails' asset server (same reason ExecJS is dead
+// in showWindowAt).
+func (b *nativeBridge) OpenExternal(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
+	}
 }
 
 // confirmTakeover asks whether to stop an already-running backend and become

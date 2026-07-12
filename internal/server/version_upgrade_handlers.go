@@ -50,7 +50,27 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		// uploading. Remote web gets neither and falls back to upload.
 		"native": s.cfg.Native != nil,
 		"local":  isLoopbackRemote(r.RemoteAddr),
+		// upgrade_mode tells the badge which update mechanism this server offers:
+		// "cli" — the in-place binary swap of POST /api/version/upgrade (octo
+		// serve); "installer" — the desktop build, whose binary can't be swapped
+		// in place (it would overwrite the GUI / break the macOS bundle), so the
+		// UI offers a download link instead. Derived, not configured.
+		"upgrade_mode": s.upgradeMode(),
+		// download_url is where "Download update" sends the user — the marketing
+		// site's per-platform installer buttons, not the raw releases listing — so
+		// the frontend needn't hardcode it. Constant; this endpoint is unauthenticated.
+		"download_url": upgrade.DownloadPageURL,
 	})
+}
+
+// upgradeMode reports how this server updates: "installer" for the desktop
+// build (a NativeBridge is wired and its binary is installer-managed), "cli"
+// otherwise (octo serve's in-place swap).
+func (s *Server) upgradeMode() string {
+	if s.cfg.Native != nil {
+		return "installer"
+	}
+	return "cli"
 }
 
 // latestVersion resolves the latest released version through the cache.
@@ -108,6 +128,16 @@ func needsUpdate(current, latest string) bool {
 // upgrade_complete broadcast, because the frontend ignores this response's
 // status code and only a completion event unwedges its popover.
 func (s *Server) handleVersionUpgrade(w http.ResponseWriter, r *http.Request) {
+	// The desktop build updates through its installer — its running binary is
+	// the GUI, not the octo CLI the release archive carries, so an in-place swap
+	// would corrupt it (and break the macOS bundle signature). Refuse here as
+	// defense in depth: the installer-mode frontend never posts this, but the
+	// route is registered unconditionally, so a remote peer must not drive it.
+	if s.cfg.Native != nil {
+		writeError(w, http.StatusConflict, "this build updates through its installer; use the download link")
+		return
+	}
+
 	s.upgradeMu.Lock()
 	if s.upgradeRunning {
 		s.upgradeMu.Unlock()

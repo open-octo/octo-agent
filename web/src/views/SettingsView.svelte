@@ -24,6 +24,13 @@
   let coauthor      = $state(true)
   let autostart     = $state(false) // desktop shell only
   let versionStr    = $state('')
+  // Update state, populated by loadVersion — used by the desktop-only "Check for
+  // updates" row. The desktop build reports upgrade_mode 'installer', so the row
+  // links to the release page rather than swapping the binary in place.
+  let latestStr     = $state('')
+  let updateAvail   = $state(false)
+  let downloadUrl   = $state('')
+  let checkingUpdate = $state(false)
   let saving        = $state(false)
   let loading       = $state(true)
   let providersLoaded = $state(false)
@@ -193,7 +200,31 @@
     try {
       const v = await api.getVersion() as any
       versionStr = v.current ?? v.version ?? ''
+      latestStr = v.latest ?? ''
+      updateAvail = !!v.needs_update
+      downloadUrl = v.download_url ?? ''
     } catch { /* non-critical */ }
+  }
+
+  // Desktop-only "Check for updates" action: re-fetch /api/version (which
+  // performs the latest-release lookup) and either open the release page or
+  // report that this build is current. Same install-through-installer flow as
+  // the version badge; the desktop shell is always a loopback peer, so the
+  // native bridge opens the page in the system browser.
+  async function checkUpdate() {
+    if (checkingUpdate) return
+    checkingUpdate = true
+    try {
+      await loadVersion()
+      if (updateAvail && downloadUrl) {
+        try { await api.openExternal(downloadUrl) }
+        catch { window.open(downloadUrl, '_blank', 'noopener') }
+      } else {
+        showToast($t('settings.update.uptodate'), 'success')
+      }
+    } finally {
+      checkingUpdate = false
+    }
   }
 
   function capitalize(s: string): string {
@@ -391,6 +422,21 @@
             </div>
             <Switch checked={autostart} onchange={(v) => toggleAutostart(v)} />
           </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">{$t('settings.update')}</span>
+              <span class="setting-desc">
+                {#if updateAvail}
+                  {$t('settings.update_available')} v{latestStr}
+                {:else}
+                  {$t('settings.update_desc')}
+                {/if}
+              </span>
+            </div>
+            <button class="btn-secondary" onclick={checkUpdate} disabled={checkingUpdate}>
+              {checkingUpdate ? $t('settings.update.checking') : updateAvail ? $t('upgrade.btn.download') : $t('settings.update.check')}
+            </button>
+          </div>
         {/if}
         <div class="setting-row last">
           <div class="setting-info">
@@ -537,6 +583,13 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
   font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
 }
 .btn-add:hover { border-color: var(--blue-5); color: var(--blue-5); }
+.btn-secondary {
+  height: 30px; padding: 0 14px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer;
+  font-family: inherit; white-space: nowrap;
+}
+.btn-secondary:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
+.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 .models-empty { padding: 28px 24px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
 .model-row {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;

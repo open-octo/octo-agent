@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"net/url"
 )
 
 // NativeBridge is the desktop shell's hook into OS-native capabilities that a
@@ -41,6 +42,12 @@ type NativeBridge interface {
 	// the double-click-the-titlebar zoom the frontend's draggable header can't do
 	// itself (the page is octo-served, so it has no Wails runtime to call).
 	ToggleMaximise()
+
+	// OpenExternal opens url in the user's default browser — used by the update
+	// badge's "Download update" action to reach the release page, since the
+	// desktop build updates through its installer, not an in-place swap. The
+	// server validates url is http/https before calling.
+	OpenExternal(url string) error
 }
 
 type nativePickFolderRequest struct {
@@ -236,5 +243,39 @@ func (s *Server) handleNativeToggleMaximise(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.cfg.Native.ToggleMaximise()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type nativeOpenExternalRequest struct {
+	URL string `json:"url"`
+}
+
+// POST /api/native/open-external — open a URL in the system browser (desktop
+// only). The update badge calls this in installer mode to reach the release
+// download page. Loopback-gated like the other native routes, and restricted to
+// http/https so the endpoint can't be coerced into launching a local handler.
+func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	var req nativeOpenExternalRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	u, err := url.Parse(req.URL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		writeError(w, http.StatusBadRequest, "only http(s) URLs may be opened")
+		return
+	}
+	if err := s.cfg.Native.OpenExternal(req.URL); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

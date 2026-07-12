@@ -30,8 +30,18 @@ import (
 	"github.com/open-octo/octo-agent/internal/version"
 )
 
-// BaseURL is the release origin. A var so tests point it at httptest.
+// BaseURL is the release origin — where the CLI in-place upgrade fetches asset
+// files (with MirrorBaseURLs as fallback). Machine-facing. A var so tests point
+// it at httptest.
 var BaseURL = "https://github.com/open-octo/octo-agent"
+
+// DownloadPageURL is the human-facing "get a new build" landing page: the marketing
+// site's hero has per-platform installer buttons (macOS .pkg / Windows .exe /
+// Linux AppImage, always resolving to releases/latest). The desktop shell's
+// notify-and-open flow sends the user here rather than to the raw GitHub
+// releases listing (which dumps every architecture + checksums). Distinct from
+// BaseURL: that's where bytes are fetched, this is where a person clicks.
+var DownloadPageURL = "https://octo-agent.dev/"
 
 // MirrorBaseURLs are tried in order when a release asset or checksums.txt
 // fails to download from BaseURL. They must expose the same path layout as

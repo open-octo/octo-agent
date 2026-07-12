@@ -22,6 +22,11 @@
   let latest = $state('')
   let needsUpdate = $state(false)
   let cliCommand = $state('octo')
+  // upgradeMode is 'cli' (octo serve — the in-place swap below is valid) or
+  // 'installer' (desktop build — a swap would clobber the running binary, so we
+  // link to the download page instead). downloadUrl is that download page.
+  let upgradeMode = $state<'cli' | 'installer'>('cli')
+  let downloadUrl = $state('')
   let phase = $state<Phase>('idle')
   let logLines = $state<string[]>([])
   let open = $state(false)
@@ -41,9 +46,24 @@
       latest = d.latest ?? ''
       needsUpdate = !!d.needs_update
       if (d.cli_command) cliCommand = d.cli_command
+      upgradeMode = d.upgrade_mode === 'installer' ? 'installer' : 'cli'
+      downloadUrl = d.download_url ?? ''
       nativeShell.set(d.native === true)
       localAccess.set(d.local === true)
     } catch { /* badge stays minimal */ }
+  }
+
+  // Installer mode: open the release download page instead of swapping the
+  // binary in place. A loopback peer (the desktop window, or a localhost
+  // browser) routes through the native bridge; a remote browser can't drive the
+  // desktop process, so it opens the page in its own new tab.
+  async function downloadUpdate() {
+    if (!downloadUrl) return
+    if ($localAccess) {
+      try { await api.openExternal(downloadUrl); open = false; return } catch { /* fall through to window.open */ }
+    }
+    window.open(downloadUrl, '_blank', 'noopener')
+    open = false
   }
 
   onMount(() => {
@@ -142,7 +162,11 @@
         <p class="vb-desc">{$t('upgrade.desc')}</p>
         <p class="vb-versions">v{current} <span class="vb-arrow">→</span> v{latest}</p>
         <div class="vb-actions">
-          <button class="vb-btn-primary" onclick={startUpgrade}>{$t('upgrade.btn.upgrade')}</button>
+          {#if upgradeMode === 'installer'}
+            <button class="vb-btn-primary" onclick={downloadUpdate}>{$t('upgrade.btn.download')}</button>
+          {:else}
+            <button class="vb-btn-primary" onclick={startUpgrade}>{$t('upgrade.btn.upgrade')}</button>
+          {/if}
           <button class="vb-btn-cancel" onclick={close}>{$t('upgrade.btn.cancel')}</button>
         </div>
       {:else}

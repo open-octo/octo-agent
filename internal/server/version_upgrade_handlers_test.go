@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -72,5 +73,51 @@ func TestLatestVersion_DevBuildNeverNags(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
 	if latest, needs := srv.latestVersion(); needs {
 		t.Errorf("dev build reported needs_update for latest %q", latest)
+	}
+}
+
+// TestVersionUpgradeMode: a plain serve build reports upgrade_mode "cli"; the
+// desktop build (a NativeBridge wired) reports "installer". download_url is
+// always present so the badge needn't hardcode the download landing page.
+func TestVersionUpgradeMode(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	get := func(srv *Server) (mode, downloadURL string) {
+		req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		m, _ := body["upgrade_mode"].(string)
+		u, _ := body["download_url"].(string)
+		return m, u
+	}
+
+	if mode, url := get(mustServer(t, Config{Addr: "127.0.0.1:0"})); mode != "cli" || url == "" {
+		t.Errorf("serve build: got mode=%q download_url=%q, want cli / non-empty", mode, url)
+	}
+	if mode, _ := get(mustServer(t, Config{Addr: "127.0.0.1:0", Native: &fakeNative{}})); mode != "installer" {
+		t.Errorf("desktop build: got mode=%q, want installer", mode)
+	}
+}
+
+// TestVersionUpgradeRefusedInInstallerMode: the in-place swap endpoint refuses
+// with 409 when a NativeBridge is wired, so a remote peer can't drive a desktop
+// binary swap.
+func TestVersionUpgradeRefusedInInstallerMode(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: &fakeNative{}})
+	req := httptest.NewRequest(http.MethodPost, "/api/version/upgrade", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("installer-mode upgrade: got %d, want 409", w.Code)
 	}
 }

@@ -15,6 +15,7 @@ import (
 type uiStrings struct {
 	trayShow, trayQuit string
 	traySettings       string
+	trayCheckUpdates   string
 	trayStarting       string
 	trayBackendFmt     string // "Backend · %s"
 	trayChannelsOff    string
@@ -37,12 +38,20 @@ type uiStrings struct {
 	errStopFmt   string // "...%v"
 	errStartFmt  string // "...%v"
 	dialogOKText string
+
+	updTitle        string
+	updFailed       string
+	updLatestFmt    string // "...(v%s)."
+	updAvailableFmt string // "...%s..."
+	updOpen         string
+	updLater        string
 }
 
 var enStrings = uiStrings{
 	trayShow:           "Show Octo",
 	trayQuit:           "Quit Octo",
 	traySettings:       "Settings…",
+	trayCheckUpdates:   "Check for Updates…",
 	trayStarting:       "Starting…",
 	trayBackendFmt:     "Backend · %s",
 	trayChannelsOff:    "Channels: off",
@@ -65,12 +74,20 @@ var enStrings = uiStrings{
 	errStopFmt:   "Couldn't stop the running backend: %v",
 	errStartFmt:  "Couldn't start the backend: %v",
 	dialogOKText: "OK",
+
+	updTitle:        "Octo",
+	updFailed:       "Couldn't check for updates. Please try again later.",
+	updLatestFmt:    "You're on the latest version (v%s).",
+	updAvailableFmt: "Octo %s is available. Open the download page?",
+	updOpen:         "Open Download Page",
+	updLater:        "Later",
 }
 
 var zhStrings = uiStrings{
 	trayShow:           "显示 Octo",
 	trayQuit:           "退出 Octo",
 	traySettings:       "设置…",
+	trayCheckUpdates:   "检查更新…",
 	trayStarting:       "启动中…",
 	trayBackendFmt:     "后端 · %s",
 	trayChannelsOff:    "Channel：未开启",
@@ -93,6 +110,13 @@ var zhStrings = uiStrings{
 	errStopFmt:   "无法停止正在运行的后端：%v",
 	errStartFmt:  "无法启动后端：%v",
 	dialogOKText: "好",
+
+	updTitle:        "Octo",
+	updFailed:       "检查更新失败,请稍后重试。",
+	updLatestFmt:    "已是最新版本(v%s)。",
+	updAvailableFmt: "Octo %s 已发布,是否打开下载页?",
+	updOpen:         "打开下载页",
+	updLater:        "稍后",
 }
 
 // active holds the current string set. It's an atomic pointer because the tray
