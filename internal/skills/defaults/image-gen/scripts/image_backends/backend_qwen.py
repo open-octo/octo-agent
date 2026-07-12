@@ -6,6 +6,12 @@ Configuration keys:
   QWEN_API_KEY / DASHSCOPE_API_KEY   (required)
   QWEN_BASE_URL                      (optional)
   QWEN_MODEL                         (optional)
+
+Note: the default endpoint is the China host (dashscope.aliyuncs.com).
+If your API key was issued by DashScope's international console and
+returns 401, override the base URL to the international endpoint:
+
+  QWEN_BASE_URL=https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
 """
 
 import sys
