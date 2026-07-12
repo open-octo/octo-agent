@@ -74,6 +74,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runInit(args[1:], stdin, stdout, stderr)
 	case "config":
 		return runConfig(args[1:], stdin, stdout, stderr)
+	case "doctor":
+		return runDoctor(args[1:], stdin, stdout, stderr)
 	case "memory":
 		return runMemory(args[1:], stdout, stderr)
 	case "sessions":
@@ -133,7 +135,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --quiet / --verbose      Less / more status chrome")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
-	fmt.Fprintln(w, "  config     Set your default provider/model (~/.octo/config.yml)")
+	fmt.Fprintln(w, "  config     Set your default provider/model (`octo config --fix` repairs it)")
+	fmt.Fprintln(w, "  doctor     Check config + environment health (safe to run with a broken config)")
 	fmt.Fprintln(w, "  serve      Start the HTTP server (REST + WebSocket + Web UI)")
 	fmt.Fprintln(w, "  init       Analyze the repo and generate/update .octorules")
 	fmt.Fprintln(w, "  memory     Manage cross-session memory (e.g. `octo memory list`)")
