@@ -23,6 +23,15 @@ type desktopSettings struct {
 	// installers). It scopes the refresh-on-upgrade: an octo on ~/.local/bin
 	// with no matching record here is the user's own and is never overwritten.
 	SeededOctoVersion string `json:"seeded_octo_version,omitempty"`
+	// WindowWidth/WindowHeight remember the window's non-maximised size across
+	// relaunches. Zero (a fresh install) means "use the built-in default size".
+	// They hold the *restore* size — while maximised the size isn't overwritten,
+	// so un-maximising after a relaunch returns to the size the user last chose.
+	WindowWidth  int `json:"window_width,omitempty"`
+	WindowHeight int `json:"window_height,omitempty"`
+	// WindowMaximised remembers whether the window was maximised at exit, so a
+	// relaunch reopens maximised instead of at the restore size.
+	WindowMaximised bool `json:"window_maximised,omitempty"`
 }
 
 // defaultDesktopSettings is what a first launch (no file yet) uses.

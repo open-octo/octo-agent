@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -43,6 +44,54 @@ type nativeBridge struct {
 
 	settingsMu sync.Mutex
 	settings   desktopSettings
+	// geomTimer debounces window-geometry persistence: WindowDidResize fires
+	// once per pixel during a drag, so we coalesce to a single write after the
+	// gesture settles. Guarded by settingsMu.
+	geomTimer *time.Timer
+}
+
+// Built-in window size for a first launch (no saved geometry yet).
+const (
+	defaultWindowWidth  = 1280
+	defaultWindowHeight = 860
+)
+
+// scheduleWindowGeometrySave coalesces the flood of WindowDidResize events from
+// a single drag/zoom into one persisted write ~400ms after it settles.
+func (b *nativeBridge) scheduleWindowGeometrySave() {
+	b.settingsMu.Lock()
+	defer b.settingsMu.Unlock()
+	if b.geomTimer != nil {
+		b.geomTimer.Stop()
+	}
+	b.geomTimer = time.AfterFunc(400*time.Millisecond, b.saveWindowGeometry)
+}
+
+// saveWindowGeometry records the window's current maximised state and, while it
+// is NOT maximised, its size. Skipping the size write while maximised keeps the
+// persisted W×H as the restore size, so a relaunch that reopens maximised still
+// un-maximises back to the size the user last chose. Wails window methods are
+// read outside the lock — they marshal to the UI thread internally, and holding
+// settingsMu across that could deadlock the main thread.
+func (b *nativeBridge) saveWindowGeometry() {
+	b.settingsMu.Lock()
+	w := b.window
+	b.settingsMu.Unlock()
+	if w == nil {
+		return
+	}
+	maximised := w.IsMaximised()
+	width, height := w.Size()
+
+	b.settingsMu.Lock()
+	b.settings.WindowMaximised = maximised
+	if !maximised && width > 0 && height > 0 {
+		b.settings.WindowWidth = width
+		b.settings.WindowHeight = height
+	}
+	snapshot := b.settings
+	b.settingsMu.Unlock()
+	_ = saveDesktopSettings(snapshot)
 }
 
 // PickFolder opens the OS directory-choose dialog and returns the chosen path.
@@ -156,19 +205,38 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		if b.app == nil || b.url == "" {
 			return // not bound yet
 		}
+		// Restore the size and maximised state saved from the last session.
+		b.settingsMu.Lock()
+		width, height, maximised := b.settings.WindowWidth, b.settings.WindowHeight, b.settings.WindowMaximised
+		b.settingsMu.Unlock()
+		if width <= 0 || height <= 0 {
+			width, height = defaultWindowWidth, defaultWindowHeight
+		}
+		startState := application.WindowStateNormal
+		if maximised {
+			startState = application.WindowStateMaximised
+		}
 		w := b.app.Window.NewWithOptions(application.WebviewWindowOptions{
-			Title:  "Octo",
-			Width:  1280,
-			Height: 860,
-			URL:    target,
+			Title:      "Octo",
+			Width:      width,
+			Height:     height,
+			StartState: startState,
+			URL:        target,
 			// Hidden-inset title bar: the traffic lights float over the page's
 			// top-left; the frontend insets its header past them (nativeShell).
 			Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
 		})
 		// Forget the window when it closes so a later Show re-creates one; the
 		// app itself stays alive via ApplicationShouldTerminateAfterLastWindowClosed.
+		// Flush the latest geometry first, in case a resize is still pending in
+		// the debounce timer when the window (or the app) goes away.
 		w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
+			b.saveWindowGeometry()
 			b.window = nil
+		})
+		// Persist size/maximised changes as the user drags or zooms the window.
+		w.OnWindowEvent(events.Common.WindowDidResize, func(*application.WindowEvent) {
+			b.scheduleWindowGeometrySave()
 		})
 		b.window = w
 	} else if hash != "" {
