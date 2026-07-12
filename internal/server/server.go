@@ -2665,6 +2665,14 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	cwd, envCtx := s.sessionCwdEnv(sess.Store)
 	sess.Agent.CWD = cwd          // keep tool cwd aligned with the per-session dir the prompt/hooks use
 	cfg, _ := config.LoadCached() // zero value on error (no last-good yet) still resolves correctly via EffectiveCoauthor
+	// Honor the configured auto-compaction threshold, like buildAgent does for
+	// web/desktop turns. The IM agent is persistent across turns (not rebuilt via
+	// buildAgent), so resolve it per turn — and reset to 0 when unset so a config
+	// change (or its removal) takes effect on the next turn.
+	sess.Agent.CompactAutoFraction = 0
+	if cfg.CompactAutoPct > 0 {
+		sess.Agent.CompactAutoFraction = float64(cfg.CompactAutoPct) / 100.0
+	}
 	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(sess.Agent.Model), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,

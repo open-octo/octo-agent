@@ -158,6 +158,32 @@ func TestRouteChannelEvent_NormalMessageRunsTurn(t *testing.T) {
 // TestHandleChannelMessage_SetsPerTurnGate: every IM turn gets a fresh
 // permission gate (configured mode + chat-interactive ask) on the session
 // agent — the factory-time strict gate is gone.
+// IM turns build their agent via the channel factory (persistent, not buildAgent),
+// so runChannelTurns must resolve compact_auto_pct from config per turn — else IM
+// silently ignores the configured threshold that web/desktop honor.
+func TestHandleChannelMessage_HonorsCompactAutoPct(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models:         []config.ModelEntry{{Provider: "openai", Model: "stub-model"}},
+		DefaultModel:   "stub-model",
+		CompactAutoPct: 70,
+	})
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"))
+	// The factory does not set it; only a turn resolves it from config.
+	if sess.Agent.CompactAutoFraction != 0 {
+		t.Fatalf("factory should not pre-set CompactAutoFraction, got %v", sess.Agent.CompactAutoFraction)
+	}
+
+	srv.handleChannelMessage(context.Background(), ad, evFor("hello"))
+
+	if want := float64(70) / 100.0; sess.Agent.CompactAutoFraction != want {
+		t.Errorf("after an IM turn CompactAutoFraction = %v, want %v (from compact_auto_pct: 70)", sess.Agent.CompactAutoFraction, want)
+	}
+}
+
 func TestHandleChannelMessage_SetsPerTurnGate(t *testing.T) {
 	srv := chanServer(t)
 	ad := &fullFakeAdapter{}
