@@ -299,6 +299,27 @@
       margin: 0 auto;
     }
 
+    /* One brain, many arms — the octopus diagram */
+    .octo-map { max-width: 720px; margin: -1rem auto 2.5rem; }
+    .octo-map svg { width: 100%; height: auto; display: block; }
+    .om-boundary { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 4 6; opacity: 0.5; }
+    .om-boundary-label { fill: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+    .om-arm { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; opacity: 0.85; stroke-dasharray: 4 10; animation: om-flow 3.4s linear infinite; }
+    .om-exit { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; }
+    .om-chip { fill: var(--card-bg); stroke: var(--border); stroke-width: 1.4; }
+    .om-ico { fill: none; stroke: var(--accent); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+    .om-name { fill: var(--fg-secondary); font-size: 14px; font-weight: 600; }
+    .om-brain-ring { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+    .om-brain-body { fill: var(--accent); }
+    .om-brain-eye { fill: var(--bg); }
+    .om-model { fill: var(--accent); }
+    .om-model-txt { fill: #fff; font-size: 13px; font-weight: 600; }
+    .octo-map text { font-family: inherit; }
+    .octo-map figcaption { text-align: center; color: var(--muted); font-size: 0.92rem; max-width: 540px; margin: 0.75rem auto 0; }
+    @keyframes om-flow { to { stroke-dashoffset: -140; } }
+    @media (prefers-reduced-motion: reduce) { .om-arm { animation: none; } }
+    @media (max-width: 640px) { .octo-map { margin-top: 0; } }
+
     /* Feature grid */
     .features {
       display: grid;
@@ -649,6 +670,66 @@
         <p data-en="Each interface is a first-class arm — same brain, same memory, same ~/.octo. Reach the agent from wherever you work."
            data-zh="每个界面都是一条一等公民的腕 —— 同一个大脑、同一份记忆、同一个 ~/.octo。你在哪干活，就从哪够到它。"></p>
       </div>
+
+      <figure class="octo-map reveal">
+        <svg viewBox="0 0 720 430" role="img" aria-label="One brain, many arms — one local agent reaching six interfaces, with only requests leaving your machine">
+          <!-- your-machine boundary -->
+          <rect class="om-boundary" x="28" y="70" width="550" height="330" rx="24"/>
+          <text class="om-boundary-label" x="40" y="60">your machine</text>
+
+          <!-- six arms (brain → interfaces) -->
+          <path class="om-arm" d="M262 216 C216 200 176 165 146 151"/>
+          <path class="om-arm" d="M250 240 C210 232 165 248 134 240"/>
+          <path class="om-arm" d="M262 264 C216 280 176 315 146 329"/>
+          <path class="om-arm" d="M338 216 C384 200 424 165 454 151"/>
+          <path class="om-arm" d="M350 240 C390 232 435 248 466 240"/>
+          <path class="om-arm" d="M338 264 C384 280 424 315 454 329"/>
+
+          <!-- the one thing that leaves: request → model -->
+          <path class="om-exit" d="M300 190 C300 150 300 95 300 46"/>
+          <path class="om-exit" d="M293 55 L300 44 L307 55"/>
+          <rect class="om-model" x="246" y="8" width="108" height="32" rx="16"/>
+          <text class="om-model-txt" x="300" y="29" text-anchor="middle">your model</text>
+
+          <!-- brain -->
+          <circle class="om-brain-ring" cx="300" cy="240" r="50"/>
+          <g transform="translate(259,199) scale(0.82)">
+            <path class="om-brain-body" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/>
+            <circle class="om-brain-eye" cx="40" cy="42" r="5"/>
+            <circle class="om-brain-eye" cx="60" cy="42" r="5"/>
+          </g>
+
+          <!-- endpoints: chip + hand-drawn line icon + label -->
+          <!-- Terminal -->
+          <rect class="om-chip" x="108" y="130" width="40" height="40" rx="10"/>
+          <g class="om-ico" transform="translate(116,138)"><polyline points="5 7 10 12 5 17"/><line x1="12" y1="17" x2="19" y2="17"/></g>
+          <text class="om-name" x="96" y="155" text-anchor="end">Terminal</text>
+          <!-- VS Code -->
+          <rect class="om-chip" x="92" y="220" width="40" height="40" rx="10"/>
+          <g class="om-ico" transform="translate(100,228)"><polyline points="9 8 5 12 9 16"/><polyline points="15 8 19 12 15 16"/></g>
+          <text class="om-name" x="80" y="245" text-anchor="end">VS Code</text>
+          <!-- Obsidian -->
+          <rect class="om-chip" x="108" y="310" width="40" height="40" rx="10"/>
+          <g class="om-ico" transform="translate(116,318)"><path d="M12 2 4 9l8 13 8-13-8-7z"/><path d="M4 9h16"/></g>
+          <text class="om-name" x="96" y="335" text-anchor="end">Obsidian</text>
+          <!-- Web -->
+          <rect class="om-chip" x="452" y="130" width="40" height="40" rx="10"/>
+          <g class="om-ico" transform="translate(460,138)"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3c3.5 3 3.5 15 0 18M12 3c-3.5 3-3.5 15 0 18"/></g>
+          <text class="om-name" x="496" y="155" text-anchor="start">Web</text>
+          <!-- Desktop -->
+          <rect class="om-chip" x="468" y="220" width="40" height="40" rx="10"/>
+          <g class="om-ico" transform="translate(476,228)"><rect x="3" y="4" width="18" height="12" rx="1.5"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="16" x2="12" y2="20"/></g>
+          <text class="om-name" x="512" y="245" text-anchor="start">Desktop</text>
+          <!-- IM -->
+          <rect class="om-chip" x="452" y="310" width="40" height="40" rx="10"/>
+          <g class="om-ico" transform="translate(460,318)"><path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/></g>
+          <text class="om-name" x="496" y="335" text-anchor="start">IM</text>
+        </svg>
+        <figcaption
+          data-en="Everything lives in one body on your machine — only the requests you send cross the line, to the model you chose."
+          data-zh="一切都在你机器上的同一具身体里 —— 只有你发出的请求会越过这条线，去到你选定的模型。"></figcaption>
+      </figure>
+
       <div class="interfaces">
         <div class="iface reveal">
           <div class="iface-icon">💻</div>
