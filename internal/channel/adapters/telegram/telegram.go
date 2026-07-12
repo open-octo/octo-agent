@@ -837,9 +837,9 @@ func (a *Adapter) processUpdate(upd tgUpdate, onMessage func(channel.InboundEven
 		chatType = "group"
 	}
 
-	// Debug-level and content-free: message text is not logged, and the line
-	// stays silent at the default level so IM traffic never lands in serve.log.
-	slog.Debug("channel message received", "platform", platformName, "chat", msg.Chat.ID, "user", userID, "chat_type", chatType, "chars", len(text))
+	// Content-free reception line: message text is never logged (only metadata),
+	// so this stays a safe per-message signal in serve.log at the default level.
+	slog.Info("channel message received", "platform", platformName, "chat", msg.Chat.ID, "user", userID, "chat_type", chatType, "bytes", len(text))
 	onMessage(channel.InboundEvent{
 		Type:      "message",
 		Platform:  platformName,

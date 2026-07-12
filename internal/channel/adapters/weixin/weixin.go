@@ -750,9 +750,9 @@ func (a *Adapter) handleInbound(wire *ilink.WireMessage, onMessage func(channel.
 		return
 	}
 
-	// Debug-level and content-free: message text is not logged, and the line
-	// stays silent at the default level so IM traffic never lands in serve.log.
-	slog.Debug("channel message received", "platform", platformName, "chat", userID, "user", userID, "chars", len(strings.TrimSpace(text)))
+	// Content-free reception line: message text is never logged (only metadata),
+	// so this stays a safe per-message signal in serve.log at the default level.
+	slog.Info("channel message received", "platform", platformName, "chat", userID, "user", userID, "bytes", len(strings.TrimSpace(text)))
 
 	ev := channel.InboundEvent{
 		Type:         "message",

@@ -972,9 +972,9 @@ func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.Inb
 		chatType = "group"
 	}
 
-	// Debug-level: reception is routine traffic, silent at the default level so
-	// it never fills serve.log. Message text was never logged here.
-	slog.Debug("channel message received", "platform", platformName, "chat", chatID, "user", msg.From.UserID, "chat_type", chatType, "msgtype", msg.MsgType)
+	// Content-free reception line: message text is never logged (only metadata),
+	// so this stays a safe per-message signal in serve.log at the default level.
+	slog.Info("channel message received", "platform", platformName, "chat", chatID, "user", msg.From.UserID, "chat_type", chatType, "msgtype", msg.MsgType)
 	onMessage(channel.InboundEvent{
 		Type:      "message",
 		Platform:  platformName,
