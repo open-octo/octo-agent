@@ -319,6 +319,16 @@ octo --sandbox --sandbox-write ./build      # 额外可写目录（可重复）
 octo --sandbox --sandbox-read /opt/data     # 额外可读目录（可重复）
 ```
 
+## 回收站
+
+Agent 发疯删错、覆盖错文件，不该让你丢掉工作成果。octo 在 `~/.octo/trash/` 维护一个按项目隔离的文件级回收站：
+
+- **删除被拦截。** Agent 发起的 `rm` / `del` / `Remove-Item` 会被包一层，目标在删除*之前*先复制进回收站，之后可从 Web UI 的 **文件回收站** 面板还原。Agent 通过 session、skill、workflow、调度器、记忆等途径的删除也同样受保护。
+- **覆盖会备份。** `write_file` / `edit_file` 覆盖已有文件前，旧内容先暂存进回收站，工具结果里给出一键 **撤销**。已被 git 跟踪且干净的文件会跳过 —— `git checkout` 本就能还原，回收站因此保持精简。
+- **还原绝不覆盖。** 如果原路径处已重新存在文件，还原不会静默覆盖它：octo 会中止、还原到旁边、或先把当前文件移入回收站 —— 由你选择。
+- **记录来源。** 每条记录都知道是谁删的（`rm`、`write_file`、某个 session 及其标题、某个 skill、某个 workflow……）以及何时删的，误删和有意删除一眼可辨。
+- **自动有界。** 条目 14 天后自动过期，回收站上限 10 GiB（均可经 `trash.retention_days` / `trash.max_size_mb` 配置），超限时按最旧优先淘汰，绝不无限增长。
+
 ## 已实现
 
 | 领域 | 状态 | 内容 |
@@ -331,6 +341,7 @@ octo --sandbox --sandbox-read /opt/data     # 额外可读目录（可重复）
 | 记忆与配置 | 完成 | `~/.octo/octorules.md`、`.octorules`、`octo init`、`@include` |
 | Skills | 完成 | 兼容 Claude Code 的 SKILL.md 加载器（`octo skills`、`/skills`、`/<name>`） |
 | 沙箱 | 完成 | 操作系统强制的 `--sandbox`（macOS / Linux） |
+| 回收站 | 完成 | `~/.octo/trash/` 文件级回收站 —— agent 的删除（`rm`/`del`/`Remove-Item`）和 `write_file`/`edit_file` 覆盖都先备份；可从 Web UI 还原或一键撤销，带来源标记，按保留期 + 体积上限清理 |
 | MCP 客户端 | 完成 | `mcp.json` 的 stdio + Streamable HTTP 服务，tools/resources/prompts，OAuth（Authorization Code + PKCE）；Tool Search 按需延迟加载大量 MCP 工具 schema |
 | 记忆 | 完成 | `~/.octo/memories/` 下的跨会话持久化记忆，自动抽取/整合 |
 | 子代理 | 完成 | `sub_agent` 并行扇出，异步 + 可恢复（`sub_agent_send`、`sub_agent_status`、`sub_agent_kill`） |

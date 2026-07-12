@@ -347,12 +347,22 @@ octo --sandbox --sandbox-write ./build      # extra writable dir (repeatable)
 octo --sandbox --sandbox-read /opt/data     # extra readable dir (repeatable)
 ```
 
+## Recycle bin
+
+An agent that goes off the rails and deletes or overwrites the wrong file shouldn't cost you your work. octo keeps a file-level recycle bin at `~/.octo/trash/`, scoped per project:
+
+- **Deletes are intercepted.** Agent-issued `rm` / `del` / `Remove-Item` are wrapped so the targets are copied to the trash *before* removal, recoverable from the Web UI's **File Recall** panel. The same guard covers deletions the agent makes through sessions, skills, workflows, the scheduler, and memory.
+- **Overwrites are backed up.** Before `write_file` / `edit_file` overwrites an existing file, its previous contents are staged into the trash and the tool result offers a one-click **Undo**. Files that are git-tracked and clean are skipped — `git checkout` already recovers those, so the bin stays lean.
+- **Restore never clobbers.** Restoring a file that has since been recreated at the same path won't silently overwrite it: octo aborts, restores alongside, or moves the current file to the trash first — your choice.
+- **Provenance is recorded.** Each entry knows what removed it (`rm`, `write_file`, a session and its title, a skill, a workflow…) and when, so an accidental delete is easy to tell from an intended one.
+- **Bounded automatically.** Entries age out after 14 days and the bin is capped at 10 GiB (both configurable via `trash.retention_days` / `trash.max_size_mb`), evicting oldest-first so it never grows without limit.
+
 ## Platform notes
 
 octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 
 - **Shell is PowerShell.** The `terminal` tool runs commands through PowerShell (`pwsh`, else Windows PowerShell 5.1), not POSIX `sh` — use PowerShell syntax (`Get-ChildItem`, `Select-String`, `Remove-Item`, `$env:VAR`) and chain with `;` (5.1 has no `&&`). The agent is told this, and the built-in `read_file` / `glob` / `grep` / `write_file` / `edit_file` tools are cross-platform and don't shell out, so prefer them.
-- **Deletes go to the trash, like POSIX.** Agent-issued `Remove-Item` / `rm` / `del` are intercepted and the targets copied to `~/.octo/trash/` before deletion, so they're recoverable from the Web UI trash panel — the same protection as the POSIX `rm` wrapper. Best-effort: literal and globbed filesystem paths are backed up; provider paths (`Env:`, registry), pipeline input, and anything that fails to copy fall through to a normal delete.
+- **Deletes go to the recycle bin, like POSIX.** Agent-issued `Remove-Item` / `rm` / `del` are intercepted and backed up before deletion, the same protection as the POSIX `rm` wrapper (see [Recycle bin](#recycle-bin)). Best-effort: literal and globbed filesystem paths are backed up; provider paths (`Env:`, registry), pipeline input, and anything that fails to copy fall through to a normal delete.
 - **`--sandbox` is unavailable on Windows.** OS confinement is macOS Seatbelt / Linux Landlock only; on Windows `--sandbox` fails closed (refuses to run). The permission engine (interactive prompts) is the safety layer there.
 - **`terminal_input`** (writing to a background process's stdin) is reliable only on POSIX shells; PowerShell's `-Command` mode doesn't deterministically forward stdin to a spawned process.
 
@@ -368,6 +378,7 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 | Memory & config | done | `~/.octo/octorules.md`, `.octorules`, `octo init`, `@include` |
 | Skills | done | Claude Code-compatible SKILL.md loader (`octo skills`, `/skills`, `/<name>`) |
 | Sandbox | done | OS-enforced `--sandbox` (macOS / Linux) |
+| Recycle bin | done | File-level trash at `~/.octo/trash/` — agent deletes (`rm`/`del`/`Remove-Item`) and `write_file`/`edit_file` overwrites are backed up first; restore or one-click undo from the Web UI, provenance-tagged, retention + size-capped |
 | MCP client | done | `mcp.json` stdio + Streamable HTTP servers, tools/resources/prompts, OAuth (Authorization Code + PKCE); Tool Search defers large MCP schemas until needed |
 | Memory | done | Persistent cross-session memory under `~/.octo/memories/`, auto extract/consolidate |
 | Sub-agents | done | `sub_agent` fan-out, async + resumable (`sub_agent_send`, `sub_agent_status`, `sub_agent_kill`) |
