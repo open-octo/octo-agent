@@ -22,6 +22,9 @@ type fakeNative struct {
 	toggleMaxCalls    int
 	gotOpenURL        string
 	openCalls         int
+	gotSaveName       string
+	gotSaveContent    string
+	saveCalls         int
 }
 
 func (f *fakeNative) PickFolder(_ context.Context, startDir string) (string, bool, error) {
@@ -48,6 +51,11 @@ func (f *fakeNative) OpenExternal(url string) error {
 	f.openCalls++
 	f.gotOpenURL = url
 	return nil
+}
+func (f *fakeNative) SaveFile(_ context.Context, defaultName, content string) (string, bool, error) {
+	f.saveCalls++
+	f.gotSaveName, f.gotSaveContent = defaultName, content
+	return f.retPath, f.retCancel, nil
 }
 
 func TestNativePickFolderNotRegisteredWithoutBridge(t *testing.T) {
@@ -356,6 +364,79 @@ func TestNativeOpenExternalNotRegisteredWithoutBridge(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 	req := httptest.NewRequest(http.MethodPost, "/api/native/open-external", strings.NewReader(`{"url":"https://example.com"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("without a bridge the route must not exist: got %d, want 404", w.Code)
+	}
+}
+
+func TestNativeSaveFileDelegatesToBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{retPath: "/Users/x/Downloads/notes.md"}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/save-file",
+		strings.NewReader(`{"name":"notes.md","content":"# hello"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.saveCalls != 1 || fake.gotSaveName != "notes.md" || fake.gotSaveContent != "# hello" {
+		t.Errorf("SaveFile calls=%d name=%q content=%q, want 1/notes.md/# hello",
+			fake.saveCalls, fake.gotSaveName, fake.gotSaveContent)
+	}
+	var resp struct {
+		Path      string `json:"path"`
+		Cancelled bool   `json:"cancelled"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Path != "/Users/x/Downloads/notes.md" || resp.Cancelled {
+		t.Errorf("got path=%q cancelled=%v, want the chosen path/false", resp.Path, resp.Cancelled)
+	}
+}
+
+func TestNativeSaveFileReportsCancel(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{retCancel: true}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/save-file",
+		strings.NewReader(`{"name":"a.txt","content":"x"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Path      string `json:"path"`
+		Cancelled bool   `json:"cancelled"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Cancelled || resp.Path != "" {
+		t.Errorf("dismissed dialog: got path=%q cancelled=%v, want empty/true", resp.Path, resp.Cancelled)
+	}
+}
+
+func TestNativeSaveFileNotRegisteredWithoutBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/save-file",
+		strings.NewReader(`{"name":"a.txt","content":"x"}`))
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusNotFound {

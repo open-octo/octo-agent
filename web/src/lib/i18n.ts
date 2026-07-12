@@ -197,6 +197,8 @@ export const en: Record<string, string> = {
   // Artifacts panel
   "artifacts.copied": "Copied to clipboard",
   "artifacts.copy_failed": "Copy failed — clipboard access denied",
+  "artifacts.saved": "File saved",
+  "artifacts.save_failed": "Save failed",
   // Command palette
   "cmdk.no_matches": "No matches for \"{query}\"",
   // Composer
@@ -753,6 +755,8 @@ export const zh: Record<string, string> = {
   // 制品面板
   "artifacts.copied": "已复制到剪贴板",
   "artifacts.copy_failed": "复制失败 — 剪贴板访问被拒绝",
+  "artifacts.saved": "文件已保存",
+  "artifacts.save_failed": "保存失败",
   // 命令面板
   "cmdk.no_matches": "未找到 \"{query}\" 的匹配项",
   // 编辑器

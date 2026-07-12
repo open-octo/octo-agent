@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"sync"
@@ -156,6 +157,29 @@ func (b *nativeBridge) PickFile(_ context.Context, startDir string) (string, boo
 	}
 	if path == "" {
 		return "", true, nil
+	}
+	return path, false, nil
+}
+
+// SaveFile shows the OS save dialog seeded with defaultName, writes content to
+// the chosen path, and returns it. cancelled when dismissed. This is how the
+// artifact "Download" action lands a file on disk in the desktop shell — the
+// octo-served page has no webview download delegate, so an in-page blob
+// download does nothing.
+func (b *nativeBridge) SaveFile(_ context.Context, defaultName, content string) (string, bool, error) {
+	dlg := b.app.Dialog.SaveFile().CanCreateDirectories(true)
+	if defaultName != "" {
+		dlg.SetFilename(defaultName)
+	}
+	path, err := dlg.PromptForSingleSelection()
+	if err != nil {
+		return "", false, err
+	}
+	if path == "" {
+		return "", true, nil
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", false, err
 	}
 	return path, false, nil
 }

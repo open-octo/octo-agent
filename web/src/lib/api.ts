@@ -195,6 +195,17 @@ export async function nativePickFolder(startDir?: string): Promise<NativePickRes
   })
 }
 
+// Desktop shell only: show the OS save dialog seeded with name, write content
+// to the chosen path, and return it. Used for the artifact download, which the
+// octo-served webview can't do with an in-page blob download. cancelled is
+// true when the user dismissed the dialog.
+export async function nativeSaveFile(name: string, content: string): Promise<{ path: string; cancelled: boolean }> {
+  return request<{ path: string; cancelled: boolean }>('/api/native/save-file', {
+    method: 'POST',
+    ...json({ name, content }),
+  })
+}
+
 // Desktop shell only: raise an OS-native notification. Used in place of the
 // browser Notification API, which native webviews don't implement. Best-effort.
 export async function nativeNotify(title: string, body: string): Promise<void> {
