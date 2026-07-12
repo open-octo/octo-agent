@@ -219,3 +219,58 @@ func TestSetTitle_RewritesAfterPartialTail(t *testing.T) {
 		t.Fatalf("reloaded title=%q messages=%d, want \"My Title\"/1", re.Title, len(re.Messages))
 	}
 }
+
+// TestSetLastContextTokens_AppendsAndRoundTrips covers the path a real turn
+// takes: an already-persisted session gets its context-token count via an
+// APPENDED "context_tokens" record (O(1), not a full rewrite), the no-op guards
+// hold, and the value round-trips through a reload.
+func TestSetLastContextTokens_AppendsAndRoundTrips(t *testing.T) {
+	setTempHome(t)
+	s := NewSession("m", "")
+	s.Messages = []Message{NewUserMessage("hi"), NewAssistantMessage("hello")}
+	if err := s.Save(); err != nil { // persisted > 0, transcript on disk
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := s.SetLastContextTokens(4321); err != nil {
+		t.Fatalf("SetLastContextTokens: %v", err)
+	}
+
+	path, err := s.SavePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Must APPEND a context_tokens record, not rewrite the whole file.
+	if !strings.Contains(string(data), `"type":"context_tokens"`) {
+		t.Fatalf("expected an appended context_tokens record; file was:\n%s", data)
+	}
+
+	// No-op guards: an unchanged value and a non-positive value append nothing.
+	before := len(data)
+	if err := s.SetLastContextTokens(4321); err != nil { // unchanged
+		t.Fatal(err)
+	}
+	if err := s.SetLastContextTokens(0); err != nil { // non-positive
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != before {
+		t.Errorf("no-op SetLastContextTokens must not append: file grew %d -> %d bytes", before, len(after))
+	}
+
+	// Round-trips through a reload.
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got.LastContextTokens != 4321 {
+		t.Errorf("reloaded LastContextTokens = %d, want 4321", got.LastContextTokens)
+	}
+}

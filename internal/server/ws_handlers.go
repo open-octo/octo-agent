@@ -162,19 +162,23 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 			pct = used * 100 / window
 			usedTokens = used
 		}
-	} else if sess != nil && sess.LastContextTokens > 0 {
-		// Idle/resumed session: the real count from its last turn was persisted,
-		// so report that exact value (matches what the turn-end broadcast sent).
+	}
+	if pct == 0 && sess != nil && sess.LastContextTokens > 0 {
+		// Idle/resumed session — or a turn whose first provider call hasn't
+		// reported usage yet (live agent returns 0). Report the real count
+		// persisted from its last turn (matches what the turn-end broadcast sent).
 		if window := agent.ContextWindow(sess.Model); window > 0 {
 			pct = sess.LastContextTokens * 100 / window
 			usedTokens = sess.LastContextTokens
 		}
 	}
 	if pct == 0 && sess != nil {
-		// No token count anywhere (a session predating the field, or one that
-		// never completed a turn with a real count): fall back to a transcript
-		// estimate. Leave usedTokens 0 so the UI shows a bare arrow.
+		// No real count anywhere (a session predating the field, one that never
+		// completed a turn with a real count, or a count too small to reach 1% of
+		// the window): fall back to a transcript estimate. It carries no exact
+		// token count, so clear usedTokens — the UI shows a bare arrow.
 		pct = estimateContextPct(sess)
+		usedTokens = 0
 	}
 	if pct <= 0 {
 		return
