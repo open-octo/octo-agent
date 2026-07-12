@@ -35,8 +35,17 @@ cp "$LINUX/octo-desktop.desktop" "$APPDIR/usr/share/applications/octo-desktop.de
 cp "$LINUX/icon.png" "$APPDIR/octo-desktop.png"
 cp "$LINUX/icon.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/octo-desktop.png"
 
+# Bundle the octo CLI so the app seeds it to ~/.local/bin on first launch (via
+# $APPDIR/usr/bin by bundledBinaryPath), matching the mac/win installers that
+# put the CLI on PATH. Optional — a plain `make` without OCTO_CLI still produces
+# a runnable GUI; the release sets OCTO_CLI to the linux amd64 CLI binary.
+if [ -n "${OCTO_CLI:-}" ] && [ -f "$OCTO_CLI" ]; then
+	install -m 0755 "$OCTO_CLI" "$APPDIR/usr/bin/octo"
+	echo "    embedded octo CLI"
+fi
+
 # Bundle uv so it's seeded into ~/.octo/bin on first launch (via $APPDIR/usr/bin
-# by bundledUvPath). Optional. Release sets UV_BINARY.
+# by bundledBinaryPath). Optional. Release sets UV_BINARY.
 if [ -n "${UV_BINARY:-}" ] && [ -f "$UV_BINARY" ]; then
 	install -m 0755 "$UV_BINARY" "$APPDIR/usr/bin/uv"
 	echo "    embedded uv"

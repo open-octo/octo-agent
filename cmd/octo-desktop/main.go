@@ -70,6 +70,11 @@ func main() {
 	// that need Python work even for a standalone download (no installer).
 	ensureBundledUv()
 
+	// Seed the octo CLI to ~/.local/bin on Linux so a terminal has `octo` like
+	// the mac/win installers provide. May update settings.SeededOctoVersion, so
+	// it runs before the bridge takes its copy of settings below.
+	ensureBundledOcto(&settings)
+
 	bridge := &nativeBridge{settings: settings, url: "http://" + hubAddr}
 	// On Windows/Linux a window close would otherwise quit the app; start with
 	// quit allowed only when the user opted out of keep-running-in-background.

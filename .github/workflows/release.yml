@@ -216,6 +216,19 @@ jobs:
       - name: Install webview deps
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev
 
+      # Stage the released linux amd64 CLI so package-desktop-linux.sh bundles it
+      # into the AppImage — the app seeds it to ~/.local/bin on first launch, so
+      # a terminal has `octo` like the mac/win installers provide.
+      - name: Stage the released CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p dl
+          gh release download "$GITHUB_REF_NAME" --pattern "octo_${version}_linux_amd64.tar.gz" --dir dl
+          tar -xzf "dl/octo_${version}_linux_amd64.tar.gz" -C dl octo
+          echo "OCTO_CLI=$PWD/dl/octo" >> "$GITHUB_ENV"
+
       - name: Fetch bundled uv
         run: |
           uvVersion=0.11.26

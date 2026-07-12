@@ -26,20 +26,20 @@ func ensureBundledUv() {
 	if _, err := os.Stat(target); err == nil {
 		return // already seeded (by us or the installer)
 	}
-	src := bundledUvPath(name)
+	src := bundledBinaryPath(name)
 	if src == "" {
 		return // this build doesn't ship uv
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return
 	}
-	copyExecutable(src, target)
+	_ = copyExecutable(src, target)
 }
 
-// bundledUvPath locates the uv shipped alongside the app, whichever way it was
-// packaged: beside the binary (Windows dir, Linux), in the macOS .app's
-// Resources, or under an AppImage's mount ($APPDIR).
-func bundledUvPath(name string) string {
+// bundledBinaryPath locates a binary shipped alongside the app (uv, or the octo
+// CLI), whichever way it was packaged: beside the binary (Windows dir, Linux),
+// in the macOS .app's Resources, or under an AppImage's mount ($APPDIR).
+func bundledBinaryPath(name string) string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
@@ -61,26 +61,27 @@ func bundledUvPath(name string) string {
 }
 
 // copyExecutable copies src to dst (0755) via a temp file + rename so a crash
-// mid-copy can't leave a truncated, executable uv behind. Best-effort.
-func copyExecutable(src, dst string) {
+// mid-copy can't leave a truncated, executable binary behind. Returns an error
+// so callers that persist "seeded version" state only record success.
+func copyExecutable(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
-		return
+		return err
 	}
 	defer in.Close()
 	tmp := dst + ".tmp"
 	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
-		return
+		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
 		os.Remove(tmp)
-		return
+		return err
 	}
 	if err := out.Close(); err != nil {
 		os.Remove(tmp)
-		return
+		return err
 	}
-	_ = os.Rename(tmp, dst)
+	return os.Rename(tmp, dst)
 }
