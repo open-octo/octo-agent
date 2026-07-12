@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -836,7 +837,9 @@ func (a *Adapter) processUpdate(upd tgUpdate, onMessage func(channel.InboundEven
 		chatType = "group"
 	}
 
-	log.Printf("[telegram] msg from %s in %d (%s): %.80s", userID, msg.Chat.ID, msg.Chat.Type, text)
+	// Debug-level and content-free: message text is not logged, and the line
+	// stays silent at the default level so IM traffic never lands in serve.log.
+	slog.Debug("channel message received", "platform", platformName, "chat", msg.Chat.ID, "user", userID, "chat_type", chatType, "chars", len(text))
 	onMessage(channel.InboundEvent{
 		Type:      "message",
 		Platform:  platformName,

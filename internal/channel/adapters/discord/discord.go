@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"math/rand"
 	"mime/multipart"
 	"net/http"
@@ -952,7 +953,9 @@ func (a *Adapter) handleMessage(msg *dcMessage, onMessage func(channel.InboundEv
 		return
 	}
 
-	log.Printf("[discord] msg from %s in %s (%s): %.80s", msg.Author.ID, msg.ChannelID, chatType, text)
+	// Debug-level and content-free: message text is not logged, and the line
+	// stays silent at the default level so IM traffic never lands in serve.log.
+	slog.Debug("channel message received", "platform", platformName, "chat", msg.ChannelID, "user", msg.Author.ID, "chat_type", chatType, "chars", len(text))
 	onMessage(channel.InboundEvent{
 		Type:      "message",
 		Platform:  platformName,

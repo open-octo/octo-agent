@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -971,7 +972,9 @@ func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.Inb
 		chatType = "group"
 	}
 
-	log.Printf("[wecom] msg from %s in %s (%s) type=%s", msg.From.UserID, chatID, chatType, msg.MsgType)
+	// Debug-level: reception is routine traffic, silent at the default level so
+	// it never fills serve.log. Message text was never logged here.
+	slog.Debug("channel message received", "platform", platformName, "chat", chatID, "user", msg.From.UserID, "chat_type", chatType, "msgtype", msg.MsgType)
 	onMessage(channel.InboundEvent{
 		Type:      "message",
 		Platform:  platformName,
