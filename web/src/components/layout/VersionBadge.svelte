@@ -34,6 +34,13 @@
 
   const RECONNECT_TIMEOUT_MS = 30_000
 
+  // The hub reports native=true to every client, but only the desktop-shell
+  // webview should behave as native (OS file dialog, OS notifications, header
+  // inset past the traffic lights). The shell tags its window URL with this
+  // marker (cmd/octo-desktop/bridge.go); an external browser on the same
+  // machine lacks it and stays plain web. Fixed for the page's lifetime.
+  const isDesktopShell = new URLSearchParams(location.search).get('shell') === 'octo-desktop'
+
   let versionLabel = $derived(current ? `v${current}` : '')
   // Locked open: the user must not dismiss the popover mid-install or while the
   // server is restarting (the flow would keep running with no surface).
@@ -48,7 +55,7 @@
       if (d.cli_command) cliCommand = d.cli_command
       upgradeMode = d.upgrade_mode === 'installer' ? 'installer' : 'cli'
       downloadUrl = d.download_url ?? ''
-      nativeShell.set(d.native === true)
+      nativeShell.set(d.native === true && isDesktopShell)
       localAccess.set(d.local === true)
     } catch { /* badge stays minimal */ }
   }

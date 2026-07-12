@@ -56,6 +56,31 @@ const (
 	defaultWindowHeight = 860
 )
 
+// desktopShellQuery marks the window's URL so the frontend can tell it is
+// running inside the desktop-shell webview rather than an external browser
+// pointed at the same hub. The hub reports native=true to every client (the
+// NativeBridge is a server-wide capability), but only the shell webview should
+// behave as "native" — use the OS file dialog, route notifications through the
+// OS, inset the header past the traffic lights. An external browser on this
+// machine keys off the absent marker and stays plain web. The frontend reads it
+// from location.search (see VersionBadge.svelte).
+const desktopShellQuery = "shell=octo-desktop"
+
+// shellURL builds the desktop-shell window URL for a frontend route hash,
+// always carrying the desktopShellQuery marker. base is b.url, e.g.
+// "http://127.0.0.1:8088". Fresh-window loads and SetURL navigations share it,
+// so they produce the identical path+query and a route change stays a pure
+// hashchange (no reload). The exact query string is contracted with the
+// frontend reader in web/src/components/layout/VersionBadge.svelte — keep both
+// sides in sync (TestShellURL pins the Go side).
+func shellURL(base, hash string) string {
+	u := base + "/?" + desktopShellQuery
+	if hash != "" {
+		u += "#" + hash
+	}
+	return u
+}
+
 // rememberWindowGeometry captures the window's size and maximised state into
 // settings and debounces the disk write. The window is read HERE, from the
 // WindowDidResize handler where it is guaranteed alive — never from the debounce
@@ -198,10 +223,9 @@ func (b *nativeBridge) openSettings() { b.showWindowAt("settings") }
 // location.hash, so a fresh window loads straight into the view and an existing
 // one navigates via a hashchange — no full reload.
 func (b *nativeBridge) showWindowAt(hash string) {
-	target := b.url
-	if hash != "" {
-		target = b.url + "#" + hash
-	}
+	// The marker rides on every navigation the shell performs (fresh window and
+	// SetURL alike) so nativeShell stays true across reloads and route changes.
+	target := shellURL(b.url, hash)
 	if b.window == nil {
 		if b.app == nil || b.url == "" {
 			return // not bound yet
