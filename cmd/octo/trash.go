@@ -7,8 +7,34 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/trash"
 )
+
+// startTrashHousekeeping bounds the recycle bin in the background at startup:
+// it ages out old entries and evicts the oldest once the trash exceeds its
+// size cap (both configurable under `trash:`, defaults 14 days / 10 GiB). Runs
+// in a goroutine and is best-effort — the recycle bin working at all never
+// depends on housekeeping having finished.
+// housekeepingDisabled is set by an init() in the test binary so `go test`
+// never runs Enforce against the developer's real ~/.octo/trash (many cmd/octo
+// tests drive runChat/runServe, which call this).
+var housekeepingDisabled bool
+
+func startTrashHousekeeping() {
+	if housekeepingDisabled {
+		return
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return
+	}
+	maxBytes, retention := cfg.TrashMaxBytes(), cfg.TrashRetention()
+	if maxBytes <= 0 && retention <= 0 {
+		return // both bounds disabled
+	}
+	go func() { _, _, _ = trash.Enforce(maxBytes, retention) }()
+}
 
 // runTrash handles `octo trash <subcommand>` — the terminal twin of the Web
 // UI's file-recall view, so a CLI/TUI user can list and recover files the

@@ -335,6 +335,7 @@ func init() {
 // With a positional message argument (or piped stdin): one headless agentic
 // turn, then exit. Without one, on a terminal: the interactive TUI.
 func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	startTrashHousekeeping()
 	args = normalizeBareContinue(args)
 	fs := flag.NewFlagSet("octo", flag.ContinueOnError)
 	fs.SetOutput(stderr)
