@@ -6,7 +6,7 @@
 # AppRun preflight (build/linux/AppRun) guides the user if they're absent.
 #
 # Requires the GTK4/WebKitGTK dev packages (to compile) and downloads
-# appimagetool. Usage: scripts/package-desktop-linux.sh
+# appimagetool. Usage: scripts/package-desktop-linux.sh [version]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,6 +14,9 @@ MOD_DIR="$ROOT/cmd/octo-desktop"
 LINUX="$MOD_DIR/build/linux"
 APPDIR="$ROOT/Octo.AppDir"
 OUT="$ROOT/Octo-x86_64.AppImage"
+VERSION="${1:-$(git -C "$ROOT" describe --tags --always 2>/dev/null || echo 0.1.0)}"
+VERSION="${VERSION#v}"
+COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 # Bundle ripgrep so the desktop app's grep tool has an `rg` to shell out to
 # (the app can't rely on one being on the user's PATH). Mirrors `make build`:
@@ -23,7 +26,11 @@ echo "==> embedding ripgrep"
 make -C "$ROOT" rg-embed
 
 echo "==> building octo-desktop binary"
-( cd "$MOD_DIR" && CGO_ENABLED=1 go build -tags embedrg -o "$ROOT/octo-desktop" . )
+# Inject Version/Commit so the in-app update check recognizes a real release
+# build — without them internal/upgrade.Eligible sees an empty Commit and the
+# app reports "up to date" forever.
+LDFLAGS="-X github.com/open-octo/octo-agent/internal/version.Version=$VERSION -X github.com/open-octo/octo-agent/internal/version.Commit=$COMMIT"
+( cd "$MOD_DIR" && CGO_ENABLED=1 go build -tags embedrg -ldflags "$LDFLAGS" -o "$ROOT/octo-desktop" . )
 
 echo "==> assembling AppDir"
 rm -rf "$APPDIR"
