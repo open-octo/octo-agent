@@ -274,3 +274,51 @@ func TestSetLastContextTokens_AppendsAndRoundTrips(t *testing.T) {
 		t.Errorf("reloaded LastContextTokens = %d, want 4321", got.LastContextTokens)
 	}
 }
+
+// PersistContextUsage records the agent's current context-token count on the
+// session and round-trips it, and is a safe no-op with a nil session or no
+// count. Every transport (web, IM, CLI, scheduled) calls it at turn end so a
+// session opened in the Web UI shows accurate usage regardless of where it ran.
+func TestPersistContextUsage(t *testing.T) {
+	setTempHome(t)
+
+	a := New(&summarizeFake{}, "m")
+	// The helper's purpose is persisting the real provider-reported count; set it
+	// directly (in-package) so the assertion pins the exact value, not an estimate.
+	a.usageMu.Lock()
+	a.lastInputTokens = 12345
+	a.usageMu.Unlock()
+
+	sess := NewSession("m", "")
+	sess.Messages = []Message{NewUserMessage("hi")}
+	if err := sess.Save(); err != nil { // persisted, on disk
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := a.PersistContextUsage(sess); err != nil {
+		t.Fatalf("PersistContextUsage: %v", err)
+	}
+	if sess.LastContextTokens != 12345 {
+		t.Fatalf("LastContextTokens = %d, want 12345 (the real provider count)", sess.LastContextTokens)
+	}
+	reloaded, err := LoadSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.LastContextTokens != 12345 {
+		t.Errorf("reloaded LastContextTokens = %d, want 12345", reloaded.LastContextTokens)
+	}
+
+	// A nil session and an agent with no countable context are safe no-ops.
+	if err := a.PersistContextUsage(nil); err != nil {
+		t.Errorf("nil session should be a no-op, got %v", err)
+	}
+	empty := New(&summarizeFake{}, "m")
+	s2 := NewSession("m", "")
+	if err := empty.PersistContextUsage(s2); err != nil {
+		t.Errorf("no-count should be a no-op, got %v", err)
+	}
+	if s2.LastContextTokens != 0 {
+		t.Errorf("no-count must not set a token count, got %d", s2.LastContextTokens)
+	}
+}

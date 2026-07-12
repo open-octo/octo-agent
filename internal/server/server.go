@@ -2824,6 +2824,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	persist := func() {
 		// Persist the conversation so it survives server restarts. Failure
 		// must not eat the reply the user already got — log and move on.
+		// Persist() also records the context-token count (under storeMu) so this
+		// session shows accurate usage in the Web UI — parity with web/desktop.
 		if err := sess.Persist(); err != nil {
 			slog.Error("channel persist session", "channel", ev.Platform, "err", err)
 		}

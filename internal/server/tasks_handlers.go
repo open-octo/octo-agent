@@ -292,6 +292,11 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 
 	sess.SyncFrom(a.History)
 	_ = sess.Save()
+	// Record the real context-token count so this cron session shows accurate
+	// usage when opened in the Web UI (parity with web/desktop turns).
+	if perr := a.PersistContextUsage(sess); perr != nil {
+		slog.Warn("scheduled task: persist context tokens", "task", task.Name, "err", perr)
+	}
 
 	s.liveStateMu.Lock()
 	delete(s.liveStates, sessionID)

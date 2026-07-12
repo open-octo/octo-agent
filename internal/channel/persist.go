@@ -131,7 +131,15 @@ func (s *Session) Persist() error {
 		return nil
 	}
 	s.Store.SyncFrom(s.Agent.History)
-	return s.Store.Save()
+	if err := s.Store.Save(); err != nil {
+		return err
+	}
+	// Record the real context-token count under the same storeMu as the save
+	// (Store is only ever touched while holding it), so an idle/resumed session
+	// shows accurate usage in the Web UI — parity with web/desktop turns.
+	// Best-effort and idempotent (a no-op when the count is unchanged).
+	_ = s.Agent.PersistContextUsage(s.Store)
+	return nil
 }
 
 // UnbindStore releases the store's entry binding and persists the change.
