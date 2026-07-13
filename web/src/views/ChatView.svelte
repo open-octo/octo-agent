@@ -140,6 +140,13 @@
     ((msgs.find((m: any) => m.streaming && m.type === 'assistant')?.content?.length) ?? 0) + thinking.length
   )
   let thinkTokens = $derived(Math.floor(turnOutChars / 4))
+
+  const THINKING_KEYS = ['chat.thinking_0', 'chat.thinking_1', 'chat.thinking_2', 'chat.thinking_3']
+  let thinkingLabel = $derived(
+    (progress && progress.message && progress.message !== 'Thinking')
+      ? progress.message
+      : $t(THINKING_KEYS[Math.floor(thinkElapsed / 3) % THINKING_KEYS.length])
+  )
   // Uplink size: the context being sent up (last known occupancy in tokens).
   let ctxTokens = $derived(Number($chatContextTokens[$activeSessionId ?? ''] ?? 0))
   function fmtDur(s: number): string {
@@ -1464,7 +1471,7 @@
               <div class="agent-avatar"><OctoLogo size={18} /></div>
               <div class="thinking-indicator">
                 <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
-                <span>{progress.message || $t('chat.thinking')}</span>
+                <span>{thinkingLabel}</span>
                 <span class="dots">
                   <span></span>
                   <span style="animation-delay:0.2s"></span>
