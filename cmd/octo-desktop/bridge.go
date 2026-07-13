@@ -43,6 +43,13 @@ type nativeBridge struct {
 	// option; ShouldQuit there always allows the quit).
 	allowQuit atomic.Bool
 
+	// notifySeq makes each Notify call's notification identifier unique. macOS
+	// rejects an addNotificationRequest with an empty identifier (its completion
+	// handler errors and nothing is delivered), and a shared constant id would
+	// make each new toast silently replace the previous one, so every call gets
+	// its own.
+	notifySeq atomic.Uint64
+
 	settingsMu sync.Mutex
 	settings   desktopSettings
 	// geomTimer debounces persistence of the window geometry to disk: a drag
@@ -205,6 +212,7 @@ func (b *nativeBridge) Notify(title, body string) {
 		return
 	}
 	_ = b.notifier.SendNotification(notifications.NotificationOptions{
+		ID:    fmt.Sprintf("octo-notify-%d", b.notifySeq.Add(1)),
 		Title: title,
 		Body:  body,
 	})
