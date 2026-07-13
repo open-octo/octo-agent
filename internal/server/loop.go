@@ -38,9 +38,41 @@ func (w serverWaker) CancelWakeup() error {
 // the same path background/sub-agent completion notes use.
 func (s *Server) armWakeup(sessionID string, delay time.Duration, prompt string, repeat bool) {
 	s.armWakeupFn(sessionID, delay, repeat, func() {
-		s.enqueueSteer(sessionID, agent.InboxItem{Text: prompt})
-		s.kickIdleSteerTurn(sessionID)
+		s.deliverLoopTick(sessionID, prompt, repeat)
 	})
+}
+
+// deliverLoopTick injects one loop tick as a user steer and kicks an idle turn.
+// In interval mode it no-ops while a turn is already running: kickIdleSteerTurn
+// bails when busy, so the steer would sit undrained and every later tick would
+// stack another identical copy for the running turn to replay. The interval
+// timer has already re-armed, so the next tick delivers once the session is
+// idle — mirroring the TUI, which only re-arms (never queues) while a turn runs.
+func (s *Server) deliverLoopTick(sessionID, prompt string, repeat bool) {
+	if s.shouldSkipTick(sessionID, repeat) {
+		return
+	}
+	s.enqueueSteer(sessionID, agent.InboxItem{Text: prompt})
+	s.kickIdleSteerTurn(sessionID)
+}
+
+// shouldSkipTick reports whether this tick's delivery should be dropped because
+// a turn is already running. Only interval mode (repeat) skips: its timer
+// re-arms independently, so a dropped tick is retried next cadence. A dynamic
+// tick (repeat=false) fires exactly once and does NOT re-arm — dropping it would
+// silently kill the loop, so it always delivers; the running turn drains the
+// steer at its next chain boundary and the model re-arms from there.
+func (s *Server) shouldSkipTick(sessionID string, repeat bool) bool {
+	return repeat && s.turnActive(sessionID)
+}
+
+// turnActive reports whether a turn is currently running for the session,
+// reading turnRunning under the session's turn lock (its guarding mutex).
+func (s *Server) turnActive(sessionID string) bool {
+	mu := s.sessionTurnLock(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
+	return s.turnRunning[sessionID]
 }
 
 // armWakeupFn (re)starts the loop wakeup timer for key, replacing any pending
