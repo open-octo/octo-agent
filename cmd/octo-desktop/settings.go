@@ -8,13 +8,8 @@ import (
 
 // desktopSettings holds the desktop app's per-machine preferences — the ones
 // the server itself has no opinion about. Persisted to ~/.octo/desktop.json so
-// they survive a relaunch. Read once at startup; the channels toggle is also
-// written by the native bridge when the user flips it in the UI.
+// they survive a relaunch.
 type desktopSettings struct {
-	// ChannelsEnabled is the "run channels on this machine" toggle. Default
-	// false: launching the GUI must never silently start an IM bridge.
-	ChannelsEnabled bool `json:"channels_enabled"`
-	// KeepRunningInBackground keeps the hub (and its clients) alive when the
 	// window is closed, hiding to the tray instead of quitting. Default true —
 	// closing the window shouldn't drop a VS Code / phone client's backend.
 	KeepRunningInBackground bool `json:"keep_running_in_background"`
@@ -36,7 +31,7 @@ type desktopSettings struct {
 
 // defaultDesktopSettings is what a first launch (no file yet) uses.
 func defaultDesktopSettings() desktopSettings {
-	return desktopSettings{ChannelsEnabled: false, KeepRunningInBackground: true}
+	return desktopSettings{KeepRunningInBackground: true}
 }
 
 func desktopSettingsPath() (string, error) {

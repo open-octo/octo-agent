@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
-  import { channels, showToast, openAgentSession, nativeShell } from '../lib/stores'
+  import { channels, showToast, openAgentSession } from '../lib/stores'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import Switch from '../components/ui/Switch.svelte'
   import * as api from '../lib/api'
@@ -33,37 +33,9 @@
   let loading = $state(true)
   let busyPlatform = $state<string | null>(null)
 
-  // Desktop hub only: whether this machine runs channels at all. The desktop
-  // app can be a hub for the UI/sessions without bridging IM, so channels are
-  // opt-in per machine; when off, configuring a channel below does nothing
-  // until this is turned on. isNative gates the whole control out of plain web.
-  const isNative = get(nativeShell)
-  let hubChannelsOn = $state(false)
-  let hubBusy = $state(false)
-
   onMount(async () => {
-    if (isNative) {
-      try { hubChannelsOn = await api.getChannelsEnabled() } catch { /* leave off */ }
-    }
     await reload()
   })
-
-  async function toggleHubChannels(on: boolean) {
-    if (hubBusy) return
-    hubBusy = true
-    const prev = hubChannelsOn
-    hubChannelsOn = on // optimistic
-    try {
-      hubChannelsOn = await api.setChannelsEnabled(on)
-      await reload()
-    } catch (e: any) {
-      hubChannelsOn = prev
-      showToast(tr('channels.hub_toggle_failed') + `: ${e.message}`, 'error')
-    } finally {
-      hubBusy = false
-    }
-  }
-
   async function reload() {
     loading = true
     try {
@@ -193,16 +165,6 @@
       </div>
     </div>
 
-    {#if isNative}
-      <div class="hub-toggle" class:off={!hubChannelsOn}>
-        <div class="hub-toggle-text">
-          <strong>{$t('channels.hub_run_here')}</strong>
-          <span>{hubChannelsOn ? $t('channels.hub_on_hint') : $t('channels.hub_off_hint')}</span>
-        </div>
-        <Switch checked={hubChannelsOn} onchange={(v: boolean) => toggleHubChannels(v)} />
-      </div>
-    {/if}
-
     {#if loading}
       <div class="empty-state">{$t('channels.loading')}</div>
     {:else}
@@ -262,15 +224,6 @@
 .title-block { display: flex; flex-direction: column; gap: 4px; }
 h2 { margin: 0; font-size: 24px; font-weight: 600; color: var(--text-heading); }
 p { margin: 0; font-size: 14px; color: var(--text-secondary); }
-.hub-toggle {
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  background: var(--bg-container); border-radius: 12px; box-shadow: var(--card-shadow);
-  padding: 14px 18px; border: 1px solid transparent;
-}
-.hub-toggle.off { border-color: var(--warning-border, var(--blue-6)); background: var(--bg-elevated, var(--bg-container)); }
-.hub-toggle-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.hub-toggle-text strong { font-size: 14px; font-weight: 600; color: var(--text-heading); }
-.hub-toggle-text span { font-size: 13px; color: var(--text-secondary); }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
 .channel-card {
   background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow);
