@@ -258,10 +258,21 @@ func browserWebSocketURL(ctx context.Context, port int) (string, error) {
 			return fallback, nil
 		}
 		if time.Now().After(deadline) {
-			return "", fmt.Errorf("timed out fetching CDP endpoint on port %d", port)
+			return "", &DialError{
+				URL:        url,
+				StatusCode: 0,
+				Err:        fmt.Errorf("timed out fetching CDP endpoint on port %d", port),
+			}
 		}
 		select {
 		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				return "", &DialError{
+					URL:        url,
+					StatusCode: 0,
+					Err:        fmt.Errorf("timed out fetching CDP endpoint on port %d", port),
+				}
+			}
 			return "", ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 		}

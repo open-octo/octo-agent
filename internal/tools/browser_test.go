@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -412,6 +413,10 @@ func TestWrapBrowserConnectError(t *testing.T) {
 			got := err.Error()
 			if !strings.Contains(got, tc.wantIn) {
 				t.Errorf("error %q missing %q", got, tc.wantIn)
+			}
+			// The wrapped error should still unwrap to the original.
+			if !errors.Is(err, tc.in) {
+				t.Errorf("wrapped error does not unwrap to original %v", tc.in)
 			}
 		})
 	}

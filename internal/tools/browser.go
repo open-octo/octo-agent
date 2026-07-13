@@ -203,10 +203,10 @@ func wrapBrowserConnectError(err error) error {
 	var dialErr *browser.DialError
 	if errors.As(err, &dialErr) {
 		if dialErr.IsForbidden() {
-			return fmt.Errorf("%s (Chrome refused the connection; if a prompt appeared, click Allow)", browserConnectGuide)
+			return fmt.Errorf("%s (Chrome refused the connection; if a prompt appeared, click Allow): %w", browserConnectGuide, err)
 		}
 		if dialErr.StatusCode == 0 {
-			return fmt.Errorf("%s (cannot reach the debug port; is Chrome running?)", browserConnectGuide)
+			return fmt.Errorf("%s (cannot reach the debug port; is Chrome running?): %w", browserConnectGuide, err)
 		}
 	}
 	return fmt.Errorf("%s: %w", browserConnectGuide, err)
