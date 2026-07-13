@@ -168,6 +168,22 @@ type turnFinishedMsg struct{ err error } // the turn goroutine returned
 type noticeMsg struct{ text string }
 type bgExitMsg struct{ e tools.BgExit }                      // a background process finished (async)
 type subAgentNoteMsg struct{ ev tools.SubAgentNotification } // a sub-agent completed (async)
+
+// subAgentNoteStatus turns a sub-agent's StopReason into a user-facing status
+// word for the scrollback notice. A provider sentinel ("end_turn"/"tool_use"/…)
+// is a normal completion; "max_turns"/"max_tokens" mean it stopped on a budget
+// with partial work; an empty StopReason means the run errored out.
+func subAgentNoteStatus(stopReason string) string {
+	switch stopReason {
+	case "":
+		return "failed"
+	case "max_turns", "max_tokens":
+		return "incomplete (" + stopReason + ")"
+	default:
+		return "completed"
+	}
+}
+
 type workflowNoteMsg struct{ ev tools.WorkflowNotification } // a background workflow finished (async)
 type mcpReadyMsg struct{ reg *mcp.Registry }                 // background MCP connect finished (async)
 type subAgentEventMsg struct{ ev tools.SubAgentEvent }       // a sub-agent's runtime activity (async)
@@ -1094,11 +1110,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.removeSubAgent(msg.ev.AgentID)
 		// Print a concise scrollback notice so the user sees the completion even
 		// when the model-facing <system-reminder> is folded into a later turn.
-		status := "completed"
-		if msg.ev.StopReason != "" {
-			status = msg.ev.StopReason
-		}
-		m.printlnBlock(bgDoneStyle.Render(fmt.Sprintf("● Sub-agent %s (%s) %s", msg.ev.AgentID, msg.ev.Description, status)))
+		status := subAgentNoteStatus(msg.ev.StopReason)
+		// A completion notice is just a low-key hint, not a headline event — render
+		// it in the muted notice style rather than the attention-grabbing accent.
+		m.printlnBlock(noticeStyle.Render(fmt.Sprintf("● Sub-agent %s (%s) %s", msg.ev.AgentID, msg.ev.Description, status)))
 		// Idle auto-turn: same logic as bgExitMsg — drain inbox and trigger a
 		// turn so the model sees the notification immediately.
 		if !m.turnRunning && len(m.queue) == 0 {

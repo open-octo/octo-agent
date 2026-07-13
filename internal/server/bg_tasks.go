@@ -170,11 +170,17 @@ func bgNoticeStatus(status string) string {
 }
 
 // subAgentNoticeStatus maps a SubAgentNotification onto the frontend notice
-// levels (success / failed). A sub-agent whose exit was triggered by an error
-// or the max-turns budget is treated as failed for UI purposes.
+// levels (success / warning / failed). An empty StopReason means the sub-agent
+// exited with an error; "max_turns" or "max_tokens" mean it returned partial
+// work after hitting a budget; any other non-empty StopReason is a normal
+// completion (end_turn, tool_use, etc.).
 func subAgentNoticeStatus(ev tools.SubAgentNotification) string {
-	if ev.StopReason != "" {
+	switch ev.StopReason {
+	case "":
 		return "failed"
+	case "max_turns", "max_tokens":
+		return "warning"
+	default:
+		return "success"
 	}
-	return "success"
 }
