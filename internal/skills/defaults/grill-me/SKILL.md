@@ -6,7 +6,7 @@ description:
   understanding, resolving each branch of the decision tree one at a time. Use
   when the user wants to stress-test a plan, pressure-test a design before
   building, or says "grill me", "拷问我", "帮我把方案想清楚", "挑战一下这个设计",
-  "review my plan before I build". Pairs with the tech-design skill: grill first,
+  "review my plan before I build". Pairs with the tech-design skill — grill first,
   then hand the resolved decisions to tech-design to write them up.
 metadata:
   origin: adapted for octo — generic stack, octo-native codebase exploration
