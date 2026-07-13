@@ -1084,15 +1084,16 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 		if m.openModelPicker() {
 			return m, nil
 		}
-		m.println(errorStyle.Render("Usage: /model <model-name> [--default]"))
+		m.println(errorStyle.Render("Usage: /model <model-name> --default"))
 		return m, nil
 	}
 
-	// Parse optional flags.
+	// Parse optional --default flag (must be a trailing token).
 	setDefault := false
-	if idx := strings.Index(name, " --default"); idx >= 0 {
+	if trimmed := strings.TrimSpace(name); strings.HasSuffix(trimmed, "--default") {
 		setDefault = true
-		name = strings.TrimSpace(name[:idx])
+		rest, _ := strings.CutSuffix(trimmed, "--default")
+		name = strings.TrimSpace(rest)
 	}
 
 	tuning := senderTuning{showReasoning: m.cfg.showReasoning}

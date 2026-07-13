@@ -317,3 +317,29 @@ func TestDispatchModel_NoDefaultFlag(t *testing.T) {
 		t.Errorf("default_model = %q, want gpt-4o (unchanged)", saved.DefaultModel)
 	}
 }
+
+// TestDispatchModel_DefaultFlagOnly verifies `/model --default` (flag without
+// a model name) errors cleanly and does not touch the config.
+func TestDispatchModel_DefaultFlagOnly(t *testing.T) {
+	writeModelsConfig(t, config.Config{
+		Models: []config.ModelEntry{
+			{Model: "gpt-4o", Provider: "openai"},
+		},
+		DefaultModel: "gpt-4o",
+	})
+
+	m := newPickerTestModel("gpt-4o")
+	m.dispatchModel("--default")
+
+	// Switch should fail (no model), default should remain unchanged.
+	if m.a.Model != "gpt-4o" {
+		t.Errorf("active model = %q, want gpt-4o (unchanged)", m.a.Model)
+	}
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if saved.DefaultModel != "gpt-4o" {
+		t.Errorf("default_model = %q, want gpt-4o (unchanged)", saved.DefaultModel)
+	}
+}
