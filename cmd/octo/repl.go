@@ -96,6 +96,18 @@ func (cfg *replConfig) ensureSender(targetModel string, tuning senderTuning) err
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+	// Reject models not present in the config — resolveProviderModel would
+	// silently fall back to the current provider (matching on flagProvider),
+	// sending the request to the wrong endpoint (e.g. longcat base URL with a
+	// deepseek model name → HTTP 500).
+	if _, found := models.EntryByModel(targetModel); !found {
+		available := make([]string, 0, len(models.Models))
+		for _, e := range models.Models {
+			available = append(available, e.Model)
+		}
+		sort.Strings(available)
+		return fmt.Errorf("model %q is not configured (available: %s)", targetModel, strings.Join(available, ", "))
+	}
 	provName, _, entry, ok := resolveProviderModel(cfg.providerName, targetModel, models)
 	if !ok {
 		return fmt.Errorf("cannot resolve provider for model %q", targetModel)

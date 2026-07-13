@@ -213,3 +213,43 @@ func TestEnsureSender_ErrorLeavesConfigUnchanged(t *testing.T) {
 		t.Error("sender should be unchanged after failed rebuild")
 	}
 }
+
+// TestEnsureSender_UnconfiguredModel verifies that switching to a model not
+// present in the config returns a clear error (listing what is configured)
+// and leaves cfg untouched — the case that used to fall through to the current
+// provider and hit the wrong endpoint (e.g. longcat base URL + deepseek model
+// name → HTTP 500).
+func TestEnsureSender_UnconfiguredModel(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+
+	writeTestConfig(t, config.Config{
+		Models: []config.ModelEntry{
+			{Model: "gpt-4o", Provider: "openai"},
+			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
+		},
+		DefaultModel: "gpt-4o",
+	})
+
+	stub := &stubSender{reply: "ok"}
+	a := agent.New(stub, "gpt-4o")
+	origEntry := config.ModelEntry{Model: "gpt-4o", Provider: "openai"}
+	cfg := &replConfig{
+		a:            a,
+		providerName: "openai",
+		configEntry:  origEntry,
+		stderr:       io.Discard,
+	}
+
+	if err := cfg.ensureSender("deepseek-v4-pro", senderTuning{}); err == nil {
+		t.Fatal("expected error for unconfigured model, got nil")
+	}
+	if cfg.providerName != "openai" {
+		t.Errorf("providerName = %q, want openai (unchanged)", cfg.providerName)
+	}
+	if cfg.configEntry != origEntry {
+		t.Errorf("configEntry = %+v, want unchanged %+v", cfg.configEntry, origEntry)
+	}
+	if cfg.a.Sender != stub {
+		t.Error("sender should be unchanged after rejected switch")
+	}
+}
