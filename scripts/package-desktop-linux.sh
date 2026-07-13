@@ -13,7 +13,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MOD_DIR="$ROOT/cmd/octo-desktop"
 LINUX="$MOD_DIR/build/linux"
 APPDIR="$ROOT/Octo.AppDir"
-OUT="$ROOT/Octo-x86_64.AppImage"
+
+# Native build only: the Wails shell links GTK4/WebKitGTK 6.0 via CGO, so the
+# AppImage architecture is whatever host this runs on. Derive the AppImage arch
+# (and appimagetool variant) from uname -m instead of hardcoding x86_64, so the
+# same script produces Octo-x86_64.AppImage on amd64 and Octo-aarch64.AppImage
+# on arm64.
+case "$(uname -m)" in
+	x86_64)  APPARCH=x86_64 ;;
+	aarch64) APPARCH=aarch64 ;;
+	*) echo "unsupported host arch: $(uname -m) (expected x86_64 or aarch64)" >&2; exit 1 ;;
+esac
+OUT="$ROOT/Octo-$APPARCH.AppImage"
 VERSION="${1:-$(git -C "$ROOT" describe --tags --always 2>/dev/null || echo 0.1.0)}"
 VERSION="${VERSION#v}"
 COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -59,14 +70,16 @@ if [ -n "${UV_BINARY:-}" ] && [ -f "$UV_BINARY" ]; then
 fi
 
 echo "==> fetching appimagetool"
+# appimagetool must match the host arch to run natively (it's an AppImage
+# itself); the packaged AppImage's arch is set via the ARCH env var below.
 TOOL="$ROOT/appimagetool.AppImage"
 if [ ! -x "$TOOL" ]; then
 	curl -fsSL -o "$TOOL" \
-		"https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+		"https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$APPARCH.AppImage"
 	chmod +x "$TOOL"
 fi
 
 echo "==> building AppImage"
 # --appimage-extract-and-run: no FUSE in CI containers.
-ARCH=x86_64 "$TOOL" --appimage-extract-and-run "$APPDIR" "$OUT"
+ARCH=$APPARCH "$TOOL" --appimage-extract-and-run "$APPDIR" "$OUT"
 echo "==> done: $OUT"

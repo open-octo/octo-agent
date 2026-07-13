@@ -7,11 +7,15 @@
 # show install guidance instead.
 HERE="$(dirname "$(readlink -f "$0")")"
 
+# Debian/Ubuntu multiarch triplet for the running CPU, so the lib probe below
+# checks the right per-arch dir on both x86_64 and arm64 hosts.
+TRIPLET="$(uname -m)-linux-gnu"
+
 missing=""
 probe() {
   # Loadable if the linker cache knows it OR it's under a standard lib dir.
   ldconfig -p 2>/dev/null | grep -q "$1" && return 0
-  for d in /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu; do
+  for d in /usr/lib /usr/lib64 "/usr/lib/$TRIPLET" "/lib/$TRIPLET"; do
     [ -e "$d/$1".* ] 2>/dev/null && return 0
   done
   return 1

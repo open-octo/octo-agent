@@ -23,6 +23,15 @@
 #ifndef SourceDir
   #define SourceDir "."
 #endif
+; Target CPU architecture. Defaults keep the amd64 (x64) installer byte-for-byte
+; as before; the release passes /DArchAllowed=arm64 /DOutputName=octo-setup-arm64
+; for the native Windows-on-ARM build.
+#ifndef ArchAllowed
+  #define ArchAllowed "x64compatible"
+#endif
+#ifndef OutputName
+  #define OutputName "octo-setup"
+#endif
 
 [Setup]
 ; A stable AppId so re-running a newer installer updates in place rather than
@@ -36,9 +45,9 @@ DefaultDirName={userpf}\octo
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 PrivilegesRequired=lowest
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
-OutputBaseFilename=octo-setup
+ArchitecturesAllowed={#ArchAllowed}
+ArchitecturesInstallIn64BitMode={#ArchAllowed}
+OutputBaseFilename={#OutputName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

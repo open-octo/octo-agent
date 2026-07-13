@@ -2,12 +2,15 @@ name: Desktop
 
 # Builds the Wails desktop shell (cmd/octo-desktop, a nested module). macOS and
 # Windows are the launch platforms; Linux builds an AppImage too (installing
-# GTK4 + WebKitGTK 6.0 + libsoup 3.0). All three artifacts are build-verified
-# in CI. The Linux AppImage relies on the host GTK4/WebKitGTK 6.0 (its AppRun
-# preflights and guides the user if absent) and is not yet run-tested on a
-# real desktop. The main `Go` workflow's
-# matrix does not build this module (nested go.mod, excluded from ./...), so the
-# CLI's CGO-free, cross-platform matrix stays green independent of Wails.
+# GTK4 + WebKitGTK 6.0 + libsoup 3.0). Each is build-verified in CI across
+# amd64 and arm64: macOS is one universal app; Linux builds each arch natively
+# (CGO/GTK, so arm64 uses the ubuntu-24.04-arm runner); Windows is pure-Go
+# (WebView2, no CGO), so arm64 cross-compiles on the amd64 runner. The Linux
+# AppImage relies on the host GTK4/WebKitGTK 6.0 (its AppRun preflights and
+# guides the user if absent) and is not yet run-tested on a real desktop. The
+# main `Go` workflow's matrix does not build this module (nested go.mod,
+# excluded from ./...), so the CLI's CGO-free, cross-platform matrix stays
+# green independent of Wails.
 on:
   push:
     branches: [main]
@@ -15,12 +18,16 @@ on:
       - 'cmd/octo-desktop/**'
       - 'internal/server/**'
       - 'scripts/package-desktop-macos.sh'
+      - 'scripts/package-desktop-linux.sh'
+      - 'scripts/embed-rg-windows.ps1'
       - '.github/workflows/desktop.yml'
   pull_request:
     paths:
       - 'cmd/octo-desktop/**'
       - 'internal/server/**'
       - 'scripts/package-desktop-macos.sh'
+      - 'scripts/package-desktop-linux.sh'
+      - 'scripts/embed-rg-windows.ps1'
       - '.github/workflows/desktop.yml'
   workflow_dispatch:
 
@@ -33,12 +40,22 @@ concurrency:
 
 jobs:
   build:
-    name: Desktop (${{ matrix.os }})
+    name: Desktop (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # macOS ships a single universal (amd64+arm64) app. Linux links
+      # GTK4/WebKitGTK via CGO, so each arch builds natively on its own runner
+      # (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm). Windows is pure-Go
+      # (WebView2, no CGO), so arm64 cross-compiles on the amd64 runner —
+      # `goarch` drives the target for `go build` and the embedded ripgrep.
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        include:
+          - { os: macos-latest,     label: macos }
+          - { os: ubuntu-latest,    label: linux-amd64,   goarch: amd64 }
+          - { os: ubuntu-24.04-arm, label: linux-arm64,   goarch: arm64 }
+          - { os: windows-latest,   label: windows-amd64, goarch: amd64 }
+          - { os: windows-latest,   label: windows-arm64, goarch: arm64 }
     steps:
       - uses: actions/checkout@v5
         with:
@@ -83,25 +100,34 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/package-desktop-linux.sh
 
+      # package-desktop-linux.sh names its output by host arch
+      # (Octo-x86_64 / Octo-aarch64), so glob rather than hardcode; the
+      # per-arch artifact name keeps the amd64 and arm64 uploads distinct.
       - name: Upload Linux AppImage
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: Octo-linux-appimage
-          path: Octo-x86_64.AppImage
+          name: Octo-linux-${{ matrix.goarch }}-appimage
+          path: Octo-*.AppImage
 
       # Bundle ripgrep so the desktop app's grep tool has an `rg` to shell out
       # to (mirrors `make build`; the app can't rely on the user's PATH).
+      # -Arch is the target GOARCH so the arm64 cross-build embeds arm64 rg.
       - name: Embed ripgrep
         if: runner.os == 'Windows'
         shell: pwsh
-        run: pwsh scripts/embed-rg-windows.ps1
+        run: pwsh scripts/embed-rg-windows.ps1 -Arch ${{ matrix.goarch }}
 
       # -H windowsgui: a GUI app, so no console window flashes behind it.
-      # -tags embedrg go:embeds the rg fetched above.
+      # -tags embedrg go:embeds the rg fetched above. Windows is pure-Go
+      # (WebView2, no CGO), so arm64 cross-compiles cleanly from the amd64
+      # runner: set GOARCH and keep CGO off.
       - name: Build Windows binary
         if: runner.os == 'Windows'
         working-directory: cmd/octo-desktop
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
         run: go build -v -tags embedrg -ldflags "-H windowsgui" -o octo-desktop.exe .
 
       # Raw .exe for now; wrapping it in an installer rides the existing Inno
@@ -110,5 +136,5 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: octo-desktop-windows
+          name: octo-desktop-windows-${{ matrix.goarch }}
           path: cmd/octo-desktop/octo-desktop.exe
