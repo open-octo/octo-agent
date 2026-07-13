@@ -16,8 +16,10 @@ set -eu
 # (not as an `octo serve -d` daemon), so the `octo serve --stop` below can't
 # reach it — quitting the app is what frees the port and releases the old binary.
 # Graceful first (the app's ShouldQuit always allows termination on macOS, so it
-# tears down cleanly and releases its serveproc pid entry), then hard-kill any
-# stragglers an unresponsive UI leaves behind. No-op on a clean first install.
+# tears down cleanly and releases its serveproc pid entry), then SIGTERM any
+# straggler an unresponsive UI leaves behind — a process already mid-shutdown is
+# a no-op. Deliberately not SIGKILL: that would skip the app's pid-file cleanup
+# and leave a stale serveproc entry. No-op on a clean first install.
 osascript -e 'tell application id "dev.octo-agent.desktop" to quit' >/dev/null 2>&1 || true
 n=0
 while [ "$n" -lt 20 ]; do
