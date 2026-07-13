@@ -44,7 +44,7 @@ octo can install skills from a public GitHub repository into the user-level skil
 - `octo skills list` — list installed skills.
 - `octo skills add <owner/repo[/sub/path]>` — install a skill from GitHub into `~/.octo/skills/<name>`.
 - `octo skills add <owner/repo[/sub/path]> --force` — replace an existing installed skill.
-- `octo skills path` — print the user-level skill root directory.
+- `octo skills path` — print the skill roots (default, user, project) in order of increasing precedence.
 
 A skill is a directory containing a `SKILL.md` file. User-level skills live in `~/.octo/skills/<name>/`; project-level skills can be placed in `.octo/skills/<name>/` under the working directory and take precedence over user-level skills of the same name.
 
