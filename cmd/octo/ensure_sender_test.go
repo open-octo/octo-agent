@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -242,6 +243,8 @@ func TestEnsureSender_UnconfiguredModel(t *testing.T) {
 
 	if err := cfg.ensureSender("deepseek-v4-pro", senderTuning{}); err == nil {
 		t.Fatal("expected error for unconfigured model, got nil")
+	} else if !strings.Contains(err.Error(), "gpt-4o") || !strings.Contains(err.Error(), "deepseek-v4-flash") {
+		t.Errorf("error should list available models, got: %v", err)
 	}
 	if cfg.providerName != "openai" {
 		t.Errorf("providerName = %q, want openai (unchanged)", cfg.providerName)

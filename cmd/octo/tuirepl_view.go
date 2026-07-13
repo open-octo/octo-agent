@@ -89,6 +89,10 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case tea.KeyEsc:
 			m.modelPicker = nil
 			return m, nil
+		default:
+			// Any other key (printable chars, etc.) dismisses the picker and
+			// falls through to normal handling so the key reaches the textarea.
+			m.modelPicker = nil
 		}
 	}
 	if len(m.complItems) > 0 {

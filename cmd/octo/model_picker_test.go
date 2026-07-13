@@ -195,6 +195,39 @@ func TestModelPickerView_Renders(t *testing.T) {
 	}
 }
 
+// TestDispatchModel_PickerSingleModel verifies the picker opens and behaves
+// correctly when only one model is configured (wrap arithmetic is a no-op).
+func TestDispatchModel_PickerSingleModel(t *testing.T) {
+	writeModelsConfig(t, config.Config{
+		Models: []config.ModelEntry{
+			{Model: "gpt-4o", Provider: "openai"},
+		},
+		DefaultModel: "gpt-4o",
+	})
+
+	m := newPickerTestModel("gpt-4o")
+	m.dispatchModel("")
+
+	if m.modelPicker == nil {
+		t.Fatal("picker should open even with a single model")
+	}
+	if len(m.modelPicker.items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(m.modelPicker.items))
+	}
+	if m.modelPicker.idx != 0 {
+		t.Errorf("picker cursor = %d, want 0", m.modelPicker.idx)
+	}
+	// DOWN/UP should both stay at index 0 (wrap with len==1).
+	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.modelPicker.idx != 0 {
+		t.Errorf("after DOWN: idx = %d, want 0", m.modelPicker.idx)
+	}
+	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.modelPicker.idx != 0 {
+		t.Errorf("after UP: idx = %d, want 0", m.modelPicker.idx)
+	}
+}
+
 // TestModelPickerView_EmptyWhenInactive verifies the picker renders nothing
 // when not active.
 func TestModelPickerView_EmptyWhenInactive(t *testing.T) {
