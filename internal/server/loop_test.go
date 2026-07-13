@@ -1,9 +1,11 @@
 package server
 
 import (
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/channel"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
@@ -90,10 +92,63 @@ func TestServerWaker_MaxLifetimeStops(t *testing.T) {
 	}
 }
 
+// An interval tick must not enqueue a steer while a turn is already running: the
+// steer would sit undrained (kickIdleSteerTurn bails when busy) and every later
+// tick would stack another identical copy. The re-armed timer delivers on the
+// next idle tick instead.
+func TestDeliverLoopTick_IntervalSkipsWhileTurnRunning(t *testing.T) {
+	s := newLoopTestServer()
+	s.turnRunning["sid"] = true
+	s.deliverLoopTick("sid", "check whether the PR is merged", true)
+	if q := s.steerQueues["sid"]; len(q) != 0 {
+		t.Fatalf("expected no steer enqueued while a turn runs, got %d", len(q))
+	}
+}
+
+// shouldSkipTick gates only interval ticks on a running turn. A dynamic tick
+// (repeat=false) fires once and never re-arms, so it must deliver even while a
+// turn runs — skipping it would silently kill the loop.
+func TestShouldSkipTick(t *testing.T) {
+	cases := []struct {
+		name    string
+		repeat  bool
+		running bool
+		skip    bool
+	}{
+		{"interval, turn running", true, true, true},
+		{"interval, idle", true, false, false},
+		{"dynamic, turn running", false, true, false}, // must NOT skip: no re-arm
+		{"dynamic, idle", false, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newLoopTestServer()
+			s.turnRunning["sid"] = tc.running
+			if got := s.shouldSkipTick("sid", tc.repeat); got != tc.skip {
+				t.Fatalf("shouldSkipTick(repeat=%v, running=%v) = %v, want %v", tc.repeat, tc.running, got, tc.skip)
+			}
+		})
+	}
+}
+
+func TestServer_TurnActive(t *testing.T) {
+	s := newLoopTestServer()
+	if s.turnActive("sid") {
+		t.Fatal("a session with no running turn must report inactive")
+	}
+	s.turnRunning["sid"] = true
+	if !s.turnActive("sid") {
+		t.Fatal("a session with a running turn must report active")
+	}
+}
+
 func newLoopTestServer() *Server {
 	return &Server{
 		wakeupTimers: map[string]*time.Timer{},
 		wakeupStart:  map[string]time.Time{},
+		turnRunning:  map[string]bool{},
+		turnLocks:    map[string]*sync.Mutex{},
+		steerQueues:  map[string][]agent.InboxItem{},
 	}
 }
 
