@@ -68,8 +68,8 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	// distillation and run_skill's selector self-heal need a model. WireTools
 	// installs these for the CLI; serve must too, or the web UI silently falls
 	// back to deterministic compilation and no self-heal.
-	tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.Sender, a.Model))
-	tools.SetBrowserHealer(app.MakeBrowserHealer(a.Sender, a.Model))
+	tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.GetSender(), a.Model))
+	tools.SetBrowserHealer(app.MakeBrowserHealer(a.GetSender(), a.Model))
 
 	// Same omission for the external memory backend: WireTools installs it for
 	// the CLI, but serve never calls WireTools. app.RefreshMemoryBackend is

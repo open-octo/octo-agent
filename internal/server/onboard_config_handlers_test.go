@@ -726,7 +726,7 @@ func TestBuildAgent_ImplicitLiteForBoundSession(t *testing.T) {
 	if a.LiteModel != "deepseek-v4-flash" {
 		t.Errorf("LiteModel = %q, want deepseek-v4-flash from the bound entry's vendor", a.LiteModel)
 	}
-	if a.LiteSender == nil || a.LiteSender != a.Sender {
+	if a.LiteSender == nil || a.LiteSender != a.GetSender() {
 		t.Error("bound session's implicit lite must reuse that session's sender")
 	}
 }

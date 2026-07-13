@@ -26,7 +26,8 @@ project context, useful references). Output only the updated summary text.`
 // may be empty — empty priorSummary means "first pass"; empty newNotes means
 // "no new material" and the call short-circuits.
 func (a *Agent) ConsolidateMemory(ctx context.Context, priorSummary, newNotes string) (string, error) {
-	if a.Sender == nil {
+	sender := a.GetSender()
+	if sender == nil {
 		return "", fmt.Errorf("agent: no Sender configured")
 	}
 	priorSummary = strings.TrimSpace(priorSummary)
@@ -49,7 +50,7 @@ func (a *Agent) ConsolidateMemory(ctx context.Context, priorSummary, newNotes st
 	prompt.WriteString("Produce the updated consolidated summary per your instructions.")
 
 	req := []Message{NewUserMessage(prompt.String())}
-	reply, err := a.Sender.SendMessages(ctx, a.Model, consolidateSystem, req, consolidateMaxTokens)
+	reply, err := sender.SendMessages(ctx, a.Model, consolidateSystem, req, consolidateMaxTokens)
 	if err != nil {
 		return "", err
 	}

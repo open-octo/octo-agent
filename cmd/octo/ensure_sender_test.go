@@ -62,7 +62,7 @@ func TestEnsureSender_ConfigLoadFailure(t *testing.T) {
 	if cfg.configEntry != origEntry {
 		t.Errorf("configEntry = %+v, want unchanged %+v", cfg.configEntry, origEntry)
 	}
-	if cfg.a.Sender != stub {
+	if cfg.a.GetSender() != stub {
 		t.Error("sender should be unchanged after config.Load() failure")
 	}
 }
@@ -101,10 +101,10 @@ func TestEnsureSender_RebuildsOnProviderChange(t *testing.T) {
 	if cfg.configEntry.BaseURL != "https://api.moonshot.cn/anthropic" {
 		t.Errorf("configEntry.BaseURL = %q, want https://api.moonshot.cn/anthropic", cfg.configEntry.BaseURL)
 	}
-	if cfg.a.Sender == nil {
+	if cfg.a.GetSender() == nil {
 		t.Fatal("sender should be rebuilt, got nil")
 	}
-	if _, ok := cfg.a.Sender.(*stubSender); ok {
+	if _, ok := cfg.a.GetSender().(*stubSender); ok {
 		t.Error("sender should be a real provider sender, not the original stub")
 	}
 }
@@ -136,7 +136,7 @@ func TestEnsureSender_NoRebuildWhenUnchanged(t *testing.T) {
 		t.Fatalf("ensureSender: %v", err)
 	}
 	// Sender must be the same stub — no rebuild happened.
-	if cfg.a.Sender != stub {
+	if cfg.a.GetSender() != stub {
 		t.Error("sender should NOT be rebuilt when provider and base URL match")
 	}
 }
@@ -169,7 +169,7 @@ func TestEnsureSender_RebuildsOnBaseURLChange(t *testing.T) {
 	if cfg.configEntry.BaseURL != "https://api.moonshot.cn/anthropic" {
 		t.Errorf("configEntry.BaseURL = %q, want https://api.moonshot.cn/anthropic", cfg.configEntry.BaseURL)
 	}
-	if cfg.a.Sender == stub {
+	if cfg.a.GetSender() == stub {
 		t.Error("sender should be rebuilt when base URL changes")
 	}
 }
@@ -209,7 +209,7 @@ func TestEnsureSender_ErrorLeavesConfigUnchanged(t *testing.T) {
 	if cfg.configEntry != origEntry {
 		t.Errorf("configEntry = %+v, want unchanged %+v", cfg.configEntry, origEntry)
 	}
-	if cfg.a.Sender != stub {
+	if cfg.a.GetSender() != stub {
 		t.Error("sender should be unchanged after failed rebuild")
 	}
 }

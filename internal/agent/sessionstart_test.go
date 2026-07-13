@@ -42,7 +42,7 @@ func TestSessionStart_StartupFiresPersistsAndFolds(t *testing.T) {
 	if !a.SessionStarted {
 		t.Error("SessionStarted must be set after startup")
 	}
-	send := a.Sender.(*fakeSender)
+	send := a.GetSender().(*fakeSender)
 	got := userText(send.gotMessages[0])
 	if !strings.Contains(got, "[warmup]") || !strings.HasSuffix(got, "hello") {
 		t.Errorf("SessionStart output not folded into the first user message: %q", got)

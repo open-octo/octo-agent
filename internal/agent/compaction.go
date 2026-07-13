@@ -499,7 +499,7 @@ func (a *Agent) summarize(ctx context.Context, msgs []Message, handler EventHand
 			return summary, nil
 		}
 	}
-	return a.summarizeOn(ctx, a.Sender, a.Model, msgs, handler)
+	return a.summarizeOn(ctx, a.GetSender(), a.Model, msgs, handler)
 }
 
 // summarizeOn runs one summarisation call on the given sender/model pair.

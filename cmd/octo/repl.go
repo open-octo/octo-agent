@@ -107,7 +107,7 @@ func (cfg *replConfig) ensureSender(targetModel string, tuning senderTuning) err
 	if err != nil {
 		return err
 	}
-	cfg.a.Sender = newSender
+	cfg.a.SetSender(newSender)
 	cfg.providerName = provName
 	cfg.configEntry = entry
 	return nil

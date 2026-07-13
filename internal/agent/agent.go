@@ -136,11 +136,12 @@ type Reply struct {
 // Agent owns one conversation: the system prompt, the history of turns, the
 // model name, and the LLM transport (Sender).
 type Agent struct {
-	System    string
-	Model     string
+	mu      sync.RWMutex // protects Sender (written by TUI event loop, read by turn goroutine)
+	Sender  Sender
+	System  string
+	Model   string
 	MaxTokens int
 	History   *History
-	Sender    Sender
 
 	// LeanSystem, when set, is a lighter variant of System (skills manifest and
 	// memory dropped) used to seed cheap read-only sub-agents. Empty falls back
@@ -511,11 +512,31 @@ func New(sender Sender, model string) *Agent {
 	}
 }
 
+// GetSender returns the agent's current sender under a read lock. Callers that
+// need a consistent sender across multiple calls (e.g. type-asserting to
+// StreamingSender AND calling SendMessages) should capture the returned value
+// once and use that snapshot.
+func (a *Agent) GetSender() Sender {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.Sender
+}
+
+// SetSender swaps the agent's sender under a write lock. Used by the TUI's
+// /model and /thinking commands to rebuild the sender when the provider or
+// base URL changes.
+func (a *Agent) SetSender(s Sender) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Sender = s
+}
+
 // Turn appends the user's input to history, asks the Sender for a reply,
 // appends the reply to history, and returns it. Errors leave History
 // unchanged from before the call.
 func (a *Agent) Turn(ctx context.Context, userInput string) (Reply, error) {
-	if a.Sender == nil {
+	sender := a.GetSender()
+	if sender == nil {
 		return Reply{}, fmt.Errorf("agent: no Sender configured")
 	}
 	if a.Model == "" {
@@ -529,7 +550,7 @@ func (a *Agent) Turn(ctx context.Context, userInput string) (Reply, error) {
 	a.appendUserInput(ctx, userInput)
 
 	a.ResetGoalBaseline()
-	reply, err := a.Sender.SendMessages(ctx, a.Model, a.System, a.History.Snapshot(), a.MaxTokens)
+	reply, err := sender.SendMessages(ctx, a.Model, a.System, a.History.Snapshot(), a.MaxTokens)
 	if err != nil {
 		// Pop the user message we just appended so retrying with the same
 		// History doesn't duplicate it. Cheaper than transactional locking
@@ -574,7 +595,8 @@ func (a *Agent) turnStream(
 	onThinking func(thinkingDelta string),
 	handler EventHandler,
 ) (Reply, error) {
-	if a.Sender == nil {
+	sender := a.GetSender()
+	if sender == nil {
 		return Reply{}, fmt.Errorf("agent: no Sender configured")
 	}
 	if a.Model == "" {
@@ -591,13 +613,13 @@ func (a *Agent) turnStream(
 		reply Reply
 		err   error
 	)
-	if ss, ok := a.Sender.(StreamingSender); ok {
+	if ss, ok := sender.(StreamingSender); ok {
 		reply, err = ss.StreamMessages(ctx, a.Model, a.System, a.History.Snapshot(), a.MaxTokens, onChunk, onThinking)
 	} else {
 		// Fallback: buffer the call and surface a single "chunk" with the
 		// full content. Keeps callers from having to branch on capability
 		// at the cost of losing real-time visibility on this backend.
-		reply, err = a.Sender.SendMessages(ctx, a.Model, a.System, a.History.Snapshot(), a.MaxTokens)
+		reply, err = sender.SendMessages(ctx, a.Model, a.System, a.History.Snapshot(), a.MaxTokens)
 		if err == nil && onChunk != nil && reply.Content != "" {
 			onChunk(reply.Content)
 		}
@@ -642,7 +664,8 @@ const truncationResumePrompt = "You were cut off mid-thought. Continue exactly w
 // If tools is nil or executor is nil, Run is equivalent to Turn (single-turn,
 // no tool dispatch).
 func (a *Agent) Run(ctx context.Context, userInput string, tools []ToolDefinition, executor ToolExecutor) (reply Reply, err error) {
-	if a.Sender == nil {
+	sender := a.GetSender()
+	if sender == nil {
 		return Reply{}, fmt.Errorf("agent: no Sender configured")
 	}
 	if a.Model == "" {
@@ -661,7 +684,7 @@ func (a *Agent) Run(ctx context.Context, userInput string, tools []ToolDefinitio
 	if len(tools) == 0 || executor == nil {
 		return a.Turn(ctx, userInput)
 	}
-	ts, ok := a.Sender.(ToolSender)
+	ts, ok := sender.(ToolSender)
 	if !ok {
 		return a.Turn(ctx, userInput)
 	}
@@ -688,7 +711,8 @@ func (a *Agent) RunStream(
 	executor ToolExecutor,
 	handler EventHandler,
 ) (reply Reply, err error) {
-	if a.Sender == nil {
+	sender := a.GetSender()
+	if sender == nil {
 		return Reply{}, fmt.Errorf("agent: no Sender configured")
 	}
 	if a.Model == "" {
@@ -746,13 +770,13 @@ func (a *Agent) RunStream(
 	}
 
 	// Try ToolStreamingSender first, then fall back to ToolSender (buffered).
-	if tss, ok := a.Sender.(ToolStreamingSender); ok {
+	if tss, ok := sender.(ToolStreamingSender); ok {
 		return a.runLoop(ctx, userInput, tools, executor, handler,
 			func(ctx context.Context, msgs []Message, maxTokens int) (Reply, error) {
 				return tss.StreamMessagesWithTools(ctx, a.Model, a.System, msgs, maxTokens, tools, onChunk, onToolDelta, onThinking)
 			})
 	}
-	if ts, ok := a.Sender.(ToolSender); ok {
+	if ts, ok := sender.(ToolSender); ok {
 		return a.runLoop(ctx, userInput, tools, executor, handler,
 			func(ctx context.Context, msgs []Message, maxTokens int) (Reply, error) {
 				reply, err := ts.SendMessagesWithTools(ctx, a.Model, a.System, msgs, maxTokens, tools)
@@ -1217,7 +1241,8 @@ const suggestInstruction = "Suggest ONE concise, specific next message I (the us
 // is told not to call tools; if it returns a tool_use anyway, Content is empty
 // and we simply produce no suggestion that turn.
 func (a *Agent) Suggest(ctx context.Context, tools []ToolDefinition) (string, error) {
-	if a.Sender == nil || a.Model == "" {
+	sender := a.GetSender()
+	if sender == nil || a.Model == "" {
 		return "", fmt.Errorf("agent: suggest: not configured")
 	}
 	snap := a.History.Snapshot()
@@ -1228,7 +1253,6 @@ func (a *Agent) Suggest(ctx context.Context, tools []ToolDefinition) (string, er
 	msgs = append(msgs, snap...)
 	msgs = append(msgs, NewUserMessage(suggestInstruction))
 
-	sender := a.Sender
 	if le, ok := sender.(LowEffortSender); ok {
 		sender = le.LowEffort()
 	}
@@ -1269,7 +1293,8 @@ const titleInstruction = "Summarize this conversation as a short title of at mos
 // rationale). The model is told not to call tools; a stray tool_use yields empty
 // Content and we simply produce no title.
 func (a *Agent) GenerateTitle(ctx context.Context, tools []ToolDefinition) (string, error) {
-	if a.Sender == nil || a.Model == "" {
+	sender := a.GetSender()
+	if sender == nil || a.Model == "" {
 		return "", fmt.Errorf("agent: title: not configured")
 	}
 	snap := a.History.Snapshot()
@@ -1280,7 +1305,6 @@ func (a *Agent) GenerateTitle(ctx context.Context, tools []ToolDefinition) (stri
 	msgs = append(msgs, snap...)
 	msgs = append(msgs, NewUserMessage(titleInstruction))
 
-	sender := a.Sender
 	if le, ok := sender.(LowEffortSender); ok {
 		sender = le.LowEffort()
 	}

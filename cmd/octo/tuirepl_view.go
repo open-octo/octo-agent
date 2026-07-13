@@ -1039,7 +1039,7 @@ func (m *tuiModel) dispatchThinking(level string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.a.Sender = newSender
+	m.a.SetSender(newSender)
 	m.cfg.reasoningEffort = level
 	return m, nil
 }

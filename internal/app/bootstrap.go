@@ -76,8 +76,8 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	tools.SetDefaultSubAgentManager(mgr)
 
 	// LLM-backed distill (record_stop) + self-heal (run_skill) for browser skills.
-	tools.SetBrowserSkillGenerator(MakeSkillGenerator(a.Sender, a.Model))
-	tools.SetBrowserHealer(MakeBrowserHealer(a.Sender, a.Model))
+	tools.SetBrowserSkillGenerator(MakeSkillGenerator(a.GetSender(), a.Model))
+	tools.SetBrowserHealer(MakeBrowserHealer(a.GetSender(), a.Model))
 
 	// Gate image content (browser screenshots) on the active model's vision
 	// capability so a text-only model isn't handed images its endpoint rejects.

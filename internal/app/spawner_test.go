@@ -484,7 +484,7 @@ func TestAgentSpawner_LeanUsesLiteModelAndSystem(t *testing.T) {
 	if lc.agent.Model != "lite-model" {
 		t.Errorf("lean child model = %q, want lite-model", lc.agent.Model)
 	}
-	if lc.agent.Sender != lite {
+	if lc.agent.GetSender() != lite {
 		t.Error("lean child should run on the lite sender, not the main one")
 	}
 	if lc.agent.System != "LEAN BASE\n\nPERSONA" {
@@ -502,7 +502,7 @@ func TestAgentSpawner_LeanFallsBackWithoutLiteModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	lc := sp.reg.m[onlyChildID(t, sp)]
-	if lc.agent.Model != "main-model" || lc.agent.Sender != main {
+	if lc.agent.Model != "main-model" || lc.agent.GetSender() != main {
 		t.Errorf("lean with no lite model should fall back to main sender/model; got model=%q", lc.agent.Model)
 	}
 	if lc.agent.System != "FULL BASE" {
@@ -521,7 +521,7 @@ func TestAgentSpawner_ExplicitModelWinsOverLean(t *testing.T) {
 		t.Fatal(err)
 	}
 	lc := sp.reg.m[onlyChildID(t, sp)]
-	if lc.agent.Model != "explicit" || lc.agent.Sender != main {
+	if lc.agent.Model != "explicit" || lc.agent.GetSender() != main {
 		t.Errorf("explicit model should win and use main sender; got model=%q", lc.agent.Model)
 	}
 }

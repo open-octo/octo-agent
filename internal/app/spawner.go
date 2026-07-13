@@ -69,7 +69,7 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	// parent's lite model when one is configured — its own cheaper sender, not
 	// the main one, since a named lite model may live on a different provider.
 	// An explicit req.Model always wins; otherwise lean → lite, else parent's.
-	sender, model := s.parent.Sender, req.Model
+	sender, model := s.parent.GetSender(), req.Model
 	if model == "" {
 		if req.LeanContext && s.parent.LiteModel != "" && s.parent.LiteSender != nil {
 			sender, model = s.parent.LiteSender, s.parent.LiteModel
