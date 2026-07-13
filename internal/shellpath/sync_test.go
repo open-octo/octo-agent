@@ -52,6 +52,12 @@ func TestMergePaths(t *testing.T) {
 }
 
 func TestLooksLikeFullPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// looksLikeFullPath splits on os.PathListSeparator and reasons about Unix
+		// system directories; the cases below use ':'-joined POSIX PATHs. The
+		// function is only ever invoked on darwin/linux, so this test is Unix-only.
+		t.Skip("Unix PATH semantics; looksLikeFullPath only runs on darwin/linux")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Skip("no home dir")
