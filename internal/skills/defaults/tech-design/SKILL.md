@@ -20,7 +20,7 @@ write → self-review**.
 
 ## Rules (the reason this skill exists)
 
-These five rules run through the whole process. Follow them while writing
+These six rules run through the whole process. Follow them while writing
 (Phase 4), then grep for violations in the self-review. Most rework on a design
 doc traces back to breaking one of them.
 
@@ -88,6 +88,32 @@ field is usually N") must be grepped / measured / confirmed from logs. Ask "can 
 reproduce this example?" — if not, don't write it. An honest "needs verification"
 beats a wrong example that a later reader treats as truth. An old default config
 existing ≠ the current fact being correct; infrastructure migrates.
+
+### R6. Resolve every uncertainty now — never defer it to the implementation phase
+
+The finished design must be accurate and complete: an implementer builds from it
+without discovering that a decision was left open. A "待实现阶段确认 / to be
+confirmed during implementation / TBD" item is a **design defect**, not a legal
+hand-off — it is exactly the gap this skill exists to close. Every uncertainty
+you hit while writing (Phase 4) or in self-review (Phase 5) must be closed before
+the doc is done. There are two kinds, and each has one correct way to close it:
+
+- **A code-verifiable fact** — does this RPC actually return field X? what is the
+  struct's real shape? which column / tag / enum? → **resolve it yourself by
+  reading the code** (grep / codegraph / trace the call chain to the source).
+  Never turn a checkable fact into an open question for someone else.
+- **A genuine decision** — which of data-source A/B/C, sync vs async, extend an
+  existing struct vs add a new RPC, each with different costs → **re-enter the
+  grill-me skill** and drive it to a decision with the user, one question at a
+  time. Then write the chosen approach in as settled fact (per R4 — the actual
+  choice and its reason, never a bare option letter).
+
+If you catch yourself writing an "open questions" / "实现阶段需确认" list that
+shifts a decision downstream: stop. Check the code, or grill the user, then write
+the answer. The only thing that may remain unresolved is something genuinely
+outside the design's control (e.g. an upstream team owes a field that does not
+exist yet) — and that is recorded as a **blocking external dependency with an
+owner**, not as a decision the implementer is expected to make.
 
 ## Inputs
 
@@ -190,11 +216,16 @@ Before showing the user, grep for rule violations:
 | **R4** | `grep -E 'Q\d+\|grill\|option [ABCD]\|方案 ?[ABCD]\|走 ?[ABCD] ?路'` | Rewrite as a direct technical statement; replace bare option letters with their actual content. Changelog is exempt |
 | **R4-jargon** | List domain jargon / coined abbreviations; confirm each is defined in the glossary or on first use | Define the undefined ones |
 | **R5** | Every concrete example (service/cluster/field value/call chain) is empirical | Can't reproduce → change to "needs verification" or delete |
+| **R6** | `grep -E '实现阶段\|待实现\|待确认\|to be confirmed\|during implementation\|open question'` — any hit is a deferred decision | Close it before hand-off: a code-checkable fact → read the code; a genuine decision → re-enter grill-me and ask the user. Only a real external blocker may remain, recorded with an owner |
 | **Completeness** | `grep -E 'TBD\|TODO\|待定'`; empty tables, placeholders | Every cache key / MQ topic / API endpoint / DB column must be concrete |
 | **Consistency** | Sequence-diagram field names vs API response fields vs DB columns aligned? MQ topic name producer == consumer? | Rename to align |
 
-Fix issues in place. Leave open questions that genuinely need user input for the
-hand-off. Present the draft, iterate on feedback until approved.
+Fix issues in place, including every R6 deferral: close each one before you
+present the draft — a code-checkable fact by reading the code, a genuine decision
+by re-entering **grill-me** to resolve it with the user. The draft you hand off
+carries no "confirm during implementation" items; the only thing that may remain
+is a real external blocker, recorded with an owner. Present the draft, iterate on
+feedback until approved.
 
 ## Output
 
