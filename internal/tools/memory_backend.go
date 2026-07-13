@@ -140,6 +140,10 @@ func RegisterMemoryBackendHooks(e *hooks.Engine) {
 			return ""
 		}
 		content := strings.TrimSpace("User: " + p.UserInput + "\nAssistant: " + p.AssistantReply)
+		// Strip <system-reminder> spans before storing so injected context
+		// (recalled memories, background-task notes, goal context, …) never
+		// lands in long-term memory and can't resurface via memory_recall.
+		content = agent.StripSystemReminders(content)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -165,7 +169,10 @@ func RegisterMemoryBackendHooks(e *hooks.Engine) {
 				"`memory_recall` again for this same question; only call it if you need to dig further " +
 				"(a different angle, more results, or something this list doesn't cover):\n")
 			for _, r := range results {
-				sb.WriteString("- " + r.Content + "\n")
+				// Recall may return content stored before the strip was added, or
+				// externally indexed text carrying <system-reminder> spans — strip
+				// them so they don't ride the automatic-injection path back in.
+				sb.WriteString("- " + agent.StripSystemReminders(r.Content) + "\n")
 			}
 			sb.WriteString("</system-reminder>")
 			return sb.String()
