@@ -22,6 +22,11 @@ The text after `/loop` is `[interval] <task>`:
 - **Interval given** (`/loop 5m check the build`, `/loop 30s …`, `/loop 2h …`) →
   **interval mode**. Parse the leading duration to seconds and run the task on
   that fixed cadence.
+  - **Rule of thumb:** if the user names a concrete interval, use interval mode
+    with `repeat=true`. The system will re-run the task on that cadence; you do
+    **not** need to call `schedule_wakeup` again on each tick. Once the goal is
+    met (e.g. the PR is merged, CI is green), call `schedule_wakeup(cancel=true)`
+    to stop the loop.
 - **No interval** (`/loop keep refining the draft until it reads cleanly`) →
   **dynamic mode**. You choose the cadence each turn and you decide when to stop.
 
@@ -30,23 +35,30 @@ loop that runs the wrong task wastes every iteration.
 
 ## Interval mode — fixed cadence
 
+Use this when the user wants the same task checked or run on a **steady
+cadence** (e.g. polling a CI job, a deploy, a PR merge status, or a queue).
+
 Do the task once, then call `schedule_wakeup` **with `repeat: true`** so the
 wakeup re-arms itself automatically:
 
 ```
-schedule_wakeup(delay_seconds=300, repeat=true,
-                reason="polling the deploy every 5m until it's live",
-                prompt="<the task to run each tick>")
+schedule_wakeup(delay_seconds=120, repeat=true,
+                reason="checking if PR is merged every 2 minutes",
+                prompt="Check whether the PR has been merged. If it has, say so and stop the loop by cancelling the wakeup. If not, just report the current status.")
 ```
 
 You only call it **once** — the cadence holds on its own. Each tick re-runs
 `prompt` as a fresh turn. Pass the task verbatim as `prompt` so every tick does
-the same work. The loop keeps ticking until it's stopped (see **Stopping**).
+the same work. **Do NOT call `schedule_wakeup` again inside the tick; the timer
+re-arms automatically.** The loop keeps ticking until it's stopped (see
+**Stopping**).
 
 ## Dynamic mode — you set the pace
 
-Do the task, then call `schedule_wakeup` **with `repeat: false`** (the default)
-to come back later:
+Use this when the user did **not** specify an interval, or when the next step
+depends on what you learn in this turn and you want to decide the cadence
+yourself (e.g. "keep refining this draft until it reads cleanly"). Do **not**
+use dynamic mode for fixed-interval polling; that is what interval mode is for.
 
 ```
 schedule_wakeup(delay_seconds=900, reason="<what you're waiting for>",
