@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SubAgentState } from '../../lib/stores'
   import { t } from '../../lib/i18n'
+  import { fade } from 'svelte/transition'
 
   // Live concurrent sub-agents for the current turn. Fed from chatSubAgents.
   let { agents = [], elapsed = 0 }: { agents?: SubAgentState[]; elapsed?: number } = $props()
@@ -62,7 +63,7 @@
   </div>
 
   {#each agents as a (a.id)}
-    <details class="agent-row" open={expanded[a.id] ?? (a.status === 'done')}>
+    <details class="agent-row" open={expanded[a.id] ?? (a.status === 'done')} out:fade={{ duration: 250 }}>
       <summary class="agent-summary" onclick={() => toggleExpand(a.id)}>
         <span class="agent-avatar" class:blue={a.status === 'running'} class:green-av={a.status === 'done'}>
           {initials(a)}

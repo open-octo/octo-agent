@@ -40,6 +40,7 @@
     finishToolsById,
     resetSubAgents,
     clearDoneSubAgents,
+    removeSubAgent,
     applySubAgentEvent,
     showToast,
     uid,
@@ -91,6 +92,26 @@
   // the streaming flag to its pre-send value. Content and files are kept so a
   // force takeover can retry the same message.
   const pendingSends = new Map<string, { pendingId: string; wasStreaming: boolean; text: string; files?: any[] }[]>()
+
+  // Pending auto-dismiss timers for background sub-agents that finished with no
+  // active turn (keyed by `${sid}\x00${agentId}`). A turn-less `done` has no
+  // `complete` event to clear it, so we show it briefly then drop it. Cleared
+  // per-session on the effect teardown.
+  const subAgentDismissTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const SUB_AGENT_DISMISS_MS = 4000
+
+  function scheduleSubAgentDismiss(sid: string, agentId: string) {
+    const key = `${sid}\x00${agentId}`
+    const existing = subAgentDismissTimers.get(key)
+    if (existing) clearTimeout(existing)
+    subAgentDismissTimers.set(key, setTimeout(() => {
+      subAgentDismissTimers.delete(key)
+      // Guard against the agent having restarted (a new `started` would flip it
+      // back to running): only drop it if it's still present and done.
+      const cur = (get(chatSubAgents)[sid] || []).find(a => a.id === agentId)
+      if (cur && cur.status === 'done') removeSubAgent(sid, agentId)
+    }, SUB_AGENT_DISMISS_MS))
+  }
 
   // Pending steer messages typed while a turn is running. They are shown above
   // the composer as ghost user bubbles until the server drains the inbox and
@@ -261,12 +282,17 @@
 
   // Clear transient runtime state for a session so switching back from another
   // conversation never shows a stale thinking indicator or spinning sub-agent.
-  function resetSessionRuntimeState(sid: string) {
+  // keepRunningSubAgents preserves in-flight background sub-agents (which
+  // outlive turns) while still clearing turn-scoped state. The server's idle
+  // snapshot replays running sub-agents just before it, so a full resetSubAgents
+  // there would wipe the very entries that were just restored (flicker).
+  function resetSessionRuntimeState(sid: string, keepRunningSubAgents = false) {
     chatStreaming.update(s => ({ ...s, [sid]: false }))
     chatProgress.update(p => ({ ...p, [sid]: null }))
     chatThinking.update(t => ({ ...t, [sid]: '' }))
     chatTurnStart.update(m => { const n = { ...m }; delete n[sid]; return n })
-    resetSubAgents(sid)
+    if (keepRunningSubAgents) clearDoneSubAgents(sid)
+    else resetSubAgents(sid)
     finishAllTools(sid)
   }
 
@@ -494,15 +520,24 @@
 
     cleanups.push(ws.on('sub_agent_event', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const kind = (ev as any).kind ?? ''
+      const agentId = (ev as any).agent_id ?? ''
       applySubAgentEvent(
         sid,
-        (ev as any).agent_id ?? '',
+        agentId,
         (ev as any).description ?? '',
         (ev as any).agent_type ?? '',
-        (ev as any).kind ?? '',
+        kind,
         (ev as any).tool_name ?? '',
         (ev as any).tool_input,
       )
+      // A background sub-agent that finishes while no turn is streaming has no
+      // `complete` to clean it up — it would linger until an unrelated event
+      // (next send / reconnect). Show its done state briefly, then auto-dismiss.
+      // During an active turn we leave it: `complete` clears the whole trail.
+      if (kind === 'done' && agentId && !(get(chatStreaming)[sid] ?? false)) {
+        scheduleSubAgentDismiss(sid, agentId)
+      }
     }))
 
     cleanups.push(ws.on('sub_agent_notice', (ev) => {
@@ -760,9 +795,12 @@
       if (typeof (ev as any).working_dir === 'string' && (ev as any).working_dir) {
         chatWorkingDir.update(w => ({ ...w, [sid]: (ev as any).working_dir }))
       }
-      // An idle snapshot from the server clears a stale thinking indicator.
+      // An idle snapshot from the server clears a stale thinking indicator, but
+      // must keep still-running background sub-agents: replayLiveState pushes
+      // their events immediately before this snapshot, so wiping them here made
+      // the panel flash out and back in as the next sub_agent_event re-added it.
       if ((ev as any).status === 'idle') {
-        resetSessionRuntimeState(sid)
+        resetSessionRuntimeState(sid, true)
       }
     }))
 
@@ -861,6 +899,14 @@
       cancelled = true
       ws.unsubscribe(sid)
       for (const cleanup of cleanups) cleanup()
+      // Drop this session's pending sub-agent dismiss timers so they can't fire
+      // against a session no longer shown in this view.
+      for (const [key, timer] of subAgentDismissTimers) {
+        if (key.startsWith(`${sid}\x00`)) {
+          clearTimeout(timer)
+          subAgentDismissTimers.delete(key)
+        }
+      }
     }
   })
 
