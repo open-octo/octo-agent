@@ -85,6 +85,34 @@ type replConfig struct {
 	autoFirstInput string
 }
 
+// ensureSender rebuilds cfg.a.Sender when targetModel resolves to a different
+// provider or base URL than the one currently in use. The existing sender is
+// kept when provider and base URL match (no rebuild, no cache-key rotation).
+// cfg.providerName / cfg.configEntry are updated to match the new sender. On
+// error (missing key for the target provider, unknown model) cfg is left
+// unchanged.
+func (cfg *replConfig) ensureSender(targetModel string, tuning senderTuning) error {
+	models, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	provName, _, entry, ok := resolveProviderModel(cfg.providerName, targetModel, models)
+	if !ok {
+		return fmt.Errorf("cannot resolve provider for model %q", targetModel)
+	}
+	if provName == cfg.providerName && entry.BaseURL == cfg.configEntry.BaseURL {
+		return nil // no rebuild needed
+	}
+	newSender, err := buildSender(provName, entry, cfg.stderr, tuning)
+	if err != nil {
+		return err
+	}
+	cfg.a.Sender = newSender
+	cfg.providerName = provName
+	cfg.configEntry = entry
+	return nil
+}
+
 // mcpBootstrap carries the inputs runTUI needs to connect MCP servers from a
 // background tea.Cmd: the resolved config, our client identity, and the writer
 // that receives stdio servers' child stderr (a log file under the TUI).
