@@ -431,6 +431,16 @@ export function clearDoneSubAgents(sessionId: string) {
   })
 }
 
+// Remove one sub-agent by id. Used to auto-dismiss a background sub-agent that
+// finished with no active turn to clean it up — there is no `complete` event in
+// that case, so it would otherwise linger until an unrelated event.
+export function removeSubAgent(sessionId: string, agentId: string) {
+  chatSubAgents.update(m => {
+    const remaining = (m[sessionId] || []).filter(a => a.id !== agentId)
+    return { ...m, [sessionId]: remaining }
+  })
+}
+
 export function applySubAgentEvent(
   sessionId: string,
   agentId: string,
