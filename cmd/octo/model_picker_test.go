@@ -236,3 +236,110 @@ func TestModelPickerView_EmptyWhenInactive(t *testing.T) {
 		t.Errorf("expected empty picker view when inactive, got:\n%s", out)
 	}
 }
+
+// TestDispatchModel_DefaultFlag verifies that `/model <name> --default` sets
+// the model as default in the persisted config.
+func TestDispatchModel_DefaultFlag(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
+	writeModelsConfig(t, config.Config{
+		Models: []config.ModelEntry{
+			{Model: "gpt-4o", Provider: "openai"},
+			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
+		},
+		DefaultModel: "gpt-4o",
+	})
+
+	m := newPickerTestModel("gpt-4o")
+	m.dispatchModel("deepseek-v4-flash --default")
+
+	if m.a.Model != "deepseek-v4-flash" {
+		t.Errorf("active model = %q, want deepseek-v4-flash", m.a.Model)
+	}
+
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if saved.DefaultModel != "deepseek-v4-flash" {
+		t.Errorf("default_model = %q, want deepseek-v4-flash", saved.DefaultModel)
+	}
+}
+
+// TestDispatchModel_DefaultFlagUnconfigured verifies `/model <unknown> --default`
+// errors on the switch step and does NOT touch the config.
+func TestDispatchModel_DefaultFlagUnconfigured(t *testing.T) {
+	writeModelsConfig(t, config.Config{
+		Models: []config.ModelEntry{
+			{Model: "gpt-4o", Provider: "openai"},
+		},
+		DefaultModel: "gpt-4o",
+	})
+
+	m := newPickerTestModel("gpt-4o")
+	m.dispatchModel("nonexistent --default")
+
+	// Model should NOT have switched.
+	if m.a.Model != "gpt-4o" {
+		t.Errorf("active model = %q, want gpt-4o (unchanged)", m.a.Model)
+	}
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if saved.DefaultModel != "gpt-4o" {
+		t.Errorf("default_model = %q, want gpt-4o (unchanged)", saved.DefaultModel)
+	}
+}
+
+// TestDispatchModel_NoDefaultFlag verifies `/model <name>` (no --default) does
+// NOT change the persisted default.
+func TestDispatchModel_NoDefaultFlag(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
+	writeModelsConfig(t, config.Config{
+		Models: []config.ModelEntry{
+			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
+			{Model: "gpt-4o", Provider: "openai"},
+		},
+		DefaultModel: "gpt-4o",
+	})
+
+	m := newPickerTestModel("gpt-4o")
+	m.dispatchModel("deepseek-v4-flash")
+
+	if m.a.Model != "deepseek-v4-flash" {
+		t.Errorf("active model = %q, want deepseek-v4-flash", m.a.Model)
+	}
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if saved.DefaultModel != "gpt-4o" {
+		t.Errorf("default_model = %q, want gpt-4o (unchanged)", saved.DefaultModel)
+	}
+}
+
+// TestDispatchModel_DefaultFlagOnly verifies `/model --default` (flag without
+// a model name) errors cleanly and does not touch the config.
+func TestDispatchModel_DefaultFlagOnly(t *testing.T) {
+	writeModelsConfig(t, config.Config{
+		Models: []config.ModelEntry{
+			{Model: "gpt-4o", Provider: "openai"},
+		},
+		DefaultModel: "gpt-4o",
+	})
+
+	m := newPickerTestModel("gpt-4o")
+	m.dispatchModel("--default")
+
+	// Switch should fail (no model), default should remain unchanged.
+	if m.a.Model != "gpt-4o" {
+		t.Errorf("active model = %q, want gpt-4o (unchanged)", m.a.Model)
+	}
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if saved.DefaultModel != "gpt-4o" {
+		t.Errorf("default_model = %q, want gpt-4o (unchanged)", saved.DefaultModel)
+	}
+}
