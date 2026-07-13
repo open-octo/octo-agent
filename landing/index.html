@@ -621,12 +621,6 @@
              data-zh="没有埋点 SDK、没有崩溃上报、没有内置的用量回传。除了你主动配置、显式发出的模型请求，没有任何东西离开你的机器。"></p>
         </div>
         <div class="feature reveal">
-          <span class="feature-icon">🛡️</span>
-          <h3 data-en="Won't break on upgrade" data-zh="升级配置不会把 agent 搞挂"></h3>
-          <p data-en="Config and permission changes are validated before they take effect — a bad edit to config.yml or permissions.yml can't crash a running session; the last good config keeps serving until the new one passes."
-             data-zh="配置与权限变更先校验、后生效 —— config.yml 或 permissions.yml 改错了也不会把正在跑的 agent 搞挂，新配置没校验通过就继续用上一份好的。"></p>
-        </div>
-        <div class="feature reveal">
           <span class="feature-icon">♻️</span>
           <h3 data-en="A recycle bin for your files" data-zh="给文件留一个回收站"></h3>
           <p data-en="An agent that goes rogue and deletes or overwrites the wrong file shouldn't cost you your work. Agent deletes are intercepted and overwrites are backed up before they happen — restore from the Web UI, or hit one-click Undo. Every entry is tagged with what removed it, and the bin bounds itself by age and size."
@@ -639,26 +633,26 @@
              data-zh="稳定的系统提示词与消息结构，让多轮对话持续吃到供应商侧的 prompt 缓存；缓存读写 token 按协议正确追踪并展示 —— 省下的钱看得见，不是营销话术。"></p>
         </div>
         <div class="feature reveal">
-          <span class="feature-icon">🛠️</span>
-          <h3 data-en="Real tools, not toy examples" data-zh="真工具，不是玩具示例"></h3>
-          <p data-en="File read/write/edit, terminal (with background jobs), glob, grep, web fetch/search. Plus MCP servers and reusable Skills in Claude Code format."
-             data-zh="文件读/写/改、终端（含后台任务）、glob、grep、网页抓取/搜索。外加 MCP 服务与 Claude Code 格式的可复用 Skills。"></p>
-        </div>
-        <div class="feature reveal">
           <span class="feature-icon">🔎</span>
           <h3 data-en="MCP Tool Search" data-zh="MCP Tool Search"></h3>
           <p data-en="Connect dozens of MCP tools without blowing the context window. Octo keeps every tool's name and one-line description listed, and defers the full schema behind a small describe/call bridge loaded only when the model needs it."
              data-zh="连接几十个 MCP 工具也不撑爆上下文。Octo 会一直列出每个工具的名字和一行说明，完整 schema 则通过小型 describe/call 桥延迟加载，只在模型需要时才加载。"></p>
         </div>
         <div class="feature reveal">
-          <span class="feature-icon">🧠</span>
-          <h3 data-en="Persistent memory" data-zh="持久化记忆"></h3>
-          <p data-en="Octo remembers your preferences, project conventions, and past corrections across sessions — stored locally in ~/.octo/memories/, not in the cloud."
-             data-zh="Octo 跨会话记住你的偏好、项目约定与过往纠正 —— 本地存于 ~/.octo/memories/，不上云。"></p>
+          <span class="feature-icon">🌐</span>
+          <h3 data-en="Browser automation" data-zh="浏览器自动化"></h3>
+          <p data-en="Connect your own Chrome via CDP and click, type, scroll, screenshot, and download in one go. Complex web tasks become agent tool calls — no scripts required."
+             data-zh="通过 CDP 连接你自己的 Chrome，点击、输入、滚动、截图、下载一气呵成。复杂网页操作变成 agent 的工具调用，无需写脚本。"></p>
+        </div>
+        <div class="feature reveal">
+          <span class="feature-icon">🍳</span>
+          <h3 data-en="Chef recipes" data-zh="主厨配方"></h3>
+          <p data-en="20 hand-picked skills are bundled and ready to use right away — no wiring, no prompt engineering from scratch. Just tell Octo what you want."
+             data-zh="内置 20 个精选 skill，开箱即用。无需从零搭建或写 prompt，开口就能派活。"></p>
         </div>
         <div class="feature reveal">
           <span class="feature-icon">🤖</span>
-          <h3 data-en="Background workflows &amp; sub-agents" data-zh="后台工作流 & 子代理"></h3>
+          <h3 data-en="Background workflows &amp; sub-agents" data-zh="后台工作流 &amp; 子代理"></h3>
           <p data-en="The workflow tool orchestrates parallel sub-agents (fan-out, pipelines) with git worktree isolation, runs detached in the background, and reports back across every interface. Long-horizon tasks without babysitting."
              data-zh="workflow 工具编排并行子代理（扇出、流水线），带 git worktree 隔离，可后台分离运行，并在每个界面回报进度。长周期任务无需盯着。"></p>
         </div>
