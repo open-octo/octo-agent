@@ -986,11 +986,18 @@ func (m *tuiModel) dispatchTranscript(arg string) (tea.Model, tea.Cmd) {
 }
 
 // dispatchModel handles "/model <name>" — switch the active model for the
-// current session. The provider stays the same; only the model identifier
-// changes, so the sender does not need rebuilding.
+// current session. If the new model resolves to a different provider or base
+// URL, the sender is rebuilt so requests go to the right endpoint. A rebuild
+// failure (e.g. missing API key for the target provider) aborts the switch and
+// reports the error — the session stays on the old model.
 func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	if name == "" {
 		m.println(errorStyle.Render("Usage: /model <model-name>"))
+		return m, nil
+	}
+	tuning := senderTuning{showReasoning: m.cfg.showReasoning}
+	if err := m.cfg.ensureSender(name, tuning); err != nil {
+		m.println(errorStyle.Render(fmt.Sprintf("error switching model: %v", err)))
 		return m, nil
 	}
 	m.a.Model = name
