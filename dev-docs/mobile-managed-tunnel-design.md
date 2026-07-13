@@ -85,18 +85,50 @@ A Capacitor project — a sibling repository to `octo-vscode` and `octo-obsidian
 
 The frontend is **bundled into the app** and served to the webview from `capacitor://localhost`, so it starts instantly and — crucially — keeps its same-origin assumptions. It does **not** connect cross-origin to the relay; the local shim (above) presents the `/api` and `/ws` surface locally and tunnels it out. Keys and the Noise handshake stay in the native layer and secure storage, never in JavaScript.
 
-Native bridges the app must add, following the desktop `NativeBridge` pattern (interface + handler + client shim):
+Because the app is bundled and connects out to a *remote* host, its nativeness is a client-side fact, not a server-reported one — the desktop shell's model, where a same-machine server reports `native:true` and the page carries `?shell=octo-desktop`, does not apply here. The native layer and how it re-points the frontend's existing native branches are detailed next.
 
-| Bridge | Purpose |
-|---|---|
-| Local tunnel shim | Terminate the webview's `/api` + `/ws`, run Noise, tunnel to the relay. |
-| Push registration | Obtain the APNs/FCM device token; hand it to the host over E2E for wakeups. |
-| Secure storage | Keep the device keypair and tunnel credentials in Keychain / Keystore. |
-| Biometric unlock | Gate access to the tunnel credential behind Face ID / fingerprint. |
-| Deep link | A push tap opens the app on the exact session that raised the event. |
-| External open / share | Route link taps and share-outs through native APIs — the octo-served page has no browser navigation runtime, the same gap the desktop shell hit ([desktop-hub-design.md](desktop-hub-design.md)). |
+## The native layer: what the app implements
 
-The desktop shell learned that an octo-served page has no injected native runtime, so navigation and download APIs are dead in the webview and must route through native bridges. The mobile shell inherits that lesson: anything beyond rendering the page and speaking `/ws` goes through a bridge, gated on a "native shell" marker the way the desktop build sets `shell=octo-desktop`.
+Mobile's native layer is not the desktop shell's. Desktop native capabilities are **server-side** — `/api/native/*` routes on a server that runs on the same machine as the OS dialogs, dock, and notifications it drives. A phone's native capabilities are on the phone, and the phone connects to a **remote** `octo serve --tunnel` that runs plain: `cfg.Native` is nil, so `/api/version` reports `native:false` and no `/api/native/*` routes exist. The app therefore reaches native capability through **Capacitor's JS↔native plugin bridge**, not HTTP to the remote. The layer is three parts: new Capacitor plugins, a re-pointing of the frontend's existing native branches, and a set of desktop-only capabilities that don't apply.
+
+### Client-side nativeness
+
+The frontend today sets `nativeShell` as `native:true` (from `/api/version`) *and* `?shell=octo-desktop` (from the URL). Neither holds on mobile — the remote is plain serve, and the bundled app has no shell query. The app introduces a separate `mobileShell` signal set from `Capacitor.isNativePlatform()`, and the frontend's `if (nativeShell)` branches become `if (nativeShell || mobileShell)`, dispatching to the desktop `/api/native/*` path or the Capacitor path by whichever is set. Mobile nativeness depends on the client, not on anything the server reports.
+
+### Capacitor plugins (new; JS↔native, never the remote)
+
+| Capability | Plugin | Role |
+|---|---|---|
+| Local tunnel shim | custom | The transport: terminate the webview's `/api` + `/ws` at `capacitor://localhost`, run Noise, tunnel to the relay. The desktop had no equivalent — it connected same-origin. |
+| Secure storage | Keychain / Keystore | Hold the device keypair and tunnel credentials (the host keeps these in `~/.octo`). |
+| Biometric unlock | biometric | Gate release of the stored credential behind Face ID / fingerprint. |
+| Push registration + receipt | `@capacitor/push-notifications` | Obtain the APNs/FCM token and hand it to the host at pairing; on a wakeup, reconnect and pull state. |
+| Local notification | `@capacitor/local-notifications` | Foreground/attended notifications, in place of the browser Notification API the webview lacks. |
+| Deep link | `@capacitor/app` (`appUrlOpen`) | A push tap opens the app on the exact session that raised the event. |
+| QR scan | barcode-scanner / camera | Scan the host's pairing QR. |
+| Open external URL | `@capacitor/browser` | Open links in the system browser. |
+| Save / share file | `@capacitor/filesystem` + share | Land an artifact download on the phone. |
+
+### Re-pointing the frontend's native branches
+
+These points already branch on `nativeShell`; mobile adds a `mobileShell` arm that targets Capacitor — **never** the remote `/api/native/*`, which is both absent and semantically wrong (opening a URL or saving a file on the remote host is useless to a phone user).
+
+| Frontend point | Desktop | Mobile |
+|---|---|---|
+| `externalLinks.ts` (open URL / anchor intercept) | `/api/native/open-external` | Capacitor Browser |
+| `notifications.ts` | `/api/native/notify` | foreground → local notification; background → push |
+| Pick working directory (`nativePickFolder`) | remote OS dialog | **the existing remote web folder picker** (`GET /api/fs/list` → `PATCH …/working_dir`) — the target directory is on the remote host, not the phone, so this reuses the same path plain web uses, not a phone file dialog |
+| Artifact download (`nativeSaveFile`) | remote save dialog | Capacitor filesystem + share (the file belongs on the phone) |
+
+### Desktop-only, dropped
+
+- **`ToggleMaximise`** — no window chrome to zoom.
+- **`AutostartEnabled` / `SetAutostart`** — no launch-at-login concept.
+- **`PersistChannelsEnabled` / channels toggle** — a host concern; the remote plain serve exposes no `NativeBridge` for it anyway.
+
+### Server side
+
+Nothing new. The remote is plain `octo serve --tunnel` with `cfg.Native` nil; the entire native layer is client-side Capacitor code. The one server-side change the mobile experience needs — the conditional-indefinite permission-confirmation wait — is described under [Reconnect and durability](#reconnect-and-durability-a-wakeup-is-a-tab-refresh) and is orthogonal to this layer.
 
 ## End-to-end encryption and pairing
 
