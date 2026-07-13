@@ -50,8 +50,7 @@ Before asking any questions, do your homework:
    can: problem statement, core user flow, scope boundaries. The less the user
    gives, the more Phase 1 needs to cover.
 2. **Explore the codebase** — identify the existing services, data models, APIs,
-   message-queue topics, cache keys, and prior art relevant to the plan. Use
-   codegraph if the project has it indexed, otherwise search directly. Report key
+   message-queue topics, cache keys, and prior art relevant to the plan. Report key
    findings to the user concisely before starting questions.
 
 This phase is silent work — don't ask the user things you can learn from the code.
