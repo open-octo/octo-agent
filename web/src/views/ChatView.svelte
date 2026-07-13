@@ -1,5 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store'
+  import { fade } from 'svelte/transition'
   import {
     activeSessionId,
     activeSession,
@@ -1486,7 +1487,11 @@
 
           <!-- Live sub-agents panel (current turn) -->
           {#if subAgents.length > 0}
-            <div class="msg-agent fadein">
+            <!-- |global so the fade plays when this whole {#if} block unmounts
+                 (the common auto-dismiss case: the last background sub-agent is
+                 removed and the array empties). A default local transition would
+                 only play on an {#each}-item removal inside a still-mounted card. -->
+            <div class="msg-agent fadein" out:fade|global={{ duration: 250 }}>
               <div class="agent-avatar"><OctoLogo size={18} /></div>
               <div class="agent-content">
                 <SubAgentsCard agents={subAgents} elapsed={subAgentsElapsed} />
