@@ -290,18 +290,6 @@ func (b *nativeBridge) SetAutostart(enable bool) error {
 	return b.app.Autostart.Disable()
 }
 
-// PersistChannelsEnabled records the "run channels on this machine" preference
-// so a relaunch honors it (the desktop reads it at startup to seed the server).
-// The live start/stop is the server's own SetChannelsEnabled, driven from the
-// same request; this only writes ~/.octo/desktop.json.
-func (b *nativeBridge) PersistChannelsEnabled(enabled bool) error {
-	b.settingsMu.Lock()
-	b.settings.ChannelsEnabled = enabled
-	snapshot := b.settings
-	b.settingsMu.Unlock()
-	return saveDesktopSettings(snapshot)
-}
-
 // ToggleMaximise maximises or restores the window (the double-click-titlebar
 // zoom the frontend can't trigger itself). No-op before the window exists.
 func (b *nativeBridge) ToggleMaximise() {
@@ -442,7 +430,7 @@ func (b *nativeBridge) confirmTakeover(pid int) bool {
 // requestQuit is the tray "Quit Octo" action: it fully stops the backend, so it
 // confirms first when channels are running (other clients would disconnect).
 func (b *nativeBridge) requestQuit() {
-	if srv := b.srv.Load(); srv != nil && srv.ChannelsEnabled() {
+	if srv := b.srv.Load(); srv != nil && len(srv.RunningChannels()) > 0 {
 		if !b.confirm(L().quitTitle, L().quitMsg, L().quitOK, L().quitCancel) {
 			return
 		}

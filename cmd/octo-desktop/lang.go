@@ -18,9 +18,6 @@ type uiStrings struct {
 	trayCheckUpdates   string
 	trayStarting       string
 	trayBackendFmt     string // "Backend · %s"
-	trayChannelsOff    string
-	trayChannelsOnNone string
-	trayChannelsOnFmt  string // "Channels: on · %d (%s)"
 	trayClientsFmt     string // "Connected clients: %d"
 
 	takeoverTitle  string
@@ -53,9 +50,6 @@ var enStrings = uiStrings{
 	trayCheckUpdates:   "Check for Updates…",
 	trayStarting:       "Starting…",
 	trayBackendFmt:     "Backend · %s",
-	trayChannelsOff:    "Channels: off",
-	trayChannelsOnNone: "Channels: on · none connected",
-	trayChannelsOnFmt:  "Channels: on · %d (%s)",
 	trayClientsFmt:     "Connected clients: %d",
 
 	takeoverTitle:  "Octo",
@@ -88,9 +82,6 @@ var zhStrings = uiStrings{
 	trayCheckUpdates:   "检查更新…",
 	trayStarting:       "启动中…",
 	trayBackendFmt:     "后端 · %s",
-	trayChannelsOff:    "Channel：未开启",
-	trayChannelsOnNone: "Channel：已开启 · 暂无连接",
-	trayChannelsOnFmt:  "Channel：已开启 · %d 个（%s）",
 	trayClientsFmt:     "已连接客户端：%d",
 
 	takeoverTitle:  "Octo",

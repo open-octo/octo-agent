@@ -32,12 +32,6 @@ type NativeBridge interface {
 	// SetAutostart registers (enable) or unregisters the app from launch-at-login.
 	SetAutostart(enable bool) error
 
-	// PersistChannelsEnabled records the desktop hub's per-machine "run channels
-	// on this machine" preference so it survives a relaunch (the desktop reads
-	// it at startup to seed the server). This only stores the choice; the live
-	// start/stop of the channel subsystem is the server's own SetChannelsEnabled.
-	PersistChannelsEnabled(enabled bool) error
-
 	// ToggleMaximise maximises the window if it isn't, or restores it if it is —
 	// the double-click-the-titlebar zoom the frontend's draggable header can't do
 	// itself (the page is octo-served, so it has no Wails runtime to call).
@@ -190,52 +184,6 @@ func (s *Server) handleNativeAutostartSet(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": req.Enabled})
-}
-
-type nativeChannelsRequest struct {
-	Enabled bool `json:"enabled"`
-}
-
-// GET /api/native/channels — report whether the hub is running IM channels on
-// this machine (desktop only). Reflects the live subsystem state, which after
-// boot equals the persisted per-machine toggle.
-func (s *Server) handleNativeChannelsGet(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
-		writeError(w, http.StatusForbidden, "available only from the local machine")
-		return
-	}
-	if s.cfg.Native == nil {
-		writeError(w, http.StatusNotFound, "native bridge not available")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": s.ChannelsEnabled()})
-}
-
-// PUT /api/native/channels — turn IM channels on/off on this machine (desktop
-// only). Applies immediately via the server's runtime toggle and persists the
-// choice through the bridge so it survives a relaunch.
-func (s *Server) handleNativeChannelsSet(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
-		writeError(w, http.StatusForbidden, "available only from the local machine")
-		return
-	}
-	if s.cfg.Native == nil {
-		writeError(w, http.StatusNotFound, "native bridge not available")
-		return
-	}
-	var req nativeChannelsRequest
-	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	// Persist the per-machine preference first so a relaunch honors it even if
-	// the process dies right after; then apply the live start/stop.
-	if err := s.cfg.Native.PersistChannelsEnabled(req.Enabled); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	s.SetChannelsEnabled(req.Enabled)
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": s.ChannelsEnabled()})
 }
 
 // POST /api/native/window/toggle-maximise — maximise/restore the desktop window

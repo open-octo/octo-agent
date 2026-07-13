@@ -338,19 +338,13 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 		bridge.closeLog.Store(&closeLog)
 	}
 
-	// Channels start only when the per-machine toggle is on (default off): the
-	// hub is a hub for the UI/sessions immediately, but launching the GUI never
-	// silently starts an IM bridge. The toggle is flipped at runtime via
-	// /api/native/channels.
-	channelsOn := settings.ChannelsEnabled
 	srv, err := server.New(server.Config{
 		Tools: true,
 		// On: the version badge needs the latest-release lookup to know an update
 		// exists. It reports upgrade_mode "installer" (Native is set), so the UI
 		// offers a download link, not the in-place swap this build can't do.
-		UpdateCheck:     true,
-		Native:          bridge,
-		ChannelsEnabled: &channelsOn,
+		UpdateCheck: true,
+		Native:      bridge,
 	})
 	if err != nil {
 		bridge.showError(L().errTitle, fmt.Sprintf(L().errStartFmt, err))
@@ -411,23 +405,13 @@ func listenHub(addr string, grace time.Duration) (net.Listener, error) {
 }
 
 // trayStatusLines is the (info-only) top of the tray menu: what the hub is
-// doing right now — where it's serving, whether it's bridging IM channels
-// (and which), and how many clients are attached.
+// doing right now — where it's serving and how many clients are attached.
 func trayStatusLines(bridge *nativeBridge) []string {
 	srv := bridge.srv.Load()
 	if srv == nil {
 		return []string{L().trayStarting}
 	}
 	lines := []string{fmt.Sprintf(L().trayBackendFmt, hubAddr)}
-	if srv.ChannelsEnabled() {
-		if running := srv.RunningChannels(); len(running) > 0 {
-			lines = append(lines, fmt.Sprintf(L().trayChannelsOnFmt, len(running), strings.Join(running, ", ")))
-		} else {
-			lines = append(lines, L().trayChannelsOnNone)
-		}
-	} else {
-		lines = append(lines, L().trayChannelsOff)
-	}
 	lines = append(lines, fmt.Sprintf(L().trayClientsFmt, srv.ConnectedClients()))
 	return lines
 }
