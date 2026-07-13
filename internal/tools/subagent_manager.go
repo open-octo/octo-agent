@@ -25,8 +25,10 @@ type SubAgentNotification struct {
 	Result       string // final reply text
 	InputTokens  int
 	OutputTokens int
-	// StopReason is empty for normal completion, "max_turns" when the sub-agent
-	// hit its loop budget. The parent uses this to decide whether to continue.
+	// StopReason carries why the sub-agent stopped: "end_turn"/"tool_use" (and
+	// other provider sentinels) for a normal completion, "max_turns"/"max_tokens"
+	// when a loop/output budget was exhausted, and empty when the run errored out.
+	// The parent uses this to decide whether to continue.
 	StopReason string
 }
 

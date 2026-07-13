@@ -30,6 +30,24 @@ func TestBgNoticeStatus(t *testing.T) {
 	}
 }
 
+func TestSubAgentNoticeStatus(t *testing.T) {
+	cases := []struct {
+		stopReason, want string
+	}{
+		{"", "failed"},            // error exit
+		{"end_turn", "success"},   // normal completion
+		{"tool_use", "success"},   // normal completion
+		{"max_turns", "warning"},  // partial completion
+		{"max_tokens", "warning"}, // partial completion
+		{"promoted", "success"},   // user-promoted sync run
+	}
+	for _, c := range cases {
+		if got := subAgentNoticeStatus(tools.SubAgentNotification{StopReason: c.stopReason}); got != c.want {
+			t.Errorf("subAgentNoticeStatus(StopReason=%q) = %q, want %q", c.stopReason, got, c.want)
+		}
+	}
+}
+
 func TestBackgroundTasksUpdate_Payload(t *testing.T) {
 	now := time.Now()
 	infos := []tools.BgInfo{

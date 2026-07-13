@@ -99,8 +99,9 @@ type SpawnResult struct {
 	OutputTokens int
 	// Turns is the number of provider round-trips the sub-agent executed.
 	Turns int
-	// StopReason carries why the sub-agent stopped. Empty for normal
-	// completion; "max_turns" when the loop budget was exhausted.
+	// StopReason carries why the sub-agent stopped: a provider sentinel
+	// ("end_turn"/"tool_use"/…) for a normal completion, "max_turns"/"max_tokens"
+	// when a budget was exhausted, and empty when the run errored out.
 	StopReason string
 }
 
