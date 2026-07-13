@@ -55,7 +55,7 @@ for the task in plain language instead and the model loads the matching skill it
 
 ## Built-in skills
 
-octo ships 20 skills out of the box. Every one triggers automatically when the model judges a task
+octo ships 21 skills out of the box. Every one triggers automatically when the model judges a task
 matches its description — you rarely need to invoke them by name.
 
 **Get started**
