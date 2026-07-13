@@ -10,6 +10,8 @@
 /octo-desktop.exe
 cmd/octo-desktop/octo-desktop
 cmd/octo-desktop/octo-desktop.exe
+/cmd/octo/octo
+/cmd/octo/octo.exe
 /Octo.app
 /Octo.AppDir/
 /Octo-x86_64.AppImage
