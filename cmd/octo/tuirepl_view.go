@@ -1092,8 +1092,11 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	setDefault := false
 	if trimmed := strings.TrimSpace(name); strings.HasSuffix(trimmed, "--default") {
 		setDefault = true
-		rest, _ := strings.CutSuffix(trimmed, "--default")
-		name = strings.TrimSpace(rest)
+		name = strings.TrimSpace(strings.TrimSuffix(trimmed, "--default"))
+	}
+	if setDefault && name == "" {
+		m.println(errorStyle.Render("Usage: /model <model-name> --default"))
+		return m, nil
 	}
 
 	tuning := senderTuning{showReasoning: m.cfg.showReasoning}
