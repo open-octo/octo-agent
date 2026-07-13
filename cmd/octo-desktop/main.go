@@ -218,6 +218,9 @@ func main() {
 		// service has started (Windows/Linux drop the action buttons if a
 		// notification is sent before its category is registered).
 		bridge.registerUpdateNotifyCategory()
+		// Prompt for notification permission (macOS blocks until answered, so
+		// off the UI thread) — without it every toast silently no-ops.
+		go bridge.requestNotificationAuthorization()
 		startHub(app, bridge, settings)
 	})
 

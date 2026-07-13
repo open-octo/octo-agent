@@ -210,6 +210,19 @@ func (b *nativeBridge) Notify(title, body string) {
 	})
 }
 
+// requestNotificationAuthorization asks the OS for permission to post
+// notifications, without which every Notify call silently no-ops. macOS
+// requires this at runtime: UNUserNotificationCenter drops delivery (reporting
+// no error) until the user has granted authorization, so the first call raises
+// the system permission prompt and blocks until they answer — run it off the UI
+// thread. Windows/Linux grant immediately. No-op without a notifier.
+func (b *nativeBridge) requestNotificationAuthorization() {
+	if b.notifier == nil {
+		return
+	}
+	_, _ = b.notifier.RequestNotificationAuthorization()
+}
+
 // Update-check notifications: the tray "Check for Updates…" flow reports via a
 // toast rather than a modal dialog. The "update available" toast carries an
 // action button; both it and a tap on the body open the download page, routed
