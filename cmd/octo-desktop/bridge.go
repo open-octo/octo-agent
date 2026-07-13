@@ -43,6 +43,13 @@ type nativeBridge struct {
 	// option; ShouldQuit there always allows the quit).
 	allowQuit atomic.Bool
 
+	// notifySeq makes each Notify call's notification identifier unique. macOS
+	// rejects an addNotificationRequest with an empty identifier (its completion
+	// handler errors and nothing is delivered), and a shared constant id would
+	// make each new toast silently replace the previous one, so every call gets
+	// its own.
+	notifySeq atomic.Uint64
+
 	settingsMu sync.Mutex
 	settings   desktopSettings
 	// geomTimer debounces persistence of the window geometry to disk: a drag
@@ -205,9 +212,23 @@ func (b *nativeBridge) Notify(title, body string) {
 		return
 	}
 	_ = b.notifier.SendNotification(notifications.NotificationOptions{
+		ID:    fmt.Sprintf("octo-notify-%d", b.notifySeq.Add(1)),
 		Title: title,
 		Body:  body,
 	})
+}
+
+// requestNotificationAuthorization asks the OS for permission to post
+// notifications, without which every Notify call silently no-ops. macOS
+// requires this at runtime: UNUserNotificationCenter drops delivery (reporting
+// no error) until the user has granted authorization, so the first call raises
+// the system permission prompt and blocks until they answer — run it off the UI
+// thread. Windows/Linux grant immediately. No-op without a notifier.
+func (b *nativeBridge) requestNotificationAuthorization() {
+	if b.notifier == nil {
+		return
+	}
+	_, _ = b.notifier.RequestNotificationAuthorization()
 }
 
 // Update-check notifications: the tray "Check for Updates…" flow reports via a
