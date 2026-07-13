@@ -44,13 +44,13 @@ type uiStrings struct {
 }
 
 var enStrings = uiStrings{
-	trayShow:           "Show Octo",
-	trayQuit:           "Quit Octo",
-	traySettings:       "Settings…",
-	trayCheckUpdates:   "Check for Updates…",
-	trayStarting:       "Starting…",
-	trayBackendFmt:     "Backend · %s",
-	trayClientsFmt:     "Connected clients: %d",
+	trayShow:         "Show Octo",
+	trayQuit:         "Quit Octo",
+	traySettings:     "Settings…",
+	trayCheckUpdates: "Check for Updates…",
+	trayStarting:     "Starting…",
+	trayBackendFmt:   "Backend · %s",
+	trayClientsFmt:   "Connected clients: %d",
 
 	takeoverTitle:  "Octo",
 	takeoverMsgFmt: "A background Octo backend is already running (pid %d).\n\nStop it and run Octo as the hub for this machine?",
@@ -76,13 +76,13 @@ var enStrings = uiStrings{
 }
 
 var zhStrings = uiStrings{
-	trayShow:           "显示 Octo",
-	trayQuit:           "退出 Octo",
-	traySettings:       "设置…",
-	trayCheckUpdates:   "检查更新…",
-	trayStarting:       "启动中…",
-	trayBackendFmt:     "后端 · %s",
-	trayClientsFmt:     "已连接客户端：%d",
+	trayShow:         "显示 Octo",
+	trayQuit:         "退出 Octo",
+	traySettings:     "设置…",
+	trayCheckUpdates: "检查更新…",
+	trayStarting:     "启动中…",
+	trayBackendFmt:   "后端 · %s",
+	trayClientsFmt:   "已连接客户端：%d",
 
 	takeoverTitle:  "Octo",
 	takeoverMsgFmt: "已有一个 Octo 后端在后台运行（pid %d）。\n\n停止它，并让 Octo 作为本机的后端中枢？",

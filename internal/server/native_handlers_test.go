@@ -39,7 +39,7 @@ func (f *fakeNative) Notify(title, body string) {
 }
 func (f *fakeNative) AutostartEnabled() (bool, error) { return f.autostart, nil }
 func (f *fakeNative) SetAutostart(enable bool) error  { f.autostart = enable; return nil }
-func (f *fakeNative) ToggleMaximise() { f.toggleMaxCalls++ }
+func (f *fakeNative) ToggleMaximise()                 { f.toggleMaxCalls++ }
 func (f *fakeNative) OpenExternal(url string) error {
 	f.openCalls++
 	f.gotOpenURL = url
