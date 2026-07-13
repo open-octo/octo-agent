@@ -48,6 +48,7 @@ var (
 	complSelStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
 	complNameStyle       = lipgloss.NewStyle().Foreground(tui.ColAccent)
 	bgDoneStyle          = lipgloss.NewStyle().Foreground(tui.ColAccent)
+	bgWarnStyle          = lipgloss.NewStyle().Foreground(tui.ColWarning)
 )
 
 func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

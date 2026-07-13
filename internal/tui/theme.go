@@ -10,12 +10,13 @@ import (
 // terminals. Values follow GitHub's light/dark themes; lipgloss resolves the
 // right side at render time from the terminal-background probe.
 var (
-	ColAccent = lipgloss.AdaptiveColor{Light: "#1A7F37", Dark: "#3FB950"} // success / additions
-	ColDanger = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F85149"} // errors / removals
-	ColMuted  = lipgloss.AdaptiveColor{Light: "#57606A", Dark: "#8B949E"} // secondary text
-	ColDim    = lipgloss.AdaptiveColor{Light: "#6E7781", Dark: "#6E7681"} // gutters, line numbers
-	ColDimmer = lipgloss.AdaptiveColor{Light: "#AFB8C1", Dark: "#484F58"} // dimmest (unchanged line nos)
-	ColBorder = lipgloss.AdaptiveColor{Light: "#D0D7DE", Dark: "#30363D"} // panel / input-box border
+	ColAccent  = lipgloss.AdaptiveColor{Light: "#1A7F37", Dark: "#3FB950"} // success / additions
+	ColDanger  = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F85149"} // errors / removals
+	ColWarning = lipgloss.AdaptiveColor{Light: "#D89614", Dark: "#FAAD14"} // partial / warnings
+	ColMuted   = lipgloss.AdaptiveColor{Light: "#57606A", Dark: "#8B949E"} // secondary text
+	ColDim     = lipgloss.AdaptiveColor{Light: "#6E7781", Dark: "#6E7681"} // gutters, line numbers
+	ColDimmer  = lipgloss.AdaptiveColor{Light: "#AFB8C1", Dark: "#484F58"} // dimmest (unchanged line nos)
+	ColBorder  = lipgloss.AdaptiveColor{Light: "#D0D7DE", Dark: "#30363D"} // panel / input-box border
 
 	ColBrand    = lipgloss.AdaptiveColor{Light: "#6F42C1", Dark: "#A371F7"} // purple — octo brand
 	ColBrandDim = lipgloss.AdaptiveColor{Light: "#B4A7D6", Dark: "#6E5494"} // muted purple
