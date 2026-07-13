@@ -1075,14 +1075,26 @@ func (m *tuiModel) modelPickerView() string {
 // failure (e.g. missing API key for the target provider) aborts the switch and
 // reports the error — the session stays on the old model. With no argument, an
 // arrow-key picker overlays the configured models so one can be chosen.
+//
+// Flags:
+//
+//	--default  also persist the model as default_model in ~/.octo/config.yml.
 func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	if name == "" {
 		if m.openModelPicker() {
 			return m, nil
 		}
-		m.println(errorStyle.Render("Usage: /model <model-name>"))
+		m.println(errorStyle.Render("Usage: /model <model-name> [--default]"))
 		return m, nil
 	}
+
+	// Parse optional flags.
+	setDefault := false
+	if idx := strings.Index(name, " --default"); idx >= 0 {
+		setDefault = true
+		name = strings.TrimSpace(name[:idx])
+	}
+
 	tuning := senderTuning{showReasoning: m.cfg.showReasoning}
 	if err := m.cfg.ensureSender(name, tuning); err != nil {
 		m.println(errorStyle.Render(fmt.Sprintf("error switching model: %v", err)))
@@ -1094,7 +1106,29 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	if m.cfg.tools != nil {
 		m.cfg.tools = tools.DefaultToolsFor(name)
 	}
+
+	if setDefault {
+		if err := setModelAsDefault(name); err != nil {
+			m.println(errorStyle.Render(fmt.Sprintf("switched to %q but failed to set default: %v", name, err)))
+		} else {
+			m.println(noticeStyle.Render(fmt.Sprintf("Default model set to %q", name)))
+		}
+	}
 	return m, nil
+}
+
+// setModelAsDefault persists name as default_model in ~/.octo/config.yml,
+// keeping all existing entries intact.
+func setModelAsDefault(name string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	if _, ok := cfg.EntryByModel(name); !ok {
+		return fmt.Errorf("model %q is not configured", name)
+	}
+	cfg.DefaultModel = name
+	return cfg.Save()
 }
 
 // dispatchThinking handles "/thinking <off|low|medium|high|xhigh|max>" — change the
