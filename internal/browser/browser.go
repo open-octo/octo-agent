@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"sync"
 	"time"
@@ -97,10 +98,32 @@ func DiscoverRunningChrome(ctx context.Context) (*Browser, error) {
 	return nil, fmt.Errorf("no running Chrome with remote debugging found; launch Chrome with --remote-debugging-port or set browser.connect_port")
 }
 
+// DialError reports a failed WebSocket dial to a CDP endpoint, carrying the HTTP
+// response status when the server rejected the upgrade (e.g., Chrome's remote-
+// debugging origin check returns 403). Callers can inspect StatusCode to give
+// actionable setup guidance.
+type DialError struct {
+	URL        string
+	StatusCode int
+	Err        error
+}
+
+func (e *DialError) Error() string { return fmt.Sprintf("dial cdp %s: %v", e.URL, e.Err) }
+func (e *DialError) Unwrap() error { return e.Err }
+
+// IsForbidden reports whether the dial was rejected by Chrome's remote debugging
+// authorization / origin check (HTTP 403). This typically means the user needs
+// to approve the Chrome authorization prompt or reconfigure remote debugging.
+func (e *DialError) IsForbidden() bool { return e.StatusCode == http.StatusForbidden }
+
 func dial(ctx context.Context, wsURL string) (*cdpClient, error) {
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("dial cdp %s: %w", wsURL, err)
+		de := &DialError{URL: wsURL, Err: err}
+		if resp != nil {
+			de.StatusCode = resp.StatusCode
+		}
+		return nil, de
 	}
 	// Screenshots and full AX trees can be large; lift the read cap.
 	conn.SetReadLimit(64 << 20)

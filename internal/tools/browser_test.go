@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -377,5 +379,45 @@ func TestBrowserTool_ObserveAndScreenshotVision(t *testing.T) {
 	}
 	if !strings.Contains(noVis.Text, "saved to") {
 		t.Errorf("screenshot (vision off) should still report the saved path; got: %q", noVis.Text)
+	}
+}
+
+// TestWrapBrowserConnectError verifies that connection failures are surfaced as
+// actionable setup guidance rather than bare low-level errors, so the LLM can
+// offer to start the browser-setup flow.
+func TestWrapBrowserConnectError(t *testing.T) {
+	cases := []struct {
+		name   string
+		in     error
+		wantIn string // substring the wrapped error must contain
+	}{
+		{
+			name:   "Chrome 403 rejection",
+			in:     &browser.DialError{URL: "ws://127.0.0.1:9222/devtools/browser", StatusCode: 403, Err: fmt.Errorf("websocket: bad handshake")},
+			wantIn: "Browser is not correctly set up",
+		},
+		{
+			name:   "port not reachable",
+			in:     &browser.DialError{URL: "ws://127.0.0.1:9222/devtools/browser", StatusCode: 0, Err: fmt.Errorf("dial tcp 127.0.0.1:9222: connect: connection refused")},
+			wantIn: "cannot reach the debug port",
+		},
+		{
+			name:   "other dial error still gets guidance",
+			in:     fmt.Errorf("some unexpected dial failure"),
+			wantIn: "Browser is not correctly set up",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := wrapBrowserConnectError(tc.in)
+			got := err.Error()
+			if !strings.Contains(got, tc.wantIn) {
+				t.Errorf("error %q missing %q", got, tc.wantIn)
+			}
+			// The wrapped error should still unwrap to the original.
+			if !errors.Is(err, tc.in) {
+				t.Errorf("wrapped error does not unwrap to original %v", tc.in)
+			}
+		})
 	}
 }

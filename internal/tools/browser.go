@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -187,6 +188,30 @@ func browserEnabled() bool {
 	return cfg.Browser.ConnectPort != 0 || cfg.Browser.AttachRunning || browser.ChromeAvailable(cfg.Browser.ExecPath)
 }
 
+// browserConnectGuide is the user-facing instruction shown when the browser tool
+// cannot attach to Chrome. It is phrased so the LLM can offer to start the
+// browser-setup flow, not just report a low-level error.
+const browserConnectGuide = "Browser is not correctly set up. To fix: open Chrome, go to chrome://inspect/#remote-debugging, enable remote debugging, and allow the authorization prompt. Alternatively, reconfigure via Octo's Browser settings, or start Chrome from the terminal with --remote-debugging-port=9222 --remote-allow-origins=*"
+
+// wrapBrowserConnectError turns a low-level connection error into an actionable
+// message that tells the user (and the LLM) how to run browser setup. It
+// preserves the original error for logging via Unwrap.
+func wrapBrowserConnectError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var dialErr *browser.DialError
+	if errors.As(err, &dialErr) {
+		if dialErr.IsForbidden() {
+			return fmt.Errorf("%s (Chrome refused the connection; if a prompt appeared, click Allow): %w", browserConnectGuide, err)
+		}
+		if dialErr.StatusCode == 0 {
+			return fmt.Errorf("%s (cannot reach the debug port; is Chrome running?): %w", browserConnectGuide, err)
+		}
+	}
+	return fmt.Errorf("%s: %w", browserConnectGuide, err)
+}
+
 // browserPage returns the active page, connecting (or launching) Chrome on first
 // use according to config.
 func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
@@ -214,7 +239,14 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 	// (same WS → no re-auth). Only if that fails is the connection itself gone
 	// (Chrome closed/restarted), so drop it and fall through to a fresh connect.
 	if browserSession.b != nil {
-		if page, err := browserSession.b.NewPage(ctx, "about:blank"); err == nil {
+		// Probe the browser-level connection with a short timeout. If Chrome was
+		// restarted, the old WebSocket may be half-open and hang until the caller's
+		// context expires — leaving no time to dial a new connection. We deliberately
+		// sacrifice a few seconds here so the reconnect below has a fresh chance.
+		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		page, err := browserSession.b.NewPage(probeCtx, "about:blank")
+		cancel()
+		if err == nil {
 			browserSession.page = page
 			return page, browserSession.b, nil
 		}
@@ -229,15 +261,15 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 	switch {
 	case bc.ConnectPort != 0:
 		if b, err = browser.ConnectByPort(ctx, bc.ConnectPort); err != nil {
-			return nil, nil, fmt.Errorf("connect to Chrome on port %d: %w", bc.ConnectPort, err)
+			return nil, nil, fmt.Errorf("connect to Chrome on port %d: %w", bc.ConnectPort, wrapBrowserConnectError(err))
 		}
 	case bc.AttachRunning && bc.UserDataDir != "":
 		if b, err = browser.ConnectViaProfile(ctx, bc.UserDataDir); err != nil {
-			return nil, nil, err
+			return nil, nil, wrapBrowserConnectError(err)
 		}
 	case bc.AttachRunning:
 		if b, err = browser.DiscoverRunningChrome(ctx); err != nil {
-			return nil, nil, err
+			return nil, nil, wrapBrowserConnectError(err)
 		}
 	default:
 		// No explicit attach config: prefer the user's logged-in Chrome if one
@@ -253,7 +285,7 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 				UserDataDir: bc.UserDataDir,
 				Headless:    bc.Headless,
 			}); err != nil {
-				return nil, nil, fmt.Errorf("launch Chrome: %w", err)
+				return nil, nil, fmt.Errorf("launch Chrome: %w", wrapBrowserConnectError(err))
 			}
 		}
 	}

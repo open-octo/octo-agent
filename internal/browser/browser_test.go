@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -405,6 +406,41 @@ func TestBrowserWebSocketURL_Fallback(t *testing.T) {
 	}
 	if want := fmt.Sprintf("ws://127.0.0.1:%d/devtools/browser", port); got != want {
 		t.Fatalf("ws = %q, want fallback %q", got, want)
+	}
+}
+
+// TestBrowserWebSocketURL_TimeoutDialError verifies that a port that never
+// answers is surfaced as a DialError with StatusCode 0, so the tool layer can
+// tell the user "cannot reach the debug port" instead of a generic timeout.
+func TestBrowserWebSocketURL_TimeoutDialError(t *testing.T) {
+	// Port 1 is reserved/unreachable on every platform.
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	_, err := browserWebSocketURL(ctx, 1)
+	if err == nil {
+		t.Fatal("expected error for unreachable port")
+	}
+	var de *DialError
+	if !errors.As(err, &de) {
+		t.Fatalf("expected *DialError, got %T: %v", err, err)
+	}
+	if de.StatusCode != 0 {
+		t.Fatalf("expected status code 0, got %d", de.StatusCode)
+	}
+}
+
+// TestDialError carries the HTTP status through so callers can identify Chrome's
+// remote-debugging authorization rejection.
+func TestDialError(t *testing.T) {
+	err := &DialError{URL: "ws://127.0.0.1:9222/devtools/browser", StatusCode: 403, Err: fmt.Errorf("websocket: bad handshake")}
+	if !err.IsForbidden() {
+		t.Error("expected 403 to be forbidden")
+	}
+	if !strings.Contains(err.Error(), "ws://127.0.0.1:9222/devtools/browser") {
+		t.Errorf("error message should contain URL; got %q", err.Error())
+	}
+	if err.Unwrap() == nil {
+		t.Error("Unwrap should return the underlying error")
 	}
 }
 
