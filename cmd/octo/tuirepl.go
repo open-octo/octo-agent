@@ -351,6 +351,12 @@ type tuiModel struct {
 	complItems []complItem
 	complIdx   int
 
+	// modelPicker is the arrow-key model-switch overlay. When non-nil, ↑/↓/Enter/Esc
+	// are routed to it and it renders over the conversation. Built on demand by
+	// dispatchModel when "/model" is issued with no argument, and cleared once the
+	// user picks or cancels.
+	modelPicker *modelPicker
+
 	// turnRunning is true between starting a turn and turnFinishedMsg.
 	turnRunning bool
 	cancelTurn  context.CancelFunc
@@ -558,6 +564,12 @@ type tuiModel struct {
 	// id (wf_N). An entry appears on the "started" event and is removed when the
 	// "done" event arrives, so only running workflows are shown in the panel.
 	workflows map[string]*workflowUI
+}
+
+// modelPicker is the state of the arrow-key model-switch overlay.
+type modelPicker struct {
+	items []complItem // one per configured model (name = model id, desc = provider + base URL)
+	idx   int         // highlighted row
 }
 
 // subAgentUI is the live panel state for one running sub-agent.

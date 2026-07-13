@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	rw "github.com/mattn/go-runewidth"
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tools"
 	"github.com/open-octo/octo-agent/internal/tui"
@@ -73,6 +74,23 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// submit. Plain typing falls through and re-filters the menu below.
 	// Key semantics mirror Claude Code: Enter runs the highlighted command
 	// immediately; Tab fills it into the input to add arguments first.
+	if m.modelPicker != nil {
+		switch msg.Type {
+		case tea.KeyDown:
+			m.modelPicker.idx = (m.modelPicker.idx + 1) % len(m.modelPicker.items)
+			return m, nil
+		case tea.KeyUp:
+			m.modelPicker.idx = (m.modelPicker.idx - 1 + len(m.modelPicker.items)) % len(m.modelPicker.items)
+			return m, nil
+		case tea.KeyEnter:
+			if !msg.Alt {
+				return m.acceptModelPicker()
+			}
+		case tea.KeyEsc:
+			m.modelPicker = nil
+			return m, nil
+		}
+	}
 	if len(m.complItems) > 0 {
 		switch msg.Type {
 		case tea.KeyDown:
@@ -985,13 +1003,78 @@ func (m *tuiModel) dispatchTranscript(arg string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// openModelPicker arms m.modelPicker with the configured models (name +
+// provider + base URL), cursor starting on the active model. The picker renders
+// as an overlay and owns ↑/↓/Enter/Esc until the user picks or cancels. Returns
+// false if no models are configured (rare — there's always at least the default).
+func (m *tuiModel) openModelPicker() bool {
+	cfg, err := config.Load()
+	if err != nil || len(cfg.Models) == 0 {
+		return false
+	}
+	items := make([]complItem, 0, len(cfg.Models))
+	for _, e := range cfg.Models {
+		desc := e.Provider
+		if e.BaseURL != "" {
+			desc += " · " + e.BaseURL
+		}
+		items = append(items, complItem{name: e.Model, desc: desc})
+	}
+	idx := 0
+	for i, it := range items {
+		if it.name == m.a.Model {
+			idx = i
+			break
+		}
+	}
+	m.modelPicker = &modelPicker{items: items, idx: idx}
+	return true
+}
+
+// acceptModelPicker switches to the highlighted model and clears the picker.
+func (m *tuiModel) acceptModelPicker() (tea.Model, tea.Cmd) {
+	p := m.modelPicker
+	m.modelPicker = nil
+	if p == nil || p.idx < 0 || p.idx >= len(p.items) {
+		return m, nil
+	}
+	return m.dispatchModel(p.items[p.idx].name)
+}
+
+// modelPickerView renders the model-switch overlay, reusing the completion menu
+// styles so it reads as the same family of UI.
+func (m *tuiModel) modelPickerView() string {
+	p := m.modelPicker
+	if p == nil || len(p.items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(selectPromptStyle.Render("Switch model:") + "\n")
+	for i, it := range p.items {
+		label := fmt.Sprintf("%-24s", it.name)
+		if i == p.idx {
+			b.WriteString("  " + complSelStyle.Render("▸ "+label) + " " + hintStyle.Render(it.desc))
+		} else {
+			b.WriteString("  " + complNameStyle.Render(label) + " " + hintStyle.Render(it.desc))
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteString(hintStyle.Render("  ↑/↓ select · Enter switch · Esc dismiss"))
+	b.WriteByte('\n')
+	return b.String()
+}
+
 // dispatchModel handles "/model <name>" — switch the active model for the
 // current session. If the new model resolves to a different provider or base
 // URL, the sender is rebuilt so requests go to the right endpoint. A rebuild
 // failure (e.g. missing API key for the target provider) aborts the switch and
-// reports the error — the session stays on the old model.
+// reports the error — the session stays on the old model. With no argument, an
+// arrow-key picker overlays the configured models so one can be chosen.
 func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	if name == "" {
+		if m.openModelPicker() {
+			return m, nil
+		}
 		m.println(errorStyle.Render("Usage: /model <model-name>"))
 		return m, nil
 	}
@@ -1432,6 +1515,12 @@ func (m *tuiModel) View() string {
 
 	// Slash-command completion menu, right above the input box (Claude Code style).
 	b.WriteString(m.completionView())
+
+	// Model-switch picker overlay, shown when "/model" was issued without an
+	// argument. Renders the configured models; ↑/↓/Enter switch, Esc dismisses.
+	if pv := m.modelPickerView(); pv != "" {
+		b.WriteString(pv)
+	}
 
 	// Input box + status bar
 	b.WriteString(m.renderInputBox())
