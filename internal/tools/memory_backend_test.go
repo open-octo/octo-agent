@@ -226,3 +226,71 @@ func TestRegisterMemoryBackendHooks_AutoRecallSkipsEmptyInput(t *testing.T) {
 		t.Errorf("expected empty injection for empty UserInput, got %q", got)
 	}
 }
+
+// TestRegisterMemoryBackendHooks_StripsSystemRemindersBeforeStore guards against
+// <system-reminder> spans (recalled memories, goal context, background-task
+// notes) landing in long-term memory — they'd resurface via memory_recall and
+// ride the tool_result path to the web UI.
+func TestRegisterMemoryBackendHooks_StripsSystemRemindersBeforeStore(t *testing.T) {
+	fake := &fakeMemoryBackend{name: "hindsight", stored: make(chan string, 1)}
+	setMemoryBackendFor(t, fake)
+
+	e := hooks.NewEngine(nil)
+	RegisterMemoryBackendHooks(e)
+	e.Dispatch(context.Background(), hooks.Payload{
+		Event:          hooks.EventStop,
+		UserInput:      "<system-reminder>\n[OLD MEMORY] legacy content\n</system-reminder>Hello",
+		AssistantReply: "Hi",
+	})
+
+	select {
+	case got := <-fake.stored:
+		if strings.Contains(got, "<system-reminder>") || strings.Contains(got, "</system-reminder>") {
+			t.Errorf("stored content should have system-reminder spans stripped, got %q", got)
+		}
+		if strings.Contains(got, "legacy content") {
+			t.Errorf("stored content should not contain reminder body text, got %q", got)
+		}
+		if !strings.Contains(got, "Hello") || !strings.Contains(got, "Hi") {
+			t.Errorf("stored content should keep real turn text, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Store was not called within timeout")
+	}
+}
+
+// TestRegisterMemoryBackendHooks_AutoRecallStripsSystemReminders guards Recall
+// results that carry pre-existing <system-reminder> spans (e.g. from before
+// this fix, or external index data) — they must be stripped before the
+// automatic user-prompt injection, not re-injected verbatim.
+func TestRegisterMemoryBackendHooks_AutoRecallStripsSystemReminders(t *testing.T) {
+	fake := &fakeMemoryBackend{
+		name: "hindsight",
+		recallOut: []memorybackend.Result{
+			{ID: "m1", Content: "<system-reminder>\nStale recall body\n</system-reminder>real fact"},
+		},
+	}
+	setMemoryBackendFor(t, fake)
+	SetMemoryBackendAutoRecall(true)
+	t.Cleanup(func() { SetMemoryBackendAutoRecall(false) })
+
+	e := hooks.NewEngine(nil)
+	RegisterMemoryBackendHooks(e)
+	got := e.Inject(context.Background(), hooks.Payload{
+		Event:     hooks.EventUserPromptSubmit,
+		UserInput: "question",
+	})
+
+	// The hook intentionally wraps recalled memory in <system-reminder>, so we
+	// expect exactly one open tag — two would mean the nested span leaked
+	// through. The nested reminder body must be gone.
+	if gotCount := strings.Count(got, "<system-reminder>"); gotCount != 1 {
+		t.Errorf("injected text should have exactly one <system-reminder> wrapper, found %d in %q", gotCount, got)
+	}
+	if strings.Contains(got, "Stale recall body") {
+		t.Errorf("injected text should not contain reminder body from recall result, got %q", got)
+	}
+	if !strings.Contains(got, "real fact") {
+		t.Errorf("injected text should keep the real part of the recall, got %q", got)
+	}
+}
