@@ -55,7 +55,7 @@ for the task in plain language instead and the model loads the matching skill it
 
 ## Built-in skills
 
-octo ships 21 skills out of the box. Every one triggers automatically when the model judges a task
+octo ships 20 skills out of the box. Every one triggers automatically when the model judges a task
 matches its description — you rarely need to invoke them by name.
 
 **Get started**
@@ -95,7 +95,6 @@ matches its description — you rarely need to invoke them by name.
 
 | Skill | What it does |
 |---|---|
-| `deep-research` | Multi-source, fact-checked research — fans out searches, reads primary sources, adversarially verifies claims, synthesizes a cited report |
 | `web-access` | Methodology + a cross-session experience library for hard web targets: login-gated or anti-bot sites, unknown page structure, cross-source verification |
 | `office-xlsx` | Creates/reads/edits `.xlsx` spreadsheets — formulas, styling, merged cells, multiple sheets, charts, validation |
 | `ppt-master` | Turns a document (PDF/DOCX/URL/Markdown) into an editable PowerPoint deck — SVG-authored slides with native charts/tables and speaker notes, exported to `.pptx` |
