@@ -136,10 +136,10 @@ type Reply struct {
 // Agent owns one conversation: the system prompt, the history of turns, the
 // model name, and the LLM transport (Sender).
 type Agent struct {
-	mu      sync.RWMutex // protects Sender (written by TUI event loop, read by turn goroutine)
-	Sender  Sender
-	System  string
-	Model   string
+	mu        sync.RWMutex // protects Sender (written by TUI event loop, read by turn goroutine)
+	Sender    Sender
+	System    string
+	Model     string
 	MaxTokens int
 	History   *History
 

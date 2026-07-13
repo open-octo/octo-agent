@@ -112,8 +112,8 @@ type PermissionGate interface {
 
 ```go
 tools.SetBrowserVision(cfg.ModelVision(a.Model))
-tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.Sender, a.Model))
-tools.SetBrowserHealer(app.MakeBrowserHealer(a.Sender, a.Model))
+tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.GetSender(), a.Model))
+tools.SetBrowserHealer(app.MakeBrowserHealer(a.GetSender(), a.Model))
 ```
 
 如果 Director 并发跑的两个 agent 都启用 browser 工具且用不同 model,这三行会互相覆盖——**这是一个
