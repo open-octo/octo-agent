@@ -1111,7 +1111,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Print a concise scrollback notice so the user sees the completion even
 		// when the model-facing <system-reminder> is folded into a later turn.
 		status := subAgentNoteStatus(msg.ev.StopReason)
-		m.printlnBlock(bgDoneStyle.Render(fmt.Sprintf("● Sub-agent %s (%s) %s", msg.ev.AgentID, msg.ev.Description, status)))
+		// A completion notice is just a low-key hint, not a headline event — render
+		// it in the muted notice style rather than the attention-grabbing accent.
+		m.printlnBlock(noticeStyle.Render(fmt.Sprintf("● Sub-agent %s (%s) %s", msg.ev.AgentID, msg.ev.Description, status)))
 		// Idle auto-turn: same logic as bgExitMsg — drain inbox and trigger a
 		// turn so the model sees the notification immediately.
 		if !m.turnRunning && len(m.queue) == 0 {
