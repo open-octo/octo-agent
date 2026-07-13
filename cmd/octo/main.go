@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/open-octo/octo-agent/internal/sandbox"
+	"github.com/open-octo/octo-agent/internal/shellpath"
 	"github.com/open-octo/octo-agent/internal/skills"
 	"github.com/open-octo/octo-agent/internal/tools"
 	"github.com/open-octo/octo-agent/internal/version"
@@ -28,6 +29,15 @@ func main() {
 // run is the testable entry point. Splitting it out keeps main thin and
 // lets the test harness drive the CLI without spawning a subprocess.
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	// GUI-/service-launched processes (macOS GUI/launchd, Linux .desktop/systemd)
+	// inherit a minimal PATH that misses common user directories (e.g.
+	// ~/.local/bin, /opt/homebrew/bin). Sync once at startup so stdio MCP servers
+	// and shell tools find binaries in every mode (serve, interactive REPL,
+	// headless) without requiring every user to write absolute paths in mcp.json.
+	// A no-op on Windows and when the PATH already looks like a login shell's
+	// (the common terminal launch).
+	shellpath.SyncToLoginShell()
+
 	if len(args) == 0 {
 		return runChat(args, stdin, stdout, stderr)
 	}

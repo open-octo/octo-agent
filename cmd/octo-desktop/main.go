@@ -30,6 +30,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/logfile"
 	"github.com/open-octo/octo-agent/internal/serveproc"
 	"github.com/open-octo/octo-agent/internal/server"
+	"github.com/open-octo/octo-agent/internal/shellpath"
 	"github.com/open-octo/octo-agent/internal/upgrade"
 	"github.com/open-octo/octo-agent/internal/version"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -114,6 +115,13 @@ func main() {
 	// home before anything reads it (the in-process server records its launch
 	// dir as the default for sessions without a configured workspace_dir).
 	ensureWorkingDir()
+
+	// A GUI launch also inherits a minimal PATH (macOS: no ~/.local/bin,
+	// /opt/homebrew/bin; Linux: a .desktop/systemd launch may skip the login
+	// profile entirely). The server runs in-process here, so stdio MCP children
+	// and shell tools inherit this process's PATH directly — sync it to the login
+	// shell's before server.New below, mirroring the `octo serve` binary.
+	shellpath.SyncToLoginShell()
 
 	// Pick the language for native dialogs/tray from the system UI language.
 	applyLang()

@@ -94,6 +94,9 @@ func NewStdioTransport(ctx context.Context, cfg StdioConfig) (*StdioTransport, e
 		return nil, fmt.Errorf("mcp: stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil, fmt.Errorf("mcp: start %s: command not found in PATH (use an absolute path in mcp.json, or add the directory to PATH)", cfg.Command)
+		}
 		return nil, fmt.Errorf("mcp: start %s: %w", cfg.Command, err)
 	}
 
