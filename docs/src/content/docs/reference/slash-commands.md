@@ -25,7 +25,7 @@ is the process; an IM chat can be re-bound to a different session entirely).
 | `/save` | `/save` | Saves the session now, prints the file path |
 | `/sessions` | `/sessions` | Lists the 10 most recent sessions |
 | `/exit`, `/quit` | | Quits (same as Ctrl-C / Ctrl-D) |
-| `/<skill-name>` | `/<name> [args]` | Any discovered skill not shadowed by a reserved command above inlines that skill as the next turn |
+| `/<skill-name>` | `/<name> [args]` | Any discovered skill not shadowed by a reserved command above is sent as ordinary `/<name>` text so the model loads it via the `skill` tool (needs tools — refused without them) |
 
 Anything starting with `/` that isn't recognized is sent to the model as plain text — handy for
 paths or regexes that happen to start with a slash.

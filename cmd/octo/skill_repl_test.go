@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/skills"
 )
 
@@ -59,28 +61,68 @@ func TestSkillTrigger(t *testing.T) {
 	}
 }
 
-func TestInlineSkill(t *testing.T) {
-	// No Dir → no location header, so the bare body (matching the old behaviour).
-	plain := skills.Skill{Body: "BODY"}
-	if got := inlineSkill(plain, ""); got != "BODY" {
-		t.Errorf("no args → %q", got)
+// noopExec is a do-nothing ToolExecutor: enough to make a replConfig look
+// tool-enabled so dispatchSlash takes its with-tools path.
+type noopExec struct{}
+
+func (noopExec) Execute(context.Context, string, map[string]any) (agent.ToolResult, error) {
+	return agent.ToolResult{}, nil
+}
+
+// skillDispatchModel builds a TUI model backed by a stub sender and fake
+// program, with the given skill registry and (optionally) tools, so
+// dispatchSlash can be driven without a real provider or terminal.
+func skillDispatchModel(reg *skills.Registry, withTools bool) *tuiModel {
+	cfg := replConfig{a: agent.New(&stubSender{reply: "ok"}, "m"), skillReg: reg, noSave: true}
+	if withTools {
+		cfg.tools = []agent.ToolDefinition{{Name: "noop"}}
+		cfg.executor = noopExec{}
 	}
-	if got := inlineSkill(plain, "x"); got != "BODY\n\nUser input: x" {
-		t.Errorf("with args → %q", got)
+	m := newTUIModel(cfg)
+	m.sink = &tuiSink{prog: &fakeProg{}}
+	return m
+}
+
+// A /<skill> trigger with tools present is NOT expanded inline — it falls
+// through to the default branch and starts an ordinary turn with the literal
+// "/name" text, so the model loads the skill via the `skill` tool (parity with
+// the web and IM transports).
+func TestDispatchSlash_SkillWithTools_FallsThrough(t *testing.T) {
+	reg := skillRegFor(t, map[string]string{"greet": "---\ndescription: d\n---\nbody"})
+	m := skillDispatchModel(reg, true)
+
+	_, cmd := m.dispatchSlash("/greet")
+
+	if got := strings.Join(m.printlnBuf, "\n"); strings.Contains(got, "needs tools") {
+		t.Errorf("with tools, a skill trigger must not be refused; got:\n%s", got)
 	}
-	// With Dir → the directory header is prefixed so referenced files resolve.
-	withDir := skills.Skill{Name: "review", Body: "BODY", Dir: "/abs/skills/review"}
-	got := inlineSkill(withDir, "")
-	if !strings.Contains(got, "/abs/skills/review") || !strings.Contains(got, "BODY") {
-		t.Errorf("expected dir header + body; got:\n%s", got)
+	if !m.turnRunning || cmd == nil {
+		t.Error("with tools, /greet should fall through and start an ordinary turn")
 	}
 }
 
-// The /skills listing, /<skill> trigger, and unknown-command behaviour are
-// exercised through the TUI's dispatchSlash in tuirepl_slash_test.go now that
-// slash commands live there. skillTrigger / inlineSkill remain unit-tested
-// above since dispatchSlash relies on them; printSkills (the /skills renderer)
-// is tested directly here.
+// Without tools the `skill` tool doesn't exist, so a /<skill> trigger can't
+// work — it is refused (mirroring /init) rather than starting a dead turn.
+func TestDispatchSlash_SkillWithoutTools_Refused(t *testing.T) {
+	reg := skillRegFor(t, map[string]string{"greet": "---\ndescription: d\n---\nbody"})
+	m := skillDispatchModel(reg, false)
+
+	_, cmd := m.dispatchSlash("/greet")
+
+	if cmd != nil {
+		t.Errorf("refusal must not start a turn, got cmd=%v", cmd)
+	}
+	if m.turnRunning {
+		t.Error("no turn should start when a skill trigger is refused")
+	}
+	if got := strings.Join(m.printlnBuf, "\n"); !strings.Contains(got, "/greet needs tools") {
+		t.Errorf("expected a 'needs tools' refusal for /greet; got:\n%s", got)
+	}
+}
+
+// skillTrigger remains unit-tested above since dispatchSlash relies on it to
+// detect a skill name (to refuse without tools); printSkills (the /skills
+// renderer) is tested directly here.
 
 func TestPrintSkills_ListsSkills(t *testing.T) {
 	reg := skillRegFor(t, map[string]string{"greet": "---\ndescription: say hi\n---\nbody"})

@@ -881,13 +881,17 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 		return m, m.startTurnEcho(initInstruction, "/init")
 	}
 
-	// /<skill> [args]: inline the skill body and run it as a turn.
-	if s, args, ok := skillTrigger(cfg.skillReg, text); ok {
-		echo := "/" + s.Name
-		if args != "" {
-			echo += " " + args
-		}
-		return m, m.startTurnEcho(inlineSkill(s, args), echo)
+	// /<skill> [args]: a discovered skill invoked by name. It is NOT expanded
+	// inline here — with tools it falls through to the default branch and is
+	// sent as ordinary "/name" text, so the model loads it via the `skill` tool
+	// (matching the web and IM transports: one path, and the body lands in a
+	// foldable tool card instead of flooding the scrollback — and the resumed
+	// transcript shows "> /name" rather than the whole SKILL.md). Without tools
+	// the `skill` tool doesn't exist, so the trigger can't work — refuse with the
+	// same guidance as /init.
+	if s, _, ok := skillTrigger(cfg.skillReg, text); ok && (len(cfg.tools) == 0 || cfg.executor == nil) {
+		m.println(noticeStyle.Render("/" + s.Name + " needs tools — restart with: octo --tools"))
+		return m, nil
 	}
 
 	first := strings.Fields(text)[0]

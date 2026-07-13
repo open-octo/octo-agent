@@ -24,7 +24,7 @@ description: 每一个 / 命令，以及它们在 TUI、Web UI、IM 渠道之间
 | `/save` | `/save` | 立即保存会话，打印文件路径 |
 | `/sessions` | `/sessions` | 列出最近的 10 个会话 |
 | `/exit`、`/quit` | | 退出（等同 Ctrl-C / Ctrl-D） |
-| `/<skill-name>` | `/<name> [args]` | 任何没有被上面这些保留命令占用名字的已发现 skill，会把它内联成下一轮对话 |
+| `/<skill-name>` | `/<name> [args]` | 任何没有被上面这些保留命令占用名字的已发现 skill，会作为普通 `/<name>` 文本发出，由模型通过 `skill` 工具加载（需要工具——无工具时会被拒绝） |
 
 不认识的 `/xxx` 会原样当作纯文本发给模型——对那些碰巧以斜杠开头的路径或正则表达式很友好。
 

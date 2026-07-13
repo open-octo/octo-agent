@@ -133,9 +133,12 @@ turn
 
 ## 5. 显式触发与 CLI
 
-- **`/<name> [args]`**(REPL):命中 skill registry 则 `line = skill.Body`(args 非空追加为
-  用户附加输入)、fall through 到 turn——直接把正文喂模型,省一次 skill 工具往返。与模型
-  自主调 skill 工具并存,语义一致。未命中保持 `Unknown command`。
+- **`/<name> [args]`**(TUI):命中 skill registry 时**不再内联展开正文**——作为普通 `/<name>`
+  文本 fall through 到 turn,由模型看到 system 的 "Available skills" 清单后自主调 `skill` 工具
+  加载正文。与 web / IM 完全一致:一条路径,正文落在可折叠的 tool_result 卡里,而非灌进
+  scrollback,resume 时也只显示 `> /<name>`。无工具模式下 `skill` 工具不存在、触发无从谈起,
+  直接拒绝(`/<name> needs tools — restart with: octo --tools`,与 `/init` 一致)。未命中的
+  `/` 前缀文本当普通用户输入照发(路径、正则等)。
 - **`octo skills list|update|path`**:`list` 按来源(default → user → project)列出;
   `update` 强制重新落地默认集;`path` 打印三个 root。
 - **`octo chat --list-skills`**:发现并打印后退出,不需 provider/key。
@@ -152,5 +155,6 @@ description 时,先调 `skill` 工具加载完整指令再行动,不要凭一句
   skill 覆盖。
 - `internal/tools`:`SkillTool.Execute` 命中返回正文 / 未命中报错;`DefaultTools` 按 registry
   空非空决定 skill 工具有无。
-- `cmd/octo`:`/<name>` 命中 inline / 未命中 Unknown command / `/skills` 输出;`--list-skills`
+- `cmd/octo`:`skillTrigger` 命中/未命中/保留命令不被同名 skill 劫持;无工具时 `/<name>` 被拒绝 /
+  `/skills` 输出;`--list-skills`
   与退出码;`Compose` 的 skills 层位置;`octo skills` 子命令。
