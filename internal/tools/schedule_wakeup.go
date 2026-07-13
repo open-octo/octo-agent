@@ -136,7 +136,7 @@ func (ScheduleWakeupTool) Definition() agent.ToolDefinition {
 				},
 				"repeat": map[string]any{
 					"type":        "boolean",
-					"description": "false (default) for dynamic mode (fires once; re-arm yourself to continue). true for interval mode (re-arms automatically on the same cadence).",
+					"description": "false (default) for dynamic mode (fires once; you must call schedule_wakeup again on the next turn to continue). true for interval mode (the wakeup re-arms automatically on the same cadence; do NOT call schedule_wakeup again inside each tick).",
 				},
 				"cancel": map[string]any{
 					"type":        "boolean",
