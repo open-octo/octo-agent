@@ -42,11 +42,13 @@ func (AgentTool) Definition() agent.ToolDefinition {
 			"- **Fresh agent** (set subagent_type): the child starts with zero context and a " +
 			"specialized persona. Provide a complete task description. Use when you want an " +
 			"independent read (e.g. code review).\n\n" +
-			"Set run_in_background=true to run asynchronously — you will be notified when " +
-			"it completes. Leave it false (default) to block and receive the result directly. " +
+			"Set run_in_background=true when you are dispatching multiple independent sub-agents that can run in parallel, " +
+			"or when a sub-agent is expected to take a while. You will be notified when it completes. " +
+			"Leave it false (default) to block and receive the result directly when the task is short. " +
 			"(Some transports run every sub-agent synchronously; the result says so when it does.)\n\n" +
-			"Follow up with sub_agent_send (message a child with its context intact), " +
-			"sub_agent_status (check progress / latest result), and sub_agent_kill.",
+			"Follow up with sub_agent_send. Do not poll sub_agent_status while waiting for a background sub-agent; " +
+			"wait for the completion notification instead. Use sub_agent_status only to list running agents or when you " +
+			"suspect a sub-agent is stuck. Use sub_agent_kill to terminate a stuck or no-longer-needed agent.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

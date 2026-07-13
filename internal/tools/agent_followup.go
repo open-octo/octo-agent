@@ -96,10 +96,12 @@ type AgentStatusTool struct{}
 func (AgentStatusTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "sub_agent_status",
-		Description: "Check on async sub-agents: with agent_id, report that sub-agent's state " +
-			"(running/done/exited) and its latest result; without agent_id, list all currently " +
-			"running sub-agents. Synchronous sub-agents return their result inline at spawn " +
-			"and are not tracked here unless the user promotes them to background while running.",
+		Description: "Check on async sub-agents, but do not use this as a polling loop while waiting for a " +
+			"background sub-agent to finish — wait for the completion notification instead. With agent_id, report " +
+			"that sub-agent's state (running/done/exited) and its latest result; without agent_id, list all currently " +
+			"running sub-agents. Use this tool only when you suspect a sub-agent is stuck or when you need to know " +
+			"which agents are still running. Synchronous sub-agents return their result inline at spawn and are not " +
+			"tracked here unless the user promotes them to background while running.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
