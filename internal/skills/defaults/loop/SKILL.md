@@ -44,7 +44,7 @@ wakeup re-arms itself automatically:
 ```
 schedule_wakeup(delay_seconds=120, repeat=true,
                 reason="checking if PR is merged every 2 minutes",
-                prompt="Check whether the PR has been merged. If it has, say so and stop the loop. If not, just report the current status.")
+                prompt="Check whether the PR has been merged. If it has, say so and stop the loop by cancelling the wakeup. If not, just report the current status.")
 ```
 
 You only call it **once** — the cadence holds on its own. Each tick re-runs
@@ -52,15 +52,6 @@ You only call it **once** — the cadence holds on its own. Each tick re-runs
 the same work. **Do NOT call `schedule_wakeup` again inside the tick; the timer
 re-arms automatically.** The loop keeps ticking until it's stopped (see
 **Stopping**).
-
-### Why interval mode for fixed-interval polling?
-
-A polling task like "check every 2 minutes if PR #123 is merged" is a perfect
-fit for interval mode: the user named the interval (`2m`), and the work repeats
-until a condition is met. Use `repeat=true` and let the system wake you up on
-cadence. On each tick, inspect the state; if the goal is achieved, call
-`schedule_wakeup(cancel=true)` to stop. If not, simply report the status and end
-your turn — the next tick will fire automatically.
 
 ## Dynamic mode — you set the pace
 
