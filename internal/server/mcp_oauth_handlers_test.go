@@ -351,7 +351,7 @@ func TestRequestScheme(t *testing.T) {
 // "authorization received" page.
 func TestMCPOAuth_LateCallbackAfterTimeout_Rejected(t *testing.T) {
 	orig := authCodeTimeout
-	authCodeTimeout = 50 * time.Millisecond
+	authCodeTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { authCodeTimeout = orig })
 
 	fake := newFakeOAuthMCPServer(t)
