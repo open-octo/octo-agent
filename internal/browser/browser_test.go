@@ -408,6 +408,21 @@ func TestBrowserWebSocketURL_Fallback(t *testing.T) {
 	}
 }
 
+// TestDialError carries the HTTP status through so callers can identify Chrome's
+// remote-debugging authorization rejection.
+func TestDialError(t *testing.T) {
+	err := &DialError{URL: "ws://127.0.0.1:9222/devtools/browser", StatusCode: 403, Err: fmt.Errorf("websocket: bad handshake")}
+	if !err.IsForbidden() {
+		t.Error("expected 403 to be forbidden")
+	}
+	if !strings.Contains(err.Error(), "ws://127.0.0.1:9222/devtools/browser") {
+		t.Errorf("error message should contain URL; got %q", err.Error())
+	}
+	if err.Unwrap() == nil {
+		t.Error("Unwrap should return the underlying error")
+	}
+}
+
 // TestConnectViaProfile attaches to a running Chrome by reading its profile's
 // DevToolsActivePort — the path used to reuse a logged-in browser without
 // relaunching (and without /json, which recent Chrome disables).
