@@ -508,13 +508,18 @@
     cleanups.push(ws.on('sub_agent_notice', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       const status = (ev as any).status ?? ''
-      const level = status === 'success' ? 'success' : 'error'
       const description = (ev as any).description ?? ''
       const agentId = (ev as any).agent_id ?? ''
       const label = description || agentId || 'sub-agent'
-      const text = status === 'success'
-        ? `Sub-agent \`${label}\` completed`
-        : `Sub-agent \`${label}\` failed`
+      let level: 'success' | 'warning' | 'error' = 'error'
+      let text = `Sub-agent \`${label}\` failed`
+      if (status === 'success') {
+        level = 'success'
+        text = `Sub-agent \`${label}\` completed`
+      } else if (status === 'warning') {
+        level = 'warning'
+        text = `Sub-agent \`${label}\` incomplete`
+      }
       addChatMsg(sid, {
         id: uid('note'),
         type: 'notice',
@@ -1815,6 +1820,7 @@
   color: var(--text-tertiary);
 }
 .notice-avatar[data-level="success"] { color: var(--success); }
+.notice-avatar[data-level="warning"] { color: var(--warning); }
 .notice-avatar[data-level="error"] { color: var(--error); }
 .notice-avatar[data-level="info"] { color: var(--text-secondary); }
 .notice-line {
@@ -1822,6 +1828,7 @@
   font-size: 13px; color: var(--text-secondary);
 }
 .notice-line[data-level="success"] { color: var(--success); }
+.notice-line[data-level="warning"] { color: var(--warning); }
 .notice-line[data-level="error"] { color: var(--error); }
 .notice-line[data-level="info"] { color: var(--text-secondary); }
 .notice-line :global(p) { margin: 0; }
