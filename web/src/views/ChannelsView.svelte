@@ -36,6 +36,7 @@
   onMount(async () => {
     await reload()
   })
+  async function reload() {
     loading = true
     try {
       // /api/channels returns only CONFIGURED channels; show every supported

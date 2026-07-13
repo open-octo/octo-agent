@@ -247,8 +247,6 @@ export async function setAutostart(enabled: boolean): Promise<void> {
   })
 }
 
-
-
 export interface FsEntry {
   name: string
   is_dir: boolean
