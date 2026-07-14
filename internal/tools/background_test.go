@@ -423,3 +423,24 @@ func TestTerminalTool_InvalidBackgroundMode(t *testing.T) {
 		})
 	}
 }
+
+func TestBgExit_ExitedOK(t *testing.T) {
+	cases := []struct {
+		name   string
+		e      BgExit
+		wantOK bool
+	}{
+		{"clean exit", BgExit{Status: "exited: 0", Killed: false}, true},
+		{"clean exit but killed (race)", BgExit{Status: "exited: 0", Killed: true}, false},
+		{"non-zero exit", BgExit{Status: "exited: exit status 1", Killed: false}, false},
+		{"signal killed", BgExit{Status: "exited: signal: terminated", Killed: true}, false},
+		{"still running (should not happen)", BgExit{Status: "running", Killed: false}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.e.ExitedOK(); got != tc.wantOK {
+				t.Errorf("ExitedOK() = %v, want %v", got, tc.wantOK)
+			}
+		})
+	}
+}

@@ -225,6 +225,12 @@ type BgExit struct {
 	Killed    bool          // the process was deliberately killed, not self-exited
 }
 
+// ExitedOK reports whether the process exited cleanly: exit code 0 and not
+// deliberately killed by a user / session teardown.
+func (e BgExit) ExitedOK() bool {
+	return !e.Killed && e.Status == "exited: 0"
+}
+
 // SyncSession is the promote handle for one in-flight synchronous terminal
 // command. Closing the channel (via Signal) unblocks the polling loop so the
 // process is promoted to a visible background task before the timer fires.

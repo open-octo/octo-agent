@@ -184,6 +184,25 @@ func subAgentNoteStatus(stopReason string) string {
 	}
 }
 
+// bgExitNoticeStyle picks the scrollback notice colour for a background-task
+// completion: green on clean exit, red on non-zero / killed.
+func bgExitNoticeStyle(e tools.BgExit) lipgloss.Style {
+	if e.ExitedOK() {
+		return bgDoneStyle
+	}
+	return errorStyle
+}
+
+// workflowNoticeStyle picks the scrollback notice colour for a workflow
+// completion: green on "done", red on "error". Anything unexpected falls
+// through to green (matches the existing done-only convention in WorkflowNotification).
+func workflowNoticeStyle(status string) lipgloss.Style {
+	if status == "error" {
+		return errorStyle
+	}
+	return bgDoneStyle
+}
+
 type workflowNoteMsg struct{ ev tools.WorkflowNotification } // a background workflow finished (async)
 type mcpReadyMsg struct{ reg *mcp.Registry }                 // background MCP connect finished (async)
 type subAgentEventMsg struct{ ev tools.SubAgentEvent }       // a sub-agent's runtime activity (async)
@@ -1012,8 +1031,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bgExitMsg:
 		// Print a concise, Claude-Code-style scrollback notice so the user
 		// sees the completion even when the model-facing <system-reminder>
-		// is folded into a later turn.
-		m.printlnBlock(bgDoneStyle.Render(fmt.Sprintf("● Background `%s` %s", msg.e.Command, msg.e.Status)))
+		// is folded into a later turn. Colour by outcome so a non-zero exit
+		// / kill jumps out red against the normal green.
+		m.printlnBlock(bgExitNoticeStyle(msg.e).Render(fmt.Sprintf("● Background `%s` %s", msg.e.Command, msg.e.Status)))
 		// Idle auto-turn: if no turn is running and nothing is queued, drain the
 		// inbox (which holds the full <system-reminder> notice) and start a
 		// turn so the model sees the completion immediately instead of waiting
@@ -1029,12 +1049,13 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workflowNoteMsg:
 		// Scrollback notice for the user; the full <system-reminder> rode the
 		// inbox for the model. Idle auto-turn mirrors bgExitMsg so the model
-		// reacts to a finished background workflow immediately.
+		// reacts to a finished background workflow immediately. Red on error,
+		// green on success — same visual language as the bg-task notice above.
 		status := msg.ev.Status
 		if status == "" {
 			status = "done"
 		}
-		m.printlnBlock(bgDoneStyle.Render(fmt.Sprintf("● Workflow %s (%s) %s", msg.ev.RunID, msg.ev.Description, status)))
+		m.printlnBlock(workflowNoticeStyle(status).Render(fmt.Sprintf("● Workflow %s (%s) %s", msg.ev.RunID, msg.ev.Description, status)))
 		if !m.turnRunning && len(m.queue) == 0 {
 			if items := m.a.Inbox.Drain(); len(items) > 0 {
 				s := strings.Join(agent.Texts(items), "\n\n")

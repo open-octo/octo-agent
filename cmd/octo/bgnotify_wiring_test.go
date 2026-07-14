@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
@@ -110,5 +112,35 @@ func TestTUI_SubAgentNoteMsgStopReason(t *testing.T) {
 	}})
 	if cmd == nil {
 		t.Fatal("subAgentNoteMsg should return a non-nil cmd even when stopped")
+	}
+}
+
+// TestTUI_NoticeStylesByOutcome verifies the colour-selection helpers pick the
+// right style per outcome (green for success, red for failure). Forces the
+// lipgloss renderer to ANSI so output is deterministic in a test pipeline.
+func TestTUI_NoticeStylesByOutcome(t *testing.T) {
+	orig := lipgloss.DefaultRenderer().ColorProfile()
+	lipgloss.DefaultRenderer().SetColorProfile(termenv.ANSI)
+	defer lipgloss.DefaultRenderer().SetColorProfile(orig)
+
+	// Background task: clean exit → green, failed/killed → red.
+	green := bgExitNoticeStyle(tools.BgExit{Status: "exited: 0", Killed: false}).Render("x")
+	red := bgExitNoticeStyle(tools.BgExit{Status: "exited: 1", Killed: false}).Render("x")
+	redKilled := bgExitNoticeStyle(tools.BgExit{Status: "exited: 0", Killed: true}).Render("x")
+	if !strings.Contains(green, "\x1b[") {
+		t.Errorf("clean exit expected ANSI colour, got: %q", green)
+	}
+	if red == green {
+		t.Errorf("failed exit expected different (red) colour, got same %q", red)
+	}
+	if redKilled == green {
+		t.Errorf("killed exit expected different (red) colour, got same %q", redKilled)
+	}
+
+	// Workflow: done → green, error → red.
+	wfGreen := workflowNoticeStyle("done").Render("x")
+	wfRed := workflowNoticeStyle("error").Render("x")
+	if wfGreen == wfRed {
+		t.Errorf("workflow done vs error should differ, both: %q", wfGreen)
 	}
 }
