@@ -3,26 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Octo — private, self-hosted AI agent · one brain, many arms</title>
-  <meta name="description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with many arms reaching your terminal, web, desktop, IM, and editor. Any model, zero telemetry; your data never leaves your machine.">
+  <title>Octo — private, self-hosted AI agent · one brain, eight arms</title>
+  <meta name="description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight arms, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232F54EB'/%3E%3Cpath fill='%23ffffff' d='M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z'/%3E%3Ccircle cx='40' cy='42' r='5' fill='%232F54EB'/%3E%3Ccircle cx='60' cy='42' r='5' fill='%232F54EB'/%3E%3C/svg%3E">
   <link rel="canonical" href="https://octo-agent.dev/">
-  <meta property="og:title" content="Octo — private, self-hosted AI agent · one brain, many arms">
-  <meta property="og:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with many arms reaching your terminal, web, desktop, IM, and editor. Any model, zero telemetry; your data never leaves your machine.">
+  <meta property="og:title" content="Octo — private, self-hosted AI agent · one brain, eight arms">
+  <meta property="og:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight arms, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://octo-agent.dev/">
   <meta property="og:image" content="https://octo-agent.dev/og-image.svg">
   <meta property="og:site_name" content="Octo">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Octo — private, self-hosted AI agent · one brain, many arms">
-  <meta name="twitter:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with many arms reaching your terminal, web, desktop, IM, and editor. Any model, zero telemetry; your data never leaves your machine.">
+  <meta name="twitter:title" content="Octo — private, self-hosted AI agent · one brain, eight arms">
+  <meta name="twitter:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight arms, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
   <meta name="twitter:image" content="https://octo-agent.dev/og-image.svg">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Octo",
-    "description": "A private, self-hosted AI agent: one brain — a single fast Go binary — with many arms reaching your terminal, web, desktop, IM, and editor. Any model; your data never leaves your machine.",
+    "description": "A private, self-hosted AI agent: one brain — a single fast Go binary — with eight arms, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model; your data never leaves your machine.",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "macOS, Linux, Windows",
     "license": "https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt",
@@ -299,7 +299,7 @@
       margin: 0 auto;
     }
 
-    /* One brain, many arms — the octopus diagram */
+    /* One brain, eight arms — the octopus diagram */
     .octo-map { max-width: 640px; margin: -0.5rem auto 2.5rem; }
     .octo-map svg { width: 100%; height: auto; display: block; overflow: visible; }
     .om-tentacle { fill: var(--accent); }
@@ -314,6 +314,12 @@
     .om-leak-head { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.8; }
     .om-model { fill: none; stroke: var(--border); stroke-width: 1.4; }
     .om-model-txt { fill: var(--muted); font-size: 12px; font-weight: 600; }
+    /* the not-yet-shipped arm (mobile) reads as a faint, dashed outline */
+    .om-tentacle.om-soon { fill: var(--muted); opacity: 0.32; }
+    .om-chip.om-soon { stroke-dasharray: 4 3; opacity: 0.65; }
+    .om-ico.om-soon { stroke: var(--muted); opacity: 0.7; }
+    .om-name.om-soon { fill: var(--muted); }
+    .om-soon-tag { fill: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: 0.02em; }
     .octo-map text { font-family: inherit; }
     .octo-map figcaption { text-align: center; color: var(--muted); font-size: 0.92rem; max-width: 520px; margin: 1rem auto 0; }
     @media (max-width: 640px) { .octo-map { margin-top: 0; } }
@@ -374,6 +380,19 @@
     .iface:hover {
       transform: translateY(-2px);
       box-shadow: var(--shadow-lg);
+    }
+    .iface.soon { opacity: 0.72; }
+    .soon-badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.12rem 0.55rem;
+      margin-top: 0.6rem;
     }
     .iface-icon {
       font-size: 2rem;
@@ -542,11 +561,11 @@
         <circle cx="40" cy="42" r="5" fill="#2F54EB"/>
         <circle cx="60" cy="42" r="5" fill="#2F54EB"/>
       </svg>
-      <p class="hero-kicker" data-en="One brain, many arms" data-zh="一个脑，多条腕"></p>
+      <p class="hero-kicker" data-en="One brain, eight arms" data-zh="一个脑，八条腕"></p>
       <h1><span class="accent">Octo</span></h1>
       <p class="hero-tagline"
-         data-en="A private, self-hosted AI agent that reaches your terminal, web, desktop, IM, and editor. One fast Go binary, any model, your data."
-         data-zh="一个私密、自托管的 AI Agent，伸进你的终端、网页、桌面、IM 和编辑器。一个够快的 Go 二进制，任意模型，你的数据。"></p>
+         data-en="One brain, eight arms — like an octopus. A private, self-hosted AI agent that reaches your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. One fast Go binary, any model, your data."
+         data-zh="一个脑，八条腕 —— 正好是章鱼的八只脚。一个私密、自托管的 AI Agent，伸进你的终端、VS Code、Obsidian、SDK、网页、桌面、IM 和移动端。一个够快的 Go 二进制，任意模型，你的数据。"></p>
       <div class="hero-proof">
         <span data-en="🔒 No telemetry, ever — nothing leaves your machine except the requests you send"
               data-zh="🔒 没有埋点 —— 除了你主动发出的请求，没有任何东西离开你的机器"></span>
@@ -660,62 +679,74 @@
     </div>
   </section>
 
-  <!-- Six interfaces -->
+  <!-- Eight interfaces = eight arms -->
   <section>
     <div class="container">
       <div class="section-header reveal">
-        <h2 data-en="One brain, many arms" data-zh="一个脑，多条腕"></h2>
-        <p data-en="Each interface is a first-class arm — same brain, same memory, same ~/.octo. Reach the agent from wherever you work."
-           data-zh="每个界面都是一条一等公民的腕 —— 同一个大脑、同一份记忆、同一个 ~/.octo。你在哪干活，就从哪够到它。"></p>
+        <h2 data-en="One brain, eight arms" data-zh="一个脑，八条腕"></h2>
+        <p data-en="Eight interfaces, one for each arm of the octopus — same brain, same memory, same ~/.octo. Reach the agent from wherever you work; mobile is the eighth arm, landing next."
+           data-zh="八个界面，正好对上章鱼的八条腕 —— 同一个大脑、同一份记忆、同一个 ~/.octo。你在哪干活，就从哪够到它；移动端是第八条腕，即将补上。"></p>
       </div>
 
       <figure class="octo-map reveal">
-        <svg viewBox="0 0 720 430" role="img" aria-label="One brain, many arms — one local octopus agent whose tentacles reach six interfaces; only requests leave, to the model you chose">
+        <svg viewBox="0 0 720 480" role="img" aria-label="One brain, eight arms — one local octopus agent whose eight tentacles reach eight interfaces: terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile (coming soon); only requests leave, to the model you chose">
           <!-- the one thing that leaves: a request to the model -->
-          <path class="om-leak" d="M300 150 L300 44"/>
-          <path class="om-leak-head" d="M294 54 L300 43 L306 54"/>
-          <rect class="om-model" x="252" y="10" width="96" height="30" rx="15"/>
-          <text class="om-model-txt" x="300" y="30" text-anchor="middle">your model</text>
+          <path class="om-leak" d="M360 192 L360 46"/>
+          <path class="om-leak-head" d="M354 56 L360 45 L366 56"/>
+          <rect class="om-model" x="312" y="12" width="96" height="30" rx="15"/>
+          <text class="om-model-txt" x="360" y="32" text-anchor="middle">your model</text>
 
-          <!-- six tentacles = the six connectors -->
+          <!-- eight tentacles = the eight interfaces -->
           <g class="om-body">
-          <path class="om-tentacle" d="M 265.97 209.98 L 261.58 209.81 L 257.26 209.35 L 252.99 208.61 L 248.77 207.59 L 244.59 206.32 L 240.46 204.81 L 236.36 203.07 L 232.30 201.11 L 228.28 198.97 L 224.29 196.66 L 220.34 194.20 L 216.43 191.61 L 212.55 188.92 L 208.71 186.14 L 204.89 183.30 L 201.10 180.43 L 197.33 177.54 L 193.58 174.66 L 189.84 171.82 L 186.11 169.02 L 182.39 166.31 L 178.67 163.69 L 174.94 161.20 L 171.20 158.85 L 167.44 156.66 L 163.66 154.67 L 159.86 152.88 L 156.03 151.32 L 152.17 150.00 L 148.27 148.93 L 147.73 151.07 L 151.43 152.22 L 155.07 153.68 L 158.65 155.42 L 162.17 157.39 L 165.66 159.59 L 169.11 161.99 L 172.54 164.57 L 175.95 167.30 L 179.35 170.17 L 182.75 173.16 L 186.16 176.24 L 189.58 179.41 L 193.02 182.62 L 196.50 185.88 L 200.01 189.15 L 203.58 192.42 L 207.20 195.66 L 210.90 198.87 L 214.67 202.01 L 218.54 205.06 L 222.50 208.01 L 226.59 210.84 L 230.80 213.52 L 235.15 216.03 L 239.65 218.33 L 244.32 220.42 L 249.16 222.25 L 254.18 223.80 L 259.39 225.04 L 264.80 225.94 Z"/>
-          <path class="om-tentacle" d="M 256.51 230.80 L 252.95 232.71 L 249.30 234.36 L 245.56 235.76 L 241.73 236.93 L 237.81 237.86 L 233.80 238.59 L 229.72 239.12 L 225.56 239.46 L 221.35 239.63 L 217.08 239.64 L 212.77 239.52 L 208.42 239.28 L 204.06 238.94 L 199.67 238.51 L 195.29 238.03 L 190.90 237.50 L 186.52 236.95 L 182.16 236.40 L 177.83 235.86 L 173.53 235.37 L 169.26 234.93 L 165.05 234.58 L 160.88 234.32 L 156.77 234.18 L 152.73 234.19 L 148.76 234.35 L 144.87 234.69 L 141.06 235.23 L 137.34 235.98 L 133.70 236.94 L 134.30 239.06 L 137.81 238.27 L 141.41 237.76 L 145.09 237.50 L 148.84 237.46 L 152.66 237.61 L 156.55 237.95 L 160.50 238.44 L 164.50 239.06 L 168.57 239.80 L 172.69 240.63 L 176.86 241.54 L 181.07 242.51 L 185.34 243.51 L 189.64 244.52 L 193.99 245.53 L 198.38 246.52 L 202.80 247.46 L 207.27 248.33 L 211.77 249.12 L 216.31 249.80 L 220.88 250.34 L 225.50 250.74 L 230.14 250.95 L 234.83 250.96 L 239.55 250.74 L 244.30 250.26 L 249.08 249.49 L 253.88 248.41 L 258.69 246.99 L 263.49 245.20 Z"/>
-          <path class="om-tentacle" d="M 259.07 254.36 L 256.77 258.19 L 254.24 261.81 L 251.49 265.25 L 248.52 268.51 L 245.34 271.61 L 241.96 274.55 L 238.41 277.35 L 234.68 280.01 L 230.81 282.54 L 226.80 284.95 L 222.68 287.26 L 218.46 289.48 L 214.17 291.61 L 209.82 293.67 L 205.43 295.68 L 201.02 297.65 L 196.61 299.59 L 192.22 301.52 L 187.86 303.45 L 183.55 305.40 L 179.32 307.39 L 175.17 309.42 L 171.13 311.52 L 167.21 313.70 L 163.43 315.97 L 159.81 318.36 L 156.36 320.86 L 153.11 323.51 L 150.05 326.30 L 147.19 329.25 L 148.81 330.75 L 151.64 328.02 L 154.72 325.49 L 158.00 323.15 L 161.49 320.98 L 165.14 318.94 L 168.96 317.04 L 172.93 315.24 L 177.03 313.54 L 181.24 311.91 L 185.56 310.34 L 189.97 308.82 L 194.45 307.31 L 198.99 305.81 L 203.58 304.31 L 208.21 302.77 L 212.86 301.19 L 217.51 299.54 L 222.16 297.82 L 226.80 295.99 L 231.40 294.04 L 235.96 291.95 L 240.46 289.69 L 244.90 287.25 L 249.25 284.60 L 253.49 281.72 L 257.62 278.58 L 261.60 275.17 L 265.43 271.46 L 269.07 267.43 L 272.49 263.06 Z"/>
-          <path class="om-tentacle" d="M 335.20 225.94 L 340.61 225.04 L 345.82 223.80 L 350.84 222.25 L 355.68 220.42 L 360.35 218.33 L 364.85 216.03 L 369.20 213.52 L 373.41 210.84 L 377.50 208.01 L 381.46 205.06 L 385.33 202.01 L 389.10 198.87 L 392.80 195.66 L 396.42 192.42 L 399.99 189.15 L 403.50 185.88 L 406.98 182.62 L 410.42 179.41 L 413.84 176.24 L 417.25 173.16 L 420.65 170.17 L 424.05 167.30 L 427.46 164.57 L 430.89 161.99 L 434.34 159.59 L 437.83 157.39 L 441.35 155.42 L 444.93 153.68 L 448.57 152.22 L 452.27 151.07 L 451.73 148.93 L 447.83 150.00 L 443.97 151.32 L 440.14 152.88 L 436.34 154.67 L 432.56 156.66 L 428.80 158.85 L 425.06 161.20 L 421.33 163.69 L 417.61 166.31 L 413.89 169.02 L 410.16 171.82 L 406.42 174.66 L 402.67 177.54 L 398.90 180.43 L 395.11 183.30 L 391.29 186.14 L 387.45 188.92 L 383.57 191.61 L 379.66 194.20 L 375.71 196.66 L 371.72 198.97 L 367.70 201.11 L 363.64 203.07 L 359.54 204.81 L 355.41 206.32 L 351.23 207.59 L 347.01 208.61 L 342.74 209.35 L 338.42 209.81 L 334.03 209.98 Z"/>
-          <path class="om-tentacle" d="M 336.51 245.20 L 341.31 246.99 L 346.12 248.41 L 350.92 249.49 L 355.70 250.26 L 360.45 250.74 L 365.17 250.96 L 369.86 250.95 L 374.50 250.74 L 379.12 250.34 L 383.69 249.80 L 388.23 249.12 L 392.73 248.33 L 397.20 247.46 L 401.62 246.52 L 406.01 245.53 L 410.36 244.52 L 414.66 243.51 L 418.93 242.51 L 423.14 241.54 L 427.31 240.63 L 431.43 239.80 L 435.50 239.06 L 439.50 238.44 L 443.45 237.95 L 447.34 237.61 L 451.16 237.46 L 454.91 237.50 L 458.59 237.76 L 462.19 238.27 L 465.70 239.06 L 466.30 236.94 L 462.66 235.98 L 458.94 235.23 L 455.13 234.69 L 451.24 234.35 L 447.27 234.19 L 443.23 234.18 L 439.12 234.32 L 434.95 234.58 L 430.74 234.93 L 426.47 235.37 L 422.17 235.86 L 417.84 236.40 L 413.48 236.95 L 409.10 237.50 L 404.71 238.03 L 400.33 238.51 L 395.94 238.94 L 391.58 239.28 L 387.23 239.52 L 382.92 239.64 L 378.65 239.63 L 374.44 239.46 L 370.28 239.12 L 366.20 238.59 L 362.19 237.86 L 358.27 236.93 L 354.44 235.76 L 350.70 234.36 L 347.05 232.71 L 343.49 230.80 Z"/>
-          <path class="om-tentacle" d="M 327.51 263.06 L 330.93 267.43 L 334.57 271.46 L 338.40 275.17 L 342.38 278.58 L 346.51 281.72 L 350.75 284.60 L 355.10 287.25 L 359.54 289.69 L 364.04 291.95 L 368.60 294.04 L 373.20 295.99 L 377.84 297.82 L 382.49 299.54 L 387.14 301.19 L 391.79 302.77 L 396.42 304.31 L 401.01 305.81 L 405.55 307.31 L 410.03 308.82 L 414.44 310.34 L 418.76 311.91 L 422.97 313.54 L 427.07 315.24 L 431.04 317.04 L 434.86 318.94 L 438.51 320.98 L 442.00 323.15 L 445.28 325.49 L 448.36 328.02 L 451.19 330.75 L 452.81 329.25 L 449.95 326.30 L 446.89 323.51 L 443.64 320.86 L 440.19 318.36 L 436.57 315.97 L 432.79 313.70 L 428.87 311.52 L 424.83 309.42 L 420.68 307.39 L 416.45 305.40 L 412.14 303.45 L 407.78 301.52 L 403.39 299.59 L 398.98 297.65 L 394.57 295.68 L 390.18 293.67 L 385.83 291.61 L 381.54 289.48 L 377.32 287.26 L 373.20 284.95 L 369.19 282.54 L 365.32 280.01 L 361.59 277.35 L 358.04 274.55 L 354.66 271.61 L 351.48 268.51 L 348.51 265.25 L 345.76 261.81 L 343.23 258.19 L 340.93 254.36 Z"/>
+          <path class="om-tentacle" d="M 330.11 206.96 L 324.02 202.37 L 317.87 197.81 L 311.65 193.27 L 305.37 188.75 L 299.02 184.26 L 292.61 179.80 L 286.13 175.35 L 279.58 170.93 L 272.97 166.54 L 266.29 162.17 L 259.54 157.82 L 252.73 153.49 L 245.85 149.19 L 238.91 144.90 L 231.90 140.64 L 224.83 136.41 L 217.69 132.19 L 210.48 127.99 L 203.21 123.82 L 195.88 119.66 L 188.47 115.52 L 181.01 111.40 L 173.48 107.29 L 165.88 103.20 L 158.23 99.12 L 150.52 95.03 L 149.48 96.97 L 157.08 101.21 L 164.60 105.51 L 172.04 109.84 L 179.40 114.21 L 186.67 118.61 L 193.88 123.04 L 201.00 127.50 L 208.05 131.98 L 215.02 136.50 L 221.92 141.04 L 228.74 145.60 L 235.48 150.20 L 242.15 154.81 L 248.74 159.46 L 255.25 164.12 L 261.69 168.82 L 268.05 173.53 L 274.34 178.27 L 280.55 183.04 L 286.68 187.83 L 292.74 192.64 L 298.72 197.47 L 304.63 202.33 L 310.46 207.21 L 316.21 212.11 L 321.89 217.04 Z"/>
+          <path class="om-tentacle" d="M 316.03 229.83 L 309.84 228.07 L 303.63 226.35 L 297.41 224.64 L 291.17 222.95 L 284.92 221.29 L 278.65 219.65 L 272.37 218.03 L 266.08 216.43 L 259.77 214.85 L 253.44 213.29 L 247.10 211.76 L 240.74 210.24 L 234.37 208.74 L 227.99 207.27 L 221.59 205.81 L 215.17 204.38 L 208.74 202.96 L 202.30 201.56 L 195.84 200.19 L 189.36 198.82 L 182.88 197.48 L 176.37 196.15 L 169.86 194.83 L 163.33 193.53 L 156.78 192.23 L 150.23 190.92 L 149.77 193.08 L 156.28 194.56 L 162.76 196.10 L 169.22 197.69 L 175.65 199.31 L 182.06 200.96 L 188.46 202.64 L 194.83 204.36 L 201.18 206.10 L 207.51 207.88 L 213.82 209.68 L 220.11 211.51 L 226.38 213.37 L 232.63 215.26 L 238.85 217.17 L 245.06 219.11 L 251.25 221.07 L 257.41 223.07 L 263.56 225.09 L 269.68 227.13 L 275.78 229.21 L 281.87 231.30 L 287.93 233.43 L 293.97 235.57 L 299.99 237.75 L 305.99 239.95 L 311.97 242.17 Z"/>
+          <path class="om-tentacle" d="M 316.12 255.78 L 309.65 257.97 L 303.18 260.08 L 296.72 262.12 L 290.27 264.08 L 283.82 265.96 L 277.38 267.76 L 270.95 269.48 L 264.52 271.13 L 258.10 272.69 L 251.69 274.18 L 245.28 275.59 L 238.88 276.92 L 232.48 278.17 L 226.10 279.34 L 219.72 280.43 L 213.34 281.44 L 206.98 282.37 L 200.62 283.21 L 194.26 283.98 L 187.92 284.66 L 181.58 285.25 L 175.25 285.77 L 168.92 286.19 L 162.61 286.53 L 156.30 286.77 L 150.00 286.90 L 150.00 289.10 L 156.33 289.15 L 162.67 289.16 L 169.03 289.12 L 175.40 289.00 L 181.79 288.82 L 188.20 288.57 L 194.62 288.26 L 201.06 287.87 L 207.52 287.40 L 213.99 286.87 L 220.48 286.26 L 226.99 285.58 L 233.52 284.83 L 240.06 284.00 L 246.62 283.10 L 253.19 282.13 L 259.78 281.08 L 266.39 279.95 L 273.02 278.75 L 279.66 277.47 L 286.32 276.12 L 293.00 274.69 L 299.70 273.19 L 306.41 271.61 L 313.14 269.95 L 319.88 268.22 Z"/>
+          <path class="om-tentacle" d="M 329.49 279.32 L 323.65 285.19 L 317.72 290.91 L 311.70 296.49 L 305.60 301.91 L 299.42 307.19 L 293.15 312.32 L 286.80 317.30 L 280.36 322.13 L 273.84 326.82 L 267.23 331.35 L 260.54 335.73 L 253.76 339.96 L 246.89 344.04 L 239.94 347.97 L 232.90 351.74 L 225.77 355.36 L 218.56 358.83 L 211.26 362.15 L 203.88 365.31 L 196.41 368.31 L 188.85 371.15 L 181.20 373.84 L 173.47 376.37 L 165.65 378.73 L 157.75 380.92 L 149.75 382.93 L 150.25 385.07 L 158.33 383.23 L 166.35 381.27 L 174.30 379.17 L 182.18 376.93 L 190.00 374.54 L 197.75 372.00 L 205.43 369.31 L 213.04 366.47 L 220.59 363.48 L 228.07 360.33 L 235.49 357.03 L 242.83 353.57 L 250.11 349.96 L 257.32 346.19 L 264.46 342.27 L 271.54 338.19 L 278.54 333.95 L 285.48 329.56 L 292.35 325.01 L 299.16 320.29 L 305.89 315.42 L 312.55 310.39 L 319.15 305.21 L 325.67 299.86 L 332.12 294.35 L 338.51 288.68 Z"/>
+          <path class="om-tentacle" d="M 398.11 217.04 L 403.79 212.11 L 409.54 207.21 L 415.37 202.33 L 421.28 197.47 L 427.26 192.64 L 433.32 187.83 L 439.45 183.04 L 445.66 178.27 L 451.95 173.53 L 458.31 168.82 L 464.75 164.12 L 471.26 159.46 L 477.85 154.81 L 484.52 150.20 L 491.26 145.60 L 498.08 141.04 L 504.98 136.50 L 511.95 131.98 L 519.00 127.50 L 526.12 123.04 L 533.33 118.61 L 540.60 114.21 L 547.96 109.84 L 555.40 105.51 L 562.92 101.21 L 570.52 96.97 L 569.48 95.03 L 561.77 99.12 L 554.12 103.20 L 546.52 107.29 L 538.99 111.40 L 531.53 115.52 L 524.12 119.66 L 516.79 123.82 L 509.52 127.99 L 502.31 132.19 L 495.17 136.41 L 488.10 140.64 L 481.09 144.90 L 474.15 149.19 L 467.27 153.49 L 460.46 157.82 L 453.71 162.17 L 447.03 166.54 L 440.42 170.93 L 433.87 175.35 L 427.39 179.80 L 420.98 184.26 L 414.63 188.75 L 408.35 193.27 L 402.13 197.81 L 395.98 202.37 L 389.89 206.96 Z"/>
+          <path class="om-tentacle" d="M 408.03 242.17 L 414.01 239.95 L 420.01 237.75 L 426.03 235.57 L 432.07 233.43 L 438.13 231.30 L 444.22 229.21 L 450.32 227.13 L 456.44 225.09 L 462.59 223.07 L 468.75 221.07 L 474.94 219.11 L 481.15 217.17 L 487.37 215.26 L 493.62 213.37 L 499.89 211.51 L 506.18 209.68 L 512.49 207.88 L 518.82 206.10 L 525.17 204.36 L 531.54 202.64 L 537.94 200.96 L 544.35 199.31 L 550.78 197.69 L 557.24 196.10 L 563.72 194.56 L 570.23 193.08 L 569.77 190.92 L 563.22 192.23 L 556.67 193.53 L 550.14 194.83 L 543.63 196.15 L 537.12 197.48 L 530.64 198.82 L 524.16 200.19 L 517.70 201.56 L 511.26 202.96 L 504.83 204.38 L 498.41 205.81 L 492.01 207.27 L 485.63 208.74 L 479.26 210.24 L 472.90 211.76 L 466.56 213.29 L 460.23 214.85 L 453.92 216.43 L 447.63 218.03 L 441.35 219.65 L 435.08 221.29 L 428.83 222.95 L 422.59 224.64 L 416.37 226.35 L 410.16 228.07 L 403.97 229.83 Z"/>
+          <path class="om-tentacle" d="M 400.12 268.22 L 406.86 269.95 L 413.59 271.61 L 420.30 273.19 L 427.00 274.69 L 433.68 276.12 L 440.34 277.47 L 446.98 278.75 L 453.61 279.95 L 460.22 281.08 L 466.81 282.13 L 473.38 283.10 L 479.94 284.00 L 486.48 284.83 L 493.01 285.58 L 499.52 286.26 L 506.01 286.87 L 512.48 287.40 L 518.94 287.87 L 525.38 288.26 L 531.80 288.57 L 538.21 288.82 L 544.60 289.00 L 550.97 289.12 L 557.33 289.16 L 563.67 289.15 L 570.00 289.10 L 570.00 286.90 L 563.70 286.77 L 557.39 286.53 L 551.08 286.19 L 544.75 285.77 L 538.42 285.25 L 532.08 284.66 L 525.74 283.98 L 519.38 283.21 L 513.02 282.37 L 506.66 281.44 L 500.28 280.43 L 493.90 279.34 L 487.52 278.17 L 481.12 276.92 L 474.72 275.59 L 468.31 274.18 L 461.90 272.69 L 455.48 271.13 L 449.05 269.48 L 442.62 267.76 L 436.18 265.96 L 429.73 264.08 L 423.28 262.12 L 416.82 260.08 L 410.35 257.97 L 403.88 255.78 Z"/>
+          <path class="om-tentacle om-soon" d="M 381.49 288.68 L 387.88 294.35 L 394.33 299.86 L 400.85 305.21 L 407.45 310.39 L 414.11 315.42 L 420.84 320.29 L 427.65 325.01 L 434.52 329.56 L 441.46 333.95 L 448.46 338.19 L 455.54 342.27 L 462.68 346.19 L 469.89 349.96 L 477.17 353.57 L 484.51 357.03 L 491.93 360.33 L 499.41 363.48 L 506.96 366.47 L 514.57 369.31 L 522.25 372.00 L 530.00 374.54 L 537.82 376.93 L 545.70 379.17 L 553.65 381.27 L 561.67 383.23 L 569.75 385.07 L 570.25 382.93 L 562.25 380.92 L 554.35 378.73 L 546.53 376.37 L 538.80 373.84 L 531.15 371.15 L 523.59 368.31 L 516.12 365.31 L 508.74 362.15 L 501.44 358.83 L 494.23 355.36 L 487.10 351.74 L 480.06 347.97 L 473.11 344.04 L 466.24 339.96 L 459.46 335.73 L 452.77 331.35 L 446.16 326.82 L 439.64 322.13 L 433.20 317.30 L 426.85 312.32 L 420.58 307.19 L 414.40 301.91 L 408.30 296.49 L 402.28 290.91 L 396.35 285.19 L 390.51 279.32 Z"/>
             <!-- head -->
-            <ellipse class="om-halo" cx="300" cy="234" rx="58" ry="54"/>
-            <path class="om-head" d="M256 244 C256 205 273 186 300 186 C327 186 344 205 344 244 C344 262 330 272 300 272 C270 272 256 262 256 244 Z"/>
-            <ellipse class="om-eye" cx="287" cy="230" rx="6.5" ry="8"/>
-            <ellipse class="om-eye" cx="313" cy="230" rx="6.5" ry="8"/>
-            <circle class="om-pupil" cx="288.5" cy="231.5" r="2.6"/>
-            <circle class="om-pupil" cx="314.5" cy="231.5" r="2.6"/>
+            <ellipse class="om-halo" cx="360" cy="248" rx="64" ry="58"/>
+            <path class="om-head" d="M310 258 C310 214 328 194 360 194 C392 194 410 214 410 258 C410 278 393 290 360 290 C327 290 310 278 310 258 Z"/>
+            <ellipse class="om-eye" cx="345" cy="242" rx="6.5" ry="8"/>
+            <ellipse class="om-eye" cx="375" cy="242" rx="6.5" ry="8"/>
+            <circle class="om-pupil" cx="346.5" cy="243.5" r="2.6"/>
+            <circle class="om-pupil" cx="376.5" cy="243.5" r="2.6"/>
           </g>
 
-          <rect class="om-chip" x="108" y="130" width="40" height="40" rx="11"/>
-          <g class="om-ico" transform="translate(116,138)"><polyline points="5 7 10 12 5 17"/><line x1="12" y1="17" x2="19" y2="17"/></g>
-          <text class="om-name" x="96" y="155" text-anchor="end">Terminal</text>
-          <rect class="om-chip" x="94" y="218" width="40" height="40" rx="11"/>
-          <g class="om-ico" transform="translate(102,226)"><polyline points="9 8 5 12 9 16"/><polyline points="15 8 19 12 15 16"/></g>
-          <text class="om-name" x="82" y="243" text-anchor="end">VS Code</text>
-          <rect class="om-chip" x="108" y="310" width="40" height="40" rx="11"/>
-          <g class="om-ico" transform="translate(116,318)"><path d="M12 2 4 9l8 13 8-13-8-7z"/><path d="M4 9h16"/></g>
-          <text class="om-name" x="96" y="335" text-anchor="end">Obsidian</text>
-          <rect class="om-chip" x="452" y="130" width="40" height="40" rx="11"/>
-          <g class="om-ico" transform="translate(460,138)"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3c3.5 3 3.5 15 0 18M12 3c-3.5 3-3.5 15 0 18"/></g>
-          <text class="om-name" x="496" y="155" text-anchor="start">Web</text>
-          <rect class="om-chip" x="468" y="218" width="40" height="40" rx="11"/>
-          <g class="om-ico" transform="translate(476,226)"><rect x="3" y="4" width="18" height="12" rx="1.5"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="16" x2="12" y2="20"/></g>
-          <text class="om-name" x="512" y="243" text-anchor="start">Desktop</text>
-          <rect class="om-chip" x="452" y="310" width="40" height="40" rx="11"/>
-          <g class="om-ico" transform="translate(460,318)"><path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/></g>
-          <text class="om-name" x="496" y="335" text-anchor="start">IM</text>
+          <!-- left arms: dev-side surfaces -->
+          <rect class="om-chip" x="96" y="76" width="40" height="40" rx="11"/>
+          <g class="om-ico" transform="translate(104,84)"><polyline points="5 7 10 12 5 17"/><line x1="12" y1="17" x2="19" y2="17"/></g>
+          <text class="om-name" x="88" y="101" text-anchor="end">Terminal</text>
+          <rect class="om-chip" x="96" y="172" width="40" height="40" rx="11"/>
+          <g class="om-ico" transform="translate(104,180)"><polyline points="9 8 5 12 9 16"/><polyline points="15 8 19 12 15 16"/></g>
+          <text class="om-name" x="88" y="197" text-anchor="end">VS Code</text>
+          <rect class="om-chip" x="96" y="268" width="40" height="40" rx="11"/>
+          <g class="om-ico" transform="translate(104,276)"><path d="M12 2 4 9l8 13 8-13-8-7z"/><path d="M4 9h16"/></g>
+          <text class="om-name" x="88" y="293" text-anchor="end">Obsidian</text>
+          <rect class="om-chip" x="96" y="364" width="40" height="40" rx="11"/>
+          <g class="om-ico" transform="translate(104,372)"><path d="M8 4c-2 0-2 2-2 4s0 4-2 4c2 0 2 2 2 4s0 4 2 4"/><path d="M16 4c2 0 2 2 2 4s0 4 2 4c-2 0-2 2-2 4s0 4-2 4"/></g>
+          <text class="om-name" x="88" y="389" text-anchor="end">SDK</text>
+
+          <!-- right arms: standalone surfaces -->
+          <rect class="om-chip" x="584" y="76" width="40" height="40" rx="11"/>
+          <g class="om-ico" transform="translate(592,84)"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3c3.5 3 3.5 15 0 18M12 3c-3.5 3-3.5 15 0 18"/></g>
+          <text class="om-name" x="632" y="101" text-anchor="start">Web</text>
+          <rect class="om-chip" x="584" y="172" width="40" height="40" rx="11"/>
+          <g class="om-ico" transform="translate(592,180)"><rect x="3" y="4" width="18" height="12" rx="1.5"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="16" x2="12" y2="20"/></g>
+          <text class="om-name" x="632" y="197" text-anchor="start">Desktop</text>
+          <rect class="om-chip" x="584" y="268" width="40" height="40" rx="11"/>
+          <g class="om-ico" transform="translate(592,276)"><path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/></g>
+          <text class="om-name" x="632" y="293" text-anchor="start">IM</text>
+          <rect class="om-chip om-soon" x="584" y="364" width="40" height="40" rx="11"/>
+          <g class="om-ico om-soon" transform="translate(592,372)"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></g>
+          <text class="om-name om-soon" x="632" y="381" text-anchor="start">Mobile</text>
+          <text class="om-soon-tag" x="632" y="396" text-anchor="start" data-en="coming soon" data-zh="即将推出"></text>
         </svg>
         <figcaption
-          data-en="One local octopus, many arms — its tentacles reach every interface, while the brain and your data stay in one body. Only the requests you send ever leave, to the model you chose."
-          data-zh="一只本地章鱼，多条腕 —— 触手够到每个界面，而大脑和你的数据留在同一具身体里。只有你发出的请求会离开，去到你选定的模型。"></figcaption>
+          data-en="One local octopus, eight arms — its tentacles reach all eight interfaces (mobile lands next), while the brain and your data stay in one body. Only the requests you send ever leave, to the model you chose."
+          data-zh="一只本地章鱼，八条腕 —— 触手够到全部八个界面（移动端即将补上），而大脑和你的数据留在同一具身体里。只有你发出的请求会离开，去到你选定的模型。"></figcaption>
       </figure>
 
       <div class="interfaces">
@@ -754,6 +785,19 @@
           <h3 data-en="Obsidian plugin" data-zh="Obsidian 插件"></h3>
           <p data-en="Your vault becomes the agent's working directory — sidebar chat, inline edit with word-level diff, slash commands, @mentions. open-octo/octo-obsidian."
              data-zh="你的 vault 变成 agent 的工作目录 —— 侧边栏对话、行内编辑（word-level diff）、slash 命令、@mention。open-octo/octo-obsidian。"></p>
+        </div>
+        <div class="iface reveal">
+          <div class="iface-icon">🧰</div>
+          <h3 data-en="Go SDK" data-zh="Go SDK"></h3>
+          <p data-en="Embed the same agent loop in your own Go programs. pkg/octoagent exports the core — turns, tools, permission gate, hooks — as a public API, no internal imports. Build your own interface on the same brain."
+             data-zh="把同一套 agent 循环嵌进你自己的 Go 程序。pkg/octoagent 把核心（turn、工具、权限门、hooks）作为公开 API 导出，无需 internal 依赖。同一个大脑，长出你自己的那条腕。"></p>
+        </div>
+        <div class="iface reveal soon">
+          <div class="iface-icon">📱</div>
+          <h3 data-en="Mobile app" data-zh="移动端"></h3>
+          <p data-en="A thin native client for iOS and Android — drive the same agent from your pocket over an end-to-end encrypted link to your own machine. The eighth arm."
+             data-zh="iOS 与 Android 的轻量原生客户端 —— 通过端到端加密链路连回你自己的机器，在口袋里驱动同一个 agent。第八条腕。"></p>
+          <span class="soon-badge" data-en="Coming soon" data-zh="即将推出"></span>
         </div>
       </div>
     </div>
