@@ -61,7 +61,7 @@ func TestSnip_SkipsErrorTurns(t *testing.T) {
 	t.Error("error turn was dropped")
 }
 
-func TestSnip_NoCandidateReturnsFalse(t *testing.T) {
+func TestSnip_RespectsMinTriggerTokens(t *testing.T) {
 	a := New(&summarizeFake{}, "test-model")
 	a.CompactThreshold = 20
 	a.History.Append(NewUserMessage("only"))
@@ -92,4 +92,24 @@ func TestSnip_EmitEvent(t *testing.T) {
 		}
 	}
 	t.Error("EventSnip not emitted")
+}
+
+func TestSnip_NoSafeCandidateWhenAllHaveErrors(t *testing.T) {
+	a := New(&summarizeFake{}, "test-model")
+	a.CompactThreshold = 2000
+	a.History.Append(NewUserMessage("task definition"))
+	a.History.Append(NewAssistantMessage("ok"))
+	err1 := Message{Role: RoleUser, Blocks: []ContentBlock{{Type: "tool_result", Result: "fail", IsError: true}}}
+	a.History.Append(err1)
+	a.History.Append(NewAssistantMessage("a1"))
+	err2 := Message{Role: RoleUser, Blocks: []ContentBlock{{Type: "tool_result", Result: "also fail", IsError: true}}}
+	a.History.Append(err2)
+	a.History.Append(NewAssistantMessage("a2"))
+	a.History.Append(NewUserMessage(strings.Repeat("y", 12000)))
+	a.History.Append(NewAssistantMessage("a3"))
+
+	result := a.snipBeforeSummarize(a.History.Snapshot(), 2000, nil)
+	if result {
+		t.Error("snip returned true when all candidates had errors")
+	}
 }
