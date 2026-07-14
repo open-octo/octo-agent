@@ -43,6 +43,8 @@ import (
 	"github.com/open-octo/octo-agent/internal/skills"
 	"github.com/open-octo/octo-agent/internal/tasks"
 	"github.com/open-octo/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/version"
+	"github.com/open-octo/octo-agent/internal/workflow"
 )
 
 // getDefaultToolsFor bridges to tools.DefaultToolsFor for ws_handlers.go.
@@ -393,6 +395,16 @@ func New(cfg Config) (*Server, error) {
 			}
 		}
 	}
+
+	// Materialize the binary's default skills/workflows to ~/.octo/skills-default
+	// and ~/.octo/workflows-default so Discover() below finds them. The CLI's
+	// run() does the same before runChat/runServe, but server.New() is also
+	// called directly by the desktop app (which never goes through run()) — so
+	// the init has to live here too. A no-op/cheap-pass once current (stamp
+	// file), so calling it from both paths is harmless.
+	_ = skills.MaterializeDefaults(version.Version)
+	_ = tools.MaterializeDefaultWorkflows(version.Version)
+	_ = workflow.PruneJournals()
 
 	cwd, _ := os.Getwd()
 	envCtx := buildEnvContext(cwd)
