@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/tools/rgembed"
 )
 
@@ -153,6 +154,7 @@ func (GrepTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, rgPath, args...)
+	executil.SetNoWindow(cmd)
 	// Root rg in the session's working directory. Without this, a grep with no
 	// explicit `path` runs in the octo process CWD — which for a long-lived
 	// `octo serve`/desktop hub is wherever the daemon launched (often $HOME),
