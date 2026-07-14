@@ -184,8 +184,10 @@ func TestHandleCreateMCPServer_AllowArbitraryCommand(t *testing.T) {
 
 	// Absolute path with opt-in whitelisted as stdio.
 	codegraphABS := filepath.Join(t.TempDir(), "codegraph")
+	// Escape backslashes so the path survives JSON embedding.
+	escaped := strings.ReplaceAll(codegraphABS, `\`, `\\`)
 	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"mcpServers": {"codegraph": {"command": "`+codegraphABS+` serve --mcp", "allow_arbitrary_command": true}}}`)
+		`{"mcpServers": {"codegraph": {"command": "`+escaped+` serve --mcp", "allow_arbitrary_command": true}}}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("absolute path with opt-in: status = %d: %s", w.Code, w.Body.String())
 	}
