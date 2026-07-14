@@ -11,6 +11,13 @@ import (
 // live in the startup banner) and no running-turn duration.
 func TestRenderStatusBar_NoHintNoDuration(t *testing.T) {
 	m := newTestModel()
+	// Pin a short cwd and a wide terminal so the segment isn't width-elided:
+	// newTestModel inherits the real os.Getwd(), which under a deeply-nested
+	// git worktree (.claude/worktrees/<name>/…) is long enough that StatusBar
+	// truncates it with "…", breaking the substring check for reasons unrelated
+	// to what this test asserts.
+	m.cwd = "/tmp/proj"
+	m.width = 200
 	if !strings.Contains(m.renderStatusBar(), m.cwd) {
 		t.Errorf("status bar should include the cwd; got:\n%s", m.renderStatusBar())
 	}
