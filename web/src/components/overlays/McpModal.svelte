@@ -32,7 +32,7 @@
     try {
       let parsed: any
       try { parsed = JSON.parse(jsonText) } catch { errorMsg = $t('mcp.invalid_json'); submitting = false; return }
-      const servers = parsed.mcpServers ?? parsed
+      const servers: Record<string, Record<string, unknown>> = (parsed.mcpServers ?? parsed) as Record<string, Record<string, unknown>>
       // Import silently overwrites a same-named entry in ~/.octo/mcp.json —
       // fine for a genuine re-paste, but this is now the only structured UI
       // path for adding even a single server, so warn before clobbering one
