@@ -54,22 +54,35 @@ Check for `lang:zh` or `lang:en` in the invocation:
 
 If the `lang:` argument is absent, infer from the user's first reply; default to English.
 
-### A.2. Greet the user
+### A.2. Greet the user AND ask the first question
 
-Send a short, warm welcome message (2–3 sentences). Use the language determined above.
-Do NOT ask any questions yet.
+Open with a short, warm welcome (2–3 sentences) **and, in the same message,
+immediately go on to ask the first question (A.3, the AI's name).** Do NOT stop
+after the greeting alone: a bare welcome with no question ends your turn and
+leaves the user staring at a dead-end with nothing to answer. Greet and ask in
+one breath, then end the turn to wait for their reply. Use the language
+determined above.
 
 Example (English):
 > Hi! I'm your personal assistant.
 > Let's take 30 seconds to personalize your experience — I'll ask just a couple of quick things.
+>
+> Let's start with something fun — what would you like to call me?
+> Options: Nox, Sable, Remy, Vex, Pip, Zola, Bex
+> (Or type any name you like)
 
 Example (Chinese):
 > 嗨！我是你的专属助手。
 > 只需 30 秒完成个性化设置，我会问你两个简单问题。
+>
+> 先来点有意思的 —— 你想叫我什么名字？
+> 选项：摸鱼王、老六、夜猫子、话唠、包打听、碎碎念、掌柜的
+> （也可以直接输入你喜欢的名字）
 
 ### A.3. Ask the user to name the AI
 
-Ask the user what they'd like to call you. Provide some fun options but let them type anything.
+This is the question you fold into the A.2 greeting message above — ask what
+they'd like to call you. Provide some fun options but let them type anything.
 
 zh:
 > 先来点有意思的 —— 你想叫我什么名字？
