@@ -48,6 +48,7 @@ func soulMissing() bool {
 
 // offerOnboarding asks (on a first run) whether to run the onboarding ceremony.
 // Default is yes; "n"/"no"/"s"/"skip" declines. Returns true to run /onboard.
+// Kept for tests; the CLI/TUI now auto-starts onboarding instead of prompting.
 func offerOnboarding(reader lineReader, out io.Writer) bool {
 	fmt.Fprintln(out, "octo isn't personalized yet — name it and tell it a bit about you (~2 min).")
 	line, ok := reader.ReadLine("Onboard now? [Y/skip]: ")
@@ -982,14 +983,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			cfg.executor = toolExecutor
 			cfg.subAgentMgr = subAgentMgr
 		}
-		// First run with a working model but no identity yet: offer the
-		// onboarding ceremony (skippable) so a new CLI user isn't left with an
+		// First run with a working model but no identity yet: automatically
+		// start the onboarding ceremony so a new CLI user isn't left with an
 		// impersonal agent — mirroring the web's soul_setup nudge. The config
 		// wizard above only sets the key/model; onboard is who-it-is/who-you-are.
 		if isFirstEverSession() && soulMissing() {
-			if offerOnboarding(replReader, stdout) {
-				cfg.autoFirstInput = "/onboard"
-			}
+			cfg.autoFirstInput = "/onboard"
 		}
 		return runTUI(cfg)
 	}
