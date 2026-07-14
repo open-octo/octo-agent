@@ -490,6 +490,24 @@
       })
     }))
 
+    // An in-session loop wakeup fired and started a fresh turn. Render a "Loop
+    // tick" scrollback notice, mirroring the TUI line — the loop prompt itself
+    // is suppressed server-side (wrapped as a <system-reminder>), so it no
+    // longer duplicates as a user-message bubble on every tick.
+    cleanups.push(ws.on('loop_tick_notice', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      addChatMsg(sid, {
+        id: uid('note'),
+        type: 'notice',
+        content: 'Loop tick',
+        level: 'info',
+        createdAt: Date.now(),
+        streaming: false,
+        tools: [],
+        todos: [],
+      })
+    }))
+
     cleanups.push(ws.on('text_delta', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       const txt = (ev as any).text ?? ''

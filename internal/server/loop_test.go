@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,6 +129,23 @@ func TestShouldSkipTick(t *testing.T) {
 				t.Fatalf("shouldSkipTick(repeat=%v, running=%v) = %v, want %v", tc.repeat, tc.running, got, tc.skip)
 			}
 		})
+	}
+}
+
+// A loop tick is wrapped as a <system-reminder> so the web transcript stops
+// duplicating the prompt as a user-message bubble on every tick. The model must
+// still receive the prompt verbatim, and the visible bubble text (what
+// doAgentTurn derives via StripSystemReminders) must be empty — the same
+// suppression that keeps completion notes from rendering as user speech.
+func TestFormatLoopTick_SuppressesUserBubble(t *testing.T) {
+	prompt := "check whether the PR is merged and report"
+	wrapped := formatLoopTick(prompt)
+
+	if !strings.Contains(wrapped, prompt) {
+		t.Fatalf("wrapped tick must carry the original task verbatim, got %q", wrapped)
+	}
+	if visible := strings.TrimSpace(agent.StripSystemReminders(wrapped)); visible != "" {
+		t.Fatalf("a loop tick must leave no visible user-bubble text, got %q", visible)
 	}
 }
 

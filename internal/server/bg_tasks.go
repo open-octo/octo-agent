@@ -102,14 +102,17 @@ func (s *Server) deliverModelNote(sessionID, note string) {
 // kickIdleSteerTurn starts a turn for sessionID when none is running, so a
 // completion note queued while idle reaches the model immediately. No-op when
 // a turn is running (its chained loop drains the queue at turn end) or the
-// queue is already empty by the time the lock is held.
-func (s *Server) kickIdleSteerTurn(sessionID string) {
+// queue is already empty by the time the lock is held. Returns true only when it
+// actually launched a turn — callers that want to surface a "started" signal
+// (e.g. the loop-tick notice) must gate on it, since the session may have been
+// taken over by another entry or have nothing left to drain.
+func (s *Server) kickIdleSteerTurn(sessionID string) bool {
 	// Acquire the persistent binding before locking the turn: this keeps the
 	// same lock order as the user-initiated web path and prevents idle
 	// follow-up turns from interleaving with another entry (cli/tui/im) that
 	// has taken over the session while we were idle.
 	if ok, _, _ := s.acquireSessionBinding(sessionID, agent.EntryWeb, false); !ok {
-		return
+		return false
 	}
 
 	mu := s.sessionTurnLock(sessionID)
@@ -117,7 +120,7 @@ func (s *Server) kickIdleSteerTurn(sessionID string) {
 	if s.turnRunning[sessionID] {
 		mu.Unlock()
 		s.releaseSessionBinding(sessionID, agent.EntryWeb)
-		return
+		return false
 	}
 	sess, err := agent.LoadSession(sessionID)
 	if err != nil {
@@ -125,13 +128,13 @@ func (s *Server) kickIdleSteerTurn(sessionID string) {
 		// the queue untouched; the next turn will pick the note up.
 		mu.Unlock()
 		s.releaseSessionBinding(sessionID, agent.EntryWeb)
-		return
+		return false
 	}
 	items := s.drainSteer(sessionID)
 	if len(items) == 0 {
 		mu.Unlock()
 		s.releaseSessionBinding(sessionID, agent.EntryWeb)
-		return
+		return false
 	}
 	s.turnRunning[sessionID] = true
 	mu.Unlock()
@@ -153,6 +156,7 @@ func (s *Server) kickIdleSteerTurn(sessionID string) {
 		}()
 		s.runAgentTurnLoop(sess, strings.Join(texts, "\n\n"), blocks, imageRefsFromBlocks(blocks))
 	}()
+	return true
 }
 
 // bgNoticeStatus maps a BackgroundManager exit status ("exited: 0",

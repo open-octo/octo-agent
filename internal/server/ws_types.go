@@ -308,6 +308,16 @@ type wsEventSubAgentNotice struct {
 	Status      string `json:"status"`
 }
 
+// wsEventLoopTickNotice announces that an in-session loop wakeup fired and
+// started a fresh turn. The web UI renders it as an inline "Loop tick"
+// scrollback notice, mirroring the TUI line — the loop prompt itself is
+// suppressed (wrapped as a <system-reminder> in formatLoopTick) so it no longer
+// duplicates as a user-message bubble on every tick.
+type wsEventLoopTickNotice struct {
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+}
+
 type wsEventUserMessageQueueStatus struct {
 	Type    string `json:"type"`
 	Pending int    `json:"pending"`
