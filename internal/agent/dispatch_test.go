@@ -33,17 +33,23 @@ func TestCanParallelize(t *testing.T) {
 			true,
 		},
 		{
-			// sub_agent is NOT in the parallel-safe set because sub-agents can have
-			// side effects and run for a long time. Serial dispatch preserves
-			// EventToolProgress for streaming tools and keeps the event order
-			// predictable.
-			"two sub_agent calls → serial",
+			// sub_agent is concurrency-safe: each runs in an isolated child, and
+			// the manager/token accounting are mutex-guarded. A fan-out must run
+			// concurrently, else 7 sub-agents block one another.
+			"two sub_agent calls → parallel",
 			[]toolCall{ro("sub_agent"), ro("sub_agent")},
-			false,
+			true,
 		},
 		{
-			"sub_agent + read_file → serial",
+			"sub_agent + read_file → parallel",
 			[]toolCall{ro("sub_agent"), ro("read_file")},
+			true,
+		},
+		{
+			// A mutating tool in the batch still forces serial, even alongside
+			// sub_agent — write_file is not concurrency-safe.
+			"sub_agent + write_file → serial",
+			[]toolCall{ro("sub_agent"), ro("write_file")},
 			false,
 		},
 	}
@@ -101,6 +107,40 @@ func TestDispatchTools_ParallelReadOnly(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("read-only batch did not run concurrently — the arrival barrier never released (serial dispatch)")
+	}
+}
+
+func TestDispatchTools_ParallelSubAgents(t *testing.T) {
+	// A fan-out of sub_agent calls must run concurrently, not serially — the
+	// whole point of dispatching several at once. The arrival barrier only
+	// releases if all three start together.
+	exec := &barrierExec{}
+	exec.wg.Add(3)
+	blocks := []ContentBlock{
+		NewToolUseBlock("s1", "sub_agent", map[string]any{"prompt": "a"}),
+		NewToolUseBlock("s2", "sub_agent", map[string]any{"prompt": "b"}),
+		NewToolUseBlock("s3", "sub_agent", map[string]any{"prompt": "c"}),
+	}
+
+	done := make(chan []ContentBlock, 1)
+	go func() {
+		r, _ := dispatchTools(context.Background(), exec, blocks, nil, nil)
+		done <- r
+	}()
+
+	select {
+	case results := <-done:
+		want := []string{"s1", "s2", "s3"}
+		if len(results) != 3 {
+			t.Fatalf("got %d results, want 3", len(results))
+		}
+		for i, w := range want {
+			if results[i].ToolUseID != w {
+				t.Errorf("results[%d].ToolUseID = %q, want %q", i, results[i].ToolUseID, w)
+			}
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("sub_agent batch did not run concurrently — the arrival barrier never released (serial dispatch)")
 	}
 }
 

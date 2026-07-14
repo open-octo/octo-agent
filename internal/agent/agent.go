@@ -1470,9 +1470,13 @@ type toolCall struct {
 // "ask" prompt must never race another on stdin. Execution then happens in one
 // of two modes:
 //   - Parallel, when the batch has >1 executable call and every executable
-//     call is a read-only tool (readOnlyTools). The model frequently fires
-//     several read_file/grep calls at once; running them concurrently cuts
-//     latency. Read-only tools don't stream, so no progress events are lost.
+//     call is concurrency-safe (concurrencySafe): the read-only built-ins the
+//     model frequently fires several of at once (read_file/grep/…), plus
+//     sub_agent, whose whole point is a parallel fan-out. Running them
+//     concurrently cuts latency — and for sub_agent avoids the "7 sub-agents
+//     block one another" serialization that a synchronous fan-out would
+//     otherwise hit. None of these stream tool-level progress, so no
+//     EventToolProgress is lost.
 //   - Serial otherwise (a single call, or any mutating/streaming tool present),
 //     preserving EventToolProgress for StreamingToolExecutor tools.
 //
@@ -1551,15 +1555,28 @@ func dispatchTools(ctx context.Context, executor ToolExecutor, blocks []ContentB
 	return flattenResults(resultSlices), nil
 }
 
+// concurrencySafe reports whether a tool may be dispatched concurrently with
+// its siblings in the same turn. It's the read-only built-ins (no side effects)
+// plus sub_agent: each sub-agent runs in its own isolated child (fresh history,
+// its own agent loop) and the SubAgentManager and token accounting are
+// mutex-guarded, so a fan-out of sub_agent calls is safe to run at once —
+// running them serially is exactly the "7 sub-agents block one another" latency
+// the concurrent path avoids. sub_agent surfaces its activity through its own
+// event sink (not EventToolProgress), so the parallel path loses no progress
+// events for it either.
+func concurrencySafe(name string) bool {
+	return readOnlyTools[name] || name == "sub_agent"
+}
+
 // canParallelize reports whether a batch can run concurrently: more than one
-// executable (non-denied) call, every one a known read-only tool.
+// executable (non-denied) call, every one a concurrency-safe tool.
 func canParallelize(calls []toolCall) bool {
 	executable := 0
 	for _, c := range calls {
 		if c.denyReason != "" {
 			continue
 		}
-		if !readOnlyTools[c.block.Name] {
+		if !concurrencySafe(c.block.Name) {
 			return false
 		}
 		executable++

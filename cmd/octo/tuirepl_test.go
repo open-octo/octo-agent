@@ -965,6 +965,65 @@ func TestTUI_PermissionModal(t *testing.T) {
 	}
 }
 
+// A second Ask arriving while a modal is open (concurrent sub-agents can each
+// prompt at once) is queued, not dropped: the first prompt stays on screen, the
+// second opens once the first is answered, and neither Ask goroutine is
+// stranded.
+func TestTUI_ConcurrentAsksQueue(t *testing.T) {
+	m := newTestModel()
+	resp1 := make(chan UserResponse, 1)
+	resp2 := make(chan UserResponse, 1)
+	m.openModal(askMsg{prompt: UserPrompt{Kind: KindPermission, ToolName: "terminal"}, resp: resp1})
+	m.openModal(askMsg{prompt: UserPrompt{Kind: KindPermission, ToolName: "write_file"}, resp: resp2})
+
+	if m.modal == nil || m.modal.prompt.ToolName != "terminal" {
+		t.Fatalf("first prompt should be showing, got %+v", m.modal)
+	}
+	if len(m.modalQueue) != 1 {
+		t.Fatalf("second prompt should be queued, queue len = %d", len(m.modalQueue))
+	}
+
+	// Answer the first: its resp fires and the queued second opens.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if got := <-resp1; !got.Allow {
+		t.Errorf("first prompt should have been allowed, got %+v", got)
+	}
+	if m.modal == nil || m.modal.prompt.ToolName != "write_file" {
+		t.Fatalf("queued prompt should now be showing, got %+v", m.modal)
+	}
+	if len(m.modalQueue) != 0 {
+		t.Errorf("queue should be empty after popping, len = %d", len(m.modalQueue))
+	}
+
+	// Answer the second.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if got := <-resp2; got.Allow {
+		t.Errorf("second prompt should have been denied, got %+v", got)
+	}
+	if m.modal != nil {
+		t.Error("no modal should remain after both answered")
+	}
+}
+
+// A background sub-agent's permission prompt outlives the turn that spawned it
+// (its context is detached from the turn), so a finishing turn must NOT clear an
+// open/queued modal — doing so would strand that sub-agent's Ask goroutine.
+func TestTUI_TurnFinishedKeepsBackgroundModal(t *testing.T) {
+	m := newTestModel()
+	m.openModal(askMsg{prompt: UserPrompt{Kind: KindPermission, ToolName: "terminal"}, resp: make(chan UserResponse, 1)})
+	m.openModal(askMsg{prompt: UserPrompt{Kind: KindPermission, ToolName: "write_file"}, resp: make(chan UserResponse, 1)})
+	m.turnRunning = true
+
+	m.handleTurnFinished(nil)
+
+	if m.modal == nil {
+		t.Error("modal must survive turn finish (may belong to a background sub-agent)")
+	}
+	if len(m.modalQueue) != 1 {
+		t.Errorf("queued modal must survive turn finish, len = %d", len(m.modalQueue))
+	}
+}
+
 func TestTUI_PermissionModalEscDenies(t *testing.T) {
 	m := newTestModel()
 	resp := make(chan UserResponse, 1)

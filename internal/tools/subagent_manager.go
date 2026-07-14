@@ -194,6 +194,16 @@ type SubAgentManager struct {
 	synchronous bool
 	activeAsync int // running async spawns, for the concurrency cap
 
+	// syncSem bounds how many synchronous (RunSync) sub-agents run at once. A
+	// single assistant turn can dispatch a whole batch of foreground sub_agent
+	// calls, and dispatchTools now runs them concurrently — without this a large
+	// fan-out would open an unbounded number of child agent loops (and provider
+	// connections) at once. Excess RunSync calls block here until a slot frees,
+	// mirroring the maxConcurrentSubAgents guard the async Start path enforces by
+	// rejection. Buffered to maxConcurrentSubAgents; nil-safe is not required
+	// since NewSubAgentManager always sets it.
+	syncSem chan struct{}
+
 	// syncMu guards the sync session slot used to promote a synchronous
 	// sub-agent to background while it is running.
 	syncMu   sync.Mutex
@@ -205,6 +215,7 @@ func NewSubAgentManager(spawner Spawner) *SubAgentManager {
 	return &SubAgentManager{
 		agents:  map[string]*asyncSubAgent{},
 		spawner: spawner,
+		syncSem: make(chan struct{}, maxConcurrentSubAgents),
 	}
 }
 
@@ -314,6 +325,18 @@ func PromoteCurrentSubAgentSync() {
 func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnResult, error) {
 	if m.spawner == nil {
 		return SpawnResult{}, fmt.Errorf("subagent: no spawner configured")
+	}
+
+	// Bound concurrent foreground sub-agents (see syncSem): a batch dispatched
+	// in one turn runs concurrently, so cap how many child agent loops run at
+	// once. Blocks until a slot frees; a cancelled turn stops waiting. Released
+	// on return — including the promote path, where the run is re-counted against
+	// the async budget (activeAsync) instead.
+	select {
+	case m.syncSem <- struct{}{}:
+		defer func() { <-m.syncSem }()
+	case <-ctx.Done():
+		return SpawnResult{}, ctx.Err()
 	}
 
 	// Run the spawn on a background context so a user promotion can detach it

@@ -1185,6 +1185,19 @@ func (m *tuiModel) interrupt() {
 // ── modal (Ask) ──
 
 func (m *tuiModel) openModal(msg askMsg) {
+	// A modal is already showing — queue this one; answerModal opens it once the
+	// current prompt is resolved. Concurrent sub-agents can each ask at once, and
+	// overwriting m.modal would strand the earlier prompt's Ask goroutine (its
+	// resp channel would never receive) until its context is cancelled.
+	if m.modal != nil {
+		m.modalQueue = append(m.modalQueue, msg)
+		return
+	}
+	m.modal = m.newModalState(msg)
+}
+
+// newModalState builds the modalState for an Ask prompt.
+func (m *tuiModel) newModalState(msg askMsg) *modalState {
 	st := &modalState{prompt: msg.prompt, resp: msg.resp, selected: map[int]bool{}}
 	if msg.prompt.Kind == KindQuestion {
 		st.options = append(st.options, msg.prompt.Options...)
@@ -1194,10 +1207,11 @@ func (m *tuiModel) openModal(msg askMsg) {
 	st.otherActive = false
 	st.otherInput = textinput.New()
 	st.otherInput.Prompt = ""
-	m.modal = st
+	return st
 }
 
-// answerModal sends a response and clears the modal.
+// answerModal sends a response, clears the modal, and opens the next queued
+// prompt (if any) so concurrent asks are handled one at a time.
 func (m *tuiModel) answerModal(r UserResponse) {
 	if m.modal == nil {
 		return
@@ -1207,6 +1221,11 @@ func (m *tuiModel) answerModal(r UserResponse) {
 	default:
 	}
 	m.modal = nil
+	if len(m.modalQueue) > 0 {
+		next := m.modalQueue[0]
+		m.modalQueue = m.modalQueue[1:]
+		m.modal = m.newModalState(next)
+	}
 }
 
 func (m *tuiModel) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
