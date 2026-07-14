@@ -40,7 +40,9 @@ func Terminate(proc *os.Process) error {
 	if proc == nil {
 		return nil
 	}
-	if err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(proc.Pid)).Run(); err != nil {
+	cmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(proc.Pid))
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	if err := cmd.Run(); err != nil {
 		return proc.Kill()
 	}
 	return nil
