@@ -108,6 +108,12 @@ func (ScheduleWakeupTool) Definition() agent.ToolDefinition {
 			"the cadence turn-by-turn or want to stop once the task is done.\n" +
 			"- INTERVAL (repeat=true): the wakeup re-arms itself on the same cadence and keeps firing " +
 			"on schedule. Use for a steady \"every N seconds\" loop.\n\n" +
+			"Make each tick a single bounded unit of work that returns promptly — never a `prompt` " +
+			"that spins until it times out. If the loop has a completion goal, put the check in the " +
+			"`prompt` and stop (cancel, below) once it's met — e.g. \"check whether the PR's CI " +
+			"passed; if it did, merge and stop by cancelling; otherwise report the status in one " +
+			"line.\" A loop with no natural end (a heartbeat, a monitor, a periodic emit) legitimately " +
+			"has no completion check and just runs until the user stops it or the safety cap.\n\n" +
 			"delay_seconds is clamped to [60, 3600]. Picking a cadence: the model's prompt cache has a " +
 			"~5-minute TTL, so a delay under 300s keeps context warm (right for actively polling " +
 			"external state like a CI run or a deploy), while 300s+ pays a cache miss (right when " +
