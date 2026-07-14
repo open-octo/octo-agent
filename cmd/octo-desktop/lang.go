@@ -19,6 +19,7 @@ type uiStrings struct {
 	trayStarting       string
 	trayBackendFmt     string // "Backend · %s"
 	trayClientsFmt     string // "Connected clients: %d"
+	trayChannelsFmt    string // "Configured channels: %d"
 
 	takeoverTitle  string
 	takeoverMsgFmt string // "...(pid %d)..."
@@ -51,6 +52,7 @@ var enStrings = uiStrings{
 	trayStarting:     "Starting…",
 	trayBackendFmt:   "Backend · %s",
 	trayClientsFmt:   "Connected clients: %d",
+	trayChannelsFmt:  "Configured channels: %d",
 
 	takeoverTitle:  "Octo",
 	takeoverMsgFmt: "A background Octo backend is already running (pid %d).\n\nStop it and run Octo as the hub for this machine?",
@@ -83,6 +85,7 @@ var zhStrings = uiStrings{
 	trayStarting:     "启动中…",
 	trayBackendFmt:   "后端 · %s",
 	trayClientsFmt:   "已连接客户端：%d",
+	trayChannelsFmt:  "已配置 channel：%d",
 
 	takeoverTitle:  "Octo",
 	takeoverMsgFmt: "已有一个 Octo 后端在后台运行（pid %d）。\n\n停止它，并让 Octo 作为本机的后端中枢？",

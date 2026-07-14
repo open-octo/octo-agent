@@ -2987,3 +2987,14 @@ func (s *Server) ConnectedClients() int {
 	defer s.wsHub.mu.Unlock()
 	return len(s.wsHub.connections)
 }
+
+// ConfiguredChannelCount reports how many IM platforms are configured in
+// channels.yml (enabled or not). Surfaced in the desktop tray so the user
+// can tell "configured" from "connected" at a glance.
+func (s *Server) ConfiguredChannelCount() int {
+	cfg, err := channel.LoadConfig()
+	if err != nil {
+		return 0
+	}
+	return len(cfg.Channels)
+}
