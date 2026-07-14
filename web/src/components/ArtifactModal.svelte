@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { get } from 'svelte/store'
-  import { artifacts, artifactsOpen, artifactSel, artifactView, artifactModalOpen, showToast, nativeShell } from '../lib/stores'
-  import { t, tr } from '../lib/i18n'
-  import * as api from '../lib/api'
+  import { artifacts, artifactsOpen, artifactSel, artifactView, artifactModalOpen, showToast } from '../lib/stores'
+  import { t } from '../lib/i18n'
+  import { copyArtifact, downloadArtifact } from '../lib/artifact-actions'
 
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
   let modalEl = $state<HTMLDivElement | null>(null)
@@ -13,32 +12,8 @@
     if ($artifactModalOpen && cur && modalEl) modalEl.focus()
   })
 
-  function copyArtifact() {
-    navigator.clipboard.writeText(cur?.code ?? '')
-      .then(() => showToast(tr('artifacts.copied')))
-      .catch(() => showToast(tr('artifacts.copy_failed'), 'error'))
-  }
-
-  async function downloadArtifact() {
-    const name = cur?.name || 'artifact.txt'
-    const content = cur?.code ?? ''
-    if (get(nativeShell)) {
-      try {
-        const r = await api.nativeSaveFile(name, content)
-        if (!r.cancelled) showToast(tr('artifacts.saved'))
-      } catch {
-        showToast(tr('artifacts.save_failed'), 'error')
-      }
-      return
-    }
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = name
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  function onCopy() { copyArtifact(cur?.code ?? '', showToast) }
+  function onDownload() { downloadArtifact(cur?.name, cur?.code ?? '', showToast) }
 
   // "Back to sidebar": close modal, reopen the side panel.
   function restoreSidebar() {
@@ -66,8 +41,8 @@
         <span class="file-name">{cur.name}</span>
         <span class="file-meta">{cur.type}</span>
       </div>
-      <button class="icon-btn" title={$t('artifacts.copy')} onclick={copyArtifact}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
-      <button class="icon-btn" title={$t('artifacts.download')} onclick={downloadArtifact}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
+      <button class="icon-btn" title={$t('artifacts.copy')} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
+      <button class="icon-btn" title={$t('artifacts.download')} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
       <button class="icon-btn" title={$t('artifacts.restore')} onclick={restoreSidebar}>
         <iconify-icon icon="ant-design:compress-outlined" width="14"></iconify-icon>
       </button>
@@ -123,6 +98,7 @@
 .modal {
   width: min(1200px, 90vw);
   height: min(760px, 82vh);
+  min-width: 320px;
   background: var(--bg-container);
   border: 1px solid var(--border-secondary);
   border-radius: 12px;
@@ -130,6 +106,14 @@
   box-shadow: 0 16px 48px rgba(0,0,0,0.18);
   animation: octo-fadein 0.16s ease;
   overflow: hidden;
+}
+/* Small desktop window / narrow viewport: fill the screen, drop the chrome */
+@media (max-width: 900px), (max-height: 600px) {
+  .backdrop { padding: 8px; }
+  .modal {
+    width: 100vw; height: 100vh; max-width: none; max-height: none;
+    border-radius: 0; border: none;
+  }
 }
 .modal:focus { outline: none; }
 .topbar {

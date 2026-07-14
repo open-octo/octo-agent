@@ -1,43 +1,14 @@
 <script lang="ts">
-  import { get } from 'svelte/store'
-  import { artifacts, artifactsOpen, artifactSel, artifactView, artifactModalOpen, showToast, nativeShell } from '../lib/stores'
-  import { t, tr } from '../lib/i18n'
-  import * as api from '../lib/api'
+  import { artifacts, artifactsOpen, artifactSel, artifactView, artifactModalOpen, showToast } from '../lib/stores'
+  import { t } from '../lib/i18n'
+  import { copyArtifact, downloadArtifact } from '../lib/artifact-actions'
 
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
 
-  // #1109: had no .catch — on a non-secure context or a permission denial,
-  // clipboard writes reject and the failure was invisible (no toast either
-  // way, so it looked identical to success).
-  function copyArtifact() {
-    navigator.clipboard.writeText(cur?.code ?? '')
-      .then(() => showToast(tr('artifacts.copied')))
-      .catch(() => showToast(tr('artifacts.copy_failed'), 'error'))
-  }
-
-  async function downloadArtifact() {
-    const name = cur?.name || 'artifact.txt'
-    const content = cur?.code ?? ''
-    // Desktop shell: the octo-served webview has no download delegate, so an
-    // in-page blob download does nothing. Write through the native save dialog.
-    if (get(nativeShell)) {
-      try {
-        const r = await api.nativeSaveFile(name, content)
-        if (!r.cancelled) showToast(tr('artifacts.saved'))
-      } catch {
-        showToast(tr('artifacts.save_failed'), 'error')
-      }
-      return
-    }
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = name
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
+  // Wrap the shared helpers with this component's current artifact so the
+  // template can call them with no arguments.
+  function onCopy() { copyArtifact(cur?.code ?? '', showToast) }
+  function onDownload() { downloadArtifact(cur?.name, cur?.code ?? '', showToast) }
 </script>
 
 <aside class="panel">
@@ -62,8 +33,8 @@
       <span class="file-name">{cur.name}</span>
       <span class="file-meta">{cur.type}</span>
     </div>
-    <button class="icon-btn" title={$t('artifacts.copy')} onclick={copyArtifact}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
-    <button class="icon-btn" title={$t('artifacts.download')} onclick={downloadArtifact}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
+    <button class="icon-btn" title={$t('artifacts.copy')} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
+    <button class="icon-btn" title={$t('artifacts.download')} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
     <button class="icon-btn" title={$t('artifacts.maximize')} onclick={() => { artifactsOpen.set(false); artifactModalOpen.set(true) }}>
       <iconify-icon icon="ant-design:expand-outlined" width="14"></iconify-icon>
     </button>
