@@ -84,6 +84,13 @@ jobs:
       # -H windowsgui so no console window flashes behind the app.
       # -tags embedrg go:embeds the rg fetched above. Pure-Go (WebView2, no
       # CGO), so arm64 cross-compiles cleanly from the x64 runner via GOARCH.
+      # The .syso embeds the icon and manifest into the .exe; it must be
+      # generated in the package directory before go build picks it up.
+      - name: Generate Windows icon resource
+        shell: pwsh
+        working-directory: cmd/octo-desktop
+        run: go run ./build/windows/generate-syso ${{ matrix.arch }} build/windows/icon.ico build/windows/wails.exe.manifest
+
       - name: Build desktop app
         shell: pwsh
         working-directory: cmd/octo-desktop

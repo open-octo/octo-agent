@@ -122,6 +122,13 @@ jobs:
       # -tags embedrg go:embeds the rg fetched above. Windows is pure-Go
       # (WebView2, no CGO), so arm64 cross-compiles cleanly from the amd64
       # runner: set GOARCH and keep CGO off.
+      # The .syso embeds the icon and manifest into the .exe; it must be
+      # generated in the package directory before go build picks it up.
+      - name: Generate Windows icon resource
+        if: runner.os == 'Windows'
+        working-directory: cmd/octo-desktop
+        run: go run ./build/windows/generate-syso ${{ matrix.goarch }} build/windows/icon.ico build/windows/wails.exe.manifest
+
       - name: Build Windows binary
         if: runner.os == 'Windows'
         working-directory: cmd/octo-desktop

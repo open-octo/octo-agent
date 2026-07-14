@@ -36,6 +36,9 @@ jobs:
           go build -o staging\octo.exe ./cmd/octo # plain build; embedded rg is irrelevant to packaging
           # The desktop app is a nested module (its own go.mod); Windows builds it
           # pure-Go (WebView2, no CGO). -H windowsgui: no console window flashes.
+          # Generate the icon+manifest .syso in the package directory so go build
+          # links it into the .exe; then build the desktop binary.
+          go run -C cmd/octo-desktop ./build/windows/generate-syso amd64 build/windows/icon.ico build/windows/wails.exe.manifest
           go build -C cmd/octo-desktop -ldflags "-H windowsgui" -o "$PWD\staging\octo-desktop.exe" .
           Copy-Item LICENSE.txt staging\LICENSE.txt
           # uv.exe is skipifsourcedoesntexist in the .iss, so a check compile that

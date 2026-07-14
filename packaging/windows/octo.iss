@@ -68,9 +68,10 @@ Source: "{#SourceDir}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\uv.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
-; Launch the desktop app.
+; Launch the desktop app. IconFilename points at the embedded icon in the exe so
+; the Start-menu shortcut shows the Octo logo instead of the Windows generic icon.
 Name: "{userprograms}\Octo"; Filename: "{app}\octo-desktop.exe"; \
-  WorkingDir: "{app}"; Comment: "Octo"
+  WorkingDir: "{app}"; IconFilename: "{app}\octo-desktop.exe"; Comment: "Octo"
 
 [Code]
 const
