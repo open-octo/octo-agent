@@ -38,18 +38,20 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// (the common terminal launch).
 	shellpath.SyncToLoginShell()
 
-	if len(args) == 0 {
-		return runChat(args, stdin, stdout, stderr)
-	}
-
 	// Materialize the binary's default skills/workflows to ~/.octo/skills-default
 	// and ~/.octo/workflows-default so they're discoverable like any user
 	// skill/workflow, and prune stale workflow run journals. Best-effort and a
 	// fast no-op/pass once current; skipped for the internal fast-path commands.
-	if args[0] != "__sandboxed-exec" && args[0] != "__complete" {
+	// Done before the len(args)==0 REPL early-return so a bare `octo` (the common
+	// launch on Linux) still populates the defaults before Discover() runs.
+	if len(args) == 0 || (args[0] != "__sandboxed-exec" && args[0] != "__complete") {
 		_ = skills.MaterializeDefaults(version.Version)
 		_ = tools.MaterializeDefaultWorkflows(version.Version)
 		_ = workflow.PruneJournals()
+	}
+
+	if len(args) == 0 {
+		return runChat(args, stdin, stdout, stderr)
 	}
 
 	switch args[0] {
