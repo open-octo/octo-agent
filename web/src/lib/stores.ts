@@ -39,6 +39,10 @@ export const artifactsOpen = writable(false)
 export const artifacts = writable<Artifact[]>([])
 export const artifactSel = writable(0)
 export const artifactView = writable<ArtifactView>('preview')
+// Centered modal for full artifact viewing — toggled by the sidebar's maximize
+// button. Independent from artifactsOpen so closing the modal doesn't force
+// the sidebar back open.
+export const artifactModalOpen = writable(false)
 
 // Sessions
 export const sessions = writable<Session[]>([])
