@@ -208,6 +208,36 @@ func TestTUI_EscTakesBackBeforeOutput(t *testing.T) {
 	}
 }
 
+// A reasoning model's thinking is invisible in the terminal, so thinking deltas
+// must not commit the echo. Esc during the thinking phase (still no visible
+// output) must therefore still take the turn back and restore the typed text.
+func TestTUI_EscTakesBackDuringThinking(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	cancelled := false
+	m.cancelTurn = func() { cancelled = true }
+	m.echoPending = userEchoStyle.Render("> ") + "fix the bug"
+	m.echoRestore = "fix the bug"
+
+	// The model thinks (invisible) before producing any answer text.
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventThinkingDelta, Text: "hmm, let me reason about this"})
+	if m.echoPending == "" {
+		t.Fatal("thinking must not commit the echo — take-back would be lost")
+	}
+
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if !cancelled {
+		t.Error("Esc should cancel the running turn")
+	}
+	if m.ta.Value() != "fix the bug" {
+		t.Errorf("typed text should return to the input box, got %q", m.ta.Value())
+	}
+	if len(m.printlnBuf) != 0 {
+		t.Errorf("nothing should be flushed to the scrollback, got %v", m.printlnBuf)
+	}
+}
+
 // Once output has streamed the echo is already committed (echoPending == ""), so
 // Esc only interrupts — the last submitted message is NOT recalled into the box,
 // even when it sits in history.

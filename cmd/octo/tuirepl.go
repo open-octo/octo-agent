@@ -1435,9 +1435,16 @@ func (m *tuiModel) acceptSuggestion() {
 }
 
 func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
-	// Promote the deferred user echo above this turn's first output so the
-	// transcript order (your message → reply) is preserved.
-	m.commitEcho()
+	// Promote the deferred user echo above this turn's first *visible* output so
+	// the transcript order (your message → reply) is preserved. Thinking deltas
+	// are invisible in the terminal (they only nudge the token counter), so they
+	// must NOT commit the echo — otherwise an Esc during a reasoning model's
+	// thinking phase, when nothing is on screen yet, would fail the take-back and
+	// strand the typed text. Keeping echoPending set through thinking makes it a
+	// truthful "no visible output yet" signal for the Esc handler.
+	if ev.Kind != agent.EventThinkingDelta {
+		m.commitEcho()
+	}
 	// Any event other than a continued answer delta ends a hand-off sprint and
 	// releases the held text first, so a following tool call / turn-end commits
 	// in the right order.
