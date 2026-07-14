@@ -24,6 +24,7 @@ var builtinSlashCommands = []complItem{
 	{"/compact", "Summarize older history to free up context"},
 	{"/transcript", "Re-print the last (or last N) tool call(s) with full output"},
 	{"/goal", "Set or view the session goal (edit/pause/resume/clear)"},
+	{"/loop", "Repeat a task in this session (/loop [interval] <task>)"},
 	{"/clear", "Wipe the conversation and start fresh"},
 	{"/skills", "List discovered skills"},
 	{"/mcp", "List connected MCP servers"},

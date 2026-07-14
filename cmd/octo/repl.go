@@ -261,6 +261,7 @@ func printTuiHelp(w io.Writer) {
 	fmt.Fprintln(w, "  /init        Analyze the repo and generate/update .octorules (needs --tools)")
 	fmt.Fprintln(w, "  /compact     Summarize older history now to free up context")
 	fmt.Fprintln(w, "  /transcript  Re-print the last (or last N) tool call(s) uncapped")
+	fmt.Fprintln(w, "  /loop        Repeat a task this session (/loop [interval] <task>; stop with Ctrl-C)")
 	fmt.Fprintln(w, "  /clear       Wipe the conversation and start fresh (keeps model + tools)")
 	fmt.Fprintln(w, "  /save        Save the session now (it also auto-saves after each turn)")
 	fmt.Fprintln(w, "  /sessions    List the 10 most recent sessions")

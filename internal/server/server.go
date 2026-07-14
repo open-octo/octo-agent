@@ -499,8 +499,8 @@ func New(cfg Config) (*Server, error) {
 	tools.SetServerGuard(true)
 
 	// Server-managed sessions can be re-entered, so advertise schedule_wakeup
-	// (the loop skill's mechanism); the per-session Waker is stamped into each
-	// turn's ctx in runAgentTurnLoop.
+	// (the in-session loop mechanism, behind /loop); the per-session Waker is
+	// stamped into each turn's ctx in runAgentTurnLoop.
 	tools.SetWakerSupported(true)
 
 	s.registerRoutes()
@@ -2387,6 +2387,12 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 	switch cmd {
 	case "/stop", "/bind", "/unbind", "/clear", "/new", "/status", "/list", "/help", "/goal", "/compact":
 		// fall through to CommandRouter
+	case "/loop":
+		// /loop is a built-in the model handles via the schedule_wakeup tool
+		// (which documents the "/loop [interval] <task>" convention), not a
+		// CommandRouter command — pass it through to the agent like the Web and
+		// TUI surfaces do.
+		return false
 	default:
 		// Unknown slash tokens that match a skill name are passed through as
 		// normal user messages, same as the Web and TUI surfaces.

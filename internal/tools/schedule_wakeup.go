@@ -99,9 +99,14 @@ type ScheduleWakeupTool struct{}
 func (ScheduleWakeupTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "schedule_wakeup",
-		Description: "Schedule your own next turn — the mechanism behind the loop skill. After this " +
+		Description: "Schedule your own next turn — the mechanism behind an in-session loop. After this " +
 			"turn ends and the session goes idle, the system re-runs `prompt` as a fresh user turn " +
 			"after `delay_seconds`. Use it to pace a recurring task without the user re-prompting.\n\n" +
+			"The user starts a loop by typing `/loop [interval] <task>`: a leading duration " +
+			"(`/loop 5m check the build`) selects INTERVAL mode below — parse it to seconds and call " +
+			"this tool once with repeat=true; no leading duration (`/loop keep refining the draft`) " +
+			"selects DYNAMIC mode. If the task is unclear, ask one clarifying question before starting. " +
+			"You can also start a loop on your own initiative, without `/loop`.\n\n" +
 			"Two modes:\n" +
 			"- DYNAMIC (repeat=false, the default): fires once. To keep looping you must call this " +
 			"tool again on the next turn; simply NOT calling it ends the loop. Use when you decide " +
