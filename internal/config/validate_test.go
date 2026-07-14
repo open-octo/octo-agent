@@ -14,10 +14,11 @@ func TestConfigValidate(t *testing.T) {
 	}{
 		{"empty pre-onboarding is valid", Config{}, ""},
 		{"good", Config{Models: []ModelEntry{good}, DefaultModel: "gpt-4o"}, ""},
+		{"floating default is valid", Config{Models: []ModelEntry{{Provider: "openai"}}}, ""},
 		{"dangling default_model", Config{Models: []ModelEntry{good}, DefaultModel: "nope"}, "default_model"},
 		{"dangling lite_model", Config{Models: []ModelEntry{good}, LiteModel: "nope"}, "lite_model"},
 		{"missing provider", Config{Models: []ModelEntry{{Model: "gpt-4o"}}}, "no provider"},
-		{"missing model name", Config{Models: []ModelEntry{{Provider: "openai"}}}, "no model name"},
+		{"missing model name", Config{Models: []ModelEntry{good, {Provider: "openai"}}}, "no model name"},
 		{"duplicate model", Config{Models: []ModelEntry{good, {Provider: "anthropic", Model: "gpt-4o"}}}, "duplicate"},
 	}
 	for _, tt := range tests {

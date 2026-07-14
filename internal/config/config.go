@@ -375,6 +375,11 @@ func (c Config) Validate() []string {
 	seen := make(map[string]bool, len(c.Models))
 	for i, m := range c.Models {
 		if strings.TrimSpace(m.Model) == "" {
+			// The first entry may use an empty model as a floating default: it tracks
+			// the vendor's current default model and is selected when DefaultModel is empty.
+			if i == 0 && c.DefaultModel == "" {
+				continue
+			}
 			problems = append(problems, fmt.Sprintf("models[%d] has no model name", i))
 			continue
 		}
