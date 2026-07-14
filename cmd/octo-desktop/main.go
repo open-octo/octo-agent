@@ -413,6 +413,10 @@ func trayStatusLines(bridge *nativeBridge) []string {
 	}
 	lines := []string{fmt.Sprintf(L().trayBackendFmt, hubAddr)}
 	lines = append(lines, fmt.Sprintf(L().trayClientsFmt, srv.ConnectedClients()))
+	// Only when > 0 — keeps the menu clean before any channel is configured.
+	if n := srv.ConfiguredChannelCount(); n > 0 {
+		lines = append(lines, fmt.Sprintf(L().trayChannelsFmt, n))
+	}
 	return lines
 }
 
