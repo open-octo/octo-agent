@@ -270,13 +270,42 @@
     }
     .install-cmd {
       margin: 0;
-      padding: 0.75rem 1.1rem;
+      padding: 0.75rem 3rem 0.75rem 1.1rem;
       text-align: left;
       white-space: pre;
       overflow-x: auto;
       line-height: 1.7;
       max-width: 100%;
     }
+    .install-cmd-wrap { position: relative; }
+    .copy-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      background: var(--code-bg);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      opacity: 0.75;
+      transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .copy-btn:hover { opacity: 1; color: var(--code-fg); }
+    .copy-btn svg { width: 15px; height: 15px; }
+    .copy-btn .icon-check { display: none; }
+    .copy-btn.copied {
+      opacity: 1;
+      color: #16a34a;
+      border-color: #16a34a;
+    }
+    .copy-btn.copied .icon-copy { display: none; }
+    .copy-btn.copied .icon-check { display: block; }
 
     /* Layout */
     .container { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
@@ -594,15 +623,33 @@
         <div class="install-grid">
           <div class="install-col">
             <span class="install-os">macOS</span>
-            <pre class="install-cmd">curl -fsSL https://octo-agent.dev/install.sh | sh</pre>
+            <div class="install-cmd-wrap">
+              <pre class="install-cmd">curl -fsSL https://octo-agent.dev/install.sh | sh</pre>
+              <button type="button" class="copy-btn" aria-label="Copy command" data-en-title="Copy" data-zh-title="复制">
+                <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </button>
+            </div>
           </div>
           <div class="install-col">
             <span class="install-os">Linux</span>
-            <pre class="install-cmd">curl -fsSL https://octo-agent.dev/install.sh | sh</pre>
+            <div class="install-cmd-wrap">
+              <pre class="install-cmd">curl -fsSL https://octo-agent.dev/install.sh | sh</pre>
+              <button type="button" class="copy-btn" aria-label="Copy command" data-en-title="Copy" data-zh-title="复制">
+                <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </button>
+            </div>
           </div>
           <div class="install-col">
             <span class="install-os">Windows</span>
-            <pre class="install-cmd">irm https://octo-agent.dev/install.ps1 | iex</pre>
+            <div class="install-cmd-wrap">
+              <pre class="install-cmd">irm https://octo-agent.dev/install.ps1 | iex</pre>
+              <button type="button" class="copy-btn" aria-label="Copy command" data-en-title="Copy" data-zh-title="复制">
+                <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </button>
+            </div>
           </div>
         </div>
         <p class="install-note"
@@ -893,6 +940,10 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
         const href = el.dataset['href' + (lang === 'zh' ? 'Zh' : 'En')];
         if (href) el.setAttribute('href', href);
       });
+      document.querySelectorAll('[data-en-title]').forEach(el => {
+        const t = el.dataset[lang + 'Title'];
+        if (t) el.setAttribute('title', t);
+      });
       document.querySelectorAll('.lang-toggle button').forEach(b => {
         b.classList.toggle('active', b.dataset.lang === lang);
       });
@@ -916,6 +967,28 @@ echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">oc
     // Downloads point straight at the version-stable release assets
     // (releases/latest/download/<name>), one button per platform — no OS
     // detection, no hidden buttons, so every visitor sees every choice.
+
+    // Copy-to-clipboard on the CLI install commands.
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const cmd = btn.closest('.install-cmd-wrap').querySelector('.install-cmd').textContent;
+        try {
+          await navigator.clipboard.writeText(cmd);
+        } catch (e) {
+          const ta = document.createElement('textarea');
+          ta.value = cmd;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); } catch (_) {}
+          document.body.removeChild(ta);
+        }
+        btn.classList.add('copied');
+        clearTimeout(btn._copiedTimer);
+        btn._copiedTimer = setTimeout(() => btn.classList.remove('copied'), 1500);
+      });
+    });
 
     // Simple scroll-reveal
     const observer = new IntersectionObserver((entries) => {
