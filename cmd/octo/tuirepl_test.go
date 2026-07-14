@@ -209,7 +209,8 @@ func TestTUI_EscTakesBackBeforeOutput(t *testing.T) {
 }
 
 // Once output has streamed the echo is already committed (echoPending == ""), so
-// Esc interrupts and recalls the last submitted message from history.
+// Esc only interrupts — the last submitted message is NOT recalled into the box,
+// even when it sits in history.
 func TestTUI_EscAfterOutputJustInterrupts(t *testing.T) {
 	m := newTestModel()
 	m.turnRunning = true
@@ -223,8 +224,8 @@ func TestTUI_EscAfterOutputJustInterrupts(t *testing.T) {
 	if !cancelled {
 		t.Error("Esc should still interrupt once output has started")
 	}
-	if m.ta.Value() != "fix the bug" {
-		t.Errorf("input box should recall last message, got %q", m.ta.Value())
+	if m.ta.Value() != "" {
+		t.Errorf("input box should stay empty after output, got %q", m.ta.Value())
 	}
 }
 

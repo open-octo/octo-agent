@@ -37,7 +37,7 @@ import (
 //   - Alt+Enter          → newline (traditional escape sequence)
 //   - Ctrl+J             → newline (LF — works on all terminals)
 //   - Ctrl+Q             → queue  (run as a fresh turn after this one finishes)
-//   - Esc                → take the turn back if no output yet (text returns to the input), else interrupt; queue survives
+//   - Esc                → take the turn back if no output yet (text returns to the input), else just interrupt; queue survives
 //   - Ctrl+C             → interrupt if a turn runs, else save & quit (twice)
 //   - Ctrl+D (twice)     → save & quit (first press arms, second confirms)
 func runTUI(cfg replConfig) int {
