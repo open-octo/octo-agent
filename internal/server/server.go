@@ -2922,9 +2922,6 @@ func (s *Server) stopChannels() {
 	for name := range s.adapterCancels {
 		delete(s.adapterCancels, name)
 	}
-	if s.channelMgr != nil {
-		_ = s.channelMgr.Stop()
-	}
 	// Clear entries in place rather than reassigning the sync.Map: a concurrent
 	// HTTP handler (handleListChannels/handleGetChannel → isAdapterRunning) may
 	// be calling Load() during shutdown, and a sync.Map must not be copied or

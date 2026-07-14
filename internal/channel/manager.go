@@ -3,7 +3,6 @@ package channel
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -156,9 +155,6 @@ type Manager struct {
 	factory AgentFactory
 	mode    BindingMode
 
-	// adapters holds running platform adapters keyed by platform name.
-	adapters sync.Map // string -> Adapter
-
 	// sessions holds active sessions keyed by SessionKey.
 	sessions sync.Map // SessionKey -> *Session
 
@@ -166,11 +162,6 @@ type Manager struct {
 	// key is present, the chat routes to the recorded store instead of its
 	// deterministic default (see resolveStoreID).
 	bindings *bindingStore
-
-	// mu guards the running flag.
-	mu      sync.RWMutex
-	running bool
-	cancel  context.CancelFunc
 
 	// goalsEnabled mirrors the main config's goal.enabled (default true,
 	// matching config.Config.GoalEnabled's default). The server sets it via
@@ -212,111 +203,6 @@ func (m *Manager) resolveStoreID(key SessionKey) string {
 		return id
 	}
 	return sessionStoreID(key)
-}
-
-// Start launches all enabled adapters and begins listening for messages.
-// It blocks until Stop is called or the context is cancelled.
-func (m *Manager) Start(ctx context.Context) error {
-	m.mu.Lock()
-	if m.running {
-		m.mu.Unlock()
-		return fmt.Errorf("manager already running")
-	}
-	m.running = true
-	ctx, m.cancel = context.WithCancel(ctx)
-	m.mu.Unlock()
-
-	for _, name := range m.cfg.EnabledPlatforms() {
-		pc := m.cfg.Platform(name)
-		if pc == nil {
-			// Shouldn't happen — EnabledPlatforms is derived from Config.Channels,
-			// so every name it yields should resolve back to a config here — but
-			// log it like every other skip in this loop rather than silently
-			// continuing, in case that invariant is ever violated.
-			slog.Error("channel start failed: enabled platform has no config", "channel", name)
-			continue
-		}
-		ctor, err := Find(name)
-		if err != nil {
-			slog.Error("channel start failed: adapter not registered", "channel", name, "err", err)
-			continue
-		}
-		ad, err := ctor(pc)
-		if err != nil {
-			slog.Error("channel start failed: construction failed", "channel", name, "err", err)
-			continue
-		}
-		if errs := ad.ValidateConfig(pc); len(errs) > 0 {
-			for _, e := range errs {
-				slog.Warn("channel config issue", "channel", name, "detail", e)
-			}
-			continue
-		}
-		m.adapters.Store(name, ad)
-
-		// #1121: the run error used to be discarded (`_ = a.Start(...)`), so
-		// an adapter crash mid-session (auth revoked, websocket dies
-		// unrecoverably) went dead with zero diagnostics — the only symptom
-		// was "the bot never replies". Logging it here at least gets the
-		// reason into octo serve's own log; internal/server's parallel
-		// startOneChannelLocked/runChannelWithRestart (the path octo serve
-		// actually runs) goes further and also retries with backoff and
-		// records the reason somewhere queryable (GET /api/channels).
-		go func(a Adapter, platform string) {
-			if err := a.Start(ctx, func(ev InboundEvent) {
-				ev.Platform = platform
-				m.handleInbound(ctx, ev)
-			}); err != nil && ctx.Err() == nil {
-				slog.Error("channel adapter exited unexpectedly", "channel", platform, "err", err)
-			}
-		}(ad, name)
-	}
-
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-// Stop signals all adapters to shut down.
-func (m *Manager) Stop() error {
-	m.mu.Lock()
-	if !m.running {
-		m.mu.Unlock()
-		return nil
-	}
-	m.running = false
-	if m.cancel != nil {
-		m.cancel()
-	}
-	m.mu.Unlock()
-
-	m.adapters.Range(func(_, value any) bool {
-		if ad, ok := value.(Adapter); ok {
-			_ = ad.Stop()
-		}
-		return true
-	})
-	return nil
-}
-
-// IsRunning reports whether the manager is currently active.
-func (m *Manager) IsRunning() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.running
-}
-
-// handleInbound routes an inbound event: commands go to commandRouter,
-// everything else goes to the session handler.
-func (m *Manager) handleInbound(ctx context.Context, ev InboundEvent) {
-	text := strings.TrimSpace(ev.Text)
-	if strings.HasPrefix(text, "/") {
-		reply := m.CommandRouter(ev)
-		if reply != "" {
-			m.sendReply(ev, reply)
-		}
-		return
-	}
-	m.handleSessionMessage(ctx, ev)
 }
 
 // CommandRouter processes slash commands and returns a reply text.
@@ -640,57 +526,6 @@ func (m *Manager) cmdList() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// handleSessionMessage routes a non-command message to the appropriate session,
-// creating one automatically if needed.
-func (m *Manager) handleSessionMessage(ctx context.Context, ev InboundEvent) {
-	key := sessionKeyFor(m.mode, ev)
-
-	val, loaded := m.sessions.Load(key)
-	if !loaded {
-		// Auto-create session on first message.
-		sess := m.newSession(key, ev)
-		val, _ = m.sessions.LoadOrStore(key, sess)
-	}
-	sess := val.(*Session)
-
-	// Notify the adapter that we're processing (typing indicator).
-	m.sendTyping(ev)
-
-	// The actual agent run is delegated to the UI controller callback.
-	// The manager itself does not run the agent — it only manages sessions.
-	// The caller (CLI wiring) provides the event handler that bridges
-	// agent events back to the adapter.
-	_ = ctx
-	_ = sess
-}
-
-// sendReply sends a text reply back to the chat where the event originated.
-func (m *Manager) sendReply(ev InboundEvent, text string) {
-	val, ok := m.adapters.Load(ev.Platform)
-	if !ok {
-		return
-	}
-	ad := val.(Adapter)
-	// #1118: the SendResult was previously discarded — a failed /list or
-	// /bind confirmation just evaporated with nothing in the logs to explain
-	// why the user never saw it. There's no in-band way to notify the user
-	// here (this send *is* the notification), so log loudly instead.
-	if res := ad.SendText(ev.ChatID, text, ev.MessageID); !res.OK {
-		slog.Error("channel reply send failed", "platform", ev.Platform, "chat_id", ev.ChatID, "err", res.Error)
-	}
-}
-
-// sendTyping sends a typing indicator to the chat.
-func (m *Manager) sendTyping(ev InboundEvent) {
-	val, ok := m.adapters.Load(ev.Platform)
-	if !ok {
-		return
-	}
-	ad := val.(Adapter)
-	// Best-effort; ignore errors.
-	_ = ad.SendTyping(ev.ChatID, ev.ContextToken)
-}
-
 // KeyFor exposes the session key an inbound event maps to under this
 // manager's binding mode, for callers that keep per-session state outside
 // the manager (e.g. the server's remembered-permission stores).
@@ -717,15 +552,6 @@ func (m *Manager) GetOrCreateSession(ev InboundEvent) *Session {
 		val, _ = m.sessions.LoadOrStore(key, sess)
 	}
 	return val.(*Session)
-}
-
-// AdapterFor returns the adapter for a platform name.
-func (m *Manager) AdapterFor(platform string) Adapter {
-	val, ok := m.adapters.Load(platform)
-	if !ok {
-		return nil
-	}
-	return val.(Adapter)
 }
 
 // SessionCount returns the number of active sessions.

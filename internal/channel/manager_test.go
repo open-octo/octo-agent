@@ -1,10 +1,8 @@
 package channel
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -129,39 +127,6 @@ type fakeSender struct{}
 
 func (f fakeSender) SendMessages(ctx context.Context, model, system string, messages []agent.Message, maxTokens int) (agent.Reply, error) {
 	return agent.Reply{Content: "ok"}, nil
-}
-
-func TestManager_StartStop(t *testing.T) {
-	tempHome(t)
-	Register("mock", func(pc PlatformConfig) (Adapter, error) {
-		return &mockAdapter{platform: "mock"}, nil
-	})
-
-	cfg := &Config{
-		Channels: map[string]PlatformConfig{
-			"mock": {"enabled": true},
-		},
-	}
-	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	// Start blocks; run it in a goroutine.
-	done := make(chan error, 1)
-	go func() { done <- mgr.Start(ctx) }()
-
-	time.Sleep(50 * time.Millisecond)
-	if !mgr.IsRunning() {
-		t.Fatal("expected manager to be running")
-	}
-
-	mgr.Stop()
-	<-done
-
-	if mgr.IsRunning() {
-		t.Fatal("expected manager to be stopped")
-	}
 }
 
 func TestManager_SessionBindingModes(t *testing.T) {
@@ -321,7 +286,7 @@ func TestManager_AutoSessionCreation(t *testing.T) {
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
 	ev := InboundEvent{Platform: "mock2", ChatID: "c1", UserID: "u1", Text: "hello"}
-	mgr.handleSessionMessage(context.Background(), ev)
+	mgr.GetOrCreateSession(ev)
 
 	if mgr.SessionCount() != 1 {
 		t.Fatalf("expected 1 auto-created session, got %d", mgr.SessionCount())
@@ -333,70 +298,6 @@ func TestManager_AutoSessionCreation(t *testing.T) {
 	}
 	if sess.ChatID != "c1" || sess.UserID != "u1" {
 		t.Fatalf("unexpected session chat/user: %s/%s", sess.ChatID, sess.UserID)
-	}
-}
-
-func TestManager_SendReply(t *testing.T) {
-	tempHome(t)
-	mock := &mockAdapter{platform: "mock3"}
-	Register("mock3", func(pc PlatformConfig) (Adapter, error) {
-		return mock, nil
-	})
-
-	cfg := &Config{
-		Channels: map[string]PlatformConfig{
-			"mock3": {"enabled": true},
-		},
-	}
-	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
-
-	// Manually store the adapter so sendReply works without Start().
-	mgr.adapters.Store("mock3", mock)
-
-	ev := InboundEvent{Platform: "mock3", ChatID: "c1", MessageID: "m1"}
-	mgr.sendReply(ev, "hello back")
-
-	if mock.sentTextCount() != 1 {
-		t.Fatalf("expected 1 sent text, got %d", mock.sentTextCount())
-	}
-	last := mock.lastSentText()
-	if last.text != "hello back" || last.chatID != "c1" {
-		t.Fatalf("unexpected sent text: %+v", last)
-	}
-}
-
-// #1118: a failed reply send used to just evaporate — the SendResult was
-// discarded with nothing logged, so a broken /list or /bind confirmation
-// left no trace explaining why the user never saw it.
-func TestManager_SendReply_LogsFailure(t *testing.T) {
-	tempHome(t)
-	mock := &mockAdapter{platform: "mock4", failSends: true}
-	Register("mock4", func(pc PlatformConfig) (Adapter, error) {
-		return mock, nil
-	})
-
-	cfg := &Config{
-		Channels: map[string]PlatformConfig{
-			"mock4": {"enabled": true},
-		},
-	}
-	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
-	mgr.adapters.Store("mock4", mock)
-
-	var buf bytes.Buffer
-	orig := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(orig) })
-
-	ev := InboundEvent{Platform: "mock4", ChatID: "c1", MessageID: "m1"}
-	mgr.sendReply(ev, "hello back")
-
-	if mock.sentTextCount() != 0 {
-		t.Fatalf("expected no delivered text on a failed send, got %d", mock.sentTextCount())
-	}
-	logged := buf.String()
-	if !strings.Contains(logged, "channel reply send failed") || !strings.Contains(logged, "mock4") {
-		t.Fatalf("expected the failed send to be logged, got: %s", logged)
 	}
 }
 
