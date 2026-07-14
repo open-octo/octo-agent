@@ -48,12 +48,56 @@ func (s *Server) armWakeup(sessionID string, delay time.Duration, prompt string,
 // stack another identical copy for the running turn to replay. The interval
 // timer has already re-armed, so the next tick delivers once the session is
 // idle — mirroring the TUI, which only re-arms (never queues) while a turn runs.
+//
+// The prompt is wrapped as a <system-reminder> (formatLoopTick) so the web
+// transcript renders the tick as an environment re-entry rather than a
+// duplicated user-message bubble every tick — matching the TUI, which prints a
+// "● Loop tick" line and never echoes the prompt as user speech. A tick that
+// starts a fresh turn (idle) also broadcasts that scrollback notice; one folded
+// into an already-running dynamic turn shows nothing, as the TUI prints the tick
+// line only when the wakeup actually starts a turn.
 func (s *Server) deliverLoopTick(sessionID, prompt string, repeat bool) {
 	if s.shouldSkipTick(sessionID, repeat) {
 		return
 	}
-	s.enqueueSteer(sessionID, agent.InboxItem{Text: prompt})
+	if !s.turnActive(sessionID) {
+		s.broadcastLoopTick(sessionID)
+	}
+	s.enqueueSteer(sessionID, agent.InboxItem{Text: formatLoopTick(prompt)})
 	s.kickIdleSteerTurn(sessionID)
+}
+
+// formatLoopTick wraps a loop prompt as a <system-reminder> block — octo's
+// convention for injected, non-user context that UIs strip from user-visible
+// text (see FormatBgNote). This is what keeps the web transcript from rendering
+// the prompt as a fresh user bubble on every tick: doAgentTurn computes the
+// visible bubble text from StripSystemReminders(content), which is empty here,
+// so no history_user_message is broadcast (live) or reconstructed (on reload).
+// The model still reads and acts on it — doAgentTurn runs the turn on the full
+// wrapped content, and an idle turn whose entire user message is a
+// system-reminder still produces a reply (the same path background- and
+// sub-agent-completion notes use). The preamble tells the model to treat the
+// task as if the user just sent it, so a directive prompt isn't mistaken for
+// passive context.
+func formatLoopTick(prompt string) string {
+	return "<system-reminder>\n" +
+		"[LOOP TICK] Your scheduled loop fired. Continue the task below as if the user just sent it:\n\n" +
+		prompt +
+		"\n</system-reminder>"
+}
+
+// broadcastLoopTick emits the "Loop tick" scrollback notice to a web session,
+// mirroring the TUI line printed when a wakeup fires. No-op without a wsHub (IM
+// sessions, tests): the IM path surfaces the model's reply in the chat instead,
+// so it needs no separate tick marker.
+func (s *Server) broadcastLoopTick(sessionID string) {
+	if s.wsHub == nil {
+		return
+	}
+	s.wsHub.broadcast(sessionID, wsEventLoopTickNotice{
+		Type:      "loop_tick_notice",
+		SessionID: sessionID,
+	})
 }
 
 // shouldSkipTick reports whether this tick's delivery should be dropped because
