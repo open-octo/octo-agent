@@ -214,10 +214,24 @@
   let slashMcpServer = $state('')
 
   type SlashItem =
+    | { kind: 'builtin'; name: string; descKey: string }
     | { kind: 'skill'; skill: Skill }
     | { kind: 'workflow'; workflow: api.NamedWorkflow }
     | { kind: 'mcp-server'; name: string }
     | { kind: 'mcp-tool'; server: string; tool: McpTool }
+
+  // Built-in slash commands that actually do something on web: /clear, /compact
+  // and /goal are handled inline by the server; /loop falls through to the model
+  // (backed by the schedule_wakeup tool). Unlike skills they aren't discoverable
+  // on their own, so surface them in the same "/" menu — the TUI already lists
+  // its built-ins in completion. Names only; descriptions are translated in the
+  // template via descKey.
+  const BUILTIN_COMMANDS: { name: string; descKey: string }[] = [
+    { name: 'loop', descKey: 'composer.cmd_loop' },
+    { name: 'goal', descKey: 'composer.cmd_goal' },
+    { name: 'compact', descKey: 'composer.cmd_compact' },
+    { name: 'clear', descKey: 'composer.cmd_clear' },
+  ]
 
   function normalizeSlash(value: string): string {
     return value.replace(/^[\uff0f\u3001]/, '/')
@@ -252,24 +266,37 @@
     return { mode: null, query: '' }
   }
 
-  function scoreSkillMatch(skill: Skill, query: string): number {
+  function scoreNameMatch(rawName: string, query: string): number {
     if (!query) return 50
     const q = query.toLowerCase()
-    const name = skill.name.toLowerCase()
+    const name = rawName.toLowerCase()
     if (name === q) return 100
     if (name.startsWith(q)) return 80
     if (name.includes(q)) return 60
     return 0
   }
 
+  function scoreSkillMatch(skill: Skill, query: string): number {
+    return scoreNameMatch(skill.name, query)
+  }
+
   function filteredItems(): SlashItem[] {
     if (slashMode === 'skills') {
       const q = slashQuery
+      // Built-in commands share the generic "/" trigger with skills; list them
+      // first so a bare "/" (or a prefix like "/l") surfaces them alongside
+      // matching skills.
+      const builtins: SlashItem[] = BUILTIN_COMMANDS
+        .map(cmd => ({ cmd, score: scoreNameMatch(cmd.name, q) }))
+        .filter(({ score }) => score > 0)
+        .sort((a, b) => b.score - a.score || a.cmd.name.localeCompare(b.cmd.name))
+        .map(({ cmd }) => ({ kind: 'builtin', name: cmd.name, descKey: cmd.descKey }))
       let scored = skills
         .map(s => ({ skill: s, score: scoreSkillMatch(s, q) }))
         .filter(({ score }) => score > 0)
       scored.sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
-      return scored.map(({ skill }) => ({ kind: 'skill', skill }))
+      const skillItems: SlashItem[] = scored.map(({ skill }) => ({ kind: 'skill', skill }))
+      return [...builtins, ...skillItems]
     }
     if (slashMode === 'workflows') {
       const q = slashQuery
@@ -348,7 +375,12 @@
   }
 
   function selectItem(item: SlashItem) {
-    if (item.kind === 'skill') {
+    if (item.kind === 'builtin') {
+      // Prefill "/name "; the no-arg ones (/clear, /compact) tolerate the
+      // trailing space (the server trims before matching), and the arg-taking
+      // ones (/loop, /goal) leave the caret ready for input.
+      text = '/' + item.name + ' '
+    } else if (item.kind === 'skill') {
       text = '/' + item.skill.name + ' '
     } else if (item.kind === 'workflow') {
       // Prefill an editable run instruction; the user adds any args, then sends,
@@ -863,13 +895,16 @@
       ></textarea>
       {#if slashMenu}
         <div class="skill-menu">
-          {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'skill' ? item.skill.name : item.kind === 'workflow' ? item.workflow.name : item.kind === 'mcp-server' ? item.name : item.server + '/' + item.tool.name))}
+          {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'builtin' ? item.name : item.kind === 'skill' ? item.skill.name : item.kind === 'workflow' ? item.workflow.name : item.kind === 'mcp-server' ? item.name : item.server + '/' + item.tool.name))}
             <button
               class="skill-menu-item"
               class:active={i === slashActiveIndex}
               onclick={() => selectItem(item)}
             >
-              {#if item.kind === 'skill'}
+              {#if item.kind === 'builtin'}
+                <span class="skill-name">/{item.name}</span>
+                <span class="skill-desc">{$t(item.descKey)}</span>
+              {:else if item.kind === 'skill'}
                 <span class="skill-name">/{item.skill.name}</span>
                 {#if item.skill.desc}
                   <span class="skill-desc">{item.skill.desc}</span>
