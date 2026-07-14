@@ -183,8 +183,9 @@ func TestHandleCreateMCPServer_AllowArbitraryCommand(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	// Absolute path with opt-in whitelisted as stdio.
+	codegraphABS := filepath.Join(t.TempDir(), "codegraph")
 	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
-		`{"mcpServers": {"codegraph": {"command": "/Users/roy/.local/bin/codegraph serve --mcp", "allow_arbitrary_command": true}}}`)
+		`{"mcpServers": {"codegraph": {"command": "`+codegraphABS+` serve --mcp", "allow_arbitrary_command": true}}}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("absolute path with opt-in: status = %d: %s", w.Code, w.Body.String())
 	}
@@ -486,6 +487,11 @@ func TestToolSearchSettings(t *testing.T) {
 }
 
 func TestParseStdioCommand(t *testing.T) {
+	// codegraphABS is a platform-native absolute path that parseStdioCommand
+	// recognizes as absolute on the current OS (filepath.IsAbs("/...") is
+	// false on Windows).
+	codegraphABS := filepath.Join(t.TempDir(), "codegraph")
+
 	tests := []struct {
 		name           string
 		line           string
@@ -525,14 +531,14 @@ func TestParseStdioCommand(t *testing.T) {
 		// Absolute path — rejected without opt-in.
 		{
 			name:    "absolute path rejected without opt-in",
-			line:    "/Users/roy/.local/bin/codegraph serve --mcp",
+			line:    codegraphABS + " serve --mcp",
 			wantErr: "absolute-path command rejected",
 		},
 		{
 			name:           "absolute path allowed with opt-in",
-			line:           "/Users/roy/.local/bin/codegraph serve --mcp",
+			line:           codegraphABS + " serve --mcp",
 			allowArbitrary: true,
-			wantCmd:        "/Users/roy/.local/bin/codegraph",
+			wantCmd:        codegraphABS,
 			wantArgs:       []string{"serve", "--mcp"},
 		},
 
