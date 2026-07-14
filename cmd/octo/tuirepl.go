@@ -452,6 +452,13 @@ type tuiModel struct {
 
 	// modal, when non-nil, is an active Ask prompt (design §6).
 	modal *modalState
+	// modalQueue holds Ask prompts that arrived while a modal was already open.
+	// Concurrent sub-agents (parallel fan-out) can each raise a permission ask
+	// at once; only one modal renders at a time, so the rest wait here FIFO and
+	// answerModal opens the next. Without this a second ask would overwrite the
+	// first, whose Ask goroutine would then block until its context is
+	// cancelled.
+	modalQueue []askMsg
 
 	// showTasks pins the task checklist in the live area regardless of turn
 	// state (Ctrl+T toggle, Claude Code style). The pinned view also shows a
@@ -2031,6 +2038,12 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 	m.turnRunning = false
 	m.cancelTurn = nil
 	m.running = nil // clear any live tool indicator (e.g. on interrupt)
+	// NB: intentionally do NOT clear m.modal / m.modalQueue here. A background
+	// sub-agent (run_in_background) runs on a context detached from the turn, so
+	// its permission prompt outlives the turn and must stay answerable — nil-ing
+	// it would strand that sub-agent's Ask goroutine forever (its resp channel
+	// would never receive, and its context isn't cancelled at turn end). A
+	// foreground ask, by contrast, already unblocks via turn-context cancellation.
 
 	// Any steer messages that weren't drained via EventSteerInjected during
 	// the turn (e.g. typed after the last loop iteration) are printed now so

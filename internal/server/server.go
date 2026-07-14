@@ -2749,9 +2749,11 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// soon as the message finished, same bug prepareToolTurn had for web.
 		executor = tools.NewDefaultRegistryWithTracker(tools.SessionReadTracker("im:" + string(sess.Key)))
 
-		// Per-message sub-agent manager bound to THIS chat's agent —
-		// synchronous, since a chat message is request/response with no
-		// follow-up channel for an async result. Stamped into ctx BEFORE
+		// Per-message sub-agent manager bound to THIS chat's agent. Async, like
+		// the web path: a background sub-agent Starts and reports completion via
+		// SetOnExit below, and a default (foreground) fan-out of several
+		// sub_agents runs concurrently rather than blocking one another
+		// (dispatchTools parallelizes a sub_agent batch). Stamped into ctx BEFORE
 		// toolDefs is computed below (#1133 follow-up) — the process-global
 		// spawner slot is never set in server mode (only
 		// SetDefaultSubAgentManager is, in enableSubAgentTools), so without
@@ -2765,7 +2767,17 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 			return tools.WithoutGoalTools(tools.DefaultToolsForCtx(ctx, sess.Agent.Model))
 		})
 		subMgr := tools.NewSubAgentManager(spawner)
-		subMgr.SetSynchronous(true)
+		// A background sub-agent finishes after this turn's chain ends; its
+		// result reaches the model via the agent Inbox + an idle follow-up turn,
+		// the same channel every background process and workflow completion uses
+		// (see wireChannelCompletionHooks). Without this an async sub-agent's
+		// reply would be dropped, which is why this path used to force synchronous
+		// dispatch. `ev` is the outer InboundEvent (the message that opened this
+		// turn); `n` is the completion notification.
+		subMgr.SetOnExit(func(n tools.SubAgentNotification) {
+			sess.Agent.Inbox.Enqueue(tools.FormatSubAgentNote(n))
+			go s.runChannelIdleTurn(context.Background(), sess, ad, ev)
+		})
 		ctx = tools.WithSubAgentManager(ctx, subMgr)
 
 		toolDefs = tools.DefaultToolsForCtx(ctx, sess.Agent.Model)
