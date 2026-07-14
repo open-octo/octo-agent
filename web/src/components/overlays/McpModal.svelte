@@ -1,18 +1,24 @@
 <script lang="ts">
-  import { mcpModalOpen, mcpServers, showToast } from '../../lib/stores'
+  import { mcpModalOpen, mcpServers } from '../../lib/stores'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
   import * as api from '../../lib/api'
 
   let jsonText = $state('')
   let submitting = $state(false)
+  let allowArbitrary = $state(false)
+  let errorMsg = $state('')
 
   // Re-seed the form (blank) whenever the modal opens.
   $effect(() => {
-    if ($mcpModalOpen) jsonText = ''
+    if ($mcpModalOpen) {
+      jsonText = ''
+      allowArbitrary = false
+      errorMsg = ''
+    }
   })
 
-  const canSubmit = $derived(jsonText.trim().length > 0)
+  const canSubmit = $derived(jsonText.trim().length > 0 && !submitting)
 
   async function refresh() {
     const data = await api.listMcpServers()
@@ -22,9 +28,10 @@
   async function submit() {
     if (!canSubmit) return
     submitting = true
+    errorMsg = ''
     try {
       let parsed: any
-      try { parsed = JSON.parse(jsonText) } catch { showToast('Invalid JSON', 'error'); submitting = false; return }
+      try { parsed = JSON.parse(jsonText) } catch { errorMsg = $t('mcp.invalid_json'); submitting = false; return }
       const servers = parsed.mcpServers ?? parsed
       // Import silently overwrites a same-named entry in ~/.octo/mcp.json —
       // fine for a genuine re-paste, but this is now the only structured UI
@@ -39,15 +46,28 @@
         submitting = false
         return
       }
-      await api.importMcpServers(servers)
+      await api.importMcpServers(allowArbitrary
+        ? Object.fromEntries(Object.entries(servers).map(([name, entry]) => [name, { ...entry, allow_arbitrary_command: true }]))
+        : servers)
       await refresh()
-      showToast('Servers imported')
       mcpModalOpen.set(false)
     } catch (e: any) {
-      showToast(e.message ?? 'Failed', 'error')
+      errorMsg = translateImportError(e.message)
     } finally {
       submitting = false
     }
+  }
+
+  // Backend import errors are English substrings from parseStdioCommand.
+  // Map the known patterns to i18n keys; fall back to the raw message so
+  // unexpected errors don't lose their text.
+  function translateImportError(message: string): string {
+    if (!message) return tr('mcp.import_failed')
+    if (message.includes('absolute-path command rejected')) return tr('mcp.err_absolute_path')
+    if (message.includes('not a well-known launcher')) return tr('mcp.err_not_allowlisted')
+    if (message.includes('forbidden characters')) return tr('mcp.err_forbidden_chars')
+    if (message.includes('Invalid JSON') || message.includes('expected {mcpServers')) return String(message)
+    return tr('mcp.import_failed') + ': ' + String(message)
   }
 
   function close() {
@@ -74,6 +94,13 @@
           bind:value={jsonText}
         ></textarea>
       </div>
+      <label class="checkbox-row">
+        <input type="checkbox" bind:checked={allowArbitrary}>
+        <span>{$t('mcp.allow_arbitrary')}</span>
+      </label>
+      {#if errorMsg}
+        <div class="import-error">{errorMsg}</div>
+      {/if}
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick={close} disabled={submitting}>{$t('common.cancel')}</button>
@@ -117,6 +144,19 @@ label { font-size: 12px; color: var(--text-secondary); }
   resize: vertical; line-height: 1.6;
 }
 .json-area:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+.checkbox-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text-secondary); cursor: pointer;
+  padding: 4px 0;
+}
+.checkbox-row input[type="checkbox"] {
+  width: 14px; height: 14px; accent-color: var(--blue-6); cursor: pointer;
+}
+.import-error {
+  padding: 8px 12px; border-radius: 6px;
+  background: var(--error-bg); border: 1px solid var(--error-border);
+  color: var(--error-dark); font-size: 12px; line-height: 1.5;
+}
 .modal-footer {
   padding: 12px 18px; border-top: 1px solid var(--border-table);
   display: flex; justify-content: flex-end; gap: 8px;

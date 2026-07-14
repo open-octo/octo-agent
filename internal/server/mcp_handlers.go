@@ -24,22 +24,39 @@ var allowedMCPCommands = map[string]bool{
 }
 
 // parseStdioCommand splits a command line into executable and arguments,
-// validates that the executable is a simple basename (no path separators,
-// absolute paths, or shell metacharacters), and returns the parsed parts.
-// If allowArbitrary is false and the basename is not in allowedMCPCommands,
-// it returns an error telling the caller to opt in.
+// validates the executable, and returns the parsed parts.
+//
+// When allowArbitrary is false (the default for safety):
+//   - Absolute paths are rejected (user must use a basename resolvable via PATH)
+//   - The basename must be in allowedMCPCommands
+//
+// When allowArbitrary is true (user set allow_arbitrary_command in mcp.json):
+//   - Absolute paths are permitted (needed for tools outside PATH like codegraph)
+//   - The whitelist is bypassed
+//   - Shell metacharacters and ".." traversal are still rejected — this gate
+//     is about injection safety, not command trust
 func parseStdioCommand(name, line string, allowArbitrary bool) (string, []string, error) {
 	fields := strings.Fields(line)
 	if len(fields) == 0 {
 		return "", nil, fmt.Errorf("mcp server %q: empty command", name)
 	}
 	base := fields[0]
-	if filepath.IsAbs(base) || strings.ContainsAny(base, `/\;|&$<>`) || strings.Contains(base, "..") {
-		return "", nil, fmt.Errorf("mcp server %q: command must be a simple basename", name)
+	// Injection-safety check on the raw line: reject shell metacharacters and
+	// ".." traversal paths before any other parsing. This check is about
+	// preventing command injection, so it applies regardless of opt-in.
+	if strings.ContainsAny(line, ";|&$<>") || strings.Contains(base, "..") {
+		return "", nil, fmt.Errorf("mcp server %q: command contains forbidden characters", name)
+	}
+	if filepath.IsAbs(base) {
+		if !allowArbitrary {
+			return "", nil, fmt.Errorf("mcp server %q: absolute-path command rejected — check \"Allow non-standard commands\" in the import dialog, or set \"allow_arbitrary_command\": true per server", name)
+		}
+		// Absolute path is trusted by user opt-in; use as-is.
+		return base, fields[1:], nil
 	}
 	base = filepath.Base(base)
 	if !allowArbitrary && !allowedMCPCommands[base] {
-		return "", nil, fmt.Errorf("mcp server %q: command %q is not in the allowlist; enable allow arbitrary command", name, base)
+		return "", nil, fmt.Errorf("mcp server %q: command %q is not a well-known launcher — check \"Allow non-standard commands\" in the import dialog, or set \"allow_arbitrary_command\": true per server", name, base)
 	}
 	return base, fields[1:], nil
 }
@@ -284,16 +301,16 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 	defer s.mcpMu.Unlock()
 
 	// Validate everything first so a half-bad paste doesn't land half the
-	// servers. We do not require per-server opt-in; instead we parse and
-	// normalize stdio commands and reject any command that is not a simple
-	// allowlisted basename.
+	// servers. For stdio entries, parse + validate the command. Servers with
+	// allow_arbitrary_command may use absolute paths or non-whitelisted
+	// commands; others are restricted to the allowlist.
 	for name, e := range req.Servers {
 		if err := mcp.ValidateServerName(name); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if e.Command != "" {
-			cmd, args, err := parseStdioCommand(name, e.Command, false)
+			cmd, args, err := parseStdioCommand(name, e.Command, e.AllowArbitraryCommand)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return

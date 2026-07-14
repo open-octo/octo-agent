@@ -66,6 +66,13 @@ type ServerEntry struct {
 
 	// Optional: disable a server without removing it from config.
 	Disabled bool `json:"disabled,omitempty"`
+
+	// Optional: allow absolute-path or non-whitelisted commands for this server.
+	// When false (default), the import API rejects absolute paths and commands
+	// outside the allowlist. When true, the user has explicitly opted in to
+	// run the command as-is — useful for self-installed tools (e.g. codegraph)
+	// whose absolute path is needed because they live outside the default PATH.
+	AllowArbitraryCommand bool `json:"allow_arbitrary_command,omitempty"`
 }
 
 // Kind reports which transport this entry uses. Returns "" when neither

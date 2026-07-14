@@ -72,7 +72,7 @@
       mcpServers.set(data.servers as any)
       toolSearchMode.set(data.tool_search.enabled)
     } catch (e: any) {
-      showToast(e.message ?? 'Failed to load MCP servers', 'error')
+      showToast(e.message ?? tr('mcp.toast_reload_fail'), 'error')
     } finally {
       loading = false
     }
@@ -89,7 +89,7 @@
       mcpServers.set(data.servers as any)
       toolSearchMode.set(data.tool_search.enabled)
     } catch (e: any) {
-      showToast(e.message ?? 'Failed to reload MCP servers', 'error')
+      showToast(e.message ?? tr('mcp.toast_reload_fail'), 'error')
     } finally {
       loading = false
     }
@@ -126,7 +126,7 @@
       mcpServers.update(list => (list as any[]).filter((s: any) => s.name !== name))
       showToast(tr('mcp.toast_removed'))
     } catch (e: any) {
-      showToast(e.message ?? 'Failed to delete server', 'error')
+      showToast(tr('mcp.toast_delete_fail'), 'error')
     }
   }
 
@@ -142,7 +142,7 @@
         )
       )
     } catch (e: any) {
-      showToast(e.message ?? 'Failed to toggle server', 'error')
+      showToast(tr('mcp.toast_toggle_fail'), 'error')
       // The Switch already flipped optimistically on click; a rejected
       // toggle (e.g. a project-scoped server) needs a real reload to snap
       // its visual state back to what the server actually has.

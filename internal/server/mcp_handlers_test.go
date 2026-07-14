@@ -175,6 +175,37 @@ func TestHandleCreateMCPServer_ArbitraryCommandRejected(t *testing.T) {
 	}
 }
 
+// TestHandleCreateMCPServer_AllowArbitraryCommand verifies that a server with
+// allow_arbitrary_command:true can be imported with an absolute-path command
+// or a non-whitelisted basename — the bug report that prompted this change.
+func TestHandleCreateMCPServer_AllowArbitraryCommand(t *testing.T) {
+	mcpTestHome(t, "")
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// Absolute path with opt-in whitelisted as stdio.
+	w := doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
+		`{"mcpServers": {"codegraph": {"command": "/Users/roy/.local/bin/codegraph serve --mcp", "allow_arbitrary_command": true}}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("absolute path with opt-in: status = %d: %s", w.Code, w.Body.String())
+	}
+
+	// Non-whitelisted basename with opt-in also accepted.
+	w = doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
+		`{"mcpServers": {"mytool": {"command": "my-custom-server --port 3000", "allow_arbitrary_command": true}}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("basename with opt-in: status = %d: %s", w.Code, w.Body.String())
+	}
+
+	// Shell metacharacters are still rejected even with opt-in.
+	for _, cmd := range []string{"mytool; rm -rf /", "mytool | cat /etc/passwd", "../../bin/evil"} {
+		w = doJSON(t, srv, http.MethodPost, "/api/mcp/servers",
+			`{"mcpServers": {"bad": {"command": "`+cmd+`", "allow_arbitrary_command": true}}}`)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("command %q with opt-in: expected 400, got %d", cmd, w.Code)
+		}
+	}
+}
+
 func TestHandleDeleteMCPServer(t *testing.T) {
 	mcpTestHome(t, `{"mcpServers": {"a": {"command": "echo"}}}`)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
@@ -451,5 +482,123 @@ func TestToolSearchSettings(t *testing.T) {
 	w = doJSON(t, srv, http.MethodPut, "/api/config/toolsearch", `{"enabled": "sometimes"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("invalid put: status = %d, want 400", w.Code)
+	}
+}
+
+func TestParseStdioCommand(t *testing.T) {
+	tests := []struct {
+		name           string
+		line           string
+		allowArbitrary bool
+		wantCmd        string
+		wantArgs       []string
+		wantErr        string
+	}{
+		// Whitelisted basenames — allowed without opt-in.
+		{
+			name:     "whitelisted npx",
+			line:     "npx -y @modelcontextprotocol/server-filesystem /tmp",
+			wantCmd:  "npx",
+			wantArgs: []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
+		},
+		{
+			name:     "whitelisted uvx",
+			line:     "uvx --from mcp-server mcp-server",
+			wantCmd:  "uvx",
+			wantArgs: []string{"--from", "mcp-server", "mcp-server"},
+		},
+
+		// Non-whitelisted basename — rejected without opt-in.
+		{
+			name:    "non-whitelisted rejected",
+			line:    "mytool arg1",
+			wantErr: "not a well-known launcher",
+		},
+		{
+			name:           "non-whitelisted allowed with opt-in",
+			line:           "mytool arg1",
+			allowArbitrary: true,
+			wantCmd:        "mytool",
+			wantArgs:       []string{"arg1"},
+		},
+
+		// Absolute path — rejected without opt-in.
+		{
+			name:    "absolute path rejected without opt-in",
+			line:    "/Users/roy/.local/bin/codegraph serve --mcp",
+			wantErr: "absolute-path command rejected",
+		},
+		{
+			name:           "absolute path allowed with opt-in",
+			line:           "/Users/roy/.local/bin/codegraph serve --mcp",
+			allowArbitrary: true,
+			wantCmd:        "/Users/roy/.local/bin/codegraph",
+			wantArgs:       []string{"serve", "--mcp"},
+		},
+
+		// Shell injection — always rejected (applied to full line).
+		{
+			name:    "pipe always rejected",
+			line:    "npx | cat /etc/passwd",
+			wantErr: "forbidden characters",
+		},
+		{
+			name:    "semicolon always rejected",
+			line:    "npx; rm -rf /",
+			wantErr: "forbidden characters",
+		},
+		{
+			name:    "dollar expansion always rejected",
+			line:    "npx $HOME",
+			wantErr: "forbidden characters",
+		},
+		{
+			name:           "pipe rejected even with opt-in",
+			line:           "mytool | cat /etc/passwd",
+			allowArbitrary: true,
+			wantErr:        "forbidden characters",
+		},
+		{
+			name:           "parent traversal rejected with opt-in",
+			line:           "../evil serve",
+			allowArbitrary: true,
+			wantErr:        "forbidden characters",
+		},
+
+		// Edge cases.
+		{
+			name:    "empty command",
+			line:    "   ",
+			wantErr: "empty command",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, args, err := parseStdioCommand("test", tt.line, tt.allowArbitrary)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cmd != tt.wantCmd {
+				t.Errorf("cmd = %q, want %q", cmd, tt.wantCmd)
+			}
+			if len(args) != len(tt.wantArgs) {
+				t.Fatalf("args = %v (len %d), want %v (len %d)", args, len(args), tt.wantArgs, len(tt.wantArgs))
+			}
+			for i := range args {
+				if args[i] != tt.wantArgs[i] {
+					t.Errorf("args[%d] = %q, want %q", i, args[i], tt.wantArgs[i])
+				}
+			}
+		})
 	}
 }
