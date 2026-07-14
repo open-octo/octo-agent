@@ -50,6 +50,18 @@ type nativeBridge struct {
 	// its own.
 	notifySeq atomic.Uint64
 
+	// updateAvailable holds the version string of a newer release once an update
+	// check (manual or the periodic auto-check) finds one, or nil when up to
+	// date. The tray menu reads it to show a persistent, clickable "download"
+	// item instead of relying on the transient system notification, which macOS
+	// suppresses while the app is foreground — exactly when a manual check runs.
+	// Atomic: the auto-check goroutine writes it while the tray loop / UI thread
+	// read it.
+	updateAvailable atomic.Pointer[string]
+	// tray is the system-tray handle, stored so an update check can refresh the
+	// menu immediately rather than waiting for refreshTrayLoop's next tick.
+	tray atomic.Pointer[application.SystemTray]
+
 	settingsMu sync.Mutex
 	settings   desktopSettings
 	// geomTimer debounces persistence of the window geometry to disk: a drag
@@ -271,6 +283,16 @@ func (b *nativeBridge) NotifyUpdateAvailable(title, body string) {
 		Body:       body,
 		CategoryID: updateNotifyCategoryID,
 	})
+}
+
+// refreshTray rebuilds and re-publishes the tray menu right now, so an update
+// check's result shows without waiting for refreshTrayLoop's next tick. No-op
+// until the tray handle has been stored. SetMenu marshals to the UI thread, so
+// it's safe to call from the check goroutine.
+func (b *nativeBridge) refreshTray() {
+	if t := b.tray.Load(); t != nil {
+		t.SetMenu(buildTrayMenu(b.app, b))
+	}
 }
 
 // AutostartEnabled reports whether the app is registered to launch at login.

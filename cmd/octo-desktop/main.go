@@ -207,6 +207,7 @@ func main() {
 	// would disconnect other clients. An icon is required — a status item with
 	// neither icon nor label doesn't render on macOS.
 	tray := app.SystemTray.New()
+	bridge.tray.Store(tray) // let update checks refresh the menu on their own goroutine
 	if runtime.GOOS == "darwin" {
 		tray.SetTemplateIcon(trayTemplateIcon)
 	} else {
@@ -230,6 +231,10 @@ func main() {
 		// off the UI thread) — without it every toast silently no-ops.
 		go bridge.requestNotificationAuthorization()
 		startHub(app, bridge, settings)
+		// Surface a newer release in the tray without the user asking: a delayed
+		// first check, then daily. Foreground-suppressed toasts don't matter here
+		// — the tray item is the durable signal.
+		go autoUpdateLoop(bridge)
 	})
 
 	// macOS: clicking the dock icon after the window was closed (hidden to the
@@ -361,30 +366,64 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	bridge.showWindow()
 }
 
-// checkForUpdates is the tray "Check for updates…" action. It runs on a
-// background goroutine (never the UI thread) so the network round-trip can't
-// freeze the menu, then reports via a non-intrusive OS toast rather than a
-// modal dialog: a failed lookup and the already-current case are plain toasts;
-// a newer release raises the actionable "update available" toast whose button
-// (and body tap) opens the download page. Toasts are best-effort — on a
-// platform/build without the notification service (an unbundled macOS binary)
-// they no-op, matching the version badge's own silence there.
-func checkForUpdates(bridge *nativeBridge) {
+// checkForUpdates is the tray "Check for updates…" action — a manual check that
+// always reports its result.
+func checkForUpdates(bridge *nativeBridge) { runUpdateCheck(bridge, true) }
+
+// autoUpdateLoop checks for a newer release on its own, so the tray can show one
+// without the user asking. A delayed first check keeps startup uncontended, then
+// a daily cadence. Auto checks are silent unless they turn up a new version, and
+// even then only when it differs from the one already surfaced — the tray item,
+// not a daily toast, is the standing reminder.
+func autoUpdateLoop(bridge *nativeBridge) {
+	time.Sleep(30 * time.Second)
+	runUpdateCheck(bridge, false)
+	t := time.NewTicker(24 * time.Hour)
+	defer t.Stop()
+	for range t.C {
+		runUpdateCheck(bridge, false)
+	}
+}
+
+// runUpdateCheck performs one update lookup and records the outcome on the
+// bridge so the tray can show a persistent, clickable "download" item — the
+// durable signal, since macOS suppresses the toast while the app is foreground
+// (exactly when a manual check runs). It runs on a background goroutine (never
+// the UI thread) so the network round-trip can't freeze the menu.
+//
+// manual checks always report via an OS toast (failure, already-current, or the
+// actionable "update available" toast whose button and body tap open the
+// download page). auto checks stay silent except when they surface a version
+// not already shown, so the daily cadence doesn't nag. Toasts are best-effort —
+// on a build without the notification service (an unbundled macOS binary) they
+// no-op, matching the version badge's own silence there.
+func runUpdateCheck(bridge *nativeBridge, manual bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	latest, err := upgrade.Check(ctx)
 	if err != nil {
-		bridge.Notify(L().updTitle, L().updFailed)
+		if manual {
+			bridge.Notify(L().updTitle, L().updFailed)
+		}
 		return
 	}
 	current := strings.TrimPrefix(version.Version, "v")
 	// Eligible() != nil means a dev/unbundled build that never claims to be
 	// behind (matching the badge); report status without offering a download.
 	if upgrade.Eligible() != nil || upgrade.CompareVersions(current, latest) >= 0 {
-		bridge.Notify(L().updTitle, fmt.Sprintf(L().updLatestFmt, current))
+		bridge.updateAvailable.Store(nil)
+		bridge.refreshTray()
+		if manual {
+			bridge.Notify(L().updTitle, fmt.Sprintf(L().updLatestFmt, current))
+		}
 		return
 	}
-	bridge.NotifyUpdateAvailable(L().updTitle, fmt.Sprintf(L().updAvailableFmt, latest))
+	prev := bridge.updateAvailable.Load()
+	bridge.updateAvailable.Store(&latest)
+	bridge.refreshTray()
+	if manual || prev == nil || *prev != latest {
+		bridge.NotifyUpdateAvailable(L().updTitle, fmt.Sprintf(L().updAvailableFmt, latest))
+	}
 }
 
 // listenHub binds addr, retrying for up to grace so a just-stopped daemon has
@@ -431,7 +470,15 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 	m.AddSeparator()
 	m.Add(L().trayShow).OnClick(func(*application.Context) { bridge.showWindow() })
 	m.Add(L().traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
-	m.Add(L().trayCheckUpdates).OnClick(func(*application.Context) { go checkForUpdates(bridge) })
+	// A known-newer release replaces the "check" item with a one-click download —
+	// the durable prompt when the toast was suppressed. Otherwise the manual check.
+	if v := bridge.updateAvailable.Load(); v != nil {
+		m.Add(fmt.Sprintf(L().trayUpdateAvailFmt, *v)).OnClick(func(*application.Context) {
+			_ = bridge.OpenExternal(upgrade.DownloadPageURL)
+		})
+	} else {
+		m.Add(L().trayCheckUpdates).OnClick(func(*application.Context) { go checkForUpdates(bridge) })
+	}
 	m.AddSeparator()
 	m.Add(L().trayQuit).OnClick(func(*application.Context) { bridge.requestQuit() })
 	return m
@@ -444,7 +491,13 @@ func refreshTrayLoop(app *application.App, tray *application.SystemTray, bridge 
 		applyLang() // follow a language switch made in onboarding / Settings
 		// The status lines are language-dependent, so a language switch changes
 		// this signature and triggers a rebuild (which re-reads L() for labels).
-		return strings.Join(trayStatusLines(bridge), "|")
+		// The update state is folded in too, so a flip rebuilds even if the
+		// immediate refreshTray call raced with a concurrent rebuild.
+		upd := ""
+		if v := bridge.updateAvailable.Load(); v != nil {
+			upd = *v
+		}
+		return strings.Join(trayStatusLines(bridge), "|") + "\x00" + upd
 	}
 	last := sigOf()
 	t := time.NewTicker(3 * time.Second)
