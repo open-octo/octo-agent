@@ -734,7 +734,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		// are wired to the TUI sink inside runTUI.
 		defer tools.SetAsker(nil)
 		// The interactive TUI can re-enter a live session, so advertise the
-		// schedule_wakeup tool (the loop skill's mechanism). The headless
+		// schedule_wakeup tool (the in-session loop mechanism). The headless
 		// one-shot below leaves it off — a process that exits after one turn
 		// has no session to wake.
 		tools.SetWakerSupported(true)

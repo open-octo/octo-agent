@@ -348,7 +348,7 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 	case "/goal":
 		return m.cmdGoal(ev, strings.Join(args, " "))
 	case "/help":
-		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /goal, /stop, /status, /help"
+		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /goal, /loop [interval] <task>, /stop, /status, /help"
 	default:
 		return fmt.Sprintf("Unknown command: %s", cmd)
 	}

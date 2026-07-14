@@ -88,26 +88,38 @@ func LoopExpired(start time.Time) bool {
 }
 
 // ScheduleWakeupTool lets the model schedule its own next turn — the mechanism
-// behind the loop skill. The model calls it at the end of a turn to come back
-// later (dynamic, self-paced mode) or to keep a fixed cadence (repeat = interval
-// mode); NOT calling it ends the loop. It only works inside a live session that
-// can be re-entered — the interactive TUI or a server-managed web/IM session —
-// so it is withheld from the headless one-shot (wakerEnabled gates it in
-// DefaultToolsFor) and the per-session Waker is injected into the turn ctx.
+// behind an in-session loop (the /loop command). The model calls it at the end
+// of a turn to come back later (dynamic, self-paced mode) or to keep a fixed
+// cadence (repeat = interval mode); NOT calling it ends the loop. It only works
+// inside a live session that can be re-entered — the interactive TUI or a
+// server-managed web/IM session — so it is withheld from the headless one-shot
+// (wakerEnabled gates it in DefaultToolsFor) and the per-session Waker is
+// injected into the turn ctx.
 type ScheduleWakeupTool struct{}
 
 func (ScheduleWakeupTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "schedule_wakeup",
-		Description: "Schedule your own next turn — the mechanism behind the loop skill. After this " +
+		Description: "Schedule your own next turn — the mechanism behind an in-session loop. After this " +
 			"turn ends and the session goes idle, the system re-runs `prompt` as a fresh user turn " +
 			"after `delay_seconds`. Use it to pace a recurring task without the user re-prompting.\n\n" +
+			"The user starts a loop by typing `/loop [interval] <task>`: a leading duration " +
+			"(`/loop 5m check the build`) selects INTERVAL mode below — parse it to seconds and call " +
+			"this tool once with repeat=true; no leading duration (`/loop keep refining the draft`) " +
+			"selects DYNAMIC mode. If the task is unclear, ask one clarifying question before starting. " +
+			"You can also start a loop on your own initiative, without `/loop`.\n\n" +
 			"Two modes:\n" +
 			"- DYNAMIC (repeat=false, the default): fires once. To keep looping you must call this " +
 			"tool again on the next turn; simply NOT calling it ends the loop. Use when you decide " +
 			"the cadence turn-by-turn or want to stop once the task is done.\n" +
 			"- INTERVAL (repeat=true): the wakeup re-arms itself on the same cadence and keeps firing " +
 			"on schedule. Use for a steady \"every N seconds\" loop.\n\n" +
+			"Make each tick a single bounded unit of work that returns promptly — never a `prompt` " +
+			"that spins until it times out. If the loop has a completion goal, put the check in the " +
+			"`prompt` and stop (cancel, below) once it's met — e.g. \"check whether the PR's CI " +
+			"passed; if it did, merge and stop by cancelling; otherwise report the status in one " +
+			"line.\" A loop with no natural end (a heartbeat, a monitor, a periodic emit) legitimately " +
+			"has no completion check and just runs until the user stops it or the safety cap.\n\n" +
 			"delay_seconds is clamped to [60, 3600]. Picking a cadence: the model's prompt cache has a " +
 			"~5-minute TTL, so a delay under 300s keeps context warm (right for actively polling " +
 			"external state like a CI run or a deploy), while 300s+ pays a cache miss (right when " +

@@ -817,3 +817,16 @@ func TestInjectorFor_DroppedOnNew(t *testing.T) {
 		t.Error("/new must drop the session injector (fresh recall latch)")
 	}
 }
+
+// /loop is a built-in the model handles via the schedule_wakeup tool, not a
+// CommandRouter command. It must pass through to the agent (handleChannelCommand
+// returns false), the same way the Web and TUI surfaces route it — otherwise an
+// IM user's "/loop …" would be swallowed as an unknown command and never reach
+// the model.
+func TestChannelCommand_LoopPassesThroughToAgent(t *testing.T) {
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+	if srv.handleChannelCommand(ad, evFor("/loop 5m check the build")) {
+		t.Fatal("/loop must not be intercepted as a command — it routes to the agent")
+	}
+}
