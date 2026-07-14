@@ -52,19 +52,20 @@ func (s *Server) armWakeup(sessionID string, delay time.Duration, prompt string,
 // The prompt is wrapped as a <system-reminder> (formatLoopTick) so the web
 // transcript renders the tick as an environment re-entry rather than a
 // duplicated user-message bubble every tick — matching the TUI, which prints a
-// "● Loop tick" line and never echoes the prompt as user speech. A tick that
-// starts a fresh turn (idle) also broadcasts that scrollback notice; one folded
-// into an already-running dynamic turn shows nothing, as the TUI prints the tick
-// line only when the wakeup actually starts a turn.
+// "● Loop tick" line and never echoes the prompt as user speech. The scrollback
+// notice is broadcast only when kickIdleSteerTurn actually starts a turn, so a
+// tick folded into an already-running turn — or one dropped because another
+// entry took the session over — shows nothing, avoiding a "Loop tick" marker
+// with no reply behind it. This mirrors the TUI, which prints the line only when
+// the wakeup actually starts a turn.
 func (s *Server) deliverLoopTick(sessionID, prompt string, repeat bool) {
 	if s.shouldSkipTick(sessionID, repeat) {
 		return
 	}
-	if !s.turnActive(sessionID) {
+	s.enqueueSteer(sessionID, agent.InboxItem{Text: formatLoopTick(prompt)})
+	if s.kickIdleSteerTurn(sessionID) {
 		s.broadcastLoopTick(sessionID)
 	}
-	s.enqueueSteer(sessionID, agent.InboxItem{Text: formatLoopTick(prompt)})
-	s.kickIdleSteerTurn(sessionID)
 }
 
 // formatLoopTick wraps a loop prompt as a <system-reminder> block — octo's
