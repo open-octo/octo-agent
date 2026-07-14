@@ -49,14 +49,19 @@ func (WriteFileTool) Execute(ctx context.Context, _ string, input map[string]any
 		// Distinguish "not provided" from "empty string". JSON null → not a string.
 		return agent.ToolResult{Text: ""}, fmt.Errorf("write_file: content is required (string)")
 	}
-	if secret := scanForSecrets(content); secret != "" {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("write_file: refusing to write content that contains a %s. "+
-			"If this is genuinely intended (e.g. a test fixture), remove the live-credential "+
-			"shape or create the file outside the agent.", secret)
-	}
 	abs, err := resolvePathIn(WorkingDir(ctx), path)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, err
+	}
+
+	// Refuse only credentials the write would newly introduce. Overwriting a
+	// file that already holds the same secret (e.g. rewriting config.yml to add
+	// a field while preserving its api_key) carries nothing new and is allowed.
+	prior, _ := os.ReadFile(abs)
+	if secret := newSecretsIntroduced(string(prior), content); secret != "" {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("write_file: refusing to write content that contains a %s. "+
+			"If this is genuinely intended (e.g. a test fixture), remove the live-credential "+
+			"shape or create the file outside the agent.", secret)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {

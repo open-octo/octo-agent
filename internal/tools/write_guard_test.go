@@ -80,3 +80,83 @@ func TestWriteFile_AllowsNormalContent(t *testing.T) {
 		t.Errorf("normal write should succeed: %v", err)
 	}
 }
+
+func TestNewSecretsIntroduced(t *testing.T) {
+	const key = "sk-ant-aaaabbbbccccddddeeeeffffgggghhhh"
+	oldCfg := "provider: anthropic\napi_key: " + key + "\n"
+
+	// Preserving an existing key while adding an unrelated field is allowed.
+	if got := newSecretsIntroduced(oldCfg, oldCfg+"permission_mode: auto\n"); got != "" {
+		t.Errorf("preserving an existing key should be allowed, got %q", got)
+	}
+	// A key in a brand-new file (no prior content) is refused.
+	if got := newSecretsIntroduced("", oldCfg); got == "" {
+		t.Errorf("a key in new content with no prior should be refused")
+	}
+	// Changing the key's value counts as introducing a new secret.
+	changed := "provider: anthropic\napi_key: sk-ant-zzzzyyyyxxxxwwwwvvvvuuuuttttssss\n"
+	if got := newSecretsIntroduced(oldCfg, changed); got == "" {
+		t.Errorf("changing the key value should be refused")
+	}
+	// Keeping the existing key A while ALSO adding a second key B (same pattern,
+	// different value) must still refuse — B is newly introduced.
+	addB := oldCfg + "backup_key: sk-ant-zzzzyyyyxxxxwwwwvvvvuuuuttttssss\n"
+	if got := newSecretsIntroduced(oldCfg, addB); got == "" {
+		t.Errorf("adding a second, different key alongside the preserved one should be refused")
+	}
+}
+
+// A config.yml rewrite that keeps the existing api_key must not trip the guard
+// — this is the onboard flow that previously always failed.
+func TestWriteFile_PreservesExistingSecret(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yml")
+	orig := "provider: anthropic\nmodel: claude-sonnet-4-5\napi_key: sk-ant-aaaabbbbccccddddeeeeffffgggghhhh\n"
+	if err := os.WriteFile(p, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := WriteFileTool{}.Execute(context.Background(), "write_file", map[string]any{
+		"path":    p,
+		"content": orig + "permission_mode: auto\nshow_reasoning: true\n",
+	})
+	if err != nil {
+		t.Errorf("rewrite preserving the existing api_key should succeed, got %v", err)
+	}
+}
+
+// The same preservation must hold via edit_file: appending a field next to an
+// untouched api_key line does not introduce a new secret.
+func TestEditFile_PreservesExistingSecret(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yml")
+	orig := "provider: anthropic\nmodel: claude-sonnet-4-5\napi_key: sk-ant-aaaabbbbccccddddeeeeffffgggghhhh\n"
+	if err := os.WriteFile(p, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       p,
+		"old_string": "model: claude-sonnet-4-5",
+		"new_string": "model: claude-sonnet-4-5\npermission_mode: auto",
+	})
+	if err != nil {
+		t.Errorf("edit preserving the existing api_key should succeed, got %v", err)
+	}
+}
+
+// edit_file must still refuse an edit that injects a brand-new credential.
+func TestEditFile_RefusesNewSecret(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yml")
+	orig := "provider: anthropic\nmodel: claude-sonnet-4-5\n"
+	if err := os.WriteFile(p, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := EditFileTool{}.Execute(context.Background(), "edit_file", map[string]any{
+		"path":       p,
+		"old_string": "model: claude-sonnet-4-5",
+		"new_string": "model: claude-sonnet-4-5\napi_key: sk-ant-zzzzyyyyxxxxwwwwvvvvuuuuttttssss",
+	})
+	if err == nil || !strings.Contains(err.Error(), "API key") {
+		t.Errorf("edit injecting a new key should be refused, got %v", err)
+	}
+}

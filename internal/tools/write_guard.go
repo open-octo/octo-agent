@@ -23,17 +23,37 @@ var secretPatterns = []struct {
 	{"Google API key", regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{30,}\b`)},
 	{"JWT", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\b`)},
 	{"generic API key", regexp.MustCompile(`(?i)\b(?:api[_-]?key|apikey|secret[_-]?key)\s*[=:]\s*['"]?[a-zA-Z0-9_\-]{16,}\b`)},
-	{"JWT", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\b`)},
-	{"generic API key", regexp.MustCompile(`(?i)\b(?:api[_-]?key|apikey|secret[_-]?key)\s*[=:]\s*['"]?[a-zA-Z0-9_\-]{16,}\b`)},
 }
 
 // scanForSecrets returns the name of the first secret shape detected in
-// content, or "" if none match. write_file uses this to refuse writing a
-// file that looks like it embeds live credentials.
+// content, or "" if none match. It is the "written from scratch" case of
+// newSecretsIntroduced — there is no prior content to compare against.
 func scanForSecrets(content string) string {
+	return newSecretsIntroduced("", content)
+}
+
+// newSecretsIntroduced returns the name of the first secret shape that appears
+// in newContent but was not already present in oldContent, or "" if every
+// secret in newContent already existed verbatim in oldContent. The guard's job
+// is to stop the agent from introducing a live credential, not to stop it from
+// preserving one it didn't author: a read-modify-write of a credential-bearing
+// file (e.g. rewriting ~/.octo/config.yml to add a preference while keeping the
+// existing api_key) carries the same secret through both sides and is allowed,
+// while a brand-new or changed credential is still refused.
+func newSecretsIntroduced(oldContent, newContent string) string {
 	for _, p := range secretPatterns {
-		if p.re.MatchString(content) {
-			return p.name
+		newHits := p.re.FindAllString(newContent, -1)
+		if len(newHits) == 0 {
+			continue
+		}
+		oldHits := make(map[string]bool, len(newHits))
+		for _, h := range p.re.FindAllString(oldContent, -1) {
+			oldHits[h] = true
+		}
+		for _, h := range newHits {
+			if !oldHits[h] {
+				return p.name
+			}
 		}
 	}
 	return ""

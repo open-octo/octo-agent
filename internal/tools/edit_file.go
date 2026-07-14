@@ -474,16 +474,6 @@ func (EditFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 		newStrClean = stripTrailingWhitespace(newStr)
 	}
 
-	// Refuse to inject a live-credential shape — same guard write_file applies,
-	// so a secret can't slip in through the edit path instead. Only the new text
-	// is scanned (not the whole file): a pre-existing match the model didn't
-	// introduce shouldn't block an unrelated edit elsewhere in the file.
-	if secret := scanForSecrets(newStrClean); secret != "" {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("edit_file: refusing to write new_string that contains a %s. "+
-			"If this is genuinely intended (e.g. a test fixture), remove the live-credential "+
-			"shape or create the file outside the agent.", secret)
-	}
-
 	// Use findActualString for quote-, indent-, and trailing-whitespace
 	// normalized matching, plus a line-number-prefix-stripped retry.
 	actualOldStr, indentWidth := findActualString(normBody, oldStr)
@@ -559,6 +549,17 @@ func (EditFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 	}
 	out.WriteString(body[prevOrigEnd:])
 	updated := out.String()
+
+	// Refuse to inject a live-credential shape — same guard write_file applies,
+	// so a secret can't slip in through the edit path instead. Comparing the
+	// whole file before and after means only a credential the edit newly
+	// introduces is blocked: a pre-existing match the edit merely preserves
+	// (or leaves untouched elsewhere in the file) does not.
+	if secret := newSecretsIntroduced(body, updated); secret != "" {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("edit_file: refusing to write new_string that contains a %s. "+
+			"If this is genuinely intended (e.g. a test fixture), remove the live-credential "+
+			"shape or create the file outside the agent.", secret)
+	}
 
 	// Stage the pre-edit version into the trash so an edit that destroys
 	// uncommitted work is recoverable (skipped for git-tracked-clean files).
