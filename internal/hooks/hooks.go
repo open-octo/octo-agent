@@ -39,6 +39,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/executil"
 )
 
 // DefaultTimeout caps how long the REPL is willing to wait for a hook.
@@ -248,7 +250,9 @@ func shellCmd(ctx context.Context, cmd string) *exec.Cmd {
 		if _, err := exec.LookPath("pwsh"); err == nil {
 			shell = "pwsh"
 		}
-		return exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", cmd)
+		c := exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", cmd)
+		executil.SetNoWindow(c)
+		return c
 	}
 	return exec.CommandContext(ctx, "sh", "-c", cmd)
 }

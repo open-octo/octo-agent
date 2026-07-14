@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strconv"
 	"syscall"
+
+	"github.com/open-octo/octo-agent/internal/executil"
 )
 
 // IsAlive opens the process with PROCESS_QUERY_LIMITED_INFORMATION and calls
@@ -40,7 +42,9 @@ func Terminate(proc *os.Process) error {
 	if proc == nil {
 		return nil
 	}
-	if err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(proc.Pid)).Run(); err != nil {
+	cmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(proc.Pid))
+	executil.SetNoWindow(cmd)
+	if err := cmd.Run(); err != nil {
 		return proc.Kill()
 	}
 	return nil

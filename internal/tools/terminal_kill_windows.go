@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/executil"
 )
 
 // setProcessGroupOpts is a no-op on Windows, which has no POSIX process groups.
@@ -33,7 +35,9 @@ func setDetachedProcessOpts() *syscall.SysProcAttr {
 
 // processExists checks whether a process with the given PID is still running.
 func processExists(pid int) bool {
-	out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH").Output()
+	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH")
+	executil.SetNoWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}
@@ -53,7 +57,9 @@ func killProcessGroup(p *os.Process, sigName string) error {
 	force := sigName == "SIGKILL"
 	if !force {
 		// Graceful attempt: send WM_CLOSE to the process tree.
-		_ = exec.Command("taskkill", "/T", "/PID", strconv.Itoa(p.Pid)).Run()
+		cmd := exec.Command("taskkill", "/T", "/PID", strconv.Itoa(p.Pid))
+		executil.SetNoWindow(cmd)
+		_ = cmd.Run()
 		// Wait up to 5s for the process to exit.
 		for i := 0; i < 50; i++ {
 			if !processExists(p.Pid) {
@@ -65,6 +71,7 @@ func killProcessGroup(p *os.Process, sigName string) error {
 	}
 
 	cmd := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(p.Pid))
+	executil.SetNoWindow(cmd)
 	if err := cmd.Run(); err != nil {
 		return p.Kill()
 	}

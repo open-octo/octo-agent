@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/executil"
 )
 
 // captureClipboardImage reads an image from the Windows clipboard via
@@ -43,7 +45,9 @@ else { $img.Save('%s', [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	cmd := exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", script)
+	executil.SetNoWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, "", fmt.Errorf("clipboard: powershell: %w", err)
 	}

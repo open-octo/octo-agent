@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/executil"
 )
 
 // StdioTransport speaks JSON-RPC 2.0 over a subprocess's stdin/stdout. One
@@ -67,6 +69,7 @@ func NewStdioTransport(ctx context.Context, cfg StdioConfig) (*StdioTransport, e
 	// tool call with "broken pipe". The transport's Close method handles
 	// graceful shutdown via stdin EOF.
 	cmd := exec.Command(cfg.Command, cfg.Args...)
+	executil.SetNoWindow(cmd)
 	// Inherit env + add/override the configured entries. Building a fresh
 	// slice keeps os.Environ() intact for the parent.
 	if len(cfg.Env) > 0 {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/sandbox"
 	"github.com/open-octo/octo-agent/internal/trash"
 )
@@ -141,6 +142,7 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", command)
 			cmd.Env = withBundledBinPath(os.Environ())
 		}
+		executil.SetNoWindow(cmd)
 	} else {
 		projectDir := WorkingDirOrCWD(ctx)
 		if projectDir != "" {
