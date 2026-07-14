@@ -423,11 +423,6 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	} else {
 		model = strings.TrimSpace(promptDefault(reader, stdout, "Model", firstNonEmpty(existing.Model, defaultModels[provider])))
 	}
-	// Accepting the provider's built-in default leaves Model unset so it floats
-	// with future releases (and never contaminates a different --provider).
-	if model == defaultModels[provider] {
-		model = ""
-	}
 
 	// Base URL / endpoint. Compatible (custom-endpoint) vendors require a
 	// free-text URL; vendors with regional variants get a fixed menu; everyone

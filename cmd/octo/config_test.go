@@ -193,9 +193,10 @@ func TestRunConfig_Wizard_WritesFile(t *testing.T) {
 	if entry.Provider != "openai" {
 		t.Errorf("provider = %q, want openai", entry.Provider)
 	}
-	// Empty model answer keeps it unset so the built-in default applies later.
-	if entry.Model != "" {
-		t.Errorf("model = %q, want empty (use built-in default)", entry.Model)
+	// Default model answer writes the concrete model name so the saved entry is
+	// self-describing and validates cleanly.
+	if entry.Model != "gpt-5.4" {
+		t.Errorf("model = %q, want gpt-5.4 (the current openai default)", entry.Model)
 	}
 	if entry.APIKey != "" {
 		t.Errorf("APIKey should not be stored when env var is set; got %q", entry.APIKey)
