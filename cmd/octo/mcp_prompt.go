@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/mcp"
 )
 
@@ -55,6 +56,7 @@ func openBrowser(url string) error {
 		// empty quoted arg is start's window-title placeholder, required
 		// whenever the target itself might be quoted.
 		cmd = exec.Command("cmd", "/c", "start", "", url)
+		executil.SetNoWindow(cmd)
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}

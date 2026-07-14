@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/executil"
 )
 
 // setProcessGroupOpts is a no-op on Windows, which has no POSIX process groups.
@@ -22,7 +24,6 @@ func setProcessGroupOpts() *syscall.SysProcAttr { return nil }
 const (
 	detachedProcess       = 0x00000008
 	createNewProcessGroup = 0x00000200
-	createNoWindow        = 0x08000000
 )
 
 // setDetachedProcessOpts starts the child detached from the harness console in
@@ -35,7 +36,7 @@ func setDetachedProcessOpts() *syscall.SysProcAttr {
 // processExists checks whether a process with the given PID is still running.
 func processExists(pid int) bool {
 	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH")
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
+	executil.SetNoWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -57,7 +58,7 @@ func killProcessGroup(p *os.Process, sigName string) error {
 	if !force {
 		// Graceful attempt: send WM_CLOSE to the process tree.
 		cmd := exec.Command("taskkill", "/T", "/PID", strconv.Itoa(p.Pid))
-		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
+		executil.SetNoWindow(cmd)
 		_ = cmd.Run()
 		// Wait up to 5s for the process to exit.
 		for i := 0; i < 50; i++ {
@@ -70,7 +71,7 @@ func killProcessGroup(p *os.Process, sigName string) error {
 	}
 
 	cmd := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(p.Pid))
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
+	executil.SetNoWindow(cmd)
 	if err := cmd.Run(); err != nil {
 		return p.Kill()
 	}

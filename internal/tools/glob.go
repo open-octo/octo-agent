@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/tools/rgembed"
 )
 
@@ -309,6 +310,7 @@ func listProjectFiles(ctx context.Context, root string) ([]string, string, error
 
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, rgPath, "--files", "--hidden", "--null", root)
+	executil.SetNoWindow(cmd)
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 
