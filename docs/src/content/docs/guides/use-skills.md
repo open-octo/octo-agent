@@ -81,7 +81,6 @@ matches its description — you rarely need to invoke them by name.
 
 | Skill | What it does |
 |---|---|
-| `loop` | Repeats a prompt in the current session — fixed interval or self-paced — without re-prompting each time. See [`/loop`](/docs/guides/loop/) |
 | `cron-task-creator` | Creates/inspects/edits/deletes recurring prompts that survive a restart, run by `octo serve`'s scheduler. See [Schedule cron tasks](/docs/guides/cron-tasks/) |
 
 **Connect things**

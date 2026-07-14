@@ -88,12 +88,13 @@ func LoopExpired(start time.Time) bool {
 }
 
 // ScheduleWakeupTool lets the model schedule its own next turn — the mechanism
-// behind the loop skill. The model calls it at the end of a turn to come back
-// later (dynamic, self-paced mode) or to keep a fixed cadence (repeat = interval
-// mode); NOT calling it ends the loop. It only works inside a live session that
-// can be re-entered — the interactive TUI or a server-managed web/IM session —
-// so it is withheld from the headless one-shot (wakerEnabled gates it in
-// DefaultToolsFor) and the per-session Waker is injected into the turn ctx.
+// behind an in-session loop (the /loop command). The model calls it at the end
+// of a turn to come back later (dynamic, self-paced mode) or to keep a fixed
+// cadence (repeat = interval mode); NOT calling it ends the loop. It only works
+// inside a live session that can be re-entered — the interactive TUI or a
+// server-managed web/IM session — so it is withheld from the headless one-shot
+// (wakerEnabled gates it in DefaultToolsFor) and the per-session Waker is
+// injected into the turn ctx.
 type ScheduleWakeupTool struct{}
 
 func (ScheduleWakeupTool) Definition() agent.ToolDefinition {

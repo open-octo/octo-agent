@@ -204,7 +204,7 @@ type Server struct {
 	interruptMu sync.Mutex
 
 	// wakeupTimers holds the armed in-session loop wakeup per session
-	// (schedule_wakeup tool / loop skill), guarded by wakeupMu. The loop
+	// (schedule_wakeup tool, behind /loop), guarded by wakeupMu. The loop
 	// coexists with user messages; it stops on an explicit interrupt / cancel
 	// or the anti-leak lifetime bound. wakeupStart is the per-loop clock
 	// (first-arm time, kept across ticks) backing that bound. See loop.go.
@@ -2801,7 +2801,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// send_file tool itself is advertised via DefaultToolsFor (messenger
 		// registered); here we only pin which chat the no-target case sends to.
 		ctx = tools.WithChannelSender(ctx, channelFileSender{ad: ad, chatID: ev.ChatID, replyTo: ev.MessageID})
-		// Per-chat Waker so schedule_wakeup (the loop skill) can pace this and
+		// Per-chat Waker so schedule_wakeup (the in-session loop) can pace this and
 		// later turns. On wakeup it routes through runChannelIdleTurn, which
 		// delivers via the adapter — including the wakeup-injected turns, which
 		// flow back through here and re-stamp the waker so the loop continues.

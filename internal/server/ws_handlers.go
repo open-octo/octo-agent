@@ -1231,7 +1231,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	}()
 
 	runCtx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKeySessionID{}, sess.ID))
-	// Stamp the per-session Waker so schedule_wakeup (the loop skill) can pace
+	// Stamp the per-session Waker so schedule_wakeup (the in-session loop) can pace
 	// this and later turns — including the wakeup-injected turns kicked via
 	// kickIdleSteerTurn, which also flow through here.
 	runCtx = tools.WithWaker(runCtx, s.wakerFor(sess.ID))
