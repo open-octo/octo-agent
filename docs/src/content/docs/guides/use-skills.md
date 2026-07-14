@@ -65,7 +65,7 @@ matches its description — you rarely need to invoke them by name.
 | `onboard` | First-run setup (name, personality, profile → `soul.md` + `user.md`); also handles narrower re-curation with `scope:soul`, `scope:user`, or a specific memory file path |
 | `product-help` | Answers "how do I…" / "what is…" questions about octo itself by reading its own product docs |
 | `skill-creator` | Turns a repeatable task into a new `SKILL.md`, or edits/improves an existing one |
-| `workflow-creator` | Chains **existing** skills and browser recordings into one runnable, saved [workflow](/docs/guides/workflows/) |
+| `workflow-creator` | Chains **existing** skills and browser recordings, or composes fresh `agent`/`parallel`/`pipeline` orchestration, into one runnable, saved [workflow](/docs/guides/workflows/) |
 
 **Build & ship code**
 
@@ -81,7 +81,6 @@ matches its description — you rarely need to invoke them by name.
 
 | Skill | What it does |
 |---|---|
-| `loop` | Repeats a prompt in the current session — fixed interval or self-paced — without re-prompting each time. See [`/loop`](/docs/guides/loop/) |
 | `cron-task-creator` | Creates/inspects/edits/deletes recurring prompts that survive a restart, run by `octo serve`'s scheduler. See [Schedule cron tasks](/docs/guides/cron-tasks/) |
 
 **Connect things**
@@ -99,5 +98,6 @@ matches its description — you rarely need to invoke them by name.
 | `office-xlsx` | Creates/reads/edits `.xlsx` spreadsheets — formulas, styling, merged cells, multiple sheets, charts, validation |
 | `ppt-master` | Turns a document (PDF/DOCX/URL/Markdown) into an editable PowerPoint deck — SVG-authored slides with native charts/tables and speaker notes, exported to `.pptx` |
 | `image-gen` | Generates images with an AI model (14 provider backends) or sources openly-licensed stock, saved to files — one-off or batch; other skills like `ppt-master` delegate to it |
+| `deep-research` | Deep, multi-source, fact-checked research — fans out searches, reads primary sources, adversarially verifies claims, and synthesizes a cited report |
 
 Next: chaining several of these into one saved flow is exactly what [Workflows](/docs/guides/workflows/) are for.
