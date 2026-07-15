@@ -452,7 +452,32 @@ MVP 阶段 memory backend 不改。所有 agent 共享同一套 `memDir` + `home
 
 后续若出现跨 agent 记忆噪声投诉，再升级到 A（全隔）— 只需把 agent-specific directory 改名就是 shared base，迁移成本低。
 
-#### 6.5 Workflow 面板：鸭子类型接口
+#### 6.5 Browser 录制 skill 隔离
+
+Browser 录制的 skill 存储在 `~/.octo/skills/` 下，与用户安装 skill 共享发现/加载路径。录制本身依赖 `browser` 工具（`browser record` 命令），回放依赖 `browser` 工具（`run_skill`）。
+
+**隔离方式**：在 `ManifestForProfile()` 中，如果 profile 不含 `browser` 工具，过滤掉所有 browser-recorded skill。过滤条件：
+
+```go
+// 检测方式：通过 skill source 路径或 frontmatter 标记
+func isBrowserSkill(s Skill) bool {
+    return strings.Contains(s.Source, "browser/") || s.Source == "browser-record"
+}
+
+// ManifestForProfile 过滤
+if !allowed["browser"] {
+    skills = filterOut(skills, isBrowserSkill)
+}
+```
+
+**效果**：
+- code-review（tools: browser, read_file...）→ 面板可见 browser skill ✅
+- doc-writer（tools: read_file, write_file）→ 面板不可见 browser skill ✅
+- Default Agent（tools: 全部）→ 面板可见 ✅
+
+**工程量**：约 5 行代码，复用现有 `ManifestForProfile()` 过滤框架。
+
+#### 6.6 Workflow 面板：鸭子类型接口
 
 Workflow 里调度的匿名子 agent 会继承 caller 的 tool 白名单。但 workflow 编写时依赖的 tool 可能不在所有 agent 的白名单里，导致执行时报错。
 
@@ -752,7 +777,7 @@ func DefaultProfile() *Profile {
 | `internal/server/handlers.go` | 新增 agents handlers（CRUD + 资源子路由） |
 | `internal/channel/manager.go` | 接受 profile 参数注入 system prompt / model |
 | `internal/tools/registry.go` | `DefaultToolsForProfile()` — 按 profile 过滤工具 |
-| `internal/skills/skills.go` | `ManifestForProfile()` — 按 profile 过滤 skill manifest；系统级 skill frontmatter 标记 `system: true` 后对 expert agent 隐藏 |
+| `internal/skills/skills.go` | `ManifestForProfile()` — 按 profile 过滤 skill manifest；系统级 skill frontmatter 标记 `system: true` 后对 expert agent 隐藏；browser-recorded skill 在 profile 不含 browser 工具时隐藏 |
 | `internal/scheduler/` 或 task 存储 | cron task 新增 `agent_id` 字段；`GET /api/cron` 支持 `?agent_id=` 过滤；新增 `PUT /api/cron/:id/transfer` |
 | `internal/config/config.go` | `Server.Config` 新增 `agentName` 字段 |
 | `cmd/octo/chat.go` | 新增 `--agent` flag |
