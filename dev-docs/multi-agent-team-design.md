@@ -77,9 +77,38 @@
 ```go
 type Server struct {
     // ─── 多 agent 核心 ───
+    // channelMgr 已完全移除，由 multiMgr 统一派发所有 IM 事件
     agentStore   *agentprofile.Store          // ~/.octo/agents/ 的加载与热管理
-    multiMgr     *channel.MultiManager        // 替代单一 channelMgr，内持多个 per-agent Manager
-    defaultMgr   *channel.Manager             // Default Agent 的 Manager（快捷引用）
+    multiMgr     *channel.MultiManager        // 替代 channelMgr，内持多个 per-agent Manager
+    defaultMgr   *channel.Manager             // Default Agent 的 Manager（快捷引用，冗余但省去每次 map 查找）
+```
+
+### IM 事件流
+
+废弃 `Server.channelMgr` 后，`multiMgr` 成为 IM 事件的唯一分派点：
+
+```
+Channel Adapter (IM 消息)
+    │
+    ▼
+Server.handleChannelMessage(ev)         ← 入口不变，body 改造
+    │
+    ▼
+mgr := multiMgr.Resolve(ev)             ← 路由决策：拿到正确的 per-agent Manager
+if mgr == nil {
+    // 群聊多绑定无 @：drop，不路由到任何 agent
+    return
+}
+    │
+    ▼
+mgr.GetOrCreateSession(ev) & run turn    ← 跟原有单 Manager 路径一致，但隔离到目标 agent 的 pool
+```
+
+**Resolve 返回 nil 的 drop 逻辑**：当群聊绑定多个 agent 但消息无 @ 时，`Router.Route()` 返回 nil，`Resolve` 透传返回 nil，handler 直接 return 不响应。
+
+**迁移期无并存**：没有 `channelMgr` / `multiMgr` 双轨。`initChannels()` 改为 `initMultiManager()`，一次切干净。
+
+**adapter 注入改造**：每个 channel adapter 启动时的回调从 `func(ev)` 改为内部直接调 `multiMgr.Resolve`。由于 Resolve 是纯计算（路由查找 + map 读取），adapter 不需要感知 agent 数量。
 
     // ─── 以下字段基本不变 ───
     cfg          Config
