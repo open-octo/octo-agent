@@ -20,9 +20,9 @@ type SubAgentEvent struct {
 	//   "tool_error" — a tool returned an error (ToolName set)
 	//   "done"       — the round finished (sync return or async completion);
 	//                  live panels drop the entry on this
-	Kind       string
-	ToolName   string
-	ToolInput  map[string]any // optional: the tool's input arguments for UI display
+	Kind      string
+	ToolName  string
+	ToolInput map[string]any // optional: the tool's input arguments for UI display
 	// StopReason is the agent's final stop reason on a "done" event (e.g.
 	// "end_turn", "tool_use", "max_turns", "max_tokens", "promoted"). Empty or
 	// sentinel values like "error" / "killed" indicate the agent exited
