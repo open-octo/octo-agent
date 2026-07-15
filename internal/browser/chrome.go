@@ -167,6 +167,12 @@ func launchChrome(ctx context.Context, opts LaunchOptions) (*exec.Cmd, string, e
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--disable-gpu",
+		// Use an in-memory password store instead of the OS keychain. The
+		// browser runs on a throwaway profile and never needs real secrets;
+		// touching the OS keychain otherwise pops a blocking "cannot find
+		// keychain" dialog on macOS on every launch.
+		"--password-store=basic",
+		"--use-mock-keychain",
 		"about:blank",
 	}
 	if opts.Headless {
