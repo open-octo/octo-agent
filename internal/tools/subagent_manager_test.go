@@ -387,8 +387,9 @@ func TestEventSinkDoneCarriesStopReason(t *testing.T) {
 	// Normal completion via Start: stop reason is "end_turn".
 	m := NewSubAgentManager(&fixedSpawner{result: SpawnResult{Reply: "ok", AgentID: "child-1", StopReason: "end_turn"}})
 
+	var mu sync.Mutex
 	var events []SubAgentEvent
-	m.SetOnEvent(func(ev SubAgentEvent) { events = append(events, ev) })
+	m.SetOnEvent(func(ev SubAgentEvent) { mu.Lock(); events = append(events, ev); mu.Unlock() })
 
 	id, err := m.Start(SpawnRequest{Description: "d", Prompt: "p"})
 	if err != nil {
@@ -404,23 +405,33 @@ func TestEventSinkDoneCarriesStopReason(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if len(events) >= 2 && events[len(events)-1].Kind == "done" {
+		mu.Lock()
+		done := len(events) >= 2 && events[len(events)-1].Kind == "done"
+		mu.Unlock()
+		if done {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("events = %v, want trailing done", events)
+			mu.Lock()
+			evs := events
+			mu.Unlock()
+			t.Fatalf("events = %v, want trailing done", evs)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if last := events[len(events)-1]; last.StopReason != "end_turn" {
+	mu.Lock()
+	last := events[len(events)-1]
+	mu.Unlock()
+	if last.StopReason != "end_turn" {
 		t.Errorf("done StopReason = %q, want end_turn", last.StopReason)
 	}
 
 	// Kill a running agent: the done event should report killed.
 	sp := &blockingPromoteSpawner{unblock: make(chan struct{}), spawnCh: make(chan SpawnRequest, 1)}
 	m2 := NewSubAgentManager(sp)
+	var mu2 sync.Mutex
 	var events2 []SubAgentEvent
-	m2.SetOnEvent(func(ev SubAgentEvent) { events2 = append(events2, ev) })
+	m2.SetOnEvent(func(ev SubAgentEvent) { mu2.Lock(); events2 = append(events2, ev); mu2.Unlock() })
 	id2, err := m2.Start(SpawnRequest{Description: "d", Prompt: "p"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -436,16 +447,21 @@ func TestEventSinkDoneCarriesStopReason(t *testing.T) {
 	deadline = time.Now().Add(2 * time.Second)
 	var killedEvent SubAgentEvent
 	for {
+		mu2.Lock()
 		for _, ev := range events2 {
 			if ev.AgentID == id2 && ev.Kind == "done" {
 				killedEvent = ev
 			}
 		}
+		mu2.Unlock()
 		if killedEvent.Kind == "done" {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("no killed done event for %q; events = %v", id2, events2)
+			mu2.Lock()
+			evs := events2
+			mu2.Unlock()
+			t.Fatalf("no killed done event for %q; events = %v", id2, evs)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
