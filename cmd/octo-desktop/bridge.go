@@ -320,6 +320,22 @@ func (b *nativeBridge) ToggleMaximise() {
 	}
 }
 
+// Minimise minimises the window to the taskbar/dock. No-op before the window exists.
+func (b *nativeBridge) Minimise() {
+	if b.window != nil {
+		b.window.Minimise()
+	}
+}
+
+// Close closes the window (sends WindowClosing, after which the app's ShouldQuit
+// decides whether the hub actually terminates or keeps running in the tray).
+// No-op before the window exists.
+func (b *nativeBridge) Close() {
+	if b.window != nil {
+		b.window.Close()
+	}
+}
+
 // showWindow brings the hub window to the foreground on the current view.
 func (b *nativeBridge) showWindow() { b.showWindowAt("") }
 
@@ -356,9 +372,15 @@ func (b *nativeBridge) showWindowAt(hash string) {
 			Height:     height,
 			StartState: startState,
 			URL:        target,
-			// Hidden-inset title bar: the traffic lights float over the page's
-			// top-left; the frontend insets its header past them (nativeShell).
-			Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
+			// Frameless window: no native title bar or borders, the frontend draws
+			// its own. CSS --wails-draggable: drag regions (in Header) handle window
+			// dragging; Windows/Linux get custom min/max/close buttons there too.
+			// Mac keeps its native traffic-light buttons via InvisibleTitleBarHeight.
+			Frameless: true,
+			Mac: application.MacWindow{
+				TitleBar:               application.MacTitleBarHiddenInset,
+				InvisibleTitleBarHeight: 50, // hidden top strip that acts as a drag handle + restores traffic light drag
+			},
 		})
 		// Forget the window when it closes so a later Show re-creates one; the
 		// app itself stays alive via ApplicationShouldTerminateAfterLastWindowClosed.
