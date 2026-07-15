@@ -398,7 +398,52 @@ type Server struct {
 | 新建会话 | ✅（session pool 归 master） | ✅（session pool 归该 agent） |
 | 查看会话列表 | 仅 master 的 session | 仅该 agent 的 session |
 
-#### 6.2 会话列表 API 改造
+#### 6.2 系统级内置 skill 权限
+
+部分内置 skill 涉及平台资源管理（创建 skill、配置 MCP），只允许 Master agent 使用。Sub-agent 的 skill 面板**看不到**这些 skill，也无法开启：
+
+| 系统级 skill | Master | Sub-Agent |
+|-------------|--------|-----------|
+| `skill-creator` | ✅ 可见可开关 | ❌ 不可见 |
+| `mcp-creator` | ✅ 可见可开关 | ❌ 不可见 |
+| `cron-task-creator` | ✅ 可见可开关 | ❌ 不可见（但可以使用已创建的 cron） |
+| `workflow-creator` | ✅ 可见可开关 | ❌ 不可见 |
+| `channel-manager` | ✅ 可见可开关 | ❌ 不可见 |
+
+实现方式：`ManifestForProfile()` 中，对 sub-agent profile 额外过滤掉系统级 skill 白名单。这些 skill 的 `visibility` 标记在 frontmatter 中新增 `system: true`，渲染 manifest 时 `if profile.IsSystemOnly(skill) && !profile.IsMaster() { skip }`。
+
+#### 6.3 Cron 任务归属
+
+Cron 任务按 agent 归属：**谁创建的归谁**。每个 cron task 记录中新增 `agent_id` 字段，标识创建者。
+
+| 操作 | Master | Sub-Agent |
+|------|--------|-----------|
+| 创建 cron | ✅ 归 master | ✅ 归该 agent |
+| 查看 cron 列表 | 全部（含所有 agent） | 仅自己的 |
+| 编辑/删除 cron | 全部 | 仅自己的 |
+| **转移 cron 归属** | ✅ 可将自己的 cron 转给其他 agent | ❌ 无转移权限 |
+
+Master 的 cron 管理面板多一个"归属"列和"转移"操作，允许将 master 拥有的 cron 转给任意 sub-agent。转移后，cron 的执行 agent 变为目标 agent（使用目标 agent 的 profile 配置、session pool、权限）。
+
+数据结构变更：
+
+```json
+// ~/.octo/tasks/<task-id>.json 新增字段
+{
+  "agent_id": "code-review",
+  "transferable": true,
+  "transferred_at": "2026-07-15T10:00:00Z",
+  "transferred_from": "master"
+}
+```
+
+API 新增：
+
+```
+PUT /api/cron/:id/transfer  — body: {"agent_id": "code-review"}  — 仅 master 可用
+```
+
+#### 6.4 会话列表 API 改造
 
 当前 `GET /api/sessions` 列全部 session（不分 agent）。需要：
 
@@ -610,7 +655,12 @@ func MasterProfile() *Profile {
 | PUT | `/api/agents/:id/mcp/:server` | 启用/禁用 MCP server |
 | GET | `/api/agents/:id/tools` | 列出该 agent 的工具白名单 |
 
-### 切换
+### Cron 归属与转移
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/cron?agent_id=:id` | 按 agent 过滤 cron 列表 |
+| PUT | `/api/cron/:id/transfer` | 转移 cron 归属（仅 master） |
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -643,17 +693,19 @@ func MasterProfile() *Profile {
 | `internal/server/handlers.go` | 新增 agents handlers（CRUD + 资源子路由） |
 | `internal/channel/manager.go` | 接受 profile 参数注入 system prompt / model |
 | `internal/tools/registry.go` | `DefaultToolsForProfile()` — 按 profile 过滤工具 |
-| `internal/skills/skills.go` | `ManifestForProfile()` — 按 profile 过滤 skill manifest |
+| `internal/skills/skills.go` | `ManifestForProfile()` — 按 profile 过滤 skill manifest；系统级 skill frontmatter 标记 `system: true` 后对 sub-agent 隐藏 |
+| `internal/scheduler/` 或 task 存储 | cron task 新增 `agent_id` 字段；`GET /api/cron` 支持 `?agent_id=` 过滤；新增 `PUT /api/cron/:id/transfer` |
 | `internal/config/config.go` | `Server.Config` 新增 `agentName` 字段 |
 | `cmd/octo/chat.go` | 新增 `--agent` flag |
 | `cmd/octo/repl.go` | 新增 `--agent` flag；`/agent` 命令 |
 | `cmd/octo-desktop/main.go` | desktop 启动传 `agentName` 给 server |
-| `web/src/lib/stores.ts` | 新增 `activeAgentId`, `agentList` stores |
-| `web/src/lib/api.ts` | 新增 agents API 调用 |
+| `web/src/lib/stores.ts` | 新增 `activeAgentId`, `agentList`, `cronOwnership` stores |
+| `web/src/lib/api.ts` | 新增 agents API 调用；cron transfer API |
 | `web/src/components/layout/Header.svelte` | 集成 AgentAvatar 下拉 |
-| `web/src/views/SkillsView.svelte` | 技能列表根据 active agent 过滤；不在 master 时隐藏新增 |
+| `web/src/views/SkillsView.svelte` | 技能列表根据 active agent 过滤；不在 master 时隐藏新增和系统级 skill |
 | `web/src/views/McpView.svelte` | MCP 列表根据 active agent 过滤 |
 | `web/src/views/ChatView.svelte` | 会话列表根据 active agent 拉取 |
+| `web/src/views/TasksView.svelte` | cron 列表按 agent 过滤；master 视图显示"归属"列和"转移"操作 |
 
 ---
 
