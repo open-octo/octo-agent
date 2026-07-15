@@ -122,8 +122,7 @@ func TestParseUserFiles_DocPath(t *testing.T) {
 }
 
 func TestDocChipRefs(t *testing.T) {
-	// The unixnano prefix handleUpload adds is stripped so the chip shows the
-	// original filename; the note is removed from the returned text.
+	// Document attachment → "pdf:<name>" chip.
 	in := "look at this\n\n" + agent.AttachmentNote("/home/u/.octo/uploads/1720000000000000000_report.pdf")
 	cleaned, refs := docChipRefs(in)
 	if cleaned != "look at this" {
@@ -131,6 +130,23 @@ func TestDocChipRefs(t *testing.T) {
 	}
 	if len(refs) != 1 || refs[0] != "pdf:report.pdf" {
 		t.Errorf("refs = %v, want [pdf:report.pdf]", refs)
+	}
+
+	// Image attachment persisted under uploads → "/api/uploads/" thumbnail URL.
+	in = "look at this\n\n" + agent.AttachmentNote("/home/u/.octo/uploads/1720000000000000000_shot.jpg")
+	cleaned, refs = docChipRefs(in)
+	if cleaned != "look at this" {
+		t.Errorf("cleaned = %q, want %q", cleaned, "look at this")
+	}
+	if len(refs) != 1 || refs[0] != "/api/uploads/1720000000000000000_shot.jpg" {
+		t.Errorf("refs = %v, want [/api/uploads/1720000000000000000_shot.jpg]", refs)
+	}
+
+	// Non-upload local image path stays a document chip (not served by /api/uploads/).
+	in = "look at this\n\n" + agent.AttachmentNote("/tmp/local_shot.jpg")
+	cleaned, refs = docChipRefs(in)
+	if len(refs) != 1 || refs[0] != "pdf:local_shot.jpg" {
+		t.Errorf("refs = %v, want [pdf:local_shot.jpg]", refs)
 	}
 }
 
@@ -152,7 +168,8 @@ func TestParseUserFiles_SkipsBadEntries(t *testing.T) {
 // A persisted document attachment (only an "[Attached file: <abspath>]" note in
 // the text, no image block) must replay with the note stripped from the visible
 // content and re-derived into a "pdf:<name>" chip ref — so a reloaded transcript
-// matches what the live turn showed.
+// matches what the live turn showed. Image notes instead become
+// "/api/uploads/<name>" thumbnail refs.
 func TestHandleGetSessionMessages_DocAttachmentReplay(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -439,7 +456,7 @@ func TestHandleWSUserMessage_ImageOnly_NonVision(t *testing.T) {
 		},
 	})
 
-	var gotDocChip bool
+	var gotImage bool
 	deadline := time.After(5 * time.Second)
 drain:
 	for {
@@ -454,8 +471,8 @@ drain:
 				if imgs, ok := ev["images"].([]any); ok {
 					for _, img := range imgs {
 						ref, _ := img.(string)
-						if strings.HasPrefix(ref, "pdf:shot") {
-							gotDocChip = true
+						if strings.HasPrefix(ref, "/api/uploads/") {
+							gotImage = true
 						}
 					}
 				}
@@ -466,8 +483,8 @@ drain:
 			t.Fatal("turn did not complete — non-vision image-only message still dropped?")
 		}
 	}
-	if !gotDocChip {
-		t.Error("history_user_message carried no document chip for the persisted image")
+	if !gotImage {
+		t.Error("history_user_message carried no /api/uploads/ image ref for the persisted image")
 	}
 
 	// The persisted message should carry a path note, not an image block.

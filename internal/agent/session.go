@@ -941,6 +941,18 @@ func StripAttachmentNotes(s string) (cleaned string, names []string) {
 	return cleaned, names
 }
 
+// AttachmentPaths returns the raw on-disk paths from every "[Attached file: <>]"
+// note in s, in order. This is the complement of StripAttachmentNotes: callers
+// that need the full path (e.g. to derive an /api/uploads/ thumbnail URL) use
+// this; callers that only need a display name use StripAttachmentNotes.
+func AttachmentPaths(s string) []string {
+	var paths []string
+	for _, m := range attachmentNoteRe.FindAllStringSubmatch(s, -1) {
+		paths = append(paths, strings.TrimSpace(m[1]))
+	}
+	return paths
+}
+
 // LoadSession reads ~/.octo/sessions/<id>.jsonl. id may be a bare session id,
 // an id with a .jsonl/.json suffix, or an absolute path to a transcript file.
 func LoadSession(id string) (*Session, error) {
