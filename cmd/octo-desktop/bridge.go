@@ -230,6 +230,23 @@ func (b *nativeBridge) Notify(title, body string) {
 	})
 }
 
+// NotifySession raises an OS-native notification that, when clicked, brings the
+// user to the given session. The session ID travels in the notification's Data
+// payload and is echoed back as UserInfo in the platform response handler.
+func (b *nativeBridge) NotifySession(title, body, sessionID string) {
+	if b.notifier == nil {
+		return
+	}
+	_ = b.notifier.SendNotification(notifications.NotificationOptions{
+		ID:    fmt.Sprintf("octo-notify-%d", b.notifySeq.Add(1)),
+		Title: title,
+		Body:  body,
+		Data: map[string]any{
+			"session_id": sessionID,
+		},
+	})
+}
+
 // requestNotificationAuthorization asks the OS for permission to post
 // notifications, without which every Notify call silently no-ops. macOS
 // requires this at runtime: UNUserNotificationCenter drops delivery (reporting
