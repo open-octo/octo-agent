@@ -13,7 +13,7 @@
 1. 将 octo 从**单 agent** 升级为**多 agent 平台**：引入 Default Agent / Expert Agent 模型，每个 agent 拥有独立的 system prompt、工具集、skills、MCP、session pool。
 2. Default Agent 是**唯一**管理入口：创建/修改/删除 agent、增删 skill、配置 MCP 都只能在 Default Agent 视图下进行。
 3. Expert Agent 只能从已有资源池中**启用/禁用**，不能新增 skill/MCP（"定义"归 Default Agent，"使用配置"归各 agent）。
-4. 切换 agent 时，Web UI 上的会话列表、skill 面板、MCP 面板全部切换为该 agent 的集合。
+4. 每个 agent 拥有独立的会话 pool，会话一旦建立 agent 不可切换。
 5. IM 路由支持频道绑定（私聊严格一对一，群聊多 agent 共存 @ 触发）。
 6. CLI/TUI 支持启动时 `--agent` 指定 agent。
 7. 所有 agent（无论是 Default 还是 Expert）都可以通过 `sub_agent` 工具在会话内部调度匿名子 agent 执行隔离任务。
@@ -38,7 +38,7 @@
 | **Profile Store** | `~/.octo/agents/` 目录，每个 expert agent 一个 `<id>.json` 文件 |
 | **Agent Router** | 根据 InboundEvent（平台、chatID、消息内容中的 @ 提及）决定消息路由到哪个 agent profile |
 | **Session Key** | `platform:chat_id:user_id`（私聊时）或 `platform:chat_id`（群聊时），标识一个 session pool 中的唯一会话 |
-| **Agent 切换** | Web 顶部 agent 头像点击后切换当前 agent，所有 UI 面板切换到该 agent 隔离的命名空间 |
+| **Agent 绑定** | 会话创建时绑定 agent，一旦建立不可切换；通过新建会话选择其他 agent |
 
 ---
 
@@ -512,7 +512,7 @@ if !allowed["browser"] {
 
 Workflow 里调度的匿名子 agent 会继承 caller 的 tool 白名单。但 workflow 编写时依赖的 tool 可能不在所有 agent 的白名单里，导致执行时报错。
 
-**Workflow 前端面板不隔离**：所有 agent 共享同一份 workflow 列表。Workflow 的依赖校验仅在运行时执行 — 当用户触发 workflow 时检查当前 session 对应的 agent profile 是否满足依赖，缺则拒绝并提示切换 agent 或在 Agent 管理面板开启所需工具。
+**Workflow 前端面板不隔离**：所有 agent 共享同一份 workflow 列表。Workflow 的依赖校验仅在运行时执行 — 当用户触发 workflow 时检查当前 session 对应的 agent profile 是否满足依赖，缺则拒绝并提示在 Agent 管理面板开启所需工具或新建指向兼容 agent 的会话。
 
 **MCP 过滤入口**：选 A。`DefaultToolsForProfile` 统一过滤 — 该函数同时感知 skillReg + MCPRegistry + DefaultRegistry，在一个函数内完成 built-in tool + MCP tool 的 per-profile 过滤。实现简单，单一入口易于维护。
 
@@ -561,7 +561,7 @@ func DefaultToolsForProfile(ctx context.Context, profile *agentprofile.Profile, 
 交互位置：新建会话按钮旁的小 "+" 下拉（见 7.1）。点击后弹出 agent 选择列表，选择某个 expert agent → 创建归属于该 agent 的新会话。
 
 **为什么不在输入框里加 @-agent？**
-- 会话一旦建立，agent 是不可切换的。如果在输入框里允许 `@code-review` 把消息路由到另一个 agent，但 session metadata 仍归属原 agent，会出现上下文矛盾。
+- 会话一旦建立，agent 是不可切换的。想给另一个专家 agent 发消息 → 新建指向该 agent 的会话。
 - 想给另一个专家 agent 发消息 → 新建一个指向那个 agent 的会话即可。
 
 #### 7.3 会话一旦建立，Agent 不可切换
@@ -570,8 +570,6 @@ func DefaultToolsForProfile(ctx context.Context, profile *agentprofile.Profile, 
 - 会话列表每条会话标记所属 agent 的彩色 tag（如 `[🔍 code-review]`）
 - 会话内不显示 agent 切换入口
 - 想让消息走其他 agent → 要么用 `@+` 在输入框指定（见 7.2），要么新建一个指向其他 agent 的会话
-
-#### 7.4 切换 Agent 后的 UI 行为
 
 ### 8. CLI/TUI 入口指定 Agent
 
@@ -598,18 +596,18 @@ octo --agent ops-helper "查日志"    # 单轮 chat，走 ops-helper
 
 #### 8.2 后端处理
 
-`octo` 启动后，`activeAgentId` 由 flag 决定：
+`octo` 启动后，session 绑定的 agent 由 flag 决定：
 
 - 未指定：默认 `default`
 - 指定：检查 `agentStore.Get(id)` 是否存在。不存在则启动报错 `agent "xxx" not found (available: default, code-review, ops-helper)`
 
-**`-c` 会话列表按 agent 过滤**：`octo -c`（无 ID 时）弹出的会话选择列表，只展示 `activeAgentId` 对应的 session pool 中的会话。例如 `octo --agent code-review -c` 只展示 `code-review` 的 session，不展示 default 或其他 agent 的 session。
+**`-c` 会话列表展示全部**：`octo -c`（无 ID 时）弹出所有 session 的选择列表，不过滤 agent。
 
 TUI 会话的 `source` 字段标记为 `cli`，但 `agent_id` 标记为所选 profile。
 
 #### 8.3 TUI 内查看当前 Agent
 
-TUI 会话不可以在建立后切换 agent（与会话绑定）。但提供查看命令：
+TUI 会话建立后 agent 不可切换。提供查看命令：
 
 ```
 /agent                  — 显示当前会话所属 agent 名称 + 描述
@@ -706,7 +704,7 @@ func DefaultProfile() *Profile {
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/agent-current` | 获取当前 web 端的 active agent（存 cookie 或返回 default） |
-| PUT | `/api/agent-current` | 切换当前 agent |
+| GET | `/api/agents` | 列出所有 profiles（新建会话时选择） |
 
 ---
 
@@ -722,7 +720,6 @@ func DefaultProfile() *Profile {
 | `internal/channel/multi_manager.go` | MultiManager（per-agent Manager 容器） |
 | `web/src/views/AgentsView.svelte` | Agent 管理主面板 |
 | `web/src/views/AgentEditView.svelte` | Agent 编辑表单 |
-| `web/src/components/layout/AgentAvatar.svelte` | 顶部头像选择器 |
 | `web/src/components/agents/AgentList.svelte` | 下拉 agent 列表 |
 
 ### 修改文件
@@ -740,7 +737,7 @@ func DefaultProfile() *Profile {
 | `cmd/octo/chat.go` | 新增 `--agent` flag |
 | `cmd/octo/repl.go` | 新增 `--agent` flag；`/agent` 命令 |
 | `cmd/octo-desktop/main.go` | desktop 启动传 `agentName` 给 server |
-| `web/src/lib/stores.ts` | 新增 `activeAgentId`, `agentList`, `cronOwnership` stores |
+| `web/src/lib/stores.ts` | 新增 `agentList`, `cronOwnership` stores |
 | `web/src/lib/api.ts` | 新增 agents API 调用；cron transfer API |
 | `web/src/components/layout/Header.svelte` | 集成 AgentAvatar 下拉 |
 | `web/src/views/SkillsView.svelte` | 技能列表根据 active agent 过滤；不在 default 时隐藏新增和系统级 skill |
@@ -825,7 +822,7 @@ func DefaultProfile() *Profile {
 
 - [ ] 无 profile 文件时行为与改造前完全一致（向后兼容）
 - [ ] 创建 profile → 绑定频道 → IM 发消息 → 正确路由
-- [ ] Web 切换 agent → 会话列表、skill 面板、MCP 面板正确隔离
+- [ ] Web 新建会话选 agent → 会话正确归属；skill/MCP 面板不按 agent 过滤
 - [ ] 热加载后新配置生效（无需重启）
 - [ ] Default Agent 的 system prompt 不可通过 profile 编辑器修改（只读显示"由 onboard 管理"）
 - [ ] `octo --agent code-review` 正常启动
