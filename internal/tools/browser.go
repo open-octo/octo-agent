@@ -165,10 +165,12 @@ func ResetBrowserSession() {
 	closeSession(b, p)
 }
 
-// closeSession tears down a browser session. When we attached to the user's own
+// closeSession tears down a browser session. When attached to the user's own
 // Chrome, Close() only drops the WS and leaves our tab behind, so close the tab
-// we opened too (don't litter the user's browser); if we launched Chrome
-// ourselves, Close() kills it whole. Safe to call with nils.
+// we opened too (don't litter the user's browser). The production path never
+// launches its own Chrome (attach-only), so OwnsProcess is always false there;
+// integration tests inject a launched browser via SetBrowserSession, where
+// OwnsProcess can be true and Close() kills it whole. Safe to call with nils.
 func closeSession(b *browser.Browser, p *browser.Page) {
 	if b == nil {
 		return
@@ -272,21 +274,21 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 			return nil, nil, wrapBrowserConnectError(err)
 		}
 	default:
-		// No explicit attach config: prefer the user's logged-in Chrome if one
-		// is running with remote debugging. Discovery only succeeds when the
-		// user deliberately enabled it (the chrome://inspect toggle or
-		// --remote-debugging-port), so this never hijacks an ordinary browser —
-		// it just means `octo browser setup` users, and anyone who flipped the
-		// toggle, get their logged-in session without extra config. Falls back
-		// to a fresh throwaway Chrome.
+		// No explicit attach config: reuse the user's logged-in Chrome if one is
+		// running with remote debugging. Discovery only succeeds when the user
+		// deliberately enabled it (the chrome://inspect toggle or
+		// --remote-debugging-port), so this never hijacks an ordinary browser.
+		// When nothing is reachable we return an actionable error rather than
+		// launching a throwaway Chrome: the browser tool only ever drives a real,
+		// user-owned Chrome, never a headless instance it spins up itself (which
+		// would carry no login session and trip the macOS "Chrome Safe Storage"
+		// keychain prompt).
 		if b, err = browser.DiscoverRunningChrome(ctx); err != nil {
-			if b, err = browser.Launch(ctx, browser.LaunchOptions{
-				ExecPath:    bc.ExecPath,
-				UserDataDir: bc.UserDataDir,
-				Headless:    bc.Headless,
-			}); err != nil {
-				return nil, nil, fmt.Errorf("launch Chrome: %w", wrapBrowserConnectError(err))
-			}
+			// Return the discovery error as-is — it already carries an
+			// actionable connect guide ("launch Chrome with
+			// --remote-debugging-port or set browser.connect_port"), so
+			// wrapping it would repeat the setup instruction.
+			return nil, nil, err
 		}
 	}
 
