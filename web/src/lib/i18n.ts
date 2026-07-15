@@ -284,6 +284,14 @@ export const en: Record<string, string> = {
   "tasks.col_status": "Status",
   "tasks.empty": "No scheduled tasks yet — create one to get started.",
   "tasks.run_now": "Run now",
+  // Session controls how a task's runs relate to each other.
+  // "shared" (default) reuses one session so history accumulates run to run;
+  // "fresh" starts a brand-new session every run for a clean transcript.
+  "tasks.session_mode": "Session",
+  "tasks.session_mode_shared": "Accumulate",
+  "tasks.session_mode_fresh": "Fresh each run",
+  "tasks.session_mode_shared_hint": "Reuse one session across runs — history accumulates",
+  "tasks.session_mode_fresh_hint": "New session every run — clean transcript",
   "tasks.pause": "Pause",
   "tasks.resume": "Resume",
   "tasks.paused_toast": "Task paused",
@@ -866,6 +874,14 @@ export const zh: Record<string, string> = {
   "tasks.col_status": "状态",
   "tasks.empty": "暂无定时任务 — 创建一个即可开始。",
   "tasks.run_now": "立即运行",
+  // Session controls how a task's runs relate to each other.
+  // "shared" (default) reuses one session so history accumulates run to run;
+  // "fresh" starts a brand-new session every run for a clean transcript.
+  "tasks.session_mode": "会话",
+  "tasks.session_mode_shared": "累积",
+  "tasks.session_mode_fresh": "每次新建",
+  "tasks.session_mode_shared_hint": "复用同一会话——历史累积",
+  "tasks.session_mode_fresh_hint": "每次运行全新会话——空白记录",
   "tasks.pause": "暂停",
   "tasks.resume": "恢复",
   "tasks.paused_toast": "任务已暂停",
