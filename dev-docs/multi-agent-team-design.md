@@ -536,82 +536,46 @@ func DefaultToolsForProfile(ctx context.Context, profile *agentprofile.Profile, 
 
 ### 7. Web UI 布局
 
-#### 7.1 Agent 选择器（右侧顶部）
+#### 7.1 新建会话时选择 Agent
 
-在 `web/src/components/layout/Header.svelte` 的右侧区域（现有设置按钮左侧）添加 agent 头像：
-
-```
-┌────────────────────────────────────────────────────┐
-│  [搜索 pill]  ···          [🚀 Default ▼] [⚙] [−] │
-└────────────────────────────────────────────────────┘
-```
-
-点击头像展开 AgentList 下拉：
-- 当前选中 agent 高亮
-- Default Agent 在最顶部，显示 🚀 Default + 描述
-- 每个 expert agent 显示头像首字母 + name + 标记"绑定到 n 个频道"
-- 列表底部有 `[+ 新建 Agent]`（仅在 Default Agent 视图下显示）
-
-#### 7.2 Agent 管理面板
-
-在 Sidebar 中添加 `AgentsView.svelte` 入口，展示 Default Agent 下的 agent 管理界面：
+主 "新建会话" 按钮旁加一个小的 "+" 下拉，点击弹出 agent 选择列表：
 
 ```
-┌─────────────────────────────────────────────┐
-│  🤖 Agent Team                              │
-├─────────────────────────────────────────────┤
-│                                             │
-│  [+ 新建 Agent]                             │
-│                                             │
-│  ┌─────────────────────────────────────┐    │
-│  │ 🔍 code-review                      │    │
-│  │    代码审查专家                      │    │
-│  │    Model: claude-sonnet-4           │    │
-│  │    Bound: feishu/dev-group          │    │
-│  │    Mention: @review, @CR            │    │
-│  │                              [编辑] │    │
-│  └─────────────────────────────────────┘    │
-│                                             │
-│  ┌─────────────────────────────────────┐    │
-│  │ 🚀 ops-helper                       │    │
-│  │    运维助手                          │    │
-│  │    Model: claude-sonnet-4           │    │
-│  │    Bound: weixin/ops-group          │    │
-│  │                              [编辑] │    │
-│  └─────────────────────────────────────┘    │
-│                                             │
-└─────────────────────────────────────────────┘
+┌─────────────────────────┐
+│  🚀 Default Agent       │  ← 默认 agent（始终可见）
+│  ─────────────────────  │
+│  🔍 code-review         │  ← 已创建的 expert agents
+│  🚀 ops-helper          │
+│  📝 doc-writer          │
+│  ─────────────────────  │
+│  [+ 新建 Agent]         │  ← 始终可见
+└─────────────────────────┘
 ```
 
-#### 7.3 Agent 编辑视图
+选择某个 expert agent → 创建归属于该 agent 的新会话。
 
-点击编辑进入 `AgentEditView.svelte`，表单字段：
+#### 7.2 输入框内的 @-agent 命令
 
-| 字段 | 类型 | 可编辑 |
-|------|------|--------|
-| ID | 只读文本 | ❌ |
-| 名称 | 文本输入 | ✅ |
-| 描述 | 文本输入 | ✅ |
-| Model | 下拉选择（来自 config models） | ✅ |
-| System Prompt | 多行文本 | ✅ |
-| Tools | 多选 checkbox（来自 Default Agent tools） | ✅（仅开关） |
-| Skills | 多选 checkbox（来自 Default Agent skills） | ✅（仅开关） |
-| Mention Aliases | 标签输入 | ✅ |
-| 频道绑定 | 频道多选 + chat_id 输入 | ✅ |
+在 Composer 输入框中，和现有的 slash command (`/`) 补全并列，增加一个新的 **agent 选择按钮**（和附件按钮、斜杠按钮并排）：
 
-**权限控制**：仅 Default Agent 视图下可进入编辑视图。切换到 expert agent 后，新建按钮隐藏且无编辑入口（仅开关 skill/MCP）。
+```
+┌─────────────────────────────────────────────────────┐
+│  [📎]  [@+]  [/]  输入消息...           [发送]      │
+└─────────────────────────────────────────────────────┘
+```
+
+点击 `@+` 弹出 agent 选择列表，选择后将 `@agentname` 插入输入框（例如 `@code-review `）。发送后该消息路由到对应专家 agent 处理。
+
+若当前会话已有所属 agent（由新建时确定），`@+` 仍可指定其他 agent — 相当于"这条消息请某个专家帮忙看"。
+
+#### 7.3 会话一旦建立，Agent 不可切换
+
+会话创建时绑定的 agent 是该会话的永久属性，不随后续消息改变。UI：
+- 会话列表每条会话标记所属 agent 的彩色 tag（如 `[🔍 code-review]`）
+- 会话内不显示 agent 切换入口
+- 想让消息走其他 agent → 要么用 `@+` 在输入框指定（见 7.2），要么新建一个指向其他 agent 的会话
 
 #### 7.4 切换 Agent 后的 UI 行为
-
-切换 agent 时，前端 `activeAgentId` store 变更，触发：
-
-| UI 面板 | 行为 |
-|---------|------|
-| 会话列表 | 调用 `GET /api/agents/:id/sessions`，清空当前列表并展示新列表 |
-| 聊天视图 | 当前 session 变为 null；用户需新建或选择一个该 agent 的 session |
-| Skill 面板 | 展示该 agent 的 skill 列表（开关禁用/启用）；无"新增"按钮 |
-| MCP 面板 | 展示该 agent 的 MCP 列表；无"新增 server"按钮 |
-| 顶部头像 | 更新为新 agent 的首字母/图标 |
 
 ### 8. CLI/TUI 入口指定 Agent
 
@@ -647,14 +611,13 @@ octo --agent ops-helper "查日志"    # 单轮 chat，走 ops-helper
 
 TUI 会话的 `source` 字段标记为 `cli`，但 `agent_id` 标记为所选 profile。
 
-#### 8.3 TUI 内的 Agent 切换
+#### 8.3 TUI 内查看当前 Agent
 
-TUI 中增加 `/agent` 命令：
+TUI 会话不可以在建立后切换 agent（与会话绑定）。但提供查看命令：
 
 ```
-/agent                  — 显示当前 agent 名称
-/agent list             — 列出所有可用 agents（名称 + 绑定频道数）
-/agent use <name|id>    — 切换当前会话的 agent（创建新 session，旧 session 归属原 agent）
+/agent                  — 显示当前会话所属 agent 名称 + 描述
+/agent list             — 列出所有可用 agents（用于新建会话时选择）
 ```
 
 ### 9. IM 频道绑定 API
