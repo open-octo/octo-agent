@@ -406,11 +406,11 @@ type Server struct {
 |-------------|--------|-----------|
 | `skill-creator` | ✅ 可见可开关 | ❌ 不可见 |
 | `mcp-creator` | ✅ 可见可开关 | ❌ 不可见 |
-| `cron-task-creator` | ✅ 可见可开关 | ❌ 不可见（但可以使用已创建的 cron） |
 | `workflow-creator` | ✅ 可见可开关 | ❌ 不可见 |
 | `channel-manager` | ✅ 可见可开关 | ❌ 不可见 |
+| `cron-task-creator` | ✅ 可见可开关 | ✅ 可见可开关（创建属于自己的 cron） |
 
-实现方式：`ManifestForProfile()` 中，对 sub-agent profile 额外过滤掉系统级 skill 白名单。这些 skill 的 `visibility` 标记在 frontmatter 中新增 `system: true`，渲染 manifest 时 `if profile.IsSystemOnly(skill) && !profile.IsMaster() { skip }`。
+实现方式：`ManifestForProfile()` 中，对 sub-agent profile 额外过滤掉系统级 skill 白名单。这些 skill 的 `visibility` 标记在 frontmatter 中新增 `system: true`，渲染 manifest 时 `if profile.IsSystemOnly(skill) && !profile.IsMaster() { skip }`。`cron-task-creator` 标记为 `system: false`，所有 agent 可见。
 
 #### 6.3 Cron 任务归属
 
