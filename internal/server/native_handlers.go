@@ -38,6 +38,13 @@ type NativeBridge interface {
 	// itself (the page is octo-served, so it has no Wails runtime to call).
 	ToggleMaximise()
 
+	// Minimise minimises the window to the taskbar/dock.
+	Minimise()
+
+	// Close closes the window (the app's ShouldQuit hook decides whether the hub
+	// actually terminates or keeps running in the tray).
+	Close()
+
 	// OpenExternal opens url in the user's default browser — used by the update
 	// badge's "Download update" action to reach the release page, since the
 	// desktop build updates through its installer, not an in-place swap. The
@@ -199,6 +206,37 @@ func (s *Server) handleNativeToggleMaximise(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.cfg.Native.ToggleMaximise()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// POST /api/native/window/minimise — minimise the desktop window to the
+// taskbar/dock. Desktop only, loopback-gated.
+func (s *Server) handleNativeMinimise(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	s.cfg.Native.Minimise()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// POST /api/native/window/close — close the desktop window. The app's ShouldQuit
+// decides whether the hub actually terminates or keeps running in the tray.
+// Desktop only, loopback-gated.
+func (s *Server) handleNativeClose(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	s.cfg.Native.Close()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

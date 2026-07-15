@@ -233,6 +233,17 @@ export async function nativeToggleMaximise(): Promise<void> {
   await request<{ ok: boolean }>('/api/native/window/toggle-maximise', { method: 'POST' })
 }
 
+// Desktop shell only: minimise the window to the taskbar/dock. Best-effort.
+export async function nativeMinimise(): Promise<void> {
+  await request<{ ok: boolean }>('/api/native/window/minimise', { method: 'POST' })
+}
+
+// Desktop shell only: close the window (the app's ShouldQuit decides whether the
+// hub actually terminates or keeps running in the tray). Best-effort.
+export async function nativeClose(): Promise<void> {
+  await request<{ ok: boolean }>('/api/native/window/close', { method: 'POST' })
+}
+
 // Desktop shell only: open a URL with the OS default handler. The update badge
 // calls this in installer mode to reach the release download page (the desktop
 // build updates through its installer, not an in-place swap); chat links use it

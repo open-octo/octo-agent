@@ -166,6 +166,9 @@ html, body {
   font-family: var(--font-sans);
   color: var(--text);
   background: var(--bg-layout);
+  /* Frameless window: the OS can't resize us, so enable edge resize handles.
+     Harmless on the web (no Wails runtime → the property is ignored). */
+  --wails-resize: all;
 }
 
 #app { height: 100%; }

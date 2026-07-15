@@ -775,6 +775,8 @@ func (s *Server) registerRoutes() {
 		s.api("GET /api/native/autostart", s.handleNativeAutostartGet)
 		s.api("PUT /api/native/autostart", s.handleNativeAutostartSet)
 		s.api("POST /api/native/window/toggle-maximise", s.handleNativeToggleMaximise)
+		s.api("POST /api/native/window/minimise", s.handleNativeMinimise)
+		s.api("POST /api/native/window/close", s.handleNativeClose)
 		s.api("POST /api/native/open-external", s.handleNativeOpenExternal)
 		s.api("POST /api/native/save-file", s.handleNativeSaveFile)
 	}

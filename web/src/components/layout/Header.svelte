@@ -3,7 +3,7 @@
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
-  import { nativeToggleMaximise } from '../../lib/api'
+  import { nativeToggleMaximise, nativeMinimise, nativeClose } from '../../lib/api'
   import OctoLogo from './OctoLogo.svelte'
 
   function cycleSidebar() {
@@ -16,6 +16,11 @@
     setNotificationsEnabled(!$notificationsEnabled)
   }
 
+  // Frameless window: Mac gets a hidden drag strip (InvisibleTitleBarHeight)
+  // that restores the native traffic-light behaviour, so we skip the custom
+  // buttons there. Windows/Linux have no native buttons, so we draw our own.
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+
   // Desktop only: double-clicking the draggable header zooms the window, the way
   // a native title bar does. Wails' custom drag region doesn't wire this up, and
   // the octo-served page can't call Wails directly, so it goes through the native
@@ -27,7 +32,7 @@
   }
 </script>
 
-<header class:native-inset={$nativeShell} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
+<header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
   <div class="left">
     <button class="icon-btn" title={$t('header.toggle_sidebar')} onclick={cycleSidebar}>
       <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
@@ -61,6 +66,13 @@
     <button class="icon-btn" title={$t('nav.settings')} onclick={() => view.set('settings')}>
       <iconify-icon icon="ant-design:setting-outlined" width="16"></iconify-icon>
     </button>
+    {#if $nativeShell && !isMac}
+      <div class="window-controls">
+        <button class="window-btn minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
+        <button class="window-btn maximise" title="Maximise" onclick={() => nativeToggleMaximise()}>□</button>
+        <button class="window-btn close" title="Close" onclick={() => nativeClose()}>×</button>
+      </div>
+    {/if}
   </div>
 </header>
 
@@ -77,12 +89,15 @@ header {
   z-index: 100;
 }
 /* Desktop shell (macOS): the hidden-inset title bar floats the traffic-light
-   buttons over the top-left, so inset the header past them. The bar is a window
-   drag handle; interactive controls opt out below so they stay clickable. */
+   buttons over the top-left, so inset the header past them. */
 header.native-inset { padding-left: 82px; }
-header.native-inset .icon-btn,
-header.native-inset .search-pill,
-header.native-inset .brand { --wails-draggable: no-drag; }
+/* The header is a window drag handle. Every interactive control on it opts
+   back to no-drag so it stays clickable — the blank strips between controls
+   drag the window. Applied for all platforms (frameless window now), not just
+   macOS, since --wails-draggable only activates under Frameless: true. */
+header .icon-btn,
+header .search-pill,
+header .brand { --wails-draggable: no-drag; }
 .left, .right { display: flex; align-items: center; gap: 8px; }
 .brand { display: flex; align-items: center; gap: 10px; padding-left: 4px; }
 .brand :global(.logo) {
@@ -112,4 +127,22 @@ kbd {
   background: var(--bg-container); border: 1px solid var(--border-secondary); border-radius: 4px;
   padding: 1px 5px; color: var(--text-tertiary);
 }
+/* Window controls (Windows/Linux only — Mac uses native traffic lights via
+   InvisibleTitleBarHeight). Flat squares that sit flush in the title bar; the
+   close button turns red on hover like the system convention. */
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-left: 8px;
+  --wails-draggable: no-drag;
+}
+.window-btn {
+  width: 40px; height: 32px; border: none; background: transparent;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--text-secondary);
+  border-radius: 0;
+}
+.window-btn:hover { background: var(--hover-neutral); }
+.window-btn.close:hover { background: #e81123; color: white; }
 </style>
