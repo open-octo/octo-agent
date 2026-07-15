@@ -135,9 +135,13 @@ type MultiManager struct {
     store    *agentprofile.Store
 }
 
-// Resolve 根据 InboundEvent 找到应处理的 Manager
+// Resolve 根据 InboundEvent 找到应处理的 Manager。
+// profile 为 nil 时（群聊多绑定无 @）返回 nil，caller 应 drop 该消息。
 func (mm *MultiManager) Resolve(ev InboundEvent) *Manager {
     profile := mm.router.Route(ev)
+    if profile == nil {
+        return nil
+    }
     mm.mu.RLock()
     defer mm.mu.RUnlock()
     return mm.managers[profile.ID]
@@ -189,6 +193,7 @@ type Profile struct {
     SystemPrompt   string           `json:"system_prompt"`
     Tools          []string         `json:"tools"`
     ToolSkills     []string         `json:"tool_skills"`  // 这些 skill 以工具形式暴露
+    WorkingDir     string           `json:"working_dir,omitempty"`
     MentionAs      []string         `json:"mention_as"`
     ChannelBindings []ChannelBinding `json:"channel_bindings"`
     CreatedAt      time.Time        `json:"created_at"`
@@ -260,7 +265,7 @@ func (r *Router) Route(ev InboundEvent) *Profile {
         if p, ok := r.store.ByMention(mentioned); ok {
             return p
         }
-        // @ 了不存在的 alias，静默返回 Default Agent（不报错）
+        // @ 了不存在的 alias，回退到 Default Agent（Default 也可能 drop，取决于上下文）
         return DefaultProfile()
     }
 
@@ -285,11 +290,11 @@ func (r *Router) Route(ev InboundEvent) *Profile {
 |------|--------|----------|----------|
 | 私聊（未绑定） | — | 无 | **Default Agent** |
 | 私聊（绑定 code-review） | — | 有（唯一） | **code-review** |
-| 群聊（绑定 code-review） | @ops 但 ops 未绑定此群 | 有 | **静默**（drop，不响应） |
+| 群聊（绑定 code-review） | @ops 但 ops 未绑定此群 | 有 | **Default Agent**（@ 到不存在的 alias 回退） |
 | 群聊（绑定 code-review） | @review | 有 | **code-review** |
 | 群聊（绑定 code + ops） | @ops | 有（多） | **ops-helper** |
 | 群聊（绑定 code + ops） | 无 @ | 有（多） | **静默**（drop） |
-| 群聊（无绑定） | — | 无 | **Default Agent**（但无频道绑定，实际不走路由） |
+| 群聊（无绑定） | — | 无 | **Default Agent** |
 
 **注意**：AgentRouter 返回 nil 时，MultiManager 应 drop 该消息（不路由到任何 agent），这与"群聊未 @ 完全静默"的决策一致。
 
@@ -399,16 +404,38 @@ type Server struct {
 
 **资源管理权限矩阵**：
 
-| 操作 | Default Agent 视图 | Expert Agent 视图 |
-|------|-------------------|-------------------|
+| 操作 | Default Agent | Expert Agent |
+|------|--------------|--------------|
 | 新增 skill 定义 | ✅ | ❌ |
 | 删除 skill 定义 | ✅ | ❌ |
-| 开关 skill | ✅ | ✅（仅影响本 agent） |
-| 新增 MCP server | ✅ | ❌ |
-| 删除 MCP server | ✅ | ❌ |
-| 开关 MCP server | ✅ | ✅（仅影响本 agent） |
-| 新建会话 | ✅（session pool 归 default） | ✅（session pool 归该 agent） |
+| 开关 skill/MCP（本 agent） | ✅ | ✅ |
+| 新建会话 | ✅（归 default） | ✅（归该 agent） |
 | 查看会话列表 | 仅 default 的 session | 仅该 agent 的 session |
+
+**过滤模型统一为 allowlist**：每个 Expert Agent 的 `Profile.Tools` / `TaskSkills` 就是 allowlist。运行时（`DefaultToolsForProfile` / system prompt 注入）只看 allowlist。不在 `Server` 上额外维护 `disabledSkills` / `disabledMCPs` denylist。
+
+**Tool 分组**：Agent 管理面板中，built-in tool 按组分展示。用户可 allow 整个组，也可在组内 deny 个别工具：
+
+```
+┌─────────────────────────────────────────────┐
+│  🔍 code-review — Tools                     │
+├─────────────────────────────────────────────┤
+│  📁 文件操作                          [✅ 全部允许]  │
+│     ✅ read_file                             │
+│     ✅ write_file                            │
+│     ❌ edit_file          ← 组内单独 deny     │
+│     ✅ glob                                  │
+│  ─────────────────────────                  │
+│  📁 搜索                              [❌ 全部禁止]  │
+│     ❌ grep                                  │
+│     ❌ grep_search                           │
+│  ─────────────────────────                  │
+│  📁 浏览器                            [✅ 全部允许]  │
+│     ✅ browser                               │
+└─────────────────────────────────────────────┘
+```
+
+**语义**：组的 allow/deny 是快捷操作，最终生成的 `Profile.Tools` 是精确的工具名列表。Group allow + 个别 deny → 该组所有工具除去被 deny 的，写入 Profile.Tools。
 
 #### 6.2 系统级内置 skill 权限
 
@@ -429,7 +456,7 @@ type Server struct {
 
 Cron 任务按 agent 归属：**谁创建的归谁**。每个 cron task 记录中新增 `agent_id` 字段，标识创建者。
 
-> **注意**：现有 `Task.Agent string`（语义为 `"general"|"coding"` 预设路由）是死代码，直接由 `agent_id` 接管。不需要保留或重命名。
+> **注意**：现有 `Task.Agent string`（语义为 `"general"|"coding"` 预设路由）是死代码，被 `agent_id` 完全替代。不需要保留或重命名。旧 JSON 加载时忽略该字段，`agent_id` 默认 `"default"`。
 
 | 操作 | Default Agent | Expert Agent |
 |------|--------------|--------------|
@@ -471,9 +498,7 @@ GET /api/agents/:id/sessions   — 返回指定 agent 的 sessions
 
 前端按需请求当前选中 agent 的 session 列表。
 
-#### 6.7 Memory 隔离：MVP 不隔离
 
-MVP 阶段 memory backend 不改。所有 agent 共享同一套 `memDir` + `homeMemDir`，语义记忆注入对全部 agent 生效。
 
 理由：
 - 当前并无跨 agent 记忆冗余的真实投诉
@@ -534,6 +559,10 @@ func DefaultToolsForProfile(ctx context.Context, profile *agentprofile.Profile, 
 
 其中 `DefaultToolsForCtx` 已包含 MCP tool（通过 `ActiveMCPRegistry`），所以 MCP 自然被 profile 白名单过滤。被禁 MCP 的 server 仍保持 registry 注册（只剥工具不拆 server），避免 per-turn 频繁启停。
 
+#### 6.7 Memory 隔离：MVP 不隔离
+
+MVP 阶段 memory backend 不改。所有 agent 共享同一套 `memDir` + `homeMemDir`，语义记忆注入对全部 agent 生效。
+
 ### 7. Web UI 布局
 
 #### 7.1 新建会话时选择 Agent
@@ -569,7 +598,7 @@ func DefaultToolsForProfile(ctx context.Context, profile *agentprofile.Profile, 
 会话创建时绑定的 agent 是该会话的永久属性，不随后续消息改变。UI：
 - 会话列表每条会话标记所属 agent 的彩色 tag（如 `[🔍 code-review]`）
 - 会话内不显示 agent 切换入口
-- 想让消息走其他 agent → 要么用 `@+` 在输入框指定（见 7.2），要么新建一个指向其他 agent 的会话
+- 想让消息走其他 agent → 新建一个指向其他 agent 的会话（@+ 仅在新建会话流程中出现，不在现有会话的输入框里）
 
 ### 8. CLI/TUI 入口指定 Agent
 
@@ -664,6 +693,8 @@ func DefaultProfile() *Profile {
 - `~/.octo/sessions/` 中的文件直接划入 Default Agent 的 session pool
 - 这导致 Default Agent 首次加载时 session 列表包含所有历史 session — 符合预期（用户视角无感）
 
+**Cron 迁移**：现有 cron JSON 含 `"agent": "general"`（死代码字段）。加载时忽略旧 `agent` 字段，`agent_id` 默认设为 `"default"`。无需数据迁移，旧值被静默丢弃。
+
 ---
 
 ## HTTP API 完整清单
@@ -733,7 +764,7 @@ func DefaultProfile() *Profile {
 | `internal/tools/registry.go` | `DefaultToolsForProfile()` — 按 profile 过滤工具 |
 | `internal/skills/skills.go` | `ManifestForProfile()` — 按 profile 过滤 skill manifest；系统级 skill frontmatter 标记 `system: true` 后对 expert agent 隐藏；browser-recorded skill 在 profile 不含 browser 工具时隐藏 |
 | `internal/scheduler/` 或 task 存储 | cron task 新增 `agent_id` 字段；`GET /api/cron` 支持 `?agent_id=` 过滤；新增 `PUT /api/cron/:id/transfer` |
-| `internal/server/server.go` | `Server.Config`（server.go:56）新增 `agentName` 字段 |
+| `internal/server/server.go` | `Server.Config`（server.go:56）新增 `agentName` 字段（仅客户端路径 `octo`/`octo-desktop` 设置；`octo serve` 不接受此 flag，由 session 绑定 agent） |
 | `cmd/octo/chat.go` | 新增 `--agent` flag |
 | `cmd/octo/repl.go` | 新增 `--agent` flag；`/agent` 命令 |
 | `cmd/octo-desktop/main.go` | desktop 启动传 `agentName` 给 server |
@@ -742,7 +773,7 @@ func DefaultProfile() *Profile {
 | `web/src/components/layout/Header.svelte` | 集成 AgentAvatar 下拉 |
 | `web/src/views/SkillsView.svelte` | 技能列表根据 active agent 过滤；不在 default 时隐藏新增和系统级 skill |
 | `web/src/views/McpView.svelte` | MCP 列表根据 active agent 过滤 |
-| `web/src/views/WorkflowsView.svelte` | workflow 面板按 agent tool 白名单过滤；`requires_tools` 不可见的 workflow 不展示 |
+| `web/src/views/WorkflowsView.svelte` | workflow 面板展示全部 workflow；不做按 agent 过滤 |
 | `web/src/views/ChatView.svelte` | 会话列表根据 active agent 拉取 |
 | `web/src/views/TasksView.svelte` | cron 列表按 agent 过滤；default 视图显示"归属"列和"转移"操作 |
 
@@ -881,6 +912,8 @@ func DefaultProfile() *Profile {
 
 ---
 
-## 未解决问题
+## 已知限制
 
-无。所有分支已在拷问阶段 resolve。
+- **WeChat 群聊**：WeChat 没有原生 mention，群聊路由只能走频道绑定。私聊绑定同一 expert agent 后，群聊和私聊行为相同（无 @ 区分）。这是 WeChat 平台限制，无法在应用层规避。
+- **MCP Server 资源**：被禁 MCP 的 server 仍保持 registry 注册和连接。若 MCC server 数量极大且有连接数上限，可在后续加入 lazy-connect 优化。
+- **多 agent 并发 rate limit**：多个 agent 的 cron 同时跑时共用同一个 API key，可能触发 rate limit。留待后续加 per-agent 并发限制或队列。
