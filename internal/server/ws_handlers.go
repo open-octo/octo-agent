@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -435,7 +436,24 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	// through this handler): treat those as non-loopback so a real path is only
 	// ever honored for a message that genuinely arrived from a local peer.
 	loopback := conn != nil && conn.loopback
-	att := parseUserFiles(msg.Files, loopback)
+
+	sess, err := agent.LoadSession(sid)
+	if err != nil {
+		s.wsHub.broadcast(sid, map[string]any{
+			"type":       "send_rejected",
+			"session_id": sid,
+			"message":    fmt.Sprintf("session not found: %s", sid),
+		})
+		return
+	}
+
+	// Gate image attachments on the active model's vision capability so a
+	// text-only model isn't sent image blocks it rejects (HTTP 400). LoadCached
+	// keeps the last good vision setting even if config.yml is mid-edit.
+	cfg, _ := config.LoadCached()
+	vision := cfg.ModelVision(sess.Model)
+
+	att := parseUserFiles(msg.Files, loopback, vision)
 	if content == "" && len(att.blocks) == 0 && len(att.notes) == 0 {
 		return
 	}
@@ -466,16 +484,6 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	// read_file them and the transcript keeps a visible record.
 	if len(att.notes) > 0 {
 		content = strings.TrimSpace(content + "\n\n" + strings.Join(att.notes, "\n"))
-	}
-
-	sess, err := agent.LoadSession(sid)
-	if err != nil {
-		s.wsHub.broadcast(sid, map[string]any{
-			"type":       "send_rejected",
-			"session_id": sid,
-			"message":    fmt.Sprintf("session not found: %s", sid),
-		})
-		return
 	}
 
 	if ok, bindMsg, berr := s.acquireSessionBinding(sid, agent.EntryWeb, msg.Force); !ok {

@@ -2557,15 +2557,20 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 
 // attachInboundFiles bridges an inbound event's attachments into the agent
 // turn, mirroring the web composer's parseUserFiles. Images (delivered as data
-// URLs by the adapters) are decoded, persisted under ~/.octo/uploads, and
-// queued as vision blocks merged into the next user message; documents
-// (delivered as a local Path) become "[Attached file: <path>]" notes so the
-// model can open them with read_file. Per-file failures are logged and
-// skipped. Returns the content to run with any file notes folded in.
+// URLs by the adapters) are decoded and persisted under ~/.octo/uploads. If the
+// active model accepts vision they are queued as vision blocks; otherwise they
+// are surfaced as path notes so the model can read_file them and the turn keeps
+// running. Documents (delivered as a local Path) become "[Attached file: <path>]"
+// notes. Per-file failures are logged and skipped. Returns the content to run
+// with any file notes folded in.
 func (s *Server) attachInboundFiles(sess *channel.Session, ev channel.InboundEvent) string {
 	content := ev.Text
 	var blocks []agent.ContentBlock
 	var notes []string
+
+	cfg, _ := config.LoadCached()
+	vision := cfg.ModelVision(sess.Agent.Model)
+
 	for _, f := range ev.Files {
 		switch {
 		case f.DataURL != "":
@@ -2574,7 +2579,11 @@ func (s *Server) attachInboundFiles(sess *channel.Session, ev channel.InboundEve
 				slog.Debug("channel image attachment", "platform", ev.Platform, "name", f.Name, "err", err)
 				continue
 			}
-			blocks = append(blocks, block)
+			if vision {
+				blocks = append(blocks, block)
+			} else {
+				notes = append(notes, agent.AttachmentNote(block.ImagePath))
+			}
 		case f.Path != "":
 			notes = append(notes, agent.AttachmentNote(f.Path))
 		}
