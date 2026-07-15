@@ -492,7 +492,7 @@ GET /api/agents/:id/sessions   — 返回指定 agent 的 sessions
 
 #### 8.1 Flag 传递
 
-在 `cmd/octo/chat.go` flag 解析和 `cmd/octo/repl.go` 启动流程中增加 `--agent` 参数：
+在 `cmd/octo/chat.go` flag 解析和 `cmd/octo/repl.go` 启动流程中增加 `--agent` 参数。**注意：`octo serve` 不接受 `--agent`** — serve 服务器进程同时托管所有 agent（Master + `~/.octo/agents/` 里所有 profile），加此 flag 与多 agent 架构矛盾；agent 路由在 serve 里由 `AgentRouter` 按消息决定，不需要也不应该通过启动 flag 绑定。
 
 ```go
 // cmd/octo/chat.go
