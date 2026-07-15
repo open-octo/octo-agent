@@ -43,6 +43,7 @@
     clearDoneSubAgents,
     removeSubAgent,
     applySubAgentEvent,
+    markSubAgentFinished,
     showToast,
     uid,
     agenticSessions,
@@ -100,7 +101,7 @@
   // `complete` event to clear it, so we show it briefly then drop it. Cleared
   // per-session on the effect teardown.
   const subAgentDismissTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  const SUB_AGENT_DISMISS_MS = 4000
+  const SUB_AGENT_DISMISS_MS = 2000
 
   function scheduleSubAgentDismiss(sid: string, agentId: string) {
     const key = `${sid}\x00${agentId}`
@@ -109,9 +110,9 @@
     subAgentDismissTimers.set(key, setTimeout(() => {
       subAgentDismissTimers.delete(key)
       // Guard against the agent having restarted (a new `started` would flip it
-      // back to running): only drop it if it's still present and done.
+      // back to running): only drop it if it's still present and finished.
       const cur = (get(chatSubAgents)[sid] || []).find(a => a.id === agentId)
-      if (cur && cur.status === 'done') removeSubAgent(sid, agentId)
+      if (cur && cur.status !== 'running') removeSubAgent(sid, agentId)
     }, SUB_AGENT_DISMISS_MS))
   }
 
@@ -550,6 +551,7 @@
         kind,
         (ev as any).tool_name ?? '',
         (ev as any).tool_input,
+        (ev as any).stop_reason ?? '',
       )
       // A background sub-agent that finishes while no turn is streaming has no
       // `complete` to clean it up — it would linger until an unrelated event
@@ -568,12 +570,19 @@
       const label = description || agentId || 'sub-agent'
       let level: 'success' | 'warning' | 'error' = 'error'
       let text = `Sub-agent \`${label}\` failed`
+      let finishedStatus: 'done' | 'error' | 'cancelled' = 'error'
       if (status === 'success') {
         level = 'success'
         text = `Sub-agent \`${label}\` completed`
+        finishedStatus = 'done'
       } else if (status === 'warning') {
         level = 'warning'
         text = `Sub-agent \`${label}\` incomplete`
+        finishedStatus = 'done'
+      } else if (status === 'cancelled') {
+        level = 'warning'
+        text = `Sub-agent \`${label}\` cancelled`
+        finishedStatus = 'cancelled'
       }
       addChatMsg(sid, {
         id: uid('note'),
@@ -585,6 +594,16 @@
         tools: [],
         todos: [],
       })
+      // The notice is the definitive completion signal; use it to force the live
+      // panel to a finished status and then auto-dismiss, in case the final
+      // `sub_agent_event` was delayed, lost, or arrived while the turn was still
+      // streaming.
+      if (agentId) {
+        markSubAgentFinished(sid, agentId, finishedStatus)
+        if (!(get(chatStreaming)[sid] ?? false)) {
+          scheduleSubAgentDismiss(sid, agentId)
+        }
+      }
     }))
 
     cleanups.push(ws.on('workflow_event', (ev) => {

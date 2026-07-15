@@ -182,6 +182,8 @@ func subAgentNoticeStatus(ev tools.SubAgentNotification) string {
 	switch ev.StopReason {
 	case "":
 		return "failed"
+	case "killed":
+		return "cancelled"
 	case "max_turns", "max_tokens":
 		return "warning"
 	default:

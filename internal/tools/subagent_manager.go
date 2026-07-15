@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -547,6 +548,20 @@ func (m *SubAgentManager) eventSink(id, description, agentType string) func(SubA
 		if ev.AgentType == "" {
 			ev.AgentType = agentType
 		}
+		// Surface the agent's final disposition on "done" so live panels can
+		// distinguish a clean completion from an error or a user kill.
+		if ev.Kind == "done" {
+			_, status, _, _, stopReason := agent.readState()
+			if stopReason != "" {
+				ev.StopReason = stopReason
+			} else if strings.HasPrefix(status, "exited: ") {
+				if status == "exited: context canceled" {
+					ev.StopReason = "killed"
+				} else {
+					ev.StopReason = "error"
+				}
+			}
+		}
 		agent.recordEvent(ev)
 		if onEvent != nil {
 			onEvent(ev)
@@ -781,9 +796,21 @@ func (m *SubAgentManager) Kill(id string) bool {
 	if agent == nil {
 		return false
 	}
-	agent.setExited(context.Canceled)
+	agent.setKilled()
 	agent.cancel()
 	return true
+}
+
+// setKilled marks the agent as exited due to a user kill, preserving the
+// "killed" stop reason so completion notices can distinguish cancellation
+// from a failure.
+func (a *asyncSubAgent) setKilled() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.exited = true
+	a.exitErr = context.Canceled
+	a.stopReason = "killed"
+	a.busy = false
 }
 
 // KillAll terminates every tracked sub-agent. Called on session shutdown.

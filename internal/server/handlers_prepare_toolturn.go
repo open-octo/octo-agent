@@ -132,14 +132,15 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 					return
 				}
 				s.wsHub.broadcast(sid, map[string]any{
-					"type":        "sub_agent_event",
-					"session_id":  sid,
-					"agent_id":    ev.AgentID,
-					"description": ev.Description,
-					"agent_type":  ev.AgentType,
-					"kind":        ev.Kind,
-					"tool_name":   ev.ToolName,
-					"tool_input":  ev.ToolInput,
+					"type":         "sub_agent_event",
+					"session_id":   sid,
+					"agent_id":     ev.AgentID,
+					"description":  ev.Description,
+					"agent_type":   ev.AgentType,
+					"kind":         ev.Kind,
+					"tool_name":    ev.ToolName,
+					"tool_input":   ev.ToolInput,
+					"stop_reason":  ev.StopReason,
 				})
 			},
 			SubAgentOnExit: func(ev tools.SubAgentNotification) {
