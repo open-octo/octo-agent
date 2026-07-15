@@ -471,7 +471,7 @@ GET /api/agents/:id/sessions   — 返回指定 agent 的 sessions
 
 前端按需请求当前选中 agent 的 session 列表。
 
-#### 6.6 Memory 隔离：MVP 不隔离
+#### 6.7 Memory 隔离：MVP 不隔离
 
 MVP 阶段 memory backend 不改。所有 agent 共享同一套 `memDir` + `homeMemDir`，语义记忆注入对全部 agent 生效。
 
