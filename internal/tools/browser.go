@@ -252,7 +252,23 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 			browserSession.page = page
 			return page, browserSession.b, nil
 		}
-		go closeSession(browserSession.b, nil)
+		// Probe failed — the browser-level WebSocket is dead (Chrome was restarted
+		// or crashed). Close it and fall through to a fresh ConnectByPort below:
+		// the new dial must happen on a clean socket, otherwise it can land on the
+		// stale Chrome still bound to the port (bad handshake, no authorization
+		// prompt — the exact "no prompt after restart" bug this guards against).
+		// Passing page=nil skips the (dead) tab close and just drops the WS.
+		// concurrent close so a Chrome that never answers the close frame can't
+		// stall the reconnect — wait up to 3s for it to finish, then move on.
+		closeDone := make(chan struct{})
+		go func() {
+			closeSession(browserSession.b, nil)
+			close(closeDone)
+		}()
+		select {
+		case <-closeDone:
+		case <-time.After(3 * time.Second):
+		}
 		browserSession.b = nil
 	}
 	cfg, _ := config.Load()
