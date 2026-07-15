@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { workflows, showToast, openAgentSession } from '../lib/stores'
+  import { workflows, showToast, openAgentSession, nativeShell } from '../lib/stores'
+  import { get } from 'svelte/store'
   import { t, tr } from '../lib/i18n'
   import { confirmDialog } from '../lib/confirm'
   import * as api from '../lib/api'
@@ -62,7 +63,13 @@
       if (!res.ok) {
         throw new Error(await api.readErrorMessage(res, `${res.status} ${res.statusText}`))
       }
-      const blob = await res.blob()
+      const content = await res.text()
+      if (get(nativeShell)) {
+        const r = await api.nativeSaveFile(`${name}.rb`, content)
+        if (r.cancelled) return
+        return
+      }
+      const blob = new Blob([content], { type: 'text/plain' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

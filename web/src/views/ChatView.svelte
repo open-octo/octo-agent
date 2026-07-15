@@ -47,6 +47,7 @@
     uid,
     agenticSessions,
     chatGoal,
+    nativeShell,
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
@@ -1121,13 +1122,25 @@
       }
     }
 
-    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${title.replace(/[^\w.-]+/g, '_')}.md`
-    a.click()
-    URL.revokeObjectURL(url)
+    const title_safe = title.replace(/[^\w.-]+/g, '_')
+    const content = lines.join('\n')
+    if (get(nativeShell)) {
+      try {
+        const r = await api.nativeSaveFile(`${title_safe}.md`, content)
+        if (r.cancelled) return
+      } catch {
+        showToast(tr('chat.export_failed'), 'error')
+        return
+      }
+    } else {
+      const blob = new Blob([content], { type: 'text/markdown' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${title_safe}.md`
+      a.click()
+      URL.revokeObjectURL(url)
+    }
 
     if (omittedToolEvents) {
       showToast(tr('chat.export_tools_omitted'), 'info')

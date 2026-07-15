@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/url"
 )
@@ -254,6 +255,11 @@ func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request
 type nativeSaveFileRequest struct {
 	Name    string `json:"name"`
 	Content string `json:"content"`
+	// Encoding defaults to "utf8" (content written as-is). When "base64",
+	// content is decoded to bytes before writing — used for binary blobs
+	// (e.g. skill zip exports) that would otherwise not survive a UTF-8
+	// JSON round-trip.
+	Encoding string `json:"encoding"`
 }
 
 // POST /api/native/save-file — show the OS save dialog (desktop only), write
@@ -276,7 +282,16 @@ func (s *Server) handleNativeSaveFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	path, cancelled, err := s.cfg.Native.SaveFile(r.Context(), req.Name, req.Content)
+	content := req.Content
+	if req.Encoding == "base64" {
+		decoded, err := base64.StdEncoding.DecodeString(req.Content)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid base64 content")
+			return
+		}
+		content = string(decoded)
+	}
+	path, cancelled, err := s.cfg.Native.SaveFile(r.Context(), req.Name, content)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
