@@ -99,10 +99,12 @@ hot-reload via the API is the only zero-downtime path.
 ## `status`
 
 1. Read `~/.octo/channels.yml`. If missing or empty: "No channels configured yet. Run `/channel-manager setup` to get started." and stop.
-2. Check whether the serve process (which hosts the adapters) is running:
+2. Check whether the server (which hosts the adapters) is responding:
    ```bash
-   pgrep -f "octo.*serve" > /dev/null && echo RUNNING || echo STOPPED
+   curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8088/api/health
    ```
+   `200` → RUNNING. Non-200 / connection refused → STOPPED.
+   > Do NOT use `pgrep -f "octo.*serve"`: the server process is named `octo-desktop` in the desktop build and won't match. The health check works uniformly across `octo serve`, desktop, and TUI-hosted serves.
 3. Display:
 
 ```
@@ -203,6 +205,8 @@ Ask with `ask_user_question`:
 ### Weixin setup (Personal WeChat via iLink QR login)
 
 Weixin uses a QR-code login — no app credentials needed.
+
+> Do NOT `pgrep` for `octo serve` before this flow — on desktop the server runs as `octo-desktop` and won't match. Just call the API; if it fails with connection refused, then offer to start the server.
 
 1. Start the QR login flow via the serve API (the response carries the QR link):
    ```bash
@@ -367,7 +371,7 @@ Check each item, report ✅ / ❌ with remediation:
 6. **Discord credentials** (if enabled) — run the `/users/@me` curl from Discord setup step 2; an `id` in the response → ✅, else ❌ "Discord token invalid or revoked — re-run setup".
 7. **Telegram credentials** (if enabled) — run the `getMe` curl from Telegram setup step 2; `"ok":true` → ✅, else ❌ "Telegram token rejected by getMe — re-run setup".
 8. **WeCom credentials** (if enabled) — no public REST validation endpoint; check the `octo serve` output for `[wecom] authentication failed` → ❌ "WeCom credentials incorrect — re-run setup", or `[wecom] connected, authenticating` with no auth error → ✅.
-9. **Serve process** — `pgrep -f "octo.*serve"`; if no enabled platform, skip; if enabled but not running, ❌ "Run `octo serve`" (and ask to start it if the user agrees).
+9. **Serve process** — use the health check from `status` (`curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8088/api/health`); if no enabled platform, skip; if enabled but not running, ❌ "Run `octo serve`" (and ask to start it if the user agrees).
 10. **Recorded issue** (if serve is running) — query the live status instead of only grepping logs:
     ```bash
     curl -s http://127.0.0.1:8088/api/channels
