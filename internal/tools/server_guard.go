@@ -51,25 +51,41 @@ func guardServerSelfKill(command string) error {
 		return nil
 	}
 	if reKillByName.MatchString(command) {
-		return errServerSelfKill
+		return errServerSelfKill()
 	}
 	// `kill $(pgrep octo)` / `kill $(pidof octo)` — resolve-then-kill by name.
 	if reKill.MatchString(command) && strings.Contains(command, "octo") &&
 		(strings.Contains(command, "pgrep") || strings.Contains(command, "pidof")) {
-		return errServerSelfKill
+		return errServerSelfKill()
 	}
 	self := strconv.Itoa(serverSelfPID)
 	super := strconv.Itoa(serverSuperPID)
 	for _, seg := range reKill.FindAllStringSubmatch(command, -1) {
 		for _, n := range reNum.FindAllString(seg[1], -1) {
 			if n == self || n == super {
-				return errServerSelfKill
+				return errServerSelfKill()
 			}
 		}
 	}
 	return nil
 }
 
-var errServerSelfKill = fmt.Errorf("refusing to kill the octo server process that is hosting this " +
-	"session — use the restart_server tool for a graceful restart (it drains in-flight turns and lets " +
-	"the supervisor respawn the server)")
+// errServerSelfKill is returned by guardServerSelfKill when the model tries to
+// kill the octo server process hosting the current session. The message
+// branches on restarter availability: if a restarter is registered the
+// restart_server tool works; otherwise (desktop build) it doesn't.
+func errServerSelfKill() error {
+	if restarterEnabled() {
+		return errorServerSelfKillServe
+	}
+	return errorServerSelfKillDesktop
+}
+
+var (
+	errorServerSelfKillServe = fmt.Errorf("refusing to kill the octo server process that is hosting this "+
+		"session — use the restart_server tool for a graceful restart (it drains in-flight turns and "+
+		"lets the supervisor respawn the server)")
+	errorServerSelfKillDesktop = fmt.Errorf("refusing to kill the octo server process that is hosting this "+
+		"session — the desktop build has no supervisor to restart via tool; reload channel configs "+
+		"via POST /api/channels/<platform>/reload, or restart the app to apply other changes")
+)
