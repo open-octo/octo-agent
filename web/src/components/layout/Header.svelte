@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { view, cmdkOpen, sidebar, nativeShell } from '../../lib/stores'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
-  import { nativeToggleMaximise, nativeMinimise, nativeClose } from '../../lib/api'
+  import { nativeToggleMaximise, nativeMinimise, nativeClose, nativeWindowState } from '../../lib/api'
   import OctoLogo from './OctoLogo.svelte'
 
   function cycleSidebar() {
@@ -26,10 +27,43 @@
   // the octo-served page can't call Wails directly, so it goes through the native
   // bridge over HTTP. Ignore double-clicks that land on a control.
   function onHeaderDblClick(e: MouseEvent) {
-    if (!$nativeShell) return
+    if (!$nativeShell || isMac) return
     if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return
-    nativeToggleMaximise().catch(() => {})
+    flipMaximise()
   }
+
+  // Track maximise state so the icon flips between □ (maximise) and ❐ (restore).
+  // The frontend owns this state — there's no native title bar reading it. We
+  // sync from the OS on mount, on window focus (catches Aero Snap / keyboard
+  // maximize / taskbar restore the frontend can't otherwise observe), and after
+  // every toggle so the icon always reflects reality. A sequence counter
+  // prevents a stale focus response from overwriting a fresh toggle result.
+  let isMaximised = false
+  let stateSeq = 0
+  async function refreshMaximised() {
+    const seq = ++stateSeq
+    const m = await nativeWindowState()
+    if (seq === stateSeq) isMaximised = m
+  }
+  async function flipMaximise() {
+    const next = !isMaximised
+    try {
+      await nativeToggleMaximise()
+      isMaximised = next
+    } catch {
+      // Toggle failed — fetch the real OS state to stay in sync rather than
+      // gambling that the old isMaximised is still accurate.
+      await refreshMaximised()
+    }
+  }
+
+  onMount(() => {
+    if (!$nativeShell) return // web mode has no native bridge — skip entirely
+    refreshMaximised()
+    const onFocus = () => refreshMaximised()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  })
 </script>
 
 <header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
@@ -68,9 +102,11 @@
     </button>
     {#if $nativeShell && !isMac}
       <div class="window-controls">
-        <button class="window-btn minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
-        <button class="window-btn maximise" title="Maximise" onclick={() => nativeToggleMaximise()}>□</button>
-        <button class="window-btn close" title="Close" onclick={() => nativeClose()}>×</button>
+        <button class="window-btn minimise" aria-label="Minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
+        <button class="window-btn maximise" aria-label={isMaximised ? 'Restore' : 'Maximise'} title={isMaximised ? 'Restore' : 'Maximise'} onclick={flipMaximise}>
+          {isMaximised ? '❐' : '□'}
+        </button>
+        <button class="window-btn close" aria-label="Close" title="Close" onclick={() => nativeClose()}>×</button>
       </div>
     {/if}
   </div>
@@ -128,13 +164,16 @@ kbd {
   padding: 1px 5px; color: var(--text-tertiary);
 }
 /* Window controls (Windows/Linux only — Mac uses native traffic lights via
-   InvisibleTitleBarHeight). Flat squares that sit flush in the title bar; the
-   close button turns red on hover like the system convention. */
+   InvisibleTitleBarHeight). Isolated in their own visual group: a left separator
+   line + 16px breathing room, so they never visually merge with the settings
+   button to their left. Maximise icon flips □/❐ to reflect the window state. */
 .window-controls {
   display: flex;
   align-items: center;
   gap: 0;
-  margin-left: 8px;
+  margin-left: 16px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border-secondary);
   --wails-draggable: no-drag;
 }
 .window-btn {

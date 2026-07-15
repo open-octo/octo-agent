@@ -49,6 +49,12 @@ type NativeBridge interface {
 	// actually terminates or keeps running in the tray).
 	Close()
 
+	// WindowState reports whether the window is currently maximised. Used by the
+	// frontend to keep its maximise icon in sync with reality (covers Aero Snap,
+	// keyboard shortcuts, etc. that the frontend can't otherwise observe). Returns
+	// false before the window exists.
+	WindowState() bool
+
 	// OpenExternal opens url in the user's default browser — used by the update
 	// badge's "Download update" action to reach the release page, since the
 	// desktop build updates through its installer, not an in-place swap. The
@@ -249,6 +255,21 @@ func (s *Server) handleNativeClose(w http.ResponseWriter, r *http.Request) {
 	}
 	s.cfg.Native.Close()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// GET /api/native/window/state — report whether the desktop window is currently
+// maximised. Lets the frontend keep its maximise icon in sync after Aero Snap,
+// keyboard shortcuts, etc. Desktop only, loopback-gated.
+func (s *Server) handleNativeWindowState(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"maximised": s.cfg.Native.WindowState()})
 }
 
 type nativeOpenExternalRequest struct {

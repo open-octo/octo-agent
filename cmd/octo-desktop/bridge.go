@@ -353,6 +353,15 @@ func (b *nativeBridge) Close() {
 	}
 }
 
+// WindowState reports whether the window is currently maximised. Returns false
+// before the window exists.
+func (b *nativeBridge) WindowState() bool {
+	if b.window == nil {
+		return false
+	}
+	return b.window.IsMaximised()
+}
+
 // showWindow brings the hub window to the foreground on the current view.
 func (b *nativeBridge) showWindow() { b.showWindowAt("") }
 

@@ -23,6 +23,7 @@ type fakeNative struct {
 	toggleMaxCalls     int
 	minimiseCalls      int
 	closeCalls         int
+	maximised          bool
 	gotOpenURL         string
 	openCalls          int
 	gotSaveName        string
@@ -52,6 +53,7 @@ func (f *fakeNative) SetAutostart(enable bool) error  { f.autostart = enable; re
 func (f *fakeNative) ToggleMaximise()                 { f.toggleMaxCalls++ }
 func (f *fakeNative) Minimise()                       { f.minimiseCalls++ }
 func (f *fakeNative) Close()                          { f.closeCalls++ }
+func (f *fakeNative) WindowState() bool               { return f.maximised }
 func (f *fakeNative) OpenExternal(url string) error {
 	f.openCalls++
 	f.gotOpenURL = url
@@ -232,6 +234,58 @@ func TestNativeToggleMaximise(t *testing.T) {
 	}
 	if fake.toggleMaxCalls != 1 {
 		t.Errorf("ToggleMaximise calls = %d, want 1", fake.toggleMaxCalls)
+	}
+}
+
+func TestNativeWindowState(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{maximised: true}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodGet, "/api/native/window/state", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	var body struct {
+		Maximised bool `json:"maximised"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !body.Maximised {
+		t.Errorf("maximised = false, want true")
+	}
+
+	// Non-maximised window reports false.
+	fake.maximised = false
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Maximised {
+		t.Errorf("maximised = true, want false")
+	}
+}
+
+func TestNativeWindowStateRejectsNonLoopback(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: &fakeNative{maximised: true}})
+	req := httptest.NewRequest(http.MethodGet, "/api/native/window/state", nil)
+	req.RemoteAddr = "203.0.113.5:1000"
+	req.Host = "127.0.0.1:8080"
+	req.Header.Set("Authorization", "Bearer "+srv.AccessKey())
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("non-loopback peer: got %d, want 403", w.Code)
 	}
 }
 
