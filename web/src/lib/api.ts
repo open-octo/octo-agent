@@ -14,6 +14,7 @@ export interface TaskResponse {
   last_run: string
   next_run: string
   session_id: string
+  session_mode?: string
 }
 
 // #1109: every caller below throws through here, and every error toast in
@@ -203,6 +204,16 @@ export async function nativeSaveFile(name: string, content: string): Promise<{ p
   return request<{ path: string; cancelled: boolean }>('/api/native/save-file', {
     method: 'POST',
     ...json({ name, content }),
+  })
+}
+
+// Desktop shell variant for binary payloads. The content is base64-encoded; the
+// server decodes it to bytes before writing, so zips (and any other non-UTF-8
+// blob) survive the JSON round-trip intact.
+export async function nativeSaveBinary(name: string, b64: string): Promise<{ path: string; cancelled: boolean }> {
+  return request<{ path: string; cancelled: boolean }>('/api/native/save-file', {
+    method: 'POST',
+    ...json({ name, content: b64, encoding: 'base64' }),
   })
 }
 

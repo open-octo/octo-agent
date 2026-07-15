@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -373,6 +374,57 @@ func TestNativeSaveFileReportsCancel(t *testing.T) {
 	}
 	if !resp.Cancelled || resp.Path != "" {
 		t.Errorf("dismissed dialog: got path=%q cancelled=%v, want empty/true", resp.Path, resp.Cancelled)
+	}
+}
+
+// A binary payload (e.g. a skill zip) round-trips through the JSON body as a
+// base64 string. The SaveFile bridge receives the decoded bytes as a string,
+// so the written file must match the original bytes — not the base64 encoding.
+func TestNativeSaveFileDecodesBase64(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	original := []byte{0x50, 0x4B, 0x03, 0x04, 0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE}
+	b64 := base64.StdEncoding.EncodeToString(original)
+	fake := &fakeNative{retPath: "/Users/x/Downloads/b.pk"}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/save-file",
+		strings.NewReader(`{"name":"b.pk","content":"`+b64+`","encoding":"base64"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.saveCalls != 1 || fake.gotSaveName != "b.pk" {
+		t.Fatalf("SaveFile calls=%d name=%q, want 1/b.pk", fake.saveCalls, fake.gotSaveName)
+	}
+	// The bridge writes the raw decoded bytes, not the base64 string itself.
+	if fake.gotSaveContent != string(original) {
+		t.Errorf("written bytes differ")
+	}
+}
+
+// Garbage in the content field must be caught and rejected with 400 rather
+// than propagated to a native dialog.
+func TestNativeSaveFileRejectsInvalidBase64(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/save-file",
+		strings.NewReader(`{"name":"x.zip","content":"not_base64!!","encoding":"base64"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400 (%s)", w.Code, w.Body.String())
+	}
+	if fake.saveCalls != 0 {
+		t.Errorf("SaveFile called %d times; invalid input should short-circuit before the bridge", fake.saveCalls)
 	}
 }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { skills, showToast, openAgentSession } from '../lib/stores'
+  import { skills, showToast, openAgentSession, nativeShell } from '../lib/stores'
+  import { get } from 'svelte/store'
   import { t, tr } from '../lib/i18n'
   import { confirmDialog } from '../lib/confirm'
   import * as api from '../lib/api'
@@ -61,11 +62,24 @@
   // so a failing export produced zero download and zero feedback. Fetching
   // first lets a non-2xx response throw with the server's actual error
   // instead of silently doing nothing.
+  //
+  // Desktop shell has no blob <a download> delegate, so there we base64 the
+  // zip and round-trip it through nativeSaveFile — same shape as the workflow
+  // .rb export, just with an extra decoding hop for the binary payload.
   async function handleExport(name: string) {
     try {
       const res = await fetch(`/api/skills/${encodeURIComponent(name)}/export`)
       if (!res.ok) {
         throw new Error(await api.readErrorMessage(res, `${res.status} ${res.statusText}`))
+      }
+      if (get(nativeShell)) {
+        const buf = await res.arrayBuffer()
+        const bytes = new Uint8Array(buf)
+        let binary = ''
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+        const r = await api.nativeSaveBinary(`${name}.zip`, btoa(binary))
+        if (r.cancelled) return
+        return
       }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
