@@ -378,7 +378,7 @@ func (b *nativeBridge) showWindowAt(hash string) {
 			// CSS --wails-draggable header region handles dragging.
 			Frameless: runtime.GOOS != "darwin",
 			Mac: application.MacWindow{
-				TitleBar:               application.MacTitleBarHiddenInset,
+				TitleBar:                application.MacTitleBarHiddenInset,
 				InvisibleTitleBarHeight: 50,
 			},
 		})
