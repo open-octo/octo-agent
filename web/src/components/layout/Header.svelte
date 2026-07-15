@@ -28,14 +28,23 @@
   function onHeaderDblClick(e: MouseEvent) {
     if (!$nativeShell || isMac) return
     if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return
-    isMaximised = !isMaximised
-    nativeToggleMaximise().catch(() => {})
+    flipMaximise()
   }
 
   // Track maximise state so the icon flips between □ (maximise) and ❐ (restore).
   // Frameless windows here — there's no native title bar reading the state, so the
-  // frontend owns it.
+  // frontend owns it. Known limitation: Aero Snap / keyboard maximize won't sync
+  // this flag; follow-up will wire up the Wails window-state event.
   let isMaximised = false
+  async function flipMaximise() {
+    const next = !isMaximised
+    try {
+      await nativeToggleMaximise()
+      isMaximised = next
+    } catch {
+      // Keep current state on failure so the icon never desyncs from reality.
+    }
+  }
 </script>
 
 <header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
@@ -74,11 +83,11 @@
     </button>
     {#if $nativeShell && !isMac}
       <div class="window-controls">
-        <button class="window-btn minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
-        <button class="window-btn maximise" title={isMaximised ? 'Restore' : 'Maximise'} onclick={() => { isMaximised = !isMaximised; nativeToggleMaximise().catch(() => {}) }}>
+        <button class="window-btn minimise" aria-label="Minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
+        <button class="window-btn maximise" aria-label={isMaximised ? 'Restore' : 'Maximise'} title={isMaximised ? 'Restore' : 'Maximise'} onclick={flipMaximise}>
           {isMaximised ? '❐' : '□'}
         </button>
-        <button class="window-btn close" title="Close" onclick={() => nativeClose()}>×</button>
+        <button class="window-btn close" aria-label="Close" title="Close" onclick={() => nativeClose()}>×</button>
       </div>
     {/if}
   </div>
