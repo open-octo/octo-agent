@@ -63,3 +63,19 @@ func TestNotifySeq(t *testing.T) {
 		}
 	}
 }
+
+// TestNotifySeqEmptyTitle verifies that passing an empty title doesn't
+// produce malformed OSC sequences, and that Ghostty skips the title slot
+// so the tab title (OSC 2) and notification title don't duplicate.
+func TestNotifySeqEmptyTitle(t *testing.T) {
+	term := os.Getenv("TERM_PROGRAM")
+	defer os.Setenv("TERM_PROGRAM", term)
+
+	// Ghostty: empty title after "notify;" separator is safe to ignore.
+	os.Setenv("TERM_PROGRAM", "ghostty")
+	got := notifySeq("", "Turn complete")
+	want := "\033]777;notify;;Turn complete\007"
+	if got != want {
+		t.Errorf("ghostty empty title: got %q, want %q", got, want)
+	}
+}
