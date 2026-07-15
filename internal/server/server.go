@@ -105,6 +105,13 @@ type Config struct {
 	// When nil, the /api/native/* routes are not registered, so serve exposes
 	// no extra surface. See NativeBridge.
 	Native NativeBridge
+
+	// DisableRestart omits the restart_server tool from the agent's catalog.
+	// Set by the desktop build, where the server runs in-process and has no
+	// supervisor to respawn it — letting the agent call it would shut the
+	// server down and leave the GUI window attached to a dead backend. Leave
+	// false under `octo serve`, where the supervisor honours ExitRestart.
+	DisableRestart bool
 }
 
 // Server is the HTTP server skeleton. It owns the mux, the agent factory,
@@ -498,8 +505,12 @@ func New(cfg Config) (*Server, error) {
 	// ask-class (defaults.yml): the web UI confirms via the browser prompt,
 	// IM via the in-chat reply prompt. The restart drains in-flight turns
 	// (including the one calling the tool) before the worker exits with
-	// ExitRestart for the supervisor to respawn.
-	tools.SetRestarter(s.Restart)
+	// ExitRestart for the supervisor to respawn. The desktop build sets
+	// DisableRestart and skips this — its server runs in-process with no
+	// supervisor to respawn it, so the tool would just kill the backend.
+	if !cfg.DisableRestart {
+		tools.SetRestarter(s.Restart)
+	}
 
 	// Advertise send_message so a turn on any surface (web, IM, sub-agent) can
 	// proactively push to an IM chat it isn't currently talking to — e.g. a web

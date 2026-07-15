@@ -350,6 +350,12 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 		// offers a download link, not the in-place swap this build can't do.
 		UpdateCheck: true,
 		Native:      bridge,
+		// The desktop server runs in-process — there is no supervisor to
+		// respawn it after a restart, so the restart_server tool would just
+		// shut the HTTP server down and leave the GUI window attached to a
+		// dead backend. Omit the tool; the desktop shell owns its own update
+		// lifecycle (Check for Updates → installer).
+		DisableRestart: true,
 	})
 	if err != nil {
 		bridge.showError(L().errTitle, fmt.Sprintf(L().errStartFmt, err))
