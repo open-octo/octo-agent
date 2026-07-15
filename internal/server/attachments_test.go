@@ -74,16 +74,14 @@ func TestParseUserFiles_ImageDataURL_NonVision(t *testing.T) {
 		{Name: "shot.png", MimeType: "image/jpeg", DataURL: jpegDataURL(payload)},
 	}, false, false)
 
-	if len(att.blocks) != 0 || len(att.images) != 1 || len(att.notes) != 1 {
-		t.Fatalf("blocks/images/notes = %d/%d/%d, want 0/1/1",
+	// Non-vision image produces only a path note; the thumbnail is derived from
+	// the note by docChipRefs so live and replay use the same source.
+	if len(att.blocks) != 0 || len(att.images) != 0 || len(att.notes) != 1 {
+		t.Fatalf("blocks/images/notes = %d/%d/%d, want 0/0/1",
 			len(att.blocks), len(att.images), len(att.notes))
 	}
 	path := strings.TrimPrefix(strings.TrimSuffix(att.notes[0], "]"), "[Attached file: ")
-	wantURL := "/api/uploads/" + filepath.Base(path)
-	if att.images[0] != wantURL {
-		t.Errorf("display URL = %q, want %q", att.images[0], wantURL)
-	}
-	if !strings.Contains(path, ".octo") || !strings.Contains(path, "uploads") {
+	if !strings.Contains(filepath.ToSlash(path), ".octo/uploads") {
 		t.Errorf("note should reference the persisted upload path, got %q", att.notes[0])
 	}
 	onDisk, err := os.ReadFile(path)
@@ -162,6 +160,57 @@ func TestParseUserFiles_SkipsBadEntries(t *testing.T) {
 	}, false, true)
 	if len(att.blocks) != 0 || len(att.images) != 0 || len(att.notes) != 0 {
 		t.Errorf("bad entries not skipped: %+v", att)
+	}
+}
+
+// A persisted image attachment note for a non-vision model must replay as a
+// thumbnail ref (/api/uploads/<name>) rather than a pdf: document chip.
+func TestHandleGetSessionMessages_ImageAttachmentReplay(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("deepseek-v4-pro", "")
+	sess.Title = "fixed"
+	sess.Messages = []agent.Message{{
+		Role:    agent.RoleUser,
+		Content: "analyze this\n\n" + agent.AttachmentNote("/home/u/.octo/uploads/9_shot.jpg"),
+	}}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	req.SetPathValue("id", sess.ID)
+	rec := httptest.NewRecorder()
+	srv.handleGetSessionMessages(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages endpoint = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var found bool
+	for _, ev := range body.Events {
+		if ev["type"] != "history_user_message" {
+			continue
+		}
+		found = true
+		if got := ev["content"]; got != "analyze this" {
+			t.Errorf("content = %q, want %q (note not stripped)", got, "analyze this")
+		}
+		imgs, _ := ev["images"].([]any)
+		if len(imgs) != 1 || imgs[0] != "/api/uploads/9_shot.jpg" {
+			t.Errorf("images = %v, want [/api/uploads/9_shot.jpg]", ev["images"])
+		}
+	}
+	if !found {
+		t.Fatalf("no history_user_message event: %+v", body.Events)
 	}
 }
 
@@ -469,6 +518,9 @@ drain:
 			switch ev["type"] {
 			case "history_user_message":
 				if imgs, ok := ev["images"].([]any); ok {
+					if len(imgs) != 1 {
+						t.Errorf("images = %v, want length 1", imgs)
+					}
 					for _, img := range imgs {
 						ref, _ := img.(string)
 						if strings.HasPrefix(ref, "/api/uploads/") {
