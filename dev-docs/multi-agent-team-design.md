@@ -777,7 +777,7 @@ func DefaultProfile() *Profile {
 | `internal/tools/registry.go` | `DefaultToolsForProfile()` — 按 profile 过滤工具 |
 | `internal/skills/skills.go` | `ManifestForProfile()` — 按 profile 过滤 skill manifest；系统级 skill frontmatter 标记 `system: true` 后对 expert agent 隐藏；browser-recorded skill 在 profile 不含 browser 工具时隐藏 |
 | `internal/scheduler/` 或 task 存储 | cron task 新增 `agent_id` 字段；`GET /api/cron` 支持 `?agent_id=` 过滤；新增 `PUT /api/cron/:id/transfer` |
-| `internal/config/config.go` | `Server.Config` 新增 `agentName` 字段 |
+| `internal/server/server.go` | `Server.Config`（server.go:56）新增 `agentName` 字段 |
 | `cmd/octo/chat.go` | 新增 `--agent` flag |
 | `cmd/octo/repl.go` | 新增 `--agent` flag；`/agent` 命令 |
 | `cmd/octo-desktop/main.go` | desktop 启动传 `agentName` 给 server |
