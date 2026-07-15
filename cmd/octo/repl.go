@@ -83,6 +83,14 @@ type replConfig struct {
 	// the user typed it (e.g. "/onboard" on a first run). Multi-turn interaction
 	// continues normally afterward. Empty → no auto-submit.
 	autoFirstInput string
+	// notify, when true, emits a desktop notification (OSC per terminal) when a
+	// turn completes and the TUI is waiting for input. Defaults on; the global
+	// config's notify field can disable it.
+	notify bool
+	// terminalTitle, when true, sets the terminal tab/window title to the session
+	// name on TUI startup (OSC 2). Defaults on; the global config's
+	// terminal_title field can disable it.
+	terminalTitle bool
 }
 
 // ensureSender rebuilds cfg.a.Sender when targetModel resolves to a different

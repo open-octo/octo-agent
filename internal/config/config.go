@@ -142,6 +142,15 @@ type Config struct {
 	// Trash configures the file recycle bin (agent-issued deletes and
 	// overwrites are staged there for recovery).
 	Trash TrashConfig `yaml:"trash,omitempty"`
+	// Notify controls whether the TUI sends a desktop notification when a turn
+	// completes and is waiting for input (Ghostty / iTerm2 / Kitty forward the
+	// OSC sequence to the OS; other terminals fall back to the terminal bell).
+	// nil means the built-in default (enabled).
+	Notify *bool `yaml:"notify,omitempty"`
+	// TerminalTitle controls whether the TUI sets the terminal tab/window title
+	// (via OSC 2) to the session name on startup. nil means the built-in default
+	// (enabled).
+	TerminalTitle *bool `yaml:"terminal_title,omitempty"`
 }
 
 // TrashConfig configures the file recycle bin.
@@ -165,6 +174,18 @@ type TrashConfig struct {
 // the trash first (default true).
 func (c *Config) OverwriteBackupEnabled() bool {
 	return c.Trash.OverwriteBackup == nil || *c.Trash.OverwriteBackup
+}
+
+// NotifyEnabled controls whether the TUI sends a desktop notification when a
+// turn completes (default true).
+func (c *Config) NotifyEnabled() bool {
+	return c.Notify == nil || *c.Notify
+}
+
+// TerminalTitleEnabled controls whether the TUI sets the terminal tab/window
+// title to the session name on startup (default true).
+func (c *Config) TerminalTitleEnabled() bool {
+	return c.TerminalTitle == nil || *c.TerminalTitle
 }
 
 // TrashRetention returns how long entries are kept before age-out (default 14
