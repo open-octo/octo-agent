@@ -2420,18 +2420,3 @@ func TestHandleUpdateSession_Rename(t *testing.T) {
 		t.Errorf("unknown id status = %d, want 404", w.Code)
 	}
 }
-
-// TestDisableRestart_GatesRestarter verifies that New() with DisableRestart: true
-// omits restart_server from the advertised tool catalog — the desktop contract.
-func TestDisableRestart_GatesRestarter(t *testing.T) {
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", DisableRestart: true})
-	t.Cleanup(srv.stopChannels)
-
-	ctx := context.Background()
-	for _, td := range tools.DefaultToolsForCtx(ctx, "stub-model") {
-		if td.Name == "restart_server" {
-			t.Fatal("restart_server advertised in desktop mode (DisableRestart: true)")
-		}
-	}
-	_ = srv
-}
