@@ -2162,7 +2162,7 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 	// fire a desktop notification so a user who tabbed away is pulled back.
 	// Skipped on error / interrupt (err != nil) and when the user disabled it.
 	if err == nil && m.cfg.notify {
-		return m, tea.Sequence(m.flushPrints(), tea.Println(notifySeq(m.cfg.session.DisplayTitle(), "Turn complete — input needed")))
+		return m, tea.Sequence(m.flushPrints(), tea.Println(notifySeq("", "Turn complete — input needed")))
 	}
 	return m, nil
 }
