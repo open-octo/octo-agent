@@ -518,6 +518,8 @@ octo --agent ops-helper "查日志"    # 单轮 chat，走 ops-helper
 - 未指定：默认 `master`
 - 指定：检查 `agentStore.Get(id)` 是否存在。不存在则启动报错 `agent "xxx" not found (available: master, code-review, ops-helper)`
 
+**`-c` 会话列表按 agent 过滤**：`octo -c`（无 ID 时）弹出的会话选择列表，只展示 `activeAgentId` 对应的 session pool 中的会话。例如 `octo --agent code-review -c` 只展示 `code-review` 的 session，不展示 master 或其他 agent 的 session。因为 session pool 已经按 agent 隔离，`-c` picker 只需要从当前 agent 的 pool 读取列表即可。
+
 TUI 会话的 `source` 字段标记为 `cli`，但 `agent_id` 标记为所选 profile。
 
 #### 8.3 TUI 内的 Agent 切换
