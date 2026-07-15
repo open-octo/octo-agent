@@ -72,12 +72,12 @@ func TestNewSender_DerivesThinkingBudgetFromEffort(t *testing.T) {
 
 // TestSender_LowEffort_CapsReasoningRegardlessOfOriginal guards the fix for a
 // confirmed production failure: a session running reasoning_effort "max" paid
-// the model's full reasoning budget for GenerateTitle/Suggest's throwaway
-// calls, reliably exceeding their timeout. sender.LowEffort() must always cap
-// to "low" — never inherit whatever the session was actually configured
-// with — and must leave the original sender (and its caller-visible
-// reasoningEffort/thinkingBudget) untouched, since it's a value receiver
-// returning a modified copy, not a mutation.
+// the model's full reasoning budget for Suggest's throwaway call, reliably
+// exceeding its timeout. sender.LowEffort() must always cap to "low" — never
+// inherit whatever the session was actually configured with — and must leave
+// the original sender (and its caller-visible reasoningEffort/thinkingBudget)
+// untouched, since it's a value receiver returning a modified copy, not a
+// mutation.
 func TestSender_LowEffort_CapsReasoningRegardlessOfOriginal(t *testing.T) {
 	for _, original := range []string{"", "low", "medium", "high", "xhigh", "max"} {
 		t.Run("from "+original, func(t *testing.T) {
@@ -93,6 +93,35 @@ func TestSender_LowEffort_CapsReasoningRegardlessOfOriginal(t *testing.T) {
 			}
 			if want := AnthropicThinkingBudget("low"); fake.gotReq.ThinkingBudget != want {
 				t.Errorf("ThinkingBudget sent = %d, want %d", fake.gotReq.ThinkingBudget, want)
+			}
+
+			// The original sender must be unaffected (value receiver).
+			if s.reasoningEffort != original {
+				t.Errorf("original sender's reasoningEffort mutated: got %q, want %q", s.reasoningEffort, original)
+			}
+		})
+	}
+}
+
+// TestSender_NoReasoning_DisablesReasoningRegardlessOfOriginal guards
+// GenerateTitle's separate requirement: title generation needs no reasoning at
+// all, so NoReasoning() must always disable it outright regardless of the
+// session's configured effort, without mutating the original sender.
+func TestSender_NoReasoning_DisablesReasoningRegardlessOfOriginal(t *testing.T) {
+	for _, original := range []string{"", "low", "medium", "high", "xhigh", "max"} {
+		t.Run("from "+original, func(t *testing.T) {
+			fake := &mockProvider{reply: provider.Response{Content: "ok"}}
+			s := sender{p: fake, reasoningEffort: original, thinkingBudget: AnthropicThinkingBudget(original)}
+
+			no := s.NoReasoning()
+			if _, err := no.SendMessages(context.Background(), "m", "", []agent.Message{agent.NewUserMessage("hi")}, 0); err != nil {
+				t.Fatalf("SendMessages: %v", err)
+			}
+			if fake.gotReq.ReasoningEffort != "" {
+				t.Errorf("ReasoningEffort sent = %q, want %q (off)", fake.gotReq.ReasoningEffort, "")
+			}
+			if fake.gotReq.ThinkingBudget != 0 {
+				t.Errorf("ThinkingBudget sent = %d, want %d", fake.gotReq.ThinkingBudget, 0)
 			}
 
 			// The original sender must be unaffected (value receiver).

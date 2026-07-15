@@ -195,6 +195,16 @@ func (s sender) LowEffort() agent.Sender {
 	return s
 }
 
+// NoReasoning implements agent.NoReasoningSender: it returns a copy of s with
+// reasoning disabled entirely (empty effort / zero thinking budget). Used by
+// GenerateTitle because a 6-word title needs no reasoning and even "low"
+// reasoning can consume the tight title token budget or time out.
+func (s sender) NoReasoning() agent.Sender {
+	s.reasoningEffort = ""
+	s.thinkingBudget = 0
+	return s
+}
+
 // reasoningSink returns the OnThinking callback to hand the provider: the
 // agent's onThinking when reasoning display is enabled, else nil so the
 // provider skips surfacing reasoning entirely.

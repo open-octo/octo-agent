@@ -32,14 +32,23 @@ func (f *fakeSender) SendMessages(_ context.Context, model, system string, messa
 }
 
 // fakeLowEffortSender additionally implements LowEffortSender: LowEffort()
-// hands back a distinct sender (low) so a test can assert GenerateTitle/
-// Suggest actually swap to it instead of using the main sender directly.
+// hands back a distinct sender (low) so a test can assert Suggest actually
+// swaps to it instead of using the main sender directly.
 type fakeLowEffortSender struct {
 	fakeSender
 	low *fakeSender
 }
 
 func (f *fakeLowEffortSender) LowEffort() Sender { return f.low }
+
+// fakeNoReasoningSender implements both LowEffortSender and NoReasoningSender.
+// GenerateTitle should prefer NoReasoning() over LowEffort().
+type fakeNoReasoningSender struct {
+	fakeLowEffortSender
+	noReasoning *fakeSender
+}
+
+func (f *fakeNoReasoningSender) NoReasoning() Sender { return f.noReasoning }
 
 func TestAgent_Turn_HappyPath(t *testing.T) {
 	send := &fakeSender{reply: Reply{Content: "hi from agent", Model: "m", StopReason: "end_turn"}}
@@ -1892,13 +1901,45 @@ func TestAgent_GenerateTitle_NotConfigured(t *testing.T) {
 	}
 }
 
-// TestAgent_GenerateTitle_UsesLowEffortSenderWhenAvailable guards the actual
-// fix for a confirmed production failure: a session running reasoning_effort
-// "max" paid the model's full reasoning budget just to produce a 6-word
-// title, reliably exceeding the throwaway call's timeout. When the Sender
-// implements LowEffortSender, GenerateTitle must route through the
-// low-effort variant instead of the session's main sender.
-func TestAgent_GenerateTitle_UsesLowEffortSenderWhenAvailable(t *testing.T) {
+// TestAgent_GenerateTitle_UsesNoReasoningSenderWhenAvailable guards that title
+// generation disables reasoning outright when the sender supports it. A session
+// running reasoning_effort "max" would otherwise pay the model's full reasoning
+// budget just to produce a 6-word title, reliably exceeding the throwaway call's
+// timeout. GenerateTitle must prefer NoReasoning() over LowEffort().
+func TestAgent_GenerateTitle_UsesNoReasoningSenderWhenAvailable(t *testing.T) {
+	no := &fakeSender{reply: Reply{Content: "No reasoning title"}}
+	low := &fakeSender{reply: Reply{Content: "Low effort title"}}
+	main := &fakeNoReasoningSender{
+		fakeLowEffortSender: fakeLowEffortSender{fakeSender: fakeSender{reply: Reply{Content: "should not be used"}}, low: low},
+		noReasoning:         no,
+	}
+	a := New(main, "m")
+	a.History.Append(NewUserMessage("do X"))
+	a.History.Append(NewAssistantMessage("did X"))
+
+	title, err := a.GenerateTitle(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GenerateTitle: %v", err)
+	}
+	if title != "No reasoning title" {
+		t.Errorf("title = %q, want the no-reasoning sender's reply", title)
+	}
+	if len(main.gotMessages) != 0 {
+		t.Errorf("main sender should not have been called; got %d messages", len(main.gotMessages))
+	}
+	if len(no.gotMessages) == 0 {
+		t.Error("no-reasoning sender was never called")
+	}
+	if len(low.gotMessages) != 0 {
+		t.Errorf("low-effort sender should not have been called when NoReasoning is available; got %d messages", len(low.gotMessages))
+	}
+}
+
+// TestAgent_GenerateTitle_FallsBackToLowEffortSenderWhenNoReasoningUnavailable
+// guards the fallback path: if a sender implements LowEffortSender but not
+// NoReasoningSender, GenerateTitle still uses LowEffort() to avoid paying the
+// session's full reasoning budget.
+func TestAgent_GenerateTitle_FallsBackToLowEffortSenderWhenNoReasoningUnavailable(t *testing.T) {
 	low := &fakeSender{reply: Reply{Content: "Low effort title"}}
 	main := &fakeLowEffortSender{
 		fakeSender: fakeSender{reply: Reply{Content: "should not be used"}},

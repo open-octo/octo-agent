@@ -63,22 +63,28 @@ type ToolSender interface {
 
 // LowEffortSender is implemented by a Sender that can produce a cheaper
 // variant of itself with reasoning effort capped to a small, fast budget.
-// GenerateTitle and Suggest use this: both deliberately reuse the turn's own
-// Sender (so the request shares the main conversation's prompt-cache
-// prefix — see their doc comments), but that Sender carries whatever
-// reasoning_effort the session happens to be configured with. A session
-// running "high"/"max" would otherwise pay the model's full reasoning
-// budget just to produce a 6-word title or a one-line suggestion, for no
-// benefit — and on a slower provider this reliably exceeds the throwaway
-// call's timeout every single time (a session stays on that effort level
-// across turns, so title generation would retry into the same failure on
-// every turn, never succeeding). LowEffort caps effort down rather than
-// disabling it outright — thinking stays nominally enabled, just with a
-// small budget, keeping the request shape consistent with earlier turns in
-// the same conversation that may already carry thinking blocks in history.
+// Suggest uses this: it deliberately reuses the turn's own Sender (so the
+// request shares the main conversation's prompt-cache prefix — see its doc
+// comment), but that Sender carries whatever reasoning_effort the session
+// happens to be configured with. A session running "high"/"max" would otherwise
+// pay the model's full reasoning budget just to produce a one-line suggestion,
+// for no benefit — and on a slower provider this reliably exceeds the throwaway
+// call's timeout. LowEffort caps effort to "low" rather than disabling it
+// outright, so the request shape stays consistent with earlier turns that may
+// already carry thinking blocks in history.
 type LowEffortSender interface {
 	Sender
 	LowEffort() Sender
+}
+
+// NoReasoningSender is implemented by a Sender that can produce a variant of
+// itself with reasoning disabled entirely. GenerateTitle uses this because a
+// 6-word title needs no reasoning at all, and even "low" reasoning can consume
+// the tight title token budget or time out. If a sender does not implement this
+// interface, GenerateTitle falls back to LowEffortSender instead.
+type NoReasoningSender interface {
+	Sender
+	NoReasoning() Sender
 }
 
 // ToolInputDeltaFunc receives raw JSON fragments of a tool_use block's
@@ -1271,13 +1277,10 @@ func (a *Agent) Suggest(ctx context.Context, tools []ToolDefinition) (string, er
 }
 
 // titleMaxTokens caps the title response. The title itself is a handful of
-// words, but the cap has to cover the model's reasoning tokens too: on a
-// reasoning model (LowEffort only lowers effort, it doesn't disable thinking)
-// the hidden reasoning is billed against this same budget, so a tight cap gets
-// entirely consumed by reasoning and the model emits empty text — leaving the
-// session with no generated title and no live sidebar update. Give it room for
-// low-effort reasoning plus the title line.
-const titleMaxTokens = 1024
+// words; a tiny cap is enough because LowEffortSender now disables reasoning
+// outright for this throwaway call, so the budget only has to cover the title
+// line itself.
+const titleMaxTokens = 250
 
 const titleInstruction = "Summarize this conversation as a short title of at most 6 words. " +
 	"Reply with the title text only — no preamble, no quotes, no trailing punctuation, no markdown."
@@ -1305,7 +1308,9 @@ func (a *Agent) GenerateTitle(ctx context.Context, tools []ToolDefinition) (stri
 	msgs = append(msgs, snap...)
 	msgs = append(msgs, NewUserMessage(titleInstruction))
 
-	if le, ok := sender.(LowEffortSender); ok {
+	if nr, ok := sender.(NoReasoningSender); ok {
+		sender = nr.NoReasoning()
+	} else if le, ok := sender.(LowEffortSender); ok {
 		sender = le.LowEffort()
 	}
 
