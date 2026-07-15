@@ -82,10 +82,10 @@ func errServerSelfKill() error {
 }
 
 var (
-	errorServerSelfKillServe = fmt.Errorf("refusing to kill the octo server process that is hosting this "+
-		"session — use the restart_server tool for a graceful restart (it drains in-flight turns and "+
+	errorServerSelfKillServe = fmt.Errorf("refusing to kill the octo server process that is hosting this " +
+		"session — use the restart_server tool for a graceful restart (it drains in-flight turns and " +
 		"lets the supervisor respawn the server)")
-	errorServerSelfKillDesktop = fmt.Errorf("refusing to kill the octo server process that is hosting this "+
-		"session — the desktop build has no supervisor to restart via tool; reload channel configs "+
+	errorServerSelfKillDesktop = fmt.Errorf("refusing to kill the octo server process that is hosting this " +
+		"session — the desktop build has no supervisor to restart via tool; reload channel configs " +
 		"via POST /api/channels/<platform>/reload, or restart the app to apply other changes")
 )
