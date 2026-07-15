@@ -199,6 +199,8 @@ export const en: Record<string, string> = {
   "agent.n_running": "{n} running",
   "agent.n_tools": "{n} tools",
   "agent.done_n_tools": "done · {n} tools",
+  "agent.error_n_tools": "failed · {n} tools",
+  "agent.cancelled_n_tools": "cancelled · {n} tools",
   // Background processes
   "bgtask.n_processes": "{n} background processes",
   "bgtask.n_process": "{n} background process",
@@ -787,6 +789,8 @@ export const zh: Record<string, string> = {
   "agent.n_running": "{n} 个运行中",
   "agent.n_tools": "{n} 个工具",
   "agent.done_n_tools": "完成 · {n} 个工具",
+  "agent.error_n_tools": "失败 · {n} 个工具",
+  "agent.cancelled_n_tools": "已取消 · {n} 个工具",
   // 后台进程
   "bgtask.n_processes": "{n} 个后台进程",
   "bgtask.n_process": "{n} 个后台进程",

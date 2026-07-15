@@ -379,3 +379,127 @@ func TestEventSinkRecordsWithoutOnEvent(t *testing.T) {
 		t.Errorf("events = %v, want [started tool]", events)
 	}
 }
+
+// TestEventSinkDoneCarriesStopReason verifies that a "done" event carries the
+// agent's final disposition: normal completion reports the model stop reason,
+// a user kill reports "killed", and other error exits report "error".
+func TestEventSinkDoneCarriesStopReason(t *testing.T) {
+	// Normal completion via Start: stop reason is "end_turn".
+	m := NewSubAgentManager(&fixedSpawner{result: SpawnResult{Reply: "ok", AgentID: "child-1", StopReason: "end_turn"}})
+
+	var mu sync.Mutex
+	var events []SubAgentEvent
+	m.SetOnEvent(func(ev SubAgentEvent) { mu.Lock(); events = append(events, ev); mu.Unlock() })
+
+	id, err := m.Start(SpawnRequest{Description: "d", Prompt: "p"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	_ = id
+	exited := make(chan struct{})
+	m.SetOnExit(func(SubAgentNotification) { close(exited) })
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("onExit never fired")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		done := len(events) >= 2 && events[len(events)-1].Kind == "done"
+		mu.Unlock()
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			mu.Lock()
+			evs := events
+			mu.Unlock()
+			t.Fatalf("events = %v, want trailing done", evs)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	last := events[len(events)-1]
+	mu.Unlock()
+	if last.StopReason != "end_turn" {
+		t.Errorf("done StopReason = %q, want end_turn", last.StopReason)
+	}
+
+	// Kill a running agent: the done event should report killed.
+	sp := &blockingPromoteSpawner{unblock: make(chan struct{}), spawnCh: make(chan SpawnRequest, 1)}
+	m2 := NewSubAgentManager(sp)
+	var mu2 sync.Mutex
+	var events2 []SubAgentEvent
+	m2.SetOnEvent(func(ev SubAgentEvent) { mu2.Lock(); events2 = append(events2, ev); mu2.Unlock() })
+	id2, err := m2.Start(SpawnRequest{Description: "d", Prompt: "p"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	select {
+	case <-sp.spawnCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("spawn did not start")
+	}
+	m2.Kill(id2)
+	sp.Unblock(SpawnResult{Reply: "ok", AgentID: "child-1", StopReason: "end_turn"}, nil)
+
+	deadline = time.Now().Add(2 * time.Second)
+	var killedEvent SubAgentEvent
+	for {
+		mu2.Lock()
+		for _, ev := range events2 {
+			if ev.AgentID == id2 && ev.Kind == "done" {
+				killedEvent = ev
+			}
+		}
+		mu2.Unlock()
+		if killedEvent.Kind == "done" {
+			break
+		}
+		if time.Now().After(deadline) {
+			mu2.Lock()
+			evs := events2
+			mu2.Unlock()
+			t.Fatalf("no killed done event for %q; events = %v", id2, evs)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if killedEvent.StopReason != "killed" {
+		t.Errorf("killed done StopReason = %q, want killed", killedEvent.StopReason)
+	}
+}
+
+// fixedSpawner is a Spawner that returns a fixed result or error.
+type fixedSpawner struct {
+	result SpawnResult
+	err    error
+}
+
+func (s *fixedSpawner) Spawn(_ context.Context, _ SpawnRequest) (SpawnResult, error) {
+	return s.result, s.err
+}
+
+func (s *fixedSpawner) Continue(_ context.Context, _, _ string) (SpawnResult, error) {
+	return s.result, s.err
+}
+
+// TestEventSinkDoneErrorExit verifies that a Spawn error without a stop reason
+// is surfaced as StopReason="error".
+func TestEventSinkDoneErrorExit(t *testing.T) {
+	m := NewSubAgentManager(&fixedSpawner{err: fmt.Errorf("spawn failed")})
+
+	var events []SubAgentEvent
+	m.SetOnEvent(func(ev SubAgentEvent) { events = append(events, ev) })
+
+	if _, err := m.RunSync(context.Background(), SpawnRequest{Description: "d", Prompt: "p"}); err == nil {
+		t.Fatal("RunSync: expected error")
+	}
+
+	if len(events) != 2 || events[1].Kind != "done" {
+		t.Fatalf("events = %v, want [started done]", events)
+	}
+	if events[1].StopReason != "error" {
+		t.Errorf("done StopReason = %q, want error", events[1].StopReason)
+	}
+}

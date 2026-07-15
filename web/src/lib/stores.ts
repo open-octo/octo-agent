@@ -410,7 +410,9 @@ export interface SubAgentState {
   id: string
   description: string
   agentType: string // subagent_type, e.g. "explore" (empty for an untyped fork)
-  status: 'running' | 'done'
+  // running: still working. done: clean completion. error: exited with an error
+  // or was killed. cancelled: user killed (context canceled) while running.
+  status: 'running' | 'done' | 'error' | 'cancelled'
   lastTool: string
   tools: SubAgentTool[]
   startedAt: number
@@ -430,14 +432,25 @@ export function resetSubAgents(sessionId: string) {
 // resetSubAgents(), so this is acceptable.
 export function clearDoneSubAgents(sessionId: string) {
   chatSubAgents.update(m => {
-    const remaining = (m[sessionId] || []).filter(a => a.status !== 'done')
+    const remaining = (m[sessionId] || []).filter(a => a.status === 'running')
     return { ...m, [sessionId]: remaining }
   })
 }
 
-// Remove one sub-agent by id. Used to auto-dismiss a background sub-agent that
-// finished with no active turn to clean it up — there is no `complete` event in
-// that case, so it would otherwise linger until an unrelated event.
+export function markSubAgentFinished(
+  sessionId: string,
+  agentId: string,
+  status: 'done' | 'error' | 'cancelled',
+) {
+  chatSubAgents.update(m => {
+    const list = [...(m[sessionId] || [])]
+    const idx = list.findIndex(a => a.id === agentId)
+    if (idx >= 0 && list[idx].status === 'running') {
+      list[idx] = { ...list[idx], status }
+    }
+    return { ...m, [sessionId]: list }
+  })
+}
 export function removeSubAgent(sessionId: string, agentId: string) {
   chatSubAgents.update(m => {
     const remaining = (m[sessionId] || []).filter(a => a.id !== agentId)
@@ -453,6 +466,7 @@ export function applySubAgentEvent(
   kind: string,
   toolName: string,
   toolInput?: Record<string, any>,
+  stopReason?: string,
 ) {
   chatSubAgents.update(m => {
     const list = [...(m[sessionId] || [])]
@@ -483,7 +497,13 @@ export function applySubAgentEvent(
       a.tools.push({ name: toolName || 'tool', error: kind === 'tool_error', input: toolInput })
       a.lastTool = toolName || a.lastTool
     } else if (kind === 'done') {
-      a.status = 'done'
+      if (stopReason === 'killed') {
+        a.status = 'cancelled'
+      } else if (!stopReason || stopReason === 'error') {
+        a.status = 'error'
+      } else {
+        a.status = 'done'
+      }
     }
     list[idx] = a
     return { ...m, [sessionId]: list }

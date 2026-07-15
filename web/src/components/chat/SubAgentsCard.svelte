@@ -6,6 +6,7 @@
   let { agents = [], elapsed = 0 }: { agents?: SubAgentState[]; elapsed?: number } = $props()
 
   let runningCount = $derived(agents.filter(a => a.status === 'running').length)
+  let hasError = $derived(agents.some(a => a.status === 'error' || a.status === 'cancelled'))
 
   // Track expanded state per agent. Done agents start expanded.
   let expanded = $state<Record<string, boolean>>({})
@@ -15,7 +16,7 @@
     let changed = false
     for (const a of agents) {
       if (!(a.id in newExpanded)) {
-        newExpanded[a.id] = a.status === 'done'
+        newExpanded[a.id] = a.status !== 'running'
         changed = true
       }
     }
@@ -50,6 +51,11 @@
         <iconify-icon icon="ant-design:loading-outlined" width="12" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
         {$t('agent.n_running').replace('{n}', String(runningCount))}
       </span>
+    {:else if hasError}
+      <span class="running-badge error">
+        <iconify-icon icon="ant-design:close-circle-outlined" width="12"></iconify-icon>
+        {$t('agent.all_done')}
+      </span>
     {:else}
       <span class="running-badge done">
         <iconify-icon icon="ant-design:check-circle-outlined" width="12"></iconify-icon>
@@ -62,11 +68,17 @@
   </div>
 
   {#each agents as a (a.id)}
-    <details class="agent-row" open={expanded[a.id] ?? (a.status === 'done')}>
+    <details class="agent-row" open={expanded[a.id] ?? (a.status !== 'running')}>
       <summary class="agent-summary" onclick={() => toggleExpand(a.id)}>
-        <span class="agent-avatar" class:blue={a.status === 'running'} class:green-av={a.status === 'done'}>
+        <span class="agent-avatar"
+          class:blue={a.status === 'running'}
+          class:green-av={a.status === 'done'}
+          class:red-av={a.status === 'error' || a.status === 'cancelled'}>
           {initials(a)}
-          <span class="dot green" class:pulse={a.status === 'running'}></span>
+          <span class="dot"
+            class:green={a.status === 'done'}
+            class:red={a.status === 'error' || a.status === 'cancelled'}
+            class:pulse={a.status === 'running'}></span>
         </span>
         <div class="agent-info">
           <!-- An untyped child is a fork of the parent — label it "fork". -->
@@ -77,13 +89,18 @@
             <iconify-icon icon="ant-design:loading-outlined" width="12" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
             <span class="mono">{a.lastTool || $t('agent.working')} · {$t('agent.n_tools').replace('{n}', String(a.tools.length))}</span>
           </span>
+        {:else if a.status === 'error' || a.status === 'cancelled'}
+          <span class="status-error">
+            <iconify-icon icon="ant-design:close-circle-outlined" width="13"></iconify-icon>
+            {$t(a.status === 'cancelled' ? 'agent.cancelled_n_tools' : 'agent.error_n_tools').replace('{n}', String(a.tools.length))}
+          </span>
         {:else}
           <span class="status-done">
             <iconify-icon icon="ant-design:check-circle-outlined" width="13"></iconify-icon>
             {$t('agent.done_n_tools').replace('{n}', String(a.tools.length))}
           </span>
         {/if}
-        <iconify-icon icon={(expanded[a.id] ?? (a.status === 'done')) ? 'lucide:chevron-down' : 'lucide:chevron-right'} width="13" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
+        <iconify-icon icon={(expanded[a.id] ?? (a.status !== 'running')) ? 'lucide:chevron-down' : 'lucide:chevron-right'} width="13" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
       </summary>
       <div class="agent-body">
         {#if a.tools.length === 0}
@@ -125,6 +142,7 @@
 }
 .running-badge { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--blue-6); }
 .running-badge.done { color: var(--success); }
+.running-badge.error { color: var(--error); }
 .elapsed { font-size: 12px; color: var(--text-tertiary); margin-left: 10px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .agent-row { border-bottom: 1px solid var(--border-table); }
@@ -141,18 +159,21 @@
 }
 .agent-avatar.blue { background: var(--blue-1); color: var(--blue-6); }
 .agent-avatar.green-av { background: var(--success-bg); color: var(--success-text); }
+.agent-avatar.red-av { background: var(--error-bg); color: var(--error-text); }
 .dot {
   position: absolute; right: -2px; bottom: -2px;
   width: 8px; height: 8px; border-radius: 9999px;
   border: 2px solid #fff;
 }
 .dot.green { background: var(--success); }
+.dot.red { background: var(--error); }
 .dot.pulse { animation: octo-dot 1.4s infinite; }
 .agent-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .agent-name { font-size: 13px; font-weight: 600; color: var(--text-heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-type { font-weight: 600; color: var(--blue-6); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .status-running { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--blue-6); flex: 0 0 auto; }
 .status-done { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--success); flex: 0 0 auto; }
+.status-error { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--error); flex: 0 0 auto; }
 .agent-body {
   border-top: 1px solid var(--border-table); background: var(--bg-sidebar);
   padding: 8px 14px 8px 46px; display: flex; flex-direction: column; gap: 6px;
