@@ -787,6 +787,7 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/channels/available", s.handleAvailableChannels)
 	s.api("GET /api/channels/{platform}", s.handleGetChannel)
 	s.api("POST /api/channels/{platform}", s.handleSaveChannel)
+	s.api("POST /api/channels/{platform}/reload", s.handleReloadChannel)
 	s.api("DELETE /api/channels/{platform}", s.handleDeleteChannel)
 	s.api("POST /api/channels/{platform}/test", s.handleTestChannel)
 	s.api("GET /api/channels/recipients", s.handleChannelRecipients)

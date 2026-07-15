@@ -68,15 +68,11 @@ channels:
 After writing `channels.yml`, apply the change without a full restart:
 
 ```bash
-AK=$(grep access_key ~/.octo/config.yml | head -1 | sed 's/.*: *//' | tr -d '"' | tr -d "'")
-curl -s -X POST "http://127.0.0.1:8088/api/channels/<platform>" \
-  -H "Content-Type: application/json" \
-  -H "X-Access-Key: $AK"
+curl -s -X POST "http://127.0.0.1:8088/api/channels/<platform>/reload"
 ```
 
 - HTTP 200 → the adapter started immediately. Done.
 - Connection refused → the server isn't running. Ask to start it with `octo serve`.
-- 401 → the key is wrong; re-read `access_key` from `~/.octo/config.yml`.
 
 Use this in place of `restart_server` throughout this skill. The tool is no longer
 available in the desktop build (the server runs in-process with no supervisor), so
