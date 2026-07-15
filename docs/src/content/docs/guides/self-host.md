@@ -10,6 +10,39 @@ octo serve --stop               # stop a background instance
 octo serve -addr :8088          # expose on the LAN
 ```
 
+## Environment variables
+
+Some environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OCTO_ACCESS_KEY`,
+`OCTO_LOG_LEVEL`, search keys like `TAVILY_API_KEY`, …) control how octo behaves at runtime.
+Normally your shell profile exports them — but **GUI-launched processes don't inherit those**:
+the desktop app, a launchd agent, and a `.desktop` session all start with a minimal
+environment that skips `~/.bashrc` / `~/.zprofile`.
+
+Drop a `~/.octo/serve.env` file to cover every launch mode uniformly:
+
+```bash
+cat > ~/.octo/serve.env << 'EOF'
+TAVILY_API_KEY=tvly-xxxxx
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+OCTO_LOG_LEVEL=debug
+EOF
+chmod 600 ~/.octo/serve.env
+```
+
+octo loads it at startup (before any tool or channel reads the environment):
+
+- **Simple `KEY=VALUE` lines**, one per line.
+- `#` comments and blank lines are skipped.
+- An optional `export ` prefix is tolerated (so you can copy-paste from a shell rc file).
+- Keys are **whitespace-trimmed**; a value with `=` inside it is preserved (`KEY=val=ue` works).
+- **Variables already set in the process environment are NOT overridden** — explicit
+  `FOO=bar octo serve`, systemd `Environment=`, and launchd `SetEnvironmentVariable`
+  all win over the file. This keeps the file as a safe fallback, not a surprise override.
+
+This is the same file the systemd/launchd packaging templates already point at via
+`EnvironmentFile=%h/.octo/serve.env` (`packaging/systemd/octo.service`). Now `octo serve`,
+the desktop app, and the TUI all resolve the same file — pick once, work everywhere.
+
 ## Access control
 
 `127.0.0.1` is loopback and trusted implicitly — no key needed, and that's the default bind. The
