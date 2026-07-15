@@ -32,6 +32,8 @@ file as `config.yaml.bak`.
 | `tools` | [tools block](#tools-block) | Per-tool behavior knobs |
 | `browser` | [browser block](#browser-block) | Chrome connection settings |
 | `goal` | `{ enabled: bool }` | Gates `/goal` and the goal tools (default enabled) |
+| `notify` | bool | TUI only: send a desktop notification when a turn completes and is waiting for input. Ghostty / iTerm2 / Kitty forward it to the OS; other terminals fall back to the terminal bell (default `true`) |
+| `terminal_title` | bool | TUI only: set the terminal tab/window title to the session name on startup (OSC 2, honoured by Ghostty, iTerm2, Kitty and most modern terminals; default `true`) |
 
 When the agent edits this file, octo validates it right after the write and warns
 in the turn if it no longer parses or has a semantic problem (a mistyped

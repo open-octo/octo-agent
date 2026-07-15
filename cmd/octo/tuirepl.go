@@ -713,6 +713,13 @@ type autoSubmitMsg struct{ text string }
 
 func (m *tuiModel) Init() tea.Cmd {
 	bootCmds := []tea.Cmd{tea.Println(tui.Banner("", m.a.Model, m.cwd, m.width))}
+	// Set the terminal tab/window title to the session name (OSC 2) so the
+	// user can identify this session across tabs. Ghostty, iTerm2, Kitty and
+	// most modern terminals honour it; others ignore the sequence. No-op when
+	// the user disabled it via config.
+	if m.cfg.terminalTitle {
+		bootCmds = append(bootCmds, tea.Println(setTitleSeq(m.cfg.session.DisplayTitle())))
+	}
 	// A resumed session carrying a goal gets a one-line reminder under the
 	// banner (the Codex resume-paused prompt, as a hint instead of a modal).
 	if m.goalsWired() {
@@ -1142,7 +1149,15 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.text != "" && !m.cfg.noSave {
 			_ = m.cfg.session.SetTitle(msg.text)
 		}
-		return m, m.flushPrints()
+		// Refresh the terminal tab/window title to match the now-current session
+		// name. On a brand-new session Init() set it to "(untitled)"; that was the
+		// best we had until the first turn completed and produced a real title
+		// here. No-op when the user disabled it via config.
+		var cmd tea.Cmd = m.flushPrints()
+		if m.cfg.terminalTitle {
+			cmd = tea.Sequence(m.flushPrints(), tea.Println(setTitleSeq(m.cfg.session.DisplayTitle())))
+		}
+		return m, cmd
 
 	case subAgentNoteMsg:
 		// A sub-agent finished this round — drop it from the live panel (it's
@@ -2142,6 +2157,12 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 		if prompt, ok := m.goalContinuationKick(false); ok {
 			return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(prompt, ""))
 		}
+	}
+	// Truly idle (no queued turn, no goal continuation) after a clean turn:
+	// fire a desktop notification so a user who tabbed away is pulled back.
+	// Skipped on error / interrupt (err != nil) and when the user disabled it.
+	if err == nil && m.cfg.notify {
+		return m, tea.Sequence(m.flushPrints(), tea.Println(notifySeq(m.cfg.session.DisplayTitle(), "Turn complete — input needed")))
 	}
 	return m, nil
 }

@@ -963,6 +963,8 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			providerName:    provName,
 			configEntry:     entry,
 			showReasoning:   resolvedShowReasoning,
+			notify:          cfg.NotifyEnabled(),
+			terminalTitle:   cfg.TerminalTitleEnabled(),
 		}
 		// Redo the "# Available MCP tools" system-prompt layer once the
 		// background MCP connect (mcpBoot, see mcpReadyMsg in tuirepl.go)
