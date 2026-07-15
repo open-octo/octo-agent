@@ -165,10 +165,12 @@ func ResetBrowserSession() {
 	closeSession(b, p)
 }
 
-// closeSession tears down a browser session. When we attached to the user's own
+// closeSession tears down a browser session. When attached to the user's own
 // Chrome, Close() only drops the WS and leaves our tab behind, so close the tab
-// we opened too (don't litter the user's browser); if we launched Chrome
-// ourselves, Close() kills it whole. Safe to call with nils.
+// we opened too (don't litter the user's browser). The production path never
+// launches its own Chrome (attach-only), so OwnsProcess is always false there;
+// integration tests inject a launched browser via SetBrowserSession, where
+// OwnsProcess can be true and Close() kills it whole. Safe to call with nils.
 func closeSession(b *browser.Browser, p *browser.Page) {
 	if b == nil {
 		return
@@ -282,7 +284,11 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 		// would carry no login session and trip the macOS "Chrome Safe Storage"
 		// keychain prompt).
 		if b, err = browser.DiscoverRunningChrome(ctx); err != nil {
-			return nil, nil, wrapBrowserConnectError(err)
+			// Return the discovery error as-is — it already carries an
+			// actionable connect guide ("launch Chrome with
+			// --remote-debugging-port or set browser.connect_port"), so
+			// wrapping it would repeat the setup instruction.
+			return nil, nil, err
 		}
 	}
 
