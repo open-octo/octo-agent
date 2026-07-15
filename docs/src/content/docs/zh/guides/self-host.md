@@ -10,6 +10,31 @@ octo serve --stop               # 停止后台实例
 octo serve -addr :8088          # 暴露到局域网
 ```
 
+## 环境变量
+
+部分环境变量（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`OCTO_ACCESS_KEY`、`OCTO_LOG_LEVEL`，以及 `TAVILY_API_KEY` 等搜索 key）在运行时控制 octo 的行为。通常由 shell profile export —— 但 **GUI 启动的进程不会继承这些变量**：桌面应用、launchd agent、`.desktop` session 启动时只拿到最小环境，不读 `~/.bashrc` / `~/.zprofile`。
+
+放一份 `~/.octo/serve.env` 即可统一覆盖所有启动方式：
+
+```bash
+cat > ~/.octo/serve.env << 'EOF'
+TAVILY_API_KEY=tvly-xxxxx
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+OCTO_LOG_LEVEL=debug
+EOF
+chmod 600 ~/.octo/serve.env
+```
+
+octo 在启动时（早于任何工具或 channel 读取环境）加载它：
+
+- **简单的 `KEY=VALUE` 行**，一行一个。
+- `#` 注释和空行会被跳过。
+- 允许 `export ` 前缀（方便直接从 shell rc 文件复制粘贴）。
+- Key 会**去空白**；value 内部可以含 `=`（`KEY=val=ue` 能用）。
+- **已在进程环境中设置的变量不会被覆盖** ——显式的 `FOO=bar octo serve`、systemd `Environment=`、launchd `SetEnvironmentVariable` 都优先于本文件。这让文件保持为安全的 fallback，不会意外覆盖你显式设的值。
+
+这也是 systemd/launchd 打包模板里已经通过 `EnvironmentFile=%h/.octo/serve.env`（`packaging/systemd/octo.service`）指向的同一个文件。现在 `octo serve`、桌面版、TUI 都能解析同一份文件 ——配一次，到处生效。
+
 ## 访问控制
 
 `127.0.0.1` 是回环地址，默认就被信任——不需要 key，这也是默认的绑定方式。一旦绑定得更宽
