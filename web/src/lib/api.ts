@@ -246,6 +246,18 @@ export async function nativeClose(): Promise<void> {
   await request<{ ok: boolean }>('/api/native/window/close', { method: 'POST' })
 }
 
+// Desktop shell only: query whether the window is currently maximised. Lets the
+// frontend keep its maximise icon in sync after Aero Snap, keyboard shortcuts,
+// etc. Returns false if the native bridge is unavailable (e.g. web, pre-window).
+export async function nativeWindowState(): Promise<boolean> {
+  try {
+    const r = await request<{ maximised: boolean }>('/api/native/window/state')
+    return r.maximised
+  } catch {
+    return false
+  }
+}
+
 // Desktop shell only: open a URL with the OS default handler. The update badge
 // calls this in installer mode to reach the release download page (the desktop
 // build updates through its installer, not an in-place swap); chat links use it

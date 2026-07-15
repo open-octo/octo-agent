@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { view, cmdkOpen, sidebar, nativeShell } from '../../lib/stores'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
-  import { nativeToggleMaximise, nativeMinimise, nativeClose } from '../../lib/api'
+  import { nativeToggleMaximise, nativeMinimise, nativeClose, nativeWindowState } from '../../lib/api'
   import OctoLogo from './OctoLogo.svelte'
 
   function cycleSidebar() {
@@ -32,9 +33,10 @@
   }
 
   // Track maximise state so the icon flips between □ (maximise) and ❐ (restore).
-  // Frameless windows here — there's no native title bar reading the state, so the
-  // frontend owns it. Known limitation: Aero Snap / keyboard maximize won't sync
-  // this flag; follow-up will wire up the Wails window-state event.
+  // The frontend owns this state — there's no native title bar reading it. We
+  // sync from the OS on mount, on window focus (catches Aero Snap / keyboard
+  // maximize / taskbar restore the frontend can't otherwise observe), and after
+  // every toggle so the icon always reflects reality.
   let isMaximised = false
   async function flipMaximise() {
     const next = !isMaximised
@@ -45,6 +47,13 @@
       // Keep current state on failure so the icon never desyncs from reality.
     }
   }
+
+  onMount(async () => {
+    isMaximised = await nativeWindowState()
+    const onFocus = async () => { isMaximised = await nativeWindowState() }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  })
 </script>
 
 <header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
