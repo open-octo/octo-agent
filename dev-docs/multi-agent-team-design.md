@@ -554,19 +554,15 @@ func DefaultToolsForProfile(ctx context.Context, profile *agentprofile.Profile, 
 
 选择某个 expert agent → 创建归属于该 agent 的新会话。
 
-#### 7.2 输入框内的 @-agent 命令
+#### 7.2 新建会话时的 @-agent 入口
 
-在 Composer 输入框中，和现有的 slash command (`/`) 补全并列，增加一个新的 **agent 选择按钮**（和附件按钮、斜杠按钮并排）：
+`@+` 按钮不在现有的 Composer 输入框里，而是**属于新建会话流程的一部分** — 用于在创建会话时指定目标 agent。
 
-```
-┌─────────────────────────────────────────────────────┐
-│  [📎]  [@+]  [/]  输入消息...           [发送]      │
-└─────────────────────────────────────────────────────┘
-```
+交互位置：新建会话按钮旁的小 "+" 下拉（见 7.1）。点击后弹出 agent 选择列表，选择某个 expert agent → 创建归属于该 agent 的新会话。
 
-点击 `@+` 弹出 agent 选择列表，选择后将 `@agentname` 插入输入框（例如 `@code-review `）。发送后该消息路由到对应专家 agent 处理。
-
-若当前会话已有所属 agent（由新建时确定），`@+` 仍可指定其他 agent — 相当于"这条消息请某个专家帮忙看"。
+**为什么不在输入框里加 @-agent？**
+- 会话一旦建立，agent 是不可切换的。如果在输入框里允许 `@code-review` 把消息路由到另一个 agent，但 session metadata 仍归属原 agent，会出现上下文矛盾。
+- 想给另一个专家 agent 发消息 → 新建一个指向那个 agent 的会话即可。
 
 #### 7.3 会话一旦建立，Agent 不可切换
 
