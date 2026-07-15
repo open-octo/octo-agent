@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/executil"
 )
 
 // makeScript writes a shell script with the given body to a tempdir and
@@ -246,5 +248,23 @@ func TestInjectContext_PreservesUserAndAppendsContext(t *testing.T) {
 	}
 	if !strings.Contains(got, "---") {
 		t.Errorf("divider should be present: %q", got)
+	}
+}
+
+// TestShellCmd_WindowsUTF8EncodingPrefix ensures that, on Windows, the
+// PowerShell -Command payload used by hooks is prefixed with the UTF-8
+// encoding setup so child-process output is decoded correctly on GBK hosts.
+func TestShellCmd_WindowsUTF8EncodingPrefix(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only PowerShell encoding assertion")
+	}
+	cmd := shellCmd(context.Background(), "echo hi")
+	args := cmd.Args
+	if len(args) < 2 || args[len(args)-2] != "-Command" {
+		t.Fatalf("expected -Command payload, got args %v", args)
+	}
+	payload := args[len(args)-1]
+	if !strings.HasPrefix(payload, executil.PowerShellUTF8EncodingPrefix) {
+		t.Errorf("PowerShell command should start with UTF-8 encoding prefix; got:\n%s", payload)
 	}
 }

@@ -135,11 +135,11 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 		// wrapper), but only when we can locate the octo binary and a project
 		// dir; otherwise run the command bare (no protection, but never broken).
 		if exe, err := os.Executable(); err == nil && projectDir != "" {
-			wrapped := fmt.Sprintf(windowsSafeRmWrapper, strings.ReplaceAll(exe, "'", "''"), command)
+			wrapped := executil.PowerShellUTF8EncodingPrefix + fmt.Sprintf(windowsSafeRmWrapper, strings.ReplaceAll(exe, "'", "''"), command)
 			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", wrapped)
 			cmd.Env = withBundledBinPath(append(os.Environ(), "OCTO_TRASH_PROJECT="+projectDir))
 		} else {
-			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", command)
+			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", executil.PowerShellUTF8EncodingPrefix+command)
 			cmd.Env = withBundledBinPath(os.Environ())
 		}
 		executil.SetNoWindow(cmd)

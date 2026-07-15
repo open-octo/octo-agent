@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/executil"
 )
 
 // TestShellCommand_PlatformShell verifies shellCommand picks the right shell
@@ -79,7 +81,27 @@ func TestWithBundledBinPath_NoOpWhenBundledDirMissing(t *testing.T) {
 	}
 }
 
-// TestShellCommand_ResolvesBundledTool is an integration test: it spawns a
+// TestShellCommand_WindowsUTF8EncodingPrefix ensures that, on Windows, the
+// PowerShell -Command payload is prefixed with the UTF-8 encoding setup so
+// child-process output is decoded correctly on GBK hosts.
+func TestShellCommand_WindowsUTF8EncodingPrefix(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only PowerShell encoding assertion")
+	}
+	cmd, err := shellCommand(context.Background(), "echo hi")
+	if err != nil {
+		t.Fatalf("shellCommand: %v", err)
+	}
+	args := cmd.Args
+	if len(args) < 2 || args[len(args)-2] != "-Command" {
+		t.Fatalf("expected -Command payload, got args %v", args)
+	}
+	payload := args[len(args)-1]
+	if !strings.HasPrefix(payload, executil.PowerShellUTF8EncodingPrefix) {
+		t.Errorf("PowerShell command should start with UTF-8 encoding prefix; got:\n%s", payload)
+	}
+}
+
 // real child process via shellCommand and confirms the child can execute a
 // fake tool that exists ONLY under a fake ~/.octo/bin — never on the real
 // system PATH — proving the PATH-append actually makes the bundled directory

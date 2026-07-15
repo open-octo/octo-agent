@@ -250,7 +250,7 @@ func shellCmd(ctx context.Context, cmd string) *exec.Cmd {
 		if _, err := exec.LookPath("pwsh"); err == nil {
 			shell = "pwsh"
 		}
-		c := exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", cmd)
+		c := exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", executil.PowerShellUTF8EncodingPrefix+cmd)
 		executil.SetNoWindow(c)
 		return c
 	}
