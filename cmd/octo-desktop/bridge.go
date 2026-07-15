@@ -372,14 +372,14 @@ func (b *nativeBridge) showWindowAt(hash string) {
 			Height:     height,
 			StartState: startState,
 			URL:        target,
-			// Frameless window: no native title bar or borders, the frontend draws
-			// its own. CSS --wails-draggable: drag regions (in Header) handle window
-			// dragging; Windows/Linux get custom min/max/close buttons there too.
-			// Mac keeps its native traffic-light buttons via InvisibleTitleBarHeight.
-			Frameless: true,
+			// Mac keeps its native title bar (traffic lights) — non-frameless, with
+			// a 50px invisible drag strip that restores the system drag area. Win/Linux
+			// go frameless so the frontend can draw its own window controls and the
+			// CSS --wails-draggable header region handles dragging.
+			Frameless: runtime.GOOS != "darwin",
 			Mac: application.MacWindow{
 				TitleBar:               application.MacTitleBarHiddenInset,
-				InvisibleTitleBarHeight: 50, // hidden top strip that acts as a drag handle + restores traffic light drag
+				InvisibleTitleBarHeight: 50,
 			},
 		})
 		// Forget the window when it closes so a later Show re-creates one; the
