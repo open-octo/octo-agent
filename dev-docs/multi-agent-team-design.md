@@ -440,6 +440,18 @@ GET /api/agents/:id/sessions   — 返回指定 agent 的 sessions
 
 前端按需请求当前选中 agent 的 session 列表。
 
+#### 6.6 Memory 隔离：MVP 不隔离
+
+MVP 阶段 memory backend 不改。所有 agent 共享同一套 `memDir` + `homeMemDir`，语义记忆注入对全部 agent 生效。
+
+理由：
+- 当前并无跨 agent 记忆冗余的真实投诉
+- 全隔（选项 A）需要改 `memory.Dir()` 和 `memorybackend` 接口，约 20 行改动但增加维护复杂度
+- 分层合并（选项 B）写记忆时的分层判定依赖 LLM 调用，不准会导致记忆错放
+- 共享记忆在多 agent 早期阶段利大于弊（通用事实无需重复教）
+
+后续若出现跨 agent 记忆噪声投诉，再升级到 A（全隔）— 只需把 agent-specific directory 改名就是 shared base，迁移成本低。
+
 #### 6.5 Workflow 面板：鸭子类型接口
 
 Workflow 里调度的匿名子 agent 会继承 caller 的 tool 白名单。但 workflow 编写时依赖的 tool 可能不在所有 agent 的白名单里，导致执行时报错。
