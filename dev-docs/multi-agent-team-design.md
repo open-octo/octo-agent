@@ -506,64 +506,31 @@ if !allowed["browser"] {
 
 **工程量**：约 5 行代码，复用现有 `ManifestForProfile()` 过滤框架。
 
-#### 6.6 Workflow 面板：鸭子类型接口
+#### 6.6 Workflow 与 MCP：服务端隔离，运行时校验
 
 Workflow 里调度的匿名子 agent 会继承 caller 的 tool 白名单。但 workflow 编写时依赖的 tool 可能不在所有 agent 的白名单里，导致执行时报错。
 
-**方案：workflow 声明依赖的能力，面板按 agent 白名单过滤 — Go 式结构类型。**
+**Workflow 前端面板不隔离**：所有 agent 共享同一份 workflow 列表。Workflow 的依赖校验仅在运行时执行 — 当用户触发 workflow 时检查当前 session 对应的 agent profile 是否满足依赖，缺则拒绝并提示切换 agent 或在 Agent 管理面板开启所需工具。
 
-```
-workflow "daily-triage" {
-  requires_tools: ["terminal", "read_file", "code-review"]  // 接口声明
-}
+**MCP 过滤入口**：选 A。`DefaultToolsForProfile` 统一过滤 — 该函数同时感知 skillReg + MCPRegistry + DefaultRegistry，在一个函数内完成 built-in tool + MCP tool 的 per-profile 过滤。实现简单，单一入口易于维护。
 
-agent code-review {
-  tools: ["terminal", "read_file", "grep", "code-review"]    // 实现 ✅ — 可见
-}
-
-agent doc-writer {
-  tools: ["read_file", "write_file"]                          // 缺少 terminal + code-review — 不可见 ❌
-}
-```
-
-**frontmatter schema**：
-
-```yaml
-# ~/.octo/workflows/<name>.md frontmatter
----
-name: daily-triage
-description: Daily CI triage loop
-requires_tools:
-  - terminal
-  - read_file
-  - code-review
----
-```
-
-**面板过滤逻辑**（`workflows.ts`）：
-
-```ts
-function visibleWorkflows(
-  workflows: WorkflowMeta[],
-  profile: Profile | null,  // null = Default Agent
-): WorkflowMeta[] {
-  if (!profile || profile.Tools.length === 0) return workflows; // Default: 全部
-  const allowed = new Set(profile.Tools);
-  return workflows.filter(wf =>
-    wf.RequiresTools.every(t => allowed.has(t))
-  );
+```go
+func DefaultToolsForProfile(ctx context.Context, profile *agentprofile.Profile, serverModel string) []agent.ToolDefinition {
+    all := DefaultToolsForCtx(ctx, serverModel)
+    if profile == nil || len(profile.Tools) == 0 {
+        return all  // Default Agent：返回全部
+    }
+    allowed := make(map[string]bool, len(profile.Tools))
+    for _, t := range profile.Tools { allowed[t] = true }
+    filtered := make([]agent.ToolDefinition, 0, len(all))
+    for _, t := range all {
+        if allowed[t.Name] { filtered = append(filtered, t) }
+    }
+    return filtered
 }
 ```
 
-**UX 行为**：
-- code-review agent 的 Workflows 面板：只展示 `requires_tools ⊆ code-review.tools` 的 workflow
-- Default Agent 的 Workflows 面板：展示全部
-- 某个 workflow 对所有 expert agent 都不可见时：仍保留在 Default Agent 视图
-
-**额外好处**：
-- 避免了运行时时执行白名单报错（过滤在入口解决）
-- agent 拥有的 workflow 列表天然反映它的"能力范围"
-- 与 skill 隔离机制统一：都是通过 `requires_tools`/`tools` 的包含关系过滤
+其中 `DefaultToolsForCtx` 已包含 MCP tool（通过 `ActiveMCPRegistry`），所以 MCP 自然被 profile 白名单过滤。被禁 MCP 的 server 仍保持 registry 注册（只剥工具不拆 server），避免 per-turn 频繁启停。
 
 ### 7. Web UI 布局
 
