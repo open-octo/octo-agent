@@ -62,8 +62,10 @@ func ensureUploadsDir() (string, error) {
 
 // parseUserFiles converts a WS files payload into model blocks, display refs,
 // and document path notes. Per-file failures are logged and skipped so one bad
-// attachment doesn't drop the rest of the message.
-func parseUserFiles(files []wsUserFile, allowLocalPath bool) userAttachments {
+// attachment doesn't drop the rest of the message. When vision is false, image
+// data URLs are persisted to disk and referenced by path (so the model can read
+// them with read_file) instead of being sent as image blocks.
+func parseUserFiles(files []wsUserFile, allowLocalPath, vision bool) userAttachments {
 	var att userAttachments
 	for _, f := range files {
 		switch {
@@ -87,8 +89,14 @@ func parseUserFiles(files []wsUserFile, allowLocalPath bool) userAttachments {
 				log.Printf("[ws] image attachment %q: %v", f.Name, err)
 				continue
 			}
-			att.blocks = append(att.blocks, block)
 			att.images = append(att.images, url)
+			if vision {
+				att.blocks = append(att.blocks, block)
+			} else {
+				// Text-only model: hand the model a path note instead of an image
+				// block so it can read_file the image and keep working.
+				att.notes = append(att.notes, agent.AttachmentNote(block.ImagePath))
+			}
 		case f.Path != "":
 			dir, err := ensureUploadsDir()
 			if err != nil {

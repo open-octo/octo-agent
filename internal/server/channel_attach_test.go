@@ -77,3 +77,37 @@ func TestAttachInboundFiles_Image(t *testing.T) {
 		t.Error("expected the inbound image to be persisted under uploads")
 	}
 }
+
+// TestAttachInboundFiles_Image_NonVision verifies that for a text-only model
+// an inbound image is surfaced as a path note rather than a vision block, so the
+// model can read_file the image and the turn doesn't fail with a provider 400.
+func TestAttachInboundFiles_Image_NonVision(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
+
+	s := &Server{}
+	sess := &channel.Session{Agent: agent.New(&stubSender{}, "deepseek-v4-pro")}
+	dataURL := "data:image/png;base64," + tinyPNG
+	ev := channel.InboundEvent{
+		Platform: "telegram",
+		Text:     "what is this",
+		Files:    []channel.FileAttachment{{Type: "image", Name: "pic.png", MimeType: "image/png", DataURL: dataURL}},
+	}
+	got := s.attachInboundFiles(sess, ev)
+	if !strings.Contains(got, "what is this") {
+		t.Errorf("content lost the caption: %q", got)
+	}
+	if !strings.Contains(got, "[Attached file:") || !strings.Contains(filepath.ToSlash(got), ".octo/uploads") {
+		t.Errorf("content should carry a persisted upload path note for non-vision model, got %q", got)
+	}
+	// The image should still be persisted so the model can read it.
+	dir := filepath.Join(tmpHome, ".octo", "uploads")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("uploads dir not created: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Error("expected the inbound image to be persisted under uploads")
+	}
+}

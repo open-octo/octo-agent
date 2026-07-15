@@ -26,7 +26,7 @@ func TestParseUserFiles_ImageDataURL(t *testing.T) {
 	payload := []byte{0xFF, 0xD8, 0xFF, 1, 2, 3}
 	att := parseUserFiles([]wsUserFile{
 		{Name: "shot.png", MimeType: "image/jpeg", DataURL: jpegDataURL(payload)},
-	}, false)
+	}, false, true)
 
 	if len(att.blocks) != 1 || len(att.images) != 1 || len(att.notes) != 0 {
 		t.Fatalf("blocks/images/notes = %d/%d/%d, want 1/1/0",
@@ -60,6 +60,38 @@ func TestParseUserFiles_ImageDataURL(t *testing.T) {
 	}
 }
 
+// TestParseUserFiles_ImageDataURL_NonVision verifies that when the active model
+// does not accept images, an image data URL is persisted to disk and surfaced
+// to the model as a path note (so it can read_file the image) rather than an
+// image block that would be rejected by the provider.
+func TestParseUserFiles_ImageDataURL_NonVision(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	payload := []byte{0xFF, 0xD8, 0xFF, 1, 2, 3}
+	att := parseUserFiles([]wsUserFile{
+		{Name: "shot.png", MimeType: "image/jpeg", DataURL: jpegDataURL(payload)},
+	}, false, false)
+
+	if len(att.blocks) != 0 || len(att.images) != 1 || len(att.notes) != 1 {
+		t.Fatalf("blocks/images/notes = %d/%d/%d, want 0/1/1",
+			len(att.blocks), len(att.images), len(att.notes))
+	}
+	path := strings.TrimPrefix(strings.TrimSuffix(att.notes[0], "]"), "[Attached file: ")
+	wantURL := "/api/uploads/" + filepath.Base(path)
+	if att.images[0] != wantURL {
+		t.Errorf("display URL = %q, want %q", att.images[0], wantURL)
+	}
+	if !strings.Contains(path, ".octo") || !strings.Contains(path, "uploads") {
+		t.Errorf("note should reference the persisted upload path, got %q", att.notes[0])
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil || string(onDisk) != string(payload) {
+		t.Errorf("persisted copy mismatch: err=%v, match=%v", err, string(onDisk) == string(payload))
+	}
+}
+
 func TestParseUserFiles_DocPath(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -75,7 +107,7 @@ func TestParseUserFiles_DocPath(t *testing.T) {
 
 	att := parseUserFiles([]wsUserFile{
 		{Name: "report.pdf", MimeType: "application/pdf", Path: "/api/uploads/123_report.pdf"},
-	}, false)
+	}, false, true)
 
 	// A document produces no block and no image ref — only a note. Its display
 	// chip is derived from that note (see docChipRefs / the replay test).
@@ -111,7 +143,7 @@ func TestParseUserFiles_SkipsBadEntries(t *testing.T) {
 		{Name: "bad.jpg", DataURL: "not-a-data-url"},
 		{Name: "evil.pdf", Path: "/api/uploads/does-not-exist.pdf"},
 		{Name: "text.txt", DataURL: "data:text/plain;base64,aGk="}, // non-image data URL
-	}, false)
+	}, false, true)
 	if len(att.blocks) != 0 || len(att.images) != 0 || len(att.notes) != 0 {
 		t.Errorf("bad entries not skipped: %+v", att)
 	}
@@ -369,6 +401,113 @@ drain:
 	}
 }
 
+// TestHandleWSUserMessage_ImageOnly_NonVision verifies that when the active
+// model is text-only, an image-only WS message is not dropped and is surfaced
+// to the model as a path note rather than an image block that the provider
+// would reject.
+func TestHandleWSUserMessage_ImageOnly_NonVision(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("deepseek-v4-pro", "")
+	sess.Title = "fixed title"
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 256),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
+	srv.wsHub.subscribe(conn, sess.ID)
+
+	payload := []byte{0xFF, 0xD8, 0xFF, 9, 9}
+	srv.handleWSUserMessage(conn, &wsMsgUserMessage{
+		SessionID: sess.ID,
+		Content:   json.RawMessage(`""`),
+		Files: []wsUserFile{
+			{Name: "shot.jpg", MimeType: "image/jpeg", DataURL: jpegDataURL(payload)},
+		},
+	})
+
+	var gotDocChip bool
+	deadline := time.After(5 * time.Second)
+drain:
+	for {
+		select {
+		case b := <-conn.send:
+			var ev map[string]any
+			if err := json.Unmarshal(b, &ev); err != nil {
+				continue
+			}
+			switch ev["type"] {
+			case "history_user_message":
+				if imgs, ok := ev["images"].([]any); ok {
+					for _, img := range imgs {
+						ref, _ := img.(string)
+						if strings.HasPrefix(ref, "pdf:shot") {
+							gotDocChip = true
+						}
+					}
+				}
+			case "complete":
+				break drain
+			}
+		case <-deadline:
+			t.Fatal("turn did not complete — non-vision image-only message still dropped?")
+		}
+	}
+	if !gotDocChip {
+		t.Error("history_user_message carried no document chip for the persisted image")
+	}
+
+	// The persisted message should carry a path note, not an image block.
+	loaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	var hasNote, hasBlock bool
+	for _, m := range loaded.Messages {
+		if m.Role != agent.RoleUser {
+			continue
+		}
+		if strings.Contains(m.Content, "[Attached file:") && strings.Contains(filepath.ToSlash(m.Content), ".octo/uploads") {
+			hasNote = true
+		}
+		for _, blk := range m.Blocks {
+			if blk.Type == "image" {
+				hasBlock = true
+			}
+		}
+	}
+	if !hasNote {
+		t.Error("persisted user message missing the image path note")
+	}
+	if hasBlock {
+		t.Error("non-vision model persisted an image block")
+	}
+
+	turnMu := srv.sessionTurnLock(sess.ID)
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		turnMu.Lock()
+		running := srv.turnRunning[sess.ID]
+		turnMu.Unlock()
+		if !running {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // TestParseUserFilesLocalPath: a real local path is referenced in place only
 // for a loopback (same-machine) client; for a remote client it's ignored so it
 // can't make the agent read arbitrary server files.
@@ -379,12 +518,12 @@ func TestParseUserFilesLocalPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	att := parseUserFiles([]wsUserFile{{Name: "notes.md", LocalPath: f}}, true)
+	att := parseUserFiles([]wsUserFile{{Name: "notes.md", LocalPath: f}}, true, true)
 	if len(att.notes) != 1 || !strings.Contains(att.notes[0], f) {
 		t.Errorf("local path should be referenced in place for loopback, got notes=%+v", att.notes)
 	}
 
-	att2 := parseUserFiles([]wsUserFile{{Name: "notes.md", LocalPath: f}}, false)
+	att2 := parseUserFiles([]wsUserFile{{Name: "notes.md", LocalPath: f}}, false, true)
 	if len(att2.notes) != 0 {
 		t.Errorf("local path must be ignored for a non-loopback client, got notes=%+v", att2.notes)
 	}
