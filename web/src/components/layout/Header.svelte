@@ -32,7 +32,7 @@
   }
 </script>
 
-<header class:native-inset={$nativeShell} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
+<header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
   <div class="left">
     <button class="icon-btn" title={$t('header.toggle_sidebar')} onclick={cycleSidebar}>
       <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
