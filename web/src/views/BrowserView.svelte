@@ -101,7 +101,7 @@
           <span class="muted">{$t('common.loading')}</span>
         {:else}
           {#if browser.connected}
-            <StatusTag status="warning">{$t('settings.browser.port_reachable')}</StatusTag>
+            <StatusTag status="success">{$t('settings.browser.connected')}</StatusTag>
           {:else if browser.configured}
             <StatusTag status="warning">{$t('settings.browser.unreachable')}</StatusTag>
           {:else}
@@ -121,12 +121,6 @@
       <div class="conn-note">
         <iconify-icon icon="ant-design:warning-outlined" width="14"></iconify-icon>
         {$t('settings.browser.no_chrome')}
-      </div>
-    {/if}
-    {#if browser && browser.connected && browser.configured}
-      <div class="conn-note">
-        <iconify-icon icon="ant-design:info-circle-outlined" width="14"></iconify-icon>
-        {$t('settings.browser.port_reachable_hint')}
       </div>
     {/if}
   </section>
