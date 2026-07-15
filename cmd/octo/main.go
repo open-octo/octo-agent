@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/open-octo/octo-agent/internal/sandbox"
+	"github.com/open-octo/octo-agent/internal/serveenv"
 	"github.com/open-octo/octo-agent/internal/shellpath"
 	"github.com/open-octo/octo-agent/internal/skills"
 	"github.com/open-octo/octo-agent/internal/tools"
@@ -37,6 +38,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// A no-op on Windows and when the PATH already looks like a login shell's
 	// (the common terminal launch).
 	shellpath.SyncToLoginShell()
+
+	// Load ~/.octo/serve.env for variables the launcher can't inherit (GUI /
+	// launchd / .desktop start with a minimal environment, missing the user's
+	// shell profile). Best-effort — a missing file is a no-op, and explicit
+	// env (CLI / systemd Environment=) always wins over the file. Done early
+	// so provider keys, TAVILY_API_KEY, OCTO_LOG_LEVEL etc. are present before
+	// any tool or subcommand reads the environment.
+	serveenv.Load()
+
+	// Materialize the binary's default skills/workflows to ~/.octo/skills-default
 
 	// Materialize the binary's default skills/workflows to ~/.octo/skills-default
 	// and ~/.octo/workflows-default so they're discoverable like any user

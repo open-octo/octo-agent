@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/logfile"
+	"github.com/open-octo/octo-agent/internal/serveenv"
 	"github.com/open-octo/octo-agent/internal/serveproc"
 	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/open-octo/octo-agent/internal/shellpath"
@@ -122,6 +123,14 @@ func main() {
 	// and shell tools inherit this process's PATH directly — sync it to the login
 	// shell's before server.New below, mirroring the `octo serve` binary.
 	shellpath.SyncToLoginShell()
+
+	// Load ~/.octo/serve.env for variables a GUI launch can't inherit from a
+	// login shell (e.g. TAVILY_API_KEY, provider keys). Best-effort — missing
+	// file is a no-op, explicit env always wins. Mirrors the `octo serve` CLI
+	// path so both backends resolve the same set of environment variables.
+	serveenv.Load()
+
+	// Pick the language for native dialogs/tray from the system UI language.
 
 	// Pick the language for native dialogs/tray from the system UI language.
 	applyLang()
