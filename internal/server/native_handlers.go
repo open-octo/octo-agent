@@ -28,6 +28,10 @@ type NativeBridge interface {
 	// own failures; callers don't handle an error.
 	Notify(title, body string)
 
+	// NotifySession raises an OS-native notification that, when clicked, focuses
+	// the app and navigates to the given session. Best-effort like Notify.
+	NotifySession(title, body, sessionID string)
+
 	// AutostartEnabled reports whether the app is registered to launch at login.
 	AutostartEnabled() (bool, error)
 	// SetAutostart registers (enable) or unregisters the app from launch-at-login.
@@ -124,14 +128,17 @@ func (s *Server) handleNativePickFile(w http.ResponseWriter, r *http.Request) {
 }
 
 type nativeNotifyRequest struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	SessionID string `json:"session_id"`
 }
 
 // POST /api/native/notify — raise an OS-native notification (desktop only).
 // The frontend calls this in desktop mode instead of the browser Notification
-// API, which native webviews don't implement. Best-effort: it always returns
-// ok; the bridge swallows delivery failures. Registered only with a bridge.
+// API, which native webviews don't implement. When session_id is present, the
+// desktop shell routes a click on that notification to the specified session.
+// Best-effort: it always returns ok; the bridge swallows delivery failures.
+// Registered only with a bridge.
 func (s *Server) handleNativeNotify(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRemote(r.RemoteAddr) {
 		writeError(w, http.StatusForbidden, "native notifications are available only from the local machine")
@@ -146,7 +153,11 @@ func (s *Server) handleNativeNotify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	s.cfg.Native.Notify(req.Title, req.Body)
+	if req.SessionID != "" {
+		s.cfg.Native.NotifySession(req.Title, req.Body, req.SessionID)
+	} else {
+		s.cfg.Native.Notify(req.Title, req.Body)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

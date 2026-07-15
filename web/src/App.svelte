@@ -269,9 +269,9 @@ import ArtifactModal from './components/ArtifactModal.svelte'
     const title = tr(titleKey)
     const body = tr(bodyKey).replace('{name}', escapedName)
     if (native) {
-      // No click-to-focus yet (would need a native notification callback); the
-      // tray/dock and single-instance focus cover raising the window.
-      api.nativeNotify(title, body).catch(() => {})
+      // The native notification carries this session id so the desktop shell
+      // routes to it on click. Browser path handles the click in-page below.
+      api.nativeNotify(title, body, sid).catch(() => {})
       return
     }
     const n = new Notification(title, { body })

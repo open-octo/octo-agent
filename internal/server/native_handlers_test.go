@@ -12,20 +12,22 @@ import (
 
 // fakeNative records what it was asked and returns canned results.
 type fakeNative struct {
-	gotStartDir       string
-	retPath           string
-	retCancel         bool
-	gotTitle, gotBody string
-	notifyCalls       int
-	autostart         bool
-	toggleMaxCalls    int
-	minimiseCalls     int
-	closeCalls        int
-	gotOpenURL        string
-	openCalls         int
-	gotSaveName       string
-	gotSaveContent    string
-	saveCalls         int
+	gotStartDir        string
+	retPath            string
+	retCancel          bool
+	gotTitle, gotBody  string
+	notifyCalls        int
+	gotSessionID       string
+	notifySessionCalls int
+	autostart          bool
+	toggleMaxCalls     int
+	minimiseCalls      int
+	closeCalls         int
+	gotOpenURL         string
+	openCalls          int
+	gotSaveName        string
+	gotSaveContent     string
+	saveCalls          int
 }
 
 func (f *fakeNative) PickFolder(_ context.Context, startDir string) (string, bool, error) {
@@ -39,6 +41,11 @@ func (f *fakeNative) PickFile(_ context.Context, startDir string) (string, bool,
 func (f *fakeNative) Notify(title, body string) {
 	f.notifyCalls++
 	f.gotTitle, f.gotBody = title, body
+}
+func (f *fakeNative) NotifySession(title, body, sessionID string) {
+	f.notifySessionCalls++
+	f.gotTitle, f.gotBody = title, body
+	f.gotSessionID = sessionID
 }
 func (f *fakeNative) AutostartEnabled() (bool, error) { return f.autostart, nil }
 func (f *fakeNative) SetAutostart(enable bool) error  { f.autostart = enable; return nil }
@@ -134,6 +141,29 @@ func TestNativeNotifyDelegatesToBridge(t *testing.T) {
 	}
 	if fake.notifyCalls != 1 || fake.gotTitle != "Done" || fake.gotBody != "turn complete" {
 		t.Errorf("bridge.Notify got calls=%d title=%q body=%q, want 1/Done/turn complete", fake.notifyCalls, fake.gotTitle, fake.gotBody)
+	}
+}
+
+func TestNativeNotifyRoutesToNotifySessionWhenSessionIDPresent(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/notify", strings.NewReader(`{"title":"Question","body":"needs input","session_id":"sess-123"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.notifyCalls != 0 {
+		t.Errorf("bridge.Notify calls = %d, want 0 (NotifySession should be used)", fake.notifyCalls)
+	}
+	if fake.notifySessionCalls != 1 || fake.gotTitle != "Question" || fake.gotBody != "needs input" || fake.gotSessionID != "sess-123" {
+		t.Errorf("bridge.NotifySession got calls=%d title=%q body=%q sessionID=%q, want 1/Question/needs input/sess-123",
+			fake.notifySessionCalls, fake.gotTitle, fake.gotBody, fake.gotSessionID)
 	}
 }
 
@@ -282,7 +312,6 @@ func TestNativeOpenExternalRejectsDisallowedScheme(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/native/open-external", strings.NewReader(`{"url":"`+link+`"}`))
 		w := httptest.NewRecorder()
 		serveLoopback(srv.mux, w, req)
-
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("%s: got %d, want 400", link, w.Code)
 		}

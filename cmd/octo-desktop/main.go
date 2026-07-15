@@ -21,6 +21,7 @@ import (
 	"log"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -194,10 +195,10 @@ func main() {
 	bridge.app = app
 
 	// Interacting with the "update available" toast opens the download page;
-	// every other notification raises the window. Match the category (which all
-	// three platform notifiers echo back) and then only the "Open" action or a
-	// tap on the body — so dismissing the toast, whatever identifier a platform
-	// reports for that, never opens a browser.
+	// session notifications focus and route to the relevant session; every other
+	// notification just raises the window. Match the category (which all three
+	// platform notifiers echo back) and then only the "Open" action or a tap
+	// on the body — so dismissing the toast never triggers an action.
 	if bridge.notifier != nil {
 		bridge.notifier.OnNotificationResponse(func(res notifications.NotificationResult) {
 			if res.Response.CategoryID == updateNotifyCategoryID {
@@ -205,6 +206,10 @@ func main() {
 				case updateNotifyOpenActionID, notifications.DefaultActionIdentifier:
 					_ = bridge.OpenExternal(upgrade.DownloadPageURL)
 				}
+				return
+			}
+			if sid, ok := res.Response.UserInfo["session_id"].(string); ok && sid != "" {
+				bridge.showWindowAt("chat/" + url.PathEscape(sid))
 				return
 			}
 			bridge.showWindow()

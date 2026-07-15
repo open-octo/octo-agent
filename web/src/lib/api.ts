@@ -219,10 +219,12 @@ export async function nativeSaveBinary(name: string, b64: string): Promise<{ pat
 
 // Desktop shell only: raise an OS-native notification. Used in place of the
 // browser Notification API, which native webviews don't implement. Best-effort.
-export async function nativeNotify(title: string, body: string): Promise<void> {
+// When sessionId is provided, clicking the notification focuses the app and
+// jumps to that session.
+export async function nativeNotify(title: string, body: string, sessionId?: string): Promise<void> {
   await request<{ ok: boolean }>('/api/native/notify', {
     method: 'POST',
-    ...json({ title, body }),
+    ...json({ title, body, session_id: sessionId }),
   })
 }
 
