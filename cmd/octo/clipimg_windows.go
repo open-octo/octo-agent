@@ -45,7 +45,7 @@ else { $img.Save('%s', [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd := exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", executil.PowerShellUTF8EncodingPrefix+script)
 	executil.SetNoWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
