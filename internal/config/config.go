@@ -251,14 +251,12 @@ type BrowserConfig struct {
 	// --remote-debugging-port=<port> via the /json HTTP endpoint. Use when the
 	// port is known and that endpoint is served.
 	ConnectPort int `yaml:"connect_port,omitempty"`
-	// UserDataDir is the Chrome profile dir used when launching (the fallback
-	// when no running Chrome is attached). Empty uses a throwaway profile.
+	// UserDataDir is the Chrome profile dir to attach to when AttachRunning is
+	// set — its DevToolsActivePort is read to reach the logged-in session.
 	UserDataDir string `yaml:"user_data_dir,omitempty"`
-	// ExecPath overrides Chrome executable auto-detection.
+	// ExecPath overrides Chrome executable auto-detection (used to locate Chrome
+	// for the availability probe).
 	ExecPath string `yaml:"exec_path,omitempty"`
-	// Headless launches Chrome headless. Interactive workflows want this off so
-	// the user can watch and intervene.
-	Headless bool `yaml:"headless,omitempty"`
 	// DownloadDir is where captured downloads are written. Empty uses a temp dir.
 	DownloadDir string `yaml:"download_dir,omitempty"`
 }
