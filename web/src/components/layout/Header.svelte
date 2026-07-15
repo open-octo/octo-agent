@@ -68,15 +68,9 @@
     </button>
     {#if $nativeShell && !isMac}
       <div class="window-controls">
-        <button class="window-btn minimise" title="Minimise" onclick={() => nativeMinimise()}>
-          <iconify-icon icon="lucide:minus" width="14"></iconify-icon>
-        </button>
-        <button class="window-btn maximise" title="Maximise" onclick={() => nativeToggleMaximise()}>
-          <iconify-icon icon="lucide:copy" width="13"></iconify-icon>
-        </button>
-        <button class="window-btn close" title="Close" onclick={() => nativeClose()}>
-          <iconify-icon icon="lucide:x" width="14"></iconify-icon>
-        </button>
+        <button class="window-btn minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
+        <button class="window-btn maximise" title="Maximise" onclick={() => nativeToggleMaximise()}>□</button>
+        <button class="window-btn close" title="Close" onclick={() => nativeClose()}>×</button>
       </div>
     {/if}
   </div>
