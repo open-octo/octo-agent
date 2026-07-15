@@ -106,12 +106,16 @@ func parseUserFiles(files []wsUserFile, allowLocalPath, vision bool) userAttachm
 				log.Printf("[ws] image attachment %q: %v", f.Name, err)
 				continue
 			}
-			att.images = append(att.images, url)
 			if vision {
+				// Vision model: embed the image directly and pre-fill the bubble
+				// thumbnail from the same persisted copy.
+				att.images = append(att.images, url)
 				att.blocks = append(att.blocks, block)
 			} else {
 				// Text-only model: hand the model a path note instead of an image
-				// block so it can read_file the image and keep working.
+				// block so it can read_file the image and keep working. The thumbnail
+				// is derived from the note by docChipRefs so live and replay use the
+				// same source.
 				att.notes = append(att.notes, agent.AttachmentNote(block.ImagePath))
 			}
 		case f.Path != "":
