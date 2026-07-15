@@ -36,21 +36,31 @@
   // The frontend owns this state — there's no native title bar reading it. We
   // sync from the OS on mount, on window focus (catches Aero Snap / keyboard
   // maximize / taskbar restore the frontend can't otherwise observe), and after
-  // every toggle so the icon always reflects reality.
+  // every toggle so the icon always reflects reality. A sequence counter
+  // prevents a stale focus response from overwriting a fresh toggle result.
   let isMaximised = false
+  let stateSeq = 0
+  async function refreshMaximised() {
+    const seq = ++stateSeq
+    const m = await nativeWindowState()
+    if (seq === stateSeq) isMaximised = m
+  }
   async function flipMaximise() {
     const next = !isMaximised
     try {
       await nativeToggleMaximise()
       isMaximised = next
     } catch {
-      // Keep current state on failure so the icon never desyncs from reality.
+      // Toggle failed — fetch the real OS state to stay in sync rather than
+      // gambling that the old isMaximised is still accurate.
+      await refreshMaximised()
     }
   }
 
-  onMount(async () => {
-    isMaximised = await nativeWindowState()
-    const onFocus = async () => { isMaximised = await nativeWindowState() }
+  onMount(() => {
+    if (!$nativeShell) return // web mode has no native bridge — skip entirely
+    refreshMaximised()
+    const onFocus = () => refreshMaximised()
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   })

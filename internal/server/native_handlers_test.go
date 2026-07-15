@@ -272,6 +272,23 @@ func TestNativeWindowState(t *testing.T) {
 	}
 }
 
+func TestNativeWindowStateRejectsNonLoopback(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: &fakeNative{maximised: true}})
+	req := httptest.NewRequest(http.MethodGet, "/api/native/window/state", nil)
+	req.RemoteAddr = "203.0.113.5:1000"
+	req.Host = "127.0.0.1:8080"
+	req.Header.Set("Authorization", "Bearer "+srv.AccessKey())
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("non-loopback peer: got %d, want 403", w.Code)
+	}
+}
+
 func TestVersionNativeFlag(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
