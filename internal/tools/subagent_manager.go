@@ -104,7 +104,9 @@ func (a *asyncSubAgent) setDone(err error, stopReason string) {
 		a.exited = true
 	}
 	a.exitErr = err
-	a.stopReason = stopReason
+	if stopReason != "" {
+		a.stopReason = stopReason
+	}
 	a.busy = false
 }
 
@@ -818,6 +820,7 @@ func (m *SubAgentManager) KillAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, agent := range m.agents {
+		agent.setKilled()
 		agent.cancel()
 	}
 }
