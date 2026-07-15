@@ -14,17 +14,34 @@ import (
 )
 
 // docChipRefs strips "[Attached file: …]" notes from display text and returns
-// the cleaned text plus one "pdf:<name>" chip ref per note. The note in the
-// message text is the only persisted trace of a document attachment, so this is
-// the single source of doc chips for both the live broadcast and history
-// replay. ("pdf:" is the frontend's document-chip sentinel; the name is any
-// file type, not only PDFs.)
+// the cleaned text plus one chip ref per note. Image attachments persisted
+// under ~/.octo/uploads are returned as "/api/uploads/<name>" so the frontend
+// renders a thumbnail; documents and non-uploaded local paths are returned as
+// "pdf:<name>" for the document chip. The note in the message text is the only
+// persisted trace of an attachment, so this is the single source of chips for
+// both the live broadcast and history replay.
 func docChipRefs(text string) (cleaned string, refs []string) {
 	cleaned, names := agent.StripAttachmentNotes(text)
-	for _, n := range names {
-		refs = append(refs, "pdf:"+n)
+	paths := agent.AttachmentPaths(text)
+	for i, name := range names {
+		if i < len(paths) && isImageUpload(paths[i]) {
+			refs = append(refs, "/api/uploads/"+filepath.Base(paths[i]))
+		} else {
+			refs = append(refs, "pdf:"+name)
+		}
 	}
 	return cleaned, refs
+}
+
+// isImageUpload reports whether path is an image file persisted in the uploads
+// directory, i.e. one that can be served back under /api/uploads/.
+func isImageUpload(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg":
+		return strings.Contains(filepath.ToSlash(path), "/.octo/"+uploadsDirName+"/")
+	}
+	return false
 }
 
 // User attachments sent over the WebSocket message payload. Images arrive as

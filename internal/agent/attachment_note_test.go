@@ -5,6 +5,38 @@ import (
 	"testing"
 )
 
+func TestAttachmentPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{
+			name: "single note",
+			in:   "[Attached file: /home/u/.octo/uploads/123_report.pdf]",
+			want: []string{"/home/u/.octo/uploads/123_report.pdf"},
+		},
+		{
+			name: "multiple notes",
+			in:   "compare them\n\n[Attached file: /a/q1.xlsx]\n[Attached file: /a/q2.xlsx]",
+			want: []string{"/a/q1.xlsx", "/a/q2.xlsx"},
+		},
+		{
+			name: "no note",
+			in:   "just a normal message",
+			want: nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := AttachmentPaths(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("AttachmentPaths = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAttachmentNoteRoundTrip(t *testing.T) {
 	note := AttachmentNote("/home/u/.octo/uploads/123_report.pdf")
 	cleaned, names := StripAttachmentNotes(note)
