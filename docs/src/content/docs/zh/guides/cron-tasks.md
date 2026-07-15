@@ -13,8 +13,7 @@ octo serve
 ## 工作原理
 
 每个任务是 `~/.octo/tasks/` 下的一个 JSON 文件，由 `octo serve` 内部的调度器加载。任务触发时，
-调度器会用任务的 prompt 跑一轮 agent，并且**每次运行都复用同一个会话**，所以任务会在多次运行
-之间不断积累历史。每次运行都有一个 **30 分钟的墙钟超时**——唯一的硬上限。
+调度器会用任务的 prompt 跑一轮 agent。每次运行都有一个 **30 分钟的墙钟超时**——唯一的硬上限。
 
 **任务只有在 `octo serve` 跑着的时候才会触发。** 没有 serve 就没有运行——服务器关着期间错过
 的那次计划，重启后也不会补跑。
@@ -31,11 +30,20 @@ octo serve
 | `directory` | 否 | 运行时所在的工作目录 |
 | `notify` | 否 | 每次运行的最终回复（或失败信息）要推送到哪些 IM 会话 |
 | `enabled` | 是 | 这个计划当前是否处于启用状态 |
+| `session_mode` | 否 | `"shared"`（默认）每次复用同一会话——历史累积。`"fresh"` 每次创建全新会话——每次都是空白记录。 |
 
 这个 prompt 是在自己独立的会话里跑的，拿不到创建这个任务的那个对话的任何上下文，所以它必须
 自成一体：做什么、在哪做、输出该长什么样都要写清楚。也要给它一个明确的停止条件——一个开放式
-的 prompt 会让模型一直反复确认下去，直到撞上 30 分钟超时，而不是一旦"没什么可汇报的"就自己
-收尾。
+的 prompt 会让模型一直反复确认下去，直到撞上 30 分钟超时，而不是"没什么可汇报的"就自己收尾。
+
+## 会话模式
+
+任务的 `session_mode` 控制各次运行之间是否共享会话：
+
+- **`shared`**（默认）——所有运行复用同一个会话，agent 能看到之前的工作并在此基础上继续。适合那些要引用自身历史输出的周期性报告。
+- **`fresh`**——每次运行创建一个全新的会话，从空白记录开始。适合一次性提醒类、或不应看到过往运行的任务。历史会话保留在磁盘上，任务列表会链接到最近一次运行供追溯。
+
+默认值是 `"shared"`（留空也等价于 `"shared"`），现有任务不受影响。随时可以通过 `PATCH /api/tasks/{id}` 切换模式——改动在下次运行时生效。除 `"shared"` 和 `"fresh"` 之外的值会被拒绝并返回 400 错误。
 
 ## cron 表达式——6 个字段，秒在最前面
 
@@ -62,10 +70,15 @@ seconds minutes hours day-of-month month day-of-week
 
 ```bash
 # 创建——返回 {"id":"task_..."}。任何可选字段（directory、model、
-# agent、notify）都可以直接放进创建时的请求体里。
+# agent、notify、session_mode）都可以直接放进创建时的请求体里。
 curl -s -X POST http://127.0.0.1:8088/api/tasks \
   -H 'Content-Type: application/json' \
   -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ...","directory":"/srv/repo"}'
+
+# fresh 模式示例——每次运行用全新会话
+curl -s -X POST http://127.0.0.1:8088/api/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"one-shot","cron":"15 10 18 8 *","prompt":"提醒 xxx","session_mode":"fresh"}'
 
 curl -s http://127.0.0.1:8088/api/tasks                # 列表
 curl -s -X DELETE http://127.0.0.1:8088/api/tasks/{id} # 删除
@@ -80,11 +93,11 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
 ```
 
 `PATCH /api/tasks/{id}` 接受 `enabled`、`cron`、`prompt`、`model`、`agent`、`directory`、
-`notify`——只发你要改的那部分就行。Web UI 里的调度器面板就是这套 API 的一个客户端，所以用
-`curl` 创建的任务会出现在面板里，反过来也一样；面板也是**试跑一个新任务的 `Run` 按钮**推荐
-用的地方，而不是从聊天会话里直接触发 `/api/tasks/{id}/run`——一次运行是在这个任务**自己的**
-会话里跑一整轮 agent（最多 30 分钟），从对话里触发只会把那个对话卡住，而真正的输出落在了
-没人看着的地方。
+`notify`、`session_mode`——只发你要改的那部分就行。Web UI 里的调度器面板就是这套 API 的一个
+客户端，所以用 `curl` 创建的任务会出现在面板里，反过来也一样；面板也是**试跑一个新任务的
+`Run` 按钮**推荐用的地方，而不是从聊天会话里直接触发 `/api/tasks/{id}/run`——一次运行是在这
+个任务**自己的**会话里跑一整轮 agent（最多 30 分钟），从对话里触发只会把那个对话卡住，而真
+正的输出落在了没人看着的地方。
 
 ### 没有运行中的 server 时
 
@@ -98,6 +111,7 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
   "cron": "0 0 9 * * *",
   "prompt": "Summarize ...",
   "directory": "/srv/repo",
+  "session_mode": "shared",
   "enabled": true,
   "created_at": "2026-06-10T09:00:00Z"
 }

@@ -75,6 +75,25 @@
     }
   }
 
+  async function handleToggleMode(t: api.TaskResponse) {
+    const next = t.session_mode === "fresh" ? "shared" : "fresh"
+    try {
+      await api.updateTask(t.id, { session_mode: next })
+      rawTasks = rawTasks.map(r => r.id === t.id ? { ...r, session_mode: next } : r)
+      showToast(next === "fresh" ? tr('tasks.session_mode_fresh') : tr('tasks.session_mode_shared'))
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed to update mode', 'error')
+    }
+  }
+
+  function modeLabel(t: api.TaskResponse): string {
+    return t.session_mode === "fresh" ? tr('tasks.session_mode_fresh') : tr('tasks.session_mode_shared')
+  }
+
+  function modeHint(t: api.TaskResponse): string {
+    return t.session_mode === "fresh" ? tr('tasks.session_mode_fresh_hint') : tr('tasks.session_mode_shared_hint')
+  }
+
   async function handleToggle(t: api.TaskResponse) {
     const next = !t.enabled
     try {
@@ -154,6 +173,14 @@
               {#if task.agent || task.model}
                 <span class="task-target">{task.agent || task.model}</span>
               {/if}
+              <button
+                class="mode-chip"
+                title={modeHint(task)}
+                onclick={() => handleToggleMode(task)}
+              >
+                <iconify-icon icon={task.session_mode === "fresh" ? "ant-design:file-add-outlined" : "ant-design:sync-outlined"} width="11"></iconify-icon>
+                {modeLabel(task)}
+              </button>
             </div>
 
             <!-- Cron expression -->
@@ -249,6 +276,15 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .task-name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-right: 16px; }
 .task-name { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-target { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mode-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 6px; border: 1px solid var(--border-table);
+  border-radius: 4px; background: transparent;
+  font-size: 11px; color: var(--text-tertiary);
+  cursor: pointer; font-family: inherit; margin-top: 2px;
+  width: fit-content;
+}
+.mode-chip:hover { color: var(--blue-6); border-color: var(--blue-6); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .cron { font-size: 13px; color: var(--text-secondary); }
 .run-times-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

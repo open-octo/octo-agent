@@ -22,29 +22,31 @@ import (
 // ─── Tasks REST API ─────────────────────────────────────────────────────────
 
 type taskRequest struct {
-	Name      string                  `json:"name"`
-	Cron      string                  `json:"cron"`
-	Prompt    string                  `json:"prompt"`
-	Model     string                  `json:"model,omitempty"`
-	Agent     string                  `json:"agent,omitempty"`
-	Directory string                  `json:"directory,omitempty"`
-	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
+	Name        string                  `json:"name"`
+	Cron        string                  `json:"cron"`
+	Prompt      string                  `json:"prompt"`
+	Model       string                  `json:"model,omitempty"`
+	Agent       string                  `json:"agent,omitempty"`
+	Directory   string                  `json:"directory,omitempty"`
+	Notify      scheduler.NotifyTargets `json:"notify,omitempty"`
+	SessionMode string                  `json:"session_mode,omitempty"`
 }
 
 type taskResponse struct {
-	ID        string                  `json:"id"`
-	Name      string                  `json:"name"`
-	Cron      string                  `json:"cron"`
-	Prompt    string                  `json:"prompt"`
-	Model     string                  `json:"model,omitempty"`
-	Agent     string                  `json:"agent,omitempty"`
-	Directory string                  `json:"directory,omitempty"`
-	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
-	Enabled   bool                    `json:"enabled"`
-	CreatedAt string                  `json:"created_at,omitempty"`
-	LastRun   string                  `json:"last_run,omitempty"`
-	NextRun   string                  `json:"next_run,omitempty"`
-	SessionID string                  `json:"session_id,omitempty"`
+	ID          string                  `json:"id"`
+	Name        string                  `json:"name"`
+	Cron        string                  `json:"cron"`
+	Prompt      string                  `json:"prompt"`
+	Model       string                  `json:"model,omitempty"`
+	Agent       string                  `json:"agent,omitempty"`
+	Directory   string                  `json:"directory,omitempty"`
+	Notify      scheduler.NotifyTargets `json:"notify,omitempty"`
+	Enabled     bool                    `json:"enabled"`
+	CreatedAt   string                  `json:"created_at,omitempty"`
+	LastRun     string                  `json:"last_run,omitempty"`
+	NextRun     string                  `json:"next_run,omitempty"`
+	SessionID   string                  `json:"session_id,omitempty"`
+	SessionMode string                  `json:"session_mode,omitempty"`
 }
 
 // initScheduler creates the scheduler if not already initialized. It is
@@ -74,47 +76,69 @@ func (s *Server) initScheduler() {
 // CreateSession implements scheduler.Runner. It creates or reuses the session
 // for a task and persists it immediately so the web UI can open the session
 // before the (potentially long) agent turn starts.
+//
+// task.SessionMode selects the behaviour:
+//   - "shared" (default): reuse the task's existing session if one exists;
+//     history accumulates across runs — ideal for recurring reports that
+//     reference their own prior output.
+//   - "fresh": always create a new, empty session, so each run starts from a
+//     clean transcript. The previous run's session is left on disk; the task
+//     list links to the most recent one for traceability.
 func (s *Server) CreateSession(task scheduler.Task) (string, error) {
-	// Try to load an existing session for this task.
+	// Fresh mode: never reuse, always start from an empty transcript.
+	if task.SessionMode == "fresh" {
+		return s.newSession(task)
+	}
+
+	// Shared mode (default): try to load an existing session for this task.
 	sess, err := agent.LoadSession(task.SessionID)
 	if err != nil {
-		// Create a new session.
-		model := task.Model
-		if model == "" {
-			model = s.model
+		// No reusable session — create a new one.
+		return s.newSession(task)
+	}
+	return sess.ID, nil
+}
+
+// newSession creates and persists a brand-new agent session for a task, seeded
+// with the task's model, title, working directory, and unattended permission
+// mode. It is the single path that actually allocates a session on disk, so
+// both the "shared" first-run and "fresh" modes flow through it.
+func (s *Server) newSession(task scheduler.Task) (string, error) {
+	model := task.Model
+	if model == "" {
+		model = s.model
+	}
+	sess := agent.NewSession(model, s.system)
+	sess.Source = "cron"
+	sess.Title = task.Name
+	// Cron ticks have no human to answer an ask prompt, unlike the web/IM
+	// default this mirrors — see ResolveUnattendedDefaultMode's doc comment.
+	_ = sess.SetPermissionMode(string(permission.ResolveUnattendedDefaultMode()))
+	// task.Directory only seeds the session's WorkingDir here, once, at
+	// creation. After that, sess.WorkingDir (editable any time via the
+	// web Composer's directory chip, PATCH /api/sessions/{id}/working_dir)
+	// is the single source of truth for where this session's tools run —
+	// buildAgent derives both a.CWD and the system prompt's "Working
+	// directory" note from it every turn, and prepareToolTurn wires
+	// tools.WithWorkingDir from a.CWD, so nothing else needs to touch it.
+	// Editing task.Directory later only affects the NEXT session created
+	// for this task, never one that already exists.
+	if task.Directory != "" {
+		if err := seedSessionDirectory(sess, task.Directory); err != nil {
+			// sess was never Saved — sess.ID names a session that exists
+			// only in memory, not on disk. Returning it here would let
+			// fire() (internal/scheduler/scheduler.go) persist it onto
+			// task.SessionID unconditionally (it doesn't check err before
+			// writing), permanently dangling the task on a session
+			// agent.LoadSession can never load — every subsequent cron
+			// tick would then hit this exact same error again with a
+			// fresh throwaway ID, forever. Return "" instead so a bad
+			// task.Directory can never leak into task.SessionID.
+			return "", err
 		}
-		sess = agent.NewSession(model, s.system)
-		sess.Source = "cron"
-		sess.Title = task.Name
-		// Cron ticks have no human to answer an ask prompt, unlike the web/IM
-		// default this mirrors — see ResolveUnattendedDefaultMode's doc comment.
-		_ = sess.SetPermissionMode(string(permission.ResolveUnattendedDefaultMode()))
-		// task.Directory only seeds the session's WorkingDir here, once, at
-		// creation. After that, sess.WorkingDir (editable any time via the
-		// web Composer's directory chip, PATCH /api/sessions/{id}/working_dir)
-		// is the single source of truth for where this session's tools run —
-		// buildAgent derives both a.CWD and the system prompt's "Working
-		// directory" note from it every turn, and prepareToolTurn wires
-		// tools.WithWorkingDir from a.CWD, so nothing else needs to touch it.
-		// Editing task.Directory later only affects the NEXT session created
-		// for this task, never one that already exists.
-		if task.Directory != "" {
-			if err := seedSessionDirectory(sess, task.Directory); err != nil {
-				// sess was never Saved — sess.ID names a session that exists
-				// only in memory, not on disk. Returning it here would let
-				// fire() (internal/scheduler/scheduler.go) persist it onto
-				// task.SessionID unconditionally (it doesn't check err before
-				// writing), permanently dangling the task on a session
-				// agent.LoadSession can never load — every subsequent cron
-				// tick would then hit this exact same error again with a
-				// fresh throwaway ID, forever. Return "" instead so a bad
-				// task.Directory can never leak into task.SessionID.
-				return "", err
-			}
-		}
-		if err := sess.Save(); err != nil {
-			return "", fmt.Errorf("save session: %w", err)
-		}
+	}
+	if err := sess.Save(); err != nil {
+		return "", fmt.Errorf("save session: %w", err)
 	}
 	return sess.ID, nil
 }
@@ -432,14 +456,15 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task := scheduler.Task{
-		Name:      req.Name,
-		Cron:      req.Cron,
-		Prompt:    req.Prompt,
-		Model:     req.Model,
-		Agent:     req.Agent,
-		Directory: req.Directory,
-		Notify:    req.Notify,
-		Enabled:   true,
+		Name:        req.Name,
+		Cron:        req.Cron,
+		Prompt:      req.Prompt,
+		Model:       req.Model,
+		Agent:       req.Agent,
+		Directory:   req.Directory,
+		Notify:      req.Notify,
+		SessionMode: req.SessionMode,
+		Enabled:     true,
 	}
 	if err := s.scheduler.Add(&task); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -489,13 +514,14 @@ func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 // pointer so the handler only touches what the caller actually sent — a
 // partial update. Enabling/disabling is just {"enabled": ...}.
 type patchTaskRequest struct {
-	Enabled   *bool                    `json:"enabled,omitempty"`
-	Cron      *string                  `json:"cron,omitempty"`
-	Prompt    *string                  `json:"prompt,omitempty"`
-	Model     *string                  `json:"model,omitempty"`
-	Agent     *string                  `json:"agent,omitempty"`
-	Directory *string                  `json:"directory,omitempty"`
-	Notify    *scheduler.NotifyTargets `json:"notify,omitempty"`
+	Enabled     *bool                    `json:"enabled,omitempty"`
+	Cron        *string                  `json:"cron,omitempty"`
+	Prompt      *string                  `json:"prompt,omitempty"`
+	Model       *string                  `json:"model,omitempty"`
+	Agent       *string                  `json:"agent,omitempty"`
+	Directory   *string                  `json:"directory,omitempty"`
+	Notify      *scheduler.NotifyTargets `json:"notify,omitempty"`
+	SessionMode *string                  `json:"session_mode,omitempty"`
 }
 
 // handlePatchTask updates any subset of a scheduled task's fields and reschedules
@@ -545,6 +571,9 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 	if req.Notify != nil {
 		task.Notify = *req.Notify
 	}
+	if req.SessionMode != nil {
+		task.SessionMode = *req.SessionMode
+	}
 	if err := s.scheduler.Update(*task); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -576,5 +605,6 @@ func (s *Server) taskToResponse(t scheduler.Task) taskResponse {
 		}
 	}
 	r.SessionID = t.SessionID
+	r.SessionMode = t.SessionMode
 	return r
 }

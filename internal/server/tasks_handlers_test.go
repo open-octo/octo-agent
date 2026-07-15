@@ -187,3 +187,94 @@ func TestCreateSession_ReusesExistingSession_LaterDirectoryEditIgnored(t *testin
 		t.Errorf("sess.WorkingDir = %q, want unchanged %q (task.Directory edits shouldn't touch an existing session)", sess.WorkingDir, firstDir)
 	}
 }
+
+// session_mode "fresh" creates a new session every time, even when one
+// already exists — it overrides the default "shared" reuse behavior.
+func TestCreateSession_FreshMode_IgnoresExistingSession(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	dir := t.TempDir()
+	firstID, err := srv.CreateSession(scheduler.Task{
+		Name:        "t",
+		Directory:   dir,
+		SessionMode: "fresh",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession (first): %v", err)
+	}
+
+	// Run again with the SAME SessionID set — "fresh" must ignore it.
+	secondID, err := srv.CreateSession(scheduler.Task{
+		Name:        "t",
+		Directory:   dir,
+		SessionID:   firstID,
+		SessionMode: "fresh",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession (second): %v", err)
+	}
+	if secondID == firstID {
+		t.Fatalf("fresh mode reused the existing session %q; want a NEW session", firstID)
+	}
+}
+
+// session_mode "" (empty) preserves legacy shared behavior — reuse the
+// existing session if one is set on the task.
+func TestCreateSession_DefaultMode_ReusesExistingSession(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	firstID, err := srv.CreateSession(scheduler.Task{Name: "t"})
+	if err != nil {
+		t.Fatalf("CreateSession (first): %v", err)
+	}
+
+	secondID, err := srv.CreateSession(scheduler.Task{Name: "t", SessionID: firstID})
+	if err != nil {
+		t.Fatalf("CreateSession (reuse): %v", err)
+	}
+	if secondID != firstID {
+		t.Fatalf("default mode created a new session %q instead of reusing %q", secondID, firstID)
+	}
+}
+
+// Switching session_mode between runs takes effect on the very next run —
+// not whatever mode the task started with.
+func TestCreateSession_ModeSwitchBetweenRuns(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// First run: shared mode, creates session A.
+	sharedID, err := srv.CreateSession(scheduler.Task{Name: "t", SessionMode: "shared"})
+	if err != nil {
+		t.Fatalf("CreateSession (shared): %v", err)
+	}
+
+	// Shared run with SessionID set reuses A.
+	reuseID, err := srv.CreateSession(scheduler.Task{Name: "t", SessionID: sharedID, SessionMode: "shared"})
+	if err != nil {
+		t.Fatalf("CreateSession (shared reuse): %v", err)
+	}
+	if reuseID != sharedID {
+		t.Fatalf("shared mode did not reuse: got %q, want %q", reuseID, sharedID)
+	}
+
+	// Switch to fresh — must create a NEW session, ignoring sharedID.
+	freshID, err := srv.CreateSession(scheduler.Task{Name: "t", SessionID: sharedID, SessionMode: "fresh"})
+	if err != nil {
+		t.Fatalf("CreateSession (fresh after shared): %v", err)
+	}
+	if freshID == sharedID {
+		t.Fatalf("fresh mode reused the shared session %q; want a NEW session", sharedID)
+	}
+
+	// Switch back to shared without a SessionID — new shared session created.
+	newSharedID, err := srv.CreateSession(scheduler.Task{Name: "t", SessionMode: "shared"})
+	if err != nil {
+		t.Fatalf("CreateSession (shared after fresh): %v", err)
+	}
+	if newSharedID == freshID || newSharedID == sharedID {
+		t.Fatalf("shared mode after fresh should create yet another session; got %q", newSharedID)
+	}
+}

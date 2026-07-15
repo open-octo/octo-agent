@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -404,5 +405,205 @@ func TestNotifyTargetsUnmarshal_ObjectAndArray(t *testing.T) {
 	}
 	if len(again.Notify) != 2 {
 		t.Fatalf("round-trip: notify = %v", again.Notify)
+	}
+}
+
+// SessionMode "fresh" survives a full save → reload cycle, so the scheduler
+// preserves it across restarts. Tasks with the empty string default to shared
+// behavior and must round-trip unchanged.
+func TestSessionMode_PersistsThroughReload(t *testing.T) {
+	dir := t.TempDir()
+	r := &recordRunner{}
+	s, err := New(dir, r)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	task := Task{
+		ID:          "t1",
+		Name:        "fresh task",
+		Cron:        "0 0 9 * * *",
+		Prompt:      "p",
+		Enabled:     true,
+		SessionMode: "fresh",
+	}
+	if err := s.Add(&task); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	// Reload from disk — a fresh scheduler over the same dir mirrors a serve restart.
+	s2, err := New(dir, r)
+	if err != nil {
+		t.Fatalf("New (reload): %v", err)
+	}
+	got, err := s2.Get("t1")
+	if err != nil {
+		t.Fatalf("Get after reload: %v", err)
+	}
+	if got.SessionMode != "fresh" {
+		t.Fatalf("SessionMode after reload = %q, want %q", got.SessionMode, "fresh")
+	}
+
+	// Update to "shared" — the patch takes effect immediately on the live scheduler.
+	got.SessionMode = "shared"
+	if err := s2.Update(*got); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	s3, _ := New(dir, r)
+	reloaded, _ := s3.Get("t1")
+	if reloaded.SessionMode != "shared" {
+		t.Fatalf("SessionMode after update+reload = %q, want %q", reloaded.SessionMode, "shared")
+	}
+}
+
+// Unknown session_mode values must be rejected at write time, not silently
+// treated as "shared" — otherwise a typo in a hand-edited JSON file or a
+// request-body field would flip the task into an unintended mode.
+func TestAdd_RejectsInvalidSessionMode(t *testing.T) {
+	s, _ := newTestScheduler(t)
+	err := s.Add(&Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", SessionMode: "fres"})
+	if err == nil {
+		t.Fatal("Add with invalid session_mode: want error, got nil")
+	}
+	// The bad task must not have been stored.
+	if got := len(s.tasks); got != 0 {
+		t.Fatalf("tasks stored = %d, want 0", got)
+	}
+}
+
+// Update must reject unknown session_mode the same way Add does.
+func TestUpdate_RejectsInvalidSessionMode(t *testing.T) {
+	s, _ := newTestScheduler(t)
+	if err := s.Add(&Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	got, _ := s.Get("t1")
+	got.SessionMode = "FRESH" // wrong case
+	if err := s.Update(*got); err == nil {
+		t.Fatal("Update with invalid session_mode: want error, got nil")
+	}
+}
+
+// sessionTracker is a Runner that hands out unique, distinguishable session
+// IDs per CreateSession call — so a test can tell whether RunNow handed the
+// UI back a session that RunTask later reused, or whether two independent
+// sessions were created (the bug).
+type sessionTracker struct {
+	mu       sync.Mutex
+	createID int
+	tasks    []Task
+	created  []string // session IDs returned by CreateSession, in order
+}
+
+func (r *sessionTracker) CreateSession(t Task) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := fmt.Sprintf("sess_%d", r.createID)
+	r.createID++
+	r.created = append(r.created, id)
+	return id, nil
+}
+
+func (r *sessionTracker) RunTask(_ context.Context, t Task) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tasks = append(r.tasks, t)
+	// RunTask creates its own session in the real flow; mirror that with a
+	// fresh unique ID so the test can see which session the turn landed in.
+	id := fmt.Sprintf("sess_%d", r.createID)
+	r.createID++
+	return id, nil
+}
+
+// TestRunNow_FreshMode_DoesNotOrphanSession verifies that RunNow with a
+// fresh-mode task fires the agent turn without pre-creating a session that
+// the turn then ignores — the old behaviour left the user staring at an
+// empty session while the real work landed in a second one.
+func TestRunNow_FreshMode_DoesNotOrphanSession(t *testing.T) {
+	dir := t.TempDir()
+	r := &sessionTracker{}
+	s, err := New(dir, r)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	task := Task{
+		ID:          "t_fresh",
+		Name:        "fresh weekly triage",
+		Cron:        "0 0 9 * * *",
+		Prompt:      "triage",
+		SessionMode: "fresh",
+		Enabled:     true,
+	}
+	if err := s.Add(&task); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	returnedID, err := s.RunNow("t_fresh")
+	if err != nil {
+		t.Fatalf("RunNow: %v", err)
+	}
+	if returnedID != "" {
+		t.Errorf("RunNow returned %q; fresh mode must not pre-create a session", returnedID)
+	}
+
+	// Let the background fire() finish.
+	time.Sleep(200 * time.Millisecond)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Fresh mode: RunNow skips CreateSession entirely; only RunTask runs.
+	// The old bug pre-created a session A, then RunTask created session B —
+	// leaving the user staring at an empty A while work landed in B.
+	if len(r.created) != 0 {
+		t.Fatalf("expected 0 sessions pre-created in fresh mode, got %d: %v", len(r.created), r.created)
+	}
+	if len(r.tasks) != 1 {
+		t.Fatalf("expected exactly 1 RunTask call, got %d", len(r.tasks))
+	}
+}
+
+// Contrast: RunNow in shared mode still pre-creates the session and the agent
+// turn reuses it — so CreateSession is called once (by RunNow) and the UI gets
+// a valid session back immediately.
+func TestRunNow_SharedMode_PrecreatesSession(t *testing.T) {
+	dir := t.TempDir()
+	r := &sessionTracker{}
+	s, err := New(dir, r)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	task := Task{
+		ID:          "t_shared",
+		Name:        "shared daily report",
+		Cron:        "0 0 9 * * *",
+		Prompt:      "report",
+		SessionMode: "shared",
+		Enabled:     true,
+	}
+	if err := s.Add(&task); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	returnedID, err := s.RunNow("t_shared")
+	if err != nil {
+		t.Fatalf("RunNow: %v", err)
+	}
+	if returnedID == "" {
+		t.Fatal("shared-mode RunNow should return a pre-created session ID")
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Shared mode: RunNow creates the session via CreateSession, then
+	// fire()→RunTask reuses it. So CreateSession is called exactly once.
+	if len(r.created) != 1 {
+		t.Fatalf("expected exactly 1 CreateSession call (by RunNow), got %d: %v", len(r.created), r.created)
+	}
+	if r.created[0] != returnedID {
+		t.Errorf("RunNow returned %q but CreateSession produced %q", returnedID, r.created[0])
 	}
 }

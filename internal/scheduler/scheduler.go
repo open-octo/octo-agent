@@ -68,6 +68,10 @@ type Task struct {
 	LastRun   time.Time     `json:"last_run,omitempty"`
 	NextRun   time.Time     `json:"next_run,omitempty"`
 	SessionID string        `json:"session_id,omitempty"` // last session ID
+	// SessionMode controls whether the task shares one session across runs
+	// ("shared", the default — history accumulates) or creates a fresh session
+	// each time ("fresh" — empty history, kept separate from earlier runs).
+	SessionMode string `json:"session_mode,omitempty"`
 }
 
 // Runner is the interface the scheduler calls to execute a task.
@@ -137,6 +141,9 @@ func (s *Scheduler) Add(task *Task) error {
 	if _, err := exprParser.Parse(task.Cron); err != nil {
 		return fmt.Errorf("invalid cron expression %q: %w", task.Cron, err)
 	}
+	if task.SessionMode != "" && task.SessionMode != "shared" && task.SessionMode != "fresh" {
+		return fmt.Errorf("invalid session_mode %q: must be \"shared\" or \"fresh\"", task.SessionMode)
+	}
 	if task.ID == "" {
 		task.ID = fmt.Sprintf("task_%d", time.Now().UnixMilli())
 	}
@@ -163,6 +170,9 @@ func (s *Scheduler) Update(task Task) error {
 	if _, err := exprParser.Parse(task.Cron); err != nil {
 		return fmt.Errorf("invalid cron expression %q: %w", task.Cron, err)
 	}
+	if task.SessionMode != "" && task.SessionMode != "shared" && task.SessionMode != "fresh" {
+		return fmt.Errorf("invalid session_mode %q: must be \"shared\" or \"fresh\"", task.SessionMode)
+	}
 	s.mu.Lock()
 	existing, ok := s.tasks[task.ID]
 	if !ok {
@@ -177,6 +187,7 @@ func (s *Scheduler) Update(task Task) error {
 	existing.Directory = task.Directory
 	existing.Notify = task.Notify
 	existing.Enabled = task.Enabled
+	existing.SessionMode = task.SessionMode
 	cp := *existing
 	s.mu.Unlock()
 
@@ -236,16 +247,24 @@ func (s *Scheduler) Get(id string) (*Task, error) {
 // a manual run also fires when the task is disabled, since the user asked for
 // it explicitly.
 //
-// To give callers (e.g. the web UI) a session they can open immediately, the
-// session is created synchronously before the turn runs asynchronously. The
-// returned sessionID is valid as soon as RunNow returns; the turn itself may
-// take minutes.
+// For shared-mode tasks the session is created synchronously before the turn
+// runs asynchronously, so the caller (e.g. the web UI) has a session it can
+// open immediately. Fresh-mode tasks create a new session on every run, so
+// pre-creating one here would leave an orphan — fire() creates the real
+// session and the UI waits for the task list to reflect it.
 func (s *Scheduler) RunNow(id string) (string, error) {
 	s.mu.Lock()
 	task, ok := s.tasks[id]
 	s.mu.Unlock()
 	if !ok {
 		return "", fmt.Errorf("task %q not found", id)
+	}
+
+	// Fresh mode creates a new session per run — skip the optimistic
+	// pre-create so we don't orphan a session the turn will never use.
+	if task.SessionMode == "fresh" {
+		go s.fire(id, true)
+		return "", nil
 	}
 
 	sessionID, err := s.runner.CreateSession(*task)
