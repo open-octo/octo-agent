@@ -36,9 +36,9 @@ var envPath = func() string {
 }
 
 // Load reads ~/.octo/serve.env and sets any KEY=VALUE pair whose key is not
-// already present in the process environment. Safe to call repeatedly and from
-// concurrent goroutines (os.Setenv is process-global but the file is only read
-// once at startup, so races only matter in tests).
+// already present in the process environment. Call once at startup — safe to
+// call repeatedly if no concurrent goroutines are reading these keys yet
+// (os.Setenv mutates process-global state, so concurrent Load + Getenv races).
 func Load() {
 	path := envPath()
 	if path == "" {
@@ -64,9 +64,6 @@ func Load() {
 		}
 		key := strings.TrimSpace(line[:eq])
 		val := strings.TrimSpace(line[eq+1:])
-		if key == "" {
-			continue
-		}
 		// Explicit env wins: don't clobber what systemd/launchd/CLI already set.
 		if _, exists := os.LookupEnv(key); exists {
 			continue
