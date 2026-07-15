@@ -88,6 +88,6 @@ description: octo 给模型的每一个内置工具。
 | `send_message` | 在当前渠道发一条消息，但不结束这一轮 |
 | `send_file` | 把文件发回去（IM 渠道） |
 | `show_artifact` | 在 Web UI 的 artifact 面板里展示一个构建好的 HTML/Markdown/图片文件 |
-| `restart_server` | 请求一次服务器[重启](/docs/zh/guides/self-host/#重启)（比如改完配置之后）；始终是 `ask` 档位，不可能被加进白名单 |
+| `restart_server` | 请求一次服务器[重启](/docs/zh/guides/self-host/#重启)（比如改完配置之后）；始终是 `ask` 档位，不可能被加进白名单。桌面版不提供此工具——server 以内嵌进程方式运行，没有 supervisor，channel 配置走热加载生效。 |
 
 下一步：工具调用是怎么被门控的，见 [Agent 循环](/docs/zh/concepts/agent-loop/)。

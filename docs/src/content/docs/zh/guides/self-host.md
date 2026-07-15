@@ -36,6 +36,10 @@ octo serve -addr :8088 --access-key <key>
 轮次跑完（或者等满 30 秒超时，以先到者为准）才真正退出进程；在这段排空窗口期新发起的轮次会被拒绝，
 提示你过一会儿再试一次——所有传输方式（包括 IM）都是这个提示。
 
+> `restart_server` 依赖 supervisor 重启契约。桌面版以内嵌进程方式运行 server，没有 supervisor，
+> 所以不提供这个工具——channel 配置走热加载生效（`POST /api/channels/<platform>/reload`），
+> 其他改动则需重启应用。
+
 `--no-supervisor` 会跳过这整套机制，直接跑 worker——把重启完全交给你自己的 init 系统：
 
 ## 作为系统服务运行

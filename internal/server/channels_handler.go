@@ -83,7 +83,18 @@ type channelUpdateRequest struct {
 	Fields  map[string]string `json:"fields"`
 }
 
-// handleSaveChannel creates or updates a platform's config.
+// handleReloadChannel applies the saved config for one platform without a body —
+// the agent calls this after writing channels.yml to trigger reloadChannel.
+func (s *Server) handleReloadChannel(w http.ResponseWriter, r *http.Request) {
+	platform := r.PathValue("platform")
+	if platform == "" {
+		writeError(w, http.StatusBadRequest, "missing platform name")
+		return
+	}
+
+	s.reloadChannel(platform)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
+}
 func (s *Server) handleSaveChannel(w http.ResponseWriter, r *http.Request) {
 	platform := r.PathValue("platform")
 	if platform == "" {

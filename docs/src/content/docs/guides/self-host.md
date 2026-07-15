@@ -41,6 +41,11 @@ can never end up on an allow-list by accident. Either path waits for in-flight t
 during that drain window are refused with a message asking you to try again in a moment, on every
 transport including IM.
 
+> The `restart_server` tool relies on a supervisor respawn contract. The desktop build runs the
+> server in-process with no supervisor, so the tool is omitted there — channel config is instead
+> applied via hot-reload (`POST /api/channels/<platform>/reload`), and other changes take effect when
+> you restart the app.
+
 `--no-supervisor` skips all of this and runs the worker directly, so your own init system owns
 restarts instead of octo's:
 

@@ -96,6 +96,6 @@ Search is off (or hasn't activated).
 | `send_message` | proactively push text to an IM chat that is **not** the current conversation (a normal reply already covers the current one) |
 | `send_file` | send a local file over IM — defaults to the current chat; pass `platform`+`chat_id` to target a different one |
 | `show_artifact` | display a built HTML/Markdown/image file in the Web UI's artifact panel |
-| `restart_server` | request a server [restart](/docs/guides/self-host/#restarting) (e.g. after a config change); always `ask`-class, never allow-listable |
+| `restart_server` | request a server [restart](/docs/guides/self-host/#restarting) (e.g. after a config change); always `ask`-class, never allow-listable. Not available in the desktop build, where the server runs in-process with no supervisor — channel config is applied via hot-reload instead. |
 
 Next: see how tool calls are gated in [The agent loop](/docs/concepts/agent-loop/).
