@@ -26,10 +26,16 @@
   // the octo-served page can't call Wails directly, so it goes through the native
   // bridge over HTTP. Ignore double-clicks that land on a control.
   function onHeaderDblClick(e: MouseEvent) {
-    if (!$nativeShell) return
+    if (!$nativeShell || isMac) return
     if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return
+    isMaximised = !isMaximised
     nativeToggleMaximise().catch(() => {})
   }
+
+  // Track maximise state so the icon flips between □ (maximise) and ❐ (restore).
+  // Frameless windows here — there's no native title bar reading the state, so the
+  // frontend owns it.
+  let isMaximised = false
 </script>
 
 <header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
@@ -69,7 +75,9 @@
     {#if $nativeShell && !isMac}
       <div class="window-controls">
         <button class="window-btn minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
-        <button class="window-btn maximise" title="Maximise" onclick={() => nativeToggleMaximise()}>□</button>
+        <button class="window-btn maximise" title={isMaximised ? 'Restore' : 'Maximise'} onclick={() => { isMaximised = !isMaximised; nativeToggleMaximise().catch(() => {}) }}>
+          {isMaximised ? '❐' : '□'}
+        </button>
         <button class="window-btn close" title="Close" onclick={() => nativeClose()}>×</button>
       </div>
     {/if}
@@ -128,13 +136,16 @@ kbd {
   padding: 1px 5px; color: var(--text-tertiary);
 }
 /* Window controls (Windows/Linux only — Mac uses native traffic lights via
-   InvisibleTitleBarHeight). Flat squares that sit flush in the title bar; the
-   close button turns red on hover like the system convention. */
+   InvisibleTitleBarHeight). Isolated in their own visual group: a left separator
+   line + 16px breathing room, so they never visually merge with the settings
+   button to their left. Maximise icon flips □/❐ to reflect the window state. */
 .window-controls {
   display: flex;
   align-items: center;
   gap: 0;
-  margin-left: 8px;
+  margin-left: 16px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border-secondary);
   --wails-draggable: no-drag;
 }
 .window-btn {
