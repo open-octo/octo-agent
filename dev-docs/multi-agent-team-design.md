@@ -492,23 +492,28 @@ GET /api/agents/:id/sessions   — 返回指定 agent 的 sessions
 
 #### 8.1 Flag 传递
 
-在 `cmd/octo/chat.go` flag 解析和 `cmd/octo/repl.go` 启动流程中增加 `--agent` 参数。**注意：`octo serve` 不接受 `--agent`** — serve 服务器进程同时托管所有 agent（Master + `~/.octo/agents/` 里所有 profile），加此 flag 与多 agent 架构矛盾；agent 路由在 serve 里由 `AgentRouter` 按消息决定，不需要也不应该通过启动 flag 绑定。
+`octo` 的默认行为（无显式子命令时）既是 TUI 也是单轮 chat。`--agent` 参数仅加在 `cmd/octo/chat.go` 的默认入口（即 `octo` 命令本身），不在 `octo serve` 或其他子命令上：
+
+- `octo` 不接受子命令时 → 默认 entry（chat/TUI），支持 `--agent`
+- `octo serve` → 服务器，**不接受** `--agent`（serve 同时托管所有 agent，加此 flag 与多 agent 架构矛盾）
 
 ```go
 // cmd/octo/chat.go
 var agentName = flag.String("agent", "", "Start session bound to a specific agent (by ID or name)")
 ```
 
-在 TUI (`\octo`) 同样支持：
+用法示例：
 
 ```bash
 octo --agent code-review           # TUI，直接使用 code-review agent
-octo chat --agent ops-helper "查日志"  # 单轮 chat
+octo --agent ops-helper "查日志"    # 单轮 chat，走 ops-helper
 ```
+
+**为什么 `octo chat` 不存在？** `octo` 没有名为 `chat` 的显式子命令 — 直接 `octo <message>` 就是 chat 模式，`octo`（无参数）就是 TUI。`--agent` 在这个默认 entry 上，不影响 `octo serve`、`octo skills`、`octo config` 等管理子命令。
 
 #### 8.2 后端处理
 
-`octo chat` / `octo serve` 启动后，`activeAgentId` 由 flag 决定：
+`octo` 启动后，`activeAgentId` 由 flag 决定：
 
 - 未指定：默认 `master`
 - 指定：检查 `agentStore.Get(id)` 是否存在。不存在则启动报错 `agent "xxx" not found (available: master, code-review, ops-helper)`
