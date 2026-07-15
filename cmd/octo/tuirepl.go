@@ -2162,11 +2162,10 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 	// fire a desktop notification so a user who tabbed away is pulled back.
 	// Skipped on error / interrupt (err != nil) and when the user disabled it.
 	if err == nil && m.cfg.notify {
-		// Empty title: Ghostty renders both the OSC 2 tab title and the
-		// OSC 777 notification title as visible text, so passing the
-		// session title here duplicates it. Other terminals (iTerm2,
-		// Kitty, WezTerm) ignore the title slot entirely.
-		return m, tea.Sequence(m.flushPrints(), tea.Println(notifySeq("", "Turn complete — input needed")))
+		// Terminal bell (BEL): Ghostty shows a notification tied to the
+		// sending tab and clicking it focuses that specific tab. This is
+		// simpler than OSC 777 and gives us click-to-focus-tab for free.
+		return m, tea.Sequence(m.flushPrints(), tea.Println("\007"))
 	}
 	return m, nil
 }
