@@ -414,6 +414,29 @@ type Server struct {
 
 **过滤模型统一为 allowlist**：每个 Expert Agent 的 `Profile.Tools` / `TaskSkills` 就是 allowlist。运行时（`DefaultToolsForProfile` / system prompt 注入）只看 allowlist。不在 `Server` 上额外维护 `disabledSkills` / `disabledMCPs` denylist。
 
+**Tool 分组**：Agent 管理面板中，built-in tool 按组分展示。用户可 allow 整个组，也可在组内 deny 个别工具：
+
+```
+┌─────────────────────────────────────────────┐
+│  🔍 code-review — Tools                     │
+├─────────────────────────────────────────────┤
+│  📁 文件操作                          [✅ 全部允许]  │
+│     ✅ read_file                             │
+│     ✅ write_file                            │
+│     ❌ edit_file          ← 组内单独 deny     │
+│     ✅ glob                                  │
+│  ─────────────────────────                  │
+│  📁 搜索                              [❌ 全部禁止]  │
+│     ❌ grep                                  │
+│     ❌ grep_search                           │
+│  ─────────────────────────                  │
+│  📁 浏览器                            [✅ 全部允许]  │
+│     ✅ browser                               │
+└─────────────────────────────────────────────┘
+```
+
+**语义**：组的 allow/deny 是快捷操作，最终生成的 `Profile.Tools` 是精确的工具名列表。Group allow + 个别 deny → 该组所有工具除去被 deny 的，写入 Profile.Tools。
+
 #### 6.2 系统级内置 skill 权限
 
 部分内置 skill 涉及平台资源管理（创建 skill、配置 MCP），只允许 Default Agent 使用。Expert Agent 的 skill 面板**看不到**这些 skill，也无法开启：
