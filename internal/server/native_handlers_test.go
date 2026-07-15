@@ -53,7 +53,7 @@ func (f *fakeNative) SetAutostart(enable bool) error  { f.autostart = enable; re
 func (f *fakeNative) ToggleMaximise()                 { f.toggleMaxCalls++ }
 func (f *fakeNative) Minimise()                       { f.minimiseCalls++ }
 func (f *fakeNative) Close()                          { f.closeCalls++ }
-func (f *fakeNative) WindowState() bool                { return f.maximised }
+func (f *fakeNative) WindowState() bool               { return f.maximised }
 func (f *fakeNative) OpenExternal(url string) error {
 	f.openCalls++
 	f.gotOpenURL = url
