@@ -440,6 +440,65 @@ GET /api/agents/:id/sessions   — 返回指定 agent 的 sessions
 
 前端按需请求当前选中 agent 的 session 列表。
 
+#### 6.5 Workflow 面板：鸭子类型接口
+
+Workflow 里调度的匿名子 agent 会继承 caller 的 tool 白名单。但 workflow 编写时依赖的 tool 可能不在所有 agent 的白名单里，导致执行时报错。
+
+**方案：workflow 声明依赖的能力，面板按 agent 白名单过滤 — Go 式结构类型。**
+
+```
+workflow "daily-triage" {
+  requires_tools: ["terminal", "read_file", "code-review"]  // 接口声明
+}
+
+agent code-review {
+  tools: ["terminal", "read_file", "grep", "code-review"]    // 实现 ✅ — 可见
+}
+
+agent doc-writer {
+  tools: ["read_file", "write_file"]                          // 缺少 terminal + code-review — 不可见 ❌
+}
+```
+
+**frontmatter schema**：
+
+```yaml
+# ~/.octo/workflows/<name>.md frontmatter
+---
+name: daily-triage
+description: Daily CI triage loop
+requires_tools:
+  - terminal
+  - read_file
+  - code-review
+---
+```
+
+**面板过滤逻辑**（`workflows.ts`）：
+
+```ts
+function visibleWorkflows(
+  workflows: WorkflowMeta[],
+  profile: Profile | null,  // null = Default Agent
+): WorkflowMeta[] {
+  if (!profile || profile.Tools.length === 0) return workflows; // Default: 全部
+  const allowed = new Set(profile.Tools);
+  return workflows.filter(wf =>
+    wf.RequiresTools.every(t => allowed.has(t))
+  );
+}
+```
+
+**UX 行为**：
+- code-review agent 的 Workflows 面板：只展示 `requires_tools ⊆ code-review.tools` 的 workflow
+- Default Agent 的 Workflows 面板：展示全部
+- 某个 workflow 对所有 expert agent 都不可见时：仍保留在 Default Agent 视图
+
+**额外好处**：
+- 避免了运行时时执行白名单报错（过滤在入口解决）
+- agent 拥有的 workflow 列表天然反映它的"能力范围"
+- 与 skill 隔离机制统一：都是通过 `requires_tools`/`tools` 的包含关系过滤
+
 ### 7. Web UI 布局
 
 #### 7.1 Agent 选择器（右侧顶部）
@@ -692,6 +751,7 @@ func DefaultProfile() *Profile {
 | `web/src/components/layout/Header.svelte` | 集成 AgentAvatar 下拉 |
 | `web/src/views/SkillsView.svelte` | 技能列表根据 active agent 过滤；不在 default 时隐藏新增和系统级 skill |
 | `web/src/views/McpView.svelte` | MCP 列表根据 active agent 过滤 |
+| `web/src/views/WorkflowsView.svelte` | workflow 面板按 agent tool 白名单过滤；`requires_tools` 不可见的 workflow 不展示 |
 | `web/src/views/ChatView.svelte` | 会话列表根据 active agent 拉取 |
 | `web/src/views/TasksView.svelte` | cron 列表按 agent 过滤；default 视图显示"归属"列和"转移"操作 |
 
