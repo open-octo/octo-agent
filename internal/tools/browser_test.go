@@ -421,3 +421,37 @@ func TestWrapBrowserConnectError(t *testing.T) {
 		})
 	}
 }
+
+// TestBrowserPage_NoLaunchFallback locks the invariant that the browser tool
+// only ever attaches to a real, user-owned Chrome and never spins up a headless
+// instance of its own. With no attach config and no discoverable Chrome, it must
+// return the actionable connect guide — not launch a throwaway Chrome, whose
+// empty profile carries no login session and trips the macOS "Chrome Safe
+// Storage" keychain prompt.
+func TestBrowserPage_NoLaunchFallback(t *testing.T) {
+	// An empty HOME means no ~/.octo/config.yml — so ConnectPort=0 and
+	// AttachRunning=false, i.e. the default branch — and Chrome's default profile
+	// dirs resolve under this empty home, so discovery finds no running Chrome.
+	// Deterministic across runners, and it never touches the user's real profile.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows
+
+	ResetBrowserSession()
+	defer ResetBrowserSession()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	page, b, err := browserPage(ctx)
+	if err == nil {
+		ResetBrowserSession()
+		t.Fatal("browserPage returned a live browser with no attach config; it must attach only, never launch its own Chrome")
+	}
+	if page != nil || b != nil {
+		t.Fatalf("expected nil page/browser on failure, got page=%v browser=%v", page, b)
+	}
+	if !strings.Contains(err.Error(), "--remote-debugging-port") {
+		t.Fatalf("error should be the actionable connect guide, got: %v", err)
+	}
+}

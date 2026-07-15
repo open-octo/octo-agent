@@ -272,21 +272,17 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 			return nil, nil, wrapBrowserConnectError(err)
 		}
 	default:
-		// No explicit attach config: prefer the user's logged-in Chrome if one
-		// is running with remote debugging. Discovery only succeeds when the
-		// user deliberately enabled it (the chrome://inspect toggle or
-		// --remote-debugging-port), so this never hijacks an ordinary browser —
-		// it just means `octo browser setup` users, and anyone who flipped the
-		// toggle, get their logged-in session without extra config. Falls back
-		// to a fresh throwaway Chrome.
+		// No explicit attach config: reuse the user's logged-in Chrome if one is
+		// running with remote debugging. Discovery only succeeds when the user
+		// deliberately enabled it (the chrome://inspect toggle or
+		// --remote-debugging-port), so this never hijacks an ordinary browser.
+		// When nothing is reachable we return an actionable error rather than
+		// launching a throwaway Chrome: the browser tool only ever drives a real,
+		// user-owned Chrome, never a headless instance it spins up itself (which
+		// would carry no login session and trip the macOS "Chrome Safe Storage"
+		// keychain prompt).
 		if b, err = browser.DiscoverRunningChrome(ctx); err != nil {
-			if b, err = browser.Launch(ctx, browser.LaunchOptions{
-				ExecPath:    bc.ExecPath,
-				UserDataDir: bc.UserDataDir,
-				Headless:    bc.Headless,
-			}); err != nil {
-				return nil, nil, fmt.Errorf("launch Chrome: %w", wrapBrowserConnectError(err))
-			}
+			return nil, nil, wrapBrowserConnectError(err)
 		}
 	}
 
