@@ -514,7 +514,13 @@ func padCol(s string, maxW int) string {
 // plain is retained for signature stability but no longer toggles card
 // rendering: the plain / non-TTY path is always one-line tool status now;
 // rich cards are TUI-only (see dev-docs/tui-ux-upgrade-design.md decision #8).
-func replToolEventHandler(stdout io.Writer, plain bool) func(agent.AgentEvent) {
+// replToolEventHandler renders a streamed turn. Model reply text goes to
+// stdout; tool-event chrome (↳ status rows, progress, the ⋯ typing indicator)
+// goes to chrome. Splitting them keeps a headless one-shot's stdout carrying
+// only the answer, so `octo "…" | program` pipes cleanly — pass stderr as
+// chrome there. Interactive callers where both are the terminal can pass the
+// same writer for both; the rendering is unchanged.
+func replToolEventHandler(stdout, chrome io.Writer, plain bool) func(agent.AgentEvent) {
 	_ = plain
 	// Per-tool-call start times so EventToolDone can report elapsed.
 	startedAt := make(map[string]time.Time)
@@ -541,30 +547,30 @@ func replToolEventHandler(stdout io.Writer, plain bool) func(agent.AgentEvent) {
 			// terminal. The dots line is closed when tool_started fires.
 			if inputDots == 0 {
 				if prevWasText {
-					fmt.Fprintln(stdout)
+					fmt.Fprintln(chrome)
 					prevWasText = false
 				}
-				fmt.Fprint(stdout, "⋯ ")
+				fmt.Fprint(chrome, "⋯ ")
 			}
 			if inputDots < inputDotsCap {
-				fmt.Fprint(stdout, "·")
+				fmt.Fprint(chrome, "·")
 				inputDots++
 			}
 
 		case agent.EventToolStarted:
 			if inputDots > 0 {
 				// Close the typing-indicator line so the ↳ row starts clean.
-				fmt.Fprintln(stdout)
+				fmt.Fprintln(chrome)
 				inputDots = 0
 			} else if prevWasText {
-				fmt.Fprintln(stdout)
+				fmt.Fprintln(chrome)
 				prevWasText = false
 			}
 			startedAt[ev.ToolID] = time.Now()
-			fmt.Fprintf(stdout, "↳ %s: %s\n", ev.ToolName, summariseInput(ev.Input))
+			fmt.Fprintf(chrome, "↳ %s: %s\n", ev.ToolName, summariseInput(ev.Input))
 
 		case agent.EventToolProgress:
-			fmt.Fprintf(stdout, "│ %s\n", boundProgressChunk(ev.Chunk))
+			fmt.Fprintf(chrome, "│ %s\n", boundProgressChunk(ev.Chunk))
 
 		case agent.EventToolDone:
 			elapsed := time.Duration(0)
@@ -572,7 +578,7 @@ func replToolEventHandler(stdout io.Writer, plain bool) func(agent.AgentEvent) {
 				elapsed = time.Since(t).Round(time.Millisecond)
 				delete(startedAt, ev.ToolID)
 			}
-			fmt.Fprintf(stdout, "↳ %s ✓ (%s)\n", ev.ToolName, elapsed)
+			fmt.Fprintf(chrome, "↳ %s ✓ (%s)\n", ev.ToolName, elapsed)
 
 		case agent.EventToolError:
 			elapsed := time.Duration(0)
@@ -580,7 +586,7 @@ func replToolEventHandler(stdout io.Writer, plain bool) func(agent.AgentEvent) {
 				elapsed = time.Since(t).Round(time.Millisecond)
 				delete(startedAt, ev.ToolID)
 			}
-			fmt.Fprintf(stdout, "↳ %s ✗ (%s) — %s\n", ev.ToolName, elapsed, truncate1Line(ev.Err))
+			fmt.Fprintf(chrome, "↳ %s ✗ (%s) — %s\n", ev.ToolName, elapsed, truncate1Line(ev.Err))
 
 			// EventTurnDone is silent — the trailing newline emitted by the
 			// REPL loop after RunStream returns serves as the turn boundary.

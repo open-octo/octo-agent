@@ -130,7 +130,7 @@ func newPlainView(reader lineReader, out, errOut io.Writer, v verbosity, plain b
 func (v *plainView) TurnStarted() {
 	// Fresh event-rendering closure per turn — it carries per-turn state
 	// (started-at times, prevWasText, input dots).
-	v.inner = replToolEventHandler(v.out, v.plain)
+	v.inner = replToolEventHandler(v.out, v.errOut, v.plain)
 	// Spinner during the "thinking, nothing on screen yet" pause. Suppressed
 	// in quiet mode (spin stays nil; spinner.Stop is nil-safe). 250ms grace so
 	// a fast reply doesn't blink it.

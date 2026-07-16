@@ -134,7 +134,7 @@ func TestRunOnce_DoesNotPersistSession(t *testing.T) {
 
 func TestREPLToolEventHandler_TextOnly(t *testing.T) {
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, false)
+	h := replToolEventHandler(&buf, &buf, false)
 	h(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "hello"})
 	h(agent.AgentEvent{Kind: agent.EventTextDelta, Text: " world"})
 	if got := buf.String(); got != "hello world" {
@@ -144,7 +144,7 @@ func TestREPLToolEventHandler_TextOnly(t *testing.T) {
 
 func TestREPLToolEventHandler_ToolStartedAndDone(t *testing.T) {
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, false)
+	h := replToolEventHandler(&buf, &buf, false)
 	h(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Running now..."})
 	h(agent.AgentEvent{
 		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal",
@@ -167,9 +167,31 @@ func TestREPLToolEventHandler_ToolStartedAndDone(t *testing.T) {
 	}
 }
 
+func TestREPLToolEventHandler_ChromeSplitFromStdout(t *testing.T) {
+	// Headless piping: reply text must land on stdout while tool-event chrome
+	// (↳ rows, progress) goes to the chrome writer, so `octo "…" | program`
+	// pipes only the answer.
+	var stdout, chrome bytes.Buffer
+	h := replToolEventHandler(&stdout, &chrome, false)
+	h(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "answer"})
+	h(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal",
+		Input: map[string]any{"command": "ls"},
+	})
+	h(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "c1", Chunk: "line1"})
+	h(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "c1", ToolName: "terminal"})
+
+	if got := stdout.String(); got != "answer" {
+		t.Errorf("stdout must carry only reply text, got %q", got)
+	}
+	if c := chrome.String(); !strings.Contains(c, "↳ terminal") || !strings.Contains(c, "line1") {
+		t.Errorf("chrome should carry the tool rows, got %q", c)
+	}
+}
+
 func TestREPLToolEventHandler_ToolError(t *testing.T) {
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, false)
+	h := replToolEventHandler(&buf, &buf, false)
 	h(agent.AgentEvent{
 		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "write_file",
 		Input: map[string]any{"path": "/etc/passwd"},
@@ -192,7 +214,7 @@ func TestREPLToolEventHandler_TurnDoneSilent(t *testing.T) {
 	// its own trailing newline. This test locks that in so a well-meaning
 	// future change doesn't accidentally double-print.
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, false)
+	h := replToolEventHandler(&buf, &buf, false)
 	reply := agent.Reply{Content: "all done"}
 	h(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &reply})
 	if buf.Len() != 0 {
@@ -285,7 +307,7 @@ func TestREPLToolEventHandler_EditFilePlainOneLiner(t *testing.T) {
 	// renders edit_file as a terse ↳ status line like any other tool — no
 	// Update() diff card.
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, false)
+	h := replToolEventHandler(&buf, &buf, false)
 	input := map[string]any{
 		"path":       "/tmp/nope-this-file-does-not-exist.go",
 		"old_string": "alpha",
@@ -308,7 +330,7 @@ func TestREPLToolEventHandler_EditFilePlainOneLiner(t *testing.T) {
 
 func TestREPLToolEventHandler_ToolProgressRendersBetweenStartedAndDone(t *testing.T) {
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, false)
+	h := replToolEventHandler(&buf, &buf, false)
 	h(agent.AgentEvent{
 		Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal",
 		Input: map[string]any{"command": "ls"},
@@ -335,7 +357,7 @@ func TestREPLToolEventHandler_PlainPathUniformNoCards(t *testing.T) {
 	// With cards now TUI-only, the plain path treats edit_file like any tool:
 	// progress chunks render with the │ prefix and there is no diff card.
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, false)
+	h := replToolEventHandler(&buf, &buf, false)
 	input := map[string]any{
 		"path": "/tmp/x.go", "old_string": "a", "new_string": "b",
 	}
@@ -356,7 +378,7 @@ func TestREPLToolEventHandler_InputDeltaEmitsTypingIndicator(t *testing.T) {
 	// A few input_delta events before tool_started should emit a typing
 	// indicator line that closes when tool_started fires.
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, false)
+	h := replToolEventHandler(&buf, &buf, false)
 	for i := 0; i < 3; i++ {
 		h(agent.AgentEvent{Kind: agent.EventToolInputDelta, ToolID: "c1", ToolName: "terminal", InputDelta: "{frag}"})
 	}
@@ -375,7 +397,7 @@ func TestREPLToolEventHandler_InputDeltaCappedAtDotsLimit(t *testing.T) {
 	// Pump in more deltas than the visual cap — only inputDotsCap dots
 	// should ever be emitted before tool_started closes the line.
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, false)
+	h := replToolEventHandler(&buf, &buf, false)
 	for i := 0; i < inputDotsCap+50; i++ {
 		h(agent.AgentEvent{Kind: agent.EventToolInputDelta, ToolID: "c1", ToolName: "terminal", InputDelta: "x"})
 	}
@@ -392,7 +414,7 @@ func TestREPLToolEventHandler_InputDeltaResetsBetweenCalls(t *testing.T) {
 	// After tool_started closes the dots, a NEXT tool's input deltas
 	// should start a fresh indicator (not append to the previous one).
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, false)
+	h := replToolEventHandler(&buf, &buf, false)
 	h(agent.AgentEvent{Kind: agent.EventToolInputDelta, ToolID: "c1", ToolName: "terminal", InputDelta: "a"})
 	h(agent.AgentEvent{Kind: agent.EventToolStarted, ToolID: "c1", ToolName: "terminal", Input: nil})
 	h(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "c1", ToolName: "terminal"})
@@ -411,7 +433,7 @@ func TestREPLToolEventHandler_PlainForcesEditFileToStatusLine(t *testing.T) {
 	// users on constrained terminals (no truecolor, log scraping, etc.)
 	// get the terse output.
 	var buf bytes.Buffer
-	h := replToolEventHandler(&buf, true)
+	h := replToolEventHandler(&buf, &buf, true)
 	input := map[string]any{
 		"path":       "/tmp/whatever.go",
 		"old_string": "alpha",
