@@ -3,6 +3,8 @@ package tools
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,6 +39,32 @@ func (rt *ReadTracker) RecordRead(absPath string) {
 	rt.mu.Lock()
 	rt.reads[absPath] = info.ModTime()
 	rt.mu.Unlock()
+}
+
+// RefreshTarget re-stamps the recorded mtime of every tracked path covered by
+// target: an exact file match, or — when target is a directory — any tracked
+// file beneath it. It adopts the session's OWN out-of-tool writes (a formatter
+// or redirect run through the terminal tool): without it the bumped mtime would
+// trip CheckWritable's "modified since read" guard on the next edit even though
+// the change was ours.
+//
+// Only paths the tracker already recorded are ever refreshed — it never
+// introduces a new path. A file the session never read stays unwritable, and a
+// file changed by an external editor (which never passes through the terminal
+// tool) keeps its stale stamp, so the guard still fires for a genuine
+// out-of-band edit.
+func (rt *ReadTracker) RefreshTarget(target string) {
+	prefix := target + string(filepath.Separator)
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	for p := range rt.reads {
+		if p != target && !strings.HasPrefix(p, prefix) {
+			continue
+		}
+		if info, err := os.Stat(p); err == nil {
+			rt.reads[p] = info.ModTime()
+		}
+	}
 }
 
 // CheckWritable reports whether absPath may be written/edited right now.

@@ -154,6 +154,7 @@ func (r DefaultRegistry) ExecuteStream(ctx context.Context, name string, input m
 				case "terminal":
 					if cmd, ok := input["command"].(string); ok {
 						r.recordTerminalReads(cmd)
+						r.recordTerminalWrites(cmd)
 					}
 				}
 			}
@@ -219,6 +220,165 @@ func (r DefaultRegistry) recordTerminalReads(command string) {
 			r.tracker.RecordRead(abs)
 		}
 	}
+}
+
+// recordTerminalWrites is the write-side counterpart to recordTerminalReads.
+// A successful terminal command may have modified a file the session already
+// read — a formatter (`gofmt -w`, `sed -i`), a redirect (`printf … > f`), or a
+// copy/move. That bumps the file's mtime, which would otherwise trip
+// CheckWritable's "modified since read" guard on the very next edit_file even
+// though the change was the session's OWN doing, not an out-of-band editor's.
+//
+// It refreshes the recorded mtime of every tracked file the command wrote,
+// leaving the guard intact for changes that did NOT come through the terminal
+// tool (a human editing in their IDE never lands here). Detection is
+// deliberately conservative — RefreshTarget only ever touches paths the tracker
+// already knows, so an over-broad target list at worst re-stats an untouched
+// tracked file (a no-op). Opaque writers with no path on the command line
+// (`make fmt`) aren't covered; the model re-reads in that rarer case.
+func (r DefaultRegistry) recordTerminalWrites(command string) {
+	tokens := tokenizeCommand(command)
+	if len(tokens) == 0 {
+		return
+	}
+	for _, target := range writeTargets(tokens) {
+		if abs, err := resolvePath(target); err == nil {
+			r.tracker.RefreshTarget(abs)
+		}
+	}
+}
+
+// writeTargets returns the file/directory paths a terminal command writes to,
+// derived from shell redirections plus a curated set of file-mutating commands.
+// A directory target (e.g. `gofmt -w .`) covers every tracked file beneath it —
+// resolution and matching happen in RefreshTarget.
+func writeTargets(tokens []string) []string {
+	var targets []string
+
+	// Pass 1: redirections (`> f`, `>>f`, `2>f`, `&>f`) and `tee`, which can
+	// appear anywhere in a pipeline.
+	for i, tok := range tokens {
+		if tok == "tee" {
+			if p := nextPositional(tokens, i+1); p != "" {
+				targets = append(targets, p)
+			}
+			continue
+		}
+		switch op := redirectTarget(tok); op {
+		case "":
+			// not a redirect
+		case ">next":
+			if p := nextPositional(tokens, i+1); p != "" {
+				targets = append(targets, p)
+			}
+		default:
+			targets = append(targets, op)
+		}
+	}
+
+	// Pass 2: command-specific in-place / copy targets, keyed on the head of
+	// the command line.
+	cmd := filepathBase(tokens[0])
+	args := tokens[1:]
+	switch {
+	case cmd == "cp" || cmd == "mv" || cmd == "install":
+		if p := lastPositional(args); p != "" {
+			targets = append(targets, p)
+		}
+	case hasInPlaceFlag(cmd, args):
+		targets = append(targets, positionals(args)...)
+	}
+	return targets
+}
+
+// redirectTarget classifies a single token as an output redirection:
+//   - ">next" when it is a bare operator (`>`, `>>`, `2>`, `&>`) whose target
+//     is the following token;
+//   - the fused path when the operator carries its target (`>f`, `2>>f`);
+//   - "" when the token is not an output redirect (input `<` included).
+func redirectTarget(tok string) string {
+	rest := tok
+	if len(rest) > 0 && (rest[0] == '&' || (rest[0] >= '0' && rest[0] <= '9')) {
+		rest = rest[1:] // optional fd / & prefix: 2> &>
+	}
+	if !strings.HasPrefix(rest, ">") {
+		return ""
+	}
+	rest = strings.TrimPrefix(rest, ">")
+	rest = strings.TrimPrefix(rest, ">") // second '>' of an append (>>)
+	if rest == "" {
+		return ">next"
+	}
+	return rest
+}
+
+// hasInPlaceFlag reports whether the command edits its file arguments in place.
+// The long forms `--write` / `--in-place` are unambiguous across tools; the
+// short `-i` / `-w` forms are only honored for the specific editors/formatters
+// that use them that way, so `grep -w` or `cp -i` aren't mistaken for writers.
+func hasInPlaceFlag(cmd string, args []string) bool {
+	for _, a := range args {
+		if a == "--write" || a == "--in-place" {
+			return true
+		}
+	}
+	switch cmd {
+	case "sed", "perl":
+		for _, a := range args {
+			if a == "-i" || strings.HasPrefix(a, "-i") { // sed's -i.bak / -i''
+				return true
+			}
+		}
+	case "gofmt", "gofumpt", "goimports":
+		for _, a := range args {
+			if a == "-w" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// positionals returns the non-flag tokens (a flag is any token starting with
+// "-"). A stray positional that isn't a real path — a sed script, say — is
+// harmless: RefreshTarget ignores paths the tracker never recorded.
+func positionals(args []string) []string {
+	var out []string
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// lastPositional returns the final non-flag token — the destination of a
+// cp/mv/install — or "" if there is none.
+func lastPositional(args []string) string {
+	ps := positionals(args)
+	if len(ps) == 0 {
+		return ""
+	}
+	return ps[len(ps)-1]
+}
+
+// nextPositional returns the first non-flag token at or after index i, or "".
+func nextPositional(tokens []string, i int) string {
+	for ; i < len(tokens); i++ {
+		if !strings.HasPrefix(tokens[i], "-") {
+			return tokens[i]
+		}
+	}
+	return ""
+}
+
+// filepathBase strips any directory prefix from a command name (`/usr/bin/sed`
+// → `sed`) so the write-command table matches regardless of how it was invoked.
+func filepathBase(cmd string) string {
+	if i := strings.LastIndexByte(cmd, '/'); i >= 0 {
+		return cmd[i+1:]
+	}
+	return cmd
 }
 
 // tokenizeCommand splits a shell command line into whitespace-separated tokens,
