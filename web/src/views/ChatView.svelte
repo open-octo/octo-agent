@@ -2112,41 +2112,43 @@
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* ── Branch modal ───────────────────────────────────────────────────────── */
+/* Tokens must exist in app.css — var() with an undefined name invalidates the
+   whole declaration (the modal shipped fully transparent on --bg-elevated). */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
   display: flex; align-items: center; justify-content: center; z-index: 1000;
 }
 .modal {
-  background: var(--bg-elevated); border: 1px solid var(--border-primary);
+  background: var(--bg-container); border: 1px solid var(--border-secondary);
   border-radius: 12px; width: 520px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
 }
 .modal-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px; border-bottom: 1px solid var(--border-primary);
+  padding: 16px 20px; border-bottom: 1px solid var(--border-secondary);
 }
-.modal-title { font-weight: 600; font-size: 15px; }
+.modal-title { font-weight: 600; font-size: 15px; color: var(--text-heading); }
 .modal-close {
   background: none; border: none; cursor: pointer; color: var(--text-tertiary);
   padding: 4px; border-radius: 6px;
 }
-.modal-close:hover { background: var(--hover-neutral); color: var(--text-primary); }
+.modal-close:hover { background: var(--hover-neutral); color: var(--text); }
 .modal-body { padding: 20px; }
 .branch-desc { margin: 0 0 12px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
 .branch-input {
-  width: 100%; border: 1px solid var(--border-primary); border-radius: 8px;
+  width: 100%; border: 1px solid var(--border-secondary); border-radius: 8px;
   padding: 10px 12px; font-size: 14px; font-family: inherit; resize: vertical;
-  background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;
+  background: var(--bg-container); color: var(--text); box-sizing: border-box;
 }
 .branch-input:focus { outline: none; border-color: var(--blue-5); }
 .modal-footer {
   display: flex; justify-content: flex-end; gap: 8px;
-  padding: 16px 20px; border-top: 1px solid var(--border-primary);
+  padding: 16px 20px; border-top: 1px solid var(--border-secondary);
 }
 .btn {
   padding: 8px 16px; border-radius: 8px; border: 1px solid transparent;
   font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
 }
-.btn-ghost { background: transparent; border-color: var(--border-primary); color: var(--text-primary); }
+.btn-ghost { background: transparent; border-color: var(--border-secondary); color: var(--text); }
 .btn-ghost:hover { background: var(--hover-neutral); }
 .btn-primary { background: var(--blue-6); color: #fff; border-color: var(--blue-6); }
 .btn-primary:hover { background: var(--blue-5); }
@@ -2156,7 +2158,7 @@
 .inline-edit-input {
   width: 100%; border: 1px solid var(--blue-5); border-radius: 8px;
   padding: 10px 12px; font-size: 14px; font-family: inherit; resize: vertical;
-  background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;
+  background: var(--bg-container); color: var(--text); box-sizing: border-box;
   outline: none;
 }
 .inline-edit-input:focus { box-shadow: 0 0 0 2px var(--blue-5-alpha, rgba(59,130,246,0.2)); }
