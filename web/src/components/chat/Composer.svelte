@@ -16,11 +16,12 @@
 
   let { onSend }: { onSend?: (text: string, files?: any[]) => void } = $props()
 
-  // A staged attachment. Images carry inline as a base64 data URL (the model
-  // gets an image block); every other type is uploaded to the server and
-  // referenced by `path` (an /api/uploads/<name> URL) so the agent opens it
-  // with read_file/terminal — mirroring how it works against the CLI's
-  // filesystem. Exactly one of data_url / path is set once ready. `uploading`
+  // A staged attachment. Every file type (images included) is uploaded to the
+  // server and referenced by `path` (an /api/uploads/<name> URL) — images become
+  // vision blocks server-side, other types are opened by the agent with
+  // read_file/terminal, mirroring how it works against the CLI's filesystem.
+  // `data_url` is the legacy inline shape (pre-upload-path); nothing sets it
+  // anymore, but the bubbles still render it for old transcripts. `uploading`
   // marks a placeholder whose upload is still in flight; `id` keys that
   // placeholder so its async result lands on the right entry (see addAttachment).
   // local_path is a real local path (native dialog on desktop, or the in-app
@@ -144,18 +145,13 @@
       return
     }
     const originSid = sid
-    // Images ride inline as a data URL (decoded into an image block server-side).
-    if (file.type.startsWith('image/')) {
-      const reader = new FileReader()
-      reader.onload = () => attachTo(originSid, { name, data_url: String(reader.result), mime_type: file.type })
-      reader.readAsDataURL(file)
-      return
-    }
-    // Any other file (pdf, xlsx, zip, csv, …) uploads to ~/.octo/uploads and is
-    // sent by path; the agent reads it from disk with its own tools. Stage a
-    // visible placeholder immediately so the file is never silently lost while
-    // the upload is in flight (send() refuses until it clears), then fill in the
-    // path or drop the placeholder on failure.
+    // Every file (image, pdf, xlsx, zip, csv, …) uploads to ~/.octo/uploads and
+    // is sent by path. Images used to ride inline as base64 data URLs, but the
+    // server caps a WS frame at 512 KB (wsMaxMessageSize) — an oversized frame
+    // closed the connection unparsed and the message silently vanished on the
+    // reconnect history reload. Stage a visible placeholder immediately so the
+    // file is never silently lost while the upload is in flight (send() refuses
+    // until it clears), then fill in the path or drop the placeholder on failure.
     const id = `up-${++uploadSeq}`
     attachTo(originSid, { id, name, mime_type: file.type, uploading: true })
     try {

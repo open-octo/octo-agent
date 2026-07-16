@@ -1468,7 +1468,7 @@
                       <div class="msg-attachments">
                         {#each msg.files as f}
                           {#if f.mime_type?.startsWith('image/')}
-                            <img src={f.data_url} alt={f.name} class="msg-image" />
+                            <img src={f.data_url || f.path} alt={f.name} class="msg-image" />
                           {:else}
                             <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{f.name}</span>
                           {/if}
@@ -1746,7 +1746,7 @@
                     <div class="msg-attachments">
                       {#each s.files as f}
                         {#if f.mime_type?.startsWith('image/')}
-                          <img src={f.data_url} alt={f.name} class="msg-image" />
+                          <img src={f.data_url || f.path} alt={f.name} class="msg-image" />
                         {:else}
                           <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{f.name}</span>
                         {/if}
