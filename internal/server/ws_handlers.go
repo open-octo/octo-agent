@@ -1401,18 +1401,21 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// the web UI's streaming flag (and its caret) stuck on forever; the
 			// tail's session_update is a superset of what we'd emit here.
 			sw.error(err.Error())
-			// A first-round failure makes runLoop roll history back past the user
-			// message (appendUserInput's error-path contract), and the SyncFrom+
-			// Save above erased the crash-safety copy persisted before the turn.
-			// The browser still shows that user bubble with a now out-of-range
-			// message_index, so a later edit/branch would 400. Tell it to re-fetch
-			// the (shorter) transcript so its indices realign with disk. Gated on
-			// an actual shrink below the watermark so a mid-turn failure that kept
-			// the message (and any completed rounds) doesn't trigger a needless
-			// reload.
-			if len(sess.Messages) < historyWatermark {
-				s.broadcastHistoryReload(sess.ID)
-			}
+		}
+		// A first-round failure makes runLoop roll history back past the user
+		// message (appendUserInput's error-path contract), and the SyncFrom+
+		// Save above erased the crash-safety copy persisted before the turn.
+		// An interrupt can do the same: finishInterrupted pops an unanswered
+		// user message, so this must run for BOTH branches above. The browser
+		// still shows that user bubble with a now out-of-range message_index,
+		// so a later edit/branch would 400. Tell it to re-fetch the (shorter)
+		// transcript so its indices realign with disk. Gated on an actual
+		// shrink below the turn-start watermark (deliberately not the live
+		// state's compaction-adjusted copy) so a mid-turn failure that kept
+		// the message doesn't trigger a needless reload; a turn compacted
+		// below the watermark reloads too, which also realigns its indices.
+		if len(sess.Messages) < historyWatermark {
+			s.broadcastHistoryReload(sess.ID)
 		}
 	} else {
 		// Normal completion: emit the final turn_done explicitly so the
@@ -1836,8 +1839,11 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 	case agent.EventSteerInjected:
 		// Prefer the full inbox items (text + attachment blocks) so a steer
 		// message's image thumbnails reach the bubble; Messages is the
-		// text-only fallback for events from older emitters.
+		// text-only fallback for events from older emitters — those don't
+		// stamp SteerBaseIndex, so their bubbles get no message_index rather
+		// than a bogus 0+k.
 		items := ev.Steer
+		indexed := len(items) > 0
 		if len(items) == 0 {
 			for _, msg := range ev.Messages {
 				items = append(items, agent.InboxItem{Text: msg})
@@ -1857,11 +1863,13 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 				"session_id": w.sessionID,
 				"content":    text,
 				"created_at": time.Now().UnixMilli(),
+			}
+			if indexed {
 				// Position in the persisted Messages array so edit/branch can
 				// target a steered message too. Item k lands at SteerBaseIndex+k;
 				// reminder-only items skipped above still occupy a history slot,
 				// so the loop index k (not a compacted counter) is authoritative.
-				"message_index": ev.SteerBaseIndex + k,
+				evt["message_index"] = ev.SteerBaseIndex + k
 			}
 			if len(imgs) > 0 {
 				evt["images"] = imgs
