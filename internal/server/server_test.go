@@ -209,11 +209,8 @@ func TestHandleBranchSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load branch: %v", err)
 	}
-	if len(branch.Messages) != 3 {
-		t.Fatalf("branch Messages len = %d, want 3", len(branch.Messages))
-	}
-	if branch.Messages[2].Content != "BRANCHED VARIANT" {
-		t.Fatalf("last message = %q, want BRANCHED VARIANT", branch.Messages[2].Content)
+	if len(branch.Messages) != 2 {
+		t.Fatalf("branch Messages len = %d, want 2 (user message at message_index is excluded)", len(branch.Messages))
 	}
 	if branch.BranchedFrom != sess.ID {
 		t.Fatalf("BranchedFrom = %q, want %q", branch.BranchedFrom, sess.ID)

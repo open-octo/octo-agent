@@ -1570,7 +1570,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 // safety margin for normal network/provider variance, not a substitute for
 // the effort cap, so it stays modest rather than papering over a slow call
 // with a long wait.
-const throwawayGenerationTimeout = 30 * time.Second
+const throwawayGenerationTimeout = 5 * time.Second
 
 // sessionPlaceholderRe matches the frontend's auto-assigned "Session N"
 // default name on freshly created web sessions.
