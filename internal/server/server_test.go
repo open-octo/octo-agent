@@ -232,6 +232,61 @@ func TestHandleBranchSession(t *testing.T) {
 	}
 }
 
+// TestHandleEditMessage verifies POST /api/sessions/{id}/edit_message:
+// history past the index is truncated, the message content is rewritten, and
+// the source session is mutated in place (no new session created).
+func TestHandleEditMessage(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "sys")
+	sess.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: "one"},
+		{Role: agent.RoleAssistant, Content: "two"},
+		{Role: agent.RoleUser, Content: "three"},
+		{Role: agent.RoleAssistant, Content: "four"},
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// 400 — out of range
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
+		strings.NewReader(`{"message_index":99,"new_content":"x"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("out-of-range: status = %d, want 400", w.Code)
+	}
+
+	// 200 — edit index 1 (the first assistant message), truncate the rest
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
+		strings.NewReader(`{"message_index":1,"new_content":"REWRITTEN"}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	// Source session mutated in place: truncated to 2 messages, content rewritten.
+	reloaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(reloaded.Messages) != 2 {
+		t.Fatalf("Messages len = %d, want 2", len(reloaded.Messages))
+	}
+	if reloaded.Messages[1].Content != "REWRITTEN" {
+		t.Fatalf("content = %q, want REWRITTEN", reloaded.Messages[1].Content)
+	}
+	if reloaded.Messages[1].Blocks != nil {
+		t.Fatalf("Blocks should be nil after edit, got %v", reloaded.Messages[1].Blocks)
+	}
+}
+
 // TestHandleDeleteSession_InterruptsActiveTurn is the regression guard for
 // the zombie-modal-resurrects-the-deleted-file bug: deleting a session must
 // cancel its registered turn (e.g. one blocked in ask_user_question) before

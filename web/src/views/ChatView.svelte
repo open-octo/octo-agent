@@ -1273,9 +1273,42 @@
     return msg.replace(/since [^;]+;?/i, '').trim() || 'Session is bound to another entry.'
   }
 
-  // ── branch: open the edit modal on a user message ───────────────────────────
-  function openBranch(index: number, content: string) {
-    branchModal = { open: true, index, draft: content, busy: false }
+  // ── inline edit: turn a user message into an input, truncate history, resend ──
+  let editingIndex = $state<number | null>(null)
+  let editingDraft = $state('')
+  let editingBusy = $state(false)
+
+  function startEdit(index: number) {
+    if (editingBusy) return
+    const m = msgs[index]
+    if (!m) return
+    editingIndex = index
+    editingDraft = m.content
+  }
+
+  function cancelEdit() {
+    editingIndex = null
+    editingDraft = ''
+  }
+
+  async function saveEdit() {
+    const sid = get(activeSessionId)
+    if (editingIndex == null || !sid || editingBusy) return
+    const idx = editingIndex
+    const content = editingDraft.trim()
+    if (!content) return
+    editingBusy = true
+    try {
+      await api.editMessage(sid, msgs[idx].messageIndex, content)
+      editingIndex = null
+      editingDraft = ''
+      // The server truncated history past the message; resend the modified prompt.
+      setTimeout(() => { ws.sendMessage(sid, content) }, 100)
+    } catch (e: any) {
+      showToast(e.message, 'error')
+    } finally {
+      editingBusy = false
+    }
   }
 
   // Confirm: create the branched session with the (possibly edited) prompt,
@@ -1449,17 +1482,44 @@
                         {/each}
                       </div>
                     {/if}
-                    {#if msg.content}{msg.content}{/if}
+                    {#if editingIndex === i}
+                      <textarea
+                        class="inline-edit-input"
+                        bind:value={editingDraft}
+                        rows={Math.max(2, editingDraft.split('\n').length)}
+                        disabled={editingBusy}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveEdit() }
+                          if (e.key === 'Escape') { e.preventDefault(); cancelEdit() }
+                        }}
+                      ></textarea>
+                    {:else}
+                      {#if msg.content}{msg.content}{/if}
+                    {/if}
                     {#if msg.pending}<span class="pending-spinner" title={$t('status.running')}></span>{/if}
                   </div>
-                  <div class="msg-actions">
-                    <button class="action-btn" title={$t('chat.branch')} onclick={() => openBranch(msg.messageIndex, msg.content)}>
-                      <iconify-icon icon="lucide:git-branch" width="13"></iconify-icon>
-                    </button>
-                    <button class="action-btn" title={$t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
-                      <iconify-icon icon="ant-design:copy-outlined" width="13"></iconify-icon>
-                    </button>
-                  </div>
+                  {#if editingIndex === i}
+                    <div class="msg-actions editing-actions">
+                      <button class="action-btn" title={$t('chat.cancel')} onclick={cancelEdit} disabled={editingBusy}>
+                        <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
+                      </button>
+                      <button class="action-btn" title={$t('chat.send')} onclick={saveEdit} disabled={editingBusy || !editingDraft.trim()}>
+                        <iconify-icon icon="ant-design:check-outlined" width="13"></iconify-icon>
+                      </button>
+                    </div>
+                  {:else}
+                    <div class="msg-actions">
+                      <button class="action-btn" title={$t('chat.branch')} onclick={() => openBranch(msg.messageIndex, msg.content)}>
+                        <iconify-icon icon="lucide:git-branch" width="13"></iconify-icon>
+                      </button>
+                      <button class="action-btn" title={$t('chat.edit')} onclick={() => startEdit(i)}>
+                        <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+                      </button>
+                      <button class="action-btn" title={$t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
+                        <iconify-icon icon="ant-design:copy-outlined" width="13"></iconify-icon>
+                      </button>
+                    </div>
+                  {/if}
                 </div>
               </div>
 
@@ -2084,6 +2144,16 @@
 .btn-primary { background: var(--blue-6); color: #fff; border-color: var(--blue-6); }
 .btn-primary:hover { background: var(--blue-5); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Inline message edit ───────────────────────────────────────────────── */
+.inline-edit-input {
+  width: 100%; border: 1px solid var(--blue-5); border-radius: 8px;
+  padding: 10px 12px; font-size: 14px; font-family: inherit; resize: vertical;
+  background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;
+  outline: none;
+}
+.inline-edit-input:focus { box-shadow: 0 0 0 2px var(--blue-5-alpha, rgba(59,130,246,0.2)); }
+.editing-actions { opacity: 1 !important; }
 
 /* ── Branched-from label ────────────────────────────────────────────────── */
 .branched-label {

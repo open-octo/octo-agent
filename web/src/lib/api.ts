@@ -139,6 +139,15 @@ export async function branchSession(sessionId: string, messageIndex: number, pro
   return d.session
 }
 
+// Edit a user message in-place: truncate history past it, set new content.
+// The caller then resends the modified prompt via the normal chat flow.
+export async function editMessage(sessionId: string, messageIndex: number, newContent: string): Promise<void> {
+  await request<unknown>(`/api/sessions/${sessionId}/edit_message`, {
+    method: 'POST',
+    ...json({ message_index: messageIndex, new_content: newContent }),
+  })
+}
+
 // The server returns a session's full persisted transcript in one shot — it
 // has no limit/before pagination (GET /api/sessions/:id/messages ignores
 // those params entirely and always returns everything), so there is nothing

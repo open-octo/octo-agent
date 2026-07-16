@@ -252,6 +252,19 @@ func (s *Session) Unbind(entry string) bool {
 	return true
 }
 
+// TruncateTo keeps only the first n messages and forces the next Save to
+// rewrite the whole file (the on-disk prefix no longer matches). Mirrors
+// History.TruncateTo. Used by the edit-message flow, which rewrites a message
+// in place and drops everything after it.
+func (s *Session) TruncateTo(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n < len(s.Messages) {
+		s.Messages = s.Messages[:n]
+		s.forceRewrite = true
+	}
+}
+
 // IncFlight increments the in-flight turn count. Caller must already hold the
 // binding; the increment is a no-op if the session is unbound.
 func (s *Session) IncFlight() {

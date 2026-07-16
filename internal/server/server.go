@@ -759,6 +759,7 @@ func (s *Server) registerRoutes() {
 	s.api("PUT /api/sessions/{id}/group", s.handleSetSessionGroup)
 	s.api("PUT /api/sessions/{id}/pin", s.handleSetSessionPin)
 	s.api("POST /api/sessions/{id}/branch", s.handleBranchSession)
+	s.api("POST /api/sessions/{id}/edit_message", s.handleEditMessage)
 	// Session groups: a Web-UI-only sidebar organisation layer (see
 	// session_groups.go). Registered unconditionally so both `octo serve` and
 	// the desktop shell expose them.

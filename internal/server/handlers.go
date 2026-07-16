@@ -764,6 +764,49 @@ func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"session": s.toSessionItem(branch, "web", "")})
 }
 
+// ─── POST /api/sessions/{id}/edit_message ──────────────────────────────────
+
+type editMessageRequest struct {
+	MessageIndex int    `json:"message_index"`
+	NewContent   string `json:"new_content"`
+}
+
+// handleEditMessage truncates the session's history past message_index and
+// rewrites that message's content to new_content. The source session is mutated
+// in place (unlike branch, which creates a new one). The caller then resends
+// the modified prompt via the normal chat flow to regenerate from that point.
+func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+	var req editMessageRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	sess, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if req.MessageIndex < 0 || req.MessageIndex >= len(sess.Messages) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(sess.Messages)))
+		return
+	}
+	// Truncate everything past the edited message, then rewrite its content.
+	sess.TruncateTo(req.MessageIndex + 1)
+	sess.Messages[req.MessageIndex].Content = req.NewContent
+	sess.Messages[req.MessageIndex].Blocks = nil // edited content is plain text
+	if err := sess.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.broadcastHistoryReload(id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // ─── GET /api/tools ─────────────────────────────────────────────────────────
 
 func (s *Server) handleListTools(w http.ResponseWriter, r *http.Request) {

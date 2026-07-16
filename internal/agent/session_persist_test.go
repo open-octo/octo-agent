@@ -397,3 +397,37 @@ func TestBranchFrom_Clamp(t *testing.T) {
 		t.Errorf("overflow idx: Messages len = %d, want 2", len(branch.Messages))
 	}
 }
+
+// TestSessionTruncateTo verifies that TruncateTo drops messages past n and
+// forces a full-file rewrite on the next Save.
+func TestSessionTruncateTo(t *testing.T) {
+	setTempHome(t)
+
+	s := NewSession("m", "")
+	s.Messages = []Message{
+		NewUserMessage("a"), NewAssistantMessage("b"),
+		NewUserMessage("c"), NewAssistantMessage("d"),
+	}
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	s.TruncateTo(2)
+	if len(s.Messages) != 2 {
+		t.Fatalf("Messages len = %d, want 2", len(s.Messages))
+	}
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save after truncate: %v", err)
+	}
+
+	reloaded, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if len(reloaded.Messages) != 2 {
+		t.Fatalf("reloaded Messages len = %d, want 2", len(reloaded.Messages))
+	}
+	if reloaded.Messages[0].Content != "a" || reloaded.Messages[1].Content != "b" {
+		t.Fatalf("unexpected content after truncate: %+v", reloaded.Messages)
+	}
+}
