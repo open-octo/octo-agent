@@ -139,8 +139,10 @@ export async function branchSession(sessionId: string, messageIndex: number, pro
   return d.session
 }
 
-// Edit a user message in-place: truncate history past it, set new content.
-// The caller then resends the modified prompt via the normal chat flow.
+// Edit a user message and regenerate from it. The server interrupts any
+// in-flight turn, truncates history to just before the message, and reruns
+// with the new content (keeping the original image attachments) — the caller
+// must NOT resend; the rerun re-appends the prompt itself.
 export async function editMessage(sessionId: string, messageIndex: number, newContent: string): Promise<void> {
   await request<unknown>(`/api/sessions/${sessionId}/edit_message`, {
     method: 'POST',

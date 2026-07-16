@@ -1299,11 +1299,12 @@
     if (!content) return
     editingBusy = true
     try {
+      // The server interrupts any in-flight turn, truncates history to just
+      // before the message, and reruns with the edited prompt itself — no
+      // resend from here (a resend would append the prompt a second time).
       await api.editMessage(sid, msgs[idx].messageIndex, content)
       editingIndex = null
       editingDraft = ''
-      // The server truncated history past the message; resend the modified prompt.
-      setTimeout(() => { ws.sendMessage(sid, content) }, 100)
     } catch (e: any) {
       showToast(e.message, 'error')
     } finally {
@@ -1517,11 +1518,12 @@
                       <button class="action-btn" title={$t('chat.branch')} onclick={() => openBranch(msg.messageIndex, msg.content)}>
                         <iconify-icon icon="lucide:git-branch" width="13"></iconify-icon>
                       </button>
-                      {#if !streaming}
-                        <button class="action-btn" title={$t('chat.edit')} onclick={() => startEdit(i)}>
-                          <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
-                        </button>
-                      {/if}
+                      <!-- Editable even mid-stream: confirming the edit has the
+                           server interrupt the in-flight turn before rerunning,
+                           so the button needs no streaming gate. -->
+                      <button class="action-btn" title={$t('chat.edit')} onclick={() => startEdit(i)}>
+                        <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+                      </button>
                       <button class="action-btn" title={$t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
                         <iconify-icon icon="ant-design:copy-outlined" width="13"></iconify-icon>
                       </button>

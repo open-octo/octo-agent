@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -335,6 +338,107 @@ func TestRunTask_ErrorRollback_BroadcastsHistoryReload(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// blockUntilCanceledSender blocks its first provider call until the context is
+// canceled — an in-flight streaming turn awaiting an interrupt. Later calls
+// (an edit's rerun) reply normally.
+type blockUntilCanceledSender struct {
+	entered chan struct{}
+	calls   atomic.Int32
+}
+
+func (s *blockUntilCanceledSender) SendMessages(ctx context.Context, _, _ string, _ []agent.Message, _ int) (agent.Reply, error) {
+	if s.calls.Add(1) == 1 {
+		close(s.entered)
+		<-ctx.Done()
+		return agent.Reply{}, ctx.Err()
+	}
+	return agent.Reply{Content: "edited reply"}, nil
+}
+
+func (s *blockUntilCanceledSender) StreamMessages(ctx context.Context, _, _ string, _ []agent.Message, _ int, _ func(string), _ func(string)) (agent.Reply, error) {
+	return s.SendMessages(ctx, "", "", nil, 0)
+}
+
+// TestHandleEditMessage_MidStream_InterruptsAndReruns: editing the prompt of a
+// turn that is still streaming must interrupt that turn, wait out its
+// wind-down, tolerate the first-round rollback having already popped the
+// prompt (message_index == len), and rerun with the edited content — which
+// lands in history exactly once, with a fresh reply.
+func TestHandleEditMessage_MidStream_InterruptsAndReruns(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	sender := &blockUntilCanceledSender{entered: make(chan struct{})}
+	srv.sender = sender
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Title = "fixed title"
+	sess.Messages = []agent.Message{
+		agent.NewUserMessage("one"),
+		{Role: agent.RoleAssistant, Content: "two"},
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Start a turn the way handleWSUserMessage does: flag it running, run it
+	// on a goroutine, clear the flag when it fully winds down.
+	mu := srv.sessionTurnLock(sess.ID)
+	mu.Lock()
+	srv.turnRunning[sess.ID] = true
+	mu.Unlock()
+	turnDone := make(chan struct{})
+	go func() {
+		defer func() {
+			mu.Lock()
+			srv.turnRunning[sess.ID] = false
+			mu.Unlock()
+			close(turnDone)
+		}()
+		srv.doAgentTurn(sess, "original prompt", nil, nil)
+	}()
+	<-sender.entered // the turn is now mid-stream, blocked in the provider
+
+	// The frontend holds message_index 2 — the live prediction for the
+	// in-flight prompt. Edit it while the turn is still streaming.
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
+		strings.NewReader(`{"message_index":2,"new_content":"EDITED"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("mid-stream edit: status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	<-turnDone
+
+	var reloaded *agent.Session
+	waitFor(t, func() bool {
+		var err error
+		reloaded, err = agent.LoadSession(sess.ID)
+		return err == nil && len(reloaded.Messages) == 4 &&
+			reloaded.Messages[3].Role == agent.RoleAssistant
+	})
+	// The edited prompt replaced the original exactly once, no reminder prefix
+	// (the rollback left history ending on an assistant message), and the
+	// rerun produced a fresh reply.
+	if reloaded.Messages[2].Content != "EDITED" {
+		t.Fatalf("prompt = %q, want EDITED", reloaded.Messages[2].Content)
+	}
+	if reloaded.Messages[3].Content != "edited reply" {
+		t.Fatalf("reply = %q, want edited reply", reloaded.Messages[3].Content)
+	}
+	for _, m := range reloaded.Messages {
+		if m.Content == "original prompt" {
+			t.Fatal("the original in-flight prompt must not survive the edit")
+		}
+	}
 }
 
 // TestHandleEvent_SteerInjected_CarriesMessageIndex: a steer message injected
