@@ -2011,18 +2011,6 @@ func turnSummaryLine(v verbosity, stats TurnStats) string {
 		agent.FormatElapsedSeconds(int64(stats.Elapsed.Seconds())), agent.FormatGoalTokens(int64(stats.Tokens))))
 }
 
-// cacheLine formats the per-turn cache footer, or "" when nothing to show.
-// Verbose-only: at default verbosity the footer would land after every turn
-// (cache moves on essentially every Anthropic-protocol call) and the status
-// bar's ctx% already covers the at-a-glance need.
-func cacheLine(v verbosity, reply agent.Reply) string {
-	if !v.verbose() {
-		return ""
-	}
-	return noticeStyle.Render(fmt.Sprintf("  ⓘ cache: %d read, %d write (in %d / out %d)",
-		reply.CacheReadTokens, reply.CacheWriteTokens, reply.InputTokens, reply.OutputTokens))
-}
-
 // thinkingPhrases rotate (slowly) on the initial-wait placeholder so the
 // pause feels alive, CC-style. Cycled by spinnerFrame.
 var thinkingPhrases = []string{"Thinking", "Pondering", "Working", "Reasoning"}
