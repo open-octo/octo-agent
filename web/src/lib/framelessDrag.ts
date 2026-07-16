@@ -15,6 +15,8 @@
 // runtime required. macOS is excluded — its frameless windows keep native
 // drag/resize handling.
 
+import { isDesktopShell } from './stores'
+
 const RESIZE_HANDLE = 5 // px from each window edge that arms a resize
 const CORNER_EXTRA = 10 // extra px so corners are easier to hit
 
@@ -87,7 +89,11 @@ function primaryDown(event: MouseEvent): void {
   // --wails-draggable is an inherited custom property, so children of the
   // header (including shadow-DOM hosts like iconify-icon) resolve to their
   // region's value, and the no-drag opt-outs on controls win automatically.
-  const target = event.target instanceof Element ? event.target : document.body
+  // Inline-SVG children are Elements whose clientWidth is 0, which would fail
+  // the scrollbar check below — climb to the nearest HTML ancestor instead.
+  const raw = event.target
+  const target =
+    raw instanceof HTMLElement ? raw : raw instanceof Element ? raw.parentElement ?? document.body : document.body
   const style = window.getComputedStyle(target)
   // Draggable region, excluding clicks that land on the element's scrollbar.
   canDrag =
@@ -116,8 +122,11 @@ function onMouseMove(event: MouseEvent): void {
     return
   }
 
-  // A scrollbar at the window edge consumes mouse events in that strip; shift
-  // the effective content edge inward so the resize zone sits just before it.
+  // A document-level scrollbar at the window edge consumes mouse events in
+  // that strip; shift the effective content edge inward so the resize zone
+  // sits just before it. Scrollbars of inner containers that touch the window
+  // edge still overlap the zone (their outermost pixels grab a resize) — the
+  // upstream Wails runtime has the same limitation.
   const scrollbarWidth = Math.max(0, window.innerWidth - document.documentElement.clientWidth)
   const scrollbarHeight = Math.max(0, window.innerHeight - document.documentElement.clientHeight)
   const rightContentEdge = window.innerWidth - scrollbarWidth
@@ -176,11 +185,9 @@ function update(event: MouseEvent): void {
   if (event.type === 'mousemove') onMouseMove(event)
 }
 
-// Installs the handlers. Gated on the desktop-shell URL marker (set by
-// cmd/octo-desktop/bridge.go for the webview only — an external browser on the
-// same hub lacks it) and on not-macOS. Safe to call unconditionally.
+// Installs the handlers. Gated on the desktop-shell URL marker and on
+// not-macOS. Safe to call unconditionally.
 export function initFramelessDrag(): void {
-  const isDesktopShell = new URLSearchParams(location.search).get('shell') === 'octo-desktop'
   const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
   if (!isDesktopShell || isMac) return
 

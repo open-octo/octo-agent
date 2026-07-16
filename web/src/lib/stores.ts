@@ -23,6 +23,14 @@ export const toasts = writable<ToastEntry[]>([])
 export const running = writable(false)
 export const wsDown = writable(false)
 
+// True when the page runs inside the desktop-shell webview. The shell tags its
+// window URL with this marker (cmd/octo-desktop/bridge.go shellURL); an
+// external browser on the same hub lacks it and stays plain web. Fixed for the
+// page's lifetime — unlike nativeShell below it needs no API round-trip, so
+// page-load-time code (framelessDrag) can use it directly.
+export const isDesktopShell =
+  typeof location !== 'undefined' && new URLSearchParams(location.search).get('shell') === 'octo-desktop'
+
 // True when served by the Wails desktop shell (a NativeBridge is wired,
 // reported by /api/version's `native` flag). Lets the folder picker use the OS
 // dialog instead of the in-app directory tree. False under `octo serve`.

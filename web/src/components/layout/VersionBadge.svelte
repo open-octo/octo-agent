@@ -14,7 +14,7 @@
   import * as api from '../../lib/api'
   import { ws } from '../../lib/ws'
   import { t } from '../../lib/i18n'
-  import { nativeShell, localAccess } from '../../lib/stores'
+  import { nativeShell, localAccess, isDesktopShell } from '../../lib/stores'
 
   type Phase = 'idle' | 'upgrading' | 'needs_restart' | 'reconnecting' | 'restart_failed' | 'done'
 
@@ -36,10 +36,7 @@
 
   // The hub reports native=true to every client, but only the desktop-shell
   // webview should behave as native (OS file dialog, OS notifications, header
-  // inset past the traffic lights). The shell tags its window URL with this
-  // marker (cmd/octo-desktop/bridge.go); an external browser on the same
-  // machine lacks it and stays plain web. Fixed for the page's lifetime.
-  const isDesktopShell = new URLSearchParams(location.search).get('shell') === 'octo-desktop'
+  // inset past the traffic lights) — hence the isDesktopShell gate on top.
 
   let versionLabel = $derived(current ? `v${current}` : '')
   // Locked open: the user must not dismiss the popover mid-install or while the
