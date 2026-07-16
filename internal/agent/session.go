@@ -364,6 +364,7 @@ func NewSession(model, system string) *Session {
 		CreatedAt: now,
 		Model:     model,
 		System:    system,
+		Title:     "*Octo Agent",
 	}
 }
 
@@ -857,15 +858,15 @@ func (s *Session) SetLastContextTokens(n int) error {
 // DisplayTitle returns the label shown for the session in list views: the
 // generated Title when present, otherwise a snippet of the first user message
 // (so pre-title sessions and not-yet-titled ones are still recognisable), and
-// finally "(untitled)" when there's nothing to show.
+// finally "*Octo Agent" when there's nothing to show.
 func (s *Session) DisplayTitle() string {
-	if t := strings.TrimSpace(s.Title); t != "" {
+	if t := strings.TrimSpace(s.Title); t != "" && t != "*Octo Agent" {
 		return t
 	}
 	if snippet := firstUserSnippet(s.Messages); snippet != "" {
 		return snippet
 	}
-	return "(untitled)"
+	return "*Octo Agent"
 }
 
 // firstUserSnippet extracts a one-line preview from the first user message,

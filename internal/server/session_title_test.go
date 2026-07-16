@@ -43,6 +43,7 @@ func TestIsAutoNamePlaceholder(t *testing.T) {
 		{"  ", true},
 		{"Session 1", true},
 		{"Session 42", true},
+		{"*Octo Agent", true},
 		{"Session", false},
 		{"修复登录问题", false},
 		{"My Session 2", false},

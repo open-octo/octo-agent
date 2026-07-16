@@ -1577,7 +1577,7 @@ var sessionPlaceholderRe = regexp.MustCompile(`^Session \d+$`)
 // after the first completed turn. A name the user typed themselves is kept.
 func isAutoNamePlaceholder(title string) bool {
 	t := strings.TrimSpace(title)
-	return t == "" || sessionPlaceholderRe.MatchString(t)
+	return t == "" || t == "*Octo Agent" || sessionPlaceholderRe.MatchString(t)
 }
 
 // claimTitleGeneration marks a title generation in flight for the session;
