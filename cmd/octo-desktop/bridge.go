@@ -364,6 +364,25 @@ func (b *nativeBridge) WindowState() bool {
 	return b.window.IsMaximised()
 }
 
+// ToggleFullscreen enters or exits true fullscreen (a separate space, no menu
+// bar/dock), distinct from ToggleMaximise's "fill the screen" zoom. This is
+// what the green traffic light's default click does natively on macOS.
+// No-op before the window exists.
+func (b *nativeBridge) ToggleFullscreen() {
+	if b.window != nil {
+		b.window.ToggleFullscreen()
+	}
+}
+
+// FullscreenState reports whether the window is currently in true fullscreen.
+// Returns false before the window exists.
+func (b *nativeBridge) FullscreenState() bool {
+	if b.window == nil {
+		return false
+	}
+	return b.window.IsFullscreen()
+}
+
 // showWindow brings the hub window to the foreground on the current view.
 func (b *nativeBridge) showWindow() { b.showWindowAt("") }
 

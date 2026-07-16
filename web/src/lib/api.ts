@@ -256,6 +256,13 @@ export async function nativeToggleMaximise(): Promise<void> {
   await request<{ ok: boolean }>('/api/native/window/toggle-maximise', { method: 'POST' })
 }
 
+// Desktop shell only: enter/exit true fullscreen (its own space, no menu
+// bar/dock) — the mac green traffic light's default click, distinct from
+// maximise/zoom. Best-effort.
+export async function nativeToggleFullscreen(): Promise<void> {
+  await request<{ ok: boolean }>('/api/native/window/toggle-fullscreen', { method: 'POST' })
+}
+
 // Desktop shell only: minimise the window to the taskbar/dock. Best-effort.
 export async function nativeMinimise(): Promise<void> {
   await request<{ ok: boolean }>('/api/native/window/minimise', { method: 'POST' })
@@ -267,15 +274,15 @@ export async function nativeClose(): Promise<void> {
   await request<{ ok: boolean }>('/api/native/window/close', { method: 'POST' })
 }
 
-// Desktop shell only: query whether the window is currently maximised. Lets the
-// frontend keep its maximise icon in sync after Aero Snap, keyboard shortcuts,
-// etc. Returns false if the native bridge is unavailable (e.g. web, pre-window).
-export async function nativeWindowState(): Promise<boolean> {
+// Desktop shell only: query whether the window is currently maximised and/or in
+// true fullscreen. Lets the frontend keep its maximise/fullscreen icons in sync
+// after Aero Snap, keyboard shortcuts, etc. Returns both false if the native
+// bridge is unavailable (e.g. web, pre-window).
+export async function nativeWindowState(): Promise<{ maximised: boolean; fullscreen: boolean }> {
   try {
-    const r = await request<{ maximised: boolean }>('/api/native/window/state')
-    return r.maximised
+    return await request<{ maximised: boolean; fullscreen: boolean }>('/api/native/window/state')
   } catch {
-    return false
+    return { maximised: false, fullscreen: false }
   }
 }
 

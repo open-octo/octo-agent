@@ -4,7 +4,7 @@
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
-  import { nativeToggleMaximise, nativeMinimise, nativeClose, nativeWindowState } from '../../lib/api'
+  import { nativeToggleMaximise, nativeToggleFullscreen, nativeMinimise, nativeClose, nativeWindowState } from '../../lib/api'
   import OctoLogo from './OctoLogo.svelte'
 
   function cycleSidebar() {
@@ -33,18 +33,22 @@
     flipMaximise()
   }
 
-  // Track maximise state so the icon flips between □ (maximise) and ❐ (restore).
-  // The frontend owns this state — there's no native title bar reading it. We
-  // sync from the OS on mount, on window focus (catches Aero Snap / keyboard
-  // maximize / taskbar restore the frontend can't otherwise observe), and after
-  // every toggle so the icon always reflects reality. A sequence counter
-  // prevents a stale focus response from overwriting a fresh toggle result.
+  // Track maximise/fullscreen state so the icons reflect reality. The frontend
+  // owns this state — there's no native title bar reading it. We sync from the
+  // OS on mount, on window focus (catches Aero Snap / keyboard maximize /
+  // taskbar restore / Cmd+Ctrl+F the frontend can't otherwise observe), and
+  // after every toggle. A sequence counter prevents a stale focus response
+  // from overwriting a fresh toggle result.
   let isMaximised = false
+  let isFullscreen = false
   let stateSeq = 0
-  async function refreshMaximised() {
+  async function refreshWindowState() {
     const seq = ++stateSeq
-    const m = await nativeWindowState()
-    if (seq === stateSeq) isMaximised = m
+    const s = await nativeWindowState()
+    if (seq === stateSeq) {
+      isMaximised = s.maximised
+      isFullscreen = s.fullscreen
+    }
   }
   async function flipMaximise() {
     const next = !isMaximised
@@ -55,14 +59,43 @@
     } catch {
       // Toggle failed — fetch the real OS state to stay in sync rather than
       // gambling that the old isMaximised is still accurate.
-      await refreshMaximised()
+      await refreshWindowState()
     }
+  }
+
+  // The green traffic light's default click enters/exits true fullscreen (its
+  // own space, no menu bar/dock) — distinct from flipMaximise's "fill the
+  // screen" zoom, which double-clicking the header still does.
+  async function flipFullscreen() {
+    const next = !isFullscreen
+    try {
+      await nativeToggleFullscreen()
+      isFullscreen = next
+      ++stateSeq
+    } catch {
+      await refreshWindowState()
+    }
+  }
+
+  // Hovering the green button shows a small menu, matching native macOS
+  // behaviour (hover the zoom button → window-tiling popup). We only offer the
+  // one action our fullscreen bridge supports. A short close delay lets the
+  // mouse travel from the button down into the menu without it disappearing.
+  let showFullscreenMenu = false
+  let fullscreenMenuHideTimer: ReturnType<typeof setTimeout> | undefined
+  function onMaximiseHoverEnter() {
+    clearTimeout(fullscreenMenuHideTimer)
+    showFullscreenMenu = true
+  }
+  function onMaximiseHoverLeave() {
+    clearTimeout(fullscreenMenuHideTimer)
+    fullscreenMenuHideTimer = setTimeout(() => { showFullscreenMenu = false }, 150)
   }
 
   onMount(() => {
     if (!$nativeShell) return // web mode has no native bridge — skip entirely
-    refreshMaximised()
-    const onFocus = () => refreshMaximised()
+    refreshWindowState()
+    const onFocus = () => refreshWindowState()
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   })
@@ -72,9 +105,38 @@
   <div class="left">
     {#if $nativeShell && isMac}
       <div class="traffic-lights">
-        <button class="traffic-light close" aria-label="Close" title="Close" onclick={() => nativeClose()}></button>
-        <button class="traffic-light minimise" aria-label="Minimise" title="Minimise" onclick={() => nativeMinimise()}></button>
-        <button class="traffic-light maximise" aria-label={isMaximised ? 'Restore' : 'Maximise'} title={isMaximised ? 'Restore' : 'Maximise'} data-icon={isMaximised ? '❐' : '+'} onclick={flipMaximise}></button>
+        <button class="traffic-light close" aria-label="Close" title="Close" onclick={() => nativeClose()}>
+          <svg viewBox="0 0 10 10" fill="none"><path d="M3.2 3.2L6.8 6.8M6.8 3.2L3.2 6.8" stroke-width="1.1" stroke-linecap="round" /></svg>
+        </button>
+        <button class="traffic-light minimise" aria-label="Minimise" title="Minimise" onclick={() => nativeMinimise()}>
+          <svg viewBox="0 0 10 10" fill="none"><path d="M3 5H7" stroke-width="1.1" stroke-linecap="round" /></svg>
+        </button>
+        <div class="maximise-wrap" onmouseenter={onMaximiseHoverEnter} onmouseleave={onMaximiseHoverLeave} role="presentation">
+          <button
+            class="traffic-light maximise"
+            aria-label={isFullscreen ? $t('header.exit_fullscreen') : $t('header.enter_fullscreen')}
+            title={isFullscreen ? $t('header.exit_fullscreen') : $t('header.enter_fullscreen')}
+            onclick={flipFullscreen}
+          >
+            <svg viewBox="0 0 10 10" fill="none">
+              {#if isFullscreen}
+                <path d="M4.7 3.1H3.1V4.7M3.6 4.2L5.9 6.5M5.3 6.9H6.9V5.3" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" />
+              {:else}
+                <path d="M3 5.8V7.4H4.6M4.2 6.2L6.5 3.9M5.8 2.6H7.4V4.2" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" />
+              {/if}
+            </svg>
+          </button>
+          {#if showFullscreenMenu}
+            <div class="fullscreen-menu" role="menu">
+              <button
+                role="menuitem"
+                onclick={() => { showFullscreenMenu = false; flipFullscreen() }}
+              >
+                {isFullscreen ? $t('header.exit_fullscreen') : $t('header.fullscreen')}
+              </button>
+            </div>
+          {/if}
+        </div>
       </div>
     {/if}
     <button class="icon-btn" title={$t('header.toggle_sidebar')} onclick={cycleSidebar}>
@@ -195,9 +257,10 @@ kbd {
 
 /* Mac traffic lights — frameless window, so the system traffic lights are gone
    and we draw our own in their accustomed top-left position. Each button shows
-   its icon on hover, matching native macOS behaviour. The maximise/restore icon
-   flips between + and ❐ like the Windows/Linux controls so the current state
-   is visible. */
+   a thin-stroke SVG glyph on hover (close/minimise/expand), matching native
+   macOS's own hover glyphs rather than a bold unicode character. The green
+   button's default click enters/exits true fullscreen (flipFullscreen), and
+   its icon flips between the expand-diagonal and inward-arrows glyph to match. */
 .traffic-lights {
   display: flex;
   align-items: center;
@@ -214,16 +277,51 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(0, 0, 0, 0.5);
-  font-size: 9px;
-  line-height: 1;
 }
-.traffic-light::after { opacity: 0; transition: opacity 0.1s ease; }
-.traffic-light:hover::after { opacity: 1; }
+.traffic-light svg {
+  width: 100%;
+  height: 100%;
+  stroke: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.traffic-light:hover svg { opacity: 1; }
 .traffic-light.close { background: #ff5f57; }
 .traffic-light.minimise { background: #febc2e; }
 .traffic-light.maximise { background: #28c840; }
-.traffic-light.close::after { content: '\00d7'; }
-.traffic-light.minimise::after { content: '\2212'; }
-.traffic-light.maximise::after { content: attr(data-icon); }
+
+/* Hover menu — a minimal stand-in for macOS's native window-tiling popup (which
+   only exists for real NSWindow zoom buttons, not custom HTML ones): a single
+   "Full Screen" action, since that's the one native capability the app wires
+   up. Kept open briefly on mouseleave so the pointer can travel from the
+   button down into the menu without it disappearing. */
+.maximise-wrap { position: relative; display: flex; }
+.fullscreen-menu {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  background: var(--bg-container);
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+  z-index: 200;
+  white-space: nowrap;
+}
+.fullscreen-menu button {
+  display: block;
+  width: 100%;
+  padding: 5px 12px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--text);
+}
+.fullscreen-menu button:hover { background: var(--hover-neutral); }
 </style>

@@ -55,6 +55,15 @@ type NativeBridge interface {
 	// false before the window exists.
 	WindowState() bool
 
+	// ToggleFullscreen enters or exits true fullscreen (its own space, no menu
+	// bar/dock) — distinct from ToggleMaximise's "fill the screen" zoom. This is
+	// the mac green traffic light's default click action.
+	ToggleFullscreen()
+
+	// FullscreenState reports whether the window is currently in true fullscreen.
+	// Used by the frontend to keep the green button's icon in sync.
+	FullscreenState() bool
+
 	// OpenExternal opens url in the user's default browser — used by the update
 	// badge's "Download update" action to reach the release page, since the
 	// desktop build updates through its installer, not an in-place swap. The
@@ -258,8 +267,8 @@ func (s *Server) handleNativeClose(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/native/window/state — report whether the desktop window is currently
-// maximised. Lets the frontend keep its maximise icon in sync after Aero Snap,
-// keyboard shortcuts, etc. Desktop only, loopback-gated.
+// maximised or in true fullscreen. Lets the frontend keep its maximise/fullscreen
+// icons in sync after Aero Snap, keyboard shortcuts, etc. Desktop only, loopback-gated.
 func (s *Server) handleNativeWindowState(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRemote(r.RemoteAddr) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
@@ -269,7 +278,26 @@ func (s *Server) handleNativeWindowState(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "native bridge not available")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"maximised": s.cfg.Native.WindowState()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"maximised":  s.cfg.Native.WindowState(),
+		"fullscreen": s.cfg.Native.FullscreenState(),
+	})
+}
+
+// POST /api/native/window/toggle-fullscreen — enter/exit true fullscreen (the
+// mac green traffic light's default click action, distinct from maximise/zoom).
+// Desktop only, loopback-gated.
+func (s *Server) handleNativeToggleFullscreen(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	s.cfg.Native.ToggleFullscreen()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 type nativeOpenExternalRequest struct {
