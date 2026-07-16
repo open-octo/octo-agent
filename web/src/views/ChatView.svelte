@@ -1314,6 +1314,11 @@
   // Confirm: create the branched session with the (possibly edited) prompt,
   // navigate to it, and auto-send so the variant reply streams immediately.
   let branchSendTimer: ReturnType<typeof setTimeout> | null = null
+  function openBranch(index: number, content: string) {
+    branchModal.index = index
+    branchModal.draft = content
+    branchModal.open = true
+  }
   async function confirmBranch() {
     const sid = get(activeSessionId)
     if (!sid || branchModal.busy) return
