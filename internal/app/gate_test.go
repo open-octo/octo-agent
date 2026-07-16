@@ -2,10 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/open-octo/octo-agent/internal/audit"
 	"github.com/open-octo/octo-agent/internal/permission"
 )
 
@@ -23,6 +27,41 @@ func recordingAsk(allow, remember bool, err error, calls *int) PermissionAsk {
 	return func(_ context.Context, _ string, _ map[string]any) (bool, bool, error) {
 		*calls++
 		return allow, remember, err
+	}
+}
+
+func TestGate_AuditLogsDenyAndAsk(t *testing.T) {
+	// Inject an audit logger at a temp path instead of the default
+	// ~/.octo/audit.log. (Redirecting $HOME would not work on Windows, where
+	// os.UserHomeDir reads %USERPROFILE%.)
+	logPath := filepath.Join(t.TempDir(), "audit.log")
+	g := &permissionGate{engine: newEngine(t, permission.ModeInteractive), audit: audit.NewAt(logPath)}
+
+	g.Check(context.Background(), "terminal", map[string]any{"command": "rm -rf /"})
+	g.Check(context.Background(), "terminal", map[string]any{"command": "sudo apt update"})
+
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 audit lines, got %d", len(lines))
+	}
+
+	var ev audit.Event
+	if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if ev.Tool != "terminal" || ev.Decision != "deny" || ev.Input["command"] != "rm -rf /" {
+		t.Errorf("deny event mismatch: %+v", ev)
+	}
+
+	if err := json.Unmarshal([]byte(lines[1]), &ev); err != nil {
+		t.Fatalf("unmarshal second event: %v", err)
+	}
+	if ev.Tool != "terminal" || ev.Decision != "ask-denied" || ev.Input["command"] != "sudo apt update" {
+		t.Errorf("ask-denied event mismatch: %+v", ev)
 	}
 }
 

