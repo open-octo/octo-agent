@@ -1456,9 +1456,6 @@
                     <button class="action-btn" title={$t('chat.branch')} onclick={() => openBranch(msg.messageIndex, msg.content)}>
                       <iconify-icon icon="lucide:git-branch" width="13"></iconify-icon>
                     </button>
-                    <button class="action-btn" title={$t('chat.edit')} onclick={() => editMessage(msg.content)}>
-                      <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
-                    </button>
                     <button class="action-btn" title={$t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
                       <iconify-icon icon="ant-design:copy-outlined" width="13"></iconify-icon>
                     </button>
