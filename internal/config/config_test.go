@@ -290,6 +290,7 @@ func TestModelSupportsVision(t *testing.T) {
 		"gpt-4.1-mini":      true,
 		"claude-sonnet-4-6": true,
 		"gemini-2.0-flash":  true,
+		"LongCat-2.0":       true, // longcat family → now vision-capable
 		"o3":                true, // unknown family → default true
 		"some-new-llm":      true,
 	}

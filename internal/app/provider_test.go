@@ -254,6 +254,7 @@ func TestVendorModelVision(t *testing.T) {
 		{"kimi", "kimi-k2.6", true, true},       // MoonViT multimodal
 		{"openai", "o3-mini", false, true},      // no image input
 		{"openai", "o4-mini", true, true},
+		{"longcat", "LongCat-2.0", true, true},   // vision supported
 		{"bailian", "not-a-model", false, false}, // unknown model
 		{"bogus", "whatever", false, false},      // unknown vendor
 		{ProviderCustom, "anything", false, false},

@@ -258,9 +258,9 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.longcat.chat/openai",
 		DefaultModel:   "LongCat-2.0",
-		// LongCat-2.0 accepts text input only (no image/vision support on the API).
+		// LongCat-2.0 supports image/vision input on the API.
 		Models: []VendorModel{
-			{ID: "LongCat-2.0", Vision: false},
+			{ID: "LongCat-2.0", Vision: true},
 		},
 		APIKeyEnvVar: "LONGCAT_API_KEY",
 		WebsiteURL:   "https://longcat.chat/platform/api_keys",
