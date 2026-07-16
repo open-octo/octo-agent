@@ -727,11 +727,10 @@ type branchSessionRequest struct {
 }
 
 // handleBranchSession creates a new session branched from the source session's
-// history up to message_index (inclusive). The source session is untouched.
-// If prompt_override is non-empty, the branched session's last message (the
-// user message at message_index) is replaced with it before save — this lets
-// the user vary the prompt and compare results. Returns the new session so the
-// client can navigate to it.
+// history up to (but not including) message_index. The source session is
+// untouched. The user message at message_index is NOT copied — the client
+// sends it fresh via ws.sendMessage so there is no duplicate. Returns the
+// new session so the client can navigate to it.
 func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -752,10 +751,8 @@ func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(src.Messages)))
 		return
 	}
-	branch := agent.BranchFrom(src, req.MessageIndex+1) // +1: BranchFrom takes an exclusive count
-	if req.PromptOverride != "" {
-		branch.Messages[len(branch.Messages)-1].Content = req.PromptOverride
-	}
+	branch := agent.BranchFrom(src, req.MessageIndex) // BranchFrom takes an exclusive count; exclude the user message so the client can send it fresh
+
 	if err := branch.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
