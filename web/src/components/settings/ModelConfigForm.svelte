@@ -183,6 +183,15 @@
     if (!valid()) { result = { ok: false, msg: $t('models.error.required') }; return }
     saving = true
     try {
+      // Test the connection first — the button label says "Test connection and continue"
+      // during first-run onboard, and "Save" in Settings; either way, don't save an
+      // invalid or unreachable config.
+      const testRes = await api.testConfig(buildReq())
+      if (!testRes.ok) {
+        result = { ok: false, msg: testRes.message || $t('models.test.fail') }
+        saving = false
+        return
+      }
       await onSubmit(buildReq())
     } catch (e: any) {
       result = { ok: false, msg: e?.message ?? $t('models.save.fail') }
