@@ -1148,6 +1148,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Persist the generated title (silent — it surfaces in the session list).
 		m.titlePending = false
 		if msg.text != "" && !m.cfg.noSave {
+		} else if !m.cfg.noSave && m.cfg.session.Title == "*Octo Agent" {
+			if snippet := m.cfg.session.DisplayTitle(); snippet != "*Octo Agent" {
+				_ = m.cfg.session.SetTitle(snippet)
+			}
 			_ = m.cfg.session.SetTitle(msg.text)
 		}
 		// Refresh the terminal tab/window title to match the now-current session
