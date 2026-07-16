@@ -22,6 +22,7 @@ description: octo serve 背后的 REST 接口面——和内置 Web UI 用的是
 | `GET/POST /api/sessions` | 列出 / 创建 |
 | `GET /api/sessions/{id}` | 获取单个，或它的 `/messages`、`/artifacts` |
 | `DELETE`, `PATCH /api/sessions/{id}` | 删除，或更新（model、推理强度、是否显示推理、权限模式、工作目录） |
+| `POST /api/sessions/{id}/branch` | 从某条消息分支——复制历史到 `message_index`（含）创建新会话，可通过 `prompt_override` 改写该消息 |
 | `GET/PUT/DELETE /api/sessions/{id}/goal` | 读取、设置或清除会话的目标 |
 
 ## 工具、Skill、工作流

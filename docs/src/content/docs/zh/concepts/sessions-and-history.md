@@ -23,4 +23,13 @@ octo -c <session-id> # 恢复指定的一个
 这正是恢复会话时能忠实还原工具调用的原因。这个机制出现之前保存的老会话依然能正常加载:
 block 列表为空时会自动回退成纯字符串形式。
 
+## 会话分支
+
+在 Web UI 中,任意一条用户消息都可以分支: hover 消息点击 **Branch**,可以选择性地编辑 prompt,
+然后创建一个新会话,历史复制到该消息(含)为止。原会话完全不动。这在调试 prompt 变体时很有用——
+改写一个问题并排对比结果,不会污染原会话。
+
+新会话带有 `branched_from` 字段指向源会话,在会话标题旁显示"分支自 <标题>"。分支功能通过
+`POST /api/sessions/{id}/branch` 提供,参数为 `message_index` 和可选的 `prompt_override`。
+
 下一步:Web UI 和 IM 渠道上的会话共用同一套存储——见[接入聊天应用](/docs/zh/guides/channels/)。

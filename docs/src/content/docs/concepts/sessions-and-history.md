@@ -25,5 +25,16 @@ single string, which is what lets a session round-trip tool calls faithfully acr
 Older sessions saved before this existed still load: a nil block list falls back to the plain-string
 form.
 
+## Branching a session
+
+From the Web UI, any user message can be branched: hover the message, click **Branch**, optionally edit
+the prompt, and a new session is created with the history up to and including that message. The original
+session is untouched. This is useful for testing prompt variants — rewrite a question and compare the
+side-by-side results without polluting the original conversation.
+
+The new session carries a `branched_from` field pointing back to its source, shown in the session header
+as "Branched from \<title\>". Branching is available via `POST /api/sessions/{id}/branch` with a
+`message_index` and an optional `prompt_override`.
+
 Next: sessions across the web UI and IM channels share the same store — see
 [Bridge to chat apps](/docs/guides/channels/).

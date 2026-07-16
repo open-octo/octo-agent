@@ -26,6 +26,7 @@ called out in the release notes — there's no versioned `/api/v1` yet.
 | `GET/POST /api/sessions` | list / create |
 | `GET /api/sessions/{id}` | fetch one, or `/messages`, `/artifacts` |
 | `DELETE`, `PATCH /api/sessions/{id}` | delete, or update (model, reasoning effort, show-reasoning, permission mode, working dir) |
+| `POST /api/sessions/{id}/branch` | branch a session from a message — copies history up to `message_index` (inclusive) into a new session, optionally rewriting that message via `prompt_override` |
 | `GET/PUT/DELETE /api/sessions/{id}/goal` | read, set, or clear the session's goal |
 
 ## Tools, skills, workflows
