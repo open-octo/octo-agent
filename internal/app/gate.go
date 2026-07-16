@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/audit"
 	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
@@ -21,12 +22,13 @@ type PermissionAsk func(ctx context.Context, toolName string, toolInput map[stri
 // nil for a non-interactive one (HTTP server, IM bridge), where ask resolves to
 // deny — the same posture the old per-transport gates had.
 func NewPermissionGate(engine *permission.Engine, ask PermissionAsk) agent.PermissionGate {
-	return &permissionGate{engine: engine, ask: ask}
+	return &permissionGate{engine: engine, ask: ask, audit: audit.New()}
 }
 
 type permissionGate struct {
 	engine *permission.Engine
 	ask    PermissionAsk
+	audit  *audit.Logger
 }
 
 // Check implements agent.PermissionGate.
@@ -36,24 +38,34 @@ func (g *permissionGate) Check(ctx context.Context, name string, input map[strin
 	if real, realInput, ok := tools.ToolCallTarget(name, input); ok {
 		name, input = real, realInput
 	}
-	switch g.engine.Check(name, input) {
+	decision := g.engine.Check(name, input)
+	switch decision {
 	case permission.Allow:
 		return true, ""
 	case permission.Deny:
-		return false, g.engine.DenialReason(name, input)
+		reason := g.engine.DenialReason(name, input)
+		g.audit.Log(name, input, string(decision), reason)
+		return false, reason
 	case permission.Ask:
 		if g.ask == nil {
 			// Non-interactive: resolve ask → deny with the policy's reason.
-			return false, g.engine.DenialReason(name, input)
+			reason := g.engine.DenialReason(name, input)
+			g.audit.Log(name, input, "ask-denied", reason)
+			return false, reason
 		}
 		allow, remember, err := g.ask(ctx, name, input)
 		if err != nil || !allow {
-			return false, fmt.Sprintf("permission_denied: user declined to run %s", name)
+			reason := fmt.Sprintf("permission_denied: user declined to run %s", name)
+			g.audit.Log(name, input, "user-declined", reason)
+			return false, reason
 		}
 		if remember {
 			g.engine.Remember(name, input, permission.Allow)
 		}
+		g.audit.Log(name, input, "user-allowed", "")
 		return true, ""
 	}
-	return false, g.engine.DenialReason(name, input)
+	reason := g.engine.DenialReason(name, input)
+	g.audit.Log(name, input, "deny", reason)
+	return false, reason
 }

@@ -1208,9 +1208,6 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if s := turnSummaryLine(m.cfg.verbosity, msg.stats); s != "" {
 				m.printlnBlock(s)
 			}
-			if c := cacheLine(m.cfg.verbosity, msg.reply); c != "" {
-				m.printlnBlock(c)
-			}
 		}
 		// turnEndedMsg only marks the end of the agent loop's output; the turn
 		// goroutine is still alive until turnFinishedMsg. Do NOT reset turnRunning

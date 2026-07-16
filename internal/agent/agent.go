@@ -868,6 +868,9 @@ func (a *Agent) runLoop(
 		// Done before the LLM call so the model sees mid-turn user input
 		// as a first-class message boundary, not folded into tool output.
 		if steerItems := a.Inbox.Drain(); len(steerItems) > 0 {
+			// History position the first steer item lands at — item k occupies
+			// steerBaseIdx+k, since each is appended as its own message below.
+			steerBaseIdx := a.History.Len()
 			for _, it := range steerItems {
 				if len(it.Blocks) > 0 {
 					blocks := make([]ContentBlock, 0, 1+len(it.Blocks))
@@ -885,7 +888,7 @@ func (a *Agent) runLoop(
 				for i, it := range steerItems {
 					msgs[i] = it.Text
 				}
-				handler(AgentEvent{Kind: EventSteerInjected, Messages: msgs, Steer: steerItems})
+				handler(AgentEvent{Kind: EventSteerInjected, Messages: msgs, Steer: steerItems, SteerBaseIndex: steerBaseIdx})
 			}
 		}
 

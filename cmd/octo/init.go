@@ -96,7 +96,7 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	a.Gate = newCLIGate(engine, initView)
 
 	fmt.Fprintln(stdout, "Analyzing the repository to generate .octorules…")
-	handler := replToolEventHandler(stdout, *plain)
+	handler := replToolEventHandler(stdout, stderr, *plain)
 	_, err = a.RunStream(context.Background(), initInstruction, tools.DefaultTools(), tools.NewDefaultRegistry(), handler)
 	tools.KillAllBackground()
 	tools.CleanSpillFiles()
