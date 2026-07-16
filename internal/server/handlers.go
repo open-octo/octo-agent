@@ -721,12 +721,16 @@ func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
 // ─── POST /api/sessions/{id}/branch ────────────────────────────────────────
 
 type branchSessionRequest struct {
-	MessageIndex int `json:"message_index"`
+	MessageIndex   int    `json:"message_index"`
+	PromptOverride string `json:"prompt_override,omitempty"`
 }
 
 // handleBranchSession creates a new session branched from the source session's
 // history up to message_index (inclusive). The source session is untouched.
-// Returns the new session's descriptor so the client can navigate to it.
+// If prompt_override is non-empty, the branched session's last message (the
+// user message at message_index) is replaced with it before save — this lets
+// the user vary the prompt and compare results. Returns the new session so the
+// client can navigate to it.
 func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -747,7 +751,10 @@ func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(src.Messages)))
 		return
 	}
-	branch := agent.BranchFrom(src, req.MessageIndex+1) // +1: BranchFrom takes count (uptoIdx inclusive → exclusive len)
+	branch := agent.BranchFrom(src, req.MessageIndex+1) // +1: BranchFrom takes an exclusive count
+	if req.PromptOverride != "" {
+		branch.Messages[len(branch.Messages)-1].Content = req.PromptOverride
+	}
 	if err := branch.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

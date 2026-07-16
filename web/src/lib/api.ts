@@ -129,6 +129,16 @@ export async function setSessionPinned(sessionId: string, pinned: boolean): Prom
   await request<unknown>(`/api/sessions/${sessionId}/pin`, { method: 'PUT', ...json({ pinned }) })
 }
 
+// Branch a session from a specific message index, optionally overriding that
+// message's content. Returns the new session.
+export async function branchSession(sessionId: string, messageIndex: number, promptOverride?: string): Promise<Session> {
+  const d = await request<{ session: Session }>(`/api/sessions/${sessionId}/branch`, {
+    method: 'POST',
+    ...json({ message_index: messageIndex, prompt_override: promptOverride }),
+  })
+  return d.session
+}
+
 // The server returns a session's full persisted transcript in one shot — it
 // has no limit/before pagination (GET /api/sessions/:id/messages ignores
 // those params entirely and always returns everything), so there is nothing
