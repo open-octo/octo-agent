@@ -127,6 +127,11 @@
   let bindRequiredFor = $state<string | null>(null)
   let bindRequiredMessage = $state('')
 
+  // ── branch modal: edit the selected prompt and run a variant ────────────────
+  let branchModal = $state<{ open: boolean; index: number; draft: string; busy: boolean }>({
+    open: false, index: 0, draft: '', busy: false,
+  })
+
   // Sub-agents card elapsed time + reconnect countdown both tick off `now`.
   let now = $state(Date.now())
   $effect(() => {
@@ -198,6 +203,10 @@
         // chips) so a reloaded transcript shows the same attachments the live
         // turn did — this is the only place reload rehydrates them.
         images: ev.images ?? [],
+        // Position in the backend's persisted Messages array. Tool_result-only
+        // bookkeeping messages are skipped during replay, so this can differ
+        // from the rendered index — the branch feature relies on it.
+        messageIndex: ev.message_index,
       })
     } else if (ev.type === 'assistant_message') {
       // Skip empty assistant turns (thinking-only / tool-only rounds) so they
@@ -682,7 +691,7 @@
           // Steer messages enter history in chronological order: before any
           // assistant reply that is still streaming, so the transcript reads as
           // user-steer → next-assistant-reply (mirrors the TUI's EventSteerInjected).
-          const confirmedMsg = { id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images }
+          const confirmedMsg = { id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images, messageIndex: (ev as any).message_index }
           const lastStreamingAssistant = msgs.findLastIndex((x: any) => x.type === 'assistant' && x.streaming)
           if (lastStreamingAssistant >= 0) {
             msgs.splice(lastStreamingAssistant, 0, confirmedMsg)
@@ -695,9 +704,9 @@
           const lastPending = msgs.findLastIndex((x: any) => x.type === 'user' && x.pending)
           if (lastPending >= 0 && msgs[lastPending].content === content) {
             confirmedPendingId = msgs[lastPending].id
-            msgs[lastPending] = { ...msgs[lastPending], id: uid('u'), createdAt, pending: false, images }
+            msgs[lastPending] = { ...msgs[lastPending], id: uid('u'), createdAt, pending: false, images, messageIndex: (ev as any).message_index }
           } else {
-            msgs.push({ id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images })
+            msgs.push({ id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images, messageIndex: (ev as any).message_index })
           }
         }
         return { ...m, [sid]: msgs }
@@ -1263,6 +1272,75 @@
     // Keep the message concise for the inline banner.
     return msg.replace(/since [^;]+;?/i, '').trim() || 'Session is bound to another entry.'
   }
+
+  // ── inline edit: turn a user message into an input, truncate history, resend ──
+  let editingIndex = $state<number | null>(null)
+  let editingDraft = $state('')
+  let editingBusy = $state(false)
+
+  function startEdit(index: number) {
+    if (editingBusy) return
+    const m = msgs[index]
+    if (!m) return
+    editingIndex = index
+    editingDraft = m.content
+  }
+
+  function cancelEdit() {
+    editingIndex = null
+    editingDraft = ''
+  }
+
+  async function saveEdit() {
+    const sid = get(activeSessionId)
+    if (editingIndex == null || !sid || editingBusy) return
+    const idx = editingIndex
+    const content = editingDraft.trim()
+    if (!content) return
+    editingBusy = true
+    try {
+      await api.editMessage(sid, msgs[idx].messageIndex, content)
+      editingIndex = null
+      editingDraft = ''
+      // The server truncated history past the message; resend the modified prompt.
+      setTimeout(() => { ws.sendMessage(sid, content) }, 100)
+    } catch (e: any) {
+      showToast(e.message, 'error')
+    } finally {
+      editingBusy = false
+    }
+  }
+
+  // Confirm: create the branched session with the (possibly edited) prompt,
+  // navigate to it, and auto-send so the variant reply streams immediately.
+  let branchSendTimer: ReturnType<typeof setTimeout> | null = null
+  function openBranch(index: number, content: string) {
+    branchModal.index = index
+    branchModal.draft = content
+    branchModal.open = true
+  }
+  async function confirmBranch() {
+    const sid = get(activeSessionId)
+    if (!sid || branchModal.busy) return
+    branchModal.busy = true
+    try {
+      const newSess = await api.branchSession(sid, branchModal.index, branchModal.draft)
+      sessions.update(ss => [newSess, ...ss])
+      activeSessionId.set(newSess.id)
+      activeSession.set(newSess.id)
+      branchModal.open = false
+      // Defer the send until the new session's chat state registers.
+      if (branchSendTimer) clearTimeout(branchSendTimer)
+      branchSendTimer = setTimeout(() => {
+        ws.sendMessage(newSess.id, branchModal.draft)
+        branchSendTimer = null
+        branchModal.busy = false
+      }, 100)
+    } catch (e: any) {
+      branchModal.busy = false
+      showToast(e.message, 'error')
+    }
+  }
 </script>
 
 <div class="chat-view">
@@ -1272,6 +1350,13 @@
       <span class="session-title">
         {currentSession?.title ?? currentSession?.name ?? 'Chat'}
       </span>
+      {#if currentSession?.branched_from}
+        {@const src = $sessions.find(s => s.id === currentSession!.branched_from)}
+        <span class="branched-label" title={src?.title ?? src?.name ?? currentSession.branched_from}>
+          <iconify-icon icon="lucide:git-branch" width="12"></iconify-icon>
+          {$t('chat.branched_from')} {src?.title ?? src?.name ?? currentSession.branched_from}
+        </span>
+      {/if}
       {#if streaming}
         <StatusTag status="info">{$t('status.running')}</StatusTag>
       {:else}
@@ -1369,7 +1454,7 @@
       <div class="messages" bind:this={messagesEl}>
         <div class="messages-inner" bind:this={innerEl}>
 
-          {#each msgs as msg (msg.id)}
+          {#each msgs as msg, i (msg.id)}
             {#if msg.type === 'user'}
               <!-- Right-aligned user bubble -->
               <div class="msg-user fadein">
@@ -1402,17 +1487,46 @@
                         {/each}
                       </div>
                     {/if}
-                    {#if msg.content}{msg.content}{/if}
+                    {#if editingIndex === i}
+                      <textarea
+                        class="inline-edit-input"
+                        bind:value={editingDraft}
+                        rows={Math.max(2, editingDraft.split('\n').length)}
+                        disabled={editingBusy}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveEdit() }
+                          if (e.key === 'Escape') { e.preventDefault(); cancelEdit() }
+                        }}
+                      ></textarea>
+                    {:else}
+                      {#if msg.content}{msg.content}{/if}
+                    {/if}
                     {#if msg.pending}<span class="pending-spinner" title={$t('status.running')}></span>{/if}
                   </div>
-                  <div class="msg-actions">
-                    <button class="action-btn" title={$t('chat.edit')} onclick={() => editMessage(msg.content)}>
-                      <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
-                    </button>
-                    <button class="action-btn" title={$t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
-                      <iconify-icon icon="ant-design:copy-outlined" width="13"></iconify-icon>
-                    </button>
-                  </div>
+                  {#if editingIndex === i}
+                    <div class="msg-actions editing-actions">
+                      <button class="action-btn" title={$t('chat.cancel')} onclick={cancelEdit} disabled={editingBusy}>
+                        <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
+                      </button>
+                      <button class="action-btn" title={$t('chat.send')} onclick={saveEdit} disabled={editingBusy || !editingDraft.trim()}>
+                        <iconify-icon icon="ant-design:check-outlined" width="13"></iconify-icon>
+                      </button>
+                    </div>
+                  {:else}
+                    <div class="msg-actions">
+                      <button class="action-btn" title={$t('chat.branch')} onclick={() => openBranch(msg.messageIndex, msg.content)}>
+                        <iconify-icon icon="lucide:git-branch" width="13"></iconify-icon>
+                      </button>
+                      {#if !streaming}
+                        <button class="action-btn" title={$t('chat.edit')} onclick={() => startEdit(i)}>
+                          <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+                        </button>
+                      {/if}
+                      <button class="action-btn" title={$t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
+                        <iconify-icon icon="ant-design:copy-outlined" width="13"></iconify-icon>
+                      </button>
+                    </div>
+                  {/if}
                 </div>
               </div>
 
@@ -1666,6 +1780,38 @@
     {/if}
   </div>
 </div>
+
+<!-- Branch modal: edit the selected prompt and run a variant in a new session -->
+{#if branchModal.open}
+  <div class="modal-overlay" onclick={() => { if (!branchModal.busy) branchModal.open = false }}>
+    <div class="modal branch-modal" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-header">
+        <span class="modal-title">{$t('chat.branch_title')}</span>
+        <button class="modal-close" onclick={() => { if (!branchModal.busy) branchModal.open = false }}>
+          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="branch-desc">{$t('chat.branch_desc')}</p>
+        <textarea
+          class="branch-input"
+          bind:value={branchModal.draft}
+          rows={6}
+          disabled={branchModal.busy}
+        ></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick={() => branchModal.open = false} disabled={branchModal.busy}>
+          {$t('chat.branch_cancel')}
+        </button>
+        <button class="btn btn-primary" onclick={confirmBranch} disabled={branchModal.busy || !branchModal.draft.trim()}>
+          {#if branchModal.busy}<iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>{/if}
+          {$t('chat.branch_run')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
 /* ── Layout ──────────────────────────────────────────────────────────────── */
@@ -1964,4 +2110,61 @@
 /* ── Fade-in ─────────────────────────────────────────────────────────────── */
 .fadein { animation: octo-fadein 0.25s ease; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* ── Branch modal ───────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.modal {
+  background: var(--bg-elevated); border: 1px solid var(--border-primary);
+  border-radius: 12px; width: 520px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border-primary);
+}
+.modal-title { font-weight: 600; font-size: 15px; }
+.modal-close {
+  background: none; border: none; cursor: pointer; color: var(--text-tertiary);
+  padding: 4px; border-radius: 6px;
+}
+.modal-close:hover { background: var(--hover-neutral); color: var(--text-primary); }
+.modal-body { padding: 20px; }
+.branch-desc { margin: 0 0 12px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.branch-input {
+  width: 100%; border: 1px solid var(--border-primary); border-radius: 8px;
+  padding: 10px 12px; font-size: 14px; font-family: inherit; resize: vertical;
+  background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;
+}
+.branch-input:focus { outline: none; border-color: var(--blue-5); }
+.modal-footer {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 16px 20px; border-top: 1px solid var(--border-primary);
+}
+.btn {
+  padding: 8px 16px; border-radius: 8px; border: 1px solid transparent;
+  font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+}
+.btn-ghost { background: transparent; border-color: var(--border-primary); color: var(--text-primary); }
+.btn-ghost:hover { background: var(--hover-neutral); }
+.btn-primary { background: var(--blue-6); color: #fff; border-color: var(--blue-6); }
+.btn-primary:hover { background: var(--blue-5); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Inline message edit ───────────────────────────────────────────────── */
+.inline-edit-input {
+  width: 100%; border: 1px solid var(--blue-5); border-radius: 8px;
+  padding: 10px 12px; font-size: 14px; font-family: inherit; resize: vertical;
+  background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;
+  outline: none;
+}
+.inline-edit-input:focus { box-shadow: 0 0 0 2px var(--blue-5-alpha, rgba(59,130,246,0.2)); }
+.editing-actions { opacity: 1 !important; }
+
+/* ── Branched-from label ────────────────────────────────────────────────── */
+.branched-label {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+  color: var(--text-tertiary); cursor: help;
+}
 </style>

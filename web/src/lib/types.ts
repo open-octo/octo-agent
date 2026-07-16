@@ -34,6 +34,8 @@ export interface Session {
   // Optional UI-only fields carried by some broadcasts.
   time?: string
   icon?: string
+  // BranchedFrom is the session id this session was branched from, if any.
+  branched_from?: string
 }
 
 // SessionGroup is a Web-UI sidebar grouping. Membership lives here (session

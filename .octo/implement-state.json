@@ -1,0 +1,62 @@
+{
+  "tech_design_path": "(conversation)",
+  "branch": "feat/session-branch",
+  "updated_at": "2026-07-16T10:45:00+08:00",
+  "waves": [
+    {
+      "wave": 1,
+      "mode": "sequential",
+      "slices": [
+        {
+          "slice": 1,
+          "title": "Backend: BranchFrom + API",
+          "status": "in_progress",
+          "acceptance_criteria": [
+            "Session.BranchFrom(src, uptoIdx) copies meta fields and Messages[0:uptoIdx]",
+            "BranchedFrom field set on new session and survives Save/Load roundtrip",
+            "POST /api/sessions/:id/branch handler validates index bounds",
+            "Router registers the new route",
+            "toSessionItem includes BranchedFrom"
+          ],
+          "files_owned": [
+            "internal/agent/session.go",
+            "internal/server/handlers.go",
+            "internal/server/router.go",
+            "internal/agent/session_persist_test.go",
+            "internal/server/handlers_test.go"
+          ],
+          "tests_added": 2,
+          "review_summary": "",
+          "deviations": "",
+          "commit_sha": "bb189a64"
+        }
+      ]
+    },
+    {
+      "wave": 2,
+      "mode": "sequential",
+      "slices": [
+        {
+          "slice": 2,
+          "title": "Frontend: Branch UX",
+          "status": "in_progress",
+          "acceptance_criteria": [
+            "Hover menu on user messages shows Branch button",
+            "Clicking Branch opens edit modal pre-filled with original prompt",
+            "Confirming creates new session via API and navigates to it",
+            "BranchedFrom shows 'branched from' label in UI"
+          ],
+          "files_owned": [
+            "web/src/lib/api.ts",
+            "web/src/lib/types.ts",
+            "web/src/routes/ChatView.svelte"
+          ],
+          "tests_added": 0,
+          "review_summary": "",
+          "deviations": "",
+          "commit_sha": ""
+        }
+      ]
+    }
+  ]
+}

@@ -59,6 +59,7 @@ type sessionItem struct {
 	ShowReasoning   *bool     `json:"show_reasoning,omitempty"`
 	ContextUsage    int       `json:"context_usage,omitempty"`
 	PendingQuestion bool      `json:"pending_question,omitempty"`
+	BranchedFrom    string    `json:"branched_from,omitempty"`
 }
 
 type sessionDetail struct {
@@ -115,6 +116,7 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 		ShowReasoning:   sr,
 		ContextUsage:    ctxUsage,
 		PendingQuestion: srv.hasPendingQuestion(s.ID),
+		BranchedFrom:    s.BranchedFrom,
 	}
 }
 
@@ -552,9 +554,10 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 			// (tool_result-only messages are bookkeeping, not user-visible).
 			if text != "" || len(images) > 0 {
 				ev := map[string]any{
-					"type":       "history_user_message",
-					"content":    text,
-					"created_at": createdAt,
+					"type":          "history_user_message",
+					"content":       text,
+					"created_at":    createdAt,
+					"message_index": i, // position in the persisted Messages array — may differ from the rendered index (tool_result-only messages are skipped)
 				}
 				if len(images) > 0 {
 					ev["images"] = images
@@ -714,6 +717,106 @@ func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted, "failed": failed})
+}
+
+// ─── POST /api/sessions/{id}/branch ────────────────────────────────────────
+
+type branchSessionRequest struct {
+	MessageIndex   int    `json:"message_index"`
+	PromptOverride string `json:"prompt_override,omitempty"`
+}
+
+// handleBranchSession creates a new session branched from the source session's
+// history up to message_index (inclusive). The source session is untouched.
+// If prompt_override is non-empty, the branched session's last message (the
+// user message at message_index) is replaced with it before save — this lets
+// the user vary the prompt and compare results. Returns the new session so the
+// client can navigate to it.
+func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+	var req branchSessionRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	src, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if req.MessageIndex < 0 || req.MessageIndex >= len(src.Messages) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(src.Messages)))
+		return
+	}
+	branch := agent.BranchFrom(src, req.MessageIndex+1) // +1: BranchFrom takes an exclusive count
+	if req.PromptOverride != "" {
+		branch.Messages[len(branch.Messages)-1].Content = req.PromptOverride
+	}
+	if err := branch.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.wsHub.broadcast("", wsEventSessionCreated{Type: "session_created", SessionID: branch.ID})
+	writeJSON(w, http.StatusOK, map[string]any{"session": s.toSessionItem(branch, "web", "")})
+}
+
+// ─── POST /api/sessions/{id}/edit_message ──────────────────────────────────
+
+type editMessageRequest struct {
+	MessageIndex int    `json:"message_index"`
+	NewContent   string `json:"new_content"`
+}
+
+// handleEditMessage truncates the session's history past message_index and
+// rewrites that message's content to new_content. The source session is mutated
+// in place (unlike branch, which creates a new one). The caller then resends
+// the modified prompt via the normal chat flow to regenerate from that point.
+func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+	var req editMessageRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	sess, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	// Interrupt any in-flight turn before mutating history (the turn goroutine
+	// can race with the truncate + save below).
+	s.interruptSession(id)
+	if req.MessageIndex < 0 || req.MessageIndex >= len(sess.Messages) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(sess.Messages)))
+		return
+	}
+	// Truncate everything past the edited message, then rewrite its content.
+	sess.TruncateTo(req.MessageIndex + 1)
+	sess.Messages[req.MessageIndex].Content = req.NewContent
+	// Strip tool_result blocks (bookkeeping) but keep image blocks (attachments).
+	if len(sess.Messages[req.MessageIndex].Blocks) > 0 {
+		var kept []agent.ContentBlock
+		for _, b := range sess.Messages[req.MessageIndex].Blocks {
+			if b.Type != "tool_result" {
+				kept = append(kept, b)
+			}
+		}
+		sess.Messages[req.MessageIndex].Blocks = kept
+	}
+	if err := sess.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.broadcastHistoryReload(id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // ─── GET /api/tools ─────────────────────────────────────────────────────────

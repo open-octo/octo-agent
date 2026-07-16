@@ -112,6 +112,11 @@ type Session struct {
 	// Set via MarkHookStarted.
 	HookStarted bool `json:"hook_started,omitempty"`
 
+	// BranchedFrom records the session id this session was branched from.
+	// Empty means the session was created normally. Set via BranchFrom and
+	// persisted in the meta line so the UI can render a "branched from" label.
+	BranchedFrom string `json:"branched_from,omitempty"`
+
 	// Goal is the session's persistent objective (at most one). Guarded by mu —
 	// the turn goroutine accounts usage into it while user commands mutate it
 	// from other goroutines. Mutate only through the goal methods (goal.go);
@@ -247,6 +252,19 @@ func (s *Session) Unbind(entry string) bool {
 	return true
 }
 
+// TruncateTo keeps only the first n messages and forces the next Save to
+// rewrite the whole file (the on-disk prefix no longer matches). Mirrors
+// History.TruncateTo. Used by the edit-message flow, which rewrites a message
+// in place and drops everything after it.
+func (s *Session) TruncateTo(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n < len(s.Messages) {
+		s.Messages = s.Messages[:n]
+		s.forceRewrite = true
+	}
+}
+
 // IncFlight increments the in-flight turn count. Caller must already hold the
 // binding; the increment is a no-op if the session is unbound.
 func (s *Session) IncFlight() {
@@ -357,6 +375,30 @@ func randomSuffix(now time.Time) string {
 		return fmt.Sprintf("%08x", uint32(now.Nanosecond()))
 	}
 	return hex.EncodeToString(b[:])
+}
+
+// BranchFrom creates a new session branched from s, copying its meta fields
+// (model, system prompt, working dir, permission mode) and the first count
+// messages (Messages[0:count]). The new session's BranchedFrom is set to s.ID
+// so the UI can render a lineage label. The caller is responsible for Save()ing
+// the returned session. count is clamped to [0, len(s.Messages)].
+func BranchFrom(s *Session, count int) *Session {
+	if count < 0 {
+		count = 0
+	}
+	if count > len(s.Messages) {
+		count = len(s.Messages)
+	}
+	branch := NewSession(s.Model, s.System)
+	branch.WorkingDir = s.WorkingDir
+	branch.PermissionMode = s.PermissionMode
+	branch.ModelConfig = s.ModelConfig
+	branch.BranchedFrom = s.ID
+	if count > 0 {
+		branch.Messages = make([]Message, count)
+		copy(branch.Messages, s.Messages[:count])
+	}
+	return branch
 }
 
 // TurnCount returns the number of complete user+assistant turn pairs.
@@ -471,6 +513,7 @@ type sessionRecord struct {
 	LeaseEntry        string    `json:"lease_entry,omitempty"`
 	LeaseExpires      time.Time `json:"lease_expires,omitempty"`
 	HookStarted       bool      `json:"hook_started,omitempty"`
+	BranchedFrom      string    `json:"branched_from,omitempty"`
 	LastContextTokens int       `json:"last_context_tokens,omitempty"`
 	Message           *Message  `json:"message,omitempty"`
 	Goal              *Goal     `json:"goal,omitempty"`
@@ -488,7 +531,7 @@ func (s *Session) metaRecord() sessionRecord {
 		goal = &g
 	}
 	s.mu.Unlock()
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, Goal: goal}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -1013,6 +1056,7 @@ func LoadSession(id string) (*Session, error) {
 			s.BoundEntry = rec.BoundEntry
 			s.BoundAt = rec.BoundAt
 			s.HookStarted = rec.HookStarted
+			s.BranchedFrom = rec.BranchedFrom
 			s.Goal = rec.Goal // a rewritten file carries the goal in its meta header
 			s.InFlight = 0
 		case "title":
