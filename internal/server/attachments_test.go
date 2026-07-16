@@ -729,3 +729,43 @@ func TestParseUserFiles_SVGPathUpload_StaysNote(t *testing.T) {
 			len(att.blocks), len(att.images), len(att.notes))
 	}
 }
+
+// TestParseUserFiles_ExtensionlessImageUpload_FallsBackToClientMIME verifies
+// that an uploaded image whose stored filename has no recognized extension
+// (e.g. a pasted blob) still becomes a vision block via the client-declared
+// MIME type. The legacy data-URL branch keyed on MIME, so extension-only
+// detection would silently regress these inputs.
+func TestParseUserFiles_ExtensionlessImageUpload_FallsBackToClientMIME(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	dir, err := ensureUploadsDir()
+	if err != nil {
+		t.Fatalf("uploads dir: %v", err)
+	}
+	payload := []byte{0x89, 'P', 'N', 'G', 7, 8}
+	abs := filepath.Join(dir, "42_blob")
+	if err := os.WriteFile(abs, payload, 0o600); err != nil {
+		t.Fatalf("stage upload: %v", err)
+	}
+
+	att := parseUserFiles([]wsUserFile{
+		{Name: "blob", MimeType: "image/png", Path: "/api/uploads/42_blob"},
+	}, false, true)
+
+	if len(att.blocks) != 1 || len(att.notes) != 0 {
+		t.Fatalf("blocks/notes = %d/%d, want 1/0", len(att.blocks), len(att.notes))
+	}
+	if att.blocks[0].Image == nil || att.blocks[0].Image.MIMEType != "image/png" {
+		t.Errorf("unexpected block: %+v", att.blocks[0])
+	}
+
+	// A non-image client MIME must not smuggle bytes in as a block.
+	att = parseUserFiles([]wsUserFile{
+		{Name: "blob", MimeType: "application/pdf", Path: "/api/uploads/42_blob"},
+	}, false, true)
+	if len(att.blocks) != 0 || len(att.notes) != 1 {
+		t.Errorf("non-image MIME: blocks/notes = %d/%d, want 0/1", len(att.blocks), len(att.notes))
+	}
+}

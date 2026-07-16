@@ -133,7 +133,11 @@ func parseUserFiles(files []wsUserFile, allowLocalPath, vision bool) userAttachm
 				log.Printf("[ws] file attachment %q: %v", f.Name, err)
 				continue
 			}
-			if mime := imageMIMEForExt(abs); mime != "" && vision {
+			mime := imageMIMEForExt(abs)
+			if mime == "" {
+				mime = embeddableImageMIME(f.MimeType)
+			}
+			if mime != "" && vision {
 				// Uploaded image + vision model: embed it as an image block,
 				// same shape as the legacy data-URL branch above. Non-vision
 				// models keep the path note below so they can read_file it.
@@ -253,6 +257,18 @@ func imageMIMEForExt(path string) string {
 		return "image/gif"
 	case ".webp":
 		return "image/webp"
+	}
+	return ""
+}
+
+// embeddableImageMIME returns m if it is an image MIME type the providers
+// accept as image input, else "". Fallback for uploads whose stored filename
+// carries no recognized extension (.jfif saves, pasted "blob" uploads) — the
+// composer still knows the real type from the browser's File.type.
+func embeddableImageMIME(m string) string {
+	switch m {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return m
 	}
 	return ""
 }

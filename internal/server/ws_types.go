@@ -34,8 +34,9 @@ type wsUserFile struct {
 	// path: current web clients upload images and send Path instead, because
 	// an inline image over wsMaxMessageSize kills the WS connection unparsed.
 	DataURL string `json:"data_url,omitempty"`
-	// Path references a document already uploaded via POST /api/upload
-	// (an /api/uploads/<name> URL).
+	// Path references a file already uploaded via POST /api/upload
+	// (an /api/uploads/<name> URL). Images ride this field too since the
+	// composer stopped inlining them as data URLs.
 	Path string `json:"path,omitempty"`
 	// LocalPath is a real absolute path on this machine — from the desktop
 	// native file dialog or the localhost web in-app file picker. No upload:

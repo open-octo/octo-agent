@@ -21,7 +21,7 @@
   // vision blocks server-side, other types are opened by the agent with
   // read_file/terminal, mirroring how it works against the CLI's filesystem.
   // `data_url` is the legacy inline shape (pre-upload-path); nothing sets it
-  // anymore, but the bubbles still render it for old transcripts. `uploading`
+  // anymore, but the bubbles still render it for legacy-shape entries that are still live in client state (e.g. a steer staged before this change). `uploading`
   // marks a placeholder whose upload is still in flight; `id` keys that
   // placeholder so its async result lands on the right entry (see addAttachment).
   // local_path is a real local path (native dialog on desktop, or the in-app
