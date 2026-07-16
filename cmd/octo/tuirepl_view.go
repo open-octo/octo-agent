@@ -41,6 +41,7 @@ var (
 	toolErrStyle         = lipgloss.NewStyle().Foreground(tui.ColDanger)
 	queueStyle           = lipgloss.NewStyle().Foreground(tui.ColAccent)
 	modalStyle           = lipgloss.NewStyle().Foreground(tui.ColBrand).Bold(true)
+	permHintStyle        = lipgloss.NewStyle().Foreground(tui.ColMuted)
 	hintStyle            = lipgloss.NewStyle().Foreground(tui.ColDimmer).Italic(true)
 	activityStyle        = lipgloss.NewStyle().Foreground(tui.ColBrand)
 	userEchoStyle        = lipgloss.NewStyle().Foreground(tui.ColUserMsg).Bold(true)
@@ -1754,7 +1755,7 @@ func (m *tuiModel) modalView() string {
 		b.WriteByte('\n')
 		b.WriteString(st.detail)
 		b.WriteByte('\n')
-		b.WriteString(hintStyle.Render("[y]es · [a]lways this session · [n]o/Esc"))
+		b.WriteString(permHintStyle.Render("[y]es · [a]lways this session · [n]o/Esc"))
 		return b.String()
 	}
 
