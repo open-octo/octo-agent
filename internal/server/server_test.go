@@ -283,7 +283,7 @@ func TestHandleEditMessage(t *testing.T) {
 		t.Fatalf("content = %q, want REWRITTEN", reloaded.Messages[1].Content)
 	}
 	if reloaded.Messages[1].Blocks != nil {
-		t.Fatalf("Blocks should be nil after edit, got %v", reloaded.Messages[1].Blocks)
+		t.Fatalf("Blocks should be empty (message had none), got %v", reloaded.Messages[1].Blocks)
 	}
 }
 

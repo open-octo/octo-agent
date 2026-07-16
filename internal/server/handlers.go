@@ -791,6 +791,9 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	// Interrupt any in-flight turn before mutating history (the turn goroutine
+	// can race with the truncate + save below).
+	s.interruptSession(id)
 	if req.MessageIndex < 0 || req.MessageIndex >= len(sess.Messages) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(sess.Messages)))
 		return
@@ -798,7 +801,16 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	// Truncate everything past the edited message, then rewrite its content.
 	sess.TruncateTo(req.MessageIndex + 1)
 	sess.Messages[req.MessageIndex].Content = req.NewContent
-	sess.Messages[req.MessageIndex].Blocks = nil // edited content is plain text
+	// Strip tool_result blocks (bookkeeping) but keep image blocks (attachments).
+	if len(sess.Messages[req.MessageIndex].Blocks) > 0 {
+		var kept []agent.ContentBlock
+		for _, b := range sess.Messages[req.MessageIndex].Blocks {
+			if b.Type != "tool_result" {
+				kept = append(kept, b)
+			}
+		}
+		sess.Messages[req.MessageIndex].Blocks = kept
+	}
 	if err := sess.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

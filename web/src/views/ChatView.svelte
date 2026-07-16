@@ -1324,12 +1324,12 @@
       activeSessionId.set(newSess.id)
       activeSession.set(newSess.id)
       branchModal.open = false
-      branchModal.busy = false
       // Defer the send until the new session's chat state registers.
       if (branchSendTimer) clearTimeout(branchSendTimer)
       branchSendTimer = setTimeout(() => {
         ws.sendMessage(newSess.id, branchModal.draft)
         branchSendTimer = null
+        branchModal.busy = false
       }, 100)
     } catch (e: any) {
       branchModal.busy = false
@@ -1512,9 +1512,11 @@
                       <button class="action-btn" title={$t('chat.branch')} onclick={() => openBranch(msg.messageIndex, msg.content)}>
                         <iconify-icon icon="lucide:git-branch" width="13"></iconify-icon>
                       </button>
-                      <button class="action-btn" title={$t('chat.edit')} onclick={() => startEdit(i)}>
-                        <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
-                      </button>
+                      {#if !streaming}
+                        <button class="action-btn" title={$t('chat.edit')} onclick={() => startEdit(i)}>
+                          <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+                        </button>
+                      {/if}
                       <button class="action-btn" title={$t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
                         <iconify-icon icon="ant-design:copy-outlined" width="13"></iconify-icon>
                       </button>

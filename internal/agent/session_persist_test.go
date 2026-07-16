@@ -329,7 +329,7 @@ func TestBranchFrom(t *testing.T) {
 	setTempHome(t)
 
 	src := NewSession("claude-sonnet-4-20250514", "you are a helpful assistant")
-	src.WorkingDir = "/tmp/project"
+	src.WorkingDir = "/tmp"
 	src.PermissionMode = "auto"
 	src.ModelConfig = "claude-sonnet-4-20250514"
 	src.Messages = []Message{
