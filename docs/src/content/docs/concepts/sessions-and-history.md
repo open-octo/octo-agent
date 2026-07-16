@@ -32,9 +32,14 @@ the prompt, and a new session is created with the history up to and including th
 session is untouched. This is useful for testing prompt variants — rewrite a question and compare the
 side-by-side results without polluting the original conversation.
 
+You can also **edit** a user message in place: hover and click **Edit**, and the message turns into an
+input you can modify. Saving truncates the history past that point and resends the modified prompt, all
+within the current session — no new session created. Branch and edit differ only in whether a new session
+is spawned.
+
 The new session carries a `branched_from` field pointing back to its source, shown in the session header
 as "Branched from \<title\>". Branching is available via `POST /api/sessions/{id}/branch` with a
-`message_index` and an optional `prompt_override`.
+`message_index` and an optional `prompt_override`; editing via `POST /api/sessions/{id}/edit_message`.
 
 Next: sessions across the web UI and IM channels share the same store — see
 [Bridge to chat apps](/docs/guides/channels/).

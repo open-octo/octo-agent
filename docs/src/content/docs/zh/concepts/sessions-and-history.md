@@ -29,7 +29,11 @@ block 列表为空时会自动回退成纯字符串形式。
 然后创建一个新会话,历史复制到该消息(含)为止。原会话完全不动。这在调试 prompt 变体时很有用——
 改写一个问题并排对比结果,不会污染原会话。
 
+也可以**原地编辑**用户消息: hover 点击 **Edit**,消息变成输入框可以修改。保存后会截断该消息之后的历史
+并重新发送修改后的 prompt,一切都在当前会话里完成——不新建会话。Branch 和 Edit 的唯一区别是是否新建会话。
+
 新会话带有 `branched_from` 字段指向源会话,在会话标题旁显示"分支自 <标题>"。分支功能通过
-`POST /api/sessions/{id}/branch` 提供,参数为 `message_index` 和可选的 `prompt_override`。
+`POST /api/sessions/{id}/branch` 提供,参数为 `message_index` 和可选的 `prompt_override`;
+编辑功能通过 `POST /api/sessions/{id}/edit_message` 提供。
 
 下一步:Web UI 和 IM 渠道上的会话共用同一套存储——见[接入聊天应用](/docs/zh/guides/channels/)。

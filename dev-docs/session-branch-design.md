@@ -72,7 +72,7 @@ Response: { "session": { ...新 session 的 sessionItem } }
 
 ### 消息操作栏
 
-用户消息 hover 显示两个按钮：Branch + Copy。
+用户消息 hover 显示三个按钮：Branch + Edit + Copy。
 
 ### 分支编辑弹窗
 
@@ -89,6 +89,15 @@ Response: { "session": { ...新 session 的 sessionItem } }
 3. 关闭 modal
 4. 100ms 后通过 `ws.sendMessage` 自动发送变体 prompt（等 store 注册完成）
 
+### 行内编辑（Edit）
+
+点击 Edit 把该用户消息气泡变成 inline textarea（预填原内容），下方出现 ✓/✗ 按钮：
+- 保存：调 `api.editMessage(sid, messageIndex, newContent)` → 后端截断该消息之后的历史并改写内容 → 前端自动 `ws.sendMessage` 重新发送修改后的 prompt
+- 取消 / Esc：退出编辑模式
+- Cmd/Ctrl+Enter：保存
+
+和 Branch 的关键区别：Edit 在当前会话上直接修改，不新建会话。
+
 ### Branched-from 标签
 
 会话 header 的标题旁边，如果 `currentSession.branched_from` 非空，显示"Branched from <源 session 标题>"。
@@ -97,20 +106,22 @@ Response: { "session": { ...新 session 的 sessionItem } }
 
 | 文件 | 改动 |
 |------|------|
-| `internal/agent/session.go` | `BranchedFrom` 字段 + `BranchFrom()` 方法 + metaRecord/LoadSession 同步 |
-| `internal/agent/session_persist_test.go` | `TestBranchFrom` + `TestBranchFrom_Clamp` |
-| `internal/server/handlers.go` | `handleBranchSession` + `branchSessionRequest` + `toSessionItem` 加字段 |
+| `internal/agent/session.go` | `BranchedFrom` 字段 + `BranchFrom()` 方法 + `TruncateTo()` + metaRecord/LoadSession 同步 |
+| `internal/agent/session_persist_test.go` | `TestBranchFrom` + `TestBranchFrom_Clamp` + `TestSessionTruncateTo` |
+| `internal/server/handlers.go` | `handleBranchSession` + `handleEditMessage` + `toSessionItem` 加字段 |
 | `internal/server/ws_handlers.go` | `history_user_message` 事件携带 `message_index` |
 | `internal/server/ws_types.go` | `wsEventSessionCreated` 结构体 |
-| `internal/server/server.go` | 注册 `POST /api/sessions/{id}/branch` 路由 |
-| `internal/server/server_test.go` | `TestHandleBranchSession` |
-| `web/src/lib/api.ts` | `branchSession()` |
+| `internal/server/server.go` | 注册 `POST /api/sessions/{id}/branch` + `/edit_message` 路由 |
+| `internal/server/server_test.go` | `TestHandleBranchSession` + `TestHandleEditMessage` |
+| `web/src/lib/api.ts` | `branchSession()` + `editMessage()` |
 | `web/src/lib/types.ts` | `Session.branched_from` |
 | `web/src/lib/i18n.ts` | `branch.*` 中英文键 |
-| `web/src/views/ChatView.svelte` | Branch 按钮 + 编辑弹窗 + confirmBranch + header 标签 |
+| `web/src/views/ChatView.svelte` | Branch 按钮 + 编辑弹窗 + confirmBranch + Edit inline textarea + header 标签 |
 
 ## 测试
 
 - `TestBranchFrom` / `TestBranchFrom_Clamp`：模型层复制逻辑 + 越界 clamp
+- `TestSessionTruncateTo`：截断后 Save 触发完整重写
 - `TestHandleBranchSession`：HTTP 层 404/400/200 + override + 血统 + 源 session 不动
+- `TestHandleEditMessage`：HTTP 层 400/200 + 截断 + 改写 + 原地 mutation
 - 现有 `TestHandleGetSessionMessages_*` 仍通过（事件加了 `message_index` 字段）
