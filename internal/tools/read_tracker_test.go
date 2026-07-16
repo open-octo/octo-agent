@@ -133,6 +133,7 @@ func TestRegistry_TerminalWriteThenEdit_Allowed(t *testing.T) {
 		{"redirect", func(p string) string { return "printf 'package x\\nconst c = 3\\n' > " + p }},
 		{"redirect-fused", func(p string) string { return "printf 'package x\\nconst c = 3\\n' >" + p }},
 		{"sed-inplace", func(p string) string { return "sed -i '' 's/const a = 1/const a = 2/' " + p }},
+		{"gofmt-w-file", func(p string) string { return "gofmt -w " + p }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -164,29 +165,60 @@ func TestRegistry_TerminalWriteThenEdit_Allowed(t *testing.T) {
 	}
 }
 
-// gofmt -w over a directory must refresh every tracked file beneath it.
-func TestRegistry_TerminalWriteDir_RefreshesTrackedFiles(t *testing.T) {
+// A directory/whole-tree write target (`gofmt -w .`) is NOT followed to the
+// files beneath it: only files the command names exactly are refreshed. A
+// tracked sibling the command didn't name keeps its stale stamp, so a genuine
+// out-of-band edit to it stays blocked — the write detection can't be used to
+// launder an external edit through a broad formatter invocation.
+func TestRegistry_TerminalWriteDir_DoesNotRefreshSiblings(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "notes.md") // not a file gofmt would rewrite
+	if err := os.WriteFile(p, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "read_file", map[string]any{"path": p}); err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	// Out-of-band editor bumps the sibling, then the agent runs a whole-dir
+	// formatter that names the directory, not this file.
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(p, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "terminal", map[string]any{"command": "gofmt -w " + dir}); err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	_, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "hello", "new_string": "goodbye",
+	})
+	if err == nil || !strings.Contains(err.Error(), "modified since") {
+		t.Errorf("external edit to an unnamed sibling should stay blocked, got %v", err)
+	}
+}
+
+// A file the session writes through the terminal but never read must still be
+// unwritable — RefreshTarget only re-stamps already-tracked paths, so a write
+// command can't substitute for a read. Uses a `printf >` redirect: printf is
+// not a read-style command, so recordTerminalReads doesn't tag it either.
+func TestRegistry_TerminalWriteUnreadFile_StillBlocked(t *testing.T) {
 	reg := NewDefaultRegistry()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "code.go")
 	if err := os.WriteFile(p, []byte("package x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reg.Execute(context.Background(), "read_file", map[string]any{"path": p}); err != nil {
-		t.Fatalf("read_file: %v", err)
-	}
-	future := time.Now().Add(2 * time.Hour)
-	if err := os.Chtimes(p, future, future); err != nil {
-		t.Fatal(err)
-	}
-	// A directory-target formatter — the file itself is never named.
-	if _, err := reg.Execute(context.Background(), "terminal", map[string]any{"command": "gofmt -w " + dir}); err != nil {
+	// Never read; only overwritten via a redirect.
+	if _, err := reg.Execute(context.Background(), "terminal", map[string]any{
+		"command": "printf 'package x\\nconst c = 3\\n' > " + p,
+	}); err != nil {
 		t.Fatalf("terminal: %v", err)
 	}
-	if _, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+	_, err := reg.Execute(context.Background(), "edit_file", map[string]any{
 		"path": p, "old_string": "package x", "new_string": "package y",
-	}); err != nil {
-		t.Errorf("edit after gofmt -w <dir> should succeed: %v", err)
+	})
+	if err == nil || !strings.Contains(err.Error(), "not been read") {
+		t.Errorf("editing a never-read file should be blocked, got %v", err)
 	}
 }
 

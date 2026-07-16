@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -229,13 +230,15 @@ func (r DefaultRegistry) recordTerminalReads(command string) {
 // CheckWritable's "modified since read" guard on the very next edit_file even
 // though the change was the session's OWN doing, not an out-of-band editor's.
 //
-// It refreshes the recorded mtime of every tracked file the command wrote,
-// leaving the guard intact for changes that did NOT come through the terminal
-// tool (a human editing in their IDE never lands here). Detection is
-// deliberately conservative — RefreshTarget only ever touches paths the tracker
-// already knows, so an over-broad target list at worst re-stats an untouched
-// tracked file (a no-op). Opaque writers with no path on the command line
-// (`make fmt`) aren't covered; the model re-reads in that rarer case.
+// It refreshes the recorded mtime of every tracked file the command names as an
+// exact write target, leaving the guard intact for changes that did NOT come
+// through the terminal tool (a human editing in their IDE never lands here) and
+// for files the command never named. Detection is deliberately conservative —
+// RefreshTarget only ever touches an exact path the tracker already knows.
+// Writers that name a directory or the whole tree rather than specific files
+// (`gofmt -w .`, `go fmt ./...`, `make fmt`) are intentionally not followed
+// inside: attributing a subtree's mtime bumps to the command would let an
+// unrelated out-of-band edit slip through. The model re-reads in that case.
 func (r DefaultRegistry) recordTerminalWrites(command string) {
 	tokens := tokenizeCommand(command)
 	if len(tokens) == 0 {
@@ -248,10 +251,11 @@ func (r DefaultRegistry) recordTerminalWrites(command string) {
 	}
 }
 
-// writeTargets returns the file/directory paths a terminal command writes to,
-// derived from shell redirections plus a curated set of file-mutating commands.
-// A directory target (e.g. `gofmt -w .`) covers every tracked file beneath it —
-// resolution and matching happen in RefreshTarget.
+// writeTargets returns the file paths a terminal command writes to, derived
+// from shell redirections plus a curated set of in-place editors. Only paths
+// the command names explicitly are returned — a bare directory (`gofmt -w .`)
+// yields its literal token, which won't match any tracked file, so a
+// whole-subtree format falls through to a re-read rather than over-attributing.
 func writeTargets(tokens []string) []string {
 	var targets []string
 
@@ -276,17 +280,10 @@ func writeTargets(tokens []string) []string {
 		}
 	}
 
-	// Pass 2: command-specific in-place / copy targets, keyed on the head of
-	// the command line.
-	cmd := filepathBase(tokens[0])
-	args := tokens[1:]
-	switch {
-	case cmd == "cp" || cmd == "mv" || cmd == "install":
-		if p := lastPositional(args); p != "" {
-			targets = append(targets, p)
-		}
-	case hasInPlaceFlag(cmd, args):
-		targets = append(targets, positionals(args)...)
+	// Pass 2: in-place editors (`sed -i`, `gofmt -w`, `… --write`) — their
+	// non-flag args are the files rewritten, keyed on the head of the command.
+	if hasInPlaceFlag(filepath.Base(tokens[0]), tokens[1:]) {
+		targets = append(targets, positionals(tokens[1:])...)
 	}
 	return targets
 }
@@ -308,6 +305,9 @@ func redirectTarget(tok string) string {
 	rest = strings.TrimPrefix(rest, ">") // second '>' of an append (>>)
 	if rest == "" {
 		return ">next"
+	}
+	if strings.HasPrefix(rest, "&") {
+		return "" // fd duplication (2>&1, >&2), not a file target
 	}
 	return rest
 }
@@ -352,16 +352,6 @@ func positionals(args []string) []string {
 	return out
 }
 
-// lastPositional returns the final non-flag token — the destination of a
-// cp/mv/install — or "" if there is none.
-func lastPositional(args []string) string {
-	ps := positionals(args)
-	if len(ps) == 0 {
-		return ""
-	}
-	return ps[len(ps)-1]
-}
-
 // nextPositional returns the first non-flag token at or after index i, or "".
 func nextPositional(tokens []string, i int) string {
 	for ; i < len(tokens); i++ {
@@ -370,15 +360,6 @@ func nextPositional(tokens []string, i int) string {
 		}
 	}
 	return ""
-}
-
-// filepathBase strips any directory prefix from a command name (`/usr/bin/sed`
-// → `sed`) so the write-command table matches regardless of how it was invoked.
-func filepathBase(cmd string) string {
-	if i := strings.LastIndexByte(cmd, '/'); i >= 0 {
-		return cmd[i+1:]
-	}
-	return cmd
 }
 
 // tokenizeCommand splits a shell command line into whitespace-separated tokens,

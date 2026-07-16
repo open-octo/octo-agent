@@ -3,8 +3,6 @@ package tools
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 )
@@ -41,29 +39,26 @@ func (rt *ReadTracker) RecordRead(absPath string) {
 	rt.mu.Unlock()
 }
 
-// RefreshTarget re-stamps the recorded mtime of every tracked path covered by
-// target: an exact file match, or — when target is a directory — any tracked
-// file beneath it. It adopts the session's OWN out-of-tool writes (a formatter
-// or redirect run through the terminal tool): without it the bumped mtime would
-// trip CheckWritable's "modified since read" guard on the next edit even though
-// the change was ours.
+// RefreshTarget re-stamps target's recorded mtime to the file's current value.
+// It adopts the session's OWN out-of-tool write (a formatter or redirect run
+// through the terminal tool): without it the bumped mtime would trip
+// CheckWritable's "modified since read" guard on the next edit even though the
+// change was ours.
 //
-// Only paths the tracker already recorded are ever refreshed — it never
-// introduces a new path. A file the session never read stays unwritable, and a
-// file changed by an external editor (which never passes through the terminal
-// tool) keeps its stale stamp, so the guard still fires for a genuine
-// out-of-band edit.
+// It only ever re-stamps a path the tracker already recorded, and only that
+// exact path — never a directory's children, never a new path. So a file the
+// session never read stays unwritable, and a file changed by an external editor
+// (which never passes through the terminal tool, and is never named as this
+// command's exact write target) keeps its stale stamp: the guard still fires
+// for a genuine out-of-band edit.
 func (rt *ReadTracker) RefreshTarget(target string) {
-	prefix := target + string(filepath.Separator)
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	for p := range rt.reads {
-		if p != target && !strings.HasPrefix(p, prefix) {
-			continue
-		}
-		if info, err := os.Stat(p); err == nil {
-			rt.reads[p] = info.ModTime()
-		}
+	if _, tracked := rt.reads[target]; !tracked {
+		return
+	}
+	if info, err := os.Stat(target); err == nil {
+		rt.reads[target] = info.ModTime()
 	}
 }
 
