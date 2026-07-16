@@ -1491,19 +1491,23 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
 			defer cancel()
 			t, terr := a.GenerateTitle(ctx, toolDefs)
-			if terr != nil {
-				// Silent by design (retried after the next completed turn,
-				// per the comment above) — but silent must not mean
-				// invisible: without this, a persistently misconfigured
-				// model/provider on a given install never generates a
-				// title, and nothing anywhere records why, making the
-				// exact symptom "sidebar title never updates" unexplainable
-				// from the server side.
-				slog.Warn("session title generation failed", "session_id", sid, "err", terr)
-				return
-			}
-			if strings.TrimSpace(t) == "" {
-				slog.Warn("session title generation returned an empty title", "session_id", sid)
+			if terr != nil || strings.TrimSpace(t) == "" {
+				if terr != nil {
+					slog.Warn("session title generation failed", "session_id", sid, "err", terr)
+				} else {
+					slog.Warn("session title generation returned an empty title", "session_id", sid)
+				}
+				// Fall back to the first-message snippet instead of leaving
+				// the "*Octo Agent" placeholder (same logic as the TUI).
+				if fresh, lerr := agent.LoadSession(sid); lerr == nil {
+					if title := fresh.FallbackTitleIfPlaceholder(); title != "" {
+						s.wsHub.broadcast("", map[string]any{
+							"type":       "session_renamed",
+							"session_id": sid,
+							"name":       title,
+						})
+					}
+				}
 				return
 			}
 			// Apply the title to a freshly loaded Session, not the live one —

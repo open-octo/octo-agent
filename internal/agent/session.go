@@ -869,6 +869,21 @@ func (s *Session) DisplayTitle() string {
 	return "*Octo Agent"
 }
 
+// FallbackTitleIfPlaceholder replaces the "*Octo Agent" placeholder with the
+// first-message snippet when available. Returns the new title, or "" when
+// the title isn't the placeholder or there's no message content to use.
+// Both the TUI and the web server call this when async title generation fails.
+func (s *Session) FallbackTitleIfPlaceholder() string {
+	if s.Title != "*Octo Agent" {
+		return ""
+	}
+	if snippet := firstUserSnippet(s.Messages); snippet != "" {
+		_ = s.SetTitle(snippet)
+		return snippet
+	}
+	return ""
+}
+
 // firstUserSnippet extracts a one-line preview from the first user message,
 // skipping injected <system-reminder> blocks and tool-result turns, and
 // truncating to a list-friendly width.
