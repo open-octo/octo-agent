@@ -1,19 +1,22 @@
-// Frameless-window drag + edge-resize for the desktop shell on Windows/Linux.
+// Frameless-window drag + edge-resize for the desktop shell, all platforms.
 //
-// Wails removes the native frame of a frameless window (WM_NCCALCSIZE), which
-// also removes the OS's own edge-resize handling; both title-bar dragging
+// Wails removes the native frame of a frameless window, which also removes
+// the OS's own edge-resize handling; both title-bar dragging
 // (--wails-draggable regions) and edge resizing are instead detected by the
 // Wails JS runtime, which asks the Go side to start the gesture. But octo's
 // page is served by octo's own server, not Wails' asset server, so that
 // runtime never loads here — only a tiny stub (window._wails.invoke) is
 // injected into the webview. Without this module the window can't be moved or
-// resized with the mouse at all on Windows/Linux.
+// resized with the mouse at all, on any platform — including macOS: a
+// Frameless Wails v3 window has no free native drag there either (Frameless
+// only toggles NSWindowStyleMaskFullSizeContentView; nothing reads
+// --wails-draggable natively), a prior version of this comment claimed
+// otherwise and that was never actually true.
 //
 // This module replicates the runtime's gesture detection (adapted from
 // @wailsio/runtime drag.ts) and drives the window through the injected stub:
 // Go handles "wails:drag" / "wails:resize:<edge>" messages natively, no
-// runtime required. macOS is excluded — its frameless windows keep native
-// drag/resize handling.
+// runtime required.
 
 import { isDesktopShell } from './stores'
 
@@ -185,11 +188,10 @@ function update(event: MouseEvent): void {
   if (event.type === 'mousemove') onMouseMove(event)
 }
 
-// Installs the handlers. Gated on the desktop-shell URL marker and on
-// not-macOS. Safe to call unconditionally.
+// Installs the handlers. Gated on the desktop-shell URL marker. Safe to call
+// unconditionally.
 export function initFramelessDrag(): void {
-  const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
-  if (!isDesktopShell || isMac) return
+  if (!isDesktopShell) return
 
   window.addEventListener('mousedown', update, { capture: true })
   window.addEventListener('mousemove', update, { capture: true })
