@@ -796,12 +796,15 @@ func applyHardcodedDenyRules(rules RuleSet) {
 		"rm -rf /",           // root wipe
 		"rm -rf ~",           // home wipe
 		"rmdir /s /q",        // Windows recursive silent deletion
+		"rd /s /q",           // alias for rmdir /s /q
 		"del /s /q",          // Windows bulk silent deletion
+		"erase /s /q",        // alias for del /s /q
 		"format ",            // Windows filesystem format
 		"sdelete",            // Windows secure delete (can wipe data)
 		"wevtutil cl",        // Windows event log clear
 		"fsutil ",            // Windows filesystem utilities (can corrupt)
 		"defrag ",            // Windows defrag (mostly safe but unexpected for agent)
+
 	}
 	for _, pat := range hardTerminalDenies {
 		rules["terminal"] = append(rules["terminal"], Rule{Decision: Deny, Pattern: pat})

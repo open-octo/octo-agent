@@ -65,8 +65,19 @@ terminal:
   - deny:  { pattern: "rmdir /s /q \"C:\\Windows\"" }
   - deny:  { pattern: "rmdir /s /q C:\\Program Files" }
   - deny:  { pattern: "rmdir /s /q \"C:\\Program Files\"" }
+  - deny:  { pattern: "rd /s /q C:\\Windows" }        # alias for rmdir
+  - deny:  { pattern: "rd /s /q \"C:\\Windows\"" }
   - deny:  { pattern: "del /s /q C:\\Windows" }
   - deny:  { pattern: "del /s /q \"C:\\Windows\"" }
+  - deny:  { pattern: "erase /s /q C:\\Windows" }
+  - deny:  { pattern: "erase /s /q \"C:\\Windows\"" }
+  # PowerShell aliases for Remove-Item targeting Windows system dirs.
+  - deny:  { pattern: "ri -r -fo C:\\Windows" }
+  - deny:  { pattern: "ri -r -fo \"C:\\Windows\"" }
+  - deny:  { pattern: "del -r -fo C:\\Windows" }
+  - deny:  { pattern: "del -r -fo \"C:\\Windows\"" }
+  - deny:  { pattern: "erase -r -fo C:\\Windows" }
+  - deny:  { pattern: "erase -r -fo \"C:\\Windows\"" }
   # Risky but legitimate — confirm interactively.
   - ask:   { pattern: "rm -rf" }
   - ask:   { pattern: "rm -fr" }
@@ -113,6 +124,17 @@ terminal:
   - deny:  { pattern: "wbadmin delete " }     # backup catalog deletion
   - deny:  { pattern: "dism " }               # system image modification
   - deny:  { pattern: "vssadmin delete " }    # shadow copy deletion
+  - ask:   { pattern: "wmic " }             # Windows Management Instrumentation
+  - ask:   { pattern: "sc " }                 # service control
+  - ask:   { pattern: "schtasks " }           # scheduled tasks
+  - ask:   { pattern: "netsh " }              # network shell
+  - ask:   { pattern: "icacls " }             # permissions
+  - ask:   { pattern: "takeown " }            # ownership seizure
+  - ask:   { pattern: "robocopy " }           # can overwrite system dirs
+  - ask:   { pattern: "xcopy " }               # can overwrite system files
+  - ask:   { pattern: "mklink " }             # can link into system dirs
+  - ask:   { pattern: "powershell " }         # arbitrary PowerShell code
+  - ask:   { pattern: "cmd /c " }             # arbitrary cmd code
   - ask:   { pattern: "Invoke-Expression" }        # arbitrary code (alias: iex)
   - ask:   { pattern: "Invoke-WebRequest" }        # download / exfiltrate (alias: iwr)
   - ask:   { pattern: "Invoke-RestMethod" }        # alias: irm
