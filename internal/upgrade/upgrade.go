@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -85,6 +86,11 @@ func (o Options) log(format string, args ...any) {
 	}
 }
 
+// checkAttemptTimeout caps how long each individual base URL attempt
+// (GitHub or a mirror) may take. A slow primary URL must not starve the
+// mirrors of their timeout budget — each one gets a full window.
+const checkAttemptTimeout = 5 * time.Second
+
 // checkBodyCap limits how much of a 200 (non-redirect) response body gets
 // read when hunting for the release tag in HTML — a real release page is
 // ~200 KB.
@@ -107,7 +113,12 @@ var ogURLPattern = regexp.MustCompile(`<meta\s+property="og:url"\s+content="([^"
 func Check(ctx context.Context) (string, error) {
 	var lastErr error
 	for _, base := range append([]string{BaseURL}, MirrorBaseURLs...) {
-		tag, err := checkAt(ctx, base)
+		// Each attempt gets its own sub-context so a slow primary URL can't
+		// starve the mirrors of their timeout budget. Bounded by the parent
+		// context — if it's near expiry the child inherits its deadline.
+		attemptCtx, cancel := context.WithTimeout(ctx, checkAttemptTimeout)
+		tag, err := checkAt(attemptCtx, base)
+		cancel()
 		if err == nil {
 			return tag, nil
 		}
@@ -360,9 +371,18 @@ func releaseURLs(ver, asset string) []string {
 }
 
 // proxiedClient returns an *http.Client that honors HTTP_PROXY,
-// HTTPS_PROXY, and NO_PROXY via http.ProxyFromEnvironment.
+// HTTPS_PROXY, and NO_PROXY via http.ProxyFromEnvironment. The transport
+// has conservative per-connection timeouts so each mirror attempt fails
+// quickly; the caller's context is the overall budget.
 func proxiedClient() *http.Client {
-	return &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment}}
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   5 * time.Second,
+			ResponseHeaderTimeout: 5 * time.Second,
+		},
+	}
 }
 
 // downloadWithMirrors tries each URL in turn until one succeeds, respecting
