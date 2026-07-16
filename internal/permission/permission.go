@@ -263,6 +263,13 @@ func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*
 		rules["edit_file"] = append([]Rule{allow}, rules["edit_file"]...)
 	}
 
+	// Apply non-overrideable hardcoded guards last. These protect the host OS
+	// from catastrophic data loss even if a user (or a malicious LLM acting
+	// through a user's permissions.yml) tries to relax the defaults. They are
+	// appended after the user rules and after allowWriteRoots, but because
+	// classify() resolves deny > ask > allow the hardcoded denies still win.
+	applyHardcodedDenyRules(rules)
+
 	return &Engine{
 		rules:    rules,
 		mode:     mode,
@@ -740,6 +747,50 @@ type rawRule struct {
 	Allow *rawClause `yaml:"allow"`
 	Deny  *rawClause `yaml:"deny"`
 	Ask   *rawClause `yaml:"ask"`
+}
+
+// applyHardcodedDenyRules appends engine-level deny rules that cannot be
+// overridden by user permissions.yml. They are the last line of defense for
+// operations that can destroy the host OS, filesystem, or session state.
+func applyHardcodedDenyRules(rules RuleSet) {
+	// System directories that should never be written or edited by an agent.
+	systemPaths := []string{
+		"/bin/**", "/sbin/**",
+		"/usr/bin/**", "/usr/sbin/**", "/usr/lib/**", "/usr/lib64/**",
+		"/System/**", "/boot/**", "/lib/**", "/lib64/**",
+		"/Windows/**", "/Program Files/**", "/Program Files (x86)/**",
+		"C:/Windows/**", "C:/Program Files/**", "C:/Program Files (x86)/**",
+		"D:/Windows/**", "D:/Program Files/**", "D:/Program Files (x86)/**",
+	}
+	deny := Rule{Decision: Deny, Path: systemPaths}
+	rules["write_file"] = append(rules["write_file"], deny)
+	rules["edit_file"] = append(rules["edit_file"], deny)
+
+	// Terminal commands that can brick the machine or destroy data. These are
+	// also hardcoded so that a user override of terminal rules cannot silently
+	// permit them.
+	hardTerminalDenies := []string{
+		"dd if=",             // raw disk write
+		"mkfs",               // make filesystem
+		"fdisk ",             // partition manipulation
+		"parted ",            // partition manipulation
+		"diskutil erase",     // macOS disk erase
+		"diskutil partition", // macOS partition
+		"shutdown ",          // shutdown
+		"poweroff",           // shutdown
+		"halt ",              // halt
+		"init 0",             // SysV shutdown
+		"reboot ",            // reboot
+		"systemctl poweroff", // systemd shutdown
+		"systemctl reboot",   // systemd reboot
+		"kill -9 -1",         // kill all user processes
+		"kill -SIGKILL -1",   // kill all user processes
+		"rm -rf /",           // root wipe
+		"rm -rf ~",           // home wipe
+	}
+	for _, pat := range hardTerminalDenies {
+		rules["terminal"] = append(rules["terminal"], Rule{Decision: Deny, Pattern: pat})
+	}
 }
 
 // loadRules parses YAML bytes into a RuleSet. The YAML schema is the one

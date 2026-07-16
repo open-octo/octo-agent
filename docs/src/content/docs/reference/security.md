@@ -27,10 +27,40 @@ scope.
 | DNS rebinding (attacker domain resolving to 127.0.0.1) | The loopback exemption requires a local `Host` header |
 | Spoofed client IPs | `X-Forwarded-For` is never consulted for the loopback exemption |
 | XSSI reads of uploaded files | `X-Content-Type-Options: nosniff` on served uploads |
+| Agent wiping the OS with a destructive command | Permission engine with hardcoded `deny` rules for `rm -rf /`, `dd`, `mkfs`, `fdisk`, `shutdown`, `reboot`, etc.; these cannot be overridden by `~/.octo/permissions.yml` |
+| Agent writing to system directories | `write_file`/`edit_file` hardcoded `deny` for `/bin`, `/sbin`, `/usr`, `/System`, `/boot`, `/lib`, `/Windows`, `C:/Windows`, etc. |
+| Agent exfiltrating data or opening reverse shells | Default `ask` rules for `curl`, `wget`, `ssh`, `scp`, `nc`, `socat`, `nmap`, `systemctl`, `iptables`, `crontab`, etc. |
+| After-the-fact investigation | Append-only JSON audit log at `~/.octo/audit.log` recording every deny, ask-denied, and user-allowed tool decision |
 
 IM channels (Feishu, DingTalk, Discord, …) authenticate separately via each platform's own bot
 credentials plus octo's chat/user binding; adapters hold outbound connections only and expose no
 inbound HTTP routes.
+
+## The permission engine
+
+octo evaluates every tool call against a rule-driven permission engine. The default rules live in
+the binary and are supplemented by `~/.octo/permissions.yml` if present. User rules can relax or
+tighten policy, but **hardcoded OS-destruction guards cannot be overridden**: commands like `rm -rf /`,
+`dd if=/dev/zero of=/dev/sda`, `mkfs`, `fdisk`, `shutdown`, `reboot`, and `kill -9 -1` are always
+denied, and writing to system directories is always blocked. This prevents a misconfigured
+permissions file (or an LLM that persuades you to edit it) from silently disabling the guardrails.
+
+The engine operates in three modes:
+- `interactive` (default in CLI): ask-class decisions prompt the user for confirmation.
+- `auto`: ask-class decisions are automatically approved — convenient, but use with care.
+- `strict`: ask-class decisions are denied with no prompt — safest for unattended/cron/IM use.
+
+## Audit log
+
+Every non-`allow` permission decision is appended to `~/.octo/audit.log` as a single JSON line:
+
+```json
+{"ts":"2026-07-16T14:12:00.000000000Z","tool":"terminal","input":{"command":"rm -rf /"},"decision":"deny","reason":"permission_denied: terminal matched deny rule (pattern: \"rm -rf /\"). This operation is blocked by policy."}
+```
+
+Recorded decisions include `deny`, `ask-denied` (ask-class verdict in non-interactive mode),
+`user-declined`, and `user-allowed` (ask-class verdict where the user clicked yes). The log is
+created with mode `0600` and is never truncated by octo; users may rotate or archive it themselves.
 
 ## What's not defended, by design
 

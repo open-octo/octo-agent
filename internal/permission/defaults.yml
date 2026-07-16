@@ -19,6 +19,33 @@ terminal:
   - deny:  { pattern: "rm -rf /" }
   - deny:  { pattern: "rm -rf ~" }
   - deny:  { pattern: ":(){ :|:& };:" }   # fork bomb
+  # Disk / filesystem operations that can destroy data or brick the host.
+  - deny:  { pattern: "dd if=" }          # raw disk writes (e.g. dd if=/dev/zero of=/dev/sda)
+  - deny:  { pattern: "mkfs" }              # filesystem creation (mkfs, mkfs.ext4, ...)
+  - deny:  { pattern: "fdisk " }            # partition manipulation
+  - deny:  { pattern: "parted " }           # partition manipulation
+  - deny:  { pattern: "diskutil erase" }    # macOS disk erasure
+  - deny:  { pattern: "diskutil partition" } # macOS partitioning
+  # System-wide destructive operations.
+  - deny:  { pattern: "shutdown " }         # power-off / reboot commands
+  - deny:  { pattern: "poweroff" }
+  - deny:  { pattern: "halt " }
+  - deny:  { pattern: "init 0" }
+  - deny:  { pattern: "reboot " }
+  - deny:  { pattern: "systemctl poweroff" }
+  - deny:  { pattern: "systemctl reboot" }
+  - deny:  { pattern: "kill -9 -1" }        # kill every process the user owns
+  - deny:  { pattern: "kill -SIGKILL -1" }
+  # System directory removal — deleting /usr, /bin, /System, etc. bricks the OS.
+  - deny:  { pattern: "rm -rf /usr" }
+  - deny:  { pattern: "rm -rf /bin" }
+  - deny:  { pattern: "rm -rf /sbin" }
+  - deny:  { pattern: "rm -rf /boot" }
+  - deny:  { pattern: "rm -rf /lib" }
+  - deny:  { pattern: "rm -rf /lib64" }
+  - deny:  { pattern: "rm -rf /System" }
+  - deny:  { pattern: "rm -rf /Windows" }
+  - deny:  { pattern: "rm -rf /Program Files" }
   # Risky but legitimate — confirm interactively.
   - ask:   { pattern: "rm -rf" }
   - ask:   { pattern: "rm -fr" }
@@ -26,10 +53,30 @@ terminal:
   - ask:   { pattern: "git push -f " }
   - ask:   { pattern: "chmod -R 777" }
   - ask:   { pattern: "sudo " }
-  - ask:   { pattern: "curl " }            # could exfiltrate
+  # Network / remote tools that can exfiltrate or spawn reverse shells.
+  - ask:   { pattern: "curl " }
   - ask:   { pattern: "wget " }
   - ask:   { pattern: "ssh " }
   - ask:   { pattern: "scp " }
+  - ask:   { pattern: "nc " }              # netcat
+  - ask:   { pattern: "ncat " }
+  - ask:   { pattern: "socat " }
+  - ask:   { pattern: "nmap " }            # port scanning
+  # System administration that affects the whole machine.
+  - ask:   { pattern: "systemctl " }        # system services
+  - ask:   { pattern: "iptables " }         # Linux firewall
+  - ask:   { pattern: "ip6tables " }        # Linux firewall
+  - ask:   { pattern: "pfctl " }             # macOS firewall
+  - ask:   { pattern: "crontab " }           # scheduled jobs
+  - ask:   { pattern: "launchctl " }         # macOS services
+  - ask:   { pattern: "diskutil " }         # macOS disk utilities (other than erase/partition, denied above)
+  # Container cleanup that can destroy environments.
+  - ask:   { pattern: "docker rm -f " }     # force-remove containers
+  - ask:   { pattern: "docker rmi -f " }    # force-remove images
+  - ask:   { pattern: "docker system prune" } # bulk deletion
+  # Disk-space exhaustion.
+  - ask:   { pattern: "fallocate -l " }     # preallocate large files
+  - ask:   { pattern: "truncate -s " }       # grow files arbitrarily
   # Windows / PowerShell dangers. Matching is case-sensitive substring and
   # PowerShell is case-insensitive with aliases, so these catch the canonical
   # forms an LLM typically emits — anything missed still falls through to the
@@ -87,10 +134,12 @@ web_fetch:
 # explicitly — via that session's permission_mode or via allowWriteRoots —
 # not through a rule here.
 write_file:
-  - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*"] }
+  - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*",
+                    "/bin/**", "/sbin/**", "/usr/bin/**", "/usr/sbin/**", "/System/**", "/boot/**", "/lib/**", "/lib64/**"] }
 
 edit_file:
-  - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*"] }
+  - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*",
+                    "/bin/**", "/sbin/**", "/usr/bin/**", "/usr/sbin/**", "/System/**", "/boot/**", "/lib/**", "/lib64/**"] }
 
 # read_file is generally safe; only block the obvious credential bombs.
 read_file:
