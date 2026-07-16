@@ -309,7 +309,7 @@ Discord requires manual portal interaction (hCaptcha gates application creation)
        bot_token: <BOT_TOKEN>
    ```
 4. Build the invite URL with the Application ID and tell the user to open it:
-   `https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot&permissions=274877975552`
+   `https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot&permissions=274878220912`
    > Pick your server from the dropdown → Continue → Authorize. If the dropdown is empty you don't have a server yet — open <https://discord.com/channels/@me>, click the **+** button → Create My Own, then re-open the invite link.
 5. Trigger a hot reload (see "Hot-reload after config change"). If the server isn't running, remind the user to start `octo serve`. Then say: "✅ Discord channel configured. @-mention the bot in a channel or DM it."
 
