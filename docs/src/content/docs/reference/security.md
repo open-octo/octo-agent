@@ -27,9 +27,10 @@ scope.
 | DNS rebinding (attacker domain resolving to 127.0.0.1) | The loopback exemption requires a local `Host` header |
 | Spoofed client IPs | `X-Forwarded-For` is never consulted for the loopback exemption |
 | XSSI reads of uploaded files | `X-Content-Type-Options: nosniff` on served uploads |
-| Agent wiping the OS with a destructive command | Permission engine with hardcoded `deny` rules for `rm -rf /`, `dd`, `mkfs`, `fdisk`, `shutdown`, `reboot`, etc.; these cannot be overridden by `~/.octo/permissions.yml` |
-| Agent writing to system directories | `write_file`/`edit_file` hardcoded `deny` for `/bin`, `/sbin`, `/usr`, `/System`, `/boot`, `/lib`, `/Windows`, `C:/Windows`, etc. |
+| Agent wiping the OS with a destructive command | Permission engine with hardcoded `deny` rules for `rm -rf /`, `dd`, `mkfs`, `fdisk`, `shutdown`, `reboot`, etc., across all platforms; Windows-specific denies include `diskpart`, `format`, `bcdedit`, `reg delete`, `vssadmin delete`, `wbadmin delete`, `dism`, `rmdir /s /q`, `del /s /q`, and their PowerShell alias variants (`ri`, `del`, `erase` with `-r -fo`); these cannot be overridden by `~/.octo/permissions.yml` |
+| Agent writing to system directories | `write_file`/`edit_file` hardcoded `deny` for `/bin`, `/sbin`, `/usr`, `/System`, `/boot`, `/lib`, `/Windows`, `C:/Windows`, `C:/Windows/System32`, `C:/Windows/SysWOW64`, `C:/ProgramData`, etc. across Unix, macOS, and Windows |
 | Agent exfiltrating data or opening reverse shells | Default `ask` rules for `curl`, `wget`, `ssh`, `scp`, `nc`, `socat`, `nmap`, `systemctl`, `iptables`, `crontab`, etc. |
+| Agent reconfiguring or bricking the OS via Windows management tools | Default `ask` rules for `wmic`, `sc`, `schtasks`, `netsh`, `icacls`, `takeown`, `robocopy`, `xcopy`, `mklink`, `powershell`, `cmd /c` |
 | After-the-fact investigation | Append-only JSON audit log at `~/.octo/audit.log` recording every deny, ask-denied, and user-allowed tool decision |
 
 IM channels (Feishu, DingTalk, Discord, …) authenticate separately via each platform's own bot
