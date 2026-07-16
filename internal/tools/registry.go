@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -154,6 +155,7 @@ func (r DefaultRegistry) ExecuteStream(ctx context.Context, name string, input m
 				case "terminal":
 					if cmd, ok := input["command"].(string); ok {
 						r.recordTerminalReads(cmd)
+						r.recordTerminalWrites(cmd)
 					}
 				}
 			}
@@ -219,6 +221,145 @@ func (r DefaultRegistry) recordTerminalReads(command string) {
 			r.tracker.RecordRead(abs)
 		}
 	}
+}
+
+// recordTerminalWrites is the write-side counterpart to recordTerminalReads.
+// A successful terminal command may have modified a file the session already
+// read — a formatter (`gofmt -w`, `sed -i`), a redirect (`printf … > f`), or a
+// copy/move. That bumps the file's mtime, which would otherwise trip
+// CheckWritable's "modified since read" guard on the very next edit_file even
+// though the change was the session's OWN doing, not an out-of-band editor's.
+//
+// It refreshes the recorded mtime of every tracked file the command names as an
+// exact write target, leaving the guard intact for changes that did NOT come
+// through the terminal tool (a human editing in their IDE never lands here) and
+// for files the command never named. Detection is deliberately conservative —
+// RefreshTarget only ever touches an exact path the tracker already knows.
+// Writers that name a directory or the whole tree rather than specific files
+// (`gofmt -w .`, `go fmt ./...`, `make fmt`) are intentionally not followed
+// inside: attributing a subtree's mtime bumps to the command would let an
+// unrelated out-of-band edit slip through. The model re-reads in that case.
+func (r DefaultRegistry) recordTerminalWrites(command string) {
+	tokens := tokenizeCommand(command)
+	if len(tokens) == 0 {
+		return
+	}
+	for _, target := range writeTargets(tokens) {
+		if abs, err := resolvePath(target); err == nil {
+			r.tracker.RefreshTarget(abs)
+		}
+	}
+}
+
+// writeTargets returns the file paths a terminal command writes to, derived
+// from shell redirections plus a curated set of in-place editors. Only paths
+// the command names explicitly are returned — a bare directory (`gofmt -w .`)
+// yields its literal token, which won't match any tracked file, so a
+// whole-subtree format falls through to a re-read rather than over-attributing.
+func writeTargets(tokens []string) []string {
+	var targets []string
+
+	// Pass 1: redirections (`> f`, `>>f`, `2>f`, `&>f`) and `tee`, which can
+	// appear anywhere in a pipeline.
+	for i, tok := range tokens {
+		if tok == "tee" {
+			if p := nextPositional(tokens, i+1); p != "" {
+				targets = append(targets, p)
+			}
+			continue
+		}
+		switch op := redirectTarget(tok); op {
+		case "":
+			// not a redirect
+		case ">next":
+			if p := nextPositional(tokens, i+1); p != "" {
+				targets = append(targets, p)
+			}
+		default:
+			targets = append(targets, op)
+		}
+	}
+
+	// Pass 2: in-place editors (`sed -i`, `gofmt -w`, `… --write`) — their
+	// non-flag args are the files rewritten, keyed on the head of the command.
+	if hasInPlaceFlag(filepath.Base(tokens[0]), tokens[1:]) {
+		targets = append(targets, positionals(tokens[1:])...)
+	}
+	return targets
+}
+
+// redirectTarget classifies a single token as an output redirection:
+//   - ">next" when it is a bare operator (`>`, `>>`, `2>`, `&>`) whose target
+//     is the following token;
+//   - the fused path when the operator carries its target (`>f`, `2>>f`);
+//   - "" when the token is not an output redirect (input `<` included).
+func redirectTarget(tok string) string {
+	rest := tok
+	if len(rest) > 0 && (rest[0] == '&' || (rest[0] >= '0' && rest[0] <= '9')) {
+		rest = rest[1:] // optional fd / & prefix: 2> &>
+	}
+	if !strings.HasPrefix(rest, ">") {
+		return ""
+	}
+	rest = strings.TrimPrefix(rest, ">")
+	rest = strings.TrimPrefix(rest, ">") // second '>' of an append (>>)
+	if rest == "" {
+		return ">next"
+	}
+	if strings.HasPrefix(rest, "&") {
+		return "" // fd duplication (2>&1, >&2), not a file target
+	}
+	return rest
+}
+
+// hasInPlaceFlag reports whether the command edits its file arguments in place.
+// The long forms `--write` / `--in-place` are unambiguous across tools; the
+// short `-i` / `-w` forms are only honored for the specific editors/formatters
+// that use them that way, so `grep -w` or `cp -i` aren't mistaken for writers.
+func hasInPlaceFlag(cmd string, args []string) bool {
+	for _, a := range args {
+		if a == "--write" || a == "--in-place" {
+			return true
+		}
+	}
+	switch cmd {
+	case "sed", "perl":
+		for _, a := range args {
+			if a == "-i" || strings.HasPrefix(a, "-i") { // sed's -i.bak / -i''
+				return true
+			}
+		}
+	case "gofmt", "gofumpt", "goimports":
+		for _, a := range args {
+			if a == "-w" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// positionals returns the non-flag tokens (a flag is any token starting with
+// "-"). A stray positional that isn't a real path — a sed script, say — is
+// harmless: RefreshTarget ignores paths the tracker never recorded.
+func positionals(args []string) []string {
+	var out []string
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// nextPositional returns the first non-flag token at or after index i, or "".
+func nextPositional(tokens []string, i int) string {
+	for ; i < len(tokens); i++ {
+		if !strings.HasPrefix(tokens[i], "-") {
+			return tokens[i]
+		}
+	}
+	return ""
 }
 
 // tokenizeCommand splits a shell command line into whitespace-separated tokens,
