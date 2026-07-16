@@ -121,6 +121,137 @@ func TestRegistry_WriteThenEdit_NoRedundantRead(t *testing.T) {
 	}
 }
 
+// A file the session itself reformats through the terminal tool (gofmt -w,
+// sed -i, a redirect) must still be editable afterwards — the terminal write
+// is the session's own change, not an out-of-band edit, so it should refresh
+// the tracker rather than trip the "modified since read" guard.
+func TestRegistry_TerminalWriteThenEdit_Allowed(t *testing.T) {
+	cases := []struct {
+		name    string
+		command func(p string) string
+	}{
+		{"redirect", func(p string) string { return "printf 'package x\\nconst c = 3\\n' > " + p }},
+		{"redirect-fused", func(p string) string { return "printf 'package x\\nconst c = 3\\n' >" + p }},
+		{"sed-inplace", func(p string) string { return "sed -i '' 's/const a = 1/const a = 2/' " + p }},
+		{"gofmt-w-file", func(p string) string { return "gofmt -w " + p }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := NewDefaultRegistry()
+			dir := t.TempDir()
+			p := filepath.Join(dir, "code.go")
+			if err := os.WriteFile(p, []byte("package x\nconst a = 1\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := reg.Execute(context.Background(), "read_file", map[string]any{"path": p}); err != nil {
+				t.Fatalf("read_file: %v", err)
+			}
+			// Push the file's mtime forward so the terminal write is unambiguously
+			// "newer than the read" regardless of filesystem mtime resolution.
+			future := time.Now().Add(2 * time.Hour)
+			if err := os.Chtimes(p, future, future); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := reg.Execute(context.Background(), "terminal", map[string]any{"command": tc.command(p)}); err != nil {
+				t.Fatalf("terminal: %v", err)
+			}
+			if _, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+				"path": p, "old_string": "package x", "new_string": "package y",
+			}); err != nil {
+				t.Errorf("edit after the session's own terminal write should succeed: %v", err)
+			}
+		})
+	}
+}
+
+// A directory/whole-tree write target (`gofmt -w .`) is NOT followed to the
+// files beneath it: only files the command names exactly are refreshed. A
+// tracked sibling the command didn't name keeps its stale stamp, so a genuine
+// out-of-band edit to it stays blocked — the write detection can't be used to
+// launder an external edit through a broad formatter invocation.
+func TestRegistry_TerminalWriteDir_DoesNotRefreshSiblings(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "notes.md") // not a file gofmt would rewrite
+	if err := os.WriteFile(p, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "read_file", map[string]any{"path": p}); err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	// Out-of-band editor bumps the sibling, then the agent runs a whole-dir
+	// formatter that names the directory, not this file.
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(p, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "terminal", map[string]any{"command": "gofmt -w " + dir}); err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	_, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "hello", "new_string": "goodbye",
+	})
+	if err == nil || !strings.Contains(err.Error(), "modified since") {
+		t.Errorf("external edit to an unnamed sibling should stay blocked, got %v", err)
+	}
+}
+
+// A file the session writes through the terminal but never read must still be
+// unwritable — RefreshTarget only re-stamps already-tracked paths, so a write
+// command can't substitute for a read. Uses a `printf >` redirect: printf is
+// not a read-style command, so recordTerminalReads doesn't tag it either.
+func TestRegistry_TerminalWriteUnreadFile_StillBlocked(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(p, []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Never read; only overwritten via a redirect.
+	if _, err := reg.Execute(context.Background(), "terminal", map[string]any{
+		"command": "printf 'package x\\nconst c = 3\\n' > " + p,
+	}); err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	_, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "package x", "new_string": "package y",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not been read") {
+		t.Errorf("editing a never-read file should be blocked, got %v", err)
+	}
+}
+
+// The guard must still fire for a genuine out-of-band edit: a terminal command
+// that neither reads nor writes the file must not refresh its mtime, so write
+// detection can't be tricked into adopting an external editor's change.
+func TestRegistry_ExternalEditAfterUnrelatedCommand_StillBlocked(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(p, []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "read_file", map[string]any{"path": p}); err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	// Simulate an out-of-band editor bumping the file, then a terminal command
+	// that doesn't mention it at all.
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(p, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "terminal", map[string]any{"command": "echo done"}); err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	_, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "package x", "new_string": "package y",
+	})
+	if err == nil || !strings.Contains(err.Error(), "modified since") {
+		t.Errorf("external edit should still be blocked after an unrelated command, got %v", err)
+	}
+}
+
 func TestSessionReadTracker_PersistsAcrossSimulatedTurns(t *testing.T) {
 	sid := "sess-read-tracker-test"
 	t.Cleanup(func() { CloseSessionReadTracker(sid) })

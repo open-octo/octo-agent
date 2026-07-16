@@ -6,6 +6,8 @@ export default defineConfig({
   build: {
     outDir: '../internal/server/webdist',
     emptyOutDir: true,
+    // The UI ships as one embedded bundle served from localhost; code-splitting buys nothing here.
+    chunkSizeWarningLimit: 600,
   },
   server: {
     port: 5173,

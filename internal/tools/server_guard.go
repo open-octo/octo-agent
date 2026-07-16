@@ -38,7 +38,15 @@ var (
 	// A bare `kill [-SIG] <pid> …` command; its argument tail is scanned for
 	// the protected PIDs.
 	reKill = regexp.MustCompile(`(?i)\bkill\b([^|;&\n]*)`)
-	reNum  = regexp.MustCompile(`\b\d+\b`)
+	// reNum matches a PID argument inside a kill tail: a digit run that is NOT
+	// immediately preceded by '-'. A leading '-' marks a signal spec (-9) or a
+	// negative process-group argument (-1), not a target PID, so `kill -9 -1`
+	// (a phrase that shows up verbatim in commit messages and docs) no longer
+	// has its "1" scanned. RE2 has no lookbehind, so the preceding char is
+	// consumed by (?:^|[^-\w]) and the PID is submatch[1]. `[^-\w]` (rather than
+	// a bare boundary) also keeps digits glued to a word — e.g. "octo123" — from
+	// matching, matching the old `\b\d+\b` behavior for that case.
+	reNum = regexp.MustCompile(`(?:^|[^-\w])(\d+)\b`)
 )
 
 // guardServerSelfKill returns a non-nil error when command, run inside an octo
@@ -58,11 +66,19 @@ func guardServerSelfKill(command string) error {
 		(strings.Contains(command, "pgrep") || strings.Contains(command, "pidof")) {
 		return errServerSelfKill()
 	}
-	self := strconv.Itoa(serverSelfPID)
-	super := strconv.Itoa(serverSuperPID)
+	// Protected PIDs: this process and its supervisor parent. A PPID of 1 means
+	// the server was reparented to init/launchd (daemonized, or GUI-launched by
+	// the desktop app) rather than run under a real restart supervisor. Such a
+	// parent is unkillable and, worse, matching a bare "1" false-positives on
+	// any command text that happens to contain the digit — so PPID 1 is not
+	// protected.
+	protected := map[string]bool{strconv.Itoa(serverSelfPID): true}
+	if serverSuperPID > 1 {
+		protected[strconv.Itoa(serverSuperPID)] = true
+	}
 	for _, seg := range reKill.FindAllStringSubmatch(command, -1) {
-		for _, n := range reNum.FindAllString(seg[1], -1) {
-			if n == self || n == super {
+		for _, m := range reNum.FindAllStringSubmatch(seg[1], -1) {
+			if protected[m[1]] {
 				return errServerSelfKill()
 			}
 		}
