@@ -1,4 +1,4 @@
-# 技术方案：Multi-Agent Team
+# 技术方案：Multi-Agent System
 
 ## 背景与目标
 
