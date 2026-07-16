@@ -109,7 +109,8 @@ type Rule struct {
 	// Pattern is a case-sensitive substring match against the relevant
 	// input field. For `terminal` that's input["command"]; for the
 	// pattern-free tools (glob / grep / web_search) Pattern is empty and
-	// the rule matches unconditionally.
+	// the rule matches unconditionally. A leading `^` makes the match
+	// command-position anchored — see patternMatches.
 	Pattern string
 
 	// Hostname is a list of glob patterns matched against URL hosts.
@@ -469,19 +470,28 @@ func (e *Engine) matches(toolName string, r Rule, input map[string]any) bool {
 }
 
 // patternMatches reports whether cmd triggers a terminal pattern rule. The
-// documented semantics are a case-sensitive substring match, with one
-// refinement: a pattern ending in a filesystem-root marker (`/` or `~`) only
-// matches when that marker sits at an argument boundary — i.e. the command
-// targets root/home itself, not a path beneath it.
+// documented semantics are a case-sensitive substring match, with two
+// refinements:
 //
-// Without this, `deny: rm -rf /` (intended to block a root wipe) is a literal
-// substring of every absolute-path delete like `rm -rf /Users/me/project`,
-// hard-denying legitimate operations that should instead fall through to the
-// `ask: rm -rf` rule. The boundary check keeps `rm -rf /`, `rm -rf /*`, and
-// `rm -rf ~` blocked while letting a delete of a specific subpath ask.
+//   - A pattern ending in a filesystem-root marker (`/` or `~`) only matches
+//     when that marker sits at an argument boundary — i.e. the command
+//     targets root/home itself, not a path beneath it. Without this,
+//     `deny: rm -rf /` (intended to block a root wipe) is a literal substring
+//     of every absolute-path delete like `rm -rf /Users/me/project`,
+//     hard-denying legitimate operations that should instead fall through to
+//     the `ask: rm -rf` rule.
+//
+//   - A pattern starting with `^` is command-position anchored: it only
+//     matches where a command word can begin (see anchoredPatternMatches).
+//     Plain substring matching is wrong for command-name rules — a
+//     `deny: "format "` substring would hit `docker ps --format json`, and
+//     `deny: "shutdown "` would hit `git commit -m "fix shutdown handling"`.
 func patternMatches(cmd, pattern string) bool {
 	if pattern == "" {
 		return true
+	}
+	if pattern[0] == '^' {
+		return anchoredPatternMatches(cmd, pattern[1:])
 	}
 	if last := pattern[len(pattern)-1]; last != '/' && last != '~' {
 		return strings.Contains(cmd, pattern)
@@ -501,6 +511,130 @@ func patternMatches(cmd, pattern string) bool {
 		}
 		from += i + 1
 	}
+}
+
+// anchoredPatternMatches implements the `^` pattern form. The match must
+// start at a command position (see isCommandPosition) and end at a word
+// boundary, so `^shutdown` matches `shutdown -h now`, `sudo shutdown`, and
+// `echo hi; shutdown`, but not `git commit -m "fix shutdown handling"`
+// (argument text), `docker ps --format json` (a flag, for `^format`), or
+// `kill -9 -1234` (for `^kill -9 -1` — the word continues).
+//
+// A pattern ending in `/` or `~` keeps the root-marker end-anchoring of the
+// substring form, so `^rm -rf /` still refuses only a root wipe while
+// `rm -rf /path/under` falls through.
+func anchoredPatternMatches(cmd, pattern string) bool {
+	pattern = strings.TrimRight(pattern, " \t")
+	if pattern == "" {
+		return false
+	}
+	rootAnchored := pattern[len(pattern)-1] == '/' || pattern[len(pattern)-1] == '~'
+	from := 0
+	for {
+		i := strings.Index(cmd[from:], pattern)
+		if i < 0 {
+			return false
+		}
+		start := from + i
+		end := start + len(pattern)
+		endOK := true
+		switch {
+		case rootAnchored:
+			endOK = end >= len(cmd) || isArgBoundary(cmd[end])
+		case isWordChar(pattern[len(pattern)-1]):
+			endOK = end >= len(cmd) || !isWordChar(cmd[end])
+		}
+		if endOK && isCommandPosition(cmd, start) {
+			return true
+		}
+		from = start + 1
+	}
+}
+
+// isCommandPosition reports whether a token starting at cmd[i] sits where a
+// command word can begin: at the start of the command, right after a shell
+// chain operator, at the basename of a path invocation (`/sbin/reboot`), or
+// after transparent prefix tokens — command wrappers like sudo/env/xargs,
+// flags, and VAR=value assignments — that themselves sit at a command
+// position. Everything else (ordinary arguments, quoted strings, flag
+// values) is not a command position.
+func isCommandPosition(cmd string, i int) bool {
+	j := i
+	for j > 0 && (cmd[j-1] == ' ' || cmd[j-1] == '\t') {
+		j--
+	}
+	if j == 0 {
+		return true
+	}
+	c := cmd[j-1]
+	if isChainChar(c) {
+		return true
+	}
+	if j == i && c == '/' {
+		// Path invocation: the match is the basename of a path token
+		// (`/sbin/reboot`, `sudo /bin/rm …`). Accept when the path token
+		// itself starts at a command position.
+		k := j - 1
+		for k > 0 && !isTokenBreak(cmd[k-1]) {
+			k--
+		}
+		return isCommandPosition(cmd, k)
+	}
+	if j != i {
+		// Whitespace-separated: the preceding token may be a transparent
+		// prefix (sudo, a flag, VAR=value, …) that keeps this a command
+		// position.
+		k := j
+		for k > 0 && !isTokenBreak(cmd[k-1]) {
+			k--
+		}
+		if isTransparentPrefix(cmd[k:j]) {
+			return isCommandPosition(cmd, k)
+		}
+	}
+	return false
+}
+
+// isTransparentPrefix reports whether a token between a command position and
+// a candidate match keeps the match at a command position: command wrappers
+// that execute their argument, flags (Unix `-x` and cmd.exe `/c` styles),
+// and environment assignments.
+func isTransparentPrefix(tok string) bool {
+	if tok == "" {
+		return false
+	}
+	if tok[0] == '-' || tok[0] == '/' {
+		return true
+	}
+	if strings.Contains(tok, "=") {
+		return true
+	}
+	switch strings.ToLower(tok) {
+	case "sudo", "doas", "env", "nohup", "exec", "xargs", "setsid", "command",
+		"eval", "builtin", "nice", "time", "stdbuf", "timeout",
+		"cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "sh", "bash", "zsh", "busybox":
+		return true
+	}
+	return false
+}
+
+// isChainChar reports whether c starts a new shell command (chain operator,
+// subshell, command substitution, or newline).
+func isChainChar(c byte) bool {
+	return c == ';' || c == '|' || c == '&' || c == '(' || c == '`' || c == '\n'
+}
+
+// isTokenBreak reports whether c separates shell tokens for the purposes of
+// isCommandPosition's walk-back.
+func isTokenBreak(c byte) bool {
+	return c == ' ' || c == '\t' || isChainChar(c)
+}
+
+// isWordChar reports whether c can continue a command word; a `^` pattern
+// ending in a word char must be followed by a non-word char (or the end of
+// the command), so `^reboot` does not match `rebooter`.
+func isWordChar(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
 }
 
 // isArgBoundary reports whether c ends a shell argument for the purposes of
@@ -534,6 +668,9 @@ func containsShellControl(cmd string) bool {
 // command to contain no shell chaining metacharacters.
 func allowPatternMatches(cmd, pattern string) bool {
 	cmd = strings.TrimLeft(cmd, " \t\n")
+	// Allow rules are already prefix-anchored; tolerate the `^` marker so a
+	// user who writes it out of habit doesn't create a dead rule.
+	pattern = strings.TrimPrefix(pattern, "^")
 	if pattern == "" {
 		return true
 	}
@@ -768,43 +905,67 @@ func applyHardcodedDenyRules(rules RuleSet) {
 	rules["write_file"] = append(rules["write_file"], deny)
 	rules["edit_file"] = append(rules["edit_file"], deny)
 
-	// Terminal commands that can brick the machine or destroy data. These are
-	// also hardcoded so that a user override of terminal rules cannot silently
-	// permit them.
+	// Terminal commands that can brick the machine or destroy data
+	// irrecoverably. Hardcoded so that a user override of terminal rules
+	// cannot silently permit them; kept strictly to catastrophes — risky but
+	// legitimate tools (dism, fsutil, untargeted recursive deletes, …) live
+	// in defaults.yml as ask rules instead.
+	//
+	// Every pattern is command-position anchored (`^`, see patternMatches):
+	// it matches the command word itself — including after sudo/xargs/shell
+	// wrappers, chain operators, and path invocations — but not incidental
+	// occurrences inside arguments, so `git commit -m "fix shutdown handling"`
+	// and `docker ps --format json` are unaffected. The no-trailing-space
+	// forms also catch bare invocations (`reboot`, `halt`) that a trailing
+	// space would miss.
 	hardTerminalDenies := []string{
-		"dd if=",             // raw disk write
-		"mkfs",               // make filesystem
-		"fdisk ",             // partition manipulation
-		"parted ",            // partition manipulation
-		"diskpart ",          // Windows partition / volume management
-		"diskutil erase",     // macOS disk erase
-		"diskutil partition", // macOS partition
-		"reg delete ",        // Windows registry deletion
-		"bcdedit ",           // Windows boot configuration
-		"wbadmin delete ",    // Windows backup catalog deletion
-		"dism ",              // Windows system image modification
-		"vssadmin delete ",   // Windows shadow copy deletion
-		"shutdown ",          // shutdown
-		"poweroff",           // shutdown
-		"halt ",              // halt
-		"init 0",             // SysV shutdown
-		"reboot ",            // reboot
-		"systemctl poweroff", // systemd shutdown
-		"systemctl reboot",   // systemd reboot
-		"kill -9 -1",         // kill all user processes
-		"kill -SIGKILL -1",   // kill all user processes
-		"rm -rf /",           // root wipe
-		"rm -rf ~",           // home wipe
-		"rmdir /s /q",        // Windows recursive silent deletion
-		"rd /s /q",           // alias for rmdir /s /q
-		"del /s /q",          // Windows bulk silent deletion
-		"erase /s /q",        // alias for del /s /q
-		"format ",            // Windows filesystem format
-		"sdelete",            // Windows secure delete (can wipe data)
-		"wevtutil cl",        // Windows event log clear
-		"fsutil ",            // Windows filesystem utilities (can corrupt)
-		"defrag ",            // Windows defrag (mostly safe but unexpected for agent)
-
+		// Raw disk / filesystem destruction.
+		"^dd if=",                                      // raw disk write
+		"^mkfs",                                        // make filesystem (mkfs, mkfs.ext4, …)
+		"^fdisk",                                       // partition manipulation
+		"^parted",                                      // partition manipulation
+		"^format",                                      // Windows filesystem format
+		"^diskpart",                                    // Windows partition / volume management
+		"^diskutil eraseDisk", "^diskutil eraseVolume", // macOS disk erase
+		"^diskutil secureErase", "^diskutil partitionDisk", // macOS wipe / partition
+		// System-wide power / process catastrophes.
+		"^shutdown", "^poweroff", "^halt", "^init 0", "^reboot",
+		"^systemctl poweroff", "^systemctl reboot", "^systemctl halt",
+		"^kill -9 -1", "^kill -SIGKILL -1", // kill all user processes
+		// Root / home wipe (root-marker end-anchoring keeps subpaths on ask).
+		"^rm -rf /", "^rm -rf ~",
+		// Windows OS-configuration destruction.
+		"^reg delete",      // registry deletion
+		"^bcdedit",         // boot configuration
+		"^wbadmin delete",  // backup catalog deletion
+		"^vssadmin delete", // shadow copy deletion
+		"^wevtutil cl",     // event log clear
+	}
+	// Unix system directory removal — deleting /usr, /bin, /System, … bricks
+	// the OS. The pattern is a prefix, so subpaths (`rm -rf /usr/local`) are
+	// covered too.
+	for _, dir := range []string{
+		"/usr", "/bin", "/sbin", "/boot", "/lib", "/lib64",
+		"/System", "/Windows", "/Program Files",
+	} {
+		hardTerminalDenies = append(hardTerminalDenies, "^rm -rf "+dir)
+	}
+	// Windows system directory removal, across the spellings an LLM emits:
+	// rm (the PowerShell Remove-Item alias), cmd.exe builtins, and the other
+	// Remove-Item aliases. Each pattern is generated bare and with an opening
+	// quote; both are prefixes, so quoted forms, System32/SysWOW64 subpaths,
+	// and "Program Files (x86)" are all covered.
+	winDirs := []string{`C:\Windows`, `C:\ProgramData`, `C:\Program Files`}
+	winDeleteOps := []string{
+		"rm -rf", "rmdir /s /q", "rd /s /q", "del /s /q", "erase /s /q",
+		"ri -r -fo", "del -r -fo", "erase -r -fo",
+	}
+	for _, op := range winDeleteOps {
+		for _, dir := range winDirs {
+			hardTerminalDenies = append(hardTerminalDenies,
+				"^"+op+" "+dir,
+				"^"+op+` "`+dir)
+		}
 	}
 	for _, pat := range hardTerminalDenies {
 		rules["terminal"] = append(rules["terminal"], Rule{Decision: Deny, Pattern: pat})

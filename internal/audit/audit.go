@@ -1,17 +1,18 @@
-// Package audit writes a tamper-evident, append-only log of security-relevant
-// tool decisions. It is intentionally minimal: one JSON line per event, flushed
-// to ~/.octo/audit.log. Failures are logged to the application logger but never
-// block the tool call being audited.
+// Package audit writes an append-only log of security-relevant tool
+// decisions. It is intentionally minimal: one JSON line per event, flushed
+// to ~/.octo/audit.log. Failures are logged to the application logger but
+// never block the tool call being audited.
 package audit
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/logfile"
 )
 
 // Event is one entry in the audit log.
@@ -22,6 +23,19 @@ type Event struct {
 	Decision  string         `json:"decision"`
 	Reason    string         `json:"reason,omitempty"`
 }
+
+// maxFieldLen caps each string value recorded from the tool input. The log
+// exists to answer "what was denied and why", not to archive payloads: a
+// denied write_file carries the entire file body in input["content"], and
+// terminal commands can embed secrets — truncating keeps lines bounded and
+// limits how much sensitive material lands on disk.
+const maxFieldLen = 1024
+
+// Rotation policy, mirroring internal/logfile's serve.log defaults.
+const (
+	maxLogBytes = 10 << 20 // 10 MiB
+	logBackups  = 3
+)
 
 // Logger appends security events to a file.
 type Logger struct {
@@ -35,7 +49,13 @@ type Logger struct {
 // (~/.octo/audit.log). A nil Logger is never returned; the logger always
 // degrades to a no-op on failure rather than breaking callers.
 func New() *Logger {
-	return &Logger{path: defaultPath()}
+	return NewAt(defaultPath())
+}
+
+// NewAt builds a Logger that writes to the given path. An empty path yields
+// a no-op logger.
+func NewAt(path string) *Logger {
+	return &Logger{path: path}
 }
 
 // defaultPath returns ~/.octo/audit.log, or the empty string if the home
@@ -59,7 +79,7 @@ func (l *Logger) Log(tool string, input map[string]any, decision, reason string)
 	e := Event{
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		Tool:      tool,
-		Input:     input,
+		Input:     truncateInput(input),
 		Decision:  decision,
 		Reason:    reason,
 	}
@@ -71,17 +91,22 @@ func (l *Logger) Log(tool string, input map[string]any, decision, reason string)
 	b = append(b, '\n')
 
 	l.once.Do(func() {
-		// Ensure the parent directory exists once per logger lifetime.
-		if dir := filepath.Dir(l.path); dir != "" {
-			if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
-				l.openErr = mkErr
-			}
+		// Once per logger lifetime: ensure the parent directory exists and
+		// rotate an oversized log from a previous run. Rotation only happens
+		// here — never mid-run — so a single process appends to one file.
+		if mkErr := os.MkdirAll(filepath.Dir(l.path), 0o700); mkErr != nil {
+			l.openErr = mkErr
+			slog.Warn("audit: log directory not available", "path", l.path, "err", mkErr)
+			return
+		}
+		if rotErr := logfile.RotateIfLarger(l.path, maxLogBytes, logBackups); rotErr != nil {
+			// Rotation failure is not fatal — keep appending to the old file.
+			slog.Warn("audit: failed to rotate log", "path", l.path, "err", rotErr)
 		}
 	})
 	if l.openErr != nil {
-		// Directory creation failed on first use; log once and give up cleanly.
-		slog.Warn("audit: log directory not available", "path", l.path, "err", l.openErr)
-		l.openErr = nil // reset so we don't spam on every event
+		// Directory creation failed; already warned once inside once.Do, so
+		// give up silently for the rest of the logger's lifetime.
 		return
 	}
 
@@ -102,11 +127,17 @@ func (l *Logger) Log(tool string, input map[string]any, decision, reason string)
 	}
 }
 
-// FormatReason returns a concise, JSON-safe reason string. It accepts the tool
-// name and a free-form reason; if reason is empty it returns the tool name.
-func FormatReason(tool, reason string) string {
-	if reason != "" {
-		return fmt.Sprintf("%s: %s", tool, reason)
+// truncateInput returns a copy of input with every string value capped at
+// maxFieldLen. Non-string values (numbers, bools, nested structures) are
+// recorded as-is; only top-level strings carry the large payloads we care
+// about (command, path, content, diff).
+func truncateInput(input map[string]any) map[string]any {
+	out := make(map[string]any, len(input))
+	for k, v := range input {
+		if s, ok := v.(string); ok && len(s) > maxFieldLen {
+			v = s[:maxFieldLen] + "…(truncated)"
+		}
+		out[k] = v
 	}
-	return tool
+	return out
 }

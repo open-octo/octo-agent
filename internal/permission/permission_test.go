@@ -203,10 +203,71 @@ func TestDefaultRules_TerminalDangerousOperations(t *testing.T) {
 		// Disk-space exhaustion — ask.
 		"fallocate -l 100G /tmp/bigfile": Ask,
 		"truncate -s 100G /tmp/bigfile":  Ask,
+		// Benign commands that merely CONTAIN a dangerous word must not be
+		// denied: deny/ask rules for command names are `^`-anchored, so flags
+		// and argument text don't trigger them. These fall through to the
+		// implicit ask (or an explicit allow).
+		"docker ps --format json":                 Ask,
+		"pip list --format json":                  Ask,
+		"git commit -m \"fix shutdown handling\"": Ask,
+		"rg \"func \" internal/":                  Ask,
+		"kill -9 -1234":                           Ask, // a process group, not -1
+		"git log --grep \"reboot now\"":           Allow,
+		"ls misc":                                 Allow,
+		// Wrapped or chained invocations still hit the anchored rules.
+		"sudo reboot":         Deny,
+		"echo done; poweroff": Deny,
+		"/sbin/reboot":        Deny,
+		"xargs rm -rf /":      Deny,
+		// Bare invocations (no arguments) are caught too.
+		"reboot": Deny,
+		"halt":   Deny,
+		"fdisk":  Deny,
 	}
 	for cmd, want := range cases {
 		if got := e.Check("terminal", map[string]any{"command": cmd}); got != want {
 			t.Errorf("terminal %q: got %s, want %s", cmd, got, want)
+		}
+	}
+}
+
+func TestPatternMatches_CommandAnchored(t *testing.T) {
+	cases := []struct {
+		cmd, pattern string
+		want         bool
+	}{
+		// Command position: start, wrappers, chains, path invocations.
+		{"shutdown -h now", "^shutdown", true},
+		{"reboot", "^reboot", true},
+		{"sudo reboot", "^reboot", true},
+		{"/sbin/reboot", "^reboot", true},
+		{"echo hi; reboot", "^reboot", true},
+		{"true && reboot", "^reboot", true},
+		{"bash -c reboot", "^reboot", true},
+		{"cmd /c rmdir /s /q C:\\Windows", "^rmdir /s /q C:\\Windows", true},
+		{"env FOO=bar poweroff", "^poweroff", true},
+		// Not a command position: argument text, quoted strings, flags.
+		{"echo reboot", "^reboot", false},
+		{"git commit -m \"fix shutdown handling\"", "^shutdown", false},
+		{"git log --grep \"reboot \"", "^reboot", false},
+		{"docker ps --format json", "^format", false},
+		{"rg \"func Foo\"", "^nc", false},
+		{"ls misc", "^sc", false},
+		{"sort desc", "^sc", false},
+		// Word boundary at the end of the match.
+		{"rebooter", "^reboot", false},
+		{"kill -9 -1234", "^kill -9 -1", false},
+		{"kill -9 -1", "^kill -9 -1", true},
+		{"mkfs.ext4 /dev/sdb1", "^mkfs", true},
+		{"rm -rf /usr/local", "^rm -rf /usr", true},
+		{"rm -rf /usr-local", "^rm -rf /usr", false},
+		// Root-marker end anchoring still applies in anchored form.
+		{"rm -rf /", "^rm -rf /", true},
+		{"rm -rf /tmp/foo", "^rm -rf /", false},
+	}
+	for _, c := range cases {
+		if got := patternMatches(c.cmd, c.pattern); got != c.want {
+			t.Errorf("patternMatches(%q, %q) = %v, want %v", c.cmd, c.pattern, got, c.want)
 		}
 	}
 }
@@ -248,46 +309,54 @@ func TestDefaultRules_TerminalWindowsDangerous(t *testing.T) {
 		"rm -rf \"C:\\Program Files\"":       Deny,
 		"rm -rf \"C:\\Program Files (x86)\"": Deny,
 		// cmd.exe recursive deletion and their aliases.
-		"rmdir /s /q C:\\Windows":        Deny,
-		"rmdir /s /q \"C:\\Windows\"":    Deny,
-		"rmdir /s /q C:\\Program Files":  Deny,
-		"rd /s /q C:\\Windows":           Deny,
-		"rd /s /q \"C:\\Windows\"":       Deny,
-		"del /s /q C:\\Windows":          Deny,
-		"del /s /q \"C:\\Windows\"":      Deny,
-		"erase /s /q C:\\Windows":        Deny,
-		"erase /s /q \"C:\\Windows\"":    Deny,
+		"rmdir /s /q C:\\Windows":       Deny,
+		"rmdir /s /q \"C:\\Windows\"":   Deny,
+		"rmdir /s /q C:\\Program Files": Deny,
+		"rd /s /q C:\\Windows":          Deny,
+		"rd /s /q \"C:\\Windows\"":      Deny,
+		"del /s /q C:\\Windows":         Deny,
+		"del /s /q \"C:\\Windows\"":     Deny,
+		"erase /s /q C:\\Windows":       Deny,
+		"erase /s /q \"C:\\Windows\"":   Deny,
 		// PowerShell aliases for Remove-Item targeting Windows system dirs.
-		"ri -r -fo C:\\Windows":          Deny,
-		"ri -r -fo \"C:\\Windows\"":      Deny,
-		"del -r -fo C:\\Windows":          Deny,
-		"del -r -fo \"C:\\Windows\"":     Deny,
-		"erase -r -fo C:\\Windows":       Deny,
-		"erase -r -fo \"C:\\Windows\"":   Deny,
+		"ri -r -fo C:\\Windows":        Deny,
+		"ri -r -fo \"C:\\Windows\"":    Deny,
+		"del -r -fo C:\\Windows":       Deny,
+		"del -r -fo \"C:\\Windows\"":   Deny,
+		"erase -r -fo C:\\Windows":     Deny,
+		"erase -r -fo \"C:\\Windows\"": Deny,
 		// Windows system management tools that can brick the OS.
-		"diskpart /s script.txt":                            Deny,
-		"reg delete HKLM\\Software /f":                      Deny,
-		"bcdedit /delete {current}":                         Deny,
-		"format C:":                                         Deny,
-		"format D:":                                         Deny,
-		"vssadmin delete shadows /all":                      Deny,
-		"wbadmin delete catalog":                            Deny,
-		"dism /online /disable-feature /featurename:NetFx3": Deny,
-		"wevtutil cl System":                                Deny,
-		"fsutil file setzerooffset C:\\Windows\\foo.dll":    Deny,
-		"sdelete -p 3 C:\\secret.txt":                       Deny,
+		"diskpart /s script.txt":       Deny,
+		"reg delete HKLM\\Software /f": Deny,
+		"bcdedit /delete {current}":    Deny,
+		"format C:":                    Deny,
+		"format D:":                    Deny,
+		"vssadmin delete shadows /all": Deny,
+		"wbadmin delete catalog":       Deny,
+		"wevtutil cl System":           Deny,
+		// Risky-but-legitimate Windows tools are ask, not hardcoded deny:
+		// dism/fsutil have read-only and benign uses, sdelete is a targeted
+		// delete like rm.
+		"dism /online /disable-feature /featurename:NetFx3": Ask,
+		"fsutil file createnew C:\\temp\\test.bin 4096":     Ask,
+		"sdelete -p 3 C:\\secret.txt":                       Ask,
+		// Untargeted recursive deletion is the cmd.exe counterpart of
+		// `rm -rf` — ask, while system-dir targets stay hard-denied above.
+		"rmdir /s /q C:\\Temp\\build": Ask,
+		"del /s /q build":             Ask,
+		"rd /s /q node_modules":       Ask,
 		// Windows system management tools that can reconfigure or brick the OS.
-		"wmic os where primary=1 call shutdown": Ask,
-		"sc delete ServiceName":               Ask,
-		"schtasks /delete /tn \"MyTask\" /f":  Ask,
-		"netsh advfirewall set allprofiles state off": Ask,
-		"icacls C:\\Windows /grant Everyone:F": Ask,
-		"takeown /f C:\\Windows":              Ask,
-		"robocopy C:\\source C:\\Windows /MIR": Ask,
-		"xcopy C:\\source C:\\Windows /E /I":   Ask,
-		"mklink C:\\Windows\\link C:\\target":    Ask,
+		"wmic os where primary=1 call shutdown":                       Ask,
+		"sc delete ServiceName":                                       Ask,
+		"schtasks /delete /tn \"MyTask\" /f":                          Ask,
+		"netsh advfirewall set allprofiles state off":                 Ask,
+		"icacls C:\\Windows /grant Everyone:F":                        Ask,
+		"takeown /f C:\\Windows":                                      Ask,
+		"robocopy C:\\source C:\\Windows /MIR":                        Ask,
+		"xcopy C:\\source C:\\Windows /E /I":                          Ask,
+		"mklink C:\\Windows\\link C:\\target":                         Ask,
 		"powershell -Command Remove-Item C:\\Windows -Recurse -Force": Ask,
-		"cmd /c rmdir /s /q C:\\Windows":     Deny,
+		"cmd /c rmdir /s /q C:\\Windows":                              Deny,
 		// But routine maintenance on a non-system drive is ask, not deny.
 		"chkdsk E: /f": Ask,
 		"sfc /scannow": Ask,
@@ -633,6 +702,11 @@ edit_file:
 	// Sanity: ordinary non-system paths are allowed by the user's override.
 	if got := e.Check("write_file", map[string]any{"path": "/work/src/main.go"}); got != Allow {
 		t.Errorf("write_file /work/src/main.go: got %s, want Allow (user override still works for safe paths)", got)
+	}
+	// Sanity: the hardcoded guards are anchored to the command word, so a
+	// benign command merely containing a guarded word is not collateral.
+	if got := e.Check("terminal", map[string]any{"command": "docker ps --format json"}); got != Allow {
+		t.Errorf("terminal docker ps --format json: got %s, want Allow (anchored guard must not hit a flag)", got)
 	}
 }
 

@@ -31,15 +31,16 @@ func recordingAsk(allow, remember bool, err error, calls *int) PermissionAsk {
 }
 
 func TestGate_AuditLogsDenyAndAsk(t *testing.T) {
-	// The default audit log lives at ~/.octo/audit.log. Redirect HOME for the
-	// duration of this test so the gate writes to a temp directory.
-	t.Setenv("HOME", t.TempDir())
-	g := NewPermissionGate(newEngine(t, permission.ModeInteractive), nil)
+	// Inject an audit logger at a temp path instead of the default
+	// ~/.octo/audit.log. (Redirecting $HOME would not work on Windows, where
+	// os.UserHomeDir reads %USERPROFILE%.)
+	logPath := filepath.Join(t.TempDir(), "audit.log")
+	g := &permissionGate{engine: newEngine(t, permission.ModeInteractive), audit: audit.NewAt(logPath)}
 
 	g.Check(context.Background(), "terminal", map[string]any{"command": "rm -rf /"})
 	g.Check(context.Background(), "terminal", map[string]any{"command": "sudo apt update"})
 
-	b, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".octo", "audit.log"))
+	b, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("read audit log: %v", err)
 	}

@@ -72,6 +72,37 @@ func TestLogger_Concurrent(t *testing.T) {
 	}
 }
 
+func TestLogger_TruncatesLongValues(t *testing.T) {
+	l := NewAt(filepath.Join(t.TempDir(), "audit.log"))
+
+	big := strings.Repeat("x", 4*maxFieldLen)
+	input := map[string]any{"path": "/etc/passwd", "content": big}
+	l.Log("write_file", input, "deny", "sensitive path")
+
+	b, err := os.ReadFile(l.path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	var ev Event
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(b))), &ev); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	content, _ := ev.Input["content"].(string)
+	if len(content) > maxFieldLen+len("…(truncated)") {
+		t.Errorf("content not truncated: %d bytes", len(content))
+	}
+	if !strings.HasSuffix(content, "…(truncated)") {
+		t.Errorf("truncated value should be marked, got suffix %q", content[len(content)-20:])
+	}
+	if ev.Input["path"] != "/etc/passwd" {
+		t.Errorf("short values must be recorded verbatim, got %v", ev.Input["path"])
+	}
+	// The caller's map must not be mutated.
+	if got := input["content"].(string); len(got) != 4*maxFieldLen {
+		t.Errorf("Log must not mutate the caller's input map")
+	}
+}
+
 func TestLogger_Nil(t *testing.T) {
 	var l *Logger
 	// Should not panic.
