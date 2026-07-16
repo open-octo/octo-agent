@@ -91,8 +91,8 @@ const desktopShellQuery = "shell=octo-desktop"
 // "http://127.0.0.1:8088". Fresh-window loads and SetURL navigations share it,
 // so they produce the identical path+query and a route change stays a pure
 // hashchange (no reload). The exact query string is contracted with the
-// frontend reader in web/src/components/layout/VersionBadge.svelte — keep both
-// sides in sync (TestShellURL pins the Go side).
+// frontend reader isDesktopShell in web/src/lib/stores.ts — keep both sides in
+// sync (TestShellURL pins the Go side).
 func shellURL(base, hash string) string {
 	u := base + "/?" + desktopShellQuery
 	if hash != "" {
