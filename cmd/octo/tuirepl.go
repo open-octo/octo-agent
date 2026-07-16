@@ -716,7 +716,8 @@ func (m *tuiModel) Init() tea.Cmd {
 	// Set the terminal tab/window title to the session name (OSC 2) so the
 	// user can identify this session across tabs. Ghostty, iTerm2, Kitty and
 	// most modern terminals honour it; others ignore the sequence. No-op when
-	// the user disabled it via config.
+	// the user disabled it via config. For new sessions DisplayTitle returns
+	// "*Octo Agent" until the async LLM title gen completes.
 	if m.cfg.terminalTitle {
 		bootCmds = append(bootCmds, tea.Println(setTitleSeq(m.cfg.session.DisplayTitle())))
 	}
@@ -1411,12 +1412,17 @@ func (m *tuiModel) suggestCmd() tea.Cmd {
 }
 
 // titleCmd generates a session title off the event loop, once per session. It
-// returns nil (no-op) when the session is already titled, a generation is
+// titleCmd returns a tea.Cmd that asynchronously generates a session title
+// from the agent's history. It returns nil (no-op) when the session is already
+// titled (non-empty and not the "*Octo Agent" placeholder), a generation is
 // already in flight, saving is off, or there's no turn to summarize yet — so it
 // fires exactly once, after the first completed turn. The result is persisted
 // by the titleMsg handler.
 func (m *tuiModel) titleCmd() tea.Cmd {
-	if m.cfg.noSave || m.titlePending || m.cfg.session.Title != "" {
+	if m.cfg.noSave || m.titlePending {
+		return nil
+	}
+	if t := m.cfg.session.Title; t != "" && t != "*Octo Agent" {
 		return nil
 	}
 	if m.a.History.Len() == 0 {
@@ -2155,16 +2161,17 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 			return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(prompt, ""))
 		}
 	}
+
+	// Truly idle (no queued turn, no goal continuation) after a clean turn:
+	// refresh the tab title from the (now-synced) session — by this point
+	// DisplayTitle returns the first-message snippet if the async LLM title
 	// Truly idle (no queued turn, no goal continuation) after a clean turn:
 	// fire a desktop notification so a user who tabbed away is pulled back.
+	// Ghostty renders the tab title (OSC 2) as the notification's secondary
+	// label automatically, so the OSC 777 title is left empty.
 	// Skipped on error / interrupt (err != nil) and when the user disabled it.
 	if err == nil && m.cfg.notify {
-		// OSC 777 with empty title: Ghostty renders both the OSC 2 tab
-		// title and the OSC 777 notification title as visible text, so
-		// passing the session title here duplicates it. Empty title shows
-		// only the body. Other terminals (iTerm2, Kitty, WezTerm) ignore
-		// the title slot entirely.
-		return m, tea.Sequence(m.flushPrints(), tea.Println(notifySeq("", "Turn complete — input needed")))
+		return m, tea.Sequence(m.flushPrints(), tea.Println(notifySeq("Octo Agent", "Octo is waiting for your input")))
 	}
 	return m, nil
 }

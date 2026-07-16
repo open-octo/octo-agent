@@ -188,7 +188,7 @@ func (s *Session) startGoalLocked(objective string, tokenBudget int64) Goal {
 	// not billed to the fresh goal. Cleared unconsumed at the next turn start.
 	s.goalSkipNextTokenDelta = true
 	records := []sessionRecord{{Type: "goal", Goal: s.Goal}}
-	if s.Title == "" {
+	if s.Title == "" || s.Title == "*Octo Agent" {
 		// Seed the title from the objective (the Codex thread-preview
 		// behavior). It needs its own record — a "goal" record doesn't carry
 		// the title, so without one the seed would vanish on reload.

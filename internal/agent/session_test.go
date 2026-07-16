@@ -387,7 +387,7 @@ func TestDisplayTitle(t *testing.T) {
 		{
 			name: "untitled when empty",
 			s:    &Session{},
-			want: "(untitled)",
+			want: "*Octo Agent",
 		},
 	}
 	for _, tt := range tests {
