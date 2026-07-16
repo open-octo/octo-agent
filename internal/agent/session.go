@@ -365,25 +365,25 @@ func randomSuffix(now time.Time) string {
 }
 
 // BranchFrom creates a new session branched from s, copying its meta fields
-// (model, system prompt, working dir, permission mode) and the first
-// uptoIdx+1 messages. The new session's BranchedFrom is set to s.ID so the
-// UI can render a lineage label. The caller is responsible for Save()ing the
-// returned session. uptoIdx is clamped to [0, len(s.Messages)].
-func BranchFrom(s *Session, uptoIdx int) *Session {
-	if uptoIdx < 0 {
-		uptoIdx = 0
+// (model, system prompt, working dir, permission mode) and the first count
+// messages (Messages[0:count]). The new session's BranchedFrom is set to s.ID
+// so the UI can render a lineage label. The caller is responsible for Save()ing
+// the returned session. count is clamped to [0, len(s.Messages)].
+func BranchFrom(s *Session, count int) *Session {
+	if count < 0 {
+		count = 0
 	}
-	if uptoIdx > len(s.Messages) {
-		uptoIdx = len(s.Messages)
+	if count > len(s.Messages) {
+		count = len(s.Messages)
 	}
 	branch := NewSession(s.Model, s.System)
 	branch.WorkingDir = s.WorkingDir
 	branch.PermissionMode = s.PermissionMode
 	branch.ModelConfig = s.ModelConfig
 	branch.BranchedFrom = s.ID
-	if uptoIdx > 0 {
-		branch.Messages = make([]Message, uptoIdx)
-		copy(branch.Messages, s.Messages[:uptoIdx])
+	if count > 0 {
+		branch.Messages = make([]Message, count)
+		copy(branch.Messages, s.Messages[:count])
 	}
 	return branch
 }

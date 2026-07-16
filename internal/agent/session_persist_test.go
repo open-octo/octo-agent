@@ -324,7 +324,7 @@ func TestPersistContextUsage(t *testing.T) {
 }
 
 // TestBranchFrom verifies that BranchFrom copies meta fields and the first
-// uptoIdx messages, sets BranchedFrom, and survives a Save/Load roundtrip.
+// count messages, sets BranchedFrom, and survives a Save/Load roundtrip.
 func TestBranchFrom(t *testing.T) {
 	setTempHome(t)
 
@@ -342,7 +342,7 @@ func TestBranchFrom(t *testing.T) {
 		t.Fatalf("src Save: %v", err)
 	}
 
-	branch := BranchFrom(src, 3) // copy first 3 messages (up to "branch from here")
+	branch := BranchFrom(src, 3) // copy first 3 messages (index 0..2, i.e. up to and including "branch from here")
 	if branch.BranchedFrom != src.ID {
 		t.Errorf("BranchedFrom = %q, want %q", branch.BranchedFrom, src.ID)
 	}

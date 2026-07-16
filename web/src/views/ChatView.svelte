@@ -203,6 +203,10 @@
         // chips) so a reloaded transcript shows the same attachments the live
         // turn did — this is the only place reload rehydrates them.
         images: ev.images ?? [],
+        // Position in the backend's persisted Messages array. Tool_result-only
+        // bookkeeping messages are skipped during replay, so this can differ
+        // from the rendered index — the branch feature relies on it.
+        messageIndex: ev.message_index,
       })
     } else if (ev.type === 'assistant_message') {
       // Skip empty assistant turns (thinking-only / tool-only rounds) so they
@@ -687,7 +691,7 @@
           // Steer messages enter history in chronological order: before any
           // assistant reply that is still streaming, so the transcript reads as
           // user-steer → next-assistant-reply (mirrors the TUI's EventSteerInjected).
-          const confirmedMsg = { id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images }
+          const confirmedMsg = { id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images, messageIndex: (ev as any).message_index }
           const lastStreamingAssistant = msgs.findLastIndex((x: any) => x.type === 'assistant' && x.streaming)
           if (lastStreamingAssistant >= 0) {
             msgs.splice(lastStreamingAssistant, 0, confirmedMsg)
@@ -700,9 +704,9 @@
           const lastPending = msgs.findLastIndex((x: any) => x.type === 'user' && x.pending)
           if (lastPending >= 0 && msgs[lastPending].content === content) {
             confirmedPendingId = msgs[lastPending].id
-            msgs[lastPending] = { ...msgs[lastPending], id: uid('u'), createdAt, pending: false, images }
+            msgs[lastPending] = { ...msgs[lastPending], id: uid('u'), createdAt, pending: false, images, messageIndex: (ev as any).message_index }
           } else {
-            msgs.push({ id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images })
+            msgs.push({ id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images, messageIndex: (ev as any).message_index })
           }
         }
         return { ...m, [sid]: msgs }
@@ -1276,23 +1280,27 @@
 
   // Confirm: create the branched session with the (possibly edited) prompt,
   // navigate to it, and auto-send so the variant reply streams immediately.
+  let branchSendTimer: ReturnType<typeof setTimeout> | null = null
   async function confirmBranch() {
     const sid = get(activeSessionId)
     if (!sid || branchModal.busy) return
     branchModal.busy = true
     try {
-      const created = await api.branchSession(sid, branchModal.index, branchModal.draft) as any
-      const newSess = created.session ?? created
+      const newSess = await api.branchSession(sid, branchModal.index, branchModal.draft)
       sessions.update(ss => [newSess, ...ss])
       activeSessionId.set(newSess.id)
       activeSession.set(newSess.id)
       branchModal.open = false
-      // Wait one tick for the new session's chat state to register, then send.
-      setTimeout(() => { ws.sendMessage(newSess.id, branchModal.draft) }, 50)
-    } catch (e: any) {
-      showToast(e.message, 'error')
-    } finally {
       branchModal.busy = false
+      // Defer the send until the new session's chat state registers.
+      if (branchSendTimer) clearTimeout(branchSendTimer)
+      branchSendTimer = setTimeout(() => {
+        ws.sendMessage(newSess.id, branchModal.draft)
+        branchSendTimer = null
+      }, 100)
+    } catch (e: any) {
+      branchModal.busy = false
+      showToast(e.message, 'error')
     }
   }
 </script>
@@ -1445,7 +1453,7 @@
                     {#if msg.pending}<span class="pending-spinner" title={$t('status.running')}></span>{/if}
                   </div>
                   <div class="msg-actions">
-                    <button class="action-btn" title={$t('chat.branch')} onclick={() => openBranch(i, msg.content)}>
+                    <button class="action-btn" title={$t('chat.branch')} onclick={() => openBranch(msg.messageIndex, msg.content)}>
                       <iconify-icon icon="lucide:git-branch" width="13"></iconify-icon>
                     </button>
                     <button class="action-btn" title={$t('chat.edit')} onclick={() => editMessage(msg.content)}>

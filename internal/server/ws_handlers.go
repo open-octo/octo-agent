@@ -1172,10 +1172,11 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	images = append(images, docRefs...)
 	if visible != "" || len(images) > 0 {
 		userEvent := map[string]any{
-			"type":       "history_user_message",
-			"session_id": sess.ID,
-			"content":    visible,
-			"created_at": userMsg.CreatedAt.UnixMilli(),
+			"type":          "history_user_message",
+			"session_id":    sess.ID,
+			"content":       visible,
+			"created_at":    userMsg.CreatedAt.UnixMilli(),
+			"message_index": len(sess.Messages), // position in the persisted Messages array (before this message is appended)
 		}
 		if len(images) > 0 {
 			userEvent["images"] = images

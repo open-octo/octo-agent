@@ -142,6 +142,96 @@ func TestHandleDeleteSession(t *testing.T) {
 	}
 }
 
+// TestHandleBranchSession verifies POST /api/sessions/{id}/branch:
+// 200 with a new session whose history is copied up to message_index, 400
+// when the index is out of range, and 404 when the source does not exist.
+func TestHandleBranchSession(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "sys")
+	sess.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: "hello"},
+		{Role: agent.RoleAssistant, Content: "hi"},
+		{Role: agent.RoleUser, Content: "branch here"},
+		{Role: agent.RoleAssistant, Content: "ok"},
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// 404 — source session not found
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/does-not-exist/branch",
+		strings.NewReader(`{"message_index":0}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("missing session: status = %d, want 404", w.Code)
+	}
+
+	// 400 — index out of range
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
+		strings.NewReader(`{"message_index":99}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("out-of-range: status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+
+	// 200 — valid branch with prompt override
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
+		strings.NewReader(`{"message_index":2,"prompt_override":"BRANCHED VARIANT"}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Session struct {
+			ID     string `json:"id"`
+			Title  string `json:"title"`
+			Model  string `json:"model"`
+			Source string `json:"source"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, w.Body.String())
+	}
+	if resp.Session.ID == sess.ID {
+		t.Fatal("branch returned the same session id")
+	}
+
+	// Branch was saved and carries the override + lineage.
+	branch, err := agent.LoadSession(resp.Session.ID)
+	if err != nil {
+		t.Fatalf("load branch: %v", err)
+	}
+	if len(branch.Messages) != 3 {
+		t.Fatalf("branch Messages len = %d, want 3", len(branch.Messages))
+	}
+	if branch.Messages[2].Content != "BRANCHED VARIANT" {
+		t.Fatalf("last message = %q, want BRANCHED VARIANT", branch.Messages[2].Content)
+	}
+	if branch.BranchedFrom != sess.ID {
+		t.Fatalf("BranchedFrom = %q, want %q", branch.BranchedFrom, sess.ID)
+	}
+	if branch.System != "sys" {
+		t.Fatalf("System = %q, want sys", branch.System)
+	}
+
+	// Source session was untouched.
+	srcReloaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload source: %v", err)
+	}
+	if len(srcReloaded.Messages) != 4 {
+		t.Fatalf("source Messages len = %d, want 4 (untouched)", len(srcReloaded.Messages))
+	}
+}
+
 // TestHandleDeleteSession_InterruptsActiveTurn is the regression guard for
 // the zombie-modal-resurrects-the-deleted-file bug: deleting a session must
 // cancel its registered turn (e.g. one blocked in ask_user_question) before

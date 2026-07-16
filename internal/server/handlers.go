@@ -554,9 +554,10 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 			// (tool_result-only messages are bookkeeping, not user-visible).
 			if text != "" || len(images) > 0 {
 				ev := map[string]any{
-					"type":       "history_user_message",
-					"content":    text,
-					"created_at": createdAt,
+					"type":          "history_user_message",
+					"content":       text,
+					"created_at":    createdAt,
+					"message_index": i, // position in the persisted Messages array — may differ from the rendered index (tool_result-only messages are skipped)
 				}
 				if len(images) > 0 {
 					ev["images"] = images
