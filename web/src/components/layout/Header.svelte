@@ -17,17 +17,16 @@
     setNotificationsEnabled(!$notificationsEnabled)
   }
 
-  // Frameless window: Mac gets a hidden drag strip (InvisibleTitleBarHeight)
-  // that restores the native traffic-light behaviour, so we skip the custom
-  // buttons there. Windows/Linux have no native buttons, so we draw our own.
+  // Frameless window: the frontend draws its own window controls on every
+  // platform. Mac gets traffic-light-style buttons on the left, Windows/Linux
+  // keep their right-side controls. The CSS --wails-draggable header region
+  // handles dragging; the native bridge handles minimise/maximise/close.
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
   // Desktop only: double-clicking the draggable header zooms the window, the way
-  // a native title bar does. Wails' custom drag region (and the Mac hidden-inset
-  // drag strip) doesn't wire this up, and the octo-served page can't call Wails
-  // directly, so it goes through the native bridge over HTTP. Ignore double-clicks
-  // that land on a control. Applies to all platforms — Mac's InvisibleTitleBarHeight
-  // strip doesn't forward double-click events to the OS either, so we handle it.
+  // a native title bar does. Wails' custom drag region doesn't wire this up, and
+  // the octo-served page can't call Wails directly, so it goes through the native
+  // bridge over HTTP. Ignore double-clicks that land on a control.
   function onHeaderDblClick(e: MouseEvent) {
     if (!$nativeShell) return
     if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return
@@ -52,6 +51,7 @@
     try {
       await nativeToggleMaximise()
       isMaximised = next
+      ++stateSeq // stale focus refreshes that started before the toggle must not overwrite this
     } catch {
       // Toggle failed — fetch the real OS state to stay in sync rather than
       // gambling that the old isMaximised is still accurate.
@@ -68,8 +68,15 @@
   })
 </script>
 
-<header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
+<header style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
   <div class="left">
+    {#if $nativeShell && isMac}
+      <div class="traffic-lights">
+        <button class="traffic-light close" aria-label="Close" title="Close" onclick={() => nativeClose()}></button>
+        <button class="traffic-light minimise" aria-label="Minimise" title="Minimise" onclick={() => nativeMinimise()}></button>
+        <button class="traffic-light maximise" aria-label={isMaximised ? 'Restore' : 'Maximise'} title={isMaximised ? 'Restore' : 'Maximise'} data-icon={isMaximised ? '❐' : '+'} onclick={flipMaximise}></button>
+      </div>
+    {/if}
     <button class="icon-btn" title={$t('header.toggle_sidebar')} onclick={cycleSidebar}>
       <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
     </button>
@@ -126,16 +133,15 @@ header {
   padding: 0 16px;
   z-index: 100;
 }
-/* Desktop shell (macOS): the hidden-inset title bar floats the traffic-light
-   buttons over the top-left, so inset the header past them. */
-header.native-inset { padding-left: 82px; }
 /* The header is a window drag handle. Every interactive control on it opts
    back to no-drag so it stays clickable — the blank strips between controls
    drag the window. Applied for all platforms (frameless window now), not just
    macOS, since --wails-draggable only activates under Frameless: true. */
 header .icon-btn,
 header .search-pill,
-header .brand { --wails-draggable: no-drag; }
+header .brand,
+header .traffic-lights,
+header .window-controls { --wails-draggable: no-drag; }
 .left, .right { display: flex; align-items: center; gap: 8px; }
 .brand { display: flex; align-items: center; gap: 10px; padding-left: 4px; }
 .brand :global(.logo) {
@@ -165,10 +171,11 @@ kbd {
   background: var(--bg-container); border: 1px solid var(--border-secondary); border-radius: 4px;
   padding: 1px 5px; color: var(--text-tertiary);
 }
-/* Window controls (Windows/Linux only — Mac uses native traffic lights via
-   InvisibleTitleBarHeight). Isolated in their own visual group: a left separator
-   line + 16px breathing room, so they never visually merge with the settings
-   button to their left. Maximise icon flips □/❐ to reflect the window state. */
+/* Window controls: Windows/Linux get right-side controls; Mac gets traffic-light
+   controls on the left (see .traffic-lights below). Isolated in their own visual
+   group: a left separator line + 8px breathing room, so they never visually merge
+   with the settings button to their left. Maximise icon flips □/❐ to reflect the
+   window state. */
 .window-controls {
   display: flex;
   align-items: center;
@@ -176,7 +183,6 @@ kbd {
   margin-left: 8px;
   padding-left: 8px;
   border-left: 1px solid var(--border-secondary);
-  --wails-draggable: no-drag;
 }
 .window-btn {
   width: 40px; height: 32px; border: none; background: transparent;
@@ -186,4 +192,38 @@ kbd {
 }
 .window-btn:hover { background: var(--hover-neutral); }
 .window-btn.close:hover { background: #e81123; color: white; }
+
+/* Mac traffic lights — frameless window, so the system traffic lights are gone
+   and we draw our own in their accustomed top-left position. Each button shows
+   its icon on hover, matching native macOS behaviour. The maximise/restore icon
+   flips between + and ❐ like the Windows/Linux controls so the current state
+   is visible. */
+.traffic-lights {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 10px;
+}
+.traffic-light {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 9px;
+  line-height: 1;
+}
+.traffic-light::after { opacity: 0; transition: opacity 0.1s ease; }
+.traffic-light:hover::after { opacity: 1; }
+.traffic-light.close { background: #ff5f57; }
+.traffic-light.minimise { background: #febc2e; }
+.traffic-light.maximise { background: #28c840; }
+.traffic-light.close::after { content: '\00d7'; }
+.traffic-light.minimise::after { content: '\2212'; }
+.traffic-light.maximise::after { content: attr(data-icon); }
 </style>
