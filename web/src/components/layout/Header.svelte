@@ -23,11 +23,13 @@
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
   // Desktop only: double-clicking the draggable header zooms the window, the way
-  // a native title bar does. Wails' custom drag region doesn't wire this up, and
-  // the octo-served page can't call Wails directly, so it goes through the native
-  // bridge over HTTP. Ignore double-clicks that land on a control.
+  // a native title bar does. Wails' custom drag region (and the Mac hidden-inset
+  // drag strip) doesn't wire this up, and the octo-served page can't call Wails
+  // directly, so it goes through the native bridge over HTTP. Ignore double-clicks
+  // that land on a control. Applies to all platforms — Mac's InvisibleTitleBarHeight
+  // strip doesn't forward double-click events to the OS either, so we handle it.
   function onHeaderDblClick(e: MouseEvent) {
-    if (!$nativeShell || isMac) return
+    if (!$nativeShell) return
     if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return
     flipMaximise()
   }
@@ -171,8 +173,8 @@ kbd {
   display: flex;
   align-items: center;
   gap: 0;
-  margin-left: 16px;
-  padding-left: 16px;
+  margin-left: 8px;
+  padding-left: 8px;
   border-left: 1px solid var(--border-secondary);
   --wails-draggable: no-drag;
 }

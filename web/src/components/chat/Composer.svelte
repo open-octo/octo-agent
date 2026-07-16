@@ -67,12 +67,21 @@
   // Auto-grow the textarea with its content up to a max height, then scroll
   // inside (matches the max-height in CSS). The $effect re-runs on every text
   // change — typing, paste, send-clear, or programmatic setText.
+  //
+  // On Windows, setting height:'auto' then reading scrollHeight can return an
+  // inflated value (the drag strip + font metrics differ), blowing the textarea
+  // up to 5-6 lines on mount. Lock overflow to hidden while measuring so the
+  // scrollbar never contributes to scrollHeight, and floor the result to a
+  // single line so an empty box never opens tall.
   const MAX_TEXTAREA_PX = 200
+  const MIN_TEXTAREA_PX = 24 // ≈ one line: 14px * 1.6 line-height + padding
   function autoResize() {
     const el = textareaEl
     if (!el) return
+    el.style.overflow = 'hidden'
     el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, MAX_TEXTAREA_PX) + 'px'
+    el.style.height = Math.min(Math.max(el.scrollHeight, MIN_TEXTAREA_PX), MAX_TEXTAREA_PX) + 'px'
+    el.style.overflow = ''
   }
   $effect(() => {
     text // track the bound value so the effect re-runs when it changes
@@ -1067,7 +1076,7 @@
 textarea {
   border: none; outline: none; resize: none; font-size: 14px; line-height: 1.6;
   font-family: inherit; color: var(--text); background: transparent; width: 100%;
-  max-height: 200px; overflow-y: auto;
+  max-height: 200px; overflow-y: auto; min-height: 24px; /* ≈ MIN_TEXTAREA_PX in autoResize */
 }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .attach-chip {

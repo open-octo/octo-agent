@@ -110,18 +110,20 @@ func shellURL(base, hash string) string {
 // false/0×0 and would clobber the freshly-saved state. The window methods are
 // read before taking the lock (they marshal to the UI thread; holding
 // settingsMu across that could deadlock the main thread). Size is recorded only
-// while neither maximised nor fullscreen — both report a size that isn't the
-// windowed size, so persisting it would corrupt the restore size a relaunch
-// un-maximises back to.
+// while neither maximised, fullscreen, nor minimised — maximised/fullscreen
+// report a size that isn't the windowed size, and on Windows a minimised window
+// reports its taskbar-button size (≈160×28); persisting any of these would
+// corrupt the restore size a relaunch un-maximises back to.
 func (b *nativeBridge) rememberWindowGeometry(w *application.WebviewWindow) {
 	maximised := w.IsMaximised()
 	fullscreen := w.IsFullscreen()
+	minimised := w.IsMinimised()
 	width, height := w.Size()
 
 	b.settingsMu.Lock()
 	defer b.settingsMu.Unlock()
 	b.settings.WindowMaximised = maximised
-	if !maximised && !fullscreen && width > 0 && height > 0 {
+	if !maximised && !fullscreen && !minimised && width > 0 && height > 0 {
 		b.settings.WindowWidth = width
 		b.settings.WindowHeight = height
 	}
