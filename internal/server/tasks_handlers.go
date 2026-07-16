@@ -211,12 +211,15 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 	sw := s.newWSStreamWriter(sessionID)
 
 	// Broadcast the user message immediately so the transcript shows what the
-	// task is doing while it runs.
+	// task is doing while it runs. message_index mirrors doAgentTurn: without
+	// it an edit/branch on this bubble would send index 0 and clobber the
+	// session's first message.
 	s.wsHub.broadcast(sessionID, map[string]any{
-		"type":       "history_user_message",
-		"session_id": sessionID,
-		"content":    task.Prompt,
-		"created_at": userMsg.CreatedAt.UnixMilli(),
+		"type":          "history_user_message",
+		"session_id":    sessionID,
+		"content":       task.Prompt,
+		"created_at":    userMsg.CreatedAt.UnixMilli(),
+		"message_index": len(sess.Messages),
 	})
 
 	// Seed the live state with a "thinking" progress indicator so late
@@ -329,6 +332,13 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			sw.error(err.Error())
+		}
+		// A first-round failure or interrupt rolls the task prompt back out of
+		// history and the SyncFrom+Save above erased the persisted copy — tell
+		// watching tabs to re-fetch so their message indices realign with disk
+		// (same contract as doAgentTurn).
+		if len(sess.Messages) < historyWatermark {
+			s.broadcastHistoryReload(sessionID)
 		}
 		s.notifyTaskResult(task, fmt.Sprintf("⏰ %s failed: %v", task.Name, err))
 	} else {

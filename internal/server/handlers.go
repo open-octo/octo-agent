@@ -771,10 +771,15 @@ type editMessageRequest struct {
 	NewContent   string `json:"new_content"`
 }
 
-// handleEditMessage truncates the session's history past message_index and
-// rewrites that message's content to new_content. The source session is mutated
-// in place (unlike branch, which creates a new one). The caller then resends
-// the modified prompt via the normal chat flow to regenerate from that point.
+// handleEditMessage replaces the user message at message_index and regenerates
+// from that point: any in-flight turn is interrupted and waited out, history is
+// truncated to just before the message, and a fresh turn runs with new_content
+// plus the original message's image attachments. This mirrors handleWSRetry's
+// rollback-and-rerun pattern — the edited prompt re-enters history through the
+// normal turn flow, so it is persisted (and broadcast with a correct
+// message_index) exactly once. The old rewrite-in-place-then-caller-resends
+// contract double-appended the prompt and, because history then ended on a
+// user message, tripped the crash-recovery reminder on the resend.
 func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -786,36 +791,82 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	if strings.TrimSpace(req.NewContent) == "" {
+		writeError(w, http.StatusBadRequest, "new_content must be non-empty")
+		return
+	}
+
+	// Interrupt any in-flight turn, then wait for it to fully wind down —
+	// turnRunning clears only after the turn's final save — so the truncate
+	// below cannot race the dying turn's own persistence. Editing mid-stream
+	// is the supported "change my mind while it's replying" flow.
+	s.interruptSession(id)
+	mu := s.sessionTurnLock(id)
+	deadline := time.Now().Add(10 * time.Second)
+	mu.Lock()
+	for s.turnRunning[id] {
+		mu.Unlock()
+		if time.Now().After(deadline) {
+			writeError(w, http.StatusConflict, "interrupted turn is still winding down; retry the edit")
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+		mu.Lock()
+	}
+
+	// Load AFTER the wind-down so the interrupted turn's final save (or its
+	// first-round rollback) is what we see.
 	sess, err := agent.LoadSession(id)
 	if err != nil {
+		mu.Unlock()
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	// Interrupt any in-flight turn before mutating history (the turn goroutine
-	// can race with the truncate + save below).
-	s.interruptSession(id)
-	if req.MessageIndex < 0 || req.MessageIndex >= len(sess.Messages) {
+	if req.MessageIndex < 0 || req.MessageIndex > len(sess.Messages) {
+		mu.Unlock()
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(sess.Messages)))
 		return
 	}
-	// Truncate everything past the edited message, then rewrite its content.
-	sess.TruncateTo(req.MessageIndex + 1)
-	sess.Messages[req.MessageIndex].Content = req.NewContent
-	// Strip tool_result blocks (bookkeeping) but keep image blocks (attachments).
-	if len(sess.Messages[req.MessageIndex].Blocks) > 0 {
-		var kept []agent.ContentBlock
-		for _, b := range sess.Messages[req.MessageIndex].Blocks {
-			if b.Type != "tool_result" {
-				kept = append(kept, b)
+	// message_index == len(Messages) is legal: a first-round interrupt rolls
+	// the still-unanswered prompt back out of history, so there is nothing
+	// left to strip — the rerun below simply recreates it.
+	var blocks []agent.ContentBlock
+	if req.MessageIndex < len(sess.Messages) {
+		target := sess.Messages[req.MessageIndex]
+		if target.Role != agent.RoleUser {
+			mu.Unlock()
+			writeError(w, http.StatusBadRequest, "message_index does not name a user message")
+			return
+		}
+		// Keep the original image attachments (rehydrated by LoadSession) so
+		// the regenerated turn re-sends them with the edited text — the same
+		// rehydration handleWSRetry does.
+		for _, b := range target.Blocks {
+			if b.Type == "image" {
+				blocks = append(blocks, b)
 			}
 		}
-		sess.Messages[req.MessageIndex].Blocks = kept
+		sess.TruncateTo(req.MessageIndex)
+		if err := sess.Save(); err != nil {
+			mu.Unlock()
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
-	if err := sess.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	s.broadcastHistoryReload(id)
+	s.broadcastRollback(id)
+
+	s.turnRunning[id] = true
+	mu.Unlock()
+
+	go func() {
+		defer func() {
+			mu.Lock()
+			s.turnRunning[id] = false
+			mu.Unlock()
+		}()
+		s.runAgentTurnLoop(sess, req.NewContent, blocks, imageRefsFromBlocks(blocks))
+	}()
+
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

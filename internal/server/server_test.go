@@ -233,14 +233,17 @@ func TestHandleBranchSession(t *testing.T) {
 }
 
 // TestHandleEditMessage verifies POST /api/sessions/{id}/edit_message:
-// history past the index is truncated, the message content is rewritten, and
-// the source session is mutated in place (no new session created).
+// history is truncated to just before the edited user message and a fresh
+// turn reruns with the new content, so the edited prompt lands in history
+// exactly once (the old rewrite-in-place + caller-resend contract appended
+// it twice) followed by a regenerated reply.
 func TestHandleEditMessage(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
 	sess := agent.NewSession("stub-model", "sys")
+	sess.Title = "fixed title"
 	sess.Messages = []agent.Message{
 		{Role: agent.RoleUser, Content: "one"},
 		{Role: agent.RoleAssistant, Content: "two"},
@@ -252,8 +255,10 @@ func TestHandleEditMessage(t *testing.T) {
 	}
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
 
-	// 400 — out of range
+	// 400 — out of range (len is tolerated as "already rolled back"; past it is not)
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
 		strings.NewReader(`{"message_index":99,"new_content":"x"}`))
 	w := httptest.NewRecorder()
@@ -262,28 +267,47 @@ func TestHandleEditMessage(t *testing.T) {
 		t.Fatalf("out-of-range: status = %d, want 400", w.Code)
 	}
 
-	// 200 — edit index 1 (the first assistant message), truncate the rest
+	// 400 — index names an assistant message; only user prompts are editable
 	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
-		strings.NewReader(`{"message_index":1,"new_content":"REWRITTEN"}`))
+		strings.NewReader(`{"message_index":1,"new_content":"x"}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("assistant-index: status = %d, want 400", w.Code)
+	}
+
+	// 200 — edit the second user prompt; the rerun regenerates from it
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
+		strings.NewReader(`{"message_index":2,"new_content":"REWRITTEN"}`))
 	w = httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 
-	// Source session mutated in place: truncated to 2 messages, content rewritten.
-	reloaded, err := agent.LoadSession(sess.ID)
-	if err != nil {
-		t.Fatalf("reload: %v", err)
+	// The rerun is async — wait for the regenerated reply to persist.
+	var reloaded *agent.Session
+	waitFor(t, func() bool {
+		var err error
+		reloaded, err = agent.LoadSession(sess.ID)
+		return err == nil && len(reloaded.Messages) == 4 &&
+			reloaded.Messages[3].Role == agent.RoleAssistant
+	})
+	if reloaded.Messages[2].Content != "REWRITTEN" {
+		t.Fatalf("edited prompt = %q, want REWRITTEN (exactly, no reminder prefix)", reloaded.Messages[2].Content)
 	}
-	if len(reloaded.Messages) != 2 {
-		t.Fatalf("Messages len = %d, want 2", len(reloaded.Messages))
+	if reloaded.Messages[3].Content != "stub reply" {
+		t.Fatalf("regenerated reply = %q, want stub reply", reloaded.Messages[3].Content)
 	}
-	if reloaded.Messages[1].Content != "REWRITTEN" {
-		t.Fatalf("content = %q, want REWRITTEN", reloaded.Messages[1].Content)
+	// Exactly once — the old contract left a rewritten copy AND a resent copy.
+	count := 0
+	for _, m := range reloaded.Messages {
+		if m.Content == "REWRITTEN" {
+			count++
+		}
 	}
-	if reloaded.Messages[1].Blocks != nil {
-		t.Fatalf("Blocks should be empty (message had none), got %v", reloaded.Messages[1].Blocks)
+	if count != 1 {
+		t.Fatalf("edited prompt appears %d times, want exactly 1", count)
 	}
 }
 

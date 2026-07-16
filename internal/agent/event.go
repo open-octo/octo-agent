@@ -157,6 +157,12 @@ type AgentEvent struct {
 	// including attachment blocks — for handlers that render more than the
 	// plain texts in Messages.
 	Steer []InboxItem `json:"-"`
+
+	// SteerBaseIndex is the history position the first steer item was appended
+	// at (EventSteerInjected only). Item k of Steer/Messages lands at
+	// SteerBaseIndex+k, so a persistence-aware handler can label each steered
+	// user message with its true message_index for later edit/branch.
+	SteerBaseIndex int `json:"-"`
 }
 
 // CompactStats carries the numbers behind the compaction events. BeforeTokens
