@@ -30,7 +30,9 @@ type wsMsgUserMessage struct {
 
 type wsUserFile struct {
 	Name string `json:"name"`
-	// DataURL carries an image attachment inline (base64 data URL).
+	// DataURL carries an image attachment inline (base64 data URL). Legacy
+	// path: current web clients upload images and send Path instead, because
+	// an inline image over wsMaxMessageSize kills the WS connection unparsed.
 	DataURL string `json:"data_url,omitempty"`
 	// Path references a document already uploaded via POST /api/upload
 	// (an /api/uploads/<name> URL).

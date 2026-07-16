@@ -630,3 +630,102 @@ func TestParseUserFilesLocalPath(t *testing.T) {
 		t.Errorf("local path must be ignored for a non-loopback client, got notes=%+v", att2.notes)
 	}
 }
+
+// TestParseUserFiles_ImagePathUpload_Vision verifies that an image uploaded
+// via POST /api/upload and referenced by path becomes a model-facing image
+// block for a vision model — the composer no longer inlines images as data
+// URLs (a base64 image over 512 KB killed the WS connection and silently
+// swallowed the message).
+func TestParseUserFiles_ImagePathUpload_Vision(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	dir, err := ensureUploadsDir()
+	if err != nil {
+		t.Fatalf("uploads dir: %v", err)
+	}
+	payload := []byte{0x89, 'P', 'N', 'G', 1, 2, 3}
+	abs := filepath.Join(dir, "42_shot.png")
+	if err := os.WriteFile(abs, payload, 0o600); err != nil {
+		t.Fatalf("stage upload: %v", err)
+	}
+
+	att := parseUserFiles([]wsUserFile{
+		{Name: "shot.png", MimeType: "image/png", Path: "/api/uploads/42_shot.png"},
+	}, false, true)
+
+	if len(att.blocks) != 1 || len(att.images) != 1 || len(att.notes) != 0 {
+		t.Fatalf("blocks/images/notes = %d/%d/%d, want 1/1/0",
+			len(att.blocks), len(att.images), len(att.notes))
+	}
+	b := att.blocks[0]
+	if b.Type != "image" || b.Image == nil || b.Image.MIMEType != "image/png" {
+		t.Errorf("unexpected block: %+v", b)
+	}
+	if b.Image != nil && string(b.Image.Data) != string(payload) {
+		t.Errorf("block bytes mismatch")
+	}
+	if b.ImagePath != abs {
+		t.Errorf("ImagePath = %q, want %q", b.ImagePath, abs)
+	}
+	if att.images[0] != "/api/uploads/42_shot.png" {
+		t.Errorf("display URL = %q, want /api/uploads/42_shot.png", att.images[0])
+	}
+}
+
+// TestParseUserFiles_ImagePathUpload_NonVision verifies that for a text-only
+// model an uploaded image stays a read_file path note (same degradation the
+// DataURL branch got in #1467) and never becomes an image block.
+func TestParseUserFiles_ImagePathUpload_NonVision(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	dir, err := ensureUploadsDir()
+	if err != nil {
+		t.Fatalf("uploads dir: %v", err)
+	}
+	abs := filepath.Join(dir, "42_shot.png")
+	if err := os.WriteFile(abs, []byte{0x89, 'P', 'N', 'G'}, 0o600); err != nil {
+		t.Fatalf("stage upload: %v", err)
+	}
+
+	att := parseUserFiles([]wsUserFile{
+		{Name: "shot.png", MimeType: "image/png", Path: "/api/uploads/42_shot.png"},
+	}, false, false)
+
+	if len(att.blocks) != 0 || len(att.images) != 0 || len(att.notes) != 1 {
+		t.Fatalf("blocks/images/notes = %d/%d/%d, want 0/0/1",
+			len(att.blocks), len(att.images), len(att.notes))
+	}
+	if !strings.Contains(att.notes[0], abs) {
+		t.Errorf("note %q should reference %q", att.notes[0], abs)
+	}
+}
+
+// TestParseUserFiles_SVGPathUpload_StaysNote verifies formats the providers
+// reject as image input (svg) fall back to a path note even for vision models.
+func TestParseUserFiles_SVGPathUpload_StaysNote(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	dir, err := ensureUploadsDir()
+	if err != nil {
+		t.Fatalf("uploads dir: %v", err)
+	}
+	abs := filepath.Join(dir, "42_logo.svg")
+	if err := os.WriteFile(abs, []byte("<svg/>"), 0o600); err != nil {
+		t.Fatalf("stage upload: %v", err)
+	}
+
+	att := parseUserFiles([]wsUserFile{
+		{Name: "logo.svg", MimeType: "image/svg+xml", Path: "/api/uploads/42_logo.svg"},
+	}, false, true)
+
+	if len(att.blocks) != 0 || len(att.images) != 0 || len(att.notes) != 1 {
+		t.Fatalf("blocks/images/notes = %d/%d/%d, want 0/0/1",
+			len(att.blocks), len(att.images), len(att.notes))
+	}
+}

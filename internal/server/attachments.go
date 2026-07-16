@@ -44,9 +44,11 @@ func isImageUpload(path string) bool {
 	return false
 }
 
-// User attachments sent over the WebSocket message payload. Images arrive as
-// data URLs (the composer compresses them client-side); documents were already
-// uploaded via POST /api/upload and arrive as an /api/uploads/ URL reference.
+// User attachments sent over the WebSocket message payload. Images and
+// documents are uploaded via POST /api/upload and arrive as an /api/uploads/
+// URL reference so the WS frame stays far below wsMaxMessageSize; a base64
+// data URL is the legacy inline form still used by IM channel adapters and
+// older web clients.
 
 // userAttachments is the parsed, persisted form of a WS message's files array.
 type userAttachments struct {
@@ -131,6 +133,21 @@ func parseUserFiles(files []wsUserFile, allowLocalPath, vision bool) userAttachm
 				log.Printf("[ws] file attachment %q: %v", f.Name, err)
 				continue
 			}
+			if mime := imageMIMEForExt(abs); mime != "" && vision {
+				// Uploaded image + vision model: embed it as an image block,
+				// same shape as the legacy data-URL branch above. Non-vision
+				// models keep the path note below so they can read_file it.
+				data, err := os.ReadFile(abs)
+				if err != nil {
+					log.Printf("[ws] image attachment %q: %v", f.Name, err)
+					continue
+				}
+				block := agent.NewImageBlock(mime, data)
+				block.ImagePath = abs
+				att.blocks = append(att.blocks, block)
+				att.images = append(att.images, "/api/uploads/"+filepath.Base(abs))
+				continue
+			}
 			att.notes = append(att.notes, agent.AttachmentNote(abs))
 		}
 	}
@@ -152,8 +169,8 @@ func saveImageAttachment(name, dataURL string) (agent.ContentBlock, string, erro
 	}
 
 	// Basename only, no traversal; the stored extension is derived from the
-	// actual MIME type (the composer re-encodes to JPEG but keeps the original
-	// filename) so rehydration and Content-Type sniffing stay truthful.
+	// actual MIME type so rehydration and Content-Type sniffing stay truthful
+	// even when the client-supplied filename lies about the format.
 	base := strings.ReplaceAll(filepath.Base(name), "..", "_")
 	if base == "" || base == "." || base == string(filepath.Separator) {
 		base = "image"
@@ -220,6 +237,24 @@ func extForImageMIME(mime string) string {
 	default:
 		return ".jpg"
 	}
+}
+
+// imageMIMEForExt maps an uploaded image's extension to the MIME type used
+// for its model-facing image block. Only formats providers accept as image
+// input are listed; anything else (svg, bmp, non-images) returns "" and the
+// attachment stays a read_file path note.
+func imageMIMEForExt(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	}
+	return ""
 }
 
 // ─── GET /api/uploads/{name} ────────────────────────────────────────────────
