@@ -79,6 +79,23 @@ func TestRunOnce_AgenticTurn(t *testing.T) {
 	}
 }
 
+func TestRunOnce_StreamKeepsStdoutPipeable(t *testing.T) {
+	// A headless one-shot must leave stdout carrying only the reply text so
+	// `octo "…" | program` gets clean input; the per-turn ⏱/ⓘ summary is
+	// diagnostic metadata and belongs on stderr.
+	cfg, stdout, stderr, _ := makeREPLFixture(t, "")
+
+	if code := runOnce(cfg, "ping", true); code != 0 {
+		t.Fatalf("exit = %d, stderr: %s", code, stderr.String())
+	}
+	if out := stdout.String(); strings.Contains(out, "⏱") || strings.Contains(out, "ⓘ cache") {
+		t.Errorf("stdout must not carry the turn summary:\n%s", out)
+	}
+	if !strings.Contains(stderr.String(), "⏱") {
+		t.Errorf("turn summary should go to stderr; got:\n%s", stderr.String())
+	}
+}
+
 func TestRunOnce_BufferedPrintsFinalText(t *testing.T) {
 	cfg, stdout, stderr, stub := makeREPLFixture(t, "")
 

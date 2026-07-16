@@ -158,8 +158,12 @@ func (v *plainView) TurnEnded(reply agent.Reply, stats TurnStats, err error) {
 	default:
 		fmt.Fprintln(v.out) // newline after the streamed reply
 		if !v.verbosity.quiet() {
-			// Always-on per-turn summary: how long it took and what it cost.
-			fmt.Fprintf(v.out, "  ⏱ %s, %s tokens\n",
+			// Per-turn summary (how long it took, what it cost) is diagnostic
+			// metadata, not answer content — it goes to stderr so a headless
+			// one-shot run (`octo "…" | program`) leaves stdout carrying only the
+			// reply text. Interactive plain-REPL users still see it (their stderr
+			// is the terminal). Mirrors printUsageLine's stderr routing.
+			fmt.Fprintf(v.errOut, "  ⏱ %s, %s tokens\n",
 				agent.FormatElapsedSeconds(int64(stats.Elapsed.Seconds())), agent.FormatGoalTokens(int64(stats.Tokens)))
 			// Surface cache activity per turn so the win is visible. Verbose-only
 			// (always-on there so "0 read, 0 write" is a useful debugging signal).
@@ -168,7 +172,7 @@ func (v *plainView) TurnEnded(reply agent.Reply, stats TurnStats, err error) {
 				show = true
 			}
 			if show {
-				fmt.Fprintf(v.out, "  ⓘ cache: %d read, %d write (in %d / out %d)\n",
+				fmt.Fprintf(v.errOut, "  ⓘ cache: %d read, %d write (in %d / out %d)\n",
 					reply.CacheReadTokens, reply.CacheWriteTokens, reply.InputTokens, reply.OutputTokens)
 			}
 		}
