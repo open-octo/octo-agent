@@ -59,6 +59,7 @@ type sessionItem struct {
 	ShowReasoning   *bool     `json:"show_reasoning,omitempty"`
 	ContextUsage    int       `json:"context_usage,omitempty"`
 	PendingQuestion bool      `json:"pending_question,omitempty"`
+	BranchedFrom    string    `json:"branched_from,omitempty"`
 }
 
 type sessionDetail struct {
@@ -115,6 +116,7 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 		ShowReasoning:   sr,
 		ContextUsage:    ctxUsage,
 		PendingQuestion: srv.hasPendingQuestion(s.ID),
+		BranchedFrom:    s.BranchedFrom,
 	}
 }
 
@@ -714,6 +716,44 @@ func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted, "failed": failed})
+}
+
+// ─── POST /api/sessions/{id}/branch ────────────────────────────────────────
+
+type branchSessionRequest struct {
+	MessageIndex int `json:"message_index"`
+}
+
+// handleBranchSession creates a new session branched from the source session's
+// history up to message_index (inclusive). The source session is untouched.
+// Returns the new session's descriptor so the client can navigate to it.
+func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+	var req branchSessionRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	src, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if req.MessageIndex < 0 || req.MessageIndex >= len(src.Messages) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(src.Messages)))
+		return
+	}
+	branch := agent.BranchFrom(src, req.MessageIndex+1) // +1: BranchFrom takes count (uptoIdx inclusive → exclusive len)
+	if err := branch.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.wsHub.broadcast("", wsEventSessionCreated{Type: "session_created", SessionID: branch.ID})
+	writeJSON(w, http.StatusOK, map[string]any{"session": s.toSessionItem(branch, "web", "")})
 }
 
 // ─── GET /api/tools ─────────────────────────────────────────────────────────

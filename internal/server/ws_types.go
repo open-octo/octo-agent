@@ -201,6 +201,11 @@ type wsEventSessionDeleted struct {
 	SessionID string `json:"session_id"`
 }
 
+type wsEventSessionCreated struct {
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+}
+
 type wsEventRequestFeedback struct {
 	Type string `json:"type"`
 	// SessionID is required: the ws-dispatcher drops any event whose session_id

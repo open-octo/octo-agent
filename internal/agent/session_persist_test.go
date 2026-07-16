@@ -322,3 +322,78 @@ func TestPersistContextUsage(t *testing.T) {
 		t.Errorf("no-count must not set a token count, got %d", s2.LastContextTokens)
 	}
 }
+
+// TestBranchFrom verifies that BranchFrom copies meta fields and the first
+// uptoIdx messages, sets BranchedFrom, and survives a Save/Load roundtrip.
+func TestBranchFrom(t *testing.T) {
+	setTempHome(t)
+
+	src := NewSession("claude-sonnet-4-20250514", "you are a helpful assistant")
+	src.WorkingDir = "/tmp/project"
+	src.PermissionMode = "auto"
+	src.ModelConfig = "claude-sonnet-4-20250514"
+	src.Messages = []Message{
+		NewUserMessage("hello"),
+		NewAssistantMessage("hi there"),
+		NewUserMessage("branch from here"),
+		NewAssistantMessage("this should not appear in branch"),
+	}
+	if err := src.Save(); err != nil {
+		t.Fatalf("src Save: %v", err)
+	}
+
+	branch := BranchFrom(src, 3) // copy first 3 messages (up to "branch from here")
+	if branch.BranchedFrom != src.ID {
+		t.Errorf("BranchedFrom = %q, want %q", branch.BranchedFrom, src.ID)
+	}
+	if branch.Model != src.Model {
+		t.Errorf("Model = %q, want %q", branch.Model, src.Model)
+	}
+	if branch.System != src.System {
+		t.Errorf("System mismatch")
+	}
+	if branch.WorkingDir != src.WorkingDir {
+		t.Errorf("WorkingDir = %q, want %q", branch.WorkingDir, src.WorkingDir)
+	}
+	if branch.PermissionMode != src.PermissionMode {
+		t.Errorf("PermissionMode = %q, want %q", branch.PermissionMode, src.PermissionMode)
+	}
+	if len(branch.Messages) != 3 {
+		t.Fatalf("Messages len = %d, want 3", len(branch.Messages))
+	}
+	if branch.Messages[2].Content != "branch from here" {
+		t.Errorf("last message = %q, want %q", branch.Messages[2].Content, "branch from here")
+	}
+
+	if err := branch.Save(); err != nil {
+		t.Fatalf("branch Save: %v", err)
+	}
+	reloaded, err := LoadSession(branch.ID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if reloaded.BranchedFrom != src.ID {
+		t.Errorf("reloaded BranchedFrom = %q, want %q", reloaded.BranchedFrom, src.ID)
+	}
+	if len(reloaded.Messages) != 3 {
+		t.Errorf("reloaded Messages len = %d, want 3", len(reloaded.Messages))
+	}
+}
+
+// TestBranchFrom_Clamp verifies that out-of-range indices are clamped.
+func TestBranchFrom_Clamp(t *testing.T) {
+	src := NewSession("m", "")
+	src.Messages = []Message{NewUserMessage("a"), NewAssistantMessage("b")}
+
+	// negative index → 0 messages
+	branch := BranchFrom(src, -1)
+	if len(branch.Messages) != 0 {
+		t.Errorf("negative idx: Messages len = %d, want 0", len(branch.Messages))
+	}
+
+	// index beyond length → all messages
+	branch = BranchFrom(src, 99)
+	if len(branch.Messages) != 2 {
+		t.Errorf("overflow idx: Messages len = %d, want 2", len(branch.Messages))
+	}
+}
