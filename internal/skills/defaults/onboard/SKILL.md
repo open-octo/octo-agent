@@ -144,6 +144,11 @@ All have fixed choices with a sensible default, so present each as an
 skip: an empty message can't be sent (both the terminal UI and the web composer
 ignore a blank Enter), so an un-clickable list would strand them.
 
+**Before asking any behaviour question, read `~/.octo/config.yml`** and check
+for existing values. If a field is already present in the config (e.g. the user
+set it via `octo config`), **skip** that question and reuse its value. Only ask
+when the field is absent from the file.
+
 **Permission mode** — how the assistant handles sensitive tool calls (file writes, shell commands, etc.).
 
 zh:
@@ -162,19 +167,24 @@ Store as `prefs.permission_mode` (default `"interactive"`).
 
 zh:
 > **推理强度** — 支持扩展思考的模型（Claude 3.7 / o3 等）的思考深度：
-> - 空（默认关闭）— 标准模式
+> - **off**（默认）— 关闭推理功能
 > - **low** — 轻量思考，响应快
 > - **medium** — 平衡
 > - **high** — 深度思考，响应慢但质量更高
+> - **xhigh** — 更强思考
+> - **max** — 最大思考
 
 en:
 > **Reasoning effort** — how deeply supported models think (Claude 3.7, o3, etc.):
-> - empty (default off) — standard mode
+> - **off** (default) — disable, no reasoning
 > - **low** — light thinking, faster responses
 > - **medium** — balanced
 > - **high** — deep thinking, slower but higher quality
+> - **xhigh** — even deeper thinking
+> - **max** — maximum reasoning
 
-Store as `prefs.reasoning_effort` (default `""`). If the user gives an invalid value, silently fall back to `""`.
+Store as `prefs.reasoning_effort` (default `""`). If the user picks `"off"`, store as `""`. If the user gives an invalid value, silently fall back to `""`.
+If `prefs.reasoning_effort` is `""` (off), **skip** the **Show reasoning trace** question below — there is no reasoning output to show.
 
 **Show reasoning trace** — whether to stream the model's thinking chain to the terminal.
 

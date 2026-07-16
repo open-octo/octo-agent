@@ -555,13 +555,16 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 
 		// Surface the reasoning/thinking trace for the Web UI to display (the
 		// terminal never renders it): default off.
-		showDefault := existing.ShowReasoning != nil && *existing.ShowReasoning
-		showVal, ok := pickYesNo(tty, reader, stdin, stdout,
-			"Show the reasoning/thinking trace on the Web UI?", showDefault)
-		if !ok {
-			return cancelWizard(stderr)
+		// Skip when reasoning is off — no reasoning output to show.
+		if outEntry.ReasoningEffort != "" {
+			showDefault := existing.ShowReasoning != nil && *existing.ShowReasoning
+			showVal, ok := pickYesNo(tty, reader, stdin, stdout,
+				"Show the reasoning/thinking trace on the Web UI?", showDefault)
+			if !ok {
+				return cancelWizard(stderr)
+			}
+			outEntry.ShowReasoning = &showVal
 		}
-		outEntry.ShowReasoning = &showVal
 	}
 
 	// Vision capability is always recorded on the entry. A predefined model
