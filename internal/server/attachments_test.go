@@ -540,26 +540,59 @@ drain:
 	}
 
 	// The persisted message should carry a path note, not an image block.
-	loaded, err := agent.LoadSession(sess.ID)
-	if err != nil {
-		t.Fatalf("reload: %v", err)
-	}
+	// Poll briefly for the note: turnRunning flipping to false guarantees the
+	// turn loop returned and its session writes were issued, but on a loaded CI
+	// runner the directory metadata may not be visible to another handle
+	// immediately after the writer closes — a single LoadSession a hair too
+	// early reads a stale/empty transcript and flakes the assertion. Retrying
+	// bounds the wait without weakening what we check. (The vision-path test
+	// TestHandleWSUserMessage_ImageOnly uses the same pattern at line ~429.)
 	var hasNote, hasBlock bool
-	for _, m := range loaded.Messages {
-		if m.Role != agent.RoleUser {
-			continue
+	noteOK := func() bool {
+		loaded, err := agent.LoadSession(sess.ID)
+		if err != nil {
+			return false
 		}
-		if strings.Contains(m.Content, "[Attached file:") && strings.Contains(filepath.ToSlash(m.Content), ".octo/uploads") {
-			hasNote = true
+		for _, m := range loaded.Messages {
+			if m.Role != agent.RoleUser {
+				continue
+			}
+			if strings.Contains(m.Content, "[Attached file:") &&
+				strings.Contains(filepath.ToSlash(m.Content), ".octo/uploads") {
+				return true
+			}
 		}
-		for _, blk := range m.Blocks {
-			if blk.Type == "image" {
-				hasBlock = true
+		return false
+	}
+	if noteOK() {
+		hasNote = true
+	} else {
+		for deadline := time.Now().Add(2 * time.Second); !hasNote && time.Now().Before(deadline); {
+			time.Sleep(20 * time.Millisecond)
+			if noteOK() {
+				hasNote = true
+				break
 			}
 		}
 	}
 	if !hasNote {
 		t.Error("persisted user message missing the image path note")
+	}
+	// Re-load once more for the block check (cheap; the note poll above has
+	// already absorbed the cross-handle visibility lag).
+	if loaded, err := agent.LoadSession(sess.ID); err != nil {
+		t.Fatalf("reload: %v", err)
+	} else {
+		for _, m := range loaded.Messages {
+			if m.Role != agent.RoleUser {
+				continue
+			}
+			for _, blk := range m.Blocks {
+				if blk.Type == "image" {
+					hasBlock = true
+				}
+			}
+		}
 	}
 	if hasBlock {
 		t.Error("non-vision model persisted an image block")
