@@ -1401,6 +1401,18 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// the web UI's streaming flag (and its caret) stuck on forever; the
 			// tail's session_update is a superset of what we'd emit here.
 			sw.error(err.Error())
+			// A first-round failure makes runLoop roll history back past the user
+			// message (appendUserInput's error-path contract), and the SyncFrom+
+			// Save above erased the crash-safety copy persisted before the turn.
+			// The browser still shows that user bubble with a now out-of-range
+			// message_index, so a later edit/branch would 400. Tell it to re-fetch
+			// the (shorter) transcript so its indices realign with disk. Gated on
+			// an actual shrink below the watermark so a mid-turn failure that kept
+			// the message (and any completed rounds) doesn't trigger a needless
+			// reload.
+			if len(sess.Messages) < historyWatermark {
+				s.broadcastHistoryReload(sess.ID)
+			}
 		}
 	} else {
 		// Normal completion: emit the final turn_done explicitly so the
@@ -1831,7 +1843,7 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 				items = append(items, agent.InboxItem{Text: msg})
 			}
 		}
-		for _, it := range items {
+		for k, it := range items {
 			// <system-reminder> blocks (background-process completion notes,
 			// recalled memories) are model-facing context, not user speech —
 			// the TUI skips them and the web transcript must too.
@@ -1845,6 +1857,11 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 				"session_id": w.sessionID,
 				"content":    text,
 				"created_at": time.Now().UnixMilli(),
+				// Position in the persisted Messages array so edit/branch can
+				// target a steered message too. Item k lands at SteerBaseIndex+k;
+				// reminder-only items skipped above still occupy a history slot,
+				// so the loop index k (not a compacted counter) is authoritative.
+				"message_index": ev.SteerBaseIndex + k,
 			}
 			if len(imgs) > 0 {
 				evt["images"] = imgs
