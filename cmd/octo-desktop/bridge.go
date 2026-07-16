@@ -364,25 +364,6 @@ func (b *nativeBridge) WindowState() bool {
 	return b.window.IsMaximised()
 }
 
-// ToggleFullscreen enters or exits true fullscreen (a separate space, no menu
-// bar/dock), distinct from ToggleMaximise's "fill the screen" zoom. This is
-// what the green traffic light's default click does natively on macOS.
-// No-op before the window exists.
-func (b *nativeBridge) ToggleFullscreen() {
-	if b.window != nil {
-		b.window.ToggleFullscreen()
-	}
-}
-
-// FullscreenState reports whether the window is currently in true fullscreen.
-// Returns false before the window exists.
-func (b *nativeBridge) FullscreenState() bool {
-	if b.window == nil {
-		return false
-	}
-	return b.window.IsFullscreen()
-}
-
 // showWindow brings the hub window to the foreground on the current view.
 func (b *nativeBridge) showWindow() { b.showWindowAt("") }
 
@@ -419,12 +400,21 @@ func (b *nativeBridge) showWindowAt(hash string) {
 			Height:     height,
 			StartState: startState,
 			URL:        target,
-			// Frameless on all platforms: the frontend draws the title bar and its
-			// own window controls. The CSS --wails-draggable header region handles
-			// dragging, and the double-click / button handlers route through the
-			// native bridge. Mac loses its system traffic lights, which are replaced
-			// by the frontend's custom ones.
-			Frameless: true,
+			// Mac keeps its native title bar (hidden, inset traffic lights)
+			// instead of Frameless, so the real NSWindow buttons — and their
+			// native hover/zoom/tiling-menu behaviour — render for free.
+			// InvisibleTitleBarHeight is deliberately left unset: that hack
+			// natively swallows every left-mouse-down in its strip (including
+			// double-clicks) before the DOM ever sees them, which broke
+			// double-click-to-zoom the first time a native title bar was
+			// tried. Window dragging instead goes through the same JS gesture
+			// detection (framelessDrag.ts) Windows/Linux use — it isn't
+			// mac-exclusive, so double-clicks reach the DOM normally there.
+			// Windows/Linux stay Frameless with the frontend's own controls.
+			Frameless: runtime.GOOS != "darwin",
+			Mac: application.MacWindow{
+				TitleBar: application.MacTitleBarHiddenInset,
+			},
 		})
 		// Forget the window when it closes so a later Show re-creates one; the
 		// app itself stays alive via ApplicationShouldTerminateAfterLastWindowClosed.

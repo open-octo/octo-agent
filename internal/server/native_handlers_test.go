@@ -21,11 +21,9 @@ type fakeNative struct {
 	notifySessionCalls int
 	autostart          bool
 	toggleMaxCalls     int
-	toggleFsCalls      int
 	minimiseCalls      int
 	closeCalls         int
 	maximised          bool
-	fullscreen         bool
 	gotOpenURL         string
 	openCalls          int
 	gotSaveName        string
@@ -53,11 +51,9 @@ func (f *fakeNative) NotifySession(title, body, sessionID string) {
 func (f *fakeNative) AutostartEnabled() (bool, error) { return f.autostart, nil }
 func (f *fakeNative) SetAutostart(enable bool) error  { f.autostart = enable; return nil }
 func (f *fakeNative) ToggleMaximise()                 { f.toggleMaxCalls++ }
-func (f *fakeNative) ToggleFullscreen()               { f.toggleFsCalls++ }
 func (f *fakeNative) Minimise()                       { f.minimiseCalls++ }
 func (f *fakeNative) Close()                          { f.closeCalls++ }
 func (f *fakeNative) WindowState() bool               { return f.maximised }
-func (f *fakeNative) FullscreenState() bool           { return f.fullscreen }
 func (f *fakeNative) OpenExternal(url string) error {
 	f.openCalls++
 	f.gotOpenURL = url
@@ -241,30 +237,12 @@ func TestNativeToggleMaximise(t *testing.T) {
 	}
 }
 
-func TestNativeToggleFullscreen(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-
-	fake := &fakeNative{}
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
-	req := httptest.NewRequest(http.MethodPost, "/api/native/window/toggle-fullscreen", nil)
-	w := httptest.NewRecorder()
-	serveLoopback(srv.mux, w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
-	}
-	if fake.toggleFsCalls != 1 {
-		t.Errorf("ToggleFullscreen calls = %d, want 1", fake.toggleFsCalls)
-	}
-}
-
 func TestNativeWindowState(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
-	fake := &fakeNative{maximised: true, fullscreen: true}
+	fake := &fakeNative{maximised: true}
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
 	req := httptest.NewRequest(http.MethodGet, "/api/native/window/state", nil)
 	w := httptest.NewRecorder()
@@ -273,8 +251,7 @@ func TestNativeWindowState(t *testing.T) {
 		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
 	}
 	var body struct {
-		Maximised  bool `json:"maximised"`
-		Fullscreen bool `json:"fullscreen"`
+		Maximised bool `json:"maximised"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -282,13 +259,9 @@ func TestNativeWindowState(t *testing.T) {
 	if !body.Maximised {
 		t.Errorf("maximised = false, want true")
 	}
-	if !body.Fullscreen {
-		t.Errorf("fullscreen = false, want true")
-	}
 
-	// Non-maximised, non-fullscreen window reports false for both.
+	// Non-maximised window reports false.
 	fake.maximised = false
-	fake.fullscreen = false
 	w = httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
@@ -296,9 +269,6 @@ func TestNativeWindowState(t *testing.T) {
 	}
 	if body.Maximised {
 		t.Errorf("maximised = true, want false")
-	}
-	if body.Fullscreen {
-		t.Errorf("fullscreen = true, want false")
 	}
 }
 
