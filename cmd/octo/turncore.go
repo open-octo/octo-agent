@@ -165,16 +165,6 @@ func (v *plainView) TurnEnded(reply agent.Reply, stats TurnStats, err error) {
 			// is the terminal). Mirrors printUsageLine's stderr routing.
 			fmt.Fprintf(v.errOut, "  ⏱ %s, %s tokens\n",
 				agent.FormatElapsedSeconds(int64(stats.Elapsed.Seconds())), agent.FormatGoalTokens(int64(stats.Tokens)))
-			// Surface cache activity per turn so the win is visible. Verbose-only
-			// (always-on there so "0 read, 0 write" is a useful debugging signal).
-			show := reply.CacheReadTokens > 0 || reply.CacheWriteTokens > 0
-			if v.verbosity.verbose() {
-				show = true
-			}
-			if show {
-				fmt.Fprintf(v.errOut, "  ⓘ cache: %d read, %d write (in %d / out %d)\n",
-					reply.CacheReadTokens, reply.CacheWriteTokens, reply.InputTokens, reply.OutputTokens)
-			}
 		}
 	}
 }

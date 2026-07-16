@@ -81,14 +81,14 @@ func TestRunOnce_AgenticTurn(t *testing.T) {
 
 func TestRunOnce_StreamKeepsStdoutPipeable(t *testing.T) {
 	// A headless one-shot must leave stdout carrying only the reply text so
-	// `octo "…" | program` gets clean input; the per-turn ⏱/ⓘ summary is
+	// `octo "…" | program` gets clean input; the per-turn ⏱ summary is
 	// diagnostic metadata and belongs on stderr.
 	cfg, stdout, stderr, _ := makeREPLFixture(t, "")
 
 	if code := runOnce(cfg, "ping", true); code != 0 {
 		t.Fatalf("exit = %d, stderr: %s", code, stderr.String())
 	}
-	if out := stdout.String(); strings.Contains(out, "⏱") || strings.Contains(out, "ⓘ cache") {
+	if out := stdout.String(); strings.Contains(out, "⏱") {
 		t.Errorf("stdout must not carry the turn summary:\n%s", out)
 	}
 	if !strings.Contains(stderr.String(), "⏱") {
@@ -455,19 +455,18 @@ func TestREPLToolEventHandler_PlainForcesEditFileToStatusLine(t *testing.T) {
 }
 
 func TestRunOnce_QuietMode_SuppressesChrome(t *testing.T) {
-	cfg, stdout, _, _ := makeREPLFixture(t, "")
+	cfg, stdout, stderr, _ := makeREPLFixture(t, "")
 	cfg.verbosity = verbosityQuiet
 
 	if code := runOnce(cfg, "ping", true); code != 0 {
 		t.Fatalf("exit = %d", code)
 	}
-	out := stdout.String()
-	// Quiet strips the end-of-turn cache line; the model reply itself must
-	// still come through (otherwise quiet would be useless).
-	if strings.Contains(out, "ⓘ cache") {
-		t.Errorf("quiet mode should not emit the cache line:\n%s", out)
+	// Quiet strips the end-of-turn ⏱ summary (on stderr); the model reply
+	// itself must still come through on stdout (otherwise quiet is useless).
+	if s := stderr.String(); strings.Contains(s, "⏱") {
+		t.Errorf("quiet mode should not emit the turn summary:\n%s", s)
 	}
-	if !strings.Contains(out, "pong") {
+	if out := stdout.String(); !strings.Contains(out, "pong") {
 		t.Errorf("quiet mode must still print the model reply; got:\n%s", out)
 	}
 }
