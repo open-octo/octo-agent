@@ -37,6 +37,8 @@ terminal:
   - deny:  { pattern: "kill -9 -1" }        # kill every process the user owns
   - deny:  { pattern: "kill -SIGKILL -1" }
   # System directory removal — deleting /usr, /bin, /System, etc. bricks the OS.
+  # These are also the canonical Windows paths an LLM might emit via rm -rf
+  # (PowerShell aliases Remove-Item to rm) or via cmd/powershell.
   - deny:  { pattern: "rm -rf /usr" }
   - deny:  { pattern: "rm -rf /bin" }
   - deny:  { pattern: "rm -rf /sbin" }
@@ -45,7 +47,26 @@ terminal:
   - deny:  { pattern: "rm -rf /lib64" }
   - deny:  { pattern: "rm -rf /System" }
   - deny:  { pattern: "rm -rf /Windows" }
+  - deny:  { pattern: "rm -rf C:\\Windows" }
+  - deny:  { pattern: "rm -rf C:\\Windows\\System32" }
+  - deny:  { pattern: "rm -rf C:\\ProgramData" }
+  - deny:  { pattern: "rm -rf C:\\Program Files" }
+  - deny:  { pattern: "rm -rf C:\\Program Files (x86)" }
+  - deny:  { pattern: "rm -rf \"C:\\Windows\"" }
+  - deny:  { pattern: "rm -rf \"C:\\Program Files\"" }
+  - deny:  { pattern: "rm -rf \"C:\\Program Files (x86)\"" }
+  # The unquoted Unix-style /Program Files won't actually delete the directory
+  # (shell splits it into two args), but an LLM may still emit it, so we deny
+  # the intent rather than letting half of it slip through to ask.
   - deny:  { pattern: "rm -rf /Program Files" }
+  - deny:  { pattern: "rm -rf /Program Files/Foo" }
+  # Windows cmd/powershell recursive deletion variants.
+  - deny:  { pattern: "rmdir /s /q C:\\Windows" }
+  - deny:  { pattern: "rmdir /s /q \"C:\\Windows\"" }
+  - deny:  { pattern: "rmdir /s /q C:\\Program Files" }
+  - deny:  { pattern: "rmdir /s /q \"C:\\Program Files\"" }
+  - deny:  { pattern: "del /s /q C:\\Windows" }
+  - deny:  { pattern: "del /s /q \"C:\\Windows\"" }
   # Risky but legitimate — confirm interactively.
   - ask:   { pattern: "rm -rf" }
   - ask:   { pattern: "rm -fr" }
@@ -85,6 +106,13 @@ terminal:
   - deny:  { pattern: "Remove-Item -Recurse -Force" }
   - deny:  { pattern: "Remove-Item -Force -Recurse" }
   - deny:  { pattern: "Format-Volume" }
+  # Windows system administration that can brick or unconfigure the OS.
+  - deny:  { pattern: "diskpart " }           # partition / volume management
+  - deny:  { pattern: "reg delete " }         # registry deletion
+  - deny:  { pattern: "bcdedit " }            # boot configuration
+  - deny:  { pattern: "wbadmin delete " }     # backup catalog deletion
+  - deny:  { pattern: "dism " }               # system image modification
+  - deny:  { pattern: "vssadmin delete " }    # shadow copy deletion
   - ask:   { pattern: "Invoke-Expression" }        # arbitrary code (alias: iex)
   - ask:   { pattern: "Invoke-WebRequest" }        # download / exfiltrate (alias: iwr)
   - ask:   { pattern: "Invoke-RestMethod" }        # alias: irm

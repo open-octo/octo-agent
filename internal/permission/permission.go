@@ -759,8 +759,10 @@ func applyHardcodedDenyRules(rules RuleSet) {
 		"/usr/bin/**", "/usr/sbin/**", "/usr/lib/**", "/usr/lib64/**",
 		"/System/**", "/boot/**", "/lib/**", "/lib64/**",
 		"/Windows/**", "/Program Files/**", "/Program Files (x86)/**",
-		"C:/Windows/**", "C:/Program Files/**", "C:/Program Files (x86)/**",
-		"D:/Windows/**", "D:/Program Files/**", "D:/Program Files (x86)/**",
+		"C:/Windows/**", "C:/Windows/System32/**", "C:/Windows/SysWOW64/**",
+		"C:/Program Files/**", "C:/Program Files (x86)/**", "C:/ProgramData/**",
+		"D:/Windows/**", "D:/Windows/System32/**", "D:/Windows/SysWOW64/**",
+		"D:/Program Files/**", "D:/Program Files (x86)/**", "D:/ProgramData/**",
 	}
 	deny := Rule{Decision: Deny, Path: systemPaths}
 	rules["write_file"] = append(rules["write_file"], deny)
@@ -774,8 +776,14 @@ func applyHardcodedDenyRules(rules RuleSet) {
 		"mkfs",               // make filesystem
 		"fdisk ",             // partition manipulation
 		"parted ",            // partition manipulation
+		"diskpart ",          // Windows partition / volume management
 		"diskutil erase",     // macOS disk erase
 		"diskutil partition", // macOS partition
+		"reg delete ",        // Windows registry deletion
+		"bcdedit ",           // Windows boot configuration
+		"wbadmin delete ",    // Windows backup catalog deletion
+		"dism ",              // Windows system image modification
+		"vssadmin delete ",   // Windows shadow copy deletion
 		"shutdown ",          // shutdown
 		"poweroff",           // shutdown
 		"halt ",              // halt
@@ -787,6 +795,13 @@ func applyHardcodedDenyRules(rules RuleSet) {
 		"kill -SIGKILL -1",   // kill all user processes
 		"rm -rf /",           // root wipe
 		"rm -rf ~",           // home wipe
+		"rmdir /s /q",        // Windows recursive silent deletion
+		"del /s /q",          // Windows bulk silent deletion
+		"format ",            // Windows filesystem format
+		"sdelete",            // Windows secure delete (can wipe data)
+		"wevtutil cl",        // Windows event log clear
+		"fsutil ",            // Windows filesystem utilities (can corrupt)
+		"defrag ",            // Windows defrag (mostly safe but unexpected for agent)
 	}
 	for _, pat := range hardTerminalDenies {
 		rules["terminal"] = append(rules["terminal"], Rule{Decision: Deny, Pattern: pat})

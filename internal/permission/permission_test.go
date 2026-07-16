@@ -214,21 +214,64 @@ func TestDefaultRules_TerminalDangerousOperations(t *testing.T) {
 func TestDefaultRules_WriteFileSystemDirectories(t *testing.T) {
 	e := newDefaultEngine(t)
 	cases := map[string]Decision{
-		"/bin/bash":               Deny,
-		"/sbin/init":              Deny,
-		"/usr/bin/git":            Deny,
-		"/usr/sbin/nft":           Deny,
-		"/System/Library/foo.txt": Deny,
-		"/boot/grub/grub.cfg":     Deny,
-		"/lib/modules/foo.ko":     Deny,
-		"/lib64/ld-linux.so":      Deny,
-		"/work/src/main.go":       Ask,
+		"/bin/bash":                        Deny,
+		"/sbin/init":                       Deny,
+		"/usr/bin/git":                     Deny,
+		"/usr/sbin/nft":                    Deny,
+		"/System/Library/foo.txt":          Deny,
+		"/boot/grub/grub.cfg":              Deny,
+		"/lib/modules/foo.ko":              Deny,
+		"/lib64/ld-linux.so":               Deny,
+		"C:/Windows/System32/kernel32.dll": Deny,
+		"C:/Windows/SysWOW64/foo.dll":      Deny,
+		"C:/ProgramData/app/config.json":   Deny,
+		"D:/Windows/System32/bar.dll":      Deny,
+		"/work/src/main.go":                Ask,
 	}
 	for p, want := range cases {
 		for _, tool := range []string{"write_file", "edit_file"} {
 			if got := e.Check(tool, map[string]any{"path": p}); got != want {
 				t.Errorf("%s %q: got %s, want %s", tool, p, got, want)
 			}
+		}
+	}
+}
+
+func TestDefaultRules_TerminalWindowsDangerous(t *testing.T) {
+	e := newDefaultEngine(t)
+	cases := map[string]Decision{
+		// PowerShell / cross-platform rm variants targeting Windows system dirs.
+		"rm -rf C:\\Windows":                 Deny,
+		"rm -rf C:\\Windows\\System32":       Deny,
+		"rm -rf C:\\ProgramData":             Deny,
+		"rm -rf \"C:\\Windows\"":             Deny,
+		"rm -rf \"C:\\Program Files\"":       Deny,
+		"rm -rf \"C:\\Program Files (x86)\"": Deny,
+		// cmd.exe recursive deletion.
+		"rmdir /s /q C:\\Windows":       Deny,
+		"rmdir /s /q \"C:\\Windows\"":   Deny,
+		"rmdir /s /q C:\\Program Files": Deny,
+		"del /s /q C:\\Windows":         Deny,
+		"del /s /q \"C:\\Windows\"":     Deny,
+		// Windows system management tools that can brick the OS.
+		"diskpart /s script.txt":                            Deny,
+		"reg delete HKLM\\Software /f":                      Deny,
+		"bcdedit /delete {current}":                         Deny,
+		"format C:":                                         Deny,
+		"format D:":                                         Deny,
+		"vssadmin delete shadows /all":                      Deny,
+		"wbadmin delete catalog":                            Deny,
+		"dism /online /disable-feature /featurename:NetFx3": Deny,
+		"wevtutil cl System":                                Deny,
+		"fsutil file setzerooffset C:\\Windows\\foo.dll":    Deny,
+		"sdelete -p 3 C:\\secret.txt":                       Deny,
+		// But routine maintenance on a non-system drive is ask, not deny.
+		"chkdsk E: /f": Ask,
+		"sfc /scannow": Ask,
+	}
+	for cmd, want := range cases {
+		if got := e.Check("terminal", map[string]any{"command": cmd}); got != want {
+			t.Errorf("terminal %q: got %s, want %s", cmd, got, want)
 		}
 	}
 }
