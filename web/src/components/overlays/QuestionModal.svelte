@@ -148,56 +148,61 @@
   <!-- Default: bottom banner. Shows the question + inline controls without
        blocking the chat. The user can answer directly here or expand. -->
   <div class="banner" role="dialog" aria-modal="false">
-    <div class="banner-main">
-      <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
-      <span class="banner-question">{current.question}</span>
-      <button class="banner-expand" onclick={() => { expanded = true; inputEl?.focus() }}>
-        <iconify-icon icon="ant-design:arrows-alt-outlined" width="12"></iconify-icon>
-      </button>
-    </div>
-
-    {#if current.options?.length}
-      <div class="banner-options">
-        {#each current.options as opt}
-          <button
-            class="option-pill"
-            class:selected={selected.includes(opt)}
-            onclick={() => toggleOption(opt)}
-          >
-            {#if selected.includes(opt)}
-              <iconify-icon icon="ant-design:check-outlined" width="11"></iconify-icon>
-            {/if}
-            {opt}
-          </button>
-        {/each}
+    <div class="banner-inner">
+      <div class="banner-main">
+        <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
+        <span class="banner-question">{current.question}</span>
+        <button class="banner-expand" onclick={() => { expanded = true; inputEl?.focus() }}>
+          <iconify-icon icon="ant-design:arrows-alt-outlined" width="12"></iconify-icon>
+        </button>
       </div>
-    {/if}
 
-    <div class="banner-actions">
-      <input
-        bind:this={inputEl}
-        class="banner-input"
-        placeholder={$t('question.custom_placeholder')}
-        bind:value={customText}
-        onkeydown={(e) => { if (e.key === 'Enter' && customText.trim()) { e.preventDefault(); submit() } }}
-      />
-      <button class="btn-cancel btn-cancel-sm" onclick={cancel}>{$t('common.cancel')}</button>
-      <button
-        class="btn-primary btn-primary-sm"
-        onclick={submit}
-        disabled={selected.length === 0 && !customText.trim()}
-      >
-        {$t('common.submit')}
-      </button>
+      {#if current.options?.length}
+        <div class="banner-options">
+          {#each current.options as opt}
+            <button
+              class="option-pill"
+              class:selected={selected.includes(opt)}
+              onclick={() => toggleOption(opt)}
+            >
+              {#if selected.includes(opt)}
+                <iconify-icon icon="ant-design:check-outlined" width="11"></iconify-icon>
+              {/if}
+              {opt}
+            </button>
+          {/each}
+        </div>
+      {/if}
+
+      <div class="banner-actions">
+        <input
+          bind:this={inputEl}
+          class="banner-input"
+          placeholder={$t('question.custom_placeholder')}
+          bind:value={customText}
+          onkeydown={(e) => { if (e.key === 'Enter' && customText.trim()) { e.preventDefault(); submit() } }}
+        />
+        <button class="btn-cancel btn-cancel-sm" onclick={cancel}>{$t('common.cancel')}</button>
+        <button
+          class="btn-primary btn-primary-sm"
+          onclick={submit}
+          disabled={selected.length === 0 && !customText.trim()}
+        >
+          {$t('common.submit')}
+        </button>
+      </div>
     </div>
   </div>
 {/if}
 
 <style>
-  /* ─── Bottom banner (default, non-blocking) ─────────────────────────── */
+  /* ─── Bottom banner (non-blocking, aligned with composer) ──────── */
   .banner {
-    position: fixed; left: 24px; right: 24px; bottom: 24px; z-index: 1100;
-    max-width: 880px; margin: 0 auto;
+    flex: 0 0 auto;
+    max-width: var(--chat-content-max-width); margin: 0 auto; width: 100%;
+    padding: 0 24px 12px;
+  }
+  .banner-inner {
     background: var(--bg-container);
     border: 1px solid var(--blue-2);
     border-radius: 12px;

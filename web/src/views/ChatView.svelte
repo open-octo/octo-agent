@@ -64,6 +64,7 @@
   import Composer from '../components/chat/Composer.svelte'
   import ArtifactsPanel from '../components/ArtifactsPanel.svelte'
   import OctoLogo from '../components/layout/OctoLogo.svelte'
+import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
   // ── reactive state ─────────────────────────────────────────────────────────
   let messagesEl = $state<HTMLElement | null>(null)
@@ -1771,6 +1772,9 @@
           {/each}
         </div>
       {/if}
+
+      <!-- Question banner (aligned with composer) -->
+      <QuestionModal />
 
       <!-- Composer -->
       <Composer bind:this={composer} onSend={send} />
