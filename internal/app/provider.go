@@ -104,7 +104,12 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://openrouter.ai/api",
 		DefaultModel:   "anthropic/claude-sonnet-4-6",
+		// The vendor-prefixed entries below (tencent/, xiaomi/, deepseek/, z-ai/,
+		// minimax/, nvidia/) mirror OpenRouter's own top-usage rankings
+		// (openrouter.ai/rankings) — added so the most-routed models are
+		// reachable without a second direct-vendor account.
 		Models: []VendorModel{
+			{ID: "anthropic/claude-sonnet-5", Vision: true},
 			{ID: "anthropic/claude-sonnet-4-6", Vision: true},
 			{ID: "anthropic/claude-opus-4-8", Vision: true},
 			{ID: "anthropic/claude-opus-4-7", Vision: true},
@@ -113,11 +118,19 @@ var Registry = []Vendor{
 			{ID: "openai/gpt-5.5", Vision: true},
 			{ID: "openai/gpt-5.4", Vision: true},
 			{ID: "openai/gpt-5.4-mini", Vision: true},
+			{ID: "google/gemini-3-flash-preview", Vision: true},
 			{ID: "google/gemini-2.5-pro", Vision: true},
 			{ID: "google/gemini-2.5-flash", Vision: true},
 			{ID: "meta-llama/llama-3.3-70b-instruct", Vision: false}, // Llama 3.3 70B is text-only
 			{ID: "x-ai/grok-4.5", Vision: true},
 			{ID: "x-ai/grok-4.3", Vision: true},
+			{ID: "tencent/hy3", Vision: false}, // text-only on OpenRouter as of this writing
+			{ID: "xiaomi/mimo-v2.5", Vision: true},
+			{ID: "deepseek/deepseek-v4-flash", Vision: false}, // vision not exposed on the API
+			{ID: "deepseek/deepseek-v4-pro", Vision: false},   // vision not exposed on the API
+			{ID: "z-ai/glm-5.2", Vision: false},
+			{ID: "minimax/minimax-m3", Vision: true},
+			{ID: "nvidia/nemotron-3-ultra-550b-a55b", Vision: false},
 		},
 		APIKeyEnvVar: "OPENROUTER_API_KEY",
 		WebsiteURL:   "https://openrouter.ai/keys",

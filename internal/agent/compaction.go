@@ -169,7 +169,7 @@ func contextWindow(model string) int {
 
 	// ── MiniMax ──
 	case strings.Contains(m, "minimax-m3"):
-		return 256_000
+		return 1_000_000
 	case strings.Contains(m, "minimax-m2"):
 		return 256_000
 	case strings.Contains(m, "minimax"):
@@ -199,13 +199,23 @@ func contextWindow(model string) int {
 
 	// ── MiMo (Xiaomi) ──
 	case strings.Contains(m, "mimo-v2.5") || strings.Contains(m, "mimov2.5"):
-		return 256_000
+		return 1_000_000
 	case strings.Contains(m, "mimo"):
 		return 128_000
 
 	// ── LongCat (Meituan) ──
 	case strings.Contains(m, "longcat"):
 		return 1_000_000
+
+	// ── Tencent ──
+	case strings.Contains(m, "hy3"):
+		return 256_000
+
+	// ── NVIDIA ──
+	case strings.Contains(m, "nemotron-3-ultra") || strings.Contains(m, "nemotron3-ultra"):
+		return 1_000_000
+	case strings.Contains(m, "nemotron"):
+		return 128_000
 
 	// ── Cohere ──
 	case strings.Contains(m, "command-r-plus") || strings.Contains(m, "command-r"):
