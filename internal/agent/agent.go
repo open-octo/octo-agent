@@ -504,18 +504,38 @@ const (
 	StopReasonStuck = "stuck"
 )
 
-// UserFacingError strips internal agent-loop and dispatch prefixes from an
-// error for display to end users. For example:
+// UserFacingError strips internal agent-loop, dispatch, and provider prefixes
+// from an error for display to end users. For example:
 //
-//	"agent: loop[0]: anthropic: HTTP 403 ..." → "anthropic: HTTP 403 ..."
-//	"agent: dispatch tools[1]: openai: HTTP 429 ..." → "openai: HTTP 429 ..."
+//	"agent: loop[0]: anthropic: HTTP 403 ..." → "HTTP 403 ..."
+//	"agent: dispatch tools[1]: openai: HTTP 429 ..." → "HTTP 429 ..."
 func UserFacingError(err error) string {
 	msg := err.Error()
+	// Strip "agent: loop[0]: ", "agent: dispatch tools[1]: ", etc.
 	prefix := "agent: "
 	if strings.HasPrefix(msg, prefix) {
 		rest := msg[len(prefix):]
 		if idx := strings.Index(rest, ": "); idx >= 0 {
 			msg = rest[idx+2:]
+		}
+	}
+	// Strip known provider prefixes ("anthropic: ", "openai: ") so the user sees
+	// "HTTP 403 (permission_error): ..." instead of "anthropic: HTTP 403 ...".
+	msg = stripProviderPrefix(msg)
+	return msg
+}
+
+// knownProviderPrefixes are the provider names used as error-message prefixes
+// in internal/provider/*. Adding a new provider should add its name here so
+// its error messages are user-friendly.
+var knownProviderPrefixes = []string{"anthropic", "openai"}
+
+// stripProviderPrefix removes a leading "<provider>: " from msg if the
+// provider is in knownProviderPrefixes.
+func stripProviderPrefix(msg string) string {
+	for _, p := range knownProviderPrefixes {
+		if strings.HasPrefix(msg, p+": ") {
+			return msg[len(p)+2:]
 		}
 	}
 	return msg
