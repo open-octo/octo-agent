@@ -119,7 +119,7 @@
   // Pending steer messages typed while a turn is running. They are shown above
   // the composer as ghost user bubbles until the server drains the inbox and
   // confirms them in the scrollback.
-  let pendingSteers = $state<{ pendingId: string; text: string; files?: any[]; retracting?: boolean }[]>([])
+  let pendingSteers = $state<Record<string, { pendingId: string; text: string; files?: any[]; retracting?: boolean }[]>>({})
 
   // Set when the server reports a recoverable binding conflict. The UI shows a
   // banner with a "Force bind" button; clicking it retries the pending send
@@ -131,6 +131,8 @@
   let branchModal = $state<{ open: boolean; index: number; draft: string; busy: boolean }>({
     open: false, index: 0, draft: '', busy: false,
   })
+
+  let pendingSteerList = $derived(pendingSteers[$activeSessionId ?? ''] ?? [])
 
   // Sub-agents card elapsed time + reconnect countdown both tick off `now`.
   let now = $state(Date.now())
@@ -422,7 +424,7 @@
       if (queue && queue.length === 0) pendingSends.delete(sid)
       if (meta) {
         if (meta.wasStreaming) {
-          pendingSteers = pendingSteers.filter(s => s.pendingId !== meta.pendingId)
+          pendingSteers = { ...pendingSteers, [sid]: pendingSteers[sid]?.filter(s => s.pendingId !== meta.pendingId) ?? [] }
         } else {
           chatMessages.update(m => ({
             ...m,
@@ -453,8 +455,8 @@
     cleanups.push(ws.on('steer_retracted', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       const pendingId = (ev as any).pending_id
-      const s = pendingSteers.find(x => x.pendingId === pendingId)
-      pendingSteers = pendingSteers.filter(x => x.pendingId !== pendingId)
+      const s = pendingSteers[sid]?.find(x => x.pendingId === pendingId)
+      pendingSteers = { ...pendingSteers, [sid]: pendingSteers[sid]?.filter(x => x.pendingId !== pendingId) ?? [] }
       const queue = pendingSends.get(sid)
       if (queue) {
         const next = queue.filter(m => m.pendingId !== pendingId)
@@ -470,7 +472,7 @@
     cleanups.push(ws.on('steer_retract_failed', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       const pendingId = (ev as any).pending_id
-      pendingSteers = pendingSteers.map(x => x.pendingId === pendingId ? { ...x, retracting: false } : x)
+      pendingSteers = { ...pendingSteers, [sid]: pendingSteers[sid]?.map(x => x.pendingId === pendingId ? { ...x, retracting: false } : x) ?? [] }
       showToast(tr('chat.steer_retract_failed'), 'info')
     }))
 
@@ -713,7 +715,7 @@
       })
       if (isSteer && meta) {
         // The server drained this steer from the inbox; drop the ghost bubble.
-        pendingSteers = pendingSteers.filter(s => s.pendingId !== meta.pendingId)
+        pendingSteers = { ...pendingSteers, [sid]: pendingSteers[sid]?.filter(s => s.pendingId !== meta.pendingId) ?? [] }
       } else if (meta && meta.pendingId === confirmedPendingId) {
         // The server confirmed this optimistic send; stop tracking it for rollback.
         // (queue already shifted above)
@@ -1090,9 +1092,9 @@
   function retractSteer(pendingId: string) {
     const sid = get(activeSessionId)
     if (!sid) return
-    const s = pendingSteers.find(x => x.pendingId === pendingId)
+    const s = pendingSteers[sid]?.find(x => x.pendingId === pendingId)
     if (!s || s.retracting) return
-    pendingSteers = pendingSteers.map(x => x.pendingId === pendingId ? { ...x, retracting: true } : x)
+    pendingSteers = { ...pendingSteers, [sid]: pendingSteers[sid]?.map(x => x.pendingId === pendingId ? { ...x, retracting: true } : x) ?? [] }
     ws.retractSteer(sid, pendingId, s.text)
   }
 
@@ -1223,7 +1225,7 @@
     if (steering) {
       // Mid-turn input: show above the composer, not in the scrollback, until
       // the server drains it into the running turn (mirrors TUI pendingSteer).
-      pendingSteers = [...pendingSteers, { pendingId, text, files }]
+      pendingSteers = { ...pendingSteers, [sid]: [...(pendingSteers[sid] ?? []), { pendingId, text, files }] }
     } else {
       // Optimistically show the user bubble, marked pending. The server echoes
       // it back as a history_user_message — that handler replaces this pending
@@ -1733,9 +1735,9 @@
       <!-- Pending steer messages (mid-turn input) — shown above the composer
            as ghost user bubbles so they don't break the chronological order
            of the scrollback while waiting to be drained. -->
-      {#if pendingSteers.length > 0}
+      {#if pendingSteerList.length > 0}
         <div class="pending-steer-bar fadein">
-          {#each pendingSteers as s}
+          {#each pendingSteerList as s}
             <div class="pending-steer-bubble">
               <div class="user-avatar" aria-hidden="true">
                 <iconify-icon icon="ant-design:user-outlined" width="16"></iconify-icon>
