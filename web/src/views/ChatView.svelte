@@ -138,7 +138,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     open: false, index: 0, draft: '', busy: false,
   })
 
-  let pendingSteerList = $derived(pendingSteers[$activeSessionId ?? ''] ?? [])
+  let pendingSteerList = $state<{ pendingId: string; text: string; files?: any[]; retracting?: boolean }[]>([])
+
+  // Sync pendingSteerList with the current session's pending steers. Uses $effect
+  // instead of $derived to ensure correct reactivity when indexing a $state Record
+  // with a $store value (keyed lookup).
+  $effect(() => {
+    pendingSteerList = pendingSteers[$activeSessionId ?? ''] ?? []
+  })
 
   // Sub-agents card elapsed time + reconnect countdown both tick off `now`.
   let now = $state(Date.now())
@@ -971,6 +978,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           subAgentDismissTimers.delete(key)
         }
       }
+      // Clear pending steer state for the session being left. This is the only
+      // cleanup path when switching away: the WS event handlers that would drain
+      // these steers (history_user_message, steer_retracted, etc.) were
+      // unsubscribed above, so any remaining entries become orphaned and can
+      // never be cleared — they would reappear as stale ghost bubbles on return.
+      pendingSteers = { ...pendingSteers, [sid]: [] }
     }
   })
 
@@ -1725,6 +1738,48 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
             </div>
           {/if}
         </div>
+
+        <!-- Pending steer messages (mid-turn input) — shown above the composer
+             as ghost user bubbles so they don't break the chronological order
+             of the scrollback while waiting to be drained. -->
+        {#if pendingSteerList.length > 0}
+          <div class="pending-steer-bar fadein">
+            {#each pendingSteerList as s}
+              <div class="pending-steer-bubble">
+                <div class="user-avatar" aria-hidden="true">
+                  <iconify-icon icon="ant-design:user-outlined" width="16"></iconify-icon>
+                </div>
+                <div class="user-bubble-wrap">
+                  <div class="user-bubble pending">
+                    {#if s.files && s.files.length > 0}
+                      <div class="msg-attachments">
+                        {#each s.files as f}
+                          {#if f.mime_type?.startsWith('image/')}
+                            <img src={f.data_url} alt={f.name} class="msg-image" />
+                          {:else}
+                            <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{f.name}</span>
+                          {/if}
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if s.text}{s.text}{/if}
+                    <span class="pending-spinner" title={$t('status.running')}></span>
+                  </div>
+                  <div class="msg-actions">
+                    <button
+                      class="action-btn"
+                      title={$t('chat.steer_retract')}
+                      disabled={s.retracting}
+                      onclick={() => retractSteer(s.pendingId)}
+                    >
+                      <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <!-- Background workflows panel (persists across turns, pinned above composer) -->
@@ -1737,48 +1792,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       <!-- Background processes tray -->
       {#if bgTasks && bgTasks.length > 0}
         <BackgroundProcesses tasks={bgTasks} />
-      {/if}
-
-      <!-- Pending steer messages (mid-turn input) — shown above the composer
-           as ghost user bubbles so they don't break the chronological order
-           of the scrollback while waiting to be drained. -->
-      {#if pendingSteerList.length > 0}
-        <div class="pending-steer-bar fadein">
-          {#each pendingSteerList as s}
-            <div class="pending-steer-bubble">
-              <div class="user-avatar" aria-hidden="true">
-                <iconify-icon icon="ant-design:user-outlined" width="16"></iconify-icon>
-              </div>
-              <div class="user-bubble-wrap">
-                <div class="user-bubble pending">
-                  {#if s.files && s.files.length > 0}
-                    <div class="msg-attachments">
-                      {#each s.files as f}
-                        {#if f.mime_type?.startsWith('image/')}
-                          <img src={f.data_url} alt={f.name} class="msg-image" />
-                        {:else}
-                          <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{f.name}</span>
-                        {/if}
-                      {/each}
-                    </div>
-                  {/if}
-                  {#if s.text}{s.text}{/if}
-                  <span class="pending-spinner" title={$t('status.running')}></span>
-                </div>
-                <div class="msg-actions">
-                  <button
-                    class="action-btn"
-                    title={$t('chat.steer_retract')}
-                    disabled={s.retracting}
-                    onclick={() => retractSteer(s.pendingId)}
-                  >
-                    <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
-                  </button>
-                </div>
-              </div>
-            </div>
-          {/each}
-        </div>
       {/if}
 
       <!-- Question banner (aligned with composer) -->
@@ -2112,6 +2125,8 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
 /* ── Pending steer (mid-turn input) ──────────────────────────────────────── */
 .pending-steer-bar {
+  position: sticky; bottom: 0; z-index: 2;
+  background: var(--bg-container);
   max-width: var(--chat-content-max-width); margin: 0 auto; width: 100%;
   padding: 0 24px 10px;
   display: flex; flex-direction: column; gap: 10px;
