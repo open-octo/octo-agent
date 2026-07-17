@@ -90,6 +90,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // message stream; the user can expand it into a floating dropdown.
   let planExpanded = $state(false)
 
+  // Turn-level LLM error, shown as a persistent red banner above the composer.
+  // Set on turn_error WS event, cleared when the user sends a new message or
+  // dismisses it manually.
+  let turnError = $state<string | null>(null)
+
   // Tracks optimistic UI state for in-flight sends. A FIFO queue per session
   // supports multiple messages (e.g. consecutive steer messages mid-turn); if
   // the server rejects one, we roll back only that pending bubble and restore
@@ -758,13 +763,16 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
     // Turn-level failure (sender/tool setup or the LLM call itself errored).
     // It belongs to no tool card, so render it as a standalone error notice in
-    // the transcript instead of dropping it. `complete` clears the caret.
+    // the transcript instead of dropping it. Also persist it as turnError so the
+    // banner above the composer stays visible until dismissed or a new message.
     cleanups.push(ws.on('turn_error', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const msg = (ev as any).error ?? 'request failed'
+      turnError = msg
       addChatMsg(sid, {
         id: uid('err'),
         type: 'notice',
-        content: `**Error:** ${(ev as any).error ?? 'request failed'}`,
+        content: `**Error:** ${msg}`,
         level: 'error',
         createdAt: Date.now(),
         streaming: false,
@@ -1210,11 +1218,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const steering = wasStreaming
     if (!steering) {
       // A fresh turn starts: clear the previous turn's finished sub-agents and
-      // thinking buffer, and flip the session into streaming. Use
-      // clearDoneSubAgents (not resetSubAgents) so a background sub-agent still
-      // running from an earlier turn survives — it belongs to no turn and must
-      // stay in the panel; wiping it here made it flicker out and back in as its
-      // next event re-added it.
+      // thinking buffer, clear the error banner, and flip the session into
+      // streaming.
+      turnError = null
       clearDoneSubAgents(sid)
       chatThinking.update(tt => ({ ...tt, [sid]: '' }))
       chatStreaming.update(s => ({ ...s, [sid]: true }))
@@ -1777,6 +1783,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
       <!-- Question banner (aligned with composer) -->
       <QuestionModal />
+
+      <!-- Turn-error banner: persists until dismissed or new message -->
+      {#if turnError}
+        <div class="turn-error-banner transition:fade|100">
+          <span class="turn-error-text">{turnError}</span>
+          <button class="turn-error-dismiss" onclick={() => turnError = null}
+            aria-label="{$t('common.close')}">
+            <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+          </button>
+        </div>
+      {/if}
 
       <!-- Composer -->
       <Composer bind:this={composer} onSend={send} />
