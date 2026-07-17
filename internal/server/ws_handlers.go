@@ -1203,7 +1203,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	sw := s.newWSStreamWriter(sess.ID)
 
 	if err := s.ensureSender(); err != nil {
-		sw.error(err.Error())
+		sw.userError(err)
 		return
 	}
 
@@ -1323,7 +1323,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		// (live-panel events + completion notes to the model).
 		runCtx, executor, _, cleanup, perr = s.prepareToolTurn(runCtx, a, sess)
 		if perr != nil {
-			sw.error(perr.Error())
+			sw.userError(perr)
 			return
 		}
 		toolDefs = tools.DefaultToolsForCtx(runCtx, a.Model)
@@ -1460,7 +1460,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// session_update tail. Returning here would skip `complete`, leaving
 			// the web UI's streaming flag (and its caret) stuck on forever; the
 			// tail's session_update is a superset of what we'd emit here.
-			sw.error(err.Error())
+			sw.userError(err)
 		}
 		// A first-round failure makes runLoop roll history back past the user
 		// message (appendUserInput's error-path contract), and the SyncFrom+
@@ -1703,6 +1703,13 @@ func (w *wsStreamWriter) error(msg string) {
 		"session_id": w.sessionID,
 		"error":      msg,
 	})
+}
+
+// userError is like error but strips internal agent-loop prefixes so the
+// message shown in the browser is user-friendly instead of displaying
+// "agent: loop[0]: anthropic: HTTP 403 ...".
+func (w *wsStreamWriter) userError(err error) {
+	w.error(agent.UserFacingError(err))
 }
 
 // bufferTurnEvent records an already-broadcast turn event in the session's

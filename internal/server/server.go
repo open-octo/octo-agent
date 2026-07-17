@@ -2986,7 +2986,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// context length, auth) failed. A user interrupt (context.Canceled) is
 	// expected and stays quiet.
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
-		ad.SendText(ev.ChatID, "⚠️ "+runErr.Error(), ev.MessageID)
+		ad.SendText(ev.ChatID, "⚠️ "+agent.UserFacingError(runErr), ev.MessageID)
 	}
 
 	// Terminal-transition notice: the model finished, blocked, or exhausted
