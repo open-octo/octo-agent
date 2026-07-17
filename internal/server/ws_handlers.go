@@ -1666,6 +1666,21 @@ func (s *Server) peekPendingTitle(sessionID string) string {
 	return s.pendingTitles[sessionID]
 }
 
+// broadcastSessionRenamed announces a session's new title globally so every
+// tab's sidebar updates live. Nil-hub safe (broadcastGoalUpdated precedent):
+// channel turns run in processes/tests where initWS never ran, and a rename
+// is cosmetic — never worth crashing the turn that carries it.
+func (s *Server) broadcastSessionRenamed(sessionID, name string) {
+	if s.wsHub == nil {
+		return
+	}
+	s.wsHub.broadcast("", map[string]any{
+		"type":       "session_renamed",
+		"session_id": sessionID,
+		"name":       name,
+	})
+}
+
 // ─── wsStreamWriter ────────────────────────────────────────────────────────
 
 type wsStreamWriter struct {

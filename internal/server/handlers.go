@@ -92,10 +92,11 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 			updated = st.ModTime()
 		}
 	}
-	name := s.Title
-	if name == "" {
-		name = s.DisplayTitle()
-	}
+	// DisplayTitle collapses the "*Octo Agent" placeholder onto the first
+	// message snippet; Title alone would surface the raw placeholder for an
+	// IM session whose async title generation hasn't landed yet (the WS brief
+	// list already uses DisplayTitle — ws_handlers.go).
+	name := s.DisplayTitle()
 	title := s.Title
 	// A title generated mid-turn is broadcast immediately but adopted (and
 	// persisted) only at turn end; surface it in list responses meanwhile so

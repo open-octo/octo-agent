@@ -41,13 +41,15 @@ func sessionStoreID(key SessionKey) string {
 }
 
 // newChannelStore builds a fresh, persisted-shape store for a channel
-// session: source "channel", bound to EntryChannel, Title left empty so
-// DisplayTitle() falls back to the first user message snippet (truncated to
-// 60 chars) instead of showing the raw SessionKey (e.g.
-// "weixin:o9cq…@im.wechat:o9cq…@im.wechat"). Shared by restoreOrInitStore
-// (first-ever store for a session) and EnsureStoreExists (#1079 — recovering
-// after the file was deleted out from under an already-running session), so
-// both give a fresh channel session the exact same shape.
+// session: source "channel", bound to EntryChannel. Title stays at
+// agent.NewSession's "*Octo Agent" placeholder — never the raw SessionKey
+// (e.g. "weixin:o9cq…@im.wechat:o9cq…@im.wechat") — until the first turn's
+// async title generation replaces it; meanwhile DisplayTitle() surfaces the
+// first user message snippet instead of the placeholder. Shared by
+// restoreOrInitStore (first-ever store for a session) and EnsureStoreExists
+// (#1079 — recovering after the file was deleted out from under an
+// already-running session), so both give a fresh channel session the exact
+// same shape.
 func newChannelStore(id, model string) *agent.Session {
 	st := agent.NewSession(model, "")
 	st.ID = id
@@ -140,6 +142,29 @@ func (s *Session) Persist() error {
 	// Best-effort and idempotent (a no-op when the count is unchanged).
 	_ = s.Agent.PersistContextUsage(s.Store)
 	return nil
+}
+
+// AdoptGeneratedTitle records an async-generated session title, replacing the
+// "*Octo Agent" placeholder (or an empty title). A title the user set
+// themselves — anything else — always wins and the adoption is refused.
+// storeMu serializes the write with Persist/UnbindStore/deleteStore, the same
+// discipline Persist follows; a tombstoned store (concurrent /unbind) just
+// reports false. Returns true when the placeholder was replaced.
+//
+// Durability: on a transcript that already carries messages SetTitle appends
+// a title record itself; on a meta-only store (no turn persisted yet) the
+// title rides the caller's next Persist, which folds it into the meta header
+// — the server's channel persist closure always adopts right before Persist.
+func (s *Session) AdoptGeneratedTitle(title string) bool {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	if s.Store == nil {
+		return false
+	}
+	if t := strings.TrimSpace(s.Store.Title); t != "" && t != "*Octo Agent" {
+		return false
+	}
+	return s.Store.SetTitle(title) == nil
 }
 
 // UnbindStore releases the store's entry binding and persists the change.
