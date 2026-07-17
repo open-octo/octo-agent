@@ -153,6 +153,11 @@ func (c *Client) applyReasoning(body *apiRequest, effort string) {
 		}
 		return
 	case DialectBailian:
+		// Sent explicitly both ways since per-model defaults vary. Note: a
+		// handful of DashScope models (e.g. qwq-plus, deepseek-r1) are
+		// thinking-only and reject enable_thinking:false outright — none of
+		// the vendor's catalogued models are (see internal/app/provider.go's
+		// "bailian" entry), so this only bites a hand-typed custom model id.
 		enabled := effort != ""
 		body.EnableThinking = &enabled
 		return

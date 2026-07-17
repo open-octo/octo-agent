@@ -166,41 +166,60 @@ func TestBailianDialect_UsesEnableThinkingBoolean(t *testing.T) {
 // reasoning_effort clamped to its only supported value, "max".
 func TestKimiDialect_ModelDependentShape(t *testing.T) {
 	t.Run("k2.6 toggles like DeepSeek", func(t *testing.T) {
-		on := captureRequestModel(t, DialectKimi, "kimi-k2.6", "high", false)
+		for _, stream := range []bool{false, true} {
+			on := captureRequestModel(t, DialectKimi, "kimi-k2.6", "high", stream)
+			if on.Thinking == nil || on.Thinking.Type != "enabled" {
+				t.Errorf("stream=%v: thinking = %+v, want type=enabled", stream, on.Thinking)
+			}
+			if on.ReasoningEffort != "" {
+				t.Errorf("stream=%v: reasoning_effort = %q, want empty (k2.6 has no such field)", stream, on.ReasoningEffort)
+			}
+
+			off := captureRequestModel(t, DialectKimi, "kimi-k2.6", "", stream)
+			if off.Thinking == nil || off.Thinking.Type != "disabled" {
+				t.Errorf("stream=%v: off thinking = %+v, want type=disabled", stream, off.Thinking)
+			}
+		}
+	})
+
+	// k2.5 shares k2.6's nested-toggle shape (see DialectKimi's doc comment);
+	// this pins that the default branch actually covers it, not just k2.6.
+	t.Run("k2.5 toggles like k2.6", func(t *testing.T) {
+		on := captureRequestModel(t, DialectKimi, "kimi-k2.5", "high", false)
 		if on.Thinking == nil || on.Thinking.Type != "enabled" {
 			t.Errorf("thinking = %+v, want type=enabled", on.Thinking)
 		}
-		if on.ReasoningEffort != "" {
-			t.Errorf("reasoning_effort = %q, want empty (k2.6 has no such field)", on.ReasoningEffort)
-		}
-
-		off := captureRequestModel(t, DialectKimi, "kimi-k2.6", "", false)
+		off := captureRequestModel(t, DialectKimi, "kimi-k2.5", "", false)
 		if off.Thinking == nil || off.Thinking.Type != "disabled" {
 			t.Errorf("off thinking = %+v, want type=disabled", off.Thinking)
 		}
 	})
 
 	t.Run("k2.7-code always enabled", func(t *testing.T) {
-		for _, effort := range []string{"", "high"} {
-			got := captureRequestModel(t, DialectKimi, "kimi-k2.7-code", effort, false)
-			if got.Thinking == nil || got.Thinking.Type != "enabled" {
-				t.Errorf("effort=%q: thinking = %+v, want type=enabled (k2.7-code can't disable)", effort, got.Thinking)
+		for _, stream := range []bool{false, true} {
+			for _, effort := range []string{"", "high"} {
+				got := captureRequestModel(t, DialectKimi, "kimi-k2.7-code", effort, stream)
+				if got.Thinking == nil || got.Thinking.Type != "enabled" {
+					t.Errorf("stream=%v effort=%q: thinking = %+v, want type=enabled (k2.7-code can't disable)", stream, effort, got.Thinking)
+				}
 			}
 		}
 	})
 
 	t.Run("k3 clamps to reasoning_effort=max", func(t *testing.T) {
-		got := captureRequestModel(t, DialectKimi, "k3", "low", false)
-		if got.ReasoningEffort != "max" {
-			t.Errorf("reasoning_effort = %q, want max (k3's only supported value)", got.ReasoningEffort)
-		}
-		if got.Thinking != nil {
-			t.Errorf("thinking = %+v, want omitted (k3 uses reasoning_effort)", got.Thinking)
-		}
+		for _, stream := range []bool{false, true} {
+			got := captureRequestModel(t, DialectKimi, "k3", "low", stream)
+			if got.ReasoningEffort != "max" {
+				t.Errorf("stream=%v: reasoning_effort = %q, want max (k3's only supported value)", stream, got.ReasoningEffort)
+			}
+			if got.Thinking != nil {
+				t.Errorf("stream=%v: thinking = %+v, want omitted (k3 uses reasoning_effort)", stream, got.Thinking)
+			}
 
-		off := captureRequestModel(t, DialectKimi, "k3", "", false)
-		if off.ReasoningEffort != "" {
-			t.Errorf("off reasoning_effort = %q, want empty", off.ReasoningEffort)
+			off := captureRequestModel(t, DialectKimi, "k3", "", stream)
+			if off.ReasoningEffort != "" {
+				t.Errorf("stream=%v: off reasoning_effort = %q, want empty", stream, off.ReasoningEffort)
+			}
 		}
 	})
 }
