@@ -910,10 +910,10 @@ func firstUserText(msgs []Message) string {
 }
 
 // snippetBudget caps a one-line preview in half-width columns: wide (CJK)
-// runes count 2, others 1. 30 columns is 15 full-width characters or roughly
-// five English words — display width is the one ruler that makes Chinese,
+// runes count 2, others 1. 50 columns is 25 full-width characters or roughly
+// eight English words — display width is the one ruler that makes Chinese,
 // English, and mixed text land at the same visual length in the sidebar.
-const snippetBudget = 30
+const snippetBudget = 50
 
 // FirstUserSnippet extracts a one-line preview from the first user message,
 // skipping injected <system-reminder> blocks and tool-result turns, and
