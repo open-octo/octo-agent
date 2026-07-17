@@ -938,11 +938,17 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 	a := s.buildAgent(sess)
 
 	if !s.cfg.Tools {
-		reply, err := a.Turn(ctx, userInput)
+		// Run (not Turn) so this path shares the loop's interrupt contract
+		// (input kept, capped with a note) and Stop-hook firing with the WS
+		// transport's no-tools turns.
+		reply, err := a.Run(ctx, userInput, nil, nil)
+		sess.SyncFrom(a.History)
 		if err != nil {
+			// Callers only Save on success; persist what the turn left behind
+			// (an interrupt keeps the input + note) like the WS path does.
+			_ = sess.Save()
 			return "", err
 		}
-		sess.SyncFrom(a.History)
 		return reply.Content, nil
 	}
 
@@ -955,11 +961,15 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 	defer cleanup()
 
 	reply, err := a.Run(ctx, userInput, tools.DefaultToolsForCtx(ctx, a.Model), executor)
+	// Sync even on failure: an interrupt keeps the input + note, and rounds
+	// completed before a mid-turn error are billed work — the WS path
+	// persists both, so this transport must too (callers only Save on
+	// success, hence the explicit Save on the error path).
+	sess.SyncFrom(a.History)
 	if err != nil {
+		_ = sess.Save()
 		return "", err
 	}
-
-	sess.SyncFrom(a.History)
 	return reply.Content, nil
 }
 
