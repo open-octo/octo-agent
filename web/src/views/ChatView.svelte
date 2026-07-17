@@ -978,12 +978,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           subAgentDismissTimers.delete(key)
         }
       }
-      // Clear pending steer state for the session being left. This is the only
-      // cleanup path when switching away: the WS event handlers that would drain
-      // these steers (history_user_message, steer_retracted, etc.) were
-      // unsubscribed above, so any remaining entries become orphaned and can
-      // never be cleared — they would reappear as stale ghost bubbles on return.
-      pendingSteers = { ...pendingSteers, [sid]: [] }
     }
   })
 
@@ -1740,42 +1734,31 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         </div>
 
         <!-- Pending steer messages (mid-turn input) — shown above the composer
-             as ghost user bubbles so they don't break the chronological order
+             as ghost text lines so they don't break the chronological order
              of the scrollback while waiting to be drained. -->
         {#if pendingSteerList.length > 0}
           <div class="pending-steer-bar fadein">
             {#each pendingSteerList as s}
-              <div class="pending-steer-bubble">
-                <div class="user-avatar" aria-hidden="true">
-                  <iconify-icon icon="ant-design:user-outlined" width="16"></iconify-icon>
-                </div>
-                <div class="user-bubble-wrap">
-                  <div class="user-bubble pending">
-                    {#if s.files && s.files.length > 0}
-                      <div class="msg-attachments">
-                        {#each s.files as f}
-                          {#if f.mime_type?.startsWith('image/')}
-                            <img src={f.data_url} alt={f.name} class="msg-image" />
-                          {:else}
-                            <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{f.name}</span>
-                          {/if}
-                        {/each}
-                      </div>
-                    {/if}
-                    {#if s.text}{s.text}{/if}
-                    <span class="pending-spinner" title={$t('status.running')}></span>
-                  </div>
-                  <div class="msg-actions">
-                    <button
-                      class="action-btn"
-                      title={$t('chat.steer_retract')}
-                      disabled={s.retracting}
-                      onclick={() => retractSteer(s.pendingId)}
-                    >
-                      <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
-                    </button>
-                  </div>
-                </div>
+              <div class="pending-steer-line">
+                <span class="steer-text">
+                  {#if s.files && s.files.length > 0}
+                    <span class="steer-attachments">
+                      {#each s.files as f}
+                        {f.name}
+                      {/each}
+                    </span>
+                  {/if}
+                  {#if s.text}{s.text}{/if}
+                </span>
+                <span class="pending-spinner" title={$t('status.running')}></span>
+                <button
+                  class="steer-retract"
+                  title={$t('chat.steer_retract')}
+                  disabled={s.retracting}
+                  onclick={() => retractSteer(s.pendingId)}
+                >
+                  <iconify-icon icon="ant-design:edit-outlined" width="12"></iconify-icon>
+                </button>
               </div>
             {/each}
           </div>
@@ -2126,25 +2109,33 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 /* ── Pending steer (mid-turn input) ──────────────────────────────────────── */
 .pending-steer-bar {
   position: sticky; bottom: 0; z-index: 2;
-  background: var(--bg-container);
   max-width: var(--chat-content-max-width); margin: 0 auto; width: 100%;
   padding: 0 24px 10px;
-  display: flex; flex-direction: column; gap: 10px;
+  display: flex; flex-direction: column;
+  gap: 4px;
 }
-.pending-steer-bubble {
+.pending-steer-line {
   display: flex;
   justify-content: flex-end;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+  opacity: 0.7;
 }
-.pending-steer-bubble .user-bubble {
-  border-radius: 12px 12px 4px 12px;
+.steer-text {
+  white-space: pre-wrap; word-break: break-word;
 }
-.pending-steer-bubble .user-avatar {
-  width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px;
-  background: var(--bg-sidebar); border: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-secondary);
+.steer-retract {
+  width: 20px; height: 20px; border: none; background: transparent;
+  border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--text-quaternary); flex-shrink: 0;
+}
+.steer-retract:hover { color: var(--text-secondary); background: var(--hover-neutral); }
+.steer-attachments {
+  font-size: 12px;
+  color: var(--text-quaternary);
 }
 
 /* ── Fade-in ─────────────────────────────────────────────────────────────── */
