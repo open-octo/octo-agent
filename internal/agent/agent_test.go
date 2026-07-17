@@ -1901,6 +1901,56 @@ func TestAgent_GenerateTitle_NotConfigured(t *testing.T) {
 	}
 }
 
+// TestAgent_GenerateTitleOrSnippet pins the shared title mechanism used by
+// both the TUI and the server: the model's title when the throwaway call
+// works, a snippet of the first user message when it errors, times out, or
+// answers empty — so every frontend gets a title within
+// TitleGenerationTimeout.
+func TestAgent_GenerateTitleOrSnippet(t *testing.T) {
+	snap := []Message{NewUserMessage("please fix the login bug")}
+
+	t.Run("model title wins", func(t *testing.T) {
+		a := New(&fakeSender{reply: Reply{Content: "Fix the login bug"}}, "m")
+		got, err := a.GenerateTitleOrSnippet(context.Background(), snap, nil)
+		if err != nil {
+			t.Fatalf("GenerateTitleOrSnippet: %v", err)
+		}
+		if got != "Fix the login bug" {
+			t.Errorf("title = %q, want the model's title", got)
+		}
+	})
+
+	t.Run("provider error falls back to snippet", func(t *testing.T) {
+		a := New(&fakeSender{err: errors.New("boom")}, "m")
+		got, err := a.GenerateTitleOrSnippet(context.Background(), snap, nil)
+		if err == nil {
+			t.Error("expected the provider error to surface for logging")
+		}
+		if got != "please fix the login bug" {
+			t.Errorf("title = %q, want the user-message snippet", got)
+		}
+	})
+
+	t.Run("empty reply falls back to snippet", func(t *testing.T) {
+		a := New(&fakeSender{reply: Reply{Content: ""}}, "m")
+		got, err := a.GenerateTitleOrSnippet(context.Background(), snap, nil)
+		if err != nil {
+			t.Fatalf("GenerateTitleOrSnippet: %v", err)
+		}
+		if got != "please fix the login bug" {
+			t.Errorf("title = %q, want the user-message snippet", got)
+		}
+	})
+
+	t.Run("no user text returns empty", func(t *testing.T) {
+		a := New(&fakeSender{reply: Reply{Content: ""}}, "m")
+		got, _ := a.GenerateTitleOrSnippet(context.Background(), []Message{NewAssistantMessage("hi")}, nil)
+		if got != "" {
+			t.Errorf("title = %q, want empty when there's nothing to title from", got)
+		}
+	})
+}
+
 // TestAgent_GenerateTitle_UsesNoReasoningSenderWhenAvailable guards that title
 // generation disables reasoning outright when the sender supports it. A session
 // running reasoning_effort "max" would otherwise pay the model's full reasoning

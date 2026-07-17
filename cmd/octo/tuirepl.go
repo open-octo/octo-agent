@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1425,13 +1426,16 @@ func (m *tuiModel) suggestCmd() tea.Cmd {
 
 // titleCmd returns a tea.Cmd that asynchronously generates a session title,
 // once per session. Fired on receipt of the user's message (turn start), not
-// at turn end, so the terminal tab isn't stuck on "(untitled)" for the whole
-// first turn. pending is the message starting the turn — the turn goroutine
-// appends it to History later, so the snapshot is taken here, synchronously,
-// and pending is added on top. It returns nil (no-op) when the session is
-// already titled (non-empty and not the "*Octo Agent" placeholder), a
-// generation is already in flight, saving is off, or there's nothing to
-// summarize. The result is persisted by the titleMsg handler.
+// at turn end, so the terminal tab isn't stuck on the placeholder for the
+// whole first turn. pending is the message starting the turn — the turn
+// goroutine appends it to History later, so the snapshot is taken here,
+// synchronously, and pending is added on top. It returns nil (no-op) when the
+// session is already titled (non-empty and not the "*Octo Agent"
+// placeholder), a generation is already in flight, saving is off, or there's
+// nothing to summarize. The shared mechanism (agent.GenerateTitleOrSnippet)
+// guarantees a title within TitleGenerationTimeout: the model's when the
+// throwaway call works, a snippet of pending otherwise. The result is
+// persisted by the titleMsg handler.
 func (m *tuiModel) titleCmd(pending string) tea.Cmd {
 	if m.cfg.noSave || m.titlePending {
 		return nil
@@ -1450,11 +1454,11 @@ func (m *tuiModel) titleCmd(pending string) tea.Cmd {
 	a := m.a
 	tools := m.cfg.tools // same toolbelt as the loop, so the request hits the prompt cache
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), agent.TitleGenerationTimeout)
 		defer cancel()
-		t, err := a.GenerateTitleFrom(ctx, msgs, tools)
+		t, err := a.GenerateTitleOrSnippet(ctx, msgs, tools)
 		if err != nil {
-			return titleMsg{text: ""}
+			slog.Debug("session title generation failed, using snippet", "err", err)
 		}
 		return titleMsg{text: t}
 	}
