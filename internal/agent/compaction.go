@@ -177,7 +177,7 @@ func contextWindow(model string) int {
 
 	// ── GLM (Zhipu) ──
 	case strings.Contains(m, "glm-5.2") || strings.Contains(m, "glm5.2"):
-		return 128_000
+		return 1_000_000
 	case strings.Contains(m, "glm-4-air") || strings.Contains(m, "glm-4.5-air"):
 		return 128_000
 	case strings.Contains(m, "glm-4-flash") || strings.Contains(m, "glm-4.5-flash"):
@@ -190,6 +190,8 @@ func contextWindow(model string) int {
 		return 64_000
 
 	// ── XAI Grok ──
+	case strings.Contains(m, "grok-4.5") || strings.Contains(m, "grok4.5"):
+		return 500_000
 	case strings.Contains(m, "grok-4") || strings.Contains(m, "grok4"):
 		return 256_000
 	case strings.Contains(m, "grok"):

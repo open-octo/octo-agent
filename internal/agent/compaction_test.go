@@ -117,8 +117,11 @@ func TestContextWindow(t *testing.T) {
 	if got := contextWindow("gpt-5.6-sol"); got != 1_000_000 {
 		t.Errorf("gpt-5.6-sol window = %d, want 1000000", got)
 	}
-	if got := contextWindow("glm-5.2"); got != 128_000 {
-		t.Errorf("glm-5.2 window = %d, want 128000", got)
+	if got := contextWindow("glm-5.2"); got != 1_000_000 {
+		t.Errorf("glm-5.2 window = %d, want 1000000", got)
+	}
+	if got := contextWindow("x-ai/grok-4.5"); got != 500_000 {
+		t.Errorf("grok-4.5 window = %d, want 500000", got)
 	}
 	if got := contextWindow("unknown-model-xyz"); got != defaultContextWindow {
 		t.Errorf("unknown model window = %d, want %d (conservative default)", got, defaultContextWindow)
