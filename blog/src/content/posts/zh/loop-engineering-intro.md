@@ -44,56 +44,32 @@ Google 工程师 **Addy Osmani** 的定义最为准确：
 
 > “I don’t prompt Claude anymore. I have loops running that prompt Claude and figuring out what to do. My job is to write loops.”
 
-Loop Engineering 不是让 AI 一次性生成答案，而是让 AI 持续地运行一个**有状态、有反馈、可回滚**的工作系统。
+换句话说：你交付的不再是一条 prompt，而是一个**有状态、有反馈、可回滚**的工作系统。
 
 ---
 
 ## 为什么 Loop Engineering 正在成为主流
 
-| 驱动力 | 说明 |
-|------|------|
-| 工具层成熟 | 现代 coding agent 已经把循环所需的 6 大 primitive 做成一等公民 |
-| 从业者证言 | 造工具的人自己说“我不再写 prompt，我写 loop” |
-| 范式自然演进 | 从 prompt engineering → context engineering → harness engineering → loop engineering |
-| 可复现、可复用 | 一次设计，自动反复跑，适合 CI 失败、issue triage、依赖更新等重复维护任务 |
-| 经济性 | 把人类从“反复查看和发起”中解放出来，集中处理真正需要判断的工作 |
+一方面是工具层成熟了：现代 coding agent 已经把循环需要的原语——调度、隔离、技能、连接器、子 agent、记忆——做成了一等公民，搭一个 loop 不再需要自己糊一堆胶水脚本。另一方面是造工具的人自己先改了工作方式："我不再写 prompt，我写 loop"出自 Claude Code 的负责人之口，不是营销文案。
 
-Loop Engineering 的兴起，本质上反映了一个趋势：AI 的应用正从**单次交互**走向**持续运转的系统**。
+往回看，这也是 prompt engineering → context engineering → harness engineering 一路演进的自然下一步：AI 的应用正从单次交互走向持续运转的系统。对工程师来说，直接收益有两条——一次设计可以自动反复跑，CI 失败、issue triage、依赖更新这类重复维护任务尤其合适；人从"反复查看和发起"里解放出来，只处理真正需要判断的部分。
 
 ---
 
-## Loop Engineering 的六大构建块
+## 六大构建块，以及它们在 octo-agent 里的样子
 
-业界基本共识的 6 个 primitive（5 个模块 + 1 个记忆）：
+一个 loop 要能自己转起来，至少得回答五个问题：什么时候醒（调度）、在哪干活不踩别人（隔离）、按什么规矩干（项目知识）、跟外面世界怎么打交道（连接器）、干完了谁来检查（分工）——再加上第六件：跨轮次不失忆（记忆/状态）。业界对这 6 个 primitive 已有基本共识，octo-agent 把它们全部内置：
 
-| 模块 | 作用 | 典型实现 |
+| 模块 | 解决什么问题 | octo-agent 里的实现 |
 |------|------|----------|
-| **Automations / Scheduling** | 定时触发、发现任务、分类 | cron、hooks、GitHub Actions |
-| **Worktrees** | 并行 agent 不互相踩文件 | `git worktree`、隔离目录 |
-| **Skills** | 把项目知识固化成文件 | `SKILL.md`、可复用指令 |
-| **Plugins / Connectors (MCP)** | 连接外部工具（issue tracker、Slack、API） | MCP servers |
-| **Sub-agents** | 制造者 / 检查者分离 | 独立 agent 做 verifier |
-| **Memory / State** | 跨对话持久化 | 状态文件、数据库、任务记录 |
+| **Scheduling / Automations** | 什么时候醒、发现任务 | 跨 session：`cron-task-creator` 技能、`/api/tasks`；session 内：`/loop` + `schedule_wakeup` |
+| **Worktrees** | 并行 agent 不互相踩文件 | `worktree-isolate` 技能、workflow 的 `isolation: "worktree"` |
+| **Skills** | 把项目知识固化成可复用指令 | `SKILL.md` + `skill` 工具 |
+| **Connectors (MCP)** | 接 issue tracker、Slack、外部 API | `mcp` 工具 + MCP servers |
+| **Sub-agents** | 制造者 / 检查者分离 | `sub_agent` 工具、workflow 里的 `agent()` |
+| **Memory / State** | 跨对话持久化 | `MEMORY.md`、`.octo/STATE.md`、task 状态 |
 
-octo-agent 把这些 primitive 全部内置，形成了一个统一的 Loop Engineering 平台，而不是零散的工具组合。
-
----
-
-## octo-agent 如何映射这六大构建块
-
-| Loop 模块 | octo-agent 能力 | 调用方式 |
-|---|---|---|
-| **Goal / 跑到条件为止** | `/goal <objective>` 或 `create_goal` | 让 agent 持续运行直到满足条件 |
-| **Scheduling / Automations** | `cron-task-creator` 技能、`/api/tasks` | 持久化定时任务，session 关了也跑 |
-| **In-session 循环** | `loop` 技能 + `schedule_wakeup` | `octo /loop 1h 检查 CI` |
-| **Worktree 隔离** | `worktree-isolate` 技能、`workflow` 的 `isolation: "worktree"` | 写代码的 loop 必须开隔离 |
-| **Sub-agents** | `sub_agent` 工具、workflow 里的 `agent()` | implementer + verifier 分离 |
-| **Skills** | `SKILL.md` + `skill` 工具 | 加载沉淀的最佳实践 |
-| **Memory / State** | `MEMORY.md`、`.octo/STATE.md`、task 状态 | 跨对话持久化 |
-| **Connectors** | `mcp` 工具 + MCP servers | 接 issue tracker、Slack、staging API |
-| **Workflow 编排** | `workflow` 工具 | 多 agent、阶段、并行、流水线 |
-
-octo-agent 的独特之处在于：**这些能力不是各自为政的插件，而是围绕 Loop Engineering 设计的一整套协同机制**。`workflow` 负责编排，`cron-task-creator` 负责调度，`worktree-isolate` 负责隔离，`sub_agent` 负责分工，`skill` 负责沉淀，`MEMORY.md` 和 `.octo/` 负责状态。
+在这六件之上，octo 还有两个把它们串起来的东西：`workflow`（多 agent 编排——阶段、并行、流水线）和 `/goal`（定一个目标，跑到条件满足为止）。`workflow` 负责编排，cron 负责调度，worktree 负责隔离，`sub_agent` 负责分工，`skill` 负责沉淀，`MEMORY.md` 和 `.octo/` 负责状态——拼在一起才是一个 Loop Engineering 平台，而不是零散工具的堆叠。
 
 ---
 
@@ -231,7 +207,7 @@ Loop Engineering 不仅适用于代码开发。只要任务满足四个条件—
 | **Comprehension 债务** | loop 写得越快，你离真实代码越远 | 从低风险任务开始，保持 human gate |
 | **Cognitive surrender** | 从“用 loop 加速我懂的工作”变成“让 loop 替我想” | 明确 loop 只处理重复性任务，判断留给人 |
 
-Addy Osmani 的警告值得反复咀嚼：
+Addy Osmani 的警告放在这里正合适：
 
 > “Build the loop. But build it like someone who intends to stay the engineer, not just the person who presses go.”
 
@@ -245,7 +221,7 @@ Addy Osmani 的警告值得反复咀嚼：
 2. **Dependency Sweeper**：每周升级 patch/minor 依赖，尤其适合 Go 这种依赖迭代快、API 兼容性通常可控的环境。
 3. **Post-Merge Cleanup**：自动清理已合并分支，并提醒关闭关联 issue。破坏性最小，但日常很烦人。
 
-Loop Engineering 最大的价值不是减少写代码的时间，而是减少上下文切换和琐事堆积，让你把精力放在真正需要人类判断的设计、架构和复杂 bug 上。
+Loop Engineering 省下的与其说是写代码的时间，不如说是上下文切换和琐事堆积——把精力留给真正需要人类判断的设计、架构和复杂 bug。
 
 ---
 

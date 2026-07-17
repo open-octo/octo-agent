@@ -18,7 +18,7 @@ originalSlug: onboarding-skills-excel-report
 
 octo 内置了一套 Skills 系统——每个 Skill 就是一份写清楚"什么时候该用、该怎么用"的说明书，装在 `~/.octo/skills-default/` 里。它不会一直占着上下文：session 开始时，octo 只把每个 Skill 的名字和一行描述放进系统提示，等你真正说出一个跟某个 Skill 匹配的需求，它才把那份完整说明书加载进来。
 
-这意味着你**不需要知道 Skill 的存在，也不需要手动调用它**。装完 octo 之后，打开网页界面左侧的"技能"面板,能看到一整张已经装好的列表：
+这意味着你**不需要知道 Skill 的存在，也不需要手动调用它**。装完 octo 之后，打开网页界面左侧的"技能"面板，能看到一整张已经装好的列表：
 
 ![Octo 技能面板：内置的 office-xlsx、cron-task-creator、mcp-creator 等技能](../_assets/onboarding/skills-panel.png)
 
@@ -67,16 +67,16 @@ flowchart LR
 如果表里需要一行"合计"，正确的说法是让它**用 Excel 公式**，而不是"帮我算出总数填进去"：
 
 ```text
-在明细表最后加一行合计，用 SUM 公式算金额列的总和,别自己算好写数字进去。
+在明细表最后加一行合计，用 SUM 公式算金额列的总和，别自己算好写数字进去。
 ```
 
-原因很实际：`office-xlsx` 背后的 openpyxl 不会执行公式计算，它只能写公式文本，真正的计算是 Excel/LibreOffice 打开文件时才发生的。如果换成让 Python 算出一个数字直接写进单元格，那个数字就是死的——明细一改，合计不会跟着变,还会不知不觉地对不上。凡是"根据其他格算出来的值"，都该交给公式,这也是它在做财务模型类表格时会主动遵守的一条约定。
+原因很实际：`office-xlsx` 背后的 openpyxl 不会执行公式计算，它只能写公式文本，真正的计算是 Excel/LibreOffice 打开文件时才发生的。如果换成让 Python 算出一个数字直接写进单元格，那个数字就是死的——明细一改，合计不会跟着变，还会不知不觉地对不上。凡是"根据其他格算出来的值"，都该交给公式，这也是它在做财务模型类表格时会主动遵守的一条约定。
 
 ---
 
 ## 这只是 Skill 系统的一个例子
 
-`office-xlsx` 只是 18 个内置 Skill 里的一个。同样的模式——匹配意图、自动加载、你只管说需求——也适用于让 octo 帮你审一份代码 diff（`code-review`）、整理一篇技术方案（`tech-design`），后面几篇要讲的定时任务（`cron-task-creator`）和接外部工具（`mcp-creator`），本质上也是 Skill。
+`office-xlsx` 只是 20 个内置 Skill 里的一个。同样的模式——匹配意图、自动加载、你只管说需求——也适用于让 octo 帮你审一份代码 diff（`code-review`）、整理一篇技术方案（`tech-design`），后面几篇要讲的定时任务（`cron-task-creator`）和接外部工具（`mcp-creator`），本质上也是 Skill。
 
 **系列上一篇**：[Octo 上手系列（一）：装好它，跟它说上第一句话](/blog/posts/onboarding-install-and-first-run/)
 **系列下一篇**：[Octo 上手系列（三）：MCP 实战——接上 GitHub，让 octo 帮你理 issue](/blog/posts/onboarding-mcp-github-issues/)

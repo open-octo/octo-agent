@@ -44,56 +44,32 @@ Anthropic Claude Code lead **Boris Cherny** put it closer to engineering reality
 
 > “I don’t prompt Claude anymore. I have loops running that prompt Claude and figuring out what to do. My job is to write loops.”
 
-Loop Engineering is not about AI generating an answer once; it is about AI running a **stateful, feedback-driven, reversible** working system.
+Put differently: what you deliver is no longer a prompt — it's a **stateful, feedback-driven, reversible** working system.
 
 ---
 
 ## Why Loop Engineering is becoming mainstream
 
-| Driver | Why it matters |
-|--------|----------------|
-| Mature tooling | The six primitives needed for loops are now first-class citizens in modern coding agents. |
-| Practitioner testimony | The people building the tools say, “I don’t write prompts; I write loops.” |
-| Natural evolution | From prompt engineering → context engineering → harness engineering → loop engineering. |
-| Repeatability | Design once, run repeatedly for CI failures, issue triage, dependency updates, and other maintenance tasks. |
-| Economics | Free humans from initiating and following up; let them focus on actual judgment calls. |
+Part of it is tooling maturity: modern coding agents have made the primitives a loop needs — scheduling, isolation, skills, connectors, sub-agents, memory — first-class citizens, so building a loop no longer means gluing scripts together yourself. The other part is that the people building the tools changed how they work first: "I don't write prompts; I write loops" comes from the Claude Code lead, not from marketing copy.
 
-The rise of Loop Engineering reflects a broader trend: AI is moving from **single interactions** to **continuously running systems**.
+Zoom out and this is the natural next step in the prompt engineering → context engineering → harness engineering progression: AI applications are moving from single interactions to continuously running systems. For an engineer the payoff is twofold — design once and it runs repeatedly (CI failures, issue triage, dependency updates, and other maintenance chores fit especially well), and the human is freed from initiating and following up, keeping only the parts that genuinely need judgment.
 
 ---
 
-## The six building blocks of Loop Engineering
+## The six building blocks, and what they look like in octo-agent
 
-The industry has settled on six primitives (five modules + one memory layer):
+For a loop to run itself, it has to answer five questions: when do I wake up (scheduling), where do I work without stepping on anyone (isolation), what rules do I follow (project knowledge), how do I talk to the outside world (connectors), and who checks my work (division of labor) — plus a sixth: how do I avoid amnesia between rounds (memory/state). The industry has settled on these six primitives, and octo-agent ships all of them built in:
 
-| Module | Purpose | Typical implementation |
+| Module | Problem it solves | Implementation in octo-agent |
 |--------|---------|------------------------|
-| **Automations / Scheduling** | Trigger on a schedule, discover tasks, classify them | cron, hooks, GitHub Actions |
-| **Worktrees** | Parallel agents do not step on each other’s files | `git worktree`, isolated directories |
-| **Skills** | Codify project knowledge into reusable instructions | `SKILL.md`, reusable prompts |
-| **Plugins / Connectors (MCP)** | Connect to external tools (issue trackers, Slack, APIs) | MCP servers |
-| **Sub-agents** | Separate maker and checker | independent agent acting as verifier |
-| **Memory / State** | Persist across conversations | state files, databases, task records |
+| **Scheduling / Automations** | when to wake, discovering tasks | cross-session: `cron-task-creator` skill, `/api/tasks`; in-session: `/loop` + `schedule_wakeup` |
+| **Worktrees** | parallel agents not stepping on each other's files | `worktree-isolate` skill, workflow's `isolation: "worktree"` |
+| **Skills** | codifying project knowledge into reusable instructions | `SKILL.md` + the `skill` tool |
+| **Connectors (MCP)** | reaching issue trackers, Slack, external APIs | `mcp` tool + MCP servers |
+| **Sub-agents** | separating maker and checker | `sub_agent` tool, `agent()` in workflows |
+| **Memory / State** | persisting across conversations | `MEMORY.md`, `.octo/STATE.md`, task state |
 
-octo-agent provides all of these primitives as a unified Loop Engineering platform, rather than a loose collection of tools.
-
----
-
-## How octo-agent maps to the six primitives
-
-| Loop primitive | octo-agent capability | How to invoke it |
-|----------------|----------------------|------------------|
-| **Goal / run until condition** | `/goal <objective>` or `create_goal` | keep the agent running until the objective is met |
-| **Scheduling / Automations** | `cron-task-creator` skill, `/api/tasks` | persistent cron tasks that survive session restarts |
-| **In-session loops** | `loop` skill + `schedule_wakeup` | `octo /loop 1h check CI` |
-| **Worktree isolation** | `worktree-isolate` skill, `workflow` `isolation: "worktree"` | writes code in an isolated worktree |
-| **Sub-agents** | `sub_agent` tool, `agent()` in workflows | implementer + verifier separation |
-| **Skills** | `SKILL.md` + `skill` tool | load best-practice guides |
-| **Memory / State** | `MEMORY.md`, `.octo/STATE.md`, task state | persist across conversations |
-| **Connectors** | `mcp` tool + MCP servers | connect to issue trackers, Slack, staging APIs |
-| **Workflow orchestration** | `workflow` tool | multi-agent, staged, parallel, pipelined execution |
-
-octo-agent’s unique strength is that **these capabilities are not isolated plugins; they are a coordinated system designed around Loop Engineering**. `workflow` orchestrates, `cron-task-creator` schedules, `worktree-isolate` isolates, `sub_agent` divides labor, `skill` encodes practice, and `MEMORY.md` / `.octo/` hold state.
+On top of these six, octo adds two things that tie them together: `workflow` (multi-agent orchestration — phases, parallelism, pipelines) and `/goal` (set an objective, run until the condition is met). `workflow` orchestrates, cron schedules, worktrees isolate, `sub_agent` divides labor, `skill` encodes practice, and `MEMORY.md` / `.octo/` hold state — assembled together they form a Loop Engineering platform rather than a pile of loose tools.
 
 ---
 
@@ -231,7 +207,7 @@ Development has natural advantages: version control, tests, and type systems pro
 | **Comprehension debt** | The loop writes code faster than you can understand it | Start with low-risk tasks; keep a human gate. |
 | **Cognitive surrender** | Shifting from “using loops to accelerate work I understand” to “letting loops think for me” | Reserve loops for repetitive tasks; keep judgment for humans. |
 
-Addy Osmani’s warning is worth repeating:
+Addy Osmani’s warning belongs right here:
 
 > “Build the loop. But build it like someone who intends to stay the engineer, not just the person who presses go.”
 
@@ -245,7 +221,7 @@ If you are new to Loop Engineering, start with **repetitive maintenance tasks** 
 2. **Dependency Sweeper**: upgrade patch/minor dependencies weekly, especially in Go where API compatibility is usually reliable.
 3. **Post-Merge Cleanup**: auto-delete merged branches and remind people to close linked issues. Low blast radius, high annoyance value.
 
-The biggest value of Loop Engineering is not reducing time spent writing code; it is reducing context switching and accumulated busywork, so human energy goes to design, architecture, and genuinely complex bugs.
+What Loop Engineering really saves is less the time spent writing code than the context switching and accumulated busywork — leaving human energy for design, architecture, and genuinely complex bugs.
 
 ---
 

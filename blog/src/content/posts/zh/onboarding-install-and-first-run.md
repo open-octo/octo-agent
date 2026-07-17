@@ -24,7 +24,7 @@ curl -fsSL https://octo-agent.dev/install.sh | sh
 
 这条命令会自动认出你的系统架构，下载对应的预编译版本，校验 SHA-256，然后把 `octo` 放进你的 `PATH`。macOS 和 Windows 用户如果不想碰命令行，也可以在 [GitHub Releases](https://github.com/open-octo/octo-agent/releases/latest) 下载双击安装包（`octo-setup.pkg` / `octo-setup.exe`），流程是同一套，装完也会自动把 `octo` 加进 `PATH`。
 
-装完之后，路分成两条——这也是这篇要讲的重点：**终端派**直接在命令行里跟它对话；**网页派**打开浏览器,用可视化界面配置和聊天。两条路配置的是同一份 `~/.octo/config.yml`，选哪条纯粹是习惯问题，随时可以换着用。
+装完之后，路分成两条——这也是这篇要讲的重点：**终端派**直接在命令行里跟它对话；**网页派**打开浏览器，用可视化界面配置和聊天。两条路配置的是同一份 `~/.octo/config.yml`，选哪条纯粹是习惯问题，随时可以换着用。
 
 ```mermaid
 flowchart LR

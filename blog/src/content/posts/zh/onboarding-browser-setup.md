@@ -34,7 +34,7 @@ octo browser setup
 
 1. **已知的调试端口**（配置里的 `browser.connect_port`）——直接连，这条失败了不会自动退到下一条。这就是 `octo browser setup` 帮你接好的那条路。
 2. **接入一个已经在跑、开了远程调试的 Chrome**（`browser.attach_running: true`）——复用你的登录态；但只会接一个原本就开了调试的浏览器，绝不会去劫持一个没开调试的普通 Chrome 窗口。
-3. **启动一个全新的临时 profile**——前两条都没配或者都连不上时的兜底选项，没有你的任何登录态。
+3. **什么都没配时的默认路径**——自动发现一个已经开了远程调试的 Chrome。注意这里没有"启动一个临时浏览器"的兜底：找不到可连的 Chrome 时，它返回一份怎么打开调试开关的操作指引，而不是悄悄启动一个没有任何登录态的 headless 实例。
 
 对应的配置写在 `~/.octo/config.yml` 里：
 
@@ -42,13 +42,10 @@ octo browser setup
 browser:
   attach_running: true   # 复用你已登录的 Chrome，而不是用一个临时 profile
   connect_port: 9222      # 或者通过 --remote-debugging-port 接入
-  headless: false          # 默认关闭——交互式工作流需要能看到、能介入
   user_data_dir: ""
   exec_path: ""
   download_dir: ""
 ```
-
-每一项都有对应的 CLI flag，可以在单次运行时临时覆盖，不用改配置文件。
 
 不管走的是哪条路径，octo 都会打开一个**全新标签页**，而不是复用你已经开着的某个标签页（包括它自己网页界面的那个）——要操作一个已经开着的标签页，得显式调用 `pages`/`select_page` 这两个动作去选。连接会在整个会话里复用，调试器的授权提示只会跳一次，不会每次导航都弹一遍。
 

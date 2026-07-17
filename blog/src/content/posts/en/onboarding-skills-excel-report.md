@@ -76,7 +76,7 @@ The reason is practical: openpyxl, which `office-xlsx` is built on, never evalua
 
 ## This is just one example of the Skills system
 
-`office-xlsx` is one of 18 built-in skills. The same pattern — match intent, auto-load, you just describe the task — is what powers octo reviewing a code diff (`code-review`), drafting a technical design doc (`tech-design`), and the scheduled tasks (`cron-task-creator`) and external-tool connections (`mcp-creator`) the next two posts cover — those are skills too, under the hood.
+`office-xlsx` is one of 20 built-in skills. The same pattern — match intent, auto-load, you just describe the task — is what powers octo reviewing a code diff (`code-review`), drafting a technical design doc (`tech-design`), and the scheduled tasks (`cron-task-creator`) and external-tool connections (`mcp-creator`) the next two posts cover — those are skills too, under the hood.
 
 **Previous in the series**: [Octo Onboarding Series (1): Install It, Say Your First Word to It](/blog/posts/en/onboarding-install-and-first-run/)
 **Next in the series**: [Octo Onboarding Series (3): MCP in Practice — Connect GitHub and Let octo Triage Your Issues](/blog/posts/en/onboarding-mcp-github-issues/)

@@ -81,7 +81,7 @@ It lands in the project's `.octo/workflows/quick-review.rb` (or `~/.octo/workflo
 
 ## This repo already has a few
 
-`octo-agent`'s own `.octo/workflows/` directory holds several workflows that actually run in production here — issue triage, PR review, auto-fixing issues, and one small script that compares architecture styles. That last one is short enough to show in full, and its shape is almost identical to the code-review example above:
+`octo-agent`'s own `.octo/workflows/` directory holds several workflows that actually run in production here — issue triage, PR review, auto-fixing issues, and one small script that compares architecture styles. That last one is short enough that, with argument handling and logging stripped, its skeleton fits right here — and its shape is almost identical to the code-review example above:
 
 ```ruby
 # @description Analyze several architecture styles in parallel and compare them
