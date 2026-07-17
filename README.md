@@ -11,7 +11,7 @@
 
 > An **MIT-licensed, single Go binary, zero-runtime** AI agent that combines the two things people usually
 > reach for two separate tools to get: a **coding agent on par with Claude Code**, and a **personal
-> assistant that's lighter and more stable than OpenClaw** — skills, CLI / Web / desktop / phone-IM / VS Code / Obsidian, browser control,
+> assistant that's lighter and more stable than OpenClaw** — skills, CLI / Web / desktop / phone-IM / VS Code / Obsidian / a Go SDK (mobile app landing next), browser control,
 > an OS-level sandbox, all as an **open, self-contained binary you fully own**, on **any model** (DeepSeek,
 > Kimi, Anthropic, OpenAI, or anything compatible), with the server and your data staying on your own
 > machine. Reuse your existing Claude Code skills. One binary for both your coding and your everyday
@@ -77,7 +77,7 @@ lighter, more stable alternative to OpenClaw — one binary instead of two separ
 
 ## Status
 
-> **Stable (1.0).** Six interfaces are live: the CLI (an interactive TUI in a terminal, a headless agentic one-shot everywhere else), a local web server (`octo serve`), a native desktop app (`cmd/octo-desktop` — a Wails window wrapping the same UI, with a system tray, running the hub in-process; no browser or background server to manage), an IM bridge (running inside `octo serve`; WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram), a VS Code extension ([`open-octo/octo-vscode`](https://github.com/open-octo/octo-vscode)), and an Obsidian plugin ([`open-octo/octo-obsidian`](https://github.com/open-octo/octo-obsidian)) — the VS Code and Obsidian clients connect to `octo serve` over the same HTTP/WebSocket API the Web UI uses. On top of the agent loop there are skills, MCP clients, OS-level sandboxing, persistent memory, sub-agents, background workflows, and a task graph for autonomous multi-step goals.
+> **Stable (1.0).** Eight interfaces are planned — one for each arm of the octopus — and seven are live: the CLI (an interactive TUI in a terminal, a headless agentic one-shot everywhere else), a local web server (`octo serve`), a native desktop app (`cmd/octo-desktop` — a Wails window wrapping the same UI, with a system tray, running the hub in-process; no browser or background server to manage), an IM bridge (running inside `octo serve`; WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram), a VS Code extension ([`open-octo/octo-vscode`](https://github.com/open-octo/octo-vscode)), an Obsidian plugin ([`open-octo/octo-obsidian`](https://github.com/open-octo/octo-obsidian)), and a Go SDK ([`pkg/octoagent`](pkg/octoagent) — embed the same agent loop in your own Go programs, no internal imports) — the VS Code and Obsidian clients connect to `octo serve` over the same HTTP/WebSocket API the Web UI uses. The eighth interface, a mobile app, is landing next. On top of the agent loop there are skills, MCP clients, OS-level sandboxing, persistent memory, sub-agents, background workflows, and a task graph for autonomous multi-step goals.
 >
 > What you can build on is declared in [COMPATIBILITY.md](COMPATIBILITY.md) (stable config formats, CLI, exit codes — and what isn't covered); the security boundary in [SECURITY.md](SECURITY.md).
 
@@ -386,6 +386,7 @@ octo runs on Linux, macOS, and Windows. A few behaviors differ on Windows:
 | Web server | done | `octo serve` — REST + WebSocket, the embedded Octo Workbench UI (sessions, tool output, artifacts, sub-agents, tasks, memories, MCP, skills; loopback bind by default; access-key auth for exposed binds, see SECURITY.md) |
 | Desktop app | done | `cmd/octo-desktop` — native Wails GUI running the hub in-process (same Web UI in a window + system tray, no browser/background server to manage); macOS `.pkg`, Windows `.exe`, Linux AppImage |
 | IM bridge | done | runs inside `octo serve` — WeChat iLink / Feishu / DingTalk / WeCom / Discord / Telegram adapters (web QR login, per-user sessions, slash commands) |
+| Go SDK | done | `pkg/octoagent` — public API for embedding the same agent loop (turns, tools, permission gate, hooks) in your own Go programs, no internal imports |
 
 ## Architecture
 
