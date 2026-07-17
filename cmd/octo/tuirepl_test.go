@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -235,6 +236,52 @@ func TestTUI_EscTakesBackDuringThinking(t *testing.T) {
 	}
 	if len(m.printlnBuf) != 0 {
 		t.Errorf("nothing should be flushed to the scrollback, got %v", m.printlnBuf)
+	}
+}
+
+// An Esc take-back must leave no trace in the agent's history either: the
+// interrupt keeps the input capped with a note (finishInterrupted), so
+// handleTurnFinished has to strip that pair — otherwise the recalled text
+// would silently survive in context as a ghost message and reappear when the
+// session is resumed or opened in the Web UI.
+func TestTUI_EscTakeBackStripsHistoryGhost(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.cancelTurn = func() {}
+	m.echoPending = userEchoStyle.Render("> ") + "fix the bug"
+	m.echoRestore = "fix the bug"
+
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	// The turn goroutine winds down: finishInterrupted kept the input and
+	// capped it with the interrupt note before turnFinishedMsg arrived.
+	m.a.History.Append(agent.NewUserMessage("fix the bug"))
+	m.a.History.Append(agent.NewAssistantMessage("[Interrupted by user.]"))
+	_, _ = m.handleTurnFinished(context.Canceled)
+
+	if n := m.a.History.Len(); n != 0 {
+		t.Errorf("history len = %d, want 0 (take-back must leave no trace)", n)
+	}
+	if m.takeBackPending {
+		t.Error("takeBackPending should be consumed by handleTurnFinished")
+	}
+}
+
+// A plain interrupt (no take-back) keeps the interrupted input in history —
+// handleTurnFinished must NOT strip it when the user didn't ask for a recall.
+func TestTUI_PlainInterruptKeepsHistory(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.cancelTurn = func() {}
+	// Echo already committed (output streamed) — Esc is a plain interrupt.
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	m.a.History.Append(agent.NewUserMessage("fix the bug"))
+	m.a.History.Append(agent.NewAssistantMessage("[Interrupted by user.]"))
+	_, _ = m.handleTurnFinished(context.Canceled)
+
+	if n := m.a.History.Len(); n != 2 {
+		t.Errorf("history len = %d, want 2 (plain interrupt keeps the input)", n)
 	}
 }
 

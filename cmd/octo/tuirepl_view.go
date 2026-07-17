@@ -179,16 +179,19 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.turnRunning {
 			// Take-back: Esc before the model has produced any output (the echo
 			// is still pending in the live area). Drop the not-yet-committed echo
-			// and restore the typed text to the input box for editing — the agent's
-			// interrupt rolls the unanswered user message back out of history, so
-			// it leaves no trace in the scrollback. Once output has streamed the
-			// echo is already committed (echoPending == "") and Esc only interrupts:
-			// the message stays in the transcript and is NOT recalled into the box
-			// (the user can still press ↑ to edit and resubmit).
+			// and restore the typed text to the input box for editing — the
+			// interrupt keeps the input in history (finishInterrupted caps it
+			// with a note), so handleTurnFinished strips that pair via
+			// takeBackPending to honor the take-back's "no trace" contract.
+			// Once output has streamed the echo is already committed
+			// (echoPending == "") and Esc only interrupts: the message stays in
+			// the transcript and is NOT recalled into the box (the user can
+			// still press ↑ to edit and resubmit).
 			if m.echoPending != "" {
 				restore := m.echoRestore
 				m.echoPending = ""
 				m.echoRestore = ""
+				m.takeBackPending = true
 				m.interrupt()
 				if restore != "" {
 					m.ta.SetValue(restore)
