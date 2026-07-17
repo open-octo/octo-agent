@@ -258,16 +258,9 @@ import ArtifactModal from './components/ArtifactModal.svelte'
     if (now - (lastNotifiedAt[cooldownKey] ?? 0) < NOTIFY_COOLDOWN_MS) return
     lastNotifiedAt[cooldownKey] = now
     const sess = get(sessions).find(s => s.id === sid)
-    const name = sess?.title || sess?.name || sid
-    const titleKey = kind === 'question_pending' ? 'header.notif_question_title' : 'header.notif_turn_complete_title'
+    const title = sess?.name || sess?.title || sid
     const bodyKey = kind === 'question_pending' ? 'header.notif_question_body' : 'header.notif_turn_complete_body'
-    // String.replace() treats $&, $`, $', $$ specially in the REPLACEMENT
-    // argument even for a plain-string search — and name is a user-editable
-    // session title, so escape its literal $ first or a title like "A&B $$
-    // Corp" mangles the notification body.
-    const escapedName = name.replace(/\$/g, '$$$$')
-    const title = tr(titleKey)
-    const body = tr(bodyKey).replace('{name}', escapedName)
+    const body = tr(bodyKey)
     if (native) {
       // The native notification carries this session id so the desktop shell
       // routes to it on click. Browser path handles the click in-page below.
