@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -187,6 +188,57 @@ func isTitlePrompt(msgs []agent.Message) bool {
 		return false
 	}
 	return strings.Contains(msgs[len(msgs)-1].Content, "Generate a very short title")
+}
+
+// titleSpySender counts title-generation calls while letting the main turn
+// run freely — used to prove a gate SKIPPED the throwaway call rather than
+// the call merely failing.
+type titleSpySender struct {
+	stubSender
+	titleCalls atomic.Int32
+}
+
+func (s *titleSpySender) SendMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int) (agent.Reply, error) {
+	if isTitlePrompt(msgs) {
+		s.titleCalls.Add(1)
+	}
+	return agent.Reply{Content: "stub reply"}, nil
+}
+
+// TestDoAgentTurn_SkipsTitleForEmptyFirstMessage: a text-free first message
+// (attachments-only) must not spend the throwaway provider call — there is
+// nothing to summarize and the snippet fallback would come up empty, so a
+// compliant model's guessed title would be pure noise. The placeholder stays
+// and the next text-bearing message retries.
+func TestDoAgentTurn_SkipsTitleForEmptyFirstMessage(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	spy := &titleSpySender{}
+	srv.sender = spy
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv.doAgentTurn(sess, "", nil, nil)
+
+	if got := spy.titleCalls.Load(); got != 0 {
+		t.Errorf("title calls = %d, want 0 for a text-free first message", got)
+	}
+	if sess.Title != "*Octo Agent" {
+		t.Errorf("title = %q, want the placeholder (untouched)", sess.Title)
+	}
+	if pt := srv.peekPendingTitle(sess.ID); pt != "" {
+		t.Errorf("pendingTitle = %q, want none stored", pt)
+	}
 }
 
 // blockingTurnSender lets the title-generation call (plain SendMessages, no

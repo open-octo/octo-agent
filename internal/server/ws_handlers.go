@@ -1354,32 +1354,36 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// only persistence path. A provider failure is logged and the snippet
 	// still applies; the claim releases either way and the next user message
 	// retries.
-	if agent.IsAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
+	if agent.IsAutoNamePlaceholder(sess.Title) {
 		sid := sess.ID
 		titleMsgs := append(append([]agent.Message{}, sess.Messages...), userMsg)
-		go func() {
-			defer s.recoverBg("title generation")
-			defer s.releaseTitleGeneration(sid)
-			ctx, cancel := context.WithTimeout(context.Background(), agent.TitleGenerationTimeout)
-			defer cancel()
-			t, terr := a.GenerateTitleOrSnippet(ctx, titleMsgs)
-			if terr != nil {
-				slog.Warn("session title generation failed, falling back to message snippet", "session_id", sid, "err", terr)
-			}
-			if strings.TrimSpace(t) == "" {
-				// No user text to title from at all (e.g. an attachments-only
-				// first message); nothing to fall back to — next turn retries.
-				return
-			}
-			// Hand the title to the turn goroutine (it persists it) and
-			// broadcast the rename so every tab's sidebar updates live.
-			s.storePendingTitle(sid, t)
-			s.wsHub.broadcast("", map[string]any{
-				"type":       "session_renamed",
-				"session_id": sid,
-				"name":       t,
-			})
-		}()
+		// No user text to title from at all (e.g. an attachments-only first
+		// message): skip the throwaway call rather than pay for a hallucinated
+		// title — the snippet fallback would come up empty anyway. The next
+		// text-bearing user message retries.
+		if agent.FirstUserSnippet(titleMsgs) != "" && s.claimTitleGeneration(sid) {
+			go func() {
+				defer s.recoverBg("title generation")
+				defer s.releaseTitleGeneration(sid)
+				ctx, cancel := context.WithTimeout(context.Background(), agent.TitleGenerationTimeout)
+				defer cancel()
+				t, terr := a.GenerateTitleOrSnippet(ctx, titleMsgs)
+				if terr != nil {
+					slog.Warn("session title generation failed, falling back to message snippet", "session_id", sid, "err", terr)
+				}
+				if strings.TrimSpace(t) == "" {
+					return
+				}
+				// Hand the title to the turn goroutine (it persists it) and
+				// broadcast the rename so every tab's sidebar updates live.
+				s.storePendingTitle(sid, t)
+				s.wsHub.broadcast("", map[string]any{
+					"type":       "session_renamed",
+					"session_id": sid,
+					"name":       t,
+				})
+			}()
+		}
 	}
 
 	// Persist the turn's progress incrementally: after any event that grew or

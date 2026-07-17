@@ -2871,28 +2871,32 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// file itself. A generation still in flight at turn end rides the next
 	// turn's adoption; a failure leaves the placeholder and the next turn
 	// retries (the claim is released either way).
-	if st := sess.Store; st != nil && agent.IsAutoNamePlaceholder(st.Title) && s.claimTitleGeneration(st.ID) {
+	if st := sess.Store; st != nil && agent.IsAutoNamePlaceholder(st.Title) {
 		sid := st.ID
 		// Pre-turn snapshot plus the incoming user message — the turn loop
 		// owns History and hasn't appended it yet (web titleMsgs parity).
 		titleMsgs := append(append([]agent.Message{}, st.Messages...), agent.NewUserMessage(content))
-		go func() {
-			defer s.recoverBg("channel title generation")
-			defer s.releaseTitleGeneration(sid)
-			ctx, cancel := context.WithTimeout(context.Background(), agent.TitleGenerationTimeout)
-			defer cancel()
-			t, terr := sess.Agent.GenerateTitleOrSnippet(ctx, titleMsgs, toolDefs)
-			if terr != nil {
-				slog.Warn("channel session title generation failed, falling back to message snippet", "session_id", sid, "err", terr)
-			}
-			if strings.TrimSpace(t) == "" {
-				// No user text to title from at all (e.g. an attachments-only
-				// first message); nothing to fall back to — next turn retries.
-				return
-			}
-			s.storePendingTitle(sid, t)
-			s.broadcastSessionRenamed(sid, t)
-		}()
+		// No user text to title from at all (e.g. an attachments-only first
+		// message): skip the throwaway call rather than pay for a hallucinated
+		// title — the snippet fallback would come up empty anyway. The next
+		// text-bearing user message retries.
+		if agent.FirstUserSnippet(titleMsgs) != "" && s.claimTitleGeneration(sid) {
+			go func() {
+				defer s.recoverBg("channel title generation")
+				defer s.releaseTitleGeneration(sid)
+				ctx, cancel := context.WithTimeout(context.Background(), agent.TitleGenerationTimeout)
+				defer cancel()
+				t, terr := sess.Agent.GenerateTitleOrSnippet(ctx, titleMsgs)
+				if terr != nil {
+					slog.Warn("channel session title generation failed, falling back to message snippet", "session_id", sid, "err", terr)
+				}
+				if strings.TrimSpace(t) == "" {
+					return
+				}
+				s.storePendingTitle(sid, t)
+				s.broadcastSessionRenamed(sid, t)
+			}()
+		}
 	}
 
 	persist := func() {

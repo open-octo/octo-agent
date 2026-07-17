@@ -1430,24 +1430,26 @@ func (m *tuiModel) suggestCmd() tea.Cmd {
 // whole first turn. pending is the message starting the turn — the turn
 // goroutine appends it to History later, so the snapshot is taken here,
 // synchronously, and pending is added on top. It returns nil (no-op) when the
-// session is already titled (non-empty and not the "*Octo Agent"
-// placeholder), a generation is already in flight, saving is off, or there's
-// nothing to summarize. The shared mechanism (agent.GenerateTitleOrSnippet)
-// guarantees a title within TitleGenerationTimeout: the model's when the
-// throwaway call works, a snippet of pending otherwise. The result is
-// persisted by the titleMsg handler.
+// session is already titled (agent.IsAutoNamePlaceholder — the same predicate
+// the server gates on), a generation is already in flight, saving is off, or
+// there's no user text to summarize (blank pending and an empty history — no
+// throwaway call is spent on a title nothing can name). The shared mechanism
+// (agent.GenerateTitleOrSnippet) guarantees a title within
+// TitleGenerationTimeout: the model's when the throwaway call works, a
+// snippet of pending otherwise. The result is persisted by the titleMsg
+// handler.
 func (m *tuiModel) titleCmd(pending string) tea.Cmd {
 	if m.cfg.noSave || m.titlePending {
 		return nil
 	}
-	if t := m.cfg.session.Title; t != "" && t != "*Octo Agent" {
+	if !agent.IsAutoNamePlaceholder(m.cfg.session.Title) {
 		return nil
 	}
 	msgs := m.a.History.Snapshot()
 	if strings.TrimSpace(pending) != "" {
 		msgs = append(msgs, agent.NewUserMessage(pending))
 	}
-	if len(msgs) == 0 {
+	if agent.FirstUserSnippet(msgs) == "" {
 		return nil
 	}
 	m.titlePending = true

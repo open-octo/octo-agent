@@ -289,6 +289,22 @@ func TestTUI_TitleCmdFallsBackToSnippet(t *testing.T) {
 	}
 }
 
+// Blank pending on an empty history carries no user text to summarize —
+// titleCmd must skip the throwaway call entirely (the same gate the web and
+// IM turns apply to attachments-only first messages).
+func TestTUI_TitleCmdSkipsBlankPending(t *testing.T) {
+	m := newTestModel()
+	m.cfg.noSave = false // newTestModel defaults to noSave, which gates titling
+	m.cfg.session = agent.NewSession("m", "")
+
+	if c := m.titleCmd("   "); c != nil {
+		t.Error("titleCmd with blank pending and empty history = command, want nil (no throwaway spend)")
+	}
+	if m.titlePending {
+		t.Error("titlePending set despite the skipped generation")
+	}
+}
+
 // An Esc take-back must leave no trace in the agent's history either: the
 // interrupt keeps the input capped with a note (finishInterrupted), so
 // handleTurnFinished has to strip that pair — otherwise the recalled text

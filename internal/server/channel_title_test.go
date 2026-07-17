@@ -112,6 +112,35 @@ func TestHandleChannelMessage_TitleFallsBackToSnippet(t *testing.T) {
 	}
 }
 
+// TestHandleChannelMessage_SkipsTitleForEmptyFirstMessage: an attachments-only
+// first message (vision model — the image rides content blocks and the text
+// resolves to "") must not spend the throwaway title call. Web parity:
+// TestDoAgentTurn_SkipsTitleForEmptyFirstMessage.
+func TestHandleChannelMessage_SkipsTitleForEmptyFirstMessage(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	spy := &titleSpySender{}
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+		return agent.New(spy, "stub-model")
+	}, channel.BindByChat)
+
+	ad := &fullFakeAdapter{}
+	ev := evFor("") // text-free content, the attachments-only shape
+	sess := srv.channelMgr.GetOrCreateSession(ev)
+
+	srv.handleChannelMessage(context.Background(), ad, ev)
+
+	if got := spy.titleCalls.Load(); got != 0 {
+		t.Errorf("title calls = %d, want 0 for a text-free first message", got)
+	}
+	if sess.Store.Title != "*Octo Agent" {
+		t.Errorf("title = %q, want the placeholder (untouched)", sess.Store.Title)
+	}
+}
+
 // TestToSessionItem_PlaceholderFallsBackToSnippet: the REST session list must
 // collapse the "*Octo Agent" placeholder onto the first-message snippet
 // (DisplayTitle), matching the WS brief list — an IM session whose title
