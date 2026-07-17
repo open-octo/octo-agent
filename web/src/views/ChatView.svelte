@@ -2171,4 +2171,32 @@
   display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
   color: var(--text-tertiary); cursor: help;
 }
+
+/* ── Turn-error banner ──────────────────────────────────────────────────── */
+.turn-error-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 24px;
+  margin: 0 24px 10px;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--error);
+  line-height: 1.5;
+  max-width: var(--chat-content-max-width);
+  margin-left: auto; margin-right: auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+.turn-error-text {
+  flex: 1;
+  word-break: break-word;
+}
+.turn-error-dismiss {
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer;
+  color: var(--error); opacity: 0.6; padding: 2px;
+  flex-shrink: 0;
+}
+.turn-error-dismiss:hover { opacity: 1; }
 </style>
