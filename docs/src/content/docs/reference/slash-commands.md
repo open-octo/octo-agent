@@ -17,6 +17,7 @@ is the process; an IM chat can be re-bound to a different session entirely).
 | `/compact` | `/compact` | Compacts history now; refused while a turn is running |
 | `/clear` | `/clear` | Wipes history and saves immediately; refused mid-turn. Keeps the same session file — for a brand-new one, see `/new` below (IM only) |
 | `/goal` | see [Run long-horizon goals](/docs/guides/goals/) | `/goal edit` here is prefill-only — see the note on that page |
+| `/loop` | `/loop [interval] <task>` | Not a router command: the message passes through to the model, which handles the convention via the `schedule_wakeup` tool — see [Run a recurring loop](/docs/guides/loop/) |
 | `/skills` | `/skills` | Lists discovered skills with their source and description |
 | `/mcp` | `/mcp` | Lists connected MCP servers — tool/resource/prompt counts, server instructions |
 | `/workflows` | `/workflows` | Lists named workflows (embedded, user, and project); run one by describing the task, not by slash-invoking it |
@@ -62,10 +63,11 @@ IM sessions can be re-bound between chats, so this surface has commands the othe
 | `/status` | `/status` | Reports how long this chat has been bound, plus input/output token counts |
 | `/list` | `/list` | Lists up to 20 saved sessions, numbered for `/bind` |
 
-:::caution[No skill triggering in IM]
-`/<skill-name>` does **not** work in IM channels. Any text starting with `/` is matched against the
-fixed table above; anything else returns "Unknown command" rather than falling through to a skill
-or to the model. Ask in plain language instead — the model loads the matching skill on its own.
+:::note[How IM resolves a `/` message]
+Reserved commands (the table above) are handled by the command router and can't be shadowed.
+`/loop` and any `/<skill-name>` that matches a discovered skill pass through to the model as
+ordinary text, same as the TUI and Web surfaces. Only a slash token that matches neither returns
+"Unknown command".
 :::
 
 `/bind`, `/unbind`, `/clear`, and `/new` all drop the chat's remembered-permission cache and memory

@@ -54,9 +54,10 @@ type Adapter interface {
 ## 新增一个 Provider 协议
 
 第三种 wire 格式（在 Anthropic Messages 和 OpenAI Chat Completions 之外）就是
-`internal/provider/` 下的一个新包，实现
-[Provider 协议](/docs/zh/architecture/provider-protocols/)里描述的
-`Sender`/`StreamingSender`/`ToolSender`/`ToolStreamingSender` 接口栈——agent 层完全不需要
-改动，因为它本来就是针对这些接口写的，而不是某个具体的客户端。
+`internal/provider/` 下的一个新包，实现 `provider.Provider`（必须），以及可选的
+`provider.StreamingProvider` / `provider.ToolProvider` / `provider.ToolStreamingProvider`。
+[Provider 协议](/docs/zh/architecture/provider-protocols/)里描述的、面向 agent 的 `Sender`
+接口栈由 `internal/app` 的适配器统一实现一次——你的 provider 包接在它下面即可，agent 层完全
+不需要改动。
 
 PR 流程、测试约定、以及 reviewer 关注什么，见[贡献指南](/docs/zh/community/contributing/)。

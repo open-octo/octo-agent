@@ -43,7 +43,14 @@ trash:
   overwrite_backup: true  # write_file/edit_file 覆盖前是否备份
 ```
 
-从 Web UI 的 **文件回收站** 面板（`octo serve`）还原、撤销、清空回收站。
+从 Web UI 的 **文件回收站** 面板（`octo serve`）还原、撤销、清空回收站，也可以直接用 CLI：
+
+```bash
+octo trash list                  # 看回收站里有什么，最新的在前
+octo trash restore <id|路径>     # 把文件放回去（路径支持模糊匹配）
+octo trash restore --as-copy …   # 原路径被占用时，以带时间戳的新名字恢复
+octo trash rm <id> / empty       # 删除单条 / 清空回收站
+```
 
 下一步：把沙箱和[hooks](/docs/zh/guides/hooks/)搭配使用可以实现全自动、依然受限的循环；
 完整的安全边界见[安全模型](/docs/zh/reference/security/)。

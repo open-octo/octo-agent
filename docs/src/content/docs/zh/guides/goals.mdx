@@ -16,7 +16,7 @@ import { Badge } from '@astrojs/starlight/components';
 /goal pause         # 暂停空闲续跑，目标本身还在
 /goal resume        # 重新捡起续跑循环
 /goal clear         # 清掉当前目标
-/goal replace       # 用一个新目标替换已完成的目标
+/goal replace       # 强制替换一个还没完成的目标（已完成的直接 /goal 新目标 即可）
 ```
 
 当一个带着目标的会话进入空闲状态时，octo 会自己继续朝目标推进——用的是和 `/loop` 一样的机制，

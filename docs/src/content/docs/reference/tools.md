@@ -84,6 +84,7 @@ first; there's no cap on how many background processes can run at once, and all 
 |---|---|
 | `skill` | load one skill's full instructions on demand |
 | `mcp_describe` / `mcp_call` | Tool Search bridge for deferred MCP schemas — see [Connect MCP servers](/docs/guides/connect-mcp-servers/) |
+| `memory_recall` | query the configured external [memory backend](/docs/guides/memory-backends/); only present when one is configured |
 
 Every connected MCP server's own tools also appear directly as `mcp__<server>__<tool>` when Tool
 Search is off (or hasn't activated).

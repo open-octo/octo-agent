@@ -49,7 +49,15 @@ trash:
   overwrite_backup: true  # back up files before write_file/edit_file overwrites
 ```
 
-Restore, undo, and empty the bin from the Web UI's **File Recall** panel (`octo serve`).
+Restore, undo, and empty the bin from the Web UI's **File Recall** panel (`octo serve`), or from
+the CLI:
+
+```bash
+octo trash list                  # what's in the bin, newest first
+octo trash restore <id|path>     # put a file back (fuzzy path match works)
+octo trash restore --as-copy …   # restore under a timestamped name if the original path is taken
+octo trash rm <id> / empty       # delete one entry / empty the bin
+```
 
 Next: pair sandboxing with [hooks](/docs/guides/hooks/) for a fully automated, still-confined loop,
 or read the full boundary in the [security model](/docs/reference/security/).

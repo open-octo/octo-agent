@@ -6,13 +6,17 @@ description: 五层、单向依赖的架构。
 ```
 cmd/octo/          CLI 入口（单发对话 + TUI、serve、mcp、slash 命令）
    ↓
+internal/app/      装配点——构造具体的 provider 客户端，
+                   并把它作为 Sender 交给 agent
+   ↓
 internal/agent/    历史记录、会话、内容 block、Sender 接口、
                    Agent.Turn / TurnStream / Run（工具调用循环）
-   ↓
+                   ——整棵依赖树的叶子包：既不 import provider
+                     也不 import tools
+   ↑ 被以下包 import
 internal/provider/ Provider 接口及具体实现
                    ├─ anthropic/   x-api-key、system 顶层字段、content[].text
                    └─ openai/      Bearer 认证、system 放在 messages[0]
-   ↓
 internal/tools/    ToolExecutor 实现——terminal（含后台）、
                    文件读/写/改、glob、grep、web 抓取/搜索、skill
 internal/skills/   SKILL.md 发现 + 系统提示清单
@@ -23,8 +27,9 @@ internal/channel/  IM 桥接——适配器接口 + 微信 iLink / 飞书 /
                    钉钉 / 企微 / Discord / Telegram 各适配器
 ```
 
-依赖方向是强制执行的，不只是写在文档里：`provider` 从不 import `agent`，`agent` 也从不
-import `provider`——agent 循环是针对 `Sender` 接口写的，`internal/app` 是唯一构造具体
+依赖方向是强制执行的，不只是写在文档里：规则是 `provider → agent`，绝不反向。provider
+各包会 import `agent` 以使用它的消息和内容 block 类型；而 `agent` 既不 import `provider`
+也不 import `tools`——循环是针对 `Sender` 接口写的，`internal/app` 是唯一构造具体
 provider 客户端、并把它作为该接口交给 agent 的地方。
 
 ## `Sender` 接口栈

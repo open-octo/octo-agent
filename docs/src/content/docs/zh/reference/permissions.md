@@ -36,10 +36,17 @@ write_file:
 自动放行、还是拒绝的东西。
 
 你写在文件里的某个工具的 key 会**整体替换**内置默认的那份规则列表，而不是往上面追加——默认规则里
-还想保留的部分，需要自己抄一份过来。
+还想保留的部分，需要自己抄一份过来。有一个例外不受替换影响：一小批硬编码的灾难级 deny 规则
+（`rm -rf /usr`、往设备上 `dd`、`mkfs`、`shutdown` 这类）会追加在你的规则之后，并借 deny 档位
+的优先级生效——你在文件里写 `allow` 也压不过它们。
 
 ### 匹配细节
 
+- `terminal` 的 `pattern` 以 `^` 开头时是**命令位置锚定**：只在"命令词能出现的位置"匹配——行首、
+  链式操作符（`;`、`&&`、`|`）之后、或 `sudo`、`env`、`VAR=…` 这类透明前缀之后。用它来避免子串
+  误伤：裸写 `deny: {pattern: "format"}` 会连 `docker ps --format json` 一起挡掉，`"shutdown"`
+  会挡掉 `git commit -m "fix shutdown handling"`——而 `^format` / `^shutdown` 只匹配作为命令执行
+  的那个词，不碰参数和引号里的文本。
 - `terminal` 的 `pattern` 如果以 `/` 或 `~` 结尾，会做边界锚定：`deny: {pattern: "rm -rf /"}`
   会挡住清空根目录，但不会挡住 `rm -rf /Users/me/project`。
 - `terminal` 的 **allow** 规则比 `deny`/`ask` 严格：命令必须（去掉首尾空白后）以这个 pattern

@@ -17,7 +17,7 @@ JavaScript 这个选项。
 
 | 调用 | 返回值 | 作用 |
 |---|---|---|
-| `agent(prompt, opts = {})` | String | 跑一个子代理直到完成。`opts`：`model:`、`tools:`（限制只能用这些工具）、`read_only: true`、`schema:`（一段 JSON Schema 字符串——回复会是匹配它的 JSON 字符串） |
+| `agent(prompt, opts = {})` | String | 跑一个子代理直到完成。`opts`：`model:`、`tools:`（限制只能用这些工具）、`read_only: true`、`schema:`（一段 JSON Schema 字符串——回复会是匹配它的 JSON 字符串）、`isolation: "worktree"` |
 | `skill(name, params = {}, opts = {})` | Hash / Array / 标量 | 运行一个具名 skill 或浏览器录制。同名的录制和 `SKILL.md` 冲突时用 `"browser:"` 或 `"md:"` 前缀区分。和 `agent` 不同，带 `schema` 的结果会直接解析好返回 |
 | `parallel(items) { \|it\| ... }` | Array | 对每个 item 并发跑这段代码块；结果保持输入顺序 |
 | `pipeline(items, *stages)` | Array | 每个 item 独立走完所有阶段——阶段之间没有屏障，item A 可能已经领先 item B 好几个阶段 |
@@ -105,6 +105,8 @@ workflow(name: "my-check", args: { target: "src/" })
   或者 web/IM 会话在被改到偏离服务器默认目录后的工作目录），不一定是服务器进程的启动目录。正在运行的工作流脚本自身的
   `agent()`/`skill()` 调用也会一直按同一个目录解析，即便是在后台模式下。
 - 一个工作流的描述来自脚本开头 `# @description ...` 这一行注释。
+- 用 `# @param <名字> [required] [说明]` 注释行声明具名输入。标了 required 的参数在运行时缺失
+  不会直接失败，而是交互式地问你要。
 - `args`（任意 JSON 值）会一路传给脚本里的 `args` 调用；不传的话 `args` 返回 `nil`。
 
 二进制里内置了三个预置工作流，就算你一个都没保存过也始终可用：

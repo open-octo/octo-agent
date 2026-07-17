@@ -6,13 +6,17 @@ description: A five-layer, one-directional dependency graph.
 ```
 cmd/octo/          CLI entry (chat one-shot + TUI, serve, mcp, slash commands)
    ↓
+internal/app/      assembly point — constructs the concrete provider client
+                   and hands it to the agent as a Sender
+   ↓
 internal/agent/    History, sessions, content blocks, Sender interface,
                    Agent.Turn / TurnStream / Run (tool-calling loop)
-   ↓
+                   — the LEAF of the dependency tree: imports neither
+                     provider nor tools
+   ↑ imported by
 internal/provider/ Provider interface + concrete implementations
                    ├─ anthropic/   x-api-key, system top-level, content[].text
                    └─ openai/      Bearer auth, system in messages[0]
-   ↓
 internal/tools/    ToolExecutor implementations — terminal (+ background),
                    file read/write/edit, glob, grep, web fetch/search, skill
 internal/skills/   SKILL.md discovery + system-prompt manifest
@@ -23,10 +27,11 @@ internal/channel/  IM bridge — adapter interface + WeChat iLink / Feishu /
                    DingTalk / WeCom / Discord / Telegram adapters
 ```
 
-The dependency direction is enforced, not just documented: `provider` never imports `agent`, and
-`agent` never imports `provider` — the agent loop is written against the `Sender` interface, and
-`internal/app` is the one place that constructs a concrete provider client and hands it to the
-agent as that interface.
+The dependency direction is enforced, not just documented: the rule is `provider → agent`, never
+the other way. Provider packages import `agent` for its message and content-block types, while
+`agent` imports neither `provider` nor `tools` — the loop is written against the `Sender`
+interface, and `internal/app` is the one place that constructs a concrete provider client and
+hands it to the agent as that interface.
 
 ## The `Sender` interface stack
 

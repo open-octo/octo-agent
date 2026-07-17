@@ -65,7 +65,10 @@ immediately, no restart needed.
 
 ## Following up on an async sub-agent
 
-Spawns can run synchronously or asynchronously. An async one that finishes without being killed
+Spawns can run synchronously or asynchronously. When the model issues several `sub_agent` calls in
+one round, they fan out **concurrently** (capped at 16 in flight) instead of running one after
+another. In the TUI, `Ctrl+B` promotes the sub-agent you're currently watching to the background
+so the main conversation continues without it. An async one that finishes without being killed
 stays addressable:
 
 | Tool | Purpose |
