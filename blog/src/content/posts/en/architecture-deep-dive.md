@@ -147,8 +147,6 @@ flowchart TB
 
 The static prefix (tool definitions + system prompt) needs only one breakpoint — since tools precede system in the request body, a breakpoint on the system block caches the tool definitions along with it. History gets a breakpoint on each of the **last two** messages. Why two? Because the next request appends new messages, so last round's "last message" becomes "N-th from the end"; with a single breakpoint, a retry that drops the trailing message would leave *no* breakpoint anywhere in the common prefix. Two breakpoints guarantee that however the sliding window moves, at least one lands inside the prefix shared with the previous request. Three total, against Anthropic's limit of four — margin left on purpose.
 
-An honest disclosure: the money this machinery saves is currently **almost invisible to the user**. The only place in the whole repo that surfaces it is headless mode printing one `[usage] ... cache %d read` line to stderr; TUI and Web show only input/output deltas — `SessionCacheTokens()` is defined but has no callers. The mechanism is finely built; the observability hasn't caught up.
-
 ## /loop: A Command That Doesn't Exist
 
 Users keep asking for things like "check every five minutes whether CI passed." octo-agent's answer is `/loop 5m check CI` — but grep the codebase for the implementation of `/loop` and you'll find the server's command router handles it with `return false`: don't intercept, pass it to the model as an ordinary message.
