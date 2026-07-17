@@ -1350,9 +1350,10 @@ const titleContextMaxRunes = 500
 
 // titleInstruction demands brevity twice — in words for spacey languages, in
 // characters for CJK — because a sidebar title wraps or truncates past a
-// handful of words. 15 characters mirrors FirstUserSnippet's truncation
-// width, so a model title and the snippet fallback land at the same length.
-const titleInstruction = "Generate a very short title for this conversation — at most 6 words, or 15 characters for Chinese or Japanese. " +
+// handful of words. 5 words / 15 characters mirrors FirstUserSnippet's
+// truncation budget, so a model title and the snippet fallback land at the
+// same length.
+const titleInstruction = "Generate a very short title for this conversation — at most 5 words, or 15 characters for Chinese or Japanese. " +
 	"Reply with the title text only — no preamble, no quotes, no trailing punctuation, no markdown."
 
 // GenerateTitle produces a short title for the conversation so far, for
