@@ -406,9 +406,9 @@ func TestDisplayTitle(t *testing.T) {
 func TestTruncateSnippet(t *testing.T) {
 	cases := map[string]string{
 		// Fits within the budget — returned unchanged, no ellipsis.
-		"hello there":                    "hello there",
-		"please fix the login bug":       "please fix the login bug", // 24 cols
-		"帮我 review 一下这个 PR 的改动": "帮我 review 一下这个 PR 的改动", // mixed, exactly 30 cols
+		"hello there":              "hello there",
+		"please fix the login bug": "please fix the login bug", // 24 cols
+		"帮我 review 一下这个 PR 的改动":    "帮我 review 一下这个 PR 的改动",    // mixed, exactly 30 cols
 
 		// English over budget: cut snaps back to the last word boundary —
 		// "around" is dropped whole rather than left as "ar…".
