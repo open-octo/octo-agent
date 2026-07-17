@@ -368,13 +368,13 @@ func TestDisplayTitle(t *testing.T) {
 		{
 			name: "falls back to first user message",
 			s:    &Session{Messages: []Message{NewUserMessage("help me refactor the parser")}},
-			want: "help me refactor the parser",
+			want: "help me refact…",
 		},
 		{
 			name: "strips system-reminder and takes first real line",
 			s: &Session{Messages: []Message{NewUserMessage(
 				"<system-reminder>injected context</system-reminder>\n\nreal question here")}},
-			want: "real question here",
+			want: "real question…",
 		},
 		{
 			name: "skips a leading tool-result user turn",
@@ -382,7 +382,7 @@ func TestDisplayTitle(t *testing.T) {
 				NewToolResultMessage([]ContentBlock{NewToolResultBlock("id", "out", false)}),
 				NewUserMessage("the actual prompt"),
 			}},
-			want: "the actual prompt",
+			want: "the actual pro…",
 		},
 		{
 			name: "untitled when empty",

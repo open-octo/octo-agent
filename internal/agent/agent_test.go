@@ -1926,7 +1926,7 @@ func TestAgent_GenerateTitleOrSnippet(t *testing.T) {
 		if err == nil {
 			t.Error("expected the provider error to surface for logging")
 		}
-		if got != "please fix the login bug" {
+		if got != "please fix the…" {
 			t.Errorf("title = %q, want the user-message snippet", got)
 		}
 	})
@@ -1937,7 +1937,7 @@ func TestAgent_GenerateTitleOrSnippet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GenerateTitleOrSnippet: %v", err)
 		}
-		if got != "please fix the login bug" {
+		if got != "please fix the…" {
 			t.Errorf("title = %q, want the user-message snippet", got)
 		}
 	})

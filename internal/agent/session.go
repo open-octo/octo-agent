@@ -888,7 +888,7 @@ func (s *Session) FallbackTitleIfPlaceholder() string {
 // skipping injected <system-reminder> blocks and tool-result turns, and
 // truncating to a list-friendly width.
 func FirstUserSnippet(msgs []Message) string {
-	const maxLen = 60
+	const maxLen = 15
 	for _, m := range msgs {
 		if m.Role != RoleUser {
 			continue
