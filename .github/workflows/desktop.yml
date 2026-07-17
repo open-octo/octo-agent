@@ -17,6 +17,10 @@ on:
     paths:
       - 'cmd/octo-desktop/**'
       - 'internal/server/**'
+      # Root-module dep bumps flow into the nested desktop module via its
+      # replace directive, so they must build-verify the desktop app too.
+      - 'go.mod'
+      - 'go.sum'
       - 'scripts/package-desktop-macos.sh'
       - 'scripts/package-desktop-linux.sh'
       - 'scripts/embed-rg-windows.ps1'
@@ -25,6 +29,8 @@ on:
     paths:
       - 'cmd/octo-desktop/**'
       - 'internal/server/**'
+      - 'go.mod'
+      - 'go.sum'
       - 'scripts/package-desktop-macos.sh'
       - 'scripts/package-desktop-linux.sh'
       - 'scripts/embed-rg-windows.ps1'
