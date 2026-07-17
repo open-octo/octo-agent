@@ -69,6 +69,15 @@ jobs:
       - name: go build
         run: go build ./...
 
+      # cmd/octo-desktop is a nested module replaced onto the root module, so a
+      # root dependency bump can leave its go.mod untidy without any file under
+      # cmd/octo-desktop changing (broke the 1.12.20 installers). tidy -diff is
+      # module-graph-only — no CGO/GTK needed — so it runs here on every PR.
+      - name: go mod tidy check (cmd/octo-desktop)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: cmd/octo-desktop
+        run: go mod tidy -diff
+
       # Data races are OS-independent, so the detector only runs on ubuntu (where
       # it's cheapest). Windows/macOS run a plain `go test` — fast, and still
       # catches platform-specific failures (path handling, process spawning, the
