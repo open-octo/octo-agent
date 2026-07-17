@@ -154,7 +154,7 @@ func (v *plainView) TurnEnded(reply agent.Reply, stats TurnStats, err error) {
 		// Ctrl-C / Esc: silently terminate. The agent already finalized
 		// history into a well-formed state.
 	case err != nil:
-		fmt.Fprintf(v.errOut, "\nerror: %v\n", err)
+		fmt.Fprintf(v.errOut, "\nerror: %s\n", agent.UserFacingError(err))
 	default:
 		fmt.Fprintln(v.out) // newline after the streamed reply
 		if !v.verbosity.quiet() {
