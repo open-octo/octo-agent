@@ -75,14 +75,6 @@
     expanded = false
   }
 
-  function reopen() {
-    const sid = current?.sessionId
-    if (!sid) return
-    questionModals.update(m => m[sid] ? { ...m, [sid]: { ...m[sid], dismissed: false } } : m)
-    expanded = true
-    inputEl?.focus()
-  }
-
   // Only Escape is handled at the modal level — Enter-to-submit already works
   // from the free-text input, and a focused option-pill/button already
   // activates on Enter natively, so a second modal-level handler would double
@@ -93,14 +85,7 @@
   }
 </script>
 
-{#if current && current.dismissed}
-  <!-- Dismissed: show the reopen pill in the bottom-left. Clicking it
-       re-opens directly into the full modal so the user can act. -->
-  <button class="reopen-pill" onclick={reopen}>
-    <iconify-icon icon="ant-design:form-outlined" width="14"></iconify-icon>
-    {$t('question.reopen')}
-  </button>
-{:else if current && expanded}
+{#if current && expanded}
   <!-- Expanded: full modal (the previous default). Still available when the
        banner's inline controls aren't enough (many options, long question). -->
   <div class="backdrop" role="presentation">
@@ -252,18 +237,6 @@
     font-family: inherit; outline: none; background: var(--bg-container);
   }
   .banner-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
-
-  /* Reopen pill (bottom-left, when user soft-closed / dismissed) */
-  .reopen-pill {
-    position: fixed; left: 24px; bottom: 24px; z-index: 1100;
-    display: flex; align-items: center; gap: 8px;
-    height: 36px; padding: 0 14px;
-    border: 1px solid var(--blue-2); background: var(--surface-info);
-    border-radius: 9999px; box-shadow: 0 8px 24px rgba(15,23,42,0.14);
-    font-size: 13px; color: var(--blue-6); cursor: pointer; font-family: inherit;
-    animation: octo-fadein 0.16s ease;
-  }
-  .reopen-pill:hover { border-color: var(--blue-5); }
 
   /* ─── Full modal (expanded, equivalent to the old default) ──────────── */
   .backdrop {
