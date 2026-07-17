@@ -519,3 +519,98 @@ func TestEnsureStoreExists_NoOpWhenStoreIsNil(t *testing.T) {
 		t.Error("EnsureStoreExists should not resurrect a tombstoned store")
 	}
 }
+
+// TestAdoptGeneratedTitle_ReplacesPlaceholder pins the contract the server's
+// channel turn relies on: an async-generated title replaces an auto-name
+// placeholder and persists. "Session N" counts as a placeholder too — a chat
+// can /bind a web-created session that never completed title generation, and
+// the adoption predicate must agree with the server's generation gate
+// (agent.IsAutoNamePlaceholder) or the title would be regenerated every turn
+// yet never adopted.
+func TestAdoptGeneratedTitle_ReplacesPlaceholder(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+	m := testManager()
+
+	for _, placeholder := range []string{"*Octo Agent", "Session 3", ""} {
+		sess := m.GetOrCreateSession(ev)
+		sess.Store.Title = placeholder // direct assignment: SetTitle("") is a no-op
+		adopted, err := sess.AdoptGeneratedTitle("deploy staging build")
+		if err != nil {
+			t.Fatalf("AdoptGeneratedTitle over %q: %v", placeholder, err)
+		}
+		if !adopted {
+			t.Fatalf("AdoptGeneratedTitle refused to replace placeholder %q", placeholder)
+		}
+		if sess.Store.Title != "deploy staging build" {
+			t.Errorf("in-memory title = %q, want %q", sess.Store.Title, "deploy staging build")
+		}
+		if err := sess.deleteStore(); err != nil { // reset for the next case
+			t.Fatal(err)
+		}
+		m.sessions.Delete(sessionKeyFor(m.mode, ev))
+	}
+
+	// The store is meta-only (no messages persisted yet), so the title folds
+	// into the meta header on the next Persist — the order the server's
+	// channel persist closure always uses.
+	sess := m.GetOrCreateSession(ev)
+	adopted, err := sess.AdoptGeneratedTitle("deploy staging build")
+	if err != nil || !adopted {
+		t.Fatalf("AdoptGeneratedTitle: adopted=%v err=%v", adopted, err)
+	}
+	if err := sess.Persist(); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+	reloaded, err := agent.LoadSession(sess.Store.ID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if reloaded.Title != "deploy staging build" {
+		t.Errorf("persisted title = %q, want %q", reloaded.Title, "deploy staging build")
+	}
+}
+
+// TestAdoptGeneratedTitle_KeepsUserTitle: a non-placeholder in-memory title
+// (e.g. one the user set through this session) is kept over a late-arriving
+// generated one.
+func TestAdoptGeneratedTitle_KeepsUserTitle(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+	m := testManager()
+	sess := m.GetOrCreateSession(ev)
+	if err := sess.Store.SetTitle("my rename"); err != nil {
+		t.Fatal(err)
+	}
+
+	adopted, err := sess.AdoptGeneratedTitle("generated")
+	if err != nil {
+		t.Fatalf("AdoptGeneratedTitle: %v", err)
+	}
+	if adopted {
+		t.Error("AdoptGeneratedTitle overwrote a user-set title")
+	}
+	if sess.Store.Title != "my rename" {
+		t.Errorf("title = %q, want %q", sess.Store.Title, "my rename")
+	}
+}
+
+// TestAdoptGeneratedTitle_TombstonedStore: a concurrent /unbind tombstones the
+// store mid-turn; adoption must report false, not panic.
+func TestAdoptGeneratedTitle_TombstonedStore(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+	m := testManager()
+	sess := m.GetOrCreateSession(ev)
+	if err := sess.deleteStore(); err != nil {
+		t.Fatal(err)
+	}
+
+	adopted, err := sess.AdoptGeneratedTitle("generated")
+	if err != nil {
+		t.Fatalf("AdoptGeneratedTitle: %v", err)
+	}
+	if adopted {
+		t.Error("AdoptGeneratedTitle succeeded on a tombstoned store")
+	}
+}

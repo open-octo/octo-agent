@@ -41,13 +41,15 @@ func sessionStoreID(key SessionKey) string {
 }
 
 // newChannelStore builds a fresh, persisted-shape store for a channel
-// session: source "channel", bound to EntryChannel, Title left empty so
-// DisplayTitle() falls back to the first user message snippet (truncated to
-// 60 chars) instead of showing the raw SessionKey (e.g.
-// "weixin:o9cq…@im.wechat:o9cq…@im.wechat"). Shared by restoreOrInitStore
-// (first-ever store for a session) and EnsureStoreExists (#1079 — recovering
-// after the file was deleted out from under an already-running session), so
-// both give a fresh channel session the exact same shape.
+// session: source "channel", bound to EntryChannel. Title stays at
+// agent.NewSession's "*Octo Agent" placeholder — never the raw SessionKey
+// (e.g. "weixin:o9cq…@im.wechat:o9cq…@im.wechat") — until the first turn's
+// async title generation replaces it; meanwhile DisplayTitle() surfaces the
+// first user message snippet instead of the placeholder. Shared by
+// restoreOrInitStore (first-ever store for a session) and EnsureStoreExists
+// (#1079 — recovering after the file was deleted out from under an
+// already-running session), so both give a fresh channel session the exact
+// same shape.
 func newChannelStore(id, model string) *agent.Session {
 	st := agent.NewSession(model, "")
 	st.ID = id
@@ -140,6 +142,38 @@ func (s *Session) Persist() error {
 	// Best-effort and idempotent (a no-op when the count is unchanged).
 	_ = s.Agent.PersistContextUsage(s.Store)
 	return nil
+}
+
+// AdoptGeneratedTitle records an async-generated session title, replacing an
+// auto-name placeholder ("*Octo Agent", "Session N", or empty — the shared
+// agent.IsAutoNamePlaceholder predicate, so adoption can never disagree with
+// the server's generation gate). A non-placeholder in-memory title (e.g. one
+// the user set via this session) is kept and the adoption is refused — with
+// the same caveat the web path has: a rename that landed on disk mid-turn via
+// a separate load (REST rename) is only visible after the next reload.
+// storeMu serializes the write with Persist/UnbindStore/deleteStore, the same
+// discipline Persist follows; a tombstoned store (concurrent /unbind) just
+// reports false. The error is SetTitle's (a failed append surfaces to the
+// caller's log instead of vanishing). Returns true when the placeholder was
+// replaced.
+//
+// Durability: on a transcript that already carries messages SetTitle appends
+// a title record itself; on a meta-only store (no turn persisted yet) the
+// title rides the caller's next Persist, which folds it into the meta header
+// — the server's channel persist closure always adopts right before Persist.
+func (s *Session) AdoptGeneratedTitle(title string) (bool, error) {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	if s.Store == nil {
+		return false, nil
+	}
+	if !agent.IsAutoNamePlaceholder(s.Store.Title) {
+		return false, nil
+	}
+	if err := s.Store.SetTitle(title); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // UnbindStore releases the store's entry binding and persists the change.

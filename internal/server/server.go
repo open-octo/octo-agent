@@ -2861,7 +2861,61 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		ctx = tools.WithWaker(ctx, imWaker{s: s, sess: sess, ad: ad, ev: ev})
 	}
 
+	// Session title, web doAgentTurn parity: an IM session starts life with
+	// agent.NewSession's "*Octo Agent" placeholder and — unlike a web turn —
+	// nothing ever replaced it, so the session list showed the placeholder
+	// forever. Same one mechanism: an async GenerateTitleOrSnippet within
+	// TitleGenerationTimeout (an LLM title, else the first-message snippet),
+	// broadcast live and handed to this turn's serialized persist path via
+	// storePendingTitle — the generation goroutine never writes the session
+	// file itself. A generation still in flight at turn end rides the next
+	// turn's adoption; a failure leaves the placeholder and the next turn
+	// retries (the claim is released either way).
+	if st := sess.Store; st != nil && agent.IsAutoNamePlaceholder(st.Title) {
+		sid := st.ID
+		// Pre-turn snapshot plus the incoming user message — the turn loop
+		// owns History and hasn't appended it yet (web titleMsgs parity).
+		titleMsgs := append(append([]agent.Message{}, st.Messages...), agent.NewUserMessage(content))
+		// No user text to title from at all (e.g. an attachments-only first
+		// message): skip the throwaway call rather than pay for a hallucinated
+		// title — the snippet fallback would come up empty anyway. The next
+		// text-bearing user message retries.
+		if agent.FirstUserSnippet(titleMsgs) != "" && s.claimTitleGeneration(sid) {
+			go func() {
+				defer s.recoverBg("channel title generation")
+				defer s.releaseTitleGeneration(sid)
+				ctx, cancel := context.WithTimeout(context.Background(), agent.TitleGenerationTimeout)
+				defer cancel()
+				t, terr := sess.Agent.GenerateTitleOrSnippet(ctx, titleMsgs)
+				if terr != nil {
+					slog.Warn("channel session title generation failed, falling back to message snippet", "session_id", sid, "err", terr)
+				}
+				if strings.TrimSpace(t) == "" {
+					return
+				}
+				s.storePendingTitle(sid, t)
+				s.broadcastSessionRenamed(sid, t)
+			}()
+		}
+	}
+
 	persist := func() {
+		// Adopt a title generated while the turn ran (web doAgentTurn parity):
+		// the generation goroutine only broadcast + stored it — this persist
+		// path is the only writer of the session file. AdoptGeneratedTitle
+		// refuses when the session's in-memory title is no longer a placeholder.
+		if st := sess.Store; st != nil {
+			if t := s.takePendingTitle(st.ID); t != "" {
+				adopted, aerr := sess.AdoptGeneratedTitle(t)
+				if aerr != nil {
+					slog.Warn("channel session title adoption: save failed", "session_id", st.ID, "err", aerr)
+				} else if adopted {
+					// Converge any client whose list refetch saw the placeholder
+					// since the mid-turn broadcast: disk is authoritative now.
+					s.broadcastSessionRenamed(st.ID, t)
+				}
+			}
+		}
 		// Persist the conversation so it survives server restarts. Failure
 		// must not eat the reply the user already got — log and move on.
 		// Persist() also records the context-token count (under storeMu) so this
