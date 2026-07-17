@@ -1,5 +1,7 @@
 import { writable } from "svelte/store";
 import { isUnauthorized, reauth } from "./auth";
+import { showToast } from "./stores";
+import { tr } from "./i18n";
 
 export const wsState = writable<"connecting" | "connected" | "disconnected">("disconnected");
 
@@ -79,8 +81,15 @@ export class WsManager {
       this.dispatch(event);
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (ev: CloseEvent) => {
       wsState.set("disconnected");
+      if (ev?.code === 1009) {
+        // The server closed the connection for exceeding wsMaxMessageSize —
+        // almost always an oversized inline attachment. Say WHY instead of
+        // leaving the user with a bare "connection lost" banner; the normal
+        // reconnect below still runs.
+        showToast(tr("chat.attach_ws_too_big"), "error");
+      }
       if (!this.intentionalClose) {
         void this.handleUnexpectedClose();
       }

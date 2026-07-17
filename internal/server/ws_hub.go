@@ -55,10 +55,15 @@ type wsConn struct {
 }
 
 const (
-	wsWriteWait      = 10 * time.Second
-	wsPongWait       = 60 * time.Second
-	wsPingPeriod     = (wsPongWait * 9) / 10
-	wsMaxMessageSize = 512 * 1024 // 512 KB
+	wsWriteWait  = 10 * time.Second
+	wsPongWait   = 60 * time.Second
+	wsPingPeriod = (wsPongWait * 9) / 10
+	// Inbound frame cap. Image attachments ride inline as base64 data URLs,
+	// so this must comfortably fit a composer's compressed image (canvas,
+	// long edge 1568px, JPEG q0.8 ≈ 150–600 KB) plus headroom for the paths
+	// that skip compression (GIF/SVG, paste). The previous 512 KB cut off
+	// every multi-megabyte phone photo with an opaque "connection lost".
+	wsMaxMessageSize = 4 << 20 // 4 MB
 )
 
 // newWSHub creates and starts a WebSocket hub.
