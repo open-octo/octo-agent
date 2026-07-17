@@ -52,6 +52,12 @@ func TestMidTurnSteer_DeliveredOnceWithImage(t *testing.T) {
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")
+	// A non-placeholder title keeps doAgentTurn from firing its background
+	// title-generation goroutine, which would call the same srv.sender
+	// concurrently with the main turn and race midTurnSender's "first call"
+	// detection — sometimes delivering the injected steer message only after
+	// runAgentTurnLoop has already returned.
+	sess.Title = "steer probe"
 	if err := sess.Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
