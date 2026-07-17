@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -111,7 +110,7 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 		name := sess.DisplayTitle()
 		// Same pending-title overlay as toSessionItem: a title broadcast
 		// mid-turn isn't on disk yet, and this list feeds the sidebar.
-		if pt := s.peekPendingTitle(sess.ID); pt != "" && isAutoNamePlaceholder(sess.Title) {
+		if pt := s.peekPendingTitle(sess.ID); pt != "" && agent.IsAutoNamePlaceholder(sess.Title) {
 			name = pt
 		}
 		_, pm, re, sr, ctxUsage := s.sessionStatusFields(sess)
@@ -1355,7 +1354,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// only persistence path. A provider failure is logged and the snippet
 	// still applies; the claim releases either way and the next user message
 	// retries.
-	if isAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
+	if agent.IsAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
 		sid := sess.ID
 		titleMsgs := append(append([]agent.Message{}, sess.Messages...), userMsg)
 		go func() {
@@ -1538,7 +1537,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// disk keeps the placeholder and a reload falls back to the message
 	// snippet. Acceptable for a best-effort throwaway title; the common
 	// long-turn case always finishes generation well before this point.
-	if t := s.takePendingTitle(sess.ID); t != "" && isAutoNamePlaceholder(sess.Title) {
+	if t := s.takePendingTitle(sess.ID); t != "" && agent.IsAutoNamePlaceholder(sess.Title) {
 		if terr := sess.SetTitle(t); terr != nil {
 			slog.Warn("session title adoption: save failed", "session_id", sess.ID, "err", terr)
 		} else {
@@ -1596,18 +1595,6 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 // modest rather than papering over a slow call with a long wait. (Session
 // titles use agent.TitleGenerationTimeout, the shared title mechanism.)
 const throwawayGenerationTimeout = 5 * time.Second
-
-// sessionPlaceholderRe matches the frontend's auto-assigned "Session N"
-// default name on freshly created web sessions.
-var sessionPlaceholderRe = regexp.MustCompile(`^Session \d+$`)
-
-// isAutoNamePlaceholder reports whether a session title is absent or still the
-// frontend's "Session N" placeholder — both get replaced by a generated title
-// after the first completed turn. A name the user typed themselves is kept.
-func isAutoNamePlaceholder(title string) bool {
-	t := strings.TrimSpace(title)
-	return t == "" || t == "*Octo Agent" || sessionPlaceholderRe.MatchString(t)
-}
 
 // claimTitleGeneration marks a title generation in flight for the session;
 // it returns false when one is already running so concurrent turn ends don't

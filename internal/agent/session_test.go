@@ -953,3 +953,27 @@ func TestSetWorkingDir_BeforeSave(t *testing.T) {
 		t.Errorf("loaded WorkingDir = %q, want /tmp/repo-a", got.WorkingDir)
 	}
 }
+
+// TestIsAutoNamePlaceholder pins THE placeholder predicate: the title
+// generation gate, turn-end adoption (server and channel), and list overlays
+// all share it — if they disagree a title is generated but never adopted.
+func TestIsAutoNamePlaceholder(t *testing.T) {
+	cases := []struct {
+		title string
+		want  bool
+	}{
+		{"", true},
+		{"  ", true},
+		{"Session 1", true},
+		{"Session 42", true},
+		{"*Octo Agent", true},
+		{"Session", false},
+		{"修复登录问题", false},
+		{"My Session 2", false},
+	}
+	for _, c := range cases {
+		if got := IsAutoNamePlaceholder(c.title); got != c.want {
+			t.Errorf("IsAutoNamePlaceholder(%q) = %v, want %v", c.title, got, c.want)
+		}
+	}
+}

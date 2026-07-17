@@ -56,6 +56,11 @@ func TestHandleChannelMessage_GeneratesSessionTitle(t *testing.T) {
 	if sess.Store.Title != "early title" {
 		t.Errorf("adopted title = %q, want %q", sess.Store.Title, "early title")
 	}
+	// The adoption re-broadcast converges any client whose list refetch saw the
+	// placeholder since the mid-turn broadcast (web ws_handlers.go:1548 parity).
+	if name := waitForRename(t, conn, storeID); name != "early title" {
+		t.Fatalf("post-adoption re-broadcast = %q, want %q", name, "early title")
+	}
 	reloaded, err := agent.LoadSession(storeID)
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)

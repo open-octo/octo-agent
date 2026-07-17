@@ -2871,7 +2871,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// file itself. A generation still in flight at turn end rides the next
 	// turn's adoption; a failure leaves the placeholder and the next turn
 	// retries (the claim is released either way).
-	if st := sess.Store; st != nil && isAutoNamePlaceholder(st.Title) && s.claimTitleGeneration(st.ID) {
+	if st := sess.Store; st != nil && agent.IsAutoNamePlaceholder(st.Title) && s.claimTitleGeneration(st.ID) {
 		sid := st.ID
 		// Pre-turn snapshot plus the incoming user message — the turn loop
 		// owns History and hasn't appended it yet (web titleMsgs parity).
@@ -2899,12 +2899,17 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// Adopt a title generated while the turn ran (web doAgentTurn parity):
 		// the generation goroutine only broadcast + stored it — this persist
 		// path is the only writer of the session file. AdoptGeneratedTitle
-		// refuses when the user renamed the session themselves meanwhile.
+		// refuses when the session's in-memory title is no longer a placeholder.
 		if st := sess.Store; st != nil {
-			if t := s.takePendingTitle(st.ID); t != "" && sess.AdoptGeneratedTitle(t) {
-				// Converge any client whose list refetch saw the placeholder
-				// since the mid-turn broadcast: disk is authoritative now.
-				s.broadcastSessionRenamed(st.ID, t)
+			if t := s.takePendingTitle(st.ID); t != "" {
+				adopted, aerr := sess.AdoptGeneratedTitle(t)
+				if aerr != nil {
+					slog.Warn("channel session title adoption: save failed", "session_id", st.ID, "err", aerr)
+				} else if adopted {
+					// Converge any client whose list refetch saw the placeholder
+					// since the mid-turn broadcast: disk is authoritative now.
+					s.broadcastSessionRenamed(st.ID, t)
+				}
 			}
 		}
 		// Persist the conversation so it survives server restarts. Failure

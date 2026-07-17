@@ -521,26 +521,44 @@ func TestEnsureStoreExists_NoOpWhenStoreIsNil(t *testing.T) {
 }
 
 // TestAdoptGeneratedTitle_ReplacesPlaceholder pins the contract the server's
-// channel turn relies on: an async-generated title replaces the "*Octo Agent"
-// placeholder and persists.
+// channel turn relies on: an async-generated title replaces an auto-name
+// placeholder and persists. "Session N" counts as a placeholder too — a chat
+// can /bind a web-created session that never completed title generation, and
+// the adoption predicate must agree with the server's generation gate
+// (agent.IsAutoNamePlaceholder) or the title would be regenerated every turn
+// yet never adopted.
 func TestAdoptGeneratedTitle_ReplacesPlaceholder(t *testing.T) {
 	tempHome(t)
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
-	if sess.Store.Title != "*Octo Agent" {
-		t.Fatalf("fresh channel store title = %q, want the placeholder", sess.Store.Title)
+
+	for _, placeholder := range []string{"*Octo Agent", "Session 3", ""} {
+		sess := m.GetOrCreateSession(ev)
+		sess.Store.Title = placeholder // direct assignment: SetTitle("") is a no-op
+		adopted, err := sess.AdoptGeneratedTitle("deploy staging build")
+		if err != nil {
+			t.Fatalf("AdoptGeneratedTitle over %q: %v", placeholder, err)
+		}
+		if !adopted {
+			t.Fatalf("AdoptGeneratedTitle refused to replace placeholder %q", placeholder)
+		}
+		if sess.Store.Title != "deploy staging build" {
+			t.Errorf("in-memory title = %q, want %q", sess.Store.Title, "deploy staging build")
+		}
+		if err := sess.deleteStore(); err != nil { // reset for the next case
+			t.Fatal(err)
+		}
+		m.sessions.Delete(sessionKeyFor(m.mode, ev))
 	}
 
-	if !sess.AdoptGeneratedTitle("deploy staging build") {
-		t.Fatal("AdoptGeneratedTitle refused to replace the placeholder")
-	}
-	if sess.Store.Title != "deploy staging build" {
-		t.Errorf("in-memory title = %q, want %q", sess.Store.Title, "deploy staging build")
-	}
 	// The store is meta-only (no messages persisted yet), so the title folds
 	// into the meta header on the next Persist — the order the server's
 	// channel persist closure always uses.
+	sess := m.GetOrCreateSession(ev)
+	adopted, err := sess.AdoptGeneratedTitle("deploy staging build")
+	if err != nil || !adopted {
+		t.Fatalf("AdoptGeneratedTitle: adopted=%v err=%v", adopted, err)
+	}
 	if err := sess.Persist(); err != nil {
 		t.Fatalf("Persist: %v", err)
 	}
@@ -553,9 +571,9 @@ func TestAdoptGeneratedTitle_ReplacesPlaceholder(t *testing.T) {
 	}
 }
 
-// TestAdoptGeneratedTitle_KeepsUserTitle: a title the user set themselves
-// (anything but the placeholder) always wins over a late-arriving generated
-// one.
+// TestAdoptGeneratedTitle_KeepsUserTitle: a non-placeholder in-memory title
+// (e.g. one the user set through this session) is kept over a late-arriving
+// generated one.
 func TestAdoptGeneratedTitle_KeepsUserTitle(t *testing.T) {
 	tempHome(t)
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
@@ -565,7 +583,11 @@ func TestAdoptGeneratedTitle_KeepsUserTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if sess.AdoptGeneratedTitle("generated") {
+	adopted, err := sess.AdoptGeneratedTitle("generated")
+	if err != nil {
+		t.Fatalf("AdoptGeneratedTitle: %v", err)
+	}
+	if adopted {
 		t.Error("AdoptGeneratedTitle overwrote a user-set title")
 	}
 	if sess.Store.Title != "my rename" {
@@ -584,7 +606,11 @@ func TestAdoptGeneratedTitle_TombstonedStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if sess.AdoptGeneratedTitle("generated") {
+	adopted, err := sess.AdoptGeneratedTitle("generated")
+	if err != nil {
+		t.Fatalf("AdoptGeneratedTitle: %v", err)
+	}
+	if adopted {
 		t.Error("AdoptGeneratedTitle succeeded on a tombstoned store")
 	}
 }

@@ -34,27 +34,6 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-func TestIsAutoNamePlaceholder(t *testing.T) {
-	cases := []struct {
-		title string
-		want  bool
-	}{
-		{"", true},
-		{"  ", true},
-		{"Session 1", true},
-		{"Session 42", true},
-		{"*Octo Agent", true},
-		{"Session", false},
-		{"修复登录问题", false},
-		{"My Session 2", false},
-	}
-	for _, c := range cases {
-		if got := isAutoNamePlaceholder(c.title); got != c.want {
-			t.Errorf("isAutoNamePlaceholder(%q) = %v, want %v", c.title, got, c.want)
-		}
-	}
-}
-
 // waitForRename blocks until a global session_renamed for sid is observed on
 // conn (or fails on timeout), returning the broadcast name. Shared by the
 // title tests, which all drive a turn whose main call blocks so the rename is

@@ -144,27 +144,36 @@ func (s *Session) Persist() error {
 	return nil
 }
 
-// AdoptGeneratedTitle records an async-generated session title, replacing the
-// "*Octo Agent" placeholder (or an empty title). A title the user set
-// themselves — anything else — always wins and the adoption is refused.
+// AdoptGeneratedTitle records an async-generated session title, replacing an
+// auto-name placeholder ("*Octo Agent", "Session N", or empty — the shared
+// agent.IsAutoNamePlaceholder predicate, so adoption can never disagree with
+// the server's generation gate). A non-placeholder in-memory title (e.g. one
+// the user set via this session) is kept and the adoption is refused — with
+// the same caveat the web path has: a rename that landed on disk mid-turn via
+// a separate load (REST rename) is only visible after the next reload.
 // storeMu serializes the write with Persist/UnbindStore/deleteStore, the same
 // discipline Persist follows; a tombstoned store (concurrent /unbind) just
-// reports false. Returns true when the placeholder was replaced.
+// reports false. The error is SetTitle's (a failed append surfaces to the
+// caller's log instead of vanishing). Returns true when the placeholder was
+// replaced.
 //
 // Durability: on a transcript that already carries messages SetTitle appends
 // a title record itself; on a meta-only store (no turn persisted yet) the
 // title rides the caller's next Persist, which folds it into the meta header
 // — the server's channel persist closure always adopts right before Persist.
-func (s *Session) AdoptGeneratedTitle(title string) bool {
+func (s *Session) AdoptGeneratedTitle(title string) (bool, error) {
 	s.storeMu.Lock()
 	defer s.storeMu.Unlock()
 	if s.Store == nil {
-		return false
+		return false, nil
 	}
-	if t := strings.TrimSpace(s.Store.Title); t != "" && t != "*Octo Agent" {
-		return false
+	if !agent.IsAutoNamePlaceholder(s.Store.Title) {
+		return false, nil
 	}
-	return s.Store.SetTitle(title) == nil
+	if err := s.Store.SetTitle(title); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // UnbindStore releases the store's entry binding and persists the change.

@@ -103,7 +103,7 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 	// a client refetch in between doesn't regress the sidebar to the
 	// placeholder. One storage: this overlays the same pendingTitles record
 	// the turn adopts from — it never writes anything itself.
-	if pt := srv.peekPendingTitle(s.ID); pt != "" && isAutoNamePlaceholder(s.Title) {
+	if pt := srv.peekPendingTitle(s.ID); pt != "" && agent.IsAutoNamePlaceholder(s.Title) {
 		name, title = pt, pt
 	}
 	_, pm, re, sr, ctxUsage := srv.sessionStatusFields(s)

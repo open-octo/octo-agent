@@ -909,6 +909,22 @@ func firstUserText(msgs []Message) string {
 	return ""
 }
 
+// sessionPlaceholderRe matches the web frontend's auto-assigned "Session N"
+// default name on freshly created web sessions.
+var sessionPlaceholderRe = regexp.MustCompile(`^Session \d+$`)
+
+// IsAutoNamePlaceholder reports whether a session title is absent or still an
+// auto-assigned placeholder — "*Octo Agent" (agent.NewSession's default) or
+// the frontend's "Session N" — both get replaced by a generated title after
+// the first completed turn. A name the user typed themselves is kept. This is
+// THE placeholder predicate: the generation gate, the turn-end adoption, and
+// every list overlay must agree on it or a title is generated but never
+// adopted (or vice versa).
+func IsAutoNamePlaceholder(title string) bool {
+	t := strings.TrimSpace(title)
+	return t == "" || t == "*Octo Agent" || sessionPlaceholderRe.MatchString(t)
+}
+
 // snippetBudget caps a one-line preview in half-width columns: wide (CJK)
 // runes count 2, others 1. 50 columns is 25 full-width characters or roughly
 // eight English words — display width is the one ruler that makes Chinese,
