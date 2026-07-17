@@ -203,7 +203,10 @@ type Server struct {
 	// titlePending guards one in-flight title generation per session
 	// (lazily initialised by claimTitleGeneration).
 	titlePending map[string]bool
-	titleMu      sync.Mutex
+	// pendingTitles carries a mid-turn generated title to the turn goroutine,
+	// which adopts it after its final end-of-turn write (see storePendingTitle).
+	pendingTitles map[string]string
+	titleMu       sync.Mutex
 
 	// WebSocket hub for real-time browser communication.
 	wsHub *wsHub

@@ -1326,6 +1326,63 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		s.wireBackgroundTaskNotices(sess.ID)
 	}
 
+	// Once per session, as soon as its first user message arrives: generate a
+	// sidebar title. Fired on receipt rather than at turn end so the user isn't
+	// staring at the placeholder for the whole first turn (an agentic turn can
+	// run minutes). The throwaway call runs concurrently with the turn's own
+	// provider call, off a pre-turn copy of sess.Messages plus this turn's user
+	// message — the live History belongs to the loop goroutine (and is still
+	// empty here).
+	//
+	// The goroutine does NOT write the session file: the turn is concurrently
+	// rewriting it (persistTurnProgress on every event, plus a compaction
+	// rewrite), and a second writer here — via its own LoadSession'd Session —
+	// could truncate the file to a stale, shorter message list and lose the
+	// turn's transcript. Instead it broadcasts the rename (live UX) and hands
+	// the title to the turn goroutine via storePendingTitle; the turn adopts
+	// it after its final write, on the single serialized write path. If the
+	// title lands after that point it rides the next turn's adoption. Failure
+	// falls back to the first-message snippet; the claim releases either way
+	// and the next user message retries.
+	if isAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
+		sid := sess.ID
+		placeholder := sess.Title
+		titleMsgs := append(append([]agent.Message{}, sess.Messages...), userMsg)
+		go func() {
+			defer s.recoverBg("title generation")
+			defer s.releaseTitleGeneration(sid)
+			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
+			defer cancel()
+			t, terr := a.GenerateTitleFrom(ctx, titleMsgs, toolDefs)
+			if terr != nil || strings.TrimSpace(t) == "" {
+				if terr != nil {
+					slog.Warn("session title generation failed", "session_id", sid, "err", terr)
+				} else {
+					slog.Warn("session title generation returned an empty title", "session_id", sid)
+				}
+				// Fall back to the first-message snippet only for the bare
+				// "*Octo Agent" placeholder (matching FallbackTitleIfPlaceholder);
+				// the web's numbered "Session N" is left as-is and retried on the
+				// next turn. Pure snippet, no file IO — the turn owns the file.
+				if placeholder != "*Octo Agent" {
+					return
+				}
+				t = agent.FirstUserSnippet(titleMsgs)
+				if t == "" {
+					return
+				}
+			}
+			// Hand the title to the turn goroutine (it persists it) and
+			// broadcast the rename so every tab's sidebar updates live.
+			s.storePendingTitle(sid, t)
+			s.wsHub.broadcast("", map[string]any{
+				"type":       "session_renamed",
+				"session_id": sid,
+				"name":       t,
+			})
+		}()
+	}
+
 	// Persist the turn's progress incrementally: after any event that grew or
 	// rewrote history, flush it to disk so a server crash mid-turn loses at
 	// most the round in flight, not the whole turn. The length/dirty gate
@@ -1470,6 +1527,22 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	if err := a.PersistContextUsage(sess); err != nil {
 		slog.Warn("session: persist context tokens", "session_id", sess.ID, "err", err)
 	}
+
+	// Adopt a title generated while the turn ran. The generation goroutine
+	// only broadcast + stored it (it must not write the file concurrently with
+	// the turn); this is the turn's LAST write, on the single serialized write
+	// path, so persisting here is safe and survives. A generation that hasn't
+	// finished by now leaves nothing to take — its title rides the next turn's
+	// adoption (already broadcast, so the live UI is correct meanwhile). If
+	// that session never gets a next turn, the title stays broadcast-only:
+	// disk keeps the placeholder and a reload falls back to the message
+	// snippet. Acceptable for a best-effort throwaway title; the common
+	// long-turn case always finishes generation well before this point.
+	if t := s.takePendingTitle(sess.ID); t != "" && isAutoNamePlaceholder(sess.Title) {
+		if terr := sess.SetTitle(t); terr != nil {
+			slog.Warn("session title adoption: save failed", "session_id", sess.ID, "err", terr)
+		}
+	}
 	_, pm, re, _, _ := s.sessionStatusFields(sess)
 	s.wsHub.broadcast(sess.ID, map[string]any{
 		"type":             "session_update",
@@ -1481,65 +1554,6 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		"permission_mode":  pm,
 		"reasoning_effort": re,
 	})
-
-	// Once per session, after its first successful turn: generate a sidebar
-	// title (matches TUI titleCmd behaviour). Fire-and-forget; a failure is
-	// silent and simply retried after a later turn.
-	if err == nil && isAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
-		sid := sess.ID
-		go func() {
-			defer s.recoverBg("title generation")
-			defer s.releaseTitleGeneration(sid)
-			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
-			defer cancel()
-			t, terr := a.GenerateTitle(ctx, toolDefs)
-			if terr != nil || strings.TrimSpace(t) == "" {
-				if terr != nil {
-					slog.Warn("session title generation failed", "session_id", sid, "err", terr)
-				} else {
-					slog.Warn("session title generation returned an empty title", "session_id", sid)
-				}
-				// Fall back to the first-message snippet instead of leaving
-				// the "*Octo Agent" placeholder (same logic as the TUI).
-				if fresh, lerr := agent.LoadSession(sid); lerr == nil {
-					if title := fresh.FallbackTitleIfPlaceholder(); title != "" {
-						s.wsHub.broadcast("", map[string]any{
-							"type":       "session_renamed",
-							"session_id": sid,
-							"name":       title,
-						})
-					}
-				}
-				return
-			}
-			// Apply the title to a freshly loaded Session, not the live one —
-			// chained steer turns keep appending to sess on the loop
-			// goroutine, and Session isn't goroutine-safe. A load that races
-			// a concurrent append just errors out and a later turn retries.
-			fresh, lerr := agent.LoadSession(sid)
-			if lerr != nil {
-				slog.Warn("session title generation: reload session failed", "session_id", sid, "err", lerr)
-				return
-			}
-			if !isAutoNamePlaceholder(fresh.Title) {
-				// Not an error: something else (the user, or an earlier
-				// retry) already gave the session a real title.
-				return
-			}
-			if err := fresh.SetTitle(t); err != nil {
-				slog.Warn("session title generation: save failed", "session_id", sid, "err", err)
-				return
-			}
-			// Global broadcast: the sidebar lists every session, so every
-			// connected tab needs the rename, not just this session's
-			// subscribers.
-			s.wsHub.broadcast("", map[string]any{
-				"type":       "session_renamed",
-				"session_id": sid,
-				"name":       t,
-			})
-		}()
-	}
 
 	// After-turn follow-up suggestion (matches TUI suggestCmd behaviour).
 	// Fire-and-forget: the frontend shows it as ghost text; failures are silent.
@@ -1607,6 +1621,30 @@ func (s *Server) releaseTitleGeneration(sessionID string) {
 	s.titleMu.Lock()
 	delete(s.titlePending, sessionID)
 	s.titleMu.Unlock()
+}
+
+// storePendingTitle hands a title generated mid-turn to the turn goroutine,
+// which is the ONLY writer of the session file (the generation goroutine must
+// not write it concurrently — rewriteAll truncates in place and would corrupt
+// the transcript). The turn goroutine persists the stored title at its
+// end-of-turn adoption step (see doAgentTurn), on its single serialized write
+// path.
+func (s *Server) storePendingTitle(sessionID, title string) {
+	s.titleMu.Lock()
+	if s.pendingTitles == nil {
+		s.pendingTitles = make(map[string]string)
+	}
+	s.pendingTitles[sessionID] = title
+	s.titleMu.Unlock()
+}
+
+// takePendingTitle returns and clears the title stored by storePendingTitle.
+func (s *Server) takePendingTitle(sessionID string) string {
+	s.titleMu.Lock()
+	defer s.titleMu.Unlock()
+	t := s.pendingTitles[sessionID]
+	delete(s.pendingTitles, sessionID)
+	return t
 }
 
 // ─── wsStreamWriter ────────────────────────────────────────────────────────

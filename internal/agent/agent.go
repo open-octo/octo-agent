@@ -1348,11 +1348,18 @@ const titleInstruction = "Summarize this conversation as a short title of at mos
 // rationale). The model is told not to call tools; a stray tool_use yields empty
 // Content and we simply produce no title.
 func (a *Agent) GenerateTitle(ctx context.Context, tools []ToolDefinition) (string, error) {
+	return a.GenerateTitleFrom(ctx, a.History.Snapshot(), tools)
+}
+
+// GenerateTitleFrom is GenerateTitle over an explicit message snapshot. It
+// exists for title-on-receipt callers: when a turn starts, the loop goroutine
+// owns History and hasn't appended the incoming user message yet, so the
+// caller passes its own pre-turn snapshot plus that message instead.
+func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message, tools []ToolDefinition) (string, error) {
 	sender := a.GetSender()
 	if sender == nil || a.Model == "" {
 		return "", fmt.Errorf("agent: title: not configured")
 	}
-	snap := a.History.Snapshot()
 	if len(snap) == 0 {
 		return "", nil
 	}

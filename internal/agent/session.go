@@ -863,7 +863,7 @@ func (s *Session) DisplayTitle() string {
 	if t := strings.TrimSpace(s.Title); t != "" && t != "*Octo Agent" {
 		return t
 	}
-	if snippet := firstUserSnippet(s.Messages); snippet != "" {
+	if snippet := FirstUserSnippet(s.Messages); snippet != "" {
 		return snippet
 	}
 	return "*Octo Agent"
@@ -877,17 +877,17 @@ func (s *Session) FallbackTitleIfPlaceholder() string {
 	if s.Title != "*Octo Agent" {
 		return ""
 	}
-	if snippet := firstUserSnippet(s.Messages); snippet != "" {
+	if snippet := FirstUserSnippet(s.Messages); snippet != "" {
 		_ = s.SetTitle(snippet)
 		return snippet
 	}
 	return ""
 }
 
-// firstUserSnippet extracts a one-line preview from the first user message,
+// FirstUserSnippet extracts a one-line preview from the first user message,
 // skipping injected <system-reminder> blocks and tool-result turns, and
 // truncating to a list-friendly width.
-func firstUserSnippet(msgs []Message) string {
+func FirstUserSnippet(msgs []Message) string {
 	const maxLen = 60
 	for _, m := range msgs {
 		if m.Role != RoleUser {

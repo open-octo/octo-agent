@@ -55,16 +55,46 @@ func TestIsAutoNamePlaceholder(t *testing.T) {
 	}
 }
 
+// waitForRename blocks until a global session_renamed for sid is observed on
+// conn (or fails on timeout), returning the broadcast name. Shared by the
+// title tests, which all drive a turn whose main call blocks so the rename is
+// guaranteed to land while the turn is still running.
+func waitForRename(t *testing.T, conn *wsConn, sid string) string {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case b := <-conn.send:
+			var ev map[string]any
+			if json.Unmarshal(b, &ev) != nil {
+				continue
+			}
+			if ev["type"] == "session_renamed" && ev["session_id"] == sid {
+				name, _ := ev["name"].(string)
+				return name
+			}
+		case <-deadline:
+			t.Fatal("no session_renamed broadcast — title was never generated")
+			return ""
+		}
+	}
+}
+
 // TestDoAgentTurn_GeneratesSessionTitle is the regression guard for web
-// sessions never getting an auto-generated title. Two historical gaps: only
-// the TUI called GenerateTitle, and web sessions are created with a
-// "Session N" placeholder title that blocked the untitled-only gate.
+// sessions never getting an auto-generated title. Historical gaps: only the
+// TUI called GenerateTitle, and web sessions are created with a "Session N"
+// placeholder that blocked the untitled-only gate. It now also pins the
+// on-receipt timing: the rename is broadcast while the turn is still running,
+// and the title survives the turn's end-of-turn saves (adopted on the single
+// serialized write path — the title goroutine never writes the file itself).
 func TestDoAgentTurn_GeneratesSessionTitle(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	sender := &blockingTurnSender{entered: make(chan struct{}), release: make(chan struct{})}
+	srv.sender = sender
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
 	srv.steerQueues = make(map[string][]agent.InboxItem)
@@ -80,44 +110,27 @@ func TestDoAgentTurn_GeneratesSessionTitle(t *testing.T) {
 
 	// Registered but NOT subscribed to the session: session_renamed must be a
 	// global broadcast (the sidebar lists every session in every tab).
-	conn := &wsConn{
-		hub:        srv.wsHub,
-		send:       make(chan []byte, 256),
-		subscribed: map[string]struct{}{},
-	}
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
 	srv.wsHub.register <- conn
 
-	srv.doAgentTurn(sess, "hello there", nil, nil)
+	turnDone := make(chan struct{})
+	go func() { defer close(turnDone); srv.doAgentTurn(sess, "hello there", nil, nil) }()
+	<-sender.entered // main turn call is blocked; title generation runs concurrently
 
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case b := <-conn.send:
-			var ev map[string]any
-			if err := json.Unmarshal(b, &ev); err != nil {
-				continue
-			}
-			if ev["type"] != "session_renamed" {
-				continue
-			}
-			if ev["session_id"] != sess.ID {
-				t.Errorf("session_id = %v, want %s", ev["session_id"], sess.ID)
-			}
-			if ev["name"] != "stub reply" {
-				t.Errorf("name = %v, want %q", ev["name"], "stub reply")
-			}
-			// The title must also be persisted.
-			loaded, err := agent.LoadSession(sess.ID)
-			if err != nil {
-				t.Fatalf("reload: %v", err)
-			}
-			if loaded.Title != "stub reply" {
-				t.Errorf("persisted Title = %q, want %q", loaded.Title, "stub reply")
-			}
-			return
-		case <-deadline:
-			t.Fatal("no session_renamed broadcast — title was never generated")
-		}
+	if name := waitForRename(t, conn, sess.ID); name != "early title" {
+		t.Errorf("rename name = %q, want %q", name, "early title")
+	}
+
+	close(sender.release)
+	<-turnDone
+
+	// The title must survive the turn's end-of-turn saves.
+	loaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if loaded.Title != "early title" {
+		t.Errorf("persisted Title = %q, want %q", loaded.Title, "early title")
 	}
 }
 
@@ -130,6 +143,8 @@ func TestListSessionsBrief_ReflectsGeneratedTitle(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	sender := &blockingTurnSender{entered: make(chan struct{}), release: make(chan struct{})}
+	srv.sender = sender
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
 	srv.steerQueues = make(map[string][]agent.InboxItem)
@@ -141,32 +156,15 @@ func TestListSessionsBrief_ReflectsGeneratedTitle(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	// Drain the rename broadcast so we know title generation finished.
-	conn := &wsConn{
-		hub:        srv.wsHub,
-		send:       make(chan []byte, 256),
-		subscribed: map[string]struct{}{},
-	}
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
 	srv.wsHub.register <- conn
 
-	srv.doAgentTurn(sess, "hello there", nil, nil)
-
-	deadline := time.After(5 * time.Second)
-wait:
-	for {
-		select {
-		case b := <-conn.send:
-			var ev map[string]any
-			if err := json.Unmarshal(b, &ev); err != nil {
-				continue
-			}
-			if ev["type"] == "session_renamed" && ev["session_id"] == sess.ID {
-				break wait
-			}
-		case <-deadline:
-			t.Fatal("no session_renamed broadcast — title was never generated")
-		}
-	}
+	turnDone := make(chan struct{})
+	go func() { defer close(turnDone); srv.doAgentTurn(sess, "hello there", nil, nil) }()
+	<-sender.entered
+	waitForRename(t, conn, sess.ID)
+	close(sender.release)
+	<-turnDone
 
 	// listSessionsBrief is what the frontend REST fallback calls. It must
 	// report the generated title, not the placeholder.
@@ -174,8 +172,8 @@ wait:
 	if len(brief) != 1 {
 		t.Fatalf("listSessionsBrief returned %d sessions, want 1", len(brief))
 	}
-	if brief[0].Name != "stub reply" {
-		t.Errorf("Name = %q, want %q", brief[0].Name, "stub reply")
+	if brief[0].Name != "early title" {
+		t.Errorf("Name = %q, want %q", brief[0].Name, "early title")
 	}
 }
 
@@ -223,6 +221,27 @@ func isTitlePrompt(msgs []agent.Message) bool {
 		return false
 	}
 	return strings.Contains(msgs[len(msgs)-1].Content, "Summarize this conversation")
+}
+
+// blockingTurnSender lets the title-generation call (plain SendMessages, no
+// tools in these tests) complete instantly while the main turn's streaming
+// call blocks until released — a long agentic first turn in miniature.
+type blockingTurnSender struct {
+	entered chan struct{} // closed when the main call is in flight
+	release chan struct{} // the main call returns once this is closed
+}
+
+func (s *blockingTurnSender) SendMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int) (agent.Reply, error) {
+	if isTitlePrompt(msgs) {
+		return agent.Reply{Content: "early title"}, nil
+	}
+	return agent.Reply{Content: "stub reply"}, nil
+}
+
+func (s *blockingTurnSender) StreamMessages(_ context.Context, _, _ string, _ []agent.Message, _ int, _ func(string), _ func(string)) (agent.Reply, error) {
+	close(s.entered)
+	<-s.release
+	return agent.Reply{Content: "stub reply"}, nil
 }
 
 // TestDoAgentTurn_TitleGenerationFailureIsLogged is the regression guard for

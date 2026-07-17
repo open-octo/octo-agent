@@ -892,6 +892,10 @@ func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
 	m.sprintBuf.Reset()
 	m.toolStreamName, m.toolStreamID, m.toolStreamBytes = "", "", 0
 	m.clearSuggestion() // a new turn supersedes any pending follow-up
+	// Title on receipt: kick the throwaway title call now, before the turn
+	// goroutine starts, so its History snapshot is taken pre-append (no
+	// duplicate of line) and the tab title lands while the turn still runs.
+	titleCmd := m.titleCmd(line)
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = tools.WithWaker(ctx, tuiWaker{prog: m.sink.prog})
 	m.cancelTurn = cancel
@@ -915,6 +919,9 @@ func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
 	if echo != "" && !strings.HasPrefix(echo, "<system-reminder>") {
 		m.echoPending = userEchoStyle.Render("> ") + echo
 		m.echoRestore = restore
+	}
+	if titleCmd != nil {
+		return tea.Batch(m.startTicker(), titleCmd)
 	}
 	return m.startTicker()
 }
@@ -1252,9 +1259,6 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cfg.suggest && !goalActive {
 				cmds = append(cmds, m.suggestCmd())
 			}
-			if c := m.titleCmd(); c != nil {
-				cmds = append(cmds, c)
-			}
 			return m, tea.Batch(cmds...)
 		}
 		return m, m.flushPrints()
@@ -1419,21 +1423,27 @@ func (m *tuiModel) suggestCmd() tea.Cmd {
 	}
 }
 
-// titleCmd generates a session title off the event loop, once per session. It
-// titleCmd returns a tea.Cmd that asynchronously generates a session title
-// from the agent's history. It returns nil (no-op) when the session is already
-// titled (non-empty and not the "*Octo Agent" placeholder), a generation is
-// already in flight, saving is off, or there's no turn to summarize yet — so it
-// fires exactly once, after the first completed turn. The result is persisted
-// by the titleMsg handler.
-func (m *tuiModel) titleCmd() tea.Cmd {
+// titleCmd returns a tea.Cmd that asynchronously generates a session title,
+// once per session. Fired on receipt of the user's message (turn start), not
+// at turn end, so the terminal tab isn't stuck on "(untitled)" for the whole
+// first turn. pending is the message starting the turn — the turn goroutine
+// appends it to History later, so the snapshot is taken here, synchronously,
+// and pending is added on top. It returns nil (no-op) when the session is
+// already titled (non-empty and not the "*Octo Agent" placeholder), a
+// generation is already in flight, saving is off, or there's nothing to
+// summarize. The result is persisted by the titleMsg handler.
+func (m *tuiModel) titleCmd(pending string) tea.Cmd {
 	if m.cfg.noSave || m.titlePending {
 		return nil
 	}
 	if t := m.cfg.session.Title; t != "" && t != "*Octo Agent" {
 		return nil
 	}
-	if m.a.History.Len() == 0 {
+	msgs := m.a.History.Snapshot()
+	if strings.TrimSpace(pending) != "" {
+		msgs = append(msgs, agent.NewUserMessage(pending))
+	}
+	if len(msgs) == 0 {
 		return nil
 	}
 	m.titlePending = true
@@ -1442,7 +1452,7 @@ func (m *tuiModel) titleCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		t, err := a.GenerateTitle(ctx, tools)
+		t, err := a.GenerateTitleFrom(ctx, msgs, tools)
 		if err != nil {
 			return titleMsg{text: ""}
 		}
