@@ -400,6 +400,12 @@ type tuiModel struct {
 	// user takes the turn back with Esc before any output. Empty when the turn
 	// isn't a typed user message (e.g. a skill, /init, or a dequeued item).
 	echoRestore string
+	// takeBackPending marks an Esc take-back whose interrupt is still winding
+	// down. finishInterrupted keeps the interrupted input in history (capped
+	// with a note); a take-back's contract is "no trace", so handleTurnFinished
+	// consumes this flag and strips that pair before the auto-save — otherwise
+	// the recalled text would silently survive in context as a ghost message.
+	takeBackPending bool
 
 	// partial holds the in-progress assistant text not yet committed to the
 	// scrollback.  In the TUI the raw partial is rendered live in the View()
@@ -2092,6 +2098,16 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 	// it would strand that sub-agent's Ask goroutine forever (its resp channel
 	// would never receive, and its context isn't cancelled at turn end). A
 	// foreground ask, by contrast, already unblocks via turn-context cancellation.
+
+	// An Esc take-back recalled the typed text into the input box; remove the
+	// interrupted input (and its interrupt note) from history before the
+	// auto-save below, so the take-back leaves no trace in context. The shape
+	// check inside TakeBackInterrupted makes this a no-op if the turn actually
+	// made progress before the cancel landed (a race Esc can't see).
+	if m.takeBackPending {
+		m.takeBackPending = false
+		m.a.TakeBackInterrupted()
+	}
 
 	// Any steer messages that weren't drained via EventSteerInjected during
 	// the turn (e.g. typed after the last loop iteration) are printed now so

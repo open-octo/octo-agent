@@ -824,9 +824,9 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(sess.Messages)))
 		return
 	}
-	// message_index == len(Messages) is legal: a first-round interrupt rolls
-	// the still-unanswered prompt back out of history, so there is nothing
-	// left to strip — the rerun below simply recreates it.
+	// message_index == len(Messages) is legal: a first-round send failure
+	// rolls the still-unanswered prompt back out of history, so there is
+	// nothing left to strip — the rerun below simply recreates it.
 	var blocks []agent.ContentBlock
 	if req.MessageIndex < len(sess.Messages) {
 		target := sess.Messages[req.MessageIndex]
@@ -938,11 +938,17 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 	a := s.buildAgent(sess)
 
 	if !s.cfg.Tools {
-		reply, err := a.Turn(ctx, userInput)
+		// Run (not Turn) so this path shares the loop's interrupt contract
+		// (input kept, capped with a note) and Stop-hook firing with the WS
+		// transport's no-tools turns.
+		reply, err := a.Run(ctx, userInput, nil, nil)
+		sess.SyncFrom(a.History)
 		if err != nil {
+			// Callers only Save on success; persist what the turn left behind
+			// (an interrupt keeps the input + note) like the WS path does.
+			_ = sess.Save()
 			return "", err
 		}
-		sess.SyncFrom(a.History)
 		return reply.Content, nil
 	}
 
@@ -955,11 +961,15 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 	defer cleanup()
 
 	reply, err := a.Run(ctx, userInput, tools.DefaultToolsForCtx(ctx, a.Model), executor)
+	// Sync even on failure: an interrupt keeps the input + note, and rounds
+	// completed before a mid-turn error are billed work — the WS path
+	// persists both, so this transport must too (callers only Save on
+	// success, hence the explicit Save on the error path).
+	sess.SyncFrom(a.History)
 	if err != nil {
+		_ = sess.Save()
 		return "", err
 	}
-
-	sess.SyncFrom(a.History)
 	return reply.Content, nil
 }
 

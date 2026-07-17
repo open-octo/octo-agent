@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -2242,6 +2243,54 @@ func TestRunTurnForwardsTools(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("web_search not among forwarded tools: %v", rec.lastTools)
+	}
+}
+
+// ctxCancelSender cancels the turn context on its first provider call —
+// a Ctrl-C/client-disconnect arriving while the call is in flight.
+type ctxCancelSender struct{ cancel context.CancelFunc }
+
+func (s *ctxCancelSender) SendMessages(ctx context.Context, _, _ string, _ []agent.Message, _ int) (agent.Reply, error) {
+	s.cancel()
+	return agent.Reply{}, ctx.Err()
+}
+
+// TestRunTurn_InterruptPersistsKeptInput: the REST transport must persist
+// what an interrupted turn leaves in history (the input capped with the
+// interrupt note) even though runTurn returns an error — its callers only
+// Save on success. The WS path saves on every outcome; without the
+// error-path Save here the kept message silently vanished on this transport.
+func TestRunTurn_InterruptPersistsKeptInput(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := &Server{
+		cfg:       Config{Tools: false},
+		model:     "stub-model",
+		turnLocks: map[string]*sync.Mutex{},
+		sender:    &ctxCancelSender{cancel: cancel},
+	}
+
+	sess := agent.NewSession("stub-model", "")
+	_, err := srv.runTurn(ctx, sess, "fix the bug")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+
+	reloaded, lerr := agent.LoadSession(sess.ID)
+	if lerr != nil {
+		t.Fatalf("session was not persisted on the interrupt path: %v", lerr)
+	}
+	if len(reloaded.Messages) != 2 {
+		t.Fatalf("persisted messages = %d, want 2 (input + interrupt note): %+v", len(reloaded.Messages), reloaded.Messages)
+	}
+	if m := reloaded.Messages[0]; m.Role != agent.RoleUser || m.Content != "fix the bug" {
+		t.Errorf("messages[0] = %+v, want the interrupted user input", m)
+	}
+	if m := reloaded.Messages[1]; m.Role != agent.RoleAssistant {
+		t.Errorf("messages[1].Role = %q, want assistant interrupt note", m.Role)
 	}
 }
 
