@@ -1452,11 +1452,10 @@ func (m *tuiModel) titleCmd(pending string) tea.Cmd {
 	}
 	m.titlePending = true
 	a := m.a
-	tools := m.cfg.tools // same toolbelt as the loop, so the request hits the prompt cache
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), agent.TitleGenerationTimeout)
 		defer cancel()
-		t, err := a.GenerateTitleOrSnippet(ctx, msgs, tools)
+		t, err := a.GenerateTitleOrSnippet(ctx, msgs)
 		if err != nil {
 			slog.Debug("session title generation failed, using snippet", "err", err)
 		}

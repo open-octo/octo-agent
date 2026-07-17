@@ -154,10 +154,12 @@ type Agent struct {
 	// to System.
 	LeanSystem string
 
-	// LiteSender/LiteModel, when both set, run history summarisation
-	// (compaction) on a cheaper model. Unset falls back to Sender/Model.
-	// On a lite-call error summarize retries once on the primary sender, so
-	// a misconfigured lite model can't break compaction.
+	// LiteSender/LiteModel, when both set, run cheap internal calls —
+	// history summarisation (compaction) and session-title generation — on a
+	// cheaper model. Unset falls back to Sender/Model. On a lite-call error
+	// summarize retries once on the primary sender, so a misconfigured lite
+	// model can't break compaction; title generation instead surfaces the
+	// error to GenerateTitleOrSnippet's snippet fallback (no retry).
 	LiteSender Sender
 	LiteModel  string
 
@@ -1340,38 +1342,54 @@ const titleMaxTokens = 250
 // so a title always lands ~5s after the first user message.
 const TitleGenerationTimeout = 5 * time.Second
 
-const titleInstruction = "Summarize this conversation as a short title of at most 6 words. " +
+// titleContextMaxRunes caps how much of the first user message feeds the
+// title prompt. A title only needs the topic; an unbounded paste (a dumped
+// log, a whole file) would turn this deliberately-cheap call into a huge
+// request — exactly what the lite model is meant to avoid.
+const titleContextMaxRunes = 500
+
+// titleInstruction demands brevity twice — in words for spacey languages, in
+// characters for CJK — because a sidebar title wraps or truncates past a
+// handful of words. 15 characters mirrors FirstUserSnippet's truncation
+// width, so a model title and the snippet fallback land at the same length.
+const titleInstruction = "Generate a very short title for this conversation — at most 6 words, or 15 characters for Chinese or Japanese. " +
 	"Reply with the title text only — no preamble, no quotes, no trailing punctuation, no markdown."
 
-// GenerateTitle produces a short title summarizing the conversation so far, for
-// display in the session list. Like Suggest it is a throwaway provider call: the
-// instruction is appended to a snapshot of history (never the live History) and
-// its token usage is not accrued into the session. Returns "" (no error) when
-// there's nothing to title.
-//
-// tools should be the SAME toolbelt the agentic loop uses so the request reuses
-// the main conversation's prompt cache (see Suggest for the cache-prefix
-// rationale). The model is told not to call tools; a stray tool_use yields empty
-// Content and we simply produce no title.
-func (a *Agent) GenerateTitle(ctx context.Context, tools []ToolDefinition) (string, error) {
-	return a.GenerateTitleFrom(ctx, a.History.Snapshot(), tools)
+// GenerateTitle produces a short title for the conversation so far, for
+// display in the session list. It is a throwaway provider call: the request
+// carries only the first user message plus the instruction (never the live
+// History, no system prompt, no tools), runs on the lite model when one is
+// configured, and its token usage is not accrued into the session. Returns ""
+// (no error) when there's no user text to title.
+func (a *Agent) GenerateTitle(ctx context.Context) (string, error) {
+	return a.GenerateTitleFrom(ctx, a.History.Snapshot())
 }
 
 // GenerateTitleFrom is GenerateTitle over an explicit message snapshot. It
 // exists for title-on-receipt callers: when a turn starts, the loop goroutine
 // owns History and hasn't appended the incoming user message yet, so the
 // caller passes its own pre-turn snapshot plus that message instead.
-func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message, tools []ToolDefinition) (string, error) {
-	sender := a.GetSender()
-	if sender == nil || a.Model == "" {
+//
+// The call runs on LiteSender/LiteModel when set, otherwise on the primary
+// sender, and there is NO retry on the primary after a lite failure — the
+// GenerateTitleOrSnippet snippet fallback already guarantees a title, and a
+// retry would double the latency of a call bounded by TitleGenerationTimeout.
+func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message) (string, error) {
+	sender, model := a.GetSender(), a.Model
+	if a.LiteSender != nil && a.LiteModel != "" {
+		sender, model = a.LiteSender, a.LiteModel
+	}
+	if sender == nil || model == "" {
 		return "", fmt.Errorf("agent: title: not configured")
 	}
-	if len(snap) == 0 {
+	text := firstUserText(snap)
+	if text == "" {
 		return "", nil
 	}
-	msgs := make([]Message, 0, len(snap)+1)
-	msgs = append(msgs, snap...)
-	msgs = append(msgs, NewUserMessage(titleInstruction))
+	if r := []rune(text); len(r) > titleContextMaxRunes {
+		text = string(r[:titleContextMaxRunes])
+	}
+	msgs := []Message{NewUserMessage(text), NewUserMessage(titleInstruction)}
 
 	if nr, ok := sender.(NoReasoningSender); ok {
 		sender = nr.NoReasoning()
@@ -1379,13 +1397,7 @@ func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message, tools []T
 		sender = le.LowEffort()
 	}
 
-	var reply Reply
-	var err error
-	if ts, ok := sender.(ToolSender); ok && len(tools) > 0 {
-		reply, err = ts.SendMessagesWithTools(ctx, a.Model, a.System, msgs, titleMaxTokens, tools)
-	} else {
-		reply, err = sender.SendMessages(ctx, a.Model, a.System, msgs, titleMaxTokens)
-	}
+	reply, err := sender.SendMessages(ctx, model, "", msgs, titleMaxTokens)
 	if err != nil {
 		return "", err
 	}
@@ -1399,8 +1411,8 @@ func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message, tools []T
 // every frontend gets the same behaviour: an LLM title when the call works, a
 // snippet otherwise, always within ~5s of the first user message. Returns ""
 // only when snap carries no user text at all.
-func (a *Agent) GenerateTitleOrSnippet(ctx context.Context, snap []Message, tools []ToolDefinition) (string, error) {
-	t, err := a.GenerateTitleFrom(ctx, snap, tools)
+func (a *Agent) GenerateTitleOrSnippet(ctx context.Context, snap []Message) (string, error) {
+	t, err := a.GenerateTitleFrom(ctx, snap)
 	if err == nil {
 		if t = strings.TrimSpace(t); t != "" {
 			return t, nil

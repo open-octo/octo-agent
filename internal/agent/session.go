@@ -884,11 +884,11 @@ func (s *Session) FallbackTitleIfPlaceholder() string {
 	return ""
 }
 
-// FirstUserSnippet extracts a one-line preview from the first user message,
-// skipping injected <system-reminder> blocks and tool-result turns, and
-// truncating to a list-friendly width.
-func FirstUserSnippet(msgs []Message) string {
-	const maxLen = 15
+// firstUserText returns the stripped full text of the first user message in
+// msgs that carries any text (skipping injected <system-reminder> blocks and
+// tool-result turns), or "" when none does. Title generation sends this —
+// and only this — to the model.
+func firstUserText(msgs []Message) string {
 	for _, m := range msgs {
 		if m.Role != RoleUser {
 			continue
@@ -902,18 +902,28 @@ func FirstUserSnippet(msgs []Message) string {
 				}
 			}
 		}
-		text = StripSystemReminders(text)
-		// Collapse to the first non-empty line.
-		for _, line := range strings.Split(text, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			if r := []rune(line); len(r) > maxLen {
-				return strings.TrimSpace(string(r[:maxLen-1])) + "…"
-			}
-			return line
+		if text = strings.TrimSpace(StripSystemReminders(text)); text != "" {
+			return text
 		}
+	}
+	return ""
+}
+
+// FirstUserSnippet extracts a one-line preview from the first user message,
+// skipping injected <system-reminder> blocks and tool-result turns, and
+// truncating to a list-friendly width.
+func FirstUserSnippet(msgs []Message) string {
+	const maxLen = 15
+	// Collapse to the first non-empty line.
+	for _, line := range strings.Split(firstUserText(msgs), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if r := []rune(line); len(r) > maxLen {
+			return strings.TrimSpace(string(r[:maxLen-1])) + "…"
+		}
+		return line
 	}
 	return ""
 }
