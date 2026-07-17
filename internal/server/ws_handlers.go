@@ -1533,7 +1533,11 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// the turn); this is the turn's LAST write, on the single serialized write
 	// path, so persisting here is safe and survives. A generation that hasn't
 	// finished by now leaves nothing to take — its title rides the next turn's
-	// adoption (already broadcast, so the live UI is correct meanwhile).
+	// adoption (already broadcast, so the live UI is correct meanwhile). If
+	// that session never gets a next turn, the title stays broadcast-only:
+	// disk keeps the placeholder and a reload falls back to the message
+	// snippet. Acceptable for a best-effort throwaway title; the common
+	// long-turn case always finishes generation well before this point.
 	if t := s.takePendingTitle(sess.ID); t != "" && isAutoNamePlaceholder(sess.Title) {
 		if terr := sess.SetTitle(t); terr != nil {
 			slog.Warn("session title adoption: save failed", "session_id", sess.ID, "err", terr)
@@ -1619,13 +1623,12 @@ func (s *Server) releaseTitleGeneration(sessionID string) {
 	s.titleMu.Unlock()
 }
 
-// storePendingTitle hands a title generated mid-turn to the turn goroutine.
-// The generation goroutine persists the title itself, but the turn's own
-// end-of-turn saves can rewrite the session file from the live Session —
-// whose Title field is still the placeholder — clobbering that record. The
-// turn goroutine adopts the pending title after its last write (see
-// doAgentTurn); storing BEFORE the goroutine's own persist is what makes the
-// pair race-free in both orders.
+// storePendingTitle hands a title generated mid-turn to the turn goroutine,
+// which is the ONLY writer of the session file (the generation goroutine must
+// not write it concurrently — rewriteAll truncates in place and would corrupt
+// the transcript). The turn goroutine persists the stored title at its
+// end-of-turn adoption step (see doAgentTurn), on its single serialized write
+// path.
 func (s *Server) storePendingTitle(sessionID, title string) {
 	s.titleMu.Lock()
 	if s.pendingTitles == nil {
