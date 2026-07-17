@@ -503,3 +503,82 @@ func TestEventSinkDoneErrorExit(t *testing.T) {
 		t.Errorf("done StopReason = %q, want error", events[1].StopReason)
 	}
 }
+
+// TestKillAfterAgentExited verifies that Kill() emits a "done" event even when
+// the sub-agent's goroutine has already completed, so the frontend always
+// receives the update immediately.
+func TestKillAfterAgentExited(t *testing.T) {
+	m := NewSubAgentManager(&fixedSpawner{result: SpawnResult{Reply: "ok", AgentID: "child-1", StopReason: "end_turn"}})
+
+	var mu sync.Mutex
+	var events []SubAgentEvent
+	m.SetOnEvent(func(ev SubAgentEvent) { mu.Lock(); events = append(events, ev); mu.Unlock() })
+
+	id, err := m.Start(SpawnRequest{Description: "d", Prompt: "p"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for the agent to complete (onExit fires).
+	exited := make(chan struct{})
+	m.SetOnExit(func(SubAgentNotification) { close(exited) })
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("onExit never fired")
+	}
+
+	// Verify the first "done" event arrived with the original stop reason.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		done := len(events) >= 2 && events[len(events)-1].Kind == "done"
+		mu.Unlock()
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			mu.Lock()
+			evs := events
+			mu.Unlock()
+			t.Fatalf("events = %v, want trailing done", evs)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	firstDone := events[len(events)-1]
+	mu.Unlock()
+	if firstDone.StopReason != "end_turn" {
+		t.Errorf("first done StopReason = %q, want end_turn", firstDone.StopReason)
+	}
+
+	// Now kill the already-completed agent. The fix should emit a second "done"
+	// event with StopReason = "killed".
+	eventsBefore := len(events)
+	m.Kill(id)
+
+	deadline = time.Now().Add(2 * time.Second)
+	var killEvent SubAgentEvent
+	for {
+		mu.Lock()
+		for _, ev := range events[eventsBefore:] {
+			if ev.AgentID == id && ev.Kind == "done" {
+				killEvent = ev
+			}
+		}
+		mu.Unlock()
+		if killEvent.Kind == "done" {
+			break
+		}
+		if time.Now().After(deadline) {
+			mu.Lock()
+			evs := events[eventsBefore:]
+			mu.Unlock()
+			t.Fatalf("no kill done event for %q; events after kill = %v", id, evs)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if killEvent.StopReason != "killed" {
+		t.Errorf("kill done StopReason = %q, want killed", killEvent.StopReason)
+	}
+}
