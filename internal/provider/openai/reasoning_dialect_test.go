@@ -16,6 +16,13 @@ import (
 // returns a minimal valid chat.completion so Send succeeds.
 func captureRequest(t *testing.T, dialect, effort string, stream bool) apiRequest {
 	t.Helper()
+	return captureRequestModel(t, dialect, "deepseek-v4-pro", effort, stream)
+}
+
+// captureRequestModel is captureRequest with an explicit model id, for
+// dialects (Kimi) whose reasoning shape is model-dependent.
+func captureRequestModel(t *testing.T, dialect, model, effort string, stream bool) apiRequest {
+	t.Helper()
 	var got apiRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -27,7 +34,7 @@ func captureRequest(t *testing.T, dialect, effort string, stream bool) apiReques
 			_, _ = io.WriteString(w, `data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`+"\n\n")
 			return
 		}
-		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","model":"deepseek-v4-pro","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","model":"` + model + `","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
 	}))
 	defer srv.Close()
 
@@ -39,7 +46,7 @@ func captureRequest(t *testing.T, dialect, effort string, stream bool) apiReques
 	c.Dialect = dialect
 
 	req := provider.Request{
-		Model:           "deepseek-v4-pro",
+		Model:           model,
 		Messages:        []agent.Message{agent.NewUserMessage("hi")},
 		ReasoningEffort: effort,
 	}
@@ -103,6 +110,118 @@ func TestOpenAIDialect_MaxMapsToXHigh(t *testing.T) {
 			t.Errorf("OpenAI effort %q: thinking = %+v, want omitted", in, got.Thinking)
 		}
 	}
+}
+
+// OpenRouter has no reasoning_effort field at all — only a nested
+// reasoning:{effort:...} object — so the flat field must stay empty and the
+// value must pass through verbatim (its enum is a superset of ours, no
+// clamping needed). Empty effort omits the reasoning object entirely rather
+// than sending an empty one.
+func TestOpenRouterDialect_UsesNestedReasoningObject(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		got := captureRequest(t, DialectOpenRouter, "max", stream)
+		if got.ReasoningEffort != "" {
+			t.Errorf("stream=%v: reasoning_effort = %q, want empty (must use nested reasoning object)", stream, got.ReasoningEffort)
+		}
+		if got.Reasoning == nil || got.Reasoning.Effort != "max" {
+			t.Errorf("stream=%v: reasoning = %+v, want {Effort:max}", stream, got.Reasoning)
+		}
+		if got.Thinking != nil {
+			t.Errorf("stream=%v: thinking = %+v, want omitted", stream, got.Thinking)
+		}
+
+		off := captureRequest(t, DialectOpenRouter, "", stream)
+		if off.Reasoning != nil {
+			t.Errorf("stream=%v: off reasoning = %+v, want omitted", stream, off.Reasoning)
+		}
+	}
+}
+
+// Bailian (DashScope) has no reasoning_effort field at all — only a plain
+// enable_thinking boolean, sent explicitly in both directions since per-model
+// defaults vary.
+func TestBailianDialect_UsesEnableThinkingBoolean(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		got := captureRequest(t, DialectBailian, "high", stream)
+		if got.ReasoningEffort != "" {
+			t.Errorf("stream=%v: reasoning_effort = %q, want empty (must use enable_thinking)", stream, got.ReasoningEffort)
+		}
+		if got.EnableThinking == nil || !*got.EnableThinking {
+			t.Errorf("stream=%v: enable_thinking = %v, want true", stream, got.EnableThinking)
+		}
+		if got.Thinking != nil {
+			t.Errorf("stream=%v: thinking = %+v, want omitted (bailian uses enable_thinking, not thinking)", stream, got.Thinking)
+		}
+
+		off := captureRequest(t, DialectBailian, "", stream)
+		if off.EnableThinking == nil || *off.EnableThinking {
+			t.Errorf("stream=%v: off enable_thinking = %v, want explicit false", stream, off.EnableThinking)
+		}
+	}
+}
+
+// Kimi's reasoning shape is split by model generation: k2.6/k2.5 get
+// DeepSeek's nested toggle (no reasoning_effort), k2.7-code always forces the
+// toggle to "enabled" regardless of effort, and k3 gets a top-level
+// reasoning_effort clamped to its only supported value, "max".
+func TestKimiDialect_ModelDependentShape(t *testing.T) {
+	t.Run("k2.6 toggles like DeepSeek", func(t *testing.T) {
+		for _, stream := range []bool{false, true} {
+			on := captureRequestModel(t, DialectKimi, "kimi-k2.6", "high", stream)
+			if on.Thinking == nil || on.Thinking.Type != "enabled" {
+				t.Errorf("stream=%v: thinking = %+v, want type=enabled", stream, on.Thinking)
+			}
+			if on.ReasoningEffort != "" {
+				t.Errorf("stream=%v: reasoning_effort = %q, want empty (k2.6 has no such field)", stream, on.ReasoningEffort)
+			}
+
+			off := captureRequestModel(t, DialectKimi, "kimi-k2.6", "", stream)
+			if off.Thinking == nil || off.Thinking.Type != "disabled" {
+				t.Errorf("stream=%v: off thinking = %+v, want type=disabled", stream, off.Thinking)
+			}
+		}
+	})
+
+	// k2.5 shares k2.6's nested-toggle shape (see DialectKimi's doc comment);
+	// this pins that the default branch actually covers it, not just k2.6.
+	t.Run("k2.5 toggles like k2.6", func(t *testing.T) {
+		on := captureRequestModel(t, DialectKimi, "kimi-k2.5", "high", false)
+		if on.Thinking == nil || on.Thinking.Type != "enabled" {
+			t.Errorf("thinking = %+v, want type=enabled", on.Thinking)
+		}
+		off := captureRequestModel(t, DialectKimi, "kimi-k2.5", "", false)
+		if off.Thinking == nil || off.Thinking.Type != "disabled" {
+			t.Errorf("off thinking = %+v, want type=disabled", off.Thinking)
+		}
+	})
+
+	t.Run("k2.7-code always enabled", func(t *testing.T) {
+		for _, stream := range []bool{false, true} {
+			for _, effort := range []string{"", "high"} {
+				got := captureRequestModel(t, DialectKimi, "kimi-k2.7-code", effort, stream)
+				if got.Thinking == nil || got.Thinking.Type != "enabled" {
+					t.Errorf("stream=%v effort=%q: thinking = %+v, want type=enabled (k2.7-code can't disable)", stream, effort, got.Thinking)
+				}
+			}
+		}
+	})
+
+	t.Run("k3 clamps to reasoning_effort=max", func(t *testing.T) {
+		for _, stream := range []bool{false, true} {
+			got := captureRequestModel(t, DialectKimi, "k3", "low", stream)
+			if got.ReasoningEffort != "max" {
+				t.Errorf("stream=%v: reasoning_effort = %q, want max (k3's only supported value)", stream, got.ReasoningEffort)
+			}
+			if got.Thinking != nil {
+				t.Errorf("stream=%v: thinking = %+v, want omitted (k3 uses reasoning_effort)", stream, got.Thinking)
+			}
+
+			off := captureRequestModel(t, DialectKimi, "k3", "", stream)
+			if off.ReasoningEffort != "" {
+				t.Errorf("stream=%v: off reasoning_effort = %q, want empty", stream, off.ReasoningEffort)
+			}
+		}
+	})
 }
 
 // A generic (unknown) backend must never see the thinking toggle, and tops out
