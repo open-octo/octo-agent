@@ -52,16 +52,17 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 		ctx = tools.WithGoalStore(ctx, sess)
 	}
 
-	// Gate browser image content on the active model's vision capability. Unlike
-	// the CLI (which goes through app.WireTools), the server wires tools here, so
-	// this is the only place serve learns whether the model can take images — a
-	// text-only model would otherwise be handed a screenshot it rejects (HTTP
-	// 400). Re-evaluated per turn so a mid-session model switch takes effect.
-	// LoadCached so a config.yml that's momentarily invalid mid-edit keeps
-	// the last vision setting that parsed instead of silently going stale.
+	// Gate image-handing tools (browser, read_file) on the active model's vision
+	// capability. Unlike the CLI (which goes through app.WireTools), the server
+	// wires tools here, so this is the only place serve learns whether the model
+	// can take images — a text-only model would otherwise be handed a screenshot
+	// or image block it rejects (HTTP 400). Re-evaluated per turn so a mid-session
+	// model switch takes effect. LoadCached so a config.yml that's momentarily
+	// invalid mid-edit keeps the last vision setting that parsed instead of
+	// silently going stale.
 	cfg, cfgErr := config.LoadCached()
 	if cfgErr == nil {
-		tools.SetBrowserVision(cfg.ModelVision(a.Model))
+		tools.SetModelVision(cfg.ModelVision(a.Model))
 	}
 
 	// Same omission for the LLM-backed browser helpers: record_stop's skill

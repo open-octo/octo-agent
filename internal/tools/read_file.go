@@ -103,8 +103,16 @@ func (ReadFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 		return agent.ToolResult{}, fmt.Errorf("read_file: refusing to read %s — device file would block or stream indefinitely", path)
 	}
 
-	// Check for image files first — multimodal models can consume them.
+	// Check for image files first — multimodal models can consume them. A
+	// text-only model gets a refusal instead: its provider silently drops
+	// image blocks, and a model that believes it "read" an image it cannot
+	// see confidently hallucinates the contents.
 	if mimeType := imageMIMEType(abs); mimeType != "" {
+		if !ModelVisionEnabled() {
+			return agent.ToolResult{
+				Text: fmt.Sprintf("%s is an image file (%s) and the active model does not accept image input — the contents cannot be read or described. Do not guess what the image shows; tell the user to switch to a vision-capable model if they need it analyzed.", path, mimeType),
+			}, nil
+		}
 		return readImageFile(abs, path, mimeType)
 	}
 
