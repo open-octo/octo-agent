@@ -824,9 +824,9 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(sess.Messages)))
 		return
 	}
-	// message_index == len(Messages) is legal: a first-round interrupt rolls
-	// the still-unanswered prompt back out of history, so there is nothing
-	// left to strip — the rerun below simply recreates it.
+	// message_index == len(Messages) is legal: a first-round send failure
+	// rolls the still-unanswered prompt back out of history, so there is
+	// nothing left to strip — the rerun below simply recreates it.
 	var blocks []agent.ContentBlock
 	if req.MessageIndex < len(sess.Messages) {
 		target := sess.Messages[req.MessageIndex]

@@ -105,12 +105,13 @@ func (s *interruptingSender) StreamMessages(ctx context.Context, _, _ string, _ 
 	return agent.Reply{}, ctx.Err()
 }
 
-// TestDoAgentTurn_InterruptRollback_BroadcastsHistoryReload: interrupting a
-// turn before its first round completes rolls the unanswered user message back
-// just like a provider error does — the reload must fire on the canceled path
-// too, not only the error-toast path ("send → immediately Stop → Edit" is the
-// most natural way to hit the out-of-range 400).
-func TestDoAgentTurn_InterruptRollback_BroadcastsHistoryReload(t *testing.T) {
+// TestDoAgentTurn_Interrupt_KeepsUserMessage_NoReload: interrupting a turn
+// before its first round completes must KEEP the unanswered user message
+// (capped with the interrupt note) and must NOT broadcast history_reload —
+// the old rollback+reload combination cleared the rendered transcript and
+// re-fetched a history that no longer contained the message the user just
+// sent, blanking the chat (fully blank on a fresh session).
+func TestDoAgentTurn_Interrupt_KeepsUserMessage_NoReload(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
@@ -142,20 +143,25 @@ func TestDoAgentTurn_InterruptRollback_BroadcastsHistoryReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if len(reloaded.Messages) != wantLen {
-		t.Fatalf("persisted message count = %d, want %d (interrupted user message should have rolled back)", len(reloaded.Messages), wantLen)
+	// Prior history + the interrupted user message + the assistant interrupt
+	// note: the input survives the interrupt instead of rolling back.
+	if len(reloaded.Messages) != wantLen+2 {
+		t.Fatalf("persisted message count = %d, want %d (user message + interrupt note kept)", len(reloaded.Messages), wantLen+2)
+	}
+	if m := reloaded.Messages[wantLen]; m.Role != agent.RoleUser || m.Content != "second question" {
+		t.Errorf("messages[%d] = %+v, want the interrupted user message", wantLen, m)
+	}
+	if m := reloaded.Messages[wantLen+1]; m.Role != agent.RoleAssistant {
+		t.Errorf("messages[%d].Role = %q, want assistant interrupt note", wantLen+1, m.Role)
 	}
 
-	var seen []map[string]any
-	waitFor(t, func() bool {
-		seen = append(seen, drainConn(t, conn)...)
-		for _, ev := range seen {
-			if ev["type"] == "history_reload" {
-				return true
-			}
+	// doAgentTurn has returned, so every broadcast is already queued: a single
+	// drain sees them all. History did not shrink, so no reload may fire.
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] == "history_reload" {
+			t.Fatal("history_reload broadcast on interrupt — this is the blank-transcript bug")
 		}
-		return false
-	})
+	}
 }
 
 // failSecondRoundSender drives one successful tool round then errors, so the

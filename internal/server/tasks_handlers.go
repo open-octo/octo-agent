@@ -333,8 +333,9 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 		if !errors.Is(err, context.Canceled) {
 			sw.error(err.Error())
 		}
-		// A first-round failure or interrupt rolls the task prompt back out of
-		// history and the SyncFrom+Save above erased the persisted copy — tell
+		// A first-round failure rolls the task prompt back out of history
+		// (an interrupt no longer does — finishInterrupted keeps the prompt)
+		// and the SyncFrom+Save above erased the persisted copy — tell
 		// watching tabs to re-fetch so their message indices realign with disk
 		// (same contract as doAgentTurn).
 		if len(sess.Messages) < historyWatermark {

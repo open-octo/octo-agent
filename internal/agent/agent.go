@@ -588,18 +588,25 @@ func (a *Agent) TurnStream(
 	onChunk func(textDelta string),
 	onThinking func(thinkingDelta string),
 ) (Reply, error) {
-	return a.turnStream(ctx, userInput, onChunk, onThinking, nil)
+	return a.turnStream(ctx, userInput, onChunk, onThinking, nil, false)
 }
 
 // turnStream is TurnStream plus an optional event handler, so the RunStream
 // no-tools fallback keeps emitting EventGoalUpdated for goal accounting.
 // Direct TurnStream callers have no event channel and pass nil.
+//
+// finishInterrupt selects the cancellation contract: RunStream-driven calls
+// pass true so an interrupt finalizes via finishInterrupted (user input kept,
+// capped with a note, EventTurnDone emitted) exactly like the tool loop;
+// direct TurnStream/Turn callers pass false and keep the pop-on-error retry
+// contract.
 func (a *Agent) turnStream(
 	ctx context.Context,
 	userInput string,
 	onChunk func(textDelta string),
 	onThinking func(thinkingDelta string),
 	handler EventHandler,
+	finishInterrupt bool,
 ) (Reply, error) {
 	sender := a.GetSender()
 	if sender == nil {
@@ -631,6 +638,9 @@ func (a *Agent) turnStream(
 		}
 	}
 	if err != nil {
+		if finishInterrupt && ctx.Err() != nil {
+			return a.finishInterrupted(handler)
+		}
 		a.History.popLast()
 		return Reply{}, fmt.Errorf("agent: stream: %w", err)
 	}
@@ -754,7 +764,7 @@ func (a *Agent) RunStream(
 	// terminal EventTurnDone is fired here so the caller's contract is
 	// identical regardless of whether tools were used.
 	if len(tools) == 0 || executor == nil {
-		reply, err := a.turnStream(ctx, userInput, onChunk, onThinking, handler)
+		reply, err := a.turnStream(ctx, userInput, onChunk, onThinking, handler, true)
 		if err == nil && handler != nil {
 			r := reply
 			handler(AgentEvent{Kind: EventTurnDone, Reply: &r})
@@ -795,7 +805,7 @@ func (a *Agent) RunStream(
 
 	// Neither tool-aware interface available → plain TurnStream with the
 	// event-adapting onChunk. EventTurnDone fires on success.
-	reply, err = a.turnStream(ctx, userInput, onChunk, onThinking, handler)
+	reply, err = a.turnStream(ctx, userInput, onChunk, onThinking, handler, true)
 	if err == nil && handler != nil {
 		r := reply
 		handler(AgentEvent{Kind: EventTurnDone, Reply: &r})
@@ -1124,9 +1134,12 @@ func (a *Agent) runLoop(
 // context.Canceled so the caller can recognise the interrupt. It restores the
 // user/assistant alternation invariant:
 //
-//   - last message is the unanswered user input → drop it (turn never happened)
-//   - last message is a tool_result (user role) → cap with an assistant note,
-//     so the next user turn doesn't produce two user messages in a row
+//   - last message is user-role (unanswered input or a tool_result) → cap with
+//     an assistant note, so the next user turn doesn't produce two user
+//     messages in a row. The unanswered input is deliberately kept: dropping
+//     it shrank persisted history below the turn-start watermark, and every
+//     UI that re-renders from disk after the turn (web history_reload) lost
+//     the message the user just sent — a fresh session went fully blank.
 //   - last message is an assistant(tool_use) without tool_result → synthesize
 //     error tool_results and cap with an assistant note
 //   - last message is already a plain assistant turn → nothing to do
@@ -1148,10 +1161,8 @@ func (a *Agent) finishInterrupted(handler EventHandler) (Reply, error) {
 				a.History.Append(NewToolResultMessage(results))
 			}
 			a.History.Append(NewAssistantMessage(interruptNote))
-		case last.Role == RoleUser && hasToolResult(last):
-			a.History.Append(NewAssistantMessage(interruptNote))
 		case last.Role == RoleUser:
-			a.History.popLast()
+			a.History.Append(NewAssistantMessage(interruptNote))
 		}
 	}
 	reply := Reply{Content: interruptNote, StopReason: StopReasonInterrupted}

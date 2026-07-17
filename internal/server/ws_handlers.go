@@ -1405,15 +1405,17 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		// A first-round failure makes runLoop roll history back past the user
 		// message (appendUserInput's error-path contract), and the SyncFrom+
 		// Save above erased the crash-safety copy persisted before the turn.
-		// An interrupt can do the same: finishInterrupted pops an unanswered
-		// user message, so this must run for BOTH branches above. The browser
-		// still shows that user bubble with a now out-of-range message_index,
-		// so a later edit/branch would 400. Tell it to re-fetch the (shorter)
-		// transcript so its indices realign with disk. Gated on an actual
-		// shrink below the turn-start watermark (deliberately not the live
-		// state's compaction-adjusted copy) so a mid-turn failure that kept
-		// the message doesn't trigger a needless reload; a turn compacted
-		// below the watermark reloads too, which also realigns its indices.
+		// The browser still shows that user bubble with a now out-of-range
+		// message_index, so a later edit/branch would 400. Tell it to re-fetch
+		// the (shorter) transcript so its indices realign with disk. An
+		// interrupt no longer shrinks history (finishInterrupted keeps the
+		// unanswered user message and caps it with a note — popping it made
+		// this very reload blank the transcript), but the gate must still run
+		// for both branches: a turn compacted below the watermark reloads too,
+		// which also realigns its indices. Gated on an actual shrink below the
+		// turn-start watermark (deliberately not the live state's
+		// compaction-adjusted copy) so a mid-turn failure that kept the
+		// message doesn't trigger a needless reload.
 		if len(sess.Messages) < historyWatermark {
 			s.broadcastHistoryReload(sess.ID)
 		}

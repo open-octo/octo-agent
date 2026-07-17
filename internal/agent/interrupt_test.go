@@ -9,15 +9,22 @@ import (
 // TestFinishInterrupted_HistoryShapes covers the three history end-states the
 // helper must normalize so the next turn keeps user/assistant alternation.
 func TestFinishInterrupted_HistoryShapes(t *testing.T) {
-	t.Run("unanswered user input is dropped", func(t *testing.T) {
+	t.Run("unanswered user input is kept and capped with a note", func(t *testing.T) {
 		a := New(&summarizeFake{}, "m")
 		a.History.Append(NewUserMessage("hi"))
 		_, err := a.finishInterrupted(nil)
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("err = %v, want context.Canceled", err)
 		}
-		if a.History.Len() != 0 {
-			t.Errorf("history len = %d, want 0 (unanswered input dropped)", a.History.Len())
+		msgs := a.History.Snapshot()
+		if len(msgs) != 2 {
+			t.Fatalf("history len = %d, want 2 (input kept + interrupt note)", len(msgs))
+		}
+		if msgs[0].Role != RoleUser || msgs[0].Content != "hi" {
+			t.Errorf("msg[0] = %+v, want the original user input", msgs[0])
+		}
+		if last := msgs[1]; last.Role != RoleAssistant || last.Content != interruptNote {
+			t.Errorf("msg[1] = %+v, want assistant interrupt note", last)
 		}
 	})
 
@@ -62,8 +69,10 @@ func (s *cancelOnSendSender) SendMessages(ctx context.Context, _, _ string, _ []
 }
 
 // TestRun_InterruptDuringFirstCall verifies an interrupt on the very first
-// model call returns context.Canceled and leaves history empty (the unanswered
-// user turn is dropped).
+// model call returns context.Canceled. Turn's error-path contract (pop the
+// user message so a retry doesn't duplicate it) applies to every error,
+// including cancellation, so history ends up empty here — unlike the
+// Run/RunStream loop, where finishInterrupted keeps the input.
 func TestRun_InterruptDuringFirstCall(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := New(&cancelOnSendSender{cancel: cancel}, "m")
