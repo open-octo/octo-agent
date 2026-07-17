@@ -87,6 +87,12 @@ func TestContextWindow(t *testing.T) {
 	if got := contextWindow("k2.6"); got != 256_000 {
 		t.Errorf("kimi k2.6 window = %d, want 256000", got)
 	}
+	if got := contextWindow("kimi-for-coding-highspeed"); got != 256_000 {
+		t.Errorf("kimi-for-coding-highspeed window = %d, want 256000", got)
+	}
+	if got := contextWindow("k3"); got != 1_000_000 {
+		t.Errorf("k3 window = %d, want 1000000", got)
+	}
 	if got := contextWindow("deepseek-v4-pro"); got != 1_000_000 {
 		t.Errorf("deepseek-v4-pro window = %d, want 1000000", got)
 	}

@@ -185,6 +185,8 @@ var Registry = []Vendor{
 		DefaultModel:   "kimi-for-coding",
 		Models: []VendorModel{
 			{ID: "kimi-for-coding", Vision: true},
+			{ID: "kimi-for-coding-highspeed", Vision: true},
+			{ID: "k3", Vision: true},
 			{ID: "kimi-k2.6", Vision: true},
 			{ID: "kimi-k2.7-code", Vision: true},
 		},
