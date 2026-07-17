@@ -43,6 +43,15 @@ const DialectDeepSeek = "deepseek"
 // Client.Dialect for the "openai" vendor.
 const DialectOpenAI = "openai"
 
+// DialectOpenRouter selects OpenRouter's reasoning shape: a nested
+// `reasoning: {effort: ...}` object rather than the flat reasoning_effort
+// field every other OpenAI-compatible backend here uses. OpenRouter's schema
+// has no reasoning_effort field, so sending it there — as the generic
+// fallback below does — is silently ignored and the effort setting has no
+// effect. Assign it to Client.Dialect for the "openrouter" vendor. See
+// https://openrouter.ai/docs/use-cases/reasoning-tokens.
+const DialectOpenRouter = "openrouter"
+
 // DefaultStreamIdleTimeout bounds how long a streaming response may go silent
 // (no bytes received) before SendStream aborts it as a stall. Chat Completions
 // backends stream chunks continuously while generating, so a healthy stream
@@ -92,6 +101,9 @@ type Client struct {
 //     sent explicitly or it would still think).
 //   - OpenAI: gpt-5.x reasoning_effort accepts "low".."high" and "xhigh" but
 //     not "max", so "max" maps to "xhigh" (the real top tier).
+//   - OpenRouter: forwards verbatim into the nested reasoning object — its
+//     effort enum ("none".."max") is a superset of ours, so no clamping is
+//     needed. Omitted (nil) entirely when effort is "".
 //   - Generic OpenAI-compatible: top out at "high" and reject unknown enums, so
 //     both "xhigh" and "max" clamp to "high"; "thinking" is never sent.
 func (c *Client) applyReasoning(body *apiRequest, effort string) {
@@ -103,6 +115,11 @@ func (c *Client) applyReasoning(body *apiRequest, effort string) {
 			effort = "xhigh"
 		}
 		body.ReasoningEffort = effort
+		return
+	case DialectOpenRouter:
+		if effort != "" {
+			body.Reasoning = &apiReasoning{Effort: effort}
+		}
 		return
 	default:
 		if effort == "xhigh" || effort == "max" {

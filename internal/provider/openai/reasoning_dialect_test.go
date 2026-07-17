@@ -105,6 +105,31 @@ func TestOpenAIDialect_MaxMapsToXHigh(t *testing.T) {
 	}
 }
 
+// OpenRouter has no reasoning_effort field at all — only a nested
+// reasoning:{effort:...} object — so the flat field must stay empty and the
+// value must pass through verbatim (its enum is a superset of ours, no
+// clamping needed). Empty effort omits the reasoning object entirely rather
+// than sending an empty one.
+func TestOpenRouterDialect_UsesNestedReasoningObject(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		got := captureRequest(t, DialectOpenRouter, "max", stream)
+		if got.ReasoningEffort != "" {
+			t.Errorf("stream=%v: reasoning_effort = %q, want empty (must use nested reasoning object)", stream, got.ReasoningEffort)
+		}
+		if got.Reasoning == nil || got.Reasoning.Effort != "max" {
+			t.Errorf("stream=%v: reasoning = %+v, want {Effort:max}", stream, got.Reasoning)
+		}
+		if got.Thinking != nil {
+			t.Errorf("stream=%v: thinking = %+v, want omitted", stream, got.Thinking)
+		}
+
+		off := captureRequest(t, DialectOpenRouter, "", stream)
+		if off.Reasoning != nil {
+			t.Errorf("stream=%v: off reasoning = %+v, want omitted", stream, off.Reasoning)
+		}
+	}
+}
+
 // A generic (unknown) backend must never see the thinking toggle, and tops out
 // at "high" — both "xhigh" and "max" clamp down since it rejects unknown enums.
 func TestGenericDialect_OmitsThinkingAndClampsHigh(t *testing.T) {

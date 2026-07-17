@@ -46,12 +46,25 @@ type apiRequest struct {
 	// Client.applyReasoning, which normalises the value per dialect (DeepSeek
 	// verbatim, OpenAI "max"→"xhigh", generic clamps "xhigh"/"max"→"high").
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Reasoning is OpenRouter's own reasoning-tuning shape: a nested object
+	// rather than the flat reasoning_effort field above. OpenRouter's schema
+	// has no reasoning_effort field at all — sending it there is silently
+	// ignored — so the openrouter dialect populates this instead (see
+	// Client.applyReasoning and https://openrouter.ai/docs/use-cases/reasoning-tokens).
+	Reasoning *apiReasoning `json:"reasoning,omitempty"`
 	// Thinking is DeepSeek's on/off toggle for thinking mode, set only for the
 	// DeepSeek dialect (see Client.applyReasoning). DeepSeek separates enabling
 	// thinking from tuning its effort, and leaves thinking on by default — so
 	// reasoning_effort alone may not engage it, and "off" must be sent
 	// explicitly. nil (omitted) for every other OpenAI-compatible backend.
 	Thinking *apiThinking `json:"thinking,omitempty"`
+}
+
+// apiReasoning is OpenRouter's nested reasoning-tuning object. Effort accepts
+// "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" — a
+// superset of our own effort vocabulary, so values pass through unchanged.
+type apiReasoning struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 // apiThinking is DeepSeek's thinking-mode toggle. Type is "enabled" or
