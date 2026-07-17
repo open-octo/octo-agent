@@ -52,6 +52,29 @@ const DialectOpenAI = "openai"
 // https://openrouter.ai/docs/use-cases/reasoning-tokens.
 const DialectOpenRouter = "openrouter"
 
+// DialectBailian selects DashScope's (Alibaba Bailian) reasoning shape: a
+// plain top-level enable_thinking boolean — there is no reasoning_effort
+// field at all, flat or nested, so the generic fallback's clamped
+// reasoning_effort is silently ignored. Assign it to Client.Dialect for the
+// "bailian" vendor. See
+// https://www.alibabacloud.com/help/en/model-studio/deep-thinking.
+const DialectBailian = "bailian"
+
+// DialectKimi selects Moonshot Kimi's reasoning shape, which is split by
+// model generation rather than uniform across the vendor:
+//   - k2.6 / k2.5: the same nested {type: "enabled"|"disabled"} toggle as
+//     DeepSeek — no reasoning_effort field.
+//   - k2.7-code: thinking is permanently on; sending "disabled" errors, so
+//     the toggle is always {type: "enabled"}.
+//   - k3: a top-level reasoning_effort field, but the only value it currently
+//     accepts is "max" — the generic fallback's clamp-to-"high" would send an
+//     unsupported value.
+//
+// Assign it to Client.Dialect for the "kimi" vendor (kimi-coding-plan speaks
+// the Anthropic protocol and never reaches this client). See
+// https://platform.kimi.ai/docs/api/chat.
+const DialectKimi = "kimi"
+
 // DefaultStreamIdleTimeout bounds how long a streaming response may go silent
 // (no bytes received) before SendStream aborts it as a stall. Chat Completions
 // backends stream chunks continuously while generating, so a healthy stream
@@ -85,8 +108,9 @@ type Client struct {
 	StreamIdleTimeout time.Duration
 
 	// Dialect selects vendor-specific request quirks within the OpenAI protocol.
-	// Empty (the default) is generic OpenAI-compatible; DialectDeepSeek enables
-	// DeepSeek's thinking-mode toggle. Set at construction (see internal/app).
+	// Empty (the default) is generic OpenAI-compatible. See applyReasoning for
+	// what each DialectXxx constant changes. Set at construction (see
+	// internal/app).
 	Dialect string
 }
 
@@ -104,6 +128,13 @@ type Client struct {
 //   - OpenRouter: forwards verbatim into the nested reasoning object — its
 //     effort enum ("none".."max") is a superset of ours, so no clamping is
 //     needed. Omitted (nil) entirely when effort is "".
+//   - Bailian (DashScope): no reasoning_effort field at all — only a plain
+//     enable_thinking boolean, sent explicitly either way (true/false) since
+//     per-model defaults vary.
+//   - Kimi: model-dependent (see DialectKimi) — k2.6/k2.5 get the same
+//     nested toggle as DeepSeek with no reasoning_effort; k2.7-code always
+//     gets the toggle forced to "enabled"; k3 gets a top-level
+//     reasoning_effort clamped to its only supported value, "max".
 //   - Generic OpenAI-compatible: top out at "high" and reject unknown enums, so
 //     both "xhigh" and "max" clamp to "high"; "thinking" is never sent.
 func (c *Client) applyReasoning(body *apiRequest, effort string) {
@@ -119,6 +150,27 @@ func (c *Client) applyReasoning(body *apiRequest, effort string) {
 	case DialectOpenRouter:
 		if effort != "" {
 			body.Reasoning = &apiReasoning{Effort: effort}
+		}
+		return
+	case DialectBailian:
+		enabled := effort != ""
+		body.EnableThinking = &enabled
+		return
+	case DialectKimi:
+		m := strings.ToLower(body.Model)
+		switch {
+		case strings.Contains(m, "k3"):
+			if effort != "" {
+				body.ReasoningEffort = "max"
+			}
+		case strings.Contains(m, "k2.7-code") || strings.Contains(m, "k2-7-code"):
+			body.Thinking = &apiThinking{Type: "enabled"}
+		default: // k2.6, k2.5, and any other kimi model
+			if effort == "" {
+				body.Thinking = &apiThinking{Type: "disabled"}
+			} else {
+				body.Thinking = &apiThinking{Type: "enabled"}
+			}
 		}
 		return
 	default:

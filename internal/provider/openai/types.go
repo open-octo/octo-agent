@@ -52,12 +52,18 @@ type apiRequest struct {
 	// ignored — so the openrouter dialect populates this instead (see
 	// Client.applyReasoning and https://openrouter.ai/docs/use-cases/reasoning-tokens).
 	Reasoning *apiReasoning `json:"reasoning,omitempty"`
-	// Thinking is DeepSeek's on/off toggle for thinking mode, set only for the
-	// DeepSeek dialect (see Client.applyReasoning). DeepSeek separates enabling
-	// thinking from tuning its effort, and leaves thinking on by default — so
-	// reasoning_effort alone may not engage it, and "off" must be sent
-	// explicitly. nil (omitted) for every other OpenAI-compatible backend.
+	// Thinking is the nested on/off toggle for thinking mode used by DeepSeek
+	// and Kimi's k2.6/k2.5 models (see Client.applyReasoning). Both separate
+	// enabling thinking from tuning its effort, and leave thinking on by
+	// default — so reasoning_effort alone may not engage/disengage it, and
+	// "disabled" must be sent explicitly. nil (omitted) for every other
+	// OpenAI-compatible backend.
 	Thinking *apiThinking `json:"thinking,omitempty"`
+	// EnableThinking is DashScope's (Alibaba Bailian) on/off toggle — a plain
+	// boolean rather than DeepSeek/Kimi's {type: "enabled"|"disabled"} object.
+	// Set only for the bailian dialect (see Client.applyReasoning). DashScope
+	// has no reasoning_effort field at all.
+	EnableThinking *bool `json:"enable_thinking,omitempty"`
 }
 
 // apiReasoning is OpenRouter's nested reasoning-tuning object. Effort accepts
