@@ -22,7 +22,7 @@ file as `config.yaml.bak`.
 |---|---|---|
 | `models` | list of [model entry](#model-entry) | Named model configurations |
 | `default_model` | string | Entry used when nothing else selects one; empty falls back to the first entry |
-| `lite_model` | string | Entry used for cheap internal calls ([history compaction](/docs/concepts/compaction/)'s summarize step) |
+| `lite_model` | string | Entry used for cheap internal calls ([history compaction](/docs/concepts/compaction/)'s summarize step and session-title generation) |
 | `permission_mode` | string | `interactive` \| `strict` \| `auto` |
 | `coauthor` | bool | Append `Co-authored-by` to git commits the agent writes (default `true`) |
 | `access_key` | string | Shared secret for Web UI / API auth when exposed beyond loopback |

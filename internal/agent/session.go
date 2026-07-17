@@ -884,11 +884,11 @@ func (s *Session) FallbackTitleIfPlaceholder() string {
 	return ""
 }
 
-// FirstUserSnippet extracts a one-line preview from the first user message,
-// skipping injected <system-reminder> blocks and tool-result turns, and
-// truncating to a list-friendly width.
-func FirstUserSnippet(msgs []Message) string {
-	const maxLen = 15
+// firstUserText returns the stripped full text of the first user message in
+// msgs that carries any text (skipping injected <system-reminder> blocks and
+// tool-result turns), or "" when none does. Title generation sends this —
+// and only this — to the model.
+func firstUserText(msgs []Message) string {
 	for _, m := range msgs {
 		if m.Role != RoleUser {
 			continue
@@ -902,20 +902,94 @@ func FirstUserSnippet(msgs []Message) string {
 				}
 			}
 		}
-		text = StripSystemReminders(text)
-		// Collapse to the first non-empty line.
-		for _, line := range strings.Split(text, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			if r := []rune(line); len(r) > maxLen {
-				return strings.TrimSpace(string(r[:maxLen-1])) + "…"
-			}
-			return line
+		if text = strings.TrimSpace(StripSystemReminders(text)); text != "" {
+			return text
 		}
 	}
 	return ""
+}
+
+// snippetBudget caps a one-line preview in half-width columns: wide (CJK)
+// runes count 2, others 1. 30 columns is 15 full-width characters or roughly
+// five English words — display width is the one ruler that makes Chinese,
+// English, and mixed text land at the same visual length in the sidebar.
+const snippetBudget = 30
+
+// FirstUserSnippet extracts a one-line preview from the first user message,
+// skipping injected <system-reminder> blocks and tool-result turns, and
+// truncating to a list-friendly width.
+func FirstUserSnippet(msgs []Message) string {
+	// Collapse to the first non-empty line.
+	for _, line := range strings.Split(firstUserText(msgs), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		return truncateSnippet(line)
+	}
+	return ""
+}
+
+// truncateSnippet shortens a one-line preview to snippetBudget half-width
+// columns. A cut landing inside a Latin word backs off to the word's start
+// so English never breaks mid-word; an unbroken overlong token (a URL or
+// path) hard-cuts at the budget instead of snapping away to nothing. The
+// ellipsis is added only when content was actually dropped.
+func truncateSnippet(s string) string {
+	width := 0
+	for i, r := range s {
+		w := 1
+		if isWideRune(r) {
+			w = 2
+		}
+		if width+w > snippetBudget {
+			return cutSnippet(s, i)
+		}
+		width += w
+	}
+	return s
+}
+
+// cutSnippet renders the cut for truncateSnippet: kept is s[:cut] snapped
+// back to a word boundary when the cut splits a Latin word, plus an ellipsis.
+func cutSnippet(s string, cut int) string {
+	kept := s[:cut]
+	if isWordByte(s[cut]) && cut > 0 && isWordByte(s[cut-1]) {
+		// Mid-word cut: back off to just after the last non-word byte, i.e.
+		// the start of the word being split. No such byte means the whole
+		// prefix is one unbroken token — keep the hard cut rather than
+		// snapping to an empty string.
+		if start := strings.LastIndexFunc(kept, func(r rune) bool { return !isWordRune(r) }); start >= 0 {
+			kept = kept[:start+1]
+		}
+	}
+	return strings.TrimSpace(kept) + "…"
+}
+
+// isWordByte reports whether b is an ASCII letter or digit — the bytes a
+// Latin word is made of. Multi-byte runes never match (their bytes are all
+// ≥ 0x80), so a CJK character is a word boundary all by itself.
+func isWordByte(b byte) bool {
+	return b < 0x80 && isWordRune(rune(b))
+}
+
+func isWordRune(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+}
+
+// isWideRune reports whether r occupies two columns — CJK ideographs,
+// Japanese kana, Hangul syllables, fullwidth forms, and CJK punctuation.
+func isWideRune(r rune) bool {
+	switch {
+	case r >= 0x4E00 && r <= 0x9FFF, // CJK Unified Ideographs
+		r >= 0x3400 && r <= 0x4DBF, // CJK Extension A
+		r >= 0x3040 && r <= 0x30FF, // Hiragana + Katakana
+		r >= 0xAC00 && r <= 0xD7AF, // Hangul Syllables
+		r >= 0xFF00 && r <= 0xFF60, // Fullwidth Forms
+		r >= 0x3000 && r <= 0x303F: // CJK Symbols and Punctuation
+		return true
+	}
+	return false
 }
 
 // StripSystemReminders removes the runtime-injected model-facing spans from

@@ -1867,7 +1867,7 @@ func TestAgent_GenerateTitle(t *testing.T) {
 	a.History.Append(NewUserMessage("the login page redirects in a loop"))
 	a.History.Append(NewAssistantMessage("found it"))
 
-	title, err := a.GenerateTitle(context.Background(), nil)
+	title, err := a.GenerateTitle(context.Background())
 	if err != nil {
 		t.Fatalf("GenerateTitle: %v", err)
 	}
@@ -1878,8 +1878,20 @@ func TestAgent_GenerateTitle(t *testing.T) {
 	if a.History.Len() != 2 {
 		t.Errorf("history len = %d, want 2 (GenerateTitle must not append)", a.History.Len())
 	}
-	if n := len(send.gotMessages); n == 0 || send.gotMessages[n-1].Content != titleInstruction {
-		t.Errorf("last sent message = %+v, want the title instruction", send.gotMessages)
+	// The title call is deliberately minimal: ONLY the first user message's
+	// text plus the instruction, with no system prompt — the rest of the
+	// history ("found it") and a.System must not leak into the request.
+	if n := len(send.gotMessages); n != 2 {
+		t.Fatalf("sent %d messages, want 2 (first user message + instruction)", n)
+	}
+	if send.gotMessages[0].Content != "the login page redirects in a loop" {
+		t.Errorf("first sent message = %q, want the first user message only", send.gotMessages[0].Content)
+	}
+	if send.gotMessages[1].Content != titleInstruction {
+		t.Errorf("last sent message = %q, want the title instruction", send.gotMessages[1].Content)
+	}
+	if send.gotSystem != "" {
+		t.Errorf("system = %q, want empty (title call sends no system prompt)", send.gotSystem)
 	}
 	if send.gotMaxToks != titleMaxTokens {
 		t.Errorf("maxTokens = %d, want %d", send.gotMaxToks, titleMaxTokens)
@@ -1888,7 +1900,7 @@ func TestAgent_GenerateTitle(t *testing.T) {
 
 func TestAgent_GenerateTitle_EmptyHistory(t *testing.T) {
 	a := New(&fakeSender{reply: Reply{Content: "x"}}, "m")
-	title, err := a.GenerateTitle(context.Background(), nil)
+	title, err := a.GenerateTitle(context.Background())
 	if err != nil || title != "" {
 		t.Errorf("GenerateTitle on empty history = (%q, %v), want (\"\", nil)", title, err)
 	}
@@ -1896,7 +1908,7 @@ func TestAgent_GenerateTitle_EmptyHistory(t *testing.T) {
 
 func TestAgent_GenerateTitle_NotConfigured(t *testing.T) {
 	a := New(nil, "")
-	if _, err := a.GenerateTitle(context.Background(), nil); err == nil {
+	if _, err := a.GenerateTitle(context.Background()); err == nil {
 		t.Error("GenerateTitle with no sender/model should error")
 	}
 }
@@ -1911,7 +1923,7 @@ func TestAgent_GenerateTitleOrSnippet(t *testing.T) {
 
 	t.Run("model title wins", func(t *testing.T) {
 		a := New(&fakeSender{reply: Reply{Content: "Fix the login bug"}}, "m")
-		got, err := a.GenerateTitleOrSnippet(context.Background(), snap, nil)
+		got, err := a.GenerateTitleOrSnippet(context.Background(), snap)
 		if err != nil {
 			t.Fatalf("GenerateTitleOrSnippet: %v", err)
 		}
@@ -1922,29 +1934,29 @@ func TestAgent_GenerateTitleOrSnippet(t *testing.T) {
 
 	t.Run("provider error falls back to snippet", func(t *testing.T) {
 		a := New(&fakeSender{err: errors.New("boom")}, "m")
-		got, err := a.GenerateTitleOrSnippet(context.Background(), snap, nil)
+		got, err := a.GenerateTitleOrSnippet(context.Background(), snap)
 		if err == nil {
 			t.Error("expected the provider error to surface for logging")
 		}
-		if got != "please fix the…" {
+		if got != "please fix the login bug" {
 			t.Errorf("title = %q, want the user-message snippet", got)
 		}
 	})
 
 	t.Run("empty reply falls back to snippet", func(t *testing.T) {
 		a := New(&fakeSender{reply: Reply{Content: ""}}, "m")
-		got, err := a.GenerateTitleOrSnippet(context.Background(), snap, nil)
+		got, err := a.GenerateTitleOrSnippet(context.Background(), snap)
 		if err != nil {
 			t.Fatalf("GenerateTitleOrSnippet: %v", err)
 		}
-		if got != "please fix the…" {
+		if got != "please fix the login bug" {
 			t.Errorf("title = %q, want the user-message snippet", got)
 		}
 	})
 
 	t.Run("no user text returns empty", func(t *testing.T) {
 		a := New(&fakeSender{reply: Reply{Content: ""}}, "m")
-		got, _ := a.GenerateTitleOrSnippet(context.Background(), []Message{NewAssistantMessage("hi")}, nil)
+		got, _ := a.GenerateTitleOrSnippet(context.Background(), []Message{NewAssistantMessage("hi")})
 		if got != "" {
 			t.Errorf("title = %q, want empty when there's nothing to title from", got)
 		}
@@ -1967,7 +1979,7 @@ func TestAgent_GenerateTitle_UsesNoReasoningSenderWhenAvailable(t *testing.T) {
 	a.History.Append(NewUserMessage("do X"))
 	a.History.Append(NewAssistantMessage("did X"))
 
-	title, err := a.GenerateTitle(context.Background(), nil)
+	title, err := a.GenerateTitle(context.Background())
 	if err != nil {
 		t.Fatalf("GenerateTitle: %v", err)
 	}
@@ -1999,7 +2011,7 @@ func TestAgent_GenerateTitle_FallsBackToLowEffortSenderWhenNoReasoningUnavailabl
 	a.History.Append(NewUserMessage("do X"))
 	a.History.Append(NewAssistantMessage("did X"))
 
-	title, err := a.GenerateTitle(context.Background(), nil)
+	title, err := a.GenerateTitle(context.Background())
 	if err != nil {
 		t.Fatalf("GenerateTitle: %v", err)
 	}
@@ -2011,6 +2023,63 @@ func TestAgent_GenerateTitle_FallsBackToLowEffortSenderWhenNoReasoningUnavailabl
 	}
 	if len(low.gotMessages) == 0 {
 		t.Error("low-effort sender was never called")
+	}
+}
+
+// TestAgent_GenerateTitle_UsesLiteModelWhenSet pins the routing: with
+// LiteSender/LiteModel configured, the throwaway title call runs on the lite
+// model and the primary sender stays out of it.
+func TestAgent_GenerateTitle_UsesLiteModelWhenSet(t *testing.T) {
+	primary := &fakeSender{reply: Reply{Content: "primary title"}}
+	lite := &fakeSender{reply: Reply{Content: "lite title"}}
+	a := New(primary, "big-model")
+	a.LiteSender = lite
+	a.LiteModel = "lite-model"
+	a.History.Append(NewUserMessage("please fix the login bug"))
+
+	title, err := a.GenerateTitle(context.Background())
+	if err != nil {
+		t.Fatalf("GenerateTitle: %v", err)
+	}
+	if title != "lite title" {
+		t.Errorf("title = %q, want the lite sender's reply", title)
+	}
+	if lite.gotModel != "lite-model" {
+		t.Errorf("lite call model = %q, want %q", lite.gotModel, "lite-model")
+	}
+	if len(primary.gotMessages) != 0 {
+		t.Errorf("primary sender should not have been called; got %d messages", len(primary.gotMessages))
+	}
+}
+
+// TestAgent_GenerateTitle_LiteFailureSurfacesWithoutRetry pins the no-retry
+// rule: a lite-call error surfaces to the caller (and GenerateTitleOrSnippet's
+// snippet fallback) instead of retrying on the primary sender — a retry would
+// double the latency of a call bounded by TitleGenerationTimeout.
+func TestAgent_GenerateTitle_LiteFailureSurfacesWithoutRetry(t *testing.T) {
+	primary := &fakeSender{reply: Reply{Content: "primary title"}}
+	lite := &fakeSender{err: errors.New("lite boom")}
+	a := New(primary, "big-model")
+	a.LiteSender = lite
+	a.LiteModel = "lite-model"
+	a.History.Append(NewUserMessage("please fix the login bug"))
+
+	if _, err := a.GenerateTitle(context.Background()); err == nil {
+		t.Fatal("GenerateTitle: expected the lite error to surface")
+	}
+	if len(primary.gotMessages) != 0 {
+		t.Errorf("primary sender must not be retried after a lite failure; got %d calls", len(primary.gotMessages))
+	}
+
+	got, err := a.GenerateTitleOrSnippet(context.Background(), a.History.Snapshot())
+	if err == nil {
+		t.Error("expected the lite error to surface for logging")
+	}
+	if got != "please fix the login bug" {
+		t.Errorf("title = %q, want the user-message snippet fallback", got)
+	}
+	if len(primary.gotMessages) != 0 {
+		t.Errorf("primary sender must not be retried after a lite failure; got %d calls", len(primary.gotMessages))
 	}
 }
 
@@ -2033,14 +2102,25 @@ func TestCleanTitle(t *testing.T) {
 }
 
 func TestCleanTitle_RuneSafeTruncation(t *testing.T) {
-	// A long CJK title must be truncated on a rune boundary, never mid-byte.
+	// A long CJK title must be truncated on a rune boundary, never mid-byte,
+	// at the shared display-width budget: 15 full-width chars fill 30
+	// half-width columns, the 16th triggers the cut.
 	in := strings.Repeat("订", 80)
 	got := cleanTitle(in)
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("cleanTitle(long) = %q, want a trailing ellipsis", got)
 	}
-	if r := []rune(got); len(r) != 60 { // 59 kept + the ellipsis
-		t.Errorf("cleanTitle(long) rune len = %d, want 60", len(r))
+	if r := []rune(got); len(r) != 16 { // 15 kept + the ellipsis
+		t.Errorf("cleanTitle(long) rune len = %d, want 16 (15 kept + ellipsis)", len(r))
+	}
+}
+
+func TestCleanTitle_LongEnglishSnapsToWordBoundary(t *testing.T) {
+	// Same budget, Latin text: the cut must not break a word — "around"
+	// would straddle column 30, so it is dropped whole.
+	got := cleanTitle("improve concurrency handling around connection pooling internals")
+	if got != "improve concurrency handling…" {
+		t.Errorf("cleanTitle(long English) = %q, want %q", got, "improve concurrency handling…")
 	}
 }
 

@@ -207,7 +207,7 @@ func isTitlePrompt(msgs []agent.Message) bool {
 	if len(msgs) == 0 {
 		return false
 	}
-	return strings.Contains(msgs[len(msgs)-1].Content, "Summarize this conversation")
+	return strings.Contains(msgs[len(msgs)-1].Content, "Generate a very short title")
 }
 
 // blockingTurnSender lets the title-generation call (plain SendMessages, no

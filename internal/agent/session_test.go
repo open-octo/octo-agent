@@ -368,13 +368,13 @@ func TestDisplayTitle(t *testing.T) {
 		{
 			name: "falls back to first user message",
 			s:    &Session{Messages: []Message{NewUserMessage("help me refactor the parser")}},
-			want: "help me refact…",
+			want: "help me refactor the parser",
 		},
 		{
 			name: "strips system-reminder and takes first real line",
 			s: &Session{Messages: []Message{NewUserMessage(
 				"<system-reminder>injected context</system-reminder>\n\nreal question here")}},
-			want: "real question…",
+			want: "real question here",
 		},
 		{
 			name: "skips a leading tool-result user turn",
@@ -382,7 +382,7 @@ func TestDisplayTitle(t *testing.T) {
 				NewToolResultMessage([]ContentBlock{NewToolResultBlock("id", "out", false)}),
 				NewUserMessage("the actual prompt"),
 			}},
-			want: "the actual pro…",
+			want: "the actual prompt",
 		},
 		{
 			name: "untitled when empty",
@@ -396,6 +396,40 @@ func TestDisplayTitle(t *testing.T) {
 				t.Errorf("DisplayTitle() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestTruncateSnippet pins the display-width truncation strategy: a 30
+// half-width-column budget (15 full-width CJK chars ≈ five English words),
+// wide runes counting double, cuts snapped back to Latin word boundaries,
+// and an ellipsis only when content was actually dropped.
+func TestTruncateSnippet(t *testing.T) {
+	cases := map[string]string{
+		// Fits within the budget — returned unchanged, no ellipsis.
+		"hello there":              "hello there",
+		"please fix the login bug": "please fix the login bug", // 24 cols
+		"帮我 review 一下这个 PR 的改动":    "帮我 review 一下这个 PR 的改动",    // mixed, exactly 30 cols
+
+		// English over budget: cut snaps back to the last word boundary —
+		// "around" is dropped whole rather than left as "ar…".
+		"improve concurrency handling around connection pooling internals": "improve concurrency handling…",
+
+		// CJK over budget: characters are semantic units, cut anywhere —
+		// 15 full-width chars fill the budget exactly.
+		"修复登录页面的无限重定向问题并补充测试": "修复登录页面的无限重定向问题并…",
+
+		// Mixed over budget: the English prefix spends budget too, so fewer
+		// CJK chars fit.
+		"fix: 修复登录页面的无限重定向问题": "fix: 修复登录页面的无限重定向…",
+
+		// One unbroken overlong token (URL/hash): no word boundary to snap
+		// to, so it hard-cuts at the budget.
+		"abcdefghijklmnopqrstuvwxyz0123456789abcdef": "abcdefghijklmnopqrstuvwxyz0123…",
+	}
+	for in, want := range cases {
+		if got := truncateSnippet(in); got != want {
+			t.Errorf("truncateSnippet(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

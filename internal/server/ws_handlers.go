@@ -1363,7 +1363,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			defer s.releaseTitleGeneration(sid)
 			ctx, cancel := context.WithTimeout(context.Background(), agent.TitleGenerationTimeout)
 			defer cancel()
-			t, terr := a.GenerateTitleOrSnippet(ctx, titleMsgs, toolDefs)
+			t, terr := a.GenerateTitleOrSnippet(ctx, titleMsgs)
 			if terr != nil {
 				slog.Warn("session title generation failed, falling back to message snippet", "session_id", sid, "err", terr)
 			}
