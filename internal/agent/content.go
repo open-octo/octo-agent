@@ -125,8 +125,12 @@ func NewToolResultBlock(toolUseID, result string, isError bool) ContentBlock {
 
 // NewImageBlock creates a ContentBlock with Type=="image" for multimodal
 // model consumption. The provider adapter is responsible for converting this
-// to the vendor-specific wire format.
+// to the vendor-specific wire format. The bytes are normalized on the way in
+// (see compressImageData): oversized captures are downscaled and re-encoded
+// so every attach path — clipboard, composer, IM, tool results — stays under
+// provider size limits without each caller re-implementing it.
 func NewImageBlock(mimeType string, data []byte) ContentBlock {
+	mimeType, data = compressImageData(mimeType, data)
 	return ContentBlock{
 		Type:  "image",
 		Image: &ImageData{MIMEType: mimeType, Data: data},

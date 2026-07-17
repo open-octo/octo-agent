@@ -152,20 +152,25 @@ func saveImageAttachment(name, dataURL string) (agent.ContentBlock, string, erro
 	}
 
 	// Basename only, no traversal; the stored extension is derived from the
-	// actual MIME type (the composer re-encodes to JPEG but keeps the original
-	// filename) so rehydration and Content-Type sniffing stay truthful.
+	// block's MIME type AFTER NewImageBlock's normalization (a large PNG comes
+	// back JPEG) so rehydration and Content-Type sniffing stay truthful.
 	base := strings.ReplaceAll(filepath.Base(name), "..", "_")
 	if base == "" || base == "." || base == string(filepath.Separator) {
 		base = "image"
 	}
 	base = strings.TrimSuffix(base, filepath.Ext(base))
-	dstName := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), base, extForImageMIME(mime))
+
+	// Persist the NORMALIZED bytes (what the model actually gets), not the
+	// raw upload: rehydration from disk deliberately bypasses recompression,
+	// so a raw multi-megabyte copy would otherwise be sent verbatim on every
+	// resumed session. The block and its on-disk copy now agree.
+	block := agent.NewImageBlock(mime, data)
+	dstName := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), base, extForImageMIME(block.Image.MIMEType))
 	dstPath := filepath.Join(dir, dstName)
-	if err := os.WriteFile(dstPath, data, 0o600); err != nil {
+	if err := os.WriteFile(dstPath, block.Image.Data, 0o600); err != nil {
 		return agent.ContentBlock{}, "", fmt.Errorf("write %s: %w", dstPath, err)
 	}
 
-	block := agent.NewImageBlock(mime, data)
 	block.ImagePath = dstPath
 	return block, "/api/uploads/" + dstName, nil
 }
