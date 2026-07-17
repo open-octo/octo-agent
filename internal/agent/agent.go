@@ -1423,10 +1423,10 @@ func (a *Agent) GenerateTitleOrSnippet(ctx context.Context, snap []Message) (str
 }
 
 // cleanTitle reduces the model's reply to a single tidy line: first non-empty
-// line, stripped of surrounding quotes/markdown and trailing punctuation, capped
-// to a list-friendly length.
+// line, stripped of surrounding quotes/markdown and trailing punctuation, and
+// capped to the same display-width budget as the snippet fallback — one ruler
+// for every title that reaches the sidebar.
 func cleanTitle(s string) string {
-	const maxLen = 60
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)
 		line = strings.TrimPrefix(line, "# ")
@@ -1446,10 +1446,7 @@ func cleanTitle(s string) string {
 		if line == "" {
 			continue
 		}
-		if r := []rune(line); len(r) > maxLen {
-			return strings.TrimSpace(string(r[:maxLen-1])) + "…"
-		}
-		return line
+		return truncateSnippet(line)
 	}
 	return ""
 }

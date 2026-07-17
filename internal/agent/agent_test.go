@@ -2102,14 +2102,25 @@ func TestCleanTitle(t *testing.T) {
 }
 
 func TestCleanTitle_RuneSafeTruncation(t *testing.T) {
-	// A long CJK title must be truncated on a rune boundary, never mid-byte.
+	// A long CJK title must be truncated on a rune boundary, never mid-byte,
+	// at the shared display-width budget: 15 full-width chars fill 30
+	// half-width columns, the 16th triggers the cut.
 	in := strings.Repeat("订", 80)
 	got := cleanTitle(in)
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("cleanTitle(long) = %q, want a trailing ellipsis", got)
 	}
-	if r := []rune(got); len(r) != 60 { // 59 kept + the ellipsis
-		t.Errorf("cleanTitle(long) rune len = %d, want 60", len(r))
+	if r := []rune(got); len(r) != 16 { // 15 kept + the ellipsis
+		t.Errorf("cleanTitle(long) rune len = %d, want 16 (15 kept + ellipsis)", len(r))
+	}
+}
+
+func TestCleanTitle_LongEnglishSnapsToWordBoundary(t *testing.T) {
+	// Same budget, Latin text: the cut must not break a word — "around"
+	// would straddle column 30, so it is dropped whole.
+	got := cleanTitle("improve concurrency handling around connection pooling internals")
+	if got != "improve concurrency handling…" {
+		t.Errorf("cleanTitle(long English) = %q, want %q", got, "improve concurrency handling…")
 	}
 }
 
