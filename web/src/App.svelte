@@ -26,8 +26,7 @@
   import McpModal from './components/overlays/McpModal.svelte'
   import ConfirmModal from './components/overlays/ConfirmModal.svelte'
   import ConfirmDialog from './components/overlays/ConfirmDialog.svelte'
-  import QuestionModal from './components/overlays/QuestionModal.svelte'
-import ArtifactModal from './components/ArtifactModal.svelte'
+  import ArtifactModal from './components/ArtifactModal.svelte'
   import FeedbackModal from './components/overlays/FeedbackModal.svelte'
   import Toast from './components/overlays/Toast.svelte'
 
@@ -329,7 +328,6 @@ import ArtifactModal from './components/ArtifactModal.svelte'
 <McpModal />
 <ConfirmModal />
 <ConfirmDialog />
-<QuestionModal />
 <ArtifactModal />
 <FeedbackModal />
 <Toast />
