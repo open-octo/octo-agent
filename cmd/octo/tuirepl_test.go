@@ -239,6 +239,31 @@ func TestTUI_EscTakesBackDuringThinking(t *testing.T) {
 	}
 }
 
+// Title generation fires on receipt of the first message: with History still
+// empty (the turn goroutine hasn't appended the input yet), titleCmd must
+// build the throwaway prompt from the pending text alone — the old turn-end
+// version returned nil until a turn had completed.
+func TestTUI_TitleCmdFiresOnFirstMessage(t *testing.T) {
+	m := newTestModel()
+	m.cfg.noSave = false // newTestModel defaults to noSave, which gates titling
+	m.cfg.session = agent.NewSession("m", "")
+
+	c := m.titleCmd("fix the bug")
+	if c == nil {
+		t.Fatal("titleCmd = nil on first message, want a command (title on receipt)")
+	}
+	if !m.titlePending {
+		t.Error("titlePending should be set while generation is in flight")
+	}
+	msg, ok := c().(titleMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want titleMsg", c())
+	}
+	if msg.text != "ok" { // stubSender's canned reply
+		t.Errorf("title = %q, want %q", msg.text, "ok")
+	}
+}
+
 // An Esc take-back must leave no trace in the agent's history either: the
 // interrupt keeps the input capped with a note (finishInterrupted), so
 // handleTurnFinished has to strip that pair — otherwise the recalled text

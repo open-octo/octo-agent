@@ -1326,6 +1326,77 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		s.wireBackgroundTaskNotices(sess.ID)
 	}
 
+	// Once per session, as soon as its first user message arrives: generate a
+	// sidebar title. Fired on receipt rather than at turn end so the user isn't
+	// staring at the placeholder for the whole first turn (an agentic turn can
+	// run minutes). The throwaway call runs concurrently with the turn's own
+	// provider call, off a pre-turn copy of sess.Messages plus this turn's user
+	// message — the live History belongs to the loop goroutine (and is still
+	// empty here). Failure is silent: the fallback snippet lands instead, the
+	// claim is released, and the next user message retries.
+	if isAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
+		sid := sess.ID
+		titleMsgs := append(append([]agent.Message{}, sess.Messages...), userMsg)
+		go func() {
+			defer s.recoverBg("title generation")
+			defer s.releaseTitleGeneration(sid)
+			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
+			defer cancel()
+			t, terr := a.GenerateTitleFrom(ctx, titleMsgs, toolDefs)
+			if terr != nil || strings.TrimSpace(t) == "" {
+				if terr != nil {
+					slog.Warn("session title generation failed", "session_id", sid, "err", terr)
+				} else {
+					slog.Warn("session title generation returned an empty title", "session_id", sid)
+				}
+				// Fall back to the first-message snippet instead of leaving
+				// the "*Octo Agent" placeholder (same logic as the TUI).
+				if fresh, lerr := agent.LoadSession(sid); lerr == nil {
+					if title := fresh.FallbackTitleIfPlaceholder(); title != "" {
+						s.wsHub.broadcast("", map[string]any{
+							"type":       "session_renamed",
+							"session_id": sid,
+							"name":       title,
+						})
+					}
+				}
+				return
+			}
+			// Hand the title to the turn goroutine FIRST: its end-of-turn
+			// saves can rewrite the file from the live Session (stale
+			// placeholder Title) and clobber the record persisted below; the
+			// adoption step after the turn's last write re-applies it. Storing
+			// before persisting closes that race in both orders.
+			s.storePendingTitle(sid, t)
+			// Apply the title to a freshly loaded Session, not the live one —
+			// the turn keeps appending to sess on the loop goroutine, and
+			// Session isn't goroutine-safe. A load that races a concurrent
+			// append just errors out and a later turn retries.
+			fresh, lerr := agent.LoadSession(sid)
+			if lerr != nil {
+				slog.Warn("session title generation: reload session failed", "session_id", sid, "err", lerr)
+				return
+			}
+			if !isAutoNamePlaceholder(fresh.Title) {
+				// Not an error: something else (the user, or an earlier
+				// retry) already gave the session a real title.
+				return
+			}
+			if err := fresh.SetTitle(t); err != nil {
+				slog.Warn("session title generation: save failed", "session_id", sid, "err", err)
+				return
+			}
+			// Global broadcast: the sidebar lists every session, so every
+			// connected tab needs the rename, not just this session's
+			// subscribers.
+			s.wsHub.broadcast("", map[string]any{
+				"type":       "session_renamed",
+				"session_id": sid,
+				"name":       t,
+			})
+		}()
+	}
+
 	// Persist the turn's progress incrementally: after any event that grew or
 	// rewrote history, flush it to disk so a server crash mid-turn loses at
 	// most the round in flight, not the whole turn. The length/dirty gate
@@ -1470,6 +1541,19 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	if err := a.PersistContextUsage(sess); err != nil {
 		slog.Warn("session: persist context tokens", "session_id", sess.ID, "err", err)
 	}
+
+	// Adopt a title generated while the turn ran. The generation goroutine
+	// persisted it to a fresh copy, but any turn-end rewrite above (context
+	// tokens, history rewrite) re-stamped the file from this live sess — whose
+	// Title was still the placeholder — clobbering that record. This is the
+	// turn's LAST write, so re-applying here survives; a generation that
+	// finishes later than this point persists itself with nothing left to
+	// clobber it. Broadcast already happened on the generation side.
+	if t := s.takePendingTitle(sess.ID); t != "" && isAutoNamePlaceholder(sess.Title) {
+		if terr := sess.SetTitle(t); terr != nil {
+			slog.Warn("session title adoption: save failed", "session_id", sess.ID, "err", terr)
+		}
+	}
 	_, pm, re, _, _ := s.sessionStatusFields(sess)
 	s.wsHub.broadcast(sess.ID, map[string]any{
 		"type":             "session_update",
@@ -1481,65 +1565,6 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		"permission_mode":  pm,
 		"reasoning_effort": re,
 	})
-
-	// Once per session, after its first successful turn: generate a sidebar
-	// title (matches TUI titleCmd behaviour). Fire-and-forget; a failure is
-	// silent and simply retried after a later turn.
-	if err == nil && isAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
-		sid := sess.ID
-		go func() {
-			defer s.recoverBg("title generation")
-			defer s.releaseTitleGeneration(sid)
-			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
-			defer cancel()
-			t, terr := a.GenerateTitle(ctx, toolDefs)
-			if terr != nil || strings.TrimSpace(t) == "" {
-				if terr != nil {
-					slog.Warn("session title generation failed", "session_id", sid, "err", terr)
-				} else {
-					slog.Warn("session title generation returned an empty title", "session_id", sid)
-				}
-				// Fall back to the first-message snippet instead of leaving
-				// the "*Octo Agent" placeholder (same logic as the TUI).
-				if fresh, lerr := agent.LoadSession(sid); lerr == nil {
-					if title := fresh.FallbackTitleIfPlaceholder(); title != "" {
-						s.wsHub.broadcast("", map[string]any{
-							"type":       "session_renamed",
-							"session_id": sid,
-							"name":       title,
-						})
-					}
-				}
-				return
-			}
-			// Apply the title to a freshly loaded Session, not the live one —
-			// chained steer turns keep appending to sess on the loop
-			// goroutine, and Session isn't goroutine-safe. A load that races
-			// a concurrent append just errors out and a later turn retries.
-			fresh, lerr := agent.LoadSession(sid)
-			if lerr != nil {
-				slog.Warn("session title generation: reload session failed", "session_id", sid, "err", lerr)
-				return
-			}
-			if !isAutoNamePlaceholder(fresh.Title) {
-				// Not an error: something else (the user, or an earlier
-				// retry) already gave the session a real title.
-				return
-			}
-			if err := fresh.SetTitle(t); err != nil {
-				slog.Warn("session title generation: save failed", "session_id", sid, "err", err)
-				return
-			}
-			// Global broadcast: the sidebar lists every session, so every
-			// connected tab needs the rename, not just this session's
-			// subscribers.
-			s.wsHub.broadcast("", map[string]any{
-				"type":       "session_renamed",
-				"session_id": sid,
-				"name":       t,
-			})
-		}()
-	}
 
 	// After-turn follow-up suggestion (matches TUI suggestCmd behaviour).
 	// Fire-and-forget: the frontend shows it as ghost text; failures are silent.
@@ -1607,6 +1632,31 @@ func (s *Server) releaseTitleGeneration(sessionID string) {
 	s.titleMu.Lock()
 	delete(s.titlePending, sessionID)
 	s.titleMu.Unlock()
+}
+
+// storePendingTitle hands a title generated mid-turn to the turn goroutine.
+// The generation goroutine persists the title itself, but the turn's own
+// end-of-turn saves can rewrite the session file from the live Session —
+// whose Title field is still the placeholder — clobbering that record. The
+// turn goroutine adopts the pending title after its last write (see
+// doAgentTurn); storing BEFORE the goroutine's own persist is what makes the
+// pair race-free in both orders.
+func (s *Server) storePendingTitle(sessionID, title string) {
+	s.titleMu.Lock()
+	if s.pendingTitles == nil {
+		s.pendingTitles = make(map[string]string)
+	}
+	s.pendingTitles[sessionID] = title
+	s.titleMu.Unlock()
+}
+
+// takePendingTitle returns and clears the title stored by storePendingTitle.
+func (s *Server) takePendingTitle(sessionID string) string {
+	s.titleMu.Lock()
+	defer s.titleMu.Unlock()
+	t := s.pendingTitles[sessionID]
+	delete(s.pendingTitles, sessionID)
+	return t
 }
 
 // ─── wsStreamWriter ────────────────────────────────────────────────────────

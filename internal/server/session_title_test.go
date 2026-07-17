@@ -225,6 +225,94 @@ func isTitlePrompt(msgs []agent.Message) bool {
 	return strings.Contains(msgs[len(msgs)-1].Content, "Summarize this conversation")
 }
 
+// blockingTurnSender lets the title-generation call (plain SendMessages, no
+// tools in these tests) complete instantly while the main turn's streaming
+// call blocks until released — a long agentic first turn in miniature.
+type blockingTurnSender struct {
+	entered chan struct{} // closed when the main call is in flight
+	release chan struct{} // the main call returns once this is closed
+}
+
+func (s *blockingTurnSender) SendMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int) (agent.Reply, error) {
+	if isTitlePrompt(msgs) {
+		return agent.Reply{Content: "early title"}, nil
+	}
+	return agent.Reply{Content: "stub reply"}, nil
+}
+
+func (s *blockingTurnSender) StreamMessages(_ context.Context, _, _ string, _ []agent.Message, _ int, _ func(string), _ func(string)) (agent.Reply, error) {
+	close(s.entered)
+	<-s.release
+	return agent.Reply{Content: "stub reply"}, nil
+}
+
+// TestDoAgentTurn_TitleGeneratedOnReceipt pins the title timing contract:
+// the sidebar title is generated from the incoming user message and lands
+// WHILE the turn is still running — not after it — and still survives the
+// turn's end-of-turn saves (PersistContextUsage rewrites the file from the
+// live Session, whose stale placeholder Title would clobber a title record
+// without the adoption step).
+func TestDoAgentTurn_TitleGeneratedOnReceipt(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	sender := &blockingTurnSender{entered: make(chan struct{}), release: make(chan struct{})}
+	srv.sender = sender
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Title = "Session 4"
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.wsHub.register <- conn
+
+	turnDone := make(chan struct{})
+	go func() {
+		defer close(turnDone)
+		srv.doAgentTurn(sess, "hello there", nil, nil)
+	}()
+	<-sender.entered // the model call is in flight and blocked
+
+	// The rename must arrive while the turn is still blocked.
+	deadline := time.After(5 * time.Second)
+	for renamed := false; !renamed; {
+		select {
+		case b := <-conn.send:
+			var ev map[string]any
+			if json.Unmarshal(b, &ev) == nil && ev["type"] == "session_renamed" && ev["session_id"] == sess.ID {
+				if ev["name"] != "early title" {
+					t.Errorf("name = %v, want %q", ev["name"], "early title")
+				}
+				renamed = true
+			}
+		case <-turnDone:
+			t.Fatal("turn finished before session_renamed — title was not generated on receipt")
+		case <-deadline:
+			t.Fatal("no session_renamed broadcast while the turn was running")
+		}
+	}
+
+	close(sender.release)
+	<-turnDone
+
+	// The turn's final saves must not have clobbered the title.
+	loaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if loaded.Title != "early title" {
+		t.Errorf("persisted Title = %q, want %q (turn-end rewrite clobbered it)", loaded.Title, "early title")
+	}
+}
+
 // TestDoAgentTurn_TitleGenerationFailureIsLogged is the regression guard for
 // a real production symptom: on an install where the title-generation call
 // fails every time (bad model config, rate limit, etc.), the sidebar title
