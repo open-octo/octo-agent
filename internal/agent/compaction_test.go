@@ -117,6 +117,24 @@ func TestContextWindow(t *testing.T) {
 	if got := contextWindow("gpt-5.6-sol"); got != 1_000_000 {
 		t.Errorf("gpt-5.6-sol window = %d, want 1000000", got)
 	}
+	if got := contextWindow("glm-5.2"); got != 1_000_000 {
+		t.Errorf("glm-5.2 window = %d, want 1000000", got)
+	}
+	if got := contextWindow("x-ai/grok-4.5"); got != 500_000 {
+		t.Errorf("grok-4.5 window = %d, want 500000", got)
+	}
+	if got := contextWindow("xiaomi/mimo-v2.5"); got != 1_000_000 {
+		t.Errorf("mimo-v2.5 window = %d, want 1000000", got)
+	}
+	if got := contextWindow("minimax/minimax-m3"); got != 1_000_000 {
+		t.Errorf("minimax-m3 window = %d, want 1000000", got)
+	}
+	if got := contextWindow("tencent/hy3"); got != 256_000 {
+		t.Errorf("hy3 window = %d, want 256000", got)
+	}
+	if got := contextWindow("nvidia/nemotron-3-ultra-550b-a55b"); got != 1_000_000 {
+		t.Errorf("nemotron-3-ultra window = %d, want 1000000", got)
+	}
 	if got := contextWindow("unknown-model-xyz"); got != defaultContextWindow {
 		t.Errorf("unknown model window = %d, want %d (conservative default)", got, defaultContextWindow)
 	}
