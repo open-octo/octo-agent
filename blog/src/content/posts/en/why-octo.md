@@ -1,7 +1,7 @@
 ---
 title: "Why I Built Another Open-Source Agent"
 description: "The origin story of Octo, a self-hosted AI agent in a single Go binary — why I built it, the design decisions behind it, and what it deliberately won't do."
-pubDate: 2026-07-17
+pubDate: 2026-07-19
 author: "Roy Lei"
 tags: ["announcement", "octo-agent", "story"]
 locale: en

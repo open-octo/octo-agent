@@ -1,7 +1,7 @@
 ---
 title: "为什么到今天我又做了一个开源 Agent"
 description: "Octo 是一个单 Go 二进制、自托管的个人 AI Agent。这是它的起源故事：为什么做、关键设计取舍，以及它刻意不做什么。"
-pubDate: 2026-07-17
+pubDate: 2026-07-19
 author: "Roy Lei"
 tags: ["announcement", "octo-agent", "story"]
 locale: zh
