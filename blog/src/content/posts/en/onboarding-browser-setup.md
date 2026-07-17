@@ -34,7 +34,7 @@ The `browser` tool tries, in a fixed order, to get hold of a page it can drive:
 
 1. **A known debug port** (`browser.connect_port` in config) — connects directly; a failure here does not fall through to the next option. This is the path `octo browser setup` wires up for you.
 2. **Attach to an already-running, remote-debugging-enabled Chrome** (`browser.attach_running: true`) — reuses your logged-in session, but only ever attaches to a browser that already opted into debugging; it will never hijack an ordinary Chrome window that didn't.
-3. **Launch a brand-new temporary profile** — the fallback when neither of the above is configured or reachable, with none of your logins.
+3. **The default path when nothing is configured** — auto-discover a Chrome that already has remote debugging enabled. Note there is no "launch a temporary browser" fallback: when no attachable Chrome is found, the tool returns instructions for enabling the debugging toggle instead of silently spinning up a headless instance that carries none of your logins.
 
 The matching config lives in `~/.octo/config.yml`:
 
@@ -42,13 +42,10 @@ The matching config lives in `~/.octo/config.yml`:
 browser:
   attach_running: true   # reuse your logged-in Chrome instead of a temp profile
   connect_port: 9222      # or attach via --remote-debugging-port
-  headless: false          # off by default — interactive workflows need to be watchable/interruptible
   user_data_dir: ""
   exec_path: ""
   download_dir: ""
 ```
-
-Every field has a matching CLI flag for a one-off override without touching the config file.
 
 Whichever path connects, octo always opens a **brand-new tab** rather than reusing one you already have open (including its own web UI's tab) — to drive an existing tab, call `pages`/`select_page` explicitly. The connection is reused for the whole session, and the debugger authorization prompt only appears once, not on every navigation.
 

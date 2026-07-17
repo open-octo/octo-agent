@@ -80,7 +80,7 @@ summary
 
 ## 这个仓库自己就在用
 
-`octo-agent` 这个项目自己的 `.octo/workflows/` 目录下，就存着几个真实在跑的 workflow——issue 分类、PR review、自动修 issue，还有一个专门用来对比架构风格的小脚本。后者短到可以完整贴出来，结构跟上面的 code review 例子几乎一样：
+`octo-agent` 这个项目自己的 `.octo/workflows/` 目录下，就存着几个真实在跑的 workflow——issue 分类、PR review、自动修 issue，还有一个专门用来对比架构风格的小脚本。后者足够短，去掉参数处理和日志之后的骨架大致是这样，结构跟上面的 code review 例子几乎一样：
 
 ```ruby
 # @description 并发分析多种架构风格并汇总对比
@@ -97,7 +97,7 @@ summary = agent("把以下分析汇总成一段对比总结，最后加一句权
 "完成 #{results.size} 个主题分析\n\n" + summary
 ```
 
-`args["topics"]` 这一行说明它是可以传参数复用的——不传就用默认的三个话题,传了就按你给的跑。网页界面的"工作流"面板能看到这几个真实存在的脚本：
+`args["topics"]` 这一行说明它是可以传参数复用的——不传就用默认的三个话题，传了就按你给的跑。网页界面的"工作流"面板能看到这几个真实存在的脚本：
 
 ![Octo 工作流面板：这个项目自己在用的几个 workflow](../_assets/onboarding/workflows-panel.png)
 

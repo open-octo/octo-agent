@@ -70,7 +70,7 @@ steps:
     bind: receipt_url
 ```
 
-`params` 是回放时可以覆盖的输入，步骤里的 `{{amount}}`/`{{memo}}` 会被替换成调用时传的值，没传就退回 `default`；`hint` 是这个表单字段的无障碍名字（placeholder/name/aria-label/id 或者关联的 `<label>` 文字）——当按位置记下的 `selector` 失效时，回放会先按这个再定位一次，实在不行才交给下面说的自愈；`outputs` 声明了这段录制对外暴露的值，`extract`/`download` 这类步骤可以把结果通过 `bind` 绑定给一个具名的 output，供下游取用。
+这份 YAML 里有三个字段值得认识一下。`params` 是回放时可以覆盖的输入：步骤里的 `{{amount}}`/`{{memo}}` 会被替换成调用时传的值，没传就退回 `default`。`hint` 是这个表单字段的无障碍名字（placeholder/name/aria-label/id 或者关联的 `<label>` 文字）——当按位置记下的 `selector` 失效时，回放会先按 hint 重新定位一次，实在不行才交给下面说的自愈。`outputs` 声明了这段录制对外暴露的值：`extract`/`download` 这类步骤可以把结果通过 `bind` 绑定给一个具名的 output，供下游取用。
 
 ## 回放怎么保证靠谱
 

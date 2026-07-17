@@ -54,7 +54,7 @@ Scope tends to shift partway through a task:
 /goal pause         # stop idle continuation without losing the goal
 /goal resume        # pick the continuation loop back up
 /goal clear         # drop the current goal
-/goal replace       # replace a finished goal with a new one
+/goal replace       # force-replace a goal that isn't finished yet (a finished one: just /goal <new objective>)
 ```
 
 Discover halfway through the migration that a whole batch of call sites got missed? `/goal edit` tightens the scope. Going away for a few days and don't want it touching code unsupervised? `/goal pause`, then `/goal resume` when you're back.
@@ -71,7 +71,7 @@ In the **web UI and IM channels**, `/goal edit some new text` works in one step 
 
 ## Don't want it? Turn it off
 
-Goal currently carries a Beta label and is opt-in per session. If you don't want the capability at all:
+Goal currently carries a Beta label but is enabled by default — it stays entirely out of the way until you set an objective. If you don't want the capability at all:
 
 ```yaml
 # ~/.octo/config.yml

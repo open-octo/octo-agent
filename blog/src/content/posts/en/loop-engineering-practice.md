@@ -47,7 +47,7 @@ octo-agent solves these problems in one place. It is not a fancy ChatGPT client;
 - Use **workflow** to write versioned, reusable loop scripts.
 - Use **cron-task-creator** to register workflows as persistent cron tasks.
 - Use **worktree-isolate** and **sub_agent** for isolated code changes and independent review.
-- Use **skill** to load沉淀 best practices.
+- Use **skill** to load accumulated best practices.
 - All loop state lives under `.octo/`, naturally separated from human work directories.
 
 This turns Loop Engineering from “writing a pile of scripts” into “writing a few design documents and workflow files,” then continuously running, observing, and iterating.
@@ -446,6 +446,8 @@ flowchart TB
 
 ## Current running configuration
 
+Seeing all three loops at L3 below might look like it contradicts the earlier "the first version is always report-only" rule — it doesn't. This is the **steady state after each loop walked the full L1 → L2 → L3 ladder**: every one of them ran read-only for multiple rounds first, and only moved up a gear once classification quality and real output had been verified.
+
 ```bash
 curl -s http://127.0.0.1:8088/api/tasks | jq '.[] | {name, cron, enabled}'
 ```
@@ -481,7 +483,7 @@ curl -s http://127.0.0.1:8088/api/tasks | jq '.[] | {name, cron, enabled}'
 
 ## Conclusion
 
-Loop Engineering is not a slogan; it requires every step to land in a runnable, reversible, observable workflow. This practice proved three things:
+For Loop Engineering to actually land, every step has to end up in a runnable, reversible, observable workflow. This practice run verified three things:
 
 1. Machines can reliably handle repetitive repository maintenance.
 2. Humans only need to step in at key decision points.

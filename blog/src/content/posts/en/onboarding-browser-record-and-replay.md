@@ -70,7 +70,7 @@ steps:
     bind: receipt_url
 ```
 
-`params` are replay-time inputs you can override; `{{amount}}`/`{{memo}}` in the steps get substituted with whatever's passed in, falling back to `default` when nothing is. `hint` is that form field's accessible name (placeholder/name/aria-label/id, or its associated `<label>` text) — when the positionally-recorded `selector` drifts, replay tries relocating the field by `hint` before handing off to self-heal (covered below). `outputs` declares the values this recording exposes to whoever calls it; a step like `extract`/`download` can bind its result to a named output via `bind` for a downstream step to consume.
+Three fields in that YAML are worth knowing. `params` are replay-time inputs you can override: `{{amount}}`/`{{memo}}` in the steps get substituted with whatever's passed in, falling back to `default` when nothing is. `hint` is that form field's accessible name (placeholder/name/aria-label/id, or its associated `<label>` text) — when the positionally-recorded `selector` drifts, replay tries relocating the field by hint before handing off to self-heal (covered below). `outputs` declares the values this recording exposes: a step like `extract`/`download` can bind its result to a named output via `bind` for a downstream step to consume.
 
 ## What makes replay trustworthy
 
