@@ -800,6 +800,29 @@ func (m *SubAgentManager) Kill(id string) bool {
 	}
 	agent.setKilled()
 	agent.cancel()
+
+	// Emit a "done" event so the frontend receives the update immediately,
+	// even if the agent's goroutine has already exited (its deferred sink
+	// already fired, e.g. the agent completed before the kill call).
+	agent.mu.Lock()
+	desc := agent.description
+	at := agent.agentType
+	agent.mu.Unlock()
+	ev := SubAgentEvent{
+		AgentID:     id,
+		Description: desc,
+		AgentType:   at,
+		Kind:        "done",
+		StopReason:  "killed",
+	}
+	agent.recordEvent(ev)
+	m.mu.Lock()
+	onEvent := m.onEvent
+	m.mu.Unlock()
+	if onEvent != nil {
+		onEvent(ev)
+	}
+
 	return true
 }
 
