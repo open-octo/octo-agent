@@ -116,6 +116,7 @@ var Registry = []Vendor{
 			{ID: "google/gemini-2.5-pro", Vision: true},
 			{ID: "google/gemini-2.5-flash", Vision: true},
 			{ID: "meta-llama/llama-3.3-70b-instruct", Vision: false}, // Llama 3.3 70B is text-only
+			{ID: "x-ai/grok-4.5", Vision: true},
 			{ID: "x-ai/grok-4.3", Vision: true},
 		},
 		APIKeyEnvVar: "OPENROUTER_API_KEY",
@@ -166,6 +167,7 @@ var Registry = []Vendor{
 		DefaultModel:   "kimi-k2.6",
 		// Kimi K2 family is natively multimodal (image input via MoonViT).
 		Models: []VendorModel{
+			{ID: "k3", Vision: true},
 			{ID: "kimi-k2.6", Vision: true},
 			{ID: "kimi-k2.7-code", Vision: true},
 		},
@@ -200,8 +202,9 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://open.bigmodel.cn/api/paas/v4",
 		DefaultModel:   "glm-4.5",
-		// GLM-4.5 line is text-only; the vision variant (GLM-4.5V) isn't offered here.
+		// GLM-4.5/5.2 line is text-only; the vision variant (GLM-4.5V) isn't offered here.
 		Models: []VendorModel{
+			{ID: "glm-5.2", Vision: false},
 			{ID: "glm-4.5", Vision: false},
 			{ID: "glm-4.5-air", Vision: false},
 			{ID: "glm-4.5-flash", Vision: false},
