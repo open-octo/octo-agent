@@ -43,9 +43,10 @@ for capturing into a file.
 ```bash
 octo --stream=false "..."
 
-# Extended reasoning: set the intensity and stream the dimmed thinking trace.
+# Extended reasoning: set the intensity. The terminal never renders the
+# thinking trace; --show-reasoning only controls whether the Web UI gets it.
 octo --reasoning-effort high "..."
-octo --show-reasoning=false "..."   # keep reasoning enabled but hide the trace
+octo --show-reasoning=false "..."   # keep reasoning enabled but hide the trace from the Web UI
 ```
 
 ## Plain chat, no tools

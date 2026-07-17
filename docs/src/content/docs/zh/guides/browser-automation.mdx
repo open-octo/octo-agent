@@ -20,9 +20,14 @@ octo browser setup
 
 1. **已知的调试端口**（config.yml 里的 `browser.connect_port`）——直接连，失败了不会退而求其次。
    这就是 `octo browser setup` 帮你接好的那条路。
-2. **接入一个已经在跑、开了远程调试的 Chrome**（`browser.attach_running: true`）——复用你的登录态；
-   绝不会去劫持一个原本没开调试的浏览器。
-3. **启动一个全新的临时 profile**——上面两个都没配或者都不可用时的默认选项。
+2. **按指定 profile 接入**（`browser.attach_running: true` 加上 `browser.user_data_dir`）——
+   读取该 profile 目录下的 `DevToolsActivePort` 文件，连到拥有它的那个 Chrome。
+3. **接入任何一个已开远程调试的 Chrome**（只配 `browser.attach_running: true`，什么都不配时
+   也是这条默认路径）——自动发现一个开了调试的 Chrome，复用你的登录态；绝不会去劫持一个
+   原本没开调试的浏览器。
+
+没有"启动兜底"这回事：找不到可接入的 Chrome 时，工具返回的是一份打开远程调试开关的操作
+指引，而不是悄悄启动一个没有任何登录态的临时实例。
 
 不管走哪条路连上，octo 都会打开一个**全新标签页**，而不是复用你已经开着的某个标签页（包括它自己
 Web UI 的那个）——要操作一个已有标签页，必须显式调用 `pages`/`select_page` 这类动作。连接会在整个

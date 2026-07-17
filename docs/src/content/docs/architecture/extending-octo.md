@@ -56,9 +56,11 @@ needed above `internal/channel/`.
 ## Adding a provider protocol
 
 A third wire format (beyond Anthropic Messages and OpenAI Chat Completions) is a new package under
-`internal/provider/`, implementing the `Sender`/`StreamingSender`/`ToolSender`/`ToolStreamingSender`
-stack described in [Provider protocols](/docs/architecture/provider-protocols/) — the agent layer
-doesn't need to change at all, since it's written against those interfaces, not a concrete client.
+`internal/provider/`, implementing `provider.Provider` (required) and optionally
+`provider.StreamingProvider` / `provider.ToolProvider` / `provider.ToolStreamingProvider`. The
+agent-facing `Sender` stack described in [Provider protocols](/docs/architecture/provider-protocols/)
+is implemented once by the adapter in `internal/app` — your provider package plugs in beneath it, so
+the agent layer doesn't change at all.
 
 See [Contributing](/docs/community/contributing/) for the PR workflow, test conventions, and what
 reviewers look for.

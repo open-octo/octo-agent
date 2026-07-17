@@ -41,9 +41,10 @@ octo -c <session-id>
 ```bash
 octo --stream=false "..."
 
-# 扩展推理：设置强度，并把暗色的思考轨迹流式显示出来。
+# 扩展推理：设置强度。终端从不渲染思考轨迹；--show-reasoning 只控制
+# 是否把轨迹提供给 Web UI。
 octo --reasoning-effort high "..."
-octo --show-reasoning=false "..."   # 保留推理但隐藏轨迹
+octo --show-reasoning=false "..."   # 保留推理，但不给 Web UI 显示轨迹
 ```
 
 ## 纯聊天，不带工具

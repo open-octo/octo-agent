@@ -38,10 +38,19 @@ edit anywhere, cwd included, falls through to the implicit `ask` unless a rule s
 `--permission-mode` below is what actually decides whether it prompts, auto-allows, or denies.
 
 A tool key you write **fully replaces** the built-in default rule list for that tool — it doesn't
-merge with it. Add back anything from the defaults you still want.
+merge with it. Add back anything from the defaults you still want. One exception survives any
+replacement: a small set of hardcoded catastrophe denies (`rm -rf /usr`, `dd` onto a device,
+`mkfs`, `shutdown`, and the like) is appended after your rules and wins through the deny tier —
+an `allow` in your file cannot override them.
 
 ### Matching semantics
 
+- A `terminal` pattern starting with `^` is **command-position anchored**: it only matches where a
+  command word can appear — at the start, after a chain operator (`;`, `&&`, `|`), or after
+  transparent prefixes like `sudo`, `env`, or `VAR=…`. Use it to avoid substring false positives:
+  a bare `deny: {pattern: "format"}` also blocks `docker ps --format json`, and `"shutdown"`
+  blocks `git commit -m "fix shutdown handling"` — `^format` / `^shutdown` block only the command
+  itself, never an argument or quoted text.
 - A `terminal` pattern ending in `/` or `~` is boundary-anchored: `deny: {pattern: "rm -rf /"}`
   blocks a root wipe but not `rm -rf /Users/me/project`.
 - `terminal` **allow** rules are stricter than `deny`/`ask`: the command must start with the

@@ -16,7 +16,7 @@ stopping once the current message is answered.
 /goal pause         # stop idle continuation without losing the goal
 /goal resume        # pick the continuation loop back up
 /goal clear         # drop the current goal
-/goal replace       # replace a finished goal with a new one
+/goal replace       # force-replace a goal that isn't finished (a finished one: just /goal <new objective>)
 ```
 
 When a session goes idle with an active goal, octo continues working toward it on its own —

@@ -20,11 +20,16 @@ Three ways the `browser` tool gets a page, tried in this order:
 
 1. **A known debug port** (`browser.connect_port` in `config.yml`) — connects directly, no fallback
    if it fails. This is what `octo browser setup` wires up for you.
-2. **Attach to a Chrome already running** with remote debugging enabled
-   (`browser.attach_running: true`) — reuses your logins; never hijacks a browser that doesn't
-   already have debugging turned on.
-3. **Launch a fresh, throwaway profile** — the default when neither of the above is configured or
-   available.
+2. **Attach via a specific profile** (`browser.attach_running: true` plus `browser.user_data_dir`) —
+   reads that profile's `DevToolsActivePort` file and connects to the Chrome that owns it.
+3. **Attach to any Chrome already running** with remote debugging enabled
+   (`browser.attach_running: true` alone, and also the default when nothing is configured) —
+   discovers a debugging-enabled Chrome and reuses your logins; never hijacks a browser that
+   doesn't already have debugging turned on.
+
+There is no launch fallback: when no attachable Chrome is found, the tool returns instructions
+for enabling the remote-debugging toggle rather than silently starting a throwaway instance that
+would carry none of your logins.
 
 Whichever path connects, octo always opens a **brand-new tab** rather than reusing one you have
 open (including its own Web UI tab) — driving an existing tab requires an explicit `pages`/

@@ -116,6 +116,8 @@ workflow(name: "my-check", args: { target: "src/" })
   CWD. A running workflow script's own `agent()`/`skill()` calls keep resolving against that same
   directory too, even in background mode.
 - A workflow's description comes from a leading `# @description ...` comment line.
+- Declare named inputs with `# @param <name> [required] [description]` comment lines. Required
+  params that are missing at run time are prompted for interactively instead of failing the run.
 - `args` (any JSON value) is threaded through to the script's `args` call; omit it and `args`
   returns `nil`.
 

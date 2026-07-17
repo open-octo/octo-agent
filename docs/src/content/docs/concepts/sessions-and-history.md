@@ -3,8 +3,8 @@ title: Sessions & history
 description: Persistence, resume, and crash durability.
 ---
 
-Every interactive conversation is a session, persisted as JSON under `~/.octo/sessions/` after
-each round.
+Every interactive conversation is a session, persisted as JSONL (one record per line, a meta
+header first) under `~/.octo/sessions/` after each round.
 
 ```bash
 octo sessions        # list saved sessions

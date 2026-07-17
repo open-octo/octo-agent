@@ -32,6 +32,9 @@ file as `config.yaml.bak`.
 | `tools` | [tools block](#tools-block) | Per-tool behavior knobs |
 | `browser` | [browser block](#browser-block) | Chrome connection settings |
 | `goal` | `{ enabled: bool }` | Gates `/goal` and the goal tools (default enabled) |
+| `trash` | [trash block](#trash-block) | File recycle-bin behavior (overwrite backups, retention, size cap) |
+| `memory_backend` | object | Optional external semantic memory backend — see [Memory backends](/docs/guides/memory-backends/) |
+| `language` | string | UI language preference (`en` \| `zh`); empty means English |
 | `notify` | bool | TUI only: send a desktop notification when a turn completes and is waiting for input. Ghostty / iTerm2 / Kitty forward it to the OS; other terminals fall back to the terminal bell (default `true`) |
 | `terminal_title` | bool | TUI only: set the terminal tab/window title to the session name on startup (OSC 2, honoured by Ghostty, iTerm2, Kitty and most modern terminals; default `true`) |
 
@@ -89,7 +92,6 @@ See [Connect MCP servers](/docs/guides/connect-mcp-servers/) for what `tool_sear
 browser:
   attach_running: true   # reuse your logged-in Chrome instead of a throwaway profile
   connect_port: 9222      # attach via --remote-debugging-port instead
-  headless: false          # off by default — interactive workflows want to watch
   user_data_dir: ""
   exec_path: ""
   download_dir: ""
@@ -97,5 +99,17 @@ browser:
 
 See [Automate with browser control](/docs/guides/browser-automation/).
 
-Next: everything here has a matching CLI flag — see the [CLI reference](/docs/reference/cli/) for
-the per-run override.
+## Trash block
+
+```yaml
+trash:
+  overwrite_backup: true  # stage a copy before write_file/edit_file overwrites (git-clean files skipped)
+  retention_days: 14      # age out entries at startup; negative disables
+  max_size_mb: 10240      # evict oldest past this cap; negative disables
+```
+
+See [Sandbox the agent](/docs/guides/sandbox-the-agent/) for how the recycle bin fits into the
+safety model, and `octo trash list|restore|rm|empty` for recovery from the CLI.
+
+Next: many of these settings have a matching CLI flag for a per-run override — see the
+[CLI reference](/docs/reference/cli/).
