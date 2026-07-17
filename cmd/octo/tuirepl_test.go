@@ -264,6 +264,31 @@ func TestTUI_TitleCmdFiresOnFirstMessage(t *testing.T) {
 	}
 }
 
+// The 5-second guarantee's other half: when the throwaway provider call
+// fails (bad model alias, rate limit, timeout), titleCmd still yields a
+// non-empty titleMsg built from the pending message — the tab title always
+// lands, never waits for a retry that may fail the same way. This is the
+// same GenerateTitleOrSnippet mechanism the server uses.
+func TestTUI_TitleCmdFallsBackToSnippet(t *testing.T) {
+	isolateTestInputHistory()
+	a := agent.New(&stubSender{err: fmt.Errorf("stub: provider down")}, "m")
+	m := newTUIModel(replConfig{a: a})
+	m.sink = &tuiSink{prog: &fakeProg{}}
+	m.cfg.session = agent.NewSession("m", "")
+
+	c := m.titleCmd("fix the flaky title test")
+	if c == nil {
+		t.Fatal("titleCmd = nil on first message, want a command")
+	}
+	msg, ok := c().(titleMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want titleMsg", c())
+	}
+	if msg.text != "fix the flaky title test" {
+		t.Errorf("title = %q, want the pending-message snippet %q", msg.text, "fix the flaky title test")
+	}
+}
+
 // An Esc take-back must leave no trace in the agent's history either: the
 // interrupt keeps the input capped with a note (finishInterrupted), so
 // handleTurnFinished has to strip that pair — otherwise the recalled text

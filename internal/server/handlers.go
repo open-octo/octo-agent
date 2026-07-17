@@ -96,11 +96,20 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 	if name == "" {
 		name = s.DisplayTitle()
 	}
+	title := s.Title
+	// A title generated mid-turn is broadcast immediately but adopted (and
+	// persisted) only at turn end; surface it in list responses meanwhile so
+	// a client refetch in between doesn't regress the sidebar to the
+	// placeholder. One storage: this overlays the same pendingTitles record
+	// the turn adopts from — it never writes anything itself.
+	if pt := srv.peekPendingTitle(s.ID); pt != "" && isAutoNamePlaceholder(s.Title) {
+		name, title = pt, pt
+	}
 	_, pm, re, sr, ctxUsage := srv.sessionStatusFields(s)
 	return sessionItem{
 		ID:              s.ID,
 		Name:            name,
-		Title:           s.Title,
+		Title:           title,
 		CreatedAt:       s.CreatedAt,
 		UpdatedAt:       updated,
 		Model:           s.Model,

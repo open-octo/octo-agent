@@ -1334,6 +1334,12 @@ func (a *Agent) Suggest(ctx context.Context, tools []ToolDefinition) (string, er
 // line itself.
 const titleMaxTokens = 250
 
+// TitleGenerationTimeout bounds a throwaway session-title call. The TUI and
+// the server share one title mechanism: within this budget the model produces
+// a title, otherwise GenerateTitleOrSnippet falls back to a message snippet,
+// so a title always lands ~5s after the first user message.
+const TitleGenerationTimeout = 5 * time.Second
+
 const titleInstruction = "Summarize this conversation as a short title of at most 6 words. " +
 	"Reply with the title text only — no preamble, no quotes, no trailing punctuation, no markdown."
 
@@ -1384,6 +1390,23 @@ func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message, tools []T
 		return "", err
 	}
 	return cleanTitle(reply.Content), nil
+}
+
+// GenerateTitleOrSnippet is GenerateTitleFrom with a guaranteed result: on
+// error, timeout, or an empty model reply it falls back to a truncated snippet
+// of the first user message in snap. This is THE session-title mechanism —
+// the TUI and the server both call it (wrapped in TitleGenerationTimeout) so
+// every frontend gets the same behaviour: an LLM title when the call works, a
+// snippet otherwise, always within ~5s of the first user message. Returns ""
+// only when snap carries no user text at all.
+func (a *Agent) GenerateTitleOrSnippet(ctx context.Context, snap []Message, tools []ToolDefinition) (string, error) {
+	t, err := a.GenerateTitleFrom(ctx, snap, tools)
+	if err == nil {
+		if t = strings.TrimSpace(t); t != "" {
+			return t, nil
+		}
+	}
+	return FirstUserSnippet(snap), err
 }
 
 // cleanTitle reduces the model's reply to a single tidy line: first non-empty

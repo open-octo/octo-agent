@@ -108,10 +108,16 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 		if source == "" {
 			source = "manual"
 		}
+		name := sess.DisplayTitle()
+		// Same pending-title overlay as toSessionItem: a title broadcast
+		// mid-turn isn't on disk yet, and this list feeds the sidebar.
+		if pt := s.peekPendingTitle(sess.ID); pt != "" && isAutoNamePlaceholder(sess.Title) {
+			name = pt
+		}
 		_, pm, re, sr, ctxUsage := s.sessionStatusFields(sess)
 		out = append(out, wsSessionInfo{
 			ID:              sess.ID,
-			Name:            sess.DisplayTitle(),
+			Name:            name,
 			Status:          s.sessionStatus(sess.ID),
 			CreatedAt:       sess.CreatedAt.UnixMilli(),
 			Source:          source,
@@ -1341,36 +1347,30 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// turn's transcript. Instead it broadcasts the rename (live UX) and hands
 	// the title to the turn goroutine via storePendingTitle; the turn adopts
 	// it after its final write, on the single serialized write path. If the
-	// title lands after that point it rides the next turn's adoption. Failure
-	// falls back to the first-message snippet; the claim releases either way
-	// and the next user message retries.
+	// title lands after that point it rides the next turn's adoption.
+	//
+	// One mechanism, one storage: GenerateTitleOrSnippet is the same call the
+	// TUI makes — an LLM title within TitleGenerationTimeout, else a snippet
+	// of the first user message — and the turn-end SetTitle adoption is the
+	// only persistence path. A provider failure is logged and the snippet
+	// still applies; the claim releases either way and the next user message
+	// retries.
 	if isAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
 		sid := sess.ID
-		placeholder := sess.Title
 		titleMsgs := append(append([]agent.Message{}, sess.Messages...), userMsg)
 		go func() {
 			defer s.recoverBg("title generation")
 			defer s.releaseTitleGeneration(sid)
-			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), agent.TitleGenerationTimeout)
 			defer cancel()
-			t, terr := a.GenerateTitleFrom(ctx, titleMsgs, toolDefs)
-			if terr != nil || strings.TrimSpace(t) == "" {
-				if terr != nil {
-					slog.Warn("session title generation failed", "session_id", sid, "err", terr)
-				} else {
-					slog.Warn("session title generation returned an empty title", "session_id", sid)
-				}
-				// Fall back to the first-message snippet only for the bare
-				// "*Octo Agent" placeholder (matching FallbackTitleIfPlaceholder);
-				// the web's numbered "Session N" is left as-is and retried on the
-				// next turn. Pure snippet, no file IO — the turn owns the file.
-				if placeholder != "*Octo Agent" {
-					return
-				}
-				t = agent.FirstUserSnippet(titleMsgs)
-				if t == "" {
-					return
-				}
+			t, terr := a.GenerateTitleOrSnippet(ctx, titleMsgs, toolDefs)
+			if terr != nil {
+				slog.Warn("session title generation failed, falling back to message snippet", "session_id", sid, "err", terr)
+			}
+			if strings.TrimSpace(t) == "" {
+				// No user text to title from at all (e.g. an attachments-only
+				// first message); nothing to fall back to — next turn retries.
+				return
 			}
 			// Hand the title to the turn goroutine (it persists it) and
 			// broadcast the rename so every tab's sidebar updates live.
@@ -1541,6 +1541,15 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	if t := s.takePendingTitle(sess.ID); t != "" && isAutoNamePlaceholder(sess.Title) {
 		if terr := sess.SetTitle(t); terr != nil {
 			slog.Warn("session title adoption: save failed", "session_id", sess.ID, "err", terr)
+		} else {
+			// The mid-turn rename broadcast raced the not-yet-persisted title:
+			// any client whose list refetch saw the placeholder since then
+			// converges on this re-broadcast, now that disk is authoritative.
+			s.wsHub.broadcast("", map[string]any{
+				"type":       "session_renamed",
+				"session_id": sess.ID,
+				"name":       t,
+			})
 		}
 	}
 	_, pm, re, _, _ := s.sessionStatusFields(sess)
@@ -1575,17 +1584,17 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	}
 }
 
-// throwawayGenerationTimeout bounds the title- and suggestion-generation
-// calls above. A confirmed field failure hit "anthropic: send: ... context
-// deadline exceeded" on every attempt at the previous 20s timeout: both
-// calls reuse the turn's own Agent/Sender and inherited that session's
-// reasoning_effort ("max"), paying the model's full reasoning budget even
-// for a 6-word title. The real fix is agent.LowEffortSender (both calls now
-// cap effort to "low" instead of inheriting the session's), which removes
-// most of that latency at the source — this timeout is only the remaining
-// safety margin for normal network/provider variance, not a substitute for
-// the effort cap, so it stays modest rather than papering over a slow call
-// with a long wait.
+// throwawayGenerationTimeout bounds the suggestion-generation call above. A
+// confirmed field failure hit "anthropic: send: ... context deadline exceeded"
+// on every attempt at the previous 20s timeout: both throwaway calls reuse
+// the turn's own Agent/Sender and inherited that session's reasoning_effort
+// ("max"), paying the model's full reasoning budget even for a 6-word title.
+// The real fix is agent.LowEffortSender (both calls now cap effort to "low"
+// instead of inheriting the session's), which removes most of that latency at
+// the source — this timeout is only the remaining safety margin for normal
+// network/provider variance, not a substitute for the effort cap, so it stays
+// modest rather than papering over a slow call with a long wait. (Session
+// titles use agent.TitleGenerationTimeout, the shared title mechanism.)
 const throwawayGenerationTimeout = 5 * time.Second
 
 // sessionPlaceholderRe matches the frontend's auto-assigned "Session N"
@@ -1645,6 +1654,16 @@ func (s *Server) takePendingTitle(sessionID string) string {
 	t := s.pendingTitles[sessionID]
 	delete(s.pendingTitles, sessionID)
 	return t
+}
+
+// peekPendingTitle returns the stored title without clearing it. List
+// responses overlay it over the not-yet-adopted disk placeholder so a client
+// refetch between the mid-turn rename broadcast and the turn-end adoption
+// doesn't regress the sidebar to the placeholder.
+func (s *Server) peekPendingTitle(sessionID string) string {
+	s.titleMu.Lock()
+	defer s.titleMu.Unlock()
+	return s.pendingTitles[sessionID]
 }
 
 // ─── wsStreamWriter ────────────────────────────────────────────────────────

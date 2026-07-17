@@ -124,6 +124,13 @@ func TestDoAgentTurn_GeneratesSessionTitle(t *testing.T) {
 	close(sender.release)
 	<-turnDone
 
+	// The turn adopts the pending title as its last write and re-broadcasts
+	// the rename: any client whose list refetch raced the not-yet-persisted
+	// title (and saw the placeholder) converges on this second broadcast.
+	if name := waitForRename(t, conn, sess.ID); name != "early title" {
+		t.Errorf("adoption rename name = %q, want %q", name, "early title")
+	}
+
 	// The title must survive the turn's end-of-turn saves.
 	loaded, err := agent.LoadSession(sess.ID)
 	if err != nil {
@@ -163,6 +170,22 @@ func TestListSessionsBrief_ReflectsGeneratedTitle(t *testing.T) {
 	go func() { defer close(turnDone); srv.doAgentTurn(sess, "hello there", nil, nil) }()
 	<-sender.entered
 	waitForRename(t, conn, sess.ID)
+
+	// Overlay: the title is broadcast but NOT yet adopted/persisted (the turn
+	// is still running). List responses must already surface it — the web
+	// sidebar refetches on session_renamed, and without the overlay that
+	// refetch would regress the just-renamed session to the placeholder.
+	if brief := srv.listSessionsBrief(); len(brief) != 1 || brief[0].Name != "early title" {
+		n := ""
+		if len(brief) == 1 {
+			n = brief[0].Name
+		}
+		t.Errorf("mid-turn listSessionsBrief Name = %q (n=%d), want %q — pending-title overlay missing", n, len(brief), "early title")
+	}
+	if item := srv.toSessionItem(sess, "web", ""); item.Name != "early title" || item.Title != "early title" {
+		t.Errorf("mid-turn toSessionItem = (%q, %q), want (%q, %q)", item.Name, item.Title, "early title", "early title")
+	}
+
 	close(sender.release)
 	<-turnDone
 
@@ -175,42 +198,6 @@ func TestListSessionsBrief_ReflectsGeneratedTitle(t *testing.T) {
 	if brief[0].Name != "early title" {
 		t.Errorf("Name = %q, want %q", brief[0].Name, "early title")
 	}
-}
-
-// titleFailSender behaves exactly like stubSender for a normal turn, but
-// returns an error specifically for GenerateTitle's throwaway prompt (its
-// message list always ends with the "Summarize this conversation..."
-// instruction) — simulating a provider/model that's misconfigured only for
-// this fire-and-forget call, e.g. a bad model alias or a rate limit hit on a
-// second request right after the main turn's.
-type titleFailSender struct{}
-
-func (titleFailSender) SendMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int) (agent.Reply, error) {
-	if isTitlePrompt(msgs) {
-		return agent.Reply{}, fmt.Errorf("stub: title provider error")
-	}
-	return agent.Reply{Content: "stub reply"}, nil
-}
-
-func (titleFailSender) StreamMessages(_ context.Context, _, _ string, _ []agent.Message, _ int, onChunk func(string), _ func(string)) (agent.Reply, error) {
-	if onChunk != nil {
-		onChunk("stub reply")
-	}
-	return agent.Reply{Content: "stub reply"}, nil
-}
-
-func (titleFailSender) SendMessagesWithTools(_ context.Context, _, _ string, msgs []agent.Message, _ int, _ []agent.ToolDefinition) (agent.Reply, error) {
-	if isTitlePrompt(msgs) {
-		return agent.Reply{}, fmt.Errorf("stub: title provider error")
-	}
-	return agent.Reply{Content: "stub reply"}, nil
-}
-
-func (titleFailSender) StreamMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition, onChunk func(string), _ agent.ToolInputDeltaFunc, _ agent.ThinkingDeltaFunc) (agent.Reply, error) {
-	if onChunk != nil {
-		onChunk("stub reply")
-	}
-	return agent.Reply{Content: "stub reply"}, nil
 }
 
 // isTitlePrompt reports whether msgs is GenerateTitle's throwaway call
@@ -244,12 +231,34 @@ func (s *blockingTurnSender) StreamMessages(_ context.Context, _, _ string, _ []
 	return agent.Reply{Content: "stub reply"}, nil
 }
 
-// TestDoAgentTurn_TitleGenerationFailureIsLogged is the regression guard for
-// a real production symptom: on an install where the title-generation call
-// fails every time (bad model config, rate limit, etc.), the sidebar title
-// never appears and — before this test — nothing anywhere recorded why. The
-// failure is still silent to the user by design (retried on the next turn),
-// but it must not be silent to the server operator.
+// blockingTitleFailSender fails the title-generation call (plain SendMessages
+// on the title prompt) while the main turn's streaming call blocks until
+// released — so the snippet fallback is guaranteed to land mid-turn and the
+// turn-end adoption is deterministic.
+type blockingTitleFailSender struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingTitleFailSender) SendMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int) (agent.Reply, error) {
+	if isTitlePrompt(msgs) {
+		return agent.Reply{}, fmt.Errorf("stub: title provider error")
+	}
+	return agent.Reply{Content: "stub reply"}, nil
+}
+
+func (s *blockingTitleFailSender) StreamMessages(_ context.Context, _, _ string, _ []agent.Message, _ int, _ func(string), _ func(string)) (agent.Reply, error) {
+	close(s.entered)
+	<-s.release
+	return agent.Reply{Content: "stub reply"}, nil
+}
+
+// TestDoAgentTurn_TitleGenerationFailureIsLogged covers the production
+// symptom where the title-generation call fails every time (bad model config,
+// rate limit, timeout). Two guarantees: the failure is logged for the server
+// operator, AND the session still gets titled within ~5s — the shared
+// GenerateTitleOrSnippet mechanism falls back to the first-message snippet,
+// for the numbered "Session N" placeholder just as for "*Octo Agent".
 func TestDoAgentTurn_TitleGenerationFailureIsLogged(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -261,7 +270,8 @@ func TestDoAgentTurn_TitleGenerationFailureIsLogged(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prevLogger) })
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	srv.sender = &titleFailSender{}
+	sender := &blockingTitleFailSender{entered: make(chan struct{}), release: make(chan struct{})}
+	srv.sender = sender
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
 	srv.steerQueues = make(map[string][]agent.InboxItem)
@@ -280,15 +290,13 @@ func TestDoAgentTurn_TitleGenerationFailureIsLogged(t *testing.T) {
 	}
 	srv.wsHub.register <- conn
 
-	srv.doAgentTurn(sess, "hello there", nil, nil)
+	turnDone := make(chan struct{})
+	go func() { defer close(turnDone); srv.doAgentTurn(sess, "hello there", nil, nil) }()
+	<-sender.entered // main turn call is blocked; title generation runs concurrently
 
-	// The title goroutine is fire-and-forget, so there's no broadcast to wait
-	// on for the failure path — poll the captured log instead.
+	// The failure must be logged...
 	deadline := time.After(5 * time.Second)
-	for {
-		if strings.Contains(logBuf.String(), "session title generation failed") {
-			break
-		}
+	for !strings.Contains(logBuf.String(), "session title generation failed") {
 		select {
 		case <-deadline:
 			t.Fatalf("expected a logged warning for the failed title generation; log so far:\n%s", logBuf.String())
@@ -302,13 +310,20 @@ func TestDoAgentTurn_TitleGenerationFailureIsLogged(t *testing.T) {
 		t.Errorf("expected the underlying error in the log line; got:\n%s", logBuf.String())
 	}
 
-	// And the title must genuinely still be unset — the failure path must not
-	// have persisted a garbage title.
+	// ...and the snippet fallback must still title the session mid-turn.
+	if name := waitForRename(t, conn, sess.ID); name != "hello there" {
+		t.Errorf("rename name = %q, want the first-message snippet %q", name, "hello there")
+	}
+
+	close(sender.release)
+	<-turnDone
+
+	// Adoption persists the snippet title even for a "Session N" placeholder.
 	loaded, err := agent.LoadSession(sess.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if !isAutoNamePlaceholder(loaded.Title) {
-		t.Errorf("Title = %q, want it to remain a placeholder after a failed generation", loaded.Title)
+	if loaded.Title != "hello there" {
+		t.Errorf("persisted Title = %q, want the snippet fallback %q", loaded.Title, "hello there")
 	}
 }
