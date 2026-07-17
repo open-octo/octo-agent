@@ -332,12 +332,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // No active session: drop any stale force-bind banner so a deleted session
       // does not leave the chat view showing "Session is bound to another entry."
       bindRequiredFor = null
+      turnError = null
       return
     }
 
     clearMsgs(sid)
     resetArtifacts(sid)
     resetSessionRuntimeState(sid)
+    // Stale turn-error banner from a previous session must not carry over.
+    turnError = null
     if (get(pendingPrompt)?.sessionId === sid) {
       // A freshly opened agentic session (openAgentSession queued a
       // pendingPrompt) is empty at creation, so loadHistory has nothing to
