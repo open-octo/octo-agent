@@ -399,32 +399,33 @@ func TestDisplayTitle(t *testing.T) {
 	}
 }
 
-// TestTruncateSnippet pins the display-width truncation strategy: a 30
-// half-width-column budget (15 full-width CJK chars ≈ five English words),
+// TestTruncateSnippet pins the display-width truncation strategy: a 50
+// half-width-column budget (25 full-width CJK chars ≈ eight English words),
 // wide runes counting double, cuts snapped back to Latin word boundaries,
 // and an ellipsis only when content was actually dropped.
 func TestTruncateSnippet(t *testing.T) {
 	cases := map[string]string{
 		// Fits within the budget — returned unchanged, no ellipsis.
-		"hello there":              "hello there",
-		"please fix the login bug": "please fix the login bug", // 24 cols
-		"帮我 review 一下这个 PR 的改动":    "帮我 review 一下这个 PR 的改动",    // mixed, exactly 30 cols
+		"hello there":                "hello there",
+		"please fix the login bug":   "please fix the login bug",   // 24 cols
+		"帮我 review 一下这个 PR 的改动":      "帮我 review 一下这个 PR 的改动",      // mixed, 30 cols
+		"Ask user question 组件遮挡屏幕内容": "Ask user question 组件遮挡屏幕内容", // mixed, 34 cols
 
 		// English over budget: cut snaps back to the last word boundary —
-		// "around" is dropped whole rather than left as "ar…".
-		"improve concurrency handling around connection pooling internals": "improve concurrency handling…",
+		// "pooling" is dropped whole rather than left as "pool…".
+		"improve concurrency handling around connection pooling internals": "improve concurrency handling around connection…",
 
 		// CJK over budget: characters are semantic units, cut anywhere —
-		// 15 full-width chars fill the budget exactly.
-		"修复登录页面的无限重定向问题并补充测试": "修复登录页面的无限重定向问题并…",
+		// 25 full-width chars fill the budget exactly.
+		"修复登录页面的无限重定向问题并补充测试用例覆盖所有分支": "修复登录页面的无限重定向问题并补充测试用例覆盖所有…",
 
 		// Mixed over budget: the English prefix spends budget too, so fewer
 		// CJK chars fit.
-		"fix: 修复登录页面的无限重定向问题": "fix: 修复登录页面的无限重定向…",
+		"fix: 修复登录页面的无限重定向问题并补充测试用例覆盖所有分支": "fix: 修复登录页面的无限重定向问题并补充测试用例覆…",
 
 		// One unbroken overlong token (URL/hash): no word boundary to snap
 		// to, so it hard-cuts at the budget.
-		"abcdefghijklmnopqrstuvwxyz0123456789abcdef": "abcdefghijklmnopqrstuvwxyz0123…",
+		"abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwx": "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmn…",
 	}
 	for in, want := range cases {
 		if got := truncateSnippet(in); got != want {
