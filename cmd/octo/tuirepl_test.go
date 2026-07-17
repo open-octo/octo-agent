@@ -284,8 +284,8 @@ func TestTUI_TitleCmdFallsBackToSnippet(t *testing.T) {
 	if !ok {
 		t.Fatalf("cmd returned %T, want titleMsg", c())
 	}
-	if msg.text != "fix the flaky title test" {
-		t.Errorf("title = %q, want the pending-message snippet %q", msg.text, "fix the flaky title test")
+	if msg.text != "fix the flaky…" {
+		t.Errorf("title = %q, want the pending-message snippet %q", msg.text, "fix the flaky…")
 	}
 }
 
