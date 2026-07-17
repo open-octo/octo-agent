@@ -1332,10 +1332,21 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// run minutes). The throwaway call runs concurrently with the turn's own
 	// provider call, off a pre-turn copy of sess.Messages plus this turn's user
 	// message — the live History belongs to the loop goroutine (and is still
-	// empty here). Failure is silent: the fallback snippet lands instead, the
-	// claim is released, and the next user message retries.
+	// empty here).
+	//
+	// The goroutine does NOT write the session file: the turn is concurrently
+	// rewriting it (persistTurnProgress on every event, plus a compaction
+	// rewrite), and a second writer here — via its own LoadSession'd Session —
+	// could truncate the file to a stale, shorter message list and lose the
+	// turn's transcript. Instead it broadcasts the rename (live UX) and hands
+	// the title to the turn goroutine via storePendingTitle; the turn adopts
+	// it after its final write, on the single serialized write path. If the
+	// title lands after that point it rides the next turn's adoption. Failure
+	// falls back to the first-message snippet; the claim releases either way
+	// and the next user message retries.
 	if isAutoNamePlaceholder(sess.Title) && s.claimTitleGeneration(sess.ID) {
 		sid := sess.ID
+		placeholder := sess.Title
 		titleMsgs := append(append([]agent.Message{}, sess.Messages...), userMsg)
 		go func() {
 			defer s.recoverBg("title generation")
@@ -1349,46 +1360,21 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 				} else {
 					slog.Warn("session title generation returned an empty title", "session_id", sid)
 				}
-				// Fall back to the first-message snippet instead of leaving
-				// the "*Octo Agent" placeholder (same logic as the TUI).
-				if fresh, lerr := agent.LoadSession(sid); lerr == nil {
-					if title := fresh.FallbackTitleIfPlaceholder(); title != "" {
-						s.wsHub.broadcast("", map[string]any{
-							"type":       "session_renamed",
-							"session_id": sid,
-							"name":       title,
-						})
-					}
+				// Fall back to the first-message snippet only for the bare
+				// "*Octo Agent" placeholder (matching FallbackTitleIfPlaceholder);
+				// the web's numbered "Session N" is left as-is and retried on the
+				// next turn. Pure snippet, no file IO — the turn owns the file.
+				if placeholder != "*Octo Agent" {
+					return
 				}
-				return
+				t = agent.FirstUserSnippet(titleMsgs)
+				if t == "" {
+					return
+				}
 			}
-			// Hand the title to the turn goroutine FIRST: its end-of-turn
-			// saves can rewrite the file from the live Session (stale
-			// placeholder Title) and clobber the record persisted below; the
-			// adoption step after the turn's last write re-applies it. Storing
-			// before persisting closes that race in both orders.
+			// Hand the title to the turn goroutine (it persists it) and
+			// broadcast the rename so every tab's sidebar updates live.
 			s.storePendingTitle(sid, t)
-			// Apply the title to a freshly loaded Session, not the live one —
-			// the turn keeps appending to sess on the loop goroutine, and
-			// Session isn't goroutine-safe. A load that races a concurrent
-			// append just errors out and a later turn retries.
-			fresh, lerr := agent.LoadSession(sid)
-			if lerr != nil {
-				slog.Warn("session title generation: reload session failed", "session_id", sid, "err", lerr)
-				return
-			}
-			if !isAutoNamePlaceholder(fresh.Title) {
-				// Not an error: something else (the user, or an earlier
-				// retry) already gave the session a real title.
-				return
-			}
-			if err := fresh.SetTitle(t); err != nil {
-				slog.Warn("session title generation: save failed", "session_id", sid, "err", err)
-				return
-			}
-			// Global broadcast: the sidebar lists every session, so every
-			// connected tab needs the rename, not just this session's
-			// subscribers.
 			s.wsHub.broadcast("", map[string]any{
 				"type":       "session_renamed",
 				"session_id": sid,
@@ -1543,12 +1529,11 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	}
 
 	// Adopt a title generated while the turn ran. The generation goroutine
-	// persisted it to a fresh copy, but any turn-end rewrite above (context
-	// tokens, history rewrite) re-stamped the file from this live sess — whose
-	// Title was still the placeholder — clobbering that record. This is the
-	// turn's LAST write, so re-applying here survives; a generation that
-	// finishes later than this point persists itself with nothing left to
-	// clobber it. Broadcast already happened on the generation side.
+	// only broadcast + stored it (it must not write the file concurrently with
+	// the turn); this is the turn's LAST write, on the single serialized write
+	// path, so persisting here is safe and survives. A generation that hasn't
+	// finished by now leaves nothing to take — its title rides the next turn's
+	// adoption (already broadcast, so the live UI is correct meanwhile).
 	if t := s.takePendingTitle(sess.ID); t != "" && isAutoNamePlaceholder(sess.Title) {
 		if terr := sess.SetTitle(t); terr != nil {
 			slog.Warn("session title adoption: save failed", "session_id", sess.ID, "err", terr)
