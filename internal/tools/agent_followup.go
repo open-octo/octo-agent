@@ -98,7 +98,7 @@ func (AgentStatusTool) Definition() agent.ToolDefinition {
 		Name: "sub_agent_status",
 		Description: "Check on async sub-agents, but do not use this as a polling loop while waiting for a " +
 			"background sub-agent to finish — wait for the completion notification instead. With agent_id, report " +
-			"that sub-agent's state (running/done/exited) and its latest result; without agent_id, list all tracked " +
+			"that sub-agent's state (working/idle/exited) and its latest result; without agent_id, list all tracked " +
 			"sub-agents (working ones plus idle-but-resumable ones). Use this tool only when you suspect a sub-agent is stuck or when you need to know " +
 			"which agents are still running. Synchronous sub-agents return their result inline at spawn and are not " +
 			"tracked here unless the user promotes them to background while running.",
@@ -124,7 +124,7 @@ func (AgentStatusTool) Execute(ctx context.Context, _ string, input map[string]a
 	if id == "" {
 		infos := mgr.ListRunning()
 		if len(infos) == 0 {
-			return agent.ToolResult{Text: "No sub-agents are currently running."}, nil
+			return agent.ToolResult{Text: "No sub-agents are currently tracked."}, nil
 		}
 		// ListRunning includes COMPLETED agents (idle — retained so
 		// sub_agent_send can still resume them), so don't call the whole list
@@ -141,7 +141,7 @@ func (AgentStatusTool) Execute(ctx context.Context, _ string, input map[string]a
 		for _, in := range infos {
 			state := "idle"
 			if in.Busy {
-				state = "busy"
+				state = "working"
 			}
 			fmt.Fprintf(&b, "- %s — %s (%s, started %s ago)\n",
 				in.ID, in.Description, state, time.Since(in.Start).Round(time.Second))
