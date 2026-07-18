@@ -94,6 +94,14 @@ func replaySecretStore(sid, key, value string) {
 // CloseSessionReplaySecrets evaporates every secret cached for sid. Wired
 // alongside CloseSessionSubAgentManager / CloseSessionReadTracker at the
 // server's session-delete handlers.
+//
+// Scoping note: sub-agent runs build their ctx from context.Background()
+// (internal/tools/subagent_manager.go), so a replay inside a sub-agent lands
+// in the "" process-level bucket. That's currently safe — the "" bucket can
+// only hold env-resolved values, and env is process-shared by definition; a
+// TYPED secret can't get there because the askers that work (wsAsker, TUI)
+// require a session-stamped ctx the sub-agent also lacks. If sub-agents ever
+// gain a working SecretAsker, stamp their owner's sid too.
 func CloseSessionReplaySecrets(sid string) {
 	replaySecrets.Lock()
 	defer replaySecrets.Unlock()

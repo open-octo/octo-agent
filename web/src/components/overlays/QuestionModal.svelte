@@ -124,6 +124,8 @@
           <input
             bind:this={inputEl}
             class="custom-input"
+            type={current.secret ? 'password' : 'text'}
+            autocomplete="off"
             placeholder={$t('question.custom_placeholder')}
             bind:value={customText}
             onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
@@ -178,6 +180,8 @@
         <input
           bind:this={inputEl}
           class="banner-input"
+          type={current.secret ? 'password' : 'text'}
+          autocomplete="off"
           placeholder={$t('question.custom_placeholder')}
           bind:value={customText}
           onkeydown={(e) => { if (e.key === 'Enter' && customText.trim()) { e.preventDefault(); submit() } }}

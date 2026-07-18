@@ -1358,3 +1358,42 @@ func TestGenerateRecordingDistillRestoresDroppedSecretParam(t *testing.T) {
 		t.Fatalf("restored declaration must keep secret:true and no default: %+v", *pw)
 	}
 }
+
+// TestReplayVerifyErrorRedactsSecret: a hand-written step may legitimately
+// reference a secret param in its verify (verify.text is a subst() field). A
+// verify failure's error text must name the placeholder — never carry the
+// resolved value, which would flow into the tool result and the conversation.
+func TestReplayVerifyErrorRedactsSecret(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>v</title><form><input id="pw" type="password"></form>`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	recording := &Recording{
+		Name:   "x",
+		Params: []Param{{Name: "password", Secret: true}},
+		Steps: []Step{{
+			Action: "type", Selector: "#pw", Value: "{{password}}",
+			// The typed value lives in the input, not body.innerText, so this
+			// verify is guaranteed to time out.
+			Verify: &Verify{Text: "{{password}}"},
+		}},
+	}
+	_, _, _, err = ReplayRecording(ctx, page, recording, map[string]string{"password": "hunter2"}, ReplayOptions{StepTimeout: testWaitTimeout})
+	if err == nil {
+		t.Fatal("verify should have failed")
+	}
+	if strings.Contains(err.Error(), "hunter2") {
+		t.Fatalf("secret value leaked into the verify error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "{{password}}") {
+		t.Fatalf("error should name the placeholder, got: %v", err)
+	}
+}

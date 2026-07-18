@@ -120,6 +120,12 @@ type plainView struct {
 	verbosity verbosity
 	plain     bool
 
+	// secretReader reads one secret line with NO echo (production wires
+	// term.ReadPassword over stdin; tests inject a stub). Kept separate from
+	// reader so a secret never echoes or lands in readline history. Nil →
+	// secret prompts auto-cancel (the headless posture).
+	secretReader func(prompt string) (string, bool)
+
 	// Per-turn state, (re)armed in TurnStarted.
 	spin  *spinner
 	inner func(agent.AgentEvent)
@@ -191,9 +197,27 @@ func (v *plainView) Ask(_ context.Context, p UserPrompt) (UserResponse, error) {
 		return v.askPermission(p), nil
 	case KindQuestion:
 		return v.askQuestion(p), nil
+	case KindSecret:
+		return v.askSecret(p), nil
 	default:
 		return UserResponse{Cancelled: true}, nil
 	}
+}
+
+// askSecret renders the question and reads the value through the no-echo
+// secret reader. The value goes straight into UserResponse.Custom; nothing
+// echoes, and the prompt text is all that reaches the scrollback.
+func (v *plainView) askSecret(p UserPrompt) UserResponse {
+	if v.secretReader == nil {
+		return UserResponse{Cancelled: true}
+	}
+	fmt.Fprintf(v.out, "\n🔒 %s\n", p.Question)
+	answer, ok := v.secretReader("  secret (input hidden): ")
+	fmt.Fprintln(v.out) // the no-echo read leaves the cursor mid-line
+	if !ok || strings.TrimSpace(answer) == "" {
+		return UserResponse{Cancelled: true}
+	}
+	return UserResponse{Custom: strings.TrimSpace(answer)}
 }
 
 // askPermission prompts: y/yes → allow once; a/always → allow for the session;

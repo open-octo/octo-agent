@@ -937,6 +937,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           options: (ev as any).options,
           multiSelect: (ev as any).multi_select,
           header: (ev as any).header,
+          secret: (ev as any).secret === true,
           dismissed: false,
         },
       }))

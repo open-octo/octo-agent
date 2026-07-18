@@ -39,3 +39,20 @@ func (a *replAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskRespo
 		Cancelled: resp.Cancelled,
 	}, nil
 }
+
+// AskSecret implements tools.SecretAsker: the TUI/REPL collects secrets too —
+// masked input in the bubbletea modal, a no-echo read in the plain view. The
+// answer returns to the runtime caller only; it never becomes a tool result.
+func (a *replAsker) AskSecret(ctx context.Context, question string) (string, bool, error) {
+	if a.ask == nil {
+		return "", true, nil
+	}
+	resp, err := a.ask.Ask(ctx, UserPrompt{Kind: KindSecret, Question: question})
+	if err != nil {
+		return "", false, err
+	}
+	if resp.Cancelled {
+		return "", true, nil
+	}
+	return resp.Custom, false, nil
+}

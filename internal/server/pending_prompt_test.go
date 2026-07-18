@@ -311,3 +311,57 @@ func TestWSAsker_SuccessDismissesOtherSubscribedTabs(t *testing.T) {
 
 	drainForEvent(t, watcher, func(ev map[string]any) bool { return ev["type"] == "dismiss_user_question" })
 }
+
+// TestWSAsker_AskSecret: the secret variant rides the same question channel
+// but flags the event secret (the browser renders a password field), and the
+// answer arrives as the return value — never through a tool result.
+func TestWSAsker_AskSecret(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.questionChans = map[string]chan tools.AskResponse{}
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	// Compile-time contract: the collection point's type assertion finds it.
+	var _ tools.SecretAsker = wsAsker{}
+
+	const sid = "secret-asker-session"
+	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, sid)
+
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			srv.pendingPromptMu.Lock()
+			ev, ok := srv.pendingQuestions[sid]
+			srv.pendingPromptMu.Unlock()
+			if ok {
+				if !ev.Secret {
+					t.Error("request_user_question event must carry secret:true")
+				}
+				srv.handleWSUserQuestionAnswer(ev.QuestionID, nil, "hunter2", false)
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	answer, cancelled, err := srv.wsAsker().(tools.SecretAsker).AskSecret(ctx, `Enter secret for recording "login": password`)
+	if err != nil {
+		t.Fatalf("AskSecret: %v", err)
+	}
+	if cancelled {
+		t.Fatal("should not be cancelled")
+	}
+	if answer != "hunter2" {
+		t.Fatalf("answer = %q, want the custom free-text reply", answer)
+	}
+
+	// Cancellation maps through.
+	go func() {
+		qid := waitForPendingQuestionID(t, srv, sid)
+		srv.handleWSUserQuestionAnswer(qid, nil, "", true)
+	}()
+	if _, cancelled, err := srv.wsAsker().(tools.SecretAsker).AskSecret(ctx, "?"); err != nil || !cancelled {
+		t.Fatalf("cancelled = %v, err = %v; want a clean cancellation", cancelled, err)
+	}
+}

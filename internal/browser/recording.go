@@ -1135,7 +1135,10 @@ func verify(ctx context.Context, page *Page, step *Step, params map[string]strin
 				return nil
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("verify text %q not found", want)
+				// Report the unsubstituted field: it names the param
+				// ({{password}}) without carrying the resolved value, which
+				// may be a secret bound for the page only.
+				return fmt.Errorf("verify text %q not found", step.Verify.Text)
 			}
 			select {
 			case <-ctx.Done():
@@ -1169,7 +1172,10 @@ func verify(ctx context.Context, page *Page, step *Step, params map[string]strin
 			if time.Now().After(deadline) {
 				var cur string
 				_ = page.Eval(ctx, "location.href", &cur)
-				return fmt.Errorf("verify url: expected to stay on %q, but landed on %q", want, cur)
+				// Report the unsubstituted field (param name, not the resolved
+				// value, which may be a secret). cur is live page state, not a
+				// param, so it stays.
+				return fmt.Errorf("verify url: expected to stay on %q, but landed on %q", step.Verify.URL, cur)
 			}
 			select {
 			case <-ctx.Done():

@@ -27,6 +27,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/skills"
 	"github.com/open-octo/octo-agent/internal/tools"
 	"github.com/open-octo/octo-agent/internal/version"
+	"golang.org/x/term"
 )
 
 // Provider names accepted by `--provider`.
@@ -761,7 +762,20 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		} else {
 			replReader = newScannerLineReader(stdin, stdout)
 		}
-		replView = newPlainView(replReader, stdout, stderr, resolveVerbosity(*quietFlag, *verboseFlag), *plain)
+		pv := newPlainView(replReader, stdout, stderr, resolveVerbosity(*quietFlag, *verboseFlag), *plain)
+		// Secrets read with no echo, straight from the tty — never through the
+		// line editor (the value would echo and land in readline history).
+		if f, ok := stdin.(*os.File); ok && stdinIsTTY(stdin) {
+			pv.secretReader = func(prompt string) (string, bool) {
+				fmt.Fprint(pv.out, prompt)
+				b, err := term.ReadPassword(int(f.Fd()))
+				if err != nil {
+					return "", false
+				}
+				return string(b), true
+			}
+		}
+		replView = pv
 		tools.SetAsker(newREPLAsker(replView))
 		defer tools.SetAsker(nil)
 	}

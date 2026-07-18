@@ -304,3 +304,31 @@ func TestSessionIDContextRoundtrip(t *testing.T) {
 		t.Errorf("SessionIDFrom = %q, want abc", got)
 	}
 }
+
+// Leak guard: when one secret is already resolved and a LATER one fails, the
+// error text must not carry the resolved value — only names.
+func TestResolveReplayParams_ErrorNeverCarriesValues(t *testing.T) {
+	t.Setenv("OCTO_BROWSER_SECRET_USERNAME", "env-user-value")
+	resetReplaySecrets(t, "s1")
+	plain := &stubAsker{} // no SecretAsker → the second param errors
+	ctx := WithSessionID(WithAsker(context.Background(), plain), "s1")
+
+	rec := &browser.Recording{
+		Name: "login",
+		Params: []browser.Param{
+			{Name: "username", Secret: true},
+			{Name: "password", Secret: true},
+		},
+		Steps: []browser.Step{
+			{Action: "type", Selector: "#u", Value: "{{username}}"},
+			{Action: "type", Selector: "#p", Value: "{{password}}"},
+		},
+	}
+	err := resolveReplayParams(ctx, rec, "login", map[string]string{})
+	if err == nil {
+		t.Fatal("password is unresolvable (no env, no SecretAsker) — want an error")
+	}
+	if strings.Contains(err.Error(), "env-user-value") {
+		t.Fatalf("resolved secret value leaked into the error: %v", err)
+	}
+}

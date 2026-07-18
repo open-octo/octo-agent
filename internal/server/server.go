@@ -1752,6 +1752,25 @@ type wsAsker struct {
 }
 
 func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse, error) {
+	return a.ask(ctx, q, false)
+}
+
+// AskSecret implements tools.SecretAsker: the same question bridge, but the
+// event is flagged secret so the browser renders a password field. The answer
+// returns to the runtime caller only — it never becomes a tool result or
+// lands in conversation history.
+func (a wsAsker) AskSecret(ctx context.Context, question string) (string, bool, error) {
+	res, err := a.ask(ctx, tools.AskRequest{Question: question}, true)
+	if err != nil {
+		return "", false, err
+	}
+	if res.Cancelled {
+		return "", true, nil
+	}
+	return res.Custom, false, nil
+}
+
+func (a wsAsker) ask(ctx context.Context, q tools.AskRequest, secret bool) (tools.AskResponse, error) {
 	sessionID, ok := ctx.Value(ctxKeySessionID{}).(string)
 	if !ok || sessionID == "" {
 		return tools.AskResponse{}, fmt.Errorf("ask_user_question: no active WebSocket session")
@@ -1781,6 +1800,7 @@ func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse
 		Options:     q.Options,
 		MultiSelect: q.MultiSelect,
 		Header:      q.Header,
+		Secret:      secret,
 	}
 
 	// Record the outstanding question so a tab that (re)subscribes mid-ask —

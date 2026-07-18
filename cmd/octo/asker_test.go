@@ -210,3 +210,57 @@ func sliceEqualsInt(a, b []int) bool {
 	}
 	return true
 }
+
+// TestReplAsker_AskSecret: the secret path renders the question, reads the
+// answer through the no-echo reader (never the line reader — the value must
+// not echo or land in readline history), and returns it as the answer.
+func TestReplAsker_AskSecret(t *testing.T) {
+	out := &bytes.Buffer{}
+	// The line reader carries a decoy: if the secret path accidentally reads
+	// through it, the test fails — the value must come from the secret reader.
+	view := newPlainView(newScannerLineReader(strings.NewReader("decoy\n"), out), out, out, verbosityNormal, false)
+	var gotPrompt string
+	view.secretReader = func(prompt string) (string, bool) {
+		gotPrompt = prompt
+		return "hunter2", true
+	}
+	a := newREPLAsker(view)
+
+	answer, cancelled, err := a.AskSecret(context.Background(), `Enter secret for recording "login": password`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled {
+		t.Fatal("should not be cancelled")
+	}
+	if answer != "hunter2" {
+		t.Fatalf("answer = %q", answer)
+	}
+	if !strings.Contains(out.String(), `Enter secret for recording "login": password`) {
+		t.Errorf("question not rendered: %q", out.String())
+	}
+	if gotPrompt == "" {
+		t.Error("secret reader never invoked")
+	}
+	if strings.Contains(out.String(), "hunter2") {
+		t.Error("secret value echoed to the terminal output")
+	}
+}
+
+// TestReplAsker_AskSecretCancel: empty input / no reader → cancelled, so the
+// collection point aborts the replay with its clean cancellation error.
+func TestReplAsker_AskSecretCancel(t *testing.T) {
+	out := &bytes.Buffer{}
+	view := newPlainView(nil, out, out, verbosityNormal, false)
+	view.secretReader = func(string) (string, bool) { return "", false }
+	a := newREPLAsker(view)
+	if _, cancelled, _ := a.AskSecret(context.Background(), "?"); !cancelled {
+		t.Fatal("reader abort should map to cancelled")
+	}
+
+	// No secret reader wired at all (headless) — also a clean cancel.
+	a2 := newREPLAsker(newPlainView(nil, out, out, verbosityNormal, false))
+	if _, cancelled, _ := a2.AskSecret(context.Background(), "?"); !cancelled {
+		t.Fatal("nil secretReader should map to cancelled")
+	}
+}
