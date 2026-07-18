@@ -1,6 +1,6 @@
 ---
 title: "octo-agent Deep Dive: The Genuinely Hard Parts of an Agent System"
-description: "Starting from the five-layer unidirectional dependency stack, this post dissects the core mechanisms of octo-agent and the trade-offs behind them: context compaction, prompt caching, loop, workflow orchestration, browser record & replay, permission enforcement, the trash can, MCP tool search, and the batteries-included onboarding that ties them together."
+description: "Starting from the five-layer unidirectional dependency stack, this post dissects the core mechanisms of octo-agent and the trade-offs behind them: context compaction, prompt caching, loop, workflow orchestration, browser record & replay, permission enforcement, the trash can, MCP tool search, batteries-included onboarding, and the built-in tool contract that ties them together."
 pubDate: 2026-07-08
 updatedDate: 2026-07-18
 author: "octo-agent team"
@@ -313,6 +313,59 @@ A skill is usually a snippet the model can invoke — but a handful of shipped s
 
 One thing worth noting: `channel-manager`, `mcp-creator`, `cron-task-creator`, and `workflow-creator` all lean on the file tools (`write_file`, `edit_file`, `terminal`) as much as they do on octo-specific knowledge. That's a deliberate choice — it means a meta-skill doesn't need a bespoke tool for every piece of YAML it writes. The same "tools are composable" principle that powers user workflows powers octo's own onboarding.
 
+## Built-In Tool Design: Small Interfaces, Sharp Edges
+
+Every built-in tool implements the same two-method contract (`Definition() ToolDefinition` + `Execute(ctx, name, input) (ToolResult, error)`), discovered by `tools.DefaultRegistry` and dispatched by name through the agent loop. That shared surface is the point: the agent core never branches on tool species, meta-skills are free to reshuffle them, and the browser / workflow / MCP layers all speak the same narrow pipe. The structure is simple. The design tensions live at the edges.
+
+### The Read-Before-Write MTime Guard
+
+`internal/tools/ReadTracker` enforces what looks like a nitpick but stops a real class of mistake: the LLM may only write to (or edit) a file it has *already read*, and only while its on-disk mtime still matches what was seen at read time. A file read in turn 3 that an external editor touched by turn 7 is refused, and the agent is told to re-read — which mirrors Claude Code's error wording so the LLM, already trained on that prompt, reacts correctly on the retry.
+
+That last qualifier — "only while mtime matches" — introduces a bootstrapping problem the codebase handles with `RefreshTarget`: a formatter or shell redirect that the session *itself* wrote through the terminal tool stamps a fresh mtime so the next edit doesn't trip the guard on its own output. `RefreshTarget` only ever re-stamps an exact path the tracker already recorded; it never cascades to siblings, never promotes an un-readable path to writable. A file the session never read stays unwritable; a file truly touched by an out-of-band editor (which never flows through the terminal tool) keeps its stale stamp and still trips the guard. The guard catches the real mistakes; the loop-hole is narrow enough that it can't be abused to escape the sandbox.
+
+### Pulling the Floor Out from under SSRF
+
+`web_fetch` can't just `http.Get(userURL)` — that's the textbook SSRF vector. Its answer (`internal/tools/web_fetch.go`) splits the fetch into **two hardened paths** sharing one `secureFetchTransport`:
+
+- **Jina proxy path** — delegates rendering to `r.jina.ai`, but refuses *cross-host* redirects (a redirect off `r.jina.ai` means something unexpected is bouncing the request) and drops the connection if the resolved IP is link-local / cloud-metadata. It forces a direct fetch when the caller passes custom headers (Jina's outbound headers aren't controllable, so it can't honor an override).
+- **Direct fetch path** — needed for arbitrary URLs, so it *must* follow cross-host redirects (URL shorteners, `www`-canonical hops). It shares the link-local block and caps the chain at 10 hops so a redirect loop can't hang the agent.
+
+The `net.Dialer.Control` hook fires *after* DNS resolution with the concrete IP, so a hostname that resolves to `169.254.x.x` or `127.0.0.1` via DNS rebinding is refused — even when it public-IP'd at resolve time one moment earlier. Bodied too: `WebFetchInlineBytes` (64 KB) is the inline threshold; `WebFetchMaxBytes` (5 MB) is the hard ceiling; past it the body is truncated and spilled to a temp file. Big page = summary + head/tail preview + a `read_file` path to the rest, never a wall of text dumped into the model's context.
+
+### Streaming Fragments across Provider Borders
+
+A subtler design rule lives in the provider adapters, not the tools: **OpenAI-protocol tool-call arguments stream as JSON fragments across multiple chunks, keyed by `tool_calls[i].index`** — concatenate every fragment for the same index before parsing. Anthropic-style endpoints don't. The principle the codebase enforces is: the agent loop (`internal/agent/agent.go`) never branches on which spelling it got; normalization happens at the provider adapter. The same contract ("fragments in, complete tool call out") is the only way to keep the browser / workflow / MCP layers portable across Anthropic and OpenAI protocols without every layer growing `if provider == …` forks.
+
+### Five Search Surfaces, One Contract
+
+`web_search` looks simple on the wire (returns title/url/snippet), but the back is a tiered fallback over five backends (`internal/tools/web_search.go`): **Brave → Tavily → Serper → DuckDuckGo HTML → Bing HTML**. The first three activate when their env keys are set (`BRAVE_SEARCH_API_KEY` / `TAVILY_API_KEY` / `SERPER_API_KEY`); the last two need no key and are the default. Every failure gets swallowed into the response's `Error` field and the next tier is tried — the tool never panics, and the tier that actually produced the results is reported back in the `Provider` field so the model knows whether it's looking at an index lookup (Brave) or an HTML scrape (DDG/Bing).
+
+Two details actually matter: **a DuckDuckGo cooldown** (`markDDGUnavailable`, 10 minutes) that keeps a token goroutine from hammering a DDG that just returned nothing — guarded by a `sync.RWMutex` because the web server made concurrent searches routine. And **a landmine on Bing's HTML endpoint**: if you send `Accept-Encoding: gzip`, Bing answers with a ~39 KB JavaScript skeleton instead of the ~120 KB real results page. The fix is the weird rule "never let Go auto-negotiate encoding against `cn.bing.com`" — `browserGet` deliberately omits that header.
+
+### terminal: Time, Anti-Polling, and Backtick Survival
+
+The `terminal` tool runs everything you hand it on the system shell, so its description is the longest entry in the schema — most of it is rules that cost a debugging session each to learn:
+
+- **Three launch modes** — synchronous (default; blocked until the command returns), `run_in_background: "async"` (detached one-shot task, e.g. a build or `npm install`), and `"interactive"` (a long-running service / REPL you'll keep feeding via `terminal_input`). A `detached: true` mode deliberately outlives the session for things like `ngrok` / `cloudflared`.
+- **120-second default timeout** with a hard ceiling at `MaxTerminalTimeout` (600 s); anything above that must go background rather than monopolize a turn.
+- **Anti-polling window**: `BackgroundManager` tracks concurrent reads — three empty reads inside 30 seconds on a running process get blocked and the LLM is told to wait for the push notification instead of spinning in a `terminal_output` loop.
+- **A 1 MiB circular buffer** per background process — older drops are reported as such; only the most recent tail is retained.
+- **The backtick problem**: a shell will mangle backticks inside a quoted string (POSIX turns them into command substitution; PowerShell treats backtick as escape). The fix is the dedicated `stdin` parameter, which pipes text verbatim into the child's stdin and closes it — used whenever a command body contains quotes, backticks, or `$`.
+
+Together these turn "the shell can do anything" from a footgun into a bounded surface that the model can reason about without burning tokens polling dead output.
+
+### show_artifact: A File Path Is Not a UI
+
+Most artifacts enter the user's view through `write_file` / `edit_file` (the web Artifacts panel surfaces them automatically). But files produced by other means — a build step, a `cat > x.html` heredoc, a downloaded image — don't ride that path. `show_artifact` bridges the gap: it validates the path against an allowlist of previewable types (`artifactContentTypes`: `.html/.md/.png/.jpg/.gif/.svg/.webp`), confirms it's a real file, and emits a `UI` payload of `{"type": "artifact", "path": ..., "size_bytes": N}` on the result envelope.
+
+Two gates apply: the path must pass the content-type allowlist (so the renderer doesn't get handed a binary it can't show), and the resulting artifact endpoint serves the file using the matching `tool_use` block in the session transcript as the authorization token — one user's artifact isn't previewable by another session. HTML artifacts are rendered in a **sandboxed iframe** with no live script by default; each one needs explicit user permission to run code. That's the same "defer + gate" pattern as elsewhere: the default is dead-simple and safe, the powerful path requires a conscious choice.
+
+### One Registry, Many Species
+
+`tools.DefaultRegistry` (`internal/tools/registry.go`) is a single dispatcher that routes any tool call by name to one entry of the `allTools` slice — `Terminal`, `ReadFile`, `WriteFile`, `EditFile`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Skill`, `Agent*`, `Workflow*`, `ScheduleWakeup`, `Browser`, `MemoryRecall`, and the rest. There is "browser: internal/browser", "workflow: Ruby/mruby", and "MCP: a JSON-RPC bridge" — but the agent loop sees only `ToolExecutor`. The late addition of `mcp_describe` / `mcp_call` didn't require touching the agent core either; they entered through a registry entry like every other tool.
+
+That choice is what makes the meta-skills from the previous section possible: a guided "set up your IM channel" flow isn't a bespoke tool, it's `channel-manager` stringing `read_file` / `write_file` / `terminal` together in the order the user's situation demands. Tool composition is the reusable primitive; a new capability usually means a new skill, not a new tool.
+
 ## Coda: One Worldview Throughout
 
 Each of the seven mechanisms minds its own patch; together they express a single judgment: **in an agent system, whatever a mechanism can guarantee, never leave to the model's good behavior.**
@@ -337,3 +390,11 @@ The model supplies the intelligence; the mechanisms supply the floor. If one sen
 | Permission verdicts | `internal/permission/permission.go` (`classify` / `Check`) |
 | OS-level sandbox | `internal/sandbox/` |
 | Trash can | `internal/trash/trash.go` |
+| MCP tool search | `internal/tools/tool_search.go` |
+| Meta-skills | `internal/skills/defaults/{skill-creator,mcp-creator,channel-manager,cron-task-creator,workflow-creator}/SKILL.md` |
+| Built-in tool contract | `internal/tools/registry.go` (allTools), `internal/agent/tool.go` |
+| Read-before-write guard | `internal/tools/read_tracker.go` |
+| web_fetch SSRF defenses | `internal/tools/web_fetch.go` (`secureFetchTransport` / `directFetchHTTPClient`) |
+| web_search backends | `internal/tools/web_search.go` |
+| terminal background manager | `internal/tools/background.go` |
+| Artifact preview gating | `internal/tools/artifact.go`, `internal/server/artifact.go` |
