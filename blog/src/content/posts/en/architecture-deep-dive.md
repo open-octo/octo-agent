@@ -1,8 +1,8 @@
 ---
 title: "octo-agent Deep Dive: The Genuinely Hard Parts of an Agent System"
-description: "Starting from the five-layer unidirectional dependency stack, this post dissects seven core mechanisms of octo-agent and the trade-offs behind them: context compaction, prompt caching, loop, workflow orchestration, browser record & replay, permission enforcement, and the trash can."
+description: "Starting from the five-layer unidirectional dependency stack, this post dissects the core mechanisms of octo-agent and the trade-offs behind them: context compaction, prompt caching, loop, workflow orchestration, browser record & replay, permission enforcement, the trash can, MCP tool search, and the batteries-included onboarding that ties them together."
 pubDate: 2026-07-08
-updatedDate: 2026-07-17
+updatedDate: 2026-07-18
 author: "octo-agent team"
 tags: ["architecture", "deep-dive", "engineering", "ai-agent"]
 locale: en
@@ -276,6 +276,42 @@ The `rm` interception works by injecting a same-named function into the shell en
 One judgment call in the overwrite backup shows real craft: **if the target file is git-tracked and the working tree is clean, skip the backup.** Git already has that content; a second copy in the trash is pure waste. One `git ls-files` plus two `git diff --quiet` calls cut the trash noise dramatically — a good safety net must not only catch, it must stay quiet, or users will switch the whole thing off.
 
 Recovery goes through `octo trash restore`, matching by ID or fuzzy path. If the destination is now occupied, three policies apply: abort with an error (default), move the occupant into the trash too and then restore, or restore under a timestamped new name. Each project's trash is isolated by a hash of the project path; it's purely local, with 14-day expiry and a size cap enforced by background cleanup, so it never grows without bound.
+
+## Batteries Included: Discoverability, Meta-Skills, and a Gentler Default
+
+The seven sections above were the "hard parts" — places where a wrong design bleeds context tokens or loses a file. But the genuinely hardest part of shipping an agent isn't the hard parts; it's the first five minutes. If the user has to `apt install` ripgrep before the first search, or hunt down an MCP registry before asking a single question, they leave. octo answers that with three layers of "it just works" — all of which happen to be the same principles (defer what you can, surface what matters, degrade gracefully) applied to the onboarding path.
+
+### MCP Tool Search: The Lazy Registry
+
+Standard MCP wiring has a hidden tax: every tool's full JSON schema gets pushed into the system prompt on every turn. Connect three MCP servers with forty tools between them and you've spent a thousand tokens on the user just to learn *what exists before asking anything*. octo's answer (`internal/tools/tool_search.go`) is to defer the heavy half.
+
+Two bridge tools, `mcp_describe` and `mcp_call`, replace the full upload. Each MCP tool's **name and one-line description** ride along in the system prompt the same way `skills.RenderManifest` surfaces `# Available skills` — so the model can answer "is there a tool for X?" in zero round trips. `mcp_describe` pulls one schema on demand (when the model actually wants to use the tool), and `mcp_call` invokes it — routing straight into the existing `executeMCP` path, so all the `mcp__`-prefix dispatch, permission, and hook machinery runs against the real tool name unchanged.
+
+The mode selector (`auto` / `on` / `off`) is the same instinct as elsewhere: `auto` activates the bridge only when deferred schemas would occupy at least 10% of the context window. Below that, the simpler full-upload path wins; above it, the search mechanism keeps the prompt from drowning in schemas it won't use this turn.
+
+### Two Binaries You Don't Have to Install
+
+**ripgrep.** `internal/tools/rgembed` ships a platform-matched ripgrep binary *inside* the octo binary: the Makefile downloads the BurntSushi/ripgrep release for the build platform, and `go:embed` bakes it in when the `embedrg` tag is set. At runtime, if `rg` is already on `PATH`, that one's used; otherwise the embedded copy is extracted to `~/.octo/bin/rg-<version>`. The `grep` tool gets a fast, consistent search backend with zero user action.
+
+**uv.** `office-xlsx` depends on Python's openpyxl, and openpyxl needs a Python runner. Rather than ask the user to manage that, the macOS and Windows installer packages bundle uv directly. The tradeoff is straightforward: macOS grows ~100MB so the user never sees "install Python" on their first spreadsheet task. It bundles *uv* and not *bun* — uv is a single static binary that resolves dependencies; bun is a full JavaScript runtime for a power-user skill that most people don't need.
+
+### Windows Knows When to Suggest an Upgrade
+
+There's a playful bit of craft in the Windows installer (`packaging/windows/octo.iss`): it runs an `EnsurePowerShell7` check at the end. If `pwsh` isn't on PATH but `winget` is, it asks the user — once, bilingual — whether to install PowerShell 7. Why? octo runs hook scripts and the terminal tool through `pwsh` (7+) when it's present and falls back to the always-there Windows PowerShell 5.1 when it isn't. The 7 path is a better default (faster, predictable `~/.bashrc`-style profile, real `&&` semantics). Every skip-failure path is a silent no-op: if anything goes wrong, octo just keeps using 5.1. The user is prompted, never blocked.
+
+### Five Meta-Skills: octo Learns to Extend Itself
+
+A skill is usually a snippet the model can invoke — but a handful of shipped skills are *about* octo's own setup. They talk the user through configuration that would otherwise require hand-editing YAML, and they lean on agent memory so the conversation carries across sessions.
+
+| Skill | Job |
+|---|---|
+| `skill-creator` | Scaffold a new skill, edit an existing one, or capture a workflow as a skill. |
+| `mcp-creator` | Discover an MCP server package, build the `~/.octo/mcp.json` entry, verify the connection — guided, no manual JSON. |
+| `channel-manager` | Walk the user through each IM platform's console, collect credentials, write `~/.octo/channels.yml`, diagnose connection failures. |
+| `cron-task-creator` | Create, inspect, enable, and delete scheduled agent prompts stored in `~/.octo/tasks/`. |
+| `workflow-creator` | Capture a repeatable multi-step task and turn it into a saved, resumable Ruby (mruby) workflow. |
+
+One thing worth noting: `channel-manager`, `mcp-creator`, `cron-task-creator`, and `workflow-creator` all lean on the file tools (`write_file`, `edit_file`, `terminal`) as much as they do on octo-specific knowledge. That's a deliberate choice — it means a meta-skill doesn't need a bespoke tool for every piece of YAML it writes. The same "tools are composable" principle that powers user workflows powers octo's own onboarding.
 
 ## Coda: One Worldview Throughout
 

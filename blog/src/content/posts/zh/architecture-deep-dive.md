@@ -1,8 +1,8 @@
 ---
 title: "octo-agent 深度解析：一个 Agent 系统里真正难的部分"
-description: "从五层单向依赖讲起，拆解 octo-agent 七个核心机制的设计与取舍：上下文压缩、prompt 缓存、loop、workflow 编排、浏览器录制回放、权限管控、回收站。"
+description: "从五层单向依赖讲起，拆解 octo-agent 核心机制的设计与取舍：上下文压缩、prompt 缓存、loop、workflow 编排、浏览器录制回放、权限管控、回收站、MCP 工具搜索，以及把这些串起来的自带电池式入门引导。"
 pubDate: 2026-07-08
-updatedDate: 2026-07-17
+updatedDate: 2026-07-18
 author: "octo-agent team"
 tags: ["architecture", "deep-dive", "engineering", "ai-agent"]
 locale: zh
@@ -276,6 +276,42 @@ flowchart TD
 覆盖备份里有一个判断特别见功力：**如果目标文件被 git 跟踪且工作区是干净的，跳过备份**。因为这份内容 git 里已经有了，回收站再存一份是纯浪费。一个 `git ls-files` 加两次 `git diff --quiet`，把回收站噪音降了一大截——好的安全网不光要接得住，还要足够安静，不然很快会被用户整个关掉。
 
 恢复走 `octo trash restore`，支持 ID 或路径模糊匹配；目标路径已被占用时可选三种策略：报错中止（默认）、把占用者也挪进回收站再恢复、或恢复为带时间戳的新名字。每个项目的回收站按项目路径哈希隔离，纯本地，14 天过期加容量上限的后台清理，不会无限膨胀。
+
+## 自带电池：可发现性、元技能与更友好的默认
+
+前面七个是"硬伤"——设计错的地方会持续漏 token 或者丢文件。但做一个 agent 真正的难题不是这些硬伤，是头五分钟。如果用户第一次搜索之前还得自己去装 ripgrep，第一次提问之前还得先去翻 MCP 仓库，他很可能就此离开。octo 用三层"开箱即用"来回应——恰好也是同一套原则（能推迟的就推迟、露出该露的、优雅降级）在入门路径上的应用。
+
+### MCP 工具搜索：懒惰注册
+
+标准 MCP 接法有个隐形成本：每个 tool 的完整 JSON schema 在每一轮都推进 system prompt。接三个 MCP 服务器、中间有四十个工具,用户在还没问任何问题之前就已经烧了一千个 token 来"知道有什么可用"。octo 的回应放在 `internal/tools/tool_search.go`——把重的部分推迟。
+
+两个桥接工具 `mcp_describe` 和 `mcp_call` 替代了完整上传。每个 MCP 工具的**名字 + 一句话描述**走 `skills.RenderManifest` 那条路露在 system prompt 里（和 `# Available skills` 同一机制），于是模型在零往返里就能回答"有没有做 X 的工具"。`mcp_describe` 按需拉一个 schema（模型真想用那个工具时才拉），`mcp_call` 执行它——直接进入既有的 `executeMCP` 路径，所有 `mcp__` 前缀的派发、权限、hook 机制都照常在真实工具名上跑。
+
+模式选择器（`auto` / `on` / `off`）和前面各处是同一个直觉：`auto` 模式只在推迟的 schema 预计占 **context window ≥ 10%** 时才启用桥接机制。在那之下，更简单的全量上传占优；超过它，搜索机制才上场，避免 prompt 被本季不会用的 schema 淹没。
+
+### 两个不用你装的二进制
+
+**ripgrep。**`internal/tools/rgembed` 在 octo 二进制里打包了一份平台匹配的 ripgrep：构建时 Makefile 下载对应平台的 BurntSushi/ripgrep release，`go:embed` 在 `embedrg` 构建标签下把它烤进去。运行时如果 `rg` 已经在 `PATH` 里就用系统的；否则释放嵌入那份到 `~/.octo/bin/rg-<version>`。`grep` 工具由此得到一个又快又稳的搜索后端，用户不需要做任何事。
+
+**uv。**`office-xlsx` 依赖 Python 的 openpyxl，openpyxl 需要一个 Python 运行时。octo 选择不让用户操心这件事——macOS / Windows 安装包直接捆绑 uv。取舍很直接：macOS 包大约多出 100MB，换来用户在第一次做表格任务时永远看不到"请装 Python"。选捆绑 *uv* 而不是 *bun*——uv 是单一静态二进制，解析依赖就够了；bun 是完整的 JavaScript 运行时,给一个多数人用不到的 power-user skill 拖着太重。
+
+### Windows 知道何时该提示升级
+
+Windows 安装器（`packaging/windows/octo.iss`）末尾有段俏皮的工程：它跑一次 `EnsurePowerShell7` 检查。如果 `pwsh` 不在 PATH 但 `winget` 在,就问用户一次（双语）要不要装 PowerShell 7。原因：octo 跑 hook 脚本和 terminal tool 时，有 `pwsh` (7+) 就用它，没有就退回永远在那里的 Windows PowerShell 5.1。7 那条路径是更好的默认（更快、可预测的 `~/.bashrc` 式 profile、真正的 `&&` 语义）。所有跳过 / 失败路径都是静默 noop：随便哪条出错，octo 就照常用 5.1。用户被提示，从未被阻塞。
+
+### 五个元技能：octo 学会扩展自己
+
+skill 通常是一段模型能调用的流程——但有几个预装 skill 专门*处理 octo 自己的配置*。它们引导用户走过本需要手写 YAML 的流程,并依赖 agent 记忆让上下文跨 session 延续。
+
+| Skill | 职责 |
+|---|---|
+| `skill-creator` | 从零起稿新 skill、改写既有 skill、把一段 workflow 固化成 skill。 |
+| `mcp-creator` | 搜索合适的 MCP 服务器包、拼出 `~/.octo/mcp.json` 条目、验证连通——全程引导,不用手敲 JSON。 |
+| `channel-manager` | 领用户走完每家 IM 管理后台的步骤、收凭据、写 `~/.octo/channels.yml`、排查连接问题。 |
+| `cron-task-creator` | 创建 / 查看 / 启用 / 删除存在 `~/.octo/tasks/` 里的定时 agent 提示。 |
+| `workflow-creator` | 把重复的多步任务捕获成可保存、可续跑的 Ruby (mruby) workflow。 |
+
+有一点值得专门指出：`channel-manager`、`mcp-creator`、`cron-task-creator`、`workflow-creator` 都同时依赖文件工具（`write_file`、`edit_file`、`terminal`）和 octo 专属知识。这是刻意选择——一个元 skill 不需要为它写的每段 YAML 都造一个专用工具。"工具可组合"这个原则既用在用户的 workflow 里，也用在 octo 自己的入门引导上。
 
 ## 尾声：一以贯之的世界观
 
