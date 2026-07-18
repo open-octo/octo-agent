@@ -65,14 +65,17 @@ dead-end detours, turning your specific values into `{{param}}` placeholders, an
 description — but it can only reorder or rename real captured steps, never invent a new target: any
 refined step whose selector isn't in the original capture is rejected in favor of the raw version.
 
-Recordings are saved as plain YAML at `~/.octo/browser-skills/<name>.yaml` — readable, editable by
-hand, and diffable in git.
+Recordings are saved as plain YAML at `~/.octo/browser-recordings/<name>.yaml` — readable, editable by
+hand, and diffable in git. (Before the recording rename this was `~/.octo/browser-skills/`; an existing
+directory is migrated automatically.)
 
 ## Replay
 
 ```
-browser(action: "run_skill", name: "<recording>", params: { ... })
+browser(action: "replay", name: "<recording>", params: { ... })
 ```
+
+(`run_skill` remains accepted as a deprecated alias.)
 
 Replay is deterministic — no model call in the common case. Each step waits for its target,
 executes, and (if the recording declares one) checks a `verify`. A few robustness details worth
@@ -84,7 +87,7 @@ knowing:
 - After typing, an unexpectedly empty field gets one clear-and-retype before the step is marked
   failed.
 
-The result is a structured object — `{skill, steps, outputs, self_healed?}` — so a recording's
+The result is a structured object — `{recording, steps, outputs, self_healed?}` — so a recording's
 declared `outputs` (an extracted value, a downloaded file path) can feed directly into a
 [workflow](/docs/guides/workflows/) via `skill("browser:<name>", params)`.
 

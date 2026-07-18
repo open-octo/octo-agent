@@ -70,8 +70,9 @@ func (n *WorkflowNudger) observe(toolName string, input map[string]any) string {
 }
 
 // skillNameFromCall extracts the skill name from a skill-running tool call: the
-// `skill` tool (loading a SKILL.md) or the browser tool's run_skill action
-// (replaying a recording). Any other call yields "".
+// `skill` tool (loading a SKILL.md) or the browser tool's replay action
+// (replaying a recording; run_skill is its deprecated alias). Any other call
+// yields "".
 func skillNameFromCall(toolName string, input map[string]any) string {
 	switch toolName {
 	case "skill":
@@ -82,7 +83,7 @@ func skillNameFromCall(toolName string, input map[string]any) string {
 		name, _ := input["name"].(string)
 		return name
 	case "browser":
-		if action, _ := input["action"].(string); action == "run_skill" {
+		if action, _ := input["action"].(string); action == "replay" || action == "run_skill" {
 			name, _ := input["name"].(string)
 			return name
 		}

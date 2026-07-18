@@ -59,7 +59,7 @@ func TestClaimSessionRaceFree(t *testing.T) {
 
 // TestRenderTraceRedactsSecret: the LLM distiller prompt never carries a secret
 // field's value, even if one reached RecordedEvent.Value — so the plaintext can't
-// be transmitted off-machine or re-inlined into the saved skill.
+// be transmitted off-machine or re-inlined into the saved recording.
 func TestRenderTraceRedactsSecret(t *testing.T) {
 	events := []RecordedEvent{
 		{Type: "change", Selector: "#u", Tag: "INPUT", Field: "user", Value: "alice"},
@@ -69,13 +69,13 @@ func TestRenderTraceRedactsSecret(t *testing.T) {
 	if tr := renderTrace(events); strings.Contains(tr, "hunter2") {
 		t.Fatalf("renderTrace leaked the secret value:\n%s", tr)
 	}
-	// End to end: whatever prompt GenerateSkill would send the model.
+	// End to end: whatever prompt GenerateRecording would send the model.
 	var captured string
 	gen := func(_ context.Context, _, user string) (string, error) {
 		captured = user
 		return "", fmt.Errorf("stop") // force fallback to the deterministic baseline
 	}
-	GenerateSkill(context.Background(), "demo", "https://x/start", events, gen)
+	GenerateRecording(context.Background(), "demo", "https://x/start", events, gen)
 	if strings.Contains(captured, "hunter2") {
 		t.Fatalf("secret value reached the LLM distiller prompt:\n%s", captured)
 	}

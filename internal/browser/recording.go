@@ -16,10 +16,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Skill is a recorded browser workflow in its editable, replayable form. It
+// Recording is a recorded browser workflow in its editable, replayable form. It
 // serializes to YAML — human-readable, hand-editable, git-versionable — which is
 // the "editable steps" surface. Replay reads it back; self-heal writes it back.
-type Skill struct {
+type Recording struct {
 	Name        string   `yaml:"name"`
 	Description string   `yaml:"description,omitempty"`
 	Params      []Param  `yaml:"params,omitempty"`
@@ -86,18 +86,18 @@ type Verify struct {
 // an LLM-backed healer); the engine itself stays LLM-free.
 type Healer func(ctx context.Context, page *Page, step *Step, cause error) error
 
-// CompileSkill turns a recording into an editable Skill. It seeds a leading
+// CompileRecording turns a recording into an editable Recording. It seeds a leading
 // navigate from the start URL (when it's a real page, not the about:blank tab
 // octo opens) and then walks the captured events in order — including the
 // top-level navigations the recorder captured, so a multi-page demonstration
 // replays from the right pages.
-func CompileSkill(name, description, startURL string, events []RecordedEvent) Skill {
+func CompileRecording(name, description, startURL string, events []RecordedEvent) Recording {
 	// Collapse consecutive identical raw events (a jittery double-fire / re-
 	// dispatched event) BEFORE parameterization. dropConsecutiveDupeSteps can't
 	// catch a repeated `type` afterwards, because each gets a distinct {{param}}
 	// placeholder as its value — so a spurious extra param+step would survive.
 	events = dedupeConsecutiveEvents(events)
-	s := Skill{Name: name, Description: description}
+	s := Recording{Name: name, Description: description}
 	if startURL != "" && startURL != "about:blank" {
 		s.Steps = append(s.Steps, navStep(startURL))
 	}
@@ -245,7 +245,7 @@ var selectorAttrRe = regexp.MustCompile(`\[(?:name|aria-label|data-testid|data-t
 
 // dedupeConsecutiveEvents drops a raw event identical to its immediate
 // predecessor (same type/selector/frame/value/tag) — a double-fire or a
-// framework's re-dispatched event. navigate is exempt (CompileSkill collapses
+// framework's re-dispatched event. navigate is exempt (CompileRecording collapses
 // navigate echoes itself). Conservative: only exact consecutive duplicates.
 func dedupeConsecutiveEvents(events []RecordedEvent) []RecordedEvent {
 	out := make([]RecordedEvent, 0, len(events))
@@ -280,57 +280,57 @@ func dropConsecutiveDupeSteps(steps []Step) []Step {
 	return out
 }
 
-// SkillGenerator asks an LLM to refine a recording into a clean skill. It is a
+// RecordingGenerator asks an LLM to refine a recording into a clean recording. It is a
 // plain string→string call so this package needn't import the agent/provider
 // layers; the app wires a sender-backed implementation.
-type SkillGenerator func(ctx context.Context, system, user string) (string, error)
+type RecordingGenerator func(ctx context.Context, system, user string) (string, error)
 
-// GenerateSkill turns a recording into a skill. The deterministic CompileSkill
+// GenerateRecording turns a recording into a recording. The deterministic CompileRecording
 // is always the baseline (its selectors are ground truth). When gen is set, the
 // LLM refines that baseline — dropping detours/retries, parameterizing variable
 // inputs, labeling — but is constrained to the captured selectors; any output
 // that fails to parse or invents a selector falls back to the baseline. So the
 // LLM only ever cleans up real events, never hallucinates targets.
-func GenerateSkill(ctx context.Context, name, startURL string, events []RecordedEvent, gen SkillGenerator) Skill {
-	base := CompileSkill(name, "", startURL, events)
+func GenerateRecording(ctx context.Context, name, startURL string, events []RecordedEvent, gen RecordingGenerator) Recording {
+	base := CompileRecording(name, "", startURL, events)
 	if gen == nil {
 		return base
 	}
-	baseYAML, err := MarshalSkill(base)
+	baseYAML, err := MarshalRecording(base)
 	if err != nil {
 		return base
 	}
-	const system = "You clean a recorded browser workflow into a minimal, correct, replayable skill. " +
+	const system = "You clean a recorded browser workflow into a minimal, correct, replayable recording. " +
 		"RULES: (1) Use ONLY CSS selectors that appear in the provided baseline — never invent or alter a selector. " +
 		"(2) Drop redundant back-and-forth and retries; keep the intended linear path. " +
 		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}). " +
 		"(4) Preserve step order and all navigate steps. " +
 		"(5) Write description as a short statement of what the workflow does. " +
-		"Output ONLY the skill as YAML (keys: name, description, params, steps), no prose, no code fences."
-	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned skill YAML.", baseYAML, renderTrace(events))
+		"Output ONLY the recording as YAML (keys: name, description, params, steps), no prose, no code fences."
+	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned recording YAML.", baseYAML, renderTrace(events))
 
 	out, err := gen(ctx, system, user)
 	if err != nil {
-		slog.Warn("browser: skill distill failed, keeping deterministic baseline", "skill", name, "err", err)
+		slog.Warn("browser: recording distill failed, keeping deterministic baseline", "recording", name, "err", err)
 		return base
 	}
-	refined, err := ParseSkill([]byte(stripFences(out)))
+	refined, err := ParseRecording([]byte(stripFences(out)))
 	if err != nil || len(refined.Steps) == 0 {
-		slog.Warn("browser: skill distill output unusable, keeping deterministic baseline steps", "skill", name, "err", err, "steps", len(refined.Steps))
+		slog.Warn("browser: recording distill output unusable, keeping deterministic baseline steps", "recording", name, "err", err, "steps", len(refined.Steps))
 		return withDescription(base, refined.Description)
 	}
 	refined.Name = name
 	if !selectorsSubset(refined, base) {
 		// Precision guard: the model used a selector it wasn't given. The refined
 		// steps are untrustworthy, but the prose description still is — keep it so
-		// the skills manifest isn't left with a bare name.
-		slog.Warn("browser: skill distill used a selector not in the recording, keeping deterministic baseline steps", "skill", name)
+		// the recordings manifest isn't left with a bare name.
+		slog.Warn("browser: recording distill used a selector not in the recording, keeping deterministic baseline steps", "recording", name)
 		return withDescription(base, refined.Description)
 	}
 	return refined
 }
 
-func withDescription(s Skill, desc string) Skill {
+func withDescription(s Recording, desc string) Recording {
 	if desc != "" {
 		s.Description = desc
 	}
@@ -363,9 +363,9 @@ func stripFences(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// selectorsSubset reports whether every selector/frame the refined skill uses
+// selectorsSubset reports whether every selector/frame the refined recording uses
 // was present in the baseline (the captured ground truth).
-func selectorsSubset(refined, base Skill) bool {
+func selectorsSubset(refined, base Recording) bool {
 	allowed := map[string]bool{"": true}
 	for _, st := range base.Steps {
 		allowed[st.Selector] = true
@@ -381,10 +381,10 @@ func selectorsSubset(refined, base Skill) bool {
 
 // StepDigest renders a compact one-line summary of what a replay does, e.g.
 // `navigate www.zhihu.com → click "热榜" → click "日元跌破 1 美元兑 162 日元…"`.
-// The skills manifest uses it when a recording has no description, so the model
+// The recordings manifest uses it when a recording has no description, so the model
 // can still see the recording's full path — including its final step, which is
 // what tells it the replay ends somewhere specific.
-func (s Skill) StepDigest() string {
+func (s Recording) StepDigest() string {
 	var parts []string
 	for _, st := range s.Steps {
 		switch st.Action {
@@ -433,49 +433,49 @@ func truncRunes(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-// MarshalSkill renders the skill to YAML.
-func MarshalSkill(s Skill) ([]byte, error) { return yaml.Marshal(s) }
+// MarshalRecording renders the recording to YAML.
+func MarshalRecording(s Recording) ([]byte, error) { return yaml.Marshal(s) }
 
-// ParseSkill parses a skill from YAML.
-func ParseSkill(data []byte) (Skill, error) {
-	var s Skill
+// ParseRecording parses a recording from YAML.
+func ParseRecording(data []byte) (Recording, error) {
+	var s Recording
 	err := yaml.Unmarshal(data, &s)
 	return s, err
 }
 
-// SaveSkill writes a skill to a YAML file.
-func SaveSkill(path string, s Skill) error {
-	data, err := MarshalSkill(s)
+// SaveRecording writes a recording to a YAML file.
+func SaveRecording(path string, s Recording) error {
+	data, err := MarshalRecording(s)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
 }
 
-// LoadSkill reads a skill from a YAML file.
-func LoadSkill(path string) (Skill, error) {
+// LoadRecording reads a recording from a YAML file.
+func LoadRecording(path string) (Recording, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Skill{}, err
+		return Recording{}, err
 	}
-	return ParseSkill(data)
+	return ParseRecording(data)
 }
 
-// ListSkills reads every *.yaml recording in dir and returns them sorted by
+// ListRecordings reads every *.yaml recording in dir and returns them sorted by
 // name. A missing dir yields nil; an unreadable or unparseable file (a
-// half-written or hand-broken skill) is skipped rather than sinking the whole
+// half-written or hand-broken recording) is skipped rather than sinking the whole
 // list — this feeds the system-prompt manifest, which must stay robust.
-func ListSkills(dir string) []Skill {
+func ListRecordings(dir string) []Recording {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
-	var out []Skill
+	var out []Recording
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
 		}
-		s, err := LoadSkill(filepath.Join(dir, e.Name()))
+		s, err := LoadRecording(filepath.Join(dir, e.Name()))
 		if err != nil || s.Name == "" {
 			continue
 		}
@@ -553,7 +553,7 @@ func subst(s string, params map[string]string) string {
 // target to appear (default 15s — generous for slow back-ends). Healer, when
 // set, is consulted on a step failure. Browser, when set, lets a click follow a
 // new tab it opens (target=_blank / window.open). DownloadDir is where download
-// steps land their files (required only if the skill has download steps).
+// steps land their files (required only if the recording has download steps).
 type ReplayOptions struct {
 	StepTimeout time.Duration
 	Healer      Healer
@@ -561,55 +561,55 @@ type ReplayOptions struct {
 	DownloadDir string
 }
 
-// ReplaySkill runs a skill deterministically (no LLM), substituting params. Each
+// ReplayRecording runs a recording deterministically (no LLM), substituting params. Each
 // step implicitly waits for its target to appear (handling slow loads) and
 // checks any explicit Verify. On a step failure it calls the healer; if the
 // healer repairs the step, replay continues and reports modified=true so the
-// caller can write the corrected skill back. A click that opens a new tab swaps
+// caller can write the corrected recording back. A click that opens a new tab swaps
 // the active page for subsequent steps; finalPage is the page replay ended on
 // (so the caller can keep its session pointed at the right tab). outputs holds
-// the skill's declared Outputs as bound during replay (download paths, extracted
+// the recording's declared Outputs as bound during replay (download paths, extracted
 // values) — the handoff surface for composing this recording with later steps.
-func ReplaySkill(ctx context.Context, page *Page, skill *Skill, params map[string]string, opts ReplayOptions) (modified bool, finalPage *Page, outputs map[string]any, err error) {
+func ReplayRecording(ctx context.Context, page *Page, recording *Recording, params map[string]string, opts ReplayOptions) (modified bool, finalPage *Page, outputs map[string]any, err error) {
 	if opts.StepTimeout <= 0 {
 		opts.StepTimeout = 15 * time.Second
 	}
-	if err := unknownParams(skill, params); err != nil {
+	if err := unknownParams(recording, params); err != nil {
 		return false, page, nil, err
 	}
-	full := mergedParams(skill, params)
-	if missing := unresolvedPlaceholders(skill, full); len(missing) > 0 {
+	full := mergedParams(recording, params)
+	if missing := unresolvedPlaceholders(recording, full); len(missing) > 0 {
 		// Fail before running any step: a {{name}} left unresolved would
 		// otherwise be sent to the browser as literal text (a navigate to
 		// ".../item/{{item_id}}", a type into a field with that as its
 		// value) — silently doing the wrong thing instead of erroring. This
 		// also catches a caller that means to run a different, similarly
-		// named skill and passes params that don't match this one at all.
-		return false, page, nil, fmt.Errorf("run_skill %q: missing required param(s): %s", skill.Name, strings.Join(missing, ", "))
+		// named recording and passes params that don't match this one at all.
+		return false, page, nil, fmt.Errorf("replay %q: missing required param(s): %s", recording.Name, strings.Join(missing, ", "))
 	}
 	binds := map[string][]string{}
 	cur := page
-	for i := range skill.Steps {
-		np, runErr := runStep(ctx, opts.Browser, cur, &skill.Steps[i], full, opts.StepTimeout, opts.DownloadDir, binds)
+	for i := range recording.Steps {
+		np, runErr := runStep(ctx, opts.Browser, cur, &recording.Steps[i], full, opts.StepTimeout, opts.DownloadDir, binds)
 		if runErr == nil {
 			cur = np
 			continue
 		}
-		np, healed, runErr := recoverStep(ctx, opts, cur, &skill.Steps[i], full, runErr, &modified, binds)
+		np, healed, runErr := recoverStep(ctx, opts, cur, &recording.Steps[i], full, runErr, &modified, binds)
 		if runErr != nil {
-			return modified, cur, nil, fmt.Errorf("step %d (%s): %w", i+1, skill.Steps[i].Action, runErr)
+			return modified, cur, nil, fmt.Errorf("step %d (%s): %w", i+1, recording.Steps[i].Action, runErr)
 		}
 		_ = healed
 		cur = np
 	}
-	return modified, cur, assembleOutputs(skill.Outputs, binds), nil
+	return modified, cur, assembleOutputs(recording.Outputs, binds), nil
 }
 
-// assembleOutputs turns the ordered values bound during replay into the skill's
+// assembleOutputs turns the ordered values bound during replay into the recording's
 // declared outputs. A "file[]" output yields the full ordered slice (empty slice
 // if never bound); every other type yields the last bound value ("" if never
 // bound). Only declared outputs surface — a stray bind to an undeclared name is
-// ignored, keeping the handoff contract exactly what the skill promised.
+// ignored, keeping the handoff contract exactly what the recording promised.
 func assembleOutputs(outs []Output, binds map[string][]string) map[string]any {
 	res := make(map[string]any, len(outs))
 	for _, o := range outs {
@@ -676,19 +676,19 @@ func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step
 	return page, false, cause
 }
 
-// unknownParams rejects a caller-supplied param key the skill doesn't
-// declare. mergedParams alone would silently drop it (nothing in the skill's
+// unknownParams rejects a caller-supplied param key the recording doesn't
+// declare. mergedParams alone would silently drop it (nothing in the recording's
 // steps references it), which hides the two failure modes this guards
-// against: a typo'd param name, or a caller replaying the wrong skill
+// against: a typo'd param name, or a caller replaying the wrong recording
 // entirely for the request it actually has in hand.
-func unknownParams(skill *Skill, params map[string]string) error {
-	declared := make(map[string]bool, len(skill.Params))
-	for _, p := range skill.Params {
+func unknownParams(recording *Recording, params map[string]string) error {
+	declared := make(map[string]bool, len(recording.Params))
+	for _, p := range recording.Params {
 		declared[p.Name] = true
 	}
 	for k := range params {
 		if !declared[k] {
-			return fmt.Errorf("run_skill %q: unknown param %q (declared: %s)", skill.Name, k, strings.Join(paramNames(skill.Params), ", "))
+			return fmt.Errorf("replay %q: unknown param %q (declared: %s)", recording.Name, k, strings.Join(paramNames(recording.Params), ", "))
 		}
 	}
 	return nil
@@ -709,7 +709,7 @@ var placeholderRe = regexp.MustCompile(`\{\{(\w+)\}\}`)
 // (URL, Value, JS, Verify.Text, Verify.URL) and returns the deduplicated
 // names referenced there that full does not resolve — a missing param with
 // no default, most commonly. Order follows first occurrence in the steps.
-func unresolvedPlaceholders(skill *Skill, full map[string]string) []string {
+func unresolvedPlaceholders(recording *Recording, full map[string]string) []string {
 	seen := map[string]bool{}
 	var missing []string
 	scan := func(s string) {
@@ -722,7 +722,7 @@ func unresolvedPlaceholders(skill *Skill, full map[string]string) []string {
 			missing = append(missing, name)
 		}
 	}
-	for _, st := range skill.Steps {
+	for _, st := range recording.Steps {
 		scan(st.URL)
 		scan(st.Value)
 		scan(st.JS)
@@ -734,20 +734,20 @@ func unresolvedPlaceholders(skill *Skill, full map[string]string) []string {
 	return missing
 }
 
-// MissingRequiredParams reports which {{name}} placeholders in skill's steps
-// remain unresolved after overlaying params on the skill's declared defaults
-// — the same check ReplaySkill performs internally before running any step,
+// MissingRequiredParams reports which {{name}} placeholders in recording's steps
+// remain unresolved after overlaying params on the recording's declared defaults
+// — the same check ReplayRecording performs internally before running any step,
 // exposed so a caller can surface a clear error to the model (which then
 // decides whether to re-invoke with values or ask the user) instead of
-// letting ReplaySkill fail outright.
-func MissingRequiredParams(skill *Skill, params map[string]string) []string {
-	return unresolvedPlaceholders(skill, mergedParams(skill, params))
+// letting ReplayRecording fail outright.
+func MissingRequiredParams(recording *Recording, params map[string]string) []string {
+	return unresolvedPlaceholders(recording, mergedParams(recording, params))
 }
 
 // mergedParams overlays caller params on declared defaults.
-func mergedParams(skill *Skill, params map[string]string) map[string]string {
+func mergedParams(recording *Recording, params map[string]string) map[string]string {
 	out := map[string]string{}
-	for _, p := range skill.Params {
+	for _, p := range recording.Params {
 		if p.Default != "" {
 			out[p.Name] = p.Default
 		}

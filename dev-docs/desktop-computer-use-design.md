@@ -14,7 +14,7 @@ octo's record/replay has two separable layers:
   hand to an LLM only to repair a failed step. This loop, the skill-as-editable
   artifact, text/semantic anchoring, conservative distillation, and the
   self-heal-on-failure pattern are all substrate-independent. They live in the
-  `Step` / `ReplaySkill` / `Healer` shapes in `internal/browser/skill.go` and do
+  `Step` / `ReplayRecording` / `Healer` shapes in `internal/browser/skill.go` and do
   not assume a browser.
 
 - **The substrate (not portable).** Capture and replay today are bound to
@@ -61,7 +61,7 @@ DOM.
 ## Proposed shape
 
 A `internal/desktop` backend, sibling to `internal/browser`, implementing the
-same capture→`Step`→replay contract. To share `ReplaySkill`, the engine's notion
+same capture→`Step`→replay contract. To share `ReplayRecording`, the engine's notion
 of a target must abstract above CSS:
 
 - Generalize `Step.Selector` (a CSS string) into a **target descriptor** that
@@ -89,7 +89,7 @@ cost.
 
 ## Phasing
 
-1. **Abstract the target.** Generalize `Step`'s target so `ReplaySkill`,
+1. **Abstract the target.** Generalize `Step`'s target so `ReplayRecording`,
    `verify`, and the heal handoff are backend-neutral; keep the browser backend
    green against it. No desktop code yet — this de-risks the shared engine.
 2. **macOS AX capture + replay (happy path).** Record clicks/typing/navigation

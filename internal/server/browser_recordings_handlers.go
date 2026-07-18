@@ -12,9 +12,10 @@ import (
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
-// Browser recordings = the editable YAML skills produced by record_stop and
-// replayed by run_skill. The web "Browser" view manages them; recording itself
-// stays in chat (the user demonstrates in their real Chrome).
+// Browser recordings = the editable YAML workflows produced by record_stop and
+// replayed by the browser tool's replay action. The web "Browser" view manages
+// them; recording itself stays in chat (the user demonstrates in their real
+// Chrome).
 
 // recordingSummary is the list-view shape: enough to show a card without the
 // full step body.
@@ -26,7 +27,7 @@ type recordingSummary struct {
 }
 
 // safeRecordingName rejects empty names and anything that could escape the
-// skills dir. Recorded names may be non-ASCII (e.g. Chinese), so we don't
+// recordings dir. Recorded names may be non-ASCII (e.g. Chinese), so we don't
 // allowlist characters — only block separators and traversal.
 func safeRecordingName(name string) (string, bool) {
 	name = strings.TrimSpace(name)
@@ -37,12 +38,12 @@ func safeRecordingName(name string) (string, bool) {
 }
 
 func recordingPath(name string) string {
-	return filepath.Join(tools.BrowserSkillsDir(), name+".yaml")
+	return filepath.Join(tools.BrowserRecordingsDir(), name+".yaml")
 }
 
 // GET /api/browser/recordings — list recorded workflows.
 func (s *Server) handleListBrowserRecordings(w http.ResponseWriter, _ *http.Request) {
-	dir := tools.BrowserSkillsDir()
+	dir := tools.BrowserRecordingsDir()
 	entries, err := os.ReadDir(dir)
 	out := make([]recordingSummary, 0)
 	if err == nil {
@@ -50,7 +51,7 @@ func (s *Server) handleListBrowserRecordings(w http.ResponseWriter, _ *http.Requ
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 				continue
 			}
-			sk, lerr := browser.LoadSkill(filepath.Join(dir, e.Name()))
+			sk, lerr := browser.LoadRecording(filepath.Join(dir, e.Name()))
 			if lerr != nil {
 				continue // skip unparseable files rather than failing the list
 			}
@@ -86,7 +87,7 @@ func (s *Server) handleGetBrowserRecording(w http.ResponseWriter, r *http.Reques
 }
 
 // PUT /api/browser/recordings/{name} — save an edited recording. The body's
-// yaml must parse as a skill with at least one step; we keep the path's
+// yaml must parse as a recording with at least one step; we keep the path's
 // filename regardless of the name field inside.
 func (s *Server) handleSaveBrowserRecording(w http.ResponseWriter, r *http.Request) {
 	name, ok := safeRecordingName(r.PathValue("name"))
@@ -101,18 +102,18 @@ func (s *Server) handleSaveBrowserRecording(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	sk, err := browser.ParseSkill([]byte(req.YAML))
+	sk, err := browser.ParseRecording([]byte(req.YAML))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid skill YAML: %v", err))
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid recording YAML: %v", err))
 		return
 	}
 	if len(sk.Steps) == 0 {
 		writeError(w, http.StatusBadRequest, "a recording must have at least one step")
 		return
 	}
-	dir := tools.BrowserSkillsDir()
+	dir := tools.BrowserRecordingsDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("create skills dir: %v", err))
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("create recordings dir: %v", err))
 		return
 	}
 	if err := os.WriteFile(recordingPath(name), []byte(req.YAML), 0o644); err != nil {

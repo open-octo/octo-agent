@@ -59,14 +59,16 @@ octo browser setup
 `{{param}}` 占位符、写一段描述——但它只能重新排列或者重命名真实录到的步骤，不能凭空造一个新目标：
 任何一步如果它的选择器不在原始录制里，就会被拒绝，退回用原始版本。
 
-录制会以纯 YAML 的形式存在 `~/.octo/browser-skills/<name>.yaml`——可读、可手改、可以用 git 追踪
-差异。
+录制会以纯 YAML 的形式存在 `~/.octo/browser-recordings/<name>.yaml`——可读、可手改、可以用 git 追踪
+差异。（改名前位于 `~/.octo/browser-skills/`，已有目录会自动迁移。）
 
 ## 回放
 
 ```
-browser(action: "run_skill", name: "<录制名>", params: { ... })
+browser(action: "replay", name: "<录制名>", params: { ... })
 ```
+
+（`run_skill` 作为已废弃的别名仍然可用。）
 
 回放在常见情况下是确定性的——不涉及模型调用。每一步会先等目标出现，再执行，如果录制里声明了
 `verify` 还会做一次校验。几个值得知道的健壮性细节：
@@ -76,7 +78,7 @@ browser(action: "run_skill", name: "<录制名>", params: { ... })
 - 如果某一步打开了新标签页，后续步骤会自动跟到那个新标签页上。
 - 输入之后如果字段意外变成空的，会先清空重打一次，再失败才真正判定这一步失败。
 
-返回结果是一个结构化对象——`{skill, steps, outputs, self_healed?}`——所以一段录制声明的
+返回结果是一个结构化对象——`{recording, steps, outputs, self_healed?}`——所以一段录制声明的
 `outputs`（提取出来的值、下载文件的路径）可以通过 `skill("browser:<name>", params)` 直接接进
 [工作流](/docs/zh/guides/workflows/)。
 

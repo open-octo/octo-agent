@@ -51,19 +51,28 @@ func TestWorkflowNudger_DedupsByName(t *testing.T) {
 	}
 }
 
-func TestWorkflowNudger_BrowserOnlyRunSkillCounts(t *testing.T) {
+func TestWorkflowNudger_BrowserReplayCounts(t *testing.T) {
 	n := NewWorkflowNudger()
-	// A plain browser action (not run_skill) doesn't count.
+	// A plain browser action (not replay) doesn't count.
 	if got := n.observe("browser", map[string]any{"action": "navigate", "url": "x"}); got != "" {
 		t.Fatalf("browser navigate should not count, got %q", got)
 	}
 	// A recording replay counts as a skill.
-	if got := n.observe("browser", map[string]any{"action": "run_skill", "name": "rec-1"}); got != "" {
-		t.Fatalf("first (run_skill) should be silent, got %q", got)
+	if got := n.observe("browser", map[string]any{"action": "replay", "name": "rec-1"}); got != "" {
+		t.Fatalf("first (replay) should be silent, got %q", got)
 	}
 	// A second distinct skill (via the skill tool) trips the nudge — mixed sources.
 	if got := n.observe(skillCall("merge")); got == "" {
 		t.Fatalf("recording + skill should nudge (mixed sources)")
+	}
+}
+
+func TestWorkflowNudger_RunSkillAliasCounts(t *testing.T) {
+	n := NewWorkflowNudger()
+	// The deprecated run_skill alias still counts as a skill run.
+	n.observe("browser", map[string]any{"action": "run_skill", "name": "rec-1"})
+	if got := n.observe(skillCall("merge")); got == "" {
+		t.Fatalf("run_skill alias + skill should nudge")
 	}
 }
 

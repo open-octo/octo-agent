@@ -35,7 +35,7 @@ func SetBrowserSession(b *browser.Browser, p *browser.Page) {
 }
 
 // setActivePage repoints the package-global session at a new tab — e.g. after a
-// click (or a replayed skill) opened and switched to one — so subsequent tool
+// click (or a replayed recording) opened and switched to one — so subsequent tool
 // calls act on the page the user actually ended up on.
 func setActivePage(b *browser.Browser, p *browser.Page) {
 	browserSession.mu.Lock()
@@ -46,11 +46,11 @@ func setActivePage(b *browser.Browser, p *browser.Page) {
 // Recording + self-heal state. browserHealer is injected by app.WireTools (it
 // needs a model Sender, which tools can't import directly).
 var (
-	recorderMu       sync.Mutex
-	activeRecorder   *browser.Recorder
-	recorderStartURL string
-	browserHealer    browser.Healer
-	browserSkillGen  browser.SkillGenerator
+	recorderMu          sync.Mutex
+	activeRecorder      *browser.Recorder
+	recorderStartURL    string
+	browserHealer       browser.Healer
+	browserRecordingGen browser.RecordingGenerator
 )
 
 // browserVision gates whether the browser tool hands the model images. Default
@@ -65,57 +65,73 @@ func SetBrowserVision(on bool) { browserVision.Store(on) }
 // BrowserVisionEnabled reports the current setting (for tests/diagnostics).
 func BrowserVisionEnabled() bool { return browserVision.Load() }
 
-// BrowserHealerSet / BrowserSkillGeneratorSet report whether the LLM-backed
+// BrowserHealerSet / BrowserRecordingGeneratorSet report whether the LLM-backed
 // browser helpers are wired (for tests/diagnostics).
 func BrowserHealerSet() bool {
 	recorderMu.Lock()
 	defer recorderMu.Unlock()
 	return browserHealer != nil
 }
-func BrowserSkillGeneratorSet() bool {
+func BrowserRecordingGeneratorSet() bool {
 	recorderMu.Lock()
 	defer recorderMu.Unlock()
-	return browserSkillGen != nil
+	return browserRecordingGen != nil
 }
 
-// SetBrowserHealer injects the LLM-backed step healer used by run_skill.
+// SetBrowserHealer injects the LLM-backed step healer used by replay.
 func SetBrowserHealer(h browser.Healer) {
 	recorderMu.Lock()
 	defer recorderMu.Unlock()
 	browserHealer = h
 }
 
-// SetBrowserSkillGenerator injects the LLM-backed skill distiller used by
-// record_stop (nil falls back to deterministic compilation).
-func SetBrowserSkillGenerator(g browser.SkillGenerator) {
+// SetBrowserRecordingGenerator injects the LLM-backed recording distiller used
+// by record_stop (nil falls back to deterministic compilation).
+func SetBrowserRecordingGenerator(g browser.RecordingGenerator) {
 	recorderMu.Lock()
 	defer recorderMu.Unlock()
-	browserSkillGen = g
+	browserRecordingGen = g
 }
 
-// BrowserSkillsDir is where recorded browser skills live (editable YAML).
-func BrowserSkillsDir() string {
-	if d := os.Getenv("OCTO_BROWSER_SKILLS_DIR"); d != "" {
+// BrowserRecordingsDir is where browser recordings live (editable YAML).
+// OCTO_BROWSER_RECORDINGS_DIR overrides it; the legacy OCTO_BROWSER_SKILLS_DIR
+// is still honored. The default moved from ~/.octo/browser-skills with the
+// recording rename: migrate the old default dir on first sight, and fall back
+// to it when the rename can't happen rather than letting recordings vanish.
+func BrowserRecordingsDir() string {
+	if d := os.Getenv("OCTO_BROWSER_RECORDINGS_DIR"); d != "" {
+		return d
+	}
+	if d := os.Getenv("OCTO_BROWSER_SKILLS_DIR"); d != "" { // pre-rename name
 		return d
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".octo", "browser-skills")
+	dir := filepath.Join(home, ".octo", "browser-recordings")
+	old := filepath.Join(home, ".octo", "browser-skills")
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if _, err := os.Stat(old); err == nil {
+			if err := os.Rename(old, dir); err != nil {
+				return old
+			}
+		}
+	}
+	return dir
 }
 
-// RenderBrowserSkillsManifest lists recorded browser skills for the L1 system-
+// RenderBrowserRecordingsManifest lists browser recordings for the L1 system-
 // prompt manifest, so the model can discover and replay them in a normal
 // conversation instead of the user having to name one explicitly. Returns "" when
 // there are none. Unlike SKILL.md skills, these are replayed via the browser tool
-// (run_skill), not loaded via the skill tool — the note says so.
-func RenderBrowserSkillsManifest() string {
-	list := browser.ListSkills(BrowserSkillsDir())
+// (action=replay), not loaded via the skill tool — the note says so.
+func RenderBrowserRecordingsManifest() string {
+	list := browser.ListRecordings(BrowserRecordingsDir())
 	if len(list) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("# Browser recordings\n\n")
 	b.WriteString("Recorded browser workflows. Replay one with the `browser` tool " +
-		"(action=run_skill, name=<name>, params as declared); it returns the skill's " +
+		"(action=replay, name=<name>, params as declared); it returns the recording's " +
 		"declared outputs (downloaded files, extracted values) as JSON. These are " +
 		"replayed, not loaded via the `skill` tool. A replay executes every recorded " +
 		"step verbatim, end to end — it cannot be partially applied or adapted beyond " +
@@ -344,11 +360,11 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "cookies", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "run_skill"},
-					"description": "The browser action to perform. observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page for a vision-capable model to actually see (use when content is visual). ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable skill — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop. Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. run_skill replays a recording (deterministic, self-healing).",
+					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "cookies", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "replay", "run_skill"},
+					"description": "The browser action to perform. observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page for a vision-capable model to actually see (use when content is visual). ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable recording — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop. Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. replay replays a recording (deterministic, self-healing; run_skill is a deprecated alias of replay).",
 				},
-				"name":         map[string]any{"type": "string", "description": "Skill name (record_stop / run_skill)."},
-				"params":       map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (run_skill). Omit a value the skill requires (no recorded default, e.g. a secret) and, in interactive modes, the user is prompted for it instead of the call failing."},
+				"name":         map[string]any{"type": "string", "description": "Recording name (record_stop / replay)."},
+				"params":       map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (replay). Omit a value the recording requires (no recorded default, e.g. a secret) and, in interactive modes, the user is prompted for it instead of the call failing."},
 				"url":          map[string]any{"type": "string", "description": "Target URL (navigate)."},
 				"selector":     map[string]any{"type": "string", "description": "Target element selector (click/hover/type/select/scroll/wait/upload/download). Plain CSS, or a Playwright-style form: :has-text(\"…\")/:text(\"…\")/:contains(\"…\"), text=…, :visible, xpath=…, css=…. Use observe to see real selectors."},
 				"network_idle": map[string]any{"type": "boolean", "description": "wait with no selector: settle until fetch/XHR activity stops (bounded by timeout_ms) instead of a fixed delay — the robust way to wait for an SPA's data to finish loading."},
@@ -376,11 +392,11 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 
 	// Bound every action so a CDP call a janky/loading page never acks (e.g. a
 	// mouseWheel scroll on a heavy SPA) fails with a timeout instead of hanging
-	// the whole turn. run_skill replays many steps and download waits for a file
+	// the whole turn. replay runs many steps and download waits for a file
 	// to finish, so they get a much longer ceiling.
 	timeout := 45 * time.Second
 	switch action {
-	case "run_skill", "download":
+	case "replay", "run_skill", "download":
 		timeout = 5 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -656,43 +672,43 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 	case "record_stop":
 		name := getStr(input, "name")
 		if name == "" || filepath.Base(name) != name {
-			return agent.ToolResult{}, fmt.Errorf("browser: record_stop requires a valid skill name")
+			return agent.ToolResult{}, fmt.Errorf("browser: record_stop requires a valid recording name")
 		}
 		recorderMu.Lock()
-		rec, startURL, gen := activeRecorder, recorderStartURL, browserSkillGen
+		rec, startURL, gen := activeRecorder, recorderStartURL, browserRecordingGen
 		activeRecorder = nil
 		recorderMu.Unlock()
 		if rec == nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: no recording in progress")
 		}
 		rec.Stop()
-		skill := browser.GenerateSkill(ctx, name, startURL, rec.Events(), gen)
-		dir := BrowserSkillsDir()
+		recording := browser.GenerateRecording(ctx, name, startURL, rec.Events(), gen)
+		dir := BrowserRecordingsDir()
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return agent.ToolResult{}, err
 		}
 		path := filepath.Join(dir, name+".yaml")
-		if err := browser.SaveSkill(path, skill); err != nil {
+		if err := browser.SaveRecording(path, recording); err != nil {
 			return agent.ToolResult{}, err
 		}
-		msg := fmt.Sprintf("recorded %d step(s) → %s\nReview/edit it there (set params, fix selectors). Replay it with the Replay button in the Browser view, or action=run_skill name=%q. (Recordings are NOT keyword-triggerable — they only run when explicitly replayed.)", len(skill.Steps), path, name)
-		if skill.Description == "" {
+		msg := fmt.Sprintf("recorded %d step(s) → %s\nReview/edit it there (set params, fix selectors). Replay it with the Replay button in the Browser view, or action=replay name=%q. (Recordings are NOT keyword-triggerable — they only run when explicitly replayed.)", len(recording.Steps), path, name)
+		if recording.Description == "" {
 			// The LLM distill fell back (or omitted a description). Surface it here
-			// — the stderr warning never reaches the model — so the skill doesn't
+			// — the stderr warning never reaches the model — so the recording doesn't
 			// silently stay a bare name in the manifest.
-			msg += "\nNo description was distilled; the skills manifest will show a step digest instead. Add a description: line to the YAML to improve discovery."
+			msg += "\nNo description was distilled; the recordings manifest will show a step digest instead. Add a description: line to the YAML to improve discovery."
 		}
 		return agent.ToolResult{Text: msg}, nil
 
-	case "run_skill":
+	case "replay", "run_skill":
 		name := getStr(input, "name")
 		if name == "" || filepath.Base(name) != name {
-			return agent.ToolResult{}, fmt.Errorf("browser: run_skill requires a valid skill name")
+			return agent.ToolResult{}, fmt.Errorf("browser: replay requires a valid recording name")
 		}
-		path := filepath.Join(BrowserSkillsDir(), name+".yaml")
-		skill, err := browser.LoadSkill(path)
+		path := filepath.Join(BrowserRecordingsDir(), name+".yaml")
+		recording, err := browser.LoadRecording(path)
 		if err != nil {
-			return agent.ToolResult{}, fmt.Errorf("browser: load skill %q: %w", name, err)
+			return agent.ToolResult{}, fmt.Errorf("browser: load recording %q: %w", name, err)
 		}
 		params := map[string]string{}
 		if raw, ok := input["params"].(map[string]any); ok {
@@ -700,33 +716,37 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 				params[k] = fmt.Sprintf("%v", v)
 			}
 		}
-		if err := resolveMissingSkillParams(&skill, name, params); err != nil {
+		if err := resolveMissingRecordingParams(&recording, name, params); err != nil {
 			return agent.ToolResult{}, err
 		}
 		recorderMu.Lock()
 		healer := browserHealer
 		recorderMu.Unlock()
-		modified, finalPage, outputs, err := browser.ReplaySkill(ctx, page, &skill, params, browser.ReplayOptions{Healer: healer, Browser: b, DownloadDir: downloadDir()})
+		modified, finalPage, outputs, err := browser.ReplayRecording(ctx, page, &recording, params, browser.ReplayOptions{Healer: healer, Browser: b, DownloadDir: downloadDir()})
 		if err != nil {
-			return agent.ToolResult{}, fmt.Errorf("browser: run_skill %q: %w", name, err)
+			return agent.ToolResult{}, fmt.Errorf("browser: replay %q: %w", name, err)
 		}
-		// A click in the skill may have opened (and switched to) a new tab; keep
+		// A click in the recording may have opened (and switched to) a new tab; keep
 		// the session pointed there so follow-up actions act on the right page.
 		if finalPage != nil && finalPage != page {
 			setActivePage(b, finalPage)
 		}
-		// Return a structured envelope (not just a step count) so the skill's
+		// Return a structured envelope (not just a step count) so the recording's
 		// declared outputs — downloaded file paths, extracted values — can flow to
 		// a downstream step or be parsed by an orchestrating workflow.
 		env := map[string]any{
-			"skill":   name,
-			"steps":   len(skill.Steps),
-			"outputs": outputs,
+			"recording": name,
+			"steps":     len(recording.Steps),
+			"outputs":   outputs,
 		}
 		if modified {
-			if werr := browser.SaveSkill(path, skill); werr == nil {
+			if werr := browser.SaveRecording(path, recording); werr == nil {
 				env["self_healed"] = true
 			}
+		}
+		if action == "run_skill" {
+			// Deprecated alias kept so saved workflows and habits don't break.
+			env["deprecated_action"] = "run_skill is deprecated; use action=replay"
 		}
 		j, err := json.MarshalIndent(env, "", "  ")
 		if err != nil {
@@ -739,28 +759,18 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 	}
 }
 
-// resolveMissingSkillParams checks skill's {{...}} placeholders against the
-// caller-supplied params and, for any ReplaySkill would otherwise reject as
-// unresolved, prompts the user for a value via the same Asker
-// ask_user_question uses — mirroring ensureRequiredWorkflowParams in
-// workflow.go — rather than letting ReplaySkill fail with a bare "missing
-// required param(s)" error the model has no way to act on. params is mutated
-// in place. When no asker is available (headless/unattended modes),
-// ReplaySkill's own error still fires, so behavior there is unchanged.
-// resolveMissingSkillParams checks a browser skill's declared params against
-// the caller-supplied params. Any that are missing and have no default
+// resolveMissingRecordingParams checks a browser recording's declared params
+// against the caller-supplied params. Any that are missing and have no default
 // produce an error listing them — the model then decides whether it already
 // knows the values (re-invoke with `params` filled in) or needs to surface an
-// `ask_user_question` to the caller. The old behaviour auto-promoted via the
-// ctx Asker, which stole that decision from the model and caused repeat prompts
-// when the model had already asked the user.
-func resolveMissingSkillParams(skill *browser.Skill, skillName string, params map[string]string) error {
-	missing := browser.MissingRequiredParams(skill, params)
+// `ask_user_question` to the caller.
+func resolveMissingRecordingParams(rec *browser.Recording, recName string, params map[string]string) error {
+	missing := browser.MissingRequiredParams(rec, params)
 	if len(missing) == 0 {
 		return nil
 	}
-	return fmt.Errorf("browser: run_skill %q is missing required param(s): %s — pass them in `params`",
-		skillName, strings.Join(missing, ", "))
+	return fmt.Errorf("browser: replay %q is missing required param(s): %s — pass them in `params`",
+		recName, strings.Join(missing, ", "))
 }
 
 func getStr(input map[string]any, key string) string {
