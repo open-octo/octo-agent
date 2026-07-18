@@ -281,9 +281,9 @@
           <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
           <span class="tool-name mono">{tool.name}</span>
           {#if tool.summary}
-            <span class="tool-arg mono">{tool.summary}</span>
+            <span class="tool-arg mono" title={tool.summary}>{tool.summary}</span>
           {:else if tool.args}
-            <span class="tool-arg mono">{argSummary(tool.name, tool.args)}</span>
+            <span class="tool-arg mono" title={argSummary(tool.name, tool.args)}>{argSummary(tool.name, tool.args)}</span>
           {/if}
           {#if meta && !fErr && !tErr}<span class="tool-meta" style="margin-left:auto">{meta}</span>{/if}
           <span style="{(meta && !fErr && !tErr) ? '' : 'margin-left:auto;'}flex:0 0 auto;display:flex;align-items:center">
@@ -465,10 +465,43 @@
 .tool-summary {
   list-style: none; display: flex; align-items: center; gap: 8px;
   padding: 9px 12px; cursor: pointer; user-select: none;
+  position: relative;
 }
 .tool-summary:hover { background: var(--hover-neutral); }
 .tool-name { font-size: 13px; color: var(--text); }
-.tool-arg { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* tool-arg hover tooltip: 完整参数以浮层展示，支持鼠标选中复制 */
+.tool-arg {
+  font-size: 12px; color: var(--text-tertiary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  user-select: text;
+}
+.tool-arg[title]::after {
+  content: attr(title);
+  position: absolute;
+  left: 0; top: 100%;
+  margin-top: 4px;
+  max-width: min(560px, calc(100vw - 48px));
+  padding: 6px 10px;
+  background: var(--bg-container);
+  border: 1px solid var(--border-table);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  font-size: 12px; line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre-wrap; word-break: break-all;
+  overflow-wrap: anywhere;
+  z-index: 999;
+  user-select: text;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.tool-arg[title]:hover::after {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* 去掉之前 overflow: visible 的覆盖 */
+.tool-group { overflow: hidden; }
 .tool-meta { font-size: 12px; color: var(--text-tertiary); }
 .tool-output {
   margin: 0; padding: 10px 14px; border-top: 1px solid var(--border-table);
