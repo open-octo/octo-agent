@@ -14,7 +14,7 @@ octo's record/replay has two separable layers:
   hand to an LLM only to repair a failed step. This loop, the skill-as-editable
   artifact, text/semantic anchoring, conservative distillation, and the
   self-heal-on-failure pattern are all substrate-independent. They live in the
-  `Step` / `ReplayRecording` / `Healer` shapes in `internal/browser/skill.go` and do
+  `Step` / `ReplayRecording` / `Healer` shapes in `internal/browser/recording.go` and do
   not assume a browser.
 
 - **The substrate (not portable).** Capture and replay today are bound to
