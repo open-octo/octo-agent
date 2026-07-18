@@ -2191,7 +2191,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
 /* ── Inline message edit ───────────────────────────────────────────────── */
 .inline-edit-input {
-  width: 100%; border: 1px solid var(--blue-5); border-radius: 8px;
+  width: 100%; min-width: 720px; border: 1px solid var(--blue-5); border-radius: 8px;
   padding: 10px 12px; font-size: 14px; font-family: inherit; resize: vertical;
   background: var(--bg-container); color: var(--text); box-sizing: border-box;
   outline: none;
