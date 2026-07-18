@@ -266,3 +266,64 @@ func TestRecorderCapturesEnter(t *testing.T) {
 		t.Fatalf("enter event = %+v, want selector #q with the typed snapshot", enters[0])
 	}
 }
+
+// TestRecorderCapturesSPANavigation: history.pushState route changes are recorded
+// as navigate events (they never fire Page.frameNavigated), while SPA routing
+// inside a subframe is ignored — it isn't the page moving.
+func TestRecorderCapturesSPANavigation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/frame", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>f</title><button id="fb" onclick="history.pushState({},'','/frame2')">F</button>`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>spa</title>
+<button id="go" onclick="history.pushState({},'','/route2')">Go</button><iframe src="/frame"></iframe>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#go", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+	if err := page.Click(ctx, "#go"); err != nil {
+		t.Fatalf("click #go: %v", err)
+	}
+	hasNav := func(sub string) bool {
+		for _, e := range rec.Events() {
+			if e.Type == "navigate" && strings.Contains(e.URL, sub) {
+				return true
+			}
+		}
+		return false
+	}
+	found := false
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if found = hasNav("/route2"); found {
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("pushState navigation was not captured: %+v", rec.Events())
+	}
+	// SPA routing inside the iframe must NOT produce a navigate event.
+	if err := page.Eval(ctx, `document.querySelector('iframe').contentDocument.getElementById('fb').click()`, nil); err != nil {
+		t.Fatalf("drive iframe pushState: %v", err)
+	}
+	time.Sleep(700 * time.Millisecond)
+	if hasNav("/frame2") {
+		t.Fatalf("subframe SPA routing should be ignored: %+v", rec.Events())
+	}
+}
