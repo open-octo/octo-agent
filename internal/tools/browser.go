@@ -360,8 +360,8 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "cookies", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "replay", "run_skill"},
-					"description": "The browser action to perform. observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page for a vision-capable model to actually see (use when content is visual). ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable recording — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop. Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. replay replays a recording (deterministic, self-healing; run_skill is a deprecated alias of replay).",
+					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "cookies", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "record_cancel", "replay", "run_skill"},
+					"description": "The browser action to perform. observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page for a vision-capable model to actually see (use when content is visual). ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable recording — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop (or record_cancel to discard the demo without saving). Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. replay replays a recording (deterministic, self-healing; run_skill is a deprecated alias of replay).",
 				},
 				"name":         map[string]any{"type": "string", "description": "Recording name (record_stop / replay)."},
 				"params":       map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (replay). Omit a value the recording requires (no recorded default, e.g. a secret) and, in interactive modes, the user is prompted for it instead of the call failing."},
@@ -658,7 +658,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		recorderMu.Lock()
 		defer recorderMu.Unlock()
 		if activeRecorder != nil {
-			return agent.ToolResult{}, fmt.Errorf("browser: a recording is already in progress")
+			return agent.ToolResult{}, fmt.Errorf("browser: a recording is already in progress (record_stop to save it, record_cancel to discard it)")
 		}
 		rec := browser.NewRecorder(page)
 		if err := rec.Start(ctx); err != nil {
@@ -668,6 +668,20 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		_ = page.Eval(ctx, "location.href", &u)
 		activeRecorder, recorderStartURL = rec, u
 		return agent.ToolResult{Text: "recording started on " + u}, nil
+
+	case "record_cancel":
+		// Discard an abandoned demonstration without saving it — previously the
+		// only way out was a throwaway record_stop (which wrote a junk YAML), and
+		// record_start stayed wedged until then.
+		recorderMu.Lock()
+		rec := activeRecorder
+		activeRecorder = nil
+		recorderMu.Unlock()
+		if rec == nil {
+			return agent.ToolResult{}, fmt.Errorf("browser: no recording in progress")
+		}
+		rec.Stop()
+		return agent.ToolResult{Text: "recording discarded (nothing saved)"}, nil
 
 	case "record_stop":
 		name := getStr(input, "name")

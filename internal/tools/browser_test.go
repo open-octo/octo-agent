@@ -198,6 +198,48 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	}
 }
 
+// TestBrowserTool_RecordCancel: an abandoned recording can be discarded without
+// saving, freeing record_start — previously wedged until a throwaway
+// record_stop wrote a junk YAML.
+func TestBrowserTool_RecordCancel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30_000_000_000)
+	defer cancel()
+	if !browser.ChromeAvailable("") {
+		t.Skip("chrome not available")
+	}
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Headless: true})
+	skipOnBrowserFlake(t, "launch", err)
+	page, err := b.NewPage(ctx, "about:blank")
+	skipOnBrowserFlake(t, "new page", err)
+	SetBrowserSession(b, page)
+	defer ResetBrowserSession()
+
+	tool := BrowserTool{}
+	run := func(in map[string]any) (string, error) { r, e := tool.Execute(ctx, "browser", in); return r.Text, e }
+
+	if _, err := run(map[string]any{"action": "record_start"}); err != nil {
+		skipOnBrowserFlake(t, "record_start", err)
+	}
+	// A second start must fail — and the error must name the escape hatch.
+	if _, err := run(map[string]any{"action": "record_start"}); err == nil || !strings.Contains(err.Error(), "record_cancel") {
+		t.Fatalf("double record_start err = %v, want a record_cancel hint", err)
+	}
+	if _, err := run(map[string]any{"action": "record_cancel"}); err != nil {
+		t.Fatalf("record_cancel: %v", err)
+	}
+	// Freed: a fresh recording can start (and be discarded too).
+	if _, err := run(map[string]any{"action": "record_start"}); err != nil {
+		t.Fatalf("record_start after cancel: %v", err)
+	}
+	if _, err := run(map[string]any{"action": "record_cancel"}); err != nil {
+		t.Fatalf("second record_cancel: %v", err)
+	}
+	// Nothing left to cancel now.
+	if _, err := run(map[string]any{"action": "record_cancel"}); err == nil {
+		t.Fatal("record_cancel with no active recording should error")
+	}
+}
+
 // TestResolveMissingRecordingParams_ErrorsOnMissingRequired verifies a param
 // with no default and no caller-supplied value returns a clear error naming
 // the missing param(s), rather than auto-prompting the user. The model then
