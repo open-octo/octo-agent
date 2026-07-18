@@ -338,7 +338,7 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 	const system = "You clean a recorded browser workflow into a minimal, correct, replayable recording. " +
 		"RULES: (1) Use ONLY CSS selectors that appear in the provided baseline — never invent or alter a selector. " +
 		"(2) Drop redundant back-and-forth and retries; keep the intended linear path. " +
-		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}). " +
+		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}, every declared param name, and any secret: true marker unchanged). " +
 		"(4) Preserve step order and all navigate steps. " +
 		"(5) Write description as a short statement of what the workflow does. " +
 		"Output ONLY the recording as YAML (keys: name, description, params, steps), no prose, no code fences."
@@ -367,6 +367,23 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 	for i := range refined.Params {
 		if secretParams[refined.Params[i].Name] {
 			refined.Params[i].Secret = true
+		}
+	}
+	// The distiller may also drop a secret param's DECLARATION while keeping
+	// its {{placeholder}} in a step. Left alone, replay would treat it as a
+	// non-secret missing param — the plaintext-in-conversation leak the secret
+	// marker exists to close. Re-attach the baseline declaration for any
+	// baseline secret param the refined steps still reference.
+	declared := map[string]bool{}
+	for _, p := range refined.Params {
+		declared[p.Name] = true
+	}
+	for _, p := range base.Params {
+		if !p.Secret || declared[p.Name] {
+			continue
+		}
+		if paramReferenced(&refined, p.Name) {
+			refined.Params = append(refined.Params, p)
 		}
 	}
 	if !selectorsSubset(refined, base) {
@@ -811,6 +828,24 @@ func paramNames(params []Param) []string {
 		names[i] = p.Name
 	}
 	return names
+}
+
+// paramReferenced reports whether any step field subst() expands (URL, Value,
+// JS, Verify.Text, Verify.URL) contains a {{name}} placeholder — the same
+// scan unresolvedPlaceholders does, but for a single param.
+func paramReferenced(recording *Recording, name string) bool {
+	want := "{{" + name + "}}"
+	for _, st := range recording.Steps {
+		for _, field := range []string{st.URL, st.Value, st.JS} {
+			if strings.Contains(field, want) {
+				return true
+			}
+		}
+		if st.Verify != nil && (strings.Contains(st.Verify.Text, want) || strings.Contains(st.Verify.URL, want)) {
+			return true
+		}
+	}
+	return false
 }
 
 // placeholderRe matches a {{name}} substitution placeholder in a step field.

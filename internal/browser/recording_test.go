@@ -1321,3 +1321,40 @@ func TestGenerateRecordingDistillKeepsSecretFlag(t *testing.T) {
         t.Fatalf("non-secret param must not gain the secret flag: %+v", s.Params)
     }
 }
+
+// TestGenerateRecordingDistillRestoresDroppedSecretParam: the distiller may
+// keep the {{password}} placeholder while dropping the param declaration
+// entirely. Left alone, replay would treat it as a non-secret missing param —
+// the plaintext-in-conversation leak #1566 closes. The merge re-attaches the
+// baseline declaration (with its secret flag) for any baseline secret param
+// still referenced by the refined steps.
+func TestGenerateRecordingDistillRestoresDroppedSecretParam(t *testing.T) {
+	ctx := context.Background()
+	events := []RecordedEvent{
+		{Type: "change", Selector: "#u", Tag: "INPUT", Field: "username", Value: "roy"},
+		{Type: "change", Selector: "#pw", Tag: "INPUT", Field: "password", Secret: true},
+		{Type: "click", Selector: "#go", Tag: "BUTTON", Text: "Sign in"},
+	}
+	// The distiller declares only username; password survives as a bare placeholder.
+	dropDecl := func(_ context.Context, _, _ string) (string, error) {
+		return "name: x\nparams:\n" +
+			"  - {name: username}\n" +
+			"steps:\n" +
+			"  - {action: type, selector: '#u', value: '{{username}}'}\n" +
+			"  - {action: type, selector: '#pw', value: '{{password}}'}\n" +
+			"  - {action: click, selector: '#go'}\n", nil
+	}
+	s := GenerateRecording(ctx, "demo", "", events, dropDecl)
+	var pw *Param
+	for i := range s.Params {
+		if s.Params[i].Name == "password" {
+			pw = &s.Params[i]
+		}
+	}
+	if pw == nil {
+		t.Fatalf("dropped secret param declaration must be restored: %+v", s.Params)
+	}
+	if !pw.Secret || pw.Default != "" {
+		t.Fatalf("restored declaration must keep secret:true and no default: %+v", *pw)
+	}
+}
