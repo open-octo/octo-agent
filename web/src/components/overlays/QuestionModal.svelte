@@ -125,7 +125,8 @@
             bind:this={inputEl}
             class="custom-input"
             type={current.secret ? 'password' : 'text'}
-            autocomplete="off"
+            autocomplete={current.secret ? 'new-password' : 'off'}
+            data-1p-ignore={current.secret ? true : undefined}
             placeholder={$t('question.custom_placeholder')}
             bind:value={customText}
             onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
@@ -181,7 +182,8 @@
           bind:this={inputEl}
           class="banner-input"
           type={current.secret ? 'password' : 'text'}
-          autocomplete="off"
+          autocomplete={current.secret ? 'new-password' : 'off'}
+          data-1p-ignore={current.secret ? true : undefined}
           placeholder={$t('question.custom_placeholder')}
           bind:value={customText}
           onkeydown={(e) => { if (e.key === 'Enter' && customText.trim()) { e.preventDefault(); submit() } }}

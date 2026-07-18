@@ -101,6 +101,37 @@ requests. Recordings are also replay-only: there's no keyword-trigger path (an e
 that was tried and reverted as unreliable).
 :::
 
+## Secret params
+
+A param declared with `secret: true` is a password-class value that **never enters the
+conversation** — not the transcript, not memory, not the provider's context. Recording already
+guarantees the value never lands in the YAML (password fields are captured empty and declared
+without a default); replay completes the guarantee by collecting the value at runtime, out-of-band:
+
+```yaml
+params:
+  - name: password
+    description: secret value (not stored; provide at replay)
+    secret: true
+```
+
+When a secret param has no supplied value, replay resolves it in this order:
+
+1. **An explicit `params` entry** from the caller always wins.
+2. **The session cache** — a value already provided this session is reused silently (in-memory
+   only, evaporates when the session is deleted; never written to disk).
+3. **Environment** — `OCTO_BROWSER_SECRET_<NAME>` (param name uppercased, non-alphanumerics as
+   `_`: `password` → `OCTO_BROWSER_SECRET_PASSWORD`, `api_token` → `OCTO_BROWSER_SECRET_API_TOKEN`).
+   Set it in the process environment or in `~/.octo/serve.env` (mode `0600`, loaded at startup).
+   Same-named params across recordings share one env value. This is the path for cron and other
+   unattended replays.
+4. **A masked prompt** — the TUI reads with echo off; the Web UI shows a password field.
+
+IM chats (WeChat, Telegram, …) deliberately **can't** collect secrets: a value typed there persists
+in platform history, which no client-side care can undo. A replay that hits a missing secret on IM
+fails with an error pointing at `serve.env` or the Web UI / TUI instead. Error messages name the
+recording and the param — never the value.
+
 ## Self-heal
 
 If a step's selector no longer matches anything — and only if a model is configured for this
