@@ -275,15 +275,17 @@
       {@const todos = todoItems(tool)}
       {@const fErr = fetchError(tool)}
       {@const tErr = terminalFailure(tool)}
+      <!-- Full arg text lives in the DOM either way — the CSS only visually
+           ellipsizes it. Surfacing it via `title` + selectable text lets the
+           user read/copy the whole thing despite the truncation. -->
+      {@const argText = tool.summary || (tool.args ? argSummary(tool.name, tool.args) : '')}
       <details open={defaultOpen(tool, lastId, groupStreaming)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
           <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
           <span class="tool-name mono">{tool.name}</span>
-          {#if tool.summary}
-            <span class="tool-arg mono">{tool.summary}</span>
-          {:else if tool.args}
-            <span class="tool-arg mono">{argSummary(tool.name, tool.args)}</span>
+          {#if argText}
+            <span class="tool-arg mono" title={argText}>{argText}</span>
           {/if}
           {#if meta && !fErr && !tErr}<span class="tool-meta" style="margin-left:auto">{meta}</span>{/if}
           <span style="{(meta && !fErr && !tErr) ? '' : 'margin-left:auto;'}flex:0 0 auto;display:flex;align-items:center">
@@ -468,7 +470,7 @@
 }
 .tool-summary:hover { background: var(--hover-neutral); }
 .tool-name { font-size: 13px; color: var(--text); }
-.tool-arg { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-arg { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; cursor: text; }
 .tool-meta { font-size: 12px; color: var(--text-tertiary); }
 .tool-output {
   margin: 0; padding: 10px 14px; border-top: 1px solid var(--border-table);
