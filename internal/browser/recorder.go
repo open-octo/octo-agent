@@ -261,7 +261,7 @@ func (r *Recorder) Start(ctx context.Context) error {
 	// multi-page demonstration replays from the right pages — otherwise the only
 	// navigate step is the synthesized start URL, and the recording loses every
 	// page the user moved to.
-	r.watchNavigations(p.sessionID)
+	r.watchNavigations(ctx, p.sessionID)
 	return nil
 }
 
@@ -279,16 +279,49 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
 	if err := r.instrumentSession(ctx, session, ""); err != nil {
 		return
 	}
-	r.watchNavigations(session)
+	r.watchNavigations(ctx, session)
 }
 
-// watchNavigations records top-level navigations on one page session (subframe
-// navigations ignored; consecutive repeats collapsed).
-func (r *Recorder) watchNavigations(session string) {
+// watchNavigations records top-level navigations on one page session: both
+// cross-document (Page.frameNavigated) and same-document SPA route changes
+// (Page.navigatedWithinDocument — pushState/replaceState never fire
+// frameNavigated). Subframe navigations are ignored: the cross-document event
+// carries the frame's parentId, and the same-document one is filtered against
+// the session's top frame (resolved once here). Consecutive repeats collapse.
+func (r *Recorder) watchNavigations(ctx context.Context, session string) {
+	topFrameID := ""
+	if res, err := r.page.cli.call(ctx, session, "Page.getFrameTree", nil); err == nil {
+		var ft struct {
+			FrameTree struct {
+				Frame struct {
+					ID string `json:"id"`
+				} `json:"frame"`
+			} `json:"frameTree"`
+		}
+		if json.Unmarshal(res, &ft) == nil {
+			topFrameID = ft.FrameTree.Frame.ID
+		}
+	}
+
 	navEvents, navUnsub := r.page.cli.subscribe("Page.frameNavigated", session)
+	spaEvents, spaUnsub := r.page.cli.subscribe("Page.navigatedWithinDocument", session)
 	r.mu.Lock()
-	r.unsubs = append(r.unsubs, navUnsub)
+	r.unsubs = append(r.unsubs, navUnsub, spaUnsub)
 	r.mu.Unlock()
+
+	recordNav := func(u string) {
+		if u == "" || u == "about:blank" {
+			return
+		}
+		r.mu.Lock()
+		n := len(r.events)
+		if n > 0 && r.events[n-1].Type == "navigate" && r.events[n-1].URL == u {
+			r.mu.Unlock()
+			return // collapse the initial-load echo / repeat
+		}
+		r.events = append(r.events, RecordedEvent{Type: "navigate", URL: u})
+		r.mu.Unlock()
+	}
 
 	go func() {
 		for ev := range navEvents {
@@ -301,18 +334,22 @@ func (r *Recorder) watchNavigations(session string) {
 			if json.Unmarshal(ev.Params, &b) != nil || b.Frame.ParentID != "" {
 				continue // ignore subframe navigations
 			}
-			u := b.Frame.URL
-			if u == "" || u == "about:blank" {
+			recordNav(b.Frame.URL)
+		}
+	}()
+	go func() {
+		for ev := range spaEvents {
+			var b struct {
+				FrameID string `json:"frameId"`
+				URL     string `json:"url"`
+			}
+			if json.Unmarshal(ev.Params, &b) != nil {
 				continue
 			}
-			r.mu.Lock()
-			n := len(r.events)
-			if n > 0 && r.events[n-1].Type == "navigate" && r.events[n-1].URL == u {
-				r.mu.Unlock()
-				continue // collapse the initial-load echo / repeat
+			if topFrameID != "" && b.FrameID != topFrameID {
+				continue // SPA routing inside a subframe — not a page move
 			}
-			r.events = append(r.events, RecordedEvent{Type: "navigate", URL: u})
-			r.mu.Unlock()
+			recordNav(b.URL)
 		}
 	}()
 }
