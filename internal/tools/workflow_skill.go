@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,10 +20,16 @@ import (
 // concurrent replays (from a parallel()/pipeline()) would fight over one page.
 var workflowBrowserMu sync.Mutex
 
-// dispatchWorkflowSkill backs the workflow skill() primitive. It resolves name
-// (optionally "browser:"/"md:"-prefixed) to a browser recording or a
-// SKILL.md skill and runs it, returning the outputs as a JSON string in Reply —
-// what skill() parses to native Ruby.
+// dispatchWorkflowSkill backs the workflow skill() primitive: it resolves name
+// to a SKILL.md skill and runs it as a sub-agent, returning the reply as a JSON
+// string in Reply — what skill() parses to native Ruby.
+//
+// Two legacy forms still reach a browser recording for one release: a
+// "browser:"-prefixed name (the prelude logs the deprecation), and an
+// unprefixed name that exists only as a recording. A name existing as BOTH now
+// resolves to the SKILL.md skill — it used to be an ambiguity error. The
+// recording() façade arrives as a "recording:"-prefixed name and routes to
+// dispatchWorkflowRecording.
 func dispatchWorkflowSkill(ctx context.Context, spawner Spawner, name, paramsJSON, schema string) workflow.AgentResult {
 	kind, bare := splitSkillKind(name)
 
@@ -31,38 +38,45 @@ func dispatchWorkflowSkill(ctx context.Context, spawner Spawner, name, paramsJSO
 		return workflow.AgentResult{Err: fmt.Errorf("skill %q: %w", name, err)}
 	}
 
-	isBrowser := browserRecordingExists(bare)
-	_, isMD := skillRegistryGet(bare)
-
 	switch kind {
-	case "browser":
-		if !isBrowser {
-			return workflow.AgentResult{Err: fmt.Errorf("skill %q: no browser recording named %q", name, bare)}
-		}
-		return runBrowserRecording(ctx, bare, params)
+	case "recording", "browser":
+		// recording(): canonical. browser:: deprecated alias (same namespace).
+		return dispatchWorkflowRecording(ctx, bare, params)
 	case "md":
-		if !isMD {
+		if _, isMD := skillRegistryGet(bare); !isMD {
 			return workflow.AgentResult{Err: fmt.Errorf("skill %q: no SKILL.md skill named %q", name, bare)}
 		}
 		return runMDWorkflowSkill(ctx, spawner, bare, params, schema)
 	default:
-		switch {
-		case isBrowser && isMD:
-			return workflow.AgentResult{Err: fmt.Errorf("skill %q is ambiguous (both a browser recording and a SKILL.md skill exist); prefix with browser: or md:", bare)}
-		case isBrowser:
-			return runBrowserRecording(ctx, bare, params)
-		case isMD:
+		if _, isMD := skillRegistryGet(bare); isMD {
 			return runMDWorkflowSkill(ctx, spawner, bare, params, schema)
-		default:
-			return workflow.AgentResult{Err: fmt.Errorf("skill %q not found (no browser recording or SKILL.md skill by that name)", bare)}
 		}
+		if browserRecordingExists(bare) {
+			// Legacy unprefixed-to-recording resolution, kept for saved workflows.
+			slog.Warn("workflow: unprefixed skill() resolved to a browser recording — use recording()", "name", bare)
+			return dispatchWorkflowRecording(ctx, bare, params)
+		}
+		return workflow.AgentResult{Err: fmt.Errorf("skill %q not found (no browser recording or SKILL.md skill by that name)", bare)}
 	}
 }
 
-// splitSkillKind peels an optional "browser:"/"md:" engine prefix off a skill
-// name, returning the kind ("" when unprefixed) and the bare name.
+// dispatchWorkflowRecording backs the workflow recording() primitive: it
+// replays the named browser recording and returns its declared outputs as a
+// JSON string in Reply — what recording() parses to native Ruby.
+func dispatchWorkflowRecording(ctx context.Context, name string, params map[string]any) workflow.AgentResult {
+	if !browserRecordingExists(name) {
+		return workflow.AgentResult{Err: fmt.Errorf("recording %q: no browser recording by that name", name)}
+	}
+	return runBrowserRecording(ctx, name, params)
+}
+
+// splitSkillKind peels an optional engine prefix off a name, returning the kind
+// ("" when unprefixed) and the bare name: "recording:" (canonical) and
+// "browser:" (deprecated) select a browser recording, "md:" a SKILL.md skill.
 func splitSkillKind(name string) (kind, bare string) {
 	switch {
+	case strings.HasPrefix(name, "recording:"):
+		return "recording", strings.TrimPrefix(name, "recording:")
 	case strings.HasPrefix(name, "browser:"):
 		return "browser", strings.TrimPrefix(name, "browser:")
 	case strings.HasPrefix(name, "md:"):

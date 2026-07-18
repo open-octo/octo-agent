@@ -11,8 +11,8 @@ want repeated to a saved, validated workflow. It takes one of two shapes,
 sometimes mixed in the same script:
 
 - **Skill chain** — the script calls *existing* skills/recordings in order via
-  `skill(...)`, passing each one's output to the next's input. You are composing
-  things that already exist.
+  `recording(...)` / `skill(...)`, passing each one's output to the next's
+  input. You are composing things that already exist.
 - **Primitive-composed** — the script calls `agent(...)` directly (alone, or
   fanned out with `parallel`/`pipeline`) to do fresh sub-agent work that has no
   matching existing skill — e.g. "review this diff across 3 dimensions in
@@ -29,14 +29,15 @@ Figure out which shape (or mix) fits **before** drafting anything — see Step 0
   `opts[:schema]` (a JSON-schema string) makes the reply come back as a JSON
   *string* matching it — parse it yourself with `JSON.parse`, unlike `skill()`'s
   schema results, which arrive already parsed.
-- `skill(name, params = {}, opts = {})` — runs one *existing* skill and returns
-  its outputs as a Ruby `Hash`. A **browser recording** replays deterministically;
-  a **SKILL.md skill** runs as a sub-agent. `opts[:schema]` makes a SKILL.md step
-  return structured (already-parsed) output.
+- `skill(name, params = {}, opts = {})` — runs one *existing* SKILL.md skill as
+  a sub-agent and returns its result as native Ruby. `opts[:schema]` makes the
+  reply come back structured (already parsed).
+- `recording(name, params = {})` — replays one *existing* browser recording
+  deterministically and returns its declared outputs as a Ruby `Hash`.
 - `args` — the workflow's input, a Ruby `Hash`, so the saved workflow is
   parameterizable and reusable.
 - `parallel(items) { |it| ... }` / `pipeline(items, *stages)` — for fan-out or
-  staged flows, over either `agent()` or `skill()` calls.
+  staged flows, over `agent()` / `skill()` / `recording()` calls.
 - `log(msg)` / `phase(title)` — progress output, no effect on scheduling.
 - The `workflow` tool — runs a script (in the **background**: returns a run id).
 - `workflow_save` — persists the script as a named workflow.
@@ -72,9 +73,10 @@ Read the system prompt's `# Available skills` (SKILL.md skills) and
 user's goal — with their params, and, for recordings, their outputs — and ask
 which ones, in what order.
 
-Check for a **name collision**: if one name is *both* a recording and a SKILL.md
-skill, `skill("that-name")` fails as ambiguous. Flag it and disambiguate with a
-`browser:` or `md:` prefix (e.g. `skill("browser:export")`).
+Check for a **name collision**: one name can exist as *both* a recording and a
+SKILL.md skill. That's no longer an error — `recording("x")` always picks the
+recording, `skill("x")` always picks the skill — but it IS a readability trap
+for whoever reads the script later. Flag it, and prefer renaming one of them.
 
 ### 2. Wire outputs → inputs (skill-chain steps only)
 For each adjacent pair, propose how the earlier step's output feeds the next
@@ -101,7 +103,7 @@ to the user before running. Shape for a skill chain:
 
 ```ruby
 # invoked as: workflow name=monthly-report, args={ "month" => "2026-06" }
-dl  = skill("download-excels", { "month" => args["month"] })        # recording → {"files"=>[...]}
+dl  = recording("download-excels", { "month" => args["month"] })    # recording → {"files"=>[...]}
 tbl = skill("merge-excels", { "inputs" => dl["files"] },            # SKILL.md, proposed schema
             schema: '{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}')
 ppt = skill("excels-to-ppt", { "table" => tbl["path"] })            # SKILL.md
@@ -119,8 +121,8 @@ findings.each { |f| log(f) }
 findings
 ```
 
-A failed `agent()`/`skill()` raises and halts the run, so you don't have to check
-each result for errors.
+A failed `agent()`/`skill()`/`recording()` raises and halts the run, so you
+don't have to check each result for errors.
 
 ### 4. Dry-run to validate the wiring — it is asynchronous
 The `workflow` tool runs in the **background**: it returns a run id, and you must

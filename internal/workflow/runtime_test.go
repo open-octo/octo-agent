@@ -763,3 +763,33 @@ func TestRun_RegexpInvalidRaises(t *testing.T) {
 		t.Errorf("Output = %q, want raised", got.Output)
 	}
 }
+
+func TestRun_RecordingRoundTrip(t *testing.T) {
+	// recording() is a prelude façade over the same channel as skill(): the name
+	// reaches the host prefixed "recording:", params flow, outputs parse to Ruby.
+	got, err := Run(context.Background(),
+		`s = recording("download-excels", {"month" => "2026-06"}); "name=#{s["name"]} month=#{s["params"]["month"]}"`,
+		Options{Agent: echoAgent, Skill: echoSkill})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Output != "name=recording:download-excels month=2026-06" {
+		t.Errorf("Output = %q", got.Output)
+	}
+}
+
+func TestRun_SkillBrowserPrefixDeprecation(t *testing.T) {
+	// The legacy skill("browser:x") form still reaches the host (compatibility),
+	// and the prelude logs the deprecation through the workflow Log hook.
+	var logs []string
+	_, err := Run(context.Background(),
+		`skill("browser:download-excels")`,
+		Options{Agent: echoAgent, Skill: echoSkill, Log: func(s string) { logs = append(logs, s) }})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	joined := strings.Join(logs, "\n")
+	if !strings.Contains(joined, "deprecated") || !strings.Contains(joined, `recording("download-excels")`) {
+		t.Errorf("deprecation log missing or wrong: %q", joined)
+	}
+}

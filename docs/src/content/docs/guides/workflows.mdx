@@ -19,7 +19,8 @@ system Ruby needed). There is no JavaScript option.
 | Call | Returns | Purpose |
 |---|---|---|
 | `agent(prompt, opts = {})` | String | Run one sub-agent to completion. `opts`: `model:`, `tools:` (restrict to these), `read_only: true`, `schema:` (a JSON Schema string — the reply comes back as a JSON string matching it), `isolation: "worktree"` |
-| `skill(name, params = {}, opts = {})` | Hash / Array / scalar | Run a named skill or browser recording. Prefix with `"browser:"` or `"md:"` if a recording and a `SKILL.md` share a name. Unlike `agent`, results with a `schema` come back already parsed |
+| `skill(name, params = {}, opts = {})` | Hash / Array / scalar | Run a named `SKILL.md` skill as a sub-agent. Unlike `agent`, results with a `schema` come back already parsed |
+| `recording(name, params = {})` | Hash | Replay a named browser recording deterministically, returning its declared outputs |
 | `parallel(items) { \|it\| ... }` | Array | Run the block over every item concurrently; results keep input order |
 | `pipeline(items, *stages)` | Array | Each item flows through every stage independently — no barrier between stages, so item A can be three stages ahead of item B |
 | `log(msg)` | — | A progress line in the run's log |
@@ -154,5 +155,5 @@ If you manually invoke two or more distinct skills or browser recordings in one 
 `workflow-creator` skill or `workflow_save` directly. It won't nudge again in a turn where you've
 already called `workflow` or `workflow_save`.
 
-Next: browser recordings compose directly into workflow scripts via `skill("browser:<name>")` — see
+Next: browser recordings compose directly into workflow scripts via `recording("<name>")` — see
 [Automate with browser control](/docs/guides/browser-automation/).

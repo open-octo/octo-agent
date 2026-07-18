@@ -68,9 +68,11 @@ type AgentResult struct {
 	Err          error
 }
 
-// SkillFunc runs one skill() call to completion: a recorded browser skill or a
-// SKILL.md sub-agent, dispatched by name. paramsJSON is the call's params object
-// (JSON), schema an optional JSON Schema the result must satisfy (SKILL.md path).
+// SkillFunc runs one skill() call to completion: a SKILL.md skill as a
+// sub-agent, or (via the "recording:"/"browser:"-prefixed and legacy unprefixed
+// forms) a browser recording replay — see tools.dispatchWorkflowSkill for the
+// routing. paramsJSON is the call's params object (JSON), schema an optional
+// JSON Schema the result must satisfy (SKILL.md path).
 // The returned AgentResult's Reply is the skill's outputs as a JSON string —
 // what skill() returns to the script (parsed to native Ruby). Must be safe for
 // concurrent calls (parallel()/pipeline() invoke it from multiple goroutines).
