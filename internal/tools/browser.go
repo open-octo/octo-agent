@@ -762,6 +762,9 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			"outputs":   outputs,
 		}
 		if modified {
+			// Self-heal write-back: persists the selector that just verified. Note it
+			// re-marshals the whole YAML — hand-written comments in the file are
+			// dropped (fields keep their values). Documented behavior, not data loss.
 			if werr := browser.SaveRecording(path, recording); werr == nil {
 				env["self_healed"] = true
 			}

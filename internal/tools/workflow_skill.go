@@ -163,7 +163,9 @@ func runBrowserRecording(ctx context.Context, name string, params map[string]any
 		setActivePage(b, finalPage)
 	}
 	if modified {
-		_ = browser.SaveRecording(path, recording) // best-effort self-heal write-back
+		// Best-effort self-heal write-back. Re-marshals the YAML, so hand-written
+		// comments in the file are dropped (field values are kept).
+		_ = browser.SaveRecording(path, recording)
 	}
 	j, err := json.Marshal(outputs)
 	if err != nil {
