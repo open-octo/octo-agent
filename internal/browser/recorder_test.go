@@ -141,3 +141,67 @@ func TestRecorderCapturesActions(t *testing.T) {
 		t.Errorf("replay did not set the select (value=%q)", selVal)
 	}
 }
+
+// TestRecorderCapturesNewTab: a demonstration that opens a new tab (target=_blank)
+// and keeps going there is captured end to end — previously everything after the
+// tab switch was silently lost (the attach watcher only instrumented iframes).
+func TestRecorderCapturesNewTab(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/b", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>b</title><button id="bb">B</button>`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>a</title><a id="open" href="/b" target="_blank">Open</a>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#open", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	np, err := b.ClickFollow(ctx, page, "#open")
+	if err != nil {
+		t.Fatalf("open new tab: %v", err)
+	}
+	if np == page {
+		t.Fatal("click did not open a new tab")
+	}
+	if err := np.WaitFor(ctx, "#bb", testWaitTimeout); err != nil {
+		t.Fatalf("wait #bb: %v", err)
+	}
+	// The recorder instruments the new tab off the attach event — give it a beat
+	// before driving the click it must capture.
+	time.Sleep(500 * time.Millisecond)
+	if err := np.Click(ctx, "#bb"); err != nil {
+		t.Fatalf("click #bb: %v", err)
+	}
+	found := false
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		for _, e := range rec.Events() {
+			if e.Type == "click" && e.Selector == "#bb" {
+				found = true
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("click in the new tab was not captured: %+v", rec.Events())
+	}
+}
