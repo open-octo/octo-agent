@@ -294,7 +294,9 @@ pre-session input.
   when a turn is running (`Server.liveSessions`) — mutating a
   freshly-loaded copy would be overwritten by the running turn's own goal
   records. No confirm modal: the same refuse-then-`/goal replace` grammar
-  as the TUI. **webdist rebuild + commit** required (#718 lesson).
+  as the TUI. **webdist rebuild** for local verification; webdist is
+  gitignored and built from source in CI (committed artifacts were dropped —
+  they caused constant merge conflicts on the hashed asset names).
 - **IM** (`internal/channel/manager.go` `/goal` + `internal/server`
   channel-turn wiring): the goal lives on the chat's persisted backing
   store (`channel.Session.Store`, an `agent.Session`), so it is the same

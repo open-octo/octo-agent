@@ -37,3 +37,9 @@ coverage.html
 # Python bytecode from bundled skill scripts (run via uv/python)
 __pycache__/
 *.pyc
+
+# Vite build output. go:embed requires the directory to exist with at least
+# one file, so only .gitkeep is committed — the real assets are built from
+# source (`make web-build` locally, CI for releases), never committed.
+/internal/server/webdist/*
+!/internal/server/webdist/.gitkeep

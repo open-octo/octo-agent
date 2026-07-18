@@ -12,9 +12,10 @@ import (
 var webdistFS embed.FS
 
 // staticHandler serves the embedded Vite-built Web UI from webdist/. It strips
-// the "/" prefix and falls back to index.html for SPA routing. Before a real
-// `make web-build` run, webdist/ holds only a placeholder index.html with no
-// assets/ sibling — in that case we serve a minimal built-in placeholder.
+// the "/" prefix and falls back to index.html for SPA routing. webdist/ itself
+// is gitignored (built by `make web-build` locally, by CI for releases) — on a
+// fresh clone it holds only .gitkeep, in which case we serve a minimal
+// built-in placeholder instead.
 func (s *Server) staticHandler() http.Handler {
 	sub, err := fs.Sub(webdistFS, "webdist")
 	built := false
@@ -24,7 +25,7 @@ func (s *Server) staticHandler() http.Handler {
 		}
 	}
 
-	// UI not built yet (dev before `make web-build`): serve a placeholder.
+	// UI not built (fresh clone without `make web-build`): serve a placeholder.
 	if !built {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/" {
@@ -83,7 +84,7 @@ h1{color:#333}code{background:#f4f4f4;padding:2px 6px;border-radius:3px}
 </head>
 <body>
 <h1>🐙 Octo Agent Server</h1>
-<p>The Web UI assets are not embedded yet. Build them into <code>internal/server/static/</code> and recompile.</p>
+<p>The Web UI assets are not embedded in this binary. Run <code>make web-build</code> and recompile to enable it.</p>
 <p>API endpoints available:</p>
 <ul>
 <li><code>POST /api/chat</code> — create a new session and send a message</li>
