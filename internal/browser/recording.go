@@ -546,12 +546,70 @@ func (s Step) target() string {
 	return s.Selector
 }
 
+// subst replaces {{name}} placeholders with param values, verbatim. Used where
+// the surrounding context is plain text (typed values, select options, file
+// paths, verify comparisons). URL and JS contexts need the escaping variants
+// below — a raw value can silently reshape the URL or the expression.
 func subst(s string, params map[string]string) string {
 	for k, v := range params {
 		s = strings.ReplaceAll(s, "{{"+k+"}}", v)
 	}
 	return s
 }
+
+// substURL is subst for navigate targets: each param value is percent-encoded
+// as pure data (everything outside RFC 3986 unreserved), so a value containing
+// spaces, '&', '#', '%' or '/' can't silently reshape the URL. The template's
+// own structure (its query '&'/'=', path slashes) is untouched.
+func substURL(s string, params map[string]string) string {
+	enc := make(map[string]string, len(params))
+	for k, v := range params {
+		enc[k] = escapeURLValue(v)
+	}
+	return subst(s, enc)
+}
+
+// escapeURLValue percent-encodes every byte outside RFC 3986 unreserved
+// (A-Z a-z 0-9 - _ . ~). Byte-wise, so UTF-8 multibyte becomes the standard
+// %XX%XX form — correct for a data value in either path or query position.
+func escapeURLValue(v string) string {
+	const unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+	var b strings.Builder
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if strings.IndexByte(unreserved, c) >= 0 {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
+}
+
+// substJS is subst for extract expressions: values typically land inside a JS
+// string literal in the template, so escape the characters that could end the
+// literal or alter the value. \' and \" both evaluate to the bare quote in
+// either quote style in JS, so escaping both quote types is safe regardless of
+// how the template quotes the placeholder.
+func substJS(s string, params map[string]string) string {
+	enc := make(map[string]string, len(params))
+	for k, v := range params {
+		enc[k] = escapeJSStringValue(v)
+	}
+	return subst(s, enc)
+}
+
+func escapeJSStringValue(v string) string {
+	return jsStringEscaper.Replace(v)
+}
+
+var jsStringEscaper = strings.NewReplacer(
+	`\`, `\\`,
+	`'`, `\'`,
+	`"`, `\"`,
+	"\n", `\n`,
+	"\r", `\r`,
+)
 
 // ReplayOptions tunes a replay. StepTimeout bounds the per-step wait for a
 // target to appear (default 15s — generous for slow back-ends). Healer, when
@@ -770,7 +828,7 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 	target := step.target()
 	switch step.Action {
 	case "navigate":
-		if err := page.Navigate(ctx, subst(step.URL, params)); err != nil {
+		if err := page.Navigate(ctx, substURL(step.URL, params)); err != nil {
 			return page, err
 		}
 	case "wait":
@@ -907,7 +965,7 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 			return page, fmt.Errorf("extract: js is required")
 		}
 		var raw json.RawMessage
-		if err := page.Eval(ctx, subst(step.JS, params), &raw); err != nil {
+		if err := page.Eval(ctx, substJS(step.JS, params), &raw); err != nil {
 			return page, err
 		}
 		val := string(raw)

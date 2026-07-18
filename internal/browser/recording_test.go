@@ -1073,3 +1073,97 @@ func TestReplayRecordingDownloadNoDoubleBindOnHeal(t *testing.T) {
 		t.Fatalf("download must bind exactly once across a heal retry, got %#v", outputs["files"])
 	}
 }
+
+// TestSubstURLEscapesValues: navigate params are substituted as data, not URL
+// structure — a value holding spaces, query metacharacters or a slash must not
+// reshape the URL, while the template's own structure stays intact.
+func TestSubstURLEscapesValues(t *testing.T) {
+	got := substURL("https://x/s?q={{q}}&page={{p}}&tag={{tag}}", map[string]string{
+		"q": "foo bar&baz=1", "p": "2", "tag": "热榜",
+	})
+	want := "https://x/s?q=foo%20bar%26baz%3D1&page=2&tag=%E7%83%AD%E6%A6%9C"
+	if got != want {
+		t.Fatalf("substURL = %q, want %q", got, want)
+	}
+	if p := substURL("https://x/item/{{id}}", map[string]string{"id": "a/b c"}); p != "https://x/item/a%2Fb%20c" {
+		t.Fatalf("path-position value not encoded as data: %q", p)
+	}
+}
+
+// TestSubstJSEscapesValues: extract params land inside JS string literals, so
+// quotes, backslashes and newlines are escaped — \' and \" both evaluate to the
+// bare quote in either quote style, so this is safe however the template quotes.
+func TestSubstJSEscapesValues(t *testing.T) {
+	got := substJS("f('{{v}}', \"{{v}}\")", map[string]string{"v": "it's a \"q\" \\ test\nline"})
+	want := `f('it\'s a \"q\" \\ test\nline', "it\'s a \"q\" \\ test\nline")`
+	if got != want {
+		t.Fatalf("substJS = %q, want %q", got, want)
+	}
+}
+
+// TestReplayNavigateEncodesParams end to end: the server must receive the exact
+// original value (properly encoded on the wire), proving replay navigates to the
+// intended URL rather than a value-corrupted one.
+func TestReplayNavigateEncodesParams(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var gotQ, gotURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQ, gotURI = r.URL.Query().Get("q"), r.RequestURI
+		w.Write([]byte(`<!doctype html><title>echo</title>ok`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	recording := &Recording{
+		Name:   "x",
+		Params: []Param{{Name: "id"}, {Name: "q"}},
+		Steps:  []Step{{Action: "navigate", URL: srv.URL + "/item/{{id}}?q={{q}}"}},
+	}
+	params := map[string]string{"id": "a/b c", "q": "foo bar&baz=1"}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, params, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if gotQ != "foo bar&baz=1" {
+		t.Fatalf("server received q = %q, want the exact original value", gotQ)
+	}
+	if gotURI != "/item/a%2Fb%20c?q=foo%20bar%26baz%3D1" {
+		t.Fatalf("wire RequestURI = %q, value was not encoded as data", gotURI)
+	}
+}
+
+// TestReplayExtractEscapesParams: a param holding quotes and a backslash used
+// inside a JS string literal evaluates to the exact original value, not a
+// broken (or altered) expression.
+func TestReplayExtractEscapesParams(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>x</title>ok`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	recording := &Recording{
+		Name:    "x",
+		Params:  []Param{{Name: "v"}},
+		Outputs: []Output{{Name: "v", Type: "string"}},
+		Steps:   []Step{{Action: "extract", JS: `'{{v}}'`, Bind: "v"}},
+	}
+	original := `it's a "q" \ test`
+	_, _, outputs, err := ReplayRecording(ctx, page, recording, map[string]string{"v": original}, ReplayOptions{StepTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if outputs["v"] != original {
+		t.Fatalf("extract = %#v, want the exact original %#v", outputs["v"], original)
+	}
+}
