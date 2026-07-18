@@ -102,8 +102,8 @@ func TestDispatchWorkflowSkill_Routing(t *testing.T) {
 	bdir := t.TempDir()
 	t.Setenv("OCTO_BROWSER_SKILLS_DIR", bdir)
 	saveRec := func(name string) {
-		if err := browser.SaveSkill(filepath.Join(bdir, name+".yaml"),
-			browser.Skill{Name: name, Steps: []browser.Step{{Action: "navigate", URL: "x"}}}); err != nil {
+		if err := browser.SaveRecording(filepath.Join(bdir, name+".yaml"),
+			browser.Recording{Name: name, Steps: []browser.Step{{Action: "navigate", URL: "x"}}}); err != nil {
 			t.Fatal(err)
 		}
 	}

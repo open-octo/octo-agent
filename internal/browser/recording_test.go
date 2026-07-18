@@ -17,7 +17,7 @@ func TestCompileAndRoundTrip(t *testing.T) {
 		{Type: "change", Selector: "#s", Tag: "SELECT", Value: "b"},
 		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "hello"},
 	}
-	s := CompileSkill("demo", "a demo", "https://example.com/start", events)
+	s := CompileRecording("demo", "a demo", "https://example.com/start", events)
 	if len(s.Steps) != 4 {
 		t.Fatalf("want 4 steps (navigate + 3), got %d", len(s.Steps))
 	}
@@ -25,14 +25,14 @@ func TestCompileAndRoundTrip(t *testing.T) {
 		s.Steps[2].Action != "select" || s.Steps[3].Action != "type" {
 		t.Fatalf("unexpected actions: %+v", s.Steps)
 	}
-	data, err := MarshalSkill(s)
+	data, err := MarshalRecording(s)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), "action: select") {
 		t.Fatalf("yaml missing select step:\n%s", data)
 	}
-	back, err := ParseSkill(data)
+	back, err := ParseRecording(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestCompileAutoParamsTypeValues(t *testing.T) {
 		{Type: "change", Selector: "#q", Tag: "INPUT", Field: "Search query", Value: "hello world"},
 		{Type: "change", Selector: `input[name="email"]`, Tag: "INPUT", Value: "a@b.com"},
 	}
-	s := CompileSkill("demo", "", "", events)
+	s := CompileRecording("demo", "", "", events)
 	if len(s.Steps) != 2 {
 		t.Fatalf("want 2 type steps, got %d: %+v", len(s.Steps), s.Steps)
 	}
@@ -83,14 +83,14 @@ func TestCompileAutoParamsSecretNoDefault(t *testing.T) {
 	events := []RecordedEvent{
 		{Type: "change", Selector: "#pw", Tag: "INPUT", Field: "password", Secret: true, Value: "hunter2"},
 	}
-	s := CompileSkill("demo", "", "", events)
+	s := CompileRecording("demo", "", "", events)
 	if len(s.Params) != 1 {
 		t.Fatalf("want 1 param, got %+v", s.Params)
 	}
 	if s.Params[0].Default != "" {
 		t.Fatalf("secret default must be empty, got %q", s.Params[0].Default)
 	}
-	if data, _ := MarshalSkill(s); strings.Contains(string(data), "hunter2") {
+	if data, _ := MarshalRecording(s); strings.Contains(string(data), "hunter2") {
 		t.Fatalf("secret leaked into yaml:\n%s", data)
 	}
 }
@@ -102,7 +102,7 @@ func TestCompileAutoParamsDedup(t *testing.T) {
 		{Type: "change", Selector: "#a", Tag: "INPUT", Field: "City", Value: "SFO"},
 		{Type: "change", Selector: "#b", Tag: "INPUT", Field: "City", Value: "LAX"},
 	}
-	s := CompileSkill("demo", "", "", events)
+	s := CompileRecording("demo", "", "", events)
 	if len(s.Params) != 2 || s.Params[0].Name == s.Params[1].Name {
 		t.Fatalf("want two distinct params, got %+v", s.Params)
 	}
@@ -118,7 +118,7 @@ func TestCompileAutoVerifyNavigateHost(t *testing.T) {
 		{Type: "navigate", URL: "https://shop.example.com/cart?sid=abc"},
 		{Type: "click", Selector: "#pay", Tag: "BUTTON", Text: "Pay"},
 	}
-	s := CompileSkill("demo", "", "https://shop.example.com/start", events)
+	s := CompileRecording("demo", "", "https://shop.example.com/start", events)
 	nav := s.Steps[0]
 	if nav.Action != "navigate" || nav.Verify == nil || nav.Verify.URL != "shop.example.com" {
 		t.Fatalf("leading navigate missing host verify: %+v", nav)
@@ -157,10 +157,10 @@ func TestReplayVerifyURLCatchesCrossHostRedirect(t *testing.T) {
 	}
 
 	appHost := strings.TrimPrefix(app.URL, "http://")
-	skill := &Skill{Name: "x", Steps: []Step{
+	recording := &Recording{Name: "x", Steps: []Step{
 		{Action: "navigate", URL: app.URL + "/start", Verify: &Verify{URL: appHost}},
 	}}
-	_, _, _, err = ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second})
+	_, _, _, err = ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 5 * time.Second})
 	if err == nil {
 		t.Fatal("expected replay to fail: navigation bounced to a different host")
 	}
@@ -177,7 +177,7 @@ func TestCompileDedupesRepeatedType(t *testing.T) {
 		{Type: "change", Selector: "#q", Tag: "INPUT", Field: "query", Value: "abc"},
 		{Type: "change", Selector: "#q", Tag: "INPUT", Field: "query", Value: "abc"}, // re-dispatched dup
 	}
-	s := CompileSkill("demo", "", "", events)
+	s := CompileRecording("demo", "", "", events)
 	types := 0
 	for _, st := range s.Steps {
 		if st.Action == "type" {
@@ -217,10 +217,10 @@ func TestReplayVerifyURLIgnoresHostInQueryParam(t *testing.T) {
 		t.Fatalf("new page: %v", err)
 	}
 	appHost := strings.TrimPrefix(app.URL, "http://")
-	skill := &Skill{Name: "x", Steps: []Step{
+	recording := &Recording{Name: "x", Steps: []Step{
 		{Action: "navigate", URL: app.URL + "/start", Verify: &Verify{URL: appHost}},
 	}}
-	_, _, _, err = ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second})
+	_, _, _, err = ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 5 * time.Second})
 	if err == nil {
 		t.Fatal("expected failure: bounced to the login host despite the app host appearing in a query param")
 	}
@@ -229,16 +229,16 @@ func TestReplayVerifyURLIgnoresHostInQueryParam(t *testing.T) {
 	}
 }
 
-// TestReplaySkill_UnknownParamRejected: a caller-supplied param the skill
+// TestReplayRecording_UnknownParamRejected: a caller-supplied param the recording
 // doesn't declare (a typo, or params meant for a different, similarly named
-// skill) is rejected before any step runs, rather than silently ignored by
+// recording) is rejected before any step runs, rather than silently ignored by
 // mergedParams — the run_skill near-miss-replay guardrail from #1050 was
 // entirely prompt-text; this is a concrete, code-enforced check on top of it.
-func TestReplaySkill_UnknownParamRejected(t *testing.T) {
-	skill := &Skill{Name: "checkout", Params: []Param{{Name: "city"}}, Steps: []Step{
+func TestReplayRecording_UnknownParamRejected(t *testing.T) {
+	recording := &Recording{Name: "checkout", Params: []Param{{Name: "city"}}, Steps: []Step{
 		{Action: "navigate", URL: "https://example.com/{{city}}"},
 	}}
-	_, _, _, err := ReplaySkill(context.Background(), nil, skill, map[string]string{"citee": "SFO"}, ReplayOptions{})
+	_, _, _, err := ReplayRecording(context.Background(), nil, recording, map[string]string{"citee": "SFO"}, ReplayOptions{})
 	if err == nil {
 		t.Fatal("expected an error for an undeclared param")
 	}
@@ -247,16 +247,16 @@ func TestReplaySkill_UnknownParamRejected(t *testing.T) {
 	}
 }
 
-// TestReplaySkill_MissingRequiredParamRejected: a {{placeholder}} referenced
+// TestReplayRecording_MissingRequiredParamRejected: a {{placeholder}} referenced
 // by a step with no default and no caller-supplied value must fail fast,
 // instead of subst() silently sending the literal "{{name}}" text to the
 // browser (a navigate to ".../item/{{item_id}}", a type into a field with
 // that as its value).
-func TestReplaySkill_MissingRequiredParamRejected(t *testing.T) {
-	skill := &Skill{Name: "checkout", Params: []Param{{Name: "city"}}, Steps: []Step{
+func TestReplayRecording_MissingRequiredParamRejected(t *testing.T) {
+	recording := &Recording{Name: "checkout", Params: []Param{{Name: "city"}}, Steps: []Step{
 		{Action: "navigate", URL: "https://example.com/{{city}}"},
 	}}
-	_, _, _, err := ReplaySkill(context.Background(), nil, skill, nil, ReplayOptions{})
+	_, _, _, err := ReplayRecording(context.Background(), nil, recording, nil, ReplayOptions{})
 	if err == nil {
 		t.Fatal("expected an error for an unresolved required param")
 	}
@@ -265,39 +265,39 @@ func TestReplaySkill_MissingRequiredParamRejected(t *testing.T) {
 	}
 }
 
-// TestReplaySkill_DefaultAndSuppliedParamsResolve: a param with a Default
+// TestReplayRecording_DefaultAndSuppliedParamsResolve: a param with a Default
 // needs no caller value, and a caller-supplied value for a param with no
 // default is accepted — the validation added above must not reject either.
-func TestReplaySkill_DefaultAndSuppliedParamsResolve(t *testing.T) {
-	skill := &Skill{Name: "checkout", Params: []Param{
+func TestReplayRecording_DefaultAndSuppliedParamsResolve(t *testing.T) {
+	recording := &Recording{Name: "checkout", Params: []Param{
 		{Name: "city", Default: "sfo"},
 		{Name: "item"},
 	}, Steps: []Step{
 		{Action: "extract", JS: "'{{city}}/{{item}}'", Bind: "out"},
 	}}
-	if err := unknownParams(skill, map[string]string{"item": "widget"}); err != nil {
+	if err := unknownParams(recording, map[string]string{"item": "widget"}); err != nil {
 		t.Fatalf("unknownParams: %v", err)
 	}
-	full := mergedParams(skill, map[string]string{"item": "widget"})
-	if missing := unresolvedPlaceholders(skill, full); len(missing) != 0 {
+	full := mergedParams(recording, map[string]string{"item": "widget"})
+	if missing := unresolvedPlaceholders(recording, full); len(missing) != 0 {
 		t.Fatalf("expected no unresolved placeholders, got %v", missing)
 	}
 }
 
-// TestMissingRequiredParams exposes the same check ReplaySkill performs
-// internally, so a caller (the tools package's run_skill) can prompt for a
-// value instead of letting ReplaySkill fail outright.
+// TestMissingRequiredParams exposes the same check ReplayRecording performs
+// internally, so a caller (the tools package's replay action) can prompt for a
+// value instead of letting ReplayRecording fail outright.
 func TestMissingRequiredParams(t *testing.T) {
-	skill := &Skill{Name: "checkout", Params: []Param{
+	recording := &Recording{Name: "checkout", Params: []Param{
 		{Name: "city", Default: "sfo"},
 		{Name: "item"},
 	}, Steps: []Step{
 		{Action: "navigate", URL: "https://example.com/{{city}}/{{item}}"},
 	}}
-	if missing := MissingRequiredParams(skill, nil); len(missing) != 1 || missing[0] != "item" {
+	if missing := MissingRequiredParams(recording, nil); len(missing) != 1 || missing[0] != "item" {
 		t.Fatalf("MissingRequiredParams = %v, want [item] (city has a default)", missing)
 	}
-	if missing := MissingRequiredParams(skill, map[string]string{"item": "widget"}); len(missing) != 0 {
+	if missing := MissingRequiredParams(recording, map[string]string{"item": "widget"}); len(missing) != 0 {
 		t.Fatalf("MissingRequiredParams = %v, want none once item is supplied", missing)
 	}
 }
@@ -309,7 +309,7 @@ func TestCompileUploadMerge(t *testing.T) {
 		{Type: "click", Selector: ".upload-btn", Tag: "BUTTON", Text: "Upload affected booking list"},
 		{Type: "upload", Selector: "input[type=file]", Tag: "INPUT", Value: "C:\\fakepath\\x.xlsx"},
 	}
-	s := CompileSkill("u", "", "https://x/start", events)
+	s := CompileRecording("u", "", "https://x/start", events)
 	// navigate + upload (the click was merged in)
 	if len(s.Steps) != 2 {
 		t.Fatalf("want 2 steps, got %d: %+v", len(s.Steps), s.Steps)
@@ -361,17 +361,17 @@ func TestUploadViaChooser(t *testing.T) {
 	}
 }
 
-// TestCompileSkillDropsConsecutiveDupes: a jittery double-fire of the same click
+// TestCompileRecordingDropsConsecutiveDupes: a jittery double-fire of the same click
 // is collapsed to one step; distinct steps (and a legitimate repeat of the same
 // selector that is separated by another action) are preserved.
-func TestCompileSkillDropsConsecutiveDupes(t *testing.T) {
+func TestCompileRecordingDropsConsecutiveDupes(t *testing.T) {
 	events := []RecordedEvent{
 		{Type: "click", Selector: "#go", Tag: "BUTTON", Text: "Go"},
 		{Type: "click", Selector: "#go", Tag: "BUTTON", Text: "Go"}, // immediate dup → dropped
 		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "x"},
 		{Type: "click", Selector: "#go", Tag: "BUTTON", Text: "Go"}, // same selector but not consecutive → kept
 	}
-	s := CompileSkill("demo", "", "", events)
+	s := CompileRecording("demo", "", "", events)
 	clicks := 0
 	for _, st := range s.Steps {
 		if st.Action == "click" && st.Selector == "#go" {
@@ -383,16 +383,16 @@ func TestCompileSkillDropsConsecutiveDupes(t *testing.T) {
 	}
 }
 
-// TestCompileSkillCapturesNavigations: navigations recorded during the demo
+// TestCompileRecordingCapturesNavigations: navigations recorded during the demo
 // become navigate steps in order; an about:blank start URL is dropped (it's the
 // throwaway tab octo opened, not where the user worked).
-func TestCompileSkillCapturesNavigations(t *testing.T) {
+func TestCompileRecordingCapturesNavigations(t *testing.T) {
 	events := []RecordedEvent{
 		{Type: "navigate", URL: "https://www.zhihu.com/hot"},
 		{Type: "navigate", URL: "https://www.zhihu.com/hot"}, // initial-load echo → collapsed
 		{Type: "click", Selector: "section a", Tag: "A", Text: "Top story"},
 	}
-	s := CompileSkill("demo", "", "about:blank", events)
+	s := CompileRecording("demo", "", "about:blank", events)
 	if len(s.Steps) != 2 {
 		t.Fatalf("want navigate+click (blank dropped, echo collapsed), got %d: %+v", len(s.Steps), s.Steps)
 	}
@@ -404,10 +404,10 @@ func TestCompileSkillCapturesNavigations(t *testing.T) {
 	}
 }
 
-// TestGenerateSkillDistill: the LLM distiller drops a fumble (a wrong click +
+// TestGenerateRecordingDistill: the LLM distiller drops a fumble (a wrong click +
 // going back) and parameterizes a value — and the precision guard rejects any
 // output that invents a selector, falling back to the deterministic baseline.
-func TestGenerateSkillDistill(t *testing.T) {
+func TestGenerateRecordingDistill(t *testing.T) {
 	ctx := context.Background()
 	events := []RecordedEvent{
 		{Type: "click", Selector: "#wrong-tab", Tag: "A", Text: "Oops"}, // a detour
@@ -415,14 +415,14 @@ func TestGenerateSkillDistill(t *testing.T) {
 		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "ORDER-123"},
 	}
 
-	// A generator that returns a cleaned skill (drops the detour, params the value).
+	// A generator that returns a cleaned recording (drops the detour, params the value).
 	clean := func(_ context.Context, _, _ string) (string, error) {
 		return "name: x\nsteps:\n" +
 			"  - {action: navigate, url: 'https://x/start'}\n" +
 			"  - {action: click, selector: '#search'}\n" +
 			"  - {action: type, selector: '#q', value: '{{order}}'}\n", nil
 	}
-	s := GenerateSkill(ctx, "demo", "https://x/start", events, clean)
+	s := GenerateRecording(ctx, "demo", "https://x/start", events, clean)
 	if len(s.Steps) != 3 { // navigate + search + type (detour dropped)
 		t.Fatalf("distill should drop the detour; got %d steps: %+v", len(s.Steps), s.Steps)
 	}
@@ -432,11 +432,11 @@ func TestGenerateSkillDistill(t *testing.T) {
 
 	// A generator that invents a selector not in the recording -> must be rejected,
 	// but its prose description is still trustworthy and must survive the fallback
-	// (an empty description leaves the skills manifest with a bare, matchable name).
+	// (an empty description leaves the recordings manifest with a bare, matchable name).
 	cheat := func(_ context.Context, _, _ string) (string, error) {
 		return "name: x\ndescription: open the search page\nsteps:\n  - {action: click, selector: '#invented'}\n", nil
 	}
-	s2 := GenerateSkill(ctx, "demo", "https://x/start", events, cheat)
+	s2 := GenerateRecording(ctx, "demo", "https://x/start", events, cheat)
 	for _, st := range s2.Steps {
 		if st.Selector == "#invented" {
 			t.Fatal("precision guard failed: accepted an invented selector")
@@ -451,7 +451,7 @@ func TestGenerateSkillDistill(t *testing.T) {
 	descOnly := func(_ context.Context, _, _ string) (string, error) {
 		return "name: x\ndescription: search for an order\n", nil
 	}
-	s3 := GenerateSkill(ctx, "demo", "https://x/start", events, descOnly)
+	s3 := GenerateRecording(ctx, "demo", "https://x/start", events, descOnly)
 	if len(s3.Steps) == 0 {
 		t.Fatal("steps-empty fallback should keep the baseline steps")
 	}
@@ -464,7 +464,7 @@ func TestGenerateSkillDistill(t *testing.T) {
 // then selector), renders navigates as host+path, skips waits, and when long
 // keeps the head plus the FINAL step — the ending is what a bare name hides.
 func TestStepDigest(t *testing.T) {
-	s := Skill{Steps: []Step{
+	s := Recording{Steps: []Step{
 		{Action: "navigate", URL: "https://www.zhihu.com/hot/"},
 		{Action: "wait", TimeoutMS: 500},
 		{Action: "click", Label: "热榜"},
@@ -478,7 +478,7 @@ func TestStepDigest(t *testing.T) {
 		t.Fatalf("digest = %q\nwant %q", got, want)
 	}
 
-	long := Skill{}
+	long := Recording{}
 	for i := 0; i < 11; i++ {
 		long.Steps = append(long.Steps, Step{Action: "click", Label: fmt.Sprintf("s%d", i)})
 	}
@@ -488,7 +488,7 @@ func TestStepDigest(t *testing.T) {
 	}
 
 	// Exactly 8 significant steps is the no-elision boundary.
-	eight := Skill{}
+	eight := Recording{}
 	for i := 0; i < 8; i++ {
 		eight.Steps = append(eight.Steps, Step{Action: "click", Label: fmt.Sprintf("s%d", i)})
 	}
@@ -496,14 +496,14 @@ func TestStepDigest(t *testing.T) {
 		t.Fatalf("8 steps must not be elided, got %q", d)
 	}
 
-	// A skill with only waits digests to "" (the manifest then shows a bare name).
-	if d := (Skill{Steps: []Step{{Action: "wait", TimeoutMS: 100}}}).StepDigest(); d != "" {
-		t.Fatalf("wait-only skill should digest to empty, got %q", d)
+	// A recording with only waits digests to "" (the manifest then shows a bare name).
+	if d := (Recording{Steps: []Step{{Action: "wait", TimeoutMS: 100}}}).StepDigest(); d != "" {
+		t.Fatalf("wait-only recording should digest to empty, got %q", d)
 	}
 }
 
 // TestRunStepWaitFixedDelay: a wait step with no selector sleeps the requested
-// time (the SPA-settling primitive) — and run_skill no longer rejects it.
+// time (the SPA-settling primitive) — and replay no longer rejects it.
 func TestRunStepWaitFixedDelay(t *testing.T) {
 	start := time.Now()
 	if _, err := runStep(context.Background(), nil, nil, &Step{Action: "wait", TimeoutMS: 80}, nil, time.Second, "", nil); err != nil {
@@ -543,9 +543,9 @@ func TestWaitForNetworkIdle(t *testing.T) {
 		t.Fatalf("navigate: %v", err)
 	}
 
-	skill := &Skill{Name: "x", Steps: []Step{{Action: "wait", Network: true, TimeoutMS: 10000}}}
+	recording := &Recording{Name: "x", Steps: []Step{{Action: "wait", Network: true, TimeoutMS: 10000}}}
 	start := time.Now()
-	if _, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 15 * time.Second}); err != nil {
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 15 * time.Second}); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	// The in-flight fetch (~600ms) must have settled before the wait returned.
@@ -562,7 +562,7 @@ func TestWaitForNetworkIdle(t *testing.T) {
 }
 
 // TestReplayClickFollowsNewTab: a click on a target=_blank link is followed to
-// the tab it opens (the Zhihu-hot-item failure mode), and ReplaySkill returns
+// the tab it opens (the Zhihu-hot-item failure mode), and ReplayRecording returns
 // that tab as the final page.
 func TestReplayClickFollowsNewTab(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -589,8 +589,8 @@ func TestReplayClickFollowsNewTab(t *testing.T) {
 		t.Fatalf("navigate: %v", err)
 	}
 
-	skill := &Skill{Name: "x", Steps: []Step{{Action: "click", Selector: "#open"}}}
-	_, fp, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b})
+	recording := &Recording{Name: "x", Steps: []Step{{Action: "click", Selector: "#open"}}}
+	_, fp, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -630,10 +630,10 @@ func TestReplayTextAnchorRecoversFromDrift(t *testing.T) {
 
 	// The positional selector resolves to the first button ("Cancel") — the wrong
 	// one — but the recorded Label is the second button's text.
-	skill := &Skill{Name: "x", Steps: []Step{
+	recording := &Recording{Name: "x", Steps: []Step{
 		{Action: "click", Selector: "div > button:nth-of-type(1)", Label: "Book now"},
 	}}
-	if _, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	var hit string
@@ -674,10 +674,10 @@ func TestReplayFieldHintRecoversFromDrift(t *testing.T) {
 
 	// A stale positional selector that matches nothing on the current page; the
 	// hint "q" (the field name) is the recovery signal.
-	skill := &Skill{Name: "x", Steps: []Step{
+	recording := &Recording{Name: "x", Steps: []Step{
 		{Action: "type", Selector: "body > div:nth-of-type(9) > input", Hint: "q", Value: "hello"},
 	}}
-	if _, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	var got string
@@ -715,13 +715,13 @@ func TestReplayDismissesOverlayDeterministically(t *testing.T) {
 
 	// #go is absent until the overlay is dismissed; no healer is provided, so this
 	// exercises the deterministic structural recovery path.
-	skill := &Skill{Name: "x", Steps: []Step{{Action: "click", Selector: "#go"}}}
-	modified, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Browser: b})
+	recording := &Recording{Name: "x", Steps: []Step{{Action: "click", Selector: "#go"}}}
+	modified, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Browser: b})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	if modified {
-		t.Fatal("overlay dismissal is runtime-only; it must not mark the skill modified")
+		t.Fatal("overlay dismissal is runtime-only; it must not mark the recording modified")
 	}
 	var hit int
 	if err := page.Eval(ctx, "window.hit||0", &hit); err != nil {
@@ -755,7 +755,7 @@ func TestReplayMultiRoundHeal(t *testing.T) {
 		t.Fatalf("navigate: %v", err)
 	}
 
-	skill := &Skill{Name: "x", Steps: []Step{{Action: "click", Selector: "#stale"}}}
+	recording := &Recording{Name: "x", Steps: []Step{{Action: "click", Selector: "#stale"}}}
 	rounds := 0
 	heal := func(_ context.Context, _ *Page, step *Step, _ error) error {
 		rounds++
@@ -766,7 +766,7 @@ func TestReplayMultiRoundHeal(t *testing.T) {
 		}
 		return nil
 	}
-	modified, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
+	modified, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -776,15 +776,15 @@ func TestReplayMultiRoundHeal(t *testing.T) {
 	if !modified {
 		t.Fatal("expected modified=true after a successful heal")
 	}
-	if skill.Steps[0].Selector != "#real" {
-		t.Fatalf("step not corrected: %q", skill.Steps[0].Selector)
+	if recording.Steps[0].Selector != "#real" {
+		t.Fatalf("step not corrected: %q", recording.Steps[0].Selector)
 	}
 }
 
-// TestReplaySkillSelfHeal: a step has a stale selector, the implicit wait fails,
+// TestReplayRecordingSelfHeal: a step has a stale selector, the implicit wait fails,
 // the healer repairs the selector, replay retries and succeeds — and reports the
-// skill as modified so the caller can write the fix back.
-func TestReplaySkillSelfHeal(t *testing.T) {
+// recording as modified so the caller can write the fix back.
+func TestReplayRecordingSelfHeal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -801,7 +801,7 @@ func TestReplaySkillSelfHeal(t *testing.T) {
 		t.Fatalf("new page: %v", err)
 	}
 
-	skill := &Skill{
+	recording := &Recording{
 		Name: "heal-demo",
 		Steps: []Step{
 			{Action: "navigate", URL: srv.URL, Verify: &Verify{Exists: "#real"}},
@@ -820,7 +820,7 @@ func TestReplaySkillSelfHeal(t *testing.T) {
 		return context.DeadlineExceeded
 	}
 
-	modified, _, _, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal})
+	modified, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -830,8 +830,8 @@ func TestReplaySkillSelfHeal(t *testing.T) {
 	if !modified {
 		t.Fatal("expected modified=true after heal (for write-back)")
 	}
-	if skill.Steps[1].Selector != "#real" {
-		t.Fatalf("step not corrected in place: %q", skill.Steps[1].Selector)
+	if recording.Steps[1].Selector != "#real" {
+		t.Fatalf("step not corrected in place: %q", recording.Steps[1].Selector)
 	}
 	var clicks int
 	if err := page.Eval(ctx, "window.clicks", &clicks); err != nil {
@@ -875,10 +875,10 @@ func TestAssembleOutputs(t *testing.T) {
 	}
 }
 
-// TestSkillYAMLRoundTripOutputs: the new outputs/bind/js fields survive a
-// marshal → parse round-trip (so a hand-edited skill keeps its handoff contract).
-func TestSkillYAMLRoundTripOutputs(t *testing.T) {
-	s := Skill{
+// TestRecordingYAMLRoundTripOutputs: the new outputs/bind/js fields survive a
+// marshal → parse round-trip (so a hand-edited recording keeps its handoff contract).
+func TestRecordingYAMLRoundTripOutputs(t *testing.T) {
+	s := Recording{
 		Name:    "r",
 		Outputs: []Output{{Name: "files", Type: "file[]"}, {Name: "url", Type: "string"}},
 		Steps: []Step{
@@ -886,7 +886,7 @@ func TestSkillYAMLRoundTripOutputs(t *testing.T) {
 			{Action: "extract", JS: "location.href", Bind: "url"},
 		},
 	}
-	data, err := MarshalSkill(s)
+	data, err := MarshalRecording(s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -895,7 +895,7 @@ func TestSkillYAMLRoundTripOutputs(t *testing.T) {
 			t.Fatalf("yaml missing %q:\n%s", want, data)
 		}
 	}
-	back, err := ParseSkill(data)
+	back, err := ParseRecording(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -907,9 +907,9 @@ func TestSkillYAMLRoundTripOutputs(t *testing.T) {
 	}
 }
 
-// TestReplaySkillDownloadBindsOutputs: a download step captures the file the
-// trigger produces and binds its path into the skill's declared file[] output.
-func TestReplaySkillDownloadBindsOutputs(t *testing.T) {
+// TestReplayRecordingDownloadBindsOutputs: a download step captures the file the
+// trigger produces and binds its path into the recording's declared file[] output.
+func TestReplayRecordingDownloadBindsOutputs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -933,12 +933,12 @@ func TestReplaySkillDownloadBindsOutputs(t *testing.T) {
 	if err := page.WaitFor(ctx, "#dl", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
-	skill := &Skill{
+	recording := &Recording{
 		Name:    "dl",
 		Outputs: []Output{{Name: "files", Type: "file[]"}},
 		Steps:   []Step{{Action: "download", Selector: "#dl", Bind: "files"}},
 	}
-	_, _, outputs, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b, DownloadDir: t.TempDir()})
+	_, _, outputs, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b, DownloadDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -951,9 +951,9 @@ func TestReplaySkillDownloadBindsOutputs(t *testing.T) {
 	}
 }
 
-// TestReplaySkillExtractBindsOutput: an extract step evaluates JS and binds the
+// TestReplayRecordingExtractBindsOutput: an extract step evaluates JS and binds the
 // (unwrapped) string result into a declared output.
-func TestReplaySkillExtractBindsOutput(t *testing.T) {
+func TestReplayRecordingExtractBindsOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -971,12 +971,12 @@ func TestReplaySkillExtractBindsOutput(t *testing.T) {
 	if err := page.WaitFor(ctx, "#rid", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
-	skill := &Skill{
+	recording := &Recording{
 		Name:    "x",
 		Outputs: []Output{{Name: "report_id", Type: "string"}},
 		Steps:   []Step{{Action: "extract", JS: "document.querySelector('#rid').textContent", Bind: "report_id"}},
 	}
-	_, _, outputs, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b})
+	_, _, outputs, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -998,14 +998,14 @@ func TestRunStepDownloadExtractGuards(t *testing.T) {
 	}
 }
 
-// TestListSkills: reads *.yaml recordings sorted by name, skipping a nameless
-// skill and non-yaml files; a missing dir yields nil.
-func TestListSkills(t *testing.T) {
+// TestListRecordings: reads *.yaml recordings sorted by name, skipping a nameless
+// recording and non-yaml files; a missing dir yields nil.
+func TestListRecordings(t *testing.T) {
 	dir := t.TempDir()
-	if err := SaveSkill(dir+"/bravo.yaml", Skill{Name: "bravo", Steps: []Step{{Action: "navigate", URL: "x"}}}); err != nil {
+	if err := SaveRecording(dir+"/bravo.yaml", Recording{Name: "bravo", Steps: []Step{{Action: "navigate", URL: "x"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := SaveSkill(dir+"/alpha.yaml", Skill{Name: "alpha", Steps: []Step{{Action: "navigate", URL: "x"}}}); err != nil {
+	if err := SaveRecording(dir+"/alpha.yaml", Recording{Name: "alpha", Steps: []Step{{Action: "navigate", URL: "x"}}}); err != nil {
 		t.Fatal(err)
 	}
 	// A parseable YAML with no name (skipped) and a non-yaml file (ignored).
@@ -1015,22 +1015,22 @@ func TestListSkills(t *testing.T) {
 	if err := os.WriteFile(dir+"/notes.txt", []byte("ignore me"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := ListSkills(dir)
+	got := ListRecordings(dir)
 	if len(got) != 2 {
-		t.Fatalf("want 2 skills (nameless + non-yaml skipped), got %d: %+v", len(got), got)
+		t.Fatalf("want 2 recordings (nameless + non-yaml skipped), got %d: %+v", len(got), got)
 	}
 	if got[0].Name != "alpha" || got[1].Name != "bravo" {
 		t.Fatalf("want sorted [alpha bravo], got [%s %s]", got[0].Name, got[1].Name)
 	}
-	if ListSkills(dir+"/nope") != nil {
+	if ListRecordings(dir+"/nope") != nil {
 		t.Fatal("missing dir should yield nil")
 	}
 }
 
-// TestReplaySkillDownloadNoDoubleBindOnHeal: a download step whose Verify fails
+// TestReplayRecordingDownloadNoDoubleBindOnHeal: a download step whose Verify fails
 // first, then passes after a heal, must bind the file exactly once — recoverStep
 // re-runs the whole step, so binding before Verify would double-count the output.
-func TestReplaySkillDownloadNoDoubleBindOnHeal(t *testing.T) {
+func TestReplayRecordingDownloadNoDoubleBindOnHeal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1059,12 +1059,12 @@ func TestReplaySkillDownloadNoDoubleBindOnHeal(t *testing.T) {
 	heal := func(ctx context.Context, p *Page, _ *Step, _ error) error {
 		return p.Eval(ctx, "(function(){var d=document.createElement('div');d.id='done';document.body.appendChild(d);})()", nil)
 	}
-	skill := &Skill{
+	recording := &Recording{
 		Name:    "dl",
 		Outputs: []Output{{Name: "files", Type: "file[]"}},
 		Steps:   []Step{{Action: "download", Selector: "#dl", Bind: "files", Verify: &Verify{Exists: "#done"}}},
 	}
-	_, _, outputs, err := ReplaySkill(ctx, page, skill, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b, DownloadDir: t.TempDir(), Healer: heal})
+	_, _, outputs, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b, DownloadDir: t.TempDir(), Healer: heal})
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}

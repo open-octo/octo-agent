@@ -59,9 +59,9 @@ metadata:
 
 ## browser 工具要点
 
-action 级用法（observe / click / eval / record / run_skill 等的参数与语义）以 `browser` 工具自身的 schema 描述为准，此处不重复。schema 之外的判断准则：
+action 级用法（observe / click / eval / record / replay 等的参数与语义）以 `browser` 工具自身的 schema 描述为准，此处不重复。schema 之外的判断准则：
 
-- 重复性流程（批量操作、定期取数）优先录制回放（record → run_skill），而非每次盲驱动。
+- 重复性流程（批量操作、定期取数）优先录制回放（record → replay），而非每次盲驱动。
 - 收尾用 `close` 关闭自己开的标签页，保留用户原有标签页。
 
 ### 程序化 vs GUI 交互

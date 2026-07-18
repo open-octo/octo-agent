@@ -132,7 +132,7 @@ Chrome *right now*. So if the chain contains a recording:
 - confirm Chrome is attached (port 9222) before dry-running, **or**
 - validate only the SKILL.md tail by hand-feeding a sample value for the
   recording's output (e.g. pass a couple of file paths as `inputs`), and validate
-  the recording itself separately with the `browser` tool's `run_skill`.
+  the recording itself separately with the `browser` tool's `replay`.
 
 Fix any wiring error and re-run before saving.
 

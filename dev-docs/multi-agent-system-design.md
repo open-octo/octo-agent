@@ -510,7 +510,7 @@ GET /api/agents/:id/sessions   — 返回指定 agent 的 sessions
 
 #### 6.5 Browser 录制 skill 隔离
 
-Browser 录制的 skill 存储在 `~/.octo/skills/` 下，与用户安装 skill 共享发现/加载路径。录制本身依赖 `browser` 工具（`browser record` 命令），回放依赖 `browser` 工具（`run_skill`）。
+Browser 录制的 skill 存储在 `~/.octo/skills/` 下，与用户安装 skill 共享发现/加载路径。录制本身依赖 `browser` 工具（`browser record` 命令），回放依赖 `browser` 工具（`replay`）。
 
 **隔离方式**：在 `ManifestForProfile()` 中，如果 profile 不含 `browser` 工具，过滤掉所有 browser-recorded skill。过滤条件：
 

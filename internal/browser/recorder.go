@@ -275,11 +275,11 @@ func (r *Recorder) Events() []RecordedEvent {
 	return out
 }
 
-// Replay re-executes recorded events directly (no skill file, no params,
-// no healer) — a convenience over the skill path for raw record→replay.
+// Replay re-executes recorded events directly (no recording file, no params,
+// no healer) — a convenience over the recording path for raw record→replay.
 func Replay(ctx context.Context, page *Page, events []RecordedEvent) error {
-	skill := CompileSkill("", "", "", events)
-	_, _, _, err := ReplaySkill(ctx, page, &skill, nil, ReplayOptions{})
+	recording := CompileRecording("", "", "", events)
+	_, _, _, err := ReplayRecording(ctx, page, &recording, nil, ReplayOptions{})
 	return err
 }
 

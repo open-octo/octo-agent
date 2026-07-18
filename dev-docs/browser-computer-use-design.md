@@ -80,7 +80,7 @@ is dead (Chrome closed/restarted).
 One action-multiplexed tool. Actions: `navigate`, `back`, `click`, `hover`,
 `type`, `select`, `key`, `scroll`, `wait`, `screenshot`, `observe`, `ax`,
 `cookies`, `upload`, `download`, `pages`, `select_page`, `close`, `eval`,
-`record_start`, `record_stop`, `run_skill`.
+`record_start`, `record_stop`, `replay`.
 
 Notable behaviours:
 - **`observe`** returns a text digest of the page's interactable elements
@@ -95,7 +95,7 @@ Notable behaviours:
 - **Click follows new tabs.** A click that opens a tab (`target=_blank` /
   `window.open`) switches the active page to the new tab. Without this a click
   that spawns a tab looks like a no-op because the original page is unchanged.
-- **Per-action timeout** bounds every action (45s default; 5min for `run_skill`
+- **Per-action timeout** bounds every action (45s default; 5min for `replay`
   / `download`) so a stuck CDP call fails instead of hanging the turn.
 - **Selectors** accept plain CSS or a Playwright-flavored subset translated to a
   CDP-evaluable query (`internal/browser/selector.go`): the text engines
@@ -133,7 +133,7 @@ origin page and replay follows the popup.
 ## Skill artifact
 
 A recording compiles to an editable YAML skill at
-`~/.octo/browser-skills/<name>.yaml` (`tools.BrowserSkillsDir`,
+`~/.octo/browser-recordings/<name>.yaml` (`tools.BrowserRecordingsDir`,
 `$OCTO_BROWSER_SKILLS_DIR` to override):
 
 ```yaml
@@ -154,8 +154,8 @@ steps:
 are substituted at replay from `params` (falling back to declared defaults). The
 skill is plain YAML — human-readable, hand-editable, git-versionable.
 
-**Distillation.** `record_stop` runs `GenerateSkill`:
-- `CompileSkill` produces a deterministic baseline: navigations and gestures in
+**Distillation.** `record_stop` runs `GenerateRecording`:
+- `CompileRecording` produces a deterministic baseline: navigations and gestures in
   capture order; it drops an `about:blank` start URL (the throwaway tab octo
   opened), collapses initial-load navigation echoes, and removes a step
   identical to its immediate predecessor (a jittery double-fire) — conservative,
@@ -169,7 +169,7 @@ skill is plain YAML — human-readable, hand-editable, git-versionable.
 
 ## Replay, verification, self-heal
 
-`run_skill <name>` loads the YAML and runs `ReplaySkill` (`internal/browser/
+`replay <name>` loads the YAML and runs `ReplayRecording` (`internal/browser/
 skill.go`) deterministically — no LLM in the common case. Each step implicitly
 waits for its target, executes, and checks any `verify`. Robustness is built
 into the engine:
@@ -183,7 +183,7 @@ into the engine:
   miss then reaches the healer). This stops silent wrong-element clicks and lets
   replay survive layout change without the LLM.
 - **Popup following.** A click that opens a new tab swaps the active page for the
-  subsequent steps; `ReplaySkill` returns the final page so the tool keeps the
+  subsequent steps; `ReplayRecording` returns the final page so the tool keeps the
   session pointed at the right tab.
 - **Type verification.** After a `type`, if a non-empty value left the field
   empty (a disabled / re-rendering / framework-controlled input swallowed the
@@ -207,7 +207,7 @@ for each step:
 on a hard failure: it shows the model the page's current interactable elements (a
 text digest — model-agnostic, no vision) plus the intended action + label, and
 asks for the corrected selector, which is written into the step for retry and
-persisted (`run_skill` saves the healed skill back). This self-heal is the
+persisted (`replay` saves the healed skill back). This self-heal is the
 difference between this and a brittle RPA macro.
 
 ## Managing recordings (web Browser view)
@@ -220,14 +220,14 @@ the section has a **Record** button.
 
 All three actions are **agentic and consistent**: Replay, Record, and Edit each
 open a fresh agent session (`openAgentSession`) whose first message drives the
-flow — Replay runs `run_skill` through the full agent replay+heal path; Record
+flow — Replay runs `replay` through the full agent replay+heal path; Record
 walks the demonstrate-then-stop flow; Edit reads the YAML and edits it
 conversationally. There is no server-side replay endpoint and no raw-YAML modal
 editor — both would be inconsistent with the rest of the agentic-first UI. (The
 after-turn message suggestion is suppressed in these single-purpose sessions.)
 
 **Recordings are replay-only.** They run when explicitly replayed (the Replay
-button or `run_skill`); they are not keyword-triggerable. (A companion-`SKILL.md`
+button or `replay`); they are not keyword-triggerable. (A companion-`SKILL.md`
 mechanism that auto-triggered a recording by phrase was tried and removed: it was
 unreliable and led the agent to over-promise auto-execution that often did not
 fire. A recording is an automation the user replays, distinct from a SKILL.md the

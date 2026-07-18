@@ -64,7 +64,7 @@
     }
   }
 
-  // Replay reuses the full agent path (run_skill + self-heal): open a session
+  // Replay reuses the full agent path (replay action + self-heal): open a session
   // and let the model drive it, rather than a server-side replay endpoint.
   function run(name: string) {
     openAgentSession(tr('browser.rec.run_prompt').replace('{name}', name), '▶ ' + name).catch(() => {})

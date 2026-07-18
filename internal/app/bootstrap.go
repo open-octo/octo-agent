@@ -75,8 +75,8 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	mgr := tools.NewSubAgentManager(spawner)
 	tools.SetDefaultSubAgentManager(mgr)
 
-	// LLM-backed distill (record_stop) + self-heal (run_skill) for browser skills.
-	tools.SetBrowserSkillGenerator(MakeSkillGenerator(a.GetSender(), a.Model))
+	// LLM-backed distill (record_stop) + self-heal (replay) for browser recordings.
+	tools.SetBrowserRecordingGenerator(MakeRecordingGenerator(a.GetSender(), a.Model))
 	tools.SetBrowserHealer(MakeBrowserHealer(a.GetSender(), a.Model))
 
 	// Gate image content (browser screenshots) on the active model's vision
@@ -93,7 +93,7 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	cleanup := func() {
 		tools.SetDefaultSubAgentManager(nil)
 		tools.SetSpawner(nil)
-		tools.SetBrowserSkillGenerator(nil)
+		tools.SetBrowserRecordingGenerator(nil)
 		tools.SetBrowserHealer(nil)
 		tools.SetBrowserVision(true)
 		tools.ResetBrowserSession()

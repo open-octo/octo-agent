@@ -64,11 +64,11 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 		tools.SetBrowserVision(cfg.ModelVision(a.Model))
 	}
 
-	// Same omission for the LLM-backed browser helpers: record_stop's skill
-	// distillation and run_skill's selector self-heal need a model. WireTools
+	// Same omission for the LLM-backed browser helpers: record_stop's
+	// distillation and replay's selector self-heal need a model. WireTools
 	// installs these for the CLI; serve must too, or the web UI silently falls
 	// back to deterministic compilation and no self-heal.
-	tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.GetSender(), a.Model))
+	tools.SetBrowserRecordingGenerator(app.MakeRecordingGenerator(a.GetSender(), a.Model))
 	tools.SetBrowserHealer(app.MakeBrowserHealer(a.GetSender(), a.Model))
 
 	// Same omission for the external memory backend: WireTools installs it for

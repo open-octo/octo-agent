@@ -7,18 +7,18 @@ import (
 	"github.com/open-octo/octo-agent/internal/browser"
 )
 
-// TestRenderBrowserSkillsManifest: an empty recordings dir renders nothing; a
-// recording renders its name, description, params, and outputs plus the run_skill
+// TestRenderBrowserRecordingsManifest: an empty recordings dir renders nothing; a
+// recording renders its name, description, params, and outputs plus the replay
 // invocation note.
-func TestRenderBrowserSkillsManifest(t *testing.T) {
+func TestRenderBrowserRecordingsManifest(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OCTO_BROWSER_SKILLS_DIR", dir)
 
-	if m := RenderBrowserSkillsManifest(); m != "" {
+	if m := RenderBrowserRecordingsManifest(); m != "" {
 		t.Fatalf("empty dir should render empty, got %q", m)
 	}
 
-	if err := browser.SaveSkill(dir+"/download-excels.yaml", browser.Skill{
+	if err := browser.SaveRecording(dir+"/download-excels.yaml", browser.Recording{
 		Name:        "download-excels",
 		Description: "download the monthly reports",
 		Params:      []browser.Param{{Name: "month"}},
@@ -32,7 +32,7 @@ func TestRenderBrowserSkillsManifest(t *testing.T) {
 	// description, so the manifest must fall back to a step digest: without one
 	// the model only sees the name and replays near-miss recordings (a recording
 	// named for item 1 got replayed for a request about item 2).
-	if err := browser.SaveSkill(dir+"/grab-id.yaml", browser.Skill{
+	if err := browser.SaveRecording(dir+"/grab-id.yaml", browser.Recording{
 		Name:    "grab-id",
 		Outputs: []browser.Output{{Name: "raw"}},
 		Steps: []browser.Step{
@@ -42,9 +42,9 @@ func TestRenderBrowserSkillsManifest(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	m := RenderBrowserSkillsManifest()
+	m := RenderBrowserRecordingsManifest()
 	for _, want := range []string{
-		"# Browser recordings", "run_skill", "download-excels",
+		"# Browser recordings", "action=replay", "download-excels",
 		"download the monthly reports", "[params: month]", "[outputs: files (file[])]",
 		"grab-id", "[outputs: raw]",
 		// the all-or-nothing usage boundary
@@ -66,7 +66,7 @@ func TestRenderBrowserSkillsManifest(t *testing.T) {
 func TestSkillsManifestIncludesBrowserRecordings(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OCTO_BROWSER_SKILLS_DIR", dir)
-	if err := browser.SaveSkill(dir+"/dl.yaml", browser.Skill{
+	if err := browser.SaveRecording(dir+"/dl.yaml", browser.Recording{
 		Name:  "dl",
 		Steps: []browser.Step{{Action: "navigate", URL: "x"}},
 	}); err != nil {

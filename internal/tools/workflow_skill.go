@@ -14,13 +14,13 @@ import (
 	"github.com/open-octo/octo-agent/internal/workflow"
 )
 
-// workflowBrowserMu serializes browser-skill replays within and across
+// workflowBrowserMu serializes browser-recording replays within and across
 // workflows: browser automation drives a single shared Chrome session, so two
 // concurrent replays (from a parallel()/pipeline()) would fight over one page.
 var workflowBrowserMu sync.Mutex
 
 // dispatchWorkflowSkill backs the workflow skill() primitive. It resolves name
-// (optionally "browser:"/"md:"-prefixed) to a recorded browser skill or a
+// (optionally "browser:"/"md:"-prefixed) to a browser recording or a
 // SKILL.md skill and runs it, returning the outputs as a JSON string in Reply —
 // what skill() parses to native Ruby.
 func dispatchWorkflowSkill(ctx context.Context, spawner Spawner, name, paramsJSON, schema string) workflow.AgentResult {
@@ -31,7 +31,7 @@ func dispatchWorkflowSkill(ctx context.Context, spawner Spawner, name, paramsJSO
 		return workflow.AgentResult{Err: fmt.Errorf("skill %q: %w", name, err)}
 	}
 
-	isBrowser := browserSkillExists(bare)
+	isBrowser := browserRecordingExists(bare)
 	_, isMD := skillRegistryGet(bare)
 
 	switch kind {
@@ -39,7 +39,7 @@ func dispatchWorkflowSkill(ctx context.Context, spawner Spawner, name, paramsJSO
 		if !isBrowser {
 			return workflow.AgentResult{Err: fmt.Errorf("skill %q: no browser recording named %q", name, bare)}
 		}
-		return runBrowserWorkflowSkill(ctx, bare, params)
+		return runBrowserRecording(ctx, bare, params)
 	case "md":
 		if !isMD {
 			return workflow.AgentResult{Err: fmt.Errorf("skill %q: no SKILL.md skill named %q", name, bare)}
@@ -50,7 +50,7 @@ func dispatchWorkflowSkill(ctx context.Context, spawner Spawner, name, paramsJSO
 		case isBrowser && isMD:
 			return workflow.AgentResult{Err: fmt.Errorf("skill %q is ambiguous (both a browser recording and a SKILL.md skill exist); prefix with browser: or md:", bare)}
 		case isBrowser:
-			return runBrowserWorkflowSkill(ctx, bare, params)
+			return runBrowserRecording(ctx, bare, params)
 		case isMD:
 			return runMDWorkflowSkill(ctx, spawner, bare, params, schema)
 		default:
@@ -108,13 +108,13 @@ func stringifyParam(v any) string {
 	}
 }
 
-// browserSkillExists reports whether a recording of that name is on disk. The
-// base==name check keeps the name from escaping the skills dir.
-func browserSkillExists(name string) bool {
+// browserRecordingExists reports whether a recording of that name is on disk.
+// The base==name check keeps the name from escaping the recordings dir.
+func browserRecordingExists(name string) bool {
 	if name == "" || filepath.Base(name) != name {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(BrowserSkillsDir(), name+".yaml"))
+	_, err := os.Stat(filepath.Join(BrowserRecordingsDir(), name+".yaml"))
 	return err == nil
 }
 
@@ -125,13 +125,13 @@ func skillRegistryGet(name string) (skills.Skill, bool) {
 	return activeSkills.Get(name)
 }
 
-// runBrowserWorkflowSkill replays a recording deterministically and returns its
+// runBrowserRecording replays a recording deterministically and returns its
 // declared outputs as JSON. Serialized on the shared Chrome session.
-func runBrowserWorkflowSkill(ctx context.Context, name string, params map[string]any) workflow.AgentResult {
-	path := filepath.Join(BrowserSkillsDir(), name+".yaml")
-	skill, err := browser.LoadSkill(path)
+func runBrowserRecording(ctx context.Context, name string, params map[string]any) workflow.AgentResult {
+	path := filepath.Join(BrowserRecordingsDir(), name+".yaml")
+	recording, err := browser.LoadRecording(path)
 	if err != nil {
-		return workflow.AgentResult{Err: fmt.Errorf("skill %q: load: %w", name, err)}
+		return workflow.AgentResult{Err: fmt.Errorf("recording %q: load: %w", name, err)}
 	}
 
 	// Replay substitutes {{placeholder}} with strings, so narrow here.
@@ -145,29 +145,29 @@ func runBrowserWorkflowSkill(ctx context.Context, name string, params map[string
 
 	page, b, err := browserPage(ctx)
 	if err != nil {
-		return workflow.AgentResult{Err: fmt.Errorf("skill %q: %w", name, err)}
+		return workflow.AgentResult{Err: fmt.Errorf("recording %q: %w", name, err)}
 	}
 	recorderMu.Lock()
 	healer := browserHealer
 	recorderMu.Unlock()
 
-	modified, finalPage, outputs, err := browser.ReplaySkill(ctx, page, &skill, strParams, browser.ReplayOptions{
+	modified, finalPage, outputs, err := browser.ReplayRecording(ctx, page, &recording, strParams, browser.ReplayOptions{
 		Healer:      healer,
 		Browser:     b,
 		DownloadDir: downloadDir(),
 	})
 	if err != nil {
-		return workflow.AgentResult{Err: fmt.Errorf("skill %q: %w", name, err)}
+		return workflow.AgentResult{Err: fmt.Errorf("recording %q: %w", name, err)}
 	}
 	if finalPage != nil && finalPage != page {
 		setActivePage(b, finalPage)
 	}
 	if modified {
-		_ = browser.SaveSkill(path, skill) // best-effort self-heal write-back
+		_ = browser.SaveRecording(path, recording) // best-effort self-heal write-back
 	}
 	j, err := json.Marshal(outputs)
 	if err != nil {
-		return workflow.AgentResult{Err: fmt.Errorf("skill %q: marshal outputs: %w", name, err)}
+		return workflow.AgentResult{Err: fmt.Errorf("recording %q: marshal outputs: %w", name, err)}
 	}
 	return workflow.AgentResult{Reply: string(j)}
 }

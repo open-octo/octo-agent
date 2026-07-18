@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -134,7 +135,7 @@ func TestBrowserTool_SearchDownloadFlow(t *testing.T) {
 }
 
 // TestBrowserTool_RecordRunRoundTrip records a demonstration through the tool,
-// saves it as an editable skill, then replays it via run_skill on a fresh load.
+// saves it as an editable recording, then replays it via replay on a fresh load.
 func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60_000_000_000)
 	defer cancel()
@@ -177,25 +178,33 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	}
 
 	// Replay: navigates back to the start URL (reset clicks) and re-clicks.
-	if _, err := run(map[string]any{"action": "run_skill", "name": "demo"}); err != nil {
-		skipOnBrowserFlake(t, "run_skill", err)
+	if _, err := run(map[string]any{"action": "replay", "name": "demo"}); err != nil {
+		skipOnBrowserFlake(t, "replay", err)
 	}
 	var clicks int
 	if err := page.Eval(ctx, "window.clicks", &clicks); err != nil {
 		skipOnBrowserFlake(t, "eval", err)
 	}
 	if clicks < 1 {
-		t.Fatalf("replayed skill did not click (clicks=%d)", clicks)
+		t.Fatalf("replayed recording did not click (clicks=%d)", clicks)
+	}
+
+	// The deprecated run_skill alias still replays, and says so in the envelope.
+	out, err := run(map[string]any{"action": "run_skill", "name": "demo"})
+	if err != nil {
+		skipOnBrowserFlake(t, "run_skill alias", err)
+	} else if !strings.Contains(out, "deprecated_action") {
+		t.Fatalf("run_skill alias result missing deprecation note: %s", out)
 	}
 }
 
-// TestResolveMissingSkillParams_ErrorsOnMissingRequired verifies a param
+// TestResolveMissingRecordingParams_ErrorsOnMissingRequired verifies a param
 // with no default and no caller-supplied value returns a clear error naming
 // the missing param(s), rather than auto-prompting the user. The model then
 // decides whether it already knows the value (re-invoke with `params`) or
 // needs to ask the caller via ask_user_question.
-func TestResolveMissingSkillParams_ErrorsOnMissingRequired(t *testing.T) {
-	skill := browser.Skill{
+func TestResolveMissingRecordingParams_ErrorsOnMissingRequired(t *testing.T) {
+	skill := browser.Recording{
 		Name:   "demo",
 		Params: []browser.Param{{Name: "username", Description: "login name"}},
 		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
@@ -204,7 +213,7 @@ func TestResolveMissingSkillParams_ErrorsOnMissingRequired(t *testing.T) {
 	useAsker(t, stub)
 
 	params := map[string]string{}
-	err := resolveMissingSkillParams(&skill, "demo", params)
+	err := resolveMissingRecordingParams(&skill, "demo", params)
 	if err == nil || !strings.Contains(err.Error(), "missing required param") {
 		t.Fatalf("err = %v, want a missing-required-param error", err)
 	}
@@ -219,10 +228,10 @@ func TestResolveMissingSkillParams_ErrorsOnMissingRequired(t *testing.T) {
 	}
 }
 
-// TestResolveMissingSkillParams_NoPromptWhenProvided verifies an
+// TestResolveMissingRecordingParams_NoPromptWhenProvided verifies an
 // already-supplied value skips the prompt entirely.
-func TestResolveMissingSkillParams_NoPromptWhenProvided(t *testing.T) {
-	skill := browser.Skill{
+func TestResolveMissingRecordingParams_NoPromptWhenProvided(t *testing.T) {
+	skill := browser.Recording{
 		Name:   "demo",
 		Params: []browser.Param{{Name: "username"}},
 		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
@@ -231,31 +240,68 @@ func TestResolveMissingSkillParams_NoPromptWhenProvided(t *testing.T) {
 	useAsker(t, stub)
 
 	params := map[string]string{"username": "bob"}
-	if err := resolveMissingSkillParams(&skill, "demo", params); err != nil {
-		t.Fatalf("resolveMissingSkillParams: %v", err)
+	if err := resolveMissingRecordingParams(&skill, "demo", params); err != nil {
+		t.Fatalf("resolveMissingRecordingParams: %v", err)
 	}
 	if stub.called {
 		t.Error("should not prompt when the param is already provided")
 	}
 }
 
-// TestResolveMissingSkillParams_MissingReturnsError verifies that even when
+// TestResolveMissingRecordingParams_MissingReturnsError verifies that even when
 // there's no interactive asker, missing required params produce a clear error
-// (rather than the old silent no-op that left ReplaySkill to fail mid-replay).
-func TestResolveMissingSkillParams_MissingReturnsError(t *testing.T) {
+// (rather than the old silent no-op that left ReplayRecording to fail mid-replay).
+func TestResolveMissingRecordingParams_MissingReturnsError(t *testing.T) {
 	SetAsker(nil)
-	skill := browser.Skill{
+	skill := browser.Recording{
 		Name:   "demo",
 		Params: []browser.Param{{Name: "username"}},
 		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
 	}
 	params := map[string]string{}
-	err := resolveMissingSkillParams(&skill, "demo", params)
+	err := resolveMissingRecordingParams(&skill, "demo", params)
 	if err == nil || !strings.Contains(err.Error(), "missing required param") {
 		t.Fatalf("err = %v, want a missing-required-param error", err)
 	}
 	if _, ok := params["username"]; ok {
 		t.Error("params should be untouched on error")
+	}
+}
+
+// TestBrowserRecordingsDir_MigratesLegacyDir: with no env override, a pre-rename
+// ~/.octo/browser-skills directory is renamed to browser-recordings on first
+// use; env vars (new name first, then legacy) override the default.
+func TestBrowserRecordingsDir_MigratesLegacyDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp) // Windows
+	t.Setenv("OCTO_BROWSER_RECORDINGS_DIR", "")
+	t.Setenv("OCTO_BROWSER_SKILLS_DIR", "")
+
+	old := filepath.Join(tmp, ".octo", "browser-skills")
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "demo.yaml"), []byte("name: demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(tmp, ".octo", "browser-recordings")
+	if got := BrowserRecordingsDir(); got != want {
+		t.Fatalf("dir = %q, want migrated %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(want, "demo.yaml")); err != nil {
+		t.Fatalf("recordings not carried over: %v", err)
+	}
+
+	// Env overrides win over the default (new name first, then the legacy one);
+	// the values are returned verbatim, so the comparison is separator-free.
+	t.Setenv("OCTO_BROWSER_SKILLS_DIR", "/legacy")
+	if got := BrowserRecordingsDir(); got != "/legacy" {
+		t.Fatalf("legacy env not honored: %q", got)
+	}
+	t.Setenv("OCTO_BROWSER_RECORDINGS_DIR", "/new")
+	if got := BrowserRecordingsDir(); got != "/new" {
+		t.Fatalf("new env should take precedence: %q", got)
 	}
 }
 

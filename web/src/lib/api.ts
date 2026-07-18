@@ -781,8 +781,8 @@ export async function verifyBrowser(port?: number): Promise<BrowserVerifyResult>
   })
 }
 
-// Browser recordings = the editable YAML skills produced by record_stop and
-// replayed by run_skill.
+// Browser recordings = the editable YAML workflows produced by record_stop and
+// replayed by the browser tool's replay action.
 export interface BrowserRecording {
   name: string
   description?: string

@@ -52,7 +52,7 @@ func NewSender(opts SenderOptions) (agent.Sender, error)
 ### 3. 工具编排有两套并存的模式,只有一套能给 Director 用
 
 - `app.WireTools`(`internal/app/bootstrap.go:38`)是 CLI 用的模式——靠
-  `tools.SetSpawner`/`tools.SetDefaultSubAgentManager`/`tools.SetBrowserSkillGenerator` 这类
+  `tools.SetSpawner`/`tools.SetDefaultSubAgentManager`/`tools.SetBrowserRecordingGenerator` 这类
   **进程级全局变量**+`defer cleanup()`,单会话专用。CLI 一个进程只服务一个会话,这样写没问题。
 - `Server.prepareToolTurn`(`internal/server/handlers.go:806`)是 Web server 用的模式——这是
   **#1133 修复过的**,把 spawner/sub-agent-manager 从全局变量改成了 `context.Context` 携带
@@ -112,7 +112,7 @@ type PermissionGate interface {
 
 ```go
 tools.SetBrowserVision(cfg.ModelVision(a.Model))
-tools.SetBrowserSkillGenerator(app.MakeSkillGenerator(a.GetSender(), a.Model))
+tools.SetBrowserRecordingGenerator(app.MakeRecordingGenerator(a.GetSender(), a.Model))
 tools.SetBrowserHealer(app.MakeBrowserHealer(a.GetSender(), a.Model))
 ```
 
@@ -487,7 +487,7 @@ Director 侧用法：`agent.Gate = approval.GateFunc(func(ctx, name, input) (boo
 
 ## 已知限制（如实记录，不假装解决）
 
-- **Browser 工具的三个全局 setter 仍未 ctx 化**（`SetBrowserVision`/`SetBrowserSkillGenerator`/
+- **Browser 工具的三个全局 setter 仍未 ctx 化**（`SetBrowserVision`/`SetBrowserRecordingGenerator`/
   `SetBrowserHealer`，`internal/server/handlers.go:822-831`）。`toolenv.WireForSession` 不处理
   这三个，调用方若启用 browser 工具且并发跑多个不同 model 的 agent，会有互相覆盖的竞态。Sinew
   Director 的 `agent.yaml` 场景不需要 browser 工具，绕开即可；这不代表问题被解决了，只是当前
