@@ -28,16 +28,8 @@ func MakeBrowserHealer(sender agent.Sender, model string) browser.Healer {
 		if len(digest) == 0 {
 			return fmt.Errorf("heal: no interactive elements to match against")
 		}
-		var elems strings.Builder
-		for _, d := range digest {
-			fmt.Fprintf(&elems, "%s\t%s\n", d.Selector, d.Text)
-		}
-		const system = "You repair a failed browser-automation step. Given the intended action and the page's current interactive elements (each line: CSS_SELECTOR<TAB>visible text), reply with ONLY the single best CSS selector for the intended element. Reply NONE if nothing matches. No prose, no backticks."
-		user := fmt.Sprintf("Intended action: %s\nIntended element label: %q\nOld selector (no longer matches): %s\n\nCurrent elements:\n%s",
-			step.Action, step.Label, step.Selector, elems.String())
-
-		reply, err := sender.SendMessages(ctx, model, system, []agent.Message{
-			{Role: agent.RoleUser, Content: user},
+		reply, err := sender.SendMessages(ctx, model, healSystemPrompt, []agent.Message{
+			{Role: agent.RoleUser, Content: healPrompt(step, digest)},
 		}, 256)
 		if err != nil {
 			return fmt.Errorf("heal: model: %w", err)
@@ -53,6 +45,23 @@ func MakeBrowserHealer(sender agent.Sender, model string) browser.Healer {
 		step.Selector = sel
 		return nil
 	}
+}
+
+// healSystemPrompt / healPrompt ask the model for the single best replacement
+// selector, given the step's intent and the page's current interactive
+// elements. The prompt carries the step's visible label AND its field hint:
+// for a type/select step the label is empty (an input has no textContent), so
+// the hint — the placeholder/name/aria-label captured at record time — is the
+// only semantic clue to which field the step meant.
+const healSystemPrompt = "You repair a failed browser-automation step. Given the intended action and the page's current interactive elements (each line: CSS_SELECTOR<TAB>visible text), reply with ONLY the single best CSS selector for the intended element. Reply NONE if nothing matches. No prose, no backticks."
+
+func healPrompt(step *browser.Step, digest []browser.DigestElement) string {
+	var elems strings.Builder
+	for _, d := range digest {
+		fmt.Fprintf(&elems, "%s\t%s\n", d.Selector, d.Text)
+	}
+	return fmt.Sprintf("Intended action: %s\nIntended element label: %q\nField hint: %q\nOld selector (no longer matches): %s\n\nCurrent elements:\n%s",
+		step.Action, step.Label, step.Hint, step.Selector, elems.String())
 }
 
 // MakeRecordingGenerator builds the LLM-backed skill distiller for record_stop. It
