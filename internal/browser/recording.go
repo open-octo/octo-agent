@@ -525,7 +525,11 @@ func InteractiveDigest(ctx context.Context, page *Page, frame string, max int) (
 	  }
 	  var out=[];
 	  var els=d.querySelectorAll('a,button,input,select,textarea,[role=button],[role=menuitem],[role=tab],label');
-	  for(var i=0;i<els.length && out.length<%d;i++){var el=els[i]; if(el.offsetParent===null) continue; var t=(el.textContent||el.value||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().slice(0,50); out.push({text:t, selector:sel(el)});}
+	  // Visible = has layout boxes and not visibility:hidden. (The old
+	  // offsetParent===null check also dropped position:fixed controls, which are
+	  // null-offsetParent in Chrome but very much clickable — fixed nav bars and
+	  // floating buttons were invisible to the healer.)
+	  for(var i=0;i<els.length && out.length<%d;i++){var el=els[i]; if(el.getClientRects().length===0 || getComputedStyle(el).visibility==='hidden') continue; var t=(el.textContent||el.value||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().slice(0,50); out.push({text:t, selector:sel(el)});}
 	  return out;
 	})()`, doc, max)
 	var digest []DigestElement
