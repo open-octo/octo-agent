@@ -212,7 +212,7 @@ Desktop:
 - `cmd/octo-desktop/lang.go`, `lang_darwin.go`, `lang_windows.go`,
   `lang_other.go` — new tray/dialog strings.
 
-Frontend (remember `make web-build` + commit `internal/server/webdist`):
+Frontend (`make web-build` rebuilds `internal/server/webdist` locally — it is gitignored; CI builds it for releases):
 - `web/src/components/layout/VersionBadge.svelte`
 - `web/src/views/SettingsView.svelte`
 - `web/src/lib/api.ts` + i18n message files.

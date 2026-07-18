@@ -17,6 +17,8 @@ on:
     paths:
       - 'cmd/octo-desktop/**'
       - 'internal/server/**'
+      # The app embeds the web UI built from web/ (webdist is gitignored).
+      - 'web/**'
       # Root-module dep bumps flow into the nested desktop module via its
       # replace directive, so they must build-verify the desktop app too.
       - 'go.mod'
@@ -29,6 +31,7 @@ on:
     paths:
       - 'cmd/octo-desktop/**'
       - 'internal/server/**'
+      - 'web/**'
       - 'go.mod'
       - 'go.sum'
       - 'scripts/package-desktop-macos.sh'
@@ -75,6 +78,20 @@ jobs:
           cache: true
           cache-dependency-path: cmd/octo-desktop/go.sum
 
+      # The desktop app go:embeds the web UI from internal/server/webdist,
+      # which is gitignored — build it from source before any go build.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
       # Linux webview toolchain (CGO): the build/vet steps below link against it.
       - name: Install Linux webview deps
         if: runner.os == 'Linux'
@@ -82,8 +99,6 @@ jobs:
         # older webkit2gtk-4.1) plus libsoup 3.0.
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev
 
-      # The desktop app embeds the committed web UI (internal/server/webdist via
-      # go:embed), so there's no frontend build step here.
       - name: go vet
         working-directory: cmd/octo-desktop
         run: go vet ./...

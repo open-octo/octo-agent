@@ -25,6 +25,21 @@ jobs:
           go-version: '1.25'
           cache: true
 
+      # The CLI go:embeds the web UI from internal/server/webdist, which is
+      # gitignored — build it from source so every goreleaser target embeds
+      # the real assets.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
@@ -59,6 +74,20 @@ jobs:
           go-version: '1.25'
           cache-dependency-path: cmd/octo-desktop/go.sum
 
+      # The desktop GUI built below go:embeds the web UI (gitignored) — build
+      # it from source first.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
       - name: Stage the released binary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -80,7 +109,7 @@ jobs:
         shell: pwsh
         run: pwsh scripts/embed-rg-windows.ps1 -Arch ${{ matrix.arch }}
 
-      # Build the desktop GUI (nested module; embeds the committed web UI).
+      # Build the desktop GUI (nested module; embeds the web UI built above).
       # -H windowsgui so no console window flashes behind the app.
       # -tags embedrg go:embeds the rg fetched above. Pure-Go (WebView2, no
       # CGO), so arm64 cross-compiles cleanly from the x64 runner via GOARCH.
@@ -194,6 +223,20 @@ jobs:
           go-version: '1.25'
           cache-dependency-path: cmd/octo-desktop/go.sum
 
+      # The desktop app built by build.sh go:embeds the web UI (gitignored) —
+      # build it from source first.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
       - name: Stage the released binary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -252,6 +295,20 @@ jobs:
         with:
           go-version: '1.25'
           cache-dependency-path: cmd/octo-desktop/go.sum
+
+      # The AppImage build go:embeds the web UI (gitignored) — build it from
+      # source first.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
 
       - name: Install webview deps
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev
