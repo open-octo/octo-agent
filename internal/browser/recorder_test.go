@@ -318,7 +318,12 @@ func TestRecorderCapturesSPANavigation(t *testing.T) {
 	if !found {
 		t.Fatalf("pushState navigation was not captured: %+v", rec.Events())
 	}
-	// SPA routing inside the iframe must NOT produce a navigate event.
+	// SPA routing inside the iframe must NOT produce a navigate event. Wait for
+	// the iframe's button first — the top document's #go can be found (and the
+	// pushState captured) while a slow runner is still loading the iframe.
+	if err := page.WaitFor(ctx, "iframe >>> #fb", testWaitTimeout); err != nil {
+		t.Fatalf("wait iframe button: %v", err)
+	}
 	if err := page.Eval(ctx, `document.querySelector('iframe').contentDocument.getElementById('fb').click()`, nil); err != nil {
 		t.Fatalf("drive iframe pushState: %v", err)
 	}
