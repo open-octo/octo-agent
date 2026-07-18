@@ -125,6 +125,11 @@ func TestRegistry_WriteThenEdit_NoRedundantRead(t *testing.T) {
 // sed -i, a redirect) must still be editable afterwards — the terminal write
 // is the session's own change, not an out-of-band edit, so it should refresh
 // the tracker rather than trip the "modified since read" guard.
+//
+// The sed/semicolon, sed/pipe, and bash-c cases here are regression tests for
+// bugs where the tokenizer glued a trailing shell metacharacter to the filename
+// (`file.go;`) or the command was wrapped in `bash -c "..."`, both of which
+// made the write target unparseable and left the tracker unrefreshed.
 func TestRegistry_TerminalWriteThenEdit_Allowed(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -133,6 +138,10 @@ func TestRegistry_TerminalWriteThenEdit_Allowed(t *testing.T) {
 		{"redirect", func(p string) string { return "printf 'package x\\nconst c = 3\\n' > " + p }},
 		{"redirect-fused", func(p string) string { return "printf 'package x\\nconst c = 3\\n' >" + p }},
 		{"sed-inplace", func(p string) string { return "sed -i '' 's/const a = 1/const a = 2/' " + p }},
+		{"sed-inplace-semicolon", func(p string) string { return "sed -i 's/const a = 1/const a = 2/' " + p + "; echo done" }},
+		{"sed-inplace-pipe", func(p string) string { return "sed -i 's/const a = 1/const a = 2/' " + p + " | cat" }},
+		{"bash-c-sed", func(p string) string { return "bash -c \"sed -i 's/const a = 1/const a = 2/' " + p + "\"" }},
+		{"sh-c-sed", func(p string) string { return "sh -c \"sed -i 's/const a = 1/const a = 2/' " + p + "\"" }},
 		{"gofmt-w-file", func(p string) string { return "gofmt -w " + p }},
 	}
 	for _, tc := range cases {
