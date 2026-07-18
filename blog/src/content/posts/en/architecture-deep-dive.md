@@ -354,17 +354,21 @@ The `terminal` tool runs everything you hand it on the system shell, so its desc
 
 Together these turn "the shell can do anything" from a footgun into a bounded surface that the model can reason about without burning tokens polling dead output.
 
-### show_artifact: A File Path Is Not a UI
-
-Most artifacts enter the user's view through `write_file` / `edit_file` (the web Artifacts panel surfaces them automatically). But files produced by other means — a build step, a `cat > x.html` heredoc, a downloaded image — don't ride that path. `show_artifact` bridges the gap: it validates the path against an allowlist of previewable types (`artifactContentTypes`: `.html/.md/.png/.jpg/.gif/.svg/.webp`), confirms it's a real file, and emits a `UI` payload of `{"type": "artifact", "path": ..., "size_bytes": N}` on the result envelope.
-
-Two gates apply: the path must pass the content-type allowlist (so the renderer doesn't get handed a binary it can't show), and the resulting artifact endpoint serves the file using the matching `tool_use` block in the session transcript as the authorization token — one user's artifact isn't previewable by another session. HTML artifacts are rendered in a **sandboxed iframe** with no live script by default; each one needs explicit user permission to run code. That's the same "defer + gate" pattern as elsewhere: the default is dead-simple and safe, the powerful path requires a conscious choice.
-
 ### One Registry, Many Species
 
 `tools.DefaultRegistry` (`internal/tools/registry.go`) is a single dispatcher that routes any tool call by name to one entry of the `allTools` slice — `Terminal`, `ReadFile`, `WriteFile`, `EditFile`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Skill`, `Agent*`, `Workflow*`, `ScheduleWakeup`, `Browser`, `MemoryRecall`, and the rest. There is "browser: internal/browser", "workflow: Ruby/mruby", and "MCP: a JSON-RPC bridge" — but the agent loop sees only `ToolExecutor`. The late addition of `mcp_describe` / `mcp_call` didn't require touching the agent core either; they entered through a registry entry like every other tool.
 
 That choice is what makes the meta-skills from the previous section possible: a guided "set up your IM channel" flow isn't a bespoke tool, it's `channel-manager` stringing `read_file` / `write_file` / `terminal` together in the order the user's situation demands. Tool composition is the reusable primitive; a new capability usually means a new skill, not a new tool.
+
+### sub_agent: Forking Without Recursion
+
+The `sub_agent` tool looks like a simple delegate-and-wait, but the design tensions live in what it *doesn't* allow. The most visible rule is in `AgentTool.Execute` (`internal/tools/agent.go`): if the caller is already a sub-agent, the call fails outright — "a sub-agent cannot spawn another sub-agent." No recursion, period. Combined with the `tools` allowlist omitting `sub_agent` itself, that's a shallow hard ceiling rather than the workflow's Turing-complete unconstrained spawn — the design intent is a single level of delegation, not an agent tree.
+
+**Fork vs. fresh** (`subagent_type`): omitting `subagent_type` seeds the child with the *parent's full conversation* (system prompt + messages so far) — a true fork that shares context and has the same conclusion-shaped reply contract. Setting a type (`explore`, `plan`, `general`, `code-review`) starts a zero-context child with a specialized persona, read-only / lean-context defaults, and its own `model` frontmatter. The same tool covers both; a preset fills in what the call leaves unset.
+
+**Sync vs. async**: `run_in_background: true` calls `SubAgentManager.Start`, which returns an `agent_N` ID immediately and pushes a completion notification; `false` (default) calls `RunSync` and blocks the turn. A semaphore (`syncSem`) bounds how many synchronous sub-agents run at once so a wave of fan-outs can't starve the parent. Transport-aware too: synchronous channels (server / IM) have no follow-up-turn path, so `mgr.Synchronous()` silently forces the blocking path and tells the model — rather than silently failing.
+
+When a sub-agent hits its turn limit, the result returns with an explicit `[INCOMPLETE: … partial]` marker rather than passing partial work off as done. The parent is meant to either re-launch narrower or treat it as unfinished. And every `StopReason` (`end_turn`, `tool_use`, `max_turns`, `error`, `killed`) reaches the WS broadcast so the frontend status panel updates without polling.
 
 ## Coda: One Worldview Throughout
 
@@ -397,4 +401,4 @@ The model supplies the intelligence; the mechanisms supply the floor. If one sen
 | web_fetch SSRF defenses | `internal/tools/web_fetch.go` (`secureFetchTransport` / `directFetchHTTPClient`) |
 | web_search backends | `internal/tools/web_search.go` |
 | terminal background manager | `internal/tools/background.go` |
-| Artifact preview gating | `internal/tools/artifact.go`, `internal/server/artifact.go` |
+| Sub-agent lifecycle | `internal/tools/agent.go`, `internal/tools/subagent_manager.go` |
