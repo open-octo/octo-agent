@@ -49,7 +49,7 @@ type Output struct {
 // iframe selector) scopes it via the " >>> " convention. Label is a human note;
 // replay ignores it.
 type Step struct {
-	Action   string `yaml:"action"` // navigate | click | type | select | upload | wait | download | extract
+	Action   string `yaml:"action"` // navigate | click | type | select | upload | wait | download | extract | key
 	URL      string `yaml:"url,omitempty"`
 	Frame    string `yaml:"frame,omitempty"`
 	Selector string `yaml:"selector,omitempty"`
@@ -170,6 +170,30 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			}
 			pn := addParam(hint, e.Value, desc, e.Secret)
 			st.Value = "{{" + pn + "}}"
+		case e.Type == "enter":
+			// Enter in a text input — the submit gesture. Without a blur no change
+			// event fired, so the typed value only exists as this event's snapshot:
+			// emit the type step for it first (parameterized like a change), unless
+			// the field was already typed moments ago (blur → change → Enter).
+			st.Action = "key"
+			st.Value = "enter"
+			alreadyTyped := false
+			if n := len(s.Steps); n > 0 {
+				last := s.Steps[n-1]
+				alreadyTyped = last.Action == "type" && last.Selector == e.Selector && last.Frame == e.Frame
+			}
+			if (e.Value != "" || e.Secret) && !alreadyTyped {
+				hint := e.Field
+				if hint == "" {
+					hint = hintFromSelector(e.Selector)
+				}
+				desc := ""
+				if e.Secret {
+					desc = "secret value (not stored; provide at replay)"
+				}
+				pn := addParam(hint, e.Value, desc, e.Secret)
+				s.Steps = append(s.Steps, Step{Action: "type", Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: hint, Value: "{{" + pn + "}}"})
+			}
 		default:
 			continue
 		}
@@ -902,6 +926,25 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 			if !page.fieldNonEmpty(ctx, target) {
 				return page, fmt.Errorf("type: %q did not accept input", target)
 			}
+		}
+	case "key":
+		// A recorded Enter in a text input (form submit / autocomplete confirm) —
+		// the only key recorded today. Page.Key dispatches to the focused element,
+		// so focus the field with a real (trusted) click first.
+		if h := strings.TrimSpace(step.Hint); h != "" {
+			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
+		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
+			return page, err
+		}
+		key := strings.ToLower(strings.TrimSpace(subst(step.Value, params)))
+		if key != "enter" {
+			return page, fmt.Errorf("key: unsupported key %q (only enter is recorded)", step.Value)
+		}
+		if err := page.Click(ctx, target); err != nil {
+			return page, err
+		}
+		if err := page.Key(ctx, key); err != nil {
+			return page, err
 		}
 	case "select":
 		if h := strings.TrimSpace(step.Hint); h != "" {

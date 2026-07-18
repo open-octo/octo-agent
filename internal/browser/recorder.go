@@ -154,8 +154,8 @@ func (r *Recorder) instrumentOOPIF(ctx context.Context, session string) {
 	_ = r.instrumentSession(ctx, session, frameSel)
 }
 
-// captureScript installs capture-phase click/change listeners that report each
-// action (with a stable-ish selector) through the __octoRecord binding.
+// captureScript installs capture-phase click/change/keydown listeners that report
+// each action (with a stable-ish selector) through the __octoRecord binding.
 const captureScript = `(function(){
   if (window.__octoRec) return; window.__octoRec = true;
   function sel(el){
@@ -182,6 +182,21 @@ const captureScript = `(function(){
   }
   document.addEventListener('click', function(e){report('click',e);}, true);
   document.addEventListener('change', function(e){var t=e.target; report((t&&t.type==='file')?'upload':'change', e);}, true);
+  // Enter in a text input = the submit gesture (change never fires without a
+  // blur, so the typed value only reaches us as this event's snapshot). Not
+  // captured: textarea (Enter is a newline, already in the change value),
+  // select/buttons/links (Enter fires a click, caught above), non-text inputs
+  // (checkbox/radio have no typed value), and IME composition (Enter confirms
+  // the candidate — it is not a submit, CJK users hit it constantly).
+  var TEXTY={text:1,search:1,email:1,url:1,tel:1,number:1,password:1};
+  document.addEventListener('keydown', function(e){
+    if(e.key!=='Enter'&&e.keyCode!==13) return;
+    if(e.isComposing||e.keyCode===229) return;
+    var t=e.target;
+    if(!t||t.nodeType!==1||t.tagName!=='INPUT') return;
+    if(!TEXTY[t.type||'text']) return;
+    report('enter', e);
+  }, true);
 })();`
 
 // Start begins capturing. The binding and listeners are installed on the live

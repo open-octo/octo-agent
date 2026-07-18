@@ -205,3 +205,64 @@ func TestRecorderCapturesNewTab(t *testing.T) {
 		t.Fatalf("click in the new tab was not captured: %+v", rec.Events())
 	}
 }
+
+// TestRecorderCapturesEnter: Enter in a text input is captured with the field's
+// current value (change never fires without a blur); Enter in a textarea is a
+// newline, not a submit, and must not be captured.
+func TestRecorderCapturesEnter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>enter</title>
+<form onsubmit="event.preventDefault()"><input id="q"></form><textarea id="t"></textarea>`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#q", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+	if err := page.TypeText(ctx, "#q", "hello"); err != nil {
+		t.Fatalf("type: %v", err)
+	}
+	if err := page.Click(ctx, "#q"); err != nil {
+		t.Fatalf("focus #q: %v", err)
+	}
+	if err := page.Key(ctx, "enter"); err != nil {
+		t.Fatalf("enter #q: %v", err)
+	}
+	if err := page.Click(ctx, "#t"); err != nil {
+		t.Fatalf("focus #t: %v", err)
+	}
+	if err := page.Key(ctx, "enter"); err != nil {
+		t.Fatalf("enter #t: %v", err)
+	}
+	var enters []RecordedEvent
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		enters = enters[:0]
+		for _, e := range rec.Events() {
+			if e.Type == "enter" {
+				enters = append(enters, e)
+			}
+		}
+		if len(enters) >= 1 {
+			break
+		}
+	}
+	if len(enters) != 1 {
+		t.Fatalf("want exactly 1 enter event (the textarea one excluded), got %d: %+v", len(enters), rec.Events())
+	}
+	if enters[0].Selector != "#q" || enters[0].Value != "hello" {
+		t.Fatalf("enter event = %+v, want selector #q with the typed snapshot", enters[0])
+	}
+}
