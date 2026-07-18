@@ -1,7 +1,7 @@
 
 ---
 title: "octo-agent Deep Dive: The Genuinely Hard Parts of an Agent System"
-description: "This post dissects nine core mechanisms of octo-agent across the full stack — foundation, built-in tool contract, context compaction, prompt caching, /loop, workflow, browser, permissions, the trash can, and the batteries-included onboarding — and the trade-offs behind each."
+description: "This post dissects ten core mechanisms of octo-agent across the full stack — foundation, built-in tool design, context compaction, prompt caching, memory (history/context/long-term recall), /loop, workflow, browser, permissions, the trash can, and the batteries-included onboarding — and the trade-offs behind each."
 pubDate: 2026-07-08
 updatedDate: 2026-07-18
 author: "octo-agent team"
@@ -209,6 +209,57 @@ The static prefix (tool definitions + system prompt) needs only one breakpoint �
 
 
 
+## Memory: History, Context, and Long-Term Recall
+
+The previous three sections each touched a different layer of "what the model sees": tool calls arrive through the dispatcher, old turns get folded by compaction, and prompt-cached prefixes stop re-billing the unchanged parts. But none of them answer the question that holds the rest together: **what survives a session?**
+
+octo keeps three distinct layers, and the distinction matters.
+
+**会话历史 / session history** is the ordered list of user messages and assistant replies for *this* session. It's the single source of truth for "what just happened" and the payload the LLM receives on every turn. It's also the only layer that grows without a built-in ceiling — and the layer compaction fights for headroom.
+
+**上下文 / context** is the finite window actually handed to the model on a turn: the system prompt (env, skills manifest, injected memory) followed by the recent tail of conversation. Context is what compaction *shrinks* (by summarizing the older half of history into a single block), and what prompt *caching* makes cheaper to resend (by byte-stabilizing the prefix). It is per-session, rebuilt every turn, and strictly bounded by the model's context window.
+
+**长期记忆 / long-term memory** is anything that must outlive a single session — durable preferences, project decisions, corrections, the "why" behind a change. Memory is not part of context by default; it is *projected into* context at turn-build time by being injected into the system prompt or prepended to user messages, so it rides along with every turn without being part of the history that compaction can fold away.
+
+The pipeline flows one way: memory feeds context, context frames history, and when history grows too long compaction refolds it into context. Crucially, memory sits *outside* compaction's reach — a fact the agent can recall next session even if every turn from this one has been summarized into a single line.
+
+octo implements that last layer in two layers of its own, and they don't replace each other.
+
+### The Markdown Layer (internal/memory)
+
+Everything the agent remembers for the long term lives in plain markdown files it manages with the same file tools it uses on source code — there is no dedicated remember/forget/memory tool, and no code that reads the agent's intent. The agent itself decides what to keep, what to prune, and when to load a topic file on demand — the same way Claude Code works.
+
+**Layout and scoping.** Memories live in `~/.octo/memories/<repo-slug>/`, where the slug is `Slugify(basename)` plus a 32-bit FNV-1a hash of the full path — two checkouts of a repo named `my-app` don't collide. The repo root is derived from git's *common dir* (not the worktree top-level), so every linked worktree shares one memory scope. Alongside the project scope sits an **inherited home scope** (`~/.../octo-agent-<homehash>/`), for cross-project or personal preferences. On every turn, `memory.RenderInjection` loads both: inherited first (project-agnostic defaults), then project-specific.
+
+**MEMORY.md is the index; topic files hold the detail.** `MEMORY.md` is the small file loaded into the system prompt every session, acting as a pointer index. Anything longer lands in `<topic>.md` files linked from it (e.g. `octo-agent-subagent-lifecycle.md`). The budget is hard-capped: `truncateForInjection` clamps MEMORY.md to 200 lines or 25 UTF-8 kilobytes (whichever is hit first), matching Claude Code's ceiling. When the file overflows, a `⚠ exceeds the injection budget` warning is appended inside the system prompt so the model knows entries are being dropped — not silently surfacing 200 lines and forgetting the rest.
+
+**Rule tiers for action proximity.** Plain index entries are fine for "recall if you think to look," but load-bearing rules need to reach the agent *at the point of action*, not one read_file away. MEMORY.md may carry two optional structured sections parsed by `parseRules`:
+
+- `## 必须遵守` — always-apply rules, restated in full near every turn.
+- `## 触发提醒` — rules that fire only when user input matches a keyword prefix like `(触发: keyword1, keyword2)`.
+
+Rules in both tiers are written *verbatim*, not as pointers. A MEMORY.md with neither section parses to zero rules and the per-turn reminder is silent — the old plain-index style keeps working untouched. `Lint` flags the most common silent failure: a `触发提醒` rule missing its `(触发: …)` clause, which means it can never be recalled.
+
+**Per-turn reminders ride the message stream.** This is the piece most easily misunderstood. `Injector.Reminder(userInput)` runs on `EventUserPromptSubmit` and prepends activated rules as `<system-reminder>` to that turn's outgoing message — injected into history, not into the system prompt. The reason is prompt caching: keeping memory *out* of the system prompt keeps the prompt prefix byte-stable so Go's `markMessagesCacheable` breakpoints survive the protocol-adapter layer. Every turn re-announces the always-apply tier; the triggered tier is latched per text (`recalled map`) so each rule surfaces at most once per session and never spam-returns on every subsequent turn, re-armed on the next user input.
+
+Trigger matching is deliberately conservative: ASCII keywords must match on word boundaries (`deploy` does not fire on `deployment`, "用deploy部署" still matches because CJK bytes count as boundaries), while CJK keywords use substring matching because there are no spaces to anchor on and curated multi-rune phrases rarely collide. The fire direction is also one-way — input contains trigger never reverses — which is what stopped the earlier substring-explosion matcher from lighting up on nearly every message.
+
+**The save-nudge: memory as a follow-up incentive, not a pre-turn gate.** Memory survives best when the agent writes durable context while the moment is still fresh. `SaveNudge` fires on `EventPostToolUse` when the terminal runs `^gh pr (create|merge)` — a milestone that almost certainly means a decision was made. It appends a one-shot `<system-reminder>` telling the agent to record durable decisions, alternatives ruled out, and don't-repeat-this constraints in its memory directory *this turn*, while the diff and git log already hold WHAT changed — memory is for the why. The nudge is rate-limited (`nudged` flag) and re-armed per user turn, so a long session can still catch several milestones without nagging.
+
+### The Semantic Backend (internal/memorybackend, memory_recall)
+
+Plain markdown scales with the agent's own discipline and with how much prose it can hold. The optional semantic backend handles the case markdown can't: large corpora, approximate recall, and server-side extraction the agent would otherwise have to do itself.
+
+`internal/memorybackend` normalizes a swarm of external services (Hindsight, mem0, AgentMemory) behind a single `Backend { Name(); Store(ctx, content); Recall(ctx, query) }` interface. The `memory_recall` tool is advertised only when a backend is configured, and its `Execute` round-trips through `activeMemoryBackend.Recall` to return scored snippets. When the auto-recall flag is on, that same tool also runs as a `EventUserPromptSubmit` hook and folds results into the incoming message — matching the same channel `Injector` uses for MEMORY.md reminders, no new agent-core plumbing needed.
+
+Storing is a background side effect fired on `EventStop`: after each turn it detaches a goroutine (the turn's own context may already be cancelled), joins `User: … / Assistant: …` from the turn payload, strips `<system-reminder>` spans so already-injected context does not land in long-term storage (preventing round-trip recall pollution), and `Store`s with a 10-second decoupled timeout. Errors are swallowed: persistence is best-effort by design.
+
+Storing is fire-and-forget by necessity, not by choice. By the time `EventStop` fires, the turn's context may already be cancelled; the agent gets no tool_result channel to report store failures back through; and a flaky memory service should never break a turn. This is the same "memory must never block the agent" rule that keeps `RenderInjection` truncating instead of erroring when MEMORY.md is bloated.
+
+### How Memory Coexists with Compaction
+
+Because memory is injected into the system prompt / the message stream while compaction only folds the message stream's older turns, the two never trample each other. Compaction reduces history to a summary block; memory re-injected next turn still arrives in full. The index budget (200 lines / 25 KB) is deliberately compact: it is meant to stay under the cacheable prefix's own headroom so that recalling memory doesn't itself force a compaction. And because the summary produced by compaction includes the *effect* of any recalled memory (decisions the agent already acted on), memory can be pared back aggressively — the summary carries the *what*, MEMORY.md carries the *why*.
+
 ## /loop: A Command That Doesn't Exist
 
 Users keep asking for things like "check every five minutes whether CI passed." octo-agent's answer is `/loop 5m check CI` — but grep the codebase for the implementation of `/loop` and you'll find the server's command router handles it with `return false`: don't intercept, pass it to the model as an ordinary message.
@@ -395,7 +446,7 @@ One thing worth noting: `channel-manager`, `mcp-creator`, `cron-task-creator`, a
 
 ## Coda: One Worldview Throughout
 
-Each of the nine mechanisms minds its own patch; together they express a single judgment: **in an agent system, whatever a mechanism can guarantee, never leave to the model's good behavior.**
+Each of the ten mechanisms minds its own patch; together they express a single judgment: **in an agent system, whatever a mechanism can guarantee, never leave to the model's good behavior.**
 
 Compaction relies on token thresholds and safe split points, not on praying the summary loses nothing. Cache breakpoints are placed explicitly, not left to luck. Loop has a 12-hour hard cap to catch a model that forgets to stop. Workflow's concurrency cap is a constant, not a hope that script authors show restraint. Every rule in the permission system — deny precedence, command anchoring — maps to an incident that actually happened. And the trash can simply assumes wrong deletions are inevitable and spends its effort on the *after*.
 
@@ -409,6 +460,8 @@ The model supplies the intelligence; the mechanisms supply the floor. If one sen
 |---|---|
 | Agent loop | `internal/agent/agent.go` |
 | Built-in tool contract | `internal/tools/registry.go` (allTools), `internal/agent/tool.go` |
+| Memory (markdown) | `internal/memory/memory.go` (RenderInjection), `internal/memory/injector.go` (Injector.Reminder / SaveNudge), `internal/memory/rules.go` (parseRules) |
+| Memory (semantic) | `internal/memorybackend/backend.go`, `internal/tools/memory_backend.go` (memory_recall) |
 | Context compaction | `internal/agent/compaction.go` |
 | Prompt cache breakpoints | `internal/provider/anthropic/client.go` (`markMessagesCacheable`) |
 | Protocol token normalization | `internal/provider/openai/types.go` (`nonCachedInput`) |
