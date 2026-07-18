@@ -231,14 +231,14 @@ flowchart LR
     B --> C["Generate a selector per target<br/>#id → data-testid / aria-label<br/>→ fallback nth-of-type path"]
     C --> D["Password fields flagged secret,<br/>value never stored"]
     D --> E["Compile: dedupe + parameterize<br/>into {{param}} placeholders"]
-    E --> F["Artifact: structured YAML<br/>~/.octo/browser-skills/*.yaml"]
+    E --> F["Artifact: structured YAML<br/>~/.octo/browser-recordings/*.yaml"]
 ```
 
 Each recorded step compiles into structured fields — `action / selector / value / verify` — with the repeatable inputs (search terms, dates) lifted into parameters: record once, replay many times with arguments.
 
 But selectors rot: the frontend ships a redesign, `.btn-submit` becomes `.button-primary`, and the script breaks. The replay engine responds in two tiers. Tier one costs nothing: the most common failure is actually a cookie banner covering the target, so first dismiss the overlay and retry. Tier two is **self-healing**: hand the LLM the step's intent description, the dead selector, and a digest of every interactive element on the current page, and ask for exactly one new selector; swap it in and retry, up to three rounds. If the fix works and the whole skill runs green, the new selector is **written back to the YAML on disk** — the healing is durable, so one redesign doesn't cost you an LLM repair fee on every subsequent replay.
 
-One axed feature deserves a footnote: early versions tried auto-triggering recorded skills when the user mentioned certain keywords. Too many false triggers in practice; it was removed. Recorded skills now fire in exactly two ways — an explicit Replay button in the Web UI, or the model explicitly invoking `run_skill` in conversation. The design doc keeps the record of that failure — knowing what was tried and abandoned is sometimes worth more than knowing what exists.
+One axed feature deserves a footnote: early versions tried auto-triggering recorded skills when the user mentioned certain keywords. Too many false triggers in practice; it was removed. Recorded skills now fire in exactly two ways — an explicit Replay button in the Web UI, or the model explicitly invoking `replay` in conversation. The design doc keeps the record of that failure — knowing what was tried and abandoned is sometimes worth more than knowing what exists.
 
 ## Permissions: Admitting It's Just String Matching
 

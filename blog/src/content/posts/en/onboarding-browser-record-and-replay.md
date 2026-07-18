@@ -26,14 +26,14 @@ You don't need to remember the `record_start`/`record_stop` action names — the
 
 Next to every saved recording in that same panel:
 
-- **"▶ Replay"** — calls `run_skill` by name, through the full agent path (the self-heal mechanism covered below only kicks in on this path — it's not a server-side replay that bypasses the model).
+- **"▶ Replay"** — calls `replay` by name, through the full agent path (the self-heal mechanism covered below only kicks in on this path — it's not a server-side replay that bypasses the model).
 - **"✎ Edit"** — also conversational: it reads the recording's YAML, lists the steps for you, and you say what to change (fix a selector, add/remove/reorder a step, set a param's default), and it writes the file back without replaying it on your behalf.
 
 ## What a saved recording looks like
 
 The raw recording goes through one model pass — dropping detours that led nowhere, swapping the concrete values you typed for `{{param}}` placeholders, and writing a description — but this pass can only **reorder or rename steps that were actually recorded**, never invent a new one: any step whose selector isn't in the original recording gets rejected outright, falling back to the raw step instead.
 
-The distilled result is saved as plain YAML at `~/.octo/browser-skills/<name>.yaml` — readable, hand-editable, diffable in git. Roughly:
+The distilled result is saved as plain YAML at `~/.octo/browser-recordings/<name>.yaml` — readable, hand-editable, diffable in git. Roughly:
 
 ```yaml
 name: submit-expense-report
@@ -75,7 +75,7 @@ Three fields in that YAML are worth knowing. `params` are replay-time inputs you
 ## What makes replay trustworthy
 
 ```
-browser(action: "run_skill", name: "<recording-name>", params: { ... })
+browser(action: "replay", name: "<recording-name>", params: { ... })
 ```
 
 In the common case replay is deterministic and involves no model call at all: each step waits for its target to appear before acting, and runs a `verify` check if one was declared. A few robustness details worth knowing:
@@ -92,7 +92,7 @@ If a step's selector and its `hint` both come up empty — and only when a model
 
 ## Wiring it into a workflow
 
-A recording's `outputs` can be plugged straight into [the workflow scripts from the previous post in this series](/blog/posts/en/onboarding-workflow-parallel-review/) via `skill("browser:<name>", params)` — record "log in and export the invoice," bind the exported file's path as an output, and hand it to another agent to parse and summarize in the next step, with no manual hand-off in between.
+A recording's `outputs` can be plugged straight into [the workflow scripts from the previous post in this series](/blog/posts/en/onboarding-workflow-parallel-review/) via `recording("<name>", params)` — record "log in and export the invoice," bind the exported file's path as an output, and hand it to another agent to parse and summarize in the next step, with no manual hand-off in between.
 
 ---
 

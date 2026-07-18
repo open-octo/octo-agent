@@ -26,14 +26,14 @@ originalSlug: onboarding-browser-record-and-replay
 
 同一个面板上，每条已保存的录制旁边还有：
 
-- **"▶ 回放"**——按名字调 `run_skill`，走的是完整的 agent 路径（后面会讲到的自愈机制也在这条路径里生效），不是绕开模型的服务端直接重放。
+- **"▶ 回放"**——按名字调 `replay`，走的是完整的 agent 路径（后面会讲到的自愈机制也在这条路径里生效），不是绕开模型的服务端直接重放。
 - **"✎ 编辑"**——同样是对话式的：读取录制对应的 YAML，把步骤列给你看，你说要改哪一步、加/删/重排哪一步、给哪个参数设默认值，改完写回文件，不会顺手帮你回放一遍。
 
 ## 一段录制存下来长什么样
 
 原始录制会经过一次模型处理——把绕路的死胡同去掉、把你当时输入的具体值换成 `{{参数名}}` 占位符、补一段描述——但这一步只能**重新排列或重命名真实录到的步骤**，不能凭空造一个新目标：任何一步如果它的选择器不在原始录制里，就会被直接拒绝，退回用原始步骤。
 
-蒸馏完存成纯 YAML，放在 `~/.octo/browser-skills/<名字>.yaml`——可读、可手改、能用 git 追踪差异。大致长这样：
+蒸馏完存成纯 YAML，放在 `~/.octo/browser-recordings/<名字>.yaml`——可读、可手改、能用 git 追踪差异。大致长这样：
 
 ```yaml
 name: submit-expense-report
@@ -75,7 +75,7 @@ steps:
 ## 回放怎么保证靠谱
 
 ```
-browser(action: "run_skill", name: "<录制名>", params: { ... })
+browser(action: "replay", name: "<录制名>", params: { ... })
 ```
 
 常见情况下回放是确定性的，不涉及模型调用：每一步先等目标出现再执行，声明了 `verify` 的话还会做一次校验。几个值得知道的健壮细节：
@@ -92,7 +92,7 @@ browser(action: "run_skill", name: "<录制名>", params: { ... })
 
 ## 接进 workflow
 
-一段录制的 `outputs` 可以通过 `skill("browser:<名字>", params)` 直接接进[上一篇系列讲过的 workflow 脚本](/blog/posts/onboarding-workflow-parallel-review/)——比如录一段"登录后台导出账单"，把导出的文件路径当 output 绑出来，下一步再交给另一个 agent 去解析、汇总，整条链路就不用你手动衔接。
+一段录制的 `outputs` 可以通过 `recording("<名字>", params)` 直接接进[上一篇系列讲过的 workflow 脚本](/blog/posts/onboarding-workflow-parallel-review/)——比如录一段"登录后台导出账单"，把导出的文件路径当 output 绑出来，下一步再交给另一个 agent 去解析、汇总，整条链路就不用你手动衔接。
 
 ---
 
