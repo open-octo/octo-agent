@@ -58,6 +58,7 @@ IM sessions can be re-bound between chats, so this surface has commands the othe
 | `/new` | `/new` | Creates a brand-new session and binds this chat to it — the one way to start fresh without touching an existing session's history |
 | `/clear` | `/clear` | Wipes history but keeps the current binding |
 | `/compact` | `/compact` | Compacts now, out-of-band so it doesn't block the chat |
+| `/model` | `/model [name\|default]` | No argument lists the configured models; `/model <name>` binds the session to that entry, `/model default` unbinds back to the default. The binding persists and is the same one the Web UI's model picker shows |
 | `/goal [...]` | | Same shared implementation as Web — `/goal edit <text>` works inline |
 | `/stop` | `/stop` | Interrupts the in-flight turn |
 | `/status` | `/status` | Reports how long this chat has been bound, plus input/output token counts |
@@ -79,7 +80,7 @@ injector state, since those are scoped to the conversation that's being replaced
 | Command | TUI | Web | IM |
 |---|:-:|:-:|:-:|
 | `/help` | ✓ | | |
-| `/model` | ✓ | | |
+| `/model` | ✓ | | ✓ |
 | `/thinking` | ✓ | | |
 | `/compact` | ✓ | ✓ | ✓ |
 | `/clear` | ✓ | ✓ | ✓ |

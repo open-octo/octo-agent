@@ -62,10 +62,17 @@ type Session struct {
 	// so task_* state persists across messages within one chat (a fresh
 	// per-message store would reset the list every turn). Stamped into the turn
 	// ctx by the IM handler; *tasks.Store satisfies tools.TaskStore.
-	Tasks   *tasks.Store
-	ChatID  string
-	UserID  string
-	BoundAt time.Time
+	Tasks *tasks.Store
+	// AppliedModelConfig records which ModelConfig binding the agent's live
+	// sender currently reflects ("" = the factory-injected sender, typically
+	// the server default). Written by cmdModel and by the server's per-turn
+	// applyChannelModel, which swaps senders only when the persisted binding
+	// actually changes — so a factory-injected sender survives untouched
+	// while no binding exists.
+	AppliedModelConfig string
+	ChatID             string
+	UserID             string
+	BoundAt            time.Time
 
 	// runMu serialises agent turns within this session: the IM dispatcher runs
 	// each message in its own goroutine, and two interleaved turns would
@@ -133,6 +140,36 @@ func (s *Session) Interrupt() bool {
 // AgentFactory creates a new agent.Agent for a session.
 type AgentFactory func() *agent.Agent
 
+// ModelInfo describes one configured model entry for /model listings.
+type ModelInfo struct {
+	Model    string // the model id, also the /model argument that selects it
+	Provider string
+	Default  bool // the config-wide default entry
+}
+
+// ModelResolution is the server-resolved outcome of a /model switch request:
+// the sender to run on, the model name to run and report, and the config
+// entry the session binds to (empty = follow the server default, mirroring
+// the web model picker's "default" entry).
+type ModelResolution struct {
+	Sender     agent.Sender
+	Model      string
+	BoundEntry string
+}
+
+// ModelOps gives the IM /model command access to the server's model table and
+// sender cache, which live outside this package. Injected via SetModelOps; a
+// nil ModelOps disables /model with a graceful reply.
+type ModelOps struct {
+	// List returns every configured model entry for the no-argument listing.
+	List func() []ModelInfo
+	// Resolve maps a /model argument to the sender+model to run on.
+	// "default" resolves to the server's default sender with no binding.
+	// Unknown ids and unbuildable senders are errors; the session is left
+	// unchanged.
+	Resolve func(modelID string) (ModelResolution, error)
+}
+
 // newSession builds a Session with a fresh agent and per-conversation task
 // store. Centralised so every binding path (explicit /bind, auto-create on
 // first message, GetOrCreateSession) wires sessions identically.
@@ -169,6 +206,11 @@ type Manager struct {
 	// stays enabled so tests and callers that never call SetGoalsEnabled see
 	// the historical always-on behavior.
 	goalsEnabled atomic.Bool
+
+	// modelOps backs the /model command. Set once by the server alongside the
+	// factory; nil means /model replies that switching is unavailable rather
+	// than guessing at config it cannot see from this package.
+	modelOps *ModelOps
 }
 
 // NewManager creates a Manager. If mode is empty it defaults to BindByChatUser.
@@ -194,6 +236,12 @@ func NewManager(cfg *Config, factory AgentFactory, mode BindingMode) *Manager {
 // to life the moment a REST/TUI/Web surface later touches that same session.
 func (m *Manager) SetGoalsEnabled(enabled bool) {
 	m.goalsEnabled.Store(enabled)
+}
+
+// SetModelOps injects the server's model table + sender resolver for /model.
+// Called once at manager construction, before any adapter goroutine runs.
+func (m *Manager) SetModelOps(ops *ModelOps) {
+	m.modelOps = ops
 }
 
 // resolveStoreID returns the on-disk session store ID a chat should use: the
@@ -233,8 +281,10 @@ func (m *Manager) CommandRouter(ev InboundEvent) string {
 		return m.cmdCompact(ev)
 	case "/goal":
 		return m.cmdGoal(ev, strings.Join(args, " "))
+	case "/model":
+		return m.cmdModel(ev, strings.Join(args, " "))
 	case "/help":
-		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /goal, /loop [interval] <task>, /stop, /status, /help"
+		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /goal, /model [name|default], /loop [interval] <task>, /stop, /status, /help"
 	default:
 		return fmt.Sprintf("Unknown command: %s", cmd)
 	}
@@ -260,6 +310,75 @@ func (m *Manager) cmdGoal(ev InboundEvent, args string) string {
 		return "Goals are unavailable for this session."
 	}
 	return agent.GoalCommand(store, args)
+}
+
+// cmdModel lists the configured models (no argument) or switches the session
+// onto one: "/model <name>" binds to that config entry, "/model default"
+// unbinds back to the server default. The config lookup and sender build live
+// in the injected ModelOps — this package can't see the main config or the
+// server's sender cache. A successful switch swaps the live agent's sender
+// and persists the binding via SetModelConfig, so the web UI sees the same
+// binding and a restart doesn't lose it.
+func (m *Manager) cmdModel(ev InboundEvent, arg string) string {
+	if m.modelOps == nil {
+		return "Model switching is unavailable on this server."
+	}
+	key := sessionKeyFor(m.mode, ev)
+	val, loaded := m.sessions.Load(key)
+	if !loaded {
+		return "No active session. Send a message first, or /bind one."
+	}
+	sess := val.(*Session)
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return m.modelListReply(sess)
+	}
+	if sess.IsRunning() {
+		return "Can't switch model while a turn is running — /stop it first or wait for it to finish."
+	}
+	// Serialize with agent turns so the sender swap cannot race a turn that
+	// starts immediately after the IsRunning check (same pattern as /clear).
+	_, done := sess.BeginRun(context.Background())
+	defer done()
+
+	res, err := m.modelOps.Resolve(arg)
+	if err != nil {
+		return fmt.Sprintf("⚠️ %v", err)
+	}
+	sess.Agent.SetSender(res.Sender)
+	sess.Agent.Model = res.Model
+	sess.AppliedModelConfig = res.BoundEntry
+	if st := sess.Store; st != nil {
+		if err := st.SetModelConfig(res.BoundEntry, res.Model); err != nil {
+			return fmt.Sprintf("Switched to %s, but saving the binding failed: %v", res.Model, err)
+		}
+	}
+	return fmt.Sprintf("Model switched to %s.", res.Model)
+}
+
+// modelListReply renders the no-argument /model listing: the session's
+// current model plus every configured entry, marking current and default.
+func (m *Manager) modelListReply(sess *Session) string {
+	infos := m.modelOps.List()
+	if len(infos) == 0 {
+		return "No models configured. Run `octo config` to add one."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Current model: %s\nAvailable:", sess.Agent.Model)
+	for _, info := range infos {
+		mark := ""
+		switch {
+		case info.Model == sess.Agent.Model && info.Default:
+			mark = " ← current (default)"
+		case info.Model == sess.Agent.Model:
+			mark = " ← current"
+		case info.Default:
+			mark = " (default)"
+		}
+		fmt.Fprintf(&b, "\n• %s (%s)%s", info.Model, info.Provider, mark)
+	}
+	b.WriteString("\nSwitch: /model <name> — or /model default to follow the default model.")
+	return b.String()
 }
 
 // cmdClear wipes the current session's conversation history while keeping its
