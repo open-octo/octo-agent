@@ -34,6 +34,11 @@ func TestInteractiveDigestVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new page: %v", err)
 	}
+	// Wait for the document to parse before digesting: NewPage can resolve ahead
+	// of the renderer on slow runners (Windows CI returned an empty digest).
+	if err := page.WaitFor(ctx, "#fixed", 10*time.Second); err != nil {
+		t.Fatalf("wait for fixture: %v", err)
+	}
 	digest, err := InteractiveDigest(ctx, page, "", 0)
 	if err != nil {
 		t.Fatalf("digest: %v", err)
