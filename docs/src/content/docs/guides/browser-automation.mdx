@@ -89,7 +89,7 @@ knowing:
 
 The result is a structured object — `{recording, steps, outputs, self_healed?}` — so a recording's
 declared `outputs` (an extracted value, a downloaded file path) can feed directly into a
-[workflow](/docs/guides/workflows/) via `skill("browser:<name>", params)`.
+[workflow](/docs/guides/workflows/) via `recording("<name>", params)`.
 
 :::caution[Replays are all-or-nothing]
 octo is explicitly instructed not to reach for a recording unless the request matches what it does
@@ -120,4 +120,4 @@ Screenshots only come back as an image block if the active model is vision-capab
 model gets a text note instead of a rejected image.
 
 Next: recordings compose directly into [workflow](/docs/guides/workflows/) scripts via
-`skill("browser:<name>")`.
+`recording("<name>")`.

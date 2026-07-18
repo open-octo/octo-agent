@@ -18,7 +18,8 @@ JavaScript 这个选项。
 | 调用 | 返回值 | 作用 |
 |---|---|---|
 | `agent(prompt, opts = {})` | String | 跑一个子代理直到完成。`opts`：`model:`、`tools:`（限制只能用这些工具）、`read_only: true`、`schema:`（一段 JSON Schema 字符串——回复会是匹配它的 JSON 字符串）、`isolation: "worktree"` |
-| `skill(name, params = {}, opts = {})` | Hash / Array / 标量 | 运行一个具名 skill 或浏览器录制。同名的录制和 `SKILL.md` 冲突时用 `"browser:"` 或 `"md:"` 前缀区分。和 `agent` 不同，带 `schema` 的结果会直接解析好返回 |
+| `skill(name, params = {}, opts = {})` | Hash / Array / 标量 | 把一个具名 `SKILL.md` skill 跑成子代理。和 `agent` 不同，带 `schema` 的结果会直接解析好返回 |
+| `recording(name, params = {})` | Hash | 确定性地回放一段具名浏览器录制，返回它声明的 outputs |
 | `parallel(items) { \|it\| ... }` | Array | 对每个 item 并发跑这段代码块；结果保持输入顺序 |
 | `pipeline(items, *stages)` | Array | 每个 item 独立走完所有阶段——阶段之间没有屏障，item A 可能已经领先 item B 好几个阶段 |
 | `log(msg)` | — | 在这次运行的日志里打一行进度 |
@@ -140,5 +141,5 @@ journal id（`wf-YYYYMMDD-...`）是传给 `resume_from` 用的——它**不是
 UI 上不显示），建议你把这个串起来存成一个工作流——指向 `workflow-creator` 这个 skill，或者直接
 用 `workflow_save`。如果这一轮里已经调用过 `workflow` 或 `workflow_save`，就不会再提醒了。
 
-下一步：浏览器录制可以通过 `skill("browser:<name>")` 直接接进工作流脚本——见
+下一步：浏览器录制可以通过 `recording("<name>")` 直接接进工作流脚本——见
 [浏览器自动化](/docs/zh/guides/browser-automation/)。

@@ -318,8 +318,9 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		}
 	}
 
-	// skill() dispatches by name to a recorded browser skill (deterministic
-	// replay) or a SKILL.md skill (a sub-agent via the same spawner).
+	// skill() runs a SKILL.md skill as a sub-agent via the same spawner;
+	// recording() replays a browser recording deterministically. Both arrive
+	// through this one channel — see dispatchWorkflowSkill for the routing.
 	sf := func(c context.Context, name, paramsJSON, schema string) workflow.AgentResult {
 		return dispatchWorkflowSkill(c, spawner, name, paramsJSON, schema)
 	}

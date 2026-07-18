@@ -70,26 +70,9 @@ def agent(prompt, opts = {})
   end
 end
 
-# skill(name, params = {}, opts = {}) runs one skill to completion and returns
-# its declared outputs as a native Ruby Hash (parsed from the skill's outputs
-# JSON). It dispatches by name: a recorded browser skill is replayed
-# deterministically; a SKILL.md skill runs as a sub-agent. Like agent(), inside
-# parallel/pipeline it starts the work then yields its fiber; at top level it
-# blocks for its own result — so skill() composes in the same pipelines.
-#
-#   params:  Hash    — values for the skill's declared params / a recording's
-#                      {{placeholders}}
-#   opts:
-#     schema: String — a JSON Schema (as a JSON string) a SKILL.md skill's reply
-#                      must satisfy (ignored by browser recordings, whose outputs
-#                      are structurally bound)
-#
-# Prefix the name with "browser:" or "md:" to disambiguate when a recording and
-# a SKILL.md skill share a name.
-def skill(name, params = {}, opts = {})
-  params_json = JSON.generate(params || {})
-  schema = (opts[:schema] || opts["schema"]).to_s
-  token = __skill_start(name.to_s, params_json, schema)
+# __finish_skill_token is the shared tail of skill()/recording(): budget check,
+# cooperative-or-blocking wait, and outputs parsing.
+def __finish_skill_token(token, name)
   raise "workflow: token budget exhausted" if token < 0
   raw = if $__wf_sched
           Fiber.yield(token)
@@ -108,6 +91,43 @@ def skill(name, params = {}, opts = {})
   rescue
     raise "workflow: skill #{name} failed: #{raw}"
   end
+end
+
+# skill(name, params = {}, opts = {}) runs one SKILL.md skill as a sub-agent and
+# returns its result as native Ruby (parsed JSON; with opts[:schema], the
+# schema-constrained object). Use it when the step must follow a named skill
+# exactly — the skill body is resolved and injected host-side, never left to
+# the sub-agent's discretion. For free-form agentic work, call agent() instead.
+#
+#   params:  Hash    — inputs handed to the skill
+#   opts:
+#     schema: String — a JSON Schema (as a JSON string) the reply must satisfy
+#
+# Legacy: skill("browser:<name>") and an unprefixed name that only exists as a
+# recording still replay that recording for one release — both are deprecated;
+# use recording() for those. (The "md:" prefix remains accepted but is no
+# longer needed: skill() only resolves SKILL.md skills now.)
+def skill(name, params = {}, opts = {})
+  name = name.to_s
+  if name.start_with?("browser:")
+    log("workflow: skill(\"#{name}\") is deprecated — use recording(\"#{name[8..-1]}\")")
+  end
+  params_json = JSON.generate(params || {})
+  schema = (opts[:schema] || opts["schema"]).to_s
+  token = __skill_start(name, params_json, schema)
+  __finish_skill_token(token, name)
+end
+
+# recording(name, params = {}) replays one browser recording deterministically
+# and returns its declared outputs as a native Ruby Hash (parsed from the
+# outputs JSON). Compose it like skill(): inside parallel/pipeline it starts
+# the work then yields its fiber; at top level it blocks for its own result.
+#
+#   params: Hash — values for the recording's declared {{placeholders}}
+def recording(name, params = {})
+  name = name.to_s
+  token = __skill_start("recording:#{name}", JSON.generate(params || {}), "")
+  __finish_skill_token(token, name)
 end
 
 # log(msg) surfaces a progress line to the user (host event), returns nil.

@@ -14,6 +14,7 @@ import (
 func TestSplitSkillKind(t *testing.T) {
 	cases := []struct{ in, kind, bare string }{
 		{"foo", "", "foo"},
+		{"recording:foo", "recording", "foo"},
 		{"browser:foo", "browser", "foo"},
 		{"md:foo", "md", "foo"},
 		{"md:", "md", ""},
@@ -121,14 +122,53 @@ func TestDispatchWorkflowSkill_Routing(t *testing.T) {
 	cases := []struct{ name, want string }{
 		{"nope", "not found"},
 		{"browser:nope", "no browser recording"},
+		{"recording:nope", "no browser recording"},
 		{"md:wf_c_dl", "no SKILL.md"},
-		{"wf_c_proc", "ambiguous"},
 	}
 	for _, c := range cases {
 		r := dispatchWorkflowSkill(ctx, fs, c.name, "{}", "")
 		if r.Err == nil || !strings.Contains(r.Err.Error(), c.want) {
 			t.Errorf("dispatch(%q).Err = %v, want it to contain %q", c.name, r.Err, c.want)
 		}
+	}
+
+	// A name existing as BOTH a recording and a SKILL.md skill now resolves to
+	// the skill deterministically (it used to be an ambiguity error).
+	fs.last = SpawnRequest{}
+	r := dispatchWorkflowSkill(ctx, fs, "wf_c_proc", "{}", "")
+	if r.Err != nil {
+		t.Fatalf("both-kinds name should resolve to the SKILL.md skill, got %v", r.Err)
+	}
+	if !strings.Contains(fs.last.Prompt, "do the thing") {
+		t.Errorf("expected the md skill body to be spawned, got %q", fs.last.Prompt)
+	}
+
+	// Legacy unprefixed-to-recording resolution still routes to a replay. Inject a
+	// headless session when Chrome is available (so the replay fails fast on the
+	// fixture's bogus navigate URL — and we never attach to the user's real
+	// browser); without Chrome the connect error wraps the same way. Either path
+	// proves the name routed to a replay rather than falling through to not-found.
+	if browser.ChromeAvailable("") {
+		b, err := browser.Launch(ctx, browser.LaunchOptions{Headless: true})
+		if err == nil {
+			defer b.Close()
+			if page, err := b.NewPage(ctx, "about:blank"); err == nil {
+				SetBrowserSession(b, page)
+				defer ResetBrowserSession()
+			}
+		}
+	}
+	r = dispatchWorkflowSkill(ctx, fs, "wf_c_dl", "{}", "")
+	if r.Err == nil || !strings.Contains(r.Err.Error(), "wf_c_dl") || strings.Contains(r.Err.Error(), "not found") {
+		t.Errorf("unprefixed recording name should route to the replay path, got %v", r.Err)
+	}
+}
+
+func TestDispatchWorkflowRecording_NotFound(t *testing.T) {
+	t.Setenv("OCTO_BROWSER_SKILLS_DIR", t.TempDir())
+	r := dispatchWorkflowRecording(context.Background(), "nope", nil)
+	if r.Err == nil || !strings.Contains(r.Err.Error(), "no browser recording by that name") {
+		t.Fatalf("dispatchWorkflowRecording(nope).Err = %v", r.Err)
 	}
 }
 
