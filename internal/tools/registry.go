@@ -282,10 +282,40 @@ func writeTargets(tokens []string) []string {
 
 	// Pass 2: in-place editors (`sed -i`, `gofmt -w`, `… --write`) — their
 	// non-flag args are the files rewritten, keyed on the head of the command.
-	if hasInPlaceFlag(filepath.Base(tokens[0]), tokens[1:]) {
+	head := filepath.Base(tokens[0])
+	if hasInPlaceFlag(head, tokens[1:]) {
 		targets = append(targets, positionals(tokens[1:])...)
 	}
+
+	// Pass 3: shell-wrapped commands (`bash -c "sed -i ... f"`, `sh -c "…"`).
+	// The wrapped payload is a single quoted token the parser can't see into,
+	// so re-parse it as its own command and collect its write targets. Without
+	// this, `bash -c "sed -i 's/x/y/' file.go"` bumps the file's mtime without
+	// refreshing the tracker and trips the guard on the next edit_file.
+	if payload := wrappedCommand(head, tokens[1:]); payload != "" {
+		targets = append(targets, writeTargets(tokenizeCommand(payload))...)
+	}
+
 	return targets
+}
+
+// wrappedCommand returns the inner payload of a shell-wrapped invocation, or
+// "" if the command isn't one. Recognizes `bash|sh|zsh -c "..."` (and
+// `--posix -c`). The payload is the single string argument to `-c`, verbatim —
+// it's re-parsed by tokenizeCommand in the caller as its own command line.
+func wrappedCommand(head string, args []string) string {
+	switch head {
+	case "bash", "sh", "zsh":
+	default:
+		return ""
+	}
+	for i, a := range args {
+		if a == "-c" {
+			// The payload is the next positional token (the quoted script).
+			return nextPositional(args, i+1)
+		}
+	}
+	return ""
 }
 
 // redirectTarget classifies a single token as an output redirection:
@@ -342,11 +372,17 @@ func hasInPlaceFlag(cmd string, args []string) bool {
 // positionals returns the non-flag tokens (a flag is any token starting with
 // "-"). A stray positional that isn't a real path — a sed script, say — is
 // harmless: RefreshTarget ignores paths the tracker never recorded.
+//
+// Trailing shell metacharacters that tokenizeCommand can't split off (it only
+// splits on whitespace and honors quotes) are stripped here so that a filename
+// written as `file.go;` (`sed -i '...' file.go; echo done`) or `file.go|`
+// resolves to the real path. Without this, the glued `;` makes the path
+// unresolvable and the tracker is never refreshed for that file.
 func positionals(args []string) []string {
 	var out []string
 	for _, a := range args {
 		if !strings.HasPrefix(a, "-") {
-			out = append(out, a)
+			out = append(out, strings.TrimRight(a, ";|&"))
 		}
 	}
 	return out
