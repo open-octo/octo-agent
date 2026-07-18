@@ -218,13 +218,26 @@ func (r *Recorder) Start(ctx context.Context) error {
 						Type string `json:"type"`
 					} `json:"targetInfo"`
 				}
-				if json.Unmarshal(ev.Params, &a) == nil && a.TargetInfo.Type == "iframe" && a.SessionID != "" {
+				if json.Unmarshal(ev.Params, &a) != nil || a.SessionID == "" {
+					continue
+				}
+				ictx, icancel := context.WithTimeout(context.Background(), 10*time.Second)
+				switch a.TargetInfo.Type {
+				case "iframe":
 					// The browser watcher enables the child's domains; give it a
 					// moment, then instrument for recording.
-					ictx, icancel := context.WithTimeout(context.Background(), 10*time.Second)
 					r.instrumentOOPIF(ictx, a.SessionID)
-					icancel()
+				case "page":
+					// A tab the demonstration itself opened (target=_blank /
+					// window.open): instrument it like the top document so the rest
+					// of the demo is captured — replay follows the click that opened
+					// the tab, so the steps stay consistent. Tabs already open when
+					// recording started are deliberately NOT instrumented: switching
+					// to one leaves no replayable step, so its events would compile
+					// into a skill that replays on the wrong page.
+					r.instrumentPageSession(ictx, a.SessionID)
 				}
+				icancel()
 			}
 		}()
 	}
@@ -233,7 +246,31 @@ func (r *Recorder) Start(ctx context.Context) error {
 	// multi-page demonstration replays from the right pages — otherwise the only
 	// navigate step is the synthesized start URL, and the recording loses every
 	// page the user moved to.
-	navEvents, navUnsub := p.cli.subscribe("Page.frameNavigated", p.sessionID)
+	r.watchNavigations(p.sessionID)
+	return nil
+}
+
+// instrumentPageSession instruments a newly attached tab (a page target) the
+// same way the top document is instrumented, plus navigation capture — the demo
+// may navigate the new tab (or drive an SPA in it) before touching anything.
+func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
+	// Enable the domains ourselves rather than depend on the browser watcher's
+	// async registration having run first — same reasoning as instrumentOOPIF.
+	for _, d := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
+		if _, err := r.page.cli.call(ctx, session, d, nil); err != nil {
+			return
+		}
+	}
+	if err := r.instrumentSession(ctx, session, ""); err != nil {
+		return
+	}
+	r.watchNavigations(session)
+}
+
+// watchNavigations records top-level navigations on one page session (subframe
+// navigations ignored; consecutive repeats collapsed).
+func (r *Recorder) watchNavigations(session string) {
+	navEvents, navUnsub := r.page.cli.subscribe("Page.frameNavigated", session)
 	r.mu.Lock()
 	r.unsubs = append(r.unsubs, navUnsub)
 	r.mu.Unlock()
@@ -263,7 +300,6 @@ func (r *Recorder) Start(ctx context.Context) error {
 			r.mu.Unlock()
 		}
 	}()
-	return nil
 }
 
 // Events returns the captured actions so far.
