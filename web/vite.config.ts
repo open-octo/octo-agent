@@ -5,7 +5,12 @@ export default defineConfig({
   plugins: [svelte()],
   build: {
     outDir: '../internal/server/webdist',
-    emptyOutDir: true,
+    // Must stay false: webdist is gitignored except a tracked .gitkeep (which
+    // keeps go:embed satisfied on fresh clones). Emptying the dir deletes that
+    // .gitkeep and leaves the git tree dirty — goreleaser refuses to release
+    // from a dirty tree (broke the v1.12.22 tag build). Stale hashed assets
+    // left behind are inert: index.html only references the fresh ones.
+    emptyOutDir: false,
     // The UI ships as one embedded bundle served from localhost; code-splitting buys nothing here.
     chunkSizeWarningLimit: 600,
   },
