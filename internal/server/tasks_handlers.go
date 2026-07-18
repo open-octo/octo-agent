@@ -252,7 +252,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 	}()
 
 	if err := s.ensureSender(); err != nil {
-		sw.error(err.Error())
+		sw.userError(err)
 		return sessionID, fmt.Errorf("sender: %w", err)
 	}
 
@@ -293,7 +293,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 		var perr error
 		runCtx, executor, _, cleanup, perr = s.prepareToolTurn(runCtx, a, sess)
 		if perr != nil {
-			sw.error(perr.Error())
+			sw.userError(perr)
 			return sessionID, fmt.Errorf("prepare tools: %w", perr)
 		}
 		toolDefs = tools.DefaultToolsForCtx(runCtx, a.Model)
@@ -331,7 +331,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
-			sw.error(err.Error())
+			sw.userError(err)
 		}
 		// A first-round failure rolls the task prompt back out of history
 		// (an interrupt no longer does — finishInterrupted keeps the prompt)
@@ -341,7 +341,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 		if len(sess.Messages) < historyWatermark {
 			s.broadcastHistoryReload(sessionID)
 		}
-		s.notifyTaskResult(task, fmt.Sprintf("⏰ %s failed: %v", task.Name, err))
+		s.notifyTaskResult(task, fmt.Sprintf("⏰ %s failed: %s", task.Name, agent.UserFacingError(err)))
 	} else {
 		rCopy := reply
 		s.wsHub.broadcast(sessionID, map[string]any{
