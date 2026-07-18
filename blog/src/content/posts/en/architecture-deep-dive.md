@@ -317,6 +317,16 @@ One thing worth noting: `channel-manager`, `mcp-creator`, `cron-task-creator`, a
 
 Every built-in tool implements the same two-method contract (`Definition() ToolDefinition` + `Execute(ctx, name, input) (ToolResult, error)`), discovered by `tools.DefaultRegistry` and dispatched by name through the agent loop. That shared surface is the point: the agent core never branches on tool species, meta-skills are free to reshuffle them, and the browser / workflow / MCP layers all speak the same narrow pipe. The structure is simple. The design tensions live at the edges.
 
+### Streaming Fragments across Provider Borders
+
+A subtler design rule lives in the provider adapters, not the tools: **OpenAI-protocol tool-call arguments stream as JSON fragments across multiple chunks, keyed by `tool_calls[i].index`** — concatenate every fragment for the same index before parsing. Anthropic-style endpoints don't. The principle the codebase enforces is: the agent loop (`internal/agent/agent.go`) never branches on which spelling it got; normalization happens at the provider adapter. The same contract ("fragments in, complete tool call out") is the only way to keep the browser / workflow / MCP layers portable across Anthropic and OpenAI protocols without every layer growing `if provider == …` forks.
+
+### One Registry, Many Species
+
+`tools.DefaultRegistry` (`internal/tools/registry.go`) is a single dispatcher that routes any tool call by name to one entry of the `allTools` slice — `Terminal`, `ReadFile`, `WriteFile`, `EditFile`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Skill`, `Agent*`, `Workflow*`, `ScheduleWakeup`, `Browser`, `MemoryRecall`, and the rest. There is "browser: internal/browser", "workflow: Ruby/mruby", and "MCP: a JSON-RPC bridge" — but the agent loop sees only `ToolExecutor`. The late addition of `mcp_describe` / `mcp_call` didn't require touching the agent core either; they entered through a registry entry like every other tool.
+
+That choice is what makes the meta-skills from the previous section possible: a guided "set up your IM channel" flow isn't a bespoke tool, it's `channel-manager` stringing `read_file` / `write_file` / `terminal` together in the order the user's situation demands. Tool composition is the reusable primitive; a new capability usually means a new skill, not a new tool.
+
 ### The Read-Before-Write MTime Guard
 
 `internal/tools/ReadTracker` enforces what looks like a nitpick but stops a real class of mistake: the LLM may only write to (or edit) a file it has *already read*, and only while its on-disk mtime still matches what was seen at read time. A file read in turn 3 that an external editor touched by turn 7 is refused, and the agent is told to re-read — which mirrors Claude Code's error wording so the LLM, already trained on that prompt, reacts correctly on the retry.
@@ -331,10 +341,6 @@ That last qualifier — "only while mtime matches" — introduces a bootstrappin
 - **Direct fetch path** — needed for arbitrary URLs, so it *must* follow cross-host redirects (URL shorteners, `www`-canonical hops). It shares the link-local block and caps the chain at 10 hops so a redirect loop can't hang the agent.
 
 The `net.Dialer.Control` hook fires *after* DNS resolution with the concrete IP, so a hostname that resolves to `169.254.x.x` or `127.0.0.1` via DNS rebinding is refused — even when it public-IP'd at resolve time one moment earlier. Bodied too: `WebFetchInlineBytes` (64 KB) is the inline threshold; `WebFetchMaxBytes` (5 MB) is the hard ceiling; past it the body is truncated and spilled to a temp file. Big page = summary + head/tail preview + a `read_file` path to the rest, never a wall of text dumped into the model's context.
-
-### Streaming Fragments across Provider Borders
-
-A subtler design rule lives in the provider adapters, not the tools: **OpenAI-protocol tool-call arguments stream as JSON fragments across multiple chunks, keyed by `tool_calls[i].index`** — concatenate every fragment for the same index before parsing. Anthropic-style endpoints don't. The principle the codebase enforces is: the agent loop (`internal/agent/agent.go`) never branches on which spelling it got; normalization happens at the provider adapter. The same contract ("fragments in, complete tool call out") is the only way to keep the browser / workflow / MCP layers portable across Anthropic and OpenAI protocols without every layer growing `if provider == …` forks.
 
 ### Five Search Surfaces, One Contract
 
@@ -353,12 +359,6 @@ The `terminal` tool runs everything you hand it on the system shell, so its desc
 - **The backtick problem**: a shell will mangle backticks inside a quoted string (POSIX turns them into command substitution; PowerShell treats backtick as escape). The fix is the dedicated `stdin` parameter, which pipes text verbatim into the child's stdin and closes it — used whenever a command body contains quotes, backticks, or `$`.
 
 Together these turn "the shell can do anything" from a footgun into a bounded surface that the model can reason about without burning tokens polling dead output.
-
-### One Registry, Many Species
-
-`tools.DefaultRegistry` (`internal/tools/registry.go`) is a single dispatcher that routes any tool call by name to one entry of the `allTools` slice — `Terminal`, `ReadFile`, `WriteFile`, `EditFile`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Skill`, `Agent*`, `Workflow*`, `ScheduleWakeup`, `Browser`, `MemoryRecall`, and the rest. There is "browser: internal/browser", "workflow: Ruby/mruby", and "MCP: a JSON-RPC bridge" — but the agent loop sees only `ToolExecutor`. The late addition of `mcp_describe` / `mcp_call` didn't require touching the agent core either; they entered through a registry entry like every other tool.
-
-That choice is what makes the meta-skills from the previous section possible: a guided "set up your IM channel" flow isn't a bespoke tool, it's `channel-manager` stringing `read_file` / `write_file` / `terminal` together in the order the user's situation demands. Tool composition is the reusable primitive; a new capability usually means a new skill, not a new tool.
 
 ### sub_agent: Forking Without Recursion
 
