@@ -1167,3 +1167,81 @@ func TestReplayExtractEscapesParams(t *testing.T) {
 		t.Fatalf("extract = %#v, want the exact original %#v", outputs["v"], original)
 	}
 }
+
+// TestCompileEnterFlow: an Enter event compiles to a key step, preceded by a
+// type step when the value only exists as the event's snapshot (no blur → no
+// change). A field typed just before (blur → change → Enter) must not be
+// typed twice; a password's snapshot is empty, so its type step takes a
+// defaultless secret param.
+func TestCompileEnterFlow(t *testing.T) {
+	// Plain: value only from the enter snapshot.
+	s := CompileRecording("x", "", "", []RecordedEvent{
+		{Type: "enter", Selector: "#q", Tag: "INPUT", Field: "query", Value: "hello"},
+	})
+	if len(s.Steps) != 2 || s.Steps[0].Action != "type" || s.Steps[1].Action != "key" {
+		t.Fatalf("want [type, key], got %+v", s.Steps)
+	}
+	if s.Steps[1].Value != "enter" || len(s.Params) != 1 || s.Params[0].Default != "hello" {
+		t.Fatalf("key step / param wrong: %+v %+v", s.Steps[1], s.Params)
+	}
+	// Blur-then-Enter on the same field: the change already typed it.
+	s = CompileRecording("x", "", "", []RecordedEvent{
+		{Type: "change", Selector: "#q", Tag: "INPUT", Field: "query", Value: "hello"},
+		{Type: "enter", Selector: "#q", Tag: "INPUT", Field: "query", Value: "hello"},
+	})
+	nTypes := 0
+	for _, st := range s.Steps {
+		if st.Action == "type" {
+			nTypes++
+		}
+	}
+	if len(s.Steps) != 2 || nTypes != 1 || s.Steps[1].Action != "key" {
+		t.Fatalf("want [type, key] without a duplicate type, got %+v", s.Steps)
+	}
+	// Secret: snapshot is empty, so the type step needs a replay-time param.
+	s = CompileRecording("x", "", "", []RecordedEvent{
+		{Type: "enter", Selector: "#pw", Tag: "INPUT", Field: "password", Secret: true},
+	})
+	if len(s.Steps) != 2 || len(s.Params) != 1 || s.Params[0].Default != "" {
+		t.Fatalf("secret enter should declare a defaultless param: %+v %+v", s.Steps, s.Params)
+	}
+}
+
+// TestReplayKeyEnter: replay types the value, focuses the field with a real
+// click, and presses Enter — the form actually submits.
+func TestReplayKeyEnter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>k</title>
+<form onsubmit="event.preventDefault();window.submits=(window.submits||0)+1"><input id="q"></form>`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#q", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	recording := &Recording{
+		Name:   "x",
+		Params: []Param{{Name: "q"}},
+		Steps: []Step{
+			{Action: "type", Selector: "#q", Value: "{{q}}"},
+			{Action: "key", Selector: "#q", Value: "enter"},
+		},
+	}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, map[string]string{"q": "hello"}, ReplayOptions{StepTimeout: 5 * time.Second}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var submits int
+	if err := page.Eval(ctx, "window.submits||0", &submits); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if submits != 1 {
+		t.Fatalf("form should have submitted exactly once, got %d", submits)
+	}
+}

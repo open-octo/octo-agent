@@ -408,24 +408,41 @@ func (p *Page) Key(ctx context.Context, combo string) error {
 	if nk, ok := namedKeys[strings.TrimSpace(keyName)]; ok {
 		key, code, vk = nk.key, nk.code, nk.vk
 	} else if len(keyName) == 1 {
-		c := keyName[0]
 		key = keyName
 		code = "Key" + strings.ToUpper(keyName)
 		vk = int(strings.ToUpper(keyName)[0])
-		_ = c
 	} else {
 		return fmt.Errorf("key: unsupported key %q", keyName)
 	}
 
+	// Text carried on the keyDown so the press also runs its default action —
+	// without it Chrome fires the DOM events but skips the action (Enter would
+	// neither submit a form nor newline a textarea; a printable char would not
+	// insert). Only with no modifiers held: a combo like ctrl+a must not type a.
+	text := ""
+	if mods == 0 {
+		switch {
+		case key == "Enter":
+			text = "\r"
+		case len(keyName) == 1:
+			text = keyName
+		case keyName == "space":
+			text = " "
+		}
+	}
+
 	for _, typ := range []string{"keyDown", "keyUp"} {
-		_, err := p.cli.call(ctx, p.sessionID, "Input.dispatchKeyEvent", map[string]any{
+		params := map[string]any{
 			"type":                  typ,
 			"modifiers":             mods,
 			"key":                   key,
 			"code":                  code,
 			"windowsVirtualKeyCode": vk,
-		})
-		if err != nil {
+		}
+		if text != "" && typ == "keyDown" {
+			params["text"] = text
+		}
+		if _, err := p.cli.call(ctx, p.sessionID, "Input.dispatchKeyEvent", params); err != nil {
 			return err
 		}
 	}
