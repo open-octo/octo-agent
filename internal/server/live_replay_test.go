@@ -580,3 +580,84 @@ func TestReplayLiveState_ReplaysSubAgentToolHistory(t *testing.T) {
 		t.Error("replay did not include the sub-agent's tool event")
 	}
 }
+
+// gatedSpawner blocks the "busy" spawn until released; every other spawn
+// completes immediately. It lets a test hold one sub-agent genuinely running
+// while another finishes and goes idle.
+type gatedSpawner struct{ release chan struct{} }
+
+func (g *gatedSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.SpawnResult, error) {
+	if req.Description == "busy-one" {
+		select {
+		case <-g.release:
+			return tools.SpawnResult{Reply: "busy done"}, nil
+		case <-ctx.Done():
+			return tools.SpawnResult{}, ctx.Err()
+		}
+	}
+	return tools.SpawnResult{Reply: "idle done"}, nil
+}
+
+func (g *gatedSpawner) Continue(context.Context, string, string) (tools.SpawnResult, error) {
+	return tools.SpawnResult{}, nil
+}
+
+// TestReplayLiveState_SkipsIdleSubAgents: a completed-but-retained async
+// sub-agent (idle, kept so sub_agent_send can resume it) must NOT be replayed
+// to a subscribing tab — the retained events rebuild it as "running" on the
+// live panel, a ghost that only the next turn start clears. Only genuinely
+// busy agents have a live state worth replaying.
+func TestReplayLiveState_SkipsIdleSubAgents(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "replay-subagent-ghost"
+	spawner := &gatedSpawner{release: make(chan struct{})}
+	defer close(spawner.release)
+	mgr := tools.SessionSubAgentManager(sid, func() tools.Spawner { return spawner })
+	t.Cleanup(func() { tools.CloseSessionSubAgentManager(sid) })
+
+	idleID, err := mgr.Start(tools.SpawnRequest{Description: "idle-one"})
+	if err != nil {
+		t.Fatalf("start idle: %v", err)
+	}
+	busyID, err := mgr.Start(tools.SpawnRequest{Description: "busy-one"})
+	if err != nil {
+		t.Fatalf("start busy: %v", err)
+	}
+
+	// Wait for the idle agent to finish its round (busy=false, retained).
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, status, found := mgr.Read(idleID)
+		if found && status == "idle" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("idle agent never settled (status %q)", status)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	var idleReplayed, busyReplayed bool
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] != "sub_agent_event" {
+			continue
+		}
+		switch ev["agent_id"] {
+		case idleID:
+			idleReplayed = true
+		case busyID:
+			busyReplayed = true
+		}
+	}
+	if idleReplayed {
+		t.Error("idle (completed) sub-agent must not be replayed — it rebuilds a ghost 'running' panel entry")
+	}
+	if !busyReplayed {
+		t.Error("a genuinely running sub-agent must still be replayed")
+	}
+}
