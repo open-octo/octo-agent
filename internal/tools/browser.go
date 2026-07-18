@@ -392,12 +392,16 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 
 	// Bound every action so a CDP call a janky/loading page never acks (e.g. a
 	// mouseWheel scroll on a heavy SPA) fails with a timeout instead of hanging
-	// the whole turn. replay runs many steps and download waits for a file
-	// to finish, so they get a much longer ceiling.
+	// the whole turn. download waits for a file to finish, so it gets a longer
+	// ceiling. replay gets the hard cap here as a parent bound; the replay case
+	// refines it per recording via replayTimeout (a long skill must not be
+	// killed mid-run by the old fixed 5 minutes, and a short one keeps it).
 	timeout := 45 * time.Second
 	switch action {
-	case "replay", "run_skill", "download":
+	case "download":
 		timeout = 5 * time.Minute
+	case "replay", "run_skill":
+		timeout = 30 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -736,7 +740,11 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		recorderMu.Lock()
 		healer := browserHealer
 		recorderMu.Unlock()
-		modified, finalPage, outputs, err := browser.ReplayRecording(ctx, page, &recording, params, browser.ReplayOptions{Healer: healer, Browser: b, DownloadDir: downloadDir()})
+		// Refine the call's parent bound (30 min) by the recording's length, so a
+		// long but healthy replay isn't killed by a one-size-fits-all ceiling.
+		rctx, rcancel := context.WithTimeout(ctx, replayTimeout(len(recording.Steps)))
+		defer rcancel()
+		modified, finalPage, outputs, err := browser.ReplayRecording(rctx, page, &recording, params, browser.ReplayOptions{Healer: healer, Browser: b, DownloadDir: downloadDir()})
 		if err != nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: replay %q: %w", name, err)
 		}
@@ -785,6 +793,23 @@ func resolveMissingRecordingParams(rec *browser.Recording, recName string, param
 	}
 	return fmt.Errorf("browser: replay %q is missing required param(s): %s — pass them in `params`",
 		recName, strings.Join(missing, ", "))
+}
+
+// replayTimeout bounds one replay by the recording's length: a base for the
+// browser attach and page loads, plus a per-step budget (a step waits up to
+// StepTimeout for its target, and a failing step may consult the healer for
+// several rounds). Floored at the old fixed 5 minutes so short recordings
+// behave exactly as before; capped so a pathological recording can't hold a
+// turn indefinitely.
+func replayTimeout(steps int) time.Duration {
+	t := 2*time.Minute + time.Duration(steps)*20*time.Second
+	if t < 5*time.Minute {
+		return 5 * time.Minute
+	}
+	if t > 30*time.Minute {
+		return 30 * time.Minute
+	}
+	return t
 }
 
 func getStr(input map[string]any, key string) string {
