@@ -374,6 +374,128 @@ func TestCmdCompact_FoldsHistory(t *testing.T) {
 	}
 }
 
+// fakeModelOps returns a ModelOps with two configured models: "test-model"
+// (the default, matching fakeAgentFactory) and "other-model".
+func fakeModelOps() *ModelOps {
+	return &ModelOps{
+		List: func() []ModelInfo {
+			return []ModelInfo{
+				{Model: "test-model", Provider: "fake", Default: true},
+				{Model: "other-model", Provider: "fake"},
+			}
+		},
+		Resolve: func(modelID string) (ModelResolution, error) {
+			switch modelID {
+			case "other-model":
+				return ModelResolution{Sender: fakeSender{}, Model: "other-model", BoundEntry: "other-model"}, nil
+			case "default":
+				return ModelResolution{Sender: fakeSender{}, Model: "test-model"}, nil
+			default:
+				return ModelResolution{}, fmt.Errorf("model %q is not configured (available: other-model, test-model)", modelID)
+			}
+		},
+	}
+}
+
+// TestCmdModel_ListMarksCurrent: /model with no argument lists every
+// configured model and marks the session's current one.
+func TestCmdModel_ListMarksCurrent(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	mgr.SetModelOps(fakeModelOps())
+	mgr.GetOrCreateSession(ev)
+
+	reply := mgr.cmdModel(ev, "")
+	for _, want := range []string{"test-model", "other-model", "current"} {
+		if !strings.Contains(reply, want) {
+			t.Fatalf("listing should contain %q, got %q", want, reply)
+		}
+	}
+}
+
+// TestCmdModel_SwitchPersistsBinding: /model <name> swaps the live agent's
+// sender+model and persists the binding to the session store.
+func TestCmdModel_SwitchPersistsBinding(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	mgr.SetModelOps(fakeModelOps())
+	sess := mgr.GetOrCreateSession(ev)
+
+	reply := mgr.cmdModel(ev, "other-model")
+	if !strings.Contains(reply, "other-model") {
+		t.Fatalf("unexpected switch reply %q", reply)
+	}
+	if sess.Agent.Model != "other-model" {
+		t.Errorf("agent model = %q, want other-model", sess.Agent.Model)
+	}
+	if sess.Store.ModelConfig != "other-model" || sess.Store.Model != "other-model" {
+		t.Errorf("store binding = (%q, %q), want (other-model, other-model)", sess.Store.ModelConfig, sess.Store.Model)
+	}
+	// The binding must survive a reload from disk.
+	reloaded, err := agent.LoadSession(sess.Store.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.ModelConfig != "other-model" {
+		t.Errorf("reloaded ModelConfig = %q, want other-model", reloaded.ModelConfig)
+	}
+
+	// /model default unbinds back to the default.
+	if reply := mgr.cmdModel(ev, "default"); !strings.Contains(reply, "test-model") {
+		t.Fatalf("unexpected default reply %q", reply)
+	}
+	if sess.Store.ModelConfig != "" {
+		t.Errorf("ModelConfig after default = %q, want unbound", sess.Store.ModelConfig)
+	}
+}
+
+// TestCmdModel_RejectsUnknownAndRunning: an unconfigured model leaves the
+// session unchanged, and a switch is refused mid-turn.
+func TestCmdModel_RejectsUnknownAndRunning(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	mgr.SetModelOps(fakeModelOps())
+	sess := mgr.GetOrCreateSession(ev)
+
+	reply := mgr.cmdModel(ev, "nope")
+	if !strings.Contains(reply, "not configured") {
+		t.Fatalf("expected not-configured error, got %q", reply)
+	}
+	if sess.Agent.Model != "test-model" {
+		t.Errorf("agent model changed to %q on a failed switch", sess.Agent.Model)
+	}
+	if sess.Store.ModelConfig != "" {
+		t.Errorf("store binding changed to %q on a failed switch", sess.Store.ModelConfig)
+	}
+
+	_, done := sess.BeginRun(context.Background())
+	defer done()
+	reply = mgr.cmdModel(ev, "other-model")
+	if !strings.Contains(strings.ToLower(reply), "can't switch") {
+		t.Fatalf("expected refusal while running, got %q", reply)
+	}
+}
+
+// TestCmdModel_GracefulWithoutOpsOrSession: /model degrades cleanly when the
+// server injected no ModelOps, and when the chat has no session yet.
+func TestCmdModel_GracefulWithoutOpsOrSession(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	if reply := mgr.cmdModel(ev, "other-model"); !strings.Contains(reply, "unavailable") {
+		t.Fatalf("expected unavailable reply without ModelOps, got %q", reply)
+	}
+
+	mgr.SetModelOps(fakeModelOps())
+	if reply := mgr.cmdModel(ev, "other-model"); !strings.Contains(reply, "No active session") {
+		t.Fatalf("expected no-session reply, got %q", reply)
+	}
+}
+
 // TestCmdCompact_NoOpOnTinyHistory: /compact gracefully no-ops when there isn't
 // enough history to fold safely.
 func TestCmdCompact_NoOpOnTinyHistory(t *testing.T) {

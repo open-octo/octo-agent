@@ -357,7 +357,14 @@ func TestRouteChannelEvent_MidTurnMessageSteers(t *testing.T) {
 	sender := &blockingSender{started: make(chan struct{}, 8), release: make(chan struct{})}
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
-		return agent.New(sender, "stub-model")
+		a := agent.New(sender, "stub-model")
+		// Run title generation on a separate lite sender: the turn spawns it
+		// concurrently, and on the primary sender it races the turn's own
+		// first call for blockingSender's blocking "first" slot — when the
+		// title call wins, the test deadlocks waiting on a turn that never
+		// blocked.
+		a.LiteSender, a.LiteModel = stubSender{}, "stub-model"
+		return a
 	}, channel.BindByChat)
 	ad := &fullFakeAdapter{}
 

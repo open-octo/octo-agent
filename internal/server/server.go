@@ -2054,6 +2054,7 @@ func (s *Server) initChannels() {
 	}
 	s.channelMgr = channel.NewManager(chCfg, s.buildChannelFactory(), channel.BindByChatUser)
 	s.channelMgr.SetGoalsEnabled(s.goalsEnabled.Load())
+	s.channelMgr.SetModelOps(s.channelModelOps())
 	slog.Info("channels enabled", "platforms", strings.Join(platforms, ", "))
 }
 
@@ -2085,6 +2086,123 @@ func (s *Server) buildChannelFactory() func() *agent.Agent {
 		}
 		return a
 	}
+}
+
+// channelModelOps builds the ModelOps the channel manager's /model command
+// runs against: the configured model table for the no-argument listing, and a
+// resolver mapping a model id to a (cached) sender. "default" unbinds the
+// session back to the server's default sender, mirroring the web model
+// picker's "default" entry (handleUpdateSessionModel). Unknown ids are
+// rejected with the configured list — sending an unconfigured model name to
+// the current endpoint would hit the wrong protocol/base URL.
+func (s *Server) channelModelOps() *channel.ModelOps {
+	return &channel.ModelOps{
+		List: func() []channel.ModelInfo {
+			cfg, _ := config.LoadCached()
+			def := cfg.DefaultEntry()
+			infos := make([]channel.ModelInfo, 0, len(cfg.Models))
+			for _, e := range cfg.Models {
+				infos = append(infos, channel.ModelInfo{
+					Model:    e.Model,
+					Provider: e.Provider,
+					Default:  e.Model == def.Model,
+				})
+			}
+			return infos
+		},
+		Resolve: func(modelID string) (channel.ModelResolution, error) {
+			if modelID == "default" {
+				sender, model := s.defaultSenderAndModel()
+				if model == "" {
+					return channel.ModelResolution{}, fmt.Errorf("no default model configured")
+				}
+				return channel.ModelResolution{Sender: sender, Model: model}, nil
+			}
+			cfg, err := config.Load()
+			if err != nil {
+				return channel.ModelResolution{}, fmt.Errorf("loading config: %w", err)
+			}
+			entry, ok := cfg.EntryByModel(modelID)
+			if !ok {
+				available := make([]string, 0, len(cfg.Models))
+				for _, e := range cfg.Models {
+					available = append(available, e.Model)
+				}
+				sort.Strings(available)
+				return channel.ModelResolution{}, fmt.Errorf("model %q is not configured (available: %s)", modelID, strings.Join(available, ", "))
+			}
+			sender, err := s.cachedSenderForEntry(entry)
+			if err != nil {
+				return channel.ModelResolution{}, err
+			}
+			return channel.ModelResolution{Sender: sender, Model: entry.Model, BoundEntry: entry.Model}, nil
+		},
+	}
+}
+
+// applyChannelModel points the session's long-lived agent at the sender+model
+// its backing store is bound to, so a binding set via IM /model or the web
+// model picker takes effect on IM turns too — without it the factory's
+// default, baked in at session creation, would silently win. Senders are
+// swapped only when the persisted binding actually changes (tracked by
+// sess.AppliedModelConfig): a never-bound session keeps whatever sender the
+// factory injected. A binding that no longer resolves (entry deleted, key
+// gone) falls back to the default, warning once, rather than failing the
+// turn — the same degradation senderForSession gives REST turns.
+func (s *Server) applyChannelModel(sess *channel.Session) {
+	st := sess.Store
+	if st == nil {
+		return
+	}
+
+	if st.ModelConfig != "" {
+		cfg, _ := config.LoadCached()
+		if entry, ok := cfg.EntryByModel(st.ModelConfig); ok {
+			if st.ModelConfig == sess.AppliedModelConfig {
+				return // binding already live on the agent
+			}
+			if sender, err := s.cachedSenderForEntry(entry); err != nil {
+				slog.Warn("channel session model sender unavailable; using the default", "session", st.ID, "model", st.ModelConfig, "err", err)
+				s.applyChannelDefault(sess, st)
+			} else {
+				sess.Agent.SetSender(sender)
+				sess.Agent.Model = entry.Model
+				sess.AppliedModelConfig = entry.Model
+			}
+			return
+		}
+		// The bound entry is gone: fall back to the default, warning only on
+		// the live→stale flip instead of every turn.
+		if sess.AppliedModelConfig == st.ModelConfig {
+			slog.Warn("channel session bound to an unknown model entry; using the default", "session", st.ID, "model", st.ModelConfig)
+		}
+		s.applyChannelDefault(sess, st)
+		return
+	}
+
+	// Unbound: only undo a sender a previous apply swapped in. A never-bound
+	// session just tracks the store's raw model name (usually the factory's
+	// own — a no-op) and keeps its factory sender.
+	if sess.AppliedModelConfig != "" {
+		s.applyChannelDefault(sess, st)
+		return
+	}
+	if st.Model != "" {
+		sess.Agent.Model = st.Model
+	}
+}
+
+// applyChannelDefault runs the session on the server's default sender. The
+// model comes from the store when set (the binding's model name or a raw
+// override), matching how senderForSession degrades for REST turns.
+func (s *Server) applyChannelDefault(sess *channel.Session, st *agent.Session) {
+	sender, model := s.defaultSenderAndModel()
+	if st.Model != "" {
+		model = st.Model
+	}
+	sess.Agent.SetSender(sender)
+	sess.Agent.Model = model
+	sess.AppliedModelConfig = ""
 }
 
 // startChannels launches all enabled channel adapters in background goroutines.
@@ -2335,6 +2453,7 @@ func (s *Server) reloadChannel(platform string) {
 	if s.channelMgr == nil {
 		s.channelMgr = channel.NewManager(chCfg, s.buildChannelFactory(), channel.BindByChatUser)
 		s.channelMgr.SetGoalsEnabled(s.goalsEnabled.Load())
+		s.channelMgr.SetModelOps(s.channelModelOps())
 	}
 
 	s.stopOneChannelLocked(platform)
@@ -2709,6 +2828,11 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// before MemoryBackendGuidance()/RegisterMemoryBackendHooks below; see
 	// app.RefreshMemoryBackend's doc comment.
 	app.RefreshMemoryBackend()
+
+	// Apply the session's persisted model binding (set via IM /model or the
+	// web model picker) before anything reads sess.Agent.Model — the system
+	// prompt compose just below keys the MCP manifest off it.
+	s.applyChannelModel(sess)
 
 	// Recompose the system prompt every turn so memory written and skills
 	// imported/toggled since server start are visible — web turns get this
