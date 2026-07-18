@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // ViewSink is the render-decoupling seam between the turn orchestration core
@@ -60,6 +61,13 @@ type TurnStats struct {
 // sink; the caller owns input reading, slash-command dispatch, the turn's
 // cancellable context, and the save/loop decision based on the returned error.
 func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink, line string) (agent.Reply, error) {
+	// Scope the turn's tools-layer per-session state (the replay-secret cache)
+	// to this CLI session. With no session (a nil cfg.session, e.g. an
+	// ephemeral one-shot) the cache degrades to process-level — correct,
+	// because that process IS the session boundary.
+	if cfg.session != nil {
+		ctx = tools.WithSessionID(ctx, cfg.session.ID)
+	}
 	// Memory-hygiene nudge: appended when both cross-session memory and tools
 	// are active, reminding the model to scan for durable signals at the
 	// decision point. Gated on tools because the nudge asks the model to call
@@ -111,6 +119,12 @@ type plainView struct {
 	reader    lineReader // for Ask prompts; nil → Ask auto-cancels
 	verbosity verbosity
 	plain     bool
+
+	// secretReader reads one secret line with NO echo (production wires
+	// term.ReadPassword over stdin; tests inject a stub). Kept separate from
+	// reader so a secret never echoes or lands in readline history. Nil →
+	// secret prompts auto-cancel (the headless posture).
+	secretReader func(prompt string) (string, bool)
 
 	// Per-turn state, (re)armed in TurnStarted.
 	spin  *spinner
@@ -183,9 +197,27 @@ func (v *plainView) Ask(_ context.Context, p UserPrompt) (UserResponse, error) {
 		return v.askPermission(p), nil
 	case KindQuestion:
 		return v.askQuestion(p), nil
+	case KindSecret:
+		return v.askSecret(p), nil
 	default:
 		return UserResponse{Cancelled: true}, nil
 	}
+}
+
+// askSecret renders the question and reads the value through the no-echo
+// secret reader. The value goes straight into UserResponse.Custom; nothing
+// echoes, and the prompt text is all that reaches the scrollback.
+func (v *plainView) askSecret(p UserPrompt) UserResponse {
+	if v.secretReader == nil {
+		return UserResponse{Cancelled: true}
+	}
+	fmt.Fprintf(v.out, "\n🔒 %s\n", p.Question)
+	answer, ok := v.secretReader("  secret (input hidden): ")
+	fmt.Fprintln(v.out) // the no-echo read leaves the cursor mid-line
+	if !ok || strings.TrimSpace(answer) == "" {
+		return UserResponse{Cancelled: true}
+	}
+	return UserResponse{Custom: strings.TrimSpace(answer)}
 }
 
 // askPermission prompts: y/yes → allow once; a/always → allow for the session;

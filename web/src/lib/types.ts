@@ -323,6 +323,8 @@ export interface WsEventRequestUserQuestion {
   options: string[]
   multi_select: boolean
   header: string
+  /** Masked-input question (replay secret collection): render a password field. */
+  secret?: boolean
 }
 
 export interface WsEventBackgroundTaskUpdate {

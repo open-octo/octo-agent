@@ -1194,6 +1194,13 @@ func (m *tuiModel) newModalState(msg askMsg) *modalState {
 	st.otherActive = false
 	st.otherInput = textinput.New()
 	st.otherInput.Prompt = ""
+	if msg.prompt.Kind == KindSecret {
+		// No options to cursor through: straight to text entry, masked. The
+		// value lives only in the input model and the UserResponse it becomes.
+		st.otherActive = true
+		st.otherInput.EchoMode = textinput.EchoPassword
+		st.otherInput.Focus()
+	}
 	return st
 }
 
@@ -1765,6 +1772,9 @@ func (m *tuiModel) modalView() string {
 	header := st.prompt.Header
 	if header == "" {
 		header = "question"
+		if st.prompt.Kind == KindSecret {
+			header = "secret"
+		}
 	}
 	b.WriteString(modalStyle.Render("[" + header + "]"))
 	b.WriteByte('\n')
@@ -1785,7 +1795,11 @@ func (m *tuiModel) modalView() string {
 		b.WriteString(fmt.Sprintf("  %s%s%s\n", cursor, mark, opt))
 	}
 	if st.otherActive {
-		b.WriteString("  Other: " + st.otherInput.View() + "\n")
+		label := "Other"
+		if st.prompt.Kind == KindSecret {
+			label = "Secret"
+		}
+		b.WriteString("  " + label + ": " + st.otherInput.View() + "\n")
 		b.WriteString(hintStyle.Render("Enter confirm · Esc cancel"))
 		return tui.Box(b.String())
 	}

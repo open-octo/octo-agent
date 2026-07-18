@@ -1752,6 +1752,25 @@ type wsAsker struct {
 }
 
 func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse, error) {
+	return a.ask(ctx, q, false)
+}
+
+// AskSecret implements tools.SecretAsker: the same question bridge, but the
+// event is flagged secret so the browser renders a password field. The answer
+// returns to the runtime caller only — it never becomes a tool result or
+// lands in conversation history.
+func (a wsAsker) AskSecret(ctx context.Context, question string) (string, bool, error) {
+	res, err := a.ask(ctx, tools.AskRequest{Question: question}, true)
+	if err != nil {
+		return "", false, err
+	}
+	if res.Cancelled {
+		return "", true, nil
+	}
+	return res.Custom, false, nil
+}
+
+func (a wsAsker) ask(ctx context.Context, q tools.AskRequest, secret bool) (tools.AskResponse, error) {
 	sessionID, ok := ctx.Value(ctxKeySessionID{}).(string)
 	if !ok || sessionID == "" {
 		return tools.AskResponse{}, fmt.Errorf("ask_user_question: no active WebSocket session")
@@ -1781,6 +1800,7 @@ func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse
 		Options:     q.Options,
 		MultiSelect: q.MultiSelect,
 		Header:      q.Header,
+		Secret:      secret,
 	}
 
 	// Record the outstanding question so a tab that (re)subscribes mid-ask —
@@ -2859,6 +2879,15 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// delivers via the adapter — including the wakeup-injected turns, which
 		// flow back through here and re-stamp the waker so the loop continues.
 		ctx = tools.WithWaker(ctx, imWaker{s: s, sess: sess, ad: ad, ev: ev})
+		// Replay-secret cache scope: the backing agent session's ID, so a
+		// session delete reaps its cached secrets; the chat key is the fallback
+		// while no store is attached. (IM never COLLECTS secrets — no masked
+		// input — but cache/env resolution still runs on this transport.)
+		sid := "im:" + string(sess.Key)
+		if sess.Store != nil {
+			sid = sess.Store.ID
+		}
+		ctx = tools.WithSessionID(ctx, sid)
 	}
 
 	// Session title, web doAgentTurn parity: an IM session starts life with

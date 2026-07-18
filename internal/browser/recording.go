@@ -28,11 +28,15 @@ type Recording struct {
 }
 
 // Param is a replay-time input; {{name}} placeholders in step values/urls are
-// substituted from it (falling back to Default).
+// substituted from it (falling back to Default). Secret marks a password-class
+// value: it is never given a recorded Default, and at replay the runtime
+// collects it out-of-band (masked prompt / env / session cache) so the value
+// never enters the conversation.
 type Param struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description,omitempty"`
 	Default     string `yaml:"default,omitempty"`
+	Secret      bool   `yaml:"secret,omitempty"`
 }
 
 // Output is a value replay exposes to its caller — the handoff surface that lets
@@ -117,8 +121,13 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			nm = fmt.Sprintf("%s%d", root, i)
 		}
 		seen[nm] = true
-		p := Param{Name: nm, Description: desc}
-		if !secret {
+		// Default and Secret are independent concerns: Default is written
+		// whenever a recorded value exists; Secret tags password-class params.
+		// A secret param NEVER gets a Default, even if its event somehow
+		// carried a value — the YAML must stay free of plaintext (callers that
+		// merely want "no default", like upload's file, pass secret=false).
+		p := Param{Name: nm, Description: desc, Secret: secret}
+		if def != "" && !secret {
 			p.Default = def
 		}
 		s.Params = append(s.Params, p)
@@ -139,7 +148,9 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			// preceding click (the button) is the better trigger than the
 			// possibly-transient file input. The file itself can't be captured
 			// (browsers hide the path) so it's auto-parameterized (no default).
-			fp := addParam("file", "", "path to the file to upload", true)
+			// It is NOT a secret: a missing path stays a plain missing-param
+			// error, never a masked prompt.
+			fp := addParam("file", "", "path to the file to upload", false)
 			up := Step{Action: "upload", Frame: e.Frame, Selector: e.Selector, Value: "{{" + fp + "}}", Label: e.Text}
 			if n := len(s.Steps); n > 0 && s.Steps[n-1].Action == "click" {
 				up.Selector, up.Frame, up.Label = s.Steps[n-1].Selector, s.Steps[n-1].Frame, s.Steps[n-1].Label
@@ -327,7 +338,7 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 	const system = "You clean a recorded browser workflow into a minimal, correct, replayable recording. " +
 		"RULES: (1) Use ONLY CSS selectors that appear in the provided baseline — never invent or alter a selector. " +
 		"(2) Drop redundant back-and-forth and retries; keep the intended linear path. " +
-		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}). " +
+		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}, every declared param name, and any secret: true marker unchanged). " +
 		"(4) Preserve step order and all navigate steps. " +
 		"(5) Write description as a short statement of what the workflow does. " +
 		"Output ONLY the recording as YAML (keys: name, description, params, steps), no prose, no code fences."
@@ -344,6 +355,37 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		return withDescription(base, refined.Description)
 	}
 	refined.Name = name
+	// The distiller rewrites the param list from prose and can drop the secret
+	// marker; backfill it by name from the deterministic baseline so a password
+	// param is still secret after distillation.
+	secretParams := map[string]bool{}
+	for _, p := range base.Params {
+		if p.Secret {
+			secretParams[p.Name] = true
+		}
+	}
+	for i := range refined.Params {
+		if secretParams[refined.Params[i].Name] {
+			refined.Params[i].Secret = true
+		}
+	}
+	// The distiller may also drop a secret param's DECLARATION while keeping
+	// its {{placeholder}} in a step. Left alone, replay would treat it as a
+	// non-secret missing param — the plaintext-in-conversation leak the secret
+	// marker exists to close. Re-attach the baseline declaration for any
+	// baseline secret param the refined steps still reference.
+	declared := map[string]bool{}
+	for _, p := range refined.Params {
+		declared[p.Name] = true
+	}
+	for _, p := range base.Params {
+		if !p.Secret || declared[p.Name] {
+			continue
+		}
+		if paramReferenced(&refined, p.Name) {
+			refined.Params = append(refined.Params, p)
+		}
+	}
 	if !selectorsSubset(refined, base) {
 		// Precision guard: the model used a selector it wasn't given. The refined
 		// steps are untrustworthy, but the prose description still is — keep it so
@@ -788,6 +830,24 @@ func paramNames(params []Param) []string {
 	return names
 }
 
+// paramReferenced reports whether any step field subst() expands (URL, Value,
+// JS, Verify.Text, Verify.URL) contains a {{name}} placeholder — the same
+// scan unresolvedPlaceholders does, but for a single param.
+func paramReferenced(recording *Recording, name string) bool {
+	want := "{{" + name + "}}"
+	for _, st := range recording.Steps {
+		for _, field := range []string{st.URL, st.Value, st.JS} {
+			if strings.Contains(field, want) {
+				return true
+			}
+		}
+		if st.Verify != nil && (strings.Contains(st.Verify.Text, want) || strings.Contains(st.Verify.URL, want)) {
+			return true
+		}
+	}
+	return false
+}
+
 // placeholderRe matches a {{name}} substitution placeholder in a step field.
 var placeholderRe = regexp.MustCompile(`\{\{(\w+)\}\}`)
 
@@ -1075,7 +1135,10 @@ func verify(ctx context.Context, page *Page, step *Step, params map[string]strin
 				return nil
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("verify text %q not found", want)
+				// Report the unsubstituted field: it names the param
+				// ({{password}}) without carrying the resolved value, which
+				// may be a secret bound for the page only.
+				return fmt.Errorf("verify text %q not found", step.Verify.Text)
 			}
 			select {
 			case <-ctx.Done():
@@ -1109,7 +1172,10 @@ func verify(ctx context.Context, page *Page, step *Step, params map[string]strin
 			if time.Now().After(deadline) {
 				var cur string
 				_ = page.Eval(ctx, "location.href", &cur)
-				return fmt.Errorf("verify url: expected to stay on %q, but landed on %q", want, cur)
+				// Report the unsubstituted field (param name, not the resolved
+				// value, which may be a secret). cur is live page state, not a
+				// param, so it stays.
+				return fmt.Errorf("verify url: expected to stay on %q, but landed on %q", step.Verify.URL, cur)
 			}
 			select {
 			case <-ctx.Done():

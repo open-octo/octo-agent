@@ -110,11 +110,14 @@ params:
 `CompileRecording` 的 `addParam`（`internal/browser/recording.go`）语义随之拆分——现在 `secret` 实参身兼两职（抑制默认值 + 标记密码），必须分开：
 
 - `Default` 仅当 `def != ""` 时写入。行为无变化：`mergedParams`（`internal/browser/recording.go`）本来就忽略空默认值，空值参数今天实际上就是必填。
+  - **实现修正（2026-07-18）**：实际落地为 `def != "" && !secret`——既有测试（`TestCompileAutoParamsSecretNoDefault`、`TestRenderTraceRedactsSecret`）把"secret 参数永远不带 Default"当成不变量守着（即使事件异常携带了值），保留这道防线比字面的"只看 def"更安全；对正常录制流（secret 事件值必为空）两者等价。
 - `Secret` 按密码语义单独赋值。由此，upload 的文件参数调用点（`recording.go:142`，现在传 `true` 只为抑制默认值）改为传 `false`——它不是 secret，缺失时仍走普通"缺参数"错误，不该进遮蔽询问。密码输入的两处（`recording.go:171` change、`recording.go:194` enter 快照）传 `true`。
 
 ### 蒸馏保留
 
 `GenerateRecording` 的 LLM 蒸馏只受 selector 子集约束（`selectorsSubset`），参数列表由模型重写，`secret: true` 可能丢失。蒸馏合并时按参数名把 baseline 的 `Secret` 标志回填到 refined 参数上（与 `refined.Name = name` 同级处理），保证密码参数经过蒸馏仍是 secret。
+
+- **实现补充（2026-07-18）**：除按名回填外，蒸馏若把 secret 参数的**声明整个丢弃**（步骤里仍引用 `{{password}}`），合并时会把 baseline 声明重新挂上（`paramReferenced` 判定），否则该占位符会被分区成非 secret 缺失、退化为旧的明文询问路径——正是本设计要关的泄漏。蒸馏 system prompt 规则 (3) 同步要求保留参数名与 `secret: true` 标记。
 
 ### SecretAsker 能力接口
 
@@ -157,6 +160,7 @@ func resolveReplayParams(ctx context.Context, rec *browser.Recording, name strin
      `browser: replay "X" requires secret param(s): password — secrets can't be collected in this chat (messages persist). Set OCTO_BROWSER_SECRET_PASSWORD in ~/.octo/serve.env, or replay from the Web UI / TUI.`
 3. 全部解析后注入 params（原地修改，同现状），交给 `ReplayRecording`。
 4. **泄漏护栏**：该函数与回放结果路径的任何错误文本只含参数名，不含值；envelope 结构不变（不含参数值）。
+   - **实现补充（2026-07-18）**：`verify()`（`recording.go`）的两处错误文本原本内插 subst **之后**的值——手写 YAML 在 `verify: {text: "{{password}}"}` 引用 secret 时会把值带进工具错误。已改为报告未替换的 `step.Verify.Text` / `step.Verify.URL`（含参数名不含值）；`cur`（location.href，页面状态非参数值）保留。
 
 ### 会话缓存
 

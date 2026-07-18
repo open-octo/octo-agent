@@ -258,6 +258,10 @@ type wsEventRequestUserQuestion struct {
 	Options     []string `json:"options"`
 	MultiSelect bool     `json:"multi_select"`
 	Header      string   `json:"header,omitempty"`
+	// Secret marks a masked-input question (replay secret collection): the
+	// browser renders a password field, and the answer is only ever returned
+	// to the runtime caller — it must not be echoed into the chat.
+	Secret bool `json:"secret,omitempty"`
 }
 
 // wsEventDismissUserQuestion tells the browser to close the question modal

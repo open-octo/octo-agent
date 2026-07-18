@@ -154,6 +154,13 @@ func runBrowserRecording(ctx context.Context, name string, params map[string]any
 		strParams[k] = stringifyParam(v)
 	}
 
+	// Same collection point as the browser tool's replay action: non-secret
+	// missing params error plainly; missing secrets resolve from the session
+	// cache / env / masked ask (cron has no asker — env is its path).
+	if err := resolveReplayParams(ctx, &recording, name, strParams); err != nil {
+		return workflow.AgentResult{Err: err}
+	}
+
 	workflowBrowserMu.Lock()
 	defer workflowBrowserMu.Unlock()
 

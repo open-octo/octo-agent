@@ -240,12 +240,12 @@ func TestBrowserTool_RecordCancel(t *testing.T) {
 	}
 }
 
-// TestResolveMissingRecordingParams_ErrorsOnMissingRequired verifies a param
+// TestResolveReplayParams_ErrorsOnMissingRequired verifies a param
 // with no default and no caller-supplied value returns a clear error naming
 // the missing param(s), rather than auto-prompting the user. The model then
 // decides whether it already knows the value (re-invoke with `params`) or
 // needs to ask the caller via ask_user_question.
-func TestResolveMissingRecordingParams_ErrorsOnMissingRequired(t *testing.T) {
+func TestResolveReplayParams_ErrorsOnMissingRequired(t *testing.T) {
 	skill := browser.Recording{
 		Name:   "demo",
 		Params: []browser.Param{{Name: "username", Description: "login name"}},
@@ -255,7 +255,7 @@ func TestResolveMissingRecordingParams_ErrorsOnMissingRequired(t *testing.T) {
 	useAsker(t, stub)
 
 	params := map[string]string{}
-	err := resolveMissingRecordingParams(&skill, "demo", params)
+	err := resolveReplayParams(context.Background(), &skill, "demo", params)
 	if err == nil || !strings.Contains(err.Error(), "missing required param") {
 		t.Fatalf("err = %v, want a missing-required-param error", err)
 	}
@@ -270,9 +270,9 @@ func TestResolveMissingRecordingParams_ErrorsOnMissingRequired(t *testing.T) {
 	}
 }
 
-// TestResolveMissingRecordingParams_NoPromptWhenProvided verifies an
+// TestResolveReplayParams_NoPromptWhenProvided verifies an
 // already-supplied value skips the prompt entirely.
-func TestResolveMissingRecordingParams_NoPromptWhenProvided(t *testing.T) {
+func TestResolveReplayParams_NoPromptWhenProvided(t *testing.T) {
 	skill := browser.Recording{
 		Name:   "demo",
 		Params: []browser.Param{{Name: "username"}},
@@ -282,18 +282,18 @@ func TestResolveMissingRecordingParams_NoPromptWhenProvided(t *testing.T) {
 	useAsker(t, stub)
 
 	params := map[string]string{"username": "bob"}
-	if err := resolveMissingRecordingParams(&skill, "demo", params); err != nil {
-		t.Fatalf("resolveMissingRecordingParams: %v", err)
+	if err := resolveReplayParams(context.Background(), &skill, "demo", params); err != nil {
+		t.Fatalf("resolveReplayParams: %v", err)
 	}
 	if stub.called {
 		t.Error("should not prompt when the param is already provided")
 	}
 }
 
-// TestResolveMissingRecordingParams_MissingReturnsError verifies that even when
+// TestResolveReplayParams_MissingReturnsError verifies that even when
 // there's no interactive asker, missing required params produce a clear error
 // (rather than the old silent no-op that left ReplayRecording to fail mid-replay).
-func TestResolveMissingRecordingParams_MissingReturnsError(t *testing.T) {
+func TestResolveReplayParams_MissingReturnsError(t *testing.T) {
 	SetAsker(nil)
 	skill := browser.Recording{
 		Name:   "demo",
@@ -301,7 +301,7 @@ func TestResolveMissingRecordingParams_MissingReturnsError(t *testing.T) {
 		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
 	}
 	params := map[string]string{}
-	err := resolveMissingRecordingParams(&skill, "demo", params)
+	err := resolveReplayParams(context.Background(), &skill, "demo", params)
 	if err == nil || !strings.Contains(err.Error(), "missing required param") {
 		t.Fatalf("err = %v, want a missing-required-param error", err)
 	}

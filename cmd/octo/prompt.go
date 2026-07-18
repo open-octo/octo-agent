@@ -34,6 +34,10 @@ const (
 	KindPermission UserPromptKind = iota
 	// KindQuestion asks the user to pick option(s) or supply free text.
 	KindQuestion
+	// KindSecret asks for a secret value with masked input (no echo, no
+	// options). The answer travels only in the UserResponse.Custom channel
+	// back to the runtime caller — the view must never render it.
+	KindSecret
 )
 
 // UserResponse is the structured answer to a UserPrompt.

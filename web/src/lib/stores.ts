@@ -134,6 +134,8 @@ export interface QuestionModalEntry {
   options?: string[]
   multiSelect?: boolean
   header?: string
+  /** Masked-input question: the free-text input renders as a password field. */
+  secret?: boolean
   dismissed: boolean
 }
 // Keyed by sessionId, unlike a single value — a second session's question

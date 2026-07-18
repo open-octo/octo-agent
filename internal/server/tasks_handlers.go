@@ -259,6 +259,7 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 	// Register the turn's interrupt so sessionStatus reports "running" and the
 	// web UI offers the stop button.
 	runCtx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKeySessionID{}, sessionID))
+	runCtx = tools.WithSessionID(runCtx, sessionID)
 	s.registerInterrupt(sessionID, cancel)
 	defer func() {
 		cancel()

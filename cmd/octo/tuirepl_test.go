@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/permission"
@@ -1834,5 +1835,60 @@ func TestTUI_RenderToolOutcome_ArtifactHyperlink(t *testing.T) {
 	m.cfg.plain = true
 	if got := m.renderToolOutcome("show_artifact", input, "ok", false, 0); strings.Contains(got, "\x1b]8;;") {
 		t.Errorf("--plain outcome should not render a hyperlink; got %q", got)
+	}
+}
+
+// TestModalSecretMasksInput: a KindSecret prompt opens the modal straight into
+// free-text entry with password echo — no options to cursor through — and the
+// typed runes come back as the Custom answer, rendered only as mask bullets.
+func TestModalSecretMasksInput(t *testing.T) {
+	m := newTestModel()
+	resp := make(chan UserResponse, 1)
+	m.openModal(askMsg{prompt: UserPrompt{Kind: KindSecret, Question: `Enter secret for recording "login": password`}, resp: resp})
+
+	st := m.modal
+	if st == nil {
+		t.Fatal("modal not open")
+	}
+	if !st.otherActive {
+		t.Error("secret modal should go straight to text entry (no options)")
+	}
+	if len(st.options) != 0 {
+		t.Errorf("secret modal must not offer options, got %v", st.options)
+	}
+	if st.otherInput.EchoMode != textinput.EchoPassword {
+		t.Errorf("EchoMode = %v, want EchoPassword", st.otherInput.EchoMode)
+	}
+
+	for _, r := range "hunter2" {
+		m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if view := m.modalView(); strings.Contains(view, "hunter2") {
+		t.Error("secret value must never render — mask only")
+	}
+	m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	select {
+	case r := <-resp:
+		if r.Custom != "hunter2" || r.Cancelled {
+			t.Fatalf("response = %+v, want Custom hunter2", r)
+		}
+	default:
+		t.Fatal("Enter should answer the modal")
+	}
+}
+
+// TestModalSecretEscCancels: Esc on a secret modal reports cancellation.
+func TestModalSecretEscCancels(t *testing.T) {
+	m := newTestModel()
+	resp := make(chan UserResponse, 1)
+	m.openModal(askMsg{prompt: UserPrompt{Kind: KindSecret, Question: "secret?"}, resp: resp})
+	m.handleModalKey(tea.KeyMsg{Type: tea.KeyEsc})
+	select {
+	case r := <-resp:
+		if !r.Cancelled {
+			t.Fatalf("Esc should cancel, got %+v", r)
+		}
+	default:
+		t.Fatal("Esc should answer the modal")
 	}
 }
