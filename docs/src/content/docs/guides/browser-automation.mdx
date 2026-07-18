@@ -108,7 +108,9 @@ purpose — octo takes a **text digest** of the page's currently interactable el
 visible text, no screenshot, model-agnostic), and asks the model for a single corrected CSS
 selector given the intended action and the dead one. The fix is retried once and, if it works,
 written back into the recording's YAML — so a heal is durable, not a one-off patch you'd have to
-redo on every future replay.
+redo on every future replay. (The write-back re-marshals the YAML, so any hand-written comments in
+the file are dropped on the next healed replay; field values are kept. Version your recordings in
+git if you annotate them.)
 
 ## Permissions and vision
 
