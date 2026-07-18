@@ -543,3 +543,24 @@ func TestBrowserPage_NoLaunchFallback(t *testing.T) {
 		t.Fatalf("error should be the actionable connect guide, got: %v", err)
 	}
 }
+
+// TestReplayTimeoutScalesWithSteps: the replay ceiling is floored at the old
+// fixed 5 minutes for short recordings, grows linearly for long ones, and is
+// hard-capped so a pathological recording can't hold a turn forever.
+func TestReplayTimeoutScalesWithSteps(t *testing.T) {
+	for _, tc := range []struct {
+		steps int
+		want  time.Duration
+	}{
+		{0, 5 * time.Minute},
+		{9, 5 * time.Minute},
+		{10, 5*time.Minute + 20*time.Second},
+		{30, 12 * time.Minute},
+		{84, 30 * time.Minute},
+		{1000, 30 * time.Minute},
+	} {
+		if got := replayTimeout(tc.steps); got != tc.want {
+			t.Errorf("replayTimeout(%d) = %v, want %v", tc.steps, got, tc.want)
+		}
+	}
+}
