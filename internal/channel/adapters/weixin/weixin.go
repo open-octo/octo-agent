@@ -43,7 +43,7 @@ const (
 	// Send queue tuning.
 	flushCharThreshold = 400
 	flushInterval      = 2 * time.Second
-	minSendInterval    = time.Second
+	minSendInterval    = 2 * time.Second
 
 	// typingTicketTTL bounds how long a cached typing ticket is reused before
 	// SendTyping re-fetches one via GetConfig.
@@ -202,7 +202,7 @@ func (q *sendQueue) throttle() {
 }
 
 func (q *sendQueue) sendWithRetry(chatID, text, contextToken string) {
-	retryDelays := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+	retryDelays := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 	for i, delay := range retryDelays {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		err := q.client.SendMessage(ctx, q.baseURL, q.token,
