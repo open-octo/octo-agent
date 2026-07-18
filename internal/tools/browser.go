@@ -734,7 +734,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 				params[k] = fmt.Sprintf("%v", v)
 			}
 		}
-		if err := resolveMissingRecordingParams(&recording, name, params); err != nil {
+		if err := resolveReplayParams(ctx, &recording, name, params); err != nil {
 			return agent.ToolResult{}, err
 		}
 		recorderMu.Lock()
@@ -784,19 +784,13 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 	}
 }
 
-// resolveMissingRecordingParams checks a browser recording's declared params
-// against the caller-supplied params. Any that are missing and have no default
-// produce an error listing them — the model then decides whether it already
-// knows the values (re-invoke with `params` filled in) or needs to surface an
-// `ask_user_question` to the caller.
-func resolveMissingRecordingParams(rec *browser.Recording, recName string, params map[string]string) error {
-	missing := browser.MissingRequiredParams(rec, params)
-	if len(missing) == 0 {
-		return nil
-	}
-	return fmt.Errorf("browser: replay %q is missing required param(s): %s — pass them in `params`",
-		recName, strings.Join(missing, ", "))
-}
+// The replay param collection point is resolveReplayParams in
+// replay_secrets.go, shared by this tool's replay action and the workflow
+// recording() primitive: non-secret missing params keep the plain-error
+// semantics (the model decides whether to re-invoke with `params` filled or
+// surface an ask_user_question); secret params are resolved by the runtime
+// out-of-band (session cache → env → masked ask) so their values never enter
+// the conversation.
 
 // replayTimeout bounds one replay by the recording's length: a base for the
 // browser attach and page loads, plus a per-step budget (a step waits up to

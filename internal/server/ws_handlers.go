@@ -647,6 +647,7 @@ func (s *Server) wsCompactSession(sid string) {
 		a := s.buildAgent(sess)
 
 		ctx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKeySessionID{}, sid))
+		ctx = tools.WithSessionID(ctx, sid)
 		s.registerInterrupt(sid, cancel)
 		defer func() {
 			cancel()
@@ -1245,6 +1246,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	}()
 
 	runCtx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKeySessionID{}, sess.ID))
+	runCtx = tools.WithSessionID(runCtx, sess.ID)
 	// Stamp the per-session Waker so schedule_wakeup (the in-session loop) can pace
 	// this and later turns — including the wakeup-injected turns kicked via
 	// kickIdleSteerTurn, which also flow through here.

@@ -2859,6 +2859,15 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// delivers via the adapter — including the wakeup-injected turns, which
 		// flow back through here and re-stamp the waker so the loop continues.
 		ctx = tools.WithWaker(ctx, imWaker{s: s, sess: sess, ad: ad, ev: ev})
+		// Replay-secret cache scope: the backing agent session's ID, so a
+		// session delete reaps its cached secrets; the chat key is the fallback
+		// while no store is attached. (IM never COLLECTS secrets — no masked
+		// input — but cache/env resolution still runs on this transport.)
+		sid := "im:" + string(sess.Key)
+		if sess.Store != nil {
+			sid = sess.Store.ID
+		}
+		ctx = tools.WithSessionID(ctx, sid)
 	}
 
 	// Session title, web doAgentTurn parity: an IM session starts life with

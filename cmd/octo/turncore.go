@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // ViewSink is the render-decoupling seam between the turn orchestration core
@@ -60,6 +61,13 @@ type TurnStats struct {
 // sink; the caller owns input reading, slash-command dispatch, the turn's
 // cancellable context, and the save/loop decision based on the returned error.
 func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink, line string) (agent.Reply, error) {
+	// Scope the turn's tools-layer per-session state (the replay-secret cache)
+	// to this CLI session. With no session (a nil cfg.session, e.g. an
+	// ephemeral one-shot) the cache degrades to process-level — correct,
+	// because that process IS the session boundary.
+	if cfg.session != nil {
+		ctx = tools.WithSessionID(ctx, cfg.session.ID)
+	}
 	// Memory-hygiene nudge: appended when both cross-session memory and tools
 	// are active, reminding the model to scan for durable signals at the
 	// decision point. Gated on tools because the nudge asks the model to call
