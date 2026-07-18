@@ -28,11 +28,15 @@ type Recording struct {
 }
 
 // Param is a replay-time input; {{name}} placeholders in step values/urls are
-// substituted from it (falling back to Default).
+// substituted from it (falling back to Default). Secret marks a password-class
+// value: it is never given a recorded Default, and at replay the runtime
+// collects it out-of-band (masked prompt / env / session cache) so the value
+// never enters the conversation.
 type Param struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description,omitempty"`
 	Default     string `yaml:"default,omitempty"`
+	Secret      bool   `yaml:"secret,omitempty"`
 }
 
 // Output is a value replay exposes to its caller — the handoff surface that lets
@@ -117,8 +121,13 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			nm = fmt.Sprintf("%s%d", root, i)
 		}
 		seen[nm] = true
-		p := Param{Name: nm, Description: desc}
-		if !secret {
+		// Default and Secret are independent concerns: Default is written
+		// whenever a recorded value exists; Secret tags password-class params.
+		// A secret param NEVER gets a Default, even if its event somehow
+		// carried a value — the YAML must stay free of plaintext (callers that
+		// merely want "no default", like upload's file, pass secret=false).
+		p := Param{Name: nm, Description: desc, Secret: secret}
+		if def != "" && !secret {
 			p.Default = def
 		}
 		s.Params = append(s.Params, p)
@@ -139,7 +148,9 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			// preceding click (the button) is the better trigger than the
 			// possibly-transient file input. The file itself can't be captured
 			// (browsers hide the path) so it's auto-parameterized (no default).
-			fp := addParam("file", "", "path to the file to upload", true)
+			// It is NOT a secret: a missing path stays a plain missing-param
+			// error, never a masked prompt.
+			fp := addParam("file", "", "path to the file to upload", false)
 			up := Step{Action: "upload", Frame: e.Frame, Selector: e.Selector, Value: "{{" + fp + "}}", Label: e.Text}
 			if n := len(s.Steps); n > 0 && s.Steps[n-1].Action == "click" {
 				up.Selector, up.Frame, up.Label = s.Steps[n-1].Selector, s.Steps[n-1].Frame, s.Steps[n-1].Label
@@ -344,6 +355,20 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		return withDescription(base, refined.Description)
 	}
 	refined.Name = name
+	// The distiller rewrites the param list from prose and can drop the secret
+	// marker; backfill it by name from the deterministic baseline so a password
+	// param is still secret after distillation.
+	secretParams := map[string]bool{}
+	for _, p := range base.Params {
+		if p.Secret {
+			secretParams[p.Name] = true
+		}
+	}
+	for i := range refined.Params {
+		if secretParams[refined.Params[i].Name] {
+			refined.Params[i].Secret = true
+		}
+	}
 	if !selectorsSubset(refined, base) {
 		// Precision guard: the model used a selector it wasn't given. The refined
 		// steps are untrustworthy, but the prose description still is — keep it so
