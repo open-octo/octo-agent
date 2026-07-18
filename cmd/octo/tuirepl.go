@@ -1140,7 +1140,13 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.wakeupFired() // dynamic: keep the clock; the model re-arms in the turn
 		}
 		m.printlnBlock(noticeStyle.Render("● Loop tick"))
-		return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(msg.prompt, ""))
+		// Wrap the tick prompt as a <system-reminder> (tools.FormatLoopTick)
+		// — parity with the web and IM paths. The TUI itself shows only the
+		// "● Loop tick" line (the echo stays ""), but the wrapped user message
+		// is what persists, so a web/desktop UI replaying this transcript
+		// derives empty visible text and can't render the tick as a fake user
+		// bubble. The model still receives the prompt verbatim.
+		return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(tools.FormatLoopTick(msg.prompt), ""))
 
 	case cancelWakeupMsg:
 		// schedule_wakeup(cancel=true): the model stopped the loop on request.

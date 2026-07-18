@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,22 @@ func (w *fakeWaker) ScheduleWakeup(delay time.Duration, prompt, reason string, r
 func (w *fakeWaker) CancelWakeup() error {
 	w.cancelled++
 	return nil
+}
+
+// A loop tick is wrapped as a <system-reminder> so every UI strips it from
+// user-visible text (agent.StripSystemReminders) — the fired prompt never
+// renders as a fake user bubble, whichever surface delivered it. The model
+// must still receive the original task verbatim.
+func TestFormatLoopTick_SuppressesUserBubble(t *testing.T) {
+	prompt := "check whether the PR is merged and report"
+	wrapped := FormatLoopTick(prompt)
+
+	if !strings.Contains(wrapped, prompt) {
+		t.Fatalf("wrapped tick must carry the original task verbatim, got %q", wrapped)
+	}
+	if visible := strings.TrimSpace(agent.StripSystemReminders(wrapped)); visible != "" {
+		t.Fatalf("a loop tick must leave no visible user-bubble text, got %q", visible)
+	}
 }
 
 func TestScheduleWakeup_ClampsDelay(t *testing.T) {

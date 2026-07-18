@@ -49,8 +49,8 @@ func (s *Server) armWakeup(sessionID string, delay time.Duration, prompt string,
 // timer has already re-armed, so the next tick delivers once the session is
 // idle — mirroring the TUI, which only re-arms (never queues) while a turn runs.
 //
-// The prompt is wrapped as a <system-reminder> (formatLoopTick) so the web
-// transcript renders the tick as an environment re-entry rather than a
+// The prompt is wrapped as a <system-reminder> (tools.FormatLoopTick) so the
+// web transcript renders the tick as an environment re-entry rather than a
 // duplicated user-message bubble every tick — matching the TUI, which prints a
 // "● Loop tick" line and never echoes the prompt as user speech. The scrollback
 // notice is broadcast only when kickIdleSteerTurn actually starts a turn, so a
@@ -62,29 +62,10 @@ func (s *Server) deliverLoopTick(sessionID, prompt string, repeat bool) {
 	if s.shouldSkipTick(sessionID, repeat) {
 		return
 	}
-	s.enqueueSteer(sessionID, agent.InboxItem{Text: formatLoopTick(prompt)})
+	s.enqueueSteer(sessionID, agent.InboxItem{Text: tools.FormatLoopTick(prompt)})
 	if s.kickIdleSteerTurn(sessionID) {
 		s.broadcastLoopTick(sessionID)
 	}
-}
-
-// formatLoopTick wraps a loop prompt as a <system-reminder> block — octo's
-// convention for injected, non-user context that UIs strip from user-visible
-// text (see FormatBgNote). This is what keeps the web transcript from rendering
-// the prompt as a fresh user bubble on every tick: doAgentTurn computes the
-// visible bubble text from StripSystemReminders(content), which is empty here,
-// so no history_user_message is broadcast (live) or reconstructed (on reload).
-// The model still reads and acts on it — doAgentTurn runs the turn on the full
-// wrapped content, and an idle turn whose entire user message is a
-// system-reminder still produces a reply (the same path background- and
-// sub-agent-completion notes use). The preamble tells the model to treat the
-// task as if the user just sent it, so a directive prompt isn't mistaken for
-// passive context.
-func formatLoopTick(prompt string) string {
-	return "<system-reminder>\n" +
-		"[LOOP TICK] Your scheduled loop fired. Continue the task below as if the user just sent it:\n\n" +
-		prompt +
-		"\n</system-reminder>"
 }
 
 // broadcastLoopTick emits the "Loop tick" scrollback notice to a web session,
@@ -198,10 +179,21 @@ func imWakeupKey(sess *channel.Session) string { return "im:" + string(sess.Key)
 func (w imWaker) ScheduleWakeup(delay time.Duration, prompt, reason string, repeat bool) error {
 	sess, ad, ev := w.sess, w.ad, w.ev
 	w.s.armWakeupFn(imWakeupKey(sess), delay, repeat, func() {
-		sess.Agent.Inbox.Enqueue(prompt)
+		w.enqueueTick(prompt)
 		go w.s.runChannelIdleTurn(context.Background(), sess, ad, ev)
 	})
 	return nil
+}
+
+// enqueueTick queues the loop prompt into the session's Inbox, wrapped as a
+// <system-reminder> (tools.FormatLoopTick) — parity with the web path
+// (deliverLoopTick). The injected prompt is model-facing context, never user
+// speech: an IM user only ever receives the model's reply, and a web/desktop
+// UI that renders or replays this session's transcript derives an empty
+// visible text via agent.StripSystemReminders, so the tick can't surface as a
+// fake user bubble there either.
+func (w imWaker) enqueueTick(prompt string) {
+	w.sess.Agent.Inbox.Enqueue(tools.FormatLoopTick(prompt))
 }
 
 func (w imWaker) CancelWakeup() error {
