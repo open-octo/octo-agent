@@ -1252,35 +1252,35 @@ func TestReplayKeyEnter(t *testing.T) {
 // defaultless but NOT secret (a missing file path stays a plain error, never
 // a masked prompt).
 func TestCompileParamSecretFlag(t *testing.T) {
-    s := CompileRecording("demo", "", "", []RecordedEvent{
-        {Type: "change", Selector: "#pw", Tag: "INPUT", Field: "password", Secret: true},
-    })
-    if len(s.Params) != 1 || !s.Params[0].Secret {
-        t.Fatalf("password change param must be marked secret: %+v", s.Params)
-    }
+	s := CompileRecording("demo", "", "", []RecordedEvent{
+		{Type: "change", Selector: "#pw", Tag: "INPUT", Field: "password", Secret: true},
+	})
+	if len(s.Params) != 1 || !s.Params[0].Secret {
+		t.Fatalf("password change param must be marked secret: %+v", s.Params)
+	}
 
-    s = CompileRecording("demo", "", "", []RecordedEvent{
-        {Type: "enter", Selector: "#pw", Tag: "INPUT", Field: "password", Secret: true},
-    })
-    if len(s.Params) != 1 || !s.Params[0].Secret {
-        t.Fatalf("password enter-snapshot param must be marked secret: %+v", s.Params)
-    }
+	s = CompileRecording("demo", "", "", []RecordedEvent{
+		{Type: "enter", Selector: "#pw", Tag: "INPUT", Field: "password", Secret: true},
+	})
+	if len(s.Params) != 1 || !s.Params[0].Secret {
+		t.Fatalf("password enter-snapshot param must be marked secret: %+v", s.Params)
+	}
 
-    s = CompileRecording("demo", "", "", []RecordedEvent{
-        {Type: "click", Selector: ".up", Tag: "BUTTON", Text: "Upload"},
-        {Type: "upload", Selector: "input[type=file]", Tag: "INPUT", Value: `C:\fakepath\x.xlsx`},
-    })
-    if len(s.Params) != 1 || s.Params[0].Name != "file" || s.Params[0].Secret {
-        t.Fatalf("upload file param must be defaultless but NOT secret: %+v", s.Params)
-    }
+	s = CompileRecording("demo", "", "", []RecordedEvent{
+		{Type: "click", Selector: ".up", Tag: "BUTTON", Text: "Upload"},
+		{Type: "upload", Selector: "input[type=file]", Tag: "INPUT", Value: `C:\fakepath\x.xlsx`},
+	})
+	if len(s.Params) != 1 || s.Params[0].Name != "file" || s.Params[0].Secret {
+		t.Fatalf("upload file param must be defaultless but NOT secret: %+v", s.Params)
+	}
 
-    // A plain input keeps its default and stays non-secret.
-    s = CompileRecording("demo", "", "", []RecordedEvent{
-        {Type: "change", Selector: "#q", Tag: "INPUT", Field: "query", Value: "hello"},
-    })
-    if len(s.Params) != 1 || s.Params[0].Secret || s.Params[0].Default != "hello" {
-        t.Fatalf("plain param keeps default, not secret: %+v", s.Params)
-    }
+	// A plain input keeps its default and stays non-secret.
+	s = CompileRecording("demo", "", "", []RecordedEvent{
+		{Type: "change", Selector: "#q", Tag: "INPUT", Field: "query", Value: "hello"},
+	})
+	if len(s.Params) != 1 || s.Params[0].Secret || s.Params[0].Default != "hello" {
+		t.Fatalf("plain param keeps default, not secret: %+v", s.Params)
+	}
 }
 
 // TestGenerateRecordingDistillKeepsSecretFlag: the distiller rewrites the param
@@ -1288,38 +1288,38 @@ func TestCompileParamSecretFlag(t *testing.T) {
 // onto refined params by name from the deterministic baseline, so a password
 // param is still secret after distillation.
 func TestGenerateRecordingDistillKeepsSecretFlag(t *testing.T) {
-    ctx := context.Background()
-    events := []RecordedEvent{
-        {Type: "change", Selector: "#u", Tag: "INPUT", Field: "username", Value: "roy"},
-        {Type: "change", Selector: "#pw", Tag: "INPUT", Field: "password", Secret: true},
-        {Type: "click", Selector: "#go", Tag: "BUTTON", Text: "Sign in"},
-    }
-    // The distiller re-declares both params but drops secret:true.
-    dropSecret := func(_ context.Context, _, _ string) (string, error) {
-        return "name: x\nparams:\n" +
-            "  - {name: username}\n" +
-            "  - {name: password}\n" +
-            "steps:\n" +
-            "  - {action: type, selector: '#u', value: '{{username}}'}\n" +
-            "  - {action: type, selector: '#pw', value: '{{password}}'}\n" +
-            "  - {action: click, selector: '#go'}\n", nil
-    }
-    s := GenerateRecording(ctx, "demo", "", events, dropSecret)
-    var user, pw *Param
-    for i := range s.Params {
-        switch s.Params[i].Name {
-        case "username":
-            user = &s.Params[i]
-        case "password":
-            pw = &s.Params[i]
-        }
-    }
-    if pw == nil || !pw.Secret {
-        t.Fatalf("distilled password param lost its secret flag: %+v", s.Params)
-    }
-    if user == nil || user.Secret {
-        t.Fatalf("non-secret param must not gain the secret flag: %+v", s.Params)
-    }
+	ctx := context.Background()
+	events := []RecordedEvent{
+		{Type: "change", Selector: "#u", Tag: "INPUT", Field: "username", Value: "roy"},
+		{Type: "change", Selector: "#pw", Tag: "INPUT", Field: "password", Secret: true},
+		{Type: "click", Selector: "#go", Tag: "BUTTON", Text: "Sign in"},
+	}
+	// The distiller re-declares both params but drops secret:true.
+	dropSecret := func(_ context.Context, _, _ string) (string, error) {
+		return "name: x\nparams:\n" +
+			"  - {name: username}\n" +
+			"  - {name: password}\n" +
+			"steps:\n" +
+			"  - {action: type, selector: '#u', value: '{{username}}'}\n" +
+			"  - {action: type, selector: '#pw', value: '{{password}}'}\n" +
+			"  - {action: click, selector: '#go'}\n", nil
+	}
+	s := GenerateRecording(ctx, "demo", "", events, dropSecret)
+	var user, pw *Param
+	for i := range s.Params {
+		switch s.Params[i].Name {
+		case "username":
+			user = &s.Params[i]
+		case "password":
+			pw = &s.Params[i]
+		}
+	}
+	if pw == nil || !pw.Secret {
+		t.Fatalf("distilled password param lost its secret flag: %+v", s.Params)
+	}
+	if user == nil || user.Secret {
+		t.Fatalf("non-secret param must not gain the secret flag: %+v", s.Params)
+	}
 }
 
 // TestGenerateRecordingDistillRestoresDroppedSecretParam: the distiller may
