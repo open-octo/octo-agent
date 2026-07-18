@@ -281,6 +281,15 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 	// a slow consumer.
 	if sam := tools.SessionSubAgentManager(sessionID, nil); sam != nil {
 		for _, sa := range sam.ListRunning() {
+			// ListRunning also returns COMPLETED agents (idle, kept so
+			// sub_agent_send can resume them). Replaying their retained events
+			// rebuilds them as "running" on the live panel — a ghost only the
+			// next turn start clears. Only a genuinely busy agent has a live
+			// state worth replaying; an idle one's outcome already lives in
+			// the chat record (sub_agent_notice).
+			if !sa.Busy {
+				continue
+			}
 			for _, ev := range sa.Events {
 				if ev.Kind == "done" {
 					continue

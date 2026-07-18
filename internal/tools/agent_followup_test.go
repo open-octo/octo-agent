@@ -161,9 +161,16 @@ func TestStatus_ByIDAndList(t *testing.T) {
 		t.Fatalf("status list: %v", err)
 	}
 	// A completed-but-alive async agent stays listed (idle) — it can still
-	// receive sub_agent_send follow-ups.
+	// receive sub_agent_send follow-ups. The header must not call that
+	// "running": tracked ≠ working.
 	if !strings.Contains(res.Text, id) || !strings.Contains(res.Text, "idle") {
 		t.Errorf("list %q should show the resumable agent as idle", res.Text)
+	}
+	if strings.Contains(res.Text, "running") {
+		t.Errorf("header must not say 'running' when every agent is idle: %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "tracked") {
+		t.Errorf("header should frame the list as tracked (resumable) agents: %q", res.Text)
 	}
 
 	// After a kill it leaves the list.
