@@ -132,19 +132,45 @@ func TestShouldSkipTick(t *testing.T) {
 	}
 }
 
-// A loop tick is wrapped as a <system-reminder> so the web transcript stops
-// duplicating the prompt as a user-message bubble on every tick. The model must
-// still receive the prompt verbatim, and the visible bubble text (what
-// doAgentTurn derives via StripSystemReminders) must be empty — the same
-// suppression that keeps completion notes from rendering as user speech.
-func TestFormatLoopTick_SuppressesUserBubble(t *testing.T) {
-	prompt := "check whether the PR is merged and report"
-	wrapped := formatLoopTick(prompt)
+// A web loop tick reaches the steer queue wrapped as a <system-reminder>
+// (tools.FormatLoopTick), so doAgentTurn derives an empty visible bubble and
+// no history_user_message is ever broadcast for it. The wrapped text still
+// carries the task verbatim for the model. (The kick fails here because the
+// bare test server has no loadable session — the steer just stays queued,
+// which is exactly what we inspect.)
+func TestDeliverLoopTick_EnqueuesWrappedTick(t *testing.T) {
+	s := newLoopTestServer()
+	s.deliverLoopTick("loop-test-nonexistent", "check whether the PR is merged", false)
 
-	if !strings.Contains(wrapped, prompt) {
-		t.Fatalf("wrapped tick must carry the original task verbatim, got %q", wrapped)
+	q := s.steerQueues["loop-test-nonexistent"]
+	if len(q) != 1 {
+		t.Fatalf("expected exactly one enqueued steer, got %d", len(q))
 	}
-	if visible := strings.TrimSpace(agent.StripSystemReminders(wrapped)); visible != "" {
+	if !strings.Contains(q[0].Text, "check whether the PR is merged") {
+		t.Fatalf("tick steer must carry the task verbatim, got %q", q[0].Text)
+	}
+	if visible := strings.TrimSpace(agent.StripSystemReminders(q[0].Text)); visible != "" {
+		t.Fatalf("a loop tick must leave no visible user-bubble text, got %q", visible)
+	}
+}
+
+// The IM path must wrap the same way: an imWaker tick lands in the session
+// Inbox as a <system-reminder>, so a web/desktop UI rendering this session's
+// transcript never shows the tick as a fake user bubble — an IM user only
+// ever sees the model's reply.
+func TestIMWaker_EnqueueTickWrapsPrompt(t *testing.T) {
+	sess := &channel.Session{Agent: agent.New(&stubSender{}, "stub-model")}
+	w := imWaker{s: newLoopTestServer(), sess: sess}
+	w.enqueueTick("check the PR and merge when green")
+
+	items := sess.Agent.Inbox.Drain()
+	if len(items) != 1 {
+		t.Fatalf("expected one enqueued tick, got %d", len(items))
+	}
+	if !strings.Contains(items[0].Text, "check the PR and merge when green") {
+		t.Fatalf("tick must carry the task verbatim, got %q", items[0].Text)
+	}
+	if visible := strings.TrimSpace(agent.StripSystemReminders(items[0].Text)); visible != "" {
 		t.Fatalf("a loop tick must leave no visible user-bubble text, got %q", visible)
 	}
 }
@@ -162,11 +188,12 @@ func TestServer_TurnActive(t *testing.T) {
 
 func newLoopTestServer() *Server {
 	return &Server{
-		wakeupTimers: map[string]*time.Timer{},
-		wakeupStart:  map[string]time.Time{},
-		turnRunning:  map[string]bool{},
-		turnLocks:    map[string]*sync.Mutex{},
-		steerQueues:  map[string][]agent.InboxItem{},
+		wakeupTimers:        map[string]*time.Timer{},
+		wakeupStart:         map[string]time.Time{},
+		turnRunning:         map[string]bool{},
+		turnLocks:           map[string]*sync.Mutex{},
+		steerQueues:         map[string][]agent.InboxItem{},
+		sessionBindingLocks: map[string]*sync.Mutex{},
 	}
 }
 

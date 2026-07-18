@@ -87,6 +87,24 @@ func LoopExpired(start time.Time) bool {
 	return !start.IsZero() && time.Since(start) >= MaxLoopLifetime
 }
 
+// FormatLoopTick wraps a fired wakeup's prompt as a <system-reminder> block —
+// octo's convention for injected, non-user context that UIs strip from
+// user-visible text (see FormatBgNote, agent.StripSystemReminders). Every
+// surface that delivers a wakeup must wrap the prompt this way: the web path
+// (Server.deliverLoopTick), the IM path (imWaker), and the TUI tick. The
+// wrapped user message persists in the transcript, and any surface that later
+// renders or replays it derives an empty visible text, so the tick never
+// surfaces as a fake user bubble — each UI shows its own "Loop tick" marker
+// instead. The model still receives the prompt verbatim and acts on it; the
+// preamble tells it to treat the task as if the user just sent it, so a
+// directive prompt isn't mistaken for passive context.
+func FormatLoopTick(prompt string) string {
+	return "<system-reminder>\n" +
+		"[LOOP TICK] Your scheduled loop fired. Continue the task below as if the user just sent it:\n\n" +
+		prompt +
+		"\n</system-reminder>"
+}
+
 // ScheduleWakeupTool lets the model schedule its own next turn — the mechanism
 // behind an in-session loop (the /loop command). The model calls it at the end
 // of a turn to come back later (dynamic, self-paced mode) or to keep a fixed
