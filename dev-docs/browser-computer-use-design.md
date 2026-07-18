@@ -130,11 +130,11 @@ not captured (the recorder stays attached to the origin target). The common
 "click opens an article" flow is covered because the click is captured on the
 origin page and replay follows the popup.
 
-## Skill artifact
+## Recording artifact
 
-A recording compiles to an editable YAML skill at
+A recording compiles to an editable YAML recording at
 `~/.octo/browser-recordings/<name>.yaml` (`tools.BrowserRecordingsDir`,
-`$OCTO_BROWSER_SKILLS_DIR` to override):
+`$OCTO_BROWSER_RECORDINGS_DIR` to override, `$OCTO_BROWSER_SKILLS_DIR` still honored for migration):
 
 ```yaml
 name: open-zhihu-top
@@ -170,7 +170,7 @@ skill is plain YAML — human-readable, hand-editable, git-versionable.
 ## Replay, verification, self-heal
 
 `replay <name>` loads the YAML and runs `ReplayRecording` (`internal/browser/
-skill.go`) deterministically — no LLM in the common case. Each step implicitly
+recording.go`) deterministically — no LLM in the common case. Each step implicitly
 waits for its target, executes, and checks any `verify`. Robustness is built
 into the engine:
 

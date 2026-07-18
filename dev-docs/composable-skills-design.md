@@ -9,7 +9,7 @@ octo 里有两套"可复用步骤",互不相通:
 
 当一条真实流水线要横跨两者时——例如「浏览器录制下载 3 个 excel → 技能合并成一张表 → 技能出 PPT」——三个机制缺口叠加,让它跑不顺:
 
-1. **回放无输出交接。** `replay` 结束只返回一句 `ran skill "X" (N steps)`(`internal/tools/browser.go:591`)。一个"下载 3 个文件"的录制跑完,agent 拿到的是"跑了几步",拿不到那 3 个文件的路径,下游无从接手。更根本的:回放的动作词表只有 `navigate/wait/click/type/select/upload`,`runStep` 对其它一律 `unknown action`(`internal/browser/skill.go:536`)—— **回放里没有 `download` 步骤**,录制里的"点击导出"只会被当成普通 click,文件即便落盘也无人知晓其路径。
+1. **回放无输出交接。** `replay` 结束只返回一句 `ran skill "X" (N steps)`(`internal/tools/browser.go:591`)。一个"下载 3 个文件"的录制跑完,agent 拿到的是"跑了几步",拿不到那 3 个文件的路径,下游无从接手。更根本的:回放的动作词表只有 `navigate/wait/click/type/select/upload`,`runStep` 对其它一律 `unknown action`(`internal/browser/recording.go`)—— **回放里没有 `download` 步骤**,录制里的"点击导出"只会被当成普通 click,文件即便落盘也无人知晓其路径。
 2. **录制不在技能目录里。** 普通技能进 L1 清单,模型会主动想起;浏览器录制只能靠人点名 `replay name=`。全仓没有任何地方把这些 YAML 注入清单,所以在普通会话里模型不知道它存在。
 3. **两个命名空间。** 两种"技能"是两个物种、两套注册、两种调用方式,天然无法互相衔接。
 
@@ -32,10 +32,10 @@ octo 里有两套"可复用步骤",互不相通:
 
 ### A.1 浏览器录制:`outputs` + `download` 步骤
 
-`Skill` 结构(`internal/browser/skill.go:17`)加一个与 `Params` 对称的 `Outputs` 字段;`Step` 加一个 `Bind` 字段,把某步的产物绑定到具名 output。
+`Recording` 结构(`internal/browser/recording.go:22`)加一个与 `Params` 对称的 `Outputs` 字段;`Step` 加一个 `Bind` 字段,把某步的产物绑定到具名 output。
 
 ```go
-type Skill struct {
+type Recording struct {
     Name        string   `yaml:"name"`
     Description string   `yaml:"description,omitempty"`
     Params      []Param  `yaml:"params,omitempty"`
@@ -87,12 +87,12 @@ steps:
 
 ### A.2 回放执行:补 `download`/`extract`,回传 outputs
 
-`runStep`(`internal/browser/skill.go:440`)的 `switch step.Action` 增加两个 case,复用工具层已有能力:
+`runStep`(`internal/browser/recording.go`)的 `switch step.Action` 增加两个 case,复用工具层已有能力:
 
 - **`download`** —— 用 `Browser.CaptureDownload`(`internal/tools/browser.go:470` 已在交互式 `download` action 用它)包住对 `selector` 的点击,拿到落地路径,按 `step.Bind` 追加进对应 output 的收集器。下载目录沿用 `downloadDir()` 的配置(`Browser.DownloadDir`,缺省落 temp)。
 - **`extract`** —— `page.Eval(step.JS)` 求值,结果字符串写入 `step.Bind` 指向的 `string` output。给"抓一个报表 ID / 状态文本再传给下游"留口子。
 
-`ReplayRecording`(`internal/browser/skill.go:393`)签名从
+`ReplayRecording`(`internal/browser/recording.go`)签名从
 
 ```go
 func ReplayRecording(...) (modified bool, finalPage *Page, err error)
@@ -104,14 +104,14 @@ func ReplayRecording(...) (modified bool, finalPage *Page, err error)
 func ReplayRecording(...) (modified bool, finalPage *Page, outputs map[string]any, err error)
 ```
 
-`outputs` 按 `skill.Outputs` 的声明聚合:`file` → `string`,`file[]` → `[]string`,`string` → `string`。未被任何步骤 `bind` 的 output 缺省为空值(空串 / 空数组),不报错——录制可以只声明、暂不绑定。
+`outputs` 按 `recording.Outputs` 的声明聚合:`file` → `string`,`file[]` → `[]string`,`string` → `string`。未被任何步骤 `bind` 的 output 缺省为空值(空串 / 空数组),不报错——录制可以只声明、暂不绑定。
 
 ### A.3 `replay` 回传结构化 envelope
 
 `internal/tools/browser.go` 的 `replay` case(`internal/tools/browser.go:563`)从只返回一行文字,改为返回结构化结果:
 
 ```json
-{ "skill": "download-excels", "steps": 5,
+{ "recording": "download-excels", "steps": 5,
   "outputs": { "files": ["/dl/order.xlsx", "/dl/refund.xlsx", "/dl/settle.xlsx"] } }
 ```
 
@@ -132,7 +132,7 @@ SKILL.md 这侧**不加任何必填字段**——库存的 Claude Code 技能即
 
 ### 验证 / 兼容
 
-- 新增 `internal/browser/skill_test.go` 用例:一个含 `download` + `bind: file[]` 的技能,用 `httptest` 造一个触发下载的页面,断言 `ReplayRecording` 回传的 `outputs["files"]` 是两个路径。`extract` 同理断言取回的字符串。
+- 新增 `internal/browser/recording_test.go` 用例:一个含 `download` + `bind: file[]` 的录制,用 `httptest` 造一个触发下载的页面,断言 `ReplayRecording` 回传的 `outputs["files"]` 是两个路径。`extract` 同理断言取回的字符串。
 - 无 `outputs` 字段的旧录制:`Outputs` 为 nil,`ReplayRecording` 回传空 map,`replay` 的 JSON 里 `outputs: {}`。行为等价于今天,**完全向后兼容**。
 - `ReplayRecording` 签名变更是包内改动(调用点只有 `internal/tools/browser.go` 一处),不越 `provider → agent` 依赖边界。
 
@@ -144,7 +144,7 @@ SKILL.md 这侧**不加任何必填字段**——库存的 Claude Code 技能即
 
 - 扫 `BrowserRecordingsDir()`(`internal/tools/browser.go:96`)下的 `*.yaml`,解析出 `name / description / params / outputs`,作为一类条目并入技能清单的构建(`internal/skills` 的 manifest 组装处)。
 - 清单里明确标注类型与调用方式,例如:
-  `download-excels (browser skill) — 下载指定月份的 3 张报表;params: month;outputs: files(file[]);经 replay 调用`。
+  `download-excels (recording) — 下载指定月份的 3 张报表;params: month;outputs: files(file[]);经 recording() 调用`。
 - 只暴露元信息(名字/描述/参数/产物),不展开 YAML 步骤——步骤是 L2 细节,回放时才读。
 
 这样在普通会话里,用户说"把上个月的报表拉下来并出 PPT",模型能自己在清单里看到这条录制并决定 `replay`,而不必被人点名。
@@ -156,38 +156,37 @@ SKILL.md 这侧**不加任何必填字段**——库存的 Claude Code 技能即
 
 ---
 
-## C. 管道:`skill()` workflow 原语
+## C. 管道:`recording()` 与 `skill()` workflow 原语
 
 `workflow` 是现成的强编排器(`pipeline/parallel/args/log/命名保存/journal 续跑`)。要把 A/B 变成一条可反复跑、可 resume 的流水线,只缺一个能**确定性调用技能并拿回 outputs** 的脚本原语——不经 LLM、零 token(录制回放本就是确定性的),需要判断的步再交给 `agent()`。
 
-### 新增 prelude 原语 `skill()`
+### 新增 prelude 原语 `recording()` 与 `skill()`
 
-与 `agent()` 对仗——都是"跑一个步骤单元":`agent()` 跑一个 LLM 步,`skill()` 跑一个技能步。它**不是模型面的 tool**,只在 workflow 脚本里可调;排序由脚本的确定性控制流决定,派发本身不花 LLM 回合。
+与 `agent()` 对仗——都是"跑一个步骤单元":`agent()` 跑一个 LLM 步,`recording()` 跑一个浏览器录制回放,`skill()` 跑一个 SKILL.md 技能。这两者**不是模型面的 tool**,只在 workflow 脚本里可调;排序由脚本的确定性控制流决定,派发本身不花 LLM 回合。
+
+按物种拆开之前,`skill()` 一身二任——同名 YAML 与 SKILL.md 冲突时靠 `"browser:"` / `"md:"` 前缀消歧。这是一个历史性模糊:`recording("download-excels")` 现在是专用的录制回放原语;`skill("merge-excels")` 现在只解析 SKILL.md。同一个名字在目录里可以同时存在一条录制和一份 SKILL.md——不报错,`recording("x")` 永远选录制,`skill("x")` 永远选 SKILL.md(让写脚本的人困惑时,改名其一即可)。
 
 ```
-skill(name, params = {}, opts = {})   →  该技能声明的 outputs 对象(直接返回,不包 envelope)
-
-  按 B 层统一目录解析 name:
-    · name 是 YAML 录制  → 跑 ReplayRecording,确定性,0 LLM(失败才 heal)
-    · name 是 SKILL.md   → 起 skill 子 agent(opts.schema 可选,见 A.4)
+recording(name, params = {})  →  该录制声明的 outputs 对象(直接返回,不包 envelope)
+skill(name, params = {}, opts = {})  →  跑 SKILL.md 子 agent,opts.schema 可选(见 A.4)
 ```
 
-**名字全目录唯一**:`skill('x')` 只解析到一个条目;一个 YAML 与一个 MD 重名则报错要求消歧,不猜。逃生口(可选):`skill('browser:download-excels')` / `skill('md:merge-excels')` 显式指定引擎。
+`recording()` 是 `__skill_start` 通道之上的浅 façade:名字以 `"recording:"` 前缀经同一 host import 下发,Go 侧按前缀分派到 `ReplayRecording`,结果一样走 `agent_wait_any`/`agent_take` 完成队列—— 所以 `recording()` 在 `parallel`/`pipeline` 里和 `agent()`/`skill()` 一样并发、一样可 resume(同一 journal),不需要新的 take/wait 原语。`skill()` 一脉相承,也是经 `__skill_start` 把名字原样下发、由 `SkillFunc` 起 SKILL.md 子 agent。两边结果都预经 `JSON.parse` 回传为原生 Ruby `Hash`(JSON 在脚本内已可用,见 `workflow-named-args-design.md`)。
 
-`skill()` 复用 `agent()` 的整套异步机制:`__skill_start` 是**唯一新增的 host import**,拿回结果走的还是 `agent_wait_any`/`agent_take` 同一条完成队列——所以 `skill()` 在 `parallel`/`pipeline` 里和 `agent()` 一样并发、一样可 resume(同一 journal),无需新的 take/wait 原语。Go 侧 host 函数按名字查统一目录,分派到 `ReplayRecording`(录制)或 skill 子 agent(SKILL.md),把 outputs 序列化成 JSON 回传;prelude `JSON.parse` 成原生 Ruby `Hash`(JSON 在脚本内已可用,见 `workflow-named-args-design.md`)。
+**产物恒为合法 JSON,失败则 raise**:录制回 outputs、带 schema 的 SKILL.md 结果、无 schema 的自由文本(JSON 编码成字符串)三者都是合法 JSON;一旦某步失败,回传的是错误串而非 JSON,该原地 `raise` 中止整条管道,而不是把坏值喂给下游。浏览器录制串行化在同一个 Chrome 会话上(单会话资源,`parallel` 里的多个录制步骤自动排队)。
 
-**产物恒为合法 JSON,失败则 raise**:录制回outputs、带 schema 的 SKILL.md 结果、无 schema 的自由文本(JSON 编码成字符串)三者都是合法 JSON;一旦某步失败,回传的是错误串而非 JSON,`skill()` 就地 `raise` 中止整条管道,而不是把坏值喂给下游。浏览器录制串行化在同一个 Chrome 会话上(单会话资源,`parallel` 里的多个录制步骤自动排队)。
+旧脚本里的 `skill("browser:x")` 以及前缀撞名时靠 `"browser:"` / `"md:"` 的写法,**本版本保留兼容但已打 deprecation 日志**(下个主版本移除);新脚本一律用 `recording("x")` / `skill("x")`。
 
 ### 你的三段式,一条管道
 
-工作流脚本是 Ruby(mruby),`skill()` 返回原生 `Hash`:
+工作流脚本是 Ruby(mruby),`recording()`/`skill()` 都返回原生 `Hash`:
 
 ```ruby
 # .octo/workflows/monthly-report — 保存后可命名调用
-dl  = skill("download-excels", { "month" => args["month"] })          # 浏览器录制,确定性 → {"files"=>[...]}
-tbl = skill("merge-excels", { "inputs" => dl["files"] },              # SKILL.md,调用点带 schema → {"path"=>...}
+dl  = recording("download-excels", { "month" => args["month"] })        # 录制 → {"files"=>[...]}
+tbl = skill("merge-excels", { "inputs" => dl["files"] },                # SKILL.md,调用点带 schema → {"path"=>...}
             schema: '{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}')
-ppt = skill("excels-to-ppt", { "table" => tbl["path"] })              # SKILL.md → {"path"=>...}
+ppt = skill("excels-to-ppt", { "table" => tbl["path"] })                # SKILL.md → {"path"=>...}
 ppt
 ```
 
@@ -195,20 +194,19 @@ ppt
 
 - **会话里一句话**:"跑 monthly-report,月份 2026-06" → 模型调 `workflow` 命名工作流。
 - **CLI / 定时**:点名这个 saved workflow 配 cron(`scheduler` 已有)。
-- **单跑某一步**:它在目录里仍是普通技能,`replay` / `skill` 照旧。
+- **单跑某一步**:它在目录里仍是普通技能,`recording()` / `skill()` 照旧。
 
 并行/去重等复杂形态直接吃 workflow 已有原语,例如按月并行下载:
 
 ```ruby
-all = parallel(args["months"]) { |m| skill("download-excels", { "month" => m }) }
+all = parallel(args["months"]) { |m| recording("download-excels", { "month" => m }) }
 ```
 
 ### 验证 / 兼容
 
 - `internal/workflow/runtime_test.go`:用假 `SkillFunc` 打通原语端到端——round-trip(参数/名字透传)、`pipeline` 内组合、无 `Skill` 时报错、失败 `raise`。
-- `internal/tools/workflow_skill_test.go`:真派发逻辑——`browser:`/`md:` 前缀、未找到、重名歧义、MD 子 agent(有/无 schema 的回传形态)。
-- `skill()` 是新增原语,不改 `agent/parallel/pipeline` 语义,旧脚本不受影响。
-- 随该原语重生了 `mruby.wasm`(新增 `skill_start` host import),流程同 `workflow-named-args-design.md`。
+- `internal/tools/workflow_skill_test.go`:真派发逻辑——`recording()` / `skill()` 分派、旧的 `browser:`/`md:` 前缀(兼容期,已 deprecate)、未找到、重名歧义、MD 子 agent(有/无 schema 的回传形态)。
+- `recording()` 是 `__skill_start` 通道上的浅 façade,没有新 host import,不改 `agent/parallel/pipeline` 语义,旧脚本不受影响。
 
 ---
 
@@ -230,4 +228,4 @@ all = parallel(args["months"]) { |m| skill("download-excels", { "month" => m }) 
 
 1. **A(契约)** —— `outputs` + 回放 `download`/`extract` 步骤 + `replay` 回传 envelope。做完这一步,即便还没有 workflow 绑定,在一次会话里手动串三步也已经能干净交接(模型从上一步的 JSON outputs 里读出文件路径喂下一步)。这是约 80% 的价值。
 2. **B(目录)** —— 录制并入 L1 清单,让会话里自动发现。
-3. **C(管道)** —— `skill()` workflow 原语,把流水线固化成一个 saved workflow,获得 resume / cron / 并行。
+3. **C(管道)** —— `recording()` 与 `skill()` workflow 原语,把流水线固化成一个 saved workflow,获得 resume / cron / 并行。
