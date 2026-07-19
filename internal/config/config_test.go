@@ -282,6 +282,130 @@ func TestEntryByModel_EmptyNeverMatches(t *testing.T) {
 	}
 }
 
+// TestEntryByModel_CompositeIDResolvesAgainstEndpoints covers PR2 §8.2:
+// EntryByModel accepts a composite id "<endpoint_id>::<model>" and resolves
+// it against c.Endpoints, projecting the EndpointModel back into a ModelEntry
+// shape (Provider/BaseURL/APIKey/Protocol/Vision all filled from the
+// endpoint + model). This lets every callsite that reads sess.ModelConfig /
+// sess.Model work whether the session file is on the old bare-model form or
+// the new composite-id form.
+func TestEntryByModel_CompositeIDResolvesAgainstEndpoints(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{
+				ID:       "relay-a",
+				Provider: "custom",
+				BaseURL:  "https://relay.example.com",
+				APIKey:   "alpha",
+				Protocol: "anthropic",
+				Models: []EndpointModel{
+					{Model: "claude-sonnet-4-6", Vision: true},
+					{Model: "gpt-5.4", Vision: true},
+				},
+			},
+			{
+				ID:       "official",
+				Provider: "anthropic",
+				BaseURL:  "https://api.anthropic.com",
+				Models: []EndpointModel{
+					{Model: "claude-sonnet-4-6", Vision: true},
+				},
+			},
+		},
+	}
+
+	// Composite id resolves to the relay endpoint's claude, with all the
+	// endpoint's connection params projected onto the returned ModelEntry.
+	got, ok := cfg.EntryByModel("relay-a::claude-sonnet-4-6")
+	if !ok {
+		t.Fatal("EntryByModel(composite id) = (_, false), want (_, true)")
+	}
+	if got.Provider != "custom" || got.BaseURL != "https://relay.example.com" ||
+		got.APIKey != "alpha" || got.Protocol != "anthropic" || got.Model != "claude-sonnet-4-6" ||
+		!got.Vision {
+		t.Errorf("EntryByModel(composite) = %+v, want relay-a endpoint's claude-sonnet-4-6 projected", got)
+	}
+
+	// Same bare model on a different endpoint resolves to the right one
+	// when given that endpoint's composite id.
+	got, ok = cfg.EntryByModel("official::claude-sonnet-4-6")
+	if !ok {
+		t.Fatal("EntryByModel(official::claude) = false")
+	}
+	if got.Provider != "anthropic" || got.BaseURL != "https://api.anthropic.com" || got.Model != "claude-sonnet-4-6" {
+		t.Errorf("EntryByModel(official::claude) = %+v, want official anthropic endpoint", got)
+	}
+
+	// Composite id with unknown endpoint falls through to bare-model lookup
+	// (which finds nothing here since c.Models is empty) — returns false.
+	if _, ok := cfg.EntryByModel("ghost::claude-sonnet-4-6"); ok {
+		t.Error("EntryByModel(unknown endpoint) = true, want false (fall through to bare lookup, find nothing)")
+	}
+
+	// Composite id with known endpoint but unknown model under it — also
+	// falls through to bare-model lookup.
+	if _, ok := cfg.EntryByModel("relay-a::ghost-model"); ok {
+		t.Error("EntryByModel(known endpoint, unknown model) = true, want false")
+	}
+}
+
+// TestEntryByModel_BareModelStillWorks pins the legacy path: a bare model
+// string (no "::" separator) resolves against c.Models the way it always did.
+// This is what pre-PR4 session files carry — their ModelConfig is a bare model
+// string, and EntryByModel must keep working for them.
+func TestEntryByModel_BareModelStillWorks(t *testing.T) {
+	cfg := Config{
+		Models: []ModelEntry{
+			{Provider: "anthropic", Model: "claude-sonnet-4-6", BaseURL: "https://api.anthropic.com", Vision: true},
+		},
+	}
+	got, ok := cfg.EntryByModel("claude-sonnet-4-6")
+	if !ok {
+		t.Fatal("EntryByModel(bare model) = false, want true (legacy path)")
+	}
+	if got.Provider != "anthropic" || got.Model != "claude-sonnet-4-6" {
+		t.Errorf("EntryByModel(bare) = %+v, want anthropic/claude-sonnet-4-6", got)
+	}
+}
+
+// TestEntryByModel_CompositeIDWinsOverFlatModels pins the precedence: when
+// the config has BOTH a flat Models entry with the bare model AND an Endpoints
+// entry whose composite id matches, the composite-id path must win. Otherwise
+// a user who configures the same model on two endpoints (the whole point of
+// the two-level schema) and references it via composite id would get the flat
+// entry's connection params instead of the endpoint's — silently routing to
+// the wrong backend.
+func TestEntryByModel_CompositeIDWinsOverFlatModels(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{
+				ID:       "relay-a",
+				Provider: "custom",
+				BaseURL:  "https://relay.example.com",
+				APIKey:   "alpha",
+				Protocol: "anthropic",
+				Models:   []EndpointModel{{Model: "claude-sonnet-4-6", Vision: true}},
+			},
+		},
+		// A flat Models entry with the SAME bare model — this is what a
+		// migrated config looks like before the write-path switches in PR4
+		// (Endpoints synthesised in memory + Models still populated from the
+		// legacy file). The composite-id path must win so the relay's
+		// connection params are returned, not the flat entry's.
+		Models: []ModelEntry{
+			{Provider: "anthropic", Model: "claude-sonnet-4-6", BaseURL: "https://api.anthropic.com", Vision: true},
+		},
+	}
+
+	got, ok := cfg.EntryByModel("relay-a::claude-sonnet-4-6")
+	if !ok {
+		t.Fatal("EntryByModel(composite) = false, want true")
+	}
+	if got.Provider != "custom" || got.BaseURL != "https://relay.example.com" || got.APIKey != "alpha" {
+		t.Errorf("EntryByModel(composite) = %+v, want relay-a endpoint's connection params (composite path must win over flat Models)", got)
+	}
+}
+
 func TestModelVision(t *testing.T) {
 	c := Config{Models: []ModelEntry{
 		{Model: "qwen-vl-max", Vision: true},

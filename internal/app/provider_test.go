@@ -3,6 +3,7 @@ package app
 import (
 	"testing"
 
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/provider/anthropic"
 	"github.com/open-octo/octo-agent/internal/provider/openai"
 )
@@ -286,5 +287,115 @@ func TestRegistryModelsHaveDeterministicVision(t *testing.T) {
 				t.Errorf("vendor %q model %q not resolvable via VendorModelVision", v.ID, m.ID)
 			}
 		}
+	}
+}
+
+// TestImplicitLiteModel_EndpointForm covers the new signature
+// ImplicitLiteModelForEndpoint(endpoint config.Endpoint, model string)
+// introduced in PR2 (design §5.5). The precedence is:
+//
+//  1. endpoint.LiteModel non-empty and != model → endpoint.LiteModel
+//  2. otherwise, if endpoint.BaseURL hits an official vendor (via
+//     VendorByBaseURL) and that vendor has a LiteModel → vendor LiteModel
+//  3. otherwise "" (custom endpoint without explicit LiteModel has no
+//     implicit lite — the user must set endpoint.LiteModel)
+//
+// The old ImplicitLiteModel(provider, model, baseURL) is kept as a thin
+// wrapper so existing callers that haven't migrated yet keep working; this
+// test pins the new endpoint-aware behaviour.
+func TestImplicitLiteModel_EndpointForm(t *testing.T) {
+	cases := []struct {
+		name     string
+		endpoint config.Endpoint
+		model    string
+		want     string
+	}{
+		{
+			"endpoint.LiteModel wins when set and differs from model",
+			config.Endpoint{Provider: "custom", BaseURL: "https://relay.example.com", LiteModel: "gpt-5.4-mini"},
+			"claude-sonnet-4-6",
+			"gpt-5.4-mini",
+		},
+		{
+			"endpoint.LiteModel == model → fall through to vendor inference (no implicit lite from endpoint)",
+			// An endpoint that nominally points LiteModel at the same model as
+			// the primary — the lite would be a no-op, so we don't return it.
+			config.Endpoint{Provider: "anthropic", BaseURL: "https://api.anthropic.com", LiteModel: "claude-sonnet-4-6"},
+			"claude-sonnet-4-6",
+			"claude-haiku-4-5", // vendor LiteModel wins because endpoint.LiteModel == model
+		},
+		{
+			"official anthropic endpoint infers vendor LiteModel",
+			config.Endpoint{Provider: "anthropic", BaseURL: "https://api.anthropic.com"},
+			"claude-sonnet-4-6",
+			"claude-haiku-4-5",
+		},
+		{
+			"named-vendor endpoint with empty base_url still infers vendor LiteModel (regression guard for I1)",
+			// Design §3.1: "base_url,omitempty // custom 必填, 命名 vendor 可空
+			// (用 vendor 默认)". A named-vendor endpoint configured without
+			// base_url must still get its vendor's LiteModel — the legacy
+			// ImplicitLiteModel treated baseURL=="" as "trust the provider",
+			// and ImplicitLiteModelForEndpoint must match that. Without the
+			// VendorBaseURL fallback in step 2, this case would silently lose
+			// compaction lite model — a regression that only surfaces after
+			// PR4 migrates callers to the new function.
+			config.Endpoint{Provider: "anthropic"}, // BaseURL empty
+			"claude-sonnet-4-6",
+			"claude-haiku-4-5",
+		},
+		{
+			"named-vendor endpoint with empty base_url still infers vendor LiteModel (deepseek)",
+			config.Endpoint{Provider: "deepseek"},
+			"deepseek-v4-pro",
+			"deepseek-v4-flash",
+		},
+		{
+			"official deepseek endpoint infers vendor LiteModel",
+			config.Endpoint{Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
+			"deepseek-v4-pro",
+			"deepseek-v4-flash",
+		},
+		{
+			"custom endpoint with no LiteModel and off-vendor baseURL → no implicit lite",
+			config.Endpoint{Provider: "custom", BaseURL: "https://relay.example.com"},
+			"claude-sonnet-4-6",
+			"",
+		},
+		{
+			"custom endpoint with named vendor provider but off-vendor baseURL → no implicit lite",
+			// provider=anthropic but baseURL points elsewhere — VendorByBaseURL
+			// won't match anthropic, so we don't infer the anthropic LiteModel.
+			config.Endpoint{Provider: "anthropic", BaseURL: "https://relay.example.com"},
+			"claude-sonnet-4-6",
+			"",
+		},
+		{
+			"primary model already is the vendor LiteModel → no implicit lite",
+			config.Endpoint{Provider: "anthropic", BaseURL: "https://api.anthropic.com"},
+			"claude-haiku-4-5",
+			"",
+		},
+		{
+			"empty endpoint (zero value) → no implicit lite",
+			config.Endpoint{},
+			"anything",
+			"",
+		},
+		{
+			"regional variant endpoint infers vendor LiteModel (or empty if vendor has none)",
+			config.Endpoint{Provider: "minimax", BaseURL: "https://api.minimax.io"}, // intl variant
+			"MiniMax-M3",
+			"", // minimax has no LiteModel in the registry
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ImplicitLiteModelForEndpoint(tc.endpoint, tc.model)
+			if got != tc.want {
+				t.Errorf("ImplicitLiteModelForEndpoint(endpoint=%+v, model=%q) = %q, want %q",
+					tc.endpoint, tc.model, got, tc.want)
+			}
+		})
 	}
 }
