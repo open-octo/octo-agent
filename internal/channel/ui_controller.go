@@ -94,14 +94,6 @@ func (u *UIController) SetSuppressor(fn func() bool) {
 	u.suppressor = fn
 }
 
-// SuppressDelivery reports whether this session's outbound IM delivery is
-// currently suppressed (set by /unbind while a turn is in flight). The
-// runChannelTurns handler wires this into its UIController so a mid-turn
-// /unbind drops the rest of the reply.
-func (s *Session) SuppressDelivery() bool {
-	return s.suppressDelivery.Load()
-}
-
 // suppressed reports whether outbound delivery is currently suppressed,
 // polling the suppressor func if one is set.
 func (u *UIController) suppressed() bool {
@@ -203,17 +195,11 @@ func (u *UIController) onTurnDone(reply *agent.Reply) {
 // flushTextLocked delivers the accumulated text buffer to the adapter.
 // Must be called with mu held.
 func (u *UIController) flushTextLocked() {
-	chunk := u.textBuf.String()
-	if strings.TrimSpace(chunk) == "" {
-		return
-	}
-	u.textBuf.Reset()
-
-	// /unbind mid-turn: the chat is being detached, so stop the typing
-	// indicator and silently drop the buffered reply instead of sending it.
-	// The turn keeps running and its history still persists; nothing more is
-	// delivered to this chat.
+	// /unbind mid-turn: if delivery is suppressed, stop the typing indicator
+	// and drop the buffered text without sending anything. Check before
+	// reading the buffer so the early-return intent is clear.
 	if u.suppressed() {
+		u.textBuf.Reset()
 		if !u.typingStopped {
 			u.typingStopped = true
 			if u.stopTyping != nil {
@@ -222,6 +208,12 @@ func (u *UIController) flushTextLocked() {
 		}
 		return
 	}
+
+	chunk := u.textBuf.String()
+	if strings.TrimSpace(chunk) == "" {
+		return
+	}
+	u.textBuf.Reset()
 
 	if !u.typingStopped {
 		u.typingStopped = true

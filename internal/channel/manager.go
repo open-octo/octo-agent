@@ -106,6 +106,14 @@ type Session struct {
 	askButtonsOnly bool
 }
 
+// SuppressDelivery reports whether this session's outbound IM delivery is
+// currently suppressed (set by /unbind while a turn is in flight). The
+// runChannelTurns handler wires this into its UIController so a mid-turn
+// /unbind drops the rest of the reply.
+func (s *Session) SuppressDelivery() bool {
+	return s.suppressDelivery.Load()
+}
+
 // BeginRun prepares one agent turn: it blocks until any previous turn in this
 // session finishes, then returns a cancellable ctx for the run and a done
 // func that releases the session. Always call done (typically deferred).

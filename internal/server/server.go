@@ -2801,15 +2801,20 @@ func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, 
 	// Spawned via bare `go` (loop.go + the async-completion paths), so it runs a
 	// full turn outside any recover — guard it here or a panic crashes the process.
 	defer s.recoverBg("channel idle turn")
-	// Acquire the persistent binding before locking the turn: this matches the
-	// user-initiated IM path and prevents idle follow-up turns from
-	// interleaving with another entry (web/cli/tui) that has taken over the
-	// session while we were idle.
-	storeID := sess.Store.ID
-	if ok, _, _ := s.acquireSessionBinding(storeID, agent.EntryChannel, false); !ok {
-		return
+
+	// Acquire the persistent binding before locking the turn, unless the
+	// session is suppressed (/unbind mid-turn). In that case the session is
+	// being handed to web, and re-acquiring the channel binding would prevent
+	// web takeover by writing BoundEntry="channel" back to the session file.
+	// The turn still runs (keeping history alive) but the suppressed
+	// UIController keeps output silent.
+	if !sess.SuppressDelivery() {
+		storeID := sess.Store.ID
+		if ok, _, _ := s.acquireSessionBinding(storeID, agent.EntryChannel, false); !ok {
+			return
+		}
+		defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 	}
-	defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 
 	// Enroll in the drain gate so graceful shutdown waits for idle follow-up
 	// turns just like user-initiated channel turns and web turns.

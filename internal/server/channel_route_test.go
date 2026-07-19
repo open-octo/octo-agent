@@ -871,3 +871,29 @@ func TestChannelCommand_UnbindKeepsLoopWakeup(t *testing.T) {
 		t.Fatal("/clear must cancel the armed loop wakeup (fresh context)")
 	}
 }
+
+// TestChannelCommand_UnbindThenStopCancelsWakeup: after /unbind the loop keeps
+// running (suppressed), but a subsequent /stop must cancel it — the user needs
+// a way to really kill everything after leaving the chat.
+func TestChannelCommand_UnbindThenStopCancelsWakeup(t *testing.T) {
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+	srv.wakeupTimers = map[string]*time.Timer{}
+	srv.wakeupStart = map[string]time.Time{}
+	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"))
+	key := "im:" + string(sess.Key)
+	srv.wakeupTimers[key] = time.AfterFunc(time.Hour, func() {})
+	srv.wakeupStart[key] = time.Now()
+
+	// /unbind keeps the wakeup.
+	srv.handleChannelCommand(ad, evFor("/unbind"))
+	if _, ok := srv.wakeupTimers[key]; !ok {
+		t.Fatal("/unbind must keep an armed loop wakeup")
+	}
+
+	// /stop cancels it — the hard stop.
+	srv.handleChannelCommand(ad, evFor("/stop"))
+	if _, ok := srv.wakeupTimers[key]; ok {
+		t.Fatal("/stop after /unbind must cancel the armed loop wakeup")
+	}
+}
