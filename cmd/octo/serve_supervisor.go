@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 
+	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/server"
 )
 
@@ -88,6 +89,9 @@ func spawnServeWorkerWithResolver(args []string, stdout, stderr io.Writer, resol
 			return nil, nil, err
 		}
 		cmd := exec.Command(exe, append([]string{"serve"}, args...)...)
+		// Windowless on Windows: the daemonized supervisor has no console, so
+		// an unflagged console-subsystem worker would pop a visible window.
+		executil.SetNoWindow(cmd)
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
 		cmd.Env = append(os.Environ(), serveWorkerEnv+"=1")

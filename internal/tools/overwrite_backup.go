@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/trash"
 )
 
@@ -81,6 +82,7 @@ func gitTrackedClean(abs string) bool {
 // (which carries the non-zero exit status git uses to signal its answer).
 func runGitQuiet(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
+	executil.SetNoWindow(cmd)
 	cmd.Dir = dir
 	return cmd.Run()
 }

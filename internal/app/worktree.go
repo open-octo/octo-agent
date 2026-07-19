@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/open-octo/octo-agent/internal/executil"
 )
 
 // worktree is a transient git worktree backing a sub-agent's isolation. The
@@ -25,6 +27,7 @@ type worktree struct {
 // folding stderr into the error so failures are legible.
 func gitRun(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
+	executil.SetNoWindow(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
