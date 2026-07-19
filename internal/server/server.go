@@ -1470,7 +1470,7 @@ func (s *Server) senderForSession(sess *agent.Session) (agent.Sender, string) {
 		model = entry.Model
 	}
 
-	sender, err := s.cachedSenderForEntry(entry)
+	sender, err := s.cachedSenderForEntry(sess.ModelConfig, entry)
 	if err != nil {
 		return defaultSender, model
 	}
@@ -1479,10 +1479,23 @@ func (s *Server) senderForSession(sess *agent.Session) (agent.Sender, string) {
 
 // cachedSenderForEntry returns the entry's sender from the cache, building
 // and caching it on first use.
-func (s *Server) cachedSenderForEntry(entry config.ModelEntry) (agent.Sender, error) {
+//
+// PR3 (design §9): the cache key is the raw model reference (ref), not
+// entry.Model. ref is whatever the caller passed to cfg.EntryByModel — it's
+// either a bare model string (legacy session, same key as before) or a
+// composite id "<endpoint_id>::<model>" (new session, distinguishes the
+// same model on two different endpoints). Using entry.Model as the key
+// would collide across endpoints (claude-sonnet-4-6 on relay-a vs on
+// official anthropic would share one cache entry, returning the wrong
+// sender). The ref is the unambiguous identifier.
+func (s *Server) cachedSenderForEntry(ref string, entry config.ModelEntry) (agent.Sender, error) {
 	s.senderCacheMu.Lock()
 	defer s.senderCacheMu.Unlock()
-	if cached, ok := s.senderCache[entry.Model]; ok {
+	key := ref
+	if key == "" {
+		key = entry.Model // fallback: no ref (rare) → behave like the old code
+	}
+	if cached, ok := s.senderCache[key]; ok {
 		return cached, nil
 	}
 	sender, err := senderForEntry(entry)
@@ -1492,19 +1505,47 @@ func (s *Server) cachedSenderForEntry(entry config.ModelEntry) (agent.Sender, er
 	if s.senderCache == nil {
 		s.senderCache = make(map[string]agent.Sender)
 	}
-	s.senderCache[entry.Model] = sender
+	s.senderCache[key] = sender
 	return sender, nil
+}
+
+// invalidateEndpointSenders drops every cached sender whose key is prefixed
+// with "<endpointID>::". Called when an endpoint's connection params change
+// (base_url, api_key, protocol) or the endpoint is renamed — every model
+// under that endpoint must rebuild its sender because the connection it was
+// built against is stale. Other endpoints' cached senders stay (hit rate
+// preserved). Design §9.2.
+func (s *Server) invalidateEndpointSenders(endpointID string) {
+	if endpointID == "" {
+		return
+	}
+	prefix := endpointID + "::"
+	s.senderCacheMu.Lock()
+	defer s.senderCacheMu.Unlock()
+	for k := range s.senderCache {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.senderCache, k)
+		}
+	}
 }
 
 // liteSenderFromConfig resolves the configured lite entry to a (sender,
 // model) pair for compaction, or (nil, "") when none is configured or it
 // can't be built — the agent then compacts on its primary sender.
+//
+// PR4 note: this currently passes cfg.LiteModel (the legacy bare-model
+// field) as the cache ref, so the lite sender's cache key has no
+// "<endpointID>::" prefix — invalidateEndpointSenders can't reach it even
+// when the lite model lives under the endpoint being invalidated. Once
+// PR4 switches Save to emit endpoints: and cfg.Lite is populated on Load,
+// switch this arg to cfg.Lite so the lite sender participates in per-endpoint
+// invalidation (§9.2).
 func (s *Server) liteSenderFromConfig(cfg config.Config) (agent.Sender, string) {
 	entry, ok := cfg.EntryByModel(cfg.LiteModel)
 	if !ok || entry.Model == "" {
 		return nil, ""
 	}
-	sender, err := s.cachedSenderForEntry(entry)
+	sender, err := s.cachedSenderForEntry(cfg.LiteModel, entry)
 	if err != nil {
 		return nil, ""
 	}
@@ -2131,7 +2172,7 @@ func (s *Server) channelModelOps() *channel.ModelOps {
 				sort.Strings(available)
 				return channel.ModelResolution{}, fmt.Errorf("model %q is not configured (available: %s)", modelID, strings.Join(available, ", "))
 			}
-			sender, err := s.cachedSenderForEntry(entry)
+			sender, err := s.cachedSenderForEntry(modelID, entry)
 			if err != nil {
 				return channel.ModelResolution{}, err
 			}
@@ -2161,7 +2202,7 @@ func (s *Server) applyChannelModel(sess *channel.Session) {
 			if st.ModelConfig == sess.AppliedModelConfig {
 				return // binding already live on the agent
 			}
-			if sender, err := s.cachedSenderForEntry(entry); err != nil {
+			if sender, err := s.cachedSenderForEntry(st.ModelConfig, entry); err != nil {
 				slog.Warn("channel session model sender unavailable; using the default", "session", st.ID, "model", st.ModelConfig, "err", err)
 				s.applyChannelDefault(sess, st)
 			} else {
