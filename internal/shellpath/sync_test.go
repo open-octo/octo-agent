@@ -88,11 +88,12 @@ func TestLooksLikeFullPath(t *testing.T) {
 			want: true,
 		},
 		{
-			// path_helper can inject /usr/local/bin into an otherwise-minimal GUI
-			// PATH; that alone is not evidence the login shell ran, so it must NOT
-			// count as full (this is the false positive the tightening fixes).
-			name: "system dirs plus path_helper /usr/local/bin is not full",
-			path: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+			// path_helper can inject /usr/local/bin and Apple Silicon's GUI
+			// default adds /usr/libexec; neither alone is evidence the login
+			// shell ran, so neither counts as full (a GUI-launched PATH may be
+			// /bin:/sbin:/usr/bin:/usr/sbin:/usr/libexec — the bug this fixes).
+			name: "system dirs plus /usr/local/bin and /usr/libexec is not full",
+			path: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/libexec",
 			want: false,
 		},
 		{

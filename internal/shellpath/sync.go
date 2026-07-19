@@ -86,6 +86,13 @@ func looksLikeFullPath(current string) bool {
 		"/bin":             {},
 		"/usr/games":       {},
 		"/usr/local/games": {},
+		// /usr/libexec ships on Apple Silicon's default GUI PATH (path_helper
+		// injects it via /etc/paths.d). It is a system directory, not a
+		// user/package-manager one, so it must not count as "full" — otherwise
+		// a GUI-launched PATH of /bin:/sbin:/usr/bin:/usr/sbin:/usr/libexec
+		// would skip the login-shell sync and Homebrew on /opt/homebrew/bin
+		// would never be added.
+		"/usr/libexec": {},
 	}
 	for _, p := range strings.Split(current, string(os.PathListSeparator)) {
 		p = strings.TrimSpace(p)
