@@ -116,7 +116,7 @@ The `net.Dialer.Control` hook fires *after* DNS resolution with the concrete IP,
 
 `web_search` looks simple on the wire (returns title/url/snippet), but the back is a tiered fallback over five backends (`internal/tools/web_search.go`): **Brave → Tavily → Serper → DuckDuckGo HTML → Bing HTML**. The first three activate when their env keys are set (`BRAVE_SEARCH_API_KEY` / `TAVILY_API_KEY` / `SERPER_API_KEY`); the last two need no key and are the default. Every failure gets swallowed into the response's `Error` field and the next tier is tried — the tool never panics, and the tier that actually produced the results is reported back in the `Provider` field so the model knows whether it's looking at an index lookup (Brave) or an HTML scrape (DDG/Bing).
 
-Two details actually matter: **a DuckDuckGo cooldown** (`markDDGUnavailable`, 10 minutes) that keeps a token goroutine from hammering a DDG that just returned nothing — guarded by a `sync.RWMutex` because the web server made concurrent searches routine. And **a landmine on Bing's HTML endpoint**: if you send `Accept-Encoding: gzip`, Bing answers with a ~39 KB JavaScript skeleton instead of the ~120 KB real results page. The fix is the weird rule "never let Go auto-negotiate encoding against `cn.bing.com`" — `browserGet` deliberately omits that header.
+Two details actually matter: **a DuckDuckGo cooldown** (`markDDGUnavailable`, 10 minutes) that keeps a stampede of goroutines from hammering a DDG that just returned nothing — guarded by a `sync.RWMutex` because the web server made concurrent searches routine. And **a landmine on Bing's HTML endpoint**: if you send `Accept-Encoding: gzip`, Bing answers with a ~39 KB JavaScript skeleton instead of the ~120 KB real results page. The fix is the weird rule "never let Go auto-negotiate encoding against `cn.bing.com`" — `browserGet` deliberately omits that header.
 
 ### terminal: Time, Anti-Polling, and Backtick Survival
 
@@ -293,9 +293,9 @@ The cost is that loops live entirely in process memory: the timers are a map on 
 Concurrent sub-agents are another recurring need: "review this diff from correctness, security, and performance angles simultaneously, then synthesize." Having the main model call sub-agents one by one is slow and expensive; making users write Go is too heavy. octo-agent's answer is a Ruby DSL:
 
 ```ruby
-findings = parallel(["correctness", "security", "performance"].map { |view|
-  -> { agent("Review this diff from the #{view} angle") }
-})
+findings = parallel(["correctness", "security", "performance"]) { |view|
+  agent("Review this diff from the #{view} angle")
+}
 agent("Synthesize these findings: #{findings.join("\n")}")
 ```
 

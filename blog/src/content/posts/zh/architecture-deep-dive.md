@@ -89,7 +89,7 @@ sequenceDiagram
 
 ### 一个注册表，多种物种
 
-`tools.DefaultRegistry`（`internal/tools/registry.go`）是一个单一派发器，按名把任意 tool call 路由到 `allTools` slice 的某一格 —— `Terminal`、`ReadFile`、`WriteFile`、`EditFile`、`Glob`、`Grep`、`WebFetch`、`WebSearch`、`Skill`、`Agent*`、`Workflow*`、`ScheduleWakeup`、`Browser`、`MemoryRecall` 等等。（这里没有把 `TerminalOutput`/`TerminalInput` 列进去，因为它们是 background 配套的子工具，不直接由用户发起。）"浏览器: internal/browser""workflow: Ruby/mruby""MCP: 一个 JSON-RPC 桥"——但 agent 循环只看到 `ToolExecutor`。`mcp_describe` / `mcp_call` 后来加入时也没动 agent core；它们和每个其它 tool 一样通过注册表那一条缝进来。
+`tools.DefaultRegistry`（`internal/tools/registry.go`）是一个单一派发器，按名把任意 tool call 路由到 `allTools` slice 的某一格 —— `Terminal`、`ReadFile`、`WriteFile`、`EditFile`、`Glob`、`Grep`、`WebFetch`、`WebSearch`、`Skill`、`Agent*`、`Workflow*`、`ScheduleWakeup`、`Browser`、`MemoryRecall` 等等。（这里没有把 `TerminalOutput`/`TerminalInput` 列进去，因为它们是 background 配套的子工具，不直接由用户发起。）浏览器背后是 `internal/browser` 的 CDP 长连接，workflow 背后是 Ruby/mruby 沙箱，MCP 背后是一个 JSON-RPC 桥——但 agent 循环只看到 `ToolExecutor`。`mcp_describe` / `mcp_call` 后来加入时也没动 agent core；它们和每个其它 tool 一样通过注册表那一条缝进来。
 
 正是这个选择让上一节的 meta-skill 成为可能：一段引导你"配好 IM 通道"的流程不是一个定制 tool，是 `channel-manager` 把 `read_file` / `write_file` / `terminal` 按用户当下的情况串起来。tool 组合是那个可复用原语；新能力通常意味着新 skill，不是新 tool。
 
@@ -112,7 +112,7 @@ sequenceDiagram
 
 `web_search` 在线上看起来简单（返回 title/url/snippet），背后是五条后端的瀑布回退（`internal/tools/web_search.go`）：**Brave → Tavily → Serper → DuckDuckGo HTML → Bing HTML**。前三个在对应 env key（`BRAVE_SEARCH_API_KEY` / `TAVILY_API_KEY` / `SERPER_API_KEY`）出现时启用；后两个不需要 key，是默认路径。每个失败都吞进响应的 `Error` 字段、继续试下一条——tool 从不 panic，真正产出结果的层级会回到 `Provider` 字段里，让模型知道它看的是查索引（Brave）还是抓 HTML（DDG/Bing）。
 
-有两个细节真值钱：其一是 **DuckDuckGo 冷却**（`markDDGUnavailable`，10 分钟），挡住一串 token goroutine 在 DDG 刚返回空的时候继续锤——用 `sync.RWMutex` 守着，因为 Web 服务器让并发搜索成了日常。其二是 **Bing HTML 端点上的地雷**：如果你发 `Accept-Encoding: gzip`，Bing 会回一个 ~39 KB 的 JavaScript 骨架页，而不是 ~120 KB 的真正结果页。修复是这一条古怪规则"永远不要让 Go 对 `cn.bing.com` 自动协商编码"——`browserGet` 故意省略那个 header。
+有两个细节真值钱：其一是 **DuckDuckGo 冷却**（`markDDGUnavailable`，10 分钟），挡住一串 goroutine 在 DDG 刚返回空的时候继续锤它——用 `sync.RWMutex` 守着，因为 Web 服务器让并发搜索成了日常。其二是 **Bing HTML 端点上的地雷**：如果你发 `Accept-Encoding: gzip`，Bing 会回一个 ~39 KB 的 JavaScript 骨架页，而不是 ~120 KB 的真正结果页。修复是这一条古怪规则"永远不要让 Go 对 `cn.bing.com` 自动协商编码"——`browserGet` 故意省略那个 header。
 
 ### terminal：时效、反轮询、反引号求生
 
@@ -132,7 +132,7 @@ sequenceDiagram
 
 **fork vs. fresh**（`subagent_type`）：省略 `subagent_type` 时，用*父的完整对话*（system prompt + 截至目前的消息）作为子 agent 的种子——真正的 fork，共享上下文、走同样的 conclusion-shaped 回复契约。设定 subagent_type（`explore`、`plan`、`general`、`code-review`）则从零上下文起一个带专用 persona 的子 agent，走 read-only / lean-context 默认值、带自己的 `model` frontmatter。同一把 tool 覆盖两种；preset 填充调用方没覆盖的字段。
 
-**同步 vs. 异步**：`run_in_background: true` 调 `SubAgentManager.Start`，立刻返回 `agent_N` ID 并在完成后推通知；`false`（默认）调 `RunSync`，阻塞这个 turn 等结果。信号量（`syncSem`）Concurrent 同步 sub-agent 的上限，避免一波 fan-out 把父 agent 饿死。按 transport 自适应：同步通道（server / IM）没有 follow-up-turn 路径，`mgr.Synchronous()` 静默强制走阻塞路径并告知模型——而不是悄悄失败。
+**同步 vs. 异步**：`run_in_background: true` 调 `SubAgentManager.Start`，立刻返回 `agent_N` ID 并在完成后推通知；`false`（默认）调 `RunSync`，阻塞这个 turn 等结果。信号量（`syncSem`）控制同步 sub-agent 的上限，避免一波 fan-out 把父 agent 饿死。按 transport 自适应：同步通道（server / IM）没有 follow-up-turn 路径，`mgr.Synchronous()` 静默强制走阻塞路径并告知模型——而不是悄悄失败。
 
 子 agent 撞到 turn 上限时，结果会带上显式的 `[INCOMPLETE: … partial]` 标记返回，而不是把半成品当成品交差。父 agent 要么用更细的任务重启，要么把它当未完成处理。每种 `StopReason`（`end_turn`、`tool_use`、`max_turns`、`error`、`killed`）都会上送到 WS broadcast，前端状态面板无需轮询就能更新。
 
@@ -285,9 +285,9 @@ sequenceDiagram
 子 agent 并发是另一类需求："对这个 diff 同时跑正确性、安全、性能三个视角的审查，最后汇总。"让主模型挨个调用子 agent 太慢也太贵，让用户写 Go 又太重。octo-agent 给的答案是一个 Ruby DSL：
 
 ```ruby
-findings = parallel(["正确性", "安全", "性能"].map { |view|
-  -> { agent("从#{view}视角审查这个 diff") }
-})
+findings = parallel(["正确性", "安全", "性能"]) { |view|
+  agent("从#{view}视角审查这个 diff")
+}
 agent("汇总以下发现：#{findings.join("\n")}")
 ```
 
