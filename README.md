@@ -9,6 +9,8 @@
   <a href="README.md">English</a> · <a href="README_CN.md">简体中文</a>
 </p>
 
+> octo is an **opinionated** product — it bakes in the agent working patterns its author discovered through real-world use, heavily shaped by Ruby on Rails. Expect convention over configuration, **omakase** defaults over infinite choice, and metaprogramming to make the idiomatic path the effortless path.
+
 > An **MIT-licensed, single Go binary, zero-runtime** AI agent that combines the two things people usually
 > reach for two separate tools to get: a **coding agent on par with Claude Code**, and a **personal
 > assistant that's lighter and more stable than OpenClaw** — skills, CLI / Web / desktop / phone-IM / VS Code / Obsidian / a Go SDK (mobile app landing next), browser control,
