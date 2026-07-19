@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -655,6 +656,159 @@ func TestConfigModels_SetLiteToggles(t *testing.T) {
 
 	if w := doJSON(t, srv, http.MethodPost, "/api/config/models/ghost/lite", ""); w.Code != http.StatusNotFound {
 		t.Errorf("set-lite unknown id = %d, want 404", w.Code)
+	}
+}
+
+// getEndpointsResponse calls GET /api/config/endpoints and decodes the body.
+func getEndpointsResponse(t *testing.T, srv *Server) endpointsResponse {
+	t.Helper()
+	w := doJSON(t, srv, http.MethodGet, "/api/config/endpoints", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/config/endpoints = %d: %s", w.Code, w.Body.String())
+	}
+	var resp endpointsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode endpoints response: %v (body: %s)", err, w.Body.String())
+	}
+	return resp
+}
+
+// TestGetEndpoints_ReturnsTwoLevelShape pins the PR4b contract: a legacy flat
+// models: config is served as the two-level { endpoints, default, lite } shape
+// described in design §10.1, with has_api_key reporting key presence (never
+// the key itself) and default/lite expressed as composite ids.
+func TestGetEndpoints_ReturnsTwoLevelShape(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "sk-main-12345678", Vision: true},
+			{Provider: "anthropic", Model: "claude-haiku-4-5", APIKey: "sk-main-12345678"},
+			{Provider: "kimi", Model: "kimi-k2.6", BaseURL: "https://kimi.example", APIKey: "sk-kimi"},
+		},
+		DefaultModel: "claude-sonnet-4-6",
+		LiteModel:    "claude-haiku-4-5",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	// Capture the raw body too so we can assert the API keys never appear in
+	// the response at all — the JSON shape has no api_key field, only the
+	// has_api_key boolean.
+	w := doJSON(t, srv, http.MethodGet, "/api/config/endpoints", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/config/endpoints = %d: %s", w.Code, w.Body.String())
+	}
+	raw := w.Body.String()
+	if strings.Contains(raw, "sk-main-12345678") || strings.Contains(raw, "sk-kimi") {
+		t.Errorf("response body leaks an API key: %s", raw)
+	}
+
+	var resp endpointsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode endpoints response: %v (body: %s)", err, w.Body.String())
+	}
+
+	// Two distinct (provider, base_url) groups → two endpoints. Both
+	// anthropic entries have empty base_url, so they aggregate by
+	// (anthropic, "") — the shared API key is NOT the grouping key (it's
+	// (provider, base_url) per design §4.1). The kimi entry has a distinct
+	// base_url, so it forms its own endpoint.
+	if len(resp.Endpoints) != 2 {
+		t.Fatalf("endpoints = %d, want 2 (one per distinct (provider, base_url)): %+v", len(resp.Endpoints), resp.Endpoints)
+	}
+
+	// Find the anthropic endpoint (two models) and the kimi endpoint (one).
+	var anthropicEP, kimiEP *endpointConfigJSON
+	for i := range resp.Endpoints {
+		switch resp.Endpoints[i].Provider {
+		case "anthropic":
+			anthropicEP = &resp.Endpoints[i]
+		case "kimi":
+			kimiEP = &resp.Endpoints[i]
+		}
+	}
+	if anthropicEP == nil || kimiEP == nil {
+		t.Fatalf("missing expected providers: %+v", resp.Endpoints)
+	}
+	if len(anthropicEP.Models) != 2 {
+		t.Errorf("anthropic endpoint models = %d, want 2: %+v", len(anthropicEP.Models), anthropicEP.Models)
+	}
+	if len(kimiEP.Models) != 1 {
+		t.Errorf("kimi endpoint models = %d, want 1: %+v", len(kimiEP.Models), kimiEP.Models)
+	}
+	// Vision flag is per-model and migrates from the flat entry.
+	var sonnetVision bool
+	for _, m := range anthropicEP.Models {
+		if m.Model == "claude-sonnet-4-6" {
+			sonnetVision = m.Vision
+		}
+	}
+	if !sonnetVision {
+		t.Errorf("claude-sonnet-4-6 vision = false, want true (migrated from flat entry)")
+	}
+
+	// default + lite are composite ids whose endpoint prefix is the synthesised
+	// legacy-<host>-<n> id.
+	if resp.Default == "" || !strings.Contains(resp.Default, "::") {
+		t.Errorf("default = %q, want a composite id <endpoint>::<model>", resp.Default)
+	}
+	if !strings.HasSuffix(resp.Default, "::claude-sonnet-4-6") {
+		t.Errorf("default = %q, want suffix ::claude-sonnet-4-6", resp.Default)
+	}
+	if resp.Lite == "" || !strings.HasSuffix(resp.Lite, "::claude-haiku-4-5") {
+		t.Errorf("lite = %q, want suffix ::claude-haiku-4-5", resp.Lite)
+	}
+	// default and lite should point at the same endpoint (anthropic group).
+	if strings.Split(resp.Default, "::")[0] != strings.Split(resp.Lite, "::")[0] {
+		t.Errorf("default endpoint %q != lite endpoint %q", strings.Split(resp.Default, "::")[0], strings.Split(resp.Lite, "::")[0])
+	}
+
+	// has_api_key reports presence; the response must NOT expose the key —
+	// there is no api_key field in the JSON shape at all, only the boolean.
+	if !anthropicEP.HasAPIKey {
+		t.Errorf("anthropic endpoint has_api_key = false, want true (key seeded)")
+	}
+	if !kimiEP.HasAPIKey {
+		t.Errorf("kimi endpoint has_api_key = false, want true (key seeded)")
+	}
+}
+
+// TestGetEndpoints_NoKeyReportsAbsent covers the key-missing side of
+// has_api_key so a frontend "未设置" badge is reachable.
+func TestGetEndpoints_NoKeyReportsAbsent(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Models: []config.ModelEntry{
+			{Provider: "deepseek", Model: "deepseek-v4-pro"}, // no APIKey
+		},
+		DefaultModel: "deepseek-v4-pro",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	resp := getEndpointsResponse(t, srv)
+	if len(resp.Endpoints) != 1 {
+		t.Fatalf("endpoints = %d, want 1: %+v", len(resp.Endpoints), resp.Endpoints)
+	}
+	if resp.Endpoints[0].HasAPIKey {
+		t.Errorf("has_api_key = true, want false (no key seeded)")
+	}
+}
+
+// TestGetEndpoints_EmptyConfigReturnsEmptyShape pins the zero-config contract:
+// a fresh install (no models, no endpoints) returns an empty (but well-formed)
+// { endpoints: [], default: "", lite: "" } shape rather than a 404 or null.
+func TestGetEndpoints_EmptyConfigReturnsEmptyShape(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	resp := getEndpointsResponse(t, srv)
+	if resp.Endpoints == nil {
+		t.Fatal("endpoints = nil, want an empty non-null array")
+	}
+	if len(resp.Endpoints) != 0 {
+		t.Errorf("endpoints = %d, want 0: %+v", len(resp.Endpoints), resp.Endpoints)
+	}
+	if resp.Default != "" || resp.Lite != "" {
+		t.Errorf("empty config: default=%q lite=%q, want both empty", resp.Default, resp.Lite)
 	}
 }
 

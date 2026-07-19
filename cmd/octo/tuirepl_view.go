@@ -79,10 +79,24 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.modelPicker != nil {
 		switch msg.Type {
 		case tea.KeyDown:
-			m.modelPicker.idx = (m.modelPicker.idx + 1) % len(m.modelPicker.items)
+			items := m.modelPicker.endpoints[m.modelPicker.epIdx].items
+			m.modelPicker.idx = (m.modelPicker.idx + 1) % len(items)
+			m.modelPicker.items = items
 			return m, nil
 		case tea.KeyUp:
-			m.modelPicker.idx = (m.modelPicker.idx - 1 + len(m.modelPicker.items)) % len(m.modelPicker.items)
+			items := m.modelPicker.endpoints[m.modelPicker.epIdx].items
+			m.modelPicker.idx = (m.modelPicker.idx - 1 + len(items)) % len(items)
+			m.modelPicker.items = items
+			return m, nil
+		case tea.KeyLeft:
+			m.modelPicker.epIdx = (m.modelPicker.epIdx - 1 + len(m.modelPicker.endpoints)) % len(m.modelPicker.endpoints)
+			m.modelPicker.idx = 0
+			m.modelPicker.items = m.modelPicker.endpoints[m.modelPicker.epIdx].items
+			return m, nil
+		case tea.KeyRight:
+			m.modelPicker.epIdx = (m.modelPicker.epIdx + 1) % len(m.modelPicker.endpoints)
+			m.modelPicker.idx = 0
+			m.modelPicker.items = m.modelPicker.endpoints[m.modelPicker.epIdx].items
 			return m, nil
 		case tea.KeyEnter:
 			if !msg.Alt {
@@ -999,63 +1013,170 @@ func (m *tuiModel) dispatchTranscript(arg string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// openModelPicker arms m.modelPicker with the configured models (name +
-// provider + base URL), cursor starting on the active model. The picker renders
-// as an overlay and owns ↑/↓/Enter/Esc until the user picks or cancels. Returns
-// false if no models are configured (rare — there's always at least the default).
+// openModelPicker arms m.modelPicker with the configured models, two-level
+// (endpoint → model). The data comes from cfg.Endpoints — PR1-3's normalize()
+// already projects the legacy flat cfg.Models into this shape, so a one-endpoint
+// flat config and a hand-written endpoints: config both work here. The cursor
+// starts on the active model: m.a.Model may be a bare model (legacy session) or
+// a composite id (post-PR4b session), so we match either form against each
+// endpoint's models. Returns false when no models are configured anywhere.
 func (m *tuiModel) openModelPicker() bool {
 	cfg, err := config.Load()
-	if err != nil || len(cfg.Models) == 0 {
+	if err != nil || len(cfg.Endpoints) == 0 {
 		return false
 	}
-	items := make([]complItem, 0, len(cfg.Models))
-	for _, e := range cfg.Models {
-		desc := e.Provider
-		if e.BaseURL != "" {
-			desc += " · " + e.BaseURL
+
+	endpoints := make([]pickerEndpoint, 0, len(cfg.Endpoints))
+	for _, ep := range cfg.Endpoints {
+		if len(ep.Models) == 0 {
+			continue
 		}
-		items = append(items, complItem{name: e.Model, desc: desc})
+		pe := pickerEndpoint{id: ep.ID}
+		pe.display = ep.ID
+		if ep.Name != "" {
+			pe.display = ep.Name
+		}
+		pe.display += " · " + ep.Provider
+		if ep.BaseURL != "" {
+			pe.display += " · " + ep.BaseURL
+		}
+		pe.items = make([]complItem, 0, len(ep.Models))
+		for _, mdl := range ep.Models {
+			pe.items = append(pe.items, complItem{name: mdl.Model, desc: ep.ID + "::" + mdl.Model})
+		}
+		endpoints = append(endpoints, pe)
 	}
-	idx := 0
-	for i, it := range items {
-		if it.name == m.a.Model {
+	if len(endpoints) == 0 {
+		return false
+	}
+
+	m.modelPicker = &modelPicker{endpoints: endpoints, epIdx: 0, idx: 0}
+	m.modelPicker.items = m.modelPicker.endpoints[0].items
+	// Position cursor on the active model. Two forms of active model:
+	//   - composite id "<endpoint>::<model>" (post-PR4b session, set by a
+	//     prior /model dispatch) — unambiguous, matches exactly one endpoint.
+	//   - bare model "<model>" (legacy session, never ran /model) — may exist
+	//     under multiple endpoints. When it does, prefer the default endpoint
+	//     (cfg.Default's endpoint, resolved via ParseModelFlag's step 2a)
+	//     rather than the first in config order, mirroring ParseModelFlag's
+	//     own "default endpoint first" rule so the picker opens on the same
+	//     endpoint a bare `--model <X>` would have selected.
+	active := m.a.Model
+	if endpointID, _, hasCid := splitCompositeIDForPicker(active); hasCid {
+		for ei, ep := range endpoints {
+			if ep.id != endpointID {
+				continue
+			}
+			for mi, it := range ep.items {
+				if it.name == active[len(endpointID)+2:] {
+					m.modelPicker.epIdx = ei
+					m.modelPicker.idx = mi
+					m.modelPicker.items = endpoints[ei].items
+					return true
+				}
+			}
+		}
+	}
+	// Bare active model: collect all endpoints that carry it, prefer the
+	// default endpoint if any of them is the default, else first match.
+	type hit struct{ ep, mi int }
+	var hits []hit
+	for ei, ep := range endpoints {
+		for mi, it := range ep.items {
+			if it.name == active {
+				hits = append(hits, hit{ei, mi})
+			}
+		}
+	}
+	if len(hits) > 0 {
+		pick := hits[0]
+		if defaultEpID, _, hasDefault := splitCompositeIDForPicker(cfg.Default); hasDefault {
+			for _, h := range hits {
+				if endpoints[h.ep].id == defaultEpID {
+					pick = h
+					break
+				}
+			}
+		}
+		m.modelPicker.epIdx = pick.ep
+		m.modelPicker.idx = pick.mi
+		m.modelPicker.items = endpoints[pick.ep].items
+	}
+	return true
+}
+
+// splitCompositeIDForPicker splits "<endpoint_id>::<model>". Returns
+// hasCid=false when the input doesn't contain "::" (a bare model name).
+// Thin wrapper around config.splitCompositeID's semantics; duplicated here
+// because splitCompositeID is unexported in package config and the picker
+// lives in package main.
+func splitCompositeIDForPicker(id string) (endpointID, model string, hasCid bool) {
+	idx := -1
+	for i := 0; i+1 < len(id); i++ {
+		if id[i] == ':' && id[i+1] == ':' {
 			idx = i
 			break
 		}
 	}
-	m.modelPicker = &modelPicker{items: items, idx: idx}
-	return true
+	if idx < 0 {
+		return "", "", false
+	}
+	return id[:idx], id[idx+2:], true
 }
 
-// acceptModelPicker switches to the highlighted model and clears the picker.
+// acceptModelPicker switches to the highlighted (endpoint, model) and clears
+// the picker. The model is passed to dispatchModel as the composite id
+// "<endpoint_id>::<model>" so the receiver resolves the right endpoint's
+// connection params (PR2's EntryByModel handles the composite id form).
 func (m *tuiModel) acceptModelPicker() (tea.Model, tea.Cmd) {
 	p := m.modelPicker
 	m.modelPicker = nil
-	if p == nil || p.idx < 0 || p.idx >= len(p.items) {
+	if p == nil || p.epIdx < 0 || p.epIdx >= len(p.endpoints) {
 		return m, nil
 	}
-	return m.dispatchModel(p.items[p.idx].name)
+	ep := p.endpoints[p.epIdx]
+	if p.idx < 0 || p.idx >= len(ep.items) {
+		return m, nil
+	}
+	return m.dispatchModel(ep.id + "::" + ep.items[p.idx].name)
 }
 
-// modelPickerView renders the model-switch overlay, reusing the completion menu
-// styles so it reads as the same family of UI.
+// modelPickerView renders the model-switch overlay, two-level: each endpoint
+// is a header line, with its models listed indented below. The current
+// endpoint is highlighted; the cursor (▸) marks the highlighted model within
+// the current endpoint. ←→ switch endpoint, ↑↓ switch model, Enter selects.
 func (m *tuiModel) modelPickerView() string {
 	p := m.modelPicker
-	if p == nil || len(p.items) == 0 {
+	if p == nil || len(p.endpoints) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString(selectPromptStyle.Render("Switch model:") + "\n")
-	for i, it := range p.items {
-		label := fmt.Sprintf("%-24s", it.name)
-		if i == p.idx {
-			b.WriteString("  " + complSelStyle.Render("▸ "+label) + " " + hintStyle.Render(it.desc))
+	for ei, ep := range p.endpoints {
+		// Endpoint header. Highlight the focused one.
+		if ei == p.epIdx {
+			b.WriteString("  " + complSelStyle.Render("▣ "+ep.display))
 		} else {
-			b.WriteString("  " + complNameStyle.Render(label) + " " + hintStyle.Render(it.desc))
+			b.WriteString("  " + complNameStyle.Render(ep.display))
 		}
 		b.WriteByte('\n')
+		// Only render the focused endpoint's models — collapsing the others
+		// keeps the overlay short (one endpoint's worth of models at a time)
+		// and matches the ←→ mental model: "I'm in this endpoint, ↑↓ moves
+		// within it; ←→ jumps to another endpoint and its models appear."
+		if ei == p.epIdx {
+			for mi, it := range ep.items {
+				label := fmt.Sprintf("%-24s", it.name)
+				if mi == p.idx {
+					b.WriteString("    " + complSelStyle.Render("▸ "+label) + " " + hintStyle.Render(it.desc))
+				} else {
+					b.WriteString("    " + complNameStyle.Render(label) + " " + hintStyle.Render(it.desc))
+				}
+				b.WriteByte('\n')
+			}
+		}
 	}
-	b.WriteString(hintStyle.Render("  ↑/↓ select · Enter switch · Esc dismiss"))
+	b.WriteString(hintStyle.Render("  ←/→ endpoint · ↑/↓ model · Enter switch · Esc dismiss"))
 	b.WriteByte('\n')
 	return b.String()
 }

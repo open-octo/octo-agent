@@ -158,10 +158,21 @@ func (s *Session) Interrupt() bool {
 type AgentFactory func() *agent.Agent
 
 // ModelInfo describes one configured model entry for /model listings.
+//
+// PR4b (design §12.2): the listing is two-level — each info carries its
+// EndpointID/EndpointName so the manager can group models under their channel
+// header, and CompositeID ("<endpoint>::<model>") so /model can be told to
+// switch to a specific endpoint's copy of a model that may exist under more
+// than one. Model stays the bare model id (also still accepted by /model for
+// back-compat — Resolve runs it through ParseModelFlag's default-priority
+// path).
 type ModelInfo struct {
-	Model    string // the model id, also the /model argument that selects it
-	Provider string
-	Default  bool // the config-wide default entry
+	EndpointID   string // the channel this model lives under; empty only on a misconfigured ops
+	EndpointName string // display name for the channel header
+	Model        string // the bare model id
+	CompositeID  string // "<endpoint>::<model>" — the precise /model argument
+	Provider     string
+	Default      bool // the config-wide default entry (composite id matches cfg.Default)
 }
 
 // ModelResolution is the server-resolved outcome of a /model switch request:
@@ -385,27 +396,99 @@ func (m *Manager) cmdModel(ev InboundEvent, arg string) string {
 }
 
 // modelListReply renders the no-argument /model listing: the session's
-// current model plus every configured entry, marking current and default.
+// current model plus every configured entry, grouped by endpoint (PR4b design
+// §12.2). Each endpoint is a header line; its models are listed below with
+// their composite id (the precise /model argument). The current and default
+// models are marked.
+//
+// Backward compat: when ModelOps returns ModelInfo values with no EndpointID
+// (e.g. a stale or test-injected ops), the listing falls back to the flat
+// one-line-per-model shape so the command still produces something readable
+// rather than crashing on a missing endpoint dimension.
 func (m *Manager) modelListReply(sess *Session) string {
 	infos := m.modelOps.List()
 	if len(infos) == 0 {
 		return "No models configured. Run `octo config` to add one."
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Current model: %s\nAvailable:", sess.Agent.Model)
-	for _, info := range infos {
-		mark := ""
-		switch {
-		case info.Model == sess.Agent.Model && info.Default:
-			mark = " ← current (default)"
-		case info.Model == sess.Agent.Model:
-			mark = " ← current"
-		case info.Default:
-			mark = " (default)"
-		}
-		fmt.Fprintf(&b, "\n• %s (%s)%s", info.Model, info.Provider, mark)
+	fmt.Fprintf(&b, "Current model: %s\n", sess.Agent.Model)
+
+	// Group by endpoint, preserving the order List returned (which is the
+	// config order — Endpoints[0].Models[0], Endpoints[0].Models[1], …).
+	type group struct {
+		endpointID   string
+		endpointName string
+		models       []ModelInfo
 	}
-	b.WriteString("\nSwitch: /model <name> — or /model default to follow the default model.")
+	var groups []*group
+	groupIdx := map[string]int{}
+	hasEndpoints := false
+	for _, info := range infos {
+		if info.EndpointID == "" {
+			continue // fall back to flat rendering below
+		}
+		hasEndpoints = true
+		if idx, ok := groupIdx[info.EndpointID]; ok {
+			groups[idx].models = append(groups[idx].models, info)
+			continue
+		}
+		groupIdx[info.EndpointID] = len(groups)
+		groups = append(groups, &group{
+			endpointID:   info.EndpointID,
+			endpointName: info.EndpointName,
+			models:       []ModelInfo{info},
+		})
+	}
+
+	if !hasEndpoints {
+		// Flat fallback (legacy/test ops without endpoint info).
+		b.WriteString("Available:")
+		for _, info := range infos {
+			mark := ""
+			switch {
+			case info.Model == sess.Agent.Model && info.Default:
+				mark = " ← current (default)"
+			case info.Model == sess.Agent.Model:
+				mark = " ← current"
+			case info.Default:
+				mark = " (default)"
+			}
+			fmt.Fprintf(&b, "\n• %s (%s)%s", info.Model, info.Provider, mark)
+		}
+		b.WriteString("\nSwitch: /model <name> — or /model default to follow the default model.")
+		return b.String()
+	}
+
+	b.WriteString("Channels:")
+	for _, g := range groups {
+		header := g.endpointID
+		if g.endpointName != "" && g.endpointName != g.endpointID {
+			header = fmt.Sprintf("%s (%s)", g.endpointID, g.endpointName)
+		}
+		fmt.Fprintf(&b, "\n  %s", header)
+		for _, info := range g.models {
+			mark := ""
+			// The "current" mark is keyed off the persisted binding
+			// (sess.AppliedModelConfig, a composite id) rather than
+			// sess.Agent.Model (a bare model id). Keying off the bare model
+			// would mark the same model on every endpoint that carries it
+			// (e.g. claude-sonnet-4-6 under both relay and official). The
+			// composite id is unambiguous — only the endpoint the user
+			// actually switched to gets the mark. An unbound session (never
+			// ran /model) shows no "current" mark, which is correct: the
+			// session is on the server default, not any endpoint's binding.
+			switch {
+			case info.CompositeID == sess.AppliedModelConfig && info.Default:
+				mark = " ← current (default)"
+			case info.CompositeID == sess.AppliedModelConfig:
+				mark = " ← current"
+			case info.Default:
+				mark = " (default)"
+			}
+			fmt.Fprintf(&b, "\n    • %s%s", info.CompositeID, mark)
+		}
+	}
+	b.WriteString("\nSwitch: /model <endpoint>::<model> — or /model default to follow the default model.")
 	return b.String()
 }
 

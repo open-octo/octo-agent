@@ -11,7 +11,7 @@
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import { notificationsEnabled, setNotificationsEnabled } from '../lib/notifications'
   import * as api from '../lib/api'
-  import type { ModelEntry, ProviderPreset, ModelConfigInput } from '../lib/api'
+  import type { ModelEntry, ProviderPreset, ModelConfigInput, EndpointConfig } from '../lib/api'
 
   // --- local state ---
   let language      = $state('en')
@@ -56,6 +56,16 @@
   let editingModel = $state<ModelEntry | null>(null)
   let busyModelId  = $state<string | null>(null)
   let modelModalEl = $state<HTMLDivElement | null>(null)
+
+  // ── Endpoints section (PR4b: two-level read-only preview) ──────────────────
+  // Mirrors GET /api/config/endpoints. The two-level shape (channel cards with
+  // their model lists) is the future of this page, but PR4b ships it read-only —
+  // the write path (CRUD on endpoints) lands in PR5 alongside the Save format
+  // switch. The existing flat "AI Models" section below remains the editing
+  // surface until then.
+  let endpoints     = $state<EndpointConfig[]>([])
+  let defaultCid    = $state('')
+  let liteCid       = $state('')
 
   // Focus trap so Esc doesn't leak past the modal (#1112).
   $effect(() => {
@@ -189,6 +199,20 @@
       // choice. Language still seeds from config when present.
       if (cfg.language)   language = cfg.language
       origLanguage = language
+
+      // PR4b: load the two-level endpoint view in parallel. Failure is non-fatal
+      // — the read-only Channels section just renders empty and the existing
+      // flat Models section still carries the editing surface.
+      try {
+        const ep = await api.getEndpoints()
+        endpoints = ep.endpoints ?? []
+        defaultCid = ep.default ?? ''
+        liteCid = ep.lite ?? ''
+      } catch {
+        endpoints = []
+        defaultCid = ''
+        liteCid = ''
+      }
     } catch (e: any) {
       showToast(`Failed to load config: ${e.message}`, 'error')
     } finally {
@@ -345,6 +369,55 @@
     {#if loading}
       <div class="loading-state">{$t('settings.loading')}</div>
     {:else}
+      <!-- Channels (PR4b: two-level read-only preview) -->
+      <div class="section-card">
+        <div class="section-head">
+          <span class="section-title-inline">{$t('settings.endpoints.title')}</span>
+        </div>
+        <div class="endpoints-notice">{$t('settings.endpoints.readonly_notice')}</div>
+        {#if endpoints.length === 0}
+          <div class="models-empty">{$t('settings.endpoints.empty')}</div>
+        {:else}
+          {#each endpoints as ep (ep.id)}
+            <div class="endpoint-card">
+              <div class="endpoint-head">
+                <div class="endpoint-title-line">
+                  <span class="endpoint-id mono">{ep.id}</span>
+                  {#if ep.name}<span class="endpoint-name">{ep.name}</span>{/if}
+                </div>
+                <div class="endpoint-meta mono">
+                  <span>{ep.provider}</span>
+                  {#if ep.base_url}<span> · {ep.base_url}</span>{/if}
+                  {#if ep.protocol}<span> · {ep.protocol}</span>{/if}
+                </div>
+                <div class="endpoint-key">
+                  {#if ep.has_api_key}
+                    <span class="key-set">{$t('settings.endpoints.api_key')}: {$t('settings.endpoints.api_key.set')}</span>
+                  {:else}
+                    <span class="key-missing">{$t('settings.endpoints.api_key')}: {$t('settings.endpoints.api_key.missing')}</span>
+                  {/if}
+                </div>
+              </div>
+              <div class="endpoint-models">
+                <div class="endpoint-models-head">{$t('settings.endpoints.models')}</div>
+                {#each ep.models as m (m.model)}
+                  <div class="endpoint-model-row">
+                    <span class="mono">{ep.id}::{m.model}</span>
+                    {#if m.vision}<span class="vision-tag">{$t('settings.endpoints.models.vision')}</span>{/if}
+                    {#if defaultCid === `${ep.id}::${m.model}`}
+                      <StatusTag status="success">{$t('settings.endpoints.badge.default')}</StatusTag>
+                    {/if}
+                    {#if liteCid === `${ep.id}::${m.model}`}
+                      <StatusTag status="info">{$t('settings.endpoints.badge.lite')}</StatusTag>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+
       <!-- AI Models (config-level entries) -->
       <div class="section-card">
         <div class="section-head">
@@ -577,6 +650,39 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
   padding: 14px 24px; border-bottom: 1px solid var(--border-table);
 }
 .section-title-inline { font-size: 16px; font-weight: 600; color: var(--text-heading); }
+
+/* ── Channels section (PR4b two-level read-only) ───────────────────────────── */
+.endpoints-notice {
+  padding: 10px 24px; font-size: 12px; color: var(--text-tertiary);
+  background: var(--bg-subtle, rgba(0,0,0,0.02));
+  border-bottom: 1px solid var(--border-table);
+}
+.endpoint-card {
+  padding: 14px 24px; border-bottom: 1px solid var(--border-table);
+}
+.endpoint-card:last-child { border-bottom: none; }
+.endpoint-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.endpoint-title-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.endpoint-id { font-size: 14px; font-weight: 600; color: var(--text); }
+.endpoint-name { font-size: 13px; color: var(--text-secondary); }
+.endpoint-meta { font-size: 12px; color: var(--text-tertiary); display: flex; flex-wrap: wrap; }
+.endpoint-key { font-size: 12px; }
+.endpoint-key .key-set { color: var(--green-6, #16a34a); }
+.endpoint-key .key-missing { color: var(--red-6, #dc2626); }
+.endpoint-models { margin-top: 6px; padding-left: 12px; border-left: 2px solid var(--border-table); }
+.endpoint-models-head {
+  font-size: 12px; color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;
+}
+.endpoint-model-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 4px 0; font-size: 13px; color: var(--text);
+}
+.vision-tag {
+  font-size: 11px; padding: 1px 6px; border-radius: 4px;
+  background: var(--bg-subtle, rgba(0,0,0,0.04)); color: var(--text-tertiary);
+}
+
 .btn-add {
   height: 30px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
   border-radius: 6px; display: flex; align-items: center; gap: 6px;

@@ -586,6 +586,51 @@ func TestCmdModel_ListMarksCurrent(t *testing.T) {
 	}
 }
 
+// TestCmdModel_ListGroupsByEndpoint covers the PR4b two-level shape (§12.2):
+// when List returns ModelInfo with EndpointID set, the no-argument /model
+// listing groups models under their endpoint header and shows the composite
+// id as the switch argument. The current and default models are still marked.
+func TestCmdModel_ListGroupsByEndpoint(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	mgr.SetModelOps(&ModelOps{
+		List: func() []ModelInfo {
+			return []ModelInfo{
+				{EndpointID: "relay-a", EndpointName: "中转站A", Model: "claude-sonnet-4-6", CompositeID: "relay-a::claude-sonnet-4-6", Provider: "custom", Default: true},
+				{EndpointID: "relay-a", EndpointName: "中转站A", Model: "gpt-5.4", CompositeID: "relay-a::gpt-5.4", Provider: "custom"},
+				{EndpointID: "official", EndpointName: "官方", Model: "claude-opus-4-8", CompositeID: "official::claude-opus-4-8", Provider: "anthropic"},
+			}
+		},
+		Resolve: func(modelID string) (ModelResolution, error) {
+			return ModelResolution{}, fmt.Errorf("unused in this test")
+		},
+	})
+	sess := mgr.GetOrCreateSession(ev)
+	// The "current" mark is keyed off the persisted binding (composite id),
+	// not the bare model on the agent — so set AppliedModelConfig.
+	sess.AppliedModelConfig = "relay-a::claude-sonnet-4-6"
+
+	reply := mgr.cmdModel(ev, "")
+	for _, want := range []string{
+		"relay-a (中转站A)",
+		"relay-a::claude-sonnet-4-6",
+		"relay-a::gpt-5.4",
+		"official (官方)",
+		"official::claude-opus-4-8",
+		"current (default)",
+		"<endpoint>::<model>",
+	} {
+		if !strings.Contains(reply, want) {
+			t.Errorf("listing should contain %q, got:\n%s", want, reply)
+		}
+	}
+	// Default badge should NOT appear on gpt-5.4 (only on claude-sonnet-4-6).
+	if strings.Contains(reply, "gpt-5.4 (default)") {
+		t.Errorf("gpt-5.4 must not be marked default:\n%s", reply)
+	}
+}
+
 // TestCmdModel_SwitchPersistsBinding: /model <name> swaps the live agent's
 // sender+model and persists the binding to the session store.
 func TestCmdModel_SwitchPersistsBinding(t *testing.T) {

@@ -44,7 +44,9 @@ func pickUpdate(m *tuiModel, msg tea.Msg) *tuiModel {
 }
 
 // TestDispatchModel_NoArgOpensPicker verifies that "/model" without an argument
-// opens the picker overlay (instead of printing a usage error).
+// opens the picker overlay (instead of printing a usage error). PR4b: the
+// picker is two-level — two distinct (provider, base_url) groups become two
+// endpoints, and the cursor starts on the active model's endpoint.
 func TestDispatchModel_NoArgOpensPicker(t *testing.T) {
 	writeModelsConfig(t, config.Config{
 		Models: []config.ModelEntry{
@@ -57,15 +59,21 @@ func TestDispatchModel_NoArgOpensPicker(t *testing.T) {
 	m := newPickerTestModel("gpt-4o")
 	model, _ := m.dispatchModel("")
 
-	if model.(*tuiModel).modelPicker == nil {
+	p := model.(*tuiModel).modelPicker
+	if p == nil {
 		t.Fatal("expected picker to be open after dispatchModel(\"\")")
 	}
-	if len(model.(*tuiModel).modelPicker.items) != 2 {
-		t.Errorf("picker items = %d, want 2", len(model.(*tuiModel).modelPicker.items))
+	if len(p.endpoints) != 2 {
+		t.Fatalf("picker endpoints = %d, want 2 (one per distinct provider): %+v", len(p.endpoints), p.endpoints)
 	}
-	// Cursor should start on the active model (gpt-4o = index 0).
-	if model.(*tuiModel).modelPicker.idx != 0 {
-		t.Errorf("picker cursor = %d, want 0 (active model)", model.(*tuiModel).modelPicker.idx)
+	// Current endpoint should have exactly its models exposed as items.
+	if len(p.items) != len(p.endpoints[p.epIdx].items) {
+		t.Errorf("picker items = %d, want %d (current endpoint's models)", len(p.items), len(p.endpoints[p.epIdx].items))
+	}
+	// Cursor should start on the active model (gpt-4o). Its endpoint is the
+	// openai one; within that endpoint gpt-4o is the only (→ index 0) model.
+	if p.idx != 0 {
+		t.Errorf("picker cursor = %d, want 0 (active model)", p.idx)
 	}
 }
 
@@ -84,18 +92,30 @@ func TestDispatchModel_NoArgCursorOnActive(t *testing.T) {
 	m := newPickerTestModel("claude-sonnet-4-6")
 	m.dispatchModel("")
 
-	if m.modelPicker.idx != 1 {
-		t.Errorf("picker cursor = %d, want 1 (claude-sonnet-4-6)", m.modelPicker.idx)
+	p := m.modelPicker
+	if p == nil {
+		t.Fatal("picker not open")
+	}
+	// The active model claude-sonnet-4-6 is the only model under the anthropic
+	// endpoint, so idx within that endpoint is 0; the endpoint cursor should be
+	// on the anthropic endpoint (index 1, assuming openai→0, anthropic→1,
+	// deepseek→2 ordering).
+	if p.idx != 0 {
+		t.Errorf("picker model cursor = %d, want 0 (claude-sonnet-4-6 is the only model in its endpoint)", p.idx)
+	}
+	if p.endpoints[p.epIdx].items[0].name != "claude-sonnet-4-6" {
+		t.Errorf("active endpoint = %q, want the one holding claude-sonnet-4-6", p.endpoints[p.epIdx].items[0].name)
 	}
 }
 
 // TestDispatchModel_PickerKeyDown verifies DOWN advances the cursor (with
-// wrap) and UP moves it back, while the picker stays open.
+// wrap) and UP moves it back, while the picker stays open. Uses a single
+// endpoint with two models so ↑↓ stays within one endpoint.
 func TestDispatchModel_PickerKeyDown(t *testing.T) {
 	writeModelsConfig(t, config.Config{
 		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
-			{Model: "claude-sonnet-4-6", Provider: "anthropic"},
+			{Model: "gpt-4o", Provider: "openai", BaseURL: "https://api.openai.com"},
+			{Model: "gpt-4.1", Provider: "openai", BaseURL: "https://api.openai.com"},
 		},
 		DefaultModel: "gpt-4o",
 	})
@@ -103,6 +123,9 @@ func TestDispatchModel_PickerKeyDown(t *testing.T) {
 	m := newPickerTestModel("gpt-4o")
 	m.dispatchModel("")
 
+	if len(m.modelPicker.endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint (same provider+base_url), got %d", len(m.modelPicker.endpoints))
+	}
 	// Down → index 1
 	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyDown})
 	if m.modelPicker.idx != 1 {
@@ -139,8 +162,10 @@ func TestDispatchModel_PickerKeyEsc(t *testing.T) {
 }
 
 // TestDispatchModel_PickerKeyEnter verifies Enter switches to the highlighted
-// model and clears the picker. Two models share a provider + base URL so
-// ensureSender returns early (no live rebuild needed).
+// (endpoint, model) and clears the picker. The accept path now produces a
+// composite id "<endpoint>::<model>" so the receiver resolves the right
+// endpoint's connection params (PR4b). Two models share a provider + base URL
+// so ensureSender returns early (no live rebuild needed).
 func TestDispatchModel_PickerKeyEnter(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
 	writeModelsConfig(t, config.Config{
@@ -154,24 +179,26 @@ func TestDispatchModel_PickerKeyEnter(t *testing.T) {
 	m := newPickerTestModel("deepseek-v4-flash")
 	m.dispatchModel("")
 
-	// Move to index 1 (deepseek-v4-pro)
+	// Move to index 1 (deepseek-v4-pro) within the single endpoint.
 	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyDown})
-	// Enter accepts
+	// Enter accepts.
 	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.modelPicker != nil {
 		t.Error("picker should be cleared after Enter")
 	}
-	if m.a.Model != "deepseek-v4-pro" {
-		t.Errorf("active model = %q, want deepseek-v4-pro", m.a.Model)
+	// m.a.Model is now the composite id; EntryByModel resolves it back to the
+	// same model id, so we assert the suffix rather than the bare name.
+	if !strings.HasSuffix(m.a.Model, "::deepseek-v4-pro") {
+		t.Errorf("active model = %q, want suffix ::deepseek-v4-pro", m.a.Model)
 	}
 }
 
-// TestModelPickerView_Renders verifies the overlay lists all models with
-// provider/endpoint info.
+// TestModelPickerView_Renders verifies the overlay shows the focused endpoint's
+// models (collapsed for others — ←→ switches focus to reveal theirs).
 func TestModelPickerView_Renders(t *testing.T) {
 	writeModelsConfig(t, config.Config{
 		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
+			{Model: "gpt-4o", Provider: "openai", BaseURL: "https://api.openai.com"},
 			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
 		},
 		DefaultModel: "gpt-4o",
@@ -180,18 +207,89 @@ func TestModelPickerView_Renders(t *testing.T) {
 	m := newPickerTestModel("gpt-4o")
 	m.dispatchModel("")
 
+	// Initial focus is on the openai endpoint (where gpt-4o lives).
 	out := m.modelPickerView()
 	if !strings.Contains(out, "gpt-4o") {
-		t.Errorf("picker view missing gpt-4o:\n%s", out)
+		t.Errorf("picker view missing focused model gpt-4o:\n%s", out)
 	}
-	if !strings.Contains(out, "deepseek-v4-flash") {
-		t.Errorf("picker view missing deepseek-v4-flash:\n%s", out)
+	if !strings.Contains(out, "https://api.openai.com") {
+		t.Errorf("picker view missing focused endpoint's base URL:\n%s", out)
 	}
 	if !strings.Contains(out, "https://api.deepseek.com") {
-		t.Errorf("picker view missing base URL:\n%s", out)
+		t.Errorf("picker view missing other endpoint's header:\n%s", out)
 	}
 	if !strings.Contains(out, "Switch model") {
 		t.Errorf("picker view missing prompt:\n%s", out)
+	}
+	if !strings.Contains(out, "←/→ endpoint") {
+		t.Errorf("picker view missing ←→ hint:\n%s", out)
+	}
+
+	// ←→ moves focus to the deepseek endpoint; its models now appear.
+	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyRight})
+	out = m.modelPickerView()
+	if !strings.Contains(out, "deepseek-v4-flash") {
+		t.Errorf("picker view missing deepseek-v4-flash after →:\n%s", out)
+	}
+}
+
+// TestModelPicker_TwoLevelEndpointSwitch exercises the PR4b ←→ keys: with two
+// endpoints, ←/→ cycle the endpoint cursor and reset the model cursor to 0,
+// and Enter on the second endpoint's model dispatches a composite id that
+// resolves to that endpoint's connection params.
+func TestModelPicker_TwoLevelEndpointSwitch(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	writeModelsConfig(t, config.Config{
+		Models: []config.ModelEntry{
+			{Model: "gpt-4o", Provider: "openai", BaseURL: "https://api.openai.com", APIKey: "sk-openai"},
+			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com", APIKey: "sk-deepseek"},
+		},
+		DefaultModel: "gpt-4o",
+	})
+
+	m := newPickerTestModel("gpt-4o")
+	m.dispatchModel("")
+
+	if len(m.modelPicker.endpoints) != 2 {
+		t.Fatalf("endpoints = %d, want 2: %+v", len(m.modelPicker.endpoints), m.modelPicker.endpoints)
+	}
+	// Start: focused on the openai endpoint (where gpt-4o lives), model idx 0.
+	if m.modelPicker.endpoints[m.modelPicker.epIdx].items[0].name != "gpt-4o" {
+		t.Errorf("initial endpoint = %q, want the one with gpt-4o", m.modelPicker.endpoints[m.modelPicker.epIdx].items[0].name)
+	}
+
+	// → moves to the deepseek endpoint and resets model idx to 0.
+	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.modelPicker.endpoints[m.modelPicker.epIdx].items[0].name != "deepseek-v4-flash" {
+		t.Errorf("after →: endpoint = %q, want deepseek endpoint",
+			m.modelPicker.endpoints[m.modelPicker.epIdx].items[0].name)
+	}
+	if m.modelPicker.idx != 0 {
+		t.Errorf("after →: model idx = %d, want 0 (reset on endpoint switch)", m.modelPicker.idx)
+	}
+
+	// → again wraps back to the openai endpoint.
+	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.modelPicker.endpoints[m.modelPicker.epIdx].items[0].name != "gpt-4o" {
+		t.Errorf("after →→ (wrap): endpoint = %q, want gpt-4o endpoint",
+			m.modelPicker.endpoints[m.modelPicker.epIdx].items[0].name)
+	}
+
+	// ← wraps to the deepseek endpoint (the last one).
+	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyLeft})
+	if m.modelPicker.endpoints[m.modelPicker.epIdx].items[0].name != "deepseek-v4-flash" {
+		t.Errorf("after ← (wrap): endpoint = %q, want deepseek endpoint",
+			m.modelPicker.endpoints[m.modelPicker.epIdx].items[0].name)
+	}
+
+	// Enter on deepseek-v4-flash dispatches the composite id.
+	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.modelPicker != nil {
+		t.Fatal("picker should be cleared after Enter")
+	}
+	if m.a.Model != "legacy-api-deepseek-com-0::deepseek-v4-flash" {
+		t.Errorf("active model = %q, want legacy-api-deepseek-com-0::deepseek-v4-flash", m.a.Model)
 	}
 }
 

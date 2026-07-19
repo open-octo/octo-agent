@@ -822,6 +822,7 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/onboard/complete", s.handleOnboardComplete)
 	s.api("GET /api/providers", s.handleListProviders)
 	s.api("GET /api/config", s.handleGetConfig)
+	s.api("GET /api/config/endpoints", s.handleGetEndpoints)
 	s.api("PUT /api/config/show_reasoning", s.handlePutShowReasoning)
 	s.api("PUT /api/config/coauthor", s.handlePutCoauthor)
 	s.api("PUT /api/config/language", s.handlePutLanguage)
@@ -2130,24 +2131,44 @@ func (s *Server) buildChannelFactory() func() *agent.Agent {
 }
 
 // channelModelOps builds the ModelOps the channel manager's /model command
-// runs against: the configured model table for the no-argument listing, and a
-// resolver mapping a model id to a (cached) sender. "default" unbinds the
-// session back to the server's default sender, mirroring the web model
-// picker's "default" entry (handleUpdateSessionModel). Unknown ids are
-// rejected with the configured list — sending an unconfigured model name to
-// the current endpoint would hit the wrong protocol/base URL.
+// runs against: the configured endpoint+model table for the no-argument
+// listing (grouped by endpoint, PR4b design §12.2), and a resolver mapping a
+// model id to a (cached) sender. "default" unbinds the session back to the
+// server's default sender, mirroring the web model picker's "default" entry
+// (handleUpdateSessionModel). Unknown ids are rejected with the configured
+// list — sending an unconfigured model name to the current endpoint would hit
+// the wrong protocol/base URL.
+//
+// Resolve accepts three forms (design §5.4, §12.2):
+//   - "default" — unbind, ride the server default.
+//   - Composite id "<endpoint>::<model>" — precise; resolved via
+//     cfg.ParseModelFlag so a missing endpoint or model produces the exact
+//     "available: …" error.
+//   - Bare model "<model>" — legacy back-compat; goes through ParseModelFlag's
+//     default-priority path (default endpoint wins; ambiguous match picks
+//     the first with a warning).
+//
+// ModelResolution.BoundEntry is the composite id — it's what gets persisted
+// to the channel store so the binding survives restarts and round-trips
+// through applyChannelModel (which reads it back via EntryByModel, itself
+// composite-id-aware since PR2).
 func (s *Server) channelModelOps() *channel.ModelOps {
 	return &channel.ModelOps{
 		List: func() []channel.ModelInfo {
 			cfg, _ := config.LoadCached()
-			def := cfg.DefaultEntry()
-			infos := make([]channel.ModelInfo, 0, len(cfg.Models))
-			for _, e := range cfg.Models {
-				infos = append(infos, channel.ModelInfo{
-					Model:    e.Model,
-					Provider: e.Provider,
-					Default:  e.Model == def.Model,
-				})
+			infos := make([]channel.ModelInfo, 0, len(cfg.Endpoints))
+			for _, ep := range cfg.Endpoints {
+				for _, m := range ep.Models {
+					cid := ep.CompositeID(m.Model)
+					infos = append(infos, channel.ModelInfo{
+						EndpointID:   ep.ID,
+						EndpointName: ep.Name,
+						Model:        m.Model,
+						CompositeID:  cid,
+						Provider:     ep.Provider,
+						Default:      cid == cfg.Default,
+					})
+				}
 			}
 			return infos
 		},
@@ -2163,20 +2184,24 @@ func (s *Server) channelModelOps() *channel.ModelOps {
 			if err != nil {
 				return channel.ModelResolution{}, fmt.Errorf("loading config: %w", err)
 			}
-			entry, ok := cfg.EntryByModel(modelID)
-			if !ok {
-				available := make([]string, 0, len(cfg.Models))
-				for _, e := range cfg.Models {
-					available = append(available, e.Model)
-				}
-				sort.Strings(available)
-				return channel.ModelResolution{}, fmt.Errorf("model %q is not configured (available: %s)", modelID, strings.Join(available, ", "))
+			ep, m, perr := cfg.ParseModelFlag(modelID)
+			if perr != nil {
+				return channel.ModelResolution{}, perr
 			}
-			sender, err := s.cachedSenderForEntry(modelID, entry)
+			entry := config.ModelEntry{
+				Provider: ep.Provider,
+				Model:    m.Model,
+				BaseURL:  ep.BaseURL,
+				APIKey:   ep.APIKey,
+				Protocol: ep.Protocol,
+				Vision:   m.Vision,
+			}
+			cid := ep.CompositeID(m.Model)
+			sender, err := s.cachedSenderForEntry(cid, entry)
 			if err != nil {
 				return channel.ModelResolution{}, err
 			}
-			return channel.ModelResolution{Sender: sender, Model: entry.Model, BoundEntry: entry.Model}, nil
+			return channel.ModelResolution{Sender: sender, Model: m.Model, BoundEntry: cid}, nil
 		},
 	}
 }
