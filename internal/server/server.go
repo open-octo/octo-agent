@@ -2916,6 +2916,11 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	sess.Agent.Gate = app.NewPermissionGate(engine, s.channelPermissionAsk(sess, ad, ev))
 
 	ctrl := channel.NewUIController(ad, ev.ChatID, ev.MessageID, stopTyping)
+	// If /unbind lands mid-turn (suppressDelivery set on the session), the turn
+	// keeps running but its reply must not be delivered to this IM chat — poll
+	// the session's flag so a /unbind that arrives after the controller is
+	// built still takes effect for the rest of the turn.
+	ctrl.SetSuppressor(func() bool { return sess.SuppressDelivery() })
 
 	// The persisted backing session carries the conversation's goal — the
 	// same record every transport bound to this session sees. Wire it as the

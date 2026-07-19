@@ -74,6 +74,15 @@ type Session struct {
 	UserID             string
 	BoundAt            time.Time
 
+	// suppressDelivery is set by /unbind while a turn is in flight. Once true,
+	// the session's UIController must silently drop all further outbound
+	// messages to the IM chat instead of sending them — the turn keeps running
+	// (and its history still persists), but the user asked to leave the chat,
+	// so nothing more is delivered there. Pair with the suppressor func wired
+	// into the UIController at turn start; cleared when the session is next
+	// handed to a new entry (e.g. a later /bind back to IM).
+	suppressDelivery atomic.Bool
+
 	// runMu serialises agent turns within this session: the IM dispatcher runs
 	// each message in its own goroutine, and two interleaved turns would
 	// corrupt the agent's user/assistant history alternation. runCancel
@@ -584,12 +593,22 @@ func (m *Manager) cmdStop(ev InboundEvent) string {
 // explicitly /bind-ed to another session, that override is dropped; if the
 // chat owned its automatically-created session's entry binding, that binding
 // is released so other entries can use it. No history is deleted.
+//
+// If a turn is in flight, the turn still runs to completion (its history still
+// persists), but its reply is not delivered to the IM chat — suppressDelivery
+// makes the in-flight UIController silently drop everything it has not sent
+// yet, and the session is treated as handed to web, so any idle follow-up
+// turns the chat suppresses too.
 func (m *Manager) cmdUnbind(ev InboundEvent) string {
 	key := sessionKeyFor(m.mode, ev)
 
 	released := false
 	if val, ok := m.sessions.Load(key); ok {
-		released = val.(*Session).UnbindStore(agent.EntryChannel)
+		sess := val.(*Session)
+		if sess.IsRunning() {
+			sess.suppressDelivery.Store(true)
+		}
+		released = sess.UnbindStore(agent.EntryChannel)
 	}
 
 	hadOverride, err := m.bindings.remove(key)

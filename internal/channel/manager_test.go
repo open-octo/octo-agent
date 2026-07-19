@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -253,6 +254,53 @@ func TestSession_BeginRunSerialisesTurns(t *testing.T) {
 	case <-second:
 	case <-time.After(2 * time.Second):
 		t.Fatal("second turn never started after the first finished")
+	}
+}
+
+// TestManager_UnbindMidTurn_SuppressesButKeepsRunning: /unbind while a turn is
+// in flight must suppress further IM delivery (so the chat is left) but must
+// NOT cancel the turn — unlike /stop — and must keep the store file. This is
+// the /unbind mid-turn contract that hands the session to web.
+func TestManager_UnbindMidTurn_SuppressesButKeepsRunning(t *testing.T) {
+	tempHome(t)
+	cfg := &Config{Channels: map[string]PlatformConfig{}}
+	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
+
+	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
+	sess := mgr.GetOrCreateSession(ev)
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "q"})
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	path, err := sess.Store.SavePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Begin a turn and keep it in flight (don't call done).
+	runCtx, done := sess.BeginRun(context.Background())
+	defer done()
+
+	ev.Text = "/unbind"
+	reply := mgr.CommandRouter(ev)
+	if !strings.Contains(strings.ToLower(reply), "unbound") {
+		t.Fatalf("expected unbind reply, got %q", reply)
+	}
+
+	// The turn must NOT have been interrupted (/unbind is not /stop).
+	if runCtx.Err() != nil {
+		t.Fatal("/unbind must not cancel the in-flight turn")
+	}
+	if !sess.IsRunning() {
+		t.Fatal("/unbind must leave the turn running")
+	}
+	// Suppress delivery from now on.
+	if !sess.SuppressDelivery() {
+		t.Fatal("/unbind mid-turn must set suppressDelivery")
+	}
+	// Store must be preserved.
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("/unbind must keep the persisted history, but the file is gone: %v", err)
 	}
 }
 
