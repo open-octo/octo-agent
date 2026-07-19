@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,17 +89,92 @@ func (e *ModelEntry) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// Endpoint is a user-configured channel: a bundle of models sharing one set
+// of connection parameters (base_url + api_key + protocol). The two-level
+// schema (endpoints → models) replaces the flat models list so the same model
+// can be reached via multiple channels (e.g. an official vendor endpoint and
+// a relay endpoint), which the flat list forbade ("Two entries may not share
+// a model string", see ModelEntry). An Endpoint is referenced from Default /
+// Lite / channel bindings via the composite id "<ID>::<model>".
+type Endpoint struct {
+	// ID is the unique identifier and the composite-id prefix. Must match
+	// ^[a-zA-Z0-9_-]+$ and must not contain "::". Legacy entries migrated
+	// from the flat schema get IDs of the form "legacy-<host>-<n>"; users
+	// can rename them to anything friendly.
+	ID string `yaml:"id"`
+	// Name is the optional display name shown in the UI. May differ from ID.
+	Name string `yaml:"name,omitempty"`
+	// Provider is the vendor id ("anthropic" | "openai" | "custom" | ...).
+	// Named vendors pin base_url/protocol via the registry; the "custom"
+	// vendor requires an explicit BaseURL and Protocol.
+	Provider string `yaml:"provider"`
+	// BaseURL is the endpoint URL. Empty for named vendors uses the vendor
+	// default; required for the "custom" vendor.
+	BaseURL string `yaml:"base_url,omitempty"`
+	// APIKey is a plaintext fallback used only if the provider's env var is
+	// empty. Stored mode 0600. Prefer the env var.
+	APIKey string `yaml:"api_key,omitempty"`
+	// Protocol is the wire format ("anthropic" | "openai"). Only the
+	// "custom" vendor needs it set explicitly; named vendors pin it.
+	Protocol string `yaml:"protocol,omitempty"`
+	// LiteModel optionally names a model in Models used as the lite model
+	// for compaction. Empty falls back to vendor inference (see
+	// ImplicitLiteModel).
+	LiteModel string `yaml:"lite_model,omitempty"`
+	// Models is the list of models offered through this endpoint. Each
+	// carries its own Vision flag (model-level capability, not endpoint-level).
+	Models []EndpointModel `yaml:"models"`
+}
+
+// EndpointModel is one model entry under an Endpoint.
+type EndpointModel struct {
+	// Model is the model id sent to the API (e.g. claude-sonnet-4-6).
+	Model string `yaml:"model"`
+	// Vision reports whether this model accepts image input. It is a
+	// model-level capability: the same endpoint may expose a vision model
+	// and a text-only model side by side.
+	Vision bool `yaml:"vision"`
+}
+
+// CompositeID returns the "<ID>::<Model>" reference for this endpoint+model.
+// Used by Default / Lite / channel bindings. The caller is responsible for
+// ensuring the model exists under this endpoint.
+func (e Endpoint) CompositeID(model string) string {
+	return e.ID + "::" + model
+}
+
 // Config is the persisted set of CLI defaults. Every field is optional; a
 // missing file (or a missing field) leaves the zero value, and the caller
 // substitutes its built-in default.
 type Config struct {
-	// Models is the list of named model configurations.
+	// Endpoints is the list of user-configured channels (the new two-level
+	// schema's authoritative field). Each bundles shared connection params
+	// and a list of models. PR1 populates this from the legacy flat Models
+	// list during normalize(); the write path switches to emitting this in
+	// PR4. Until then Save still writes the flat Models form so existing
+	// callers and on-disk files keep working.
+	Endpoints []Endpoint `yaml:"endpoints,omitempty"`
+	// Default is the composite id "<endpoint_id>::<model>" selecting the
+	// endpoint+model used when nothing else picks one. Empty falls back to
+	// the first endpoint's first model (see ResolveDefault).
+	Default string `yaml:"default,omitempty"`
+	// Lite is the composite id for the compaction lite model. Empty means
+	// fall back to ImplicitLiteModel inference (endpoint.lite_model, else
+	// the vendor registry's LiteModel for official endpoints).
+	Lite string `yaml:"lite,omitempty"`
+
+	// Models is the legacy flat list of named model configurations. Kept
+	// for read compatibility — normalize() populates it from Endpoints so
+	// existing callers keep working. PR4 switches Save to write Endpoints
+	// and stops emitting this.
 	Models []ModelEntry `yaml:"models,omitempty"`
 	// DefaultModel names the entry used when nothing else selects one.
-	// Empty falls back to the first entry.
+	// Empty falls back to the first entry. Legacy read-compat only; the
+	// authoritative field is Default above.
 	DefaultModel string `yaml:"default_model,omitempty"`
 	// LiteModel optionally names the entry used for cheap internal calls
-	// (history compaction). Empty means no lite model.
+	// (history compaction). Empty means no lite model. Legacy read-compat
+	// only; the authoritative field is Lite above.
 	LiteModel string `yaml:"lite_model,omitempty"`
 
 	PermissionMode string `yaml:"permission_mode,omitempty"`
@@ -518,6 +594,7 @@ func (f fileConfig) normalize() Config {
 		for i := range c.Models {
 			migrateEntryProvider(&c.Models[i])
 		}
+		syncEndpointsFromModels(&c)
 		return c
 	}
 	if f.LegacyProvider == "" && f.LegacyModel == "" && f.LegacyBaseURL == "" && f.LegacyAPIKey == "" {
@@ -537,7 +614,126 @@ func (f fileConfig) normalize() Config {
 	migrateEntryProvider(&e)
 	c.Models = []ModelEntry{e}
 	c.DefaultModel = f.LegacyModel
+	syncEndpointsFromModels(&c)
 	return c
+}
+
+// syncEndpointsFromModels populates c.Endpoints / c.Default / c.Lite from the
+// legacy flat c.Models / c.DefaultModel / c.LiteModel. It runs after the flat
+// list is finalised so every Load leaves both shapes in sync: existing callers
+// keep reading c.Models (PR1 doesn't switch the write path), while new code
+// reads c.Endpoints.
+//
+// Aggregation is by (provider, base_url): entries sharing the same provider
+// and base_url collapse into one endpoint (that bundle is exactly what an
+// endpoint represents — shared connection params). Each migrated endpoint gets
+// a stable implicit ID "legacy-<host>-<n>" so repeated loads produce the same
+// ID; the user can rename it later. api_key/protocol are taken from the first
+// entry of each group; if a later entry in the same group carried a different
+// key, it's dropped with a slog.Warn so the loss isn't silent.
+//
+// Default/Lite (composite ids) are mapped from the legacy DefaultModel/LiteModel
+// (bare model strings) by locating the first endpoint whose Models contains
+// the model.
+func syncEndpointsFromModels(c *Config) {
+	c.Endpoints = nil
+	c.Default = ""
+	c.Lite = ""
+	if len(c.Models) == 0 {
+		return
+	}
+
+	type group struct {
+		provider string
+		baseURL  string
+		entries  []ModelEntry
+	}
+	var groups []group
+	groupIdx := map[string]int{} // key: provider+"\x00"+baseURL → index in groups
+	for _, e := range c.Models {
+		key := e.Provider + "\x00" + e.BaseURL
+		if idx, ok := groupIdx[key]; ok {
+			groups[idx].entries = append(groups[idx].entries, e)
+			continue
+		}
+		groupIdx[key] = len(groups)
+		groups = append(groups, group{provider: e.Provider, baseURL: e.BaseURL, entries: []ModelEntry{e}})
+	}
+
+	// Per-baseURL counter for the legacy-<host>-<n> suffix so two endpoints
+	// sharing a host (e.g. regional variants) get distinct IDs.
+	hostCounter := map[string]int{}
+	for _, g := range groups {
+		host := hostFromBaseURL(g.baseURL)
+		n := hostCounter[host]
+		hostCounter[host] = n + 1
+		ep := Endpoint{
+			ID:       legacyEndpointID(host, n),
+			Provider: g.provider,
+			BaseURL:  g.baseURL,
+		}
+		for i, e := range g.entries {
+			if i == 0 {
+				ep.APIKey = e.APIKey
+				ep.Protocol = e.Protocol
+			} else if e.APIKey != "" && e.APIKey != g.entries[0].APIKey {
+				slog.Warn("config: multiple api_keys found for same base_url, keeping the first",
+					"base_url", g.baseURL, "dropped_key", e.APIKey[:min(8, len(e.APIKey))]+"…")
+			}
+			ep.Models = append(ep.Models, EndpointModel{Model: e.Model, Vision: e.Vision})
+		}
+		c.Endpoints = append(c.Endpoints, ep)
+	}
+
+	if c.DefaultModel != "" {
+		if ep, m, ok := findEndpointModel(c.Endpoints, c.DefaultModel); ok {
+			c.Default = ep.CompositeID(m.Model)
+		}
+	}
+	if c.LiteModel != "" {
+		if ep, m, ok := findEndpointModel(c.Endpoints, c.LiteModel); ok {
+			c.Lite = ep.CompositeID(m.Model)
+		}
+	}
+}
+
+// findEndpointModel returns the first endpoint whose Models contains the given
+// bare model id, plus the matching EndpointModel. Used to map legacy bare-model
+// references (DefaultModel / LiteModel) to composite ids during normalisation.
+func findEndpointModel(endpoints []Endpoint, model string) (Endpoint, EndpointModel, bool) {
+	for _, ep := range endpoints {
+		for _, m := range ep.Models {
+			if m.Model == model {
+				return ep, m, true
+			}
+		}
+	}
+	return Endpoint{}, EndpointModel{}, false
+}
+
+// hostFromBaseURL extracts the URL host for use in a legacy-<host>-<n> endpoint
+// ID. On a parse failure it falls back to the raw string so a malformed base_url
+// still yields a stable (if ugly) ID rather than aborting normalisation.
+func hostFromBaseURL(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return baseURL
+	}
+	return u.Host
+}
+
+// legacyEndpointID builds the "legacy-<host>-<n>" ID for an implicit endpoint
+// migrated from the flat schema. Non-alphanumeric characters in the host are
+// replaced with "-" so the result matches the endpoint ID regex
+// ^[a-zA-Z0-9_-]+$.
+func legacyEndpointID(host string, n int) string {
+	safe := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, host)
+	return fmt.Sprintf("legacy-%s-%d", safe, n)
 }
 
 // migrateEntryProvider folds the retired openai_compatible / anthropic_compatible

@@ -401,3 +401,60 @@ func TestMemoryBackendConfig_RoundTrip(t *testing.T) {
 		t.Errorf("round-trip MemoryBackend = %+v, want %+v", got.MemoryBackend, want.MemoryBackend)
 	}
 }
+
+// TestLoad_LegacyFlatSynthesizesEndpoint is the tracer-bullet test for the
+// endpoint two-level schema: a legacy flat config.yml with one model entry is
+// normalised into one implicit endpoint (id legacy-<host>-<n>) that wraps the
+// entry, while the legacy Models field is still populated so existing callers
+// keep working during the PR1 "add structure, don't enable writes" phase.
+func TestLoad_LegacyFlatSynthesizesEndpoint(t *testing.T) {
+	home := setHome(t)
+	writeOcto(t, home, "config.yml",
+		"models:\n"+
+			"  - provider: anthropic\n"+
+			"    model: claude-sonnet-4-6\n"+
+			"    base_url: https://api.anthropic.com\n"+
+			"    api_key: sk-test\n"+
+			"    vision: true\n"+
+			"default_model: claude-sonnet-4-6\n")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// New schema: one implicit endpoint wrapping the legacy entry.
+	if len(c.Endpoints) != 1 {
+		t.Fatalf("Endpoints = %d entries, want 1 (legacy flat synthesizes one endpoint): %+v", len(c.Endpoints), c.Endpoints)
+	}
+	ep := c.Endpoints[0]
+	if ep.Provider != "anthropic" || ep.BaseURL != "https://api.anthropic.com" || ep.APIKey != "sk-test" {
+		t.Errorf("synthesized endpoint = %+v, want anthropic/api.anthropic.com/sk-test", ep)
+	}
+	if len(ep.Models) != 1 || ep.Models[0].Model != "claude-sonnet-4-6" || !ep.Models[0].Vision {
+		t.Errorf("endpoint models = %+v, want one claude-sonnet-4-6 with vision true", ep.Models)
+	}
+	if ep.ID == "" {
+		t.Error("synthesized endpoint has empty ID, want legacy-<host>-<n>")
+	}
+	if !strings.HasPrefix(ep.ID, "legacy-") {
+		t.Errorf("synthesized endpoint ID = %q, want legacy-<host>-<n> prefix", ep.ID)
+	}
+
+	// Default maps to a composite id pointing at the implicit endpoint.
+	wantDefault := ep.ID + "::claude-sonnet-4-6"
+	if c.Default != wantDefault {
+		t.Errorf("Default = %q, want %q", c.Default, wantDefault)
+	}
+
+	// Legacy Models field still populated — existing callers keep working.
+	if len(c.Models) != 1 {
+		t.Fatalf("legacy Models = %d entries, want 1 (must stay populated for existing callers): %+v", len(c.Models), c.Models)
+	}
+	if c.Models[0].Model != "claude-sonnet-4-6" || c.Models[0].Provider != "anthropic" {
+		t.Errorf("legacy Models[0] = %+v, want claude-sonnet-4-6/anthropic", c.Models[0])
+	}
+	if c.DefaultModel != "claude-sonnet-4-6" {
+		t.Errorf("legacy DefaultModel = %q, want claude-sonnet-4-6", c.DefaultModel)
+	}
+}
