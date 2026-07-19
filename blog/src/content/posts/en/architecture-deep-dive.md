@@ -1,37 +1,47 @@
-
 ---
-title: "octo-agent Deep Dive: The Genuinely Hard Parts of an Agent System"
-description: "This post dissects ten core mechanisms of octo-agent across the full stack — foundation, built-in tool design, context compaction, prompt caching, memory (history/context/long-term recall), /loop, workflow, browser, permissions, the trash can, and the batteries-included onboarding — and the trade-offs behind each."
+title: "octo-agent Deep Dive: The Genuinely Hard Parts of an AI Agent System"
+description: "Starting from an agent loop of only a few hundred lines, this post dissects the ten mechanisms that keep octo-agent stable, fast, and cheap — the built-in tool contract, context compaction, prompt caching, three lifetimes of memory, the robustness design of octo serve, workflow orchestration, a self-healing browser, the permission system, the trash can, and batteries included — plus the one line running through them all: whatever a mechanism can guarantee, never leave to the model's self-discipline."
 pubDate: 2026-07-08
-updatedDate: 2026-07-18
+updatedDate: 2026-07-19
 author: "octo-agent team"
 tags: ["architecture", "deep-dive", "engineering", "ai-agent"]
 locale: en
 originalSlug: architecture-deep-dive
 ---
 
-# octo-agent Deep Dive: The Genuinely Hard Parts of an Agent System
+# octo-agent Deep Dive: The Genuinely Hard Parts of an AI Agent System
 
+## Opening: What Happens Behind a Casual "Go Check That For Me"
 
-## The Foundation: The Agent Loop Must Stay Ignorant
+Between typing `octo "check the error rate in prod"` into your terminal and getting an answer back — what actually happens?
 
-Start with the big picture. The core of octo-agent is literally a while loop: send the history to the model; the model either answers (loop ends) or asks for a tool; execute the tool, append the result to history, go back to the top.
+The message enters through any one of the TUI, headless mode, an IM bridge, or the web UI, gets packed into an event structure, and is routed to the agent loop. The loop sends the full history to the LLM; the LLM either answers or asks to call a tool. If it calls a tool, the result is appended to the history and the loop continues.
+
+That loop itself is only a few hundred lines of code. But the ten mechanisms that make it actually work each answer a real design problem — without them, the agent runs unstable, slow, and expensive.
+
+This post walks through those mechanisms: what they solve, how they solve it, and why it's done that way. By the end you'll see one line running through all of them: **in an agent system, whatever a mechanism can guarantee, never leave to the model's self-discipline.**
+
+## The Foundation: Why the Agent Loop Gets to Be Only a Few Hundred Lines
+
+**The agent loop is small not because it does little, but because it knows only two interfaces (`Sender` + `ToolExecutor`) — it is the leaf package of the whole dependency tree.** It doesn't assemble JSON, doesn't speak HTTP, and has no idea how Anthropic's protocol differs from OpenAI's — all of that is quarantined in the adapter layer.
+
+First, the panorama. The core of octo-agent is a single while loop:
 
 ```mermaid
 flowchart TB
-    subgraph Entries["Entry layer — five faces, one loop"]
+    subgraph Entry["Entry layer — five faces, one loop"]
         TUI["TUI<br/>(Bubble Tea)"]
         Web["Web<br/>(Svelte 5 SPA)"]
         Headless["Headless<br/>(octo -p ...)"]
-        IM["IM bridges<br/>(Feishu / Telegram / Discord ...)"]
+        IM["IM bridge<br/>(Feishu / Telegram / Discord ...)"]
     end
 
     subgraph Assembly["Assembly layer — internal/app"]
-        App["The only package that knows everyone:<br/>provider + permission + subagent<br/>+ mcp + memory get wired here"]
+        App["The only package that knows every component:<br/>provider + permission + subagent<br/>+ mcp + memory, assembled here"]
     end
 
     subgraph Core["Agent core — internal/agent (leaf of the dependency tree)"]
-        Agent["RunStream: send → tool → append → send<br/>reads no HTTP, builds no JSON,<br/>knows no wire protocol"]
+        Agent["RunStream: send → tool → append → send<br/>no HTTP, no JSON, knows no protocol"]
     end
 
     subgraph Downstream["Downstream, behind abstract interfaces"]
@@ -51,430 +61,282 @@ flowchart TB
     style Core fill:#1a202c,color:#fff
 ```
 
-The loop itself is a few hundred lines. Everything complicated is kept out of it by a single discipline: **`internal/agent` is the leaf package of the entire dependency tree.** It imports neither `provider` nor `tools` nor any UI. It knows exactly two interfaces — `Sender` (send messages, get an abstract reply back) and `ToolExecutor` (run a tool by name, get text back).
+One rule of discipline: **`internal/agent` is the leaf package of the dependency tree** — it doesn't import `provider`, doesn't import `tools`, doesn't import any UI. To the outside it knows exactly two interfaces: `Sender` (send messages out, get an abstract reply back) and `ToolExecutor` (execute a tool by name, get a chunk of text back).
 
-The value of that discipline only shows in the details. When the model wants a tool, Anthropic's API says `stop_reason: "tool_use"` while OpenAI says `finish_reason: "tool_calls"`. In OpenAI streaming, tool arguments arrive as JSON fragments scattered across chunks that must be reassembled by index before parsing. Some third-party OpenAI-compatible servers don't even send the `[DONE]` sentinel. Each of these quirks is one temptation to bury an `if provider == "openai"` inside the core loop — and once that starts, the loop is unreadable by the time the third provider lands. octo-agent instead locks all of it inside two adapter packages, `internal/provider/anthropic` and `internal/provider/openai`; the agent loop only ever sees normalized, unified semantics.
+The value of this rule only shows in the details. Anthropic's API signals "the model wants to call a tool" with `stop_reason: "tool_use"`; OpenAI uses `finish_reason: "tool_calls"`. In OpenAI's streaming responses, tool-call arguments arrive as JSON fragments spread across multiple chunks and must be reassembled by index before parsing. Some third-party OpenAI-compatible services don't even send the `[DONE]` sentinel. Each of these quirks is enough to plant an `if provider == "openai"` in the core loop — and once that starts, the loop is unreadable by the time a third provider lands. octo-agent locks all of them inside the two adapter packages `internal/provider/anthropic` and `internal/provider/openai`; the agent loop only ever sees normalized, unified semantics.
 
-The payoff: five kinds of entry points (TUI, Web, Headless, IM, plus sub-agents) all run the same `RunStream`. Plugging in a new LLM backend changes zero lines of agent code; adding a tool means implementing an interface and registering one line. A full turn looks like this:
+So all five entries (TUI, Web, headless, IM, plus sub-agents) run the same `RunStream`; adding a new LLM backend doesn't touch a single line of agent code, and adding a tool means implementing an interface plus one line of registration. The full lifecycle of one turn:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as User (any entry point)
+    participant U as User (any entry)
     participant Ag as Agent.RunStream
     participant Perm as Permission gate
     participant Prov as Provider adapter
     participant Tool as Tool
 
-    U->>Ag: one message (app layer has injected permission / browser / memory env)
+    U->>Ag: one message (app layer already injected permission/browser/memory context)
     loop until the model gives a final answer
-        Ag->>Prov: SendMessagesToTools(entire history)
+        Ag->>Prov: SendMessagesToTools(full history)
         Prov-->>Ag: normalized text / tool_use
         Ag->>Perm: is this call allowed? (deny/ask/allow)
-        Perm-->>Ag: allow / ask the user / deny
-        Ag->>Tool: execute, append result as tool_result
+        Perm-->>Ag: pass / ask the user / refuse
+        Ag->>Tool: execute; result appended to history as tool_result
     end
     Ag-->>U: event stream (text_delta / tool_started / turn_done)
     Note over Ag: history persisted to ~/.octo/sessions/*.jsonl
 ```
 
-That's the foundation. Now for the main course: the problems that only start once this loop is actually running.
+That's the foundation. Now the main event: the genuinely hard problems that show up once this loop starts running.
 
+## Built-in Tools: A Converged Interface with Sharp Edges
 
+Terminal, browser, workflow, MCP — these tools differ completely in how they're invoked, their parameter shapes, and their lifecycles. If the agent loop had to perceive those differences, every new tool species would mean changing the core loop. That's not architecture; that's piling.
 
+**octo's answer: lock down one pipe.** Every built-in tool implements the same two-method contract (`Definition() ToolDefinition` + `Execute(ctx, name, input) (ToolResult, error)`), discovered and dispatched by name through `tools.DefaultRegistry`, executed through the agent loop. The shared surface is itself the point: the agent core never branches on tool species, meta-skills freely recombine them, and browser / workflow / MCP all travel the same narrow pipe. The structure is simple; the design tension lives at the edges.
 
-## Built-In Tool Design: Small Interfaces, Sharp Edges
+### Streaming Fragments Across a Protocol Boundary
 
-Every built-in tool implements the same two-method contract (`Definition() ToolDefinition` + `Execute(ctx, name, input) (ToolResult, error)`), discovered by `tools.DefaultRegistry` and dispatched by name through the agent loop. That shared surface is the point: the agent core never branches on tool species, meta-skills are free to reshuffle them, and the browser / workflow / MCP layers all speak the same narrow pipe. The structure is simple. The design tensions live at the edges.
-
-### Streaming Fragments across Provider Borders
-
-A subtler design rule lives in the provider adapters, not the tools: **OpenAI-protocol tool-call arguments stream as JSON fragments across multiple chunks, keyed by `tool_calls[i].index`** — concatenate every fragment for the same index before parsing. Anthropic-style endpoints don't. The principle the codebase enforces is: the agent loop (`internal/agent/agent.go`) never branches on which spelling it got; normalization happens at the provider adapter. The same contract ("fragments in, complete tool call out") is the only way to keep the browser / workflow / MCP layers portable across Anthropic and OpenAI protocols without every layer growing `if provider == …` forks.
+OpenAI-protocol tool-call arguments stream as JSON fragments across multiple chunks, keyed by `tool_calls[i].index` — concatenate every fragment of the same index before parsing. Anthropic-style endpoints don't do this. The rule the codebase enforces: the agent loop (`internal/agent/agent.go`) never branches on which spelling it received; normalization happens in the provider adapter. The same "fragments in, complete tool call out" contract is the only way the browser / workflow / MCP layers stay portable between the Anthropic and OpenAI protocols, without every layer growing its own `if provider == …` forks.
 
 ### One Registry, Many Species
 
-`tools.DefaultRegistry` (`internal/tools/registry.go`) is a single dispatcher that routes any tool call by name to one entry of the `allTools` slice — `Terminal`, `ReadFile`, `WriteFile`, `EditFile`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Skill`, `Agent*`, `Workflow*`, `ScheduleWakeup`, `Browser`, `MemoryRecall`, and the rest. There is "browser: internal/browser", "workflow: Ruby/mruby", and "MCP: a JSON-RPC bridge" — but the agent loop sees only `ToolExecutor`. The late addition of `mcp_describe` / `mcp_call` didn't require touching the agent core either; they entered through a registry entry like every other tool.
+`tools.DefaultRegistry` (`internal/tools/registry.go`) is a single dispatcher that routes any tool call by name to one slot of the `allTools` slice — `Terminal`, `ReadFile`, `WriteFile`, `EditFile`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Skill`, `Agent*`, `Workflow*`, `ScheduleWakeup`, `Browser`, `MemoryRecall`, and so on. (We left out `TerminalOutput`/`TerminalInput` here — they're companion sub-tools for background processes, not invoked directly by the user.) Behind the browser lives a CDP long connection in `internal/browser`; behind workflow, a Ruby/mruby sandbox; behind MCP, a JSON-RPC bridge — but the agent loop sees only `ToolExecutor`. This choice is exactly what makes meta-skills possible: a guided "set up your IM channel" flow isn't a bespoke tool; it's `channel-manager` stringing `read_file` / `write_file` / `terminal` together in the order the user's situation demands. Tool composition is the reusable primitive; a new capability usually means a new skill, not a new tool.
 
-That choice is what makes the meta-skills from the previous section possible: a guided "set up your IM channel" flow isn't a bespoke tool, it's `channel-manager` stringing `read_file` / `write_file` / `terminal` together in the order the user's situation demands. Tool composition is the reusable primitive; a new capability usually means a new skill, not a new tool.
+### Read-Before-Write + the mtime Guard
 
-### The Read-Before-Write MTime Guard
+`internal/tools/ReadTracker` enforces a rule that sounds fussy but blocks a real class of bugs: the LLM may only write/edit files it has **already read**, and only while the on-disk mtime still matches what it was at read time. A file read on turn 3 that gets modified by an external editor by turn 7 → refuse, and tell the agent to re-read. The error wording is lifted from Claude Code — models trained on that corpus react correctly on retry.
 
-`internal/tools/ReadTracker` enforces what looks like a nitpick but stops a real class of mistake: the LLM may only write to (or edit) a file it has *already read*, and only while its on-disk mtime still matches what was seen at read time. A file read in turn 3 that an external editor touched by turn 7 is refused, and the agent is told to re-read — which mirrors Claude Code's error wording so the LLM, already trained on that prompt, reacts correctly on the retry.
+Guarding on an external file's mtime is inherently strict — what if a command the agent itself ran changed the file? A compile, a formatter rewrite — all of those touch mtime. The answer is `RefreshTarget`: paths the terminal tool has written get a fresh mtime stamp, so subsequent edits don't false-alarm. `RefreshTarget` re-stamps only the **exact** paths already registered in the tracker — never spreading to sibling files, and never promoting an unread file to writable. Files never read stay unwritable; files genuinely changed by an external editor (which never flow through the terminal tool and are never the exact write target of that command) keep their stale stamps and still raise the alarm. The guard catches real mistakes; the escape hatch is too narrow to be abused out of the sandbox.
 
-That last qualifier — "only while mtime matches" — introduces a bootstrapping problem the codebase handles with `RefreshTarget`: a formatter or shell redirect that the session *itself* wrote through the terminal tool stamps a fresh mtime so the next edit doesn't trip the guard on its own output. `RefreshTarget` only ever re-stamps an exact path the tracker already recorded; it never cascades to siblings, never promotes an un-readable path to writable. A file the session never read stays unwritable; a file truly touched by an out-of-band editor (which never flows through the terminal tool) keeps its stale stamp and still trips the guard. The guard catches the real mistakes; the loop-hole is narrow enough that it can't be abused to escape the sandbox.
+### Pulling the Floor Out from Under SSRF
 
-### Pulling the Floor Out from under SSRF
+`web_fetch` can't just `http.Get(userURL)` — that's textbook SSRF (Server-Side Request Forgery). Its answer (`internal/tools/web_fetch.go`) splits requests into **two hardened paths** sharing one `secureFetchTransport`:
 
-`web_fetch` can't just `http.Get(userURL)` — that's the textbook SSRF vector. Its answer (`internal/tools/web_fetch.go`) splits the fetch into **two hardened paths** sharing one `secureFetchTransport`:
+- **The Jina proxy path** — rendering is handed to `r.jina.ai` (Jina AI's page-parsing service), but **cross-host** redirects are refused (a redirect off `r.jina.ai` means being bounced somewhere unexpected), and the connection is cut if the resolved IP is link-local or cloud metadata. When the caller passes custom headers, the request is forced onto the direct path (Jina's outbound headers aren't controllable, so the overrides can't be enforced).
+- **The direct path** — required for arbitrary URLs, so it **must** follow cross-host redirects (URL shorteners and `www` canonicalization are normal). It shares the link-local ban and caps the redirect chain at 10 hops so a loop can't hang the agent.
 
-- **Jina proxy path** — delegates rendering to `r.jina.ai`, but refuses *cross-host* redirects (a redirect off `r.jina.ai` means something unexpected is bouncing the request) and drops the connection if the resolved IP is link-local / cloud-metadata. It forces a direct fetch when the caller passes custom headers (Jina's outbound headers aren't controllable, so it can't honor an override).
-- **Direct fetch path** — needed for arbitrary URLs, so it *must* follow cross-host redirects (URL shorteners, `www`-canonical hops). It shares the link-local block and caps the chain at 10 hops so a redirect loop can't hang the agent.
-
-The `net.Dialer.Control` hook fires *after* DNS resolution with the concrete IP, so a hostname that resolves to `169.254.x.x` or `127.0.0.1` via DNS rebinding is refused — even when it public-IP'd at resolve time one moment earlier. Bodied too: `WebFetchInlineBytes` (64 KB) is the inline threshold; `WebFetchMaxBytes` (5 MB) is the hard ceiling; past it the body is truncated and spilled to a temp file. Big page = summary + head/tail preview + a `read_file` path to the rest, never a wall of text dumped into the model's context.
+The `net.Dialer.Control` hook fires **after** DNS resolution with the concrete IP, so DNS rebinding (a hostname that resolves to a public IP now and `169.254.x.x` / `127.0.0.1` a moment later) is blocked too. Bodies have bounds as well: `WebFetchInlineBytes` (64 KB) is the inline threshold; `WebFetchMaxBytes` (5 MB) is the hard cap; beyond that the body is truncated to a temp file. A big page = summary + head/tail preview + a `read_file` pointer to the rest — never a wall of text shoved into the model's context.
 
 ### Five Search Surfaces, One Contract
 
-`web_search` looks simple on the wire (returns title/url/snippet), but the back is a tiered fallback over five backends (`internal/tools/web_search.go`): **Brave → Tavily → Serper → DuckDuckGo HTML → Bing HTML**. The first three activate when their env keys are set (`BRAVE_SEARCH_API_KEY` / `TAVILY_API_KEY` / `SERPER_API_KEY`); the last two need no key and are the default. Every failure gets swallowed into the response's `Error` field and the next tier is tried — the tool never panics, and the tier that actually produced the results is reported back in the `Provider` field so the model knows whether it's looking at an index lookup (Brave) or an HTML scrape (DDG/Bing).
+`web_search` looks simple on the wire (returns title/url/snippet), but behind it is a tiered fallback over five backends (`internal/tools/web_search.go`): **Brave → Tavily → Serper → DuckDuckGo HTML → Bing HTML**. The first three activate when their env keys (`BRAVE_SEARCH_API_KEY` / `TAVILY_API_KEY` / `SERPER_API_KEY`) are present; the last two need no key and are the default path. Every failure is swallowed into the response's `Error` field and the next tier is tried — the tool never panics, and the tier that actually produced results is reported back in the `Provider` field so the model knows whether it's looking at an index lookup (Brave) or an HTML scrape (DDG/Bing).
 
-Two details actually matter: **a DuckDuckGo cooldown** (`markDDGUnavailable`, 10 minutes) that keeps a token goroutine from hammering a DDG that just returned nothing — guarded by a `sync.RWMutex` because the web server made concurrent searches routine. And **a landmine on Bing's HTML endpoint**: if you send `Accept-Encoding: gzip`, Bing answers with a ~39 KB JavaScript skeleton instead of the ~120 KB real results page. The fix is the weird rule "never let Go auto-negotiate encoding against `cn.bing.com`" — `browserGet` deliberately omits that header.
+Two details are worth real money: first, the **DuckDuckGo cooldown** (`markDDGUnavailable`, 10 minutes), which stops a stampede of goroutines from hammering DDG right after it returned nothing — guarded by a `sync.RWMutex` because the web server made concurrent searches routine. Second, **a landmine on Bing's HTML endpoint**: if you send `Accept-Encoding: gzip`, Bing answers with a ~39 KB JavaScript skeleton page instead of the ~120 KB real results page. The fix is the odd rule "never let Go auto-negotiate encoding against `cn.bing.com`" — `browserGet` deliberately omits that header.
 
-### terminal: Time, Anti-Polling, and Backtick Survival
+### terminal: Timeouts, Anti-Polling, Backtick Survival
 
-The `terminal` tool runs everything you hand it on the system shell, so its description is the longest entry in the schema — most of it is rules that cost a debugging session each to learn:
+The `terminal` tool runs everything you hand it on the system shell, so its schema description is the longest in the codebase — most rules cost a debugging session each to learn:
 
-- **Three launch modes** — synchronous (default; blocked until the command returns), `run_in_background: "async"` (detached one-shot task, e.g. a build or `npm install`), and `"interactive"` (a long-running service / REPL you'll keep feeding via `terminal_input`). A `detached: true` mode deliberately outlives the session for things like `ngrok` / `cloudflared`.
-- **120-second default timeout** with a hard ceiling at `MaxTerminalTimeout` (600 s); anything above that must go background rather than monopolize a turn.
-- **Anti-polling window**: `BackgroundManager` tracks concurrent reads — three empty reads inside 30 seconds on a running process get blocked and the LLM is told to wait for the push notification instead of spinning in a `terminal_output` loop.
-- **A 1 MiB circular buffer** per background process — older drops are reported as such; only the most recent tail is retained.
-- **The backtick problem**: a shell will mangle backticks inside a quoted string (POSIX turns them into command substitution; PowerShell treats backtick as escape). The fix is the dedicated `stdin` parameter, which pipes text verbatim into the child's stdin and closes it — used whenever a command body contains quotes, backticks, or `$`.
+- **Three launch modes** — synchronous (default; blocks until the command returns), `run_in_background: "async"` (a detached one-shot like a build or `npm install`), and `"interactive"` (a long-running service / REPL you keep feeding via `terminal_input`). A `detached: true` mode is reserved for things that outlive the session (`ngrok` / `cloudflared`).
+- **120-second default timeout**, hard ceiling at `MaxTerminalTimeout` (600 s); anything longer must go background instead of hogging a turn.
+- **Anti-polling window**: `BackgroundManager` watches concurrent reads — three empty reads of a running process inside 30 seconds get blocked, and the LLM is told to wait for the push notification instead of spinning in `terminal_output`.
+- **A 1 MiB circular buffer per background process** — older drops are honestly reported; only the recent tail is kept.
+- **The backtick problem**: shells mangle backticks inside quotes (POSIX turns them into command substitution; PowerShell treats backtick as an escape). The fix is the dedicated `stdin` parameter, which pipes text verbatim into the child's stdin and closes it — mandatory whenever the command body contains quotes, backticks, or `$`.
 
-Together these turn "the shell can do anything" from a footgun into a bounded surface that the model can reason about without burning tokens polling dead output.
+Together these turn "a shell can do anything" from a blunderbuss into a bounded surface the model can reason about — without burning tokens polling dead output.
 
-### sub_agent: Forking Without Recursion
+### sub_agent: Can Fork, Can't Recurse
 
-The `sub_agent` tool looks like a simple delegate-and-wait, but the design tensions live in what it *doesn't* allow. The most visible rule is in `AgentTool.Execute` (`internal/tools/agent.go`): if the caller is already a sub-agent, the call fails outright — "a sub-agent cannot spawn another sub-agent." No recursion, period. Combined with the `tools` allowlist omitting `sub_agent` itself, that's a shallow hard ceiling rather than the workflow's Turing-complete unconstrained spawn — the design intent is a single level of delegation, not an agent tree.
+The `sub_agent` tool looks like delegate-and-wait, but the design tension lives in what it *refuses* to do. The most visible rule sits in `AgentTool.Execute` (`internal/tools/agent.go`): if the caller is already a sub-agent, fail outright — "a sub-agent cannot spawn another sub-agent." No recursion, period. Combined with the `tools` allowlist deliberately omitting `sub_agent` itself, that's a hard ceiling — not the workflow's Turing-complete arbitrary spawn. The design intent is "one layer of delegation only"; no agent trees.
 
-**Fork vs. fresh** (`subagent_type`): omitting `subagent_type` seeds the child with the *parent's full conversation* (system prompt + messages so far) — a true fork that shares context and has the same conclusion-shaped reply contract. Setting a type (`explore`, `plan`, `general`, `code-review`) starts a zero-context child with a specialized persona, read-only / lean-context defaults, and its own `model` frontmatter. The same tool covers both; a preset fills in what the call leaves unset.
+**Fork vs. fresh** (`subagent_type`): omitting `subagent_type` seeds the child with the **parent's full conversation** (system prompt + messages so far) — a true fork that shares context and follows the same conclusion-shaped reply contract. Setting a type (`explore`, `plan`, `general`, `code-review`) starts a zero-context child with a specialized persona, read-only / lean-context defaults, and its own `model` frontmatter. One tool covers both; presets fill in whatever the caller left unset.
 
-**Sync vs. async**: `run_in_background: true` calls `SubAgentManager.Start`, which returns an `agent_N` ID immediately and pushes a completion notification; `false` (default) calls `RunSync` and blocks the turn. A semaphore (`syncSem`) bounds how many synchronous sub-agents run at once so a wave of fan-outs can't starve the parent. Transport-aware too: synchronous channels (server / IM) have no follow-up-turn path, so `mgr.Synchronous()` silently forces the blocking path and tells the model — rather than silently failing.
+**Sync vs. async**: `run_in_background: true` calls `SubAgentManager.Start`, returning an `agent_N` ID immediately and pushing a notification on completion; `false` (default) calls `RunSync`, blocking the turn until the result is back. A semaphore (`syncSem`) bounds concurrent synchronous sub-agents so a fan-out wave can't starve the parent. Transport-aware too: synchronous channels (server / IM) have no follow-up-turn path, so `mgr.Synchronous()` silently forces the blocking path and tells the model — instead of failing quietly.
 
-When a sub-agent hits its turn limit, the result returns with an explicit `[INCOMPLETE: … partial]` marker rather than passing partial work off as done. The parent is meant to either re-launch narrower or treat it as unfinished. And every `StopReason` (`end_turn`, `tool_use`, `max_turns`, `error`, `killed`) reaches the WS broadcast so the frontend status panel updates without polling.
-
-
-
+When a sub-agent hits its turn limit, the result comes back with an explicit `[INCOMPLETE: … partial]` marker rather than passing half-done work off as finished. The parent either relaunches with a narrower task or treats it as unfinished. Every `StopReason` (`end_turn`, `tool_use`, `max_turns`, `error`, `killed`) is pushed to the WS broadcast, so the frontend status panel updates without polling.
 
 ## Context Compaction: You Can't Delete Messages, Only Fold Time
 
-The first wall you hit is physical: the context window has a fixed size, and agent conversations balloon fast — a single compiler-error tool_result can be thousands of tokens, and an afternoon session piles up to six figures without trying.
+The first wall is physics: the context window is only so big, and agent conversations inflate fast — a single compile-error tool_result can be thousands of tokens, and an afternoon session easily piles up into six figures.
 
-The intuitive fix is "when the window fills up, drop the oldest messages." In an agent setting this breaks the API outright: `tool_use` and `tool_result` blocks in history are strictly paired, and deleting messages that sever a pair gets you a 400 from both Anthropic and OpenAI. Worse, the oldest messages usually contain the original task statement — drop them and the agent forgets what it's doing halfway through.
+The intuitive fix — "drop the oldest messages when the window fills up" — outright breaks API requests in an agent setting: `tool_use` and `tool_result` in the history are strictly paired, and cutting a pair makes both Anthropic and OpenAI return 400. Worse, "the oldest messages" usually contain the original task statement; delete it and the agent spends the second half not knowing what it's doing.
 
-octo-agent's answer is **summary folding**: compress the early history into one summary, keep the recent history verbatim. Three details carry the design.
+octo-agent's answer is **summary folding**: compress the early history into a summary, keep the recent history verbatim. The devil is in three details.
 
 ```mermaid
 flowchart LR
-    A["usage ≥ 75% of window"] --> B["Free win first: reclaim stale<br/>bulky tool_results (zero cost)"]
+    A["usage ≥ 75% of window"] --> B["free win first: reclaim expired<br/>large tool_results (zero cost)"]
     B --> C{"still over?"}
     C -->|no| Z["done"]
-    C -->|yes| D["Find a split point: only at a<br/>'pure user message' boundary"]
-    D --> E["before the split → LLM summary<br/>after (≤30% of window) → kept verbatim"]
-    E --> F["History rebuilt as:<br/>one summary message + recent originals"]
+    C -->|yes| D["find split point: cut only at<br/>'pure user message' boundaries"]
+    D --> E["before split → LLM summary<br/>after (≤30% of window) → verbatim"]
+    E --> F["history rebuilt as:<br/>one summary message + recent verbatim"]
 ```
 
-**First, the split point is always safe.** `safeSplitIndexByBudget` (`internal/agent/compaction.go`) only ever cuts at a "pure user message containing no tool_result," which structurally guarantees no tool_use/tool_result pair is ever severed. That same guarantee is what allows compaction to happen *mid-turn*: a long turn checks usage after every batch of tool calls, and if it's over the line, earlier completed rounds get folded immediately while the in-flight calls stay untouched. For agent tasks that routinely make dozens of tool calls in one turn, mid-turn compaction isn't a nicety — it's table stakes.
+**First, the split point is always safe.** `safeSplitIndexByBudget` (`internal/agent/compaction.go`) only cuts at "pure user messages containing no tool_result" — structurally guaranteeing a tool_use/tool_result pair can never be split. This also lets compaction happen mid-turn: a long turn checks usage after every batch of tool calls, and if it's over, folds earlier complete rounds immediately while the in-flight calls proceed untouched. For agent tasks with dozens of tool calls, "can compact mid-turn" isn't a nice-to-have; it's a necessity.
 
-**Second, the usage math is counter-intuitive.** Context usage is not whatever `input_tokens` reports — when the prompt cache hits, Anthropic's `input_tokens` is only the uncached remainder, and the real footprint requires adding `cache_read + cache_write` back in (`accrueUsage` in `agent.go`). Get this wrong and the better your cache hit rate, the less compaction triggers — until one cache miss blows straight through the window.
+**Second, the usage math is counterintuitive.** Context usage is not whatever `input_tokens` reports — on a prompt-cache hit, Anthropic's `input_tokens` is only the uncached delta; the real usage adds `cache_read` back (`accrueUsage` in `agent.go`). Example: a 100K window, all early turns cache-hit, Anthropic reports `input_tokens: 20K` (the delta); real usage is 20K + 80K cache_read = 100K. A naive compactor sees 20K → 20% → doesn't trigger. Next turn the cache misses and 80K of original text + 20K of new content slams into the 100K threshold at once. **Without adding cache_read back, compaction never fires when hit rates are high — and the miss turn is exactly the turn that needs it most.**
 
-**Third, compaction has damping.** The trigger threshold defaults to 75% (configurable via `compact_auto_pct`), the keep budget is 30% of the window, and there's an anti-thrashing rule: if a fold would reclaim less than 15%, skip it entirely — otherwise a session hovering at the threshold pays for an expensive summarization call every single round.
+**Third, compaction has damping.** The trigger threshold defaults to 75% (configurable via `compact_auto_pct`), the retention budget is 30% of the window, and there's an anti-flap rule: if this fold would save less than 15%, skip it — otherwise a borderline session pays for an expensive summary call every single turn.
 
-One pitfall worth knowing: **the persisted `session.jsonl` stores the post-compaction history.** Compaction rebuilds the history wholesale, which triggers a full rewrite of the session file; the verbatim originals survive only if `ArchiveDir` is configured, in which case they're archived as `chunk-*.md` (the summary ends with the file path, so the model can read them back on demand) — otherwise they're gone for good. And since the history just got shorter, every `message_index` held by the Web frontend (edit and branch features depend on it) is silently invalidated; the server watches a length watermark and forces the frontend to re-fetch the whole transcript when the history shrinks below it. These compaction ripple effects have caused more rework than any other part of the mechanism.
-
-
-
+A pit worth knowing: **the on-disk `session.jsonl` stores the compacted history**. Compaction rebuilds the history wholesale, triggering a full rewrite of the session file; the original text only survives if `ArchiveDir` is configured, archived as `chunk-*.md` (the summary ends with the file path so the model can read it back itself with the read tool) — otherwise it's gone for good. A shorter history also invalidates every `message_index` the web frontend holds (edit/branch depend on it); the server detects the shrink via a watermark and forces the frontend to re-pull the whole transcript. These "compaction ripples" are the most reworked part of the whole mechanism.
 
 ## Prompt Caching: An Agent's Bill Is Quadratic
 
-The second problem is money. Every round of the loop re-sends the entire history, which means in an N-round session, message #1 gets billed N times — without caching, cost grows quadratically with conversation length.
+**The problem**: every iteration of the agent loop resends the full history. In an N-turn session, the first message gets billed N times. Without caching, cost grows **quadratically** with conversation length.
 
-Prompt caching fits in one sentence: if this request shares a prefix with the previous one, the matched part is billed at roughly a tenth of the price. The trouble is twofold: different protocols report "how much was cached" in completely different ways, and the Anthropic protocol requires you to **explicitly declare** where the cache boundary sits.
+The principle of prompt caching is simple: if this request shares a prefix with the last one, the hit portion is billed at about a tenth of the price. The trouble is that protocols report hits completely differently.
 
-The first point is where self-hosted gateway integrations crash most often:
+| Protocol | cache-hit field | semantics of input_tokens |
+|------|-------------|---------------------|
+| Anthropic | `cache_read_input_tokens` | reports only the uncached delta; hits counted separately |
+| OpenAI | `prompt_tokens_details.cached_tokens` | reports all input; hits are a subset |
+| DeepSeek | `prompt_cache_hit/miss_tokens` | two explicit buckets |
 
-| Protocol | Cache-hit field | Meaning of `input`/`prompt` tokens |
-|---|---|---|
-| Anthropic | `cache_read_input_tokens` | **only the uncached remainder**; hits counted separately |
-| OpenAI | `prompt_tokens_details.cached_tokens` | **the entire input**; hits are a subset of it |
-| DeepSeek | `prompt_cache_hit/miss_tokens` | explicitly split into two buckets |
+octo's answer: do one subtraction in the OpenAI adapter (`nonCachedInput`), turning OpenAI-style reporting into "two non-overlapping buckets" as well. From then on, the agent layer's `InputTokens` and `CacheReadTokens` mean the same thing under every protocol — and the usage math the compaction mechanism depends on is built on exactly that unification.
 
-Same semantics, three encodings. octo-agent performs one subtraction in the openai adapter (`nonCachedInput()`, `internal/provider/openai/types.go`) so the OpenAI-style numbers also become "two non-overlapping buckets" — from that point on, `InputTokens` and `CacheReadTokens` mean the same thing at the agent layer regardless of protocol. The usage arithmetic that compaction depends on (previous section) is built exactly on this unification. Protocol normalization isn't tidiness; it's the precondition for the layers above to be *correct*.
+**Breakpoint strategy**: declare cache scope with `cache_control` breakpoints in the request. There's one at the end of the system prompt — because the HTTP body order is tools → system → messages, the tools array sits before the system block and is implicitly included in the cached prefix, needing no breakpoint of its own. On the message side, one breakpoint each goes on the last two messages (two consecutive marks keep the cache anchor straddling the "old tail / new head" boundary). The newest message is never cached — it changes every time.
 
-The second point is more interesting: where to place the breakpoints. octo-agent plants exactly three `cache_control` breakpoints in every Anthropic request:
+## Memory: Three Lifetimes of "Remembering"
 
-```mermaid
-flowchart TB
-    subgraph Req["Request body (fixed order: tools → system → messages)"]
-        T["tool definitions"]
-        S["system prompt"]
-        M1["... earlier history ..."]
-        M2["second-to-last message"]
-        M3["last message"]
-    end
-    S ---|"breakpoint ① static prefix<br/>1h TTL on official endpoint, 5min on gateways"| S
-    M2 ---|"breakpoint ② 5min"| M2
-    M3 ---|"breakpoint ③ 5min"| M3
-```
+What an agent needs to remember spans three different lifecycle scales — the chat context within a session, user preferences across sessions, and retrievable knowledge fragments. Put it all in the system prompt and the window blows up fast; route it all through semantic search and high-frequency preferences get too slow to fetch. Three lifetimes naturally map to three storage and retrieval strategies:
 
-The static prefix (tool definitions + system prompt) needs only one breakpoint — since tools precede system in the request body, a breakpoint on the system block caches the tool definitions along with it. History gets a breakpoint on each of the **last two** messages. Why two? Because the next request appends new messages, so last round's "last message" becomes "N-th from the end"; with a single breakpoint, a retry that drops the trailing message would leave *no* breakpoint anywhere in the common prefix. Two breakpoints guarantee that however the sliding window moves, at least one lands inside the prefix shared with the previous request. Three total, against Anthropic's limit of four — margin left on purpose.
+| memory type | lifetime | storage | retrieval |
+|----------|------|----------|------|
+| session history | session lifetime | `~/.octo/sessions/*.jsonl` | loaded per session |
+| user preferences | cross-session | Markdown files under `~/.octo/memories/` | system-prompt injection (`Reminder`) |
+| semantic recall | cross-session | external memory backends (hindsight / mem0 / agentmemory, optionally self-hosted) | the `memory_recall` tool |
 
+The "user preference" memory deserves a closer look. It does no automatic extraction — the user or the agent triggers saves explicitly via `SaveNudge`. The `Reminder` injection runs on two tracks: entries written in `MEMORY.md` land directly in the system prompt as must-follow rules; topic files show up as only a filename and tags, and the agent reads them itself with `read_file` when needed. Textbook progressive disclosure — not every memory gets crammed into context.
 
+The "semantic recall" layer is likewise a product of restraint: octo ships no built-in vector database, instead handing conversation indexing wholesale to pluggable external backends (hindsight, mem0, or agentmemory — pick one, run the container yourself or use their managed clouds). Extraction and indexing are the backend's own business; octo only asks questions and collects answers. With no backend configured, `memory_recall` simply isn't registered into the tool list — not advertising a tool doomed to fail is more honest than failing after advertising it.
 
+## The Unkillable Host: octo serve's Robustness Design
 
-## Memory: History, Context, and Long-Term Recall
+A war story of my own first. I used to run an agent of OpenClaw's gateway-style architecture through IM: it ran on my machine at home while I was at the office. One day it executed a command that took the gateway process down — and from that moment, the chat window went dead silent. Later, on the subway, all I had was a conversation that would never reply again; there was nothing I could do until I got home and reached a terminal. For an agent that "lives in IM", a dead host process is brain death — and the killer was the agent itself.
 
-The previous three sections each touched a different layer of "what the model sees": tool calls arrive through the dispatcher, old turns get folded by compaction, and prompt-cached prefixes stop re-billing the unchanged parts. But none of them answer the question that holds the rest together: **what survives a session?**
+octo serve doesn't count on the model learning from other people's accidents; it stacks four layers of mechanism.
 
-octo keeps three distinct layers, and the distinction matters.
+**Layer one: the terminal refuses to hand over the knife.** When a serve process starts, it turns on the guard (`internal/tools/server_guard.go`); from then on the terminal tool refuses to execute any kill aimed at the host: `pkill / killall octo` (kill by name), `kill <PID>` (arguments scanned one by one, protecting its own PID and the supervisor's parent PID), `kill $(pgrep octo)` (resolve-then-kill) — all get bounced back with an error that names the correct move: use `restart_server`. Two details worth recording: a parent PID of 1 is not protected (being reparented to init/launchd means there is no supervisor, and a bare "1" would false-positive every command containing the digit); RE2 has no lookbehind, so PID extraction uses `(?:^|[^-\w])(\d+)` to explicitly sidestep — otherwise `kill -9 -1`, a phrase common in commit messages, would be misjudged. The package comment is honest as usual: this is a best-effort textual guard, not a sandbox — it stops the model from **reflexively** killing its host, not from a deliberate jailbreak.
 
-**会话历史 / session history** is the ordered list of user messages and assistant replies for *this* session. It's the single source of truth for "what just happened" and the payload the LLM receives on every turn. It's also the only layer that grows without a built-in ceiling — and the layer compaction fights for headroom.
-
-**上下文 / context** is the finite window actually handed to the model on a turn: the system prompt (env, skills manifest, injected memory) followed by the recent tail of conversation. Context is what compaction *shrinks* (by summarizing the older half of history into a single block), and what prompt *caching* makes cheaper to resend (by byte-stabilizing the prefix). It is per-session, rebuilt every turn, and strictly bounded by the model's context window.
-
-**长期记忆 / long-term memory** is anything that must outlive a single session — durable preferences, project decisions, corrections, the "why" behind a change. Memory is not part of context by default; it is *projected into* context at turn-build time by being injected into the system prompt or prepended to user messages, so it rides along with every turn without being part of the history that compaction can fold away.
-
-The pipeline flows one way: memory feeds context, context frames history, and when history grows too long compaction refolds it into context. Crucially, memory sits *outside* compaction's reach — a fact the agent can recall next session even if every turn from this one has been summarized into a single line.
-
-octo implements that last layer in two layers of its own, and they don't replace each other.
-
-### The Markdown Layer (internal/memory)
-
-Everything the agent remembers for the long term lives in plain markdown files it manages with the same file tools it uses on source code — there is no dedicated remember/forget/memory tool, and no code that reads the agent's intent. The agent itself decides what to keep, what to prune, and when to load a topic file on demand — the same way Claude Code works.
-
-**Layout and scoping.** Memories live in `~/.octo/memories/<repo-slug>/`, where the slug is `Slugify(basename)` plus a 32-bit FNV-1a hash of the full path — two checkouts of a repo named `my-app` don't collide. The repo root is derived from git's *common dir* (not the worktree top-level), so every linked worktree shares one memory scope. Alongside the project scope sits an **inherited home scope** (`~/.../octo-agent-<homehash>/`), for cross-project or personal preferences. On every turn, `memory.RenderInjection` loads both: inherited first (project-agnostic defaults), then project-specific.
-
-**MEMORY.md is the index; topic files hold the detail.** `MEMORY.md` is the small file loaded into the system prompt every session, acting as a pointer index. Anything longer lands in `<topic>.md` files linked from it (e.g. `octo-agent-subagent-lifecycle.md`). The budget is hard-capped: `truncateForInjection` clamps MEMORY.md to 200 lines or 25 UTF-8 kilobytes (whichever is hit first), matching Claude Code's ceiling. When the file overflows, a `⚠ exceeds the injection budget` warning is appended inside the system prompt so the model knows entries are being dropped — not silently surfacing 200 lines and forgetting the rest.
-
-**Rule tiers for action proximity.** Plain index entries are fine for "recall if you think to look," but load-bearing rules need to reach the agent *at the point of action*, not one read_file away. MEMORY.md may carry two optional structured sections parsed by `parseRules`:
-
-- `## 必须遵守` — always-apply rules, restated in full near every turn.
-- `## 触发提醒` — rules that fire only when user input matches a keyword prefix like `(触发: keyword1, keyword2)`.
-
-Rules in both tiers are written *verbatim*, not as pointers. A MEMORY.md with neither section parses to zero rules and the per-turn reminder is silent — the old plain-index style keeps working untouched. `Lint` flags the most common silent failure: a `触发提醒` rule missing its `(触发: …)` clause, which means it can never be recalled.
-
-**Per-turn reminders ride the message stream.** This is the piece most easily misunderstood. `Injector.Reminder(userInput)` runs on `EventUserPromptSubmit` and prepends activated rules as `<system-reminder>` to that turn's outgoing message — injected into history, not into the system prompt. The reason is prompt caching: keeping memory *out* of the system prompt keeps the prompt prefix byte-stable so Go's `markMessagesCacheable` breakpoints survive the protocol-adapter layer. Every turn re-announces the always-apply tier; the triggered tier is latched per text (`recalled map`) so each rule surfaces at most once per session and never spam-returns on every subsequent turn, re-armed on the next user input.
-
-Trigger matching is deliberately conservative: ASCII keywords must match on word boundaries (`deploy` does not fire on `deployment`, "用deploy部署" still matches because CJK bytes count as boundaries), while CJK keywords use substring matching because there are no spaces to anchor on and curated multi-rune phrases rarely collide. The fire direction is also one-way — input contains trigger never reverses — which is what stopped the earlier substring-explosion matcher from lighting up on nearly every message.
-
-**The save-nudge: memory as a follow-up incentive, not a pre-turn gate.** Memory survives best when the agent writes durable context while the moment is still fresh. `SaveNudge` fires on `EventPostToolUse` when the terminal runs `^gh pr (create|merge)` — a milestone that almost certainly means a decision was made. It appends a one-shot `<system-reminder>` telling the agent to record durable decisions, alternatives ruled out, and don't-repeat-this constraints in its memory directory *this turn*, while the diff and git log already hold WHAT changed — memory is for the why. The nudge is rate-limited (`nudged` flag) and re-armed per user turn, so a long session can still catch several milestones without nagging.
-
-### The Semantic Backend (internal/memorybackend, memory_recall)
-
-Plain markdown scales with the agent's own discipline and with how much prose it can hold. The optional semantic backend handles the case markdown can't: large corpora, approximate recall, and server-side extraction the agent would otherwise have to do itself.
-
-`internal/memorybackend` normalizes a swarm of external services (Hindsight, mem0, AgentMemory) behind a single `Backend { Name(); Store(ctx, content); Recall(ctx, query) }` interface. The `memory_recall` tool is advertised only when a backend is configured, and its `Execute` round-trips through `activeMemoryBackend.Recall` to return scored snippets. When the auto-recall flag is on, that same tool also runs as a `EventUserPromptSubmit` hook and folds results into the incoming message — matching the same channel `Injector` uses for MEMORY.md reminders, no new agent-core plumbing needed.
-
-Storing is a background side effect fired on `EventStop`: after each turn it detaches a goroutine (the turn's own context may already be cancelled), joins `User: … / Assistant: …` from the turn payload, strips `<system-reminder>` spans so already-injected context does not land in long-term storage (preventing round-trip recall pollution), and `Store`s with a 10-second decoupled timeout. Errors are swallowed: persistence is best-effort by design.
-
-Storing is fire-and-forget by necessity, not by choice. By the time `EventStop` fires, the turn's context may already be cancelled; the agent gets no tool_result channel to report store failures back through; and a flaky memory service should never break a turn. This is the same "memory must never block the agent" rule that keeps `RenderInjection` truncating instead of erroring when MEMORY.md is bloated.
-
-### How Memory Coexists with Compaction
-
-Because memory is injected into the system prompt / the message stream while compaction only folds the message stream's older turns, the two never trample each other. Compaction reduces history to a summary block; memory re-injected next turn still arrives in full. The index budget (200 lines / 25 KB) is deliberately compact: it is meant to stay under the cacheable prefix's own headroom so that recalling memory doesn't itself force a compaction. And because the summary produced by compaction includes the *effect* of any recalled memory (decisions the agent already acted on), memory can be pared back aggressively — the summary carries the *what*, MEMORY.md carries the *why*.
-
-## /loop: A Command That Doesn't Exist
-
-Users keep asking for things like "check every five minutes whether CI passed." octo-agent's answer is `/loop 5m check CI` — but grep the codebase for the implementation of `/loop` and you'll find the server's command router handles it with `return false`: don't intercept, pass it to the model as an ordinary message.
-
-**`/loop` isn't a command. It's a behavior taught by a tool description.** The thing that actually exists is a tool called `schedule_wakeup`, whose description spells out the convention: if the user's message starts with `/loop` plus a duration, parse the duration and call me with `repeat=true`; if it's `/loop` with no duration, enter dynamic mode and decide the next interval yourself each time you wake. Everything else is left to the model's reading comprehension.
+**Layer two: one front door for restarts, and it always asks you first.** Only two things genuinely need a restart: a replaced binary, or a change to config read only at startup. `restart_server` (`internal/tools/restart.go`) is that one front door, and it is pinned to the ask class, never allow-listable (`internal/permission/defaults.yml`) — every restart needs your personal confirmation: a modal on the web, a reply in IM; one tap on the subway is enough. The tool is only registered in the serve process (CLI/TUI never even see it), and sub-agents inherit the same gate. More importantly, calling it does **not** exit immediately: the server first drains all in-flight turns (30-second hard cap), *including the turn that made the call* — the "I'm about to restart" message is guaranteed to reach you before the process exits.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant M as Model
-    participant W as schedule_wakeup
-    participant T as time.AfterFunc (in-process timer)
-    participant S as same session
-
-    M->>W: repeat=true, delay=300s (clamped to [60, 3600])
-    W->>T: arm the timer (12-hour hard cap)
-    T-->>S: fires: drop a [LOOP TICK] system reminder into the inbox
-    S->>M: kick one idle turn, the model carries on
-    T->>T: repeat=true → re-arm inside the callback
+    participant M as Model (mid-turn)
+    participant U as User (IM / on the subway)
+    participant W as serve worker
+    participant S as supervisor
+    M->>U: ask confirmation: restart the server?
+    U-->>M: replies "yes"
+    M->>W: restart_server(reason)
+    W->>W: drain in-flight turns (≤30s, incl. this turn)
+    W-->>M: "restart scheduled" + farewell reply delivered
+    W->>S: exits with code 42
+    S->>S: re-resolve binary path, spawn new worker
+    S-->>U: clients reconnect automatically
 ```
 
-What makes this design good is how cleanly it splits three responsibilities: **parsing belongs to the model** (no parser needed for "5m" or "every half hour"), **triggering belongs to Go** (`time.AfterFunc`; on wake, the prompt is wrapped as a system reminder and dropped into the session inbox, reusing the existing pathway for background-task notifications), and **cadence belongs to convention** (in dynamic mode, if the model doesn't re-arm, the loop simply ends — the termination condition is the model's *inaction*, not a state machine).
+**Layer three: the supervisor contract makes "restart" mean "back at full health".** `octo serve` runs as a supervisor/worker pair by default (`cmd/octo/serve_supervisor.go`). After draining, the worker exits with code **42** (`ExitRestart`); the supervisor sees 42 and respawns — re-resolving the binary path on every spawn, so replacing the binary on disk and restarting amounts to an upgrade. The contract is open to the outside: set `OCTO_SERVE_WORKER=1` and an external supervisor takes over respawn (systemd joins the same protocol via `RestartForceExitStatus=42`). Two honest boundaries: when the user hits Ctrl-C, the signal is forwarded and the worker is **not** respawned (the user asked the whole thing to quit — this isn't whack-a-mole); when the worker genuinely crashes, its exit code propagates as-is and it isn't respawned either — the built-in supervisor only handles graceful restarts; crash recovery belongs to systemd, the thing that actually does that for a living. No fake high availability.
 
-The cost is that loops live entirely in process memory: the timers are a map on the `Server` struct, gone on restart, with no state file. That's a deliberate division of labor — periodic tasks that must survive restarts belong to a different subsystem, `internal/scheduler` (real cron, JSON-persisted under `~/.octo/tasks/`); `/loop` serves the session-scoped "keep an eye on this for the next few hours" need, which is why it carries a 12-hour hard cap after which it stops re-arming. As for "won't a long-running loop blow up the history" — every tick is just a normal turn, and the compaction machinery above applies unchanged. Loop needs, and gets, no special treatment.
+**Layer four: most things that "need a restart" need no restart at all.** Hot reload is the preferred path for config changes. After editing channels.yml, `POST /api/channels/{platform}/reload` rebuilds only that one platform's adapter — the channel-manager skill calls it right after writing the config, and you won't feel so much as a tremor in IM. The desktop build has no supervisor, so hot reload is the only path there. The per-turn rebuild of permissions.yml was covered in the permissions chapter — same philosophy: whatever can be hot-swapped is never restarted; whatever must be restarted is never hard-cut.
 
+The four layers add up to the same old line: you can't teach a model "never kill your host", but you can make it unable to; you can't guarantee it remembers the front door every time, but you can make the front door the only way through.
 
+## Workflow: Turing-Complete Orchestration That Can't Touch the System
 
+**The problem**: "Review this diff from correctness, security, and performance angles simultaneously." Having the main model call sub-agents one by one is too slow; making users write Go is too heavy.
 
-## Workflow: Make Orchestration Turing-Complete, but Keep It Away from the System
-
-Concurrent sub-agents are another recurring need: "review this diff from correctness, security, and performance angles simultaneously, then synthesize." Having the main model call sub-agents one by one is slow and expensive; making users write Go is too heavy. octo-agent's answer is a Ruby DSL:
+**The answer**: a Ruby DSL running on the chain mruby (a lightweight embeddable Ruby interpreter) → wasm32-wasi → wazero (a pure-Go wasm runtime):
 
 ```ruby
-findings = parallel(["correctness", "security", "performance"].map { |view|
-  -> { agent("Review this diff from the #{view} angle") }
-})
+findings = parallel(["correctness", "security", "performance"]) { |view|
+  agent("Review this diff from the #{view} angle")
+}
 agent("Synthesize these findings: #{findings.join("\n")}")
 ```
 
-Where does this script run? The answer takes a detour: **an mruby interpreter, compiled to wasm32-wasi, executed by wazero (a pure-Go wasm runtime).** Every layer of the detour has a reason. Turing-complete orchestration (loops, conditionals, retries) demands a real language. Embedding an interpreter without cgo is non-negotiable — cgo destroys Go's "one command, binaries for every platform" cross-compilation, fatal for a project whose selling point is single-file distribution. And the wasm sandbox solves a third problem for free: user scripts physically cannot touch the filesystem or network; their entire capability surface is the handful of functions the host explicitly exports. Even the regex support is a child of this constraint — mruby's official C regex engine won't compile for the wasi target, so `Regexp` is bridged to Go's RE2, with an accidental bonus: RE2 guarantees linear time, so script authors can't write a ReDoS.
+Every layer has its reason:
+- **mruby**: Turing completeness demands a real language
+- **wasm32-wasi**: embed an interpreter without cgo (cgo kills Go's cross-compilation)
+- **wazero**: a pure-Go wasm runtime; one command builds binaries for every platform
 
-The most delicate part is the concurrency model. mruby inside wasm is single-threaded — how does `parallel` actually parallelize? By **two kinds of coroutines shaking hands at the function boundary**: Fibers (cooperative) on the mruby side, goroutines (truly concurrent) on the Go side.
+**Concurrency model**: mruby inside wasm is single-threaded. mruby-side Fibers (cooperative) and Go-side goroutines (true concurrency) shake hands at the function boundary — an `agent()` call is non-blocking: Go starts a goroutine for the LLM call while mruby suspends. `parallel`'s concurrency is fixed at 8 (`defaultWorkflowConcurrency`), so a `parallel` over a large list can't fan out an unbounded number of concurrent LLM calls.
 
-```mermaid
-flowchart TB
-    subgraph mruby["mruby VM (inside wasm, single-threaded)"]
-        F1["Fiber ①: agent('correctness…')"]
-        F2["Fiber ②: agent('security…')"]
-        L["scheduler loop __run_fibers"]
-    end
-    subgraph go["Go host (real concurrency)"]
-        S["agent_start: register token,<br/>immediately go func() the sub-agent"]
-        G1["goroutine ①: LLM call"]
-        G2["goroutine ②: LLM call"]
-        W["agent_wait_any:<br/>select on first completion"]
-    end
-    F1 -->|"non-blocking start"| S
-    F2 -->|"non-blocking start"| S
-    S --> G1
-    S --> G2
-    F1 -.->|"Fiber.yield suspends"| L
-    F2 -.->|"Fiber.yield suspends"| L
-    L -->|wait| W
-    G1 --> W
-    G2 --> W
-    W -->|"first finished token"| L
-    L -->|"resume that Fiber"| F1
-```
+**The journal mechanism**: every `agent()` call's result is recorded under `~/.octo/workflow-journals/`. On a re-run, once the hashes check out, completed calls replay their cached results — if step 8 of a long workflow died, fix one line and re-run without re-paying the LLM bill for the first 7 steps.
 
-An `agent()` call into the host's `agent_start` is non-blocking: the Go side immediately spawns a goroutine for the real LLM call and hands back a token, while the mruby side suspends itself with `Fiber.yield`. The scheduler loop first advances every branch to its first `agent()` call — launching all the goroutines — then repeatedly calls `agent_wait_any` (a Go `select` parked on a completion channel) and resumes whichever Fiber's work finished first. Concurrency is capped at a hardcoded 8; calls beyond the cap queue on a semaphore, so a `parallel` over a large list can't fan out an unbounded number of concurrent LLM turns.
+## The Browser: Never Launch, Only Attach
 
-There's a journal to go with it: every `agent()` result is appended to `~/.octo/workflow-journals/`, and on re-run — after verifying the script+args hash matches — completed calls replay their cached results instead of hitting the LLM again. For a long workflow that died at step 8, fixing one line and re-running doesn't re-pay for the first 7 steps.
+**The counterintuitive design**: octo never launches a browser; it only attaches to the Chrome the user already has open. A self-launched headless instance has no login state, and on macOS it triggers the keychain prompt — for a daily tool, the moment that prompt appears, user trust is gone.
 
+**Record & replay**: what's recorded is not a coordinate sequence (coordinates die the moment the window resizes) but a **semantic event stream** — structured fields like `action / selector / value / verify`. The recording pipeline: inject a listener script into the page to capture click/change/navigation events → generate a selector for each target element (prefer id → data-testid / aria-label → fall back to nth-of-type) → compile and dedupe → parameterize the repeatable inputs → emit structured YAML.
 
+Selectors rot: one frontend redesign turns `.btn-submit` into `.button-primary` and the script breaks. The replay engine's answer has two tiers:
 
+1. **The free tier**: the most common failure is actually a cookie popup covering the target element — auto-dismiss the overlay and retry first
+2. **The LLM tier**: feed the intent, the dead selector, and a digest of every interactable element on the current page to the model, have it answer with only a new selector, swap it in and retry, up to three rounds. Once the fix works and the whole skill run passes, the new selector is **written back to the YAML on disk** — the same redesign never costs you another LLM repair fee
 
-## Browser: Never Launch, Only Attach
+## The Permission System: Admitting It's Just String Matching
 
-The industry-standard move in browser automation is to launch a headless Chrome. octo-agent goes the opposite way: **it never launches a browser; it only attaches to the Chrome the user already has open.** The launch capability exists in the code but the production path never calls it, and the comment is blunt about why: a self-launched headless instance carries no login sessions, and on macOS it trips the "Chrome Safe Storage" keychain prompt — for a daily-driver tool, the moment that dialog appears, the user's trust is gone. When no attachable Chrome is found, the tool returns instructions for enabling the remote-debugging port rather than silently falling back to headless.
+An agent that can execute arbitrary shell commands needs a carefully thought-out security model.
 
-Underneath is a hand-rolled CDP (Chrome DevTools Protocol) client over `gorilla/websocket` — no chromedp. The needed domains (Target/Page/DOM/Runtime/Input/Network and a few more) are a short list; writing them directly turns out thinner than the dependency.
+**First, precedence is independent of declaration order** — it's not "the first matching rule from the top wins", which would make file line order part of the security semantics. The actual implementation buckets matches: hit rules go into deny/ask/allow buckets, and the result is taken by fixed priority. Hardcoded backstop rules (`rm -rf /usr`, `dd if=`, etc.) can't be overridden even by a user-written allow.
 
-The part worth unpacking is **record & replay**. What gets recorded is neither a screen capture nor a coordinate sequence — coordinates die with the next window resize — but a **semantic event stream**:
+**Second, `^` anchoring solves real accidents**: `deny: "format"` was meant to stop disk formatting, but it also stopped `docker ps --format json`; `deny: "shutdown"` stopped `git commit -m "fix shutdown handling"` — the sensitive word appearing inside a commit message. `^` anchors matching to command position (start of line, after a pipe, after `sudo`), leaving arguments and string contents alone.
 
-```mermaid
-flowchart LR
-    A["Inject listener script<br/>(Runtime.addBinding)"] --> B["Capture click / change / navigation"]
-    B --> C["Generate a selector per target<br/>#id → data-testid / aria-label<br/>→ fallback nth-of-type path"]
-    C --> D["Password fields flagged secret,<br/>value never stored"]
-    D --> E["Compile: dedupe + parameterize<br/>into {{param}} placeholders"]
-    E --> F["Artifact: structured YAML<br/>~/.octo/browser-recordings/*.yaml"]
-```
+**Third, hot reload + graceful degradation**: the permission engine is rebuilt every turn, so an edit to `permissions.yml` takes effect on the very next command. A YAML syntax error falls back to the last successfully parsed rules — a briefly broken config file must neither crash the session nor leave it "temporarily undefended" in that window.
 
-Each recorded step compiles into structured fields — `action / selector / value / verify` — with the repeatable inputs (search terms, dates) lifted into parameters: record once, replay many times with arguments.
+**Honesty**: by default there's no OS-level isolation; the shell tool is a bare `exec.Command` and the only line of defense is string rules. Real OS-level isolation is optional depth (macOS Seatbelt, Linux Landlock + seccomp). The package comment says it plainly — string matching can certainly be bypassed; stating the boundary clearly is worth far more than advertising a security model that doesn't exist.
 
-But selectors rot: the frontend ships a redesign, `.btn-submit` becomes `.button-primary`, and the script breaks. The replay engine responds in two tiers. Tier one costs nothing: the most common failure is actually a cookie banner covering the target, so first dismiss the overlay and retry. Tier two is **self-healing**: hand the LLM the step's intent description, the dead selector, and a digest of every interactive element on the current page, and ask for exactly one new selector; swap it in and retry, up to three rounds. If the fix works and the whole skill runs green, the new selector is **written back to the YAML on disk** — the healing is durable, so one redesign doesn't cost you an LLM repair fee on every subsequent replay.
+## The Trash Can: Designed for the Premise "The Model Will Delete the Wrong File"
 
-One axed feature deserves a footnote: early versions tried auto-triggering recorded skills when the user mentioned certain keywords. Too many false triggers in practice; it was removed. Recorded skills now fire in exactly two ways — an explicit Replay button in the Web UI, or the model explicitly invoking `replay` in conversation. The design doc keeps the record of that failure — knowing what was tried and abandoned is sometimes worth more than knowing what exists.
+**The premise**: the model **will** delete the wrong file. Not "might" — sooner or later. The right question isn't "how do we prevent bad deletes" but "what happens after one".
 
-
-
-
-## Permissions: Admitting It's Just String Matching
-
-An agent that can run arbitrary shell commands needs its security model thought all the way through. octo-agent's permission system has three designs worth telling, and one piece of honesty worth respecting.
-
-**First, precedence is independent of declaration order.** The verdict is not "first matching rule from the top wins" — that would make the line order of a config file part of the security semantics, where reshuffling lines can open a hole. The actual implementation buckets: walk every rule, drop the hits into deny/ask/allow buckets, then read out in fixed precedence — a non-empty deny bucket means denied, regardless of whether an allow was written above or below it. The hardcoded backstop rules (catastrophes like `^rm -rf /usr`, `^dd if=`) ride the same mechanism, so no user-written allow can override them.
-
-**Second, the `^` anchor exists because of real incidents.** Matching is substring-based at its core, and bare substrings over-block: `deny: "format"` was meant to stop disk formatting but also blocked `docker ps --format json`; `deny: "shutdown"` blocked `git commit -m "fix shutdown handling"` — the sensitive word merely appeared inside a commit message. The `^` prefix anchors the match to **command position**: start of line, after `&&`/`;`/`|`, after `sudo` or environment-variable prefixes. `^format` matches format being *executed as a command*, never as an argument or string content. This feature wasn't designed in the abstract; it was forced into existence by those two false positives.
-
-**Third, hot reload plus graceful degradation.** The permission engine is rebuilt every turn, so an edit to `permissions.yml` takes effect on the very next command, no restart. What if the YAML is mid-edit and syntactically broken? Fall back to the last successfully parsed rules (`lastGoodRules`) and log a warning — a briefly broken config file must neither crash the session nor leave it *temporarily unguarded* during that window.
-
-Then the honesty. **By default, octo-agent has no OS-level isolation whatsoever**: without `--sandbox`, the shell tool is a bare `exec.Command("sh", "-c", ...)`, and the only line of defense is the string rules above. Real OS-level isolation is opt-in depth: Seatbelt on macOS, Landlock + seccomp on Linux (inet sockets banned outright), unsupported elsewhere — and if `--sandbox` is requested on an unsupported platform, it refuses to run (fail closed) rather than silently degrading. The package comment in `internal/sandbox` characterizes the relationship precisely: the sandbox is "defense-in-depth *beneath* the permission engine, which only gates command strings." String matching can of course be bypassed — stating the boundary plainly is worth far more than advertising a security model that doesn't exist.
-
-The companion audit log records every deny and every user verdict (one JSON per line, 10 MiB rotation). One detail inside: every field is truncated at 1 KiB. Not to save disk — to prevent a single rejected `write_file` from copying an entire file's contents, or a command containing a secret, verbatim into the audit log. The audit log must not become a new leak surface.
-
-
-
-
-## Trash Can: Designed for the Premise "the Model Will Delete the Wrong File"
-
-The last mechanism is the humblest, and the clearest window into the project's worldview. The premise is simple: the model **will** delete the wrong file. Not might — eventually will. So the right question isn't "how do we prevent wrong deletions" but "what happens after one."
-
-octo-agent's answer is to turn every destructive operation from irreversible into reversible — with broader coverage than you'd guess:
+Coverage is wider than you'd think:
 
 ```mermaid
 flowchart TD
-    A["rm in the shell<br/>(injected __octo_safe_rm backs up first)"] --> T
-    B["Remove-Item on Windows<br/>(cmdlet shadowed by a wrapper)"] --> T
-    C["write_file / edit_file overwriting an existing file<br/>(old version backed up first)"] --> T
-    D["programmatic deletion<br/>session / skill / workflow / memory"] --> T
-    T["~/.octo/trash/&lt;project hash&gt;/<br/>&lt;timestamp&gt;_&lt;random&gt;_&lt;filename&gt; + .meta.json"]
-    T --> R["octo trash restore<br/>(by ID or fuzzy path match)"]
-    T --> E["background cleanup: 14-day expiry<br/>+ size cap, oldest evicted first"]
+    A["rm in shell (injected __octo_safe_rm cp -al's to trash first)"] --> T
+    B["write_file / edit_file overwriting an existing file<br/>old version backed up first"] --> T
+    C["programmatic deletes of session / skill / workflow / memory"] --> T
+    T["~/.octo/trash/<project hash>/<br/><timestamp>_<random>_<filename> + .meta.json"]
+    T --> R["octo trash restore<br/>fuzzy match by ID or path"]
+    T --> E["background sweep: 14-day expiry + size cap"]
 ```
 
-The `rm` interception works by injecting a same-named function into the shell environment; before the real delete, the target is moved into the trash via `cp -al` (hard links, nearly zero cost). On Windows the `Remove-Item` cmdlet is shadowed to run the same flow. Even the model *editing* files is covered — `write_file` overwriting an existing file sends the old version to the trash first.
+One small judgment call that shows craft: **if the target file is tracked by git and the working tree is clean, skip the backup**. git already has the content; storing another copy in the trash is pure waste. A good safety net doesn't just catch — it stays quiet.
 
-One judgment call in the overwrite backup shows real craft: **if the target file is git-tracked and the working tree is clean, skip the backup.** Git already has that content; a second copy in the trash is pure waste. One `git ls-files` plus two `git diff --quiet` calls cut the trash noise dramatically — a good safety net must not only catch, it must stay quiet, or users will switch the whole thing off.
+## Batteries Included: Keeping Users Through the First Five Minutes
 
-Recovery goes through `octo trash restore`, matching by ID or fuzzy path. If the destination is now occupied, three policies apply: abort with an error (default), move the occupant into the trash too and then restore, or restore under a timestamped new name. Each project's trash is isolated by a hash of the project path; it's purely local, with 14-day expiry and a size cap enforced by background cleanup, so it never grows without bound.
+The previous nine are "hard problems", but the genuinely hard part of building an agent is **the first five minutes**. If a user has to install ripgrep or dig through MCP repos before their first question, they're likely gone for good.
 
+- **MCP tool search**: don't cram full JSON schemas into the prompt; expose only a name and a one-line description. When the model actually wants to use one, it pulls the schema via `mcp_describe`. `auto` mode only kicks in when lazy-loading saves ≥ 10% of the context over uploading everything.
+- **Two bundled binaries**: ripgrep is compiled into the binary (`go:embed`) so users don't install anything; the Python openpyxl dependency is solved by bundling uv.
+- **Five meta-skills** (`skill-creator`, `mcp-creator`, `channel-manager`, `cron-task-creator`, `workflow-creator`) that handle octo's own configuration — walking users through flows that would otherwise be handwritten YAML. They rely on the file tools (`write_file`, `edit_file`, `terminal`) plus octo-specific knowledge, rather than a bespoke tool per YAML file — the "tools are composable" principle applies to user workflows and to octo's own onboarding alike.
 
+## Closing
 
+Ten mechanisms, each minding its own business — and together, one judgment: **whatever a mechanism can guarantee, never leave to the model's self-discipline.**
 
-## Batteries Included: Discoverability, Meta-Skills, and a Gentler Default
+Compaction rests on token thresholds and safe split points, not prayers that the summary loses nothing; cache breakpoints are inserted explicitly, not left to luck; serve makes sure the model can't kill its own host, and even a restart asks you first and delivers its reply before going down; workflow's concurrency cap is a constant, not the script author's self-restraint; the permission system's deny-first and command anchoring each correspond to a real accident; and the trash can simply assumes bad deletes are inevitable and spends its effort on "after".
 
-The seven sections above were the "hard parts" — places where a wrong design bleeds context tokens or loses a file. But the genuinely hardest part of shipping an agent isn't the hard parts; it's the first five minutes. If the user has to `apt install` ripgrep before the first search, or hunt down an MCP registry before asking a single question, they leave. octo answers that with three layers of "it just works" — all of which happen to be the same principles (defer what you can, surface what matters, degrade gracefully) applied to the onboarding path.
-
-### MCP Tool Search: The Lazy Registry
-
-Standard MCP wiring has a hidden tax: every tool's full JSON schema gets pushed into the system prompt on every turn. Connect three MCP servers with forty tools between them and you've spent a thousand tokens on the user just to learn *what exists before asking anything*. octo's answer (`internal/tools/tool_search.go`) is to defer the heavy half.
-
-Two bridge tools, `mcp_describe` and `mcp_call`, replace the full upload. Each MCP tool's **name and one-line description** ride along in the system prompt the same way `skills.RenderManifest` surfaces `# Available skills` — so the model can answer "is there a tool for X?" in zero round trips. `mcp_describe` pulls one schema on demand (when the model actually wants to use the tool), and `mcp_call` invokes it — routing straight into the existing `executeMCP` path, so all the `mcp__`-prefix dispatch, permission, and hook machinery runs against the real tool name unchanged.
-
-The mode selector (`auto` / `on` / `off`) is the same instinct as elsewhere: `auto` activates the bridge only when deferred schemas would occupy at least 10% of the context window. Below that, the simpler full-upload path wins; above it, the search mechanism keeps the prompt from drowning in schemas it won't use this turn.
-
-### Two Binaries You Don't Have to Install
-
-**ripgrep.** `internal/tools/rgembed` ships a platform-matched ripgrep binary *inside* the octo binary: the Makefile downloads the BurntSushi/ripgrep release for the build platform, and `go:embed` bakes it in when the `embedrg` tag is set. At runtime, if `rg` is already on `PATH`, that one's used; otherwise the embedded copy is extracted to `~/.octo/bin/rg-<version>`. The `grep` tool gets a fast, consistent search backend with zero user action.
-
-**uv.** `office-xlsx` depends on Python's openpyxl, and openpyxl needs a Python runner. Rather than ask the user to manage that, the macOS and Windows installer packages bundle uv directly. The tradeoff is straightforward: macOS grows ~100MB so the user never sees "install Python" on their first spreadsheet task. It bundles *uv* and not *bun* — uv is a single static binary that resolves dependencies; bun is a full JavaScript runtime for a power-user skill that most people don't need.
-
-### Windows Knows When to Suggest an Upgrade
-
-There's a playful bit of craft in the Windows installer (`packaging/windows/octo.iss`): it runs an `EnsurePowerShell7` check at the end. If `pwsh` isn't on PATH but `winget` is, it asks the user — once, bilingual — whether to install PowerShell 7. Why? octo runs hook scripts and the terminal tool through `pwsh` (7+) when it's present and falls back to the always-there Windows PowerShell 5.1 when it isn't. The 7 path is a better default (faster, predictable `~/.bashrc`-style profile, real `&&` semantics). Every skip-failure path is a silent no-op: if anything goes wrong, octo just keeps using 5.1. The user is prompted, never blocked.
-
-### Five Meta-Skills: octo Learns to Extend Itself
-
-A skill is usually a snippet the model can invoke — but a handful of shipped skills are *about* octo's own setup. They talk the user through configuration that would otherwise require hand-editing YAML, and they lean on agent memory so the conversation carries across sessions.
-
-| Skill | Job |
-|---|---|
-| `skill-creator` | Scaffold a new skill, edit an existing one, or capture a workflow as a skill. |
-| `mcp-creator` | Discover an MCP server package, build the `~/.octo/mcp.json` entry, verify the connection — guided, no manual JSON. |
-| `channel-manager` | Walk the user through each IM platform's console, collect credentials, write `~/.octo/channels.yml`, diagnose connection failures. |
-| `cron-task-creator` | Create, inspect, enable, and delete scheduled agent prompts stored in `~/.octo/tasks/`. |
-| `workflow-creator` | Capture a repeatable multi-step task and turn it into a saved, resumable Ruby (mruby) workflow. |
-
-One thing worth noting: `channel-manager`, `mcp-creator`, `cron-task-creator`, and `workflow-creator` all lean on the file tools (`write_file`, `edit_file`, `terminal`) as much as they do on octo-specific knowledge. That's a deliberate choice — it means a meta-skill doesn't need a bespoke tool for every piece of YAML it writes. The same "tools are composable" principle that powers user workflows powers octo's own onboarding.
-
-
-
-
-## Coda: One Worldview Throughout
-
-Each of the ten mechanisms minds its own patch; together they express a single judgment: **in an agent system, whatever a mechanism can guarantee, never leave to the model's good behavior.**
-
-Compaction relies on token thresholds and safe split points, not on praying the summary loses nothing. Cache breakpoints are placed explicitly, not left to luck. Loop has a 12-hour hard cap to catch a model that forgets to stop. Workflow's concurrency cap is a constant, not a hope that script authors show restraint. Every rule in the permission system — deny precedence, command anchoring — maps to an incident that actually happened. And the trash can simply assumes wrong deletions are inevitable and spends its effort on the *after*.
-
-The model supplies the intelligence; the mechanisms supply the floor. If one sentence is worth taking away from this codebase, it's that.
+The model does the clever; the mechanism does the floor. That's probably the one line most worth taking away from this codebase.
 
 ---
 
-### Appendix: Where to Start Reading the Code
+### Appendix: Code Entry Points
 
-| Mechanism | Entry file |
-|---|---|
+| mechanism | entry files |
+|------|----------|
 | Agent loop | `internal/agent/agent.go` |
-| Built-in tool contract | `internal/tools/registry.go` (allTools), `internal/agent/tool.go` |
-| Memory (markdown) | `internal/memory/memory.go` (RenderInjection), `internal/memory/injector.go` (Injector.Reminder / SaveNudge), `internal/memory/rules.go` (parseRules) |
-| Memory (semantic) | `internal/memorybackend/backend.go`, `internal/tools/memory_backend.go` (memory_recall) |
 | Context compaction | `internal/agent/compaction.go` |
-| Prompt cache breakpoints | `internal/provider/anthropic/client.go` (`markMessagesCacheable`) |
-| Protocol token normalization | `internal/provider/openai/types.go` (`nonCachedInput`) |
-| /loop | `internal/tools/schedule_wakeup.go`, `internal/server/loop.go` |
-| Workflow runtime | `internal/workflow/runtime.go`, `internal/workflow/prelude.rb` |
-| Browser record / self-heal | `internal/browser/recorder.go`, `internal/app/browser_heal.go` |
-| Permission verdicts | `internal/permission/permission.go` (`classify` / `Check`) |
+| Prompt-cache breakpoints | `internal/provider/anthropic/client.go` |
+| Protocol token normalization | `internal/provider/openai/types.go` |
+| Memory (Markdown) | `internal/memory/memory.go` |
+| Memory (semantic) | `internal/memorybackend/backend.go` |
+| serve self-kill guard | `internal/tools/server_guard.go` |
+| Graceful restart / supervisor | `internal/tools/restart.go`, `internal/server/restart.go`, `cmd/octo/serve_supervisor.go` |
+| Workflow runtime | `internal/workflow/runtime.go` |
+| Browser record/self-heal | `internal/browser/recorder.go` |
+| Permission decisions | `internal/permission/permission.go` |
 | OS-level sandbox | `internal/sandbox/` |
 | Trash can | `internal/trash/trash.go` |
 | MCP tool search | `internal/tools/tool_search.go` |
-| Meta-skills | `internal/skills/defaults/{skill-creator,mcp-creator,channel-manager,cron-task-creator,workflow-creator}/SKILL.md` |
+| Meta-skills | `internal/skills/defaults/` |
 | Read-before-write guard | `internal/tools/read_tracker.go` |
-| web_fetch SSRF defenses | `internal/tools/web_fetch.go` (`secureFetchTransport` / `directFetchHTTPClient`) |
-| web_search backends | `internal/tools/web_search.go` |
-| terminal background manager | `internal/tools/background.go` |
-| Sub-agent lifecycle | `internal/tools/agent.go`, `internal/tools/subagent_manager.go` |
+| web_fetch SSRF defense | `internal/tools/web_fetch.go` |
+| web_search tiered backends | `internal/tools/web_search.go` |
+| sub_agent lifecycle | `internal/tools/agent.go` |
