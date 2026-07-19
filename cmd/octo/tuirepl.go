@@ -617,16 +617,16 @@ type tuiModel struct {
 // exercised by TestModelPicker_TwoLevelEndpointSwitch.
 type modelPicker struct {
 	endpoints []pickerEndpoint
-	epIdx     int // highlighted endpoint
+	epIdx     int         // highlighted endpoint
 	items     []complItem // alias for endpoints[epIdx].items; kept for tests + view
 	idx       int         // highlighted model within the current endpoint
 }
 
 // pickerEndpoint is one channel in the two-level model picker.
 type pickerEndpoint struct {
-	id      string        // endpoint ID; used to build the composite id on accept
-	display string        // one-line header shown above the endpoint's models (name · provider · base_url)
-	items   []complItem   // models under this endpoint (name = model id, desc = extra hint)
+	id      string      // endpoint ID; used to build the composite id on accept
+	display string      // one-line header shown above the endpoint's models (name · provider · base_url)
+	items   []complItem // models under this endpoint (name = model id, desc = extra hint)
 }
 
 // subAgentUI is the live panel state for one running sub-agent.

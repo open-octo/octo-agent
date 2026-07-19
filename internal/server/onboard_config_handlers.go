@@ -247,8 +247,8 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 // badge "已配置 / 未设置" without exposing the secret.
 type endpointsResponse struct {
 	Endpoints []endpointConfigJSON `json:"endpoints"`
-	Default   string                `json:"default,omitempty"`
-	Lite      string                `json:"lite,omitempty"`
+	Default   string               `json:"default,omitempty"`
+	Lite      string               `json:"lite,omitempty"`
 }
 
 // endpointConfigJSON is one channel in the two-level response.
