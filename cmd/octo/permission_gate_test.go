@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/audit"
 	"github.com/open-octo/octo-agent/internal/permission"
 )
 
@@ -21,7 +22,8 @@ func newGate(t *testing.T, mode permission.Mode, stdin string) (agent.Permission
 	}
 	var out bytes.Buffer
 	view := newPlainView(newScannerLineReader(strings.NewReader(stdin), &out), &out, &out, verbosityNormal, false)
-	return newCLIGate(eng, view), &out
+	// No-op audit logger: test checks must not land in the real ~/.octo/audit.log.
+	return newCLIGate(eng, view, audit.NewAt("")), &out
 }
 
 func TestCLIGate_AllowPassesThrough(t *testing.T) {

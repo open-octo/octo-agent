@@ -30,6 +30,14 @@ func recordingAsk(allow, remember bool, err error, calls *int) PermissionAsk {
 	}
 }
 
+// quietGate builds a gate with a no-op audit logger, so test checks never
+// append to the real ~/.octo/audit.log (NewPermissionGate writes there by
+// default).
+func quietGate(t *testing.T, ask PermissionAsk) *permissionGate {
+	t.Helper()
+	return &permissionGate{engine: newEngine(t, permission.ModeInteractive), ask: ask, audit: audit.NewAt("")}
+}
+
 func TestGate_AuditLogsDenyAndAsk(t *testing.T) {
 	// Inject an audit logger at a temp path instead of the default
 	// ~/.octo/audit.log. (Redirecting $HOME would not work on Windows, where
@@ -67,7 +75,7 @@ func TestGate_AuditLogsDenyAndAsk(t *testing.T) {
 
 func TestGate_AllowPassesThrough(t *testing.T) {
 	calls := 0
-	g := NewPermissionGate(newEngine(t, permission.ModeInteractive), recordingAsk(true, false, nil, &calls))
+	g := quietGate(t, recordingAsk(true, false, nil, &calls))
 	ok, _ := g.Check(context.Background(), "terminal", map[string]any{"command": "ls"})
 	if !ok {
 		t.Error("ls should be allowed")
@@ -79,7 +87,7 @@ func TestGate_AllowPassesThrough(t *testing.T) {
 
 func TestGate_DenyReturnsReason(t *testing.T) {
 	calls := 0
-	g := NewPermissionGate(newEngine(t, permission.ModeInteractive), recordingAsk(true, false, nil, &calls))
+	g := quietGate(t, recordingAsk(true, false, nil, &calls))
 	ok, reason := g.Check(context.Background(), "terminal", map[string]any{"command": "rm -rf /"})
 	if ok {
 		t.Error("rm -rf / must be denied")
@@ -94,7 +102,7 @@ func TestGate_DenyReturnsReason(t *testing.T) {
 
 func TestGate_AskInteractive_Allow(t *testing.T) {
 	calls := 0
-	g := NewPermissionGate(newEngine(t, permission.ModeInteractive), recordingAsk(true, false, nil, &calls))
+	g := quietGate(t, recordingAsk(true, false, nil, &calls))
 	ok, _ := g.Check(context.Background(), "terminal", map[string]any{"command": "sudo apt update"})
 	if !ok || calls != 1 {
 		t.Errorf("ask-class should prompt once and allow; ok=%v calls=%d", ok, calls)
@@ -112,7 +120,7 @@ func TestGate_AskInteractive_DeclineOrError(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			calls := 0
-			g := NewPermissionGate(newEngine(t, permission.ModeInteractive), recordingAsk(c.allow, false, c.err, &calls))
+			g := quietGate(t, recordingAsk(c.allow, false, c.err, &calls))
 			ok, reason := g.Check(context.Background(), "terminal", map[string]any{"command": "sudo apt update"})
 			if ok {
 				t.Error("decline/error must deny")
@@ -126,7 +134,7 @@ func TestGate_AskInteractive_DeclineOrError(t *testing.T) {
 
 func TestGate_AskRemembers(t *testing.T) {
 	calls := 0
-	g := NewPermissionGate(newEngine(t, permission.ModeInteractive), recordingAsk(true, true, nil, &calls))
+	g := quietGate(t, recordingAsk(true, true, nil, &calls))
 	input := map[string]any{"command": "sudo apt update"}
 	if ok, _ := g.Check(context.Background(), "terminal", input); !ok {
 		t.Fatal("first ask should allow")
@@ -142,7 +150,7 @@ func TestGate_AskRemembers(t *testing.T) {
 func TestGate_NonInteractive_DeniesAsk(t *testing.T) {
 	// A nil PermissionAsk is the server/IM posture: ask-class verdicts deny
 	// without prompting, carrying the policy's reason.
-	g := NewPermissionGate(newEngine(t, permission.ModeInteractive), nil)
+	g := quietGate(t, nil)
 	ok, reason := g.Check(context.Background(), "terminal", map[string]any{"command": "sudo apt update"})
 	if ok {
 		t.Error("non-interactive gate must deny ask-class commands")
@@ -154,7 +162,7 @@ func TestGate_NonInteractive_DeniesAsk(t *testing.T) {
 
 func TestGate_UnwrapsToolCall(t *testing.T) {
 	// A Tool Search mcp_call must be evaluated against the wrapped tool name.
-	g := NewPermissionGate(newEngine(t, permission.ModeInteractive), nil)
+	g := quietGate(t, nil)
 	ok, reason := g.Check(context.Background(), "mcp_call", map[string]any{
 		"name":      "terminal",
 		"arguments": map[string]any{"command": "rm -rf /"},

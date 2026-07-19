@@ -7,15 +7,17 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/audit"
 	"github.com/open-octo/octo-agent/internal/permission"
 )
 
 // newCLIGate builds the shared app permission gate wired to an interactive
 // prompter: ask-class verdicts raise a KindPermission prompt through the view
 // (stdin line today, modal in the TUI) and map the structured answer. A nil
-// prompter yields a non-interactive gate (ask → deny).
-func newCLIGate(engine *permission.Engine, ask userPrompter) agent.PermissionGate {
-	return app.NewPermissionGate(engine, permissionAskFrom(ask))
+// prompter yields a non-interactive gate (ask → deny). The optional auditLog
+// is for tests — see app.NewPermissionGate.
+func newCLIGate(engine *permission.Engine, ask userPrompter, auditLog ...*audit.Logger) agent.PermissionGate {
+	return app.NewPermissionGate(engine, permissionAskFrom(ask), auditLog...)
 }
 
 // permissionAskFrom adapts a userPrompter (the view) into an app.PermissionAsk.
