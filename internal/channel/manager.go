@@ -546,6 +546,14 @@ func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
 	if live, ok := m.sessionsByStore.Load(target.ID); ok {
 		sess := live.(*Session)
 		sess.suppressDelivery.Store(false)
+		sess.Key = key
+		sess.ChatID = ev.ChatID
+		sess.UserID = ev.UserID
+		sess.BoundAt = time.Now()
+		sess.storeMu.Lock()
+		sess.Store.BoundEntry = target.BoundEntry
+		sess.Store.BoundAt = target.BoundAt
+		sess.storeMu.Unlock()
 		m.sessions.Store(key, sess)
 	} else {
 		// No running session found — create a new one from the store file.
