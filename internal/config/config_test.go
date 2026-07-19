@@ -762,6 +762,61 @@ func TestResolveDefault_EmptyEndpointTreatedAsMissing(t *testing.T) {
 	}
 }
 
+// TestResolveDefault_EmptyDefaultEndpointNoOthersReturnsFalse covers the dead-end:
+// Default's endpoint exists but is empty, AND there are no other endpoints to
+// fall back to. ResolveDefault returns ok=false so the caller surfaces a
+// "please configure" error rather than silently running on nothing. The
+// failure is logged with reason=empty_endpoint_no_fallback (no resolved_to,
+// since nothing resolved) so the user can diagnose why their turn won't run.
+func TestResolveDefault_EmptyDefaultEndpointNoOthersReturnsFalse(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-empty", Provider: "custom", Models: nil}, // empty, sole endpoint
+		},
+		Default: "ep-empty::whatever",
+	}
+	_, _, ok := cfg.ResolveDefault()
+	if ok {
+		t.Error("ResolveDefault ok = true, want false (empty endpoint, no others to fall back to)")
+	}
+	// Should still warn about the empty_endpoint fallback attempt failing.
+	if !strings.Contains(logBuf.String(), "empty_endpoint_no_fallback") {
+		t.Errorf("expected slog.Warn with reason=empty_endpoint_no_fallback, got:\n%s", logBuf.String())
+	}
+}
+
+// TestParseModelFlag_BareModelAmbiguousWithNoDefaultWarns pins the M1 fix:
+// when the user has NOT set a Default (empty string), two endpoints exposing
+// the same model should NOT silently pick the first via step 2a (which treats
+// ResolveDefault's first-endpoint fallback as a "default endpoint"). Instead
+// step 2b's ambiguity path fires and slog.Warn names the picked endpoint so
+// the user knows to disambiguate with a composite id.
+func TestParseModelFlag_BareModelAmbiguousWithNoDefaultWarns(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "relay-b", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "", // no Default set — fresh install with two endpoints
+	}
+	ep, m, err := cfg.ParseModelFlag("claude-sonnet-4-6")
+	if err != nil {
+		t.Fatalf("ParseModelFlag: %v", err)
+	}
+	if ep.ID != "relay-a" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ParseModelFlag = (%q, %q), want (relay-a, claude-sonnet-4-6) (first match)", ep.ID, m.Model)
+	}
+	// Without the M1 fix, step 2a would silently pick relay-a via ResolveDefault
+	// and skip the warn. With the fix, step 2b's ambiguity path fires.
+	if !strings.Contains(logBuf.String(), "matches multiple endpoints") {
+		t.Errorf("expected slog.Warn about ambiguity (no Default set), got:\n%s", logBuf.String())
+	}
+}
+
 // --- ParseModelFlag ---
 
 // TestParseModelFlag_CompositeIDPreciseHit covers the composite-id path: a

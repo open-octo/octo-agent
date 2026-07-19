@@ -898,13 +898,21 @@ func (c Config) ResolveDefault() (Endpoint, EndpointModel, bool) {
 			if len(ep.Models) == 0 {
 				// Step 2 dead-end: endpoint exists but is empty. Fall through
 				// to step 3 (first non-empty endpoint), with a warn that the
-				// targeted endpoint was empty.
-				slog.Warn("config: default model resolution fell back",
-					"default", c.Default, "reason", "empty_endpoint",
-					"endpoint_id", endpointID)
+				// targeted endpoint was empty. Carry resolved_to like the
+				// other fallback paths so log scanners see a uniform shape.
 				if first := firstNonEmptyEndpoint(c.Endpoints); first != nil {
+					slog.Warn("config: default model resolution fell back",
+						"default", c.Default, "reason", "empty_endpoint",
+						"endpoint_id", endpointID,
+						"resolved_to", first.CompositeID(first.Models[0].Model))
 					return *first, first.Models[0], true
 				}
+				// No non-empty endpoint to fall back to — log the failure
+				// (no resolved_to, since nothing resolved) and return ok=false
+				// so the caller surfaces a "please configure" error.
+				slog.Warn("config: default model resolution failed",
+					"default", c.Default, "reason", "empty_endpoint_no_fallback",
+					"endpoint_id", endpointID)
 				return Endpoint{}, EndpointModel{}, false
 			}
 			// Step 1: exact model hit.
@@ -1012,9 +1020,16 @@ func (c Config) ParseModelFlag(flag string) (Endpoint, EndpointModel, error) {
 	}
 
 	// Bare-model path.
-	// Step 2a: prefer the Default endpoint if its model matches.
-	if defEp, defM, ok := c.ResolveDefault(); ok {
-		if defM.Model == flag {
+	// Step 2a: prefer the Default endpoint if its model matches. Only applies
+	// when the user explicitly set a Default (c.Default != "") — an empty
+	// Default falling back to the first endpoint (ResolveDefault step 3) is
+	// NOT a "user-designated main endpoint", so it shouldn't short-circuit
+	// the ambiguity check in step 2b. Without this guard, two endpoints
+	// exposing the same model with no Default set would silently pick the
+	// first instead of warning about the ambiguity (design §5.4 rationale:
+	// "用户配 default 说明这是我的主 endpoint" — no Default, no preference).
+	if c.Default != "" {
+		if defEp, defM, ok := c.ResolveDefault(); ok && defM.Model == flag {
 			return defEp, defM, nil
 		}
 	}
@@ -1377,10 +1392,11 @@ func (c Config) Repair() (repaired Config, fixed, unfixable []string) {
 		}
 		if repaired.Lite != "" {
 			// Lite dangles OR Lite == Default → clear. The "==" check is on
-			// the resolved composite id, so a Lite that points at the same
-			// endpoint+model as Default is caught even if the strings differ
-			// in casing or whitespace (they won't for composite ids, but the
-			// resolved form is the canonical one).
+			// the raw composite-id strings — endpoint IDs must match
+			// ^[a-zA-Z0-9_-]+$ (no spaces, no case variation), so two
+			// different strings can never resolve to the same endpoint+model
+			// in practice. Validate rejects any id that would; reaching here
+			// with a valid composite id means the string form is canonical.
 			_, _, liteOK := repaired.resolveCompositeID(repaired.Lite)
 			if !liteOK || repaired.Lite == repaired.Default {
 				fixed = append(fixed, fmt.Sprintf("cleared lite %q (matched no endpoint+model or equals default)", repaired.Lite))
