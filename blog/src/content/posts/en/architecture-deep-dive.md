@@ -207,7 +207,7 @@ The "semantic recall" layer is likewise a product of restraint: octo ships no bu
 
 A war story of my own first. I used to run an agent of OpenClaw's gateway-style architecture through IM: it ran on my machine at home while I was at the office. One day it executed a command that took the gateway process down — and from that moment, the chat window went dead silent. Later, on the subway, all I had was a conversation that would never reply again; there was nothing I could do until I got home and reached a terminal. For an agent that "lives in IM", a dead host process is brain death — and the killer was the agent itself.
 
-octo serve doesn't count on the model learning from other people's accidents; it stacks four layers of mechanism.
+octo serve doesn't count on the model learning from other people's accidents; it stacks five layers of mechanism.
 
 **Layer one: the terminal refuses to hand over the knife.** When a serve process starts, it turns on the guard (`internal/tools/server_guard.go`); from then on the terminal tool refuses to execute any kill aimed at the host: `pkill / killall octo` (kill by name), `kill <PID>` (arguments scanned one by one, protecting its own PID and the supervisor's parent PID), `kill $(pgrep octo)` (resolve-then-kill) — all get bounced back with an error that names the correct move: use `restart_server`. Two details worth recording: a parent PID of 1 is not protected (being reparented to init/launchd means there is no supervisor, and a bare "1" would false-positive every command containing the digit); RE2 has no lookbehind, so PID extraction uses `(?:^|[^-\w])(\d+)` to explicitly sidestep — otherwise `kill -9 -1`, a phrase common in commit messages, would be misjudged. The package comment is honest as usual: this is a best-effort textual guard, not a sandbox — it stops the model from **reflexively** killing its host, not from a deliberate jailbreak.
 
@@ -234,7 +234,9 @@ sequenceDiagram
 
 **Layer four: most things that "need a restart" need no restart at all.** Hot reload is the preferred path for config changes. After editing channels.yml, `POST /api/channels/{platform}/reload` rebuilds only that one platform's adapter — the channel-manager skill calls it right after writing the config, and you won't feel so much as a tremor in IM. The desktop build has no supervisor, so hot reload is the only path there. The per-turn rebuild of permissions.yml was covered in the permissions chapter — same philosophy: whatever can be hot-swapped is never restarted; whatever must be restarted is never hard-cut.
 
-The four layers add up to the same old line: you can't teach a model "never kill your host", but you can make it unable to; you can't guarantee it remembers the front door every time, but you can make the front door the only way through.
+**Layer five: config edits get proctored, and failing has a safety net.** Config is the thing the agent most often edits with its own hands, so it gets two lines of defense. **The first is on the write side**: an in-proc hook registered on PostToolUse (`internal/tools/config_guard.go`) watches every tool call — `edit_file` / `write_file` are matched by exact path (with `~` expansion), `terminal` loosely by the command containing both `.octo` and `config.yml` (arbitrary shell can't be parsed; a rare false positive costs one harmless re-validation) — and whenever `~/.octo/config.yml` was touched, it immediately validates with `Load` (a raw parse, no cache) plus a semantic check, folding any warning into the very next step's context: "your change did NOT take effect (the server kept the last valid config) — fix the file before relying on the edit." The agent doesn't have to deduce the failure from weird downstream behavior; it knows on the very next step after the edit. **The second is on the read side**: serve re-reads config.yml every turn (so config changes need no restart), but `LoadCached` is a validate-then-replace cache — when the file is broken it keeps serving the last cleanly parsed config until it's fixed; without it, one YAML typo would revert every config-derived feature (per-session model binding, the compaction lite model, the coauthor flag, browser vision) to hardcoded defaults the instant the bad file is saved — a slip becoming a live behavior change across every session. channels.yml behaves the same: if reload can't load the config it returns immediately, leaving the running adapter untouched; semantically invalid new config simply isn't started, and the reason lands in the `issue` field, queryable from the web panel and the desktop tray. The two defenses patch each other: the read-side fallback makes failure silent; the write-side proctor makes it loud again.
+
+The five layers add up to the same old line: you can't teach a model "never kill your host", but you can make it unable to; you can't guarantee it remembers the front door every time, but you can make the front door the only way through.
 
 ## Workflow: Turing-Complete Orchestration That Can't Touch the System
 
@@ -329,6 +331,8 @@ The model does the clever; the mechanism does the floor. That's probably the one
 | Memory (semantic) | `internal/memorybackend/backend.go` |
 | serve self-kill guard | `internal/tools/server_guard.go` |
 | Graceful restart / supervisor | `internal/tools/restart.go`, `internal/server/restart.go`, `cmd/octo/serve_supervisor.go` |
+| Config post-write validation | `internal/tools/config_guard.go` |
+| Config last-good fallback | `internal/config/config.go` (`LoadCached`) |
 | Workflow runtime | `internal/workflow/runtime.go` |
 | Browser record/self-heal | `internal/browser/recorder.go` |
 | Permission decisions | `internal/permission/permission.go` |
