@@ -477,7 +477,7 @@ func ImplicitLiteModel(provider, model, baseURL string) string {
 //     user explicitly marked this endpoint's lite model (e.g. a custom relay
 //     endpoint carrying both claude-sonnet and gpt-5.4-mini, with mini marked
 //     as lite) — that wins over any vendor inference.
-//  2. Otherwise, if endpoint.BaseURL hits an official vendor (via
+//  2. Otherwise, if the endpoint points at an official vendor (via
 //     VendorByBaseURL) and that vendor has a LiteModel != model → vendor
 //     LiteModel. An official endpoint (e.g. anthropic's api.anthropic.com)
 //     can safely serve the vendor's lite model over the same sender, sharing
@@ -487,9 +487,20 @@ func ImplicitLiteModel(provider, model, baseURL string) string {
 //     doesn't know about, so guessing a vendor LiteModel would serve a model
 //     the relay doesn't expose. The user must set endpoint.LiteModel.
 //
+// Step 2's vendor inference uses the endpoint's effective base URL — when
+// the user omits base_url (legal for named vendors, design §3.1: "命名 vendor
+// 可空, 用 vendor 默认"), we fall back to the vendor's DefaultBaseURL so the
+// inference still fires. Without this fallback, a named-vendor endpoint
+// configured without base_url would silently lose its compaction lite model,
+// which is a regression from the legacy ImplicitLiteModel (which treated
+// baseURL=="" as "trust the provider field").
+//
 // Migrating from the old ImplicitLiteModel(provider, model, baseURL): the old
 // form is equivalent to ImplicitLiteModelForEndpoint with an endpoint whose
-// LiteModel is empty and whose Provider/BaseURL come from the old args.
+// LiteModel is empty, Provider = provider, and BaseURL = baseURL. Callers
+// that haven't migrated yet (cmd/octo/chat.go, internal/server/server.go) stay
+// on the old form because the ModelEntry they hold has no LiteModel field;
+// they'll migrate in PR4 when the entry becomes a config.Endpoint.
 func ImplicitLiteModelForEndpoint(endpoint config.Endpoint, model string) string {
 	// Step 1: explicit endpoint LiteModel wins when it differs from the
 	// primary model. If they're equal, the lite would be a no-op — fall
@@ -506,8 +517,17 @@ func ImplicitLiteModelForEndpoint(endpoint config.Endpoint, model string) string
 	// whose base_url points elsewhere (a relay wearing the anthropic
 	// protocol). VendorByBaseURL confirms the endpoint actually points at the
 	// named vendor's host before inferring its LiteModel.
-	if endpoint.BaseURL != "" {
-		inferredProvider := VendorByBaseURL(endpoint.BaseURL)
+	//
+	// When base_url is empty (legal for named vendors per §3.1), fall back to
+	// the vendor's DefaultBaseURL so the inference still fires. This matches
+	// the legacy ImplicitLiteModel's treatment of baseURL=="" as "trust the
+	// provider field".
+	baseURL := endpoint.BaseURL
+	if baseURL == "" {
+		baseURL = VendorBaseURL(endpoint.Provider)
+	}
+	if baseURL != "" {
+		inferredProvider := VendorByBaseURL(baseURL)
 		if inferredProvider != "" && inferredProvider == endpoint.Provider {
 			if v := vendorByID(inferredProvider); v != nil && v.LiteModel != "" && v.LiteModel != model {
 				return v.LiteModel

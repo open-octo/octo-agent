@@ -629,10 +629,16 @@ func (c Config) EntryByModel(model string) (ModelEntry, bool) {
 				}
 			}
 		}
-		// Composite id didn't resolve — fall through to the bare-model path
-		// rather than returning false, so a stale composite id (endpoint
-		// deleted but session still references it) degrades to a bare-model
-		// lookup that might still find the model on another endpoint.
+		// Composite id didn't resolve against c.Endpoints — fall through to
+		// the bare-model path rather than returning false. This only fires on
+		// a mixed-schema config (Endpoints populated AND Models populated, e.g.
+		// a hand-edited file with both blocks, or an in-memory config where
+		// Load's normalize synthesised Endpoints from Models): a stale
+		// composite id whose endpoint was deleted might still find the bare
+		// model in c.Models and degrade gracefully. On a pure-new-schema
+		// config (Endpoints only, Models empty) the bare scan below finds
+		// nothing and returns false, which is correct — the caller should
+		// fall back to ResolveDefault.
 	}
 	// Bare-model path: legacy flat Models lookup.
 	for _, e := range c.Models {

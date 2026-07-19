@@ -331,6 +331,26 @@ func TestImplicitLiteModel_EndpointForm(t *testing.T) {
 			"claude-haiku-4-5",
 		},
 		{
+			"named-vendor endpoint with empty base_url still infers vendor LiteModel (regression guard for I1)",
+			// Design §3.1: "base_url,omitempty // custom 必填, 命名 vendor 可空
+			// (用 vendor 默认)". A named-vendor endpoint configured without
+			// base_url must still get its vendor's LiteModel — the legacy
+			// ImplicitLiteModel treated baseURL=="" as "trust the provider",
+			// and ImplicitLiteModelForEndpoint must match that. Without the
+			// VendorBaseURL fallback in step 2, this case would silently lose
+			// compaction lite model — a regression that only surfaces after
+			// PR4 migrates callers to the new function.
+			config.Endpoint{Provider: "anthropic"}, // BaseURL empty
+			"claude-sonnet-4-6",
+			"claude-haiku-4-5",
+		},
+		{
+			"named-vendor endpoint with empty base_url still infers vendor LiteModel (deepseek)",
+			config.Endpoint{Provider: "deepseek"},
+			"deepseek-v4-pro",
+			"deepseek-v4-flash",
+		},
+		{
 			"official deepseek endpoint infers vendor LiteModel",
 			config.Endpoint{Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
 			"deepseek-v4-pro",

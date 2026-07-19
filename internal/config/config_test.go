@@ -368,6 +368,44 @@ func TestEntryByModel_BareModelStillWorks(t *testing.T) {
 	}
 }
 
+// TestEntryByModel_CompositeIDWinsOverFlatModels pins the precedence: when
+// the config has BOTH a flat Models entry with the bare model AND an Endpoints
+// entry whose composite id matches, the composite-id path must win. Otherwise
+// a user who configures the same model on two endpoints (the whole point of
+// the two-level schema) and references it via composite id would get the flat
+// entry's connection params instead of the endpoint's — silently routing to
+// the wrong backend.
+func TestEntryByModel_CompositeIDWinsOverFlatModels(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{
+				ID:       "relay-a",
+				Provider: "custom",
+				BaseURL:  "https://relay.example.com",
+				APIKey:   "alpha",
+				Protocol: "anthropic",
+				Models:   []EndpointModel{{Model: "claude-sonnet-4-6", Vision: true}},
+			},
+		},
+		// A flat Models entry with the SAME bare model — this is what a
+		// migrated config looks like before the write-path switches in PR4
+		// (Endpoints synthesised in memory + Models still populated from the
+		// legacy file). The composite-id path must win so the relay's
+		// connection params are returned, not the flat entry's.
+		Models: []ModelEntry{
+			{Provider: "anthropic", Model: "claude-sonnet-4-6", BaseURL: "https://api.anthropic.com", Vision: true},
+		},
+	}
+
+	got, ok := cfg.EntryByModel("relay-a::claude-sonnet-4-6")
+	if !ok {
+		t.Fatal("EntryByModel(composite) = false, want true")
+	}
+	if got.Provider != "custom" || got.BaseURL != "https://relay.example.com" || got.APIKey != "alpha" {
+		t.Errorf("EntryByModel(composite) = %+v, want relay-a endpoint's connection params (composite path must win over flat Models)", got)
+	}
+}
+
 func TestModelVision(t *testing.T) {
 	c := Config{Models: []ModelEntry{
 		{Model: "qwen-vl-max", Vision: true},
