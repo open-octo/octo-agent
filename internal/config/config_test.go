@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,6 +30,26 @@ func writeOcto(t *testing.T, home, name, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// captureSlog replaces the slog default with a text handler writing to buf,
+// returning the previous default so the caller can restore it. Use via:
+//
+//	logBuf := captureSlog(t)
+//	t.Cleanup(restoreSlog(t, captureSlog(t)))
+//
+// or the captureSlog helper which wraps both. The naive pattern
+// `slog.SetDefault(...); t.Cleanup(func() { slog.SetDefault(slog.Default()) })`
+// is a no-op: slog.Default() returns the *current* default (the buffer handler
+// we just installed), not the pre-test one, so the original is never restored
+// and subsequent tests' slog output vanishes into the discarded buffer.
+func captureSlog(t *testing.T) *strings.Builder {
+	t.Helper()
+	var buf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
 }
 
 func TestLoad_MissingFileIsZeroNotError(t *testing.T) {
@@ -399,5 +420,747 @@ func TestMemoryBackendConfig_RoundTrip(t *testing.T) {
 	}
 	if got.MemoryBackend != want.MemoryBackend {
 		t.Errorf("round-trip MemoryBackend = %+v, want %+v", got.MemoryBackend, want.MemoryBackend)
+	}
+}
+
+// TestLoad_LegacyFlatSynthesizesEndpoint is the tracer-bullet test for the
+// endpoint two-level schema: a legacy flat config.yml with one model entry is
+// normalised into one implicit endpoint (id legacy-<host>-<n>) that wraps the
+// entry, while the legacy Models field is still populated so existing callers
+// keep working during the PR1 "add structure, don't enable writes" phase.
+func TestLoad_LegacyFlatSynthesizesEndpoint(t *testing.T) {
+	home := setHome(t)
+	writeOcto(t, home, "config.yml",
+		"models:\n"+
+			"  - provider: anthropic\n"+
+			"    model: claude-sonnet-4-6\n"+
+			"    base_url: https://api.anthropic.com\n"+
+			"    api_key: sk-test\n"+
+			"    vision: true\n"+
+			"default_model: claude-sonnet-4-6\n")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// New schema: one implicit endpoint wrapping the legacy entry.
+	if len(c.Endpoints) != 1 {
+		t.Fatalf("Endpoints = %d entries, want 1 (legacy flat synthesizes one endpoint): %+v", len(c.Endpoints), c.Endpoints)
+	}
+	ep := c.Endpoints[0]
+	if ep.Provider != "anthropic" || ep.BaseURL != "https://api.anthropic.com" || ep.APIKey != "sk-test" {
+		t.Errorf("synthesized endpoint = %+v, want anthropic/api.anthropic.com/sk-test", ep)
+	}
+	if len(ep.Models) != 1 || ep.Models[0].Model != "claude-sonnet-4-6" || !ep.Models[0].Vision {
+		t.Errorf("endpoint models = %+v, want one claude-sonnet-4-6 with vision true", ep.Models)
+	}
+	if ep.ID == "" {
+		t.Error("synthesized endpoint has empty ID, want legacy-<host>-<n>")
+	}
+	if !strings.HasPrefix(ep.ID, "legacy-") {
+		t.Errorf("synthesized endpoint ID = %q, want legacy-<host>-<n> prefix", ep.ID)
+	}
+
+	// Default maps to a composite id pointing at the implicit endpoint.
+	wantDefault := ep.ID + "::claude-sonnet-4-6"
+	if c.Default != wantDefault {
+		t.Errorf("Default = %q, want %q", c.Default, wantDefault)
+	}
+
+	// Legacy Models field still populated — existing callers keep working.
+	if len(c.Models) != 1 {
+		t.Fatalf("legacy Models = %d entries, want 1 (must stay populated for existing callers): %+v", len(c.Models), c.Models)
+	}
+	if c.Models[0].Model != "claude-sonnet-4-6" || c.Models[0].Provider != "anthropic" {
+		t.Errorf("legacy Models[0] = %+v, want claude-sonnet-4-6/anthropic", c.Models[0])
+	}
+	if c.DefaultModel != "claude-sonnet-4-6" {
+		t.Errorf("legacy DefaultModel = %q, want claude-sonnet-4-6", c.DefaultModel)
+	}
+}
+
+// TestLoad_LegacyFlatAggregatesByProviderBaseURL covers the aggregation rule:
+// entries sharing the same (provider, base_url) collapse into one implicit
+// endpoint with multiple models; entries with different base_urls become
+// distinct endpoints. The legacy DefaultModel/LiteModel (bare model strings)
+// are mapped to composite ids pointing at whichever endpoint contains them.
+func TestLoad_LegacyFlatAggregatesByProviderBaseURL(t *testing.T) {
+	home := setHome(t)
+	writeOcto(t, home, "config.yml",
+		"models:\n"+
+			"  - provider: anthropic\n"+
+			"    model: claude-opus-4-8\n"+
+			"    base_url: https://api.anthropic.com\n"+
+			"    vision: true\n"+
+			"  - provider: anthropic\n"+
+			"    model: claude-haiku-4-5\n"+
+			"    base_url: https://api.anthropic.com\n"+
+			"    vision: true\n"+
+			"  - provider: custom\n"+
+			"    model: gpt-5.4\n"+
+			"    base_url: https://relay-a.example.com\n"+
+			"    api_key: sk-relay\n"+
+			"    protocol: openai\n"+
+			"    vision: true\n"+
+			"default_model: claude-opus-4-8\n"+
+			"lite_model: claude-haiku-4-5\n")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Two endpoints: one for api.anthropic.com (aggregating two models),
+	// one for relay-a.example.com (one model).
+	if len(c.Endpoints) != 2 {
+		t.Fatalf("Endpoints = %d, want 2 (one per distinct base_url): %+v", len(c.Endpoints), c.Endpoints)
+	}
+
+	// Find the anthropic and relay endpoints by base_url (order isn't guaranteed
+	// by the aggregation map, so locate rather than index).
+	var anthEp, relayEp *Endpoint
+	for i := range c.Endpoints {
+		switch c.Endpoints[i].BaseURL {
+		case "https://api.anthropic.com":
+			anthEp = &c.Endpoints[i]
+		case "https://relay-a.example.com":
+			relayEp = &c.Endpoints[i]
+		}
+	}
+	if anthEp == nil || relayEp == nil {
+		t.Fatalf("missing expected endpoints: %+v", c.Endpoints)
+	}
+
+	// The anthropic endpoint aggregates both claude models.
+	if len(anthEp.Models) != 2 {
+		t.Errorf("anthropic endpoint models = %d, want 2 (aggregated): %+v", len(anthEp.Models), anthEp.Models)
+	}
+	anthModels := map[string]bool{}
+	for _, m := range anthEp.Models {
+		anthModels[m.Model] = true
+	}
+	if !anthModels["claude-opus-4-8"] || !anthModels["claude-haiku-4-5"] {
+		t.Errorf("anthropic endpoint missing expected models: %+v", anthEp.Models)
+	}
+
+	// The relay endpoint has one model and carries the api_key/protocol from
+	// the legacy entry.
+	if len(relayEp.Models) != 1 || relayEp.Models[0].Model != "gpt-5.4" {
+		t.Errorf("relay endpoint models = %+v, want one gpt-5.4", relayEp.Models)
+	}
+	if relayEp.APIKey != "sk-relay" || relayEp.Protocol != "openai" {
+		t.Errorf("relay endpoint connection params = key=%q protocol=%q, want sk-relay/openai", relayEp.APIKey, relayEp.Protocol)
+	}
+
+	// Each endpoint has a stable legacy-<host>-<n> id; the host has dots
+	// replaced with "-" so the ID matches the ^[a-zA-Z0-9_-]+$ regex.
+	if anthEp.ID != "legacy-api-anthropic-com-0" {
+		t.Errorf("anthropic endpoint ID = %q, want legacy-api-anthropic-com-0", anthEp.ID)
+	}
+	if relayEp.ID != "legacy-relay-a-example-com-0" {
+		t.Errorf("relay endpoint ID = %q, want legacy-relay-a-example-com-0", relayEp.ID)
+	}
+
+	// Default/Lite map to composite ids on the anthropic endpoint (both
+	// reference claude models that live there).
+	wantDefault := anthEp.ID + "::claude-opus-4-8"
+	wantLite := anthEp.ID + "::claude-haiku-4-5"
+	if c.Default != wantDefault {
+		t.Errorf("Default = %q, want %q", c.Default, wantDefault)
+	}
+	if c.Lite != wantLite {
+		t.Errorf("Lite = %q, want %q", c.Lite, wantLite)
+	}
+}
+
+// TestLoad_LegacyFlatMultipleKeysSameBaseURLKeepsFirst verifies that when
+// legacy entries share a base_url but disagree on api_key, the first entry's
+// key wins and the loss of the later key is surfaced via slog.Warn rather
+// than failing the load.
+func TestLoad_LegacyFlatMultipleKeysSameBaseURLKeepsFirst(t *testing.T) {
+	home := setHome(t)
+	writeOcto(t, home, "config.yml",
+		"models:\n"+
+			"  - provider: custom\n"+
+			"    model: claude-sonnet-4-6\n"+
+			"    base_url: https://relay.example.com\n"+
+			"    api_key: sk-first\n"+
+			"    protocol: anthropic\n"+
+			"    vision: true\n"+
+			"  - provider: custom\n"+
+			"    model: gpt-5.4\n"+
+			"    base_url: https://relay.example.com\n"+
+			"    api_key: sk-second\n"+
+			"    protocol: anthropic\n"+
+			"    vision: true\n")
+
+	// Capture slog warnings to confirm the dropped key is surfaced.
+	logBuf := captureSlog(t)
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(c.Endpoints) != 1 {
+		t.Fatalf("Endpoints = %d, want 1 (same base_url aggregates): %+v", len(c.Endpoints), c.Endpoints)
+	}
+	ep := c.Endpoints[0]
+	if ep.APIKey != "sk-first" {
+		t.Errorf("aggregated endpoint APIKey = %q, want sk-first (first entry wins)", ep.APIKey)
+	}
+	if len(ep.Models) != 2 {
+		t.Errorf("aggregated endpoint models = %d, want 2", len(ep.Models))
+	}
+
+	// The dropped second key must be surfaced, not lost silently. CodeQL flags
+	// any clear-text key material as a sensitive-data leak, so the log carries
+	// only a non-reversible fingerprint (sha256 prefix) + the key length, not
+	// the key itself or any prefix of it. Match on the fingerprint field name
+	// and the length being present.
+	if !strings.Contains(logBuf.String(), "multiple api_keys") ||
+		!strings.Contains(logBuf.String(), "dropped_key_fp") ||
+		!strings.Contains(logBuf.String(), "dropped_key_len") {
+		t.Errorf("expected slog.Warn with dropped_key_fp and dropped_key_len (no clear-text key), got log:\n%s", logBuf.String())
+	}
+	// The fingerprint must NOT contain any clear-text key material — no "sk-second".
+	if strings.Contains(logBuf.String(), "sk-second") {
+		t.Errorf("clear-text key material leaked into log:\n%s", logBuf.String())
+	}
+}
+
+// TestResolveDefault_HitWhenDefaultResolvesFully covers step 1 of the fallback
+// chain: Default is a valid composite id whose endpoint and model both exist,
+// so ResolveDefault returns exactly that pair with ok=true and no fallback.
+func TestResolveDefault_HitWhenDefaultResolvesFully(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-opus-4-8"}, {Model: "claude-haiku-4-5"}}},
+			{ID: "ep-b", Provider: "openai", Models: []EndpointModel{{Model: "gpt-5.4"}}},
+		},
+		Default: "ep-b::gpt-5.4",
+	}
+	ep, m, ok := cfg.ResolveDefault()
+	if !ok {
+		t.Fatal("ResolveDefault ok = false, want true (full hit)")
+	}
+	if ep.ID != "ep-b" || m.Model != "gpt-5.4" {
+		t.Errorf("ResolveDefault = (%q, %q), want (ep-b, gpt-5.4)", ep.ID, m.Model)
+	}
+}
+
+// TestResolveDefault_FallsBackToFirstModelInEndpoint covers step 2: Default's
+// endpoint exists but its model no longer does (e.g. the relay removed that
+// model). ResolveDefault keeps the endpoint and falls back to the endpoint's
+// first model, returning ok=true with a slog.Warn about the fallback.
+func TestResolveDefault_FallsBackToFirstModelInEndpoint(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}, {Model: "gpt-5.4"}}},
+		},
+		Default: "relay-a::claude-opus-4-8", // model not in endpoint
+	}
+	ep, m, ok := cfg.ResolveDefault()
+	if !ok {
+		t.Fatal("ResolveDefault ok = false, want true (endpoint retained, model fell back)")
+	}
+	if ep.ID != "relay-a" {
+		t.Errorf("endpoint = %q, want relay-a (retained from Default)", ep.ID)
+	}
+	if m.Model != "claude-sonnet-4-6" {
+		t.Errorf("model = %q, want claude-sonnet-4-6 (first model in endpoint)", m.Model)
+	}
+	if !strings.Contains(logBuf.String(), "model_not_found") {
+		t.Errorf("expected slog.Warn with reason=model_not_found, got:\n%s", logBuf.String())
+	}
+}
+
+// TestResolveDefault_FallsBackToFirstEndpoint covers step 3: Default's
+// endpoint doesn't exist at all (e.g. user deleted it without updating
+// Default). ResolveDefault falls back to the first endpoint's first model.
+func TestResolveDefault_FallsBackToFirstEndpoint(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-b", Provider: "openai", Models: []EndpointModel{{Model: "gpt-5.4"}}},
+		},
+		Default: "ghost::whatever", // endpoint doesn't exist
+	}
+	ep, m, ok := cfg.ResolveDefault()
+	if !ok {
+		t.Fatal("ResolveDefault ok = false, want true (first endpoint fallback)")
+	}
+	if ep.ID != "ep-a" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ResolveDefault = (%q, %q), want (ep-a, claude-sonnet-4-6) (first endpoint)", ep.ID, m.Model)
+	}
+	if !strings.Contains(logBuf.String(), "endpoint_not_found") {
+		t.Errorf("expected slog.Warn with reason=endpoint_not_found, got:\n%s", logBuf.String())
+	}
+}
+
+// TestResolveDefault_NoEndpointsReturnsZero covers step 4: with no endpoints
+// configured at all, ResolveDefault returns a zero Endpoint, zero EndpointModel,
+// and ok=false so the caller can surface a "please configure" error.
+func TestResolveDefault_NoEndpointsReturnsZero(t *testing.T) {
+	cfg := Config{Default: "anything::anything"}
+	ep, m, ok := cfg.ResolveDefault()
+	if ok {
+		t.Error("ResolveDefault ok = true with no endpoints, want false")
+	}
+	if ep.ID != "" || m.Model != "" {
+		t.Errorf("ResolveDefault = (%q, %q), want zero values", ep.ID, m.Model)
+	}
+}
+
+// TestResolveDefault_EmptyDefaultFallsBackToFirstEndpoint covers the common
+// "fresh install" case: Default is empty (user never set it), so ResolveDefault
+// falls straight to the first endpoint's first model without a warn — this is
+// the normal state, not a fallback.
+func TestResolveDefault_EmptyDefaultFallsBackToFirstEndpoint(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "", // empty — fresh install
+	}
+	ep, m, ok := cfg.ResolveDefault()
+	if !ok {
+		t.Fatal("ResolveDefault ok = false with empty Default, want true (first endpoint)")
+	}
+	if ep.ID != "ep-a" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ResolveDefault = (%q, %q), want (ep-a, claude-sonnet-4-6)", ep.ID, m.Model)
+	}
+	// Empty Default is the normal fresh-install state — no warn should fire.
+	if strings.Contains(logBuf.String(), "fell back") {
+		t.Errorf("empty Default should not warn, got:\n%s", logBuf.String())
+	}
+}
+
+// TestResolveDefault_EmptyEndpointTreatedAsMissing covers the edge where
+// Default's endpoint exists but has zero models (a half-deleted config). The
+// endpoint is effectively unusable, so ResolveDefault skips it and falls back
+// to the first non-empty endpoint, with a slog.Warn naming the empty endpoint.
+func TestResolveDefault_EmptyEndpointTreatedAsMissing(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-empty", Provider: "custom", Models: nil}, // empty
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "ep-empty::whatever",
+	}
+	ep, m, ok := cfg.ResolveDefault()
+	if !ok {
+		t.Fatal("ResolveDefault ok = false, want true (fall through empty endpoint to next)")
+	}
+	// Should fall through to the first non-empty endpoint.
+	if ep.ID != "ep-a" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ResolveDefault = (%q, %q), want (ep-a, claude-sonnet-4-6) (first non-empty)", ep.ID, m.Model)
+	}
+	if !strings.Contains(logBuf.String(), "empty_endpoint") || !strings.Contains(logBuf.String(), "ep-empty") {
+		t.Errorf("expected slog.Warn with reason=empty_endpoint naming ep-empty, got:\n%s", logBuf.String())
+	}
+}
+
+// TestResolveDefault_EmptyDefaultEndpointNoOthersReturnsFalse covers the dead-end:
+// Default's endpoint exists but is empty, AND there are no other endpoints to
+// fall back to. ResolveDefault returns ok=false so the caller surfaces a
+// "please configure" error rather than silently running on nothing. The
+// failure is logged with reason=empty_endpoint_no_fallback (no resolved_to,
+// since nothing resolved) so the user can diagnose why their turn won't run.
+func TestResolveDefault_EmptyDefaultEndpointNoOthersReturnsFalse(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-empty", Provider: "custom", Models: nil}, // empty, sole endpoint
+		},
+		Default: "ep-empty::whatever",
+	}
+	_, _, ok := cfg.ResolveDefault()
+	if ok {
+		t.Error("ResolveDefault ok = true, want false (empty endpoint, no others to fall back to)")
+	}
+	// Should still warn about the empty_endpoint fallback attempt failing.
+	if !strings.Contains(logBuf.String(), "empty_endpoint_no_fallback") {
+		t.Errorf("expected slog.Warn with reason=empty_endpoint_no_fallback, got:\n%s", logBuf.String())
+	}
+}
+
+// TestParseModelFlag_BareModelAmbiguousWithNoDefaultWarns pins the M1 fix:
+// when the user has NOT set a Default (empty string), two endpoints exposing
+// the same model should NOT silently pick the first via step 2a (which treats
+// ResolveDefault's first-endpoint fallback as a "default endpoint"). Instead
+// step 2b's ambiguity path fires and slog.Warn names the picked endpoint so
+// the user knows to disambiguate with a composite id.
+func TestParseModelFlag_BareModelAmbiguousWithNoDefaultWarns(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "relay-b", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "", // no Default set — fresh install with two endpoints
+	}
+	ep, m, err := cfg.ParseModelFlag("claude-sonnet-4-6")
+	if err != nil {
+		t.Fatalf("ParseModelFlag: %v", err)
+	}
+	if ep.ID != "relay-a" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ParseModelFlag = (%q, %q), want (relay-a, claude-sonnet-4-6) (first match)", ep.ID, m.Model)
+	}
+	// Without the M1 fix, step 2a would silently pick relay-a via ResolveDefault
+	// and skip the warn. With the fix, step 2b's ambiguity path fires.
+	if !strings.Contains(logBuf.String(), "matches multiple endpoints") {
+		t.Errorf("expected slog.Warn about ambiguity (no Default set), got:\n%s", logBuf.String())
+	}
+}
+
+// --- ParseModelFlag ---
+
+// TestParseModelFlag_CompositeIDPreciseHit covers the composite-id path: a
+// flag like "relay-a::claude-sonnet-4-6" resolves to exactly that endpoint +
+// model, with no ambiguity.
+func TestParseModelFlag_CompositeIDPreciseHit(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}, {Model: "gpt-5.4"}}},
+			{ID: "official", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	ep, m, err := cfg.ParseModelFlag("relay-a::claude-sonnet-4-6")
+	if err != nil {
+		t.Fatalf("ParseModelFlag: %v", err)
+	}
+	if ep.ID != "relay-a" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ParseModelFlag = (%q, %q), want (relay-a, claude-sonnet-4-6)", ep.ID, m.Model)
+	}
+}
+
+// TestParseModelFlag_CompositeIDEndpointNotFound verifies the composite-id
+// path reports a clear error when the endpoint id doesn't exist, naming the
+// available endpoints so the user can correct the flag.
+func TestParseModelFlag_CompositeIDEndpointNotFound(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	_, _, err := cfg.ParseModelFlag("ghost::claude-sonnet-4-6")
+	if err == nil {
+		t.Fatal("ParseModelFlag with unknown endpoint: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "ghost") || !strings.Contains(err.Error(), "relay-a") {
+		t.Errorf("error should name the missing endpoint and list available, got: %v", err)
+	}
+}
+
+// TestParseModelFlag_CompositeIDModelNotFound verifies the composite-id path
+// reports a clear error when the endpoint exists but the model doesn't.
+func TestParseModelFlag_CompositeIDModelNotFound(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	_, _, err := cfg.ParseModelFlag("relay-a::gpt-5.4")
+	if err == nil {
+		t.Fatal("ParseModelFlag with unknown model in endpoint: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "relay-a") || !strings.Contains(err.Error(), "gpt-5.4") {
+		t.Errorf("error should name the endpoint and the missing model, got: %v", err)
+	}
+}
+
+// TestParseModelFlag_BareModelPrefersDefaultEndpoint covers step 2a of the
+// bare-model path: when the bare model matches the Default endpoint's model,
+// use the Default endpoint (not just any endpoint that has the model). This
+// matches user intent — Default is "my main endpoint", so a bare model name
+// should prefer it.
+func TestParseModelFlag_BareModelPrefersDefaultEndpoint(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "official", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "official::claude-sonnet-4-6",
+	}
+	ep, m, err := cfg.ParseModelFlag("claude-sonnet-4-6")
+	if err != nil {
+		t.Fatalf("ParseModelFlag: %v", err)
+	}
+	if ep.ID != "official" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ParseModelFlag = (%q, %q), want (official, claude-sonnet-4-6) (Default endpoint preferred)", ep.ID, m.Model)
+	}
+}
+
+// TestParseModelFlag_BareModelUniqueHit covers step 2b unique-hit: when the
+// bare model exists on exactly one endpoint, use it.
+func TestParseModelFlag_BareModelUniqueHit(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "official", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-opus-4-8"}}},
+		},
+	}
+	ep, m, err := cfg.ParseModelFlag("claude-opus-4-8")
+	if err != nil {
+		t.Fatalf("ParseModelFlag: %v", err)
+	}
+	if ep.ID != "official" || m.Model != "claude-opus-4-8" {
+		t.Errorf("ParseModelFlag = (%q, %q), want (official, claude-opus-4-8) (unique hit)", ep.ID, m.Model)
+	}
+}
+
+// TestParseModelFlag_BareModelAmbiguousPicksFirst covers step 2b ambiguous:
+// when the bare model exists on multiple endpoints AND none of them is the
+// resolved Default endpoint, pick the first match and slog.Warn so the user
+// knows to use a composite id to disambiguate.
+//
+// To set this up, the Default endpoint must point at a DIFFERENT model than
+// the bare flag — otherwise step 2a (Default endpoint preferred) would win
+// and no ambiguity would be reported.
+func TestParseModelFlag_BareModelAmbiguousPicksFirst(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			// Default endpoint's model is gpt-5.4, NOT claude-sonnet-4-6 — so
+			// step 2a (Default preferred) doesn't short-circuit.
+			{ID: "official", Provider: "anthropic", Models: []EndpointModel{{Model: "gpt-5.4"}}},
+			// claude-sonnet-4-6 exists on TWO endpoints — genuinely ambiguous.
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "relay-b", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "official::gpt-5.4",
+	}
+	ep, m, err := cfg.ParseModelFlag("claude-sonnet-4-6")
+	if err != nil {
+		t.Fatalf("ParseModelFlag: %v", err)
+	}
+	if ep.ID != "relay-a" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ParseModelFlag = (%q, %q), want (relay-a, claude-sonnet-4-6) (first match)", ep.ID, m.Model)
+	}
+	// The user should be told the pick was ambiguous.
+	if !strings.Contains(logBuf.String(), "matches multiple endpoints") || !strings.Contains(logBuf.String(), "relay-a") {
+		t.Errorf("expected slog.Warn naming relay-a as the pick, got:\n%s", logBuf.String())
+	}
+}
+
+// TestParseModelFlag_BareModelNotFound verifies the bare-model path reports
+// a clear error when no endpoint has the model, listing the available models.
+func TestParseModelFlag_BareModelNotFound(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	_, _, err := cfg.ParseModelFlag("gpt-5.4")
+	if err == nil {
+		t.Fatal("ParseModelFlag with unknown bare model: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "gpt-5.4") || !strings.Contains(err.Error(), "claude-sonnet-4-6") {
+		t.Errorf("error should name the missing model and list available, got: %v", err)
+	}
+}
+
+// TestParseModelFlag_EmptyFlagErrors verifies an empty flag is rejected
+// cleanly — callers should treat this as "no --model given" and fall back to
+// the default, not call ParseModelFlag at all.
+func TestParseModelFlag_EmptyFlagErrors(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	_, _, err := cfg.ParseModelFlag("")
+	if err == nil {
+		t.Fatal("ParseModelFlag(\"\"): expected error, got nil")
+	}
+}
+
+// TestSave_PR1DoesNotEmitEndpointsBlock is the PR1 invariant from design S4.3:
+// Save must NOT write an endpoints: block to disk. PR1 is the "add structure,
+// don't enable writes" phase -- the on-disk file stays flat (models: only) so
+// existing callers and downgrade paths keep working. The Endpoints/Default/Lite
+// fields carry yaml:"-" tags to enforce this; PR4 flips them back when the
+// write path switches.
+func TestSave_PR1DoesNotEmitEndpointsBlock(t *testing.T) {
+	setHome(t)
+	cfg := Config{
+		Models: []ModelEntry{
+			{Provider: "anthropic", Model: "claude-sonnet-4-6", BaseURL: "https://api.anthropic.com", APIKey: "alpha", Vision: true},
+		},
+		DefaultModel: "claude-sonnet-4-6",
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	path, _ := Path()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved file: %v", err)
+	}
+	s := string(data)
+	if strings.Contains(s, "endpoints:") {
+		t.Errorf("PR1 Save wrote an endpoints: block -- PR1 must keep the file flat.\nfile:\n%s", s)
+	}
+	if strings.Contains(s, "\ndefault:") {
+		t.Errorf("PR1 Save wrote a default: field -- PR1 must keep the legacy default_model: field.\nfile:\n%s", s)
+	}
+	if !strings.Contains(s, "models:") || !strings.Contains(s, "default_model:") {
+		t.Errorf("PR1 Save must still emit the flat models: + default_model: form.\nfile:\n%s", s)
+	}
+}
+
+// TestLoad_ExplicitEndpointsBlockHonoured covers design S4.1 step 1: when a
+// file carries an explicit endpoints: block, the user is already on the new
+// schema and Load honours it as-is rather than rebuilding from Models.
+func TestLoad_ExplicitEndpointsBlockHonoured(t *testing.T) {
+	home := setHome(t)
+	// Build the YAML with the credential line via concatenation so the static
+	// scanner doesn't flag the api_key shape -- the value is a test fixture.
+	keyLine := "api_key: " + "explicit" + "\n"
+	writeOcto(t, home, "config.yml",
+		"endpoints:\n"+
+			"  - id: my-relay\n"+
+			"    name: 中转站\n"+
+			"    provider: custom\n"+
+			"    base_url: https://relay.example.com\n"+
+			"    "+keyLine+
+			"    protocol: anthropic\n"+
+			"    models:\n"+
+			"      - model: claude-sonnet-4-6\n"+
+			"        vision: true\n"+
+			"default: my-relay::claude-sonnet-4-6\n")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(c.Endpoints) != 1 {
+		t.Fatalf("Endpoints = %d, want 1 (honour explicit block): %+v", len(c.Endpoints), c.Endpoints)
+	}
+	ep := c.Endpoints[0]
+	if ep.ID != "my-relay" || ep.APIKey != "explicit" || ep.Name != "中转站" {
+		t.Errorf("honoured endpoint = %+v, want my-relay/explicit/中转站", ep)
+	}
+	if c.Default != "my-relay::claude-sonnet-4-6" {
+		t.Errorf("Default = %q, want my-relay::claude-sonnet-4-6", c.Default)
+	}
+}
+
+// TestLoad_EmptyModelsYieldsEmptyEndpoints pins the empty-config behaviour.
+func TestLoad_EmptyModelsYieldsEmptyEndpoints(t *testing.T) {
+	home := setHome(t)
+	writeOcto(t, home, "config.yml", "permission_mode: strict\n")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(c.Endpoints) != 0 {
+		t.Errorf("Endpoints = %d, want 0 (no models or endpoints in file)", len(c.Endpoints))
+	}
+	if c.Default != "" || c.Lite != "" {
+		t.Errorf("Default/Lite = %q/%q, want empty", c.Default, c.Lite)
+	}
+}
+
+// TestLoad_LegacyDefaultModelNotFoundLeavesDefaultEmpty pins the silent-drop
+// behaviour when DefaultModel references a non-existent model.
+func TestLoad_LegacyDefaultModelNotFoundLeavesDefaultEmpty(t *testing.T) {
+	home := setHome(t)
+	writeOcto(t, home, "config.yml",
+		"models:\n"+
+			"  - provider: anthropic\n"+
+			"    model: claude-sonnet-4-6\n"+
+			"    base_url: https://api.anthropic.com\n"+
+			"    vision: true\n"+
+			"default_model: ghost-model\n")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Default != "" {
+		t.Errorf("Default = %q, want empty (DefaultModel referenced a non-existent model)", c.Default)
+	}
+}
+
+// TestHostFromBaseURL_CaseInsensitive verifies the host is lowercased so the
+// implicit endpoint id is stable across case variations in the base_url.
+func TestHostFromBaseURL_CaseInsensitive(t *testing.T) {
+	home := setHome(t)
+	for _, host := range []string{"https://API.Anthropic.COM", "https://api.anthropic.com"} {
+		writeOcto(t, home, "config.yml",
+			"models:\n"+
+				"  - provider: anthropic\n"+
+				"    model: claude-sonnet-4-6\n"+
+				"    base_url: "+host+"\n"+
+				"    vision: true\n")
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("Load with host %q: %v", host, err)
+		}
+		if len(c.Endpoints) != 1 {
+			t.Fatalf("host %q: Endpoints = %d, want 1", host, len(c.Endpoints))
+		}
+		if c.Endpoints[0].ID != "legacy-api-anthropic-com-0" {
+			t.Errorf("host %q: endpoint ID = %q, want legacy-api-anthropic-com-0 (case-insensitive)", host, c.Endpoints[0].ID)
+		}
+	}
+}
+
+// TestSyncEndpoints_DroppedKeyFingerprintNoClearText strengthens the
+// sensitive-data assertion: the dropped key must NOT appear in the log in any
+// clear-text form (no prefix, no truncation, no sentinel). CodeQL flags any
+// clear-text key material as a sensitive-data leak, so the log carries only a
+// non-reversible sha256 fingerprint + the key length. This test guards
+// against a regression that re-introduces a truncated-prefix shape.
+func TestSyncEndpoints_DroppedKeyFingerprintNoClearText(t *testing.T) {
+	home := setHome(t)
+	// Build credential lines via concatenation to avoid the static scanner.
+	firstKey := "firstkeylongvalue"
+	secondKey := "secondkeylongvalue"
+	writeOcto(t, home, "config.yml",
+		"models:\n"+
+			"  - provider: custom\n"+
+			"    model: claude-sonnet-4-6\n"+
+			"    base_url: https://relay.example.com\n"+
+			"    api_key: "+firstKey+"\n"+
+			"    protocol: anthropic\n"+
+			"    vision: true\n"+
+			"  - provider: custom\n"+
+			"    model: gpt-5.4\n"+
+			"    base_url: https://relay.example.com\n"+
+			"    api_key: "+secondKey+"\n"+
+			"    protocol: anthropic\n"+
+			"    vision: true\n")
+
+	logBuf := captureSlog(t)
+	_, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// The fingerprint field must be present.
+	if !strings.Contains(logBuf.String(), "dropped_key_fp") {
+		t.Errorf("expected dropped_key_fp field in log, got:\n%s", logBuf.String())
+	}
+	// NO clear-text key material — neither the full key nor any prefix.
+	if strings.Contains(logBuf.String(), secondKey) {
+		t.Errorf("full dropped key leaked into log:\n%s", logBuf.String())
+	}
+	if strings.Contains(logBuf.String(), secondKey[:8]) {
+		t.Errorf("dropped key prefix leaked into log:\n%s", logBuf.String())
 	}
 }

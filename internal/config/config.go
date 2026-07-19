@@ -17,10 +17,13 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,17 +91,96 @@ func (e *ModelEntry) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// Endpoint is a user-configured channel: a bundle of models sharing one set
+// of connection parameters (base_url + api_key + protocol). The two-level
+// schema (endpoints → models) replaces the flat models list so the same model
+// can be reached via multiple channels (e.g. an official vendor endpoint and
+// a relay endpoint), which the flat list forbade ("Two entries may not share
+// a model string", see ModelEntry). An Endpoint is referenced from Default /
+// Lite / channel bindings via the composite id "<ID>::<model>".
+type Endpoint struct {
+	// ID is the unique identifier and the composite-id prefix. Must match
+	// ^[a-zA-Z0-9_-]+$ and must not contain "::". Legacy entries migrated
+	// from the flat schema get IDs of the form "legacy-<host>-<n>"; users
+	// can rename them to anything friendly.
+	ID string `yaml:"id"`
+	// Name is the optional display name shown in the UI. May differ from ID.
+	Name string `yaml:"name,omitempty"`
+	// Provider is the vendor id ("anthropic" | "openai" | "custom" | ...).
+	// Named vendors pin base_url/protocol via the registry; the "custom"
+	// vendor requires an explicit BaseURL and Protocol.
+	Provider string `yaml:"provider"`
+	// BaseURL is the endpoint URL. Empty for named vendors uses the vendor
+	// default; required for the "custom" vendor.
+	BaseURL string `yaml:"base_url,omitempty"`
+	// APIKey is a plaintext fallback used only if the provider's env var is
+	// empty. Stored mode 0600. Prefer the env var.
+	APIKey string `yaml:"api_key,omitempty"`
+	// Protocol is the wire format ("anthropic" | "openai"). Only the
+	// "custom" vendor needs it set explicitly; named vendors pin it.
+	Protocol string `yaml:"protocol,omitempty"`
+	// LiteModel optionally names a model in Models used as the lite model
+	// for compaction. Empty falls back to vendor inference (see
+	// ImplicitLiteModel).
+	LiteModel string `yaml:"lite_model,omitempty"`
+	// Models is the list of models offered through this endpoint. Each
+	// carries its own Vision flag (model-level capability, not endpoint-level).
+	Models []EndpointModel `yaml:"models"`
+}
+
+// EndpointModel is one model entry under an Endpoint.
+type EndpointModel struct {
+	// Model is the model id sent to the API (e.g. claude-sonnet-4-6).
+	Model string `yaml:"model"`
+	// Vision reports whether this model accepts image input. It is a
+	// model-level capability: the same endpoint may expose a vision model
+	// and a text-only model side by side.
+	Vision bool `yaml:"vision"`
+}
+
+// CompositeID returns the "<ID>::<Model>" reference for this endpoint+model.
+// Used by Default / Lite / channel bindings. The caller is responsible for
+// ensuring the model exists under this endpoint.
+func (e Endpoint) CompositeID(model string) string {
+	return e.ID + "::" + model
+}
+
 // Config is the persisted set of CLI defaults. Every field is optional; a
 // missing file (or a missing field) leaves the zero value, and the caller
 // substitutes its built-in default.
 type Config struct {
-	// Models is the list of named model configurations.
+	// Endpoints is the list of user-configured channels (the new two-level
+	// schema's authoritative field). Each bundles shared connection params
+	// and a list of models. PR1 populates this from the legacy flat Models
+	// list during normalize(); the write path switches to emitting this in
+	// PR4. Until then Save still writes the flat Models form (Save elides
+	// this field at marshal time) so existing callers and on-disk files
+	// keep working, while Load still honours an explicit endpoints: block
+	// if the user hand-writes one (design §4.1 step 1).
+	Endpoints []Endpoint `yaml:"endpoints,omitempty"`
+	// Default is the composite id "<endpoint_id>::<model>" selecting the
+	// endpoint+model used when nothing else picks one. Empty falls back to
+	// the first endpoint's first model (see ResolveDefault). Elided at
+	// Save time in PR1; see Save.
+	Default string `yaml:"default,omitempty"`
+	// Lite is the composite id for the compaction lite model. Empty means
+	// fall back to ImplicitLiteModel inference (endpoint.lite_model, else
+	// the vendor registry's LiteModel for official endpoints). Elided at
+	// Save time in PR1; see Save.
+	Lite string `yaml:"lite,omitempty"`
+
+	// Models is the legacy flat list of named model configurations. Kept
+	// for read compatibility — normalize() populates it from Endpoints so
+	// existing callers keep working. PR4 switches Save to write Endpoints
+	// and stops emitting this.
 	Models []ModelEntry `yaml:"models,omitempty"`
 	// DefaultModel names the entry used when nothing else selects one.
-	// Empty falls back to the first entry.
+	// Empty falls back to the first entry. Legacy read-compat only; the
+	// authoritative field is Default above.
 	DefaultModel string `yaml:"default_model,omitempty"`
 	// LiteModel optionally names the entry used for cheap internal calls
-	// (history compaction). Empty means no lite model.
+	// (history compaction). Empty means no lite model. Legacy read-compat
+	// only; the authoritative field is Lite above.
 	LiteModel string `yaml:"lite_model,omitempty"`
 
 	PermissionMode string `yaml:"permission_mode,omitempty"`
@@ -384,13 +466,73 @@ func (c Config) DefaultEntry() ModelEntry {
 // duplicated or half-filled entry) but which usually mean a hand edit went
 // wrong. It returns a human-readable list; empty means the config is usable. A
 // config with no models (the valid pre-onboarding state) reports nothing.
+//
+// PR1 layers endpoint-level checks on top of the legacy Models checks (design
+// §14.1): endpoint id uniqueness/legality, each endpoint has at least one
+// model, model names non-empty, no duplicate models within one endpoint, and
+// Default/Lite composite ids resolve.
+//
+// To avoid double-reporting on a migrated flat config (where Endpoints is
+// synthesised from Models and the same duplicate would surface in both
+// layers), the endpoint-level checks only run when the config is on the pure
+// new schema — i.e. Endpoints is non-empty AND Models is empty (a hand-written
+// endpoints: block with no models: block, the shape §4.1 step 1 recognises as
+// "user is already on the new schema"). A flat config (Models non-empty,
+// Endpoints synthesised in memory) gets only the legacy Models checks, so
+// hand-edited flat files keep getting exactly the validation they always did.
+// PR4, which switches Save to emit Endpoints and drops the Models write path,
+// will lift this guard so endpoint-level checks always run.
 func (c Config) Validate() []string {
-	if len(c.Models) == 0 {
-		return nil
-	}
 	var problems []string
-	// Keyed by the raw model string (EntryByModel matches exactly), so the
-	// default_model/lite_model checks below agree with runtime resolution.
+
+	// Endpoint-level checks — only on the pure new schema (Endpoints set,
+	// Models empty). See the doc comment for why.
+	if len(c.Endpoints) > 0 && len(c.Models) == 0 {
+		seenEndpointID := make(map[string]bool, len(c.Endpoints))
+		for i, ep := range c.Endpoints {
+			if strings.TrimSpace(ep.ID) == "" {
+				problems = append(problems, fmt.Sprintf("endpoints[%d] has no id", i))
+			} else if !isValidEndpointID(ep.ID) {
+				problems = append(problems, fmt.Sprintf("endpoint id %q contains illegal chars (allowed: a-z A-Z 0-9 _ -, and no \"::\")", ep.ID))
+			}
+			if seenEndpointID[ep.ID] {
+				problems = append(problems, fmt.Sprintf("duplicate endpoint id %q", ep.ID))
+			}
+			seenEndpointID[ep.ID] = true
+
+			if len(ep.Models) == 0 {
+				problems = append(problems, fmt.Sprintf("endpoint %q has no models", ep.ID))
+			}
+			seenModel := make(map[string]bool, len(ep.Models))
+			for j, m := range ep.Models {
+				if strings.TrimSpace(m.Model) == "" {
+					problems = append(problems, fmt.Sprintf("endpoint %q models[%d] has no model name", ep.ID, j))
+					continue
+				}
+				if seenModel[m.Model] {
+					problems = append(problems, fmt.Sprintf("duplicate model %q in endpoint %q", m.Model, ep.ID))
+				}
+				seenModel[m.Model] = true
+			}
+		}
+
+		// Default/Lite composite-id resolution.
+		if c.Default != "" {
+			if _, _, ok := c.resolveCompositeID(c.Default); !ok {
+				problems = append(problems, fmt.Sprintf("default %q does not resolve to any endpoint+model", c.Default))
+			}
+		}
+		if c.Lite != "" {
+			if _, _, ok := c.resolveCompositeID(c.Lite); !ok {
+				problems = append(problems, fmt.Sprintf("lite %q does not resolve to any endpoint+model", c.Lite))
+			}
+		}
+	}
+
+	// Legacy flat Models checks.
+	if len(c.Models) == 0 {
+		return problems
+	}
 	seen := make(map[string]bool, len(c.Models))
 	for i, m := range c.Models {
 		if strings.TrimSpace(m.Model) == "" {
@@ -412,6 +554,44 @@ func (c Config) Validate() []string {
 		problems = append(problems, fmt.Sprintf("lite_model %q matches no entry", c.LiteModel))
 	}
 	return problems
+}
+
+// isValidEndpointID reports whether id matches the endpoint id regex
+// ^[a-zA-Z0-9_-]+$ and does not contain the composite-id separator "::". The
+// "::" check is redundant with the regex (":" isn't in the allowed set) but
+// spelled out for clarity — a future regex relaxation must still reject "::".
+func isValidEndpointID(id string) bool {
+	if id == "" || strings.Contains(id, "::") {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveCompositeID parses "<endpoint_id>::<model>" and reports whether both
+// the endpoint and the model under it exist. Used by Validate to check Default
+// and Lite without coupling to ParseModelFlag's error messages (Validate
+// produces its own "does not resolve" wording).
+func (c Config) resolveCompositeID(id string) (Endpoint, EndpointModel, bool) {
+	endpointID, model, ok := splitCompositeID(id)
+	if !ok {
+		return Endpoint{}, EndpointModel{}, false
+	}
+	for _, ep := range c.Endpoints {
+		if ep.ID != endpointID {
+			continue
+		}
+		for _, m := range ep.Models {
+			if m.Model == model {
+				return ep, m, true
+			}
+		}
+	}
+	return Endpoint{}, EndpointModel{}, false
 }
 
 // EntryByModel returns the entry with the given model string. An empty model
@@ -512,12 +692,28 @@ type fileConfig struct {
 // normalize folds legacy top-level model fields into a one-entry Models list.
 // Files already on the new schema pass through untouched; legacy fields are
 // ignored once a models list exists.
+//
+// Precedence (design §4.1): if the file carries an explicit endpoints: block
+// the user is already on the new schema and we honour it as-is — rebuilding
+// from Models would silently drop their endpoints: edits. Otherwise we
+// synthesise Endpoints from the flat Models list so new code can read the
+// two-level shape while existing callers keep reading Models.
 func (f fileConfig) normalize() Config {
 	c := f.Config
+	if len(c.Endpoints) > 0 {
+		// Already on the new schema — leave Endpoints/Default/Lite as the
+		// authoritative shape. Migrate any provider aliases on Models too,
+		// for callers that still read the flat list.
+		for i := range c.Models {
+			migrateEntryProvider(&c.Models[i])
+		}
+		return c
+	}
 	if len(c.Models) > 0 {
 		for i := range c.Models {
 			migrateEntryProvider(&c.Models[i])
 		}
+		syncEndpointsFromModels(&c)
 		return c
 	}
 	if f.LegacyProvider == "" && f.LegacyModel == "" && f.LegacyBaseURL == "" && f.LegacyAPIKey == "" {
@@ -537,7 +733,391 @@ func (f fileConfig) normalize() Config {
 	migrateEntryProvider(&e)
 	c.Models = []ModelEntry{e}
 	c.DefaultModel = f.LegacyModel
+	syncEndpointsFromModels(&c)
 	return c
+}
+
+// syncEndpointsFromModels populates c.Endpoints / c.Default / c.Lite from the
+// legacy flat c.Models / c.DefaultModel / c.LiteModel. It runs after the flat
+// list is finalised so every Load leaves both shapes in sync: existing callers
+// keep reading c.Models (PR1 doesn't switch the write path), while new code
+// reads c.Endpoints.
+//
+// Aggregation is by (provider, base_url): entries sharing the same provider
+// and base_url collapse into one endpoint (that bundle is exactly what an
+// endpoint represents — shared connection params). Each migrated endpoint gets
+// a stable implicit ID "legacy-<host>-<n>" so repeated loads produce the same
+// ID; the user can rename it later. api_key/protocol are taken from the first
+// entry of each group; if a later entry in the same group carried a different
+// key, it's dropped with a slog.Warn so the loss isn't silent.
+//
+// Default/Lite (composite ids) are mapped from the legacy DefaultModel/LiteModel
+// (bare model strings) by locating the first endpoint whose Models contains
+// the model.
+func syncEndpointsFromModels(c *Config) {
+	c.Endpoints = nil
+	c.Default = ""
+	c.Lite = ""
+	if len(c.Models) == 0 {
+		return
+	}
+
+	type group struct {
+		provider string
+		baseURL  string
+		entries  []ModelEntry
+	}
+	var groups []group
+	groupIdx := map[string]int{} // key: provider+"\x00"+baseURL → index in groups
+	for _, e := range c.Models {
+		key := e.Provider + "\x00" + e.BaseURL
+		if idx, ok := groupIdx[key]; ok {
+			groups[idx].entries = append(groups[idx].entries, e)
+			continue
+		}
+		groupIdx[key] = len(groups)
+		groups = append(groups, group{provider: e.Provider, baseURL: e.BaseURL, entries: []ModelEntry{e}})
+	}
+
+	// Per-baseURL counter for the legacy-<host>-<n> suffix so two endpoints
+	// sharing a host (e.g. regional variants) get distinct IDs.
+	hostCounter := map[string]int{}
+	for _, g := range groups {
+		host := hostFromBaseURL(g.baseURL)
+		n := hostCounter[host]
+		hostCounter[host] = n + 1
+		ep := Endpoint{
+			ID:       legacyEndpointID(host, n),
+			Provider: g.provider,
+			BaseURL:  g.baseURL,
+		}
+		for i, e := range g.entries {
+			if i == 0 {
+				ep.APIKey = e.APIKey
+				ep.Protocol = e.Protocol
+			} else if e.APIKey != "" && e.APIKey != g.entries[0].APIKey {
+				// Log only a non-reversible fingerprint of the dropped key —
+				// CodeQL (correctly) flags any clear-text key material as a
+				// sensitive-data leak, even a truncated prefix (the first 8
+				// chars of an sk-... key are enough to identify it). The
+				// length plus a 4-char sha256 prefix is enough for the user
+				// to tell which key was dropped without any key material
+				// landing in the log.
+				slog.Warn("config: multiple api_keys found for same base_url, keeping the first",
+					"base_url", g.baseURL,
+					"dropped_key_len", len(e.APIKey),
+					"dropped_key_fp", keyFingerprint(e.APIKey))
+			}
+			ep.Models = append(ep.Models, EndpointModel{Model: e.Model, Vision: e.Vision})
+		}
+		c.Endpoints = append(c.Endpoints, ep)
+	}
+
+	if c.DefaultModel != "" {
+		if ep, m, ok := findEndpointModel(c.Endpoints, c.DefaultModel); ok {
+			c.Default = ep.CompositeID(m.Model)
+		}
+	}
+	if c.LiteModel != "" {
+		if ep, m, ok := findEndpointModel(c.Endpoints, c.LiteModel); ok {
+			c.Lite = ep.CompositeID(m.Model)
+		}
+	}
+}
+
+// findEndpointModel returns the first endpoint whose Models contains the given
+// bare model id, plus the matching EndpointModel. Used to map legacy bare-model
+// references (DefaultModel / LiteModel) to composite ids during normalisation.
+func findEndpointModel(endpoints []Endpoint, model string) (Endpoint, EndpointModel, bool) {
+	for _, ep := range endpoints {
+		for _, m := range ep.Models {
+			if m.Model == model {
+				return ep, m, true
+			}
+		}
+	}
+	return Endpoint{}, EndpointModel{}, false
+}
+
+// hostFromBaseURL extracts the URL host (lowercased) for use in a
+// legacy-<host>-<n> endpoint ID. Hosts are case-insensitive per RFC 3986
+// (url.Parse normalises the scheme but not the host), so lowercasing gives a
+// stable id regardless of how the user cased the base_url in the YAML —
+// design §4.4 requires the implicit id to be stable across repeated
+// Load→Save cycles, and a case change in the file must not rotate it. On a
+// parse failure it falls back to the raw string lowercased so a malformed
+// base_url still yields a stable (if ugly) ID rather than aborting
+// normalisation.
+func hostFromBaseURL(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return strings.ToLower(baseURL)
+	}
+	return strings.ToLower(u.Host)
+}
+
+// legacyEndpointID builds the "legacy-<host>-<n>" ID for an implicit endpoint
+// migrated from the flat schema. Non-alphanumeric characters in the host are
+// replaced with "-" so the result matches the endpoint ID regex
+// ^[a-zA-Z0-9_-]+$.
+func legacyEndpointID(host string, n int) string {
+	safe := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, host)
+	return fmt.Sprintf("legacy-%s-%d", safe, n)
+}
+
+// keyFingerprint returns a short, non-reversible fingerprint of an API key for
+// use in logs — the first 4 hex chars of sha256(key). This is enough for the
+// user to tell which key was dropped (by matching against `sha256sum` of their
+// known keys) without any clear-text key material landing on disk. CodeQL
+// flags any clear-text key material — even a truncated prefix — as a
+// sensitive-data leak, so the old `key[:8] + "…"` shape was flagged.
+func keyFingerprint(key string) string {
+	h := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(h[:2])
+}
+
+// ResolveDefault returns the (endpoint, model) pair the session should run on
+// when nothing else selects one. It implements the four-step fallback chain
+// from the design doc (§5.3):
+//
+//  1. Default parses to (endpointID, model) and both resolve → that pair.
+//  2. Default's endpoint resolves but the model doesn't (e.g. the relay
+//     dropped it) → keep the endpoint, fall back to its first model.
+//  3. Default's endpoint doesn't exist (e.g. user deleted it) → fall back
+//     to the first endpoint's first model.
+//  4. No endpoints at all → zero values, ok=false (caller surfaces a
+//     "please configure" error).
+//
+// An empty Default is the normal fresh-install state, not a fallback: step 3
+// applies silently (no warn) so a brand-new config doesn't log noise on every
+// turn. Every other step that falls back logs a slog.Warn with the reason so
+// the user can see why their turns aren't running on the model they expected.
+//
+// The (endpoint, model, ok) shape mirrors DefaultEntry/EntryByModel: callers
+// that only need a ModelEntry for the legacy sender-building path can read
+// the returned Endpoint and EndpointModel directly.
+func (c Config) ResolveDefault() (Endpoint, EndpointModel, bool) {
+	if len(c.Endpoints) == 0 {
+		return Endpoint{}, EndpointModel{}, false
+	}
+
+	// Parse Default into (endpointID, model). An empty Default or one missing
+	// the separator is treated as "no default set" — step 3 applies silently.
+	endpointID, model, hasDefault := splitCompositeID(c.Default)
+
+	if hasDefault {
+		// Step 1 + 2: find the endpoint Default points at.
+		for i := range c.Endpoints {
+			if c.Endpoints[i].ID != endpointID {
+				continue
+			}
+			ep := &c.Endpoints[i]
+			if len(ep.Models) == 0 {
+				// Step 2 dead-end: endpoint exists but is empty. Fall through
+				// to step 3 (first non-empty endpoint), with a warn that the
+				// targeted endpoint was empty. Carry resolved_to like the
+				// other fallback paths so log scanners see a uniform shape.
+				if first := firstNonEmptyEndpoint(c.Endpoints); first != nil {
+					slog.Warn("config: default model resolution fell back",
+						"default", c.Default, "reason", "empty_endpoint",
+						"endpoint_id", endpointID,
+						"resolved_to", first.CompositeID(first.Models[0].Model))
+					return *first, first.Models[0], true
+				}
+				// No non-empty endpoint to fall back to — log the failure
+				// (no resolved_to, since nothing resolved) and return ok=false
+				// so the caller surfaces a "please configure" error.
+				slog.Warn("config: default model resolution failed",
+					"default", c.Default, "reason", "empty_endpoint_no_fallback",
+					"endpoint_id", endpointID)
+				return Endpoint{}, EndpointModel{}, false
+			}
+			// Step 1: exact model hit.
+			for j := range ep.Models {
+				if ep.Models[j].Model == model {
+					return *ep, ep.Models[j], true
+				}
+			}
+			// Step 2: endpoint found, model not found — fall back to the
+			// endpoint's first model.
+			slog.Warn("config: default model resolution fell back",
+				"default", c.Default, "resolved_to", ep.CompositeID(ep.Models[0].Model),
+				"reason", "model_not_found")
+			return *ep, ep.Models[0], true
+		}
+
+		// Step 3: Default's endpoint doesn't exist.
+		if first := firstNonEmptyEndpoint(c.Endpoints); first != nil {
+			slog.Warn("config: default model resolution fell back",
+				"default", c.Default,
+				"resolved_to", first.CompositeID(first.Models[0].Model),
+				"reason", "endpoint_not_found")
+			return *first, first.Models[0], true
+		}
+		return Endpoint{}, EndpointModel{}, false
+	}
+
+	// Empty Default — fresh install, not a fallback. Step 3 applies silently.
+	if first := firstNonEmptyEndpoint(c.Endpoints); first != nil {
+		return *first, first.Models[0], true
+	}
+	return Endpoint{}, EndpointModel{}, false
+}
+
+// splitCompositeID splits "<endpoint_id>::<model>" into its parts. hasDefault
+// is false when the input is empty or doesn't contain the "::" separator —
+// both mean "no default set" to ResolveDefault. A composite id with an empty
+// endpoint id or empty model (e.g. "::model" or "ep::") is treated as set
+// (hasDefault true) so ResolveDefault can report the specific failure rather
+// than silently ignoring it.
+func splitCompositeID(id string) (endpointID, model string, hasDefault bool) {
+	if id == "" {
+		return "", "", false
+	}
+	idx := strings.Index(id, "::")
+	if idx < 0 {
+		// Bare model with no endpoint prefix — not a valid composite id. Treat
+		// as "no default set" so the caller falls back rather than reporting a
+		// parse error mid-turn.
+		return "", "", false
+	}
+	return id[:idx], id[idx+2:], true
+}
+
+// firstNonEmptyEndpoint returns the first endpoint in the slice that has at
+// least one model, or nil if none do. An endpoint with zero models is
+// unusable (nothing to run), so the fallback chain skips them.
+func firstNonEmptyEndpoint(endpoints []Endpoint) *Endpoint {
+	for i := range endpoints {
+		if len(endpoints[i].Models) > 0 {
+			return &endpoints[i]
+		}
+	}
+	return nil
+}
+
+// ParseModelFlag resolves a --model flag value (or env *_MODEL value) to the
+// (endpoint, model) pair it selects. It accepts two forms:
+//
+//   - Composite id "<endpoint_id>::<model>" — resolves to exactly that pair.
+//     An unknown endpoint id or unknown model under a known endpoint is an
+//     error naming the missing part and listing the available ones.
+//   - Bare model "<model>" — resolves via the precedence in S5.4:
+//     1. If the Default endpoint's model matches, use the Default endpoint
+//     (Default is "my main endpoint", a bare name prefers it).
+//     2. Otherwise scan all endpoints; a unique hit returns it.
+//     3. Multiple hits return the first match and slog.Warn naming the
+//     picked endpoint so the user can disambiguate with a composite id.
+//     4. No hit is an error listing the available models.
+//
+// An empty flag is an error — callers should treat empty as "no --model given"
+// and fall back to ResolveDefault rather than calling ParseModelFlag.
+func (c Config) ParseModelFlag(flag string) (Endpoint, EndpointModel, error) {
+	if flag == "" {
+		return Endpoint{}, EndpointModel{}, fmt.Errorf("model flag is empty")
+	}
+
+	// Composite-id path.
+	if endpointID, model, ok := splitCompositeID(flag); ok {
+		for i := range c.Endpoints {
+			if c.Endpoints[i].ID != endpointID {
+				continue
+			}
+			ep := &c.Endpoints[i]
+			for j := range ep.Models {
+				if ep.Models[j].Model == model {
+					return *ep, ep.Models[j], nil
+				}
+			}
+			available := availableModelsInEndpoint(ep)
+			return Endpoint{}, EndpointModel{}, fmt.Errorf("model %q not found in endpoint %q (available: %s)", model, endpointID, available)
+		}
+		available := availableEndpoints(c.Endpoints)
+		return Endpoint{}, EndpointModel{}, fmt.Errorf("endpoint %q not found (available: %s)", endpointID, available)
+	}
+
+	// Bare-model path.
+	// Step 2a: prefer the Default endpoint if its model matches. Only applies
+	// when the user explicitly set a Default (c.Default != "") — an empty
+	// Default falling back to the first endpoint (ResolveDefault step 3) is
+	// NOT a "user-designated main endpoint", so it shouldn't short-circuit
+	// the ambiguity check in step 2b. Without this guard, two endpoints
+	// exposing the same model with no Default set would silently pick the
+	// first instead of warning about the ambiguity (design §5.4 rationale:
+	// "用户配 default 说明这是我的主 endpoint" — no Default, no preference).
+	if c.Default != "" {
+		if defEp, defM, ok := c.ResolveDefault(); ok && defM.Model == flag {
+			return defEp, defM, nil
+		}
+	}
+	// Step 2b: scan all endpoints for a match.
+	var hits []endpointModelIndex
+	for i := range c.Endpoints {
+		for j := range c.Endpoints[i].Models {
+			if c.Endpoints[i].Models[j].Model == flag {
+				hits = append(hits, endpointModelIndex{ep: i, m: j})
+			}
+		}
+	}
+	switch len(hits) {
+	case 0:
+		available := availableModelsAcrossEndpoints(c.Endpoints)
+		return Endpoint{}, EndpointModel{}, fmt.Errorf("model %q not found in any endpoint (available: %s)", flag, available)
+	case 1:
+		h := hits[0]
+		return c.Endpoints[h.ep], c.Endpoints[h.ep].Models[h.m], nil
+	default:
+		h := hits[0]
+		picked := c.Endpoints[h.ep]
+		pickedModel := picked.Models[h.m]
+		// Warn so the user knows the bare flag was ambiguous and can switch
+		// to a composite id to pin a specific endpoint.
+		slog.Warn("config: model flag matches multiple endpoints, using the first match",
+			"flag", flag, "picked_endpoint", picked.ID,
+			"hint", fmt.Sprintf("use %s::%s to disambiguate", picked.ID, pickedModel.Model))
+		return picked, pickedModel, nil
+	}
+}
+
+// endpointModelIndex pairs an endpoint index with a model index inside it.
+type endpointModelIndex struct{ ep, m int }
+
+// availableEndpoints returns a comma-joined list of endpoint ids for use in
+// error messages.
+func availableEndpoints(endpoints []Endpoint) string {
+	ids := make([]string, 0, len(endpoints))
+	for _, ep := range endpoints {
+		ids = append(ids, ep.ID)
+	}
+	return strings.Join(ids, ", ")
+}
+
+// availableModelsInEndpoint returns a comma-joined list of model ids in one
+// endpoint for use in error messages.
+func availableModelsInEndpoint(ep *Endpoint) string {
+	models := make([]string, 0, len(ep.Models))
+	for _, m := range ep.Models {
+		models = append(models, m.Model)
+	}
+	return strings.Join(models, ", ")
+}
+
+// availableModelsAcrossEndpoints returns a comma-joined list of every model
+// across every endpoint for use in error messages. Duplicates (same model on
+// multiple endpoints) are kept so the user sees the full picture.
+func availableModelsAcrossEndpoints(endpoints []Endpoint) string {
+	var models []string
+	for _, ep := range endpoints {
+		for _, m := range ep.Models {
+			models = append(models, m.Model)
+		}
+	}
+	return strings.Join(models, ", ")
 }
 
 // migrateEntryProvider folds the retired openai_compatible / anthropic_compatible
@@ -650,6 +1230,19 @@ func resetLastGoodForTest() {
 // API keys), creating ~/.octo if needed. A legacy config.yaml present at that
 // moment is renamed to config.yaml.bak — best effort, because config.yml wins
 // the read order regardless.
+// Save writes the config to ~/.octo/config.yml with mode 0600 (it may hold
+// API keys), creating ~/.octo if needed. A legacy config.yaml present at that
+// moment is renamed to config.yaml.bak — best effort, because config.yml wins
+// the read order regardless.
+//
+// PR1 invariant (design §4.3): Save must write the legacy flat form
+// (models: + default_model: + lite_model:), NOT the new endpoints: form.
+// The new Endpoints/Default/Lite fields are in-memory only during PR1-3 so
+// existing callers and downgrade paths keep working. PR4 will flip this to
+// emit endpoints: instead. To enforce that here without changing the field
+// tags (Load still needs to honour an explicit endpoints: block the user
+// hand-writes, per §4.1 step 1), Save marshals a shallow copy with the new
+// fields cleared.
 func (c Config) Save() error {
 	path, err := Path()
 	if err != nil {
@@ -658,7 +1251,14 @@ func (c Config) Save() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(c)
+	// Shallow copy with the new-schema fields cleared so yaml.Marshal emits
+	// only the legacy flat form. The Models slice is shared by reference,
+	// which is fine — we don't mutate it.
+	saved := c
+	saved.Endpoints = nil
+	saved.Default = ""
+	saved.Lite = ""
+	data, err := yaml.Marshal(saved)
 	if err != nil {
 		return err
 	}
@@ -730,8 +1330,106 @@ func RestoreFromBackup() (brokenSaved string, err error) {
 // reset to the first entry; a dangling lite_model is cleared. A duplicate model
 // or a half-filled entry is reported as unfixable — the intended value can't be
 // guessed, so it's left for the user.
+//
+// PR1 layers endpoint-level auto-fixes on top of the legacy Models fixes
+// (design §14.2): dangling Default resets to the first endpoint's first
+// model; dangling Lite clears; an empty endpoint (no models) is deleted; Lite
+// == Default clears Lite. Duplicate endpoint id, illegal id chars, missing
+// model name, and duplicate model within one endpoint are unfixable (can't
+// guess the intended value). Like Validate, the endpoint-level branch only
+// runs on the pure new schema (Endpoints set, Models empty) to avoid
+// double-acting on a migrated flat config; PR4 lifts that guard.
 func (c Config) Repair() (repaired Config, fixed, unfixable []string) {
 	repaired = c
+
+	// Endpoint-level repair — only on the pure new schema (Endpoints set,
+	// Models empty). See the doc comment for why.
+	if len(repaired.Endpoints) > 0 && len(repaired.Models) == 0 {
+		// Scan for unfixable problems first so the auto-fixes below don't
+		// act on garbage (e.g. an illegal id can't be safely renamed, so
+		// the user must fix it before any auto-reset of Default makes
+		// sense).
+		seenID := make(map[string]bool, len(repaired.Endpoints))
+		for i, ep := range repaired.Endpoints {
+			if strings.TrimSpace(ep.ID) == "" {
+				unfixable = append(unfixable, fmt.Sprintf("endpoints[%d] has no id — add one", i))
+			} else if !isValidEndpointID(ep.ID) {
+				unfixable = append(unfixable, fmt.Sprintf("endpoint id %q contains illegal chars — rename", ep.ID))
+			}
+			if seenID[ep.ID] {
+				unfixable = append(unfixable, fmt.Sprintf("duplicate endpoint id %q — rename one", ep.ID))
+			}
+			seenID[ep.ID] = true
+
+			seenModel := make(map[string]bool, len(ep.Models))
+			for j, m := range ep.Models {
+				if strings.TrimSpace(m.Model) == "" {
+					unfixable = append(unfixable, fmt.Sprintf("endpoint %q models[%d] has no model name — add one or remove it", ep.ID, j))
+					continue
+				}
+				if seenModel[m.Model] {
+					unfixable = append(unfixable, fmt.Sprintf("duplicate model %q in endpoint %q — remove one", m.Model, ep.ID))
+				}
+				seenModel[m.Model] = true
+			}
+		}
+
+		// Auto-fixes (safe, no guessing).
+
+		// Delete empty endpoints (no models). These are unusable and a
+		// dangling-Default reset below would have nothing to point at if all
+		// endpoints were empty.
+		var kept []Endpoint
+		for _, ep := range repaired.Endpoints {
+			if len(ep.Models) == 0 {
+				fixed = append(fixed, fmt.Sprintf("deleted empty endpoint %q (had no models)", ep.ID))
+				continue
+			}
+			kept = append(kept, ep)
+		}
+		repaired.Endpoints = kept
+
+		// Find the first non-empty endpoint + its first model — the reset
+		// target for a dangling Default. If there are none, leave Default
+		// for the user (all-empty config is the pre-onboarding state).
+		var firstEpID, firstModel string
+		for _, ep := range repaired.Endpoints {
+			if len(ep.Models) > 0 {
+				firstEpID = ep.ID
+				firstModel = ep.Models[0].Model
+				break
+			}
+		}
+		if repaired.Default != "" {
+			if _, _, ok := repaired.resolveCompositeID(repaired.Default); !ok {
+				if firstEpID != "" {
+					newDefault := firstEpID + "::" + firstModel
+					fixed = append(fixed, fmt.Sprintf("reset default %q → %q (first endpoint's first model)", repaired.Default, newDefault))
+					repaired.Default = newDefault
+				} else {
+					fixed = append(fixed, fmt.Sprintf("cleared default %q (no endpoints with models to fall back to)", repaired.Default))
+					repaired.Default = ""
+				}
+			}
+		}
+		if repaired.Lite != "" {
+			// Lite dangles OR Lite == Default → clear. The "==" check is on
+			// the raw composite-id strings — endpoint IDs must match
+			// ^[a-zA-Z0-9_-]+$ (no spaces, no case variation), so two
+			// different strings can never resolve to the same endpoint+model
+			// in practice. Validate rejects any id that would; reaching here
+			// with a valid composite id means the string form is canonical.
+			_, _, liteOK := repaired.resolveCompositeID(repaired.Lite)
+			if !liteOK || repaired.Lite == repaired.Default {
+				fixed = append(fixed, fmt.Sprintf("cleared lite %q (matched no endpoint+model or equals default)", repaired.Lite))
+				repaired.Lite = ""
+			}
+		}
+
+		return repaired, fixed, unfixable
+	}
+
+	// Legacy flat Models repair.
 	if len(repaired.Models) == 0 {
 		return repaired, nil, nil
 	}
