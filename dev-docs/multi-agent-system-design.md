@@ -11,7 +11,9 @@
 ### 目标
 
 1. 将 octo 从**单 agent** 升级为**多 agent 平台**：引入 Default Agent / Expert Agent 模型，每个 agent 拥有独立的 system prompt、工具集、skills、MCP、session pool。
-2. Default Agent 是**唯一**管理入口：创建/修改/删除 agent、增删 skill、配置 MCP 都只能在 Default Agent 视图下进行。
+2. Default Agent 是**唯一**管理入口：创建/修改/删除 agent、增删 skill、配置 MCP 都只能在 Default Agent 视图下进行。提供两种管理方式：
+   - **Web UI 管理面板**——可视化操作（见第 7 节）
+   - **expert-agent-manager 元技能**——对话式管理，用户直接跟 Default Agent 说"帮我创建一个代码审查 agent"即可完成配置（见第 7.4 节）
 3. Expert Agent 只能从已有资源池中**启用/禁用**，不能新增 skill/MCP（"定义"归 Default Agent，"使用配置"归各 agent）。
 4. 每个 agent 拥有独立的会话 pool，会话一旦建立 agent 不可切换。
 5. IM 路由支持频道绑定（私聊严格一对一，群聊多 agent 共存 @ 触发）。
@@ -600,6 +602,62 @@ MVP 阶段 memory backend 不改。所有 agent 共享同一套 `memDir` + `home
 - 会话内不显示 agent 切换入口
 - 想让消息走其他 agent → 新建一个指向其他 agent 的会话（@+ 仅在新建会话流程中出现，不在现有会话的输入框里）
 
+### 7.4 Expert Agent Manager 元技能
+
+#### 7.4.1 设计意图
+
+Web UI 是管理 Expert Agent 的主要途径，但用户有时不想离开对话界面去操作 UI——直接跟 Default Agent 说"帮我新建一个代码审查 agent"更自然。为此引入 **expert-agent-manager** 元技能，以对话方式提供 agent 管理能力。
+
+#### 7.4.2 权限控制
+
+- 该 skill **只暴露给 Default Agent**，不在 Expert Agent 的 skill 清单中
+- Expert Agent 无法调用此 skill 修改自身或其他 agent 的配置
+- 删除等破坏性操作需要用户二次确认（skill 内部做 confirm 步骤）
+
+#### 7.4.3 能力范围
+
+| 操作 | 说明 | 二次确认 |
+|------|------|----------|
+| 创建 agent | 引导用户输入 name、description、system_prompt、model、tools、skills、aliases、channel_bindings | 否（创建后告知结果） |
+| 修改 agent | 更新已有 profile 的任意字段 | 否 |
+| 删除 agent | 删除 profile 文件，有频道绑定时阻止 | **是** |
+| 列出 agents | 展示所有 Expert Agent 及其状态 | — |
+| 绑定频道 | 将 agent 绑定到指定 IM 频道 | 否 |
+| 解绑频道 | 移除频道绑定 | 否 |
+| 启用/禁用 skill | 从全局技能池中开关 | 否 |
+| 启用/禁用 tool | 从工具白名单中开关 | 否 |
+
+#### 7.4.4 交互流程
+
+```
+用户: "帮我建一个代码审查 agent"
+  │
+  ▼
+Default Agent 收到消息，匹配到 expert-agent-manager skill
+  │
+  ├─ 1. 提取已有信息：从用户消息中提取 name/description 等字段
+  ├─ 2. 缺失字段走引导式问答：
+  │      "给它起个什么名字？" → "用什么模型？" → "要启用哪些技能？"
+  ├─ 3. 校验输入（模型是否在 config 列表中、alias 是否全局唯一）
+  ├─ 4. 调用 Profile Store.Create() 写入 ~/.octo/agents/<id>.json
+  ├─ 5. 热加载事件触发 → MultiManager 重建
+  └─ 6. 回复: "代码审查 Agent 已创建，ID: code-review-v1。你可以用 @review 在群里 @ 它。"
+```
+
+#### 7.4.5 实现路径
+
+- `expert-agent-manager` 是一个系统级内置 skill（类似 `code-review`），在 Default Agent 的 skill registry 中注册
+- 它封装对 `Profile Store` CRUD API 的调用，不新增后端接口（复用已有的 `POST /api/agents`、`PUT /api/agents/:id`、`DELETE /api/agents/:id` 等接口）
+- skill 的 SKILL.md 定义交互模板和校验规则（字段格式、唯一性检查、模型白名单校验）
+- 所有通过对话创建的 agent 写入同一个 `~/.octo/agents/` 目录，Web UI 立即可见，无需同步
+
+#### 7.4.6 设计原则
+
+- **对话管理是 Web UI 的补充，不是替代。** 复杂批量操作（如一次配置多个 agent）仍然推荐使用 Web UI
+- **同一数据源。** 对话和 UI 共享同一个 Profile Store，不存在不一致的问题
+- **引导式创建。** 关键字段缺失时走问答补充，不留半残配置
+- **安全前置。** 破坏性操作（删除）强制二次确认
+
 ### 8. CLI/TUI 入口指定 Agent
 
 #### 8.1 Flag 传递
@@ -752,6 +810,7 @@ func DefaultProfile() *Profile {
 | `web/src/views/AgentsView.svelte` | Agent 管理主面板 |
 | `web/src/views/AgentEditView.svelte` | Agent 编辑表单 |
 | `web/src/components/agents/AgentList.svelte` | 下拉 agent 列表 |
+| `skills/expert-agent-manager/SKILL.md` | Expert Agent Manager 元技能（Default Agent 专用） |
 
 ### 修改文件
 
