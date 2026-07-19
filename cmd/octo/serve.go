@@ -54,7 +54,14 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-
+	// Reject any positional argument: serve takes flags only, and a bare
+	// value like ":19099" silently falls into fs.Args() (defaulting --addr to
+	// 127.0.0.1:8088) — see issue #1614. Point the user at the flag form
+	// explicitly instead of letting the wrong port start quietly.
+	if rest := fs.Args(); len(rest) > 0 {
+		fmt.Fprintf(stderr, "octo serve: unexpected positional argument(s) %q — use flags for every option (e.g. `octo serve -addr %s -d`)\n", rest, rest[0])
+		return 2
+	}
 	if *stop {
 		return stopDaemon(stdout, stderr)
 	}
