@@ -178,8 +178,8 @@ func resolveMaxTurns(flagVal int, seeded, interactive bool) int {
 // model whose ceiling is below the target backs off at the API (see the agent
 // loop's isMaxTokensTooLargeErr). See dev-docs/truncation-recovery.md.
 const (
-	escalateMaxTokensOpenAI    = 32768
-	escalateMaxTokensAnthropic = 32768
+	escalateMaxTokensOpenAI    = 65536
+	escalateMaxTokensAnthropic = 65536
 )
 
 // resolveMaxTokensEscalate picks the escalated cap: an explicit flag (>= 0)

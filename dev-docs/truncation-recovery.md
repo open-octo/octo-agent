@@ -59,8 +59,8 @@ conservative default per protocol, overridable by flag/env:
 
 | Provider | first attempt | escalation target |
 |---|---|---|
-| OpenAI protocol | provider default (4096) | 16384 |
-| Anthropic protocol | provider default (4096) | 32768 |
+| OpenAI protocol | provider default (32768) | 65536 |
+| Anthropic protocol | provider default (32768) | 65536 |
 
 - `--max-tokens-escalate N` / `OCTO_MAX_TOKENS_ESCALATE=N` overrides it;
   `0` disables escalation entirely.
