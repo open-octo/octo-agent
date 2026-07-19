@@ -23,6 +23,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/open-octo/octo-agent/internal/executil"
 )
 
 // IndexFile is the per-repo memory index, loaded into the system prompt.
@@ -33,6 +35,16 @@ const (
 	maxInjectLines = 200
 	maxInjectBytes = 25 * 1024
 )
+
+// gitOutput runs git -C dir with stdout captured. SetNoWindow keeps the
+// console-subsystem git.exe from flashing a console window when the parent is
+// the windowless Windows desktop app.
+func gitOutput(dir string, args ...string) ([]byte, error) {
+	args = append([]string{"-C", dir}, args...)
+	cmd := exec.Command("git", args...)
+	executil.SetNoWindow(cmd)
+	return cmd.Output()
+}
 
 // ProjectRoot returns the repo root that memory is scoped to for dir, or dir
 // itself when it's not in a git repo (or git is unavailable).
@@ -50,7 +62,7 @@ func ProjectRoot(dir string) string {
 	if dir == "" {
 		return ""
 	}
-	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output(); err == nil {
+	if out, err := gitOutput(dir, "rev-parse", "--git-common-dir"); err == nil {
 		common := strings.TrimSpace(string(out))
 		if common != "" {
 			if !filepath.IsAbs(common) {
@@ -63,7 +75,7 @@ func ProjectRoot(dir string) string {
 			// Bare repo or unusual layout — fall through to the top-level.
 		}
 	}
-	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output(); err == nil {
+	if out, err := gitOutput(dir, "rev-parse", "--show-toplevel"); err == nil {
 		if root := strings.TrimSpace(string(out)); root != "" {
 			return resolveSymlinks(root)
 		}

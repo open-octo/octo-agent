@@ -16,6 +16,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
@@ -1044,16 +1045,20 @@ func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "open action only allowed on localhost")
 			return
 		}
-		var cmd string
+		var cmd *exec.Cmd
 		switch runtime.GOOS {
 		case "darwin":
-			cmd = "open"
+			cmd = exec.Command("open", abs)
 		case "windows":
-			cmd = "start"
+			// start is a cmd.exe builtin, not an executable — route through
+			// cmd /c. The empty "" is start's window-title argument so a
+			// quoted path containing spaces isn't mistaken for the title.
+			cmd = exec.Command("cmd", "/c", "start", "", abs)
+			executil.SetNoWindow(cmd)
 		default:
-			cmd = "xdg-open"
+			cmd = exec.Command("xdg-open", abs)
 		}
-		if err := exec.Command(cmd, abs).Start(); err != nil {
+		if err := cmd.Start(); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
