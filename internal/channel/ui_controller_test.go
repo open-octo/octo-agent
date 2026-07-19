@@ -601,3 +601,63 @@ func TestUIController_NilStopTypingIsSafe(t *testing.T) {
 		t.Fatalf("expected 1 sent text, got %d", mock.sentTextCount())
 	}
 }
+
+// TestUIController_SuppressorDropsOutbound: when the suppressor func returns
+// true, the controller must silently drop all further text (the turn keeps
+// running and persisting, but nothing more is delivered to the chat) — the
+// /unbind mid-turn contract.
+func TestUIController_SuppressorDropsOutbound(t *testing.T) {
+	mock := &mockAdapter{platform: "mock"}
+	ctrl := NewUIController(mock, "chat1", "msg1", nil)
+	ctrl.SetSuppressor(func() bool { return true })
+	handler := ctrl.Handler()
+
+	// Stream several deltas — none should be delivered while suppressed.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Hello "})
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "world"})
+	if mock.sentTextCount() != 0 {
+		t.Fatalf("expected 0 sent texts while suppressed, got %d", mock.sentTextCount())
+	}
+
+	// End the turn — still nothing delivered, and the adapter must not be
+	// flushed (no trailing empty/partial message).
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{Content: "Hello world"}})
+	if mock.sentTextCount() != 0 {
+		t.Fatalf("expected 0 sent texts after turn_done while suppressed, got %d", mock.sentTextCount())
+	}
+}
+
+// TestUIController_SuppressorMidTurn: a suppressor that flips on partway
+// through the turn must let earlier text through (flushed before the flip)
+// but drop everything after — models a /unbind that lands mid-stream. The
+// "before" chunk ends on a natural flush boundary (paragraph break) so it is
+// delivered before the flip; the "after" chunk arrives post-unbind and must
+// be dropped.
+func TestUIController_SuppressorMidTurn(t *testing.T) {
+	mock := &mockAdapter{platform: "mock"}
+	suppressed := false
+	ctrl := NewUIController(mock, "chat1", "msg1", nil)
+	ctrl.SetSuppressor(func() bool { return suppressed })
+	handler := ctrl.Handler()
+
+	// Ends on "\n\n" → shouldFlush fires → delivered before the flip.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "First paragraph.\n\n"})
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("expected 1 sent text before unbind, got %d", mock.sentTextCount())
+	}
+	// /unbind lands now.
+	suppressed = true
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Second paragraph."})
+
+	// Force a final flush via turn_done — the suppressed chunk must not appear.
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{Content: "First paragraph.\n\nSecond paragraph."}})
+
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("expected exactly 1 sent text (pre-unbind only), got %d", mock.sentTextCount())
+	}
+	// SendText trims trailing whitespace, so the delivered chunk is the
+	// pre-unbind paragraph without its trailing "\n\n".
+	if mock.lastSentText().text != "First paragraph." {
+		t.Fatalf("unexpected text: %q", mock.lastSentText().text)
+	}
+}

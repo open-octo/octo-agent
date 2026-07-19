@@ -141,7 +141,7 @@ func (s *Server) armWakeupFn(key string, delay time.Duration, repeat bool, fire 
 
 // cancelWakeup stops a session's loop and resets its anti-leak clock. Called on
 // an explicit stop: an interrupt, schedule_wakeup(cancel=true), or a context
-// reset (/clear, /new, /bind, /unbind).
+// reset (/clear, /new, /bind).
 func (s *Server) cancelWakeup(sessionID string) {
 	s.wakeupMu.Lock()
 	defer s.wakeupMu.Unlock()

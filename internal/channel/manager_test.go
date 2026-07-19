@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -253,6 +254,177 @@ func TestSession_BeginRunSerialisesTurns(t *testing.T) {
 	case <-second:
 	case <-time.After(2 * time.Second):
 		t.Fatal("second turn never started after the first finished")
+	}
+}
+
+// TestManager_UnbindMidTurn_SuppressesButKeepsRunning: /unbind while a turn is
+// in flight must suppress further IM delivery (so the chat is left) but must
+// NOT cancel the turn — unlike /stop — and must keep the store file. This is
+// the /unbind mid-turn contract that hands the session to web.
+func TestManager_UnbindMidTurn_SuppressesButKeepsRunning(t *testing.T) {
+	tempHome(t)
+	cfg := &Config{Channels: map[string]PlatformConfig{}}
+	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
+
+	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
+	sess := mgr.GetOrCreateSession(ev)
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "q"})
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	path, err := sess.Store.SavePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Begin a turn and keep it in flight (don't call done).
+	runCtx, done := sess.BeginRun(context.Background())
+	defer done()
+
+	ev.Text = "/unbind"
+	reply := mgr.CommandRouter(ev)
+	if !strings.Contains(strings.ToLower(reply), "unbound") {
+		t.Fatalf("expected unbind reply, got %q", reply)
+	}
+
+	// The turn must NOT have been interrupted (/unbind is not /stop).
+	if runCtx.Err() != nil {
+		t.Fatal("/unbind must not cancel the in-flight turn")
+	}
+	if !sess.IsRunning() {
+		t.Fatal("/unbind must leave the turn running")
+	}
+	// Suppress delivery from now on.
+	if !sess.SuppressDelivery() {
+		t.Fatal("/unbind mid-turn must set suppressDelivery")
+	}
+	// Store must be preserved.
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("/unbind must keep the persisted history, but the file is gone: %v", err)
+	}
+}
+
+// TestManager_UnbindThenBindBackRecoversRunningSession: /unbind mid-turn
+// suppresses delivery and removes the session from the active map, but /bind
+// back to the same session must recover the in-memory session object: clear
+// suppressDelivery and re-add it to the sessions map so the running turn's
+// remaining output resumes delivery.
+func TestManager_UnbindThenBindBackRecoversRunningSession(t *testing.T) {
+	tempHome(t)
+	cfg := &Config{Channels: map[string]PlatformConfig{}}
+	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
+
+	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
+	sess := mgr.GetOrCreateSession(ev)
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "q"})
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	storeID := sess.Store.ID
+
+	// Begin a turn and keep it in flight.
+	runCtx, done := sess.BeginRun(context.Background())
+	defer done()
+
+	// /unbind: suppress delivery, remove from sessions map.
+	ev.Text = "/unbind"
+	reply := mgr.CommandRouter(ev)
+	if !strings.Contains(strings.ToLower(reply), "unbound") {
+		t.Fatalf("expected unbind reply, got %q", reply)
+	}
+	if !sess.SuppressDelivery() {
+		t.Fatal("/unbind must set suppressDelivery")
+	}
+	key := sessionKeyFor(BindByChatUser, ev)
+	if _, ok := mgr.sessions.Load(key); ok {
+		t.Fatal("/unbind must remove session from sessions map")
+	}
+	if runCtx.Err() != nil {
+		t.Fatal("/unbind must not cancel the in-flight turn")
+	}
+
+	// /bind back to the same session by its store ID.
+	ev.Text = "/bind " + storeID
+	reply = mgr.CommandRouter(ev)
+	if !strings.Contains(strings.ToLower(reply), "bound") {
+		t.Fatalf("expected bind reply, got %q", reply)
+	}
+
+	// Verify: the SAME session object is back in the map, delivery restored.
+	got, ok := mgr.sessions.Load(key)
+	if !ok {
+		t.Fatal("/bind must re-add the session to the sessions map")
+	}
+	gotSess := got.(*Session)
+	if gotSess != sess {
+		t.Fatal("/bind must recover the same session object, not create a new one")
+	}
+	if gotSess.SuppressDelivery() {
+		t.Fatal("/bind must clear suppressDelivery on the recovered session")
+	}
+	if runCtx.Err() != nil {
+		t.Fatal("/bind must not cancel the in-flight turn")
+	}
+	// Recovered session metadata must reflect the new binding.
+	if gotSess.Key != key {
+		t.Fatalf("recovered session Key mismatch: got %q, want %q", gotSess.Key, key)
+	}
+	if gotSess.ChatID != ev.ChatID {
+		t.Fatalf("recovered session ChatID mismatch: got %q, want %q", gotSess.ChatID, ev.ChatID)
+	}
+	if gotSess.UserID != ev.UserID {
+		t.Fatalf("recovered session UserID mismatch: got %q, want %q", gotSess.UserID, ev.UserID)
+	}
+	if gotSess.Store.BoundEntry != "channel" {
+		t.Fatalf("recovered store BoundEntry not synced, got %q", gotSess.Store.BoundEntry)
+	}
+}
+
+// TestManager_BindCreatesNewWhenNoRunningSession: /bind to a store that has no
+// in-memory session (e.g., after the turn finished) must fall through to
+// creating a fresh session from the store file — not panic or return
+// nonsense.
+func TestManager_BindCreatesNewWhenNoRunningSession(t *testing.T) {
+	tempHome(t)
+	cfg := &Config{Channels: map[string]PlatformConfig{}}
+	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
+
+	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
+	sess := mgr.GetOrCreateSession(ev)
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "q"})
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	storeID := sess.Store.ID
+	key := sessionKeyFor(BindByChatUser, ev)
+
+	// Unbind and let the old session object be GC'd (no references kept).
+	ev.Text = "/unbind"
+	mgr.CommandRouter(ev)
+
+	// Also remove from sessionsByStore to simulate the case where the running
+	// session has been evicted (e.g., a later message already created a new
+	// session for the same chat but different store, causing overwrite).
+	mgr.sessionsByStore.Delete(storeID)
+
+	// /bind the same store ID — must fall through to creating a new session.
+	ev.Text = "/bind " + storeID
+	reply := mgr.CommandRouter(ev)
+	if !strings.Contains(strings.ToLower(reply), "bound") {
+		t.Fatalf("expected bind reply, got %q", reply)
+	}
+
+	got, ok := mgr.sessions.Load(key)
+	if !ok {
+		t.Fatal("/bind must create a session in the map")
+	}
+	gotSess := got.(*Session)
+	// Must be a NEW session object, not the original one.
+	if gotSess == sess {
+		t.Fatal("/bind must create a new session when no running session exists")
+	}
+	if gotSess.SuppressDelivery() {
+		t.Fatal("newly created session must not be suppressed")
 	}
 }
 

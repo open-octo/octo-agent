@@ -2533,7 +2533,7 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 	// per-key latches.
 	cmd := strings.ToLower(strings.Fields(text)[0])
 	switch cmd {
-	case "/unbind", "/bind", "/clear", "/new":
+	case "/bind", "/clear", "/new":
 		imKey := "im:" + string(s.channelMgr.KeyFor(ev))
 		s.rememberedMu.Lock()
 		delete(s.rememberedStores, imKey)
@@ -2543,6 +2543,21 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		s.injectorMu.Unlock()
 		// A fresh context drops any armed loop wakeup for this chat.
 		s.cancelWakeup(imKey)
+	case "/unbind":
+		// /unbind detaches the chat but does NOT start a fresh context: an
+		// already-armed loop keeps firing, and the running turn (if any) keeps
+		// running — suppressDelivery makes their replies stay out of the IM
+		// chat (the session is handed to web as a fallback), so the loop only
+		// stops on an explicit /stop or schedule_wakeup(cancel=true). We still
+		// drop the per-key latches so the next non-loop message rebuilds a clean
+		// context under the chat's fresh session.
+		imKey := "im:" + string(s.channelMgr.KeyFor(ev))
+		s.rememberedMu.Lock()
+		delete(s.rememberedStores, imKey)
+		s.rememberedMu.Unlock()
+		s.injectorMu.Lock()
+		delete(s.sessionInjectors, imKey)
+		s.injectorMu.Unlock()
 	case "/stop":
 		// /stop is the IM interrupt — also the hard stop for an armed loop.
 		s.cancelWakeup("im:" + string(s.channelMgr.KeyFor(ev)))
@@ -2786,15 +2801,20 @@ func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, 
 	// Spawned via bare `go` (loop.go + the async-completion paths), so it runs a
 	// full turn outside any recover — guard it here or a panic crashes the process.
 	defer s.recoverBg("channel idle turn")
-	// Acquire the persistent binding before locking the turn: this matches the
-	// user-initiated IM path and prevents idle follow-up turns from
-	// interleaving with another entry (web/cli/tui) that has taken over the
-	// session while we were idle.
-	storeID := sess.Store.ID
-	if ok, _, _ := s.acquireSessionBinding(storeID, agent.EntryChannel, false); !ok {
-		return
+
+	// Acquire the persistent binding before locking the turn, unless the
+	// session is suppressed (/unbind mid-turn). In that case the session is
+	// being handed to web, and re-acquiring the channel binding would prevent
+	// web takeover by writing BoundEntry="channel" back to the session file.
+	// The turn still runs (keeping history alive) but the suppressed
+	// UIController keeps output silent.
+	if !sess.SuppressDelivery() {
+		storeID := sess.Store.ID
+		if ok, _, _ := s.acquireSessionBinding(storeID, agent.EntryChannel, false); !ok {
+			return
+		}
+		defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 	}
-	defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 
 	// Enroll in the drain gate so graceful shutdown waits for idle follow-up
 	// turns just like user-initiated channel turns and web turns.
@@ -2916,6 +2936,11 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	sess.Agent.Gate = app.NewPermissionGate(engine, s.channelPermissionAsk(sess, ad, ev))
 
 	ctrl := channel.NewUIController(ad, ev.ChatID, ev.MessageID, stopTyping)
+	// If /unbind lands mid-turn (suppressDelivery set on the session), the turn
+	// keeps running but its reply must not be delivered to this IM chat — poll
+	// the session's flag so a /unbind that arrives after the controller is
+	// built still takes effect for the rest of the turn.
+	ctrl.SetSuppressor(func() bool { return sess.SuppressDelivery() })
 
 	// The persisted backing session carries the conversation's goal — the
 	// same record every transport bound to this session sees. Wire it as the

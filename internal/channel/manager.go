@@ -74,6 +74,15 @@ type Session struct {
 	UserID             string
 	BoundAt            time.Time
 
+	// suppressDelivery is set by /unbind while a turn is in flight. Once true,
+	// the session's UIController must silently drop all further outbound
+	// messages to the IM chat instead of sending them — the turn keeps running
+	// (and its history still persists), but the user asked to leave the chat,
+	// so nothing more is delivered there. Pair with the suppressor func wired
+	// into the UIController at turn start; cleared when the session is next
+	// handed to a new entry (e.g. a later /bind back to IM).
+	suppressDelivery atomic.Bool
+
 	// runMu serialises agent turns within this session: the IM dispatcher runs
 	// each message in its own goroutine, and two interleaved turns would
 	// corrupt the agent's user/assistant history alternation. runCancel
@@ -95,6 +104,14 @@ type Session struct {
 	askChatID      string
 	askUserID      string
 	askButtonsOnly bool
+}
+
+// SuppressDelivery reports whether this session's outbound IM delivery is
+// currently suppressed (set by /unbind while a turn is in flight). The
+// runChannelTurns handler wires this into its UIController so a mid-turn
+// /unbind drops the rest of the reply.
+func (s *Session) SuppressDelivery() bool {
+	return s.suppressDelivery.Load()
 }
 
 // BeginRun prepares one agent turn: it blocks until any previous turn in this
@@ -183,6 +200,8 @@ func (m *Manager) newSession(key SessionKey, ev InboundEvent) *Session {
 		BoundAt: time.Now(),
 	}
 	s.restoreOrInitStore(m.resolveStoreID(key))
+	// Index by store ID so /bind can re-attach to this session later.
+	m.sessionsByStore.Store(s.Store.ID, s)
 	return s
 }
 
@@ -194,6 +213,15 @@ type Manager struct {
 
 	// sessions holds active sessions keyed by SessionKey.
 	sessions sync.Map // SessionKey -> *Session
+
+	// sessionsByStore indexes the same Session objects by their persistent
+	// store ID, so /bind can re-attach to an in-memory session after /unbind
+	// instead of creating a new one. The entry is written once by newSession
+	// and survives LoadAndDelete from sessions (e.g. /unbind), giving cmdBind
+	// a chance to recover the running session. It is overwritten naturally
+	// when a new session claims the same store (via newSession), so old
+	// pointers don't leak.
+	sessionsByStore sync.Map // string (store ID) -> *Session
 
 	// bindings is the persistent chat→session redirection set by /bind. When a
 	// key is present, the chat routes to the recorded store instead of its
@@ -511,11 +539,27 @@ func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
 		_ = target.Save()
 		return fmt.Sprintf("Could not save the binding: %v", err)
 	}
-	// Drop any live session for this key, then rebuild it against the newly
-	// bound store so the chat is ready immediately. A turn still in flight on
-	// the old session keeps persisting to its own store — nothing is deleted.
-	m.sessions.LoadAndDelete(key)
-	m.sessions.Store(key, m.newSession(key, ev))
+	// If an in-memory session for this store is still running (e.g. after
+	// /unbind mid-turn), re-attach it instead of creating a new one. This
+	// lets /bind recover the running session including its in-flight output:
+	// suppressDelivery is cleared so the remaining turn text resumes delivery.
+	if live, ok := m.sessionsByStore.Load(target.ID); ok {
+		sess := live.(*Session)
+		sess.suppressDelivery.Store(false)
+		sess.Key = key
+		sess.ChatID = ev.ChatID
+		sess.UserID = ev.UserID
+		sess.BoundAt = time.Now()
+		sess.storeMu.Lock()
+		sess.Store.BoundEntry = target.BoundEntry
+		sess.Store.BoundAt = target.BoundAt
+		sess.storeMu.Unlock()
+		m.sessions.Store(key, sess)
+	} else {
+		// No running session found — create a new one from the store file.
+		m.sessions.LoadAndDelete(key)
+		m.sessions.Store(key, m.newSession(key, ev))
+	}
 	if res == agent.Stolen {
 		return fmt.Sprintf("Taken over %q [%s] from %s. History preserved.", target.DisplayTitle(), target.ShortID(), previousEntry)
 	}
@@ -584,12 +628,27 @@ func (m *Manager) cmdStop(ev InboundEvent) string {
 // explicitly /bind-ed to another session, that override is dropped; if the
 // chat owned its automatically-created session's entry binding, that binding
 // is released so other entries can use it. No history is deleted.
+//
+// If a turn is in flight, the turn still runs to completion (its history still
+// persists), but its reply is not delivered to the IM chat — suppressDelivery
+// makes the in-flight UIController silently drop everything it has not sent
+// yet, and the session is treated as handed to web, so any idle follow-up
+// turns the chat suppresses too.
 func (m *Manager) cmdUnbind(ev InboundEvent) string {
 	key := sessionKeyFor(m.mode, ev)
 
 	released := false
 	if val, ok := m.sessions.Load(key); ok {
-		released = val.(*Session).UnbindStore(agent.EntryChannel)
+		sess := val.(*Session)
+		// The chat is being detached: suppress all further outbound delivery
+		// for this session. This covers both a turn in flight (the in-flight
+		// UIController reads sess.suppressDelivery) and any armed loop wakeup
+		// — imWaker holds this same session object, so its future idle turns
+		// build a UIController that polls the same flag and stay silent too.
+		// A later message rebuilds a fresh session (zero value = not suppressed),
+		// so normal chat resumes after /bind.
+		sess.suppressDelivery.Store(true)
+		released = sess.UnbindStore(agent.EntryChannel)
 	}
 
 	hadOverride, err := m.bindings.remove(key)

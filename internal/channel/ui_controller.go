@@ -66,6 +66,14 @@ type UIController struct {
 	// turns within one inbound message, and once the user has seen a reply
 	// there's no need to re-arm typing for later turns in the same chain.
 	typingStopped bool
+
+	// suppressor, when non-nil, is checked before every outbound message. If it
+	// returns true, the message is silently dropped instead of delivered to the
+	// chat — used by /unbind to detach the chat mid-turn: the turn keeps running
+	// and its history still persists, but nothing more is sent to this IM chat.
+	// The func is polled (not snapshotted) so a /unbind that lands after the
+	// controller was built still takes effect for the rest of the turn.
+	suppressor func() bool
 }
 
 // NewUIController creates a controller bound to one chat conversation.
@@ -78,6 +86,18 @@ func NewUIController(adapter Adapter, chatID, replyTo string, stopTyping func())
 		replyTo:    replyTo,
 		stopTyping: stopTyping,
 	}
+}
+
+// SetSuppressor sets the suppressor func consulted before each outbound
+// message. A nil func clears suppression. See the suppressor field.
+func (u *UIController) SetSuppressor(fn func() bool) {
+	u.suppressor = fn
+}
+
+// suppressed reports whether outbound delivery is currently suppressed,
+// polling the suppressor func if one is set.
+func (u *UIController) suppressed() bool {
+	return u.suppressor != nil && u.suppressor()
 }
 
 // Handler returns an agent.EventHandler that forwards events to the adapter.
@@ -156,19 +176,39 @@ func (u *UIController) onToolError(toolName string) {
 
 // onTurnDone finalizes the turn: flushes remaining text, resets state, then
 // force-drains any adapter send queue so the final message is delivered
-// immediately instead of waiting for the background flush timer.
+// immediately instead of waiting for the background flush timer. When
+// suppressed (chat detached mid-turn), the buffered text is dropped in
+// flushTextLocked and there is nothing to drain — skip Flush so we don't
+// push anything more to a chat the user already left.
 func (u *UIController) onTurnDone(reply *agent.Reply) {
 	u.mu.Lock()
 	u.flushTextLocked()
 	u.resetLocked()
 	u.mu.Unlock() // explicit unlock before Flush — Flush may block during send
 
+	if u.suppressed() {
+		return
+	}
 	u.adapter.Flush(u.chatID)
 }
 
 // flushTextLocked delivers the accumulated text buffer to the adapter.
 // Must be called with mu held.
 func (u *UIController) flushTextLocked() {
+	// /unbind mid-turn: if delivery is suppressed, stop the typing indicator
+	// and drop the buffered text without sending anything. Check before
+	// reading the buffer so the early-return intent is clear.
+	if u.suppressed() {
+		u.textBuf.Reset()
+		if !u.typingStopped {
+			u.typingStopped = true
+			if u.stopTyping != nil {
+				u.stopTyping()
+			}
+		}
+		return
+	}
+
 	chunk := u.textBuf.String()
 	if strings.TrimSpace(chunk) == "" {
 		return
