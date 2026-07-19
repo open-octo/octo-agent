@@ -34,10 +34,10 @@ const MessagesPath = "/v1/messages"
 const DefaultAPIVersion = "2023-06-01"
 
 // DefaultMaxTokens caps response length when a caller doesn't specify one.
-// 16384 leaves room for the large code edits agent turns routinely emit while
-// staying well below the model ceilings; truncation escalation (32768) sits on
+// 32768 leaves room for the large code edits agent turns routinely emit while
+// staying well below the model ceilings; truncation escalation (65536) sits on
 // top. See cmd/octo escalateMaxTokensAnthropic and dev-docs/truncation-recovery.md.
-const DefaultMaxTokens = 16384
+const DefaultMaxTokens = 32768
 
 // DefaultStreamIdleTimeout bounds how long a streaming response may go silent
 // (no bytes received) before SendStream aborts it as a stall. The Messages API
