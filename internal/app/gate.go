@@ -21,8 +21,16 @@ type PermissionAsk func(ctx context.Context, toolName string, toolInput map[stri
 // interactive transport (the CLI prompts the user on ask-class verdicts); pass
 // nil for a non-interactive one (HTTP server, IM bridge), where ask resolves to
 // deny — the same posture the old per-transport gates had.
-func NewPermissionGate(engine *permission.Engine, ask PermissionAsk) agent.PermissionGate {
-	return &permissionGate{engine: engine, ask: ask, audit: audit.New()}
+//
+// The optional auditLog exists for tests: pass audit.NewAt("") (a no-op
+// logger) or a temp-path logger so test checks never land in the real
+// ~/.octo/audit.log. Production callers omit it and audit to the default path.
+func NewPermissionGate(engine *permission.Engine, ask PermissionAsk, auditLog ...*audit.Logger) agent.PermissionGate {
+	l := audit.New()
+	if len(auditLog) > 0 {
+		l = auditLog[0]
+	}
+	return &permissionGate{engine: engine, ask: ask, audit: l}
 }
 
 type permissionGate struct {

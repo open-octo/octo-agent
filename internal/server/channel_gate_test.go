@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/audit"
 	"github.com/open-octo/octo-agent/internal/channel"
 	"github.com/open-octo/octo-agent/internal/permission"
 )
@@ -26,7 +27,8 @@ func TestChannelPerTurnGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("permission engine: %v", err)
 	}
-	gate := app.NewPermissionGate(engine, srv.channelPermissionAsk(sess, ad, ev))
+	// No-op audit logger: test checks must not land in the real ~/.octo/audit.log.
+	gate := app.NewPermissionGate(engine, srv.channelPermissionAsk(sess, ad, ev), audit.NewAt(""))
 
 	ctx := context.Background()
 
