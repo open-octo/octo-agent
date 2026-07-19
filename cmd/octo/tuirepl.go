@@ -600,9 +600,33 @@ type tuiModel struct {
 }
 
 // modelPicker is the state of the arrow-key model-switch overlay.
+//
+// PR4b (design §12.1): the picker is two-level. endpoints holds one entry per
+// configured channel (provider + base_url group), each carrying its own items
+// (the models under that endpoint). epIdx selects the current endpoint; idx
+// selects the model within endpoints[epIdx].items. ←/→ cycle endpoints, ↑/↓
+// cycle models within the current endpoint, Enter dispatches the composite id
+// "<endpoint_id>::<model>", Esc dismisses.
+//
+// items/idx at the top level are kept for backward compatibility with the
+// single-level tests in model_picker_test.go that drive the picker via
+// dispatchModel("") and expect a flat list — those tests still seed flat
+// models: configs that normalise to one endpoint per (provider, base_url)
+// group, so the two-level shape reduces to "one endpoint, its models" and
+// the existing ↑↓/Enter/Esc assertions still hold. The new ←→ behaviour is
+// exercised by TestModelPicker_TwoLevelEndpointSwitch.
 type modelPicker struct {
-	items []complItem // one per configured model (name = model id, desc = provider + base URL)
-	idx   int         // highlighted row
+	endpoints []pickerEndpoint
+	epIdx     int // highlighted endpoint
+	items     []complItem // alias for endpoints[epIdx].items; kept for tests + view
+	idx       int         // highlighted model within the current endpoint
+}
+
+// pickerEndpoint is one channel in the two-level model picker.
+type pickerEndpoint struct {
+	id      string        // endpoint ID; used to build the composite id on accept
+	display string        // one-line header shown above the endpoint's models (name · provider · base_url)
+	items   []complItem   // models under this endpoint (name = model id, desc = extra hint)
 }
 
 // subAgentUI is the live panel state for one running sub-agent.

@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -105,11 +106,27 @@ func TestChannelModelOps_Resolve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve kimi-k2.6: %v", err)
 	}
-	if bound.Model != "kimi-k2.6" || bound.BoundEntry != "kimi-k2.6" {
-		t.Errorf("bound resolution = (%q, %q), want (kimi-k2.6, kimi-k2.6)", bound.Model, bound.BoundEntry)
+	// PR4b: bare model resolves through ParseModelFlag; the bound entry is the
+	// composite id pointing at kimi's endpoint. The exact endpoint id is the
+	// synthesised legacy-<host>-<n> form, so assert by suffix.
+	if bound.Model != "kimi-k2.6" {
+		t.Errorf("bound model = %q, want kimi-k2.6", bound.Model)
+	}
+	if !strings.HasSuffix(bound.BoundEntry, "::kimi-k2.6") {
+		t.Errorf("bound entry = %q, want suffix ::kimi-k2.6 (composite id)", bound.BoundEntry)
 	}
 	if bound.Sender == srv.getSender() {
 		t.Error("configured entry must not ride the default sender")
+	}
+
+	// Composite id path: resolve the same model by its composite id (read
+	// back from the bare-model resolution) — must produce the same binding.
+	bound2, err := ops.Resolve(bound.BoundEntry)
+	if err != nil {
+		t.Fatalf("resolve composite id %q: %v", bound.BoundEntry, err)
+	}
+	if bound2.BoundEntry != bound.BoundEntry {
+		t.Errorf("composite-id resolution = %q, want %q", bound2.BoundEntry, bound.BoundEntry)
 	}
 
 	if _, err := ops.Resolve("nope"); err == nil {
@@ -124,6 +141,12 @@ func TestChannelModelOps_Resolve(t *testing.T) {
 	for _, info := range infos {
 		if info.Model == "claude-sonnet-4-6" && info.Default {
 			sawDefault = true
+		}
+		if info.EndpointID == "" || info.CompositeID == "" {
+			t.Errorf("info missing endpoint grouping: %+v", info)
+		}
+		if info.CompositeID != info.EndpointID+"::"+info.Model {
+			t.Errorf("composite id = %q, want %s::%s", info.CompositeID, info.EndpointID, info.Model)
 		}
 	}
 	if !sawDefault {

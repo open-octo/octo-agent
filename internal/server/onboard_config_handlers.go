@@ -236,6 +236,77 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ─── GET /api/config/endpoints ───────────────────────────────────────────────
+
+// endpointsResponse is the two-level shape served by GET /api/config/endpoints
+// (design §10.1). PR4b ships only the read path: the frontend renders this as
+// read-only endpoint cards with their model lists; the write path (CRUD on
+// endpoints) lands in PR5 alongside the Save format switch.
+//
+// Security: APIKey is never echoed. HasAPIKey reports presence so the UI can
+// badge "已配置 / 未设置" without exposing the secret.
+type endpointsResponse struct {
+	Endpoints []endpointConfigJSON `json:"endpoints"`
+	Default   string                `json:"default,omitempty"`
+	Lite      string                `json:"lite,omitempty"`
+}
+
+// endpointConfigJSON is one channel in the two-level response.
+//
+// APIKey is deliberately absent from the JSON shape: the read API never echoes
+// the secret. HasAPIKey is the only key-related field the frontend gets, so it
+// can badge "已配置 / 未设置" without learning the key itself (design §10.1,
+// §19.1).
+type endpointConfigJSON struct {
+	ID        string              `json:"id"`
+	Name      string              `json:"name,omitempty"`
+	Provider  string              `json:"provider"`
+	BaseURL   string              `json:"base_url,omitempty"`
+	Protocol  string              `json:"protocol,omitempty"`
+	HasAPIKey bool                `json:"has_api_key"`
+	LiteModel string              `json:"lite_model,omitempty"`
+	Models    []endpointModelJSON `json:"models"`
+}
+
+// endpointModelJSON is one model under an endpoint.
+type endpointModelJSON struct {
+	Model  string `json:"model"`
+	Vision bool   `json:"vision"`
+}
+
+// handleGetEndpoints serves the two-level endpoint view. Data comes straight
+// from config.Load's in-memory Endpoints (syncEndpointsFromModels already
+// projects the legacy flat Models list into this shape, so PR4b works against
+// either schema). Default/Lite are echoed as composite ids verbatim — on a
+// legacy flat config they're synthesised by syncEndpointsFromModels, on a
+// hand-written new-schema config they're whatever the user typed.
+func (s *Server) handleGetEndpoints(w http.ResponseWriter, r *http.Request) {
+	cfg, _ := config.Load()
+
+	out := endpointsResponse{
+		Endpoints: make([]endpointConfigJSON, 0, len(cfg.Endpoints)),
+		Default:   cfg.Default,
+		Lite:      cfg.Lite,
+	}
+	for _, ep := range cfg.Endpoints {
+		em := endpointConfigJSON{
+			ID:        ep.ID,
+			Name:      ep.Name,
+			Provider:  ep.Provider,
+			BaseURL:   ep.BaseURL,
+			Protocol:  ep.Protocol,
+			HasAPIKey: ep.APIKey != "",
+			LiteModel: ep.LiteModel,
+			Models:    make([]endpointModelJSON, 0, len(ep.Models)),
+		}
+		for _, m := range ep.Models {
+			em.Models = append(em.Models, endpointModelJSON{Model: m.Model, Vision: m.Vision})
+		}
+		out.Endpoints = append(out.Endpoints, em)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // ─── PUT /api/config/show_reasoning ─────────────────────────────────────────
 
 type putShowReasoningRequest struct {

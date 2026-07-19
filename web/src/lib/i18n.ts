@@ -595,6 +595,25 @@ export const en: Record<string, string> = {
   "settings.models.confirm_remove": "Remove this model?",
   "settings.models.modal_add": "Add Model",
   "settings.models.modal_edit": "Edit Model",
+
+  // PR4b (design §15.1): two-level endpoint display. Read-only for now —
+  // CRUD lands in PR5 alongside the Save format switch.
+  "settings.endpoints.title": "Channels",
+  "settings.endpoints.empty": "No channels configured. Run `octo config` to add one.",
+  "settings.endpoints.readonly_notice": "Read-only preview of the new two-level config. Editing lands in a later release.",
+  "settings.endpoints.id": "ID",
+  "settings.endpoints.name": "Display name",
+  "settings.endpoints.provider": "Provider",
+  "settings.endpoints.base_url": "Base URL",
+  "settings.endpoints.protocol": "Protocol",
+  "settings.endpoints.api_key": "API key",
+  "settings.endpoints.api_key.set": "Set",
+  "settings.endpoints.api_key.missing": "Missing",
+  "settings.endpoints.lite_model": "Lite model",
+  "settings.endpoints.models": "Models",
+  "settings.endpoints.models.vision": "Vision",
+  "settings.endpoints.badge.default": "Default",
+  "settings.endpoints.badge.lite": "Lite",
 };
 
 export const zh: Record<string, string> = {
@@ -1188,6 +1207,24 @@ export const zh: Record<string, string> = {
   "settings.models.confirm_remove": "删除该模型？",
   "settings.models.modal_add": "添加模型",
   "settings.models.modal_edit": "编辑模型",
+
+  // PR4b (design §15.1)：渠道两级展示。只读——CRUD 在 PR5 写路径切换时再上。
+  "settings.endpoints.title": "渠道",
+  "settings.endpoints.empty": "暂未配置渠道，运行 `octo config` 添加一个。",
+  "settings.endpoints.readonly_notice": "新两级配置的只读预览，编辑能力会在后续版本提供。",
+  "settings.endpoints.id": "ID",
+  "settings.endpoints.name": "显示名称",
+  "settings.endpoints.provider": "厂商",
+  "settings.endpoints.base_url": "接口地址",
+  "settings.endpoints.protocol": "协议",
+  "settings.endpoints.api_key": "API 密钥",
+  "settings.endpoints.api_key.set": "已设置",
+  "settings.endpoints.api_key.missing": "未设置",
+  "settings.endpoints.lite_model": "轻量模型",
+  "settings.endpoints.models": "模型",
+  "settings.endpoints.models.vision": "视觉",
+  "settings.endpoints.badge.default": "默认",
+  "settings.endpoints.badge.lite": "轻量",
 };
 
 const dictionaries: Record<string, Record<string, string>> = { en, zh };

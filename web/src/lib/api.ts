@@ -719,6 +719,34 @@ export async function getConfig(): Promise<ConfigResponse> {
   return request<ConfigResponse>('/api/config')
 }
 
+// PR4b (design §10.1): two-level endpoint view. Mirrors server endpointsResponse
+// (onboard_config_handlers.go). has_api_key is the only key-related field — the
+// server never echoes the key itself. models is the per-endpoint model list.
+// Read-only in PR4b; CRUD lands in PR5.
+export interface EndpointModel {
+  model: string
+  vision: boolean
+}
+export interface EndpointConfig {
+  id: string
+  name?: string
+  provider: string
+  base_url?: string
+  protocol?: string
+  has_api_key: boolean
+  lite_model?: string
+  models: EndpointModel[]
+}
+export interface EndpointsResponse {
+  endpoints: EndpointConfig[]
+  default?: string
+  lite?: string
+}
+
+export async function getEndpoints(): Promise<EndpointsResponse> {
+  return request<EndpointsResponse>('/api/config/endpoints')
+}
+
 export async function updateShowReasoning(showReasoning: boolean): Promise<{ ok: boolean; show_reasoning?: boolean }> {
   return request<{ ok: boolean; show_reasoning?: boolean }>('/api/config/show_reasoning', {
     method: 'PUT',
