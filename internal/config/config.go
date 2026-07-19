@@ -596,10 +596,45 @@ func (c Config) resolveCompositeID(id string) (Endpoint, EndpointModel, bool) {
 
 // EntryByModel returns the entry with the given model string. An empty model
 // never matches.
+//
+// PR2 (design §8.2): the input may be either a bare model string (legacy
+// session files, pre-PR4) or a composite id "<endpoint_id>::<model>" (new
+// session files). A composite id is resolved against c.Endpoints first —
+// the matching EndpointModel is projected back into a ModelEntry shape so
+// callers that still read ModelEntry fields (Provider, BaseURL, APIKey,
+// Protocol, Vision) get consistent values. A bare model falls back to the
+// legacy flat c.Models lookup. This keeps every callsite that reads
+// sess.ModelConfig / sess.Model (server.go, handlers.go, ws_handlers.go)
+// working without each one having to know about the composite-id form.
 func (c Config) EntryByModel(model string) (ModelEntry, bool) {
 	if model == "" {
 		return ModelEntry{}, false
 	}
+	// Composite-id path: resolve against Endpoints.
+	if endpointID, modelName, ok := splitCompositeID(model); ok {
+		for _, ep := range c.Endpoints {
+			if ep.ID != endpointID {
+				continue
+			}
+			for _, m := range ep.Models {
+				if m.Model == modelName {
+					return ModelEntry{
+						Provider: ep.Provider,
+						Model:    m.Model,
+						BaseURL:  ep.BaseURL,
+						APIKey:   ep.APIKey,
+						Protocol: ep.Protocol,
+						Vision:   m.Vision,
+					}, true
+				}
+			}
+		}
+		// Composite id didn't resolve — fall through to the bare-model path
+		// rather than returning false, so a stale composite id (endpoint
+		// deleted but session still references it) degrades to a bare-model
+		// lookup that might still find the model on another endpoint.
+	}
+	// Bare-model path: legacy flat Models lookup.
 	for _, e := range c.Models {
 		if e.Model == model {
 			return e, true
