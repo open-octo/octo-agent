@@ -391,13 +391,18 @@ func TestEventSinkDoneCarriesStopReason(t *testing.T) {
 	var events []SubAgentEvent
 	m.SetOnEvent(func(ev SubAgentEvent) { mu.Lock(); events = append(events, ev); mu.Unlock() })
 
+	// SetOnExit must be registered before Start(): the fixedSpawner returns
+	// immediately, so the async goroutine can complete and fire the exit hook
+	// before Start() returns — registering after Start() races that fire and
+	// loses the notification on a fast runner.
+	exited := make(chan struct{})
+	m.SetOnExit(func(SubAgentNotification) { close(exited) })
+
 	id, err := m.Start(SpawnRequest{Description: "d", Prompt: "p"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	_ = id
-	exited := make(chan struct{})
-	m.SetOnExit(func(SubAgentNotification) { close(exited) })
 	select {
 	case <-exited:
 	case <-time.After(5 * time.Second):
