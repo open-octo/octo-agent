@@ -151,16 +151,20 @@ type Config struct {
 	// schema's authoritative field). Each bundles shared connection params
 	// and a list of models. PR1 populates this from the legacy flat Models
 	// list during normalize(); the write path switches to emitting this in
-	// PR4. Until then Save still writes the flat Models form so existing
-	// callers and on-disk files keep working.
+	// PR4. Until then Save still writes the flat Models form (Save elides
+	// this field at marshal time) so existing callers and on-disk files
+	// keep working, while Load still honours an explicit endpoints: block
+	// if the user hand-writes one (design §4.1 step 1).
 	Endpoints []Endpoint `yaml:"endpoints,omitempty"`
 	// Default is the composite id "<endpoint_id>::<model>" selecting the
 	// endpoint+model used when nothing else picks one. Empty falls back to
-	// the first endpoint's first model (see ResolveDefault).
+	// the first endpoint's first model (see ResolveDefault). Elided at
+	// Save time in PR1; see Save.
 	Default string `yaml:"default,omitempty"`
 	// Lite is the composite id for the compaction lite model. Empty means
 	// fall back to ImplicitLiteModel inference (endpoint.lite_model, else
-	// the vendor registry's LiteModel for official endpoints).
+	// the vendor registry's LiteModel for official endpoints). Elided at
+	// Save time in PR1; see Save.
 	Lite string `yaml:"lite,omitempty"`
 
 	// Models is the legacy flat list of named model configurations. Kept
@@ -588,8 +592,23 @@ type fileConfig struct {
 // normalize folds legacy top-level model fields into a one-entry Models list.
 // Files already on the new schema pass through untouched; legacy fields are
 // ignored once a models list exists.
+//
+// Precedence (design §4.1): if the file carries an explicit endpoints: block
+// the user is already on the new schema and we honour it as-is — rebuilding
+// from Models would silently drop their endpoints: edits. Otherwise we
+// synthesise Endpoints from the flat Models list so new code can read the
+// two-level shape while existing callers keep reading Models.
 func (f fileConfig) normalize() Config {
 	c := f.Config
+	if len(c.Endpoints) > 0 {
+		// Already on the new schema — leave Endpoints/Default/Lite as the
+		// authoritative shape. Migrate any provider aliases on Models too,
+		// for callers that still read the flat list.
+		for i := range c.Models {
+			migrateEntryProvider(&c.Models[i])
+		}
+		return c
+	}
 	if len(c.Models) > 0 {
 		for i := range c.Models {
 			migrateEntryProvider(&c.Models[i])
@@ -711,15 +730,21 @@ func findEndpointModel(endpoints []Endpoint, model string) (Endpoint, EndpointMo
 	return Endpoint{}, EndpointModel{}, false
 }
 
-// hostFromBaseURL extracts the URL host for use in a legacy-<host>-<n> endpoint
-// ID. On a parse failure it falls back to the raw string so a malformed base_url
-// still yields a stable (if ugly) ID rather than aborting normalisation.
+// hostFromBaseURL extracts the URL host (lowercased) for use in a
+// legacy-<host>-<n> endpoint ID. Hosts are case-insensitive per RFC 3986
+// (url.Parse normalises the scheme but not the host), so lowercasing gives a
+// stable id regardless of how the user cased the base_url in the YAML —
+// design §4.4 requires the implicit id to be stable across repeated
+// Load→Save cycles, and a case change in the file must not rotate it. On a
+// parse failure it falls back to the raw string lowercased so a malformed
+// base_url still yields a stable (if ugly) ID rather than aborting
+// normalisation.
 func hostFromBaseURL(baseURL string) string {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" {
-		return baseURL
+		return strings.ToLower(baseURL)
 	}
-	return u.Host
+	return strings.ToLower(u.Host)
 }
 
 // legacyEndpointID builds the "legacy-<host>-<n>" ID for an implicit endpoint
@@ -848,6 +873,118 @@ func firstNonEmptyEndpoint(endpoints []Endpoint) *Endpoint {
 	return nil
 }
 
+// ParseModelFlag resolves a --model flag value (or env *_MODEL value) to the
+// (endpoint, model) pair it selects. It accepts two forms:
+//
+//   - Composite id "<endpoint_id>::<model>" — resolves to exactly that pair.
+//     An unknown endpoint id or unknown model under a known endpoint is an
+//     error naming the missing part and listing the available ones.
+//   - Bare model "<model>" — resolves via the precedence in S5.4:
+//     1. If the Default endpoint's model matches, use the Default endpoint
+//        (Default is "my main endpoint", a bare name prefers it).
+//     2. Otherwise scan all endpoints; a unique hit returns it.
+//     3. Multiple hits return the first match and slog.Warn naming the
+//        picked endpoint so the user can disambiguate with a composite id.
+//     4. No hit is an error listing the available models.
+//
+// An empty flag is an error — callers should treat empty as "no --model given"
+// and fall back to ResolveDefault rather than calling ParseModelFlag.
+func (c Config) ParseModelFlag(flag string) (Endpoint, EndpointModel, error) {
+	if flag == "" {
+		return Endpoint{}, EndpointModel{}, fmt.Errorf("model flag is empty")
+	}
+
+	// Composite-id path.
+	if endpointID, model, ok := splitCompositeID(flag); ok {
+		for i := range c.Endpoints {
+			if c.Endpoints[i].ID != endpointID {
+				continue
+			}
+			ep := &c.Endpoints[i]
+			for j := range ep.Models {
+				if ep.Models[j].Model == model {
+					return *ep, ep.Models[j], nil
+				}
+			}
+			available := availableModelsInEndpoint(ep)
+			return Endpoint{}, EndpointModel{}, fmt.Errorf("model %q not found in endpoint %q (available: %s)", model, endpointID, available)
+		}
+		available := availableEndpoints(c.Endpoints)
+		return Endpoint{}, EndpointModel{}, fmt.Errorf("endpoint %q not found (available: %s)", endpointID, available)
+	}
+
+	// Bare-model path.
+	// Step 2a: prefer the Default endpoint if its model matches.
+	if defEp, defM, ok := c.ResolveDefault(); ok {
+		if defM.Model == flag {
+			return defEp, defM, nil
+		}
+	}
+	// Step 2b: scan all endpoints for a match.
+	var hits []endpointModelIndex
+	for i := range c.Endpoints {
+		for j := range c.Endpoints[i].Models {
+			if c.Endpoints[i].Models[j].Model == flag {
+				hits = append(hits, endpointModelIndex{ep: i, m: j})
+			}
+		}
+	}
+	switch len(hits) {
+	case 0:
+		available := availableModelsAcrossEndpoints(c.Endpoints)
+		return Endpoint{}, EndpointModel{}, fmt.Errorf("model %q not found in any endpoint (available: %s)", flag, available)
+	case 1:
+		h := hits[0]
+		return c.Endpoints[h.ep], c.Endpoints[h.ep].Models[h.m], nil
+	default:
+		h := hits[0]
+		picked := c.Endpoints[h.ep]
+		pickedModel := picked.Models[h.m]
+		// Warn so the user knows the bare flag was ambiguous and can switch
+		// to a composite id to pin a specific endpoint.
+		slog.Warn("config: model flag matches multiple endpoints, using the first match",
+			"flag", flag, "picked_endpoint", picked.ID,
+			"hint", fmt.Sprintf("use %s::%s to disambiguate", picked.ID, pickedModel.Model))
+		return picked, pickedModel, nil
+	}
+}
+
+// endpointModelIndex pairs an endpoint index with a model index inside it.
+type endpointModelIndex struct{ ep, m int }
+
+// availableEndpoints returns a comma-joined list of endpoint ids for use in
+// error messages.
+func availableEndpoints(endpoints []Endpoint) string {
+	ids := make([]string, 0, len(endpoints))
+	for _, ep := range endpoints {
+		ids = append(ids, ep.ID)
+	}
+	return strings.Join(ids, ", ")
+}
+
+// availableModelsInEndpoint returns a comma-joined list of model ids in one
+// endpoint for use in error messages.
+func availableModelsInEndpoint(ep *Endpoint) string {
+	models := make([]string, 0, len(ep.Models))
+	for _, m := range ep.Models {
+		models = append(models, m.Model)
+	}
+	return strings.Join(models, ", ")
+}
+
+// availableModelsAcrossEndpoints returns a comma-joined list of every model
+// across every endpoint for use in error messages. Duplicates (same model on
+// multiple endpoints) are kept so the user sees the full picture.
+func availableModelsAcrossEndpoints(endpoints []Endpoint) string {
+	var models []string
+	for _, ep := range endpoints {
+		for _, m := range ep.Models {
+			models = append(models, m.Model)
+		}
+	}
+	return strings.Join(models, ", ")
+}
+
 // migrateEntryProvider folds the retired openai_compatible / anthropic_compatible
 // catch-all vendors into the unified "custom" vendor, recovering the wire format
 // into the new per-entry Protocol field so existing configs keep working.
@@ -958,6 +1095,19 @@ func resetLastGoodForTest() {
 // API keys), creating ~/.octo if needed. A legacy config.yaml present at that
 // moment is renamed to config.yaml.bak — best effort, because config.yml wins
 // the read order regardless.
+// Save writes the config to ~/.octo/config.yml with mode 0600 (it may hold
+// API keys), creating ~/.octo if needed. A legacy config.yaml present at that
+// moment is renamed to config.yaml.bak — best effort, because config.yml wins
+// the read order regardless.
+//
+// PR1 invariant (design §4.3): Save must write the legacy flat form
+// (models: + default_model: + lite_model:), NOT the new endpoints: form.
+// The new Endpoints/Default/Lite fields are in-memory only during PR1-3 so
+// existing callers and downgrade paths keep working. PR4 will flip this to
+// emit endpoints: instead. To enforce that here without changing the field
+// tags (Load still needs to honour an explicit endpoints: block the user
+// hand-writes, per §4.1 step 1), Save marshals a shallow copy with the new
+// fields cleared.
 func (c Config) Save() error {
 	path, err := Path()
 	if err != nil {
@@ -966,7 +1116,14 @@ func (c Config) Save() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(c)
+	// Shallow copy with the new-schema fields cleared so yaml.Marshal emits
+	// only the legacy flat form. The Models slice is shared by reference,
+	// which is fine — we don't mutate it.
+	saved := c
+	saved.Endpoints = nil
+	saved.Default = ""
+	saved.Lite = ""
+	data, err := yaml.Marshal(saved)
 	if err != nil {
 		return err
 	}
