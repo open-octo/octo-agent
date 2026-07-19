@@ -19,7 +19,7 @@ originalSlug: architecture-deep-dive
 
 这个循环本身只有几百行代码。但围绕它运转起来的十个机制，每一个都对应一个真实的设计难题——不解决它们，Agent 就跑不稳、跑不快、跑不省。
 
-本文梳理这些机制：它们解决什么、怎么解决的、以及为什么那么做。读完你会看到一条贯穿始终的线：**在 Agent 系统里，凡是能用机制保证的，就不要指望模型的自觉。**
+本文逐一过这十个机制：各自解决什么问题、怎么解决的、为什么那么做。读完你会发现它们指向同一句话：**在 Agent 系统里，凡是能用机制保证的，就不要指望模型的自觉。**
 
 ## 地基：Agent 循环为什么可以只有几百行
 
@@ -104,11 +104,15 @@ OpenAI 协议的 tool-call 参数会按 `tool_calls[i].index` 分散在多个 ch
 
 `tools.DefaultRegistry`（`internal/tools/registry.go`）是一个单一派发器，按名把任意 tool call 路由到 `allTools` slice 的某一格——`Terminal`、`ReadFile`、`WriteFile`、`EditFile`、`Glob`、`Grep`、`WebFetch`、`WebSearch`、`Skill`、`Agent*`、`Workflow*`、`ScheduleWakeup`、`Browser`、`MemoryRecall` 等等。（这里没有把 `TerminalOutput`/`TerminalInput` 列进去，因为它们是 background 配套的子工具，不直接由用户发起。）浏览器背后是 `internal/browser` 的 CDP 长连接，workflow 背后是 Ruby/mruby 沙箱，MCP 背后是一个 JSON-RPC 桥——但 agent 循环只看到 `ToolExecutor`。正是这个选择让 meta-skill 成为可能：一段引导你"配好 IM 通道"的流程不是一个定制 tool，是 `channel-manager` 把 `read_file` / `write_file` / `terminal` 按用户当下的情况串起来。tool 组合是那个可复用原语；新能力通常意味着新 skill，不是新 tool。
 
+### MCP 工具延迟加载
+
+MCP 工具的 JSON schema 可能非常庞大——配置几十个 MCP 服务器的 session，全套 schema 足以撑爆上下文。解法是**延迟加载**：只暴露名字+一句话描述，模型真想用的时候才用 `mcp_describe` 拉完整 schema。`auto` 模式只在延迟加载比全量上传节省 ≥10% 上下文时才启用。
+
 ### 读取先行 + mTime 守卫
 
-`internal/tools/ReadTracker` 管的是一个听起来像挑剔、却能拦住一类真问题的规矩：LLM 只能在**已经读取过的**文件上写入 / 编辑，且只在磁盘 mtime（修改时间戳）仍与读取时一致才放行。第 3 轮读的文件在第 7 轮被外部编辑器改过 -> 拒绝，并告知 agent 重读——这个错误语料照搬 Claude Code 的措辞，已经被那样训练过的 LLM 在重试时会做出正确反应。
+`internal/tools/ReadTracker` 管的是条听起来挑剔但拦得住真问题的规矩：LLM 只能在**已经读取过的**文件上写入 / 编辑，且只在磁盘 mtime（修改时间戳）仍与读取时一致才放行。第 3 轮读的文件在第 7 轮被外部编辑器改过 -> 拒绝，并告知 agent 重读——这个错误语料照搬 Claude Code 的措辞，已经被那样训练过的 LLM 在重试时会做出正确反应。
 
-靠一个外部文件的 mtime 做守卫本质上是很苛刻的——但如果是 agent 自己执行的命令改了这个文件怎么办？一轮编译输出、代码格式重写、等等都会改 mtime。答案是 `RefreshTarget`：terminal 工具写过的路径补盖一个新 mtime 戳，这之后编辑不再误发告警。`RefreshTarget` 只重新戳记 tracker 已经登记过的**精确**路径，绝不扩散到兄弟文件，也绝不把一个没读过的文件提拔成可写。从未读过的文件依旧不可写；真被外部编辑器改过的文件（永远不流经 terminal tool，永远不作为这次命令的精确写目标）保持其陈旧戳记，照发告警。守卫接住真正的错误，逃生口窄到没法滥用出沙箱。
+靠外部文件的 mtime 做守卫是很苛刻的——但如果是 agent 自己执行的命令改了这个文件怎么办？一轮编译输出、代码格式重写、等等都会改 mtime。答案是 `RefreshTarget`：terminal 工具写过的路径补盖一个新 mtime 戳，这之后编辑不再误发告警。`RefreshTarget` 只重新戳记 tracker 已经登记过的**精确**路径，绝不扩散到兄弟文件，也绝不把一个没读过的文件提拔成可写。从未读过的文件依旧不可写；真被外部编辑器改过的文件（永远不流经 terminal tool，永远不作为这次命令的精确写目标）保持其陈旧戳记，照发告警。守卫接住真正的错误，逃生口窄到没法滥用出沙箱。
 
 ### 抽掉 SSRF 的地板
 
@@ -299,14 +303,17 @@ flowchart TD
     T --> E["后台清理：14 天过期 + 容量上限"]
 ```
 
-一个见功力的小判断：**如果目标文件被 git 跟踪且工作区是干净的，跳过备份**。因为内容 git 里已经有了，回收站再存一份是纯浪费。好的安全网不光要接得住，还要足够安静。
+一个小判断：**如果目标文件被 git 跟踪且工作区是干净的，跳过备份**。因为内容 git 里已经有了，回收站再存一份是纯浪费。好的安全网不光要接得住，还要足够安静。
 
 ## 自带电池：让用户在头五分钟留下来
 
 前面九个是"硬伤"，但做一个 Agent 真正的难题是**头五分钟**。如果用户第一次提问前还得自己去装 ripgrep、去翻 MCP 仓库，他很可能就此离开。
 
-- **MCP 工具搜索**：不把全套 JSON schema 塞进 prompt，只暴露名字+一句话描述。模型真想用的时候才用 `mcp_describe` 拉 schema。`auto` 模式只在延迟加载比全量上传节省 ≥10% 上下文时才启用。
 - **两个内置二进制**：ripgrep 编译进二进制（`go:embed`），用户不需要装；Python 的 openpyxl 依赖通过捆绑 uv 解决。
+- **二十个内置技能，主厨精选**：不是"装完才用"的插件市场，而是打开就能端上桌的招牌套件。
+  - **编码链**：`grill-me` → `tech-design` → `implement` → `code-review` 构成从方案拷问到代码落地的完整管线，`worktree-isolate` 提供隔离沙盒，`loop-engineering` 和 `workflow-creator` 把单个 skill 拼成自动流程，`artifact-design` 和 `dataviz` 负责架构图和可视化。
+  - **内容线**：`ppt-master`（多角色协作做 PPT）、`image-gen`（AI 生图）、`office-xlsx`（编程操作 Excel）、`deep-research`（多来源深度调研）、`web-access`（反爬网页抓取）——日常写报告、做演示、搞调研一站式覆盖。
+  - 触发零门槛：每个 skill 的 description 内嵌了中英文触发词——用户说"帮我审下代码"自动命中 `code-review`，"把调研结果做成 PPT"自动命中 `ppt-master`，不需要知道任何一个 skill 名字。
 - **五个元技能**（`skill-creator`、`mcp-creator`、`channel-manager`、`cron-task-creator`、`workflow-creator`）专门处理 octo 自己的配置——引导用户走完本需要手写 YAML 的流程。它们依赖文件工具（`write_file`、`edit_file`、`terminal`）加上 octo 专属知识，而不是为每段 YAML 都造专用工具——"工具可组合"这个原则既用在用户的 workflow 里，也用在 octo 自己的入门引导上。
 
 ## 尾声
@@ -315,7 +322,7 @@ flowchart TD
 
 压缩靠 token 阈值和安全切分点，而不是祈祷摘要别丢东西；缓存断点是显式插的，不是等运气命中；serve 让模型杀不死自己的宿主，连重启都要先问过你、先把答复送到；workflow 并发上限是常量，不指望脚本作者自律；权限系统的 deny 优先和命令锚定，每一条都对应一个真实出过的事故；回收站干脆假设删错必然发生，把功夫花在"删错之后"。
 
-模型负责聪明，机制负责兜底。这大概就是读完这份代码库之后，最值得带走的一句话。
+模型负责聪明，机制负责兜底。这就是读完这份代码库之后，最值得带走的一句话。
 
 ---
 
